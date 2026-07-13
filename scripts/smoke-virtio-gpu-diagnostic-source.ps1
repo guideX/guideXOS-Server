@@ -85,6 +85,7 @@ function Get-FunctionBody {
 $mmioHeader = Read-Text -Path (Join-Path $Root 'kernel\core\include\kernel\mmio.h')
 $mmioCpp = Read-Text -Path (Join-Path $Root 'kernel\core\mmio.cpp')
 $virtioGpuCpp = Read-Text -Path (Join-Path $Root 'kernel\core\virtio_gpu.cpp')
+$backendHeader = Read-Text -Path (Join-Path $Root 'virtio_gpu_display_backend.h')
 $displayModel = Read-Text -Path (Join-Path $Root 'display_model.h')
 $compositorCpp = Read-Text -Path (Join-Path $Root 'compositor.cpp')
 $probeSmoke = Read-Text -Path (Join-Path $Root 'scripts\smoke-qemu-display-probe.ps1')
@@ -113,7 +114,22 @@ Assert-True ($mmioCpp.Contains('reserved MMIO window exhausted')) 'mmio.cpp shou
 
 Assert-True ($virtioGpuCpp.Contains('GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE')) 'virtio_gpu.cpp should gate diagnostics behind GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE'
 Assert-True ($virtioGpuCpp.Contains('GXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE')) 'virtio_gpu.cpp should keep the Stage B path behind a separate gate'
+Assert-True ($virtioGpuCpp.Contains('No physical Intel GPU support')) 'virtio_gpu.cpp should keep physical Intel GPU support out of the QEMU-only track'
+Assert-True ($virtioGpuCpp.Contains('No real hardware GPU BAR access')) 'virtio_gpu.cpp should keep real hardware GPU BAR access out of the QEMU-only track'
+Assert-True ($virtioGpuCpp.Contains('No display hotplug')) 'virtio_gpu.cpp should keep display hotplug out of the QEMU-only track'
+Assert-True ($virtioGpuCpp.Contains('No compositor desktop rendering into virtio-gpu resources')) 'virtio_gpu.cpp should keep compositor rendering out of virtio-gpu resources'
+Assert-True ($virtioGpuCpp.Contains('No continuous frame rendering or animation')) 'virtio_gpu.cpp should keep continuous animation out of the QEMU-only track'
 Assert-True ($virtioGpuCpp.Contains('REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY')) 'virtio_gpu.cpp should keep the real-hardware warning prominent'
+Assert-True ($backendHeader.Contains('struct VirtioGpuScanoutState')) 'virtio_gpu_display_backend.h should define the scanout state record'
+Assert-True ($backendHeader.Contains('struct VirtioGpuOutputInventory')) 'virtio_gpu_display_backend.h should define the output inventory record'
+Assert-True ($backendHeader.Contains('static bool isQemuOnly()')) 'virtio_gpu_display_backend.h should keep the QEMU-only gate helper'
+Assert-True ($backendHeader.Contains('getVirtioGpuOutputInventory')) 'virtio_gpu_display_backend.h should build a virtio-gpu output inventory'
+Assert-True ($backendHeader.Contains('buildVirtioGpuDisplayMonitors')) 'virtio_gpu_display_backend.h should bridge output inventory into DisplayMonitor descriptors'
+Assert-True ($backendHeader.Contains('buildVirtioGpuDisplayTargets')) 'virtio_gpu_display_backend.h should bridge output inventory into DisplayRenderTarget descriptors'
+Assert-True ($backendHeader.Contains('presentVirtioGpuTarget')) 'virtio_gpu_display_backend.h should keep the present helper for future compositor integration'
+Assert-True ($backendHeader.Contains('updateVirtioGpuTarget')) 'virtio_gpu_display_backend.h should keep the update helper for future compositor integration'
+Assert-True ($backendHeader.Contains('backedByOutputResource')) 'display_model.h should distinguish output-backed render targets from hosted framebuffer targets'
+Assert-True ($backendHeader.Contains('presentationConfirmed')) 'virtio_gpu_display_backend.h should track presentation confirmation separately from connector state'
 Assert-True ($virtioGpuCpp.Contains('s_diagnosticBackingStorage0')) 'virtio_gpu.cpp should keep the first diagnostic backing store'
 Assert-True ($virtioGpuCpp.Contains('s_diagnosticBackingStorage1')) 'virtio_gpu.cpp should keep the second diagnostic backing store'
 Assert-True ($virtioGpuCpp.Contains('kDiagnosticResourceIdSecondary')) 'virtio_gpu.cpp should reserve a second diagnostic resource id'
@@ -217,6 +233,19 @@ Assert-True ($probeSmoke.Contains('GpuSingleOutputProofLine')) 'smoke-qemu-displ
 Assert-True ($probeSmoke.Contains('GpuDualOutputProofLine')) 'smoke-qemu-display-probe.ps1 should capture the dual-output proof line'
 Assert-True ($probeSmoke.Contains('gpuPrimaryPatternChecksumLine')) 'smoke-qemu-display-probe.ps1 should capture the primary checksum line'
 Assert-True ($probeSmoke.Contains('gpuSecondaryPatternChecksumLine')) 'smoke-qemu-display-probe.ps1 should capture the secondary checksum line'
+Assert-True ($probeSmoke.Contains('gpuOutputInventoryLine')) 'smoke-qemu-display-probe.ps1 should capture the virtio-gpu output inventory summary'
+Assert-True ($probeSmoke.Contains('gpuOutputConfiguredCount')) 'smoke-qemu-display-probe.ps1 should capture the configured output count'
+Assert-True ($probeSmoke.Contains('gpuOutputOperationalCount')) 'smoke-qemu-display-probe.ps1 should capture the operational output count'
+Assert-True ($probeSmoke.Contains('gpuOutputPresentationConfirmedCount')) 'smoke-qemu-display-probe.ps1 should capture the presentation-confirmed output count'
+Assert-True ($probeSmoke.Contains('gpuOutput0Line')) 'smoke-qemu-display-probe.ps1 should capture the first output descriptor'
+Assert-True ($probeSmoke.Contains('gpuOutput1Line')) 'smoke-qemu-display-probe.ps1 should capture the second output descriptor'
+Assert-True ($probeSmoke.Contains('gpuMonitor0Line')) 'smoke-qemu-display-probe.ps1 should capture the first DisplayMonitor descriptor'
+Assert-True ($probeSmoke.Contains('gpuMonitor1Line')) 'smoke-qemu-display-probe.ps1 should capture the second DisplayMonitor descriptor'
+Assert-True ($probeSmoke.Contains('gpuTarget0Line')) 'smoke-qemu-display-probe.ps1 should capture the first DisplayRenderTarget descriptor'
+Assert-True ($probeSmoke.Contains('gpuTarget1Line')) 'smoke-qemu-display-probe.ps1 should capture the second DisplayRenderTarget descriptor'
+Assert-True ($probeSmoke.Contains('post-render scanout 1 connector disabled')) 'smoke-qemu-display-probe.ps1 should treat scanout 1 connector state as diagnostic-only'
+Assert-True ($probeSmoke.Contains('qemuTwoUsableScanouts=no')) 'smoke-qemu-display-probe.ps1 should keep the connector-state diagnostic separate from operational readiness'
+Assert-True (-not $probeSmoke.Contains('enabledScanoutsAfter=2')) 'smoke-qemu-display-probe.ps1 should not require two enabled scanouts for success'
 Assert-True ($probeSmoke.Contains('gpuResourceCreateMatches')) 'smoke-qemu-display-probe.ps1 should count resource-creation lines'
 Assert-True ($probeSmoke.Contains('gpuAttachMatches')) 'smoke-qemu-display-probe.ps1 should count attach-backing lines'
 Assert-True ($probeSmoke.Contains('gpuStageBCapacityLine')) 'smoke-qemu-display-probe.ps1 should capture Stage B capacity evidence'

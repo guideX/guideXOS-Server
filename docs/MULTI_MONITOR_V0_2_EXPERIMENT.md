@@ -6,7 +6,7 @@ Validated through `2026-07-12`. This note now tracks the implementation path tow
 
 - Prove the hosted compositor and display model can represent a synthetic second monitor without changing the default hosted path.
 - Validate virtual desktop bounds, viewport selection, render-target accounting, taskbar routing, and input mapping in a controlled hosted validation lane.
-- Prove the first QEMU-only virtio-gpu 2D render path on scanout 0 without changing the default hosted path or enabling real hardware GPU work.
+- Prove the QEMU-only virtio-gpu dual-output 2D render path while preserving the static diagnostic patterns and keeping real hardware GPU work out of scope.
 
 ## Safety Boundary
 
@@ -21,8 +21,9 @@ Validated through `2026-07-12`. This note now tracks the implementation path tow
 - Stage A is visually confirmed on scanout 0.
 - The latest confirmed scanout-0 capture is `logs\qemu-display-probe-20260712-164959\virtio-gpu-stageA\captures\scanout0-stageA-gpu0-head0.png`.
 - The Stage A physical backing audit validated one mem entry, one contiguous physical run, `coveredBytes=4096000`, and `physicalCoverageValid=yes`.
-- Stage B now renders a distinct second pattern on scanout 1, with the latest captures at `logs\qemu-display-probe-20260712-164959\virtio-gpu-stageB\captures\scanout0-stageB.png` and `logs\qemu-display-probe-20260712-164959\virtio-gpu-stageB\captures\scanout1-stageB.png`.
-- The remaining blocker is protocol-level: the latest QEMU `GET_DISPLAY_INFO` still reports `enabledScanoutsAfter=1` and `post-render scanout[1] enabled=no` after `SET_SCANOUT` for scanout 1.
+- Stage B renders a distinct second pattern on scanout 1, with the latest captures at `logs\qemu-display-probe-20260712-164959\virtio-gpu-stageB\captures\scanout0-stageB.png` and `logs\qemu-display-probe-20260712-164959\virtio-gpu-stageB\captures\scanout1-stageB.png`.
+- Dual-output rendering is proven, while `GET_DISPLAY_INFO` still reports `enabledScanoutsAfter=1` and `post-render scanout[1] enabled=no`; that connector state is tracked separately from resource assignment and presentation readiness.
+- The output inventory now reports two operational outputs, two monitors, two backed render targets, and presentation confirmation for scanout 1 when capture validation is available.
 - Latest run root: `logs\qemu-display-probe-20260712-164959\`.
 
 ## Implementation Roadmap
@@ -35,9 +36,11 @@ Validated through `2026-07-12`. This note now tracks the implementation path tow
 1. Controlled modern VirtIO transport initialization complete.
 1. GET_DISPLAY_INFO complete.
 1. First 2D resource, backing attachment, scanout 0 assignment, transfer, and flush complete.
-1. Scanout 1 resource, backing, transfer, flush, and distinct visual proof are present, but QEMU still reports scanout 1 disabled.
-1. Resolve the QEMU scanout-1 enablement blocker next.
-1. DisplayRenderTarget integration after both scanouts are proven.
+1. Scanout 1 resource, backing, transfer, flush, and distinct visual proof are present.
+1. Dual-output rendering is proven, while scanout 1 connector state remains a separate diagnostic signal.
+1. QEMU-only virtio-gpu output inventory, `DisplayMonitor`, `DisplayViewport`, and `DisplayRenderTarget` bridge complete for the static diagnostic patterns.
+1. Render one guideXOS compositor frame into each virtio-gpu backing buffer using virtual desktop clipping and per-target viewport origins.
+1. Preserve the static-pattern fallback, then add controlled continuous invalidation/presentation.
 1. Real hardware and Mule Territory later.
 
 ## Gates
@@ -84,9 +87,10 @@ If both gates are unset, `.\run-server.bat` stays in normal single-output mode.
 | `build.bat` | The hosted runtime and display code compile successfully. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-display-synthetic-layout.ps1` | The synthetic gate plumbing, display-model helpers, render-target wiring, and summary diagnostics are present and consistent. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-hosted-display-runtime.ps1` | All three validated runtime modes behave as expected, including summary logs, paint routing, input mapping, and cleanup. |
-| `powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1` | The QEMU probe confirms Stage A visually, validates the physical backing contract, captures distinct Stage B patterns on scanout 0 and scanout 1, and still surfaces the remaining QEMU `GET_DISPLAY_INFO` scanout-1 enablement blocker. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1` | The QEMU probe confirms Stage A visually, validates the physical backing contract, captures distinct Stage B patterns on scanout 0 and scanout 1, and records the split between connector state, operational output readiness, and presentation confirmation. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-mmio-mapping.ps1` | The generic MMIO mapping API contract, safety flags, and virtio-gpu probe wiring stay aligned with the runtime mapping prerequisite. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-diagnostic-source.ps1` | The virtio-gpu probe source keeps the full capability walk, the `cfg_type=0x05` diagnostic-only treatment, the QEMU-only gate, the controlled transport milestone, bounded polling, response validation, and the no-compositor / no-real-hardware constraint. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-output-backend.ps1` | The QEMU-only virtio-gpu output backend keeps connector state separate from operational readiness, bridges into `DisplayMonitor` / `DisplayViewport` / `DisplayRenderTarget`, and still leaves compositor copy for the next phase. |
 | `git diff --check` | The working tree is free of whitespace and patch-format issues. |
 
 The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes `display-options.cfg` as part of its cleanup, so validation does not leave those runtime state files dirty.
@@ -94,8 +98,9 @@ The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes
 ## Current Architecture Terms
 
 - `DisplayMonitor` here means the code-level `DisplayMonitorDescriptor` concept: one monitor record with virtual coordinates, size, enabled/primary flags, and virtual bounds.
-- `DisplayViewport` is the active hosted view into the virtual desktop; it tracks the active origin, size, synthetic-hosted state, and local-to-virtual coordinate conversion.
-- `DisplayRenderTarget` is one renderable target entry; it records the target index, monitor mapping, viewport origin, and whether the target is backed by a hosted framebuffer.
+- `DisplayViewport` is the active hosted view into the virtual desktop; it tracks the active origin, size, synthetic-hosted state, preferred geometry, assigned geometry, and local-to-virtual coordinate conversion.
+- `DisplayRenderTarget` is one renderable target entry; it records the target index, monitor mapping, viewport origin, and whether the target is backed by a hosted framebuffer or an output resource.
+- For the QEMU virtio-gpu path, those descriptors now carry separate connector state, resource binding, transfer readiness, present readiness, and presentation confirmation flags.
 - `virtual desktop bounds` are the aggregate rectangle reported by `DisplayVirtualDesktop::left`, `top`, `right`, `bottom`, `width()`, and `height()`.
 - `backed render target` means the target has a hosted framebuffer backing.
 - `conceptual render target` means the target exists in the model and diagnostics even when it is not backed in single-window synthetic-camera mode.
@@ -113,7 +118,7 @@ The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes
 ## Known Limitations
 
 - This is a hosted synthetic experiment, not real hardware multi-monitor support.
-- QEMU scanout-0 rendering is now implemented in the probe path, and scanout-1 rendering is visually proven, but QEMU still reports only one enabled scanout in the latest `GET_DISPLAY_INFO` response.
+- QEMU scanout-0 rendering is implemented in the probe path, scanout-1 rendering is visually proven, and connector state remains a separate diagnostic signal from operational output readiness.
 - The second hosted window is still synthetic, not a hardware-backed second display.
 - Default hosted mode stays single-output unless the gates are enabled.
 
@@ -185,11 +190,11 @@ The standard `std` mode still validates:
 - Multiple framebuffer descriptors are not part of the current boot handoff contract.
 - The kernel does not yet consume an array of framebuffer targets from the boot path.
 - The compositor does not yet render to more than one real framebuffer in bare-metal mode.
-- There is now a diagnostic-only virtio-gpu transport probe with a mapped MMIO window, controlled transport init, and QEMU-only scanout-0 and scanout-1 diagnostic patterns, but there is still no compositor integration or production multi-output path.
+- There is now a diagnostic-only virtio-gpu transport probe with a mapped MMIO window, controlled transport init, and QEMU-only scanout-0 and scanout-1 diagnostic patterns, but there is still no compositor copy path or production multi-output path.
 
 ### Next required implementation step
 
-Keep the diagnostic framebuffer array flowing through the boot path, then resolve the QEMU scanout-1 enablement blocker on the probe path. The separate second resource and distinct scanout-1 pattern are already proven; the remaining step is to get QEMU to report both scanouts enabled, then bridge both scanouts into `DisplayRenderTarget`.
+Keep the diagnostic framebuffer array flowing through the boot path, then bridge the proven QEMU-only outputs into `DisplayMonitor`, `DisplayViewport`, and `DisplayRenderTarget`. The separate second resource and distinct scanout-1 pattern are already proven, and connector state is now tracked independently from operational readiness.
 
 ## Virtio-GPU Driver Investigation
 
@@ -205,19 +210,21 @@ Diagnostic-only probe results from `logs\qemu-display-probe-20260709-211742\virt
 | GET_DISPLAY_INFO | Success. One diagnostic control command is issued before the render milestone and one more after flush. |
 | Scanouts reported | `deviceConfigNumScanouts=2`, `slots=16`, `enabled=1`, `disabled=15`, `qemuMaxOutputsIntent=2`, `qemuTwoUsableScanouts=no` in the current QEMU run. |
 | Stage B initial state | Success. The latest Stage B probe logs `scanout1InitialEnabled=no` before the second resource is created, while still confirming `deviceConfigNumScanouts=2` and `qemuMaxOutputsIntent=2`. |
-| Stage B activation | Success on the guest side. A second resource and backing store are created, scanout 1 is assigned, transferred, and flushed, but QEMU still reports `enabledScanoutsAfter=1` and `scanout1 enabled=no` afterward. |
+| Stage B activation | Success on the guest side. A second resource and backing store are created, scanout 1 is assigned, transferred, and flushed, and the static diagnostic pattern is visibly distinct. `GET_DISPLAY_INFO` still reports `enabledScanoutsAfter=1` and `scanout1 enabled=no`, but that connector state is tracked separately from operational readiness. |
+| Output inventory | Success. The operational output inventory now reports two outputs, two monitors, and two backed render targets; `connectorEnabled=1` and `presentationConfirmed=2` are tracked separately from `GET_DISPLAY_INFO.enabled`. |
+| Virtual desktop | Success. The virtual desktop is computed from the assigned scanout rectangles, so the current `1280x800` outputs land at `0,0` and `1280,0` with a combined `2560x800` desktop. |
 | Visual proof | The Stage B capture artifacts at `logs\qemu-display-probe-20260712-164959\virtio-gpu-stageB\captures\scanout0-stageB.png` and `logs\qemu-display-probe-20260712-164959\virtio-gpu-stageB\captures\scanout1-stageB.png` were manually inspected and are distinct. |
 | Resource / backing | Success. Stage A creates one `B8G8R8X8_UNORM` 2D resource with bounded DMA-visible backing, and Stage B creates a second independent resource with its own backing store. |
 | Scanout 0 assignment | Success. The diagnostic resource is assigned to scanout 0 before Stage B adds the second scanout. |
 | Transfer / flush | Success. Stage A transfers and flushes the primary pattern; Stage B separately transfers and flushes the secondary pattern. |
 | Modern-only QEMU mode | Supported locally. The smoke successfully launches `-device virtio-gpu-pci,max_outputs=2,disable-legacy=on`. |
-| Current interpretation | QEMU exposes a modern virtio-gpu PCI candidate, guideXOS now proves the safe QEMU-only transport initialization milestone plus the scanout-0 and scanout-1 diagnostic render milestones, but the latest `GET_DISPLAY_INFO` still reports scanout 1 as disabled. Rendering remains QEMU-only and compositor integration is still deferred. |
+| Current interpretation | QEMU exposes a modern virtio-gpu PCI candidate, guideXOS now proves the safe QEMU-only transport initialization milestone plus the scanout-0 and scanout-1 diagnostic render milestones, and the output inventory now records two operational outputs while `GET_DISPLAY_INFO` keeps connector state separate. Rendering remains QEMU-only and compositor integration is still deferred. |
 
 What remains before the next scanout can happen:
 
-- The scanout-1 enablement state is still the blocker: the guest renders a distinct second pattern, but QEMU still reports scanout 1 disabled after the flush.
-- The transport path now needs a real dual-enabled display-info state, not just two successful resource-and-flush sequences.
-- The compositor-backed multi-output bridge is still deferred until QEMU reports both scanouts enabled.
+- The scanout-1 connector state remains diagnostic-only: the guest renders a distinct second pattern, but QEMU still reports scanout 1 connectorEnabled=no after the flush.
+- The transport path now uses separate connector-state and operational-readiness tracking, not just `GET_DISPLAY_INFO.enabled`.
+- The compositor-backed multi-output bridge is now the next phase, using the already-proven dual-output inventory and static fallback patterns.
 
 ## Virtio-GPU Transport Milestone
 
@@ -231,8 +238,8 @@ The virtio-gpu discovery path now maps the modern transport MMIO regions into a 
 - The current cache policy avoids ordinary write-back RAM semantics and does not touch global MTRRs.
 - The probe now performs bounded reset/status progression, requires `VIRTIO_F_VERSION_1`, writes the minimal driver feature set, verifies `FEATURES_OK`, and configures only control queue 0.
 - `GET_DISPLAY_INFO` now runs before rendering and again after flush, and both responses are parsed.
-- The current QEMU run reported `deviceConfigNumScanouts=2`, `slots=16`, `enabled=1`, `disabled=15`, `qemuMaxOutputsIntent=2`, and `qemuTwoUsableScanouts=no` even after the second resource and flush completed.
-- The probe now creates one `B8G8R8X8_UNORM` 2D resource for scanout 0, then a second independent 2D resource for scanout 1, attaches bounded DMA-visible backing memory to both, transfers deterministic test patterns, and flushes them.
+- The current QEMU run reported `deviceConfigNumScanouts=2`, `slots=16`, `enabled=1`, `disabled=15`, `qemuMaxOutputsIntent=2`, and `qemuTwoUsableScanouts=no` even after the second resource and flush completed; that remains a connector-state diagnostic, not a statement about operational output readiness.
+- The probe now creates one `B8G8R8X8_UNORM` 2D resource for scanout 0, then a second independent 2D resource for scanout 1, attaches bounded DMA-visible backing memory to both, transfers deterministic test patterns, flushes them, and publishes an operational output inventory with two monitors and two backed render targets.
 - The render path stays QEMU-only, uses the reserved diagnostic resource id, and does not set up cursor, virgl, blob, or compositor integration.
 - Unmap currently clears only MMIO-owned leaf entries and retains the intermediate page-table pages for now.
 
@@ -250,9 +257,10 @@ The virtio-gpu discovery path now maps the modern transport MMIO regions into a 
 
 ### Next Intended Phase
 
-- Resolve the QEMU scanout-1 enablement blocker on the probe path.
-- Keep the distinct scanout 0 and scanout 1 patterns as the visual proof of the guest-side render path.
-- Bridge both scanouts into `DisplayRenderTarget` after QEMU reports both outputs enabled.
+- Render one guideXOS compositor frame into each virtio-gpu backing buffer.
+- Use virtual desktop clipping and per-target viewport origins.
+- Flush both resources once, while preserving the static-pattern fallback.
+- Then add controlled continuous invalidation/presentation.
 
 ## Framebuffer Array Handoff
 
@@ -281,5 +289,5 @@ The kernel now derives a read-only inventory of unique framebuffer-backed displa
 
 - Keep the synthetic path isolated and continue using the existing smoke tests as the regression fence.
 - Treat real hardware multi-output and QEMU scanout-1 work as separate capability-probe efforts.
-- Resolve the QEMU scanout-1 enablement blocker, then bridge both proven scanouts into `DisplayRenderTarget`.
+- Bridge the proven QEMU-only outputs into `DisplayMonitor`, `DisplayViewport`, and `DisplayRenderTarget`, then begin compositor copy into the backing buffers.
 - Add backend-specific validation only after a real multi-output implementation exists, so the current contract stays stable.

@@ -141,19 +141,42 @@ inline const char* displayModeName(DisplayModeKind mode)
 
 struct DisplayMonitorDescriptor {
     std::string id;
+    std::string source;
     uint32_t* framebufferBase{nullptr};
+    uint32_t scanoutId{0};
+    uint32_t resourceId{0};
     int width{0};
     int height{0};
     int pitch{0};
     std::string pixelFormat{"XRGB32"};
     int virtualX{0};
     int virtualY{0};
+    int preferredX{0};
+    int preferredY{0};
+    int preferredWidth{0};
+    int preferredHeight{0};
+    int assignedX{0};
+    int assignedY{0};
+    int assignedWidth{0};
+    int assignedHeight{0};
     bool enabled{true};
+    bool operational{false};
+    bool connectorEnabled{true};
+    bool resourceBound{false};
+    bool backingAttached{false};
+    bool transferReady{false};
+    bool presentReady{false};
+    bool presentationConfirmed{false};
     bool primary{false};
     float scale{1.0f};
     int rotation{0};
     int refreshRateHz{0};
     std::string name;
+    uint64_t backingVirtualAddress{0};
+    uint64_t backingByteCount{0};
+    uint32_t backingMemEntryCount{0};
+    uint64_t patternChecksum{0};
+    std::string lastCommandStatus;
 
     bool isActive() const
     {
@@ -163,6 +186,26 @@ struct DisplayMonitorDescriptor {
     bool containsVirtualPoint(int x, int y) const
     {
         return isActive() && x >= virtualX && x < (virtualX + width) && y >= virtualY && y < (virtualY + height);
+    }
+
+    DisplayRect preferredBounds() const
+    {
+        return DisplayRect{
+            preferredX,
+            preferredY,
+            preferredX + std::max(0, preferredWidth),
+            preferredY + std::max(0, preferredHeight)
+        };
+    }
+
+    DisplayRect assignedBounds() const
+    {
+        return DisplayRect{
+            assignedX,
+            assignedY,
+            assignedX + std::max(0, assignedWidth),
+            assignedY + std::max(0, assignedHeight)
+        };
     }
 
     DisplayRect virtualBounds() const
@@ -565,8 +608,30 @@ struct DisplayViewport {
     int width{0};
     int height{0};
     bool syntheticHosted{false};
+    std::string source;
+    uint32_t scanoutId{0};
+    uint32_t resourceId{0};
+    bool connectorEnabled{false};
+    bool resourceBound{false};
+    bool backingAttached{false};
+    bool transferReady{false};
+    bool presentReady{false};
+    bool presentationConfirmed{false};
     std::string monitorId;
     std::string monitorName;
+    int preferredX{0};
+    int preferredY{0};
+    int preferredWidth{0};
+    int preferredHeight{0};
+    int assignedX{0};
+    int assignedY{0};
+    int assignedWidth{0};
+    int assignedHeight{0};
+    uint64_t backingVirtualAddress{0};
+    uint64_t backingByteCount{0};
+    uint32_t backingMemEntryCount{0};
+    uint64_t patternChecksum{0};
+    std::string lastCommandStatus;
 
     bool isValid() const
     {
@@ -623,6 +688,26 @@ struct DisplayViewport {
         };
     }
 
+    DisplayRect preferredGeometry() const
+    {
+        return DisplayRect{
+            preferredX,
+            preferredY,
+            preferredX + std::max(0, preferredWidth),
+            preferredY + std::max(0, preferredHeight)
+        };
+    }
+
+    DisplayRect assignedGeometry() const
+    {
+        return DisplayRect{
+            assignedX,
+            assignedY,
+            assignedX + std::max(0, assignedWidth),
+            assignedY + std::max(0, assignedHeight)
+        };
+    }
+
     std::string summary() const
     {
         std::ostringstream out;
@@ -630,6 +715,19 @@ struct DisplayViewport {
             << " origin=" << originX << ',' << originY
             << " size=" << width << 'x' << height
             << " synthetic=" << (syntheticHosted ? "true" : "false");
+        if (!source.empty()) {
+            out << " source=" << source
+                << " scanout=" << scanoutId
+                << " resource=" << resourceId
+                << " connectorEnabled=" << (connectorEnabled ? "true" : "false")
+                << " resourceBound=" << (resourceBound ? "true" : "false")
+                << " backingAttached=" << (backingAttached ? "true" : "false")
+                << " transferReady=" << (transferReady ? "true" : "false")
+                << " presentReady=" << (presentReady ? "true" : "false")
+                << " confirmed=" << (presentationConfirmed ? "true" : "false")
+                << " preferred=" << preferredX << ',' << preferredY << ' ' << preferredWidth << 'x' << preferredHeight
+                << " assigned=" << assignedX << ',' << assignedY << ' ' << assignedWidth << 'x' << assignedHeight;
+        }
         if (!monitorId.empty()) {
             out << " monitor=" << monitorId;
             if (!monitorName.empty()) {
@@ -643,17 +741,40 @@ struct DisplayViewport {
 struct DisplayRenderTarget {
     int targetIndex{1};
     std::string targetId;
+    std::string source;
     std::string monitorId;
     std::string monitorName;
+    uint32_t scanoutId{0};
+    uint32_t resourceId{0};
     int viewportOriginX{0};
     int viewportOriginY{0};
     int width{0};
     int height{0};
     DisplayRect framebufferRect{ 0, 0, 0, 0 };
+    int preferredX{0};
+    int preferredY{0};
+    int preferredWidth{0};
+    int preferredHeight{0};
+    int assignedX{0};
+    int assignedY{0};
+    int assignedWidth{0};
+    int assignedHeight{0};
     bool primary{false};
     bool active{false};
     bool backedByHostedFramebuffer{false};
+    bool backedByOutputResource{false};
+    bool connectorEnabled{false};
+    bool resourceBound{false};
+    bool backingAttached{false};
+    bool transferReady{false};
+    bool presentReady{false};
+    bool presentationConfirmed{false};
     bool syntheticHosted{false};
+    uint64_t backingVirtualAddress{0};
+    uint64_t backingByteCount{0};
+    uint32_t backingMemEntryCount{0};
+    uint64_t patternChecksum{0};
+    std::string lastCommandStatus;
 
     bool isValid() const
     {
@@ -670,6 +791,26 @@ struct DisplayRenderTarget {
         };
     }
 
+    DisplayRect preferredGeometry() const
+    {
+        return DisplayRect{
+            preferredX,
+            preferredY,
+            preferredX + std::max(0, preferredWidth),
+            preferredY + std::max(0, preferredHeight)
+        };
+    }
+
+    DisplayRect assignedGeometry() const
+    {
+        return DisplayRect{
+            assignedX,
+            assignedY,
+            assignedX + std::max(0, assignedWidth),
+            assignedY + std::max(0, assignedHeight)
+        };
+    }
+
     DisplayViewport viewportDescriptor() const
     {
         DisplayViewport viewport;
@@ -679,8 +820,30 @@ struct DisplayRenderTarget {
         viewport.width = width;
         viewport.height = height;
         viewport.syntheticHosted = syntheticHosted;
+        viewport.source = source;
+        viewport.scanoutId = scanoutId;
+        viewport.resourceId = resourceId;
+        viewport.connectorEnabled = connectorEnabled;
+        viewport.resourceBound = resourceBound;
+        viewport.backingAttached = backingAttached;
+        viewport.transferReady = transferReady;
+        viewport.presentReady = presentReady;
+        viewport.presentationConfirmed = presentationConfirmed;
         viewport.monitorId = monitorId;
         viewport.monitorName = monitorName;
+        viewport.preferredX = preferredX;
+        viewport.preferredY = preferredY;
+        viewport.preferredWidth = preferredWidth;
+        viewport.preferredHeight = preferredHeight;
+        viewport.assignedX = assignedX;
+        viewport.assignedY = assignedY;
+        viewport.assignedWidth = assignedWidth;
+        viewport.assignedHeight = assignedHeight;
+        viewport.backingVirtualAddress = backingVirtualAddress;
+        viewport.backingByteCount = backingByteCount;
+        viewport.backingMemEntryCount = backingMemEntryCount;
+        viewport.patternChecksum = patternChecksum;
+        viewport.lastCommandStatus = lastCommandStatus;
         return viewport;
     }
 
@@ -692,12 +855,25 @@ struct DisplayRenderTarget {
         if (!monitorName.empty()) {
             out << "(" << monitorName << ")";
         }
+        if (!source.empty()) {
+            out << " source=" << source
+                << " scanout=" << scanoutId
+                << " resource=" << resourceId
+                << " connectorEnabled=" << (connectorEnabled ? "true" : "false")
+                << " resourceBound=" << (resourceBound ? "true" : "false")
+                << " backingAttached=" << (backingAttached ? "true" : "false")
+                << " transferReady=" << (transferReady ? "true" : "false")
+                << " presentReady=" << (presentReady ? "true" : "false")
+                << " confirmed=" << (presentationConfirmed ? "true" : "false")
+                << " preferred=" << preferredX << ',' << preferredY << ' ' << preferredWidth << 'x' << preferredHeight
+                << " assigned=" << assignedX << ',' << assignedY << ' ' << assignedWidth << 'x' << assignedHeight;
+        }
         out << " origin=" << viewportOriginX << ',' << viewportOriginY
             << " size=" << width << 'x' << height
             << " framebuffer=" << framebufferRect.left << ',' << framebufferRect.top << '-' << framebufferRect.right << ',' << framebufferRect.bottom
             << " primary=" << (primary ? "true" : "false")
             << " active=" << (active ? "true" : "false")
-            << " backed=" << (backedByHostedFramebuffer ? "true" : "false");
+            << " backed=" << ((backedByOutputResource || backedByHostedFramebuffer) ? "true" : "false");
         return out.str();
     }
 };
@@ -721,9 +897,18 @@ inline DisplayRenderTarget makeDisplayRenderTarget(
     target.width = width;
     target.height = height;
     target.framebufferRect = DisplayRect{ 0, 0, width, height };
+    target.preferredX = monitor.preferredX;
+    target.preferredY = monitor.preferredY;
+    target.preferredWidth = monitor.preferredWidth;
+    target.preferredHeight = monitor.preferredHeight;
+    target.assignedX = monitor.assignedX;
+    target.assignedY = monitor.assignedY;
+    target.assignedWidth = monitor.assignedWidth;
+    target.assignedHeight = monitor.assignedHeight;
     target.primary = monitor.primary;
     target.active = active;
     target.backedByHostedFramebuffer = backedByHostedFramebuffer;
+    target.backedByOutputResource = false;
     target.syntheticHosted = syntheticHosted;
     return target;
 }
@@ -749,8 +934,17 @@ inline DisplayRenderTarget makeHostedFallbackRenderTarget(
     target.width = width;
     target.height = height;
     target.framebufferRect = DisplayRect{ 0, 0, width, height };
+    target.preferredX = 0;
+    target.preferredY = 0;
+    target.preferredWidth = width;
+    target.preferredHeight = height;
+    target.assignedX = 0;
+    target.assignedY = 0;
+    target.assignedWidth = width;
+    target.assignedHeight = height;
     target.active = true;
     target.backedByHostedFramebuffer = true;
+    target.backedByOutputResource = false;
     target.syntheticHosted = syntheticHosted;
     return target;
 }
@@ -845,7 +1039,7 @@ inline const DisplayRenderTarget* activeDisplayRenderTarget(const std::vector<Di
         }
     }
     for (const auto& target : targets) {
-        if (target.backedByHostedFramebuffer) {
+        if (target.backedByOutputResource || target.backedByHostedFramebuffer) {
             return &target;
         }
     }
@@ -857,7 +1051,7 @@ inline std::string displayRenderTargetsSummary(const std::vector<DisplayRenderTa
     std::ostringstream out;
     size_t backedCount = 0;
     for (const auto& target : targets) {
-        if (target.backedByHostedFramebuffer) {
+        if (target.backedByOutputResource || target.backedByHostedFramebuffer) {
             ++backedCount;
         }
     }
@@ -900,6 +1094,16 @@ inline DisplayMonitorDescriptor makeDisplayMonitor(
     monitor.framebufferBase = framebufferBase;
     monitor.pitch = pitch;
     monitor.enabled = enabled;
+    monitor.operational = enabled && width > 0 && height > 0;
+    monitor.connectorEnabled = enabled;
+    monitor.preferredX = x;
+    monitor.preferredY = y;
+    monitor.preferredWidth = width;
+    monitor.preferredHeight = height;
+    monitor.assignedX = x;
+    monitor.assignedY = y;
+    monitor.assignedWidth = width;
+    monitor.assignedHeight = height;
     monitor.primary = primary;
     return monitor;
 }

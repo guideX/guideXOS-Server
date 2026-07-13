@@ -778,7 +778,7 @@ function Get-BackendSpec {
                 Supported = $true
                 LauncherBackend = 'virtio-gpu'
                 QemuArgs = '-vga none -device virtio-gpu-pci,id=gpu0,max_outputs=2'
-                ProbeNote = 'virtio-gpu-pci diagnostic 2D test-pattern probe (scanout 0 only)'
+                ProbeNote = 'virtio-gpu-pci diagnostic 2D test-pattern probe (QEMU-only dual-output inventory bridge)'
                 SerialPattern = 'guideXOS UEFI Bootloader'
                 WaitPattern = '\[VIRTIO-GPU\] Probe complete: devices='
             }
@@ -790,7 +790,7 @@ function Get-BackendSpec {
                 Supported = (Test-QemuVirtioGpuModernOnlySupport)
                 LauncherBackend = 'virtio-gpu-modern-only'
                 QemuArgs = '-vga none -device virtio-gpu-pci,id=gpu0,max_outputs=2,disable-legacy=on'
-                ProbeNote = 'virtio-gpu-pci modern-only diagnostic 2D test-pattern probe (scanout 0 only)'
+                ProbeNote = 'virtio-gpu-pci modern-only diagnostic 2D test-pattern probe (QEMU-only dual-output inventory bridge)'
                 SerialPattern = 'guideXOS UEFI Bootloader'
                 WaitPattern = '\[VIRTIO-GPU\] Probe complete: devices='
             }
@@ -1221,6 +1221,16 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuStageBInitialScanoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Diagnostic scanout 1 initial enabled=(yes|no) x=\d+ y=\d+ width=\d+ height=\d+')
     $gpuSingleOutputProofLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Single-output proof: resource1=ready backing1=valid scanout0=set transfer0=ok flush0=ok patternChecksum=0x[0-9A-Fa-f]+')
     $gpuDualOutputProofLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Dual-output proof: resource1=ready resource2=ready scanout0=set scanout1=set transfer0=ok transfer1=ok flush0=ok flush1=ok enabledScanoutsAfter=\d+ distinctPatterns=yes')
+    $gpuOutputInventoryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU outputs: configured=\d+ operational=\d+ connectorEnabled=\d+ presentationConfirmed=\d+ virtualDesktop=\d+x\d+ targets=\d+ backed=\d+ primaryOutput=\d+ protocolConnectorEnabledCount=\d+ operationalOutputCount=\d+ presentationConfirmedCount=\d+')
+    $gpuOutputMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] output\[\d+\]: source=virtio-gpu .*')
+    $gpuMonitorMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] monitor\[\d+\]: source=virtio-gpu .*')
+    $gpuTargetMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] target\[\d+\]: source=virtio-gpu .*')
+    $gpuOutput0Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] output\[0\]: source=virtio-gpu scanout=0 resource=\d+ connectorEnabled=yes resourceBound=yes backingAttached=yes transferReady=yes presentReady=yes confirmed=yes operational=yes preferred=\d+,\d+ \d+x\d+ assigned=\d+,\d+ \d+x\d+ virtual=0,0 primary=yes active=yes')
+    $gpuOutput1Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] output\[1\]: source=virtio-gpu scanout=1 resource=\d+ connectorEnabled=no resourceBound=yes backingAttached=yes transferReady=yes presentReady=yes confirmed=yes operational=yes preferred=\d+,\d+ \d+x\d+ assigned=\d+,\d+ \d+x\d+ virtual=\d+,\d+ primary=no active=yes')
+    $gpuMonitor0Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] monitor\[1\]: source=virtio-gpu scanout=0 resource=\d+ primary=yes enabled=yes operational=yes connectorEnabled=yes resourceBound=yes backingAttached=yes transferReady=yes presentReady=yes confirmed=yes preferred=\d+,\d+ \d+x\d+ assigned=\d+,\d+ \d+x\d+ virtual=0,0')
+    $gpuMonitor1Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] monitor\[2\]: source=virtio-gpu scanout=1 resource=\d+ primary=no enabled=yes operational=yes connectorEnabled=no resourceBound=yes backingAttached=yes transferReady=yes presentReady=yes confirmed=yes preferred=\d+,\d+ \d+x\d+ assigned=\d+,\d+ \d+x\d+ virtual=\d+,\d+')
+    $gpuTarget0Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] target\[1\]: source=virtio-gpu .*scanout=0.*resource=\d+.*backed=yes')
+    $gpuTarget1Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] target\[2\]: source=virtio-gpu .*scanout=1.*resource=\d+.*backed=yes')
     $gpuFeatureNegotiationLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Feature negotiation status=(ok|failed) negotiated=0x[0-9A-Fa-f]+ deviceFeatures=0x[0-9A-Fa-f]+ rejected=0x[0-9A-Fa-f]+')
     $gpuQueueCountLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Common config queueCount=\d+ queueMax=\d+')
     $gpuQueueLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Control queue ready size=\d+ queueEnable=yes queueNotifyOff=\d+ notifyOffMultiplier=\d+ notifyOffsetBytes=\d+ notifyAddr=0x[0-9A-Fa-f]+ descVirt=0x[0-9A-Fa-f]+ desc=0x[0-9A-Fa-f]+ availVirt=0x[0-9A-Fa-f]+ avail=0x[0-9A-Fa-f]+ usedVirt=0x[0-9A-Fa-f]+ used=0x[0-9A-Fa-f]+ alignment=4096')
@@ -1228,6 +1238,30 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuScanoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\]\s+(pre-render|post-render)\s+scanout\[\d+\].*')
     $gpuEnabledScanoutMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\]\s+post-render\s+scanout\[\d+\] enabled=yes')
     $gpuProbeCompleteLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probe complete: [^\r\n]+')
+    $gpuOutputConfiguredCount = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'configured=(\d+)' -GroupIndex 1
+    $gpuOutputOperationalCount = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'operational=(\d+)' -GroupIndex 1
+    $gpuOutputConnectorEnabledCount = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'connectorEnabled=(\d+)' -GroupIndex 1
+    $gpuOutputPresentationConfirmedCount = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'presentationConfirmed=(\d+)' -GroupIndex 1
+    $gpuOutputVirtualDesktopWidth = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'virtualDesktop=(\d+)x(\d+)' -GroupIndex 1
+    $gpuOutputVirtualDesktopHeight = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'virtualDesktop=(\d+)x(\d+)' -GroupIndex 2
+    $gpuOutputTargetCount = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'targets=(\d+)' -GroupIndex 1
+    $gpuOutputBackedTargetCount = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'backed=(\d+)' -GroupIndex 1
+    $gpuOutputPrimaryOutput = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'primaryOutput=(\d+)' -GroupIndex 1
+    $gpuOutputProtocolConnectorEnabledCount = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'protocolConnectorEnabledCount=(\d+)' -GroupIndex 1
+    $gpuOutputOperationalOutputCount = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'operationalOutputCount=(\d+)' -GroupIndex 1
+    $gpuOutputPresentationConfirmedCountDetailed = Get-TextMatchGroupValue -Text $gpuOutputInventoryLine.Value -Pattern 'presentationConfirmedCount=(\d+)' -GroupIndex 1
+    $gpuOutput0ResourceId = Get-TextMatchGroupValue -Text $gpuOutput0Line.Value -Pattern 'resource=(\d+)' -GroupIndex 1
+    $gpuOutput1ResourceId = Get-TextMatchGroupValue -Text $gpuOutput1Line.Value -Pattern 'resource=(\d+)' -GroupIndex 1
+    $gpuOutput0AssignedWidth = Get-TextMatchGroupValue -Text $gpuOutput0Line.Value -Pattern 'assigned=\d+,\d+ (\d+)x(\d+)' -GroupIndex 1
+    $gpuOutput0AssignedHeight = Get-TextMatchGroupValue -Text $gpuOutput0Line.Value -Pattern 'assigned=\d+,\d+ (\d+)x(\d+)' -GroupIndex 2
+    $gpuOutput1AssignedWidth = Get-TextMatchGroupValue -Text $gpuOutput1Line.Value -Pattern 'assigned=\d+,\d+ (\d+)x(\d+)' -GroupIndex 1
+    $gpuOutput1AssignedHeight = Get-TextMatchGroupValue -Text $gpuOutput1Line.Value -Pattern 'assigned=\d+,\d+ (\d+)x(\d+)' -GroupIndex 2
+    $gpuOutput0VirtualX = Get-TextMatchGroupValue -Text $gpuOutput0Line.Value -Pattern 'virtual=(\d+),(\d+)' -GroupIndex 1
+    $gpuOutput0VirtualY = Get-TextMatchGroupValue -Text $gpuOutput0Line.Value -Pattern 'virtual=(\d+),(\d+)' -GroupIndex 2
+    $gpuOutput1VirtualX = Get-TextMatchGroupValue -Text $gpuOutput1Line.Value -Pattern 'virtual=(\d+),(\d+)' -GroupIndex 1
+    $gpuOutput1VirtualY = Get-TextMatchGroupValue -Text $gpuOutput1Line.Value -Pattern 'virtual=(\d+),(\d+)' -GroupIndex 2
+    $gpuOutput1PreferredWidth = Get-TextMatchGroupValue -Text $gpuOutput1Line.Value -Pattern 'preferred=\d+,\d+ (\d+)x(\d+)' -GroupIndex 1
+    $gpuOutput1PreferredHeight = Get-TextMatchGroupValue -Text $gpuOutput1Line.Value -Pattern 'preferred=\d+,\d+ (\d+)x(\d+)' -GroupIndex 2
     $gpuMmioRequestBase = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'requestBase=0x([0-9A-Fa-f]+)' -GroupIndex 1
     $gpuMmioRequestLength = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'requestLength=0x([0-9A-Fa-f]+)' -GroupIndex 1
     $gpuMmioKernelVirtualBase = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'kernelVirtualBase=([^\s]+)' -GroupIndex 1
@@ -1276,7 +1310,7 @@ function Invoke-QemuDisplayProbeBackend {
     $kernelActiveRenderTargetCount = if ($kernelSummary) { $kernelSummary.ActiveRenderTargetCount } else { $null }
     $kernelDisabledCandidateCount = if ($kernelSummary) { $kernelSummary.DisabledCandidateCount } else { $null }
     $bootInvalidReason = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootInvalidReasonLine -GroupIndex 1)
-    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityWalkLine.Success -or $gpuInventoryLine.Success -or $gpuTransportLine.Success -or $gpuMmioReportLine.Success -or $gpuMmioSummaryLine.Success -or $gpuMmioMappedLine.Success -or $gpuMmioBlockedLine.Success -or $gpuResetStepLine.Success -or $gpuStatusResetLine.Success -or $gpuAckLine.Success -or $gpuDriverLine.Success -or $gpuFeaturesOkStatusLine.Success -or $gpuDriverOkStatusLine.Success -or $gpuFeatureBitmapLine.Success -or $gpuPreRenderDeviceConfigLine.Success -or $gpuPreRenderDisplayInfoBeginLine.Success -or $gpuPreRenderCompletionLine.Success -or $gpuPreRenderDisplayInfoSummaryLine.Success -or $gpuDiagnosticTargetLine.Success -or $gpuBackingLayoutLine.Success -or $gpuResourceCreateLine.Success -or $gpuAttachLine.Success -or $gpuPrimaryPatternChecksumLine.Success -or $gpuSetScanout0Line.Success -or $gpuTransferLine.Success -or $gpuFlushLine.Success -or $gpuPostRenderDisplayInfoBeginLine.Success -or $gpuPostRenderCompletionLine.Success -or $gpuPostRenderDisplayInfoSummaryLine.Success -or $gpuPostRenderScanout0Line.Success -or $gpuPostRenderScanout1Line.Success -or $gpuStageBCapacityLine.Success -or $gpuStageBInitialScanoutLine.Success -or $gpuSecondaryPatternChecksumLine.Success -or $gpuSetScanout1Line.Success -or $gpuTransfer1Line.Success -or $gpuFlush1Line.Success -or $gpuSingleOutputProofLine.Success -or $gpuDualOutputProofLine.Success -or $gpuFeatureNegotiationLine.Success -or $gpuQueueCountLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoResponseLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
+    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityWalkLine.Success -or $gpuInventoryLine.Success -or $gpuTransportLine.Success -or $gpuMmioReportLine.Success -or $gpuMmioSummaryLine.Success -or $gpuMmioMappedLine.Success -or $gpuMmioBlockedLine.Success -or $gpuResetStepLine.Success -or $gpuStatusResetLine.Success -or $gpuAckLine.Success -or $gpuDriverLine.Success -or $gpuFeaturesOkStatusLine.Success -or $gpuDriverOkStatusLine.Success -or $gpuFeatureBitmapLine.Success -or $gpuPreRenderDeviceConfigLine.Success -or $gpuPreRenderDisplayInfoBeginLine.Success -or $gpuPreRenderCompletionLine.Success -or $gpuPreRenderDisplayInfoSummaryLine.Success -or $gpuDiagnosticTargetLine.Success -or $gpuBackingLayoutLine.Success -or $gpuResourceCreateLine.Success -or $gpuAttachLine.Success -or $gpuPrimaryPatternChecksumLine.Success -or $gpuSetScanout0Line.Success -or $gpuTransferLine.Success -or $gpuFlushLine.Success -or $gpuPostRenderDisplayInfoBeginLine.Success -or $gpuPostRenderCompletionLine.Success -or $gpuPostRenderDisplayInfoSummaryLine.Success -or $gpuPostRenderScanout0Line.Success -or $gpuPostRenderScanout1Line.Success -or $gpuStageBCapacityLine.Success -or $gpuStageBInitialScanoutLine.Success -or $gpuSecondaryPatternChecksumLine.Success -or $gpuSetScanout1Line.Success -or $gpuTransfer1Line.Success -or $gpuFlush1Line.Success -or $gpuSingleOutputProofLine.Success -or $gpuDualOutputProofLine.Success -or $gpuOutputInventoryLine.Success -or $gpuOutput0Line.Success -or $gpuOutput1Line.Success -or $gpuMonitor0Line.Success -or $gpuMonitor1Line.Success -or $gpuTarget0Line.Success -or $gpuTarget1Line.Success -or $gpuFeatureNegotiationLine.Success -or $gpuQueueCountLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoResponseLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
 
     if ($spec.Required) {
         if ([string]::IsNullOrWhiteSpace($serialText)) {
@@ -1350,6 +1384,11 @@ function Invoke-QemuDisplayProbeBackend {
         Assert-Condition -Backend $backendName -Name 'virtio-gpu diagnostic target line' -Condition $gpuDiagnosticTargetLine.Success -Detail 'expected the selected diagnostic test pattern geometry to be logged'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu primary pattern checksum line' -Condition $gpuPrimaryPatternChecksumLine.Success -Detail 'expected the primary diagnostic checksum to be logged'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu backing layout line' -Condition $gpuBackingLayoutLine.Success -Detail 'expected the diagnostic backing layout line'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu output inventory line' -Condition $gpuOutputInventoryLine.Success -Detail 'expected the virtio-gpu output inventory summary'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu output 0 line' -Condition $gpuOutput0Line.Success -Detail 'expected the first operational output descriptor'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu monitor 0 line' -Condition $gpuMonitor0Line.Success -Detail 'expected the first DisplayMonitor descriptor'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu render target 0 line' -Condition $gpuTarget0Line.Success -Detail 'expected the first DisplayRenderTarget descriptor'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu output inventory descriptor counts' -Condition ($gpuOutputMatches.Count -ge 1 -and $gpuMonitorMatches.Count -ge 1 -and $gpuTargetMatches.Count -ge 1) -Detail ("outputs={0} monitors={1} targets={2}" -f $gpuOutputMatches.Count, $gpuMonitorMatches.Count, $gpuTargetMatches.Count)
         if ($stageLabel -eq 'stageA') {
             Assert-Condition -Backend $backendName -Name 'virtio-gpu resource create count' -Condition ($gpuResourceCreateMatches.Count -eq 1) -Detail ("count={0}" -f $gpuResourceCreateMatches.Count)
             Assert-Condition -Backend $backendName -Name 'virtio-gpu attach backing count' -Condition ($gpuAttachMatches.Count -eq 1) -Detail ("count={0}" -f $gpuAttachMatches.Count)
@@ -1361,6 +1400,20 @@ function Invoke-QemuDisplayProbeBackend {
             Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render display-info summary line' -Condition $gpuPostRenderDisplayInfoSummaryLine.Success -Detail 'expected the post-render scanout summary line'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu scanout geometry lines' -Condition ($gpuScanoutLine.Success -and $gpuPostRenderScanout0Line.Success -and $gpuPostRenderScanout1Line.Success) -Detail 'expected pre- and post-render scanout geometry for the primary output'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render scanout 1 disabled' -Condition ($gpuPostRenderScanout1Line.Success -and $gpuPostRenderScanout1Line.Value -match 'enabled=no') -Detail $gpuPostRenderScanout1Line.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu stage A output inventory counts' -Condition (
+                $gpuOutputConfiguredCount -eq '1' -and
+                $gpuOutputOperationalCount -eq '1' -and
+                $gpuOutputConnectorEnabledCount -eq '1' -and
+                $gpuOutputPresentationConfirmedCount -eq '1' -and
+                $gpuOutputTargetCount -eq '1' -and
+                $gpuOutputBackedTargetCount -eq '1' -and
+                $gpuOutputPrimaryOutput -eq '0' -and
+                $gpuOutputProtocolConnectorEnabledCount -eq '1' -and
+                $gpuOutputOperationalOutputCount -eq '1' -and
+                $gpuOutputPresentationConfirmedCountDetailed -eq '1'
+            ) -Detail $gpuOutputInventoryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu stage A output 1 absent' -Condition (-not $gpuOutput1Line.Success -and -not $gpuMonitor1Line.Success -and -not $gpuTarget1Line.Success) -Detail 'scanout 1 inventory should remain absent in the stage A build'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu stage A output 0 operational' -Condition ($gpuOutput0Line.Value -match 'connectorEnabled=yes' -and $gpuOutput0Line.Value -match 'resourceBound=yes' -and $gpuOutput0Line.Value -match 'presentReady=yes' -and $gpuOutput0Line.Value -match 'confirmed=yes' -and $gpuOutput0Line.Value -match 'operational=yes' -and $gpuOutput0VirtualX -eq '0' -and $gpuOutput0VirtualY -eq '0') -Detail $gpuOutput0Line.Value
             Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B gate absent' -Condition (-not $gpuStageBCapacityLine.Success -and -not $gpuSetScanout1Line.Success -and -not $gpuTransfer1Line.Success -and -not $gpuFlush1Line.Success -and -not $gpuSecondaryPatternChecksumLine.Success -and -not $gpuDualOutputProofLine.Success) -Detail 'stage B activation markers must remain absent from the stage A build'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu single-output proof line' -Condition $gpuSingleOutputProofLine.Success -Detail 'expected the single-output proof line after scanout 0 completes'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion line' -Condition $gpuProbeCompleteLine.Success -Detail 'expected the final probe summary line'
@@ -1413,9 +1466,27 @@ function Invoke-QemuDisplayProbeBackend {
             Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render completion line' -Condition $gpuPostRenderCompletionLine.Success -Detail 'expected the post-render used-ring completion log'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render display-info summary line' -Condition $gpuPostRenderDisplayInfoSummaryLine.Success -Detail 'expected the post-render scanout summary line'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu scanout geometry lines' -Condition ($gpuScanoutLine.Success -and $gpuPostRenderScanout0Line.Success -and $gpuPostRenderScanout1Line.Success) -Detail 'expected pre- and post-render scanout geometry for both outputs'
-            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render scanout 1 enabled' -Condition ($gpuPostRenderScanout1Line.Success -and $gpuPostRenderScanout1Line.Value -match 'enabled=yes') -Detail $gpuPostRenderScanout1Line.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render scanout 1 connector disabled' -Condition ($gpuPostRenderScanout1Line.Success -and $gpuPostRenderScanout1Line.Value -match 'enabled=no') -Detail $gpuPostRenderScanout1Line.Value
             Assert-Condition -Backend $backendName -Name 'virtio-gpu single-output proof line' -Condition $gpuSingleOutputProofLine.Success -Detail 'expected the single-output proof line to remain present before the dual-output proof'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu dual-output proof line' -Condition $gpuDualOutputProofLine.Success -Detail 'expected the dual-output proof line after scanout 1 completes'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu output inventory counts' -Condition (
+                $gpuOutputConfiguredCount -eq '2' -and
+                $gpuOutputOperationalCount -eq '2' -and
+                $gpuOutputConnectorEnabledCount -eq '1' -and
+                $gpuOutputPresentationConfirmedCount -eq '2' -and
+                $gpuOutputTargetCount -eq '2' -and
+                $gpuOutputBackedTargetCount -eq '2' -and
+                $gpuOutputPrimaryOutput -eq '0' -and
+                $gpuOutputProtocolConnectorEnabledCount -eq '1' -and
+                $gpuOutputOperationalOutputCount -eq '2' -and
+                $gpuOutputPresentationConfirmedCountDetailed -eq '2'
+            ) -Detail $gpuOutputInventoryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu output descriptors present' -Condition ($gpuOutputMatches.Count -eq 2 -and $gpuMonitorMatches.Count -eq 2 -and $gpuTargetMatches.Count -eq 2) -Detail ("outputs={0} monitors={1} targets={2}" -f $gpuOutputMatches.Count, $gpuMonitorMatches.Count, $gpuTargetMatches.Count)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu output resources distinct' -Condition ($gpuOutput0ResourceId -ne $gpuOutput1ResourceId) -Detail ("resource0={0} resource1={1}" -f $gpuOutput0ResourceId, $gpuOutput1ResourceId)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu output 1 operational' -Condition ($gpuOutput1Line.Value -match 'connectorEnabled=no' -and $gpuOutput1Line.Value -match 'resourceBound=yes' -and $gpuOutput1Line.Value -match 'backingAttached=yes' -and $gpuOutput1Line.Value -match 'transferReady=yes' -and $gpuOutput1Line.Value -match 'presentReady=yes' -and $gpuOutput1Line.Value -match 'confirmed=yes' -and $gpuOutput1Line.Value -match 'operational=yes' -and $gpuOutput1Line.Value -match 'primary=no' -and $gpuOutput1Line.Value -match 'active=yes') -Detail $gpuOutput1Line.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu output 1 preferred geometry separate' -Condition ($gpuOutput1PreferredWidth -eq '0' -and $gpuOutput1PreferredHeight -eq '0') -Detail $gpuOutput1Line.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu output 1 virtual origin' -Condition ($gpuOutput1VirtualX -eq $gpuOutput0AssignedWidth -and $gpuOutput1VirtualY -eq '0') -Detail $gpuOutput1Line.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu virtual desktop bounds' -Condition ($gpuOutputInventoryLine.Value -match ('virtualDesktop={0}x{1}' -f ([int]$gpuOutput0AssignedWidth + [int]$gpuOutput1AssignedWidth), [Math]::Max([int]$gpuOutput0AssignedHeight, [int]$gpuOutput1AssignedHeight))) -Detail $gpuOutputInventoryLine.Value
             Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion line' -Condition $gpuProbeCompleteLine.Success -Detail 'expected the final probe summary line'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion fields' -Condition (
                 $gpuProbeCompleteLine.Value -match 'mmioMapped=yes' -and
@@ -1443,7 +1514,7 @@ function Invoke-QemuDisplayProbeBackend {
                 $gpuProbeCompleteLine.Value -match 'transfer1=ok' -and
                 $gpuProbeCompleteLine.Value -match 'flush1=ok' -and
                 $gpuProbeCompleteLine.Value -match 'distinctPatterns=yes' -and
-                $gpuProbeCompleteLine.Value -match 'qemuTwoUsableScanouts=yes' -and
+                $gpuProbeCompleteLine.Value -match 'qemuTwoUsableScanouts=no' -and
                 $gpuProbeCompleteLine.Value -match 'rendering=dual-output-test-pattern' -and
                 $gpuProbeCompleteLine.Value -match 'reason=dual-output scanout 1 test pattern milestone complete'
             ) -Detail $gpuProbeCompleteLine.Value
@@ -1577,6 +1648,25 @@ function Invoke-QemuDisplayProbeBackend {
         "gpuScanoutLine=$($gpuScanoutLine.Value)"
         "gpuEnabledScanoutCount=$($gpuEnabledScanoutMatches.Count)"
         "gpuProbeCompleteLine=$($gpuProbeCompleteLine.Value)"
+        "gpuOutputInventoryLine=$($gpuOutputInventoryLine.Value)"
+        "gpuOutputConfiguredCount=$gpuOutputConfiguredCount"
+        "gpuOutputOperationalCount=$gpuOutputOperationalCount"
+        "gpuOutputConnectorEnabledCount=$gpuOutputConnectorEnabledCount"
+        "gpuOutputPresentationConfirmedCount=$gpuOutputPresentationConfirmedCount"
+        "gpuOutputVirtualDesktopWidth=$gpuOutputVirtualDesktopWidth"
+        "gpuOutputVirtualDesktopHeight=$gpuOutputVirtualDesktopHeight"
+        "gpuOutputTargetCount=$gpuOutputTargetCount"
+        "gpuOutputBackedTargetCount=$gpuOutputBackedTargetCount"
+        "gpuOutputPrimaryOutput=$gpuOutputPrimaryOutput"
+        "gpuOutputProtocolConnectorEnabledCount=$gpuOutputProtocolConnectorEnabledCount"
+        "gpuOutputOperationalOutputCount=$gpuOutputOperationalOutputCount"
+        "gpuOutputPresentationConfirmedCountDetailed=$gpuOutputPresentationConfirmedCountDetailed"
+        "gpuOutput0Line=$($gpuOutput0Line.Value)"
+        "gpuOutput1Line=$($gpuOutput1Line.Value)"
+        "gpuMonitor0Line=$($gpuMonitor0Line.Value)"
+        "gpuMonitor1Line=$($gpuMonitor1Line.Value)"
+        "gpuTarget0Line=$($gpuTarget0Line.Value)"
+        "gpuTarget1Line=$($gpuTarget1Line.Value)"
         "probeStage=$stageLabel"
         "visualCaptureStatus=$visualCaptureStatus"
         "visualScanout0=$visualScanout0"
@@ -1748,6 +1838,25 @@ function Invoke-QemuDisplayProbeBackend {
         GpuProbeCompleteEnabledScanoutsAfter = $gpuProbeCompleteEnabledScanoutsAfter
         GpuProbeCompleteDistinctPatterns = $gpuProbeCompleteDistinctPatterns
         GpuProbeCompleteQemuTwoUsableScanouts = $gpuProbeCompleteQemuTwoUsableScanouts
+        GpuOutputInventoryLine = $gpuOutputInventoryLine.Value
+        GpuOutputConfiguredCount = $gpuOutputConfiguredCount
+        GpuOutputOperationalCount = $gpuOutputOperationalCount
+        GpuOutputConnectorEnabledCount = $gpuOutputConnectorEnabledCount
+        GpuOutputPresentationConfirmedCount = $gpuOutputPresentationConfirmedCount
+        GpuOutputVirtualDesktopWidth = $gpuOutputVirtualDesktopWidth
+        GpuOutputVirtualDesktopHeight = $gpuOutputVirtualDesktopHeight
+        GpuOutputTargetCount = $gpuOutputTargetCount
+        GpuOutputBackedTargetCount = $gpuOutputBackedTargetCount
+        GpuOutputPrimaryOutput = $gpuOutputPrimaryOutput
+        GpuOutputProtocolConnectorEnabledCount = $gpuOutputProtocolConnectorEnabledCount
+        GpuOutputOperationalOutputCount = $gpuOutputOperationalOutputCount
+        GpuOutputPresentationConfirmedCountDetailed = $gpuOutputPresentationConfirmedCountDetailed
+        GpuOutput0Line = $gpuOutput0Line.Value
+        GpuOutput1Line = $gpuOutput1Line.Value
+        GpuMonitor0Line = $gpuMonitor0Line.Value
+        GpuMonitor1Line = $gpuMonitor1Line.Value
+        GpuTarget0Line = $gpuTarget0Line.Value
+        GpuTarget1Line = $gpuTarget1Line.Value
         GpuSingleOutputProofLine = $gpuSingleOutputProofLine.Value
         GpuDualOutputProofLine = $gpuDualOutputProofLine.Value
         Supported = $spec.Supported
@@ -1924,6 +2033,25 @@ try {
         $evidenceLines += "gpuScanoutLine=$($result.GpuScanoutLine)"
         $evidenceLines += "gpuEnabledScanoutCount=$($result.GpuEnabledScanoutCount)"
         $evidenceLines += "gpuProbeCompleteLine=$($result.GpuProbeCompleteLine)"
+        $evidenceLines += "gpuOutputInventoryLine=$($result.GpuOutputInventoryLine)"
+        $evidenceLines += "gpuOutputConfiguredCount=$($result.GpuOutputConfiguredCount)"
+        $evidenceLines += "gpuOutputOperationalCount=$($result.GpuOutputOperationalCount)"
+        $evidenceLines += "gpuOutputConnectorEnabledCount=$($result.GpuOutputConnectorEnabledCount)"
+        $evidenceLines += "gpuOutputPresentationConfirmedCount=$($result.GpuOutputPresentationConfirmedCount)"
+        $evidenceLines += "gpuOutputVirtualDesktopWidth=$($result.GpuOutputVirtualDesktopWidth)"
+        $evidenceLines += "gpuOutputVirtualDesktopHeight=$($result.GpuOutputVirtualDesktopHeight)"
+        $evidenceLines += "gpuOutputTargetCount=$($result.GpuOutputTargetCount)"
+        $evidenceLines += "gpuOutputBackedTargetCount=$($result.GpuOutputBackedTargetCount)"
+        $evidenceLines += "gpuOutputPrimaryOutput=$($result.GpuOutputPrimaryOutput)"
+        $evidenceLines += "gpuOutputProtocolConnectorEnabledCount=$($result.GpuOutputProtocolConnectorEnabledCount)"
+        $evidenceLines += "gpuOutputOperationalOutputCount=$($result.GpuOutputOperationalOutputCount)"
+        $evidenceLines += "gpuOutputPresentationConfirmedCountDetailed=$($result.GpuOutputPresentationConfirmedCountDetailed)"
+        $evidenceLines += "gpuOutput0Line=$($result.GpuOutput0Line)"
+        $evidenceLines += "gpuOutput1Line=$($result.GpuOutput1Line)"
+        $evidenceLines += "gpuMonitor0Line=$($result.GpuMonitor0Line)"
+        $evidenceLines += "gpuMonitor1Line=$($result.GpuMonitor1Line)"
+        $evidenceLines += "gpuTarget0Line=$($result.GpuTarget0Line)"
+        $evidenceLines += "gpuTarget1Line=$($result.GpuTarget1Line)"
         $evidenceLines += "gpuProbeCompleteDeviceConfigNumScanouts=$($result.GpuProbeCompleteDeviceConfigNumScanouts)"
         $evidenceLines += "gpuProbeCompleteEnabledScanoutsBefore=$($result.GpuProbeCompleteEnabledScanoutsBefore)"
         $evidenceLines += "gpuProbeCompleteDisabledScanoutsBefore=$($result.GpuProbeCompleteDisabledScanoutsBefore)"

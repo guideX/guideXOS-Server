@@ -7,7 +7,11 @@
 // - PCI discovery and VirtIO config/queue access only behind the QEMU gate
 // - QEMU-only 2D resource create, attach, scanout, transfer, and flush
 // - No cursor queue setup
+// - No physical Intel GPU support
+// - No real hardware GPU BAR access
 // - No 3D, virgl, Venus, blob, or compositor integration
+// - No display hotplug
+// - No compositor desktop rendering into virtio-gpu resources
 // - No continuous frame rendering or animation
 // - No real hardware GPU/MMIO enablement
 // REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
@@ -20,6 +24,7 @@
 #include "include/kernel/mmio.h"
 #include "include/kernel/msi.h"
 #include "include/kernel/serial_debug.h"
+#include "../../virtio_gpu_display_backend.h"
 
 #if defined(_MSC_VER)
 #define GXOS_MSVC_STUB 1
@@ -33,6 +38,8 @@
 namespace kernel {
 namespace virtio {
 namespace gpu {
+
+using namespace gxos::gui;
 
 namespace {
 
@@ -188,6 +195,7 @@ struct ProbeOutcome {
     bool renderingTestPattern;
     const char* reason;
     const DeviceState* state;
+    VirtioGpuOutputInventory outputInventory;
 };
 
 struct DiagnosticPatternPalette {
@@ -637,6 +645,88 @@ static void log_diagnostic_backing_layout(const DiagnosticBackingLayoutAudit& au
     kernel::serial::puts("-0x");
     kernel::serial::put_hex64(audit.lastPhysicalEnd);
     kernel::serial::putc('\n');
+}
+
+static VirtioGpuScanoutState make_scanout_state(
+    uint32_t scanoutId,
+    const DisplayInfo& preferred,
+    const DiagnosticResourceState& resource,
+    bool connectorEnabled,
+    int assignedX,
+    int assignedY,
+    int assignedWidth,
+    int assignedHeight,
+    bool presentationConfirmed,
+    const char* lastCommandStatus,
+    bool primary)
+{
+    VirtioGpuScanoutState state;
+    state.scanoutId = scanoutId;
+    state.resourceId = resource.resourceId;
+    state.connectorEnabled = connectorEnabled;
+    state.preferredX = static_cast<int>(preferred.x);
+    state.preferredY = static_cast<int>(preferred.y);
+    state.preferredWidth = static_cast<int>(preferred.width);
+    state.preferredHeight = static_cast<int>(preferred.height);
+    state.assignedX = assignedX;
+    state.assignedY = assignedY;
+    state.assignedWidth = assignedWidth;
+    state.assignedHeight = assignedHeight;
+    state.resourceBound = resource.scanoutSet;
+    state.backingAttached = resource.backingAttached;
+    state.transferReady = resource.transferOk;
+    state.presentReady = resource.flushOk;
+    state.presentationConfirmed = presentationConfirmed;
+    state.primary = primary;
+    state.active = resource.scanoutSet && resource.backingAttached && resource.transferOk && resource.flushOk;
+    state.backingVirtualAddress = resource.backingVirtual;
+    state.backingByteCount = resource.backingBytes;
+    state.backingMemEntryCount = resource.memEntryCount;
+    state.patternChecksum = resource.patternChecksum;
+    state.lastCommandStatus = lastCommandStatus != nullptr ? lastCommandStatus : "";
+    return state;
+}
+
+static VirtioGpuOutputInventory build_output_inventory(
+    const DisplayInfo& scanout0Preferred,
+    const DisplayInfo& scanout1Initial,
+    const DiagnosticResourceState& resource1,
+    const DiagnosticResourceState& resource2,
+    uint32_t deviceConfigNumScanouts,
+    bool scanout0PresentationConfirmed,
+    bool scanout1PresentationConfirmed,
+    uint32_t selectedWidth,
+    uint32_t selectedHeight)
+{
+    FixedList<VirtioGpuScanoutState, kVirtioGpuMaxOutputs> scanouts;
+    if (resource1.resourceId != 0u) {
+        scanouts.push_back(make_scanout_state(0u,
+            scanout0Preferred,
+            resource1,
+            scanout0Preferred.enabled,
+            0,
+            0,
+            static_cast<int>(selectedWidth),
+            static_cast<int>(selectedHeight),
+            scanout0PresentationConfirmed,
+            resource1.flushOk ? "RESOURCE_FLUSH result=ok" : "RESOURCE_FLUSH blocked",
+            true));
+    }
+    if (resource2.resourceId != 0u) {
+        scanouts.push_back(make_scanout_state(1u,
+            scanout1Initial,
+            resource2,
+            scanout1Initial.enabled,
+            0,
+            0,
+            static_cast<int>(selectedWidth),
+            static_cast<int>(selectedHeight),
+            scanout1PresentationConfirmed,
+            resource2.flushOk ? "RESOURCE_FLUSH result=ok" : "RESOURCE_FLUSH blocked",
+            false));
+    }
+
+    return VirtioGpuDisplayBackend::getVirtioGpuOutputInventory(scanouts, deviceConfigNumScanouts);
 }
 
 static inline void mmio_write8(uint64_t addr, uint8_t value)
@@ -1408,6 +1498,49 @@ static void print_probe_outcome()
         kernel::serial::puts(s_probeOutcome.reason);
     }
     kernel::serial::putc('\n');
+
+    if (s_probeOutcome.outputInventory.outputCount > 0u) {
+        kernel::serial::puts("[VIRTIO-GPU] ");
+        kernel::serial::puts(virtioGpuOutputInventorySummary(s_probeOutcome.outputInventory));
+        kernel::serial::putc('\n');
+
+        for (size_t i = 0; i < s_probeOutcome.outputInventory.outputs.size(); ++i) {
+            const VirtioGpuScanoutState& output = s_probeOutcome.outputInventory.outputs[i];
+            const DisplayMonitorDescriptor* monitor = i < s_probeOutcome.outputInventory.monitors.size()
+                ? &s_probeOutcome.outputInventory.monitors[i]
+                : nullptr;
+            const DisplayViewport* viewport = i < s_probeOutcome.outputInventory.viewports.size()
+                ? &s_probeOutcome.outputInventory.viewports[i]
+                : nullptr;
+            const DisplayRenderTarget* target = i < s_probeOutcome.outputInventory.renderTargets.size()
+                ? &s_probeOutcome.outputInventory.renderTargets[i]
+                : nullptr;
+
+            if (monitor != nullptr) {
+                kernel::serial::puts("[VIRTIO-GPU] ");
+                kernel::serial::puts(virtioGpuOutputSummaryLine(output, *monitor));
+                kernel::serial::putc('\n');
+
+                kernel::serial::puts("[VIRTIO-GPU] ");
+                kernel::serial::puts(virtioGpuMonitorSummaryLine(*monitor));
+                kernel::serial::putc('\n');
+            }
+
+            if (viewport != nullptr) {
+                kernel::serial::puts("[VIRTIO-GPU] viewport[");
+                serial_put_u32_decimal(static_cast<uint32_t>(i));
+                kernel::serial::puts("]: ");
+                kernel::serial::puts(viewport->summary());
+                kernel::serial::putc('\n');
+            }
+
+            if (target != nullptr) {
+                kernel::serial::puts("[VIRTIO-GPU] ");
+                kernel::serial::puts(virtioGpuRenderTargetSummaryLine(*target));
+                kernel::serial::putc('\n');
+            }
+        }
+    }
 }
 
 static DeviceState* find_state(GpuDevice* device)
@@ -3486,6 +3619,20 @@ static bool initialize_device(DeviceState& state)
     const uint64_t primaryBackingPhysical = dma_address(&s_diagnosticBackingStorage0[0]);
     const uint64_t secondaryBackingVirtual = reinterpret_cast<uint64_t>(&s_diagnosticBackingStorage1[0]);
     const uint64_t secondaryBackingPhysical = dma_address(&s_diagnosticBackingStorage1[0]);
+    auto updateOutputInventory = [&]() {
+        const bool scanout0PresentationConfirmed = resource1.flushOk && resource1.patternChecksum != 0u;
+        const bool scanout1PresentationConfirmed = resource2.flushOk && distinctPatternsConfirmed && resource2.patternChecksum != 0u;
+        s_probeOutcome.outputInventory = build_output_inventory(
+            scanout0,
+            scanout1Initial,
+            resource1,
+            resource2,
+            transport.mmioDeviceScanouts,
+            scanout0PresentationConfirmed,
+            scanout1PresentationConfirmed,
+            selectedWidth,
+            selectedHeight);
+    };
 
     kernel::serial::puts("[VIRTIO-GPU] Diagnostic scanout 1 initial enabled=");
     kernel::serial::puts(scanout1Initial.enabled ? "yes" : "no");
@@ -3629,6 +3776,7 @@ static bool initialize_device(DeviceState& state)
     postRenderEnabledScanouts = transport.enabledScanouts;
     stageAEnabledScanouts = postRenderEnabledScanouts;
     renderingTestPattern = true;
+    updateOutputInventory();
 
     kernel::serial::puts("[VIRTIO-GPU] Single-output proof: resource1=");
     kernel::serial::puts(resource1.created ? "ready" : "blocked");
@@ -3846,6 +3994,7 @@ static bool initialize_device(DeviceState& state)
         kernel::serial::putc('\n');
         s_probeOutcome.deviceConfigNumScanouts = transport.mmioDeviceScanouts;
         s_probeOutcome.qemuMaxOutputsIntent = kDiagnosticQemuMaxOutputsIntent;
+        updateOutputInventory();
         return true;
     }
 #endif
@@ -3889,6 +4038,7 @@ static bool initialize_device(DeviceState& state)
     s_probeOutcome.flush1Ok = flush1Ok;
     s_probeOutcome.distinctPatternsConfirmed = distinctPatternsConfirmed;
     s_probeOutcome.renderingTestPattern = renderingTestPattern;
+    updateOutputInventory();
     record_probe_outcome(state,
                          true,
                          DisplayInfoOutcome::Ok,
