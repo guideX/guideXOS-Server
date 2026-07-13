@@ -302,6 +302,24 @@ static int clampCssValue(CssDiagnostics& diag, int value, int minValue, int maxV
 	return clamped;
 }
 
+static int clampBorderWidthPx(CssDiagnostics& diag, int value)
+{
+	const int clamped = clampCssValue(diag, std::max(0, value), 0, kCssLiteMaxBorderWidthPx);
+	if (clamped != std::max(0, value)) {
+		++diag.borderWidthClampCount;
+	}
+	return clamped;
+}
+
+static int clampBorderSpacingPx(CssDiagnostics& diag, int value)
+{
+	const int clamped = clampCssValue(diag, std::max(0, value), 0, kCssLiteMaxSpacingPx);
+	if (clamped != std::max(0, value)) {
+		++diag.borderSpacingClampCount;
+	}
+	return clamped;
+}
+
 static bool parseCssLengthValue(const std::string& rawValue,
 	int basePx,
 	int& outPx,
@@ -520,6 +538,347 @@ static bool applyLengthList(WebStyle& style,
 	return false;
 }
 
+enum class BorderSideIndex : uint8_t {
+	Top = 0,
+	Right = 1,
+	Bottom = 2,
+	Left = 3,
+};
+
+struct BorderSideValue {
+	bool hasWidth = false;
+	int width = 0;
+	bool hasColor = false;
+	uint32_t color = 0;
+	bool hasStyle = false;
+	BorderLineStyle style = BorderLineStyle::Inherit;
+	bool sawRecognized = false;
+};
+
+static bool parseBorderStyleToken(const std::string& token, BorderLineStyle& style)
+{
+	const std::string lower = toLower(trim(token));
+	if (lower == "none") {
+		style = BorderLineStyle::None;
+		return true;
+	}
+	if (lower == "hidden") {
+		style = BorderLineStyle::Hidden;
+		return true;
+	}
+	if (lower == "solid") {
+		style = BorderLineStyle::Solid;
+		return true;
+	}
+	if (lower == "dashed") {
+		style = BorderLineStyle::Dashed;
+		return true;
+	}
+	if (lower == "dotted") {
+		style = BorderLineStyle::Dotted;
+		return true;
+	}
+	return false;
+}
+
+static std::vector<std::string> splitCssCommaTokens(const std::string& text)
+{
+	std::vector<std::string> tokens;
+	std::string current;
+	bool inSingle = false;
+	bool inDouble = false;
+	for (char c : text) {
+		if (c == '\'' && !inDouble) {
+			inSingle = !inSingle;
+			current += c;
+			continue;
+		}
+		if (c == '"' && !inSingle) {
+			inDouble = !inDouble;
+			current += c;
+			continue;
+		}
+		if (c == ',' && !inSingle && !inDouble) {
+			tokens.push_back(trim(current));
+			current.clear();
+			continue;
+		}
+		current += c;
+	}
+	if (!current.empty() || !tokens.empty()) {
+		tokens.push_back(trim(current));
+	}
+	return tokens;
+}
+
+static std::string stripCssQuotes(const std::string& text)
+{
+	std::string value = trim(text);
+	if (value.size() >= 2) {
+		const char first = value.front();
+		const char last = value.back();
+		if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+			return value.substr(1, value.size() - 2);
+		}
+	}
+	return value;
+}
+
+static bool parseGenericFontFamily(const std::string& rawValue, GenericFontFamily& outFamily)
+{
+	const std::string value = toLower(trim(stripCssQuotes(rawValue)));
+	if (value == "sans-serif") {
+		outFamily = GenericFontFamily::SansSerif;
+		return true;
+	}
+	if (value == "serif") {
+		outFamily = GenericFontFamily::Serif;
+		return true;
+	}
+	if (value == "monospace") {
+		outFamily = GenericFontFamily::Monospace;
+		return true;
+	}
+	return false;
+}
+
+static bool parseBorderSideValue(const std::string& rawValue, BorderSideValue& out, CssDiagnostics& diag)
+{
+	out = {};
+	out.width = 1;
+	out.color = 0xFF000000u;
+	std::vector<std::string> tokens = splitCssTokens(rawValue);
+	if (tokens.empty()) return false;
+	for (const std::string& token : tokens) {
+		const std::string lower = toLower(token);
+		BorderLineStyle style = BorderLineStyle::Inherit;
+		bool tokenRecognized = false;
+		if (parseBorderStyleToken(lower, style)) {
+			out.hasStyle = true;
+			out.style = style;
+			tokenRecognized = true;
+			if (style == BorderLineStyle::None || style == BorderLineStyle::Hidden) {
+				if (!out.hasWidth) {
+					out.width = 0;
+				}
+			}
+		} else {
+			bool autoValue = false;
+			int px = 0;
+			if (parseCssLengthValue(token, 16, px, autoValue, false) && !autoValue) {
+				out.hasWidth = true;
+				out.width = clampBorderWidthPx(diag, px);
+				tokenRecognized = true;
+			} else {
+				uint32_t color = 0;
+				if (parseCssColor(token, color)) {
+					out.hasColor = true;
+					out.color = color;
+					tokenRecognized = true;
+				}
+			}
+		}
+		if (tokenRecognized) {
+			out.sawRecognized = true;
+			continue;
+		}
+		++diag.unsupportedDeclarationCount;
+	}
+	if (!out.sawRecognized) return false;
+	return true;
+}
+
+static void applyBorderSideValue(WebStyle& style, BorderSideIndex side, const BorderSideValue& value)
+{
+	switch (side) {
+	case BorderSideIndex::Top:
+		style.hasBorderTop = true;
+		if (value.hasWidth) style.borderTopWidth = value.width;
+		if (value.hasColor) style.borderTopColor = value.color;
+		if (value.hasStyle) style.borderTopStyle = value.style;
+		break;
+	case BorderSideIndex::Right:
+		style.hasBorderRight = true;
+		if (value.hasWidth) style.borderRightWidth = value.width;
+		if (value.hasColor) style.borderRightColor = value.color;
+		if (value.hasStyle) style.borderRightStyle = value.style;
+		break;
+	case BorderSideIndex::Bottom:
+		style.hasBorderBottom = true;
+		if (value.hasWidth) style.borderBottomWidth = value.width;
+		if (value.hasColor) style.borderBottomColor = value.color;
+		if (value.hasStyle) style.borderBottomStyle = value.style;
+		break;
+	case BorderSideIndex::Left:
+		style.hasBorderLeft = true;
+		if (value.hasWidth) style.borderLeftWidth = value.width;
+		if (value.hasColor) style.borderLeftColor = value.color;
+		if (value.hasStyle) style.borderLeftStyle = value.style;
+		break;
+	}
+}
+
+static BorderSideValue borderSideValueFromStyle(const WebStyle& style, BorderSideIndex side)
+{
+	BorderSideValue value;
+	switch (side) {
+	case BorderSideIndex::Top:
+		value.hasWidth = style.hasBorderTop;
+		value.width = style.borderTopWidth;
+		value.hasColor = style.hasBorderTop;
+		value.color = style.borderTopColor;
+		value.hasStyle = style.hasBorderTop;
+		value.style = style.borderTopStyle;
+		break;
+	case BorderSideIndex::Right:
+		value.hasWidth = style.hasBorderRight;
+		value.width = style.borderRightWidth;
+		value.hasColor = style.hasBorderRight;
+		value.color = style.borderRightColor;
+		value.hasStyle = style.hasBorderRight;
+		value.style = style.borderRightStyle;
+		break;
+	case BorderSideIndex::Bottom:
+		value.hasWidth = style.hasBorderBottom;
+		value.width = style.borderBottomWidth;
+		value.hasColor = style.hasBorderBottom;
+		value.color = style.borderBottomColor;
+		value.hasStyle = style.hasBorderBottom;
+		value.style = style.borderBottomStyle;
+		break;
+	case BorderSideIndex::Left:
+		value.hasWidth = style.hasBorderLeft;
+		value.width = style.borderLeftWidth;
+		value.hasColor = style.hasBorderLeft;
+		value.color = style.borderLeftColor;
+		value.hasStyle = style.hasBorderLeft;
+		value.style = style.borderLeftStyle;
+		break;
+	}
+	value.sawRecognized = value.hasWidth || value.hasColor || value.hasStyle;
+	return value;
+}
+
+static bool applyBorderWidthListToSides(WebStyle& style, const std::vector<std::string>& values, CssDiagnostics& diag)
+{
+	if (values.empty() || values.size() > 4) return false;
+	int widths[4] = { 0, 0, 0, 0 };
+	for (size_t i = 0; i < values.size(); ++i) {
+		bool autoValue = false;
+		int px = 0;
+		if (!parseCssLengthValue(values[i], 16, px, autoValue, false) || autoValue) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		widths[i] = clampBorderWidthPx(diag, px);
+	}
+	if (values.size() == 1) {
+		widths[1] = widths[2] = widths[3] = widths[0];
+	} else if (values.size() == 2) {
+		widths[2] = widths[0];
+		widths[3] = widths[1];
+	} else if (values.size() == 3) {
+		widths[3] = widths[1];
+	}
+	style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+	style.borderTopWidth = widths[0];
+	style.borderRightWidth = widths[1];
+	style.borderBottomWidth = widths[2];
+	style.borderLeftWidth = widths[3];
+	return true;
+}
+
+static bool applyBorderStyleListToSides(WebStyle& style, const std::vector<std::string>& values, CssDiagnostics& diag)
+{
+	if (values.empty() || values.size() > 4) return false;
+	BorderLineStyle styles[4] = {
+		BorderLineStyle::Inherit,
+		BorderLineStyle::Inherit,
+		BorderLineStyle::Inherit,
+		BorderLineStyle::Inherit,
+	};
+	for (size_t i = 0; i < values.size(); ++i) {
+		BorderLineStyle borderStyle = BorderLineStyle::Inherit;
+		if (!parseBorderStyleToken(values[i], borderStyle)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		styles[i] = borderStyle;
+	}
+	if (values.size() == 1) {
+		styles[1] = styles[2] = styles[3] = styles[0];
+	} else if (values.size() == 2) {
+		styles[2] = styles[0];
+		styles[3] = styles[1];
+	} else if (values.size() == 3) {
+		styles[3] = styles[1];
+	}
+	style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+	style.borderTopStyle = styles[0];
+	style.borderRightStyle = styles[1];
+	style.borderBottomStyle = styles[2];
+	style.borderLeftStyle = styles[3];
+	return true;
+}
+
+static bool applyBorderColorListToSides(WebStyle& style, const std::vector<std::string>& values, CssDiagnostics& diag)
+{
+	if (values.empty() || values.size() > 4) return false;
+	uint32_t colors[4] = { 0xFF000000u, 0xFF000000u, 0xFF000000u, 0xFF000000u };
+	for (size_t i = 0; i < values.size(); ++i) {
+		uint32_t color = 0;
+		if (!parseCssColor(values[i], color)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		colors[i] = color;
+	}
+	if (values.size() == 1) {
+		colors[1] = colors[2] = colors[3] = colors[0];
+	} else if (values.size() == 2) {
+		colors[2] = colors[0];
+		colors[3] = colors[1];
+	} else if (values.size() == 3) {
+		colors[3] = colors[1];
+	}
+	style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+	style.borderTopColor = colors[0];
+	style.borderRightColor = colors[1];
+	style.borderBottomColor = colors[2];
+	style.borderLeftColor = colors[3];
+	return true;
+}
+
+static bool applyBorderSpacingList(WebStyle& style, const std::vector<std::string>& values, CssDiagnostics& diag)
+{
+	if (values.empty() || values.size() > 2) return false;
+	int spacing[2] = { 0, 0 };
+	for (size_t i = 0; i < values.size(); ++i) {
+		bool autoValue = false;
+		int px = 0;
+		if (!parseCssLengthValue(values[i], 16, px, autoValue, false) || autoValue) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		spacing[i] = clampBorderSpacingPx(diag, px);
+	}
+	if (values.size() == 1) {
+		spacing[1] = spacing[0];
+	}
+	style.borderSpacingHorizontal = spacing[0];
+	style.borderSpacingVertical = spacing[1];
+	return true;
+}
+
+static BorderLineStyle defaultVisibleBorderStyle(const WebStyle& style, BorderSideIndex side)
+{
+	BorderSideValue value = borderSideValueFromStyle(style, side);
+	if (!value.hasStyle || value.style == BorderLineStyle::Inherit) {
+		return value.hasWidth && value.width > 0 ? BorderLineStyle::Solid : BorderLineStyle::None;
+	}
+	return value.style;
+}
+
 static void parseEmbeddedCss(WebDocument& doc, const std::string& cssText)
 {
 	if (cssText.empty()) return;
@@ -716,8 +1075,78 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	}
 	if (prop == "text-decoration") {
 		std::string lower = toLower(val);
-		style.underline = (lower.find("underline") != std::string::npos);
-		if (!style.underline && lower != "none") ++diag.unsupportedDeclarationCount;
+		if (lower == "inherit" || lower == "initial" || lower == "unset") {
+			return true;
+		}
+		if (lower == "none") {
+			style.hasTextDecoration = true;
+			style.underline = false;
+			style.lineThrough = false;
+			return true;
+		}
+		std::vector<std::string> tokens = splitCssTokens(lower);
+		if (tokens.empty()) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		bool sawDecoration = false;
+		bool underline = false;
+		bool lineThrough = false;
+		for (const std::string& token : tokens) {
+			if (token == "underline") {
+				underline = true;
+				sawDecoration = true;
+				continue;
+			}
+			if (token == "line-through") {
+				lineThrough = true;
+				sawDecoration = true;
+				continue;
+			}
+			++diag.unsupportedDeclarationCount;
+		}
+		if (!sawDecoration) return false;
+		style.hasTextDecoration = true;
+		style.underline = underline;
+		style.lineThrough = lineThrough;
+		return true;
+	}
+	if (prop == "text-decoration-line") {
+		std::string lower = toLower(val);
+		if (lower == "inherit" || lower == "initial" || lower == "unset") {
+			return true;
+		}
+		if (lower == "none") {
+			style.hasTextDecoration = true;
+			style.underline = false;
+			style.lineThrough = false;
+			return true;
+		}
+		std::vector<std::string> tokens = splitCssTokens(lower);
+		if (tokens.empty()) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		bool sawDecoration = false;
+		bool underline = false;
+		bool lineThrough = false;
+		for (const std::string& token : tokens) {
+			if (token == "underline") {
+				underline = true;
+				sawDecoration = true;
+				continue;
+			}
+			if (token == "line-through") {
+				lineThrough = true;
+				sawDecoration = true;
+				continue;
+			}
+			++diag.unsupportedDeclarationCount;
+		}
+		if (!sawDecoration) return false;
+		style.hasTextDecoration = true;
+		style.underline = underline;
+		style.lineThrough = lineThrough;
 		return true;
 	}
 	if (prop == "text-align") {
@@ -915,58 +1344,216 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		++diag.unsupportedDeclarationCount;
 		return false;
 	}
-	if (prop == "border-top" || prop == "border-bottom") {
+	if (prop == "font-family") {
+		std::vector<std::string> families = splitCssCommaTokens(val);
+		bool sawGeneric = false;
+		for (const std::string& family : families) {
+			GenericFontFamily genericFamily = GenericFontFamily::Inherit;
+			if (parseGenericFontFamily(family, genericFamily)) {
+				style.genericFontFamily = genericFamily;
+				sawGeneric = true;
+				return true;
+			}
+		}
+		if (!sawGeneric) {
+			++diag.unsupportedDeclarationCount;
+		}
+		return sawGeneric;
+	}
+	if (prop == "list-style" || prop == "list-style-type") {
 		std::vector<std::string> tokens = splitCssTokens(val);
 		if (tokens.empty()) {
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		int width = 1;
-		uint32_t color = 0xFF000000u;
-		bool skipBorder = false;
+		bool sawSupported = false;
 		for (const std::string& token : tokens) {
 			const std::string lower = toLower(token);
-			if (lower == "none" || lower == "hidden") {
-				skipBorder = true;
-				break;
-			}
-			if (lower == "solid") continue;
-			bool autoValue = false;
-			int px = 0;
-			if (parseCssLengthValue(token, 16, px, autoValue, false)) {
-				width = clampCssValue(diag, std::max(1, px), 1, kCssLiteMaxBorderWidthPx);
+			if (lower == "none") {
+				style.listStyleNone = true;
+				style.listStyleType = ListStyleType::None;
+				sawSupported = true;
 				continue;
 			}
-			if (parseCssColor(token, color)) continue;
+			if (lower == "disc") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::Disc;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "circle") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::Circle;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "square") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::Square;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "decimal" || lower == "decimal-leading-zero") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::Decimal;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "lower-alpha" || lower == "lower-latin") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::LowerAlpha;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "upper-alpha" || lower == "upper-latin") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::UpperAlpha;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "lower-roman") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::LowerRoman;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "upper-roman") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::UpperRoman;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "inherit") {
+				sawSupported = true;
+				continue;
+			}
 			++diag.unsupportedDeclarationCount;
-			return false;
 		}
-		if (skipBorder) {
-			return true;
-		}
-		if (prop == "border-top") {
-			style.hasBorderTop = true;
-			style.borderTopWidth = width;
-			style.borderTopColor = color;
-		} else {
-			style.hasBorderBottom = true;
-			style.borderBottomWidth = width;
-			style.borderBottomColor = color;
-		}
-		return true;
+		return sawSupported;
 	}
-	if (prop == "list-style" || prop == "list-style-type") {
+	if (prop == "border-collapse") {
 		std::string lower = toLower(val);
-		if (lower == "none") {
-			style.listStyleNone = true;
+		if (lower == "inherit" || lower == "initial" || lower == "unset") {
+			style.borderCollapse = TableBorderCollapseMode::Inherit;
 			return true;
 		}
-		if (lower == "disc" || lower == "circle" || lower == "square" || lower == "decimal" || lower == "decimal-leading-zero" || lower == "inherit") {
-			if (lower != "inherit") style.listStyleNone = false;
+		if (lower == "collapse") {
+			style.borderCollapse = TableBorderCollapseMode::Collapse;
+			return true;
+		}
+		if (lower == "separate") {
+			style.borderCollapse = TableBorderCollapseMode::Separate;
 			return true;
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
+	}
+	if (prop == "border-spacing") {
+		std::vector<std::string> values = splitCssTokens(val);
+		if (!applyBorderSpacingList(style, values, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return true;
+	}
+	if (prop == "border-width") {
+		std::vector<std::string> values = splitCssTokens(val);
+		if (!applyBorderWidthListToSides(style, values, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return true;
+	}
+	if (prop == "border-style") {
+		std::vector<std::string> values = splitCssTokens(val);
+		if (!applyBorderStyleListToSides(style, values, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return true;
+	}
+	if (prop == "border-color") {
+		std::vector<std::string> values = splitCssTokens(val);
+		if (!applyBorderColorListToSides(style, values, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return true;
+	}
+	if (prop == "border" || prop == "border-top" || prop == "border-right" || prop == "border-bottom" || prop == "border-left") {
+		BorderSideValue borderValue;
+		if (!parseBorderSideValue(val, borderValue, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		if (prop == "border") {
+			applyBorderSideValue(style, BorderSideIndex::Top, borderValue);
+			applyBorderSideValue(style, BorderSideIndex::Right, borderValue);
+			applyBorderSideValue(style, BorderSideIndex::Bottom, borderValue);
+			applyBorderSideValue(style, BorderSideIndex::Left, borderValue);
+			return true;
+		}
+		if (prop == "border-top") {
+			applyBorderSideValue(style, BorderSideIndex::Top, borderValue);
+			return true;
+		}
+		if (prop == "border-right") {
+			applyBorderSideValue(style, BorderSideIndex::Right, borderValue);
+			return true;
+		}
+		if (prop == "border-bottom") {
+			applyBorderSideValue(style, BorderSideIndex::Bottom, borderValue);
+			return true;
+		}
+		applyBorderSideValue(style, BorderSideIndex::Left, borderValue);
+		return true;
+	}
+	if (prop == "border-top-width" || prop == "border-right-width" || prop == "border-bottom-width" || prop == "border-left-width" ||
+		prop == "border-top-style" || prop == "border-right-style" || prop == "border-bottom-style" || prop == "border-left-style" ||
+		prop == "border-top-color" || prop == "border-right-color" || prop == "border-bottom-color" || prop == "border-left-color") {
+		BorderSideIndex side = BorderSideIndex::Top;
+		if (prop.find("right") != std::string::npos) side = BorderSideIndex::Right;
+		else if (prop.find("bottom") != std::string::npos) side = BorderSideIndex::Bottom;
+		else if (prop.find("left") != std::string::npos) side = BorderSideIndex::Left;
+		BorderSideValue borderValue = borderSideValueFromStyle(style, side);
+		borderValue.sawRecognized = true;
+		if (prop.find("-width") != std::string::npos) {
+			bool autoValue = false;
+			int px = 0;
+			if (!parseCssLengthValue(val, 16, px, autoValue, false) || autoValue) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			borderValue.hasWidth = true;
+			borderValue.width = clampBorderWidthPx(diag, px);
+		} else if (prop.find("-style") != std::string::npos) {
+			BorderLineStyle borderStyle = BorderLineStyle::Inherit;
+			if (!parseBorderStyleToken(val, borderStyle)) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			borderValue.hasStyle = true;
+			borderValue.style = borderStyle;
+			if ((borderStyle == BorderLineStyle::Solid || borderStyle == BorderLineStyle::Dashed || borderStyle == BorderLineStyle::Dotted) &&
+				(!borderValue.hasWidth || borderValue.width <= 0)) {
+				borderValue.hasWidth = true;
+				borderValue.width = 1;
+			}
+			if ((borderStyle == BorderLineStyle::None || borderStyle == BorderLineStyle::Hidden) && !borderValue.hasWidth) {
+				borderValue.hasWidth = true;
+				borderValue.width = 0;
+			}
+		} else {
+			uint32_t color = 0;
+			if (!parseCssColor(val, color)) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			borderValue.hasColor = true;
+			borderValue.color = color;
+		}
+		applyBorderSideValue(style, side, borderValue);
+		return true;
 	}
 	++diag.unsupportedDeclarationCount;
 	return false;
@@ -1001,9 +1588,29 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	}
 	merged.bold = overrideStyle.bold ? true : merged.bold;
 	merged.italic = overrideStyle.italic ? true : merged.italic;
-	merged.underline = overrideStyle.underline ? true : merged.underline;
+	if (overrideStyle.hasTextDecoration) {
+		merged.hasTextDecoration = true;
+		merged.underline = overrideStyle.underline;
+		merged.lineThrough = overrideStyle.lineThrough;
+	}
 	merged.displayNone = overrideStyle.displayNone ? true : merged.displayNone;
 	merged.listStyleNone = overrideStyle.listStyleNone ? true : merged.listStyleNone;
+	if (overrideStyle.listStyleType != ListStyleType::Inherit) {
+		merged.listStyleType = overrideStyle.listStyleType;
+		if (overrideStyle.listStyleType != ListStyleType::None) {
+			merged.listStyleNone = false;
+		}
+	}
+	if (overrideStyle.borderCollapse != TableBorderCollapseMode::Inherit) {
+		merged.borderCollapse = overrideStyle.borderCollapse;
+	}
+	merged.borderSpacingHorizontal = overrideStyle.borderSpacingHorizontal != -1 ?
+		overrideStyle.borderSpacingHorizontal : merged.borderSpacingHorizontal;
+	merged.borderSpacingVertical = overrideStyle.borderSpacingVertical != -1 ?
+		overrideStyle.borderSpacingVertical : merged.borderSpacingVertical;
+	if (overrideStyle.genericFontFamily != GenericFontFamily::Inherit) {
+		merged.genericFontFamily = overrideStyle.genericFontFamily;
+	}
 	if (overrideStyle.textAlign != TextAlign::Inherit) {
 		merged.textAlign = overrideStyle.textAlign;
 	}
@@ -1045,11 +1652,25 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	if (overrideStyle.hasBorderTop) {
 		merged.borderTopWidth = overrideStyle.borderTopWidth;
 		merged.borderTopColor = overrideStyle.borderTopColor;
+		merged.borderTopStyle = overrideStyle.borderTopStyle;
+	}
+	merged.hasBorderRight = overrideStyle.hasBorderRight ? true : merged.hasBorderRight;
+	if (overrideStyle.hasBorderRight) {
+		merged.borderRightWidth = overrideStyle.borderRightWidth;
+		merged.borderRightColor = overrideStyle.borderRightColor;
+		merged.borderRightStyle = overrideStyle.borderRightStyle;
 	}
 	merged.hasBorderBottom = overrideStyle.hasBorderBottom ? true : merged.hasBorderBottom;
 	if (overrideStyle.hasBorderBottom) {
 		merged.borderBottomWidth = overrideStyle.borderBottomWidth;
 		merged.borderBottomColor = overrideStyle.borderBottomColor;
+		merged.borderBottomStyle = overrideStyle.borderBottomStyle;
+	}
+	merged.hasBorderLeft = overrideStyle.hasBorderLeft ? true : merged.hasBorderLeft;
+	if (overrideStyle.hasBorderLeft) {
+		merged.borderLeftWidth = overrideStyle.borderLeftWidth;
+		merged.borderLeftColor = overrideStyle.borderLeftColor;
+		merged.borderLeftStyle = overrideStyle.borderLeftStyle;
 	}
 	return merged;
 }
@@ -1152,6 +1773,7 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginTop = 8;
 		style.marginBottom = 10;
 		style.padding = 0;
+		style.borderCollapse = TableBorderCollapseMode::Separate;
 		return style;
 	}
 	if (tagName == "td" || tagName == "th") {
@@ -1214,6 +1836,7 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 	if (tagName == "a") {
 		style.hasColor = true;
 		style.color = 0xFF1E5CB8u;
+		style.hasTextDecoration = true;
 		style.underline = true;
 		style.marginTop = 4;
 		style.marginBottom = 4;
@@ -1229,6 +1852,7 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginTop = 6;
 		style.marginBottom = 8;
 		style.paddingLeft = 18;
+		style.listStyleType = tagName == "ol" ? ListStyleType::Decimal : ListStyleType::Disc;
 		return style;
 	}
 	if (tagName == "pre" || tagName == "code") {

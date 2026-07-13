@@ -299,7 +299,7 @@ if (!$SkipKernel) {
         if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }
-        $KernelExtraCFlags += "-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS=2"
+        # Keep the default bare-metal build free of boot-time smoke launches.
         & $Make "ARCH=$Arch" "EXTRA_CFLAGS=$($KernelExtraCFlags -join ' ')"
 
         if ($LASTEXITCODE -ne 0) {

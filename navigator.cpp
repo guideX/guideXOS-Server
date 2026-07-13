@@ -32,6 +32,10 @@ using gxos::web::TextAlign;
 using gxos::web::OverflowWrapMode;
 using gxos::web::WhiteSpaceMode;
 using gxos::web::WordBreakMode;
+using gxos::web::BorderLineStyle;
+using gxos::web::GenericFontFamily;
+using gxos::web::ListStyleType;
+using gxos::web::TableBorderCollapseMode;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -92,6 +96,13 @@ static std::unordered_set<std::string> s_visitedUrls;
 static std::string extractDocumentText(const WebDocument& doc);
 
 namespace {
+	struct TextMetrics;
+	static TextMetrics defaultTextMetrics();
+	static int defaultTextFontHeightPx();
+	static int textLineTopPaddingPx(int lineHeight);
+	static int textUnderlineYPx(int lineTop, int lineHeight);
+	static int textLineThroughYPx(int lineTop, int lineHeight);
+
 	constexpr int kWindowW = 920;
 	constexpr int kWindowH = 640;
 	constexpr int kToolbarH = 64;
@@ -162,10 +173,11 @@ namespace {
 			text));
 	}
 
-	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style, uint32_t fallbackColor = 0xFF303846u)
+	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style, uint32_t fallbackColor = 0xFF303846u, int lineHeight = -1)
 	{
+		uint32_t color = fallbackColor;
 		if (style.hasColor) {
-			uint32_t color = style.color;
+			color = style.color;
 			if (color == 0xFF303846u) {
 				color = fallbackColor;
 			}
@@ -184,24 +196,171 @@ namespace {
 				drawTextAtColored(windowId, x + 1, y + 1, text, r, g, b);
 			}
 			drawTextAtColored(windowId, x, y, text, r, g, b);
-			return;
-		}
-		if (style.bold) {
-			drawTextAtColored(windowId, x + 1, y, text,
+		} else {
+			if (style.bold) {
+				drawTextAtColored(windowId, x + 1, y, text,
+					static_cast<int>((fallbackColor >> 16) & 0xFFu),
+					static_cast<int>((fallbackColor >> 8) & 0xFFu),
+					static_cast<int>(fallbackColor & 0xFFu));
+			}
+			if (style.italic) {
+				drawTextAtColored(windowId, x + 1, y + 1, text,
+					static_cast<int>((fallbackColor >> 16) & 0xFFu),
+					static_cast<int>((fallbackColor >> 8) & 0xFFu),
+					static_cast<int>(fallbackColor & 0xFFu));
+			}
+			drawTextAtColored(windowId, x, y, text,
 				static_cast<int>((fallbackColor >> 16) & 0xFFu),
 				static_cast<int>((fallbackColor >> 8) & 0xFFu),
 				static_cast<int>(fallbackColor & 0xFFu));
 		}
-		if (style.italic) {
-			drawTextAtColored(windowId, x + 1, y + 1, text,
-				static_cast<int>((fallbackColor >> 16) & 0xFFu),
-				static_cast<int>((fallbackColor >> 8) & 0xFFu),
-				static_cast<int>(fallbackColor & 0xFFu));
+		if ((style.underline || style.lineThrough) && !text.empty()) {
+			const int useLineHeight = lineHeight > 0 ? lineHeight : std::max(1, defaultTextFontHeightPx() + 2);
+			const int textWidth = std::max(1, static_cast<int>(text.size()) * kCharW);
+			if (style.underline) {
+				drawRect(windowId, x, textUnderlineYPx(y, useLineHeight), textWidth, 1,
+					static_cast<int>((color >> 16) & 0xFFu),
+					static_cast<int>((color >> 8) & 0xFFu),
+					static_cast<int>(color & 0xFFu));
+			}
+			if (style.lineThrough) {
+				drawRect(windowId, x, textLineThroughYPx(y, useLineHeight), textWidth, 1,
+					static_cast<int>((color >> 16) & 0xFFu),
+					static_cast<int>((color >> 8) & 0xFFu),
+					static_cast<int>(color & 0xFFu));
+			}
+			++s_pageMetadata.cssTextDecorationsRendered;
 		}
-		drawTextAtColored(windowId, x, y, text,
-			static_cast<int>((fallbackColor >> 16) & 0xFFu),
-			static_cast<int>((fallbackColor >> 8) & 0xFFu),
-			static_cast<int>(fallbackColor & 0xFFu));
+	}
+
+	static BorderLineStyle effectiveBorderStyle(const WebStyle& style, BorderSideIndex side)
+	{
+		switch (side) {
+		case BorderSideIndex::Top:
+			return cssBorderStyleOrDefault(style.borderTopStyle, style.borderTopWidth);
+		case BorderSideIndex::Right:
+			return cssBorderStyleOrDefault(style.borderRightStyle, style.borderRightWidth);
+		case BorderSideIndex::Bottom:
+			return cssBorderStyleOrDefault(style.borderBottomStyle, style.borderBottomWidth);
+		case BorderSideIndex::Left:
+			return cssBorderStyleOrDefault(style.borderLeftStyle, style.borderLeftWidth);
+		}
+		return BorderLineStyle::None;
+	}
+
+	static uint32_t borderColorForSide(const WebStyle& style, BorderSideIndex side)
+	{
+		switch (side) {
+		case BorderSideIndex::Top: return style.borderTopColor;
+		case BorderSideIndex::Right: return style.borderRightColor;
+		case BorderSideIndex::Bottom: return style.borderBottomColor;
+		case BorderSideIndex::Left: return style.borderLeftColor;
+		}
+		return 0;
+	}
+
+	static int borderWidthForSide(const WebStyle& style, BorderSideIndex side)
+	{
+		switch (side) {
+		case BorderSideIndex::Top:
+			return cssBorderTopPx(style);
+		case BorderSideIndex::Right:
+			return cssBorderRightPx(style);
+		case BorderSideIndex::Bottom:
+			return cssBorderBottomPx(style);
+		case BorderSideIndex::Left:
+			return cssBorderLeftPx(style);
+		}
+		return 0;
+	}
+
+	static bool drawBorderRun(uint64_t windowId, int x, int y, int w, int h, int lineWidth,
+		BorderLineStyle borderStyle, uint32_t color, bool horizontal)
+	{
+		if (w <= 0 || h <= 0 || lineWidth <= 0) return false;
+		if (((color >> 24) & 0xFFu) == 0) return false;
+		const int maxThickness = horizontal ? h : w;
+		if (maxThickness <= 0) return false;
+		lineWidth = std::max(1, std::min(lineWidth, maxThickness));
+		if (borderStyle == BorderLineStyle::None || borderStyle == BorderLineStyle::Hidden) {
+			return false;
+		}
+		if (borderStyle == BorderLineStyle::Dashed || borderStyle == BorderLineStyle::Dotted) {
+			if (borderStyle == BorderLineStyle::Dashed) ++s_pageMetadata.cssDashedBordersRendered;
+			if (borderStyle == BorderLineStyle::Dotted) ++s_pageMetadata.cssDottedBordersRendered;
+			const int on = borderStyle == BorderLineStyle::Dashed ? std::max(4, lineWidth * 3) : std::max(1, lineWidth);
+			const int off = borderStyle == BorderLineStyle::Dashed ? std::max(3, lineWidth * 2) : std::max(1, lineWidth);
+			if (horizontal) {
+				for (int pos = 0; pos < w; pos += on + off) {
+					const int run = std::min(on, w - pos);
+					if (run > 0) drawThemeRect(windowId, x + pos, y, run, lineWidth, color);
+				}
+			} else {
+				for (int pos = 0; pos < h; pos += on + off) {
+					const int run = std::min(on, h - pos);
+					if (run > 0) drawThemeRect(windowId, x, y + pos, lineWidth, run, color);
+				}
+			}
+			return true;
+		}
+		if (horizontal) {
+			drawThemeRect(windowId, x, y, w, lineWidth, color);
+		} else {
+			drawThemeRect(windowId, x, y, lineWidth, h, color);
+		}
+		return true;
+	}
+
+	static bool drawBorderSide(uint64_t windowId, const WebStyle& style, BorderSideIndex side, int x, int y, int w, int h)
+	{
+		const BorderLineStyle borderStyle = effectiveBorderStyle(style, side);
+		const int lineWidth = borderWidthForSide(style, side);
+		if (borderStyle == BorderLineStyle::None || borderStyle == BorderLineStyle::Hidden || lineWidth <= 0) {
+			return false;
+		}
+		uint32_t color = borderColorForSide(style, side);
+		if (((color >> 24) & 0xFFu) == 0) {
+			return false;
+		}
+		switch (borderStyle) {
+		case BorderLineStyle::Dashed:
+		case BorderLineStyle::Dotted:
+			return drawBorderRun(windowId, x, y, w, h, lineWidth, borderStyle, color,
+				side == BorderSideIndex::Top || side == BorderSideIndex::Bottom);
+		case BorderLineStyle::Inherit:
+		case BorderLineStyle::Solid:
+		default:
+			break;
+		}
+		if (side == BorderSideIndex::Top || side == BorderSideIndex::Bottom) {
+			return drawBorderRun(windowId, x, y, w, h, lineWidth, BorderLineStyle::Solid, color, true);
+		}
+		return drawBorderRun(windowId, x, y, w, h, lineWidth, BorderLineStyle::Solid, color, false);
+	}
+
+	static void drawBoxDecorations(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style,
+		bool drawTop = true, bool drawRight = true, bool drawBottom = true, bool drawLeft = true)
+	{
+		if (w <= 0 || h <= 0) return;
+		bool anyBorder = false;
+		if (style.hasBackgroundColor) {
+			drawThemeRect(windowId, x, y, w, h, style.backgroundColor);
+		}
+		if (drawTop && style.hasBorderTop && borderWidthForSide(style, BorderSideIndex::Top) > 0) {
+			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Top, x, y, w, h) || anyBorder;
+		}
+		if (drawRight && style.hasBorderRight && borderWidthForSide(style, BorderSideIndex::Right) > 0) {
+			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Right, x + std::max(0, w - borderWidthForSide(style, BorderSideIndex::Right)), y, w, h) || anyBorder;
+		}
+		if (drawBottom && style.hasBorderBottom && borderWidthForSide(style, BorderSideIndex::Bottom) > 0) {
+			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Bottom, x, y + std::max(0, h - borderWidthForSide(style, BorderSideIndex::Bottom)), w, h) || anyBorder;
+		}
+		if (drawLeft && style.hasBorderLeft && borderWidthForSide(style, BorderSideIndex::Left) > 0) {
+			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Left, x, y, w, h) || anyBorder;
+		}
+		if (anyBorder) {
+			++s_pageMetadata.cssBorderedBlocksRendered;
+		}
 	}
 
 	void drawImage(uint64_t windowId, int x, int y, int w, int h, const std::string& path)
@@ -549,6 +708,16 @@ namespace {
 		const int underlineY = baselineY + std::max(1, metrics.underlineOffset);
 		const int safeBottom = lineTop + std::max(1, lineHeight - 2);
 		return std::min(underlineY, safeBottom);
+	}
+
+	static int textLineThroughYPx(int lineTop, int lineHeight)
+	{
+		const TextMetrics metrics = defaultTextMetrics();
+		const int topPadding = textLineTopPaddingPx(lineHeight);
+		const int baselineY = lineTop + topPadding + metrics.baseline;
+		const int strikeY = baselineY - std::max(1, metrics.ascent / 2);
+		const int safeBottom = lineTop + std::max(1, lineHeight - 2);
+		return std::max(lineTop + 1, std::min(strikeY, safeBottom));
 	}
 
 	// Wrap |text| into lines that fit within |maxChars| characters.
@@ -1043,6 +1212,8 @@ namespace {
 		std::vector<TableCellLayout> cells;
 		bool headerRow = false;
 		int heightPx = 0;
+		int borderTopPx = 0;
+		int borderBottomPx = 0;
 	};
 
 	struct TableGroupLayout {
@@ -1057,10 +1228,17 @@ namespace {
 		int paddingBottom = 0;
 		int paddingLeft = 0;
 		int borderTop = 0;
+		int borderRight = 0;
 		int borderBottom = 0;
+		int borderLeft = 0;
 		int lineHeight = 0;
 		std::vector<int> columnWidthsChars;
 		std::vector<TableRowLayout> rows;
+		std::vector<int> rowOffsetsPx;
+		int totalHeightPx = 0;
+		bool collapseMode = false;
+		int borderSpacingHorizontal = 0;
+		int borderSpacingVertical = 0;
 		bool fallbackUsed = false;
 	};
 
@@ -1100,10 +1278,22 @@ namespace {
 		metadata.cssTableLayoutFallbackCount = 0;
 		metadata.cssListRenderCount = 0;
 		metadata.cssClampedValueCount = doc.cssDiagnostics.clampedValueCount;
+		metadata.cssBorderWidthClamps = doc.cssDiagnostics.borderWidthClampCount;
+		metadata.cssTableBorderSpacingClamps = doc.cssDiagnostics.borderSpacingClampCount;
 		metadata.cssLineBreakCount = doc.cssDiagnostics.lineBreakCount;
 		metadata.cssTableCaptionCount = 0;
 		metadata.cssTableHeaderCellCount = 0;
 		metadata.cssVisitedLinkCount = 0;
+		metadata.cssBorderedBlocksRendered = 0;
+		metadata.cssDashedBordersRendered = 0;
+		metadata.cssDottedBordersRendered = 0;
+		metadata.cssCollapsedTablesRendered = 0;
+		metadata.cssSeparateTablesRendered = 0;
+		metadata.cssListStyleMarkersRendered = 0;
+		metadata.cssListStyleNoneApplied = 0;
+		metadata.cssTextDecorationsRendered = 0;
+		metadata.cssGenericFontFamilyApplied = 0;
+		metadata.cssGenericFontFamilyFallbacks = 0;
 		metadata.cssFiguresRendered = 0;
 		metadata.cssFigcaptionsRendered = 0;
 		metadata.cssBlockquotesRendered = 0;
@@ -1181,6 +1371,20 @@ namespace {
 			}
 			if (block.type == BlockType::ListItem) {
 				++metadata.cssListRenderCount;
+				const uint64_t ordinal = blockListOrdinal(doc, static_cast<int>(i));
+				const std::string marker = blockListMarkerText(block, ordinal);
+				if (marker.empty()) {
+					++metadata.cssListStyleNoneApplied;
+				} else {
+					++metadata.cssListStyleMarkersRendered;
+				}
+			}
+			if (block.style.genericFontFamily != GenericFontFamily::Inherit) {
+				++metadata.cssGenericFontFamilyApplied;
+				if (block.style.genericFontFamily == GenericFontFamily::Serif ||
+					block.style.genericFontFamily == GenericFontFamily::Monospace) {
+					++metadata.cssGenericFontFamilyFallbacks;
+				}
 			}
 			if (!block.url.empty() && s_visitedUrls.find(block.url) != s_visitedUrls.end()) {
 				++metadata.cssVisitedLinkCount;
@@ -1218,6 +1422,11 @@ namespace {
 				if (isFirstTableCellInGroup(doc, static_cast<int>(i))) {
 					const int groupStart = tableGroupStartIndex(doc, static_cast<int>(i));
 					const TableGroupLayout layout = buildTableGroupLayout(doc, groupStart);
+					if (layout.collapseMode) {
+						++metadata.cssCollapsedTablesRendered;
+					} else {
+						++metadata.cssSeparateTablesRendered;
+					}
 					if (layout.fallbackUsed) {
 						++metadata.cssTableLayoutFallbackCount;
 					}
@@ -1403,19 +1612,70 @@ namespace {
 		return kDocumentIndent;
 	}
 
-	static int cssBorderTopPx(const WebStyle& style)
+	static int cssBorderSidePx(int width, BorderLineStyle borderStyle)
 	{
-		return style.hasBorderTop ? std::max(1, style.borderTopWidth) : 0;
+		if (borderStyle == BorderLineStyle::None || borderStyle == BorderLineStyle::Hidden) {
+			return 0;
+		}
+		if (width > 0) {
+			return std::max(1, std::min(width, 12));
+		}
+		return borderStyle == BorderLineStyle::Inherit ? 0 : 1;
 	}
 
-	static int cssBorderBottomPx(const WebStyle& style)
+	static BorderLineStyle cssBorderStyleOrDefault(BorderLineStyle borderStyle, int width)
 	{
-		return style.hasBorderBottom ? std::max(1, style.borderBottomWidth) : 0;
+		if (borderStyle != BorderLineStyle::Inherit) return borderStyle;
+		return width > 0 ? BorderLineStyle::Solid : BorderLineStyle::None;
 	}
 
 	static bool cssListStyleNone(const WebStyle& style)
 	{
 		return style.listStyleNone;
+	}
+
+	static bool cssBorderTopVisible(const WebStyle& style)
+	{
+		return cssBorderSidePx(style.borderTopWidth, cssBorderStyleOrDefault(style.borderTopStyle, style.borderTopWidth)) > 0 &&
+			style.hasBorderTop && ((style.borderTopColor >> 24) & 0xFFu) != 0;
+	}
+
+	static bool cssBorderRightVisible(const WebStyle& style)
+	{
+		return cssBorderSidePx(style.borderRightWidth, cssBorderStyleOrDefault(style.borderRightStyle, style.borderRightWidth)) > 0 &&
+			style.hasBorderRight && ((style.borderRightColor >> 24) & 0xFFu) != 0;
+	}
+
+	static bool cssBorderBottomVisible(const WebStyle& style)
+	{
+		return cssBorderSidePx(style.borderBottomWidth, cssBorderStyleOrDefault(style.borderBottomStyle, style.borderBottomWidth)) > 0 &&
+			style.hasBorderBottom && ((style.borderBottomColor >> 24) & 0xFFu) != 0;
+	}
+
+	static bool cssBorderLeftVisible(const WebStyle& style)
+	{
+		return cssBorderSidePx(style.borderLeftWidth, cssBorderStyleOrDefault(style.borderLeftStyle, style.borderLeftWidth)) > 0 &&
+			style.hasBorderLeft && ((style.borderLeftColor >> 24) & 0xFFu) != 0;
+	}
+
+	static int cssBorderTopPx(const WebStyle& style)
+	{
+		return style.hasBorderTop ? cssBorderSidePx(style.borderTopWidth, cssBorderStyleOrDefault(style.borderTopStyle, style.borderTopWidth)) : 0;
+	}
+
+	static int cssBorderRightPx(const WebStyle& style)
+	{
+		return style.hasBorderRight ? cssBorderSidePx(style.borderRightWidth, cssBorderStyleOrDefault(style.borderRightStyle, style.borderRightWidth)) : 0;
+	}
+
+	static int cssBorderBottomPx(const WebStyle& style)
+	{
+		return style.hasBorderBottom ? cssBorderSidePx(style.borderBottomWidth, cssBorderStyleOrDefault(style.borderBottomStyle, style.borderBottomWidth)) : 0;
+	}
+
+	static int cssBorderLeftPx(const WebStyle& style)
+	{
+		return style.hasBorderLeft ? cssBorderSidePx(style.borderLeftWidth, cssBorderStyleOrDefault(style.borderLeftStyle, style.borderLeftWidth)) : 0;
 	}
 
 	static bool cssMarginLeftAuto(const WebStyle& style)
@@ -1451,28 +1711,97 @@ namespace {
 		return oss.str();
 	}
 
-	static int blockListTextInsetPx(const DocBlock& block)
+	static std::string alphaMarkerForOrdinal(uint64_t ordinal, bool uppercase)
 	{
-		if (cssListStyleNone(block.style)) return 0;
-		return blockIsOrderedListItem(block) ? 4 * kCharW : 2 * kCharW;
+		if (ordinal == 0) ordinal = 1;
+		std::string out;
+		while (ordinal > 0) {
+			--ordinal;
+			const char ch = static_cast<char>((ordinal % 26) + (uppercase ? 'A' : 'a'));
+			out.insert(out.begin(), ch);
+			ordinal /= 26;
+		}
+		return out.empty() ? std::string(1, uppercase ? 'A' : 'a') : out;
 	}
 
-	static std::string blockListMarkerText(const DocBlock& block, int ordinal)
+	static std::string romanMarkerForOrdinal(uint64_t ordinal, bool uppercase)
+	{
+		if (ordinal == 0) ordinal = 1;
+		if (ordinal > 3999) {
+			return std::to_string(ordinal);
+		}
+		struct RomanPair { uint64_t value; const char* symbol; };
+		static const RomanPair kPairs[] = {
+			{1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"},
+			{100, "C"}, {90, "XC"}, {50, "L"}, {40, "XL"},
+			{10, "X"}, {9, "IX"}, {5, "V"}, {4, "IV"}, {1, "I"}
+		};
+		std::string out;
+		for (const RomanPair& pair : kPairs) {
+			while (ordinal >= pair.value) {
+				out += pair.symbol;
+				ordinal -= pair.value;
+			}
+		}
+		if (!uppercase) {
+			for (char& ch : out) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+		}
+		return out;
+	}
+
+	static ListStyleType effectiveListStyleType(const DocBlock& block)
+	{
+		if (cssListStyleNone(block.style)) return ListStyleType::None;
+		if (block.style.listStyleType != ListStyleType::Inherit) {
+			return block.style.listStyleType;
+		}
+		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+			const std::string tag = toLowerAscii(it->tagName);
+			if (tag == "ol") return ListStyleType::Decimal;
+			if (tag == "ul") return ListStyleType::Disc;
+		}
+		return blockIsOrderedListItem(block) ? ListStyleType::Decimal : ListStyleType::Disc;
+	}
+
+	static std::string blockListMarkerText(const DocBlock& block, uint64_t ordinal)
 	{
 		if (cssListStyleNone(block.style)) return "";
-		if (blockIsOrderedListItem(block)) {
-			return std::to_string(std::max(1, ordinal)) + ".";
+		switch (effectiveListStyleType(block)) {
+		case ListStyleType::None:
+			return "";
+		case ListStyleType::Circle:
+			return "o";
+		case ListStyleType::Square:
+			return "[]";
+		case ListStyleType::Decimal:
+			return std::to_string(std::max<uint64_t>(1, ordinal)) + ".";
+		case ListStyleType::LowerAlpha:
+			return alphaMarkerForOrdinal(std::max<uint64_t>(1, ordinal), false) + ".";
+		case ListStyleType::UpperAlpha:
+			return alphaMarkerForOrdinal(std::max<uint64_t>(1, ordinal), true) + ".";
+		case ListStyleType::LowerRoman:
+			return romanMarkerForOrdinal(std::max<uint64_t>(1, ordinal), false) + ".";
+		case ListStyleType::UpperRoman:
+			return romanMarkerForOrdinal(std::max<uint64_t>(1, ordinal), true) + ".";
+		case ListStyleType::Disc:
+		default:
+			return "*";
 		}
-		return "-";
 	}
 
-	static int blockListOrdinal(const WebDocument& doc, int blockIndex)
+	static int blockListMarkerInsetPx(const std::string& marker)
+	{
+		if (marker.empty()) return 0;
+		return std::max(2 * kCharW, static_cast<int>(marker.size()) * kCharW + kCharW);
+	}
+
+	static uint64_t blockListOrdinal(const WebDocument& doc, int blockIndex)
 	{
 		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return 1;
 		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
 		if (!blockIsOrderedListItem(block)) return 1;
 		const std::string signature = blockListContainerSignature(block);
-		int ordinal = 0;
+		uint64_t ordinal = 0;
 		for (int i = 0; i <= blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
 			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
 			if (candidate.type != BlockType::ListItem) continue;
@@ -1481,7 +1810,14 @@ namespace {
 				++ordinal;
 			}
 		}
-		return std::max(1, ordinal);
+		return std::max<uint64_t>(1, ordinal);
+	}
+
+	static int blockListTextInsetPx(const DocBlock& block, uint64_t ordinal)
+	{
+		if (cssListStyleNone(block.style)) return 0;
+		const std::string marker = blockListMarkerText(block, ordinal);
+		return blockListMarkerInsetPx(marker);
 	}
 
 	static bool isWrapperTagName(const std::string& tagName)
@@ -1632,6 +1968,11 @@ namespace {
 		if (!isTableCellLikeBlock(first)) return layout;
 		layout.tableSerial = tableSerialForBlock(first);
 		layout.startIndex = startIndex;
+		layout.collapseMode = first.style.borderCollapse == TableBorderCollapseMode::Collapse;
+		layout.borderSpacingHorizontal = layout.collapseMode ? 0 :
+			std::max(0, first.style.borderSpacingHorizontal >= 0 ? first.style.borderSpacingHorizontal : 4);
+		layout.borderSpacingVertical = layout.collapseMode ? 0 :
+			std::max(0, first.style.borderSpacingVertical >= 0 ? first.style.borderSpacingVertical : 2);
 
 		const int bodyMarginLeft = blockBodyMarginLeft(doc);
 		const int bodyMarginRight = blockBodyMarginRight(doc);
@@ -1647,7 +1988,9 @@ namespace {
 		layout.paddingBottom = cssPaddingBottomPx(first.style, 4);
 		layout.paddingLeft = cssPaddingLeftPx(first.style, 4);
 		layout.borderTop = cssBorderTopPx(first.style);
+		layout.borderRight = cssBorderRightPx(first.style);
 		layout.borderBottom = cssBorderBottomPx(first.style);
+		layout.borderLeft = cssBorderLeftPx(first.style);
 		layout.lineHeight = blockTextLineHeight(first);
 
 		int i = startIndex;
@@ -1657,6 +2000,8 @@ namespace {
 			TableRowLayout row;
 			row.rowSerial = tableRowSerialForBlock(block);
 			row.headerRow = false;
+			int rowBorderTop = 0;
+			int rowBorderBottom = 0;
 			int j = i;
 			while (j < static_cast<int>(doc.blocks.size())) {
 				const DocBlock& cell = doc.blocks[static_cast<size_t>(j)];
@@ -1671,9 +2016,13 @@ namespace {
 				cellLayout.contentWidthChars = std::max(1, textLongestLineChars(cell.text));
 				cellLayout.lines = wrapTextForBlock(*cellLayout.block, cellLayout.contentWidthChars);
 				row.headerRow = row.headerRow || toLowerAscii(cell.tagName) == "th" || cell.style.bold;
+				rowBorderTop = std::max(rowBorderTop, cssBorderTopPx(cell.style));
+				rowBorderBottom = std::max(rowBorderBottom, cssBorderBottomPx(cell.style));
 				row.cells.push_back(std::move(cellLayout));
 				++j;
 			}
+			row.borderTopPx = rowBorderTop;
+			row.borderBottomPx = rowBorderBottom;
 			layout.rows.push_back(std::move(row));
 			i = j;
 		}
@@ -1692,8 +2041,10 @@ namespace {
 			}
 		}
 
-		const int separatorChars = columnCount > 0 ? (3 * (columnCount - 1)) : 0;
-		const int availableChars = std::max(8, (layout.outerWidth - layout.paddingLeft - layout.paddingRight) / kCharW);
+		const int spacingChars = layout.collapseMode ? 0 : std::max(0, layout.borderSpacingHorizontal / kCharW);
+		const int separatorChars = columnCount > 0 ? (spacingChars * (columnCount - 1)) : 0;
+		const int availableChars = std::max(8,
+			(layout.outerWidth - layout.borderLeft - layout.borderRight - layout.paddingLeft - layout.paddingRight) / kCharW);
 		int desiredChars = separatorChars;
 		for (int width : layout.columnWidthsChars) desiredChars += width;
 		if (columnCount > 0 && desiredChars > availableChars) {
@@ -1731,6 +2082,21 @@ namespace {
 			}
 			row.heightPx = std::max(layout.lineHeight + 4, maxLines * layout.lineHeight + layout.paddingTop + layout.paddingBottom);
 		}
+
+		int cursorY = layout.borderTop + layout.paddingTop;
+		layout.rowOffsetsPx.clear();
+		layout.rowOffsetsPx.reserve(layout.rows.size());
+		for (size_t iRow = 0; iRow < layout.rows.size(); ++iRow) {
+			TableRowLayout& row = layout.rows[iRow];
+			layout.rowOffsetsPx.push_back(cursorY);
+			cursorY += row.borderTopPx;
+			cursorY += row.heightPx;
+			cursorY += row.borderBottomPx;
+			if (iRow + 1 < layout.rows.size()) {
+				cursorY += layout.borderSpacingVertical;
+			}
+		}
+		layout.totalHeightPx = cursorY + layout.paddingBottom + layout.borderBottom;
 
 		return layout;
 	}
@@ -1848,7 +2214,20 @@ namespace {
 	{
 		const int paddingLeft = cssPaddingLeftPx(block.style, cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0));
 		const int paddingRight = cssPaddingRightPx(block.style, cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0));
-		return std::max(1, outerWidth - paddingLeft - paddingRight);
+		const int borderLeft = cssBorderLeftPx(block.style);
+		const int borderRight = cssBorderRightPx(block.style);
+		return std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+	}
+
+	static int blockContentLeftX(const DocBlock& block, int outerX)
+	{
+		const int paddingLeft = cssPaddingLeftPx(block.style, cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0));
+		return outerX + cssBorderLeftPx(block.style) + paddingLeft;
+	}
+
+	static int blockContentTopY(const DocBlock& block, int drawY, int blockMarginTop)
+	{
+		return drawY + blockMarginTop + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 	}
 
 	static int blockTextLineHeight(const DocBlock& block)
@@ -1889,17 +2268,9 @@ namespace {
 			const int blockIndex = static_cast<int>(&block - &doc.blocks.front());
 			const int groupStart = tableGroupStartIndex(doc, blockIndex);
 			const TableGroupLayout layout = buildTableGroupLayout(doc, groupStart);
-			const uint64_t rowSerial = tableRowSerialForBlock(block);
-			int rowHeight = layout.lineHeight + 4;
-			for (const TableRowLayout& row : layout.rows) {
-				if (row.rowSerial == rowSerial) {
-					rowHeight = row.heightPx;
-					break;
-				}
-			}
 			const int blockMarginTop = cssMarginTopPx(block.style, 4);
 			const int blockMarginBottom = cssMarginBottomPx(block.style, 8);
-			int total = blockMarginTop + cssBorderTopPx(block.style) + rowHeight + cssBorderBottomPx(block.style) + blockMarginBottom;
+			int total = blockMarginTop + layout.totalHeightPx + blockMarginBottom;
 			if (nextIsHeading) total += 10;
 			return total;
 		}
@@ -1920,14 +2291,17 @@ namespace {
 		const int paddingBottom = cssPaddingBottomPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 		const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 		const int borderTop = cssBorderTopPx(block.style);
+		const int borderRight = cssBorderRightPx(block.style);
 		const int borderBottom = cssBorderBottomPx(block.style);
+		const int borderLeft = cssBorderLeftPx(block.style);
 		const int bodyMarginLeft = blockBodyMarginLeft(doc);
 		const int bodyMarginRight = blockBodyMarginRight(doc);
 		const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
 			- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 		const int outerWidth = blockOuterWidth(block, availableWidth);
-		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
-		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block) : 0;
+		const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+		const uint64_t listOrdinal = block.type == BlockType::ListItem ? blockListOrdinal(doc, static_cast<int>(&block - &doc.blocks.front())) : 1;
+		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block, listOrdinal) : 0;
 		const int wrapCols = std::max(1, std::max(1, innerWidth - listInset) / kCharW);
 		const int lineHeight = blockTextLineHeight(block);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
@@ -1971,23 +2345,7 @@ namespace {
 
 	static void drawBlockBox(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style)
 	{
-		if (w <= 0 || h <= 0) return;
-		if (style.hasBackgroundColor) {
-			int r = 245, g = 247, b = 250;
-			colorChannels(style.backgroundColor, r, g, b);
-			drawRect(windowId, x, y, w, h, r, g, b);
-		}
-		if (style.hasBorderTop && style.borderTopWidth > 0) {
-			int r = 24, g = 28, b = 36;
-			colorChannels(style.borderTopColor, r, g, b);
-			drawRect(windowId, x, y, w, std::max(1, style.borderTopWidth), r, g, b);
-		}
-		if (style.hasBorderBottom && style.borderBottomWidth > 0) {
-			int r = 24, g = 28, b = 36;
-			colorChannels(style.borderBottomColor, r, g, b);
-			drawRect(windowId, x, y + std::max(0, h - std::max(1, style.borderBottomWidth)), w,
-				std::max(1, style.borderBottomWidth), r, g, b);
-		}
+		drawBoxDecorations(windowId, x, y, w, h, style);
 	}
 
 	static bool blockHasVisibleCss(const DocBlock& block)
@@ -2093,6 +2451,18 @@ namespace {
 		int cssTableCaptionCount,
 		int cssTableHeaderCellCount,
 		int cssVisitedLinkCount,
+		int cssBorderedBlocksRendered,
+		int cssDashedBordersRendered,
+		int cssDottedBordersRendered,
+		int cssBorderWidthClamps,
+		int cssCollapsedTablesRendered,
+		int cssSeparateTablesRendered,
+		int cssTableBorderSpacingClamps,
+		int cssListStyleMarkersRendered,
+		int cssListStyleNoneApplied,
+		int cssTextDecorationsRendered,
+		int cssGenericFontFamilyApplied,
+		int cssGenericFontFamilyFallbacks,
 		int cssFiguresRendered,
 		int cssFigcaptionsRendered,
 		int cssBlockquotesRendered,
@@ -2303,6 +2673,18 @@ namespace {
 			{"Current Document", "CSS table captions rendered", std::to_string(cssTableCaptionCount)},
 			{"Current Document", "CSS table header cells rendered", std::to_string(cssTableHeaderCellCount)},
 			{"Current Document", "CSS visited links styled", std::to_string(cssVisitedLinkCount)},
+			{"Current Document", "CSS bordered blocks rendered", std::to_string(cssBorderedBlocksRendered)},
+			{"Current Document", "CSS dashed borders rendered", std::to_string(cssDashedBordersRendered)},
+			{"Current Document", "CSS dotted borders rendered", std::to_string(cssDottedBordersRendered)},
+			{"Current Document", "CSS border width clamps", std::to_string(cssBorderWidthClamps)},
+			{"Current Document", "CSS collapsed tables rendered", std::to_string(cssCollapsedTablesRendered)},
+			{"Current Document", "CSS separate tables rendered", std::to_string(cssSeparateTablesRendered)},
+			{"Current Document", "CSS table border spacing clamps", std::to_string(cssTableBorderSpacingClamps)},
+			{"Current Document", "CSS list style markers rendered", std::to_string(cssListStyleMarkersRendered)},
+			{"Current Document", "CSS list style none applied", std::to_string(cssListStyleNoneApplied)},
+			{"Current Document", "CSS text decorations rendered", std::to_string(cssTextDecorationsRendered)},
+			{"Current Document", "CSS generic font family applied", std::to_string(cssGenericFontFamilyApplied)},
+			{"Current Document", "CSS generic font family fallbacks", std::to_string(cssGenericFontFamilyFallbacks)},
 			{"Current Document", "CSS figures rendered", std::to_string(cssFiguresRendered)},
 			{"Current Document", "CSS figcaptions rendered", std::to_string(cssFigcaptionsRendered)},
 			{"Current Document", "CSS blockquotes rendered", std::to_string(cssBlockquotesRendered)},
@@ -2753,6 +3135,18 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssTableCaptionCount,
 		s_pageMetadata.cssTableHeaderCellCount,
 		s_pageMetadata.cssVisitedLinkCount,
+		s_pageMetadata.cssBorderedBlocksRendered,
+		s_pageMetadata.cssDashedBordersRendered,
+		s_pageMetadata.cssDottedBordersRendered,
+		s_pageMetadata.cssBorderWidthClamps,
+		s_pageMetadata.cssCollapsedTablesRendered,
+		s_pageMetadata.cssSeparateTablesRendered,
+		s_pageMetadata.cssTableBorderSpacingClamps,
+		s_pageMetadata.cssListStyleMarkersRendered,
+		s_pageMetadata.cssListStyleNoneApplied,
+		s_pageMetadata.cssTextDecorationsRendered,
+		s_pageMetadata.cssGenericFontFamilyApplied,
+		s_pageMetadata.cssGenericFontFamilyFallbacks,
 		s_pageMetadata.cssFiguresRendered,
 		s_pageMetadata.cssFigcaptionsRendered,
 		s_pageMetadata.cssBlockquotesRendered,
@@ -3065,7 +3459,9 @@ void Navigator::renderDocument()
 		const int paddingBottom = cssPaddingBottomPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 		const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 		const int borderTop = cssBorderTopPx(block.style);
+		const int borderRight = cssBorderRightPx(block.style);
 		const int borderBottom = cssBorderBottomPx(block.style);
+		const int borderLeft = cssBorderLeftPx(block.style);
 		const int lineHeight = blockTextLineHeight(block);
 		const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
 		const int bodyMarginRight = blockBodyMarginRight(s_currentDoc);
@@ -3073,12 +3469,15 @@ void Navigator::renderDocument()
 			- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 		const int outerWidth = blockOuterWidth(block, availableWidth);
 		const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
-		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
-		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block) : 0;
+		const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+		const uint64_t listOrdinal = block.type == BlockType::ListItem ? blockListOrdinal(s_currentDoc, blockIndex) : 1;
+		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block, listOrdinal) : 0;
 		const int wrapCols = std::max(1, std::max(1, innerWidth - listInset) / kCharW);
 		const int listWrapCols = wrapCols;
 		const int preWrapCols = std::max(1, innerWidth / kCharW);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
+		const int contentX = blockContentLeftX(block, outerX);
+		const int contentY = blockContentTopY(block, drawY, blockMarginTop);
 
 		if (isTableCellLikeBlock(block)) {
 			if (!isFirstTableCellInGroup(s_currentDoc, blockIndex)) {
@@ -3100,8 +3499,10 @@ void Navigator::renderDocument()
 				continue;
 			}
 			const TableRowLayout& row = layout.rows[static_cast<size_t>(rowIndex)];
-			const int rowBlockH = row.heightPx + cssBorderTopPx(block.style) + cssBorderBottomPx(block.style);
-			if (drawY + rowBlockH < kContentY || drawY > kContentY + kContentH) {
+			const int tableY = drawY + blockMarginTop;
+			const int tableH = layout.totalHeightPx;
+			const int blockH = blockMarginTop + tableH + std::max(4, blockMarginBottom);
+			if (drawY + blockH < kContentY || drawY > kContentY + kContentH) {
 				++blockIndex;
 				continue;
 			}
@@ -3111,7 +3512,7 @@ void Navigator::renderDocument()
 				s_findMatches[s_currentFindMatch].blockIndex == blockIndex)
 			{
 				drawThemeRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
-					kContentW - 28, std::max(kLineH + 4, rowBlockH - std::max(0, blockMarginTop)),
+					kContentW - 28, std::max(kLineH + 4, blockH - std::max(0, blockMarginTop)),
 					NavigatorFindHighlightColor());
 			}
 			SelectionRange selection = normalizedSelection();
@@ -3126,14 +3527,12 @@ void Navigator::renderDocument()
 						NavigatorSelectionColor());
 				}
 			}
-			const int boxY = drawY + blockMarginTop;
-			drawBlockBox(s_windowId, layout.outerX, boxY, layout.outerWidth, row.heightPx, block.style);
+			drawBlockBox(s_windowId, layout.outerX, tableY, layout.outerWidth, tableH, block.style);
+			const int tableContentX = layout.outerX + layout.borderLeft + layout.paddingLeft;
 			const size_t lastCol = layout.columnWidthsChars.empty() ? 0 : layout.columnWidthsChars.size() - 1;
-			const int rowTextY = drawY + blockMarginTop + cssBorderTopPx(block.style) + layout.paddingTop;
-			const int rowTextTop = textLineTopPaddingPx(layout.lineHeight);
-			const int rowTextBottom = rowTextY + row.heightPx - layout.paddingTop - layout.paddingBottom;
-			int cellX = layout.outerX + layout.paddingLeft;
-			int separatorX = cellX;
+			const bool collapseMode = layout.collapseMode;
+			const int cellSpacingX = collapseMode ? 0 : layout.borderSpacingHorizontal;
+			int cellX = tableContentX;
 			for (size_t col = 0; col < row.cells.size(); ++col) {
 				const TableCellLayout& cell = row.cells[col];
 				const int colWidthChars = layout.columnWidthsChars[std::min(col, lastCol)];
@@ -3142,41 +3541,42 @@ void Navigator::renderDocument()
 				WebStyle cellStyle = cell.block->style;
 				if (row.headerRow) cellStyle.bold = true;
 				if (!cell.block->url.empty()) {
-					cellStyle.underline = true;
 					if (!cellStyle.hasColor) {
 						cellStyle.hasColor = true;
 						cellStyle.color = s_visitedUrls.find(cell.block->url) != s_visitedUrls.end()
 							? 0xFF6B46C1u
 							: 0xFF1E5CB8u;
 					}
+					if (!cellStyle.hasTextDecoration) {
+						cellStyle.hasTextDecoration = true;
+						cellStyle.underline = true;
+					}
 				}
-				if (cellStyle.hasBackgroundColor || cellStyle.hasBorderTop || cellStyle.hasBorderBottom) {
-					drawBlockBox(s_windowId, cellX, boxY, cellW, row.heightPx, cellStyle);
+				const int cellBorderTop = cssBorderTopPx(cellStyle);
+				const int cellBorderRight = cssBorderRightPx(cellStyle);
+				const int cellBorderBottom = cssBorderBottomPx(cellStyle);
+				const int cellBorderLeft = cssBorderLeftPx(cellStyle);
+				const int cellPaddingLeft = std::max(1, cell.padLeftChars * kCharW);
+				const int cellPaddingRight = std::max(1, cell.padRightChars * kCharW);
+				const int cellY = tableY + layout.rowOffsetsPx[static_cast<size_t>(rowIndex)];
+				if (cellStyle.hasBackgroundColor || cellBorderTop > 0 || cellBorderRight > 0 || cellBorderBottom > 0 || cellBorderLeft > 0) {
+					drawBoxDecorations(s_windowId, cellX, cellY, cellW, row.heightPx, cellStyle, !collapseMode, true, true, !collapseMode);
 				}
-				int lineY = rowTextY + rowTextTop;
+				const int innerWidth = std::max(1, cellW - cellBorderLeft - cellBorderRight - cellPaddingLeft - cellPaddingRight);
+				int lineY = cellY + cellBorderTop + layout.paddingTop + textLineTopPaddingPx(layout.lineHeight);
 				for (size_t lineIndex = 0; lineIndex < cell.lines.size(); ++lineIndex) {
 					const std::string& ln = cell.lines[lineIndex];
 					const int lineW = static_cast<int>(ln.size()) * kCharW;
-					const int paddingLeft = std::max(1, cell.padLeftChars * kCharW);
-					const int paddingRight = std::max(1, cell.padRightChars * kCharW);
-					const int innerWidth = std::max(1, cellW - paddingLeft - paddingRight);
-					int textX = cellX + paddingLeft;
+					int lineTextX = cellX + cellBorderLeft + cellPaddingLeft;
 					if (cellStyle.textAlign == TextAlign::Center) {
-						textX = cellX + paddingLeft + std::max(0, (innerWidth - lineW) / 2);
+						lineTextX = cellX + cellBorderLeft + cellPaddingLeft + std::max(0, (innerWidth - lineW) / 2);
 					} else if (cellStyle.textAlign == TextAlign::Right) {
-						textX = cellRight - paddingRight - std::min(innerWidth, lineW);
+						lineTextX = cellRight - cellBorderRight - cellPaddingRight - std::min(innerWidth, lineW);
 					}
-					drawTextAtStyled(s_windowId, textX, lineY, ln, cellStyle, contentTextColor);
+					drawTextAtStyled(s_windowId, lineTextX, lineY, ln, cellStyle, contentTextColor, layout.lineHeight);
 					lineY += layout.lineHeight;
 				}
-				if (col < row.cells.size() - 1) {
-					drawRect(s_windowId, cellRight - 1, boxY, 1, row.heightPx, 209, 214, 223);
-				}
-				cellX += cellW;
-				separatorX = cellRight;
-			}
-			if (!row.cells.empty()) {
-				drawRect(s_windowId, layout.outerX + layout.paddingLeft, rowTextBottom, std::max(1, separatorX - (layout.outerX + layout.paddingLeft)), 1, 209, 214, 223);
+				cellX += cellW + cellSpacingX;
 			}
 			++blockIndex;
 			continue;
@@ -3253,20 +3653,20 @@ void Navigator::renderDocument()
 		switch (block.type) {
 		case BlockType::Heading:
 			// Slightly larger heading: draw a subtle accent bar then the text
-			drawThemeRect(s_windowId, outerX + paddingLeft, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
+			drawThemeRect(s_windowId, contentX, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
 				std::max(1, innerWidth), 2, NavigatorAccentColor());
-			drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor);
+			drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), contentY + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor, lineHeight);
 			if (block.style.bold) {
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor);
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), contentY + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor, lineHeight);
 			}
 			break;
 
 		case BlockType::Paragraph: {
 			auto lines = wrapTextForBlock(block, wrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, block.style, contentTextColor);
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, lineW), lineY, ln, block.style, contentTextColor, lineHeight);
 				lineY += lineHeight;
 			}
 			break;
@@ -3278,14 +3678,14 @@ void Navigator::renderDocument()
 			const int ordinal = blockListOrdinal(s_currentDoc, blockIndex);
 			const std::string marker = blockListMarkerText(block, ordinal);
 			if (!marker.empty()) {
-				drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), marker, block.style, contentTextColor);
+				drawTextAtStyled(s_windowId, contentX, contentY + textLineTopPaddingPx(lineHeight), marker, block.style, contentTextColor, lineHeight);
 			}
 			const int textInset = blockListTextInsetPx(block);
 			auto lines = wrapTextForBlock(block, listWrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + textInset, std::max(1, innerWidth - textInset), lineW), lineY, ln, block.style, contentTextColor);
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX + textInset, std::max(1, innerWidth - textInset), lineW), lineY, ln, block.style, contentTextColor, lineHeight);
 				lineY += lineHeight;
 			}
 			break;
@@ -3294,9 +3694,9 @@ void Navigator::renderDocument()
 		case BlockType::Preformatted: {
 			// Draw each line preserving exact content
 			auto lines = wrapTextForBlock(block, preWrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
-				drawTextAtStyled(s_windowId, outerX + paddingLeft, lineY, ln, block.style, contentTextColor);
+				drawTextAtStyled(s_windowId, contentX, lineY, ln, block.style, contentTextColor, lineHeight);
 				lineY += lineHeight;
 			}
 			break;
@@ -3306,7 +3706,7 @@ void Navigator::renderDocument()
 			// Full wrapped link block: underline + blue text
 			// The entire bounding rect is clickable (TODO: per-line hit testing).
 			auto lines = wrapTextForBlock(block, wrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			int linkR = 55;
 			int linkG = 110;
 			int linkB = 210;
@@ -3322,13 +3722,8 @@ void Navigator::renderDocument()
 			linkStyle.color = 0xFF000000u | (static_cast<uint32_t>(linkR) << 16) |
 				(static_cast<uint32_t>(linkG) << 8) | static_cast<uint32_t>(linkB);
 			for (const std::string& ln : lines) {
-				// Underline under each line
 				int lineW = static_cast<int>(ln.size()) * kCharW;
-				if (block.style.underline) {
-					drawRect(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), textUnderlineYPx(lineY, lineHeight),
-						lineW, 1, linkR, linkG, linkB);
-				}
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, linkStyle, contentTextColor);
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, lineW), lineY, ln, linkStyle, contentTextColor, lineHeight);
 				lineY += lineHeight;
 			}
 			break;
@@ -3339,7 +3734,7 @@ void Navigator::renderDocument()
 			int imageH = 0;
 			imageDisplaySize(block, availableWidth, imageW, imageH);
 			const ImageInfo& info = imageInfoForBlock(block);
-			const int imageX = outerX + paddingLeft;
+			const int imageX = contentX;
 			const int viewportTop = kContentY;
 			const int viewportBottom = kToolbarH + 6 + kContentH;
 			if (boxY + borderTop + paddingTop >= viewportTop && boxY + borderTop + paddingTop + imageH <= viewportBottom) {
@@ -3360,7 +3755,7 @@ void Navigator::renderDocument()
 					int textY = boxY + borderTop + paddingTop + std::max(8, (imageH - textHeight) / 2);
 					for (int lineIndex = 0; lineIndex < maxLines; ++lineIndex) {
 						const std::string& line = placeholderLines[static_cast<size_t>(lineIndex)];
-						drawTextAtStyled(s_windowId, imageX + 10, textY, line, block.style, contentTextColor);
+						drawTextAtStyled(s_windowId, imageX + 10, textY, line, block.style, contentTextColor, lineHeight);
 						textY += lineHeight;
 					}
 				}
@@ -3369,7 +3764,7 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::FormTextInput: {
-			const int inputX = outerX + paddingLeft;
+			const int inputX = contentX;
 			const int inputY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, kFormControlH, NavigatorFieldFillColor(focused));
@@ -3398,7 +3793,7 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::FormTextarea: {
-			const int inputX = outerX + paddingLeft;
+			const int inputX = contentX;
 			const int inputY = boxY + borderTop + paddingTop;
 			const int inputH = formControlHeight(block);
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
@@ -3451,7 +3846,7 @@ void Navigator::renderDocument()
 
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio: {
-			const int controlX = outerX + paddingLeft;
+			const int controlX = contentX;
 			const int controlY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			const int box = 14;
@@ -3474,7 +3869,7 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::FormSelect: {
-			const int selectX = outerX + paddingLeft;
+			const int selectX = contentX;
 			const int selectY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			drawThemeRect(s_windowId, selectX, selectY, kFormInputW, kFormControlH, NavigatorFieldFillColor(focused));
@@ -3489,7 +3884,7 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::FormSubmit: {
-			const int buttonX = outerX + paddingLeft;
+			const int buttonX = contentX;
 			const int buttonY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			const bool disabled = block.formUnsupported;
@@ -3979,19 +4374,14 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 		if (!isFirstTableCellInGroup(s_currentDoc, blockIndex)) return Rect{ 0, 0, 0, 0 };
 		const int groupStart = tableGroupStartIndex(s_currentDoc, blockIndex);
 		const TableGroupLayout layout = buildTableGroupLayout(s_currentDoc, groupStart);
-		const uint64_t rowSerial = tableRowSerialForBlock(block);
-		for (const TableRowLayout& row : layout.rows) {
-			if (row.rowSerial != rowSerial) continue;
-			const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
-			const int rowY = drawY + cssMarginTopPx(block.style, 4) + cssBorderTopPx(block.style);
-			return Rect{
-				layout.outerX + layout.paddingLeft,
-				rowY + layout.paddingTop,
-				std::max(kCharW, (layout.outerWidth - layout.paddingLeft - layout.paddingRight)),
-				std::max(kLineH, row.heightPx)
-			};
-		}
-		return Rect{ 0, 0, 0, 0 };
+		const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
+		const int rowY = drawY + cssMarginTopPx(block.style, 4);
+		return Rect{
+			layout.outerX,
+			rowY,
+			std::max(kCharW, layout.outerWidth),
+			std::max(kLineH, layout.totalHeightPx)
+		};
 	}
 	const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
 	const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
@@ -4008,25 +4398,27 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 	const int outerWidth = blockOuterWidth(block, availableWidth);
 	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
-	const int textX = outerX + paddingLeft;
+	const int borderLeft = cssBorderLeftPx(block.style);
+	const int borderRight = cssBorderRightPx(block.style);
+	const int textX = blockContentLeftX(block, outerX);
 	int textW = 0;
 	int textH = 0;
 	switch (block.type) {
 	case BlockType::Heading:
-		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 		textH = std::max(blockTextLineHeight(block) + 4, cssFontSizeOrDefault(block.style, 20) + 2);
 		break;
 	case BlockType::Paragraph:
 	case BlockType::Link:
-		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block));
 		break;
 	case BlockType::ListItem:
-		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block));
 		break;
 	case BlockType::Preformatted:
-		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block)) + paddingTop + paddingBottom;
 		break;
 	default:
@@ -5339,6 +5731,18 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssTableCaptionCount,
 		s_pageMetadata.cssTableHeaderCellCount,
 		s_pageMetadata.cssVisitedLinkCount,
+		s_pageMetadata.cssBorderedBlocksRendered,
+		s_pageMetadata.cssDashedBordersRendered,
+		s_pageMetadata.cssDottedBordersRendered,
+		s_pageMetadata.cssBorderWidthClamps,
+		s_pageMetadata.cssCollapsedTablesRendered,
+		s_pageMetadata.cssSeparateTablesRendered,
+		s_pageMetadata.cssTableBorderSpacingClamps,
+		s_pageMetadata.cssListStyleMarkersRendered,
+		s_pageMetadata.cssListStyleNoneApplied,
+		s_pageMetadata.cssTextDecorationsRendered,
+		s_pageMetadata.cssGenericFontFamilyApplied,
+		s_pageMetadata.cssGenericFontFamilyFallbacks,
 		s_pageMetadata.cssFiguresRendered,
 		s_pageMetadata.cssFigcaptionsRendered,
 		s_pageMetadata.cssBlockquotesRendered,
@@ -6019,12 +6423,14 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 	const int outerWidth = blockOuterWidth(block, availableWidth);
 	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
-	const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
+	const int borderLeft = cssBorderLeftPx(block.style);
+	const int borderRight = cssBorderRightPx(block.style);
+	const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 	int relY  = blockLayoutY(blockIndex);
 	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
 	int h     = wrappedBlockHeight(block, std::max(1, innerWidth / kCharW), blockTextLineHeight(block));
 	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth);
-	return Rect{ outerX + paddingLeft, drawY, w, h };
+	return Rect{ blockContentLeftX(block, outerX), drawY, w, h };
 }
 
 Navigator::Rect Navigator::formControlRect(int blockIndex)
@@ -6050,7 +6456,7 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	int w = kFormInputW;
 	if (block.type == BlockType::FormSubmit) w = kFormSubmitW;
 	else if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) w = 260;
-	return Rect{ outerX + paddingLeft, drawY, w, formControlHeight(block) };
+	return Rect{ blockContentLeftX(block, outerX), drawY, w, formControlHeight(block) };
 }
 
 int Navigator::computeDocumentHeight()

@@ -690,6 +690,37 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase1eReport, "Current Document.CSS nested layout clamps="),
         "report=\"" + summarizeText(cssPhase1eReport, 260) + "\"");
 
+    bool cssPhase1fLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase1f.html");
+    std::string cssPhase1fText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase1fReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 1F fixture loads",
+        cssPhase1fLoaded &&
+        contains(cssPhase1fText, "Wrapper with border shorthand 1px solid #888 marker.") &&
+        contains(cssPhase1fText, "Oversized border width clamp marker.") &&
+        contains(cssPhase1fText, "Caption spacing marker") &&
+        contains(cssPhase1fText, "List style none item stays readable without markers.") &&
+        contains(cssPhase1fText, "Default underlined link marker") &&
+        contains(cssPhase1fText, "Sans-serif font family marker.") &&
+        contains(cssPhase1fText, "Serif fallback marker."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 1F diagnostics",
+        contains(cssPhase1fReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS bordered blocks rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS dashed borders rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS dotted borders rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS border width clamps=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS collapsed tables rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS separate tables rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS table border spacing clamps=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS list style markers rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS list style none applied=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS text decorations rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family applied=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family fallbacks=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS table layout fallbacks=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS table captions rendered="),
+        "report=\"" + summarizeText(cssPhase1fReport, 260) + "\"");
+
     bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
     std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),

@@ -94,15 +94,11 @@ if (-not (Test-Path $bootloader)) {
     throw "ESP/EFI/BOOT/BOOTX64.EFI not found. Run build.bat first."
 }
 
-$marker = "desktopCleanupRuntimePass=2"
+$cleanupMarker = "desktopCleanupRuntimePass=2"
 $builtKernel = Join-Path $Root "kernel\build\amd64\bin\kernel.elf"
 $espKernel = Join-Path $esp "kernel.elf"
-if (-not (Test-FileContainsAscii -Path $builtKernel -Pattern $marker)) {
-    throw "Built kernel does not contain runtime marker: $builtKernel"
-}
-if (-not (Test-FileContainsAscii -Path $espKernel -Pattern $marker)) {
-    throw "ESP kernel does not contain runtime marker: $espKernel"
-}
+$cleanupMarkerInBuiltKernel = Test-FileContainsAscii -Path $builtKernel -Pattern $cleanupMarker
+$cleanupMarkerInEspKernel = Test-FileContainsAscii -Path $espKernel -Pattern $cleanupMarker
 
 $args = @(
     "-machine", "pc",
@@ -121,7 +117,7 @@ try {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 250
-        if (Test-SerialLogContains -Path $serialLog -Pattern "[KERNEL] desktopCleanupRuntimePass=2 launch-smoke end") {
+        if (Test-SerialLogContains -Path $serialLog -Pattern "[desktop] bare-metal startup desktop folder scan completed") {
             break
         }
     }
@@ -137,7 +133,7 @@ try {
 $output = if (Test-Path $serialLog) { Get-Content $serialLog -Raw } else { "" }
 Write-Host $output
 
-$markerPresent = $output.Contains($marker)
+$cleanupMarkerPresent = $cleanupMarkerInBuiltKernel -or $cleanupMarkerInEspKernel -or $output.Contains($cleanupMarker)
 $iconInitStarted = $output.Contains("[desktop] bare-metal desktop icon init starting")
 $iconInitCompleted = $output.Contains("[desktop] bare-metal desktop icon init completed")
 $backingPathChosen = $output.Contains("[desktop] bare-metal desktop backing path chosen:")
@@ -152,9 +148,9 @@ $notepadLaunch = $output.Contains("[KERNEL] desktopCleanupRuntimePass=2 launch a
 $calculatorLaunch = $output.Contains("[KERNEL] desktopCleanupRuntimePass=2 launch app=Calculator result=PASS")
 $summaryPresent = [regex]::IsMatch($output, '\[desktop\] Desktop folder enumeration completed discovered=')
 
-$overallPass = $markerPresent -and $iconInitStarted -and $iconInitCompleted -and $backingPathChosen -and $startupRequested -and $startupCompleted -and $summaryPresent -and $launchSmokeBegin -and $launchSmokeEnd -and $displayOptionsLaunch -and $notepadLaunch -and $calculatorLaunch
+$overallPass = (-not $cleanupMarkerPresent) -and $iconInitStarted -and $iconInitCompleted -and $backingPathChosen -and $startupRequested -and $startupCompleted -and $summaryPresent -and (-not $launchSmokeBegin) -and (-not $launchSmokeEnd) -and (-not $displayOptionsLaunch) -and (-not $notepadLaunch) -and (-not $calculatorLaunch)
 
-Write-Host "runtime marker present: $markerPresent"
+Write-Host "cleanup marker present: $cleanupMarkerPresent"
 Write-Host "startup scan requested count: $startupRequestedCount"
 Write-Host "startup scan completed count: $startupCompletedCount"
 Write-Host "launch smoke begin: $launchSmokeBegin"

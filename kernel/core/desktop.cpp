@@ -6920,7 +6920,13 @@ static void draw_right_click_menu()
 
         const char* label = s_contextMenuItems[i];
         if (s_contextMenuMode == ContextMenuMode::StartMenuApp) {
-            label = (i == 0) ? "Open" : (is_app_shortcut_pinned_to_desktop(s_contextMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop");
+            if (i == 0) {
+                label = "Open";
+            } else if (!s_startMenuAllProgs && i == 3) {
+                label = "Remove from This List";
+            } else {
+                label = is_app_shortcut_pinned_to_desktop(s_contextMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop";
+            }
         } else if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) {
             label = (i == 0) ? "Open" : "Remove from Desktop";
         } else if (s_contextMenuMode == ContextMenuMode::DesktopTrash) {

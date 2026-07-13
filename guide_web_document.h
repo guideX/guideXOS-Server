@@ -68,6 +68,41 @@ enum class WordBreakMode : uint8_t {
 	BreakAll = 2,
 };
 
+enum class BorderLineStyle : uint8_t {
+	Inherit = 0,
+	None    = 1,
+	Hidden  = 2,
+	Solid   = 3,
+	Dashed  = 4,
+	Dotted  = 5,
+};
+
+enum class TableBorderCollapseMode : uint8_t {
+	Inherit  = 0,
+	Separate = 1,
+	Collapse = 2,
+};
+
+enum class ListStyleType : uint8_t {
+	Inherit      = 0,
+	None         = 1,
+	Disc         = 2,
+	Circle       = 3,
+	Square       = 4,
+	Decimal      = 5,
+	LowerAlpha   = 6,
+	UpperAlpha   = 7,
+	LowerRoman   = 8,
+	UpperRoman   = 9,
+};
+
+enum class GenericFontFamily : uint8_t {
+	Inherit   = 0,
+	SansSerif = 1,
+	Serif     = 2,
+	Monospace = 3,
+};
+
 struct HtmlElementRef {
 	std::string tagName;
 	std::string className;
@@ -90,8 +125,15 @@ struct WebStyle {
 	bool     bold = false;
 	bool     italic = false;
 	bool     underline = false;
+	bool     lineThrough = false;
+	bool     hasTextDecoration = false;
 	bool     displayNone = false;
 	bool     listStyleNone = false;
+	ListStyleType listStyleType = ListStyleType::Inherit;
+	TableBorderCollapseMode borderCollapse = TableBorderCollapseMode::Inherit;
+	int      borderSpacingHorizontal = -1;
+	int      borderSpacingVertical = -1;
+	GenericFontFamily genericFontFamily = GenericFontFamily::Inherit;
 	TextAlign textAlign = TextAlign::Inherit;
 	bool     lineHeightNormal = false;
 	int      marginTop = -1;
@@ -119,9 +161,19 @@ struct WebStyle {
 	bool     hasBorderTop = false;
 	int      borderTopWidth = 0;
 	uint32_t borderTopColor = 0;
+	BorderLineStyle borderTopStyle = BorderLineStyle::Inherit;
+	bool     hasBorderRight = false;
+	int      borderRightWidth = 0;
+	uint32_t borderRightColor = 0;
+	BorderLineStyle borderRightStyle = BorderLineStyle::Inherit;
 	bool     hasBorderBottom = false;
 	int      borderBottomWidth = 0;
 	uint32_t borderBottomColor = 0;
+	BorderLineStyle borderBottomStyle = BorderLineStyle::Inherit;
+	bool     hasBorderLeft = false;
+	int      borderLeftWidth = 0;
+	uint32_t borderLeftColor = 0;
+	BorderLineStyle borderLeftStyle = BorderLineStyle::Inherit;
 };
 
 struct WebStyleRule {
@@ -146,6 +198,8 @@ struct CssDiagnostics {
 	bool   styleBlockCapped = false;
 	size_t styleBytesProcessed = 0;
 	int    clampedValueCount = 0;
+	int    borderWidthClampCount = 0;
+	int    borderSpacingClampCount = 0;
 	int    lineBreakCount = 0;
 };
 
