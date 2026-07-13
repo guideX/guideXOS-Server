@@ -348,7 +348,7 @@ foreach ($dll in $expectedPeImports.Keys) {
     Assert-ManagedHostLogSetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
 }
 Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
-Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan

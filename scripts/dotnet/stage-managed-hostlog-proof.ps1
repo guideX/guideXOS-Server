@@ -149,6 +149,19 @@ if ($tlsEndAddress -le $tlsStartAddress) {
 }
 $tlsBlockSize = $tlsEndAddress - $tlsStartAddress
 $managedMainAddress = Get-MapSymbolAddress -Path $sourceMap -Symbol "ManagedMain" -Label "Managed entry"
+$entryDiagnosis = Assert-ManagedHostLogReversePInvokeChain $sourceElf $sourceMap $sourcePeDump
+$toolchainText = Get-Content -LiteralPath $sourceToolchain
+$converterPathLine = $toolchainText | Where-Object { $_ -like "PeToElfScript=*" } | Select-Object -First 1
+$converterHashLine = $toolchainText | Where-Object { $_ -like "PeToElfSha256=*" } | Select-Object -First 1
+if ($null -eq $converterPathLine -or $null -eq $converterHashLine) {
+    throw "Toolchain provenance is missing converter identity."
+}
+$converterPath = $converterPathLine.Substring("PeToElfScript=".Length)
+$converterSha256 = $converterHashLine.Substring("PeToElfSha256=".Length)
+$projectText = Get-Content -LiteralPath (Join-Path $repoRoot "samples\managed\HostLogProof\HostLogProof.csproj") -Raw
+$ilCompilerVersionMatch = [regex]::Match($projectText, 'PackageReference Include="Microsoft\.DotNet\.ILCompiler" Version="([^"]+)"')
+if (-not $ilCompilerVersionMatch.Success) { throw "NativeAOT ILCompiler package identity is missing from HostLogProof.csproj." }
+$ilCompilerVersion = $ilCompilerVersionMatch.Groups[1].Value
 
 $expectedPeImports = [ordered]@{
     "ADVAPI32.dll" = @(
@@ -217,7 +230,7 @@ foreach ($dll in $expectedPeImports.Keys) {
 }
 
 $runtimeSupportSource = Join-Path $repoRoot "samples\managed\HostLogProof\runtime_support.c"
-Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath (Join-Path $artifactRoot "HostLogProof.exe") -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeObjDump -ElfReadelfPath $sourceElfReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath (Join-Path $artifactRoot "HostLogProof.exe") -PeDumpPath $sourcePeDump -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeObjDump -ElfReadelfPath $sourceElfReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource | Out-Null
 Assert-ManagedHostLogFileNotContains $sourcePeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
 
 $stagedAppsRoot = Join-Path $StageRoot "apps"
@@ -260,6 +273,7 @@ $manifest = [ordered]@{
             architecture = "amd64"
             path = "bin/amd64/HostLogProof.elf"
             entryPoint = "ManagedMain"
+            entryCategory = "runtime-correct-reverse-pinvoke-required"
             abi = "guidexos-c-abi-v1"
             runtime = "native-elf"
         }
@@ -281,13 +295,19 @@ $envelope = [ordered]@{
     manifestId = $manifest.id
     manifestDisplayName = $manifest.displayName
     manifestEntryPoint = $manifest.entries[0].entryPoint
+    entryCategory = $entryDiagnosis.EntryCategory
     managedMainAddress = ("0x{0:X}" -f $managedMainAddress)
+    reversePInvokeAddress = ("0x{0:X}" -f $entryDiagnosis.RhpReversePInvoke)
+    reversePInvokeAttachAddress = ("0x{0:X}" -f $entryDiagnosis.RhpReversePInvokeAttachOrTrapThread2)
+    reversePInvokeReturnAddress = ("0x{0:X}" -f $entryDiagnosis.RhpReversePInvokeReturn)
+    flsGetValueImportThunkAddress = ("0x{0:X}" -f $entryDiagnosis.FlsGetValueImportThunk)
     tlsIndexAddress = ("0x{0:X}" -f $tlsIndexAddress)
     tlsStartAddress = ("0x{0:X}" -f $tlsStartAddress)
     tlsEndAddress = ("0x{0:X}" -f $tlsEndAddress)
     tlsBlockSize = ("0x{0:X}" -f $tlsBlockSize)
     stagedElf = $stagedElf
     sourceElf = $sourceElf
+    toolchainFile = $sourceToolchain
     sourceElfSha256 = $sourceHash
     stagedElfSha256 = $stagedHash
     expectedEntryAddress = ("0x{0:X}" -f $managedMainAddress)
@@ -296,6 +316,13 @@ $envelope = [ordered]@{
     expectedReturnCode = 0
     architecture = "amd64"
     abi = "guidexos-c-abi-v1"
+    converterPath = $converterPath
+    converterSha256 = $converterSha256
+    ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
+    ilCompilerVersion = $ilCompilerVersion
+    runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
+    runtimePackVersion = $ilCompilerVersion
+    tlsEnvelope = "Windows TLS index plus NativeAOT TLS template envelope; FLS/thread attachment remains uninitialized"
     registrySourceEnvironment = "GXOS_NATIVE_ELF_STAGE_ROOT"
 }
 

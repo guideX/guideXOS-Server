@@ -72,7 +72,7 @@ foreach ($dll in $expectedImports.Keys) {
 }
 Assert-ManagedHostLogFileNotContains $sourcePeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "PE forbidden imports"
 
-$elf = Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath $sourcePe -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeDump -ElfReadelfPath $sourceReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource
+$elf = Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath $sourcePe -PeDumpPath $sourcePeDump -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeDump -ElfReadelfPath $sourceReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource
 $managedMain = Get-ManagedHostLogMapSymbolAddress $sourceMap "ManagedMain" "Managed entry"
 $sourceHash = (Get-FileHash -LiteralPath $sourceElf -Algorithm SHA256).Hash.ToUpperInvariant()
 $stagedHash = (Get-FileHash -LiteralPath $stagedElf -Algorithm SHA256).Hash.ToUpperInvariant()

@@ -229,4 +229,10 @@ That pass must record whether runtime initialization is required before allocati
 | `scripts/smoke-dotnet-managed-hostlog-execution.ps1` | FAIL reproducibly in two separate Server processes: exit `-1073741819` (`0xC0000005`) before host log; the script's failure probe was not reached |
 | default inventory isolation | PASS in preflight checks before the live positive launch |
 
+## 22. Reverse-P/Invoke entry diagnosis follow-up
+
+The original Outcome C history below is preserved. The exact clean-build fault, entry-symbol chain, TLS/FLS requirements, converter provenance, and artifact comparison are documented in [NATIVEAOT_REVERSE_PINVOKE_ENTRY_DIAGNOSIS.md](NATIVEAOT_REVERSE_PINVOKE_ENTRY_DIAGNOSIS.md).
+
+Final status remains **Outcome C - Custom runtime pack required**. The current TLS envelope is not a runtime-correct NativeAOT reverse-P/Invoke initialization, and no allocation experiment is authorized until the custom runtime/platform pack establishes the managed transition and repeat-launch proof.
+
 **Decision: Outcome C — Regression found during stabilization.**

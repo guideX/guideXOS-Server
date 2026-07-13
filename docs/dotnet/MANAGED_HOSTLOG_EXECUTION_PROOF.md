@@ -470,3 +470,9 @@ The actual NativeAOT-generated `ManagedMain` executed, the host callback emitted
 
 Build a minimal guideXOS NativeAOT runtime/platform layer that supports one managed allocation while retaining the proven entry ABI, host callback, and opt-in packaging path.
 
+### 22.19 Current status correction
+
+Sections 22.15–22.18 preserve the historical successful-run report and its original Outcome A label. They are not a current reproducibility claim. The clean-build regression and exact reverse-P/Invoke fault are documented in [NATIVEAOT_REVERSE_PINVOKE_ENTRY_DIAGNOSIS.md](NATIVEAOT_REVERSE_PINVOKE_ENTRY_DIAGNOSIS.md); the current final status is Outcome C, and allocation is not authorized.
+
+The historical run demonstrates generated managed-body instructions and the guideXOS host ABI. It does not, by itself, demonstrate a runtime-correct reverse-P/Invoke transition, thread attachment, GC safety, or allocation safety.
+

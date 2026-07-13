@@ -11,6 +11,61 @@ function Get-ManagedHostLogMapSymbolAddress([string]$Path, [string]$Symbol, [str
     throw "$Label symbol not found in map: $Symbol"
 }
 
+function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$MapPath, [string]$PeDumpPath) {
+    $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
+    $reversePInvoke = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvoke" "RhpReversePInvoke"
+    $attach = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvokeAttachOrTrapThread2" "RhpReversePInvokeAttachOrTrapThread2"
+    $reverseReturn = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvokeReturn" "RhpReversePInvokeReturn"
+    $flsImport = Get-ManagedHostLogMapSymbolAddress $MapPath "__imp_FlsGetValue" "FlsGetValue import thunk"
+
+    $expected = [ordered]@{
+        ManagedMain = [uint64]0x10001900
+        RhpReversePInvoke = [uint64]0x1004B140
+        RhpReversePInvokeAttachOrTrapThread2 = [uint64]0x1004B1A0
+        RhpReversePInvokeReturn = [uint64]0x1004B290
+        FlsGetValueImportThunk = [uint64]0x10052108
+    }
+    $actual = [ordered]@{
+        ManagedMain = $managedMain
+        RhpReversePInvoke = $reversePInvoke
+        RhpReversePInvokeAttachOrTrapThread2 = $attach
+        RhpReversePInvokeReturn = $reverseReturn
+        FlsGetValueImportThunk = $flsImport
+    }
+    foreach ($name in $expected.Keys) {
+        if ([uint64]$actual[$name] -ne [uint64]$expected[$name]) {
+            throw "NativeAOT reverse-P/Invoke symbol drift for $name. Expected 0x$('{0:X}' -f $expected[$name]), got 0x$('{0:X}' -f $actual[$name])."
+        }
+    }
+
+    $elf = Read-ManagedHostLogElfEnvelope $ElfPath
+    $executableSegment = $elf.LoadSegments | Where-Object { ($_.Flags -band 1) -ne 0 } | Select-Object -First 1
+    if ($null -eq $executableSegment) { throw "No executable PT_LOAD found for reverse-P/Invoke chain assertion." }
+    $entryFileOffset = [int]($executableSegment.Offset + ($elf.Entry - $executableSegment.VirtualAddress))
+    $callOffset = $entryFileOffset + 0x40
+    if ($elf.Bytes[$callOffset] -ne 0xE8) {
+        throw "ManagedMain no longer has the expected call at entry+0x40; entry selection or generated body drifted."
+    }
+    $relativeCall = [BitConverter]::ToInt32($elf.Bytes, $callOffset + 1)
+    $callTarget = [uint64]($elf.Entry + 0x45 + [int64]$relativeCall)
+    if ($callTarget -ne $reversePInvoke) {
+        throw ("ManagedMain call-chain drift: entry+0x40 targets 0x{0:X}, expected RhpReversePInvoke 0x{1:X}." -f $callTarget, $reversePInvoke)
+    }
+
+    Assert-ManagedHostLogFileContains $PeDumpPath @(
+        '00052108\s+<none>\s+[0-9A-Fa-f]+\s+FlsGetValue'
+    ) "Reverse-P/Invoke Windows dependency evidence"
+
+    return [pscustomobject]@{
+        EntryCategory = "runtime-correct-reverse-pinvoke-required"
+        ManagedMain = $managedMain
+        RhpReversePInvoke = $reversePInvoke
+        RhpReversePInvokeAttachOrTrapThread2 = $attach
+        RhpReversePInvokeReturn = $reverseReturn
+        FlsGetValueImportThunk = $flsImport
+    }
+}
+
 function Get-ManagedHostLogImportTable([string]$Path) {
     $imports = [ordered]@{}
     $currentDll = $null
@@ -212,6 +267,7 @@ function Get-ManagedHostLogPeImageEnvelope([string]$PePath) {
 function Assert-ManagedHostLogElfEnvelope(
     [string]$ElfPath,
     [string]$PePath,
+    [string]$PeDumpPath,
     [string]$MapPath,
     [string]$NativeObjectDumpPath,
     [string]$ElfReadelfPath,
@@ -220,6 +276,7 @@ function Assert-ManagedHostLogElfEnvelope(
     $elf = Read-ManagedHostLogElfEnvelope $ElfPath
     $pe = Get-ManagedHostLogPeImageEnvelope $PePath
     $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
+    $null = Assert-ManagedHostLogReversePInvokeChain $ElfPath $MapPath $PeDumpPath
 
     if ($elf.Entry -ne $managedMain) { throw ("ELF entry 0x{0:X} is not ManagedMain 0x{1:X}." -f $elf.Entry, $managedMain) }
     if ($elf.LoadSegments.Count -eq 0) { throw "ELF has no PT_LOAD segments." }

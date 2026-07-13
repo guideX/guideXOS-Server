@@ -5,7 +5,9 @@ param(
     [string]$StageScript = "",
     [string]$ServerExe = "",
     [int]$TimeoutSeconds = 240,
-    [switch]$SkipFailureProbe
+    [switch]$SkipFailureProbe,
+    [switch]$EnableFaultDiagnostics,
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -166,8 +168,12 @@ if (-not (Test-Path -LiteralPath $StageScript)) {
 $mingwBin = "C:\mingw64\bin"
 $oldPath = $env:PATH
 $originalStageRoot = $env:GXOS_NATIVE_ELF_STAGE_ROOT
+$originalFaultDiagnostics = $env:GX_NATIVE_ELF_FAULT_DIAGNOSTICS
 if (Test-Path -LiteralPath $mingwBin) {
     $env:PATH = "$mingwBin;$env:PATH"
+}
+if ($EnableFaultDiagnostics) {
+    Set-EnvValue -Name "GX_NATIVE_ELF_FAULT_DIAGNOSTICS" -Value "1"
 }
 
 try {
@@ -193,7 +199,13 @@ try {
     }
 
     Write-Host "[dotnet-proof] staging proof artifacts"
-    $stageOutput = & powershell -ExecutionPolicy Bypass -File $StageScript -RepoRoot $Root -OutputRoot $OutputRoot -StageRoot $StageRoot
+    $stageArguments = @(
+        "-RepoRoot", $Root,
+        "-OutputRoot", $OutputRoot,
+        "-StageRoot", $StageRoot
+    )
+    if ($SkipBuild) { $stageArguments += "-SkipBuild" }
+    $stageOutput = & powershell -ExecutionPolicy Bypass -File $StageScript @stageArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Stage script failed with exit code $LASTEXITCODE"
     }
@@ -233,9 +245,34 @@ try {
     if ($stageManifestObject.entries[0].entryPoint -ne "ManagedMain") {
         throw "Missing expected value for stage manifest entry point: ManagedMain"
     }
+    if ($stageManifestObject.entries[0].entryCategory -ne "runtime-correct-reverse-pinvoke-required") {
+        throw "Entry-category drift: expected runtime-correct-reverse-pinvoke-required."
+    }
     if ($stageManifestObject.entries[0].abi -ne "guidexos-c-abi-v1") {
         throw "Missing expected value for stage manifest ABI: guidexos-c-abi-v1"
     }
+    $expectedEntryFields = @{
+        entryCategory = "runtime-correct-reverse-pinvoke-required"
+        managedMainAddress = "0x10001900"
+        reversePInvokeAddress = "0x1004B140"
+        reversePInvokeAttachAddress = "0x1004B1A0"
+        reversePInvokeReturnAddress = "0x1004B290"
+        flsGetValueImportThunkAddress = "0x10052108"
+        converterSha256 = "EAAEFBC8862D6E1A4AC1A679073AF5311A3AF9CE96F45D258617BD4FE0977434"
+        ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
+        ilCompilerVersion = "9.0.0"
+        runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
+        runtimePackVersion = "9.0.0"
+        tlsEnvelope = "Windows TLS index plus NativeAOT TLS template envelope; FLS/thread attachment remains uninitialized"
+    }
+    foreach ($field in $expectedEntryFields.Keys) {
+        if ([string]$stageEnvelope.$field -ne $expectedEntryFields[$field]) {
+            throw "Stage envelope drift for $field. Expected $($expectedEntryFields[$field]), got $($stageEnvelope.$field)."
+        }
+    }
+    $toolchainFile = [string]$stageEnvelope.toolchainFile
+    if (-not (Test-Path -LiteralPath $toolchainFile)) { throw "Toolchain provenance file missing: $toolchainFile" }
+    Assert-Contains -Text (Get-Content -LiteralPath $toolchainFile -Raw) -Needle "PeToElfSha256=$($stageEnvelope.converterSha256)" -Reason "converter identity"
 
     $oldStageRoot = $originalStageRoot
     Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $null
@@ -265,6 +302,12 @@ try {
             Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $oldStageRoot
         }
         if ($positive.ExitCode -ne 0) {
+            if ($EnableFaultDiagnostics) {
+                Assert-Contains -Text $positive.StdErr -Needle "[NativeElfFault]" -Reason "structured fault diagnostics"
+                Assert-Contains -Text $positive.StdErr -Needle "code=0xc0000005" -Reason "access-violation code"
+                Assert-Contains -Text $positive.StdErr -Needle "entry=0x10001900" -Reason "fault entry address"
+                Assert-Contains -Text $positive.StdErr -Needle "tlsIndexAddress=0x100982ac" -Reason "fault TLS index"
+            }
             throw "Managed proof server session failed with exit code $($positive.ExitCode). stderr: $($positive.StdErr)"
         }
 
@@ -346,6 +389,7 @@ try {
 } finally {
     $env:PATH = $oldPath
     Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $originalStageRoot
+    Set-EnvValue -Name "GX_NATIVE_ELF_FAULT_DIAGNOSTICS" -Value $originalFaultDiagnostics
 }
 
 
