@@ -9,9 +9,9 @@
 // - No cursor queue setup
 // - No physical Intel GPU support
 // - No real hardware GPU BAR access
-// - No 3D, virgl, Venus, blob, or compositor integration
+// - No 3D, virgl, Venus, blob, or continuous compositor integration
 // - No display hotplug
-// - No compositor desktop rendering into virtio-gpu resources
+// - QEMU-only compositor desktop rendering is limited to a single static proof frame
 // - No continuous frame rendering or animation
 // - No real hardware GPU/MMIO enablement
 // REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
@@ -23,8 +23,10 @@
 
 #include "include/kernel/mmio.h"
 #include "include/kernel/msi.h"
+#include "include/kernel/system_font.h"
 #include "include/kernel/serial_debug.h"
 #include "../../virtio_gpu_display_backend.h"
+#include "../../pixel_surface.h"
 
 #if defined(_MSC_VER)
 #define GXOS_MSVC_STUB 1
@@ -193,6 +195,9 @@ struct ProbeOutcome {
     bool flush1Ok;
     bool distinctPatternsConfirmed;
     bool renderingTestPattern;
+    const char* contentMode;
+    const char* frameMode;
+    bool continuousPresentationEnabled;
     const char* reason;
     const DeviceState* state;
     VirtioGpuOutputInventory outputInventory;
@@ -717,7 +722,7 @@ static VirtioGpuOutputInventory build_output_inventory(
             scanout1Initial,
             resource2,
             scanout1Initial.enabled,
-            0,
+            static_cast<int>(selectedWidth),
             0,
             static_cast<int>(selectedWidth),
             static_cast<int>(selectedHeight),
@@ -727,6 +732,603 @@ static VirtioGpuOutputInventory build_output_inventory(
     }
 
     return VirtioGpuDisplayBackend::getVirtioGpuOutputInventory(scanouts, deviceConfigNumScanouts);
+}
+
+struct CompositorFrameTargetResult {
+    uint32_t targetIndex{0};
+    uint32_t scanoutId{0};
+    uint32_t resourceId{0};
+    bool renderOk{false};
+    bool transferOk{false};
+    bool flushOk{false};
+    bool fallbackUsed{false};
+    bool backingValid{false};
+    bool conversionRequired{false};
+    uint64_t renderedByteCount{0};
+    uint64_t checksum{0};
+    const char* blocker{nullptr};
+};
+
+static PixelFormatKind pixel_format_from_gpu_format(GpuFormat format)
+{
+    switch (format) {
+    case FORMAT_B8G8R8X8_UNORM:
+        return PixelFormatKind::B8G8R8X8_UNORM;
+    case FORMAT_B8G8R8A8_UNORM:
+        return PixelFormatKind::B8G8R8A8_UNORM;
+    case FORMAT_X8R8G8B8_UNORM:
+        return PixelFormatKind::X8R8G8B8_UNORM;
+    case FORMAT_A8R8G8B8_UNORM:
+        return PixelFormatKind::A8R8G8B8_UNORM;
+    case FORMAT_R8G8B8A8_UNORM:
+        return PixelFormatKind::R8G8B8A8_UNORM;
+    case FORMAT_X8B8G8R8_UNORM:
+        return PixelFormatKind::X8B8G8R8_UNORM;
+    case FORMAT_A8B8G8R8_UNORM:
+        return PixelFormatKind::A8B8G8R8_UNORM;
+    case FORMAT_R8G8B8X8_UNORM:
+        return PixelFormatKind::R8G8B8X8_UNORM;
+    default:
+        return PixelFormatKind::Unknown;
+    }
+}
+
+static bool pixel_surface_is_direct_bgrx(const PixelSurface& surface)
+{
+    return pixelFormatIsBgrxLike(surface.pixelFormat);
+}
+
+static void surface_put_pixel(PixelSurface& surface, int localX, int localY, uint32_t color)
+{
+    if (surface.pixelPointer == nullptr || localX < 0 || localY < 0) {
+        return;
+    }
+    if (localX >= static_cast<int>(surface.width) || localY >= static_cast<int>(surface.height)) {
+        return;
+    }
+
+    const uint32_t stridePixels = surface.pitchBytes / 4u;
+    uint32_t* const row = surface.pixelPointer + (static_cast<size_t>(localY) * static_cast<size_t>(stridePixels));
+    row[static_cast<size_t>(localX)] = pixelSurfaceConvertBgrxToFormat(color, surface.pixelFormat);
+}
+
+static void surface_fill_rect_local(PixelSurface& surface, const PixelRect& localRect, uint32_t color)
+{
+    if (surface.pixelPointer == nullptr || !localRect.isValid()) {
+        return;
+    }
+
+    const PixelRect clip = intersectPixelRect(localRect, surface.clipRect);
+    if (!clip.isValid()) {
+        return;
+    }
+
+    const uint32_t packed = pixelSurfaceConvertBgrxToFormat(color, surface.pixelFormat);
+    const uint32_t stridePixels = surface.pitchBytes / 4u;
+    for (int y = clip.top; y < clip.bottom; ++y) {
+        uint32_t* const row = surface.pixelPointer + (static_cast<size_t>(y) * static_cast<size_t>(stridePixels));
+        for (int x = clip.left; x < clip.right; ++x) {
+            row[static_cast<size_t>(x)] = packed;
+        }
+    }
+}
+
+static void surface_fill_rect_global(PixelSurface& surface, int globalX, int globalY, int width, int height, uint32_t color)
+{
+    PixelRect local{};
+    if (!pixelSurfaceLocalRectFromGlobal(surface, globalX, globalY, width, height, &local)) {
+        return;
+    }
+    surface_fill_rect_local(surface, local, color);
+}
+
+static void surface_draw_rect_global(PixelSurface& surface, int globalX, int globalY, int width, int height, uint32_t color)
+{
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    surface_fill_rect_global(surface, globalX, globalY, width, 1, color);
+    surface_fill_rect_global(surface, globalX, globalY + height - 1, width, 1, color);
+    surface_fill_rect_global(surface, globalX, globalY, 1, height, color);
+    surface_fill_rect_global(surface, globalX + width - 1, globalY, 1, height, color);
+}
+
+static void surface_draw_text_global(PixelSurface& surface, int globalX, int globalY, const char* text, uint32_t color, FontRole role)
+{
+    if (text == nullptr || text[0] == '\0' || surface.pixelPointer == nullptr) {
+        return;
+    }
+
+    SystemFont::EnsureInitialized();
+    const int localX = globalX - surface.viewportOriginX;
+    const int localY = globalY - surface.viewportOriginY;
+    SystemFont::DrawTextToBuffer(surface.pixelPointer,
+                                 static_cast<int>(surface.pitchBytes),
+                                 static_cast<int>(surface.width),
+                                 static_cast<int>(surface.height),
+                                 localX,
+                                 localY,
+                                 text,
+                                 -1,
+                                 color,
+                                 role);
+}
+
+static void fill_virtual_desktop_background(PixelSurface& surface, uint32_t desktopWidth, uint32_t desktopHeight)
+{
+    if (surface.pixelPointer == nullptr || surface.width == 0u || surface.height == 0u) {
+        return;
+    }
+
+    const uint32_t leftRed = 0x26u;
+    const uint32_t leftGreen = 0x40u;
+    const uint32_t leftBlue = 0x56u;
+    const uint32_t rightRed = 0x52u;
+    const uint32_t rightGreen = 0x70u;
+    const uint32_t rightBlue = 0x88u;
+    const uint32_t denomX = desktopWidth > 1u ? desktopWidth - 1u : 1u;
+    const uint32_t denomY = desktopHeight > 1u ? desktopHeight - 1u : 1u;
+    const uint32_t stridePixels = surface.pitchBytes / 4u;
+
+    for (uint32_t y = 0u; y < surface.height; ++y) {
+        const uint32_t globalY = static_cast<uint32_t>(surface.viewportOriginY) + y;
+        const uint32_t shade = (globalY * 18u) / denomY;
+        uint32_t* const row = surface.pixelPointer + (static_cast<size_t>(y) * static_cast<size_t>(stridePixels));
+        for (uint32_t x = 0u; x < surface.width; ++x) {
+            const uint32_t globalX = static_cast<uint32_t>(surface.viewportOriginX) + x;
+            const uint32_t blend = (globalX * 255u) / denomX;
+            const uint32_t red = leftRed + ((rightRed - leftRed) * blend) / 255u;
+            const uint32_t green = leftGreen + ((rightGreen - leftGreen) * blend) / 255u;
+            const uint32_t blue = leftBlue + ((rightBlue - leftBlue) * blend) / 255u;
+            const uint32_t shadedRed = red > shade ? red - shade : 0u;
+            const uint32_t shadedGreen = green > shade ? green - shade : 0u;
+            const uint32_t shadedBlue = blue > shade ? blue - shade : 0u;
+            row[x] = pixelSurfaceConvertBgrxToFormat(pixelSurfacePackBgrx(static_cast<uint8_t>(shadedRed),
+                                                                          static_cast<uint8_t>(shadedGreen),
+                                                                          static_cast<uint8_t>(shadedBlue)),
+                                                     surface.pixelFormat);
+        }
+    }
+}
+
+static void draw_desktop_windows(PixelSurface& surface, bool primaryTaskbarVisible)
+{
+    surface_fill_rect_global(surface, 96, 128, 540, 308, 0x002E3540);
+    surface_fill_rect_global(surface, 96, 128, 540, 28, 0x004B77A4);
+    surface_draw_rect_global(surface, 96, 128, 540, 308, 0x00D9E5F2);
+    surface_draw_text_global(surface, 112, 135, "guideXOS desktop", 0x00FFFFFF, FontRole::Title);
+    surface_fill_rect_global(surface, 124, 178, 128, 92, 0x00446D8A);
+    surface_draw_rect_global(surface, 124, 178, 128, 92, 0x00D5E6F0);
+    surface_fill_rect_global(surface, 270, 178, 220, 36, 0x003B4C59);
+    surface_fill_rect_global(surface, 270, 220, 220, 36, 0x00475A68);
+    surface_fill_rect_global(surface, 270, 262, 220, 36, 0x00526678);
+    surface_draw_text_global(surface, 280, 186, "primary workspace", 0x00F0F6FC, FontRole::Small);
+
+    surface_fill_rect_global(surface, 1032, 156, 632, 248, 0x002C4034);
+    surface_fill_rect_global(surface, 1032, 156, 632, 28, 0x005A8A56);
+    surface_draw_rect_global(surface, 1032, 156, 632, 248, 0x00D2E8D0);
+    surface_draw_text_global(surface, 1048, 163, "spanning monitor bridge", 0x00F0FFF0, FontRole::Title);
+    surface_fill_rect_global(surface, 1072, 206, 210, 74, 0x003D5A43);
+    surface_fill_rect_global(surface, 1300, 206, 210, 74, 0x00456A4B);
+    surface_fill_rect_global(surface, 1528, 206, 108, 74, 0x00548258);
+    surface_draw_text_global(surface, 1078, 224, "clip proof", 0x00E0F2E0, FontRole::SmallBold);
+
+    if (!primaryTaskbarVisible) {
+        surface_fill_rect_global(surface, 1408, 64, 286, 182, 0x00383A2B);
+        surface_fill_rect_global(surface, 1408, 64, 286, 28, 0x00A16C2C);
+        surface_draw_rect_global(surface, 1408, 64, 286, 182, 0x00F7E0C4);
+        surface_draw_text_global(surface, 1420, 70, "secondary output", 0x00FFF6E8, FontRole::Title);
+        surface_fill_rect_global(surface, 1432, 110, 102, 58, 0x00546A34);
+        surface_fill_rect_global(surface, 1548, 110, 120, 58, 0x00507A52);
+        surface_draw_text_global(surface, 1438, 128, "no taskbar", 0x00FFF1D8, FontRole::SmallBold);
+    }
+
+    if (primaryTaskbarVisible) {
+        const int taskbarTop = static_cast<int>(surface.height) - 40;
+        const int taskbarGlobalTop = surface.viewportOriginY + taskbarTop;
+        surface_fill_rect_global(surface, surface.viewportOriginX, taskbarGlobalTop, static_cast<int>(surface.width), 40, 0x00313544);
+        surface_fill_rect_global(surface, surface.viewportOriginX + 10, taskbarGlobalTop + 6, 34, 24, 0x004C74A4);
+        surface_draw_rect_global(surface, surface.viewportOriginX + 10, taskbarGlobalTop + 6, 34, 24, 0x00FFFFFF);
+        surface_draw_text_global(surface, surface.viewportOriginX + 18, taskbarGlobalTop + 11, "S", 0x00FFFFFF, FontRole::SmallBold);
+        surface_fill_rect_global(surface, surface.viewportOriginX + 58, taskbarGlobalTop + 6, 144, 24, 0x003C4658);
+        surface_draw_rect_global(surface, surface.viewportOriginX + 58, taskbarGlobalTop + 6, 144, 24, 0x00FFFFFF);
+        surface_draw_text_global(surface, surface.viewportOriginX + 68, taskbarGlobalTop + 11, "guideXOS", 0x00E6EEF6, FontRole::Small);
+    }
+}
+
+static bool render_guide_xos_desktop_snapshot(
+    PixelSurface& surface,
+    const DisplayRenderTarget& target,
+    uint32_t virtualDesktopWidth,
+    uint32_t virtualDesktopHeight,
+    bool* conversionRequiredOut,
+    const char** blockerOut)
+{
+    if (blockerOut != nullptr) {
+        *blockerOut = nullptr;
+    }
+    if (conversionRequiredOut != nullptr) {
+        *conversionRequiredOut = false;
+    }
+
+    if (!surface.isValid()) {
+        if (blockerOut != nullptr) {
+            *blockerOut = "pixel surface is invalid";
+        }
+        return false;
+    }
+    if (!pixelSurfaceCanCoverBacking(surface)) {
+        if (blockerOut != nullptr) {
+            *blockerOut = "backing store is smaller than pitch x height";
+        }
+        return false;
+    }
+    if (surface.pixelFormat == PixelFormatKind::Unknown) {
+        if (blockerOut != nullptr) {
+            *blockerOut = "pixel format is unknown";
+        }
+        return false;
+    }
+
+    const PixelFormatKind compositorFormat = PixelFormatKind::B8G8R8X8_UNORM;
+    const bool conversionRequired = pixelSurfaceRequiresConversion(compositorFormat, surface.pixelFormat);
+    if (conversionRequiredOut != nullptr) {
+        *conversionRequiredOut = conversionRequired;
+    }
+
+    const uint32_t desktopWidth = virtualDesktopWidth > 0u ? virtualDesktopWidth : static_cast<uint32_t>(surface.width);
+    const uint32_t desktopHeight = virtualDesktopHeight > 0u ? virtualDesktopHeight : static_cast<uint32_t>(surface.height);
+
+    fill_virtual_desktop_background(surface, desktopWidth, desktopHeight);
+    draw_desktop_windows(surface, target.primary);
+    surface_draw_text_global(surface,
+                             surface.viewportOriginX + 20,
+                             surface.viewportOriginY + 28,
+                             target.primary ? "PRIMARY MONITOR" : "SECONDARY MONITOR",
+                             0x00F7FBFF,
+                             FontRole::SmallBold);
+    surface_draw_text_global(surface,
+                             surface.viewportOriginX + 20,
+                             surface.viewportOriginY + 48,
+                             target.primary ? "taskbar visible" : "taskbar suppressed",
+                             0x00D8E8F0,
+                             FontRole::Small);
+    return true;
+}
+
+static bool issue_transfer_to_host_2d(DeviceState& state,
+                                      DiagnosticResourceState& resource,
+                                      uint32_t scanoutId,
+                                      const char** failureReasonOut,
+                                      bool* completionKnownOut);
+
+static bool issue_resource_flush(DeviceState& state,
+                                 DiagnosticResourceState& resource,
+                                 uint32_t scanoutId,
+                                 const char** failureReasonOut,
+                                 bool* completionKnownOut);
+
+static CompositorFrameTargetResult present_target_once(
+    DeviceState& state,
+    const DisplayRenderTarget& target,
+    DiagnosticResourceState& resource,
+    uint8_t* backingBase,
+    uint64_t backingPhysical,
+    uint64_t totalBackingBytes,
+    const DiagnosticPatternPalette& fallbackPalette,
+    GpuFormat resourceFormat,
+    uint32_t selectedWidth,
+    uint32_t selectedHeight,
+    uint32_t bytesPerPixel,
+    uint64_t backingPageCount)
+{
+    CompositorFrameTargetResult result;
+    result.targetIndex = target.targetIndex;
+    result.scanoutId = target.scanoutId;
+    result.resourceId = target.resourceId;
+
+    if (backingBase == nullptr || target.width <= 0 || target.height <= 0) {
+        result.blocker = "target backing is unavailable";
+        return result;
+    }
+
+    PixelSurface surface{};
+    surface.pixelPointer = reinterpret_cast<uint32_t*>(backingBase);
+    surface.width = static_cast<uint32_t>(target.width);
+    surface.height = static_cast<uint32_t>(target.height);
+    surface.pitchBytes = static_cast<uint32_t>(selectedWidth) * bytesPerPixel;
+    surface.bytesPerPixel = static_cast<uint8_t>(bytesPerPixel);
+    surface.pixelFormat = pixel_format_from_gpu_format(resourceFormat);
+    surface.viewportOriginX = target.viewportOriginX;
+    surface.viewportOriginY = target.viewportOriginY;
+    surface.targetIndex = target.targetIndex;
+    surface.monitorId = target.monitorId;
+    surface.scanoutId = target.scanoutId;
+    surface.primary = target.primary;
+    surface.taskbarVisible = target.primary;
+    surface.clipRect = makePixelRect(0, 0, static_cast<int>(surface.width), static_cast<int>(surface.height));
+    surface.backingByteCount = totalBackingBytes;
+
+    result.backingValid = pixelSurfaceCanCoverBacking(surface);
+    result.renderedByteCount = pixelSurfaceExpectedByteCount(surface);
+    const PixelFormatKind compositorFormat = PixelFormatKind::B8G8R8X8_UNORM;
+    const PixelFormatKind resourcePixelFormat = surface.pixelFormat;
+    result.conversionRequired = pixelSurfaceRequiresConversion(compositorFormat, resourcePixelFormat);
+
+    if (!result.backingValid) {
+        result.blocker = "backing store is smaller than pitch x height";
+        return result;
+    }
+
+    memzero(backingBase, static_cast<size_t>(totalBackingBytes));
+    fill_diagnostic_pattern(surface.pixelPointer,
+                            surface.width,
+                            surface.height,
+                            surface.width,
+                            fallbackPalette);
+
+    bool conversionRequired = false;
+    const char* renderBlocker = nullptr;
+    const uint32_t virtualDesktopWidth = selectedWidth > 0u ? selectedWidth * 2u : surface.width;
+    const uint32_t virtualDesktopHeight = selectedHeight > 0u ? selectedHeight : surface.height;
+    result.renderOk = render_guide_xos_desktop_snapshot(surface,
+                                                        target,
+                                                        virtualDesktopWidth,
+                                                        virtualDesktopHeight,
+                                                        &conversionRequired,
+                                                        &renderBlocker);
+    result.conversionRequired = conversionRequired;
+    auto restore_fallback_pattern = [&]() {
+        fill_diagnostic_pattern(surface.pixelPointer,
+                                surface.width,
+                                surface.height,
+                                surface.width,
+                                fallbackPalette);
+        result.checksum = checksum_diagnostic_pattern(reinterpret_cast<const uint8_t*>(surface.pixelPointer),
+                                                      static_cast<size_t>(pixelSurfaceExpectedByteCount(surface)));
+        result.fallbackUsed = true;
+        result.renderOk = false;
+        resource.patternChecksum = result.checksum;
+        resource.checksumValid = true;
+        resource.patternName = fallbackPalette.name;
+        resource.transferOk = false;
+        resource.flushOk = false;
+    };
+
+    if (result.renderOk) {
+        result.checksum = checksum_diagnostic_pattern(reinterpret_cast<const uint8_t*>(surface.pixelPointer),
+                                                      static_cast<size_t>(pixelSurfaceExpectedByteCount(surface)));
+    } else {
+        result.blocker = renderBlocker != nullptr ? renderBlocker : "compositor render failed";
+        restore_fallback_pattern();
+    }
+
+    if (!result.renderOk) {
+        kernel::serial::puts("[VIRTIO-GPU] compositor target plan target=");
+        serial_put_u32_decimal(target.targetIndex);
+        kernel::serial::puts(" scanoutId=");
+        serial_put_u32_decimal(target.scanoutId);
+        kernel::serial::puts(" resourceId=0x");
+        kernel::serial::put_hex32(target.resourceId);
+        kernel::serial::puts(" viewport=");
+        kernel::serial::puts(virtioGpuGeometrySummary(target.viewportOriginX, target.viewportOriginY, target.width, target.height));
+        kernel::serial::puts(" compositorPixelFormat=");
+        kernel::serial::puts(pixelFormatKindName(compositorFormat));
+        kernel::serial::puts(" resourcePixelFormat=");
+        kernel::serial::puts(pixelFormatKindName(resourcePixelFormat));
+        kernel::serial::puts(" conversionRequired=");
+        kernel::serial::puts(result.conversionRequired ? "yes" : "no");
+        kernel::serial::puts(" stride=");
+        serial_put_u64_decimal(surface.pitchBytes);
+        kernel::serial::puts(" totalBytes=");
+        serial_put_u64_decimal(pixelSurfaceExpectedByteCount(surface));
+        kernel::serial::puts(" backingBytes=");
+        serial_put_u64_decimal(totalBackingBytes);
+        kernel::serial::puts(" backingValid=");
+        kernel::serial::puts(result.backingValid ? "yes" : "no");
+        kernel::serial::putc('\n');
+
+        kernel::serial::puts("[VIRTIO-GPU] compositor target result target=");
+        serial_put_u32_decimal(target.targetIndex);
+        kernel::serial::puts(" scanoutId=");
+        serial_put_u32_decimal(target.scanoutId);
+        kernel::serial::puts(" resourceId=0x");
+        kernel::serial::put_hex32(target.resourceId);
+        kernel::serial::puts(" viewport=");
+        kernel::serial::puts(virtioGpuGeometrySummary(target.viewportOriginX, target.viewportOriginY, target.width, target.height));
+        kernel::serial::puts(" renderedByteCount=");
+        serial_put_u64_decimal(result.renderedByteCount);
+        kernel::serial::puts(" checksum=0x");
+        kernel::serial::put_hex64(result.checksum);
+        kernel::serial::puts(" transfer=");
+        kernel::serial::puts(result.transferOk ? "ok" : "failed");
+        kernel::serial::puts(" flush=");
+        kernel::serial::puts(result.flushOk ? "ok" : "failed");
+        kernel::serial::puts(" contentMode=fallback-patterns-after-failure");
+        kernel::serial::puts(" fallbackPatterns=yes");
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(result.blocker != nullptr ? result.blocker : "compositor render failed");
+        kernel::serial::putc('\n');
+
+        (void)backingPhysical;
+        (void)backingPageCount;
+        return result;
+    }
+
+    kernel::serial::puts("[VIRTIO-GPU] compositor target plan target=");
+    serial_put_u32_decimal(target.targetIndex);
+    kernel::serial::puts(" scanoutId=");
+    serial_put_u32_decimal(target.scanoutId);
+    kernel::serial::puts(" resourceId=0x");
+    kernel::serial::put_hex32(target.resourceId);
+    kernel::serial::puts(" viewport=");
+    kernel::serial::puts(virtioGpuGeometrySummary(target.viewportOriginX, target.viewportOriginY, target.width, target.height));
+    kernel::serial::puts(" compositorPixelFormat=");
+    kernel::serial::puts(pixelFormatKindName(compositorFormat));
+    kernel::serial::puts(" resourcePixelFormat=");
+    kernel::serial::puts(pixelFormatKindName(resourcePixelFormat));
+    kernel::serial::puts(" conversionRequired=");
+    kernel::serial::puts(result.conversionRequired ? "yes" : "no");
+    kernel::serial::puts(" stride=");
+    serial_put_u64_decimal(surface.pitchBytes);
+    kernel::serial::puts(" totalBytes=");
+    serial_put_u64_decimal(pixelSurfaceExpectedByteCount(surface));
+    kernel::serial::puts(" backingBytes=");
+    serial_put_u64_decimal(totalBackingBytes);
+    kernel::serial::puts(" backingValid=");
+    kernel::serial::puts(result.backingValid ? "yes" : "no");
+    kernel::serial::putc('\n');
+
+    const char* commandReason = nullptr;
+    bool commandCompleted = false;
+    if (!issue_transfer_to_host_2d(state, resource, target.scanoutId, &commandReason, &commandCompleted)) {
+        result.transferOk = false;
+        result.blocker = commandReason != nullptr ? commandReason : "TRANSFER_TO_HOST_2D failed";
+        restore_fallback_pattern();
+        kernel::serial::puts("[VIRTIO-GPU] compositor target result target=");
+        serial_put_u32_decimal(target.targetIndex);
+        kernel::serial::puts(" scanoutId=");
+        serial_put_u32_decimal(target.scanoutId);
+        kernel::serial::puts(" resourceId=0x");
+        kernel::serial::put_hex32(target.resourceId);
+        kernel::serial::puts(" viewport=");
+        kernel::serial::puts(virtioGpuGeometrySummary(target.viewportOriginX, target.viewportOriginY, target.width, target.height));
+        kernel::serial::puts(" renderedByteCount=");
+        serial_put_u64_decimal(result.renderedByteCount);
+        kernel::serial::puts(" checksum=0x");
+        kernel::serial::put_hex64(result.checksum);
+        kernel::serial::puts(" transfer=");
+        kernel::serial::puts(result.transferOk ? "ok" : "failed");
+        kernel::serial::puts(" flush=");
+        kernel::serial::puts(result.flushOk ? "ok" : "failed");
+        kernel::serial::puts(" contentMode=fallback-patterns-after-failure");
+        kernel::serial::puts(" fallbackPatterns=yes");
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(result.blocker);
+        kernel::serial::putc('\n');
+        return result;
+    }
+    result.transferOk = true;
+
+    if (!issue_resource_flush(state, resource, target.scanoutId, &commandReason, &commandCompleted)) {
+        result.flushOk = false;
+        result.blocker = commandReason != nullptr ? commandReason : "RESOURCE_FLUSH failed";
+        restore_fallback_pattern();
+        kernel::serial::puts("[VIRTIO-GPU] compositor target result target=");
+        serial_put_u32_decimal(target.targetIndex);
+        kernel::serial::puts(" scanoutId=");
+        serial_put_u32_decimal(target.scanoutId);
+        kernel::serial::puts(" resourceId=0x");
+        kernel::serial::put_hex32(target.resourceId);
+        kernel::serial::puts(" viewport=");
+        kernel::serial::puts(virtioGpuGeometrySummary(target.viewportOriginX, target.viewportOriginY, target.width, target.height));
+        kernel::serial::puts(" renderedByteCount=");
+        serial_put_u64_decimal(result.renderedByteCount);
+        kernel::serial::puts(" checksum=0x");
+        kernel::serial::put_hex64(result.checksum);
+        kernel::serial::puts(" transfer=");
+        kernel::serial::puts(result.transferOk ? "ok" : "failed");
+        kernel::serial::puts(" flush=");
+        kernel::serial::puts(result.flushOk ? "ok" : "failed");
+        kernel::serial::puts(" contentMode=fallback-patterns-after-failure");
+        kernel::serial::puts(" fallbackPatterns=yes");
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(result.blocker);
+        kernel::serial::putc('\n');
+        return result;
+    }
+    result.flushOk = true;
+
+    resource.patternChecksum = result.checksum;
+    resource.checksumValid = true;
+    resource.transferOk = true;
+    resource.flushOk = true;
+    resource.patternName = "compositor-single-frame";
+
+    kernel::serial::puts("[VIRTIO-GPU] compositor target result target=");
+    serial_put_u32_decimal(target.targetIndex);
+    kernel::serial::puts(" scanoutId=");
+    serial_put_u32_decimal(target.scanoutId);
+    kernel::serial::puts(" resourceId=0x");
+    kernel::serial::put_hex32(target.resourceId);
+    kernel::serial::puts(" viewport=");
+    kernel::serial::puts(virtioGpuGeometrySummary(target.viewportOriginX, target.viewportOriginY, target.width, target.height));
+    kernel::serial::puts(" renderedByteCount=");
+    serial_put_u64_decimal(result.renderedByteCount);
+    kernel::serial::puts(" checksum=0x");
+    kernel::serial::put_hex64(result.checksum);
+    kernel::serial::puts(" transfer=");
+    kernel::serial::puts(result.transferOk ? "ok" : "failed");
+    kernel::serial::puts(" flush=");
+    kernel::serial::puts(result.flushOk ? "ok" : "failed");
+    kernel::serial::puts(" contentMode=");
+    kernel::serial::puts(result.renderOk ? "compositor-single-frame" : "fallback-patterns-after-failure");
+    kernel::serial::puts(" fallbackPatterns=");
+    kernel::serial::puts(result.renderOk ? "no" : "yes");
+    if (result.blocker != nullptr && result.blocker[0] != '\0') {
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(result.blocker);
+    }
+    kernel::serial::putc('\n');
+
+    (void)backingPhysical;
+    (void)backingPageCount;
+    return result;
+}
+
+static void log_compositor_proof_line(
+    const CompositorFrameTargetResult& target0Result,
+    const CompositorFrameTargetResult& target1Result,
+    uint32_t virtualDesktopWidth,
+    uint32_t virtualDesktopHeight,
+    bool taskbarPrimaryOnlyConfirmed,
+    const char* reason)
+{
+    const bool success = target0Result.renderOk
+        && target0Result.transferOk
+        && target0Result.flushOk
+        && target1Result.renderOk
+        && target1Result.transferOk
+        && target1Result.flushOk;
+
+    kernel::serial::puts("[VIRTIO-GPU] VirtioGPU compositor proof: outputs=2 targets=2 frameMode=single-shot ");
+    if (success) {
+        kernel::serial::puts("target0Render=ok target0Transfer=ok target0Flush=ok target1Render=ok target1Transfer=ok target1Flush=ok virtualDesktop=");
+        serial_put_u32_decimal(virtualDesktopWidth);
+        kernel::serial::puts("x");
+        serial_put_u32_decimal(virtualDesktopHeight);
+        kernel::serial::puts(" taskbarPrimaryOnly=");
+        kernel::serial::puts(taskbarPrimaryOnlyConfirmed ? "yes" : "no");
+        kernel::serial::puts(" continuousPresentation=disabled");
+        kernel::serial::putc('\n');
+        return;
+    }
+
+    kernel::serial::puts("target0Render=");
+    kernel::serial::puts(target0Result.renderOk ? "ok" : "failed");
+    kernel::serial::puts(" target0Transfer=");
+    kernel::serial::puts(target0Result.transferOk ? "ok" : "failed");
+    kernel::serial::puts(" target0Flush=");
+    kernel::serial::puts(target0Result.flushOk ? "ok" : "failed");
+    kernel::serial::puts(" target1Render=");
+    kernel::serial::puts(target1Result.renderOk ? "ok" : "failed");
+    kernel::serial::puts(" target1Transfer=");
+    kernel::serial::puts(target1Result.transferOk ? "ok" : "failed");
+    kernel::serial::puts(" target1Flush=");
+    kernel::serial::puts(target1Result.flushOk ? "ok" : "failed");
+    kernel::serial::puts(" fallbackPatterns=");
+    kernel::serial::puts((!target0Result.renderOk || !target1Result.renderOk) ? "yes" : "no");
+    kernel::serial::puts(" reason=");
+    if (reason != nullptr && reason[0] != '\0') {
+        kernel::serial::puts(reason);
+    } else if (!target0Result.renderOk && target0Result.blocker != nullptr) {
+        kernel::serial::puts(target0Result.blocker);
+    } else if (!target1Result.renderOk && target1Result.blocker != nullptr) {
+        kernel::serial::puts(target1Result.blocker);
+    } else {
+        kernel::serial::puts("compositor frame presentation failed");
+    }
+    kernel::serial::putc('\n');
 }
 
 static inline void mmio_write8(uint64_t addr, uint8_t value)
@@ -1487,6 +2089,12 @@ static void print_probe_outcome()
     kernel::serial::puts(s_probeOutcome.distinctPatternsConfirmed ? "yes" : "no");
     kernel::serial::puts(" qemuTwoUsableScanouts=");
     kernel::serial::puts((s_probeOutcome.deviceConfigNumScanouts >= 2u && s_probeOutcome.enabledScanoutsAfter >= 2u) ? "yes" : "no");
+    kernel::serial::puts(" contentMode=");
+    kernel::serial::puts(s_probeOutcome.contentMode != nullptr ? s_probeOutcome.contentMode : "diagnostic-patterns");
+    kernel::serial::puts(" frameMode=");
+    kernel::serial::puts(s_probeOutcome.frameMode != nullptr ? s_probeOutcome.frameMode : "single-shot");
+    kernel::serial::puts(" continuousPresentation=");
+    kernel::serial::puts(s_probeOutcome.continuousPresentationEnabled ? "enabled" : "disabled");
     kernel::serial::puts(" rendering=");
     if (s_probeOutcome.distinctPatternsConfirmed) {
         kernel::serial::puts("dual-output-test-pattern");
@@ -3378,6 +3986,9 @@ static bool initialize_device(DeviceState& state)
     bool flush1Ok = false;
     bool distinctPatternsConfirmed = false;
     bool renderingTestPattern = false;
+    s_probeOutcome.contentMode = "diagnostic-patterns";
+    s_probeOutcome.frameMode = "single-shot";
+    s_probeOutcome.continuousPresentationEnabled = false;
     auto fail_and_record = [&](const char* reason, DisplayInfoOutcome displayInfoOutcome) -> bool {
         const char* finalReason = (reason != nullptr && reason[0] != '\0')
             ? reason
@@ -3398,6 +4009,9 @@ static bool initialize_device(DeviceState& state)
         s_probeOutcome.flush1Ok = flush1Ok;
         s_probeOutcome.distinctPatternsConfirmed = distinctPatternsConfirmed;
         s_probeOutcome.renderingTestPattern = renderingTestPattern;
+        s_probeOutcome.contentMode = "diagnostic-patterns";
+        s_probeOutcome.frameMode = "single-shot";
+        s_probeOutcome.continuousPresentationEnabled = false;
         record_probe_outcome(state,
                              device.initialized,
                              displayInfoOutcome,
@@ -3621,7 +4235,7 @@ static bool initialize_device(DeviceState& state)
     const uint64_t secondaryBackingPhysical = dma_address(&s_diagnosticBackingStorage1[0]);
     auto updateOutputInventory = [&]() {
         const bool scanout0PresentationConfirmed = resource1.flushOk && resource1.patternChecksum != 0u;
-        const bool scanout1PresentationConfirmed = resource2.flushOk && distinctPatternsConfirmed && resource2.patternChecksum != 0u;
+        const bool scanout1PresentationConfirmed = resource2.flushOk && resource2.patternChecksum != 0u;
         s_probeOutcome.outputInventory = build_output_inventory(
             scanout0,
             scanout1Initial,
@@ -3632,6 +4246,278 @@ static bool initialize_device(DeviceState& state)
             scanout1PresentationConfirmed,
             selectedWidth,
             selectedHeight);
+    };
+
+    auto run_compositor_frame = [&]() -> bool {
+        CompositorFrameTargetResult target0Result{};
+        CompositorFrameTargetResult target1Result{};
+        const uint32_t virtualDesktopWidth = selectedWidth * 2u;
+        const uint32_t virtualDesktopHeight = selectedHeight;
+
+        auto finish = [&](const char* reason) -> bool {
+            const char* finalReason = reason;
+            if (finalReason == nullptr || finalReason[0] == '\0') {
+                finalReason = target1Result.blocker != nullptr ? target1Result.blocker
+                    : (target0Result.blocker != nullptr ? target0Result.blocker : "single-shot compositor frame milestone complete");
+            }
+
+            resource1.transferOk = target0Result.transferOk;
+            resource1.flushOk = target0Result.flushOk;
+            resource2.transferOk = target1Result.transferOk;
+            resource2.flushOk = target1Result.flushOk;
+            resource1.patternChecksum = target0Result.checksum;
+            resource2.patternChecksum = target1Result.checksum;
+            resource1.checksumValid = target0Result.checksum != 0u;
+            resource2.checksumValid = target1Result.checksum != 0u;
+            resource1.patternName = target0Result.renderOk ? "compositor-single-frame" : primaryPalette.name;
+            resource2.patternName = target1Result.renderOk ? "compositor-single-frame" : secondaryPalette.name;
+
+            postRenderEnabledScanouts = transport.enabledScanouts;
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            distinctPatternsConfirmed = (target0Result.checksum != 0u
+                && target1Result.checksum != 0u
+                && target0Result.checksum != target1Result.checksum);
+            renderingTestPattern = false;
+
+            transport.mmioStopReason = finalReason;
+            transport.probeComplete = true;
+            s_probeOutcome.deviceConfigNumScanouts = transport.mmioDeviceScanouts;
+            s_probeOutcome.qemuMaxOutputsIntent = kDiagnosticQemuMaxOutputsIntent;
+            s_probeOutcome.enabledScanoutsAfter = stageBEnabledScanouts != 0u ? stageBEnabledScanouts : stageAEnabledScanouts;
+            s_probeOutcome.resource2dReady = resource2dReady;
+            s_probeOutcome.backingAttached = backingAttached;
+            s_probeOutcome.scanout0Set = scanout0Set;
+            s_probeOutcome.transferOk = target0Result.transferOk;
+            s_probeOutcome.flushOk = target0Result.flushOk;
+            s_probeOutcome.resource2dReadySecondary = resource2dReadySecondary;
+            s_probeOutcome.backingAttachedSecondary = backingAttachedSecondary;
+            s_probeOutcome.scanout1Set = scanout1Set;
+            s_probeOutcome.transfer1Ok = target1Result.transferOk;
+            s_probeOutcome.flush1Ok = target1Result.flushOk;
+            s_probeOutcome.distinctPatternsConfirmed = distinctPatternsConfirmed;
+            s_probeOutcome.renderingTestPattern = renderingTestPattern;
+            s_probeOutcome.contentMode = (target0Result.renderOk && target1Result.renderOk)
+                ? "compositor-single-frame"
+                : "fallback-patterns-after-failure";
+            s_probeOutcome.frameMode = "single-shot";
+            s_probeOutcome.continuousPresentationEnabled = false;
+
+            updateOutputInventory();
+            record_probe_outcome(state,
+                                 true,
+                                 DisplayInfoOutcome::Ok,
+                                 preRenderEnabledScanouts,
+                                 preRenderDisabledScanouts,
+                                 transport.displayInfoSlots,
+                                 transport.mmioStopReason);
+            log_compositor_proof_line(target0Result,
+                                      target1Result,
+                                      virtualDesktopWidth,
+                                      virtualDesktopHeight,
+                                      true,
+                                      transport.mmioStopReason);
+            return true;
+        };
+
+        DisplayRenderTarget compositorTarget0{};
+        compositorTarget0.targetIndex = 1u;
+        compositorTarget0.targetId = "virtio-gpu-target-1";
+        compositorTarget0.source = "virtio-gpu";
+        compositorTarget0.monitorId = 1u;
+        compositorTarget0.monitorName = "Virtio GPU Output 0";
+        compositorTarget0.scanoutId = 0u;
+        compositorTarget0.resourceId = resource1.resourceId;
+        compositorTarget0.viewportOriginX = 0;
+        compositorTarget0.viewportOriginY = 0;
+        compositorTarget0.width = static_cast<int>(selectedWidth);
+        compositorTarget0.height = static_cast<int>(selectedHeight);
+        compositorTarget0.framebufferRect = DisplayRect{ 0, 0, static_cast<int>(selectedWidth), static_cast<int>(selectedHeight) };
+        compositorTarget0.preferredX = static_cast<int>(scanout0.x);
+        compositorTarget0.preferredY = static_cast<int>(scanout0.y);
+        compositorTarget0.preferredWidth = static_cast<int>(scanout0.width);
+        compositorTarget0.preferredHeight = static_cast<int>(scanout0.height);
+        compositorTarget0.assignedX = 0;
+        compositorTarget0.assignedY = 0;
+        compositorTarget0.assignedWidth = static_cast<int>(selectedWidth);
+        compositorTarget0.assignedHeight = static_cast<int>(selectedHeight);
+        compositorTarget0.primary = true;
+        compositorTarget0.active = true;
+        compositorTarget0.backedByHostedFramebuffer = false;
+        compositorTarget0.backedByOutputResource = true;
+        compositorTarget0.connectorEnabled = scanout0.enabled;
+        compositorTarget0.resourceBound = resource1.scanoutSet;
+        compositorTarget0.backingAttached = resource1.backingAttached;
+        compositorTarget0.transferReady = resource1.transferOk;
+        compositorTarget0.presentReady = resource1.flushOk;
+        compositorTarget0.presentationConfirmed = resource1.flushOk && resource1.patternChecksum != 0u;
+        compositorTarget0.syntheticHosted = false;
+        compositorTarget0.backingVirtualAddress = primaryBackingVirtual;
+        compositorTarget0.backingByteCount = totalBackingBytes;
+        compositorTarget0.backingMemEntryCount = backingAudit1.totalMemEntries;
+        compositorTarget0.patternChecksum = resource1.patternChecksum;
+        compositorTarget0.lastCommandStatus = resource1.checksumValid ? "compositor target 0 ready" : "compositor target 0 pending";
+
+        target0Result = present_target_once(state,
+                                            compositorTarget0,
+                                            resource1,
+                                            &s_diagnosticBackingStorage0[0],
+                                            primaryBackingPhysical,
+                                            totalBackingBytes,
+                                            primaryPalette,
+                                            static_cast<GpuFormat>(selectedFormat),
+                                            selectedWidth,
+                                            selectedHeight,
+                                            bytesPerPixel,
+                                            backingPageCount);
+
+        if (!target0Result.renderOk) {
+            postRenderEnabledScanouts = transport.enabledScanouts;
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            target1Result.blocker = target0Result.blocker;
+            return finish(target0Result.blocker);
+        }
+
+        resource2.patternName = secondaryPalette.name;
+        resource2.mirroredToFramebuffer = false;
+        memzero(&s_diagnosticBackingStorage1[0], static_cast<size_t>(totalBackingBytes));
+        fill_diagnostic_pattern(reinterpret_cast<uint32_t*>(&s_diagnosticBackingStorage1[0]),
+                                selectedWidth,
+                                selectedHeight,
+                                selectedWidth,
+                                secondaryPalette);
+        patternChecksum2 = checksum_diagnostic_pattern(&s_diagnosticBackingStorage1[0], static_cast<size_t>(totalBackingBytes));
+        resource2.patternChecksum = patternChecksum2;
+        resource2.checksumValid = true;
+        kernel::serial::puts("[VIRTIO-GPU] Diagnostic pattern name=");
+        kernel::serial::puts(secondaryPalette.name);
+        kernel::serial::puts(" width=");
+        serial_put_u32_decimal(selectedWidth);
+        kernel::serial::puts(" height=");
+        serial_put_u32_decimal(selectedHeight);
+        kernel::serial::puts(" stride=");
+        serial_put_u64_decimal(strideBytes);
+        kernel::serial::puts(" byteCount=");
+        serial_put_u64_decimal(totalBackingBytes);
+        kernel::serial::puts(" checksum=0x");
+        kernel::serial::put_hex64(patternChecksum2);
+        kernel::serial::putc('\n');
+
+        if (!build_diagnostic_backing_layout(&s_diagnosticBackingStorage1[0],
+                                             totalBackingBytes,
+                                             backingEntries2,
+                                             kDiagnosticBackingMaxMemEntries,
+                                             &backingAudit2)) {
+            target1Result.blocker = "secondary diagnostic backing physical coverage validation failed";
+            return finish(target1Result.blocker);
+        }
+
+        const char* commandReason = nullptr;
+        bool commandCompleted = false;
+        if (!issue_resource_create_2d(state,
+                                      resource2,
+                                      resource1.resourceId,
+                                      kDiagnosticResourceIdSecondary,
+                                      selectedWidth,
+                                      selectedHeight,
+                                      static_cast<GpuFormat>(selectedFormat),
+                                      false,
+                                      &commandReason,
+                                      &commandCompleted)) {
+            target1Result.blocker = commandReason != nullptr ? commandReason : "secondary resource create failed";
+            return finish(target1Result.blocker);
+        }
+
+        resource2dReadySecondary = true;
+
+        if (!issue_resource_attach_backing(state,
+                                           resource2,
+                                           secondaryBackingVirtual,
+                                           secondaryBackingPhysical,
+                                           totalBackingBytes,
+                                           backingPageCount,
+                                           backingEntries2,
+                                           backingAudit2.totalMemEntries,
+                                           backingAudit2,
+                                           &commandReason,
+                                           &commandCompleted)) {
+            cleanup_diagnostic_resource_if_safe(state, resource2, commandCompleted, commandReason);
+            target1Result.blocker = commandReason != nullptr ? commandReason : "secondary backing attach failed";
+            return finish(target1Result.blocker);
+        }
+
+        backingAttachedSecondary = true;
+
+        if (!issue_set_scanout(state,
+                               resource2,
+                               1u,
+                               selectedWidth,
+                               selectedHeight,
+                               &commandReason,
+                               &commandCompleted)) {
+            cleanup_diagnostic_resource_if_safe(state, resource2, commandCompleted, commandReason);
+            target1Result.blocker = commandReason != nullptr ? commandReason : "secondary scanout assignment failed";
+            return finish(target1Result.blocker);
+        }
+
+        scanout1Set = true;
+
+        DisplayRenderTarget compositorTarget1{};
+        compositorTarget1.targetIndex = 2u;
+        compositorTarget1.targetId = "virtio-gpu-target-2";
+        compositorTarget1.source = "virtio-gpu";
+        compositorTarget1.monitorId = 2u;
+        compositorTarget1.monitorName = "Virtio GPU Output 1";
+        compositorTarget1.scanoutId = 1u;
+        compositorTarget1.resourceId = resource2.resourceId;
+        compositorTarget1.viewportOriginX = static_cast<int>(selectedWidth);
+        compositorTarget1.viewportOriginY = 0;
+        compositorTarget1.width = static_cast<int>(selectedWidth);
+        compositorTarget1.height = static_cast<int>(selectedHeight);
+        compositorTarget1.framebufferRect = DisplayRect{ 0, 0, static_cast<int>(selectedWidth), static_cast<int>(selectedHeight) };
+        compositorTarget1.preferredX = static_cast<int>(scanout1Initial.x);
+        compositorTarget1.preferredY = static_cast<int>(scanout1Initial.y);
+        compositorTarget1.preferredWidth = static_cast<int>(scanout1Initial.width);
+        compositorTarget1.preferredHeight = static_cast<int>(scanout1Initial.height);
+        compositorTarget1.assignedX = static_cast<int>(selectedWidth);
+        compositorTarget1.assignedY = 0;
+        compositorTarget1.assignedWidth = static_cast<int>(selectedWidth);
+        compositorTarget1.assignedHeight = static_cast<int>(selectedHeight);
+        compositorTarget1.primary = false;
+        compositorTarget1.active = true;
+        compositorTarget1.backedByHostedFramebuffer = false;
+        compositorTarget1.backedByOutputResource = true;
+        compositorTarget1.connectorEnabled = scanout1Initial.enabled;
+        compositorTarget1.resourceBound = resource2.scanoutSet;
+        compositorTarget1.backingAttached = resource2.backingAttached;
+        compositorTarget1.transferReady = resource2.transferOk;
+        compositorTarget1.presentReady = resource2.flushOk;
+        compositorTarget1.presentationConfirmed = resource2.flushOk && resource2.patternChecksum != 0u;
+        compositorTarget1.syntheticHosted = false;
+        compositorTarget1.backingVirtualAddress = secondaryBackingVirtual;
+        compositorTarget1.backingByteCount = totalBackingBytes;
+        compositorTarget1.backingMemEntryCount = backingAudit2.totalMemEntries;
+        compositorTarget1.patternChecksum = resource2.patternChecksum;
+        compositorTarget1.lastCommandStatus = resource2.checksumValid ? "compositor target 1 ready" : "compositor target 1 pending";
+
+        target1Result = present_target_once(state,
+                                            compositorTarget1,
+                                            resource2,
+                                            &s_diagnosticBackingStorage1[0],
+                                            secondaryBackingPhysical,
+                                            totalBackingBytes,
+                                            secondaryPalette,
+                                            static_cast<GpuFormat>(selectedFormat),
+                                            selectedWidth,
+                                            selectedHeight,
+                                            bytesPerPixel,
+                                            backingPageCount);
+
+        if (!submit_display_info_request(state, "post-render", false)) {
+            target1Result.blocker = transport.mmioStopReason != nullptr ? transport.mmioStopReason : "post-render display-info request failed";
+            return finish(target1Result.blocker);
+        }
+
+        return finish(nullptr);
     };
 
     kernel::serial::puts("[VIRTIO-GPU] Diagnostic scanout 1 initial enabled=");
@@ -3746,6 +4632,7 @@ static bool initialize_device(DeviceState& state)
 
     scanout0Set = true;
 
+#if !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_FRAME_ACTIVE)
     if (!issue_transfer_to_host_2d(state,
                                    resource1,
                                    0u,
@@ -3791,6 +4678,7 @@ static bool initialize_device(DeviceState& state)
     kernel::serial::puts(" patternChecksum=0x");
     kernel::serial::put_hex64(resource1.patternChecksum);
     kernel::serial::putc('\n');
+#endif
 
 #if defined(GXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE)
     do {
@@ -3801,6 +4689,12 @@ static bool initialize_device(DeviceState& state)
         kernel::serial::puts(" qemuMaxOutputsIntent=");
         serial_put_u32_decimal(kDiagnosticQemuMaxOutputsIntent);
         kernel::serial::putc('\n');
+
+#if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_FRAME_ACTIVE)
+        if (run_compositor_frame()) {
+            return true;
+        }
+#endif
 
         resource2.patternName = secondaryPalette.name;
 

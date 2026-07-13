@@ -138,7 +138,7 @@ Assert-True ($initializeBody.Contains('Diagnostic scanout 1 initial enabled=')) 
 Assert-True ($initializeBody.Contains('submit_display_info_request(state, "pre-render", true)')) 'initialize_device should issue the pre-render GET_DISPLAY_INFO request'
 Assert-True ($initializeBody.Contains('submit_display_info_request(state, "post-render", false)')) 'initialize_device should issue the post-render GET_DISPLAY_INFO request'
 Assert-True ($initializeBody.Contains('transport.mmioStopReason = "dual-output scanout 1 test pattern milestone complete";')) 'initialize_device should keep the dual-output completion marker'
-Assert-True ($initializeBody.Contains('resource2.flushOk && distinctPatternsConfirmed && resource2.patternChecksum != 0u')) 'initialize_device should gate scanout 1 presentation confirmation on the flushed secondary resource'
+Assert-True ($initializeBody.Contains('resource2.flushOk && resource2.patternChecksum != 0u')) 'initialize_device should gate scanout 1 presentation confirmation on the flushed secondary resource'
 Assert-True ($initializeBody.Contains('cleanup_diagnostic_resource_if_safe(')) 'initialize_device should keep bounded cleanup'
 Assert-True (-not $initializeBody.Contains('cursorq')) 'initialize_device must not configure the cursor queue'
 Assert-True (-not $initializeBody.Contains('CMD_UPDATE_CURSOR')) 'initialize_device must not issue cursor update commands'
@@ -160,6 +160,9 @@ Assert-True ($printBody.Contains('virtioGpuOutputSummaryLine')) 'print_probe_out
 Assert-True ($printBody.Contains('virtioGpuMonitorSummaryLine')) 'print_probe_outcome should print per-monitor inventory lines'
 Assert-True ($printBody.Contains('virtioGpuRenderTargetSummaryLine')) 'print_probe_outcome should print per-target inventory lines'
 Assert-True ($printBody.Contains('qemuTwoUsableScanouts=')) 'print_probe_outcome should keep the connector-state verdict separate from operational readiness'
+Assert-True ($printBody.Contains('contentMode=')) 'print_probe_outcome should report the compositor content mode'
+Assert-True ($printBody.Contains('frameMode=')) 'print_probe_outcome should report the frame mode'
+Assert-True ($printBody.Contains('continuousPresentation=')) 'print_probe_outcome should report the continuous-presentation state'
 Assert-True ($printBody.Contains('dual-output-test-pattern')) 'print_probe_outcome should name the dual-output rendering mode'
 
 Assert-True ($compositorCpp.Contains('hostedRenderTargetsForDesktop')) 'compositor.cpp should still build hosted render targets'
@@ -190,7 +193,8 @@ Assert-True ($virtioGpuCpp.Contains('GXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE')) 'vi
 Assert-True ($virtioGpuCpp.Contains('No physical Intel GPU support')) 'virtio_gpu.cpp should keep physical Intel GPU support out of the QEMU-only track'
 Assert-True ($virtioGpuCpp.Contains('No real hardware GPU BAR access')) 'virtio_gpu.cpp should keep real hardware GPU BAR access out of the QEMU-only track'
 Assert-True ($virtioGpuCpp.Contains('No display hotplug')) 'virtio_gpu.cpp should keep display hotplug out of the QEMU-only track'
-Assert-True ($virtioGpuCpp.Contains('No compositor desktop rendering into virtio-gpu resources')) 'virtio_gpu.cpp should keep compositor rendering out of virtio-gpu resources'
+Assert-True ($virtioGpuCpp.Contains('QEMU-only compositor desktop rendering is limited to a single static proof frame')) 'virtio_gpu.cpp should keep compositor rendering bounded to the single-frame QEMU proof path'
+Assert-True ($virtioGpuCpp.Contains('No 3D, virgl, Venus, blob, or continuous compositor integration')) 'virtio_gpu.cpp should keep compositor integration bounded and non-3D'
 Assert-True ($virtioGpuCpp.Contains('No continuous frame rendering or animation')) 'virtio_gpu.cpp should keep continuous animation out of the QEMU-only track'
 Assert-True ($virtioGpuCpp.Contains('REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY')) 'virtio_gpu.cpp should keep the real-hardware warning prominent'
 
