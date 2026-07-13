@@ -27,5 +27,6 @@
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
 /out/dotnet/managed-hostlog/
+/out/dotnet/managed-hostlog-static-smoke/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx

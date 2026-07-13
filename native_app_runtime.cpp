@@ -71,10 +71,10 @@ bool experimentalExecutionEnabled() {
 #endif
 }
 
-constexpr const char* kNativeAotTlsIndexAddressHint = "gxos.nativeaot.tlsIndexAddress";
-constexpr const char* kNativeAotTlsBlockSizeHint = "gxos.nativeaot.tlsBlockSize";
-constexpr const char* kNativeAotTlsIndexAddressEnv = "GX_NATIVE_AOT_TLS_INDEX_ADDRESS";
-constexpr const char* kNativeAotTlsBlockSizeEnv = "GX_NATIVE_AOT_TLS_BLOCK_SIZE";
+constexpr const char* kNativeElfTlsIndexAddressHint = "gxos.nativeelf.tlsIndexAddress";
+constexpr const char* kNativeElfTlsBlockSizeHint = "gxos.nativeelf.tlsBlockSize";
+constexpr const char* kNativeElfTlsIndexAddressEnv = "GX_NATIVE_ELF_TLS_INDEX_ADDRESS";
+constexpr const char* kNativeElfTlsBlockSizeEnv = "GX_NATIVE_ELF_TLS_BLOCK_SIZE";
 
 void copyManifestHintToEnvironment(
     const RegisteredApp& app,
@@ -880,8 +880,8 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.environment["GX_APP_ARCHITECTURE"] = context.architecture;
     context.environment["GX_APP_ABI"] = launchResult.abi;
     context.environment["GX_NATIVE_RUNTIME_ID"] = std::to_string(context.runtimeId);
-    copyManifestHintToEnvironment(app, context, kNativeAotTlsIndexAddressHint, kNativeAotTlsIndexAddressEnv);
-    copyManifestHintToEnvironment(app, context, kNativeAotTlsBlockSizeHint, kNativeAotTlsBlockSizeEnv);
+    copyManifestHintToEnvironment(app, context, kNativeElfTlsIndexAddressHint, kNativeElfTlsIndexAddressEnv);
+    copyManifestHintToEnvironment(app, context, kNativeElfTlsBlockSizeHint, kNativeElfTlsBlockSizeEnv);
     context.lifecycleState = NativeAppLifecycleState::Created;
 
     context.hostCalls.size = static_cast<uint32_t>(sizeof(NativeHostCallTable));

@@ -10,6 +10,7 @@
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "managed-hostlog-artifact-assertions.ps1")
 
 function Resolve-AbsolutePath([string]$Path) {
     return (Resolve-Path -LiteralPath $Path).Path
@@ -122,13 +123,19 @@ if ([string]::IsNullOrWhiteSpace($LegacyRoot)) {
 }
 
 $LegacyRoot = [System.IO.Path]::GetFullPath($LegacyRoot)
-$peToElfDefault = Join-Path $LegacyRoot "tools\pe_to_elf_v2.py"
+$peToElfDefault = Join-Path $RepoRoot "tools\dotnet\pe_to_elf_v2_fixed_base.py"
 if ([string]::IsNullOrWhiteSpace($PeToElfScript)) {
     $PeToElfScript = $peToElfDefault
 }
 
 if (-not (Test-Path -LiteralPath $PeToElfScript)) {
     throw "PE-to-ELF converter not found: $PeToElfScript"
+}
+
+$expectedPeToElfSha256 = "EAAEFBC8862D6E1A4AC1A679073AF5311A3AF9CE96F45D258617BD4FE0977434"
+$actualPeToElfSha256 = (Get-FileHash -LiteralPath $PeToElfScript -Algorithm SHA256).Hash.ToUpperInvariant()
+if ($actualPeToElfSha256 -ne $expectedPeToElfSha256) {
+    throw "PE-to-ELF converter hash mismatch. Expected $expectedPeToElfSha256, got ${actualPeToElfSha256}: $PeToElfScript"
 }
 
 $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
@@ -227,6 +234,7 @@ $toolchainLines = @(
     "ArtifactExe=$artifactExe"
     "ArtifactMap=$artifactMap"
     "PeToElfScript=$PeToElfScript"
+    "PeToElfSha256=$actualPeToElfSha256"
     "PythonExe=$PythonExe"
     "ReadelfExe=$readelfExe"
     "ObjdumpExe=$objdumpExe"
@@ -259,7 +267,7 @@ try {
         "where cl.exe"
         "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$runtimeSupportObj`" `"$runtimeSupportSource`""
         "if errorlevel 1 exit /b %errorlevel%"
-        "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:BaseOutputPath=$binRoot\ -p:BaseIntermediateOutputPath=$objRoot\"
+        "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$artifactMap -p:BaseOutputPath=$binRoot\ -p:BaseIntermediateOutputPath=$objRoot\"
         "exit /b %errorlevel%"
     )
     $publishBatch | Set-Content -LiteralPath $buildBatch -Encoding ASCII
@@ -333,116 +341,14 @@ if (-not [string]::IsNullOrWhiteSpace($publishLinkRsp) -and (Test-Path -LiteralP
 & $readelfExe -h -l -S -r -s -d $artifactElf | Set-Content -LiteralPath $artifactElfReadelf -Encoding ASCII
 & $objdumpExe -d $artifactElf | Set-Content -LiteralPath $artifactElfDisasm -Encoding ASCII
 
-$expectedPeImports = [ordered]@{
-    "ADVAPI32.dll" = @(
-        "RegisterEventSourceW",
-        "ReportEventW",
-        "DeregisterEventSource"
-    )
-    "bcrypt.dll" = @(
-        "BCryptGenRandom"
-    )
-    "KERNEL32.dll" = @(
-        "CloseHandle",
-        "CreateEventExW",
-        "DuplicateHandle",
-        "FormatMessageW",
-        "GetConsoleOutputCP",
-        "GetCurrentProcess",
-        "GetCurrentProcessorNumberEx",
-        "GetCurrentThread",
-        "GetEnvironmentVariableW",
-        "GetLastError",
-        "GetModuleFileNameW",
-        "GetStdHandle",
-        "GetThreadPriority",
-        "GetTickCount64",
-        "IsDebuggerPresent",
-        "LocalFree",
-        "MultiByteToWideChar",
-        "QueryPerformanceCounter",
-        "QueryPerformanceFrequency",
-        "RaiseFailFastException",
-        "SetEvent",
-        "SetLastError",
-        "Sleep",
-        "VirtualAlloc",
-        "VirtualFree",
-        "WaitForMultipleObjectsEx",
-        "WideCharToMultiByte",
-        "WriteFile",
-        "RtlCaptureContext",
-        "FlsGetValue",
-        "FlsSetValue",
-        "SwitchToThread",
-        "GetCurrentThreadId",
-        "VirtualQuery",
-        "EnterCriticalSection",
-        "LeaveCriticalSection"
-    )
-    "ole32.dll" = @(
-        "CoGetApartmentType",
-        "CoInitializeEx",
-        "CoUninitialize",
-        "CoWaitForMultipleHandles"
-    )
-    "api-ms-win-crt-heap-l1-1-0.dll" = @(
-        "free",
-        "_callnewh",
-        "malloc"
-    )
-}
-
-$actualImports = Get-ImportTable $artifactPeDump
-Assert-SetEquals -Actual @($actualImports.Keys) -Expected @($expectedPeImports.Keys) -Label "PE import DLL set"
+$expectedPeImports = Get-ManagedHostLogExpectedPeImports
+$actualImports = Get-ManagedHostLogImportTable $artifactPeDump
+Assert-ManagedHostLogSetEquals -Actual @($actualImports.Keys) -Expected @($expectedPeImports.Keys) -Label "PE import DLL set"
 foreach ($dll in $expectedPeImports.Keys) {
-    Assert-SetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
+    Assert-ManagedHostLogSetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
 }
-
-Assert-FileContains -Path $artifactNativeObjDump -Patterns @(
-    'HostLogProof_HostLogProof_Program__ManagedMain>',
-    'mov\s+0x8\(%rbx\),%rcx',
-    'mov\s+0x8\(%rcx\),%rsi',
-    'call\s+\*%rsi'
-) -Label "Native object ManagedMain disassembly"
-
-Assert-FileContains -Path $artifactMap -Patterns @(
-    'ManagedMain\s+0000000010001900',
-    'HostLogProof__Module___MainMethodWrapper',
-    'HostLogProof__Module___StartupCodeMain'
-) -Label "Link map"
-
-Assert-FileContains -Path $artifactElfReadelf -Patterns @(
-    'ELF64',
-    'Type:\s+EXEC',
-    'Machine:\s+Advanced Micro Devices X86-64',
-    'Entry point address:\s+0x10001900',
-    'Number of program headers:\s+7',
-    'There is no dynamic section in this file\.',
-    'There are no relocations in this file\.',
-    'There are no sections in this file\.'
-) -Label "Final ELF"
-
-Assert-FileContains -Path $artifactElfDump -Patterns @(
-    'flags r-x',
-    'flags rw-'
-) -Label "Final ELF segment flags"
-
-Assert-FileNotContains -Path $artifactElfReadelf -Patterns @(
-    'PT_INTERP',
-    'NEEDED',
-    'libc',
-    'libpthread',
-    'libdl',
-    'libm',
-    'rwx'
-) -Label "Final ELF dependency scan"
-
-Assert-FileNotContains -Path $artifactPeDump -Patterns @(
-    'ucrtbase\.dll',
-    'msvcrt\.dll',
-    'ntdll\.dll'
-) -Label "Intermediate PE forbidden imports"
+Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan

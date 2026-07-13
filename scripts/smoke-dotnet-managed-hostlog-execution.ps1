@@ -4,7 +4,8 @@ param(
     [string]$StageRoot = "",
     [string]$StageScript = "",
     [string]$ServerExe = "",
-    [int]$TimeoutSeconds = 240
+    [int]$TimeoutSeconds = 240,
+    [switch]$SkipFailureProbe
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +56,21 @@ function Assert-RegexCountAtLeast {
     $count = [regex]::Matches($normalizedText, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Multiline).Count
     if ($count -lt $Minimum) {
         throw "Expected at least $Minimum matches for ${Reason}, but saw $count. Pattern: $Pattern"
+    }
+}
+
+function Assert-RegexCountExactly {
+    param(
+        [string]$Text,
+        [string]$Pattern,
+        [int]$Expected,
+        [string]$Reason
+    )
+
+    $normalizedText = $Text -replace "`r", ""
+    $count = [regex]::Matches($normalizedText, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Multiline).Count
+    if ($count -ne $Expected) {
+        throw "Expected exactly $Expected matches for ${Reason}, but saw $count. Pattern: $Pattern"
     }
 }
 
@@ -149,18 +165,23 @@ if (-not (Test-Path -LiteralPath $StageScript)) {
 
 $mingwBin = "C:\mingw64\bin"
 $oldPath = $env:PATH
+$originalStageRoot = $env:GXOS_NATIVE_ELF_STAGE_ROOT
 if (Test-Path -LiteralPath $mingwBin) {
     $env:PATH = "$mingwBin;$env:PATH"
 }
 
 try {
+    $buildServerScript = Join-Path $Root "build-native-experimental.bat"
+    if (-not (Test-Path -LiteralPath $buildServerScript)) {
+        throw "Experimental server build script not found: $buildServerScript"
+    }
+    $buildText = Get-Content -LiteralPath $buildServerScript -Raw
+    if ($buildText -notmatch 'GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION') {
+        throw "Experimental build script does not enable native ELF execution."
+    }
+
     if (-not (Test-Path -LiteralPath $ServerExe)) {
         Write-Host "[dotnet-proof] experimental server missing, building it now"
-        $buildServerScript = Join-Path $Root "build-native-experimental.bat"
-        if (-not (Test-Path -LiteralPath $buildServerScript)) {
-            throw "Experimental server build script not found: $buildServerScript"
-        }
-
         & cmd.exe /c "`"$buildServerScript`""
         if ($LASTEXITCODE -ne 0) {
             throw "Experimental server build failed with exit code $LASTEXITCODE"
@@ -198,6 +219,9 @@ try {
     if ($sourceHash -ne $stagedHash) {
         throw "Stage hash mismatch: source=$sourceHash staged=$stagedHash"
     }
+    if ([string]$stageEnvelope.registrySourceEnvironment -ne "GXOS_NATIVE_ELF_STAGE_ROOT") {
+        throw "Stage envelope does not identify the process-local stage-root environment."
+    }
 
     $stageManifestObject = Get-Content -LiteralPath $stageManifest -Raw | ConvertFrom-Json
     if ($stageManifestObject.kind -ne "NativeElf") {
@@ -213,85 +237,115 @@ try {
         throw "Missing expected value for stage manifest ABI: guidexos-c-abi-v1"
     }
 
-    $preflightCommands = @(
-        "nativeapp.inspect $appId"
-    )
-    $preflight = Invoke-ServerCommands -Label "preflight" -Commands $preflightCommands -WorkingDirectory $Root -ExePath $ServerExe
-    if ($preflight.ExitCode -ne 0) {
-        throw "Preflight server session failed with exit code $($preflight.ExitCode). stderr: $($preflight.StdErr)"
-    }
-
-    Assert-Contains -Text $preflight.StdOut -Needle "Result: app not found" -Reason "default inventory isolation"
-
-    $oldStageRoot = $env:GXOS_NATIVE_ELF_STAGE_ROOT
-    Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $stageAppsRoot
-
-    $positiveCommands = @(
-        "nativeapp.capabilities",
-        "nativeapp.smoketest $appId",
-        "nativeapp.smoketest $appId",
-        "nativeapp.processes"
-    )
-    $positive = $null
+    $oldStageRoot = $originalStageRoot
+    Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $null
     try {
-        $positive = Invoke-ServerCommands -Label "managed-hostlog" -Commands $positiveCommands -WorkingDirectory $Root -ExePath $ServerExe
+        $preflightCommands = @(
+            "nativeapp.inspect $appId"
+        )
+        $preflight = Invoke-ServerCommands -Label "preflight" -Commands $preflightCommands -WorkingDirectory $Root -ExePath $ServerExe
+        if ($preflight.ExitCode -ne 0) {
+            throw "Preflight server session failed with exit code $($preflight.ExitCode). stderr: $($preflight.StdErr)"
+        }
+
+        Assert-Contains -Text $preflight.StdOut -Needle "Result: app not found" -Reason "default inventory isolation"
+
+        Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $stageAppsRoot
+
+        $positiveCommands = @(
+            "nativeapp.capabilities",
+            "nativeapp.smoketest $appId",
+            "nativeapp.smoketest $appId",
+            "nativeapp.processes"
+        )
+        $positive = $null
+        try {
+            $positive = Invoke-ServerCommands -Label "managed-hostlog" -Commands $positiveCommands -WorkingDirectory $Root -ExePath $ServerExe
+        } finally {
+            Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $oldStageRoot
+        }
+        if ($positive.ExitCode -ne 0) {
+            throw "Managed proof server session failed with exit code $($positive.ExitCode). stderr: $($positive.StdErr)"
+        }
+
+        if ($env:GXOS_NATIVE_ELF_STAGE_ROOT -ne $oldStageRoot) {
+            throw "Stage-root environment was not restored after the positive process."
+        }
+
+        $output = $positive.StdOut
+        Write-Host $output
+
+        Assert-Contains -Text $output -Needle "nativeapp.capabilities" -Reason "capabilities header"
+        Assert-Contains -Text $output -Needle "experimental execution enabled: true" -Reason "experimental execution gate"
+        Assert-Contains -Text $output -Needle "supported ELF type: static ET_EXEC" -Reason "supported ELF type"
+        Assert-Contains -Text $output -Needle "supported ABI: guidexos-c-abi-v1" -Reason "supported ABI"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionSuccess:\s+true$' -Expected 2 -Reason "successful executions"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionAttempted:\s+true$' -Expected 2 -Reason "attempted executions"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: .*Host log call count:\s+1' -Expected 2 -Reason "one host log call per launch"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: .*Last host log message:\s+Hello from managed guideXOS code' -Expected 2 -Reason "managed message in executor diagnostics"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^returnCode:\s+0$' -Expected 2 -Reason "return code"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^gxMainReturnCode:\s+0$' -Expected 2 -Reason "managed return code"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^trampolineUsed:\s+true$' -Expected 2 -Reason "trampoline use"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^entryHostAddress:\s+0x[0-9a-fA-F]+$' -Expected 2 -Reason "entry address"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^preferredBaseMappingAttempted:\s+true$' -Expected 2 -Reason "preferred-base attempts"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^preferredBaseMappingSuccess:\s+true$' -Expected 2 -Reason "preferred-base success"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: Native ELF TLS bootstrap installed' -Expected 2 -Reason "TLS bootstrap success"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: .*Preferred-base mapping:\s+success' -Expected 2 -Reason "preferred-base diagnostic"
+        Assert-RegexCountExactly -Text $output -Pattern '\[NativeAppHost\].*log: Hello from managed guideXOS code' -Expected 2 -Reason "host callback output"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^cleanupAttempted:\s+true$' -Expected 2 -Reason "cleanup"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^lifecycleStateAfterExecution:\s+Exited$' -Expected 2 -Reason "exit state"
+        Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^preferredBase:\s+0x10000000$' -Minimum 2 -Reason "preferred base"
+        Assert-RegexCountExactly -Text $output -Pattern '(?m)^actualMappedBase:\s+0x10000000$' -Expected 2 -Reason "actual mapped base"
+        if ($output -match '(?i)collision|Preferred-base allocation failure|TLS bootstrap failed') {
+            throw "Live proof output contains a mapping/TLS failure or collision diagnostic."
+        }
+
+        $message = "Hello from managed guideXOS code"
+        $messageLines = @($output -replace "`r", "" -split "`n" | Where-Object { $_ -like "*$message*" })
+        foreach ($line in $messageLines) {
+            if ($line -notmatch '^\[NativeAppHost\].*log: Hello from managed guideXOS code$' -and
+                $line -notmatch 'Last host log message: Hello from managed guideXOS code' -and
+                $line -notmatch 'executionDiagnostics: .*Hello from managed guideXOS code') {
+                throw "Managed success message appeared through an unapproved output path: $line"
+            }
+        }
+
+        $processPattern = "(?m)^runtimeId=(\d+)\s+appId=$([regex]::Escape($appId))\s+.*state=Exited.*$"
+        $processMatches = [regex]::Matches(($output -replace "`r", ""), $processPattern)
+        if ($processMatches.Count -ne 2) {
+            throw "Expected exactly two exited process records for $appId, but saw $($processMatches.Count)."
+        }
+
+        $runtimeIds = @($processMatches | ForEach-Object { [uint64]$_.Groups[1].Value })
+        if ($runtimeIds[0] -eq $runtimeIds[1]) { throw "Repeat launch reused the same runtimeId: $($runtimeIds[0])" }
+        if ($runtimeIds[1] -le $runtimeIds[0]) { throw "Repeat launch runtimeIds did not increase monotonically: $($runtimeIds[0]) -> $($runtimeIds[1])" }
+
+        if (-not $SkipFailureProbe) {
+            $missingStageScript = Join-Path $OutputRoot "missing-stage-script.ps1"
+            & $powershell -ExecutionPolicy Bypass -File $PSCommandPath -RepoRoot $Root -OutputRoot $OutputRoot -StageRoot $StageRoot -StageScript $missingStageScript -ServerExe $ServerExe -SkipFailureProbe
+            $failureProbeExitCode = $LASTEXITCODE
+            if ($failureProbeExitCode -eq 0) { throw "Failure probe unexpectedly returned success." }
+            Write-Host "[dotnet-proof] invalid-input failure probe returned nonzero: $failureProbeExitCode"
+        }
+
+        $messageLength = [System.Text.Encoding]::UTF8.GetByteCount($message)
+        Write-Host "[dotnet-proof] launching NativeAOT managed entry"
+        Write-Host "[dotnet-proof] artifact accepted"
+        Write-Host "[dotnet-proof] host log invoked length=$messageLength"
+        Write-Host "[dotnet-proof] managed method returned 0"
+        Write-Host "[dotnet-proof] repeat launch runtimeIds=$($runtimeIds[0]),$($runtimeIds[1])"
+        Write-Host "[dotnet-proof] stage proof root=$stageProofRoot"
+        Write-Host "[dotnet-proof] stage app root=$stageAppRoot"
+        Write-Host "[dotnet-proof] staged ELF hash=$stagedHash"
+        Write-Host "[dotnet-proof] stage envelope=$stageEnvelopePath"
+
+        Write-Host "NativeAOT managed-code execution proof PASS"
     } finally {
         Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $oldStageRoot
     }
-
-    if ($positive.ExitCode -ne 0) {
-        throw "Managed proof server session failed with exit code $($positive.ExitCode). stderr: $($positive.StdErr)"
-    }
-
-    $output = $positive.StdOut
-    Write-Host $output
-
-    Assert-Contains -Text $output -Needle "nativeapp.capabilities" -Reason "capabilities header"
-    Assert-Contains -Text $output -Needle "experimental execution enabled: true" -Reason "experimental execution gate"
-    Assert-Contains -Text $output -Needle "supported ELF type: static ET_EXEC" -Reason "supported ELF type"
-    Assert-Contains -Text $output -Needle "supported ABI: guidexos-c-abi-v1" -Reason "supported ABI"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^executionSuccess:\s+true$' -Minimum 2 -Reason "successful executions"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^executionAttempted:\s+true$' -Minimum 2 -Reason "attempted executions"
-    Assert-RegexCountAtLeast -Text $output -Pattern 'Host log call count:\s+1' -Minimum 2 -Reason "host log count"
-    Assert-RegexCountAtLeast -Text $output -Pattern 'Last host log message:\s+Hello from managed guideXOS code' -Minimum 2 -Reason "managed message"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^returnCode:\s+0$' -Minimum 2 -Reason "return code"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^gxMainReturnCode:\s+0$' -Minimum 2 -Reason "managed return code"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^trampolineUsed:\s+true$' -Minimum 2 -Reason "trampoline use"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^entryHostAddress:\s+0x10001900$' -Minimum 2 -Reason "entry address"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^cleanupAttempted:\s+true$' -Minimum 2 -Reason "cleanup"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^lifecycleStateAfterExecution:\s+Exited$' -Minimum 2 -Reason "exit state"
-
-    $processPattern = "(?m)^runtimeId=(\d+)\s+appId=$([regex]::Escape($appId))\s+.*state=Exited.*$"
-    $processMatches = [regex]::Matches($output, $processPattern)
-    if ($processMatches.Count -lt 2) {
-        throw "Expected at least two exited process records for $appId, but saw $($processMatches.Count)."
-    }
-
-    $runtimeIds = @($processMatches | ForEach-Object { [uint64]$_.Groups[1].Value })
-    if ($runtimeIds[0] -eq $runtimeIds[1]) {
-        throw "Repeat launch reused the same runtimeId: $($runtimeIds[0])"
-    }
-    if ($runtimeIds[1] -le $runtimeIds[0]) {
-        throw "Repeat launch runtimeIds did not increase monotonically: $($runtimeIds[0]) -> $($runtimeIds[1])"
-    }
-
-    $message = "Hello from managed guideXOS code"
-    $messageLength = [System.Text.Encoding]::UTF8.GetByteCount($message)
-    Write-Host "[dotnet-proof] launching NativeAOT managed entry"
-    Write-Host "[dotnet-proof] artifact accepted"
-    Write-Host "[dotnet-proof] entry=0x10001900"
-    Write-Host "[dotnet-proof] host log invoked length=$messageLength"
-    Write-Host "[dotnet-proof] managed method returned 0"
-    Write-Host "[dotnet-proof] repeat launch runtimeIds=$($runtimeIds[0]),$($runtimeIds[1])"
-    Write-Host "[dotnet-proof] stage proof root=$stageProofRoot"
-    Write-Host "[dotnet-proof] stage app root=$stageAppRoot"
-    Write-Host "[dotnet-proof] staged ELF hash=$stagedHash"
-    Write-Host "[dotnet-proof] stage envelope=$stageEnvelopePath"
-
-    Write-Host "NativeAOT managed-code execution proof PASS"
 } finally {
     $env:PATH = $oldPath
-    Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $null
+    Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $originalStageRoot
 }
 
 

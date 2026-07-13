@@ -3,11 +3,13 @@
     [string]$OutputRoot = "",
     [string]$StageRoot = "",
     [string]$BuildScript = "",
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "managed-hostlog-artifact-assertions.ps1")
 
 function Assert-WithinRoot([string]$Path, [string]$Root, [string]$Label) {
     $resolvedPath = [System.IO.Path]::GetFullPath($Path)
@@ -112,9 +114,13 @@ if (Test-Path -LiteralPath $StageRoot) {
 New-Item -ItemType Directory -Force -Path $StageRoot | Out-Null
 
 Write-Host "[dotnet-proof] rebuilding NativeAOT proof from a clean output root"
-& powershell -ExecutionPolicy Bypass -File $BuildScript -RepoRoot $repoRoot -OutputRoot $OutputRoot -Clean
-if ($LASTEXITCODE -ne 0) {
-    throw "Managed proof build failed with exit code $LASTEXITCODE"
+if (-not $SkipBuild) {
+    & powershell -ExecutionPolicy Bypass -File $BuildScript -RepoRoot $repoRoot -OutputRoot $OutputRoot -Clean
+    if ($LASTEXITCODE -ne 0) {
+        throw "Managed proof build failed with exit code $LASTEXITCODE"
+    }
+} else {
+    Write-Host "[dotnet-proof] using existing proof output root (SkipBuild)"
 }
 
 $artifactRoot = Join-Path $OutputRoot "artifacts"
@@ -142,6 +148,7 @@ if ($tlsEndAddress -le $tlsStartAddress) {
     throw ([string]::Format("TLS template bounds are invalid: start=0x{0:X} end=0x{1:X}", $tlsStartAddress, $tlsEndAddress))
 }
 $tlsBlockSize = $tlsEndAddress - $tlsStartAddress
+$managedMainAddress = Get-MapSymbolAddress -Path $sourceMap -Symbol "ManagedMain" -Label "Managed entry"
 
 $expectedPeImports = [ordered]@{
     "ADVAPI32.dll" = @(
@@ -209,50 +216,9 @@ foreach ($dll in $expectedPeImports.Keys) {
     Assert-SetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
 }
 
-Assert-FileContains -Path $sourceNativeObjDump -Patterns @(
-    'HostLogProof_HostLogProof_Program__ManagedMain>',
-    'mov\s+0x8\(%rbx\),%rcx',
-    'mov\s+0x8\(%rcx\),%rsi',
-    'call\s+\*%rsi'
-) -Label "Native object ManagedMain disassembly"
-
-Assert-FileContains -Path $sourceMap -Patterns @(
-    'ManagedMain\s+0000000010001900',
-    'HostLogProof__Module___MainMethodWrapper',
-    'HostLogProof__Module___StartupCodeMain'
-) -Label "Link map"
-
-Assert-FileContains -Path $sourceElfReadelf -Patterns @(
-    'ELF64',
-    'Type:\s+EXEC',
-    'Machine:\s+Advanced Micro Devices X86-64',
-    'Entry point address:\s+0x10001900',
-    'Number of program headers:\s+7',
-    'There is no dynamic section in this file\.',
-    'There are no relocations in this file\.',
-    'There are no sections in this file\.'
-) -Label "Final ELF"
-
-Assert-FileContains -Path $sourceElfDump -Patterns @(
-    'flags r-x',
-    'flags rw-'
-) -Label "Final ELF segment flags"
-
-Assert-FileNotContains -Path $sourceElfReadelf -Patterns @(
-    'PT_INTERP',
-    'NEEDED',
-    'libc',
-    'libpthread',
-    'libdl',
-    'libm',
-    'rwx'
-) -Label "Final ELF dependency scan"
-
-Assert-FileNotContains -Path $sourcePeDump -Patterns @(
-    'ucrtbase\.dll',
-    'msvcrt\.dll',
-    'ntdll\.dll'
-) -Label "Intermediate PE forbidden imports"
+$runtimeSupportSource = Join-Path $repoRoot "samples\managed\HostLogProof\runtime_support.c"
+Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath (Join-Path $artifactRoot "HostLogProof.exe") -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeObjDump -ElfReadelfPath $sourceElfReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource | Out-Null
+Assert-ManagedHostLogFileNotContains $sourcePeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
 
 $stagedAppsRoot = Join-Path $StageRoot "apps"
 $stagedProofRoot = Join-Path $StageRoot "proof"
@@ -286,8 +252,8 @@ $manifest = [ordered]@{
     minGuideXOSVersion = "0.1.0"
     supportedArchitectures = @("amd64")
     desktopRegistryHints = [ordered]@{
-        "gxos.nativeaot.tlsIndexAddress" = ("0x{0:X}" -f $tlsIndexAddress)
-        "gxos.nativeaot.tlsBlockSize" = ("0x{0:X}" -f $tlsBlockSize)
+        "gxos.nativeelf.tlsIndexAddress" = ("0x{0:X}" -f $tlsIndexAddress)
+        "gxos.nativeelf.tlsBlockSize" = ("0x{0:X}" -f $tlsBlockSize)
     }
     entries = @(
         [ordered]@{
@@ -315,6 +281,7 @@ $envelope = [ordered]@{
     manifestId = $manifest.id
     manifestDisplayName = $manifest.displayName
     manifestEntryPoint = $manifest.entries[0].entryPoint
+    managedMainAddress = ("0x{0:X}" -f $managedMainAddress)
     tlsIndexAddress = ("0x{0:X}" -f $tlsIndexAddress)
     tlsStartAddress = ("0x{0:X}" -f $tlsStartAddress)
     tlsEndAddress = ("0x{0:X}" -f $tlsEndAddress)
@@ -323,7 +290,7 @@ $envelope = [ordered]@{
     sourceElf = $sourceElf
     sourceElfSha256 = $sourceHash
     stagedElfSha256 = $stagedHash
-    expectedEntryAddress = "0x10001900"
+    expectedEntryAddress = ("0x{0:X}" -f $managedMainAddress)
     expectedManagedSymbol = "ManagedMain"
     expectedMessage = "Hello from managed guideXOS code"
     expectedReturnCode = 0
@@ -340,7 +307,7 @@ Write-Host "[dotnet-proof] staged=$stagedElf"
 Write-Host "[dotnet-proof] hash=$stagedHash"
 Write-Host "[dotnet-proof] stage-root=$StageRoot"
 Write-Host "[dotnet-proof] app-source-root=$stagedAppsRoot"
-Write-Host "[dotnet-proof] entry=0x10001900"
+Write-Host ("[dotnet-proof] entry=0x{0:X}" -f $managedMainAddress)
 Write-Host "[dotnet-proof] envelope=$stageEnvelope"
 
 Write-Output $stageEnvelope

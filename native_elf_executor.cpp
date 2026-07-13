@@ -144,7 +144,7 @@ __declspec(dllimport) int __stdcall TlsFree(unsigned long tlsIndex);
 __declspec(dllimport) int __stdcall TlsSetValue(unsigned long tlsIndex, void* tlsValue);
 }
 
-struct NativeAotTlsBootstrap {
+struct NativeElfTlsBootstrap {
     unsigned long slot = kTlsOutOfIndexes;
     uint64_t tlsIndexAddress = 0;
     size_t tlsBlockSize = 0;
@@ -161,7 +161,7 @@ struct NativeAotTlsBootstrap {
         block.clear();
     }
 
-    ~NativeAotTlsBootstrap() {
+    ~NativeElfTlsBootstrap() {
         reset();
     }
 };
@@ -186,71 +186,70 @@ bool tryParseUnsigned64(const std::string& text, uint64_t& value) {
     }
 }
 
-bool prepareNativeAotTlsBootstrap(
+bool prepareNativeElfTlsBootstrap(
     const NativeAppRuntimeContext& runtimeContext,
     uint64_t minVirtualAddress,
     uint64_t maxVirtualAddress,
     ExecutableMemoryBlock& mapping,
     NativeElfExecutionResult& result,
-    NativeAotTlsBootstrap& bootstrap) {
+    NativeElfTlsBootstrap& bootstrap) {
     std::string tlsIndexAddressText;
     std::string tlsBlockSizeText;
-    bool hasIndexHint = tryGetEnvironmentValue(runtimeContext, "GX_NATIVE_AOT_TLS_INDEX_ADDRESS", tlsIndexAddressText);
-    bool hasBlockHint = tryGetEnvironmentValue(runtimeContext, "GX_NATIVE_AOT_TLS_BLOCK_SIZE", tlsBlockSizeText);
+    bool hasIndexHint = tryGetEnvironmentValue(runtimeContext, "GX_NATIVE_ELF_TLS_INDEX_ADDRESS", tlsIndexAddressText);
+    bool hasBlockHint = tryGetEnvironmentValue(runtimeContext, "GX_NATIVE_ELF_TLS_BLOCK_SIZE", tlsBlockSizeText);
     if (!hasIndexHint && !hasBlockHint) return true;
     if (!hasIndexHint || !hasBlockHint) {
-        addDiagnostic(result, "Native AOT TLS bootstrap hints are incomplete");
+        addDiagnostic(result, "Native ELF TLS bootstrap hints are incomplete");
         return false;
     }
 
     uint64_t tlsIndexAddress = 0;
     uint64_t tlsBlockSize64 = 0;
     if (!tryParseUnsigned64(tlsIndexAddressText, tlsIndexAddress)) {
-        addDiagnostic(result, "Native AOT TLS bootstrap index address is invalid: " + tlsIndexAddressText);
+        addDiagnostic(result, "Native ELF TLS bootstrap index address is invalid: " + tlsIndexAddressText);
         return false;
     }
     if (!tryParseUnsigned64(tlsBlockSizeText, tlsBlockSize64) || tlsBlockSize64 == 0) {
-        addDiagnostic(result, "Native AOT TLS bootstrap block size is invalid: " + tlsBlockSizeText);
+        addDiagnostic(result, "Native ELF TLS bootstrap block size is invalid: " + tlsBlockSizeText);
         return false;
     }
     if (tlsBlockSize64 > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-        addDiagnostic(result, "Native AOT TLS bootstrap block size is too large");
+        addDiagnostic(result, "Native ELF TLS bootstrap block size is too large");
         return false;
     }
 
     uint64_t tlsIndexEndAddress = 0;
     if (tlsIndexAddress < minVirtualAddress || !checkedAdd(tlsIndexAddress, sizeof(uint32_t), tlsIndexEndAddress) || tlsIndexEndAddress > maxVirtualAddress) {
-        addDiagnostic(result, "Native AOT TLS bootstrap index address is outside the mapped image");
+        addDiagnostic(result, "Native ELF TLS bootstrap index address is outside the mapped image");
         return false;
     }
 
     bootstrap.slot = TlsAlloc();
     if (bootstrap.slot == kTlsOutOfIndexes) {
-        addDiagnostic(result, "Native AOT TLS bootstrap failed: TlsAlloc returned TLS_OUT_OF_INDEXES");
+        addDiagnostic(result, "Native ELF TLS bootstrap failed: TlsAlloc returned TLS_OUT_OF_INDEXES");
         return false;
     }
 
     try {
         bootstrap.block.assign(static_cast<size_t>(tlsBlockSize64), 0u);
     } catch (const std::exception& ex) {
-        addDiagnostic(result, std::string("Native AOT TLS bootstrap failed to allocate the per-thread block: ") + ex.what());
+        addDiagnostic(result, std::string("Native ELF TLS bootstrap failed to allocate the per-thread block: ") + ex.what());
         bootstrap.reset();
         return false;
     } catch (...) {
-        addDiagnostic(result, "Native AOT TLS bootstrap failed to allocate the per-thread block");
+        addDiagnostic(result, "Native ELF TLS bootstrap failed to allocate the per-thread block");
         bootstrap.reset();
         return false;
     }
 
     if (!TlsSetValue(bootstrap.slot, bootstrap.block.data())) {
-        addDiagnostic(result, "Native AOT TLS bootstrap failed: TlsSetValue rejected the per-thread block");
+        addDiagnostic(result, "Native ELF TLS bootstrap failed: TlsSetValue rejected the per-thread block");
         bootstrap.reset();
         return false;
     }
-
     size_t tlsIndexOffset = static_cast<size_t>(tlsIndexAddress - minVirtualAddress);
     if (tlsIndexOffset > mapping.size || sizeof(uint32_t) > mapping.size - tlsIndexOffset) {
-        addDiagnostic(result, "Native AOT TLS bootstrap index address is out of bounds for the mapped image");
+        addDiagnostic(result, "Native ELF TLS bootstrap index address is out of bounds for the mapped image");
         bootstrap.reset();
         return false;
     }
@@ -258,7 +257,7 @@ bool prepareNativeAotTlsBootstrap(
     std::memcpy(static_cast<char*>(mapping.base) + tlsIndexOffset, &slotValue, sizeof(slotValue));
     bootstrap.tlsIndexAddress = tlsIndexAddress;
     bootstrap.tlsBlockSize = static_cast<size_t>(tlsBlockSize64);
-    addDiagnostic(result, "Native AOT TLS bootstrap installed");
+    addDiagnostic(result, "Native ELF TLS bootstrap installed");
     addDiagnostic(result, "TLS slot index: " + std::to_string(bootstrap.slot));
     addDiagnostic(result, "TLS block size: " + std::to_string(bootstrap.tlsBlockSize));
     return true;
@@ -431,8 +430,8 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     }
 
 #if defined(_WIN32) && defined(__x86_64__)
-    NativeAotTlsBootstrap tlsBootstrap;
-    if (!prepareNativeAotTlsBootstrap(runtimeContext, minVirtualAddress, maxVirtualAddress, mapping, result, tlsBootstrap)) {
+    NativeElfTlsBootstrap tlsBootstrap;
+    if (!prepareNativeElfTlsBootstrap(runtimeContext, minVirtualAddress, maxVirtualAddress, mapping, result, tlsBootstrap)) {
         ExecutableMemory::Free(mapping);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
