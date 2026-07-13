@@ -3,8 +3,8 @@ REM
 REM guideXOS Experimental QEMU Display Probe Launcher (Windows Batch)
 REM
 REM This launcher is intentionally separate from run-qemu.bat.
-REM It is diagnostic-only and does not imply that guideXOS can render
-REM to more than one real framebuffer yet.
+REM It is diagnostic-only and only proves the QEMU-side probe and
+REM scanout-0 2D diagnostic pattern path.
 REM
 REM Usage:
 REM   scripts\run-qemu-display-probe.bat [std|virtio-gpu|virtio-gpu-modern-only|virtio-vga|qxl-vga]
@@ -45,8 +45,16 @@ if /I "%GXOS_QEMU_DISPLAY_PROBE_HEADLESS%"=="1" set "QEMU_HEADLESS=1"
 set "QEMU_NO_PAUSE=0"
 if /I "%GXOS_QEMU_DISPLAY_PROBE_NO_PAUSE%"=="1" set "QEMU_NO_PAUSE=1"
 
+set "QEMU_CAPTURE=0"
+if /I "%GXOS_QEMU_DISPLAY_PROBE_CAPTURE%"=="1" set "QEMU_CAPTURE=1"
+
 set "QEMU_SERIAL_LOG="
 if defined GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG set "QEMU_SERIAL_LOG=%GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG%"
+
+set "QEMU_QMP_ARGS="
+if defined GXOS_QEMU_DISPLAY_PROBE_QMP_PORT (
+    set "QEMU_QMP_ARGS=-qmp tcp:127.0.0.1:%GXOS_QEMU_DISPLAY_PROBE_QMP_PORT%,server,nowait"
+)
 
 echo ====================================
 echo   guideXOS Experimental Display Probe
@@ -54,14 +62,16 @@ echo ====================================
 echo.
 echo Probe backend: %DISPLAY_BACKEND%
 echo Diagnostic scope: firmware and QEMU display exposure only
-echo Guest note: guideXOS still consumes one selected framebuffer
+echo Guest note: guideXOS still consumes one selected framebuffer in normal modes; virtio-gpu probe mode renders a diagnostic test pattern on scanout 0
 if "%QEMU_HEADLESS%"=="1" echo Headless capture mode: enabled
+if "%QEMU_CAPTURE%"=="1" echo Visual capture mode: enabled
 if not "%QEMU_SERIAL_LOG%"=="" echo Serial log capture: %QEMU_SERIAL_LOG%
 if "%QEMU_NO_PAUSE%"=="1" echo Pause after exit: disabled
 echo QEMU video args: %QEMU_VIDEO_ARGS%
 if not "%QEMU_SPICE_ARGS%"=="" echo QEMU spice args: %QEMU_SPICE_ARGS%
 echo QEMU display args: %QEMU_DISPLAY_ARGS%
 echo QEMU VNC args: %QEMU_VNC_ARGS%
+if not "%QEMU_QMP_ARGS%"=="" echo QEMU QMP args: %QEMU_QMP_ARGS%
 echo QEMU serial args: %QEMU_SERIAL_ARGS%
 echo.
 
@@ -178,21 +188,22 @@ set "QEMU_VIDEO_ARGS=-vga std"
 set "QEMU_DISPLAY_ARGS=-display gtk"
 set "QEMU_VNC_ARGS=-vnc :0"
 set "QEMU_SPICE_ARGS="
+set "QEMU_QMP_ARGS="
 set "QEMU_PROBE_NOTE=legacy VGA/Bochs-style framebuffer"
 set "QEMU_SERIAL_ARGS=-serial stdio"
 
 if /I "%DISPLAY_BACKEND%"=="virtio-gpu" (
-    set "QEMU_VIDEO_ARGS=-vga none -device virtio-gpu-pci,max_outputs=2"
+    set "QEMU_VIDEO_ARGS=-vga none -device virtio-gpu-pci,id=gpu0,max_outputs=2"
     set "QEMU_DISPLAY_ARGS=-display gtk,show-tabs=on,zoom-to-fit=on"
     set "QEMU_VNC_ARGS=-vnc :0"
-    set "QEMU_PROBE_NOTE=virtio-gpu-pci diagnostic probe"
+    set "QEMU_PROBE_NOTE=virtio-gpu-pci diagnostic 2D test-pattern probe (scanout 0 only)"
 )
 
 if /I "%DISPLAY_BACKEND%"=="virtio-gpu-modern-only" (
-    set "QEMU_VIDEO_ARGS=-vga none -device virtio-gpu-pci,max_outputs=2,disable-legacy=on"
+    set "QEMU_VIDEO_ARGS=-vga none -device virtio-gpu-pci,id=gpu0,max_outputs=2,disable-legacy=on"
     set "QEMU_DISPLAY_ARGS=-display gtk,show-tabs=on,zoom-to-fit=on"
     set "QEMU_VNC_ARGS=-vnc :0"
-    set "QEMU_PROBE_NOTE=virtio-gpu-pci modern-only diagnostic probe (no rendering)"
+    set "QEMU_PROBE_NOTE=virtio-gpu-pci modern-only diagnostic 2D test-pattern probe (scanout 0 only)"
 )
 
 if /I "%DISPLAY_BACKEND%"=="virtio-vga" (
@@ -212,11 +223,15 @@ if /I "%DISPLAY_BACKEND%"=="qxl-vga" (
 
 if "%QEMU_HEADLESS%"=="1" (
     set "QEMU_DISPLAY_ARGS=-display none"
-    set "QEMU_VNC_ARGS="
+    if "%QEMU_CAPTURE%"=="0" set "QEMU_VNC_ARGS="
 )
 
 if not "%QEMU_SERIAL_LOG%"=="" (
     set "QEMU_SERIAL_ARGS=-serial file:%QEMU_SERIAL_LOG%"
+)
+
+if defined GXOS_QEMU_DISPLAY_PROBE_QMP_PORT (
+    set "QEMU_QMP_ARGS=-qmp tcp:127.0.0.1:%GXOS_QEMU_DISPLAY_PROBE_QMP_PORT%,server,nowait"
 )
 
 echo Launching QEMU display probe...
@@ -232,7 +247,7 @@ cd /d "%ROOT_DIR%"
 
 if "%SPLIT_PFLASH%"=="1" (
     echo Using split pflash: CODE + VARS
-    echo QEMU launch: %QEMU_EXE% -machine q35,usb=off -drive if=pflash,format=raw,unit=0,readonly=on,file="%OVMF_CODE%" -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" -drive file=fat:rw:ESP,format=raw -netdev user,id=net0 -device e1000,netdev=net0 -m 1024M %QEMU_VIDEO_ARGS% %QEMU_SPICE_ARGS% %QEMU_DISPLAY_ARGS% %QEMU_VNC_ARGS% %QEMU_SERIAL_ARGS% -rtc base=utc,clock=host -no-reboot
+    echo QEMU launch: %QEMU_EXE% -machine q35,usb=off -drive if=pflash,format=raw,unit=0,readonly=on,file="%OVMF_CODE%" -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" -drive file=fat:rw:ESP,format=raw -netdev user,id=net0 -device e1000,netdev=net0 -m 1024M %QEMU_VIDEO_ARGS% %QEMU_SPICE_ARGS% %QEMU_DISPLAY_ARGS% %QEMU_VNC_ARGS% %QEMU_QMP_ARGS% %QEMU_SERIAL_ARGS% -rtc base=utc,clock=host -no-reboot
     "%QEMU_EXE%" ^
         -machine q35,usb=off ^
         -drive if=pflash,format=raw,unit=0,readonly=on,file="%OVMF_CODE%" ^
@@ -245,12 +260,13 @@ if "%SPLIT_PFLASH%"=="1" (
         %QEMU_SPICE_ARGS% ^
         %QEMU_DISPLAY_ARGS% ^
         %QEMU_VNC_ARGS% ^
+        %QEMU_QMP_ARGS% ^
         %QEMU_SERIAL_ARGS% ^
         -rtc base=utc,clock=host ^
         -no-reboot
 ) else (
     echo Using combined pflash: OVMF.fd
-    echo QEMU launch: %QEMU_EXE% -machine q35,usb=off -drive if=pflash,format=raw,readonly=on,file="%OVMF_CODE%" -drive file=fat:rw:ESP,format=raw -netdev user,id=net0 -device e1000,netdev=net0 -m 1024M %QEMU_VIDEO_ARGS% %QEMU_SPICE_ARGS% %QEMU_DISPLAY_ARGS% %QEMU_VNC_ARGS% %QEMU_SERIAL_ARGS% -rtc base=utc,clock=host -no-reboot
+    echo QEMU launch: %QEMU_EXE% -machine q35,usb=off -drive if=pflash,format=raw,readonly=on,file="%OVMF_CODE%" -drive file=fat:rw:ESP,format=raw -netdev user,id=net0 -device e1000,netdev=net0 -m 1024M %QEMU_VIDEO_ARGS% %QEMU_SPICE_ARGS% %QEMU_DISPLAY_ARGS% %QEMU_VNC_ARGS% %QEMU_QMP_ARGS% %QEMU_SERIAL_ARGS% -rtc base=utc,clock=host -no-reboot
     "%QEMU_EXE%" ^
         -machine q35,usb=off ^
         -drive if=pflash,format=raw,readonly=on,file="%OVMF_CODE%" ^
@@ -262,6 +278,7 @@ if "%SPLIT_PFLASH%"=="1" (
         %QEMU_SPICE_ARGS% ^
         %QEMU_DISPLAY_ARGS% ^
         %QEMU_VNC_ARGS% ^
+        %QEMU_QMP_ARGS% ^
         %QEMU_SERIAL_ARGS% ^
         -rtc base=utc,clock=host ^
         -no-reboot

@@ -1,15 +1,16 @@
 // VirtIO GPU Driver
 //
 // Diagnostic-only probe path for QEMU virtio-gpu discovery and
-// GET_DISPLAY_INFO-style scanout inspection.
+// single-scanout 2D test-pattern rendering.
 //
 // Safety boundaries:
-// - PCI discovery and VirtIO config/queue access only
-// - No resource creation
-// - No backing attachment
-// - No scanout updates
-// - No transfers or flushes
-// - No framebuffer rendering
+// - PCI discovery and VirtIO config/queue access only behind the QEMU gate
+// - QEMU-only 2D resource create, attach, scanout, transfer, and flush
+// - No cursor queue setup
+// - No 3D, virgl, Venus, blob, or compositor integration
+// - No continuous frame rendering or animation
+// - No real hardware GPU/MMIO enablement
+// REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -53,6 +54,14 @@ static const uint16_t kMaxControlQueueSize = 128;
 static const uint16_t kMinControlQueueSize = 2;
 static const uint32_t kStatusPollLimit = 100000;
 static const uint32_t kResponseSpinLimit = 1000000;
+static const uint32_t kDiagnosticBytesPerPixel = 4;
+static const uint32_t kDiagnosticQemuMaxOutputsIntent = 2;
+static const uint32_t kDiagnosticResourceId = 0x47584F53u; // "GXOS"
+static const uint32_t kDiagnosticResourceIdSecondary = kDiagnosticResourceId + 1u;
+static const size_t kDiagnosticBackingBytes = 16u * 1024u * 1024u;
+static const uint32_t kDiagnosticBackingMaxMemEntries = 64u;
+static const uint64_t kDiagnosticPageSizeBytes = 4096u;
+static const uint16_t kInvalidDescriptorIndex = 0xFFFFu;
 // VIRTIO_F_VERSION_1 is required for the modern split-queue control path.
 static const uint64_t kCommonCfgRequiredFeatureBits = FEATURE_VERSION_1;
 
@@ -162,8 +171,72 @@ struct ProbeOutcome {
     uint32_t scanoutSlots;
     uint32_t enabledScanoutCount;
     uint32_t disabledScanoutCount;
+    uint32_t deviceConfigNumScanouts;
+    uint32_t qemuMaxOutputsIntent;
+    uint32_t enabledScanoutsAfter;
+    bool resource2dReady;
+    bool backingAttached;
+    bool scanout0Set;
+    bool transferOk;
+    bool flushOk;
+    bool resource2dReadySecondary;
+    bool backingAttachedSecondary;
+    bool scanout1Set;
+    bool transfer1Ok;
+    bool flush1Ok;
+    bool distinctPatternsConfirmed;
+    bool renderingTestPattern;
     const char* reason;
     const DeviceState* state;
+};
+
+struct DiagnosticPatternPalette {
+    const char* name;
+    uint32_t topLeft;
+    uint32_t topRight;
+    uint32_t bottomLeft;
+    uint32_t bottomRight;
+    uint32_t borderDark;
+    uint32_t borderLight;
+    uint32_t center;
+};
+
+struct DiagnosticBackingLayoutAudit {
+    uint64_t backingVirtualBase;
+    uint64_t totalBackingBytes;
+    uint32_t totalPages;
+    uint32_t totalMemEntries;
+    uint32_t contiguousRunCount;
+    uint64_t coveredBytes;
+    bool physicalCoverageValid;
+    uint64_t firstPhysicalStart;
+    uint64_t firstPhysicalEnd;
+    uint64_t lastPhysicalStart;
+    uint64_t lastPhysicalEnd;
+};
+
+struct DiagnosticResourceState {
+    const char* patternName;
+    uint32_t resourceId;
+    uint32_t width;
+    uint32_t height;
+    uint32_t format;
+    uint64_t backingVirtual;
+    uint64_t backingPhysical;
+    uint64_t backingBytes;
+    uint64_t backingPageCount;
+    uint32_t memEntryCount;
+    uint32_t contiguousRunCount;
+    uint64_t coveredBytes;
+    bool physicalCoverageValid;
+    uint64_t patternChecksum;
+    bool checksumValid;
+    bool mirroredToFramebuffer;
+    bool created;
+    bool backingAttached;
+    bool scanoutSet;
+    bool transferOk;
+    bool flushOk;
 };
 
 static bool s_initialized = false;
@@ -174,12 +247,16 @@ static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 
 #if defined(_MSC_VER)
 __declspec(align(4096)) static uint8_t s_queueStorage[16384];
-__declspec(align(4096)) static uint8_t s_commandBuffer[512];
+__declspec(align(4096)) static uint8_t s_commandBuffer[4096];
 __declspec(align(4096)) static uint8_t s_responseBuffer[sizeof(RespDisplayInfo)];
+__declspec(align(4096)) static uint8_t s_diagnosticBackingStorage0[kDiagnosticBackingBytes];
+__declspec(align(4096)) static uint8_t s_diagnosticBackingStorage1[kDiagnosticBackingBytes];
 #else
 static uint8_t s_queueStorage[16384] __attribute__((aligned(4096)));
-static uint8_t s_commandBuffer[512] __attribute__((aligned(4096)));
+static uint8_t s_commandBuffer[4096] __attribute__((aligned(4096)));
 static uint8_t s_responseBuffer[sizeof(RespDisplayInfo)] __attribute__((aligned(4096)));
+static uint8_t s_diagnosticBackingStorage0[kDiagnosticBackingBytes] __attribute__((aligned(4096)));
+static uint8_t s_diagnosticBackingStorage1[kDiagnosticBackingBytes] __attribute__((aligned(4096)));
 #endif
 
 static void memzero(void* dst, size_t len)
@@ -231,6 +308,335 @@ static uint64_t dma_address(const void* ptr)
     }
 
     return virt;
+}
+
+static bool add_u64_overflow(uint64_t a, uint64_t b, uint64_t* out)
+{
+    if (out == nullptr) {
+        return true;
+    }
+
+    if (b > (~0ULL - a)) {
+        *out = 0;
+        return true;
+    }
+
+    *out = a + b;
+    return false;
+}
+
+static bool mul_u64_overflow(uint64_t a, uint64_t b, uint64_t* out)
+{
+    if (out == nullptr) {
+        return true;
+    }
+
+    if (a != 0u && b > (~0ULL / a)) {
+        *out = 0;
+        return true;
+    }
+
+    *out = a * b;
+    return false;
+}
+
+static const char* gpu_format_name(GpuFormat format)
+{
+    switch (format) {
+    case FORMAT_B8G8R8A8_UNORM:
+        return "B8G8R8A8_UNORM";
+    case FORMAT_B8G8R8X8_UNORM:
+        return "B8G8R8X8_UNORM";
+    case FORMAT_A8R8G8B8_UNORM:
+        return "A8R8G8B8_UNORM";
+    case FORMAT_X8R8G8B8_UNORM:
+        return "X8R8G8B8_UNORM";
+    case FORMAT_R8G8B8A8_UNORM:
+        return "R8G8B8A8_UNORM";
+    case FORMAT_X8B8G8R8_UNORM:
+        return "X8B8G8R8_UNORM";
+    case FORMAT_A8B8G8R8_UNORM:
+        return "A8B8G8R8_UNORM";
+    case FORMAT_R8G8B8X8_UNORM:
+        return "R8G8B8X8_UNORM";
+    default:
+        return "unknown";
+    }
+}
+
+static bool gpu_format_bytes_per_pixel(GpuFormat format, uint32_t* bytesPerPixelOut)
+{
+    if (bytesPerPixelOut == nullptr) {
+        return false;
+    }
+
+    switch (format) {
+    case FORMAT_B8G8R8A8_UNORM:
+    case FORMAT_B8G8R8X8_UNORM:
+    case FORMAT_A8R8G8B8_UNORM:
+    case FORMAT_X8R8G8B8_UNORM:
+    case FORMAT_R8G8B8A8_UNORM:
+    case FORMAT_X8B8G8R8_UNORM:
+    case FORMAT_A8B8G8R8_UNORM:
+    case FORMAT_R8G8B8X8_UNORM:
+        *bytesPerPixelOut = 4u;
+        return true;
+    default:
+        *bytesPerPixelOut = 0u;
+        return false;
+    }
+}
+
+static uint32_t make_bgrx(uint8_t red, uint8_t green, uint8_t blue)
+{
+    return (static_cast<uint32_t>(red) << 16) |
+           (static_cast<uint32_t>(green) << 8) |
+           static_cast<uint32_t>(blue);
+}
+
+static const DiagnosticPatternPalette& diagnostic_pattern_palette(uint32_t scanoutId)
+{
+    static const DiagnosticPatternPalette kScanout0Palette = {
+        "scanout0-blue-cyan",
+        make_bgrx(0x20u, 0x58u, 0xE8u),
+        make_bgrx(0x00u, 0xD8u, 0xF0u),
+        make_bgrx(0x38u, 0x78u, 0xFFu),
+        make_bgrx(0x90u, 0xF8u, 0xFFu),
+        make_bgrx(0x10u, 0x18u, 0x48u),
+        make_bgrx(0x78u, 0xD8u, 0xFFu),
+        make_bgrx(0xFFu, 0xFFu, 0xFFu),
+    };
+    static const DiagnosticPatternPalette kScanout1Palette = {
+        "scanout1-red-orange",
+        make_bgrx(0xE0u, 0x40u, 0x18u),
+        make_bgrx(0xFFu, 0x88u, 0x18u),
+        make_bgrx(0xB0u, 0x18u, 0x10u),
+        make_bgrx(0xFFu, 0xC0u, 0x48u),
+        make_bgrx(0x58u, 0x10u, 0x00u),
+        make_bgrx(0xFFu, 0xB0u, 0x60u),
+        make_bgrx(0xFFu, 0xFFu, 0xFFu),
+    };
+
+    return scanoutId == 1u ? kScanout1Palette : kScanout0Palette;
+}
+
+static void fill_diagnostic_pattern(uint32_t* pixels,
+                                    uint32_t width,
+                                    uint32_t height,
+                                    uint32_t stridePixels,
+                                    const DiagnosticPatternPalette& palette)
+{
+    if (pixels == nullptr || width == 0u || height == 0u || stridePixels < width) {
+        return;
+    }
+
+    const uint32_t border = 8u;
+    const uint32_t midX = width / 2u;
+    const uint32_t midY = height / 2u;
+    const uint32_t centerLeft = width / 4u;
+    const uint32_t centerRight = width - centerLeft;
+    const uint32_t centerTop = height / 4u;
+    const uint32_t centerBottom = height - centerTop;
+
+    for (uint32_t y = 0u; y < height; ++y) {
+        uint32_t* row = pixels + (static_cast<size_t>(y) * stridePixels);
+        for (uint32_t x = 0u; x < width; ++x) {
+            uint32_t color = 0u;
+            if (x < border || y < border || x >= (width - border) || y >= (height - border)) {
+                const bool checker = (((x / 8u) + (y / 8u)) & 1u) == 0u;
+                color = checker ? palette.borderDark : palette.borderLight;
+            } else if (x >= centerLeft && x < centerRight && y >= centerTop && y < centerBottom) {
+                color = palette.center;
+            } else if (x < midX && y < midY) {
+                color = palette.topLeft;
+            } else if (x >= midX && y < midY) {
+                color = palette.topRight;
+            } else if (x < midX && y >= midY) {
+                color = palette.bottomLeft;
+            } else {
+                color = palette.bottomRight;
+            }
+
+            row[x] = color;
+        }
+    }
+}
+
+static uint64_t checksum_diagnostic_pattern(const uint8_t* bytes, size_t byteCount)
+{
+    if (bytes == nullptr) {
+        return 0u;
+    }
+
+    uint64_t hash = 1469598103934665603ULL;
+    for (size_t i = 0; i < byteCount; ++i) {
+        hash ^= static_cast<uint64_t>(bytes[i]);
+        hash *= 1099511628211ULL;
+    }
+
+    return hash;
+}
+
+static bool build_diagnostic_backing_layout(uint8_t* backingBase,
+                                            uint64_t totalBackingBytes,
+                                            MemEntry* entriesOut,
+                                            uint32_t entryCapacity,
+                                            DiagnosticBackingLayoutAudit* auditOut)
+{
+    if (backingBase == nullptr || entriesOut == nullptr || auditOut == nullptr) {
+        return false;
+    }
+
+    memzero(auditOut, sizeof(*auditOut));
+    auditOut->backingVirtualBase = reinterpret_cast<uint64_t>(backingBase);
+    auditOut->totalBackingBytes = totalBackingBytes;
+
+    if (totalBackingBytes == 0u) {
+        return false;
+    }
+
+    const uint64_t totalPages64 = align_up(totalBackingBytes, kDiagnosticPageSizeBytes) / kDiagnosticPageSizeBytes;
+    if (totalPages64 == 0u || totalPages64 > static_cast<uint64_t>(~0u)) {
+        return false;
+    }
+
+    uint32_t entryCount = 0u;
+    uint32_t contiguousRunCount = 0u;
+    uint64_t coveredBytes = 0u;
+    bool physicalCoverageValid = true;
+    bool runOpen = false;
+    uint64_t runStartPhysical = 0u;
+    uint64_t runEndPhysical = 0u;
+    uint64_t runLength = 0u;
+    uint64_t firstPhysicalStart = 0u;
+    uint64_t firstPhysicalEnd = 0u;
+    uint64_t lastPhysicalStart = 0u;
+    uint64_t lastPhysicalEnd = 0u;
+
+    for (uint64_t pageIndex = 0u; pageIndex < totalPages64; ++pageIndex) {
+        const uint64_t pageOffset = pageIndex * kDiagnosticPageSizeBytes;
+        if (pageOffset >= totalBackingBytes) {
+            break;
+        }
+
+        uint64_t remainingBytes = totalBackingBytes - pageOffset;
+        const uint64_t chunkBytes = remainingBytes < kDiagnosticPageSizeBytes ? remainingBytes : kDiagnosticPageSizeBytes;
+        if (chunkBytes == 0u) {
+            physicalCoverageValid = false;
+            break;
+        }
+
+        uint8_t* pageVirtual = backingBase + static_cast<size_t>(pageOffset);
+        const uint64_t physicalStart = dma_address(pageVirtual);
+        if (physicalStart == 0u) {
+            physicalCoverageValid = false;
+            break;
+        }
+
+        uint64_t physicalEnd = 0u;
+        if (add_u64_overflow(physicalStart, chunkBytes - 1u, &physicalEnd)) {
+            physicalCoverageValid = false;
+            break;
+        }
+
+        if (!runOpen) {
+            runOpen = true;
+            runStartPhysical = physicalStart;
+            runEndPhysical = physicalEnd;
+            runLength = chunkBytes;
+            firstPhysicalStart = physicalStart;
+            firstPhysicalEnd = physicalEnd;
+        } else {
+            uint64_t expectedPhysicalStart = 0u;
+            if (!add_u64_overflow(runEndPhysical, 1u, &expectedPhysicalStart) && physicalStart == expectedPhysicalStart) {
+                if (add_u64_overflow(runLength, chunkBytes, &runLength)) {
+                    physicalCoverageValid = false;
+                    break;
+                }
+                runEndPhysical = physicalEnd;
+            } else {
+                if (runLength == 0u) {
+                    physicalCoverageValid = false;
+                    break;
+                }
+
+                if (entryCount >= entryCapacity) {
+                    physicalCoverageValid = false;
+                    break;
+                }
+
+                entriesOut[entryCount].addr = runStartPhysical;
+                entriesOut[entryCount].length = static_cast<uint32_t>(runLength);
+                entriesOut[entryCount].padding = 0u;
+                ++entryCount;
+                ++contiguousRunCount;
+                lastPhysicalStart = runStartPhysical;
+                lastPhysicalEnd = runEndPhysical;
+
+                runStartPhysical = physicalStart;
+                runEndPhysical = physicalEnd;
+                runLength = chunkBytes;
+            }
+        }
+
+        if (add_u64_overflow(coveredBytes, chunkBytes, &coveredBytes)) {
+            physicalCoverageValid = false;
+            break;
+        }
+    }
+
+    if (runOpen && physicalCoverageValid) {
+        if (runLength == 0u || entryCount >= entryCapacity) {
+            physicalCoverageValid = false;
+        } else {
+            entriesOut[entryCount].addr = runStartPhysical;
+            entriesOut[entryCount].length = static_cast<uint32_t>(runLength);
+            entriesOut[entryCount].padding = 0u;
+            ++entryCount;
+            ++contiguousRunCount;
+            lastPhysicalStart = runStartPhysical;
+            lastPhysicalEnd = runEndPhysical;
+        }
+    }
+
+    auditOut->totalPages = static_cast<uint32_t>(totalPages64);
+    auditOut->totalMemEntries = entryCount;
+    auditOut->contiguousRunCount = contiguousRunCount;
+    auditOut->coveredBytes = coveredBytes;
+    auditOut->physicalCoverageValid = physicalCoverageValid && (coveredBytes == totalBackingBytes) && (entryCount > 0u);
+    auditOut->firstPhysicalStart = firstPhysicalStart;
+    auditOut->firstPhysicalEnd = firstPhysicalEnd;
+    auditOut->lastPhysicalStart = lastPhysicalStart;
+    auditOut->lastPhysicalEnd = lastPhysicalEnd;
+
+    return auditOut->physicalCoverageValid;
+}
+
+static void log_diagnostic_backing_layout(const DiagnosticBackingLayoutAudit& audit)
+{
+    kernel::serial::puts("[VIRTIO-GPU] Diagnostic backing layout backingVirtualBase=0x");
+    kernel::serial::put_hex64(audit.backingVirtualBase);
+    kernel::serial::puts(" totalBackingBytes=");
+    serial_put_u64_decimal(audit.totalBackingBytes);
+    kernel::serial::puts(" totalPages=");
+    serial_put_u32_decimal(audit.totalPages);
+    kernel::serial::puts(" totalMemEntries=");
+    serial_put_u32_decimal(audit.totalMemEntries);
+    kernel::serial::puts(" contiguousRunCount=");
+    serial_put_u32_decimal(audit.contiguousRunCount);
+    kernel::serial::puts(" coveredBytes=");
+    serial_put_u64_decimal(audit.coveredBytes);
+    kernel::serial::puts(" physicalCoverageValid=");
+    kernel::serial::puts(audit.physicalCoverageValid ? "yes" : "no");
+    kernel::serial::puts(" firstPhysRange=0x");
+    kernel::serial::put_hex64(audit.firstPhysicalStart);
+    kernel::serial::puts("-0x");
+    kernel::serial::put_hex64(audit.firstPhysicalEnd);
+    kernel::serial::puts(" lastPhysRange=0x");
+    kernel::serial::put_hex64(audit.lastPhysicalStart);
+    kernel::serial::puts("-0x");
+    kernel::serial::put_hex64(audit.lastPhysicalEnd);
+    kernel::serial::putc('\n');
 }
 
 static inline void mmio_write8(uint64_t addr, uint8_t value)
@@ -957,11 +1363,46 @@ static void print_probe_outcome()
     }
     kernel::serial::puts(" scanoutSlots=");
     serial_put_u32_decimal(s_probeOutcome.scanoutSlots);
-    kernel::serial::puts(" enabledScanouts=");
+    kernel::serial::puts(" deviceConfigNumScanouts=");
+    serial_put_u32_decimal(s_probeOutcome.deviceConfigNumScanouts);
+    kernel::serial::puts(" qemuMaxOutputsIntent=");
+    serial_put_u32_decimal(s_probeOutcome.qemuMaxOutputsIntent);
+    kernel::serial::puts(" enabledScanoutsBefore=");
     serial_put_u32_decimal(s_probeOutcome.enabledScanoutCount);
-    kernel::serial::puts(" disabledScanouts=");
+    kernel::serial::puts(" disabledScanoutsBefore=");
     serial_put_u32_decimal(s_probeOutcome.disabledScanoutCount);
-    kernel::serial::puts(" rendering=disabled");
+    kernel::serial::puts(" enabledScanoutsAfter=");
+    serial_put_u32_decimal(s_probeOutcome.enabledScanoutsAfter);
+    kernel::serial::puts(" resource2d=");
+    kernel::serial::puts(s_probeOutcome.resource2dReady ? "ready" : "blocked");
+    kernel::serial::puts(" backing=");
+    kernel::serial::puts(s_probeOutcome.backingAttached ? "attached" : "blocked");
+    kernel::serial::puts(" scanout0=");
+    kernel::serial::puts(s_probeOutcome.scanout0Set ? "set" : "blocked");
+    kernel::serial::puts(" transfer=");
+    kernel::serial::puts(s_probeOutcome.transferOk ? "ok" : "blocked");
+    kernel::serial::puts(" flush=");
+    kernel::serial::puts(s_probeOutcome.flushOk ? "ok" : "blocked");
+    kernel::serial::puts(" resource2dSecondary=");
+    kernel::serial::puts(s_probeOutcome.resource2dReadySecondary ? "ready" : "blocked");
+    kernel::serial::puts(" backingSecondary=");
+    kernel::serial::puts(s_probeOutcome.backingAttachedSecondary ? "attached" : "blocked");
+    kernel::serial::puts(" scanout1=");
+    kernel::serial::puts(s_probeOutcome.scanout1Set ? "set" : "blocked");
+    kernel::serial::puts(" transfer1=");
+    kernel::serial::puts(s_probeOutcome.transfer1Ok ? "ok" : "blocked");
+    kernel::serial::puts(" flush1=");
+    kernel::serial::puts(s_probeOutcome.flush1Ok ? "ok" : "blocked");
+    kernel::serial::puts(" distinctPatterns=");
+    kernel::serial::puts(s_probeOutcome.distinctPatternsConfirmed ? "yes" : "no");
+    kernel::serial::puts(" qemuTwoUsableScanouts=");
+    kernel::serial::puts((s_probeOutcome.deviceConfigNumScanouts >= 2u && s_probeOutcome.enabledScanoutsAfter >= 2u) ? "yes" : "no");
+    kernel::serial::puts(" rendering=");
+    if (s_probeOutcome.distinctPatternsConfirmed) {
+        kernel::serial::puts("dual-output-test-pattern");
+    } else {
+        kernel::serial::puts(s_probeOutcome.renderingTestPattern ? "test-pattern-single-output" : "disabled");
+    }
     if (s_probeOutcome.reason != nullptr && s_probeOutcome.reason[0] != '\0') {
         kernel::serial::puts(" reason=");
         kernel::serial::puts(s_probeOutcome.reason);
@@ -1041,6 +1482,13 @@ static bool layout_control_queue(Virtqueue* queue, uint16_t queueSize)
     queue->descPhys = dma_address(reinterpret_cast<void*>(desc));
     queue->availPhys = dma_address(reinterpret_cast<void*>(avail));
     queue->usedPhys = dma_address(reinterpret_cast<void*>(used));
+
+    for (uint16_t index = 0; index < queueSize; ++index) {
+        queue->desc[index].addr = 0;
+        queue->desc[index].len = 0;
+        queue->desc[index].flags = 0;
+        queue->desc[index].next = (index + 1u < queueSize) ? static_cast<uint16_t>(index + 1u) : kInvalidDescriptorIndex;
+    }
 
     return true;
 }
@@ -1646,7 +2094,330 @@ static bool queue_notify(ModernTransport& transport, uint16_t queueIndex)
     return true;
 }
 
-static bool submit_display_info_request(DeviceState& state)
+static bool queue_alloc_descriptor(Virtqueue& queue, uint16_t* descriptorIndexOut)
+{
+    if (descriptorIndexOut == nullptr || queue.numFree == 0u || queue.freeHead == kInvalidDescriptorIndex) {
+        return false;
+    }
+
+    const uint16_t descriptorIndex = queue.freeHead;
+    if (descriptorIndex >= queue.size) {
+        return false;
+    }
+
+    queue.freeHead = queue.desc[descriptorIndex].next;
+    queue.desc[descriptorIndex].next = kInvalidDescriptorIndex;
+    queue.desc[descriptorIndex].flags = 0;
+    queue.desc[descriptorIndex].len = 0;
+    queue.desc[descriptorIndex].addr = 0;
+    queue.numFree = static_cast<uint16_t>(queue.numFree - 1u);
+    *descriptorIndexOut = descriptorIndex;
+    return true;
+}
+
+static void queue_release_descriptor(Virtqueue& queue, uint16_t descriptorIndex)
+{
+    if (descriptorIndex >= queue.size) {
+        return;
+    }
+
+    queue.desc[descriptorIndex].addr = 0;
+    queue.desc[descriptorIndex].len = 0;
+    queue.desc[descriptorIndex].flags = 0;
+    queue.desc[descriptorIndex].next = queue.freeHead;
+    queue.freeHead = descriptorIndex;
+    if (queue.numFree < queue.size) {
+        queue.numFree = static_cast<uint16_t>(queue.numFree + 1u);
+    }
+}
+
+static bool wait_for_control_completion(Virtqueue& queue,
+                                        uint16_t expectedUsedIdx,
+                                        uint16_t headDescriptor,
+                                        const char* commandName,
+                                        uint16_t* usedLengthOut,
+                                        const VringUsedElem** usedElemOut,
+                                        bool* completionKnownOut,
+                                        const char** failureReasonOut)
+{
+    if (usedLengthOut != nullptr) {
+        *usedLengthOut = 0;
+    }
+    if (usedElemOut != nullptr) {
+        *usedElemOut = nullptr;
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = false;
+    }
+
+    uint32_t spin = 0;
+    while (queue.used->idx == expectedUsedIdx && spin < kResponseSpinLimit) {
+        MEMORY_BARRIER();
+        ++spin;
+    }
+
+    if (queue.used->idx == expectedUsedIdx) {
+        kernel::serial::puts("[VIRTIO-GPU] ");
+        kernel::serial::puts(commandName != nullptr ? commandName : "control command");
+        kernel::serial::puts(" timed out usedIdx=");
+        serial_put_u32_decimal(expectedUsedIdx);
+        kernel::serial::puts(" spins=");
+        serial_put_u32_decimal(spin);
+        kernel::serial::putc('\n');
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "control command timed out";
+        }
+        return false;
+    }
+
+    const uint16_t completedUsedIdx = queue.used->idx;
+    const VringUsedElem& usedElem = queue.used->ring[expectedUsedIdx % queue.size];
+    if (usedElemOut != nullptr) {
+        *usedElemOut = &usedElem;
+    }
+    if (usedLengthOut != nullptr) {
+        *usedLengthOut = static_cast<uint16_t>(usedElem.len);
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = (usedElem.id == headDescriptor);
+    }
+
+    kernel::serial::puts("[VIRTIO-GPU] ");
+    kernel::serial::puts(commandName != nullptr ? commandName : "control command");
+    kernel::serial::puts(" completion usedIdx=");
+    serial_put_u32_decimal(completedUsedIdx);
+    kernel::serial::puts(" usedLen=");
+    serial_put_u32_decimal(usedElem.len);
+    kernel::serial::puts(" headDescriptor=");
+    serial_put_u32_decimal(usedElem.id);
+    kernel::serial::putc('\n');
+
+    if (usedElem.id != headDescriptor) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "control command completed on unexpected descriptor";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+static bool submit_control_command_sync(ModernTransport& transport,
+                                        const char* commandName,
+                                        uint32_t commandType,
+                                        const void* request,
+                                        size_t requestLen,
+                                        void* response,
+                                        size_t responseLen,
+                                        uint32_t expectedResponseType,
+                                        const char** failureReasonOut,
+                                        bool* completionKnownOut)
+{
+    if (failureReasonOut != nullptr) {
+        *failureReasonOut = nullptr;
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = false;
+    }
+
+    Virtqueue& queue = transport.controlQueue;
+    if (queue.desc == nullptr || queue.avail == nullptr || queue.used == nullptr || queue.size < kMinControlQueueSize) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "control queue is not ready";
+        }
+        return false;
+    }
+
+    if (request == nullptr || response == nullptr || requestLen < sizeof(CtrlHeader) || responseLen < sizeof(CtrlHeader)) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "control command buffers are invalid";
+        }
+        return false;
+    }
+
+    const CtrlHeader* requestHeader = reinterpret_cast<const CtrlHeader*>(request);
+    if (requestHeader->type != commandType) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "control command type mismatch";
+        }
+        return false;
+    }
+
+    if (queue.numFree < 2u) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "control queue has insufficient free descriptors";
+        }
+        return false;
+    }
+
+    uint16_t requestDescriptor = kInvalidDescriptorIndex;
+    uint16_t responseDescriptor = kInvalidDescriptorIndex;
+    if (!queue_alloc_descriptor(queue, &requestDescriptor) ||
+        !queue_alloc_descriptor(queue, &responseDescriptor)) {
+        if (requestDescriptor != kInvalidDescriptorIndex) {
+            queue_release_descriptor(queue, requestDescriptor);
+        }
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "control queue descriptor allocation failed";
+        }
+        return false;
+    }
+
+    memzero(response, responseLen);
+    queue.desc[requestDescriptor].addr = dma_address(request);
+    queue.desc[requestDescriptor].len = static_cast<uint32_t>(requestLen);
+    queue.desc[requestDescriptor].flags = VRING_DESC_F_NEXT;
+    queue.desc[requestDescriptor].next = responseDescriptor;
+    queue.desc[responseDescriptor].addr = dma_address(response);
+    queue.desc[responseDescriptor].len = static_cast<uint32_t>(responseLen);
+    queue.desc[responseDescriptor].flags = VRING_DESC_F_WRITE;
+    queue.desc[responseDescriptor].next = 0;
+
+    const uint16_t expectedUsedIdx = queue.lastUsedIdx;
+    const uint16_t slot = static_cast<uint16_t>(queue.avail->idx % queue.size);
+    queue.avail->ring[slot] = requestDescriptor;
+    MEMORY_BARRIER();
+    queue.avail->idx = static_cast<uint16_t>(queue.avail->idx + 1u);
+    MEMORY_BARRIER();
+
+    if (!queue_notify(transport, 0)) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "notify address validation failed";
+        }
+        return false;
+    }
+
+    const VringUsedElem* usedElem = nullptr;
+    uint16_t usedLen = 0;
+    bool completionKnown = false;
+    if (!wait_for_control_completion(queue,
+                                     expectedUsedIdx,
+                                     requestDescriptor,
+                                     commandName,
+                                     &usedLen,
+                                     &usedElem,
+                                     &completionKnown,
+                                     failureReasonOut)) {
+        if (completionKnown && responseDescriptor != kInvalidDescriptorIndex) {
+            queue_release_descriptor(queue, responseDescriptor);
+            queue_release_descriptor(queue, requestDescriptor);
+            queue.lastUsedIdx = queue.used->idx;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = completionKnown;
+        }
+        return false;
+    }
+
+    if (usedLen < responseLen) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "control command returned a short response";
+        }
+        if (responseDescriptor != kInvalidDescriptorIndex) {
+            queue_release_descriptor(queue, responseDescriptor);
+            queue_release_descriptor(queue, requestDescriptor);
+            queue.lastUsedIdx = queue.used->idx;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = true;
+        }
+        return false;
+    }
+
+    const CtrlHeader* responseHeader = reinterpret_cast<const CtrlHeader*>(response);
+    if (responseHeader->type != expectedResponseType) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "unexpected control response type";
+        }
+        if (responseDescriptor != kInvalidDescriptorIndex) {
+            queue_release_descriptor(queue, responseDescriptor);
+            queue_release_descriptor(queue, requestDescriptor);
+            queue.lastUsedIdx = queue.used->idx;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = true;
+        }
+        return false;
+    }
+
+    if (responseDescriptor != kInvalidDescriptorIndex) {
+        queue_release_descriptor(queue, responseDescriptor);
+        queue_release_descriptor(queue, requestDescriptor);
+        queue.lastUsedIdx = queue.used->idx;
+    }
+
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = true;
+    }
+
+    return true;
+}
+
+#if defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+static void log_display_info_snapshot(const DeviceState& state,
+                                      const char* phaseLabel,
+                                      const ModernTransport& transport,
+                                      uint32_t deviceConfigScanouts,
+                                      uint32_t deviceConfigCapsets,
+                                      uint32_t qemuMaxOutputsIntent,
+                                      bool logDeviceConfigLine)
+{
+    if (logDeviceConfigLine) {
+        kernel::serial::puts("[VIRTIO-GPU] ");
+        if (phaseLabel != nullptr && phaseLabel[0] != '\0') {
+            kernel::serial::puts(phaseLabel);
+            kernel::serial::puts(" ");
+        }
+        kernel::serial::puts("Device config numScanouts=");
+        serial_put_u32_decimal(deviceConfigScanouts);
+        kernel::serial::puts(" numCapsets=");
+        serial_put_u32_decimal(deviceConfigCapsets);
+        kernel::serial::putc('\n');
+    }
+
+    kernel::serial::puts("[VIRTIO-GPU] ");
+    if (phaseLabel != nullptr && phaseLabel[0] != '\0') {
+        kernel::serial::puts(phaseLabel);
+        kernel::serial::puts(" ");
+    }
+    kernel::serial::puts("GET_DISPLAY_INFO protocolSlots=");
+    serial_put_u32_decimal(transport.displayInfoSlots);
+    kernel::serial::puts(" enabledScanouts=");
+    serial_put_u32_decimal(transport.enabledScanouts);
+    kernel::serial::puts(" disabledScanouts=");
+    serial_put_u32_decimal(transport.disabledScanouts);
+    kernel::serial::puts(" deviceConfigNumScanouts=");
+    serial_put_u32_decimal(deviceConfigScanouts);
+    kernel::serial::puts(" qemuMaxOutputsIntent=");
+    serial_put_u32_decimal(qemuMaxOutputsIntent);
+    kernel::serial::putc('\n');
+
+    for (uint32_t i = 0; i < MAX_SCANOUTS; ++i) {
+        const DisplayInfo& mode = state.device.displays[i];
+        kernel::serial::puts("[VIRTIO-GPU] ");
+        if (phaseLabel != nullptr && phaseLabel[0] != '\0') {
+            kernel::serial::puts(phaseLabel);
+            kernel::serial::puts(" ");
+        }
+        kernel::serial::puts("scanout[");
+        serial_put_u32_decimal(i);
+        kernel::serial::puts("] enabled=");
+        kernel::serial::puts(mode.enabled ? "yes" : "no");
+        kernel::serial::puts(" x=");
+        serial_put_u32_decimal(mode.x);
+        kernel::serial::puts(" y=");
+        serial_put_u32_decimal(mode.y);
+        kernel::serial::puts(" width=");
+        serial_put_u32_decimal(mode.width);
+        kernel::serial::puts(" height=");
+        serial_put_u32_decimal(mode.height);
+        kernel::serial::putc('\n');
+    }
+}
+
+static bool submit_display_info_request(DeviceState& state,
+                                        const char* phaseLabel,
+                                        bool logDeviceConfigLine)
 {
     ModernTransport& transport = state.transport;
     Virtqueue& queue = transport.controlQueue;
@@ -1657,7 +2428,13 @@ static bool submit_display_info_request(DeviceState& state)
         return false;
     }
 
-    log_init_step("GET_DISPLAY_INFO begin");
+    kernel::serial::puts("[VIRTIO-GPU] ");
+    if (phaseLabel != nullptr && phaseLabel[0] != '\0') {
+        kernel::serial::puts(phaseLabel);
+        kernel::serial::puts(" ");
+    }
+    kernel::serial::puts("GET_DISPLAY_INFO begin\n");
+
     memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
     memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
 
@@ -1668,150 +2445,725 @@ static bool submit_display_info_request(DeviceState& state)
     request->ctxId = 0;
     request->padding = 0;
 
-    queue.desc[0].addr = dma_address(request);
-    queue.desc[0].len = sizeof(CtrlHeader);
-    queue.desc[0].flags = VRING_DESC_F_NEXT;
-    queue.desc[0].next = 1;
-
-    queue.desc[1].addr = dma_address(&s_responseBuffer[0]);
-    queue.desc[1].len = sizeof(RespDisplayInfo);
-    queue.desc[1].flags = VRING_DESC_F_WRITE;
-    queue.desc[1].next = 0;
-
-    const uint16_t slot = static_cast<uint16_t>(queue.avail->idx % queue.size);
-    const uint16_t usedBefore = queue.used->idx;
-    queue.avail->ring[slot] = 0;
-    MEMORY_BARRIER();
-    queue.avail->idx = static_cast<uint16_t>(queue.avail->idx + 1);
-    MEMORY_BARRIER();
-
-    if (!queue_notify(transport, 0)) {
-        transport.mmioStopReason = "notify address validation failed";
-        return false;
-    }
-
-    uint32_t spin = 0;
-    while (queue.used->idx == usedBefore && spin < kResponseSpinLimit) {
-        MEMORY_BARRIER();
-        ++spin;
-    }
-
-    if (queue.used->idx == usedBefore) {
-        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO timed out");
-        kernel::serial::puts(" availIdx=");
-        serial_put_u32_decimal(queue.avail->idx);
-        kernel::serial::puts(" usedIdx=");
-        serial_put_u32_decimal(queue.used->idx);
-        kernel::serial::puts(" lastUsedIdx=");
-        serial_put_u32_decimal(queue.lastUsedIdx);
-        kernel::serial::puts(" descriptorHead=");
-        serial_put_u32_decimal(0);
-        kernel::serial::puts(" descPhys=0x");
-        kernel::serial::put_hex64(queue.descPhys);
+    const char* failureReason = nullptr;
+    bool completionKnown = false;
+    if (!submit_control_command_sync(transport,
+                                     phaseLabel != nullptr ? phaseLabel : "GET_DISPLAY_INFO",
+                                     CMD_GET_DISPLAY_INFO,
+                                     request,
+                                     sizeof(CtrlHeader),
+                                     &s_responseBuffer[0],
+                                     sizeof(RespDisplayInfo),
+                                     RESP_OK_DISPLAY_INFO,
+                                     &failureReason,
+                                     &completionKnown)) {
+        kernel::serial::puts("[VIRTIO-GPU] ");
+        if (phaseLabel != nullptr && phaseLabel[0] != '\0') {
+            kernel::serial::puts(phaseLabel);
+            kernel::serial::puts(" ");
+        }
+        kernel::serial::puts("GET_DISPLAY_INFO failed: ");
+        kernel::serial::puts(failureReason != nullptr ? failureReason : "n/a");
         kernel::serial::putc('\n');
-        transport.mmioStopReason = "GET_DISPLAY_INFO timed out";
+        transport.mmioStopReason = failureReason != nullptr ? failureReason : "GET_DISPLAY_INFO failed";
         return false;
     }
-
-    const VringUsedElem& usedElem = queue.used->ring[queue.lastUsedIdx % queue.size];
-    queue.lastUsedIdx = queue.used->idx;
-
-    if (usedElem.id != 0) {
-        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO completed on unexpected descriptor\n");
-        transport.mmioStopReason = "GET_DISPLAY_INFO completed on unexpected descriptor";
-        return false;
-    }
-
-    if (usedElem.len < sizeof(RespDisplayInfo)) {
-        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO returned a short response len=0x");
-        kernel::serial::put_hex32(usedElem.len);
-        kernel::serial::putc('\n');
-        transport.mmioStopReason = "GET_DISPLAY_INFO returned a short response";
-        return false;
-    }
-
-    kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO completion usedIdx=");
-    serial_put_u32_decimal(queue.lastUsedIdx);
-    kernel::serial::puts(" usedLen=");
-    serial_put_u32_decimal(usedElem.len);
-    kernel::serial::puts(" headDescriptor=");
-    serial_put_u32_decimal(usedElem.id);
-    kernel::serial::putc('\n');
 
     const RespDisplayInfo* response = reinterpret_cast<const RespDisplayInfo*>(&s_responseBuffer[0]);
-    kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO response type=0x");
+    kernel::serial::puts("[VIRTIO-GPU] ");
+    if (phaseLabel != nullptr && phaseLabel[0] != '\0') {
+        kernel::serial::puts(phaseLabel);
+        kernel::serial::puts(" ");
+    }
+    kernel::serial::puts("GET_DISPLAY_INFO response type=0x");
     kernel::serial::put_hex32(response->header.type);
     kernel::serial::putc('\n');
+
     if (response->header.type != RESP_OK_DISPLAY_INFO) {
-        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO returned unexpected response type\n");
+        kernel::serial::puts("[VIRTIO-GPU] ");
+        if (phaseLabel != nullptr && phaseLabel[0] != '\0') {
+            kernel::serial::puts(phaseLabel);
+            kernel::serial::puts(" ");
+        }
+        kernel::serial::puts("GET_DISPLAY_INFO returned unexpected response type\n");
         transport.mmioStopReason = "GET_DISPLAY_INFO returned unexpected response type";
         return false;
+    }
+
+    uint32_t deviceConfigScanouts = transport.mmioDeviceScanouts;
+    uint32_t deviceConfigCapsets = transport.mmioDeviceCapsets;
+    if (logDeviceConfigLine && transport.deviceCfg.present) {
+        deviceConfigScanouts = mmio_read32(device_cfg_addr(transport, 0x08));
+        deviceConfigCapsets = mmio_read32(device_cfg_addr(transport, 0x0C));
+        transport.mmioDeviceScanouts = deviceConfigScanouts;
+        transport.mmioDeviceCapsets = deviceConfigCapsets;
     }
 
     transport.displayInfoSlots = MAX_SCANOUTS;
     transport.enabledScanouts = 0;
     transport.disabledScanouts = 0;
 
-    uint32_t deviceConfigScanouts = 0;
-    uint32_t deviceConfigCapsets = 0;
-    if (transport.deviceCfg.present) {
-        deviceConfigScanouts = mmio_read32(device_cfg_addr(transport, 0x08));
-        deviceConfigCapsets = mmio_read32(device_cfg_addr(transport, 0x0C));
-        transport.mmioDeviceScanouts = deviceConfigScanouts;
-        transport.mmioDeviceCapsets = deviceConfigCapsets;
-        kernel::serial::puts("[VIRTIO-GPU] Device config numScanouts=");
-        serial_put_u32_decimal(deviceConfigScanouts);
-        kernel::serial::puts(" numCapsets=");
-        serial_put_u32_decimal(deviceConfigCapsets);
-        kernel::serial::putc('\n');
-    }
-
     for (uint32_t i = 0; i < MAX_SCANOUTS; ++i) {
         const DisplayOne& mode = response->pmodes[i];
+        state.device.displays[i].x = mode.rect.x;
+        state.device.displays[i].y = mode.rect.y;
         state.device.displays[i].width = mode.rect.width;
         state.device.displays[i].height = mode.rect.height;
-        state.device.displays[i].enabled = mode.enabled != 0;
-        if (mode.enabled != 0) {
+        state.device.displays[i].enabled = mode.enabled != 0u;
+        if (mode.enabled != 0u) {
             ++transport.enabledScanouts;
         } else {
             ++transport.disabledScanouts;
         }
-
-        kernel::serial::puts("[VIRTIO-GPU]   scanout[");
-        serial_put_u32_decimal(i);
-        kernel::serial::puts("] enabled=");
-        kernel::serial::puts(mode.enabled != 0 ? "yes" : "no");
-        kernel::serial::puts(" x=");
-        serial_put_u32_decimal(mode.rect.x);
-        kernel::serial::puts(" y=");
-        serial_put_u32_decimal(mode.rect.y);
-        kernel::serial::puts(" width=");
-        serial_put_u32_decimal(mode.rect.width);
-        kernel::serial::puts(" height=");
-        serial_put_u32_decimal(mode.rect.height);
-        kernel::serial::puts(" flags=0x");
-        kernel::serial::put_hex32(mode.flags);
-        kernel::serial::putc('\n');
     }
 
     state.device.numScanouts = transport.enabledScanouts;
     state.device.features = transport.negotiatedFeatures;
-    kernel::serial::puts("[VIRTIO-GPU] Display info summary slots=");
-    serial_put_u32_decimal(transport.displayInfoSlots);
-    kernel::serial::puts(" enabled=");
-    serial_put_u32_decimal(transport.enabledScanouts);
-    kernel::serial::puts(" disabled=");
-    serial_put_u32_decimal(transport.disabledScanouts);
-    kernel::serial::puts(" deviceConfigScanouts=");
-    serial_put_u32_decimal(deviceConfigScanouts);
-    kernel::serial::puts(" qemuTwoUsableScanouts=");
-    kernel::serial::puts(transport.enabledScanouts >= 2u ? "yes" : "no");
-    kernel::serial::putc('\n');
+    log_display_info_snapshot(state,
+                              phaseLabel,
+                              transport,
+                              deviceConfigScanouts,
+                              deviceConfigCapsets,
+                              kDiagnosticQemuMaxOutputsIntent,
+                              logDeviceConfigLine);
 
-    transport.displayInfoSlots = MAX_SCANOUTS;
-    transport.probeComplete = true;
+    transport.mmioStopReason = "GET_DISPLAY_INFO milestone complete";
     return true;
 }
+
+static void mirror_diagnostic_resource_to_framebuffer(DeviceState& state,
+                                                      const DiagnosticResourceState& resource)
+{
+    if (!resource.mirroredToFramebuffer) {
+        return;
+    }
+
+    state.device.fbResourceId = resource.resourceId;
+    state.device.fbWidth = resource.width;
+    state.device.fbHeight = resource.height;
+    state.device.fbFormat = resource.format;
+}
+
+static void clear_diagnostic_resource_from_framebuffer(DeviceState& state,
+                                                       const DiagnosticResourceState& resource)
+{
+    if (!resource.mirroredToFramebuffer || state.device.fbResourceId != resource.resourceId) {
+        return;
+    }
+
+    state.device.fbResourceId = 0u;
+    state.device.fbBuffer = nullptr;
+    state.device.fbBufferPhys = 0u;
+    state.device.fbBufferSize = 0u;
+    state.device.fbWidth = 0u;
+    state.device.fbHeight = 0u;
+    state.device.fbFormat = 0u;
+}
+
+static bool issue_resource_create_2d(DeviceState& state,
+                                     DiagnosticResourceState& resource,
+                                     uint32_t reservedResourceId,
+                                     uint32_t resourceId,
+                                     uint32_t width,
+                                     uint32_t height,
+                                     GpuFormat format,
+                                     bool mirrorToFramebuffer,
+                                     const char** failureReasonOut,
+                                     bool* completionKnownOut)
+{
+    ModernTransport& transport = state.transport;
+    if (failureReasonOut != nullptr) {
+        *failureReasonOut = nullptr;
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = false;
+    }
+
+    if (resourceId == 0u || resourceId == reservedResourceId || resource.resourceId != 0u) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "diagnostic resource id is invalid";
+        }
+        return false;
+    }
+
+    memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
+    memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
+    ResourceCreate2d* request = reinterpret_cast<ResourceCreate2d*>(&s_commandBuffer[0]);
+    request->header.type = CMD_RESOURCE_CREATE_2D;
+    request->header.flags = 0;
+    request->header.fenceId = 0;
+    request->header.ctxId = 0;
+    request->header.padding = 0;
+    request->resourceId = resourceId;
+    request->format = static_cast<uint32_t>(format);
+    request->width = width;
+    request->height = height;
+
+    log_init_step("RESOURCE_CREATE_2D begin");
+    const char* submitReason = nullptr;
+    bool completionKnown = false;
+    if (!submit_control_command_sync(transport,
+                                     "RESOURCE_CREATE_2D",
+                                     CMD_RESOURCE_CREATE_2D,
+                                     request,
+                                     sizeof(ResourceCreate2d),
+                                     &s_responseBuffer[0],
+                                     sizeof(CtrlHeader),
+                                     RESP_OK_NODATA,
+                                     &submitReason,
+                                     &completionKnown)) {
+        kernel::serial::puts("[VIRTIO-GPU] RESOURCE_CREATE_2D result=failed reason=");
+        kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
+        kernel::serial::putc('\n');
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = submitReason;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = completionKnown;
+        }
+        return false;
+    }
+
+    resource.resourceId = resourceId;
+    resource.width = width;
+    resource.height = height;
+    resource.format = static_cast<uint32_t>(format);
+    resource.mirroredToFramebuffer = mirrorToFramebuffer;
+    resource.created = true;
+
+    if (mirrorToFramebuffer) {
+        mirror_diagnostic_resource_to_framebuffer(state, resource);
+    }
+
+    kernel::serial::puts("[VIRTIO-GPU] RESOURCE_CREATE_2D result=ready resourceId=0x");
+    kernel::serial::put_hex32(resourceId);
+    kernel::serial::puts(" format=");
+    kernel::serial::puts(gpu_format_name(format));
+    kernel::serial::puts(" width=");
+    serial_put_u32_decimal(width);
+    kernel::serial::puts(" height=");
+    serial_put_u32_decimal(height);
+    kernel::serial::putc('\n');
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = true;
+    }
+    return true;
+}
+
+static bool issue_resource_attach_backing(DeviceState& state,
+                                          DiagnosticResourceState& resource,
+                                          uint64_t backingVirtual,
+                                          uint64_t backingPhysical,
+                                          uint64_t backingBytes,
+                                          uint64_t backingPageCount,
+                                          const MemEntry* entries,
+                                          uint32_t entryCount,
+                                          const DiagnosticBackingLayoutAudit& audit,
+                                          const char** failureReasonOut,
+                                          bool* completionKnownOut)
+{
+    ModernTransport& transport = state.transport;
+    if (failureReasonOut != nullptr) {
+        *failureReasonOut = nullptr;
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = false;
+    }
+
+    if (resource.resourceId == 0u || !resource.created || resource.backingAttached) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "attach backing resource id mismatch";
+        }
+        return false;
+    }
+
+    if (backingPhysical == 0u || backingVirtual == 0u || backingBytes == 0u || entryCount == 0u || entries == nullptr) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "attach backing parameters are invalid";
+        }
+        return false;
+    }
+
+    if (!audit.physicalCoverageValid || audit.totalMemEntries != entryCount || audit.coveredBytes != backingBytes) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "attach backing coverage validation failed";
+        }
+        return false;
+    }
+
+    if (entryCount > kDiagnosticBackingMaxMemEntries) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "attach backing entry count exceeds limit";
+        }
+        return false;
+    }
+
+    const size_t requestLength = sizeof(ResourceAttachBacking) + (static_cast<size_t>(entryCount) * sizeof(MemEntry));
+    if (requestLength > sizeof(s_commandBuffer)) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "attach backing request is too large";
+        }
+        return false;
+    }
+
+    log_diagnostic_backing_layout(audit);
+
+    memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
+    memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
+    ResourceAttachBacking* request = reinterpret_cast<ResourceAttachBacking*>(&s_commandBuffer[0]);
+    request->header.type = CMD_RESOURCE_ATTACH_BACKING;
+    request->header.flags = 0;
+    request->header.fenceId = 0;
+    request->header.ctxId = 0;
+    request->header.padding = 0;
+    request->resourceId = resource.resourceId;
+    request->numEntries = entryCount;
+    MemEntry* requestEntries = reinterpret_cast<MemEntry*>(reinterpret_cast<uint8_t*>(request) + sizeof(ResourceAttachBacking));
+    for (uint32_t i = 0u; i < entryCount; ++i) {
+        requestEntries[i] = entries[i];
+    }
+
+    log_init_step("RESOURCE_ATTACH_BACKING begin");
+    const char* submitReason = nullptr;
+    bool completionKnown = false;
+    if (!submit_control_command_sync(transport,
+                                     "RESOURCE_ATTACH_BACKING",
+                                     CMD_RESOURCE_ATTACH_BACKING,
+                                     request,
+                                     requestLength,
+                                     &s_responseBuffer[0],
+                                     sizeof(CtrlHeader),
+                                     RESP_OK_NODATA,
+                                     &submitReason,
+                                     &completionKnown)) {
+        kernel::serial::puts("[VIRTIO-GPU] RESOURCE_ATTACH_BACKING result=failed reason=");
+        kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
+        kernel::serial::putc('\n');
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = submitReason;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = completionKnown;
+        }
+        return false;
+    }
+
+    resource.backingVirtual = backingVirtual;
+    resource.backingPhysical = backingPhysical;
+    resource.backingBytes = backingBytes;
+    resource.backingPageCount = backingPageCount;
+    resource.memEntryCount = entryCount;
+    resource.contiguousRunCount = audit.contiguousRunCount;
+    resource.coveredBytes = audit.coveredBytes;
+    resource.physicalCoverageValid = audit.physicalCoverageValid;
+    resource.backingAttached = true;
+
+    if (resource.mirroredToFramebuffer) {
+        state.device.fbBuffer = reinterpret_cast<uint8_t*>(backingVirtual);
+        state.device.fbBufferPhys = backingPhysical;
+        state.device.fbBufferSize = static_cast<size_t>(backingBytes);
+    }
+
+    kernel::serial::puts("[VIRTIO-GPU] RESOURCE_ATTACH_BACKING result=attached resourceId=0x");
+    kernel::serial::put_hex32(resource.resourceId);
+    kernel::serial::puts(" backingVirtualBase=0x");
+    kernel::serial::put_hex64(backingVirtual);
+    kernel::serial::puts(" totalBackingBytes=");
+    serial_put_u64_decimal(backingBytes);
+    kernel::serial::puts(" totalPages=");
+    serial_put_u64_decimal(backingPageCount);
+    kernel::serial::puts(" totalMemEntries=");
+    serial_put_u32_decimal(entryCount);
+    kernel::serial::puts(" contiguousRunCount=");
+    serial_put_u32_decimal(audit.contiguousRunCount);
+    kernel::serial::puts(" coveredBytes=");
+    serial_put_u64_decimal(audit.coveredBytes);
+    kernel::serial::puts(" physicalCoverageValid=");
+    kernel::serial::puts(audit.physicalCoverageValid ? "yes" : "no");
+    kernel::serial::puts(" firstPhysRange=0x");
+    kernel::serial::put_hex64(audit.firstPhysicalStart);
+    kernel::serial::puts("-0x");
+    kernel::serial::put_hex64(audit.firstPhysicalEnd);
+    kernel::serial::puts(" lastPhysRange=0x");
+    kernel::serial::put_hex64(audit.lastPhysicalStart);
+    kernel::serial::puts("-0x");
+    kernel::serial::put_hex64(audit.lastPhysicalEnd);
+    kernel::serial::putc('\n');
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = true;
+    }
+    return true;
+}
+
+static bool issue_set_scanout(DeviceState& state,
+                              DiagnosticResourceState& resource,
+                              uint32_t scanoutId,
+                              uint32_t width,
+                              uint32_t height,
+                              const char** failureReasonOut,
+                              bool* completionKnownOut)
+{
+    ModernTransport& transport = state.transport;
+    if (failureReasonOut != nullptr) {
+        *failureReasonOut = nullptr;
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = false;
+    }
+
+    if (scanoutId > 1u) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "scanout id is not permitted";
+        }
+        return false;
+    }
+
+    if (resource.resourceId == 0u || !resource.backingAttached || width == 0u || height == 0u) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "set scanout resource state is invalid";
+        }
+        return false;
+    }
+
+    if (width > resource.width || height > resource.height) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "scanout rectangle exceeds resource bounds";
+        }
+        return false;
+    }
+
+    memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
+    memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
+    SetScanout* request = reinterpret_cast<SetScanout*>(&s_commandBuffer[0]);
+    request->header.type = CMD_SET_SCANOUT;
+    request->header.flags = 0;
+    request->header.fenceId = 0;
+    request->header.ctxId = 0;
+    request->header.padding = 0;
+    request->rect.x = 0u;
+    request->rect.y = 0u;
+    request->rect.width = width;
+    request->rect.height = height;
+    request->scanoutId = scanoutId;
+    request->resourceId = resource.resourceId;
+
+    kernel::serial::puts("[VIRTIO-GPU] Init step: SET_SCANOUT scanout");
+    serial_put_u32_decimal(scanoutId);
+    kernel::serial::puts(" begin\n");
+
+    const char* submitReason = nullptr;
+    bool completionKnown = false;
+    if (!submit_control_command_sync(transport,
+                                     "SET_SCANOUT",
+                                     CMD_SET_SCANOUT,
+                                     request,
+                                     sizeof(SetScanout),
+                                     &s_responseBuffer[0],
+                                     sizeof(CtrlHeader),
+                                     RESP_OK_NODATA,
+                                     &submitReason,
+                                     &completionKnown)) {
+        kernel::serial::puts("[VIRTIO-GPU] SET_SCANOUT result=failed scanoutId=");
+        serial_put_u32_decimal(scanoutId);
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
+        kernel::serial::putc('\n');
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = submitReason;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = completionKnown;
+        }
+        return false;
+    }
+
+    resource.scanoutSet = true;
+    kernel::serial::puts("[VIRTIO-GPU] SET_SCANOUT result=set scanoutId=");
+    serial_put_u32_decimal(scanoutId);
+    kernel::serial::puts(" resourceId=0x");
+    kernel::serial::put_hex32(resource.resourceId);
+    kernel::serial::puts(" rect=0,0 ");
+    serial_put_u32_decimal(width);
+    kernel::serial::putc('x');
+    serial_put_u32_decimal(height);
+    kernel::serial::putc('\n');
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = true;
+    }
+    return true;
+}
+
+static bool issue_transfer_to_host_2d(DeviceState& state,
+                                      DiagnosticResourceState& resource,
+                                      uint32_t scanoutId,
+                                      const char** failureReasonOut,
+                                      bool* completionKnownOut)
+{
+    ModernTransport& transport = state.transport;
+    if (failureReasonOut != nullptr) {
+        *failureReasonOut = nullptr;
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = false;
+    }
+
+    if (resource.resourceId == 0u || !resource.scanoutSet || resource.width == 0u || resource.height == 0u) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "transfer resource state is invalid";
+        }
+        return false;
+    }
+
+    memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
+    memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
+    TransferToHost2d* request = reinterpret_cast<TransferToHost2d*>(&s_commandBuffer[0]);
+    request->header.type = CMD_TRANSFER_TO_HOST_2D;
+    request->header.flags = 0;
+    request->header.fenceId = 0;
+    request->header.ctxId = 0;
+    request->header.padding = 0;
+    request->rect.x = 0u;
+    request->rect.y = 0u;
+    request->rect.width = resource.width;
+    request->rect.height = resource.height;
+    request->offset = 0u;
+    request->resourceId = resource.resourceId;
+    request->padding = 0u;
+
+    kernel::serial::puts("[VIRTIO-GPU] Init step: TRANSFER_TO_HOST_2D scanout");
+    serial_put_u32_decimal(scanoutId);
+    kernel::serial::puts(" begin\n");
+
+    const char* submitReason = nullptr;
+    bool completionKnown = false;
+    if (!submit_control_command_sync(transport,
+                                     "TRANSFER_TO_HOST_2D",
+                                     CMD_TRANSFER_TO_HOST_2D,
+                                     request,
+                                     sizeof(TransferToHost2d),
+                                     &s_responseBuffer[0],
+                                     sizeof(CtrlHeader),
+                                     RESP_OK_NODATA,
+                                     &submitReason,
+                                     &completionKnown)) {
+        kernel::serial::puts("[VIRTIO-GPU] TRANSFER_TO_HOST_2D result=failed scanoutId=");
+        serial_put_u32_decimal(scanoutId);
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
+        kernel::serial::putc('\n');
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = submitReason;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = completionKnown;
+        }
+        return false;
+    }
+
+    resource.transferOk = true;
+    kernel::serial::puts("[VIRTIO-GPU] TRANSFER_TO_HOST_2D result=ok scanoutId=");
+    serial_put_u32_decimal(scanoutId);
+    kernel::serial::puts(" resourceId=0x");
+    kernel::serial::put_hex32(resource.resourceId);
+    kernel::serial::puts(" rect=0,0 ");
+    serial_put_u32_decimal(resource.width);
+    kernel::serial::putc('x');
+    serial_put_u32_decimal(resource.height);
+    kernel::serial::puts(" offset=0");
+    kernel::serial::putc('\n');
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = true;
+    }
+    return true;
+}
+
+static bool issue_resource_flush(DeviceState& state,
+                                 DiagnosticResourceState& resource,
+                                 uint32_t scanoutId,
+                                 const char** failureReasonOut,
+                                 bool* completionKnownOut)
+{
+    ModernTransport& transport = state.transport;
+    if (failureReasonOut != nullptr) {
+        *failureReasonOut = nullptr;
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = false;
+    }
+
+    if (resource.resourceId == 0u || !resource.transferOk || resource.width == 0u || resource.height == 0u) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "flush resource state is invalid";
+        }
+        return false;
+    }
+
+    memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
+    memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
+    ResourceFlush* request = reinterpret_cast<ResourceFlush*>(&s_commandBuffer[0]);
+    request->header.type = CMD_RESOURCE_FLUSH;
+    request->header.flags = 0;
+    request->header.fenceId = 0;
+    request->header.ctxId = 0;
+    request->header.padding = 0;
+    request->rect.x = 0u;
+    request->rect.y = 0u;
+    request->rect.width = resource.width;
+    request->rect.height = resource.height;
+    request->resourceId = resource.resourceId;
+    request->padding = 0u;
+
+    kernel::serial::puts("[VIRTIO-GPU] Init step: RESOURCE_FLUSH scanout");
+    serial_put_u32_decimal(scanoutId);
+    kernel::serial::puts(" begin\n");
+
+    const char* submitReason = nullptr;
+    bool completionKnown = false;
+    if (!submit_control_command_sync(transport,
+                                     "RESOURCE_FLUSH",
+                                     CMD_RESOURCE_FLUSH,
+                                     request,
+                                     sizeof(ResourceFlush),
+                                     &s_responseBuffer[0],
+                                     sizeof(CtrlHeader),
+                                     RESP_OK_NODATA,
+                                     &submitReason,
+                                     &completionKnown)) {
+        kernel::serial::puts("[VIRTIO-GPU] RESOURCE_FLUSH result=failed scanoutId=");
+        serial_put_u32_decimal(scanoutId);
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
+        kernel::serial::putc('\n');
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = submitReason;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = completionKnown;
+        }
+        return false;
+    }
+
+    resource.flushOk = true;
+    kernel::serial::puts("[VIRTIO-GPU] RESOURCE_FLUSH result=ok scanoutId=");
+    serial_put_u32_decimal(scanoutId);
+    kernel::serial::puts(" resourceId=0x");
+    kernel::serial::put_hex32(resource.resourceId);
+    kernel::serial::puts(" rect=0,0 ");
+    serial_put_u32_decimal(resource.width);
+    kernel::serial::putc('x');
+    serial_put_u32_decimal(resource.height);
+    kernel::serial::putc('\n');
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = true;
+    }
+    return true;
+}
+
+static bool issue_resource_unref(DeviceState& state,
+                                 DiagnosticResourceState& resource,
+                                 const char** failureReasonOut,
+                                 bool* completionKnownOut)
+{
+    ModernTransport& transport = state.transport;
+    if (failureReasonOut != nullptr) {
+        *failureReasonOut = nullptr;
+    }
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = false;
+    }
+
+    if (resource.resourceId == 0u) {
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = "resource id is zero";
+        }
+        return false;
+    }
+
+    memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
+    memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
+    ResourceUnref* request = reinterpret_cast<ResourceUnref*>(&s_commandBuffer[0]);
+    request->header.type = CMD_RESOURCE_UNREF;
+    request->header.flags = 0;
+    request->header.fenceId = 0;
+    request->header.ctxId = 0;
+    request->header.padding = 0;
+    request->resourceId = resource.resourceId;
+    request->padding = 0u;
+
+    log_init_step("RESOURCE_UNREF begin");
+    const char* submitReason = nullptr;
+    bool completionKnown = false;
+    if (!submit_control_command_sync(transport,
+                                     "RESOURCE_UNREF",
+                                     CMD_RESOURCE_UNREF,
+                                     request,
+                                     sizeof(ResourceUnref),
+                                     &s_responseBuffer[0],
+                                     sizeof(CtrlHeader),
+                                     RESP_OK_NODATA,
+                                     &submitReason,
+                                     &completionKnown)) {
+        kernel::serial::puts("[VIRTIO-GPU] RESOURCE_UNREF result=failed reason=");
+        kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
+        kernel::serial::putc('\n');
+        if (failureReasonOut != nullptr) {
+            *failureReasonOut = submitReason;
+        }
+        if (completionKnownOut != nullptr) {
+            *completionKnownOut = completionKnown;
+        }
+        return false;
+    }
+
+    kernel::serial::puts("[VIRTIO-GPU] RESOURCE_UNREF result=ok resourceId=0x");
+    kernel::serial::put_hex32(resource.resourceId);
+    kernel::serial::putc('\n');
+    if (resource.mirroredToFramebuffer) {
+        clear_diagnostic_resource_from_framebuffer(state, resource);
+    }
+    resource = DiagnosticResourceState{};
+    if (completionKnownOut != nullptr) {
+        *completionKnownOut = true;
+    }
+    return true;
+}
+
+static void cleanup_diagnostic_resource_if_safe(DeviceState& state,
+                                                DiagnosticResourceState& resource,
+                                                bool commandCompleted,
+                                                const char* cleanupReason)
+{
+    if (resource.resourceId == 0u) {
+        kernel::serial::puts("[VIRTIO-GPU] Cleanup state resourceId=n/a skipped=already-cleaned reason=");
+        kernel::serial::puts(cleanupReason != nullptr ? cleanupReason : "n/a");
+        kernel::serial::putc('\n');
+        return;
+    }
+
+    kernel::serial::puts("[VIRTIO-GPU] Cleanup state resourceId=0x");
+    kernel::serial::put_hex32(resource.resourceId);
+    kernel::serial::puts(" commandCompleted=");
+    kernel::serial::puts(commandCompleted ? "yes" : "no");
+    kernel::serial::puts(" reason=");
+    kernel::serial::puts(cleanupReason != nullptr ? cleanupReason : "n/a");
+    kernel::serial::putc('\n');
+
+    if (!commandCompleted) {
+        return;
+    }
+
+    const char* unrefReason = nullptr;
+    bool unrefKnown = false;
+    if (issue_resource_unref(state, resource, &unrefReason, &unrefKnown)) {
+        kernel::serial::puts("[VIRTIO-GPU] Cleanup resource release complete\n");
+    } else {
+        kernel::serial::puts("[VIRTIO-GPU] Cleanup resource release failed reason=");
+        kernel::serial::puts(unrefReason != nullptr ? unrefReason : "n/a");
+        kernel::serial::putc('\n');
+        (void)unrefKnown;
+    }
+}
+#endif // GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE
 
 static bool probe_device(DeviceState& state, uint8_t bus, uint8_t device, uint8_t function)
 {
@@ -1862,16 +3214,64 @@ static bool probe_device(DeviceState& state, uint8_t bus, uint8_t device, uint8_
     return true;
 }
 
+#if defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
 static bool initialize_device(DeviceState& state)
 {
     ModernTransport& transport = state.transport;
     GpuDevice& device = state.device;
+    DisplayInfoOutcome displayInfoOutcome = DisplayInfoOutcome::NotQueried;
+    uint32_t preRenderEnabledScanouts = 0u;
+    uint32_t preRenderDisabledScanouts = 0u;
+    uint32_t postRenderEnabledScanouts = 0u;
+    DiagnosticResourceState resource1{};
+    DiagnosticResourceState resource2{};
+    DiagnosticBackingLayoutAudit backingAudit1{};
+    DiagnosticBackingLayoutAudit backingAudit2{};
+    MemEntry backingEntries1[kDiagnosticBackingMaxMemEntries]{};
+    MemEntry backingEntries2[kDiagnosticBackingMaxMemEntries]{};
+    uint64_t patternChecksum1 = 0u;
+    uint64_t patternChecksum2 = 0u;
+    uint32_t stageAEnabledScanouts = 0u;
+    uint32_t stageBEnabledScanouts = 0u;
+    bool resource2dReady = false;
+    bool backingAttached = false;
+    bool scanout0Set = false;
+    bool transferOk = false;
+    bool flushOk = false;
+    bool resource2dReadySecondary = false;
+    bool backingAttachedSecondary = false;
+    bool scanout1Set = false;
+    bool transfer1Ok = false;
+    bool flush1Ok = false;
+    bool distinctPatternsConfirmed = false;
+    bool renderingTestPattern = false;
     auto fail_and_record = [&](const char* reason, DisplayInfoOutcome displayInfoOutcome) -> bool {
         const char* finalReason = (reason != nullptr && reason[0] != '\0')
             ? reason
             : "virtio-gpu initialization failed";
         mark_device_failed(transport, finalReason);
-        record_probe_outcome(state, false, displayInfoOutcome, 0u, 0u, 0u, finalReason);
+        s_probeOutcome.deviceConfigNumScanouts = transport.mmioDeviceScanouts;
+        s_probeOutcome.qemuMaxOutputsIntent = kDiagnosticQemuMaxOutputsIntent;
+        s_probeOutcome.enabledScanoutsAfter = stageBEnabledScanouts != 0u ? stageBEnabledScanouts : postRenderEnabledScanouts;
+        s_probeOutcome.resource2dReady = resource2dReady;
+        s_probeOutcome.backingAttached = backingAttached;
+        s_probeOutcome.scanout0Set = scanout0Set;
+        s_probeOutcome.transferOk = transferOk;
+        s_probeOutcome.flushOk = flushOk;
+        s_probeOutcome.resource2dReadySecondary = resource2dReadySecondary;
+        s_probeOutcome.backingAttachedSecondary = backingAttachedSecondary;
+        s_probeOutcome.scanout1Set = scanout1Set;
+        s_probeOutcome.transfer1Ok = transfer1Ok;
+        s_probeOutcome.flush1Ok = flush1Ok;
+        s_probeOutcome.distinctPatternsConfirmed = distinctPatternsConfirmed;
+        s_probeOutcome.renderingTestPattern = renderingTestPattern;
+        record_probe_outcome(state,
+                             device.initialized,
+                             displayInfoOutcome,
+                             preRenderEnabledScanouts,
+                             preRenderDisabledScanouts,
+                             transport.displayInfoSlots,
+                             finalReason);
         return false;
     };
 
@@ -2017,21 +3417,488 @@ static bool initialize_device(DeviceState& state)
 
     transport.mmioDeviceStatus = finalStatus;
 
-    if (!submit_display_info_request(state)) {
-        return fail_and_record(transport.mmioStopReason, DisplayInfoOutcome::Failed);
+    if (!submit_display_info_request(state, "pre-render", true)) {
+        displayInfoOutcome = DisplayInfoOutcome::Failed;
+        return fail_and_record(transport.mmioStopReason, displayInfoOutcome);
     }
 
-    transport.mmioStopReason = "GET_DISPLAY_INFO milestone complete";
+    displayInfoOutcome = DisplayInfoOutcome::Ok;
+    preRenderEnabledScanouts = transport.enabledScanouts;
+    preRenderDisabledScanouts = transport.disabledScanouts;
     device.initialized = true;
+
+    const DisplayInfo& scanout0 = device.displays[0];
+    const DisplayInfo& scanout1Initial = device.displays[1];
+    if (!scanout0.enabled) {
+        return fail_and_record("scanout 0 is not enabled", displayInfoOutcome);
+    }
+    if (transport.mmioDeviceScanouts < 2u) {
+        return fail_and_record("deviceConfigNumScanouts reported fewer than two scanouts", displayInfoOutcome);
+    }
+
+    uint32_t selectedWidth = scanout0.width;
+    uint32_t selectedHeight = scanout0.height;
+    bool usedFallbackGeometry = false;
+    const uint32_t kDiagnosticMaxDimension = 4096u;
+    const uint32_t kFallbackWidth = 1024u;
+    const uint32_t kFallbackHeight = 768u;
+    if (selectedWidth == 0u || selectedHeight == 0u) {
+        return fail_and_record("scanout 0 geometry is invalid", displayInfoOutcome);
+    }
+    if (selectedWidth > kDiagnosticMaxDimension || selectedHeight > kDiagnosticMaxDimension) {
+        selectedWidth = kFallbackWidth;
+        selectedHeight = kFallbackHeight;
+        usedFallbackGeometry = true;
+        kernel::serial::puts("[VIRTIO-GPU] Scanout 0 reported geometry exceeds the diagnostic limit; using conservative fallback size\n");
+    }
+
+    const DiagnosticPatternPalette& primaryPalette = diagnostic_pattern_palette(0u);
+    const DiagnosticPatternPalette& secondaryPalette = diagnostic_pattern_palette(1u);
+    resource1.patternName = primaryPalette.name;
+    resource1.mirroredToFramebuffer = true;
+    resource2.patternName = secondaryPalette.name;
+    resource2.mirroredToFramebuffer = false;
+
+    uint32_t bytesPerPixel = 0u;
+    if (!gpu_format_bytes_per_pixel(FORMAT_B8G8R8X8_UNORM, &bytesPerPixel) || bytesPerPixel != kDiagnosticBytesPerPixel) {
+        return fail_and_record("diagnostic pixel format is unsupported", displayInfoOutcome);
+    }
+
+    uint64_t strideBytes = 0u;
+    if (mul_u64_overflow(static_cast<uint64_t>(selectedWidth), static_cast<uint64_t>(bytesPerPixel), &strideBytes) ||
+        strideBytes == 0u ||
+        strideBytes > static_cast<uint64_t>(~0u)) {
+        return fail_and_record("diagnostic stride overflows", displayInfoOutcome);
+    }
+
+    uint64_t totalBackingBytes = 0u;
+    if (mul_u64_overflow(strideBytes, static_cast<uint64_t>(selectedHeight), &totalBackingBytes) || totalBackingBytes == 0u) {
+        return fail_and_record("diagnostic backing size overflows", displayInfoOutcome);
+    }
+
+    if (totalBackingBytes > static_cast<uint64_t>(kDiagnosticBackingBytes)) {
+        return fail_and_record("diagnostic backing exceeds allocator limit", displayInfoOutcome);
+    }
+
+    const uint64_t backingPageCount = align_up(totalBackingBytes, kDiagnosticPageSizeBytes) / kDiagnosticPageSizeBytes;
+    const uint32_t selectedFormat = FORMAT_B8G8R8X8_UNORM;
+    const uint64_t primaryBackingVirtual = reinterpret_cast<uint64_t>(&s_diagnosticBackingStorage0[0]);
+    const uint64_t primaryBackingPhysical = dma_address(&s_diagnosticBackingStorage0[0]);
+    const uint64_t secondaryBackingVirtual = reinterpret_cast<uint64_t>(&s_diagnosticBackingStorage1[0]);
+    const uint64_t secondaryBackingPhysical = dma_address(&s_diagnosticBackingStorage1[0]);
+
+    kernel::serial::puts("[VIRTIO-GPU] Diagnostic scanout 1 initial enabled=");
+    kernel::serial::puts(scanout1Initial.enabled ? "yes" : "no");
+    kernel::serial::puts(" x=");
+    serial_put_u32_decimal(scanout1Initial.x);
+    kernel::serial::puts(" y=");
+    serial_put_u32_decimal(scanout1Initial.y);
+    kernel::serial::puts(" width=");
+    serial_put_u32_decimal(scanout1Initial.width);
+    kernel::serial::puts(" height=");
+    serial_put_u32_decimal(scanout1Initial.height);
+    kernel::serial::putc('\n');
+
+    kernel::serial::puts("[VIRTIO-GPU] Diagnostic test pattern format=");
+    kernel::serial::puts(gpu_format_name(static_cast<GpuFormat>(selectedFormat)));
+    kernel::serial::puts(" selectedWidth=");
+    serial_put_u32_decimal(selectedWidth);
+    kernel::serial::puts(" selectedHeight=");
+    serial_put_u32_decimal(selectedHeight);
+    kernel::serial::puts(" bytesPerPixel=");
+    serial_put_u32_decimal(bytesPerPixel);
+    kernel::serial::puts(" stride=");
+    serial_put_u64_decimal(strideBytes);
+    kernel::serial::puts(" totalBackingBytes=");
+    serial_put_u64_decimal(totalBackingBytes);
+    kernel::serial::puts(" pageCount=");
+    serial_put_u64_decimal(backingPageCount);
+    kernel::serial::puts(" entryCount<= ");
+    serial_put_u32_decimal(kDiagnosticBackingMaxMemEntries);
+    kernel::serial::puts(" fallbackGeometry=");
+    kernel::serial::puts(usedFallbackGeometry ? "yes" : "no");
+    kernel::serial::putc('\n');
+
+    memzero(&s_diagnosticBackingStorage0[0], static_cast<size_t>(totalBackingBytes));
+    fill_diagnostic_pattern(reinterpret_cast<uint32_t*>(&s_diagnosticBackingStorage0[0]),
+                            selectedWidth,
+                            selectedHeight,
+                            selectedWidth,
+                            primaryPalette);
+    patternChecksum1 = checksum_diagnostic_pattern(&s_diagnosticBackingStorage0[0], static_cast<size_t>(totalBackingBytes));
+    resource1.patternChecksum = patternChecksum1;
+    resource1.checksumValid = true;
+    kernel::serial::puts("[VIRTIO-GPU] Diagnostic pattern name=");
+    kernel::serial::puts(primaryPalette.name);
+    kernel::serial::puts(" width=");
+    serial_put_u32_decimal(selectedWidth);
+    kernel::serial::puts(" height=");
+    serial_put_u32_decimal(selectedHeight);
+    kernel::serial::puts(" stride=");
+    serial_put_u64_decimal(strideBytes);
+    kernel::serial::puts(" byteCount=");
+    serial_put_u64_decimal(totalBackingBytes);
+    kernel::serial::puts(" checksum=0x");
+    kernel::serial::put_hex64(patternChecksum1);
+    kernel::serial::putc('\n');
+
+    if (!build_diagnostic_backing_layout(&s_diagnosticBackingStorage0[0],
+                                         totalBackingBytes,
+                                         backingEntries1,
+                                         kDiagnosticBackingMaxMemEntries,
+                                         &backingAudit1)) {
+        return fail_and_record("primary diagnostic backing physical coverage validation failed", displayInfoOutcome);
+    }
+
+    kernel::serial::puts("[VIRTIO-GPU] Primary backing lifetime=static until QEMU exit or cleanup\n");
+
+    const char* commandReason = nullptr;
+    bool commandCompleted = false;
+    if (!issue_resource_create_2d(state,
+                                  resource1,
+                                  0u,
+                                  kDiagnosticResourceId,
+                                  selectedWidth,
+                                  selectedHeight,
+                                  static_cast<GpuFormat>(selectedFormat),
+                                  true,
+                                  &commandReason,
+                                  &commandCompleted)) {
+        return fail_and_record(commandReason, displayInfoOutcome);
+    }
+
+    resource2dReady = true;
+
+    if (!issue_resource_attach_backing(state,
+                                       resource1,
+                                       primaryBackingVirtual,
+                                       primaryBackingPhysical,
+                                       totalBackingBytes,
+                                       backingPageCount,
+                                       backingEntries1,
+                                       backingAudit1.totalMemEntries,
+                                       backingAudit1,
+                                       &commandReason,
+                                       &commandCompleted)) {
+        cleanup_diagnostic_resource_if_safe(state, resource1, commandCompleted, commandReason);
+        return fail_and_record(commandReason, displayInfoOutcome);
+    }
+
+    backingAttached = true;
+
+    if (!issue_set_scanout(state,
+                           resource1,
+                           0u,
+                           selectedWidth,
+                           selectedHeight,
+                           &commandReason,
+                           &commandCompleted)) {
+        cleanup_diagnostic_resource_if_safe(state, resource1, commandCompleted, commandReason);
+        return fail_and_record(commandReason, displayInfoOutcome);
+    }
+
+    scanout0Set = true;
+
+    if (!issue_transfer_to_host_2d(state,
+                                   resource1,
+                                   0u,
+                                   &commandReason,
+                                   &commandCompleted)) {
+        cleanup_diagnostic_resource_if_safe(state, resource1, commandCompleted, commandReason);
+        return fail_and_record(commandReason, displayInfoOutcome);
+    }
+
+    transferOk = true;
+
+    if (!issue_resource_flush(state,
+                              resource1,
+                              0u,
+                              &commandReason,
+                              &commandCompleted)) {
+        cleanup_diagnostic_resource_if_safe(state, resource1, commandCompleted, commandReason);
+        return fail_and_record(commandReason, displayInfoOutcome);
+    }
+
+    flushOk = true;
+
+    if (!submit_display_info_request(state, "post-render", false)) {
+        cleanup_diagnostic_resource_if_safe(state, resource1, true, transport.mmioStopReason);
+        return fail_and_record(transport.mmioStopReason, displayInfoOutcome);
+    }
+
+    postRenderEnabledScanouts = transport.enabledScanouts;
+    stageAEnabledScanouts = postRenderEnabledScanouts;
+    renderingTestPattern = true;
+
+    kernel::serial::puts("[VIRTIO-GPU] Single-output proof: resource1=");
+    kernel::serial::puts(resource1.created ? "ready" : "blocked");
+    kernel::serial::puts(" backing1=");
+    kernel::serial::puts(backingAudit1.physicalCoverageValid ? "valid" : "invalid");
+    kernel::serial::puts(" scanout0=");
+    kernel::serial::puts(resource1.scanoutSet ? "set" : "blocked");
+    kernel::serial::puts(" transfer0=");
+    kernel::serial::puts(resource1.transferOk ? "ok" : "blocked");
+    kernel::serial::puts(" flush0=");
+    kernel::serial::puts(resource1.flushOk ? "ok" : "blocked");
+    kernel::serial::puts(" patternChecksum=0x");
+    kernel::serial::put_hex64(resource1.patternChecksum);
+    kernel::serial::putc('\n');
+
+#if defined(GXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE)
+    do {
+        kernel::serial::puts("[VIRTIO-GPU] Stage B scanout capacity deviceConfigNumScanouts=");
+        serial_put_u32_decimal(transport.mmioDeviceScanouts);
+        kernel::serial::puts(" scanout1InitialEnabled=");
+        kernel::serial::puts(scanout1Initial.enabled ? "yes" : "no");
+        kernel::serial::puts(" qemuMaxOutputsIntent=");
+        serial_put_u32_decimal(kDiagnosticQemuMaxOutputsIntent);
+        kernel::serial::putc('\n');
+
+        resource2.patternName = secondaryPalette.name;
+
+        memzero(&s_diagnosticBackingStorage1[0], static_cast<size_t>(totalBackingBytes));
+        fill_diagnostic_pattern(reinterpret_cast<uint32_t*>(&s_diagnosticBackingStorage1[0]),
+                                selectedWidth,
+                                selectedHeight,
+                                selectedWidth,
+                                secondaryPalette);
+        patternChecksum2 = checksum_diagnostic_pattern(&s_diagnosticBackingStorage1[0], static_cast<size_t>(totalBackingBytes));
+        resource2.patternChecksum = patternChecksum2;
+        resource2.checksumValid = true;
+        kernel::serial::puts("[VIRTIO-GPU] Diagnostic pattern name=");
+        kernel::serial::puts(secondaryPalette.name);
+        kernel::serial::puts(" width=");
+        serial_put_u32_decimal(selectedWidth);
+        kernel::serial::puts(" height=");
+        serial_put_u32_decimal(selectedHeight);
+        kernel::serial::puts(" stride=");
+        serial_put_u64_decimal(strideBytes);
+        kernel::serial::puts(" byteCount=");
+        serial_put_u64_decimal(totalBackingBytes);
+        kernel::serial::puts(" checksum=0x");
+        kernel::serial::put_hex64(patternChecksum2);
+        kernel::serial::putc('\n');
+
+        if (!build_diagnostic_backing_layout(&s_diagnosticBackingStorage1[0],
+                                             totalBackingBytes,
+                                             backingEntries2,
+                                             kDiagnosticBackingMaxMemEntries,
+                                             &backingAudit2)) {
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=secondary diagnostic backing physical coverage validation failed\n");
+            break;
+        }
+
+        commandReason = nullptr;
+        commandCompleted = false;
+        if (!issue_resource_create_2d(state,
+                                      resource2,
+                                      resource1.resourceId,
+                                      kDiagnosticResourceIdSecondary,
+                                      selectedWidth,
+                                      selectedHeight,
+                                      static_cast<GpuFormat>(selectedFormat),
+                                      false,
+                                      &commandReason,
+                                      &commandCompleted)) {
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=");
+            kernel::serial::puts(commandReason != nullptr ? commandReason : "n/a");
+            kernel::serial::putc('\n');
+            break;
+        }
+
+        resource2dReadySecondary = true;
+
+        if (!issue_resource_attach_backing(state,
+                                           resource2,
+                                           secondaryBackingVirtual,
+                                           secondaryBackingPhysical,
+                                           totalBackingBytes,
+                                           backingPageCount,
+                                           backingEntries2,
+                                           backingAudit2.totalMemEntries,
+                                           backingAudit2,
+                                           &commandReason,
+                                           &commandCompleted)) {
+            cleanup_diagnostic_resource_if_safe(state, resource2, commandCompleted, commandReason);
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=");
+            kernel::serial::puts(commandReason != nullptr ? commandReason : "n/a");
+            kernel::serial::putc('\n');
+            break;
+        }
+
+        backingAttachedSecondary = true;
+
+        if (!issue_set_scanout(state,
+                               resource2,
+                               1u,
+                               selectedWidth,
+                               selectedHeight,
+                               &commandReason,
+                               &commandCompleted)) {
+            cleanup_diagnostic_resource_if_safe(state, resource2, commandCompleted, commandReason);
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=");
+            kernel::serial::puts(commandReason != nullptr ? commandReason : "n/a");
+            kernel::serial::putc('\n');
+            break;
+        }
+
+        scanout1Set = true;
+
+        if (!issue_transfer_to_host_2d(state,
+                                       resource2,
+                                       1u,
+                                       &commandReason,
+                                       &commandCompleted)) {
+            cleanup_diagnostic_resource_if_safe(state, resource2, commandCompleted, commandReason);
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=");
+            kernel::serial::puts(commandReason != nullptr ? commandReason : "n/a");
+            kernel::serial::putc('\n');
+            break;
+        }
+
+        transfer1Ok = true;
+
+        if (!issue_resource_flush(state,
+                                  resource2,
+                                  1u,
+                                  &commandReason,
+                                  &commandCompleted)) {
+            cleanup_diagnostic_resource_if_safe(state, resource2, commandCompleted, commandReason);
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=");
+            kernel::serial::puts(commandReason != nullptr ? commandReason : "n/a");
+            kernel::serial::putc('\n');
+            break;
+        }
+
+        flush1Ok = true;
+
+        if (!submit_display_info_request(state, "post-scanout1", false)) {
+            cleanup_diagnostic_resource_if_safe(state, resource2, true, transport.mmioStopReason);
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=");
+            kernel::serial::puts(transport.mmioStopReason != nullptr ? transport.mmioStopReason : "n/a");
+            kernel::serial::putc('\n');
+            break;
+        }
+
+        stageBEnabledScanouts = transport.enabledScanouts;
+        distinctPatternsConfirmed = (resource1.patternChecksum != 0u && resource1.patternChecksum != resource2.patternChecksum);
+        if (!distinctPatternsConfirmed) {
+            cleanup_diagnostic_resource_if_safe(state, resource2, true, "distinct diagnostic patterns were not confirmed");
+            stageBEnabledScanouts = postRenderEnabledScanouts;
+            kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=distinct diagnostic patterns were not confirmed\n");
+            break;
+        }
+
+        renderingTestPattern = true;
+    } while (false);
+
+    if (!distinctPatternsConfirmed && (scanout1Set || transfer1Ok || flush1Ok || resource2dReadySecondary || backingAttachedSecondary)) {
+        // resource2 cleanup already handled above when a command completed.
+    }
+
+    if (!scanout1Set || !transfer1Ok || !flush1Ok || !distinctPatternsConfirmed) {
+        s_probeOutcome.enabledScanoutsAfter = stageBEnabledScanouts != 0u ? stageBEnabledScanouts : stageAEnabledScanouts;
+        s_probeOutcome.resource2dReady = resource2dReady;
+        s_probeOutcome.backingAttached = backingAttached;
+        s_probeOutcome.scanout0Set = scanout0Set;
+        s_probeOutcome.transferOk = transferOk;
+        s_probeOutcome.flushOk = flushOk;
+        s_probeOutcome.resource2dReadySecondary = resource2dReadySecondary;
+        s_probeOutcome.backingAttachedSecondary = backingAttachedSecondary;
+        s_probeOutcome.scanout1Set = scanout1Set;
+        s_probeOutcome.transfer1Ok = transfer1Ok;
+        s_probeOutcome.flush1Ok = flush1Ok;
+        s_probeOutcome.distinctPatternsConfirmed = distinctPatternsConfirmed;
+        s_probeOutcome.renderingTestPattern = renderingTestPattern;
+        transport.mmioStopReason = transport.mmioStopReason != nullptr && transport.mmioStopReason[0] != '\0'
+            ? transport.mmioStopReason
+            : "scanout 1 activation blocker";
+        transport.probeComplete = true;
+        record_probe_outcome(state,
+                             true,
+                             DisplayInfoOutcome::Ok,
+                             preRenderEnabledScanouts,
+                             preRenderDisabledScanouts,
+                             transport.displayInfoSlots,
+                             transport.mmioStopReason);
+        kernel::serial::puts("[VIRTIO-GPU] Single-output proof: resource1=");
+        kernel::serial::puts(resource1.created ? "ready" : "blocked");
+        kernel::serial::puts(" backing1=");
+        kernel::serial::puts(backingAudit1.physicalCoverageValid ? "valid" : "invalid");
+        kernel::serial::puts(" scanout0=");
+        kernel::serial::puts(resource1.scanoutSet ? "set" : "blocked");
+        kernel::serial::puts(" transfer0=");
+        kernel::serial::puts(resource1.transferOk ? "ok" : "blocked");
+        kernel::serial::puts(" flush0=");
+        kernel::serial::puts(resource1.flushOk ? "ok" : "blocked");
+        kernel::serial::puts(" patternChecksum=0x");
+        kernel::serial::put_hex64(resource1.patternChecksum);
+        kernel::serial::putc('\n');
+        kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: scanout0=working scanout1=failed reason=");
+        kernel::serial::puts(transport.mmioStopReason);
+        kernel::serial::putc('\n');
+        s_probeOutcome.deviceConfigNumScanouts = transport.mmioDeviceScanouts;
+        s_probeOutcome.qemuMaxOutputsIntent = kDiagnosticQemuMaxOutputsIntent;
+        return true;
+    }
+#endif
+
+    kernel::serial::puts("[VIRTIO-GPU] Dual-output proof: resource1=");
+    kernel::serial::puts(resource1.created ? "ready" : "blocked");
+    kernel::serial::puts(" resource2=");
+    kernel::serial::puts(resource2.created ? "ready" : "blocked");
+    kernel::serial::puts(" scanout0=");
+    kernel::serial::puts(resource1.scanoutSet ? "set" : "blocked");
+    kernel::serial::puts(" scanout1=");
+    kernel::serial::puts(resource2.scanoutSet ? "set" : "blocked");
+    kernel::serial::puts(" transfer0=");
+    kernel::serial::puts(resource1.transferOk ? "ok" : "blocked");
+    kernel::serial::puts(" transfer1=");
+    kernel::serial::puts(resource2.transferOk ? "ok" : "blocked");
+    kernel::serial::puts(" flush0=");
+    kernel::serial::puts(resource1.flushOk ? "ok" : "blocked");
+    kernel::serial::puts(" flush1=");
+    kernel::serial::puts(resource2.flushOk ? "ok" : "blocked");
+    kernel::serial::puts(" enabledScanoutsAfter=");
+    serial_put_u32_decimal(stageBEnabledScanouts != 0u ? stageBEnabledScanouts : stageAEnabledScanouts);
+    kernel::serial::puts(" distinctPatterns=");
+    kernel::serial::puts(distinctPatternsConfirmed ? "yes" : "no");
+    kernel::serial::putc('\n');
+
+    transport.mmioStopReason = "dual-output scanout 1 test pattern milestone complete";
     transport.probeComplete = true;
-    kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO milestone complete; rendering remains disabled\n");
-    record_probe_outcome(state, true, DisplayInfoOutcome::Ok,
-                         transport.enabledScanouts,
-                         transport.disabledScanouts,
+    s_probeOutcome.deviceConfigNumScanouts = transport.mmioDeviceScanouts;
+    s_probeOutcome.qemuMaxOutputsIntent = kDiagnosticQemuMaxOutputsIntent;
+    s_probeOutcome.enabledScanoutsAfter = stageBEnabledScanouts != 0u ? stageBEnabledScanouts : stageAEnabledScanouts;
+    s_probeOutcome.resource2dReady = resource2dReady;
+    s_probeOutcome.backingAttached = backingAttached;
+    s_probeOutcome.scanout0Set = scanout0Set;
+    s_probeOutcome.transferOk = transferOk;
+    s_probeOutcome.flushOk = flushOk;
+    s_probeOutcome.resource2dReadySecondary = resource2dReadySecondary;
+    s_probeOutcome.backingAttachedSecondary = backingAttachedSecondary;
+    s_probeOutcome.scanout1Set = scanout1Set;
+    s_probeOutcome.transfer1Ok = transfer1Ok;
+    s_probeOutcome.flush1Ok = flush1Ok;
+    s_probeOutcome.distinctPatternsConfirmed = distinctPatternsConfirmed;
+    s_probeOutcome.renderingTestPattern = renderingTestPattern;
+    record_probe_outcome(state,
+                         true,
+                         DisplayInfoOutcome::Ok,
+                         preRenderEnabledScanouts,
+                         preRenderDisabledScanouts,
                          transport.displayInfoSlots,
                          transport.mmioStopReason);
     return true;
 }
+#endif // GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE
 
 static void print_device_summary(const DeviceState& state)
 {

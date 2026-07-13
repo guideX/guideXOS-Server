@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
 
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $LogRoot = Join-Path $Root 'logs'
@@ -244,7 +245,9 @@ function Start-ProbeLauncher {
         [Parameter(Mandatory = $true)]
         [string]$LauncherStdOut,
         [Parameter(Mandatory = $true)]
-        [string]$LauncherStdErr
+        [string]$LauncherStdErr,
+        [switch]$EnableVisualCapture,
+        [int]$QmpPort = 0
     )
 
     $batchPath = Join-Path $Root 'scripts\run-qemu-display-probe.bat'
@@ -252,13 +255,24 @@ function Start-ProbeLauncher {
 
     $oldState = Save-EnvironmentState -Names @(
         'GXOS_QEMU_DISPLAY_PROBE_HEADLESS',
+        'GXOS_QEMU_DISPLAY_PROBE_CAPTURE',
         'GXOS_QEMU_DISPLAY_PROBE_NO_PAUSE',
+        'GXOS_QEMU_DISPLAY_PROBE_QMP_PORT',
         'GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG'
     )
 
     $env:GXOS_QEMU_DISPLAY_PROBE_HEADLESS = '1'
     $env:GXOS_QEMU_DISPLAY_PROBE_NO_PAUSE = '1'
     $env:GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG = $SerialLog
+    if ($EnableVisualCapture) {
+        $env:GXOS_QEMU_DISPLAY_PROBE_CAPTURE = '1'
+        if ($QmpPort -gt 0) {
+            $env:GXOS_QEMU_DISPLAY_PROBE_QMP_PORT = [string]$QmpPort
+        }
+    } else {
+        Remove-Item Env:\GXOS_QEMU_DISPLAY_PROBE_CAPTURE -ErrorAction SilentlyContinue
+        Remove-Item Env:\GXOS_QEMU_DISPLAY_PROBE_QMP_PORT -ErrorAction SilentlyContinue
+    }
 
     $cmdArgs = @(
         '/c',
@@ -345,6 +359,366 @@ function Get-MatchGroupValue {
     return $Fallback
 }
 
+function Get-TextMatchGroupValue {
+    param(
+        [AllowEmptyString()]
+        [string]$Text,
+        [Parameter(Mandatory = $true)]
+        [string]$Pattern,
+        [int]$GroupIndex = 1,
+        [string]$Fallback = ''
+    )
+
+    $match = [regex]::Match($Text, $Pattern)
+    if ($match.Success -and $match.Groups.Count -gt $GroupIndex) {
+        return $match.Groups[$GroupIndex].Value
+    }
+
+    return $Fallback
+}
+
+function Get-FreeTcpPort {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    try {
+        $listener.Start()
+        return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+    } finally {
+        $listener.Stop()
+    }
+}
+
+function Read-QmpMessage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.StreamReader]$Reader,
+        [int]$TimeoutSeconds = 10
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $line = $Reader.ReadLine()
+        } catch {
+            Start-Sleep -Milliseconds 50
+            continue
+        }
+
+        if ($null -eq $line) {
+            Start-Sleep -Milliseconds 50
+            continue
+        }
+
+        $line = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        try {
+            return $line | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            continue
+        }
+    }
+
+    throw "Timed out waiting for QMP data."
+}
+
+function New-QmpSession {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$Port,
+        [int]$TimeoutSeconds = 10
+    )
+
+    $client = [System.Net.Sockets.TcpClient]::new()
+    $timeoutMs = [Math]::Max(1000, $TimeoutSeconds * 1000)
+    $client.ReceiveTimeout = $timeoutMs
+    $client.SendTimeout = $timeoutMs
+    $client.Connect('127.0.0.1', $Port)
+
+    $stream = $client.GetStream()
+    $stream.ReadTimeout = $timeoutMs
+    $stream.WriteTimeout = $timeoutMs
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    $reader = [System.IO.StreamReader]::new($stream, $utf8NoBom, $false, 1024, $true)
+    $writer = [System.IO.StreamWriter]::new($stream, $utf8NoBom, 1024, $true)
+    $writer.NewLine = "`n"
+    $writer.AutoFlush = $true
+
+    $greeting = Read-QmpMessage -Reader $reader -TimeoutSeconds $TimeoutSeconds
+    if (-not ($greeting.PSObject.Properties.Name -contains 'QMP')) {
+        throw "QMP greeting missing from port $Port."
+    }
+
+    [void](Invoke-QmpCommand -Session ([pscustomobject]@{
+        Client = $client
+        Stream = $stream
+        Reader = $reader
+        Writer = $writer
+        Port = $Port
+    }) -Execute 'qmp_capabilities' -TimeoutSeconds $TimeoutSeconds)
+
+    return [pscustomobject]@{
+        Client = $client
+        Stream = $stream
+        Reader = $reader
+        Writer = $writer
+        Port = $Port
+    }
+}
+
+function Close-QmpSession {
+    param(
+        [AllowNull()]
+        [object]$Session
+    )
+
+    if ($null -eq $Session) {
+        return
+    }
+
+    foreach ($name in @('Writer', 'Reader', 'Stream', 'Client')) {
+        $member = $Session.$name
+        if ($null -ne $member) {
+            try {
+                $member.Dispose()
+            } catch {
+            }
+        }
+    }
+}
+
+function Invoke-QmpCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Session,
+        [Parameter(Mandatory = $true)]
+        [string]$Execute,
+        [hashtable]$Arguments = $null,
+        [int]$TimeoutSeconds = 10
+    )
+
+    $payload = [ordered]@{
+        execute = $Execute
+    }
+    if ($null -ne $Arguments -and $Arguments.Count -gt 0) {
+        $payload.arguments = $Arguments
+    }
+
+    $json = $payload | ConvertTo-Json -Compress -Depth 8
+    $Session.Writer.WriteLine($json)
+    $Session.Writer.Flush()
+
+    while ($true) {
+        $message = Read-QmpMessage -Reader $Session.Reader -TimeoutSeconds $TimeoutSeconds
+        if ($message.PSObject.Properties.Name -contains 'event') {
+            continue
+        }
+
+        if ($message.PSObject.Properties.Name -contains 'return') {
+            return $message
+        }
+
+        if ($message.PSObject.Properties.Name -contains 'error') {
+            $errorClass = if ($message.error.PSObject.Properties.Name -contains 'class') { $message.error.class } else { 'unknown' }
+            $errorDesc = if ($message.error.PSObject.Properties.Name -contains 'desc') { $message.error.desc } else { 'unknown' }
+            throw ("QMP command '{0}' failed: {1}: {2}" -f $Execute, $errorClass, $errorDesc)
+        }
+    }
+}
+
+function Invoke-QmpScreendump {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Session,
+        [Parameter(Mandatory = $true)]
+        [string]$Filename,
+        [string]$DeviceId = '',
+        [int]$Head = -1,
+        [string]$Format = 'png'
+    )
+
+    $arguments = @{
+        filename = $Filename
+    }
+    if (-not [string]::IsNullOrWhiteSpace($DeviceId)) {
+        $arguments.device = $DeviceId
+    }
+    if ($Head -ge 0) {
+        $arguments.head = $Head
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Format)) {
+        $arguments.format = $Format
+    }
+
+    [void](Invoke-QmpCommand -Session $Session -Execute 'screendump' -Arguments $arguments -TimeoutSeconds 10)
+}
+
+function Wait-ForCaptureFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [int]$TimeoutSeconds = 2
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path -LiteralPath $Path) {
+            $fileInfo = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+            if ($fileInfo -and $fileInfo.Length -gt 0) {
+                return $true
+            }
+        }
+
+        Start-Sleep -Milliseconds 100
+    }
+
+    return $false
+}
+
+function Get-DiagnosticPatternSpec {
+    param(
+        [Parameter(Mandatory = $true)]
+        [uint32]$ScanoutId
+    )
+
+    if ($ScanoutId -eq 1) {
+        return [pscustomobject]@{
+            Name = 'scanout1-red-orange'
+            BorderDark = [System.Drawing.Color]::FromArgb(255, 0x58, 0x10, 0x00)
+            BorderLight = [System.Drawing.Color]::FromArgb(255, 0xFF, 0xB0, 0x60)
+            TopLeft = [System.Drawing.Color]::FromArgb(255, 0xE0, 0x40, 0x18)
+            TopRight = [System.Drawing.Color]::FromArgb(255, 0xFF, 0x88, 0x18)
+            BottomLeft = [System.Drawing.Color]::FromArgb(255, 0xB0, 0x18, 0x10)
+            BottomRight = [System.Drawing.Color]::FromArgb(255, 0xFF, 0xC0, 0x48)
+            Center = [System.Drawing.Color]::FromArgb(255, 0xFF, 0xFF, 0xFF)
+        }
+    }
+
+    return [pscustomobject]@{
+        Name = 'scanout0-blue-cyan'
+        BorderDark = [System.Drawing.Color]::FromArgb(255, 0x10, 0x18, 0x48)
+        BorderLight = [System.Drawing.Color]::FromArgb(255, 0x78, 0xD8, 0xFF)
+        TopLeft = [System.Drawing.Color]::FromArgb(255, 0x20, 0x58, 0xE8)
+        TopRight = [System.Drawing.Color]::FromArgb(255, 0x00, 0xD8, 0xF0)
+        BottomLeft = [System.Drawing.Color]::FromArgb(255, 0x38, 0x78, 0xFF)
+        BottomRight = [System.Drawing.Color]::FromArgb(255, 0x90, 0xF8, 0xFF)
+        Center = [System.Drawing.Color]::FromArgb(255, 0xFF, 0xFF, 0xFF)
+    }
+}
+
+function Get-DiagnosticCaptureAssessment {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ImagePath,
+        [Parameter(Mandatory = $true)]
+        [uint32]$ScanoutId
+    )
+
+    if (-not (Test-Path -LiteralPath $ImagePath)) {
+        return [pscustomobject]@{
+            Status = 'failed'
+            Reason = 'capture file missing'
+            PatternName = (Get-DiagnosticPatternSpec -ScanoutId $ScanoutId).Name
+            Width = 0
+            Height = 0
+            Signature = ''
+            Exists = $false
+            ByteCount = 0
+        }
+    }
+
+    $fileInfo = Get-Item -LiteralPath $ImagePath
+    if ($fileInfo.Length -le 0) {
+        return [pscustomobject]@{
+            Status = 'failed'
+            Reason = 'capture file is empty'
+            PatternName = (Get-DiagnosticPatternSpec -ScanoutId $ScanoutId).Name
+            Width = 0
+            Height = 0
+            Signature = ''
+            Exists = $true
+            ByteCount = [int64]$fileInfo.Length
+        }
+    }
+
+    $bitmap = $null
+    try {
+        $bitmap = [System.Drawing.Bitmap]::FromFile($ImagePath)
+        $width = $bitmap.Width
+        $height = $bitmap.Height
+        $spec = Get-DiagnosticPatternSpec -ScanoutId $ScanoutId
+
+        if ($width -lt 64 -or $height -lt 64) {
+            return [pscustomobject]@{
+                Status = 'manual-check-required'
+                Reason = 'capture dimensions are too small for reliable pixel sampling'
+                PatternName = $spec.Name
+                Width = $width
+                Height = $height
+                Signature = ''
+                Exists = $true
+                ByteCount = [int64]$fileInfo.Length
+            }
+        }
+
+        $sampleCoords = @(
+            @{ Name = 'borderDark'; X = 4; Y = 4; Expected = $spec.BorderDark },
+            @{ Name = 'borderLight'; X = 12; Y = 4; Expected = $spec.BorderLight },
+            @{ Name = 'topLeft'; X = [Math]::Max(16, [int]($width / 8)); Y = [Math]::Max(16, [int]($height / 8)); Expected = $spec.TopLeft },
+            @{ Name = 'topRight'; X = [Math]::Min($width - 17, [int](($width * 7) / 8)); Y = [Math]::Max(16, [int]($height / 8)); Expected = $spec.TopRight },
+            @{ Name = 'bottomLeft'; X = [Math]::Max(16, [int]($width / 8)); Y = [Math]::Min($height - 17, [int](($height * 7) / 8)); Expected = $spec.BottomLeft },
+            @{ Name = 'bottomRight'; X = [Math]::Min($width - 17, [int](($width * 7) / 8)); Y = [Math]::Min($height - 17, [int](($height * 7) / 8)); Expected = $spec.BottomRight },
+            @{ Name = 'center'; X = [int]($width / 2); Y = [int]($height / 2); Expected = $spec.Center }
+        )
+
+        $signatureParts = New-Object System.Collections.Generic.List[string]
+        $allMatched = $true
+        $mismatchDetails = New-Object System.Collections.Generic.List[string]
+
+        foreach ($sample in $sampleCoords) {
+            $x = [int]$sample.X
+            $y = [int]$sample.Y
+            if ($x -lt 0 -or $y -lt 0 -or $x -ge $width -or $y -ge $height) {
+                return [pscustomobject]@{
+                    Status = 'manual-check-required'
+                    Reason = "sample point $($sample.Name) falls outside capture bounds"
+                    PatternName = $spec.Name
+                    Width = $width
+                    Height = $height
+                    Signature = ''
+                    Exists = $true
+                    ByteCount = [int64]$fileInfo.Length
+                }
+            }
+
+            $actual = $bitmap.GetPixel($x, $y)
+            $expected = $sample.Expected
+            $signatureParts.Add(("{0}={1:00}{2:00}{3:00}" -f $sample.Name, $actual.R, $actual.G, $actual.B))
+            if ($actual.R -ne $expected.R -or $actual.G -ne $expected.G -or $actual.B -ne $expected.B) {
+                $allMatched = $false
+                $mismatchDetails.Add(("{0} expected={1:00}{2:00}{3:00} actual={4:00}{5:00}{6:00}" -f $sample.Name, $expected.R, $expected.G, $expected.B, $actual.R, $actual.G, $actual.B))
+            }
+        }
+
+        return [pscustomobject]@{
+            Status = if ($allMatched) { 'confirmed' } else { 'failed' }
+            Reason = if ($allMatched) { 'pixel samples matched expected pattern' } else { ($mismatchDetails -join '; ') }
+            PatternName = $spec.Name
+            Width = $width
+            Height = $height
+            Signature = ($signatureParts -join '|')
+            Exists = $true
+            ByteCount = [int64]$fileInfo.Length
+        }
+    } finally {
+        if ($bitmap) {
+            $bitmap.Dispose()
+        }
+    }
+}
+
 function Format-OptionalValue {
     param(
         [AllowNull()]
@@ -403,8 +777,8 @@ function Get-BackendSpec {
                 Required = $false
                 Supported = $true
                 LauncherBackend = 'virtio-gpu'
-                QemuArgs = '-vga none -device virtio-gpu-pci,max_outputs=2'
-                ProbeNote = 'virtio-gpu-pci diagnostic discovery probe'
+                QemuArgs = '-vga none -device virtio-gpu-pci,id=gpu0,max_outputs=2'
+                ProbeNote = 'virtio-gpu-pci diagnostic 2D test-pattern probe (scanout 0 only)'
                 SerialPattern = 'guideXOS UEFI Bootloader'
                 WaitPattern = '\[VIRTIO-GPU\] Probe complete: devices='
             }
@@ -415,8 +789,8 @@ function Get-BackendSpec {
                 Required = $false
                 Supported = (Test-QemuVirtioGpuModernOnlySupport)
                 LauncherBackend = 'virtio-gpu-modern-only'
-                QemuArgs = '-vga none -device virtio-gpu-pci,max_outputs=2,disable-legacy=on'
-                ProbeNote = 'virtio-gpu-pci modern-only diagnostic probe (no rendering)'
+                QemuArgs = '-vga none -device virtio-gpu-pci,id=gpu0,max_outputs=2,disable-legacy=on'
+                ProbeNote = 'virtio-gpu-pci modern-only diagnostic 2D test-pattern probe (scanout 0 only)'
                 SerialPattern = 'guideXOS UEFI Bootloader'
                 WaitPattern = '\[VIRTIO-GPU\] Probe complete: devices='
             }
@@ -465,18 +839,41 @@ function Invoke-QemuDisplayProbeBackend {
         [Parameter(Mandatory = $true)]
         [string]$Backend,
         [Parameter(Mandatory = $true)]
-        [int]$TimeoutSeconds
+        [int]$TimeoutSeconds,
+        [string]$ProbeStage = 'stageA',
+        [switch]$EnableVisualCapture
     )
 
     $spec = Get-BackendSpec -Backend $Backend
     $backendName = $spec.Backend
-    $backendRoot = Join-Path $RunRoot $backendName
+    $stageLabel = if ([string]::IsNullOrWhiteSpace($ProbeStage)) { 'stageA' } else { $ProbeStage }
+    $backendRoot = Join-Path $RunRoot ("{0}-{1}" -f $backendName, $stageLabel)
     New-Item -ItemType Directory -Force -Path $backendRoot | Out-Null
 
     $launcherStdOut = Join-Path $backendRoot 'launcher.stdout.log'
     $launcherStdErr = Join-Path $backendRoot 'launcher.stderr.log'
     $serialLog = Join-Path $backendRoot 'serial.log'
-    $summaryPath = Join-Path $backendRoot 'summary.txt'
+    $summaryPath = Join-Path $backendRoot ("summary-{0}.txt" -f $stageLabel)
+    $captureRoot = Join-Path $backendRoot 'captures'
+    if ($EnableVisualCapture) {
+        New-Item -ItemType Directory -Force -Path $captureRoot | Out-Null
+    }
+    $qmpPort = 0
+    if ($EnableVisualCapture) {
+        $qmpPort = Get-FreeTcpPort
+    }
+    $visualCaptureStatus = 'disabled'
+    $visualScanout0 = 'not-attempted'
+    $visualScanout1 = 'not-attempted'
+    $visualScanout0Path = ''
+    $visualScanout1Path = ''
+    $visualScanout0Signature = ''
+    $visualScanout1Signature = ''
+    $visualScanout0Assessment = $null
+    $visualScanout1Assessment = $null
+    $distinctPatternsConfirmed = $false
+    $captureReason = 'manual-check-required'
+    $visualCaptureReason = ''
 
     if (-not (Find-Qemu)) {
         throw 'qemu-system-x86_64 not found.'
@@ -506,10 +903,17 @@ function Invoke-QemuDisplayProbeBackend {
         return [pscustomobject]@{
             Backend = $backendName
             BackendRoot = $backendRoot
+            ProbeStage = $stageLabel
             LauncherStdOut = $launcherStdOut
             LauncherStdErr = $launcherStdErr
             SerialLog = $serialLog
             SummaryPath = $summaryPath
+            CaptureRoot = $captureRoot
+            VisualCaptureStatus = 'unsupported'
+            VisualScanout0 = 'not-attempted'
+            VisualScanout1 = 'not-attempted'
+            DistinctPatternsConfirmed = $false
+            DualOutputVisualProof = 'not-attempted'
             QemuArgs = $spec.QemuArgs
             ProbeNote = $spec.ProbeNote
             Required = $spec.Required
@@ -561,6 +965,22 @@ function Invoke-QemuDisplayProbeBackend {
             GpuFeatureNegotiationLine = ''
             GpuQueueCountLine = ''
             GpuCapabilityWalkLine = ''
+            GpuPreRenderDeviceConfigLine = ''
+            GpuPreRenderDisplayInfoBeginLine = ''
+            GpuPreRenderCompletionLine = ''
+            GpuPreRenderDisplayInfoSummaryLine = ''
+            GpuDiagnosticTargetLine = ''
+            GpuBackingLayoutLine = ''
+            GpuResourceCreateLine = ''
+            GpuAttachLine = ''
+            GpuSetScanoutLine = ''
+            GpuTransferLine = ''
+            GpuFlushLine = ''
+            GpuPostRenderDisplayInfoBeginLine = ''
+            GpuPostRenderCompletionLine = ''
+            GpuPostRenderDisplayInfoSummaryLine = ''
+            GpuPostRenderScanout0Line = ''
+            GpuPostRenderScanout1Line = ''
             DiagnosticStatus = 'unsupported'
             Interpretation = $supportReason
             LauncherStdOutText = ''
@@ -589,7 +1009,7 @@ function Invoke-QemuDisplayProbeBackend {
     $launcherState = $null
     $sentinelSeen = $false
     try {
-        $launcherState = Start-ProbeLauncher -Backend $spec.LauncherBackend -SerialLog $serialLog -LauncherStdOut $launcherStdOut -LauncherStdErr $launcherStdErr
+        $launcherState = Start-ProbeLauncher -Backend $spec.LauncherBackend -SerialLog $serialLog -LauncherStdOut $launcherStdOut -LauncherStdErr $launcherStdErr -EnableVisualCapture:$EnableVisualCapture -QmpPort $qmpPort
         $proc = $launcherState.Process
 
         $sentinelSeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern $spec.WaitPattern -TimeoutSeconds $TimeoutSeconds
@@ -601,6 +1021,115 @@ function Invoke-QemuDisplayProbeBackend {
             }
         } else {
             Start-Sleep -Seconds 1
+            if ($EnableVisualCapture -and -not $proc.HasExited) {
+                try {
+                    $qmpSession = New-QmpSession -Port $qmpPort -TimeoutSeconds ([Math]::Min([Math]::Max($TimeoutSeconds, 10), 30))
+                    try {
+                        $captureAttemptNotes = New-Object System.Collections.Generic.List[string]
+                        if ($stageLabel -eq 'stageA') {
+                            $captureAttempts = @(
+                                [pscustomobject]@{
+                                    Name = 'gpu0-head0'
+                                    Path = (Join-Path $captureRoot ("scanout0-{0}-gpu0-head0.png" -f $stageLabel))
+                                    DeviceId = 'gpu0'
+                                    Head = 0
+                                    ScanoutId = 0
+                                },
+                                [pscustomobject]@{
+                                    Name = 'primary'
+                                    Path = (Join-Path $captureRoot ("scanout0-{0}-primary.png" -f $stageLabel))
+                                    DeviceId = ''
+                                    Head = -1
+                                    ScanoutId = 0
+                                }
+                            )
+                            $stageAFailedAssessment = $null
+
+                            foreach ($attempt in $captureAttempts) {
+                                try {
+                                    Invoke-QmpScreendump -Session $qmpSession -Filename $attempt.Path -DeviceId $attempt.DeviceId -Head $attempt.Head
+                                    if (-not (Wait-ForCaptureFile -Path $attempt.Path -TimeoutSeconds 2)) {
+                                        $captureAttemptNotes.Add(("{0}=missing" -f $attempt.Name))
+                                        continue
+                                    }
+
+                                    $visualScanout0Path = $attempt.Path
+                                    $visualScanout0Assessment = Get-DiagnosticCaptureAssessment -ImagePath $attempt.Path -ScanoutId 0
+                                    $visualScanout0 = $visualScanout0Assessment.Status
+                                    $visualScanout0Signature = $visualScanout0Assessment.Signature
+                                    $captureAttemptNotes.Add(("{0}={1}:{2}" -f $attempt.Name, $visualScanout0Assessment.Status, $visualScanout0Assessment.Reason))
+
+                                    if ($visualScanout0 -eq 'confirmed') {
+                                        $captureReason = 'scanout0 capture matched the expected diagnostic pattern'
+                                        $visualCaptureStatus = 'captured'
+                                        break
+                                    }
+
+                                    if ($visualScanout0 -eq 'failed' -and $stageAFailedAssessment -eq $null) {
+                                        $stageAFailedAssessment = $visualScanout0Assessment
+                                    }
+                                } catch {
+                                    $captureAttemptNotes.Add(("{0}=manual-check-required:{1}" -f $attempt.Name, $_.Exception.Message))
+                                }
+                            }
+
+                            if ($visualScanout0 -eq 'confirmed') {
+                                $captureReason = if ([string]::IsNullOrWhiteSpace($captureReason)) { 'scanout0 capture matched the expected diagnostic pattern' } else { $captureReason }
+                            } elseif ($stageAFailedAssessment) {
+                                $captureReason = $stageAFailedAssessment.Reason
+                                $visualCaptureStatus = 'failed'
+                                $visualScanout0 = 'failed'
+                            } else {
+                                $captureReason = if ($captureAttemptNotes.Count -gt 0) { $captureAttemptNotes -join ' | ' } else { 'capture assessment unavailable' }
+                                $visualCaptureStatus = 'manual-check-required'
+                                $visualScanout0 = 'manual-check-required'
+                            }
+                        } else {
+                            $captureHeads = @(0, 1)
+                            foreach ($head in $captureHeads) {
+                                $capturePath = Join-Path $captureRoot ("scanout{0}-{1}.png" -f $head, $stageLabel)
+                                Invoke-QmpScreendump -Session $qmpSession -Filename $capturePath -DeviceId 'gpu0' -Head $head
+                                if ($head -eq 0) {
+                                    $visualScanout0Path = $capturePath
+                                    $visualScanout0Assessment = Get-DiagnosticCaptureAssessment -ImagePath $capturePath -ScanoutId 0
+                                    $visualScanout0 = $visualScanout0Assessment.Status
+                                    $visualScanout0Signature = $visualScanout0Assessment.Signature
+                                } elseif ($head -eq 1) {
+                                    $visualScanout1Path = $capturePath
+                                    $visualScanout1Assessment = Get-DiagnosticCaptureAssessment -ImagePath $capturePath -ScanoutId 1
+                                    $visualScanout1 = $visualScanout1Assessment.Status
+                                    $visualScanout1Signature = $visualScanout1Assessment.Signature
+                                }
+                            }
+
+                            if ($stageLabel -eq 'stageB' -and $visualScanout0 -eq 'confirmed' -and $visualScanout1 -eq 'confirmed') {
+                                $distinctPatternsConfirmed = ($visualScanout0Signature -ne $visualScanout1Signature)
+                                $captureReason = if ($distinctPatternsConfirmed) { 'scanout0 and scanout1 captures differed as expected' } else { 'scanout0 and scanout1 captures matched unexpectedly' }
+                                $visualCaptureStatus = if ($distinctPatternsConfirmed) { 'captured' } else { 'failed' }
+                            } elseif ($stageLabel -eq 'stageB') {
+                                $captureReason = if ($visualScanout0Assessment -and $visualScanout1Assessment) {
+                                    "scanout0=$($visualScanout0Assessment.Status) scanout1=$($visualScanout1Assessment.Status)"
+                                } else {
+                                    'capture assessment unavailable'
+                                }
+                                $visualCaptureStatus = 'manual-check-required'
+                            }
+                        }
+                        $visualCaptureReason = $captureReason
+                    } finally {
+                        Close-QmpSession -Session $qmpSession
+                    }
+                } catch {
+                    $captureReason = $_.Exception.Message
+                    if ($stageLabel -eq 'stageA') {
+                        $visualScanout0 = 'manual-check-required'
+                    } else {
+                        $visualScanout1 = 'manual-check-required'
+                    }
+                    $visualCaptureStatus = 'manual-check-required'
+                    $visualCaptureReason = $captureReason
+                }
+            }
             if (-not $proc.HasExited) {
                 Stop-ProcessTree -Process $proc
                 [void]$proc.WaitForExit(5000)
@@ -665,16 +1194,75 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuFeaturesOkStatusLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Status FEATURES_OK write=0x[0-9A-Fa-f]+ readback=0x[0-9A-Fa-f]+')
     $gpuDriverOkStatusLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Status DRIVER_OK write=0x[0-9A-Fa-f]+ readback=0x[0-9A-Fa-f]+')
     $gpuFeatureBitmapLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Feature bitmap rawLow=0x[0-9A-Fa-f]+ rawHigh=0x[0-9A-Fa-f]+ raw=0x[0-9A-Fa-f]+')
-    $gpuGetDisplayInfoStepLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Init step: GET_DISPLAY_INFO begin')
+    $gpuPreRenderDeviceConfigLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] pre-render Device config numScanouts=\d+ numCapsets=\d+')
+    $gpuPreRenderDisplayInfoBeginLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] pre-render GET_DISPLAY_INFO begin')
+    $gpuPreRenderCompletionLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] pre-render completion usedIdx=\d+ usedLen=\d+ headDescriptor=\d+')
+    $gpuPreRenderDisplayInfoSummaryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] pre-render GET_DISPLAY_INFO protocolSlots=\d+ enabledScanouts=\d+ disabledScanouts=\d+ deviceConfigNumScanouts=\d+ qemuMaxOutputsIntent=\d+')
+    $gpuDiagnosticTargetLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Diagnostic test pattern format=B8G8R8X8_UNORM selectedWidth=\d+ selectedHeight=\d+ bytesPerPixel=\d+ stride=\d+ totalBackingBytes=\d+ pageCount=\d+ entryCount<=\s+\d+ fallbackGeometry=(yes|no)')
+    $gpuBackingLayoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Diagnostic backing layout backingVirtualBase=0x[0-9A-Fa-f]+ totalBackingBytes=\d+ totalPages=\d+ totalMemEntries=\d+ contiguousRunCount=\d+ coveredBytes=\d+ physicalCoverageValid=(yes|no) firstPhysRange=0x[0-9A-Fa-f]+-0x[0-9A-Fa-f]+ lastPhysRange=0x[0-9A-Fa-f]+-0x[0-9A-Fa-f]+')
+    $gpuResourceCreateLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] RESOURCE_CREATE_2D result=ready resourceId=0x[0-9A-Fa-f]+ format=B8G8R8X8_UNORM width=\d+ height=\d+')
+    $gpuResourceCreateMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] RESOURCE_CREATE_2D result=ready resourceId=0x[0-9A-Fa-f]+ format=B8G8R8X8_UNORM width=\d+ height=\d+')
+    $gpuAttachLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] RESOURCE_ATTACH_BACKING result=attached resourceId=0x[0-9A-Fa-f]+ backingVirtualBase=0x[0-9A-Fa-f]+ totalBackingBytes=\d+ totalPages=\d+ totalMemEntries=\d+ contiguousRunCount=\d+ coveredBytes=\d+ physicalCoverageValid=(yes|no) firstPhysRange=0x[0-9A-Fa-f]+-0x[0-9A-Fa-f]+ lastPhysRange=0x[0-9A-Fa-f]+-0x[0-9A-Fa-f]+')
+    $gpuAttachMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] RESOURCE_ATTACH_BACKING result=attached resourceId=0x[0-9A-Fa-f]+ backingVirtualBase=0x[0-9A-Fa-f]+ totalBackingBytes=\d+ totalPages=\d+ totalMemEntries=\d+ contiguousRunCount=\d+ coveredBytes=\d+ physicalCoverageValid=(yes|no) firstPhysRange=0x[0-9A-Fa-f]+-0x[0-9A-Fa-f]+ lastPhysRange=0x[0-9A-Fa-f]+-0x[0-9A-Fa-f]+')
+    $gpuSecondaryPatternChecksumLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Diagnostic pattern name=scanout1-red-orange width=\d+ height=\d+ stride=\d+ byteCount=\d+ checksum=0x[0-9A-Fa-f]+')
+    $gpuPrimaryPatternChecksumLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Diagnostic pattern name=scanout0-blue-cyan width=\d+ height=\d+ stride=\d+ byteCount=\d+ checksum=0x[0-9A-Fa-f]+')
+    $gpuSetScanout0Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] SET_SCANOUT result=set scanoutId=0 resourceId=0x[0-9A-Fa-f]+ rect=0,0 \d+x\d+')
+    $gpuSetScanout1Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] SET_SCANOUT result=set scanoutId=1 resourceId=0x[0-9A-Fa-f]+ rect=0,0 \d+x\d+')
+    $gpuTransferLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] TRANSFER_TO_HOST_2D result=ok scanoutId=0 resourceId=0x[0-9A-Fa-f]+ rect=0,0 \d+x\d+ offset=0')
+    $gpuTransfer1Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] TRANSFER_TO_HOST_2D result=ok scanoutId=1 resourceId=0x[0-9A-Fa-f]+ rect=0,0 \d+x\d+ offset=0')
+    $gpuFlushLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] RESOURCE_FLUSH result=ok scanoutId=0 resourceId=0x[0-9A-Fa-f]+ rect=0,0 \d+x\d+')
+    $gpuFlush1Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] RESOURCE_FLUSH result=ok scanoutId=1 resourceId=0x[0-9A-Fa-f]+ rect=0,0 \d+x\d+')
+    $gpuPostRenderDisplayInfoBeginLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] post-render GET_DISPLAY_INFO begin')
+    $gpuPostRenderCompletionLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] post-render completion usedIdx=\d+ usedLen=\d+ headDescriptor=\d+')
+    $gpuPostRenderDisplayInfoSummaryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] post-render GET_DISPLAY_INFO protocolSlots=\d+ enabledScanouts=\d+ disabledScanouts=\d+ deviceConfigNumScanouts=\d+ qemuMaxOutputsIntent=\d+')
+    $gpuPostRenderScanout0Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] post-render scanout\[0\] enabled=yes x=0 y=0 width=\d+ height=\d+')
+    $gpuPostRenderScanout1Line = [regex]::Match($serialText, '\[VIRTIO-GPU\] post-render scanout\[1\] enabled=(yes|no) x=\d+ y=\d+ width=\d+ height=\d+')
+    $gpuStageBCapacityLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Stage B scanout capacity deviceConfigNumScanouts=\d+ scanout1InitialEnabled=(yes|no) qemuMaxOutputsIntent=\d+')
+    $gpuStageBInitialScanoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Diagnostic scanout 1 initial enabled=(yes|no) x=\d+ y=\d+ width=\d+ height=\d+')
+    $gpuSingleOutputProofLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Single-output proof: resource1=ready backing1=valid scanout0=set transfer0=ok flush0=ok patternChecksum=0x[0-9A-Fa-f]+')
+    $gpuDualOutputProofLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Dual-output proof: resource1=ready resource2=ready scanout0=set scanout1=set transfer0=ok transfer1=ok flush0=ok flush1=ok enabledScanoutsAfter=\d+ distinctPatterns=yes')
     $gpuFeatureNegotiationLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Feature negotiation status=(ok|failed) negotiated=0x[0-9A-Fa-f]+ deviceFeatures=0x[0-9A-Fa-f]+ rejected=0x[0-9A-Fa-f]+')
     $gpuQueueCountLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Common config queueCount=\d+ queueMax=\d+')
     $gpuQueueLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Control queue ready size=\d+ queueEnable=yes queueNotifyOff=\d+ notifyOffMultiplier=\d+ notifyOffsetBytes=\d+ notifyAddr=0x[0-9A-Fa-f]+ descVirt=0x[0-9A-Fa-f]+ desc=0x[0-9A-Fa-f]+ availVirt=0x[0-9A-Fa-f]+ avail=0x[0-9A-Fa-f]+ usedVirt=0x[0-9A-Fa-f]+ used=0x[0-9A-Fa-f]+ alignment=4096')
-    $gpuDisplayInfoResponseLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] GET_DISPLAY_INFO response type=0x[0-9A-Fa-f]+')
-    $gpuDisplayInfoLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] GET_DISPLAY_INFO completion usedIdx=\d+ usedLen=\d+ headDescriptor=\d+')
-    $gpuDisplayInfoSummaryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Display info summary slots=\d+ enabled=\d+ disabled=\d+ deviceConfigScanouts=\d+ qemuTwoUsableScanouts=(yes|no)')
-    $gpuScanoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\]\s+scanout\[\d+\].*')
-    $gpuEnabledScanoutMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\]\s+scanout\[\d+\] enabled=yes')
-    $gpuProbeCompleteLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probe complete: devices=\d+ initialized=\d+ transport=[^\r\n]+ mmioMapped=yes mappingVirtual=0x[0-9A-Fa-f]+ pageCount=\d+ cacheMode=uc\(pcd\+pwt\) sanityReads=ok featuresOk=yes controlq=ready caps=[^\r\n]+ displayInfo=ok scanoutSlots=16 enabledScanouts=\d+ disabledScanouts=\d+ rendering=disabled reason=GET_DISPLAY_INFO milestone complete')
+    $gpuDisplayInfoResponseLine = [regex]::Match($serialText, '\[VIRTIO-GPU\]\s+(pre-render|post-render)\s+GET_DISPLAY_INFO response type=0x[0-9A-Fa-f]+')
+    $gpuScanoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\]\s+(pre-render|post-render)\s+scanout\[\d+\].*')
+    $gpuEnabledScanoutMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\]\s+post-render\s+scanout\[\d+\] enabled=yes')
+    $gpuProbeCompleteLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probe complete: [^\r\n]+')
+    $gpuMmioRequestBase = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'requestBase=0x([0-9A-Fa-f]+)' -GroupIndex 1
+    $gpuMmioRequestLength = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'requestLength=0x([0-9A-Fa-f]+)' -GroupIndex 1
+    $gpuMmioKernelVirtualBase = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'kernelVirtualBase=([^\s]+)' -GroupIndex 1
+    $gpuMmioMappedVirtual = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'mappedVirtual=([^\s]+)' -GroupIndex 1
+    $gpuMmioMappedLength = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'mappedLength=([^\s]+)' -GroupIndex 1
+    $gpuMmioPages = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'pages=(\d+)' -GroupIndex 1
+    $gpuMmioFlags = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'flags=0x([0-9A-Fa-f]+)' -GroupIndex 1
+    $gpuMmioNonUser = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'nonUser=(yes|no)' -GroupIndex 1
+    $gpuMmioNoExec = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'noExec=(yes|no)' -GroupIndex 1
+    $gpuMmioUncached = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'uncached=(yes|no)' -GroupIndex 1
+    $gpuMmioCacheAttrs = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'cacheAttrs=([^\s]+)' -GroupIndex 1
+    $gpuMmioQemuProbeOnly = Get-TextMatchGroupValue -Text $gpuMmioReportLine.Value -Pattern 'qemuProbeOnly=(yes|no)' -GroupIndex 1
+
+    $gpuResourceCreateSecondaryLine = if ($gpuResourceCreateMatches.Count -ge 2) { $gpuResourceCreateMatches[1].Value } else { '' }
+    $gpuAttachSecondaryLine = if ($gpuAttachMatches.Count -ge 2) { $gpuAttachMatches[1].Value } else { '' }
+    $gpuBackingPhysicalCoverageValid = Get-TextMatchGroupValue -Text $gpuBackingLayoutLine.Value -Pattern 'physicalCoverageValid=(yes|no)' -GroupIndex 1
+    $gpuBackingMemEntryCount = Get-TextMatchGroupValue -Text $gpuBackingLayoutLine.Value -Pattern 'totalMemEntries=(\d+)' -GroupIndex 1
+    $gpuBackingContiguousRunCount = Get-TextMatchGroupValue -Text $gpuBackingLayoutLine.Value -Pattern 'contiguousRunCount=(\d+)' -GroupIndex 1
+    $gpuBackingCoveredBytes = Get-TextMatchGroupValue -Text $gpuBackingLayoutLine.Value -Pattern 'coveredBytes=(\d+)' -GroupIndex 1
+    $gpuPrimaryPatternChecksum = Get-TextMatchGroupValue -Text $gpuPrimaryPatternChecksumLine.Value -Pattern 'checksum=(0x[0-9A-Fa-f]+)' -GroupIndex 1
+    $gpuSecondaryPatternChecksum = Get-TextMatchGroupValue -Text $gpuSecondaryPatternChecksumLine.Value -Pattern 'checksum=(0x[0-9A-Fa-f]+)' -GroupIndex 1
+    $gpuPreRenderEnabledScanouts = Get-TextMatchGroupValue -Text $gpuPreRenderDisplayInfoSummaryLine.Value -Pattern 'enabledScanouts=(\d+)' -GroupIndex 1
+    $gpuPreRenderDisabledScanouts = Get-TextMatchGroupValue -Text $gpuPreRenderDisplayInfoSummaryLine.Value -Pattern 'disabledScanouts=(\d+)' -GroupIndex 1
+    $gpuPreRenderDeviceConfigNumScanouts = Get-TextMatchGroupValue -Text $gpuPreRenderDisplayInfoSummaryLine.Value -Pattern 'deviceConfigNumScanouts=(\d+)' -GroupIndex 1
+    $gpuPreRenderQemuMaxOutputsIntent = Get-TextMatchGroupValue -Text $gpuPreRenderDisplayInfoSummaryLine.Value -Pattern 'qemuMaxOutputsIntent=(\d+)' -GroupIndex 1
+    $gpuPostRenderEnabledScanouts = Get-TextMatchGroupValue -Text $gpuPostRenderDisplayInfoSummaryLine.Value -Pattern 'enabledScanouts=(\d+)' -GroupIndex 1
+    $gpuPostRenderDisabledScanouts = Get-TextMatchGroupValue -Text $gpuPostRenderDisplayInfoSummaryLine.Value -Pattern 'disabledScanouts=(\d+)' -GroupIndex 1
+    $gpuPostRenderDeviceConfigNumScanouts = Get-TextMatchGroupValue -Text $gpuPostRenderDisplayInfoSummaryLine.Value -Pattern 'deviceConfigNumScanouts=(\d+)' -GroupIndex 1
+    $gpuPostRenderQemuMaxOutputsIntent = Get-TextMatchGroupValue -Text $gpuPostRenderDisplayInfoSummaryLine.Value -Pattern 'qemuMaxOutputsIntent=(\d+)' -GroupIndex 1
+    $gpuProbeCompleteDeviceConfigNumScanouts = Get-TextMatchGroupValue -Text $gpuProbeCompleteLine.Value -Pattern 'deviceConfigNumScanouts=(\d+)' -GroupIndex 1
+    $gpuProbeCompleteEnabledScanoutsBefore = Get-TextMatchGroupValue -Text $gpuProbeCompleteLine.Value -Pattern 'enabledScanoutsBefore=(\d+)' -GroupIndex 1
+    $gpuProbeCompleteDisabledScanoutsBefore = Get-TextMatchGroupValue -Text $gpuProbeCompleteLine.Value -Pattern 'disabledScanoutsBefore=(\d+)' -GroupIndex 1
+    $gpuProbeCompleteEnabledScanoutsAfter = Get-TextMatchGroupValue -Text $gpuProbeCompleteLine.Value -Pattern 'enabledScanoutsAfter=(\d+)' -GroupIndex 1
+    $gpuProbeCompleteDistinctPatterns = Get-TextMatchGroupValue -Text $gpuProbeCompleteLine.Value -Pattern 'distinctPatterns=([a-z]+)' -GroupIndex 1
+    $gpuProbeCompleteQemuTwoUsableScanouts = Get-TextMatchGroupValue -Text $gpuProbeCompleteLine.Value -Pattern 'qemuTwoUsableScanouts=([a-z]+)' -GroupIndex 1
 
     $bootGopHandles = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootGopLine -GroupIndex 1)
     $bootFramebufferCount = if ($bootSummary) { $bootSummary.RawCount } else { $null }
@@ -688,7 +1276,7 @@ function Invoke-QemuDisplayProbeBackend {
     $kernelActiveRenderTargetCount = if ($kernelSummary) { $kernelSummary.ActiveRenderTargetCount } else { $null }
     $kernelDisabledCandidateCount = if ($kernelSummary) { $kernelSummary.DisabledCandidateCount } else { $null }
     $bootInvalidReason = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootInvalidReasonLine -GroupIndex 1)
-    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityWalkLine.Success -or $gpuInventoryLine.Success -or $gpuTransportLine.Success -or $gpuMmioReportLine.Success -or $gpuMmioSummaryLine.Success -or $gpuMmioMappedLine.Success -or $gpuMmioBlockedLine.Success -or $gpuResetStepLine.Success -or $gpuStatusResetLine.Success -or $gpuAckLine.Success -or $gpuDriverLine.Success -or $gpuFeaturesOkStatusLine.Success -or $gpuDriverOkStatusLine.Success -or $gpuFeatureBitmapLine.Success -or $gpuGetDisplayInfoStepLine.Success -or $gpuFeatureNegotiationLine.Success -or $gpuQueueCountLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoResponseLine.Success -or $gpuDisplayInfoLine.Success -or $gpuDisplayInfoSummaryLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
+    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityWalkLine.Success -or $gpuInventoryLine.Success -or $gpuTransportLine.Success -or $gpuMmioReportLine.Success -or $gpuMmioSummaryLine.Success -or $gpuMmioMappedLine.Success -or $gpuMmioBlockedLine.Success -or $gpuResetStepLine.Success -or $gpuStatusResetLine.Success -or $gpuAckLine.Success -or $gpuDriverLine.Success -or $gpuFeaturesOkStatusLine.Success -or $gpuDriverOkStatusLine.Success -or $gpuFeatureBitmapLine.Success -or $gpuPreRenderDeviceConfigLine.Success -or $gpuPreRenderDisplayInfoBeginLine.Success -or $gpuPreRenderCompletionLine.Success -or $gpuPreRenderDisplayInfoSummaryLine.Success -or $gpuDiagnosticTargetLine.Success -or $gpuBackingLayoutLine.Success -or $gpuResourceCreateLine.Success -or $gpuAttachLine.Success -or $gpuPrimaryPatternChecksumLine.Success -or $gpuSetScanout0Line.Success -or $gpuTransferLine.Success -or $gpuFlushLine.Success -or $gpuPostRenderDisplayInfoBeginLine.Success -or $gpuPostRenderCompletionLine.Success -or $gpuPostRenderDisplayInfoSummaryLine.Success -or $gpuPostRenderScanout0Line.Success -or $gpuPostRenderScanout1Line.Success -or $gpuStageBCapacityLine.Success -or $gpuStageBInitialScanoutLine.Success -or $gpuSecondaryPatternChecksumLine.Success -or $gpuSetScanout1Line.Success -or $gpuTransfer1Line.Success -or $gpuFlush1Line.Success -or $gpuSingleOutputProofLine.Success -or $gpuDualOutputProofLine.Success -or $gpuFeatureNegotiationLine.Success -or $gpuQueueCountLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoResponseLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
 
     if ($spec.Required) {
         if ([string]::IsNullOrWhiteSpace($serialText)) {
@@ -754,98 +1342,158 @@ function Invoke-QemuDisplayProbeBackend {
         Assert-Condition -Backend $backendName -Name 'virtio-gpu feature negotiation line' -Condition $gpuFeatureNegotiationLine.Success -Detail 'expected feature negotiation with VERSION_1'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu queue count line' -Condition $gpuQueueCountLine.Success -Detail 'expected control queue sizing diagnostics'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu queue setup line' -Condition $gpuQueueLine.Success -Detail 'expected the control queue layout and enablement log'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu GET_DISPLAY_INFO step line' -Condition $gpuGetDisplayInfoStepLine.Success -Detail 'expected the diagnostic GET_DISPLAY_INFO step'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu pre-render config line' -Condition $gpuPreRenderDeviceConfigLine.Success -Detail 'expected the pre-render device-config snapshot'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu pre-render GET_DISPLAY_INFO begin line' -Condition $gpuPreRenderDisplayInfoBeginLine.Success -Detail 'expected the pre-render GET_DISPLAY_INFO submission'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu pre-render completion line' -Condition $gpuPreRenderCompletionLine.Success -Detail 'expected the pre-render used-ring completion log'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu GET_DISPLAY_INFO response line' -Condition $gpuDisplayInfoResponseLine.Success -Detail 'expected the response type to be logged'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu GET_DISPLAY_INFO completion line' -Condition $gpuDisplayInfoLine.Success -Detail 'expected the used-ring completion log'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu display-info summary line' -Condition $gpuDisplayInfoSummaryLine.Success -Detail 'expected the scanout summary line'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu MMIO report fields' -Condition (
-            $gpuMmioReportLine.Success -and
-            $gpuMmioReportLine.Value -match 'requestBase=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'requestLength=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'alignedBase=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'alignedLength=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'mappedLength=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'pages=\d+' -and
-            $gpuMmioReportLine.Value -match 'kernelVirtualBase=(n/a|0x[0-9A-Fa-f]+)' -and
-            $gpuMmioReportLine.Value -match 'mappedVirtual=(n/a|0x[0-9A-Fa-f]+)' -and
-            $gpuMmioReportLine.Value -match 'flags=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'nonUser=yes' -and
-            $gpuMmioReportLine.Value -match 'noExec=yes' -and
-            $gpuMmioReportLine.Value -match 'uncached=yes' -and
-            $gpuMmioReportLine.Value -match 'cacheAttrs=ok' -and
-            $gpuMmioReportLine.Value -match 'cacheMode=uc\(pcd\+pwt\)' -and
-            $gpuMmioReportLine.Value -match 'qemuProbeOnly=yes' -and
-            $gpuMmioReportLine.Value -match 'pageAligned=(yes|no)' -and
-            $gpuMmioReportLine.Value -match 'windowEligible=yes' -and
-            $gpuMmioReportLine.Value -match 'requiresNewPageTableEntries=(yes|no)' -and
-            $gpuMmioReportLine.Value -match 'success=yes' -and
-            $gpuMmioReportLine.Value -match 'reason=mapped into reserved kernel MMIO window' -and
-            $gpuMmioReportLine.Value -match 'nextFeature=controlled feature negotiation'
-        ) -Detail ($gpuMmioReportLine.Value)
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu blocker absent' -Condition (-not $gpuMmioBlockedLine.Success) -Detail 'probe should not emit a blocker line once the transport mapping succeeds'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu mapping milestone stop' -Condition ($gpuMmioSummaryLine.Success -and $gpuMmioMappedLine.Success) -Detail 'probe should end at the mapped MMIO transport milestone'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu enabled scanout geometry captured' -Condition ($gpuEnabledScanoutMatches.Count -ge 1) -Detail ("enabledScanoutMatches={0}" -f $gpuEnabledScanoutMatches.Count)
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu scanout summary fields' -Condition (
-            $gpuDisplayInfoSummaryLine.Success -and
-            $gpuDisplayInfoSummaryLine.Value -match 'slots=16' -and
-            $gpuDisplayInfoSummaryLine.Value -match 'enabled=\d+' -and
-            $gpuDisplayInfoSummaryLine.Value -match 'disabled=\d+' -and
-            $gpuDisplayInfoSummaryLine.Value -match 'deviceConfigScanouts=\d+' -and
-            $gpuDisplayInfoSummaryLine.Value -match 'qemuTwoUsableScanouts=(yes|no)'
-        ) -Detail $gpuDisplayInfoSummaryLine.Value
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu scanout geometry lines' -Condition ($gpuScanoutLine.Success -and $gpuEnabledScanoutMatches.Count -ge 1) -Detail 'expected scanout geometry for the enabled outputs'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion line' -Condition $gpuProbeCompleteLine.Success -Detail 'expected the final probe summary line'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion fields' -Condition (
-            $gpuProbeCompleteLine.Value -match 'mmioMapped=yes' -and
-            $gpuProbeCompleteLine.Value -match 'mappingVirtual=0x[0-9A-Fa-f]+' -and
-            $gpuProbeCompleteLine.Value -match 'pageCount=\d+' -and
-            $gpuProbeCompleteLine.Value -match 'cacheMode=uc\(pcd\+pwt\)' -and
-            $gpuProbeCompleteLine.Value -match 'sanityReads=ok' -and
-            $gpuProbeCompleteLine.Value -match 'featuresOk=yes' -and
-            $gpuProbeCompleteLine.Value -match 'controlq=ready' -and
-            $gpuProbeCompleteLine.Value -match 'displayInfo=ok' -and
-            $gpuProbeCompleteLine.Value -match 'scanoutSlots=16' -and
-            $gpuProbeCompleteLine.Value -match 'enabledScanouts=\d+' -and
-            $gpuProbeCompleteLine.Value -match 'disabledScanouts=\d+' -and
-            $gpuProbeCompleteLine.Value -match 'rendering=disabled' -and
-            $gpuProbeCompleteLine.Value -match 'reason=GET_DISPLAY_INFO milestone complete'
-        ) -Detail $gpuProbeCompleteLine.Value
-        $backendStatus = 'complete'
-        $interpretation = 'QEMU virtio-gpu MMIO transport mapped, controlq initialized, and GET_DISPLAY_INFO completed'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu pre-render display-info summary line' -Condition $gpuPreRenderDisplayInfoSummaryLine.Success -Detail 'expected the pre-render scanout summary line'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu diagnostic target line' -Condition $gpuDiagnosticTargetLine.Success -Detail 'expected the selected diagnostic test pattern geometry to be logged'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu primary pattern checksum line' -Condition $gpuPrimaryPatternChecksumLine.Success -Detail 'expected the primary diagnostic checksum to be logged'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu backing layout line' -Condition $gpuBackingLayoutLine.Success -Detail 'expected the diagnostic backing layout line'
+        if ($stageLabel -eq 'stageA') {
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu resource create count' -Condition ($gpuResourceCreateMatches.Count -eq 1) -Detail ("count={0}" -f $gpuResourceCreateMatches.Count)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu attach backing count' -Condition ($gpuAttachMatches.Count -eq 1) -Detail ("count={0}" -f $gpuAttachMatches.Count)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu set scanout0 line' -Condition $gpuSetScanout0Line.Success -Detail 'expected SET_SCANOUT for scanout 0 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu transfer0 line' -Condition $gpuTransferLine.Success -Detail 'expected TRANSFER_TO_HOST_2D for scanout 0 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu flush0 line' -Condition $gpuFlushLine.Success -Detail 'expected RESOURCE_FLUSH for scanout 0 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render GET_DISPLAY_INFO begin line' -Condition $gpuPostRenderDisplayInfoBeginLine.Success -Detail 'expected the post-render GET_DISPLAY_INFO submission'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render completion line' -Condition $gpuPostRenderCompletionLine.Success -Detail 'expected the post-render used-ring completion log'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render display-info summary line' -Condition $gpuPostRenderDisplayInfoSummaryLine.Success -Detail 'expected the post-render scanout summary line'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu scanout geometry lines' -Condition ($gpuScanoutLine.Success -and $gpuPostRenderScanout0Line.Success -and $gpuPostRenderScanout1Line.Success) -Detail 'expected pre- and post-render scanout geometry for the primary output'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render scanout 1 disabled' -Condition ($gpuPostRenderScanout1Line.Success -and $gpuPostRenderScanout1Line.Value -match 'enabled=no') -Detail $gpuPostRenderScanout1Line.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B gate absent' -Condition (-not $gpuStageBCapacityLine.Success -and -not $gpuSetScanout1Line.Success -and -not $gpuTransfer1Line.Success -and -not $gpuFlush1Line.Success -and -not $gpuSecondaryPatternChecksumLine.Success -and -not $gpuDualOutputProofLine.Success) -Detail 'stage B activation markers must remain absent from the stage A build'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu single-output proof line' -Condition $gpuSingleOutputProofLine.Success -Detail 'expected the single-output proof line after scanout 0 completes'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion line' -Condition $gpuProbeCompleteLine.Success -Detail 'expected the final probe summary line'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion fields' -Condition (
+                $gpuProbeCompleteLine.Value -match 'mmioMapped=yes' -and
+                $gpuProbeCompleteLine.Value -match 'mappingVirtual=0x[0-9A-Fa-f]+' -and
+                $gpuProbeCompleteLine.Value -match 'pageCount=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'cacheMode=uc\(pcd\+pwt\)' -and
+                $gpuProbeCompleteLine.Value -match 'sanityReads=ok' -and
+                $gpuProbeCompleteLine.Value -match 'featuresOk=yes' -and
+                $gpuProbeCompleteLine.Value -match 'controlq=ready' -and
+                $gpuProbeCompleteLine.Value -match 'displayInfo=ok' -and
+                $gpuProbeCompleteLine.Value -match 'scanoutSlots=16' -and
+                $gpuProbeCompleteLine.Value -match 'deviceConfigNumScanouts=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'qemuMaxOutputsIntent=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'enabledScanoutsBefore=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'disabledScanoutsBefore=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'enabledScanoutsAfter=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'resource2d=ready' -and
+                $gpuProbeCompleteLine.Value -match 'backing=attached' -and
+                $gpuProbeCompleteLine.Value -match 'scanout0=set' -and
+                $gpuProbeCompleteLine.Value -match 'transfer=ok' -and
+                $gpuProbeCompleteLine.Value -match 'flush=ok' -and
+                $gpuProbeCompleteLine.Value -match 'resource2dSecondary=blocked' -and
+                $gpuProbeCompleteLine.Value -match 'backingSecondary=blocked' -and
+                $gpuProbeCompleteLine.Value -match 'scanout1=blocked' -and
+                $gpuProbeCompleteLine.Value -match 'transfer1=blocked' -and
+                $gpuProbeCompleteLine.Value -match 'flush1=blocked' -and
+                $gpuProbeCompleteLine.Value -match 'distinctPatterns=no' -and
+                $gpuProbeCompleteLine.Value -match 'qemuTwoUsableScanouts=no' -and
+                $gpuProbeCompleteLine.Value -match 'rendering=test-pattern-single-output' -and
+                $gpuProbeCompleteLine.Value -match 'reason=dual-output scanout 1 test pattern milestone complete'
+            ) -Detail $gpuProbeCompleteLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu visual scanout0 proof' -Condition ($EnableVisualCapture -and (($visualScanout0 -eq 'confirmed' -and (Test-Path -LiteralPath $visualScanout0Path) -and ((Get-Item -LiteralPath $visualScanout0Path).Length -gt 0)) -or $visualScanout0 -eq 'manual-check-required' -or $visualScanout0 -eq 'failed')) -Detail ("status={0} path={1}" -f $visualScanout0, $visualScanout0Path)
+            $backendStatus = 'complete'
+            $interpretation = 'QEMU virtio-gpu MMIO transport mapped, controlq initialized, scanout 0 test pattern rendered, and post-render display-info completed'
+        } else {
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B capacity line' -Condition $gpuStageBCapacityLine.Success -Detail 'expected Stage B capacity evidence'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B initial scanout line' -Condition $gpuStageBInitialScanoutLine.Success -Detail 'expected scanout 1 initial state evidence'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu secondary pattern checksum line' -Condition $gpuSecondaryPatternChecksumLine.Success -Detail 'expected the secondary diagnostic checksum to be logged'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu resource create count' -Condition ($gpuResourceCreateMatches.Count -ge 2) -Detail ("count={0}" -f $gpuResourceCreateMatches.Count)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu attach backing count' -Condition ($gpuAttachMatches.Count -ge 2) -Detail ("count={0}" -f $gpuAttachMatches.Count)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu set scanout0 line' -Condition $gpuSetScanout0Line.Success -Detail 'expected SET_SCANOUT for scanout 0 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu set scanout1 line' -Condition $gpuSetScanout1Line.Success -Detail 'expected SET_SCANOUT for scanout 1 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu transfer0 line' -Condition $gpuTransferLine.Success -Detail 'expected TRANSFER_TO_HOST_2D for scanout 0 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu transfer1 line' -Condition $gpuTransfer1Line.Success -Detail 'expected TRANSFER_TO_HOST_2D for scanout 1 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu flush0 line' -Condition $gpuFlushLine.Success -Detail 'expected RESOURCE_FLUSH for scanout 0 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu flush1 line' -Condition $gpuFlush1Line.Success -Detail 'expected RESOURCE_FLUSH for scanout 1 to succeed'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render GET_DISPLAY_INFO begin line' -Condition $gpuPostRenderDisplayInfoBeginLine.Success -Detail 'expected the post-render GET_DISPLAY_INFO submission'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render completion line' -Condition $gpuPostRenderCompletionLine.Success -Detail 'expected the post-render used-ring completion log'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render display-info summary line' -Condition $gpuPostRenderDisplayInfoSummaryLine.Success -Detail 'expected the post-render scanout summary line'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu scanout geometry lines' -Condition ($gpuScanoutLine.Success -and $gpuPostRenderScanout0Line.Success -and $gpuPostRenderScanout1Line.Success) -Detail 'expected pre- and post-render scanout geometry for both outputs'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu post-render scanout 1 enabled' -Condition ($gpuPostRenderScanout1Line.Success -and $gpuPostRenderScanout1Line.Value -match 'enabled=yes') -Detail $gpuPostRenderScanout1Line.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu single-output proof line' -Condition $gpuSingleOutputProofLine.Success -Detail 'expected the single-output proof line to remain present before the dual-output proof'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu dual-output proof line' -Condition $gpuDualOutputProofLine.Success -Detail 'expected the dual-output proof line after scanout 1 completes'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion line' -Condition $gpuProbeCompleteLine.Success -Detail 'expected the final probe summary line'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion fields' -Condition (
+                $gpuProbeCompleteLine.Value -match 'mmioMapped=yes' -and
+                $gpuProbeCompleteLine.Value -match 'mappingVirtual=0x[0-9A-Fa-f]+' -and
+                $gpuProbeCompleteLine.Value -match 'pageCount=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'cacheMode=uc\(pcd\+pwt\)' -and
+                $gpuProbeCompleteLine.Value -match 'sanityReads=ok' -and
+                $gpuProbeCompleteLine.Value -match 'featuresOk=yes' -and
+                $gpuProbeCompleteLine.Value -match 'controlq=ready' -and
+                $gpuProbeCompleteLine.Value -match 'displayInfo=ok' -and
+                $gpuProbeCompleteLine.Value -match 'scanoutSlots=16' -and
+                $gpuProbeCompleteLine.Value -match 'deviceConfigNumScanouts=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'qemuMaxOutputsIntent=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'enabledScanoutsBefore=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'disabledScanoutsBefore=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'enabledScanoutsAfter=\d+' -and
+                $gpuProbeCompleteLine.Value -match 'resource2d=ready' -and
+                $gpuProbeCompleteLine.Value -match 'backing=attached' -and
+                $gpuProbeCompleteLine.Value -match 'scanout0=set' -and
+                $gpuProbeCompleteLine.Value -match 'transfer=ok' -and
+                $gpuProbeCompleteLine.Value -match 'flush=ok' -and
+                $gpuProbeCompleteLine.Value -match 'resource2dSecondary=ready' -and
+                $gpuProbeCompleteLine.Value -match 'backingSecondary=attached' -and
+                $gpuProbeCompleteLine.Value -match 'scanout1=set' -and
+                $gpuProbeCompleteLine.Value -match 'transfer1=ok' -and
+                $gpuProbeCompleteLine.Value -match 'flush1=ok' -and
+                $gpuProbeCompleteLine.Value -match 'distinctPatterns=yes' -and
+                $gpuProbeCompleteLine.Value -match 'qemuTwoUsableScanouts=yes' -and
+                $gpuProbeCompleteLine.Value -match 'rendering=dual-output-test-pattern' -and
+                $gpuProbeCompleteLine.Value -match 'reason=dual-output scanout 1 test pattern milestone complete'
+            ) -Detail $gpuProbeCompleteLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu distinct visual capture' -Condition ($EnableVisualCapture -and $visualScanout0 -eq 'confirmed' -and $visualScanout1 -eq 'confirmed' -and $distinctPatternsConfirmed -and (Test-Path -LiteralPath $visualScanout0Path) -and (Test-Path -LiteralPath $visualScanout1Path) -and ((Get-Item -LiteralPath $visualScanout0Path).Length -gt 0) -and ((Get-Item -LiteralPath $visualScanout1Path).Length -gt 0)) -Detail ("scanout0={0} scanout1={1} distinct={2}" -f $visualScanout0, $visualScanout1, $distinctPatternsConfirmed)
+            $backendStatus = 'complete'
+            $interpretation = 'QEMU virtio-gpu MMIO transport mapped, controlq initialized, scanout 0 and scanout 1 test patterns rendered, and post-render display-info completed'
+        }
     }
 
     $launched = $launchRecorded
     $bootloaderSerialCaptured = $bootloaderSerialAppeared
     $framebufferReady = $kernelFramebufferReady.Success
 
-    $backendStatus = 'unsupported'
-    if ($spec.Required) {
-        $backendStatus = 'validated'
-    } elseif ($bootloaderSerialCaptured) {
-        if ($bootSummary -and $kernelSummary) {
-            $backendStatus = if ($framebufferReady) { 'complete' } else { 'partial' }
-        } elseif ($bootSummary -or $kernelSummary) {
-            $backendStatus = 'partial'
-        } else {
-            $backendStatus = 'partial'
+    if ($backendName -notlike 'virtio-gpu*') {
+        $backendStatus = 'unsupported'
+        if ($spec.Required) {
+            $backendStatus = 'validated'
+        } elseif ($bootloaderSerialCaptured) {
+            if ($bootSummary -and $kernelSummary) {
+                $backendStatus = if ($framebufferReady) { 'complete' } else { 'partial' }
+            } elseif ($bootSummary -or $kernelSummary) {
+                $backendStatus = 'partial'
+            } else {
+                $backendStatus = 'partial'
+            }
         }
-    }
 
-    $interpretation = 'no framebuffer evidence captured'
-    if ($bootSummary) {
-        if ($bootSummary.UniqueCount -gt 1) {
-            $interpretation = 'more than one unique framebuffer candidate exposed through current GOP handoff'
-        } elseif ($bootSummary.UniqueCount -eq 1 -and $bootSummary.DuplicateCount -ge 1) {
-            $interpretation = 'single unique framebuffer candidate with duplicate aliases'
-        } elseif ($bootSummary.UniqueCount -eq 1) {
-            $interpretation = 'single unique framebuffer candidate and no duplicates'
-        } elseif ($bootSummary.RawCount -eq 0) {
-            $interpretation = 'GOP framebuffer export disabled'
+        $interpretation = 'no framebuffer evidence captured'
+        if ($bootSummary) {
+            if ($bootSummary.UniqueCount -gt 1) {
+                $interpretation = 'more than one unique framebuffer candidate exposed through current GOP handoff'
+            } elseif ($bootSummary.UniqueCount -eq 1 -and $bootSummary.DuplicateCount -ge 1) {
+                $interpretation = 'single unique framebuffer candidate with duplicate aliases'
+            } elseif ($bootSummary.UniqueCount -eq 1) {
+                $interpretation = 'single unique framebuffer candidate and no duplicates'
+            } elseif ($bootSummary.RawCount -eq 0) {
+                $interpretation = 'GOP framebuffer export disabled'
+            }
+        } elseif ($bootInvalidReason -ne 'n/a') {
+            $interpretation = "selected GOP framebuffer rejected: $bootInvalidReason"
+        } elseif ($bootloaderSerialCaptured) {
+            $interpretation = 'bootloader reached serial output but no framebuffer summary was captured'
         }
-    } elseif ($bootInvalidReason -ne 'n/a') {
-        $interpretation = "selected GOP framebuffer rejected: $bootInvalidReason"
-    } elseif ($bootloaderSerialCaptured) {
-        $interpretation = 'bootloader reached serial output but no framebuffer summary was captured'
+    } else {
+        if ([string]::IsNullOrWhiteSpace($backendStatus)) {
+            $backendStatus = 'complete'
+        }
+        if ([string]::IsNullOrWhiteSpace($interpretation)) {
+            $interpretation = 'QEMU virtio-gpu diagnostics captured'
+        }
     }
 
     $launcherStdOutTail = (Get-LogTail -Path $launcherStdOut -LineCount 12) -replace "`r", ''
@@ -906,16 +1554,40 @@ function Invoke-QemuDisplayProbeBackend {
         "gpuFeaturesOkStatusLine=$($gpuFeaturesOkStatusLine.Value)"
         "gpuDriverOkStatusLine=$($gpuDriverOkStatusLine.Value)"
         "gpuFeatureBitmapLine=$($gpuFeatureBitmapLine.Value)"
-        "gpuGetDisplayInfoStepLine=$($gpuGetDisplayInfoStepLine.Value)"
+        "gpuPreRenderDeviceConfigLine=$($gpuPreRenderDeviceConfigLine.Value)"
+        "gpuPreRenderDisplayInfoBeginLine=$($gpuPreRenderDisplayInfoBeginLine.Value)"
+        "gpuPreRenderCompletionLine=$($gpuPreRenderCompletionLine.Value)"
+        "gpuPreRenderDisplayInfoSummaryLine=$($gpuPreRenderDisplayInfoSummaryLine.Value)"
+        "gpuDiagnosticTargetLine=$($gpuDiagnosticTargetLine.Value)"
+        "gpuBackingLayoutLine=$($gpuBackingLayoutLine.Value)"
+        "gpuResourceCreateLine=$($gpuResourceCreateLine.Value)"
+        "gpuAttachLine=$($gpuAttachLine.Value)"
+        "gpuSetScanoutLine=$($gpuSetScanoutLine.Value)"
+        "gpuTransferLine=$($gpuTransferLine.Value)"
+        "gpuFlushLine=$($gpuFlushLine.Value)"
+        "gpuPostRenderDisplayInfoBeginLine=$($gpuPostRenderDisplayInfoBeginLine.Value)"
+        "gpuPostRenderCompletionLine=$($gpuPostRenderCompletionLine.Value)"
+        "gpuPostRenderDisplayInfoSummaryLine=$($gpuPostRenderDisplayInfoSummaryLine.Value)"
+        "gpuPostRenderScanout0Line=$($gpuPostRenderScanout0Line.Value)"
+        "gpuPostRenderScanout1Line=$($gpuPostRenderScanout1Line.Value)"
         "gpuFeatureNegotiationLine=$($gpuFeatureNegotiationLine.Value)"
         "gpuQueueCountLine=$($gpuQueueCountLine.Value)"
         "gpuQueueLine=$($gpuQueueLine.Value)"
         "gpuDisplayInfoResponseLine=$($gpuDisplayInfoResponseLine.Value)"
-        "gpuDisplayInfoLine=$($gpuDisplayInfoLine.Value)"
-        "gpuDisplayInfoSummaryLine=$($gpuDisplayInfoSummaryLine.Value)"
         "gpuScanoutLine=$($gpuScanoutLine.Value)"
         "gpuEnabledScanoutCount=$($gpuEnabledScanoutMatches.Count)"
         "gpuProbeCompleteLine=$($gpuProbeCompleteLine.Value)"
+        "probeStage=$stageLabel"
+        "visualCaptureStatus=$visualCaptureStatus"
+        "visualScanout0=$visualScanout0"
+        "visualScanout1=$visualScanout1"
+        "visualScanout0Path=$visualScanout0Path"
+        "visualScanout1Path=$visualScanout1Path"
+        "visualScanout0Signature=$visualScanout0Signature"
+        "visualScanout1Signature=$visualScanout1Signature"
+        "visualCaptureReason=$visualCaptureReason"
+        "distinctPatternsConfirmed=$distinctPatternsConfirmed"
+        "dualOutputVisualProof=$(if ($stageLabel -eq 'stageB' -and $distinctPatternsConfirmed) { 'confirmed' } elseif ($stageLabel -eq 'stageA' -and $visualScanout0 -eq 'confirmed') { 'confirmed' } else { 'not-confirmed' })"
         "launcherStdOut=$launcherStdOut"
         "launcherStdErr=$launcherStdErr"
         "serialLog=$serialLog"
@@ -945,16 +1617,28 @@ function Invoke-QemuDisplayProbeBackend {
         Write-Host ("[{0}] interpretation: {1}" -f $backendName, $interpretation)
     }
 
-    return [pscustomobject]@{
-        Backend = $backendName
-        BackendRoot = $backendRoot
-        LauncherStdOut = $launcherStdOut
-        LauncherStdErr = $launcherStdErr
-        SerialLog = $serialLog
-        SummaryPath = $summaryPath
-        QemuArgs = $spec.QemuArgs
-        ProbeNote = $spec.ProbeNote
-        Required = $spec.Required
+        return [pscustomobject]@{
+            Backend = $backendName
+            ProbeStage = $stageLabel
+            BackendRoot = $backendRoot
+            LauncherStdOut = $launcherStdOut
+            LauncherStdErr = $launcherStdErr
+            SerialLog = $serialLog
+            SummaryPath = $summaryPath
+            CaptureRoot = $captureRoot
+            VisualCaptureStatus = $visualCaptureStatus
+            VisualScanout0 = $visualScanout0
+            VisualScanout1 = $visualScanout1
+            VisualScanout0Path = $visualScanout0Path
+            VisualScanout1Path = $visualScanout1Path
+            VisualScanout0Signature = $visualScanout0Signature
+            VisualScanout1Signature = $visualScanout1Signature
+            VisualCaptureReason = $visualCaptureReason
+            DistinctPatternsConfirmed = $distinctPatternsConfirmed
+            DualOutputVisualProof = if ($stageLabel -eq 'stageB' -and $distinctPatternsConfirmed) { 'confirmed' } elseif ($stageLabel -eq 'stageA' -and $visualScanout0 -eq 'confirmed') { 'confirmed' } else { 'not-confirmed' }
+            QemuArgs = $spec.QemuArgs
+            ProbeNote = $spec.ProbeNote
+            Required = $spec.Required
         Launched = $launched
         BootloaderSerialAppeared = $bootloaderSerialCaptured
         LauncherExitCode = $launcherExitCode
@@ -990,6 +1674,18 @@ function Invoke-QemuDisplayProbeBackend {
         GpuInventoryLine = $gpuInventoryLine.Value
         GpuTransportLine = $gpuTransportLine.Value
         GpuMmioReportLine = $gpuMmioReportLine.Value
+        GpuMmioRequestBase = $gpuMmioRequestBase
+        GpuMmioRequestLength = $gpuMmioRequestLength
+        GpuMmioKernelVirtualBase = $gpuMmioKernelVirtualBase
+        GpuMmioMappedVirtual = $gpuMmioMappedVirtual
+        GpuMmioMappedLength = $gpuMmioMappedLength
+        GpuMmioPages = $gpuMmioPages
+        GpuMmioFlags = $gpuMmioFlags
+        GpuMmioNonUser = $gpuMmioNonUser
+        GpuMmioNoExec = $gpuMmioNoExec
+        GpuMmioUncached = $gpuMmioUncached
+        GpuMmioCacheAttrs = $gpuMmioCacheAttrs
+        GpuMmioQemuProbeOnly = $gpuMmioQemuProbeOnly
         GpuMmioSummaryLine = $gpuMmioSummaryLine.Value
         GpuMmioMappedLine = $gpuMmioMappedLine.Value
         GpuMmioBlockedLine = $gpuMmioBlockedLine.Value
@@ -1000,16 +1696,60 @@ function Invoke-QemuDisplayProbeBackend {
         GpuFeaturesOkStatusLine = $gpuFeaturesOkStatusLine.Value
         GpuDriverOkStatusLine = $gpuDriverOkStatusLine.Value
         GpuFeatureBitmapLine = $gpuFeatureBitmapLine.Value
-        GpuGetDisplayInfoStepLine = $gpuGetDisplayInfoStepLine.Value
+        GpuPreRenderDeviceConfigLine = $gpuPreRenderDeviceConfigLine.Value
+        GpuPreRenderDisplayInfoBeginLine = $gpuPreRenderDisplayInfoBeginLine.Value
+        GpuPreRenderCompletionLine = $gpuPreRenderCompletionLine.Value
+        GpuPreRenderDisplayInfoSummaryLine = $gpuPreRenderDisplayInfoSummaryLine.Value
+        GpuDiagnosticTargetLine = $gpuDiagnosticTargetLine.Value
+        GpuBackingLayoutLine = $gpuBackingLayoutLine.Value
+        GpuBackingPhysicalCoverageValid = $gpuBackingPhysicalCoverageValid
+        GpuBackingMemEntryCount = $gpuBackingMemEntryCount
+        GpuBackingContiguousRunCount = $gpuBackingContiguousRunCount
+        GpuBackingCoveredBytes = $gpuBackingCoveredBytes
+        GpuPrimaryPatternChecksumLine = $gpuPrimaryPatternChecksumLine.Value
+        GpuPrimaryPatternChecksum = $gpuPrimaryPatternChecksum
+        GpuSecondaryPatternChecksumLine = $gpuSecondaryPatternChecksumLine.Value
+        GpuSecondaryPatternChecksum = $gpuSecondaryPatternChecksum
+        GpuStageBCapacityLine = $gpuStageBCapacityLine.Value
+        GpuStageBInitialScanoutLine = $gpuStageBInitialScanoutLine.Value
+        GpuResourceCreateLine = $gpuResourceCreateLine.Value
+        GpuResourceCreateSecondaryLine = $gpuResourceCreateSecondaryLine
+        GpuAttachLine = $gpuAttachLine.Value
+        GpuAttachSecondaryLine = $gpuAttachSecondaryLine
+        GpuSetScanoutLine = $gpuSetScanoutLine.Value
+        GpuSetScanout1Line = $gpuSetScanout1Line.Value
+        GpuTransferLine = $gpuTransferLine.Value
+        GpuTransfer1Line = $gpuTransfer1Line.Value
+        GpuFlushLine = $gpuFlushLine.Value
+        GpuFlush1Line = $gpuFlush1Line.Value
+        GpuPostRenderDisplayInfoBeginLine = $gpuPostRenderDisplayInfoBeginLine.Value
+        GpuPostRenderCompletionLine = $gpuPostRenderCompletionLine.Value
+        GpuPostRenderDisplayInfoSummaryLine = $gpuPostRenderDisplayInfoSummaryLine.Value
+        GpuPostRenderScanout0Line = $gpuPostRenderScanout0Line.Value
+        GpuPostRenderScanout1Line = $gpuPostRenderScanout1Line.Value
+        GpuPreRenderEnabledScanouts = $gpuPreRenderEnabledScanouts
+        GpuPreRenderDisabledScanouts = $gpuPreRenderDisabledScanouts
+        GpuPreRenderDeviceConfigNumScanouts = $gpuPreRenderDeviceConfigNumScanouts
+        GpuPreRenderQemuMaxOutputsIntent = $gpuPreRenderQemuMaxOutputsIntent
+        GpuPostRenderEnabledScanouts = $gpuPostRenderEnabledScanouts
+        GpuPostRenderDisabledScanouts = $gpuPostRenderDisabledScanouts
+        GpuPostRenderDeviceConfigNumScanouts = $gpuPostRenderDeviceConfigNumScanouts
+        GpuPostRenderQemuMaxOutputsIntent = $gpuPostRenderQemuMaxOutputsIntent
         GpuFeatureNegotiationLine = $gpuFeatureNegotiationLine.Value
         GpuQueueCountLine = $gpuQueueCountLine.Value
         GpuQueueLine = $gpuQueueLine.Value
         GpuDisplayInfoResponseLine = $gpuDisplayInfoResponseLine.Value
-        GpuDisplayInfoLine = $gpuDisplayInfoLine.Value
-        GpuDisplayInfoSummaryLine = $gpuDisplayInfoSummaryLine.Value
         GpuScanoutLine = $gpuScanoutLine.Value
         GpuEnabledScanoutCount = $gpuEnabledScanoutMatches.Count
         GpuProbeCompleteLine = $gpuProbeCompleteLine.Value
+        GpuProbeCompleteDeviceConfigNumScanouts = $gpuProbeCompleteDeviceConfigNumScanouts
+        GpuProbeCompleteEnabledScanoutsBefore = $gpuProbeCompleteEnabledScanoutsBefore
+        GpuProbeCompleteDisabledScanoutsBefore = $gpuProbeCompleteDisabledScanoutsBefore
+        GpuProbeCompleteEnabledScanoutsAfter = $gpuProbeCompleteEnabledScanoutsAfter
+        GpuProbeCompleteDistinctPatterns = $gpuProbeCompleteDistinctPatterns
+        GpuProbeCompleteQemuTwoUsableScanouts = $gpuProbeCompleteQemuTwoUsableScanouts
+        GpuSingleOutputProofLine = $gpuSingleOutputProofLine.Value
+        GpuDualOutputProofLine = $gpuDualOutputProofLine.Value
         Supported = $spec.Supported
         DiagnosticStatus = $backendStatus
         Interpretation = $interpretation
@@ -1026,10 +1766,46 @@ try {
 
     $results = @()
     foreach ($backend in $Backends) {
-        Write-Host ("[{0}] launching display probe smoke" -f $backend)
-        $result = Invoke-QemuDisplayProbeBackend -Backend $backend -TimeoutSeconds $TimeoutSeconds
+        Write-Host ("[{0} stageA] launching display probe smoke" -f $backend)
+        $result = Invoke-QemuDisplayProbeBackend -Backend $backend -TimeoutSeconds $TimeoutSeconds -ProbeStage 'stageA' -EnableVisualCapture:($backend -like 'virtio-gpu*')
         $results += $result
-        Write-Host ("[{0}] completed. serial={1}" -f $backend, $result.SerialLog)
+        Write-Host ("[{0} stageA] completed. serial={1}" -f $backend, $result.SerialLog)
+    }
+
+    $virtioGpuStageAResult = $results | Where-Object { $_.Backend -eq 'virtio-gpu' -and $_.ProbeStage -eq 'stageA' } | Select-Object -First 1
+    $stageBResult = $null
+    $stageBBlockerReason = ''
+
+    if ($virtioGpuStageAResult -and $virtioGpuStageAResult.VisualScanout0 -eq 'confirmed' -and $virtioGpuStageAResult.VisualCaptureStatus -eq 'captured') {
+        Write-Host '[build] rebuilding kernel with virtio-gpu dual-scanout probe enabled'
+        Invoke-KernelBuildForSmoke -ExtraCFlags '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE'
+        $script:activeSmokeBuild = $true
+        try {
+            $stageBResult = Invoke-QemuDisplayProbeBackend -Backend 'virtio-gpu' -TimeoutSeconds $TimeoutSeconds -ProbeStage 'stageB' -EnableVisualCapture
+            $results += $stageBResult
+            Write-Host ("[virtio-gpu stageB] completed. serial={0}" -f $stageBResult.SerialLog)
+        } catch {
+            $stageBBlockerReason = $_.Exception.Message
+            Write-Host ("[virtio-gpu stageB] blocker: {0}" -f $stageBBlockerReason)
+        }
+    } else {
+        $stageBBlockerReason = if ($virtioGpuStageAResult) {
+            "Stage A visual proof not confirmed: visualScanout0=$($virtioGpuStageAResult.VisualScanout0) capture=$($virtioGpuStageAResult.VisualCaptureStatus)"
+        } else {
+            'Stage A virtio-gpu result missing'
+        }
+        Write-Host ("[virtio-gpu stageB] skipped: {0}" -f $stageBBlockerReason)
+    }
+
+    $stageBResultComplete = $stageBResult -and $stageBResult.DiagnosticStatus -eq 'complete'
+    if ($stageBResult -and -not $stageBResultComplete -and [string]::IsNullOrWhiteSpace($stageBBlockerReason)) {
+        $stageBBlockerReason = if (-not [string]::IsNullOrWhiteSpace($stageBResult.Interpretation)) {
+            $stageBResult.Interpretation
+        } elseif (-not [string]::IsNullOrWhiteSpace($stageBResult.DiagnosticStatus)) {
+            "Stage B diagnostic status=$($stageBResult.DiagnosticStatus)"
+        } else {
+            'Stage B failed without a blocker reason'
+        }
     }
 
     $evidencePath = Join-Path $RunRoot 'qemu-display-probe.evidence.txt'
@@ -1039,12 +1815,13 @@ try {
         "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))",
         "repoRoot=$Root",
         "runRoot=$RunRoot",
-        "backends=$($Backends -join ',')"
+        "backends=$($Backends -join ',')",
+        "stageBBlockerReason=$stageBBlockerReason"
     )
 
     foreach ($result in $results) {
         $evidenceLines += ''
-        $evidenceLines += "[backend $($result.Backend)]"
+        $evidenceLines += "[backend $($result.Backend) stage=$($result.ProbeStage)]"
         $evidenceLines += "required=$($result.Required.ToString().ToLowerInvariant())"
         $evidenceLines += "supported=$($result.Supported.ToString().ToLowerInvariant())"
         $evidenceLines += "qemuArgs=$($result.QemuArgs)"
@@ -1085,6 +1862,18 @@ try {
         $evidenceLines += "gpuInventoryLine=$($result.GpuInventoryLine)"
         $evidenceLines += "gpuTransportLine=$($result.GpuTransportLine)"
         $evidenceLines += "gpuMmioReportLine=$($result.GpuMmioReportLine)"
+        $evidenceLines += "gpuMmioRequestBase=$($result.GpuMmioRequestBase)"
+        $evidenceLines += "gpuMmioRequestLength=$($result.GpuMmioRequestLength)"
+        $evidenceLines += "gpuMmioKernelVirtualBase=$($result.GpuMmioKernelVirtualBase)"
+        $evidenceLines += "gpuMmioMappedVirtual=$($result.GpuMmioMappedVirtual)"
+        $evidenceLines += "gpuMmioMappedLength=$($result.GpuMmioMappedLength)"
+        $evidenceLines += "gpuMmioPages=$($result.GpuMmioPages)"
+        $evidenceLines += "gpuMmioFlags=$($result.GpuMmioFlags)"
+        $evidenceLines += "gpuMmioNonUser=$($result.GpuMmioNonUser)"
+        $evidenceLines += "gpuMmioNoExec=$($result.GpuMmioNoExec)"
+        $evidenceLines += "gpuMmioUncached=$($result.GpuMmioUncached)"
+        $evidenceLines += "gpuMmioCacheAttrs=$($result.GpuMmioCacheAttrs)"
+        $evidenceLines += "gpuMmioQemuProbeOnly=$($result.GpuMmioQemuProbeOnly)"
         $evidenceLines += "gpuMmioSummaryLine=$($result.GpuMmioSummaryLine)"
         $evidenceLines += "gpuMmioMappedLine=$($result.GpuMmioMappedLine)"
         $evidenceLines += "gpuMmioBlockedLine=$($result.GpuMmioBlockedLine)"
@@ -1095,29 +1884,94 @@ try {
         $evidenceLines += "gpuFeaturesOkStatusLine=$($result.GpuFeaturesOkStatusLine)"
         $evidenceLines += "gpuDriverOkStatusLine=$($result.GpuDriverOkStatusLine)"
         $evidenceLines += "gpuFeatureBitmapLine=$($result.GpuFeatureBitmapLine)"
-        $evidenceLines += "gpuGetDisplayInfoStepLine=$($result.GpuGetDisplayInfoStepLine)"
+        $evidenceLines += "gpuPreRenderDeviceConfigLine=$($result.GpuPreRenderDeviceConfigLine)"
+        $evidenceLines += "gpuPreRenderDisplayInfoBeginLine=$($result.GpuPreRenderDisplayInfoBeginLine)"
+        $evidenceLines += "gpuPreRenderCompletionLine=$($result.GpuPreRenderCompletionLine)"
+        $evidenceLines += "gpuPreRenderDisplayInfoSummaryLine=$($result.GpuPreRenderDisplayInfoSummaryLine)"
+        $evidenceLines += "gpuDiagnosticTargetLine=$($result.GpuDiagnosticTargetLine)"
+        $evidenceLines += "gpuBackingLayoutLine=$($result.GpuBackingLayoutLine)"
+        $evidenceLines += "gpuBackingPhysicalCoverageValid=$($result.GpuBackingPhysicalCoverageValid)"
+        $evidenceLines += "gpuBackingMemEntryCount=$($result.GpuBackingMemEntryCount)"
+        $evidenceLines += "gpuBackingContiguousRunCount=$($result.GpuBackingContiguousRunCount)"
+        $evidenceLines += "gpuBackingCoveredBytes=$($result.GpuBackingCoveredBytes)"
+        $evidenceLines += "gpuResourceCreateLine=$($result.GpuResourceCreateLine)"
+        $evidenceLines += "gpuResourceCreateSecondaryLine=$($result.GpuResourceCreateSecondaryLine)"
+        $evidenceLines += "gpuAttachLine=$($result.GpuAttachLine)"
+        $evidenceLines += "gpuAttachSecondaryLine=$($result.GpuAttachSecondaryLine)"
+        $evidenceLines += "gpuSetScanoutLine=$($result.GpuSetScanoutLine)"
+        $evidenceLines += "gpuSetScanout1Line=$($result.GpuSetScanout1Line)"
+        $evidenceLines += "gpuTransferLine=$($result.GpuTransferLine)"
+        $evidenceLines += "gpuTransfer1Line=$($result.GpuTransfer1Line)"
+        $evidenceLines += "gpuFlushLine=$($result.GpuFlushLine)"
+        $evidenceLines += "gpuFlush1Line=$($result.GpuFlush1Line)"
+        $evidenceLines += "gpuPostRenderDisplayInfoBeginLine=$($result.GpuPostRenderDisplayInfoBeginLine)"
+        $evidenceLines += "gpuPostRenderCompletionLine=$($result.GpuPostRenderCompletionLine)"
+        $evidenceLines += "gpuPostRenderDisplayInfoSummaryLine=$($result.GpuPostRenderDisplayInfoSummaryLine)"
+        $evidenceLines += "gpuPreRenderEnabledScanouts=$($result.GpuPreRenderEnabledScanouts)"
+        $evidenceLines += "gpuPreRenderDisabledScanouts=$($result.GpuPreRenderDisabledScanouts)"
+        $evidenceLines += "gpuPreRenderDeviceConfigNumScanouts=$($result.GpuPreRenderDeviceConfigNumScanouts)"
+        $evidenceLines += "gpuPreRenderQemuMaxOutputsIntent=$($result.GpuPreRenderQemuMaxOutputsIntent)"
+        $evidenceLines += "gpuPostRenderEnabledScanouts=$($result.GpuPostRenderEnabledScanouts)"
+        $evidenceLines += "gpuPostRenderDisabledScanouts=$($result.GpuPostRenderDisabledScanouts)"
+        $evidenceLines += "gpuPostRenderDeviceConfigNumScanouts=$($result.GpuPostRenderDeviceConfigNumScanouts)"
+        $evidenceLines += "gpuPostRenderQemuMaxOutputsIntent=$($result.GpuPostRenderQemuMaxOutputsIntent)"
+        $evidenceLines += "gpuPostRenderScanout0Line=$($result.GpuPostRenderScanout0Line)"
+        $evidenceLines += "gpuPostRenderScanout1Line=$($result.GpuPostRenderScanout1Line)"
         $evidenceLines += "gpuFeatureNegotiationLine=$($result.GpuFeatureNegotiationLine)"
         $evidenceLines += "gpuQueueCountLine=$($result.GpuQueueCountLine)"
         $evidenceLines += "gpuQueueLine=$($result.GpuQueueLine)"
         $evidenceLines += "gpuDisplayInfoResponseLine=$($result.GpuDisplayInfoResponseLine)"
-        $evidenceLines += "gpuDisplayInfoLine=$($result.GpuDisplayInfoLine)"
-        $evidenceLines += "gpuDisplayInfoSummaryLine=$($result.GpuDisplayInfoSummaryLine)"
         $evidenceLines += "gpuScanoutLine=$($result.GpuScanoutLine)"
         $evidenceLines += "gpuEnabledScanoutCount=$($result.GpuEnabledScanoutCount)"
         $evidenceLines += "gpuProbeCompleteLine=$($result.GpuProbeCompleteLine)"
+        $evidenceLines += "gpuProbeCompleteDeviceConfigNumScanouts=$($result.GpuProbeCompleteDeviceConfigNumScanouts)"
+        $evidenceLines += "gpuProbeCompleteEnabledScanoutsBefore=$($result.GpuProbeCompleteEnabledScanoutsBefore)"
+        $evidenceLines += "gpuProbeCompleteDisabledScanoutsBefore=$($result.GpuProbeCompleteDisabledScanoutsBefore)"
+        $evidenceLines += "gpuProbeCompleteEnabledScanoutsAfter=$($result.GpuProbeCompleteEnabledScanoutsAfter)"
+        $evidenceLines += "gpuProbeCompleteDistinctPatterns=$($result.GpuProbeCompleteDistinctPatterns)"
+        $evidenceLines += "gpuProbeCompleteQemuTwoUsableScanouts=$($result.GpuProbeCompleteQemuTwoUsableScanouts)"
+        $evidenceLines += "gpuPrimaryPatternChecksum=$($result.GpuPrimaryPatternChecksum)"
+        $evidenceLines += "gpuSecondaryPatternChecksum=$($result.GpuSecondaryPatternChecksum)"
+        $evidenceLines += "gpuSingleOutputProofLine=$($result.GpuSingleOutputProofLine)"
+        $evidenceLines += "gpuDualOutputProofLine=$($result.GpuDualOutputProofLine)"
+        $evidenceLines += "visualCaptureStatus=$($result.VisualCaptureStatus)"
+        $evidenceLines += "visualScanout0=$($result.VisualScanout0)"
+        $evidenceLines += "visualScanout1=$($result.VisualScanout1)"
+        $evidenceLines += "visualCaptureReason=$($result.VisualCaptureReason)"
+        $evidenceLines += "distinctPatternsConfirmed=$($result.DistinctPatternsConfirmed)"
+        $evidenceLines += "dualOutputVisualProof=$($result.DualOutputVisualProof)"
         $evidenceLines += "launcherStdOut=$($result.LauncherStdOut)"
         $evidenceLines += "launcherStdErr=$($result.LauncherStdErr)"
         $evidenceLines += "serialLog=$($result.SerialLog)"
         $evidenceLines += "summaryPath=$($result.SummaryPath)"
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($stageBBlockerReason) -and $stageBResult -eq $null) {
+        $evidenceLines += ''
+        $evidenceLines += '[virtio-gpu stageB]'
+        $evidenceLines += 'required=false'
+        $evidenceLines += 'supported=true'
+        $evidenceLines += 'diagnosticStatus=blocked'
+        $evidenceLines += "interpretation=$stageBBlockerReason"
+    }
+
     Set-Content -LiteralPath $evidencePath -Value $evidenceLines -Encoding UTF8
 
-    Write-Host 'QEMU display probe smoke passed.'
+    if ($stageBResultComplete) {
+        Write-Host 'QEMU display probe smoke passed.'
+    } else {
+        Write-Host 'QEMU display probe smoke completed with a Stage B blocker.'
+    }
     Write-Host ("Evidence: {0}" -f $evidencePath)
     foreach ($result in $results) {
-        Write-Host ("[{0}] status={1} launched={2} serial={3}" -f $result.Backend, $result.DiagnosticStatus, $result.Launched, $result.BootloaderSerialAppeared)
-        Write-Host ("[{0}] summary={1}" -f $result.Backend, $result.SummaryPath)
+        Write-Host ("[{0} stage={1}] status={2} launched={3} serial={4}" -f $result.Backend, $result.ProbeStage, $result.DiagnosticStatus, $result.Launched, $result.BootloaderSerialAppeared)
+        Write-Host ("[{0} stage={1}] summary={2}" -f $result.Backend, $result.ProbeStage, $result.SummaryPath)
+    }
+    if (-not $stageBResultComplete) {
+        if ([string]::IsNullOrWhiteSpace($stageBBlockerReason)) {
+            $stageBBlockerReason = 'Stage B failed without a blocker reason'
+        }
+        throw $stageBBlockerReason
     }
 } finally {
     Restore-NormalKernelBuild
