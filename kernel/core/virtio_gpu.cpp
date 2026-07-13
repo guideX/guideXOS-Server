@@ -9,10 +9,11 @@
 // - No cursor queue setup
 // - No physical Intel GPU support
 // - No real hardware GPU BAR access
-// - No 3D, virgl, Venus, blob, or continuous compositor integration
+// - No 3D, virgl, Venus, blob, or unrestricted production compositor integration
 // - No display hotplug
-// - QEMU-only compositor desktop rendering is limited to a single static proof frame
-// - No continuous frame rendering or animation
+// - QEMU-only compositor desktop rendering is single-shot unless the explicit
+//   bounded live QEMU proof gate is selected
+// - No unbounded busy rendering loops or unlimited queue polling
 // - No real hardware GPU/MMIO enablement
 // REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
 //
@@ -23,6 +24,8 @@
 
 #include "include/kernel/mmio.h"
 #include "include/kernel/msi.h"
+#include "include/kernel/pit.h"
+#include "include/kernel/desktop.h"
 #include "include/kernel/system_font.h"
 #include "include/kernel/serial_debug.h"
 #include "../../virtio_gpu_display_backend.h"
@@ -71,6 +74,15 @@ static const size_t kDiagnosticBackingBytes = 16u * 1024u * 1024u;
 static const uint32_t kDiagnosticBackingMaxMemEntries = 64u;
 static const uint64_t kDiagnosticPageSizeBytes = 4096u;
 static const uint16_t kInvalidDescriptorIndex = 0xFFFFu;
+// The live path intentionally starts at a conservative 10 FPS cap.  PIT is
+// configured at 100 Hz by the normal kernel boot path, so this interval is a
+// hard minimum in scheduler ticks rather than a best-effort target.
+static const uint32_t kLivePresentationFrameCap = 10u;
+static const uint64_t kLivePresentationIntervalTicks = 10u;
+static const uint32_t kLivePresentationBoundedAttemptLimit = 60u;
+static const uint64_t kLivePresentationBoundedTimeLimitTicks = 800u;
+static const uint32_t kLivePresentationOverlayPeriodAttempts = 2u;
+static const uint32_t kLivePresentationFallbackFailureThreshold = 2u;
 // VIRTIO_F_VERSION_1 is required for the modern split-queue control path.
 static const uint64_t kCommonCfgRequiredFeatureBits = FEATURE_VERSION_1;
 
@@ -252,10 +264,80 @@ struct DiagnosticResourceState {
     bool flushOk;
 };
 
+struct LivePresentationTargetDescriptor {
+    uint32_t targetIndex{0};
+    uint32_t scanoutId{0};
+    uint32_t resourceId{0};
+    int viewportOriginX{0};
+    int viewportOriginY{0};
+    int width{0};
+    int height{0};
+    bool primary{false};
+};
+
+// Persistent QEMU-only presentation state.  Transport/resource readiness is
+// copied into this record after the one-shot proof, while compositor state
+// remains owned by the normal desktop invalidation path.
+struct LivePresentationBackendState {
+    bool initialized{false};
+    bool enabled{false};
+    bool stopped{false};
+    uint64_t frameSequence{0};
+    uint64_t lastPresentedFrame{0};
+    uint64_t lastDirtyGeneration{0};
+    uint32_t framesAttempted{0};
+    uint32_t dirtyFrames{0};
+    uint32_t framesRendered{0};
+    uint32_t framesSkippedClean{0};
+    uint32_t rateLimitSkips{0};
+    uint32_t target0TransferCount{0};
+    uint32_t target0FlushCount{0};
+    uint32_t target1TransferCount{0};
+    uint32_t target1FlushCount{0};
+    uint32_t target0Failures{0};
+    uint32_t target1Failures{0};
+    uint32_t target0FailureStreak{0};
+    uint32_t target1FailureStreak{0};
+    uint64_t presentationStartTicks{0};
+    uint64_t lastPresentationTicks{0};
+    uint32_t configuredFrameCap{kLivePresentationFrameCap};
+    uint32_t boundedRunLimit{kLivePresentationBoundedAttemptLimit};
+    uint64_t boundedTimeLimitTicks{kLivePresentationBoundedTimeLimitTicks};
+    const char* fallbackMode{"static-patterns-retained"};
+    const char* stoppedReason{"not-started"};
+    bool fallbackActivated{false};
+    bool fallbackTargetValid{false};
+    uint32_t fallbackTarget{0};
+    const char* fallbackReason{"none"};
+    const char* fallbackResult{"not-used"};
+    bool initialFrameReadyLogged{false};
+    uint64_t initialTarget0Checksum{0};
+    uint64_t initialTarget1Checksum{0};
+    uint64_t finalTarget0Checksum{0};
+    uint64_t finalTarget1Checksum{0};
+    DeviceState* device{nullptr};
+    DiagnosticResourceState resource0{};
+    DiagnosticResourceState resource1{};
+    LivePresentationTargetDescriptor target0{};
+    LivePresentationTargetDescriptor target1{};
+    uint8_t* backing0{nullptr};
+    uint8_t* backing1{nullptr};
+    uint64_t backingPhysical0{0};
+    uint64_t backingPhysical1{0};
+    uint64_t totalBackingBytes{0};
+    uint64_t backingPageCount{0};
+    uint32_t selectedWidth{0};
+    uint32_t selectedHeight{0};
+    uint32_t bytesPerPixel{0};
+    GpuFormat resourceFormat{FORMAT_B8G8R8X8_UNORM};
+};
+
 static bool s_initialized = false;
 static DeviceState s_devices[4];
 static int s_deviceCount = 0;
 static ProbeOutcome s_probeOutcome{};
+static LivePresentationBackendState s_livePresentation{};
+static bool s_liveCommandLoggingSuppressed = false;
 static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 
 #if defined(_MSC_VER)
@@ -306,6 +388,49 @@ static void serial_put_u64_decimal(uint64_t value)
     } while (value != 0u && index > 0);
 
     kernel::serial::puts(&buffer[index]);
+}
+
+static void write_u64_decimal(char* buffer, size_t bufferSize, uint64_t value)
+{
+    if (buffer == nullptr || bufferSize < 2u) {
+        return;
+    }
+
+    size_t index = bufferSize - 1u;
+    buffer[index] = '\0';
+    do {
+        if (index == 0u) {
+            break;
+        }
+        buffer[--index] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u);
+
+    if (index != 0u) {
+        size_t out = 0u;
+        while (index < bufferSize) {
+            buffer[out++] = buffer[index++];
+        }
+    }
+}
+
+static bool text_contains(const char* text, const char* needle)
+{
+    if (text == nullptr || needle == nullptr || needle[0] == '\0') {
+        return false;
+    }
+    for (const char* start = text; *start != '\0'; ++start) {
+        const char* a = start;
+        const char* b = needle;
+        while (*a != '\0' && *b != '\0' && *a == *b) {
+            ++a;
+            ++b;
+        }
+        if (*b == '\0') {
+            return true;
+        }
+    }
+    return false;
 }
 
 static uint64_t align_up(uint64_t value, uint64_t alignment)
@@ -936,13 +1061,46 @@ static void draw_desktop_windows(PixelSurface& surface, bool primaryTaskbarVisib
     }
 }
 
+static void draw_live_diagnostic_overlay(
+    PixelSurface& surface,
+    const DisplayRenderTarget& target,
+    uint64_t frameSequence)
+{
+    // QEMU-only proof marker: a small moving rectangle and frame label in the
+    // work area.  It is clipped through the target viewport and never touches
+    // the primary-only taskbar at the bottom of the target.
+    const int slot = static_cast<int>(frameSequence % 8u);
+    const int markerX = surface.viewportOriginX + 24 + (slot * 22);
+    const int markerY = surface.viewportOriginY + 78;
+    const uint32_t markerColor = target.primary ? 0x00A8E6FF : 0x00FFD070;
+    surface_fill_rect_global(surface, markerX, markerY, 16, 12, markerColor);
+    surface_draw_rect_global(surface, markerX, markerY, 16, 12, 0x00FFFFFF);
+
+    char frameText[24]{};
+    write_u64_decimal(frameText, sizeof(frameText), frameSequence);
+    char label[32] = "LIVE ";
+    size_t labelIndex = 5u;
+    for (size_t textIndex = 0u; frameText[textIndex] != '\0' && labelIndex < sizeof(label) - 1u; ++textIndex) {
+        label[labelIndex++] = frameText[textIndex];
+    }
+    label[labelIndex] = '\0';
+    surface_draw_text_global(surface,
+                             surface.viewportOriginX + 48,
+                             surface.viewportOriginY + 80,
+                             label,
+                             0x00FFFFFF,
+                             FontRole::SmallBold);
+}
+
 static bool render_guide_xos_desktop_snapshot(
     PixelSurface& surface,
     const DisplayRenderTarget& target,
     uint32_t virtualDesktopWidth,
     uint32_t virtualDesktopHeight,
     bool* conversionRequiredOut,
-    const char** blockerOut)
+    const char** blockerOut,
+    uint64_t diagnosticFrameSequence = 0u,
+    bool liveDiagnosticOverlay = false)
 {
     if (blockerOut != nullptr) {
         *blockerOut = nullptr;
@@ -993,6 +1151,9 @@ static bool render_guide_xos_desktop_snapshot(
                              target.primary ? "taskbar visible" : "taskbar suppressed",
                              0x00D8E8F0,
                              FontRole::Small);
+    if (liveDiagnosticOverlay) {
+        draw_live_diagnostic_overlay(surface, target, diagnosticFrameSequence);
+    }
     return true;
 }
 
@@ -1020,7 +1181,10 @@ static CompositorFrameTargetResult present_target_once(
     uint32_t selectedWidth,
     uint32_t selectedHeight,
     uint32_t bytesPerPixel,
-    uint64_t backingPageCount)
+    uint64_t backingPageCount,
+    uint64_t diagnosticFrameSequence = 0u,
+    bool liveDiagnosticOverlay = false,
+    bool verbose = true)
 {
     CompositorFrameTargetResult result;
     result.targetIndex = target.targetIndex;
@@ -1073,10 +1237,12 @@ static CompositorFrameTargetResult present_target_once(
     const uint32_t virtualDesktopHeight = selectedHeight > 0u ? selectedHeight : surface.height;
     result.renderOk = render_guide_xos_desktop_snapshot(surface,
                                                         target,
-                                                        virtualDesktopWidth,
-                                                        virtualDesktopHeight,
-                                                        &conversionRequired,
-                                                        &renderBlocker);
+                                                         virtualDesktopWidth,
+                                                         virtualDesktopHeight,
+                                                         &conversionRequired,
+                                                         &renderBlocker,
+                                                         diagnosticFrameSequence,
+                                                         liveDiagnosticOverlay);
     result.conversionRequired = conversionRequired;
     auto restore_fallback_pattern = [&]() {
         fill_diagnostic_pattern(surface.pixelPointer,
@@ -1091,8 +1257,6 @@ static CompositorFrameTargetResult present_target_once(
         resource.patternChecksum = result.checksum;
         resource.checksumValid = true;
         resource.patternName = fallbackPalette.name;
-        resource.transferOk = false;
-        resource.flushOk = false;
     };
 
     if (result.renderOk) {
@@ -1104,6 +1268,7 @@ static CompositorFrameTargetResult present_target_once(
     }
 
     if (!result.renderOk) {
+        if (verbose) {
         kernel::serial::puts("[VIRTIO-GPU] compositor target plan target=");
         serial_put_u32_decimal(target.targetIndex);
         kernel::serial::puts(" scanoutId=");
@@ -1149,12 +1314,14 @@ static CompositorFrameTargetResult present_target_once(
         kernel::serial::puts(" reason=");
         kernel::serial::puts(result.blocker != nullptr ? result.blocker : "compositor render failed");
         kernel::serial::putc('\n');
+        }
 
         (void)backingPhysical;
         (void)backingPageCount;
         return result;
     }
 
+    if (verbose) {
     kernel::serial::puts("[VIRTIO-GPU] compositor target plan target=");
     serial_put_u32_decimal(target.targetIndex);
     kernel::serial::puts(" scanoutId=");
@@ -1178,6 +1345,7 @@ static CompositorFrameTargetResult present_target_once(
     kernel::serial::puts(" backingValid=");
     kernel::serial::puts(result.backingValid ? "yes" : "no");
     kernel::serial::putc('\n');
+    }
 
     const char* commandReason = nullptr;
     bool commandCompleted = false;
@@ -1185,6 +1353,7 @@ static CompositorFrameTargetResult present_target_once(
         result.transferOk = false;
         result.blocker = commandReason != nullptr ? commandReason : "TRANSFER_TO_HOST_2D failed";
         restore_fallback_pattern();
+        if (verbose) {
         kernel::serial::puts("[VIRTIO-GPU] compositor target result target=");
         serial_put_u32_decimal(target.targetIndex);
         kernel::serial::puts(" scanoutId=");
@@ -1206,6 +1375,7 @@ static CompositorFrameTargetResult present_target_once(
         kernel::serial::puts(" reason=");
         kernel::serial::puts(result.blocker);
         kernel::serial::putc('\n');
+        }
         return result;
     }
     result.transferOk = true;
@@ -1214,6 +1384,7 @@ static CompositorFrameTargetResult present_target_once(
         result.flushOk = false;
         result.blocker = commandReason != nullptr ? commandReason : "RESOURCE_FLUSH failed";
         restore_fallback_pattern();
+        if (verbose) {
         kernel::serial::puts("[VIRTIO-GPU] compositor target result target=");
         serial_put_u32_decimal(target.targetIndex);
         kernel::serial::puts(" scanoutId=");
@@ -1235,6 +1406,7 @@ static CompositorFrameTargetResult present_target_once(
         kernel::serial::puts(" reason=");
         kernel::serial::puts(result.blocker);
         kernel::serial::putc('\n');
+        }
         return result;
     }
     result.flushOk = true;
@@ -1245,6 +1417,7 @@ static CompositorFrameTargetResult present_target_once(
     resource.flushOk = true;
     resource.patternName = "compositor-single-frame";
 
+    if (verbose) {
     kernel::serial::puts("[VIRTIO-GPU] compositor target result target=");
     serial_put_u32_decimal(target.targetIndex);
     kernel::serial::puts(" scanoutId=");
@@ -1270,10 +1443,101 @@ static CompositorFrameTargetResult present_target_once(
         kernel::serial::puts(result.blocker);
     }
     kernel::serial::putc('\n');
+    }
 
     (void)backingPhysical;
     (void)backingPageCount;
     return result;
+}
+
+static void store_live_target_descriptor(LivePresentationTargetDescriptor& descriptor,
+                                         const DisplayRenderTarget& target)
+{
+    descriptor.targetIndex = target.targetIndex;
+    descriptor.scanoutId = target.scanoutId;
+    descriptor.resourceId = target.resourceId;
+    descriptor.viewportOriginX = target.viewportOriginX;
+    descriptor.viewportOriginY = target.viewportOriginY;
+    descriptor.width = target.width;
+    descriptor.height = target.height;
+    descriptor.primary = target.primary;
+}
+
+static DisplayRenderTarget make_live_target(const LivePresentationTargetDescriptor& descriptor)
+{
+    DisplayRenderTarget target{};
+    target.targetIndex = descriptor.targetIndex;
+    target.targetId = descriptor.primary ? "virtio-gpu-target-1" : "virtio-gpu-target-2";
+    target.source = "virtio-gpu";
+    target.monitorId = descriptor.primary ? 1u : 2u;
+    target.monitorName = descriptor.primary ? "Virtio GPU Output 0" : "Virtio GPU Output 1";
+    target.scanoutId = descriptor.scanoutId;
+    target.resourceId = descriptor.resourceId;
+    target.viewportOriginX = descriptor.viewportOriginX;
+    target.viewportOriginY = descriptor.viewportOriginY;
+    target.width = descriptor.width;
+    target.height = descriptor.height;
+    target.framebufferRect = DisplayRect{ 0, 0, descriptor.width, descriptor.height };
+    target.preferredX = descriptor.viewportOriginX;
+    target.preferredY = descriptor.viewportOriginY;
+    target.preferredWidth = descriptor.width;
+    target.preferredHeight = descriptor.height;
+    target.assignedX = descriptor.viewportOriginX;
+    target.assignedY = descriptor.viewportOriginY;
+    target.assignedWidth = descriptor.width;
+    target.assignedHeight = descriptor.height;
+    target.primary = descriptor.primary;
+    target.active = true;
+    target.backedByHostedFramebuffer = false;
+    target.backedByOutputResource = true;
+    target.connectorEnabled = true;
+    target.resourceBound = true;
+    target.backingAttached = true;
+    target.transferReady = true;
+    target.presentReady = true;
+    target.presentationConfirmed = true;
+    target.syntheticHosted = false;
+    return target;
+}
+
+// Repaint one complete target with the known-good static pattern after a
+// bounded streak of live command failures.  This is deliberately target-local
+// and keeps the other output's resource and scanout untouched.
+static bool repaint_static_fallback_target(DeviceState& state,
+                                           DiagnosticResourceState& resource,
+                                           uint32_t scanoutId,
+                                           uint8_t* backingBase,
+                                           uint32_t width,
+                                           uint32_t height,
+                                           uint64_t backingBytes,
+                                           const DiagnosticPatternPalette& palette,
+                                           uint64_t* checksumOut)
+{
+    if (backingBase == nullptr || width == 0u || height == 0u || backingBytes == 0u) {
+        return false;
+    }
+
+    memzero(backingBase, static_cast<size_t>(backingBytes));
+    fill_diagnostic_pattern(reinterpret_cast<uint32_t*>(backingBase), width, height, width, palette);
+    const uint64_t checksum = checksum_diagnostic_pattern(backingBase, static_cast<size_t>(backingBytes));
+    const char* failureReason = nullptr;
+    bool completionKnown = false;
+    if (!issue_transfer_to_host_2d(state, resource, scanoutId, &failureReason, &completionKnown)) {
+        return false;
+    }
+    if (!issue_resource_flush(state, resource, scanoutId, &failureReason, &completionKnown)) {
+        return false;
+    }
+
+    resource.patternName = palette.name;
+    resource.patternChecksum = checksum;
+    resource.checksumValid = true;
+    resource.transferOk = true;
+    resource.flushOk = true;
+    if (checksumOut != nullptr) {
+        *checksumOut = checksum;
+    }
+    return true;
 }
 
 static void log_compositor_proof_line(
@@ -2898,13 +3162,15 @@ static bool wait_for_control_completion(Virtqueue& queue,
     }
 
     if (queue.used->idx == expectedUsedIdx) {
-        kernel::serial::puts("[VIRTIO-GPU] ");
-        kernel::serial::puts(commandName != nullptr ? commandName : "control command");
-        kernel::serial::puts(" timed out usedIdx=");
-        serial_put_u32_decimal(expectedUsedIdx);
-        kernel::serial::puts(" spins=");
-        serial_put_u32_decimal(spin);
-        kernel::serial::putc('\n');
+        if (!s_liveCommandLoggingSuppressed) {
+            kernel::serial::puts("[VIRTIO-GPU] ");
+            kernel::serial::puts(commandName != nullptr ? commandName : "control command");
+            kernel::serial::puts(" timed out usedIdx=");
+            serial_put_u32_decimal(expectedUsedIdx);
+            kernel::serial::puts(" spins=");
+            serial_put_u32_decimal(spin);
+            kernel::serial::putc('\n');
+        }
         if (failureReasonOut != nullptr) {
             *failureReasonOut = "control command timed out";
         }
@@ -2923,15 +3189,17 @@ static bool wait_for_control_completion(Virtqueue& queue,
         *completionKnownOut = (usedElem.id == headDescriptor);
     }
 
-    kernel::serial::puts("[VIRTIO-GPU] ");
-    kernel::serial::puts(commandName != nullptr ? commandName : "control command");
-    kernel::serial::puts(" completion usedIdx=");
-    serial_put_u32_decimal(completedUsedIdx);
-    kernel::serial::puts(" usedLen=");
-    serial_put_u32_decimal(usedElem.len);
-    kernel::serial::puts(" headDescriptor=");
-    serial_put_u32_decimal(usedElem.id);
-    kernel::serial::putc('\n');
+    if (!s_liveCommandLoggingSuppressed) {
+        kernel::serial::puts("[VIRTIO-GPU] ");
+        kernel::serial::puts(commandName != nullptr ? commandName : "control command");
+        kernel::serial::puts(" completion usedIdx=");
+        serial_put_u32_decimal(completedUsedIdx);
+        kernel::serial::puts(" usedLen=");
+        serial_put_u32_decimal(usedElem.len);
+        kernel::serial::puts(" headDescriptor=");
+        serial_put_u32_decimal(usedElem.id);
+        kernel::serial::putc('\n');
+    }
 
     if (usedElem.id != headDescriptor) {
         if (failureReasonOut != nullptr) {
@@ -3671,9 +3939,11 @@ static bool issue_transfer_to_host_2d(DeviceState& state,
     request->resourceId = resource.resourceId;
     request->padding = 0u;
 
-    kernel::serial::puts("[VIRTIO-GPU] Init step: TRANSFER_TO_HOST_2D scanout");
-    serial_put_u32_decimal(scanoutId);
-    kernel::serial::puts(" begin\n");
+    if (!s_liveCommandLoggingSuppressed) {
+        kernel::serial::puts("[VIRTIO-GPU] Init step: TRANSFER_TO_HOST_2D scanout");
+        serial_put_u32_decimal(scanoutId);
+        kernel::serial::puts(" begin\n");
+    }
 
     const char* submitReason = nullptr;
     bool completionKnown = false;
@@ -3687,11 +3957,13 @@ static bool issue_transfer_to_host_2d(DeviceState& state,
                                      RESP_OK_NODATA,
                                      &submitReason,
                                      &completionKnown)) {
-        kernel::serial::puts("[VIRTIO-GPU] TRANSFER_TO_HOST_2D result=failed scanoutId=");
-        serial_put_u32_decimal(scanoutId);
-        kernel::serial::puts(" reason=");
-        kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
-        kernel::serial::putc('\n');
+        if (!s_liveCommandLoggingSuppressed) {
+            kernel::serial::puts("[VIRTIO-GPU] TRANSFER_TO_HOST_2D result=failed scanoutId=");
+            serial_put_u32_decimal(scanoutId);
+            kernel::serial::puts(" reason=");
+            kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
+            kernel::serial::putc('\n');
+        }
         if (failureReasonOut != nullptr) {
             *failureReasonOut = submitReason;
         }
@@ -3702,16 +3974,18 @@ static bool issue_transfer_to_host_2d(DeviceState& state,
     }
 
     resource.transferOk = true;
-    kernel::serial::puts("[VIRTIO-GPU] TRANSFER_TO_HOST_2D result=ok scanoutId=");
-    serial_put_u32_decimal(scanoutId);
-    kernel::serial::puts(" resourceId=0x");
-    kernel::serial::put_hex32(resource.resourceId);
-    kernel::serial::puts(" rect=0,0 ");
-    serial_put_u32_decimal(resource.width);
-    kernel::serial::putc('x');
-    serial_put_u32_decimal(resource.height);
-    kernel::serial::puts(" offset=0");
-    kernel::serial::putc('\n');
+    if (!s_liveCommandLoggingSuppressed) {
+        kernel::serial::puts("[VIRTIO-GPU] TRANSFER_TO_HOST_2D result=ok scanoutId=");
+        serial_put_u32_decimal(scanoutId);
+        kernel::serial::puts(" resourceId=0x");
+        kernel::serial::put_hex32(resource.resourceId);
+        kernel::serial::puts(" rect=0,0 ");
+        serial_put_u32_decimal(resource.width);
+        kernel::serial::putc('x');
+        serial_put_u32_decimal(resource.height);
+        kernel::serial::puts(" offset=0");
+        kernel::serial::putc('\n');
+    }
     if (completionKnownOut != nullptr) {
         *completionKnownOut = true;
     }
@@ -3754,9 +4028,11 @@ static bool issue_resource_flush(DeviceState& state,
     request->resourceId = resource.resourceId;
     request->padding = 0u;
 
-    kernel::serial::puts("[VIRTIO-GPU] Init step: RESOURCE_FLUSH scanout");
-    serial_put_u32_decimal(scanoutId);
-    kernel::serial::puts(" begin\n");
+    if (!s_liveCommandLoggingSuppressed) {
+        kernel::serial::puts("[VIRTIO-GPU] Init step: RESOURCE_FLUSH scanout");
+        serial_put_u32_decimal(scanoutId);
+        kernel::serial::puts(" begin\n");
+    }
 
     const char* submitReason = nullptr;
     bool completionKnown = false;
@@ -3770,11 +4046,13 @@ static bool issue_resource_flush(DeviceState& state,
                                      RESP_OK_NODATA,
                                      &submitReason,
                                      &completionKnown)) {
-        kernel::serial::puts("[VIRTIO-GPU] RESOURCE_FLUSH result=failed scanoutId=");
-        serial_put_u32_decimal(scanoutId);
-        kernel::serial::puts(" reason=");
-        kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
-        kernel::serial::putc('\n');
+        if (!s_liveCommandLoggingSuppressed) {
+            kernel::serial::puts("[VIRTIO-GPU] RESOURCE_FLUSH result=failed scanoutId=");
+            serial_put_u32_decimal(scanoutId);
+            kernel::serial::puts(" reason=");
+            kernel::serial::puts(submitReason != nullptr ? submitReason : "n/a");
+            kernel::serial::putc('\n');
+        }
         if (failureReasonOut != nullptr) {
             *failureReasonOut = submitReason;
         }
@@ -3785,15 +4063,17 @@ static bool issue_resource_flush(DeviceState& state,
     }
 
     resource.flushOk = true;
-    kernel::serial::puts("[VIRTIO-GPU] RESOURCE_FLUSH result=ok scanoutId=");
-    serial_put_u32_decimal(scanoutId);
-    kernel::serial::puts(" resourceId=0x");
-    kernel::serial::put_hex32(resource.resourceId);
-    kernel::serial::puts(" rect=0,0 ");
-    serial_put_u32_decimal(resource.width);
-    kernel::serial::putc('x');
-    serial_put_u32_decimal(resource.height);
-    kernel::serial::putc('\n');
+    if (!s_liveCommandLoggingSuppressed) {
+        kernel::serial::puts("[VIRTIO-GPU] RESOURCE_FLUSH result=ok scanoutId=");
+        serial_put_u32_decimal(scanoutId);
+        kernel::serial::puts(" resourceId=0x");
+        kernel::serial::put_hex32(resource.resourceId);
+        kernel::serial::puts(" rect=0,0 ");
+        serial_put_u32_decimal(resource.width);
+        kernel::serial::putc('x');
+        serial_put_u32_decimal(resource.height);
+        kernel::serial::putc('\n');
+    }
     if (completionKnownOut != nullptr) {
         *completionKnownOut = true;
     }
@@ -4302,6 +4582,46 @@ static bool initialize_device(DeviceState& state)
             s_probeOutcome.frameMode = "single-shot";
             s_probeOutcome.continuousPresentationEnabled = false;
 
+#if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+            const bool liveResourcesReady = target0Result.renderOk
+                && target0Result.transferOk
+                && target0Result.flushOk
+                && target1Result.renderOk
+                && target1Result.transferOk
+                && target1Result.flushOk
+                && resource1.created
+                && resource1.backingAttached
+                && resource1.scanoutSet
+                && resource2.created
+                && resource2.backingAttached
+                && resource2.scanoutSet;
+            s_livePresentation.device = &state;
+            s_livePresentation.enabled = liveResourcesReady;
+            s_livePresentation.stopped = !liveResourcesReady;
+            s_livePresentation.stoppedReason = liveResourcesReady ? "awaiting-scheduler" : "initial-frame-failed";
+            s_livePresentation.resource0 = resource1;
+            s_livePresentation.resource1 = resource2;
+            s_livePresentation.backing0 = &s_diagnosticBackingStorage0[0];
+            s_livePresentation.backing1 = &s_diagnosticBackingStorage1[0];
+            s_livePresentation.backingPhysical0 = primaryBackingPhysical;
+            s_livePresentation.backingPhysical1 = secondaryBackingPhysical;
+            s_livePresentation.totalBackingBytes = totalBackingBytes;
+            s_livePresentation.backingPageCount = backingPageCount;
+            s_livePresentation.selectedWidth = selectedWidth;
+            s_livePresentation.selectedHeight = selectedHeight;
+            s_livePresentation.bytesPerPixel = bytesPerPixel;
+            s_livePresentation.resourceFormat = static_cast<GpuFormat>(selectedFormat);
+            s_livePresentation.initialTarget0Checksum = target0Result.checksum;
+            s_livePresentation.initialTarget1Checksum = target1Result.checksum;
+            s_livePresentation.finalTarget0Checksum = target0Result.checksum;
+            s_livePresentation.finalTarget1Checksum = target1Result.checksum;
+            if (liveResourcesReady) {
+                s_probeOutcome.contentMode = "compositor-live-bounded";
+                s_probeOutcome.frameMode = "bounded";
+                s_probeOutcome.continuousPresentationEnabled = true;
+            }
+#endif
+
             updateOutputInventory();
             record_probe_outcome(state,
                                  true,
@@ -4356,6 +4676,10 @@ static bool initialize_device(DeviceState& state)
         compositorTarget0.backingMemEntryCount = backingAudit1.totalMemEntries;
         compositorTarget0.patternChecksum = resource1.patternChecksum;
         compositorTarget0.lastCommandStatus = resource1.checksumValid ? "compositor target 0 ready" : "compositor target 0 pending";
+
+#if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+        store_live_target_descriptor(s_livePresentation.target0, compositorTarget0);
+#endif
 
         target0Result = present_target_once(state,
                                             compositorTarget0,
@@ -4499,6 +4823,10 @@ static bool initialize_device(DeviceState& state)
         compositorTarget1.patternChecksum = resource2.patternChecksum;
         compositorTarget1.lastCommandStatus = resource2.checksumValid ? "compositor target 1 ready" : "compositor target 1 pending";
 
+#if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+        store_live_target_descriptor(s_livePresentation.target1, compositorTarget1);
+#endif
+
         target1Result = present_target_once(state,
                                             compositorTarget1,
                                             resource2,
@@ -4632,7 +4960,7 @@ static bool initialize_device(DeviceState& state)
 
     scanout0Set = true;
 
-#if !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_FRAME_ACTIVE)
+#if !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_FRAME_ACTIVE) && !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
     if (!issue_transfer_to_host_2d(state,
                                    resource1,
                                    0u,
@@ -4690,7 +5018,7 @@ static bool initialize_device(DeviceState& state)
         serial_put_u32_decimal(kDiagnosticQemuMaxOutputsIntent);
         kernel::serial::putc('\n');
 
-#if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_FRAME_ACTIVE)
+#if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_FRAME_ACTIVE) || defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
         if (run_compositor_frame()) {
             return true;
         }
@@ -5025,6 +5353,98 @@ static DeviceState* active_state(GpuDevice* device)
     return find_state(device);
 }
 
+#if defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+static void log_live_target_failure(uint64_t frameSequence,
+                                    uint32_t targetId,
+                                    const char* command,
+                                    const char* response)
+{
+    kernel::serial::puts("[VIRTIO-GPU] live failure frame=");
+    serial_put_u64_decimal(frameSequence);
+    kernel::serial::puts(" target=");
+    serial_put_u32_decimal(targetId);
+    kernel::serial::puts(" command=");
+    kernel::serial::puts(command != nullptr ? command : "unknown");
+    kernel::serial::puts(" response=");
+    kernel::serial::puts(response != nullptr && response[0] != '\0' ? response : "n/a");
+    kernel::serial::puts(" timeout=");
+    kernel::serial::puts(text_contains(response, "timed out") || text_contains(response, "timeout") ? "yes" : "no");
+    kernel::serial::putc('\n');
+}
+
+static void print_live_presentation_summary()
+{
+    const LivePresentationBackendState& live = s_livePresentation;
+    kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation: enabled=");
+    kernel::serial::puts(live.enabled ? "yes" : "no");
+    kernel::serial::puts(" outputs=2 contentMode=compositor-live-bounded frameCap=");
+    serial_put_u32_decimal(live.configuredFrameCap);
+    kernel::serial::puts(" frameLimit=");
+    serial_put_u32_decimal(live.boundedRunLimit);
+    kernel::serial::puts(" timeLimitTicks=");
+    serial_put_u64_decimal(live.boundedTimeLimitTicks);
+    kernel::serial::puts(" attempted=");
+    serial_put_u32_decimal(live.framesAttempted);
+    kernel::serial::puts(" rendered=");
+    serial_put_u32_decimal(live.framesRendered);
+    kernel::serial::puts(" dirtyFrames=");
+    serial_put_u32_decimal(live.dirtyFrames);
+    kernel::serial::puts(" cleanSkips=");
+    serial_put_u32_decimal(live.framesSkippedClean);
+    kernel::serial::puts(" rateSkips=");
+    serial_put_u32_decimal(live.rateLimitSkips);
+    kernel::serial::puts(" target0Frames=");
+    serial_put_u32_decimal(live.target0FlushCount);
+    kernel::serial::puts(" target1Frames=");
+    serial_put_u32_decimal(live.target1FlushCount);
+    kernel::serial::puts(" target0Transfer=");
+    serial_put_u32_decimal(live.target0TransferCount);
+    kernel::serial::puts(" target0Flush=");
+    serial_put_u32_decimal(live.target0FlushCount);
+    kernel::serial::puts(" target1Transfer=");
+    serial_put_u32_decimal(live.target1TransferCount);
+    kernel::serial::puts(" target1Flush=");
+    serial_put_u32_decimal(live.target1FlushCount);
+    kernel::serial::puts(" target0Failures=");
+    serial_put_u32_decimal(live.target0Failures);
+    kernel::serial::puts(" target1Failures=");
+    serial_put_u32_decimal(live.target1Failures);
+    kernel::serial::puts(" initialChecksum0=0x");
+    kernel::serial::put_hex64(live.initialTarget0Checksum);
+    kernel::serial::puts(" finalChecksum0=0x");
+    kernel::serial::put_hex64(live.finalTarget0Checksum);
+    kernel::serial::puts(" initialChecksum1=0x");
+    kernel::serial::put_hex64(live.initialTarget1Checksum);
+    kernel::serial::puts(" finalChecksum1=0x");
+    kernel::serial::put_hex64(live.finalTarget1Checksum);
+    kernel::serial::puts(" fallbackActivated=");
+    kernel::serial::puts(live.fallbackActivated ? "yes" : "no");
+    kernel::serial::puts(" fallbackTarget=");
+    if (live.fallbackTargetValid) {
+        serial_put_u32_decimal(live.fallbackTarget);
+    } else {
+        kernel::serial::puts("none");
+    }
+    kernel::serial::puts(" fallbackReason=");
+    kernel::serial::puts(live.fallbackReason != nullptr ? live.fallbackReason : "none");
+    kernel::serial::puts(" fallbackResult=");
+    kernel::serial::puts(live.fallbackResult != nullptr ? live.fallbackResult : "not-used");
+    kernel::serial::puts(" continuousPresentation=bounded stopReason=");
+    kernel::serial::puts(live.stoppedReason != nullptr ? live.stoppedReason : "unknown");
+    kernel::serial::putc('\n');
+}
+
+static void stop_live_presentation(const char* reason)
+{
+    if (s_livePresentation.stopped) {
+        return;
+    }
+    s_livePresentation.stopped = true;
+    s_livePresentation.stoppedReason = reason != nullptr ? reason : "explicit-stop";
+    print_live_presentation_summary();
+}
+#endif
+
 } // namespace
 
 void set_kernel_physical_base(uint64_t physicalBase)
@@ -5062,6 +5482,10 @@ int probe()
     s_probeOutcome = ProbeOutcome{};
     s_probeOutcome.valid = false;
     s_probeOutcome.reason = "no compatible virtio-gpu PCI function found";
+#if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+    s_livePresentation = LivePresentationBackendState{};
+    s_liveCommandLoggingSuppressed = false;
+#endif
 
     kernel::serial::puts("[VIRTIO-GPU] Probing PCI bus for virtio-gpu devices\n");
 
@@ -5326,6 +5750,205 @@ void irq_handler()
 void poll(GpuDevice* dev)
 {
     (void)dev;
+}
+
+void presentation_tick()
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+    return;
+#else
+    LivePresentationBackendState& live = s_livePresentation;
+    if (!live.enabled || live.device == nullptr || live.stopped) {
+        return;
+    }
+
+    const uint64_t now = kernel::pit::ticks();
+    if (!live.initialized) {
+        live.initialized = true;
+        live.presentationStartTicks = now;
+        live.lastPresentationTicks = now;
+        live.lastDirtyGeneration = kernel::desktop::redraw_generation();
+        live.initialFrameReadyLogged = true;
+        kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation configured: enabled=yes outputs=2 frameCap=");
+        serial_put_u32_decimal(live.configuredFrameCap);
+        kernel::serial::puts(" frameLimit=");
+        serial_put_u32_decimal(live.boundedRunLimit);
+        kernel::serial::puts(" timeLimitTicks=");
+        serial_put_u64_decimal(live.boundedTimeLimitTicks);
+        kernel::serial::puts(" rateIntervalTicks=");
+        serial_put_u64_decimal(kLivePresentationIntervalTicks);
+        kernel::serial::puts(" overlay=bounded-moving-marker\n");
+        kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation: initial frame ready target0Checksum=0x");
+        kernel::serial::put_hex64(live.initialTarget0Checksum);
+        kernel::serial::puts(" target1Checksum=0x");
+        kernel::serial::put_hex64(live.initialTarget1Checksum);
+        kernel::serial::puts(" backingLifetime=static resourceIdsStable=yes scanoutsStable=yes\n");
+        return;
+    }
+
+    if (now - live.presentationStartTicks >= live.boundedTimeLimitTicks) {
+        stop_live_presentation("time-limit");
+        return;
+    }
+    if (live.framesAttempted >= live.boundedRunLimit) {
+        stop_live_presentation("frame-limit");
+        return;
+    }
+    if (now - live.lastPresentationTicks < kLivePresentationIntervalTicks) {
+        ++live.rateLimitSkips;
+        return;
+    }
+
+    live.lastPresentationTicks = now;
+    ++live.framesAttempted;
+    const bool overlayDue = (live.framesAttempted % kLivePresentationOverlayPeriodAttempts) == 1u;
+    if (overlayDue) {
+        // The overlay is a diagnostic-only visible state change, routed through
+        // the normal desktop invalidation flag and rendered by this presenter.
+        kernel::desktop::request_redraw();
+    }
+
+    uint64_t dirtyGeneration = kernel::desktop::redraw_generation();
+    if (overlayDue) {
+        // presentation_tick runs after the normal redraw consumer in main.cpp;
+        // account for the pending invalidation without consuming it here.
+        dirtyGeneration += 1u;
+    }
+    if (dirtyGeneration == live.lastDirtyGeneration) {
+        ++live.framesSkippedClean;
+        if (live.framesAttempted >= live.boundedRunLimit) {
+            stop_live_presentation("frame-limit");
+        }
+        return;
+    }
+
+    ++live.dirtyFrames;
+    const uint64_t frameSequence = ++live.frameSequence;
+
+    auto render_target = [&](uint32_t targetId,
+                             const LivePresentationTargetDescriptor& descriptor,
+                             DiagnosticResourceState& resource,
+                             uint8_t* backing,
+                             uint64_t backingPhysical,
+                             const DiagnosticPatternPalette& palette,
+                             uint32_t& transferCount,
+                             uint32_t& flushCount,
+                             uint32_t& failureCount,
+                             uint32_t& failureStreak) -> CompositorFrameTargetResult {
+        const DisplayRenderTarget target = make_live_target(descriptor);
+        s_liveCommandLoggingSuppressed = true;
+        CompositorFrameTargetResult result = present_target_once(*live.device,
+                                                                  target,
+                                                                  resource,
+                                                                  backing,
+                                                                  backingPhysical,
+                                                                  live.totalBackingBytes,
+                                                                  palette,
+                                                                  live.resourceFormat,
+                                                                  live.selectedWidth,
+                                                                  live.selectedHeight,
+                                                                  live.bytesPerPixel,
+                                                                  live.backingPageCount,
+                                                                  frameSequence,
+                                                                  true,
+                                                                  false);
+        if (result.transferOk) {
+            ++transferCount;
+        }
+        if (result.flushOk) {
+            ++flushCount;
+        }
+
+        const bool presented = result.renderOk && result.transferOk && result.flushOk;
+        if (presented) {
+            failureStreak = 0u;
+        } else {
+            ++failureCount;
+            ++failureStreak;
+            const char* command = !result.renderOk ? "RENDER"
+                : (!result.transferOk ? "TRANSFER_TO_HOST_2D" : "RESOURCE_FLUSH");
+            log_live_target_failure(frameSequence, targetId, command, result.blocker);
+
+            if (failureStreak >= kLivePresentationFallbackFailureThreshold) {
+                uint64_t fallbackChecksum = 0u;
+                const bool fallbackOk = repaint_static_fallback_target(*live.device,
+                                                                        resource,
+                                                                        descriptor.scanoutId,
+                                                                        backing,
+                                                                        live.selectedWidth,
+                                                                        live.selectedHeight,
+                                                                        live.totalBackingBytes,
+                                                                        palette,
+                                                                        &fallbackChecksum);
+                live.fallbackActivated = true;
+                live.fallbackTargetValid = true;
+                live.fallbackTarget = targetId;
+                live.fallbackReason = result.blocker != nullptr ? result.blocker : command;
+                live.fallbackResult = fallbackOk ? "static-pattern-repaint" : "static-pattern-repaint-failed";
+                kernel::serial::puts("[VIRTIO-GPU] live fallback frame=");
+                serial_put_u64_decimal(frameSequence);
+                kernel::serial::puts(" target=");
+                serial_put_u32_decimal(targetId);
+                kernel::serial::puts(" activated=yes result=");
+                kernel::serial::puts(fallbackOk ? "ok" : "failed");
+                kernel::serial::puts(" checksum=0x");
+                kernel::serial::put_hex64(fallbackChecksum);
+                kernel::serial::putc('\n');
+                if (fallbackOk) {
+                    ++transferCount;
+                    ++flushCount;
+                }
+                failureStreak = 0u;
+            }
+        }
+        s_liveCommandLoggingSuppressed = false;
+        return result;
+    };
+
+    CompositorFrameTargetResult target0Result = render_target(0u,
+                                                               live.target0,
+                                                               live.resource0,
+                                                               live.backing0,
+                                                               live.backingPhysical0,
+                                                               diagnostic_pattern_palette(0u),
+                                                               live.target0TransferCount,
+                                                               live.target0FlushCount,
+                                                               live.target0Failures,
+                                                               live.target0FailureStreak);
+    CompositorFrameTargetResult target1Result = render_target(1u,
+                                                               live.target1,
+                                                               live.resource1,
+                                                               live.backing1,
+                                                               live.backingPhysical1,
+                                                               diagnostic_pattern_palette(1u),
+                                                               live.target1TransferCount,
+                                                               live.target1FlushCount,
+                                                               live.target1Failures,
+                                                               live.target1FailureStreak);
+
+    const bool target0Presented = target0Result.renderOk && target0Result.transferOk && target0Result.flushOk;
+    const bool target1Presented = target1Result.renderOk && target1Result.transferOk && target1Result.flushOk;
+    if (target0Presented || target1Presented) {
+        ++live.framesRendered;
+        live.lastPresentedFrame = frameSequence;
+        live.lastDirtyGeneration = dirtyGeneration;
+        live.finalTarget0Checksum = live.resource0.patternChecksum;
+        live.finalTarget1Checksum = live.resource1.patternChecksum;
+    }
+
+    if (live.framesAttempted >= live.boundedRunLimit) {
+        stop_live_presentation("frame-limit");
+    }
+#endif
+}
+
+bool presentation_finished()
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+    return true;
+#else
+    return s_livePresentation.stopped;
+#endif
 }
 
 GpuStatus register_as_framebuffer(GpuDevice* dev)

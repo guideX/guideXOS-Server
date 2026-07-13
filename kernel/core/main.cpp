@@ -762,6 +762,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::input::mouse_y());
             }
 
+            // The virtio-gpu live path consumes the normal desktop update
+            // cadence; it does not own desktop/window state or input routing.
+            kernel::virtio::gpu::presentation_tick();
+
             uint64_t workEndTicks = kernel::pit::ticks();
             if (workEndTicks >= workStartTicks) {
                 kernel::desktop::record_cpu_busy_ticks(workEndTicks - workStartTicks);
@@ -779,6 +783,27 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
     }
     else {
+#if defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+        // QEMU virtio-gpu owns its scanout resources rather than exporting a
+        // GOP framebuffer.  Keep this small probe-only pump separate from the
+        // normal text fallback so the bounded live proof still receives PIT
+        // ticks without creating a product compositor loop.
+        kernel::interrupts::init();
+        kernel::pit::init(100);
+        kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+        kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu live presentation pump active\n");
+        while (!kernel::virtio::gpu::presentation_finished()) {
+            kernel::virtio::gpu::presentation_tick();
+            // Consume the normal compositor invalidation request after the
+            // live presenter has observed it, allowing clean-frame skips.
+            (void)kernel::desktop::needs_redraw();
+            kernel::arch::halt();
+        }
+        kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu bounded live presentation pump stopped\n");
+        while (1) {
+            kernel::arch::halt();
+        }
+#else
         // === TEXT MODE FALLBACK ===
         kernel::vga::init();
         kernel::vga::print_colored("guideXOS Kernel\n", kernel::vga::Color::LightCyan, kernel::vga::Color::Black);
@@ -806,8 +831,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             0u,
             0u,
             "Unknown");
-        
+
         while (1) { }
+#endif
     }
 
 #else

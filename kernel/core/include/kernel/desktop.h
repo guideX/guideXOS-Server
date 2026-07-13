@@ -67,6 +67,17 @@ void cooperative_yield();
 // Check if redraw is needed (called from main loop)
 bool needs_redraw();
 
+// Monotonic visible-desktop invalidation generation consumed by presentation
+// backends.  The generation advances when the normal redraw flag is consumed;
+// this keeps the existing narrow invalidation bridge without making a backend
+// the owner of desktop/window state.
+uint64_t redraw_generation();
+
+// Request a normal desktop redraw.  QEMU-only diagnostic presenters may use
+// this for a visible overlay update; it remains the desktop's existing redraw
+// mechanism and does not route input.
+void request_redraw();
+
 // ================================================================
 // Input Handling
 // ================================================================

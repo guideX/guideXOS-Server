@@ -1,7 +1,7 @@
 param(
     [string[]]$Backends = @('std', 'virtio-gpu', 'virtio-gpu-modern-only', 'virtio-vga', 'qxl-vga'),
     [int]$TimeoutSeconds = 120,
-    [ValidateSet('diagnostic', 'compositorFrame')]
+    [ValidateSet('diagnostic', 'compositorFrame', 'compositorLiveBounded')]
     [string]$Mode = 'diagnostic'
 )
 
@@ -141,10 +141,14 @@ function Invoke-KernelBuildForSmoke {
         $probeObjectCandidates = @(
             (Join-Path $Root 'build\amd64\obj\core\virtio_gpu.o'),
             (Join-Path $Root 'build\amd64\obj\core\virtio_gpu.d'),
+            (Join-Path $Root 'build\amd64\obj\core\main.o'),
+            (Join-Path $Root 'build\amd64\obj\core\main.d'),
             (Join-Path $Root 'build\amd64\obj\core\mmio.o'),
             (Join-Path $Root 'build\amd64\obj\core\mmio.d'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\virtio_gpu.o'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\virtio_gpu.d'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\main.o'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\main.d'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\mmio.o'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\mmio.d')
         )
@@ -577,6 +581,22 @@ function Wait-ForCaptureFile {
     }
 
     return $false
+}
+
+function Get-CaptureChecksum {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return ''
+    }
+    $fileInfo = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+    if (-not $fileInfo -or $fileInfo.Length -le 0) {
+        return ''
+    }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
 function Get-DiagnosticPatternSpec {
@@ -1073,6 +1093,17 @@ function Invoke-QemuDisplayProbeBackend {
     $visualScanout1Signature = ''
     $visualScanout0Assessment = $null
     $visualScanout1Assessment = $null
+    $initialScanout0Path = ''
+    $initialScanout1Path = ''
+    $finalScanout0Path = ''
+    $finalScanout1Path = ''
+    $initialChecksum0 = ''
+    $initialChecksum1 = ''
+    $finalChecksum0 = ''
+    $finalChecksum1 = ''
+    $visualChanged0 = $false
+    $visualChanged1 = $false
+    $initialFinalCaptureStatus = 'not-attempted'
     $distinctPatternsConfirmed = $false
     $compositorContentConfirmed0 = $false
     $compositorContentConfirmed1 = $false
@@ -1278,6 +1309,37 @@ function Invoke-QemuDisplayProbeBackend {
             'GpuTransfer1Line',
             'GpuSingleOutputProofLine',
             'GpuDualOutputProofLine',
+            'GpuLiveConfiguredLine',
+            'GpuLiveInitialFrameLine',
+            'GpuLiveSummaryLine',
+            'GpuLiveFrameCap',
+            'GpuLiveFrameLimit',
+            'GpuLiveTimeLimitTicks',
+            'GpuLiveAttempted',
+            'GpuLiveRendered',
+            'GpuLiveDirtyFrames',
+            'GpuLiveCleanSkips',
+            'GpuLiveRateSkips',
+            'GpuLiveTarget0Frames',
+            'GpuLiveTarget1Frames',
+            'GpuLiveTarget0Failures',
+            'GpuLiveTarget1Failures',
+            'GpuLiveFallbackActivated',
+            'GpuLiveFallbackTarget',
+            'GpuLiveFallbackReason',
+            'GpuLiveFallbackResult',
+            'GpuLiveStopReason',
+            'InitialScanout0Path',
+            'InitialScanout1Path',
+            'FinalScanout0Path',
+            'FinalScanout1Path',
+            'InitialChecksum0',
+            'InitialChecksum1',
+            'FinalChecksum0',
+            'FinalChecksum1',
+            'VisualChanged0',
+            'VisualChanged1',
+            'InitialFinalCaptureStatus',
             'VisualCaptureReason',
             'VisualScanout0Path',
             'VisualScanout0Signature',
@@ -1315,7 +1377,36 @@ function Invoke-QemuDisplayProbeBackend {
         $launcherState = Start-ProbeLauncher -Backend $spec.LauncherBackend -SerialLog $serialLog -LauncherStdOut $launcherStdOut -LauncherStdErr $launcherStdErr -EnableVisualCapture:$EnableVisualCapture -QmpPort $qmpPort
         $proc = $launcherState.Process
 
-        $sentinelSeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern $spec.WaitPattern -TimeoutSeconds $TimeoutSeconds
+        if ($stageLabel -eq 'compositorLiveBounded') {
+            $initialFrameReadySeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern '\[VIRTIO-GPU\] VirtioGPU live presentation: initial frame ready' -TimeoutSeconds $TimeoutSeconds
+            if ($initialFrameReadySeen -and $EnableVisualCapture -and -not $proc.HasExited) {
+                $initialQmpSession = $null
+                try {
+                    $initialQmpSession = New-QmpSession -Port $qmpPort -TimeoutSeconds ([Math]::Min([Math]::Max($TimeoutSeconds, 10), 30))
+                    $initialScanout0Path = Join-Path $captureRoot 'initial-head0.png'
+                    $initialScanout1Path = Join-Path $captureRoot 'initial-head1.png'
+                    Invoke-QmpScreendump -Session $initialQmpSession -Filename $initialScanout0Path -DeviceId 'gpu0' -Head 0
+                    Invoke-QmpScreendump -Session $initialQmpSession -Filename $initialScanout1Path -DeviceId 'gpu0' -Head 1
+                    if ((Wait-ForCaptureFile -Path $initialScanout0Path -TimeoutSeconds 2) -and (Wait-ForCaptureFile -Path $initialScanout1Path -TimeoutSeconds 2)) {
+                        $initialChecksum0 = Get-CaptureChecksum -Path $initialScanout0Path
+                        $initialChecksum1 = Get-CaptureChecksum -Path $initialScanout1Path
+                    }
+                } catch {
+                    $visualCaptureReason = $_.Exception.Message
+                } finally {
+                    if ($initialQmpSession) {
+                        Close-QmpSession -Session $initialQmpSession
+                    }
+                }
+            }
+            $sentinelSeen = if ($initialFrameReadySeen) {
+                Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern '\[VIRTIO-GPU\] VirtioGPU live presentation: enabled=yes outputs=2 contentMode=compositor-live-bounded .* stopReason=(frame-limit|time-limit)' -TimeoutSeconds $TimeoutSeconds
+            } else {
+                $false
+            }
+        } else {
+            $sentinelSeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern $spec.WaitPattern -TimeoutSeconds $TimeoutSeconds
+        }
 
         if (-not $sentinelSeen) {
             if (-not $proc.HasExited) {
@@ -1451,6 +1542,43 @@ function Invoke-QemuDisplayProbeBackend {
                                 $captureReason = 'capture assessment unavailable'
                                 $visualCaptureStatus = 'manual-check-required'
                             }
+                        } elseif ($stageLabel -eq 'compositorLiveBounded') {
+                            $finalScanout0Path = Join-Path $captureRoot 'final-head0.png'
+                            $finalScanout1Path = Join-Path $captureRoot 'final-head1.png'
+                            Invoke-QmpScreendump -Session $qmpSession -Filename $finalScanout0Path -DeviceId 'gpu0' -Head 0
+                            Invoke-QmpScreendump -Session $qmpSession -Filename $finalScanout1Path -DeviceId 'gpu0' -Head 1
+                            if ((Wait-ForCaptureFile -Path $finalScanout0Path -TimeoutSeconds 2) -and (Wait-ForCaptureFile -Path $finalScanout1Path -TimeoutSeconds 2)) {
+                                $finalChecksum0 = Get-CaptureChecksum -Path $finalScanout0Path
+                                $finalChecksum1 = Get-CaptureChecksum -Path $finalScanout1Path
+                                $visualChanged0 = -not [string]::IsNullOrWhiteSpace($initialChecksum0) -and $initialChecksum0 -ne $finalChecksum0
+                                $visualChanged1 = -not [string]::IsNullOrWhiteSpace($initialChecksum1) -and $initialChecksum1 -ne $finalChecksum1
+
+                                $visualScanout0Path = $finalScanout0Path
+                                $visualScanout1Path = $finalScanout1Path
+                                $visualScanout0Assessment = Get-CompositorCaptureAssessment -ImagePath $finalScanout0Path -ScanoutId 0
+                                $visualScanout1Assessment = Get-CompositorCaptureAssessment -ImagePath $finalScanout1Path -ScanoutId 1
+                                $visualScanout0 = $visualScanout0Assessment.Status
+                                $visualScanout1 = $visualScanout1Assessment.Status
+                                $visualScanout0Signature = $visualScanout0Assessment.Signature
+                                $visualScanout1Signature = $visualScanout1Assessment.Signature
+                                $compositorContentConfirmed0 = $visualScanout0Assessment.ContentConfirmed
+                                $compositorContentConfirmed1 = $visualScanout1Assessment.ContentConfirmed
+                                $taskbarPrimaryOnlyConfirmed = ($visualScanout0Assessment.TaskbarConfirmed -and $visualScanout1Assessment.TaskbarConfirmed)
+                                $viewportSplitConfirmed = ($visualScanout0Assessment.BackgroundSignature -ne $visualScanout1Assessment.BackgroundSignature)
+                                $distinctPatternsConfirmed = $viewportSplitConfirmed
+                                $initialFinalCaptureStatus = if ($visualChanged0 -and $visualChanged1) { 'changed' } else { 'unchanged' }
+                                if ($compositorContentConfirmed0 -and $compositorContentConfirmed1 -and $taskbarPrimaryOnlyConfirmed -and $viewportSplitConfirmed) {
+                                    $captureReason = "bounded live final captures confirmed desktop layout; changed0=$visualChanged0 changed1=$visualChanged1"
+                                    $visualCaptureStatus = 'captured'
+                                } else {
+                                    $captureReason = "final capture assessment scanout0=$($visualScanout0Assessment.Status) scanout1=$($visualScanout1Assessment.Status) taskbarPrimaryOnly=$taskbarPrimaryOnlyConfirmed viewportSplit=$viewportSplitConfirmed"
+                                    $visualCaptureStatus = 'manual-check-required'
+                                }
+                            } else {
+                                $initialFinalCaptureStatus = 'missing'
+                                $captureReason = 'bounded live initial or final capture missing'
+                                $visualCaptureStatus = 'manual-check-required'
+                            }
                         }
                         $visualCaptureReason = $captureReason
                     } finally {
@@ -1563,6 +1691,26 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuCompositorTarget1PlanLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] compositor target plan target=2 scanoutId=1 resourceId=0x[0-9A-Fa-f]+ viewport=\d+,0 \d+x\d+ compositorPixelFormat=B8G8R8X8_UNORM resourcePixelFormat=B8G8R8X8_UNORM conversionRequired=(yes|no) stride=\d+ totalBytes=\d+ backingBytes=\d+ backingValid=(yes|no)')
     $gpuCompositorTarget1ResultLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] compositor target result target=2 scanoutId=1 resourceId=0x[0-9A-Fa-f]+ viewport=\d+,0 \d+x\d+ renderedByteCount=\d+ checksum=0x[0-9A-Fa-f]+ transfer=(ok|failed) flush=(ok|failed) contentMode=(compositor-single-frame|fallback-patterns-after-failure) fallbackPatterns=(yes|no)( reason=[^\r\n]+)?')
     $gpuCompositorProofLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU compositor proof: outputs=2 targets=2 frameMode=single-shot target0Render=(ok|failed) target0Transfer=(ok|failed) target0Flush=(ok|failed) target1Render=(ok|failed) target1Transfer=(ok|failed) target1Flush=(ok|failed) virtualDesktop=\d+x\d+ taskbarPrimaryOnly=(yes|no) continuousPresentation=disabled')
+    $gpuLiveConfiguredLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU live presentation configured: enabled=yes outputs=2 frameCap=\d+ frameLimit=\d+ timeLimitTicks=\d+ rateIntervalTicks=\d+ overlay=bounded-moving-marker')
+    $gpuLiveInitialFrameLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU live presentation: initial frame ready target0Checksum=0x[0-9A-Fa-f]+ target1Checksum=0x[0-9A-Fa-f]+ backingLifetime=static resourceIdsStable=yes scanoutsStable=yes')
+    $gpuLiveSummaryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU live presentation: enabled=(yes|no) outputs=2 contentMode=compositor-live-bounded frameCap=\d+ frameLimit=\d+ timeLimitTicks=\d+ attempted=\d+ rendered=\d+ dirtyFrames=\d+ cleanSkips=\d+ rateSkips=\d+ target0Frames=\d+ target1Frames=\d+ target0Transfer=\d+ target0Flush=\d+ target1Transfer=\d+ target1Flush=\d+ target0Failures=\d+ target1Failures=\d+ initialChecksum0=0x[0-9A-Fa-f]+ finalChecksum0=0x[0-9A-Fa-f]+ initialChecksum1=0x[0-9A-Fa-f]+ finalChecksum1=0x[0-9A-Fa-f]+ fallbackActivated=(yes|no) fallbackTarget=([^ ]+) fallbackReason=([^ ]+) fallbackResult=([^ ]+) continuousPresentation=bounded stopReason=(frame-limit|time-limit)')
+    $gpuLiveFrameCap = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'frameCap=(\d+)' -GroupIndex 1
+    $gpuLiveFrameLimit = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'frameLimit=(\d+)' -GroupIndex 1
+    $gpuLiveTimeLimitTicks = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'timeLimitTicks=(\d+)' -GroupIndex 1
+    $gpuLiveAttempted = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'attempted=(\d+)' -GroupIndex 1
+    $gpuLiveRendered = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'rendered=(\d+)' -GroupIndex 1
+    $gpuLiveDirtyFrames = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'dirtyFrames=(\d+)' -GroupIndex 1
+    $gpuLiveCleanSkips = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'cleanSkips=(\d+)' -GroupIndex 1
+    $gpuLiveRateSkips = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'rateSkips=(\d+)' -GroupIndex 1
+    $gpuLiveTarget0Frames = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'target0Frames=(\d+)' -GroupIndex 1
+    $gpuLiveTarget1Frames = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'target1Frames=(\d+)' -GroupIndex 1
+    $gpuLiveTarget0Failures = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'target0Failures=(\d+)' -GroupIndex 1
+    $gpuLiveTarget1Failures = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'target1Failures=(\d+)' -GroupIndex 1
+    $gpuLiveFallbackActivated = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'fallbackActivated=(yes|no)' -GroupIndex 1
+    $gpuLiveFallbackTarget = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'fallbackTarget=([^ ]+)' -GroupIndex 1
+    $gpuLiveFallbackReason = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'fallbackReason=([^ ]+)' -GroupIndex 1
+    $gpuLiveFallbackResult = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'fallbackResult=([^ ]+)' -GroupIndex 1
+    $gpuLiveStopReason = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'stopReason=([^ ]+)' -GroupIndex 1
     $gpuOutputInventoryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU outputs: configured=\d+ operational=\d+ connectorEnabled=\d+ presentationConfirmed=\d+ virtualDesktop=\d+x\d+ targets=\d+ backed=\d+ primaryOutput=\d+ protocolConnectorEnabledCount=\d+ operationalOutputCount=\d+ presentationConfirmedCount=\d+')
     $gpuOutputMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] output\[\d+\]: source=virtio-gpu .*')
     $gpuMonitorMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] monitor\[\d+\]: source=virtio-gpu .*')
@@ -1870,6 +2018,29 @@ function Invoke-QemuDisplayProbeBackend {
             ) -Detail $gpuProbeCompleteLine.Value
             $backendStatus = 'complete'
             $interpretation = 'QEMU virtio-gpu compositor frame rendered once into both scanouts and post-render display-info completed'
+        } elseif ($stageLabel -eq 'compositorLiveBounded') {
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live configured line' -Condition $gpuLiveConfiguredLine.Success -Detail 'expected the explicit bounded live presenter configuration'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live initial frame line' -Condition $gpuLiveInitialFrameLine.Success -Detail 'expected the initial capture synchronization marker'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live summary line' -Condition $gpuLiveSummaryLine.Success -Detail 'expected the bounded live presenter summary'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live frame cap' -Condition ($gpuLiveFrameCap -eq '10') -Detail $gpuLiveSummaryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live bounded frame limit' -Condition ($gpuLiveFrameLimit -eq '60' -and $gpuLiveStopReason -eq 'frame-limit') -Detail $gpuLiveSummaryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live dirty-aware activity' -Condition ([int]$gpuLiveDirtyFrames -gt 0 -and [int]$gpuLiveRendered -gt 0) -Detail $gpuLiveSummaryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live clean skips' -Condition ([int]$gpuLiveCleanSkips -gt 0) -Detail $gpuLiveSummaryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live rate cap skips' -Condition ([int]$gpuLiveRateSkips -gt 0) -Detail $gpuLiveSummaryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live both targets presented' -Condition ([int]$gpuLiveTarget0Frames -gt 0 -and [int]$gpuLiveTarget1Frames -gt 0 -and $gpuLiveTarget0Frames -eq $gpuLiveTarget1Frames) -Detail $gpuLiveSummaryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live target failures absent' -Condition ($gpuLiveTarget0Failures -eq '0' -and $gpuLiveTarget1Failures -eq '0') -Detail $gpuLiveSummaryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live initial captures' -Condition ($EnableVisualCapture -and (Test-Path -LiteralPath $initialScanout0Path) -and (Test-Path -LiteralPath $initialScanout1Path) -and ((Get-Item -LiteralPath $initialScanout0Path).Length -gt 0) -and ((Get-Item -LiteralPath $initialScanout1Path).Length -gt 0)) -Detail ("head0={0} head1={1}" -f $initialScanout0Path, $initialScanout1Path)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live final captures' -Condition ($EnableVisualCapture -and (Test-Path -LiteralPath $finalScanout0Path) -and (Test-Path -LiteralPath $finalScanout1Path) -and ((Get-Item -LiteralPath $finalScanout0Path).Length -gt 0) -and ((Get-Item -LiteralPath $finalScanout1Path).Length -gt 0)) -Detail ("head0={0} head1={1}" -f $finalScanout0Path, $finalScanout1Path)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live visual change' -Condition ($visualChanged0 -and $visualChanged1 -and $initialFinalCaptureStatus -eq 'changed') -Detail ("initial0={0} final0={1} initial1={2} final1={3}" -f $initialChecksum0, $finalChecksum0, $initialChecksum1, $finalChecksum1)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live content confirmations' -Condition ($compositorContentConfirmed0 -and $compositorContentConfirmed1) -Detail ("scanout0={0} scanout1={1}" -f $compositorContentConfirmed0, $compositorContentConfirmed1)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live taskbar primary only' -Condition $taskbarPrimaryOnlyConfirmed -Detail ("taskbarPrimaryOnly={0}" -f $taskbarPrimaryOnlyConfirmed)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live viewport split' -Condition $viewportSplitConfirmed -Detail ("viewportSplit={0}" -f $viewportSplitConfirmed)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live output inventory' -Condition ($gpuOutputConfiguredCount -eq '2' -and $gpuOutputOperationalCount -eq '2' -and $gpuOutputConnectorEnabledCount -eq '1' -and $gpuOutputPresentationConfirmedCount -eq '2' -and $gpuOutputTargetCount -eq '2' -and $gpuOutputBackedTargetCount -eq '2' -and $gpuOutputPrimaryOutput -eq '0') -Detail $gpuOutputInventoryLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live output descriptors' -Condition ($gpuOutputMatches.Count -eq 2 -and $gpuMonitorMatches.Count -eq 2 -and $gpuTargetMatches.Count -eq 2) -Detail ("outputs={0} monitors={1} targets={2}" -f $gpuOutputMatches.Count, $gpuMonitorMatches.Count, $gpuTargetMatches.Count)
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live probe content mode' -Condition ($gpuProbeCompleteContentMode -eq 'compositor-live-bounded' -and $gpuProbeCompleteFrameMode -eq 'bounded' -and $gpuProbeCompleteContinuousPresentation -eq 'enabled') -Detail $gpuProbeCompleteLine.Value
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live single-frame proof retained' -Condition $gpuCompositorProofLine.Success -Detail 'expected the original single-shot compositor proof line to remain available'
+            $backendStatus = 'complete'
+            $interpretation = 'QEMU virtio-gpu compositor live bounded mode repeatedly presented both operational targets with dirty-generation skipping, a hard rate cap, and initial/final capture evidence'
         } else {
             Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B capacity line' -Condition $gpuStageBCapacityLine.Success -Detail 'expected Stage B capacity evidence'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B initial scanout line' -Condition $gpuStageBInitialScanoutLine.Success -Detail 'expected scanout 1 initial state evidence'
@@ -2095,6 +2266,26 @@ function Invoke-QemuDisplayProbeBackend {
         "gpuCompositorTarget1PlanLine=$gpuCompositorTarget1PlanSummary"
         "gpuCompositorTarget1ResultLine=$gpuCompositorTarget1ResultSummary"
         "gpuCompositorProofLine=$gpuCompositorProofSummary"
+        "gpuLiveConfiguredLine=$($gpuLiveConfiguredLine.Value)"
+        "gpuLiveInitialFrameLine=$($gpuLiveInitialFrameLine.Value)"
+        "gpuLiveSummaryLine=$($gpuLiveSummaryLine.Value)"
+        "gpuLiveFrameCap=$gpuLiveFrameCap"
+        "gpuLiveFrameLimit=$gpuLiveFrameLimit"
+        "gpuLiveTimeLimitTicks=$gpuLiveTimeLimitTicks"
+        "gpuLiveAttempted=$gpuLiveAttempted"
+        "gpuLiveRendered=$gpuLiveRendered"
+        "gpuLiveDirtyFrames=$gpuLiveDirtyFrames"
+        "gpuLiveCleanSkips=$gpuLiveCleanSkips"
+        "gpuLiveRateSkips=$gpuLiveRateSkips"
+        "gpuLiveTarget0Frames=$gpuLiveTarget0Frames"
+        "gpuLiveTarget1Frames=$gpuLiveTarget1Frames"
+        "gpuLiveTarget0Failures=$gpuLiveTarget0Failures"
+        "gpuLiveTarget1Failures=$gpuLiveTarget1Failures"
+        "gpuLiveFallbackActivated=$gpuLiveFallbackActivated"
+        "gpuLiveFallbackTarget=$gpuLiveFallbackTarget"
+        "gpuLiveFallbackReason=$gpuLiveFallbackReason"
+        "gpuLiveFallbackResult=$gpuLiveFallbackResult"
+        "gpuLiveStopReason=$gpuLiveStopReason"
         "compositorContentConfirmed0=$compositorContentConfirmed0"
         "compositorContentConfirmed1=$compositorContentConfirmed1"
         "taskbarPrimaryOnlyConfirmed=$taskbarPrimaryOnlyConfirmed"
@@ -2109,6 +2300,17 @@ function Invoke-QemuDisplayProbeBackend {
         "visualScanout0Signature=$visualScanout0Signature"
         "visualScanout1Signature=$visualScanout1Signature"
         "visualCaptureReason=$visualCaptureReason"
+        "initialScanout0Path=$initialScanout0Path"
+        "initialScanout1Path=$initialScanout1Path"
+        "finalScanout0Path=$finalScanout0Path"
+        "finalScanout1Path=$finalScanout1Path"
+        "initialChecksum0=$initialChecksum0"
+        "initialChecksum1=$initialChecksum1"
+        "finalChecksum0=$finalChecksum0"
+        "finalChecksum1=$finalChecksum1"
+        "visualChanged0=$visualChanged0"
+        "visualChanged1=$visualChanged1"
+        "initialFinalCaptureStatus=$initialFinalCaptureStatus"
         "distinctPatternsConfirmed=$distinctPatternsConfirmed"
         "dualOutputVisualProof=$dualOutputVisualProof"
         "launcherStdOut=$launcherStdOut"
@@ -2295,6 +2497,26 @@ function Invoke-QemuDisplayProbeBackend {
         GpuCompositorTarget1PlanLine = $gpuCompositorTarget1PlanSummary
         GpuCompositorTarget1ResultLine = $gpuCompositorTarget1ResultSummary
         GpuCompositorProofLine = $gpuCompositorProofSummary
+        GpuLiveConfiguredLine = $gpuLiveConfiguredLine.Value
+        GpuLiveInitialFrameLine = $gpuLiveInitialFrameLine.Value
+        GpuLiveSummaryLine = $gpuLiveSummaryLine.Value
+        GpuLiveFrameCap = $gpuLiveFrameCap
+        GpuLiveFrameLimit = $gpuLiveFrameLimit
+        GpuLiveTimeLimitTicks = $gpuLiveTimeLimitTicks
+        GpuLiveAttempted = $gpuLiveAttempted
+        GpuLiveRendered = $gpuLiveRendered
+        GpuLiveDirtyFrames = $gpuLiveDirtyFrames
+        GpuLiveCleanSkips = $gpuLiveCleanSkips
+        GpuLiveRateSkips = $gpuLiveRateSkips
+        GpuLiveTarget0Frames = $gpuLiveTarget0Frames
+        GpuLiveTarget1Frames = $gpuLiveTarget1Frames
+        GpuLiveTarget0Failures = $gpuLiveTarget0Failures
+        GpuLiveTarget1Failures = $gpuLiveTarget1Failures
+        GpuLiveFallbackActivated = $gpuLiveFallbackActivated
+        GpuLiveFallbackTarget = $gpuLiveFallbackTarget
+        GpuLiveFallbackReason = $gpuLiveFallbackReason
+        GpuLiveFallbackResult = $gpuLiveFallbackResult
+        GpuLiveStopReason = $gpuLiveStopReason
         GpuProbeCompleteContentMode = $gpuProbeCompleteContentMode
         GpuProbeCompleteFrameMode = $gpuProbeCompleteFrameMode
         GpuProbeCompleteContinuousPresentation = $gpuProbeCompleteContinuousPresentation
@@ -2302,6 +2524,17 @@ function Invoke-QemuDisplayProbeBackend {
         CompositorContentConfirmed1 = $compositorContentConfirmed1
         TaskbarPrimaryOnlyConfirmed = $taskbarPrimaryOnlyConfirmed
         ViewportSplitConfirmed = $viewportSplitConfirmed
+        InitialScanout0Path = $initialScanout0Path
+        InitialScanout1Path = $initialScanout1Path
+        FinalScanout0Path = $finalScanout0Path
+        FinalScanout1Path = $finalScanout1Path
+        InitialChecksum0 = $initialChecksum0
+        InitialChecksum1 = $initialChecksum1
+        FinalChecksum0 = $finalChecksum0
+        FinalChecksum1 = $finalChecksum1
+        VisualChanged0 = $visualChanged0
+        VisualChanged1 = $visualChanged1
+        InitialFinalCaptureStatus = $initialFinalCaptureStatus
         GpuSingleOutputProofLine = $gpuSingleOutputProofLine.Value
         GpuDualOutputProofLine = $gpuDualOutputProofLine.Value
         Supported = $spec.Supported
@@ -2314,7 +2547,31 @@ function Invoke-QemuDisplayProbeBackend {
 }
 
 try {
-    if ($Mode -eq 'compositorFrame') {
+    if ($Mode -eq 'compositorLiveBounded') {
+        Write-Host '[build] rebuilding kernel with QEMU-only bounded virtio-gpu compositor-live probe enabled'
+        Invoke-KernelBuildForSmoke -ExtraCFlags '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE_BOUNDED'
+        $script:activeSmokeBuild = $true
+
+        $results = @()
+        if ($Backends.Count -ne 1 -or $Backends[0] -notlike 'virtio-gpu*') {
+            throw 'Compositor live bounded mode only supports a single virtio-gpu backend.'
+        }
+
+        $backend = $Backends[0]
+        Write-Host ("[{0} compositorLiveBounded] launching display probe smoke" -f $backend)
+        $result = Invoke-QemuDisplayProbeBackend -Backend $backend -TimeoutSeconds $TimeoutSeconds -ProbeStage 'compositorLiveBounded' -EnableVisualCapture
+        $results += $result
+        Write-Host ("[{0} compositorLiveBounded] completed. serial={1}" -f $backend, $result.SerialLog)
+        $stageBResult = $result
+        $stageBResultComplete = $result.DiagnosticStatus -eq 'complete'
+        $stageBBlockerReason = if ($stageBResultComplete) {
+            ''
+        } elseif (-not [string]::IsNullOrWhiteSpace($result.Interpretation)) {
+            $result.Interpretation
+        } else {
+            'Compositor-live bounded probe failed without a blocker reason'
+        }
+    } elseif ($Mode -eq 'compositorFrame') {
         Write-Host '[build] rebuilding kernel with virtio-gpu compositor-frame probe enabled'
         Invoke-KernelBuildForSmoke -ExtraCFlags '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_FRAME_ACTIVE'
         $script:activeSmokeBuild = $true

@@ -415,6 +415,15 @@ void irq_handler();
 // Poll for completion (if not using interrupts)
 void poll(GpuDevice* dev);
 
+// Scheduler-owned QEMU-only live presenter step.  It is a no-op unless both
+// GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE and the explicit live build gate are set.
+void presentation_tick();
+
+// True once the bounded live proof has stopped, or in builds where the live
+// presenter is not compiled.  This is only used by the QEMU text-mode probe
+// pump and is not a product presentation-control API.
+bool presentation_finished();
+
 // ================================================================
 // Integration with Kernel Framebuffer
 // ================================================================

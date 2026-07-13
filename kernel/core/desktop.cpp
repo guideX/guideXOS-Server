@@ -706,6 +706,7 @@ static int s_rightClickHover = -1;
 static uint32_t s_screenW = 0;
 static uint32_t s_screenH = 0;
 static volatile bool s_needsRedraw = false;
+static volatile uint64_t s_redrawGeneration = 1;
 
 // Shutdown dialog state
 static bool s_shutdownDialogOpen = false;
@@ -10202,7 +10203,7 @@ void handle_key(uint32_t key)
 // External function for keyboard IRQ to request redraw
 void desktop_request_redraw()
 {
-    kernel::desktop::s_needsRedraw = true;
+    kernel::desktop::request_redraw();
 }
 
 namespace kernel {
@@ -10213,9 +10214,20 @@ bool needs_redraw()
 {
     if (s_needsRedraw) {
         s_needsRedraw = false;
+        ++s_redrawGeneration;
         return true;
     }
     return false;
+}
+
+uint64_t redraw_generation()
+{
+    return s_redrawGeneration;
+}
+
+void request_redraw()
+{
+    s_needsRedraw = true;
 }
 
 // Classic arrow cursor bitmap (12 wide x 19 tall)

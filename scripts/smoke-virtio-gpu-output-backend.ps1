@@ -193,9 +193,9 @@ Assert-True ($virtioGpuCpp.Contains('GXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE')) 'vi
 Assert-True ($virtioGpuCpp.Contains('No physical Intel GPU support')) 'virtio_gpu.cpp should keep physical Intel GPU support out of the QEMU-only track'
 Assert-True ($virtioGpuCpp.Contains('No real hardware GPU BAR access')) 'virtio_gpu.cpp should keep real hardware GPU BAR access out of the QEMU-only track'
 Assert-True ($virtioGpuCpp.Contains('No display hotplug')) 'virtio_gpu.cpp should keep display hotplug out of the QEMU-only track'
-Assert-True ($virtioGpuCpp.Contains('QEMU-only compositor desktop rendering is limited to a single static proof frame')) 'virtio_gpu.cpp should keep compositor rendering bounded to the single-frame QEMU proof path'
-Assert-True ($virtioGpuCpp.Contains('No 3D, virgl, Venus, blob, or continuous compositor integration')) 'virtio_gpu.cpp should keep compositor integration bounded and non-3D'
-Assert-True ($virtioGpuCpp.Contains('No continuous frame rendering or animation')) 'virtio_gpu.cpp should keep continuous animation out of the QEMU-only track'
+Assert-True ($virtioGpuCpp.Contains('QEMU-only compositor desktop rendering is single-shot unless the explicit')) 'virtio_gpu.cpp should keep the default compositor proof conservative'
+Assert-True ($virtioGpuCpp.Contains('No 3D, virgl, Venus, blob, or unrestricted production compositor integration')) 'virtio_gpu.cpp should keep compositor integration bounded and non-3D'
+Assert-True ($virtioGpuCpp.Contains('No unbounded busy rendering loops or unlimited queue polling')) 'virtio_gpu.cpp should keep live rendering bounded'
 Assert-True ($virtioGpuCpp.Contains('REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY')) 'virtio_gpu.cpp should keep the real-hardware warning prominent'
 
 Write-Host 'virtio-gpu output backend source smoke passed.'
