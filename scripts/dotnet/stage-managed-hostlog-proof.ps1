@@ -3,6 +3,8 @@
     [string]$OutputRoot = "",
     [string]$StageRoot = "",
     [string]$BuildScript = "",
+    [string]$RuntimePackRoot = "",
+    [switch]$UseGuideXosRuntimePack,
     [switch]$Clean,
     [switch]$SkipBuild
 )
@@ -24,6 +26,51 @@ function Assert-WithinRoot([string]$Path, [string]$Root, [string]$Label) {
 
 function Get-FileHashHex([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+
+function Read-GuideXosRuntimePack([string]$Root) {
+    if ([string]::IsNullOrWhiteSpace($Root)) {
+        $Root = Join-Path $repoRoot "tools\dotnet\runtime-pack"
+    }
+    $Root = [System.IO.Path]::GetFullPath($Root)
+    Assert-WithinRoot $Root $repoRoot "Runtime-pack source"
+    $outputRoot = Join-Path $repoRoot "out\dotnet\runtime-pack"
+    $manifestPath = Join-Path $outputRoot "runtime-pack.manifest.json"
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        throw "GuideXOS runtime-pack manifest is missing: $manifestPath"
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ([string]$manifest.identity -ne "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1") {
+        throw "Unexpected guideXOS runtime-pack identity: $($manifest.identity)"
+    }
+    if ([string]$manifest.sourceRoot -ne $Root) {
+        throw "Runtime-pack source root mismatch. Expected $Root, got $($manifest.sourceRoot)"
+    }
+    $objectPath = [string]$manifest.object
+    if ([string]::IsNullOrWhiteSpace($objectPath) -or -not (Test-Path -LiteralPath $objectPath)) {
+        throw "GuideXOS runtime-pack object is missing: $objectPath"
+    }
+    $objectHash = Get-FileHashHex $objectPath
+    if ($objectHash -ne [string]$manifest.objectSha256.ToUpperInvariant()) {
+        throw "GuideXOS runtime-pack object hash mismatch."
+    }
+    $lockPath = [string]$manifest.lockFile
+    if (-not (Test-Path -LiteralPath $lockPath)) { throw "GuideXOS runtime-pack lock file is missing: $lockPath" }
+    $lockHash = Get-FileHashHex $lockPath
+    if ($lockHash -ne [string]$manifest.lockFileSha256.ToUpperInvariant()) {
+        throw "GuideXOS runtime-pack lock hash mismatch."
+    }
+    return [pscustomobject]@{
+        Root = $Root
+        OutputRoot = $outputRoot
+        ManifestPath = $manifestPath
+        Manifest = $manifest
+        ObjectPath = $objectPath
+        ObjectSha256 = $objectHash
+        ManifestSha256 = Get-FileHashHex $manifestPath
+        LockPath = $lockPath
+        LockSha256 = $lockHash
+    }
 }
 
 function Assert-FileContains([string]$Path, [string[]]$Patterns, [string]$Label) {
@@ -100,6 +147,15 @@ $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $StageRoot = [System.IO.Path]::GetFullPath($StageRoot)
 $BuildScript = [System.IO.Path]::GetFullPath($BuildScript)
 
+$runtimePack = $null
+if ($UseGuideXosRuntimePack) {
+    if ([string]::IsNullOrWhiteSpace($RuntimePackRoot)) {
+        $RuntimePackRoot = Join-Path $repoRoot "tools\dotnet\runtime-pack"
+    }
+    $RuntimePackRoot = [System.IO.Path]::GetFullPath($RuntimePackRoot)
+    Assert-WithinRoot $RuntimePackRoot $repoRoot "Runtime-pack source"
+}
+
 Assert-WithinRoot $OutputRoot $repoRoot "Output"
 Assert-WithinRoot $StageRoot $repoRoot "Stage"
 
@@ -115,12 +171,20 @@ New-Item -ItemType Directory -Force -Path $StageRoot | Out-Null
 
 Write-Host "[dotnet-proof] rebuilding NativeAOT proof from a clean output root"
 if (-not $SkipBuild) {
-    & powershell -ExecutionPolicy Bypass -File $BuildScript -RepoRoot $repoRoot -OutputRoot $OutputRoot -Clean
+    $buildArguments = @("-RepoRoot", $repoRoot, "-OutputRoot", $OutputRoot, "-Clean")
+    if ($UseGuideXosRuntimePack) {
+        $buildArguments += @("-RuntimePackRoot", $RuntimePackRoot, "-UseGuideXosRuntimePack")
+    }
+    & powershell -ExecutionPolicy Bypass -File $BuildScript @buildArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Managed proof build failed with exit code $LASTEXITCODE"
     }
 } else {
     Write-Host "[dotnet-proof] using existing proof output root (SkipBuild)"
+}
+
+if ($UseGuideXosRuntimePack) {
+    $runtimePack = Read-GuideXosRuntimePack $RuntimePackRoot
 }
 
 $artifactRoot = Join-Path $OutputRoot "artifacts"
@@ -149,7 +213,7 @@ if ($tlsEndAddress -le $tlsStartAddress) {
 }
 $tlsBlockSize = $tlsEndAddress - $tlsStartAddress
 $managedMainAddress = Get-MapSymbolAddress -Path $sourceMap -Symbol "ManagedMain" -Label "Managed entry"
-$entryDiagnosis = Assert-ManagedHostLogReversePInvokeChain $sourceElf $sourceMap $sourcePeDump
+$entryDiagnosis = Assert-ManagedHostLogReversePInvokeChain $sourceElf $sourceMap $sourcePeDump -GuideXosRuntimePack:$UseGuideXosRuntimePack
 $toolchainText = Get-Content -LiteralPath $sourceToolchain
 $converterPathLine = $toolchainText | Where-Object { $_ -like "PeToElfScript=*" } | Select-Object -First 1
 $converterHashLine = $toolchainText | Where-Object { $_ -like "PeToElfSha256=*" } | Select-Object -First 1
@@ -224,13 +288,23 @@ $expectedPeImports = [ordered]@{
 }
 
 $actualImports = Get-ImportTable $sourcePeDump
-Assert-SetEquals -Actual @($actualImports.Keys) -Expected @($expectedPeImports.Keys) -Label "PE import DLL set"
-foreach ($dll in $expectedPeImports.Keys) {
-    Assert-SetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
+if ($UseGuideXosRuntimePack) {
+    $liveFlsImports = @()
+    foreach ($dll in $actualImports.Keys) {
+        $liveFlsImports += @($actualImports[$dll] | Where-Object { $_ -in @("FlsGetValue", "FlsSetValue") })
+    }
+    if ($liveFlsImports.Count -ne 0) {
+        throw "GuideXOS runtime-pack image still imports stock FLS entry points: $($liveFlsImports -join ', ')"
+    }
+} else {
+    Assert-SetEquals -Actual @($actualImports.Keys) -Expected @($expectedPeImports.Keys) -Label "PE import DLL set"
+    foreach ($dll in $expectedPeImports.Keys) {
+        Assert-SetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
+    }
 }
 
 $runtimeSupportSource = Join-Path $repoRoot "samples\managed\HostLogProof\runtime_support.c"
-Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath (Join-Path $artifactRoot "HostLogProof.exe") -PeDumpPath $sourcePeDump -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeObjDump -ElfReadelfPath $sourceElfReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath (Join-Path $artifactRoot "HostLogProof.exe") -PeDumpPath $sourcePeDump -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeObjDump -ElfReadelfPath $sourceElfReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack | Out-Null
 Assert-ManagedHostLogFileNotContains $sourcePeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
 
 $stagedAppsRoot = Join-Path $StageRoot "apps"
@@ -273,7 +347,7 @@ $manifest = [ordered]@{
             architecture = "amd64"
             path = "bin/amd64/HostLogProof.elf"
             entryPoint = "ManagedMain"
-            entryCategory = "runtime-correct-reverse-pinvoke-required"
+            entryCategory = if ($UseGuideXosRuntimePack) { "guidexos-runtime-pack-reverse-pinvoke" } else { "runtime-correct-reverse-pinvoke-required" }
             abi = "guidexos-c-abi-v1"
             runtime = "native-elf"
         }
@@ -320,9 +394,15 @@ $envelope = [ordered]@{
     converterSha256 = $converterSha256
     ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
     ilCompilerVersion = $ilCompilerVersion
-    runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
-    runtimePackVersion = $ilCompilerVersion
-    tlsEnvelope = "Windows TLS index plus NativeAOT TLS template envelope; FLS/thread attachment remains uninitialized"
+    runtimePackPackage = if ($UseGuideXosRuntimePack) { [string]$runtimePack.Manifest.stockRuntimePackPackage } else { "runtime.win-x64.microsoft.dotnet.ilcompiler" }
+    runtimePackVersion = if ($UseGuideXosRuntimePack) { [string]$runtimePack.Manifest.stockRuntimePackVersion } else { $ilCompilerVersion }
+    useGuideXosRuntimePack = [bool]$UseGuideXosRuntimePack
+    runtimePackIdentity = if ($UseGuideXosRuntimePack) { [string]$runtimePack.Manifest.identity } else { $null }
+    runtimePackManifest = if ($UseGuideXosRuntimePack) { $runtimePack.ManifestPath } else { $null }
+    runtimePackManifestSha256 = if ($UseGuideXosRuntimePack) { $runtimePack.ManifestSha256 } else { $null }
+    runtimePackObject = if ($UseGuideXosRuntimePack) { $runtimePack.ObjectPath } else { $null }
+    runtimePackObjectSha256 = if ($UseGuideXosRuntimePack) { $runtimePack.ObjectSha256 } else { $null }
+    tlsEnvelope = if ($UseGuideXosRuntimePack) { "guideXOS TLS-template-backed per-thread runtime cell with local FLS namespace" } else { "Windows TLS index plus NativeAOT TLS template envelope; FLS/thread attachment remains uninitialized" }
     registrySourceEnvironment = "GXOS_NATIVE_ELF_STAGE_ROOT"
 }
 

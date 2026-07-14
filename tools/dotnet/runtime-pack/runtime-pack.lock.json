@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "architecture": "amd64",
+  "targetFramework": "net9.0",
+  "runtimeIdentifier": "win-x64",
+  "sdk": {
+    "version": "10.0.301",
+    "commit": "96856fd726"
+  },
+  "ilCompiler": {
+    "package": "Microsoft.DotNet.ILCompiler",
+    "version": "9.0.0",
+    "repository": "https://github.com/dotnet/runtime",
+    "commit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+  },
+  "runtimePack": {
+    "package": "runtime.win-x64.microsoft.dotnet.ilcompiler",
+    "version": "9.0.0",
+    "repository": "https://github.com/dotnet/runtime",
+    "commit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+    "packageRoot": "C:\\Users\\guideX\\.nuget\\packages\\runtime.win-x64.microsoft.dotnet.ilcompiler\\9.0.0",
+    "files": {
+      "sdk/bootstrapper.obj": {
+        "sha256": "E97995D4179E4B493232CE386DC8D2780E53E5EAF8724E663E598EA096FD7685",
+        "length": 7374
+      },
+      "sdk/Runtime.WorkstationGC.lib": {
+        "sha256": "0E6A134AD4150CD604317A47860DAE82EB30AAE4D9CDB14144E06454E7BB1948",
+        "length": 5802942
+      },
+      "sdk/eventpipe-disabled.lib": {
+        "sha256": "E93CB51344EE86484AC09E8DC13B80FAE269719432775E3E4F012C6C18184027",
+        "length": 298348
+      },
+      "sdk/Runtime.VxsortEnabled.lib": {
+        "sha256": "D1EF0E9EFA2E757BB17401861792C8F7480374D9B33B47EF327EB635A315D0FB",
+        "length": 855870
+      },
+      "sdk/standalonegc-disabled.lib": {
+        "sha256": "7CE4836B9D161503F0A78E7BC4B9952181EE47CAEAE41B5B7B497FD1B4001CE7",
+        "length": 38966
+      },
+      "sdk/System.Globalization.Native.Aot.lib": {
+        "sha256": "F80ADFE69D69755B3B0FE24CCA4161441B9112CB18241F5695C4E2DAAA093423",
+        "length": 491946
+      },
+      "sdk/System.IO.Compression.Native.Aot.lib": {
+        "sha256": "B14CD39B05D4F138F68C14841A1155D3781B5A80F5EE6DBB681C45DD22E8D32E",
+        "length": 2845984
+      },
+      "sdk/zlibstatic.lib": {
+        "sha256": "5AC043249BA7057D27445DDFA5BF2F3A4ABEEEBB9D4809D98F0B6F0C4DDB0EAD",
+        "length": 946686
+      },
+      "sdk/System.Private.CoreLib.dll": {
+        "sha256": "BAD35E3A8C882A49EEC31AC2A3E544DFBA1042C9990913B2842BBEE0E121BF0D",
+        "fileVersion": "9.0.24.52809",
+        "productVersion": "9.0.0+9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+      },
+      "sdk/System.Private.TypeLoader.dll": {
+        "sha256": "238EB0871F26427B2D33845ABE8AF5FE265CC33CFAEC8A517D3FFA22FD25EFE5",
+        "fileVersion": "9.0.24.52809",
+        "productVersion": "9.0.0+9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+      },
+      "sdk/System.Private.Reflection.Execution.dll": {
+        "sha256": "0EF9593E279CC256A8574FD247842C33E2EE70AEE6331783C025960D745D7B46",
+        "fileVersion": "9.0.24.52809",
+        "productVersion": "9.0.0+9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+      },
+      "sdk/System.Private.StackTraceMetadata.dll": {
+        "sha256": "6C04AC18106A2971BEE95783882F8A4B3B0E7ADE8CE5CD8841DF6F2572529AFB",
+        "fileVersion": "9.0.24.52809",
+        "productVersion": "9.0.0+9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+      }
+    }
+  },
+  "platformObject": {
+    "source": "src/platform/guidexos_nativeaot_platform.cpp",
+    "purpose": "AMD64 guideXOS FLS and non-allocating reverse-P/Invoke transition",
+    "tlsBlockMinimum": "0x110",
+    "runtimeCellOffset": "0x30",
+    "runtimeCellInitializedOffset": "0x38",
+    "runtimeCellTransitionFrameOffset": "0x40",
+    "flsCellOffset": "0x80",
+    "flsCellCount": 8,
+    "flsIndex": 0,
+    "managedAllocation": false,
+    "managedExceptions": false,
+    "managedThreads": false
+  },
+  "sourceCommitClaim": "The ILCompiler/runtime-pack source commit is proven by the package nuspec. No guideXOS platform fork commit is claimed; the platform object is local source under this directory."
+}

@@ -4,9 +4,10 @@ param(
     [string]$StageRoot = "",
     [string]$StageScript = "",
     [string]$ServerExe = "",
+    [string]$RuntimePackRoot = "",
+    [switch]$UseGuideXosRuntimePack,
     [int]$TimeoutSeconds = 240,
     [switch]$SkipFailureProbe,
-    [switch]$EnableFaultDiagnostics,
     [switch]$SkipBuild
 )
 
@@ -155,6 +156,9 @@ if ([string]::IsNullOrWhiteSpace($StageScript)) {
 if ([string]::IsNullOrWhiteSpace($ServerExe)) {
     $ServerExe = Join-Path $Root "guideXOSServer.experimental.exe"
 }
+if ($UseGuideXosRuntimePack -and [string]::IsNullOrWhiteSpace($RuntimePackRoot)) {
+    $RuntimePackRoot = Join-Path $Root "tools\dotnet\runtime-pack"
+}
 
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $StageRoot = [System.IO.Path]::GetFullPath($StageRoot)
@@ -168,12 +172,8 @@ if (-not (Test-Path -LiteralPath $StageScript)) {
 $mingwBin = "C:\mingw64\bin"
 $oldPath = $env:PATH
 $originalStageRoot = $env:GXOS_NATIVE_ELF_STAGE_ROOT
-$originalFaultDiagnostics = $env:GX_NATIVE_ELF_FAULT_DIAGNOSTICS
 if (Test-Path -LiteralPath $mingwBin) {
     $env:PATH = "$mingwBin;$env:PATH"
-}
-if ($EnableFaultDiagnostics) {
-    Set-EnvValue -Name "GX_NATIVE_ELF_FAULT_DIAGNOSTICS" -Value "1"
 }
 
 try {
@@ -204,6 +204,9 @@ try {
         "-OutputRoot", $OutputRoot,
         "-StageRoot", $StageRoot
     )
+    if ($UseGuideXosRuntimePack) {
+        $stageArguments += @("-RuntimePackRoot", $RuntimePackRoot, "-UseGuideXosRuntimePack")
+    }
     if ($SkipBuild) { $stageArguments += "-SkipBuild" }
     $stageOutput = & powershell -ExecutionPolicy Bypass -File $StageScript @stageArguments
     if ($LASTEXITCODE -ne 0) {
@@ -245,29 +248,52 @@ try {
     if ($stageManifestObject.entries[0].entryPoint -ne "ManagedMain") {
         throw "Missing expected value for stage manifest entry point: ManagedMain"
     }
-    if ($stageManifestObject.entries[0].entryCategory -ne "runtime-correct-reverse-pinvoke-required") {
-        throw "Entry-category drift: expected runtime-correct-reverse-pinvoke-required."
+    $expectedEntryCategory = if ($UseGuideXosRuntimePack) { "guidexos-runtime-pack-reverse-pinvoke" } else { "runtime-correct-reverse-pinvoke-required" }
+    if ($stageManifestObject.entries[0].entryCategory -ne $expectedEntryCategory) {
+        throw "Entry-category drift: expected $expectedEntryCategory."
     }
     if ($stageManifestObject.entries[0].abi -ne "guidexos-c-abi-v1") {
         throw "Missing expected value for stage manifest ABI: guidexos-c-abi-v1"
     }
-    $expectedEntryFields = @{
-        entryCategory = "runtime-correct-reverse-pinvoke-required"
-        managedMainAddress = "0x10001900"
-        reversePInvokeAddress = "0x1004B140"
-        reversePInvokeAttachAddress = "0x1004B1A0"
-        reversePInvokeReturnAddress = "0x1004B290"
-        flsGetValueImportThunkAddress = "0x10052108"
-        converterSha256 = "EAAEFBC8862D6E1A4AC1A679073AF5311A3AF9CE96F45D258617BD4FE0977434"
-        ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
-        ilCompilerVersion = "9.0.0"
-        runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
-        runtimePackVersion = "9.0.0"
-        tlsEnvelope = "Windows TLS index plus NativeAOT TLS template envelope; FLS/thread attachment remains uninitialized"
+    $expectedEntryFields = if ($UseGuideXosRuntimePack) {
+        @{
+            entryCategory = "guidexos-runtime-pack-reverse-pinvoke"
+            converterSha256 = "EAAEFBC8862D6E1A4AC1A679073AF5311A3AF9CE96F45D258617BD4FE0977434"
+            ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
+            ilCompilerVersion = "9.0.0"
+            runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
+            runtimePackVersion = "9.0.0"
+            useGuideXosRuntimePack = "True"
+            tlsEnvelope = "guideXOS TLS-template-backed per-thread runtime cell with local FLS namespace"
+        }
+    } else {
+        @{
+            entryCategory = "runtime-correct-reverse-pinvoke-required"
+            managedMainAddress = "0x10001900"
+            reversePInvokeAddress = "0x1004B140"
+            reversePInvokeAttachAddress = "0x1004B1A0"
+            reversePInvokeReturnAddress = "0x1004B290"
+            flsGetValueImportThunkAddress = "0x10052108"
+            converterSha256 = "EAAEFBC8862D6E1A4AC1A679073AF5311A3AF9CE96F45D258617BD4FE0977434"
+            ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
+            ilCompilerVersion = "9.0.0"
+            runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
+            runtimePackVersion = "9.0.0"
+            tlsEnvelope = "Windows TLS index plus NativeAOT TLS template envelope; FLS/thread attachment remains uninitialized"
+        }
     }
     foreach ($field in $expectedEntryFields.Keys) {
         if ([string]$stageEnvelope.$field -ne $expectedEntryFields[$field]) {
             throw "Stage envelope drift for $field. Expected $($expectedEntryFields[$field]), got $($stageEnvelope.$field)."
+        }
+    }
+    if ($UseGuideXosRuntimePack) {
+        if ([string]::IsNullOrWhiteSpace([string]$stageEnvelope.runtimePackIdentity) -or
+            [string]$stageEnvelope.runtimePackIdentity -ne "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1") {
+            throw "Stage envelope does not identify the locked guideXOS runtime pack."
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$stageEnvelope.runtimePackObjectSha256)) {
+            throw "Stage envelope is missing the runtime-pack object hash."
         }
     }
     $toolchainFile = [string]$stageEnvelope.toolchainFile
@@ -302,12 +328,6 @@ try {
             Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $oldStageRoot
         }
         if ($positive.ExitCode -ne 0) {
-            if ($EnableFaultDiagnostics) {
-                Assert-Contains -Text $positive.StdErr -Needle "[NativeElfFault]" -Reason "structured fault diagnostics"
-                Assert-Contains -Text $positive.StdErr -Needle "code=0xc0000005" -Reason "access-violation code"
-                Assert-Contains -Text $positive.StdErr -Needle "entry=0x10001900" -Reason "fault entry address"
-                Assert-Contains -Text $positive.StdErr -Needle "tlsIndexAddress=0x100982ac" -Reason "fault TLS index"
-            }
             throw "Managed proof server session failed with exit code $($positive.ExitCode). stderr: $($positive.StdErr)"
         }
 
@@ -365,7 +385,9 @@ try {
 
         if (-not $SkipFailureProbe) {
             $missingStageScript = Join-Path $OutputRoot "missing-stage-script.ps1"
-            & $powershell -ExecutionPolicy Bypass -File $PSCommandPath -RepoRoot $Root -OutputRoot $OutputRoot -StageRoot $StageRoot -StageScript $missingStageScript -ServerExe $ServerExe -SkipFailureProbe
+            $failureArguments = @("-RepoRoot", $Root, "-OutputRoot", $OutputRoot, "-StageRoot", $StageRoot, "-StageScript", $missingStageScript, "-ServerExe", $ServerExe, "-SkipFailureProbe")
+            if ($UseGuideXosRuntimePack) { $failureArguments += @("-RuntimePackRoot", $RuntimePackRoot, "-UseGuideXosRuntimePack") }
+            & $powershell -ExecutionPolicy Bypass -File $PSCommandPath @failureArguments
             $failureProbeExitCode = $LASTEXITCODE
             if ($failureProbeExitCode -eq 0) { throw "Failure probe unexpectedly returned success." }
             Write-Host "[dotnet-proof] invalid-input failure probe returned nonzero: $failureProbeExitCode"
@@ -389,7 +411,6 @@ try {
 } finally {
     $env:PATH = $oldPath
     Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $originalStageRoot
-    Set-EnvValue -Name "GX_NATIVE_ELF_FAULT_DIAGNOSTICS" -Value $originalFaultDiagnostics
 }
 
 

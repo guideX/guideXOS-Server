@@ -235,4 +235,12 @@ The original Outcome C history below is preserved. The exact clean-build fault, 
 
 Final status remains **Outcome C - Custom runtime pack required**. The current TLS envelope is not a runtime-correct NativeAOT reverse-P/Invoke initialization, and no allocation experiment is authorized until the custom runtime/platform pack establishes the managed transition and repeat-launch proof.
 
+## Follow-up status
+
+The historical closeout remains preserved above. The bounded non-allocating
+runtime-pack result is documented in
+[GUIDEXOS_NATIVEAOT_MINIMAL_RUNTIME_PACK.md](GUIDEXOS_NATIVEAOT_MINIMAL_RUNTIME_PACK.md);
+its final status for that scope is **Outcome A — Minimal guideXOS runtime pack
+executes managed entry correctly**.
+
 **Decision: Outcome C — Regression found during stabilization.**

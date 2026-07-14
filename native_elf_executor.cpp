@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <iomanip>
@@ -26,115 +25,6 @@
 namespace gxos {
 namespace apps {
 namespace {
-
-#if defined(_WIN32) && defined(__x86_64__)
-struct NativeElfFaultCaptureState {
-    volatile LONG enabled = 0;
-    volatile uintptr_t entryAddress = 0;
-    volatile uintptr_t mappedBase = 0;
-    volatile uintptr_t appContext = 0;
-    volatile uintptr_t tlsIndexAddress = 0;
-    volatile uintptr_t tlsBlock = 0;
-    volatile uint64_t tlsBlockSize = 0;
-    volatile unsigned long tlsSlot = 0xFFFFFFFFul;
-};
-
-NativeElfFaultCaptureState g_nativeElfFaultCapture;
-PVOID g_nativeElfFaultHandler = nullptr;
-
-void appendFaultText(char*& cursor, char* end, const char* text) {
-    while (*text != '\0' && cursor < end) *cursor++ = *text++;
-}
-
-void appendFaultHex(char*& cursor, char* end, uint64_t value) {
-    static constexpr char digits[] = "0123456789abcdef";
-    appendFaultText(cursor, end, "0x");
-    char reversed[16];
-    size_t count = 0;
-    do {
-        reversed[count++] = digits[value & 0xFu];
-        value >>= 4;
-    } while (value != 0 && count < sizeof(reversed));
-    while (count != 0 && cursor < end) *cursor++ = reversed[--count];
-}
-
-void appendFaultField(char*& cursor, char* end, const char* name, uint64_t value) {
-    appendFaultText(cursor, end, name);
-    appendFaultHex(cursor, end, value);
-    appendFaultText(cursor, end, " ");
-}
-
-LONG CALLBACK nativeElfFaultHandler(EXCEPTION_POINTERS* exceptionPointers) {
-    if (InterlockedCompareExchange(&g_nativeElfFaultCapture.enabled, 0, 0) == 0 ||
-        exceptionPointers == nullptr || exceptionPointers->ExceptionRecord == nullptr ||
-        exceptionPointers->ContextRecord == nullptr) {
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
-
-    if (InterlockedExchange(&g_nativeElfFaultCapture.enabled, 0) == 0) {
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
-
-    char buffer[2048];
-    char* cursor = buffer;
-    char* end = buffer + sizeof(buffer) - 2;
-    const EXCEPTION_RECORD* record = exceptionPointers->ExceptionRecord;
-    const CONTEXT* context = exceptionPointers->ContextRecord;
-    appendFaultText(cursor, end, "[NativeElfFault] ");
-    appendFaultField(cursor, end, "code=", record->ExceptionCode);
-    appendFaultField(cursor, end, "faultAddress=", reinterpret_cast<uintptr_t>(record->ExceptionAddress));
-    appendFaultField(cursor, end, "rip=", context->Rip);
-    appendFaultField(cursor, end, "rsp=", context->Rsp);
-    appendFaultField(cursor, end, "rspMod16=", context->Rsp & 0xFu);
-    appendFaultField(cursor, end, "rbp=", context->Rbp);
-    appendFaultField(cursor, end, "rax=", context->Rax);
-    appendFaultField(cursor, end, "rbx=", context->Rbx);
-    appendFaultField(cursor, end, "rcx=", context->Rcx);
-    appendFaultField(cursor, end, "rdx=", context->Rdx);
-    appendFaultField(cursor, end, "r8=", context->R8);
-    appendFaultField(cursor, end, "r9=", context->R9);
-    appendFaultField(cursor, end, "fsSelector=", context->SegFs);
-    appendFaultField(cursor, end, "gsSelector=", context->SegGs);
-    appendFaultField(cursor, end, "entry=", g_nativeElfFaultCapture.entryAddress);
-    appendFaultField(cursor, end, "mappedBase=", g_nativeElfFaultCapture.mappedBase);
-    appendFaultField(cursor, end, "appContext=", g_nativeElfFaultCapture.appContext);
-    appendFaultField(cursor, end, "tlsIndexAddress=", g_nativeElfFaultCapture.tlsIndexAddress);
-    appendFaultField(cursor, end, "tlsBlock=", g_nativeElfFaultCapture.tlsBlock);
-    appendFaultField(cursor, end, "tlsBlockSize=", g_nativeElfFaultCapture.tlsBlockSize);
-    appendFaultField(cursor, end, "tlsSlot=", g_nativeElfFaultCapture.tlsSlot);
-    appendFaultField(cursor, end, "info0=", record->NumberParameters > 0 ? record->ExceptionInformation[0] : 0);
-    appendFaultField(cursor, end, "info1=", record->NumberParameters > 1 ? record->ExceptionInformation[1] : 0);
-
-    if (g_nativeElfFaultCapture.appContext != 0) {
-        const NativeGxAppContext* appContext = reinterpret_cast<const NativeGxAppContext*>(g_nativeElfFaultCapture.appContext);
-        appendFaultField(cursor, end, "ctx.size=", appContext->size);
-        appendFaultField(cursor, end, "ctx.apiVersion=", appContext->apiVersion);
-        appendFaultField(cursor, end, "ctx.host=", reinterpret_cast<uintptr_t>(appContext->host));
-        appendFaultField(cursor, end, "ctx.userData=", reinterpret_cast<uintptr_t>(appContext->userData));
-    }
-    appendFaultText(cursor, end, "\r\n");
-    DWORD written = 0;
-    HANDLE stderrHandle = GetStdHandle(STD_ERROR_HANDLE);
-    if (stderrHandle != nullptr && stderrHandle != INVALID_HANDLE_VALUE) {
-        (void)WriteFile(stderrHandle, buffer, static_cast<DWORD>(cursor - buffer), &written, nullptr);
-    }
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-
-void enableNativeElfFaultDiagnostics() {
-    if (g_nativeElfFaultHandler == nullptr) {
-        g_nativeElfFaultHandler = AddVectoredExceptionHandler(1, nativeElfFaultHandler);
-    }
-}
-
-void disableNativeElfFaultDiagnostics() {
-    InterlockedExchange(&g_nativeElfFaultCapture.enabled, 0);
-    if (g_nativeElfFaultHandler != nullptr) {
-        (void)RemoveVectoredExceptionHandler(g_nativeElfFaultHandler);
-        g_nativeElfFaultHandler = nullptr;
-    }
-}
-#endif
 
 bool experimentalExecutionEnabled() {
 #ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
@@ -371,12 +261,6 @@ bool prepareNativeElfTlsBootstrap(
     std::memcpy(static_cast<char*>(mapping.base) + tlsIndexOffset, &slotValue, sizeof(slotValue));
     bootstrap.tlsIndexAddress = tlsIndexAddress;
     bootstrap.tlsBlockSize = static_cast<size_t>(tlsBlockSize64);
-#if defined(_WIN32) && defined(__x86_64__)
-    g_nativeElfFaultCapture.tlsIndexAddress = static_cast<uintptr_t>(tlsIndexAddress);
-    g_nativeElfFaultCapture.tlsBlock = reinterpret_cast<uintptr_t>(bootstrap.block.data());
-    g_nativeElfFaultCapture.tlsBlockSize = static_cast<uint64_t>(bootstrap.tlsBlockSize);
-    g_nativeElfFaultCapture.tlsSlot = bootstrap.slot;
-#endif
     addDiagnostic(result, "Native ELF TLS bootstrap installed");
     addDiagnostic(result, "TLS slot index: " + std::to_string(bootstrap.slot));
     addDiagnostic(result, "TLS block size: " + std::to_string(bootstrap.tlsBlockSize));
@@ -590,16 +474,6 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     appContext.host = &runtimeContext.hostCalls;
     appContext.userData = nullptr;
     gx_entry_fn entry = reinterpret_cast<gx_entry_fn>(entryAddress);
-#if defined(_WIN32) && defined(__x86_64__)
-    const bool faultDiagnosticsEnabled = std::getenv("GX_NATIVE_ELF_FAULT_DIAGNOSTICS") != nullptr;
-    if (faultDiagnosticsEnabled) {
-        enableNativeElfFaultDiagnostics();
-        g_nativeElfFaultCapture.entryAddress = reinterpret_cast<uintptr_t>(entryAddress);
-        g_nativeElfFaultCapture.mappedBase = reinterpret_cast<uintptr_t>(mapping.base);
-        g_nativeElfFaultCapture.appContext = reinterpret_cast<uintptr_t>(&appContext);
-        InterlockedExchange(&g_nativeElfFaultCapture.enabled, 1);
-    }
-#endif
     NativeAppProcessTable::RegisterPrepared(runtimeContext, true, hostArchitecture());
     NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
     NativeAppProcessTable::MarkRunning(runtimeContext.runtimeId);
@@ -643,9 +517,6 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
         result.exitCode = GX_ERROR_FAILED;
         executionFailed = true;
     }
-#endif
-#if defined(_WIN32) && defined(__x86_64__)
-    if (faultDiagnosticsEnabled) disableNativeElfFaultDiagnostics();
 #endif
     if (smokeTestCloseThread.joinable()) smokeTestCloseThread.join();
     NativeAppRuntime::EndHostCallDispatch(runtimeContext);

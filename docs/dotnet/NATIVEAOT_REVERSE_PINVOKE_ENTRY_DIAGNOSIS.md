@@ -270,3 +270,11 @@ Build the smallest guideXOS NativeAOT runtime/platform pack that replaces the st
 Do not bind only `FlsGetValue`, do not fabricate `g_flsIndex` or a thread object, and do not begin allocation until the expected reverse-P/Invoke transition returns correctly twice in one process and in a second independent Server process.
 
 **Final decision: Outcome C - Custom runtime pack required.**
+
+## Follow-up status
+
+The custom non-allocating runtime-pack result is documented in
+[GUIDEXOS_NATIVEAOT_MINIMAL_RUNTIME_PACK.md](GUIDEXOS_NATIVEAOT_MINIMAL_RUNTIME_PACK.md).
+The historical diagnosis above remains unchanged; for the bounded HostLogProof
+scope, the final status is **Outcome A — Minimal guideXOS runtime pack executes
+managed entry correctly**.

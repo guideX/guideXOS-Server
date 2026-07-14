@@ -5,6 +5,8 @@
     [string]$PythonExe = "",
     [string]$PeToElfScript = "",
     [string]$OutputRoot = "",
+    [string]$RuntimePackRoot = "",
+    [switch]$UseGuideXosRuntimePack,
     [switch]$Clean
 )
 
@@ -114,6 +116,52 @@ $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 
 Assert-WithinRoot $OutputRoot $RepoRoot "Output"
 
+$runtimePackManifest = $null
+$runtimePackObject = $null
+$runtimePackSdkPath = $null
+$runtimePackManifestHash = $null
+$runtimePackObjectHash = $null
+if ($UseGuideXosRuntimePack) {
+    if ([string]::IsNullOrWhiteSpace($RuntimePackRoot)) {
+        $RuntimePackRoot = Join-Path $RepoRoot "tools\dotnet\runtime-pack"
+    }
+    $RuntimePackRoot = [System.IO.Path]::GetFullPath($RuntimePackRoot)
+    Assert-WithinRoot $RuntimePackRoot $RepoRoot "Runtime-pack source"
+    $runtimePackBuild = Join-Path $RuntimePackRoot "build-runtime-pack.ps1"
+    if (-not (Test-Path -LiteralPath $runtimePackBuild)) {
+        throw "GuideXOS runtime-pack build script not found: $runtimePackBuild"
+    }
+    $runtimePackOutputRoot = Join-Path $RepoRoot "out\dotnet\runtime-pack"
+    $runtimePackBuildArguments = @(
+        "-RepoRoot", $RepoRoot,
+        "-RuntimePackRoot", $RuntimePackRoot,
+        "-OutputRoot", $runtimePackOutputRoot
+    )
+    if ($Clean) { $runtimePackBuildArguments += "-Clean" }
+    & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "GuideXOS runtime-pack build failed with exit code $LASTEXITCODE"
+    }
+    $runtimePackManifest = Join-Path $runtimePackOutputRoot "runtime-pack.manifest.json"
+    if (-not (Test-Path -LiteralPath $runtimePackManifest)) {
+        throw "GuideXOS runtime-pack manifest not found: $runtimePackManifest"
+    }
+    $runtimePackManifestObject = Get-Content -LiteralPath $runtimePackManifest -Raw | ConvertFrom-Json
+    $runtimePackObject = [string]$runtimePackManifestObject.object
+    if ([string]::IsNullOrWhiteSpace($runtimePackObject) -or -not (Test-Path -LiteralPath $runtimePackObject)) {
+        throw "GuideXOS runtime-pack object not found: $runtimePackObject"
+    }
+    $runtimePackObjectHash = Get-FileHash -LiteralPath $runtimePackObject -Algorithm SHA256 | Select-Object -ExpandProperty Hash
+    if ($runtimePackObjectHash.ToUpperInvariant() -ne [string]$runtimePackManifestObject.objectSha256.ToUpperInvariant()) {
+        throw "GuideXOS runtime-pack object hash does not match its manifest."
+    }
+    $runtimePackSdkPath = [string]$runtimePackManifestObject.sdkPath
+    if ([string]::IsNullOrWhiteSpace($runtimePackSdkPath) -or -not (Test-Path -LiteralPath $runtimePackSdkPath)) {
+        throw "GuideXOS runtime-pack SDK path is missing: $runtimePackSdkPath"
+    }
+    $runtimePackManifestHash = (Get-FileHash -LiteralPath $runtimePackManifest -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+
 if (-not (Test-Path -LiteralPath $projectFile)) {
     throw "Sample project not found: $projectFile"
 }
@@ -191,6 +239,8 @@ $artifactElfReadelf = Join-Path $artifactRoot "HostLogProof.elf.readelf.txt"
 $artifactElfDisasm = Join-Path $artifactRoot "HostLogProof.elf.disasm.txt"
 $artifactNativeObjDump = Join-Path $artifactRoot "HostLogProof.native.objdump.txt"
 $artifactNativeObjReloc = Join-Path $artifactRoot "HostLogProof.native.reloc.txt"
+$artifactRuntimePackObjDump = Join-Path $artifactRoot "guidexos_nativeaot_platform.objdump.txt"
+$artifactRuntimePackObjReloc = Join-Path $artifactRoot "guidexos_nativeaot_platform.reloc.txt"
 $artifactIlcRsp = Join-Path $artifactRoot "HostLogProof.ilc.rsp"
 $artifactLinkRsp = Join-Path $artifactRoot "HostLogProof.link.rsp"
 $artifactToolchain = Join-Path $artifactRoot "toolchain.txt"
@@ -241,6 +291,13 @@ $toolchainLines = @(
     "VcVars64=$vcvars64"
     "RuntimeSupportSource=$runtimeSupportSource"
     "RuntimeSupportObj=$runtimeSupportObj"
+    "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
+    "RuntimePackRoot=$RuntimePackRoot"
+    "RuntimePackManifest=$runtimePackManifest"
+    "RuntimePackObject=$runtimePackObject"
+    "RuntimePackSdkPath=$runtimePackSdkPath"
+    "RuntimePackManifestSha256=$runtimePackManifestHash"
+    "RuntimePackObjectSha256=$runtimePackObjectHash"
     "DotNetVersion=$dotnetVersion"
     "PythonVersion=$pythonVersion"
 )
@@ -258,6 +315,16 @@ try {
         throw "dotnet executable not found."
     }
 
+    $publishProperties = @(
+        "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
+        "-p:HostLogProofMapPath=$artifactMap",
+        "-p:BaseOutputPath=$binRoot\",
+        "-p:BaseIntermediateOutputPath=$objRoot\"
+    )
+    if ($UseGuideXosRuntimePack) {
+        $publishProperties += "-p:HostLogProofRuntimePackObj=$runtimePackObject"
+        $publishProperties += "-p:IlcSdkPath=$runtimePackSdkPath\"
+    }
     $publishBatch = @(
         "@echo off"
         "setlocal"
@@ -267,7 +334,7 @@ try {
         "where cl.exe"
         "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$runtimeSupportObj`" `"$runtimeSupportSource`""
         "if errorlevel 1 exit /b %errorlevel%"
-        "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$artifactMap -p:BaseOutputPath=$binRoot\ -p:BaseIntermediateOutputPath=$objRoot\"
+        "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true $($publishProperties -join ' ')"
         "exit /b %errorlevel%"
     )
     $publishBatch | Set-Content -LiteralPath $buildBatch -Encoding ASCII
@@ -337,18 +404,33 @@ if (-not [string]::IsNullOrWhiteSpace($publishLinkRsp) -and (Test-Path -LiteralP
 & $objdumpExe -p $artifactExe | Set-Content -LiteralPath $artifactPeDump -Encoding ASCII
 & $objdumpExe -d $nativeHostLogObj | Set-Content -LiteralPath $artifactNativeObjDump -Encoding ASCII
 & $objdumpExe -r $nativeHostLogObj | Set-Content -LiteralPath $artifactNativeObjReloc -Encoding ASCII
+if ($UseGuideXosRuntimePack) {
+    & $objdumpExe -d $runtimePackObject | Set-Content -LiteralPath $artifactRuntimePackObjDump -Encoding ASCII
+    & $objdumpExe -r $runtimePackObject | Set-Content -LiteralPath $artifactRuntimePackObjReloc -Encoding ASCII
+}
 & $objdumpExe -p -d $artifactElf | Set-Content -LiteralPath $artifactElfDump -Encoding ASCII
 & $readelfExe -h -l -S -r -s -d $artifactElf | Set-Content -LiteralPath $artifactElfReadelf -Encoding ASCII
 & $objdumpExe -d $artifactElf | Set-Content -LiteralPath $artifactElfDisasm -Encoding ASCII
 
-$expectedPeImports = Get-ManagedHostLogExpectedPeImports
 $actualImports = Get-ManagedHostLogImportTable $artifactPeDump
-Assert-ManagedHostLogSetEquals -Actual @($actualImports.Keys) -Expected @($expectedPeImports.Keys) -Label "PE import DLL set"
-foreach ($dll in $expectedPeImports.Keys) {
-    Assert-ManagedHostLogSetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
+if ($UseGuideXosRuntimePack) {
+    $liveFlsImports = @()
+    foreach ($dll in $actualImports.Keys) {
+        $liveFlsImports += @($actualImports[$dll] | Where-Object { $_ -in @("FlsGetValue", "FlsSetValue") })
+    }
+    if ($liveFlsImports.Count -ne 0) {
+        throw "GuideXOS runtime-pack image still imports stock FLS entry points: $($liveFlsImports -join ', ')"
+    }
+    Assert-ManagedHostLogFileContains $artifactMap @('guidexos_nativeaot_platform\.obj', 'RhpReversePInvoke', 'RhpReversePInvokeReturn') "GuideXOS runtime-pack map evidence"
+} else {
+    $expectedPeImports = Get-ManagedHostLogExpectedPeImports
+    Assert-ManagedHostLogSetEquals -Actual @($actualImports.Keys) -Expected @($expectedPeImports.Keys) -Label "PE import DLL set"
+    foreach ($dll in $expectedPeImports.Keys) {
+        Assert-ManagedHostLogSetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
+    }
 }
 Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
-Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan
