@@ -2551,6 +2551,20 @@ struct GxosTlsHttpByteStreamSession {
     bool closed = false;
 };
 
+/*
+ * Keep the freestanding client offer explicit and limited to the four
+ * TLS 1.2 suites provided by the guideXOS Mbed TLS/PSA configuration. This
+ * avoids depending on the runtime-filtered default list while preserving the
+ * same RSA/ECDSA and AES-GCM capabilities.
+ */
+const int kGxosTlsClientCiphersuites[] = {
+    MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    MBEDTLS_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+    MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+    MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+    0
+};
+
 void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
                               gxos::web::HttpByteStreamTlsStatus status,
                               const char* errorText)
@@ -3652,6 +3666,7 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         }
         result->sslConfigDefaultsStatus = ret;
         result->sslAuthmode = MBEDTLS_SSL_VERIFY_REQUIRED;
+        mbedtls_ssl_conf_ciphersuites(&session->conf, kGxosTlsClientCiphersuites);
 
         mbedtls_ssl_conf_authmode(&session->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         mbedtls_ssl_conf_ca_chain(&session->conf, &runtime.caChain, nullptr);

@@ -300,9 +300,20 @@ if (!$SkipKernel) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }
         # Keep the default bare-metal build free of boot-time smoke launches.
-        & $Make "ARCH=$Arch" "EXTRA_CFLAGS=$($KernelExtraCFlags -join ' ')"
+        # Compiler diagnostics are written to stderr even for successful builds.
+        # Keep them visible, but let the native make exit code remain the build
+        # result instead of treating a warning as a terminating PowerShell error.
+        $savedMakeErrorActionPreference = $ErrorActionPreference
+        $makeExitCode = 1
+        try {
+            $ErrorActionPreference = "Continue"
+            & $Make "ARCH=$Arch" "EXTRA_CFLAGS=$($KernelExtraCFlags -join ' ')"
+            $makeExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedMakeErrorActionPreference
+        }
 
-        if ($LASTEXITCODE -ne 0) {
+        if ($makeExitCode -ne 0) {
             Write-Host "      ERROR: Kernel build failed" -ForegroundColor Red
             Pop-Location   # kernel dir
             Pop-Location   # root dir

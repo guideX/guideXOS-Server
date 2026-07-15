@@ -8,7 +8,9 @@ import binascii
 import gzip
 import zlib
 import ssl
+import socket
 import struct
+import os
 
 
 def png_chunk(kind, data):
@@ -755,10 +757,90 @@ class NavigatorTlsSmokeServer(ThreadingHTTPServer):
         super().__init__(server_address, request_handler_class)
         self._ssl_context = ssl_context
 
+    @staticmethod
+    def _log_client_hello(raw_socket):
+        if not os.environ.get("GXOS_NAVIGATOR_TLS_DIAGNOSTICS"):
+            return
+
+        old_timeout = raw_socket.gettimeout()
+        try:
+            raw_socket.settimeout(1.0)
+            header = raw_socket.recv(5, socket.MSG_PEEK)
+            if len(header) < 5:
+                print("TLS clienthello metadata=unavailable short_record_header", flush=True)
+                return
+            record_length = struct.unpack(">H", header[3:5])[0]
+            record = raw_socket.recv(5 + record_length, socket.MSG_PEEK)
+            if len(record) < 9 or record[0] != 0x16 or record[5] != 0x01:
+                print("TLS clienthello metadata=unavailable unexpected_record", flush=True)
+                return
+            hello_length = int.from_bytes(record[6:9], "big")
+            if len(record) < 9 + hello_length:
+                print("TLS clienthello metadata=unavailable short_clienthello", flush=True)
+                return
+
+            body = record[9:9 + hello_length]
+            if len(body) < 34:
+                print("TLS clienthello metadata=unavailable short_clienthello_body", flush=True)
+                return
+            legacy_version = "0x%04x" % struct.unpack(">H", body[0:2])[0]
+            offset = 34
+            session_id_length = body[offset]
+            offset += 1 + session_id_length
+            cipher_length = struct.unpack(">H", body[offset:offset + 2])[0]
+            offset += 2
+            cipher_suites = [
+                "0x%04x" % struct.unpack(">H", body[index:index + 2])[0]
+                for index in range(offset, offset + cipher_length, 2)
+            ]
+            offset += cipher_length
+            compression_length = body[offset]
+            offset += 1 + compression_length
+            extension_length = struct.unpack(">H", body[offset:offset + 2])[0]
+            offset += 2
+            extensions_end = min(offset + extension_length, len(body))
+            supported_versions = []
+            signature_algorithms = []
+            while offset + 4 <= extensions_end:
+                extension_type = struct.unpack(">H", body[offset:offset + 2])[0]
+                extension_size = struct.unpack(">H", body[offset + 2:offset + 4])[0]
+                extension_data = body[offset + 4:offset + 4 + extension_size]
+                if extension_type == 43 and len(extension_data) >= 1:
+                    versions_length = extension_data[0]
+                    supported_versions = [
+                        "0x%04x" % struct.unpack(">H", extension_data[index:index + 2])[0]
+                        for index in range(1, min(1 + versions_length, len(extension_data)), 2)
+                    ]
+                elif extension_type == 13 and len(extension_data) >= 2:
+                    algorithms_length = struct.unpack(">H", extension_data[0:2])[0]
+                    signature_algorithms = [
+                        "0x%04x" % struct.unpack(">H", extension_data[index:index + 2])[0]
+                        for index in range(2, min(2 + algorithms_length, len(extension_data)), 2)
+                    ]
+                offset += 4 + extension_size
+
+            print(
+                "TLS clienthello metadata record_version=0x%04x legacy_version=%s "
+                "cipher_suites=%s supported_versions=%s signature_algorithms=%s"
+                % (
+                    struct.unpack(">H", header[1:3])[0],
+                    legacy_version,
+                    ",".join(cipher_suites) or "(none)",
+                    ",".join(supported_versions) or "(none)",
+                    ",".join(signature_algorithms) or "(none)",
+                ),
+                flush=True,
+            )
+        except (OSError, IndexError, struct.error) as exc:
+            print("TLS clienthello metadata=unavailable error=%s" % exc, flush=True)
+        finally:
+            raw_socket.settimeout(old_timeout)
+
     def get_request(self):
         raw_socket, client_address = super().get_request()
         print("TLS accept from %s:%s" % (client_address[0], client_address[1]), flush=True)
         try:
+            self._log_client_hello(raw_socket)
             tls_socket = self._ssl_context.wrap_socket(raw_socket, server_side=True)
             print(
                 "TLS handshake ok from %s:%s sni=%s protocol=%s cipher=%s"
