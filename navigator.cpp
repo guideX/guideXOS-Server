@@ -1286,6 +1286,7 @@ namespace {
 		metadata.unsupportedExternalStylesheetCount = doc.cssDiagnostics.unsupportedExternalStylesheetCount;
 		metadata.unsupportedCssRuleCount = doc.cssDiagnostics.unsupportedRuleCount;
 		metadata.unsupportedCssDeclarationCount = doc.cssDiagnostics.unsupportedDeclarationCount;
+		metadata.cssUnsupportedSelectorCount = doc.cssDiagnostics.unsupportedSelectorCount;
 		metadata.cssParseErrorCount = doc.cssDiagnostics.parseErrorCount;
 		metadata.cssStyleBlockCapped = doc.cssDiagnostics.styleBlockCapped;
 		metadata.cssStyleBytesProcessed = doc.cssDiagnostics.styleBytesProcessed;
@@ -1326,6 +1327,23 @@ namespace {
 		metadata.cssImageSizeClamps = 0;
 		metadata.cssNestedLayoutClamps = 0;
 		metadata.cssMaxWrapperAncestorDepth = 0;
+		metadata.cssSelectorGroupsParsed = doc.cssDiagnostics.selectorGroupsParsed;
+		metadata.cssCompoundSelectorsParsed = doc.cssDiagnostics.compoundSelectorsParsed;
+		metadata.cssChildCombinators = doc.cssDiagnostics.childCombinatorCount;
+		metadata.cssDescendantCombinators = doc.cssDiagnostics.descendantCombinatorCount;
+		metadata.cssSelectorMatches = doc.cssDiagnostics.selectorMatches;
+		metadata.cssSpecificityOverrides = doc.cssDiagnostics.specificityOverrides;
+		metadata.cssSourceOrderOverrides = doc.cssDiagnostics.sourceOrderOverrides;
+		metadata.cssInlineOverrides = doc.cssDiagnostics.inlineOverrides;
+		metadata.cssInheritedPropertiesApplied = doc.cssDiagnostics.inheritedPropertiesApplied;
+		metadata.cssSelectorDepthClamps = doc.cssDiagnostics.selectorDepthClamps;
+		metadata.cssSelectorGroupClamps = doc.cssDiagnostics.selectorGroupClamps;
+		metadata.cssCascadePropertyResolutions = doc.cssDiagnostics.cascadePropertyResolutions;
+		metadata.cssImportantDeclarationsApplied = doc.cssDiagnostics.importantDeclarationsApplied;
+		metadata.cssRuleCapCount = doc.cssDiagnostics.ruleCapCount;
+		metadata.cssDeclarationCapCount = doc.cssDiagnostics.declarationCapCount;
+		metadata.cssInheritanceDepthClamps = doc.cssDiagnostics.inheritanceDepthClamps;
+		metadata.cssComputedStyleEvidence = doc.cssDiagnostics.computedStyleEvidence;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
 		metadata.formCheckboxCount = doc.formsDiagnostics.checkboxCount;
@@ -2530,6 +2548,7 @@ namespace {
 		int cssUnsupportedExternalStylesheetCount,
 		int cssUnsupportedRuleCount,
 		int cssUnsupportedDeclarationCount,
+		int cssUnsupportedSelectorCount,
 		int cssParseErrorCount,
 		bool cssStyleBlockCapped,
 		size_t cssStyleBytesProcessed,
@@ -2570,6 +2589,23 @@ namespace {
 		int cssImageSizeClamps,
 		int cssNestedLayoutClamps,
 		int cssMaxWrapperAncestorDepth,
+		int cssSelectorGroupsParsed,
+		int cssCompoundSelectorsParsed,
+		int cssChildCombinators,
+		int cssDescendantCombinators,
+		int cssSelectorMatches,
+		int cssSpecificityOverrides,
+		int cssSourceOrderOverrides,
+		int cssInlineOverrides,
+		int cssInheritedPropertiesApplied,
+		int cssSelectorDepthClamps,
+		int cssSelectorGroupClamps,
+		int cssCascadePropertyResolutions,
+		int cssImportantDeclarationsApplied,
+		int cssRuleCapCount,
+		int cssDeclarationCapCount,
+		int cssInheritanceDepthClamps,
+		const std::string& cssComputedStyleEvidence,
 		int formCount,
 		int formInputCount,
 		int checkboxCount,
@@ -2660,7 +2696,7 @@ namespace {
 			{"Capabilities", "Find in Page", "enabled"},
 			{"Capabilities", "Text selection", "enabled"},
 			{"Capabilities", "Clipboard mode", clipboardMode.empty() ? "Navigator internal clipboard" : clipboardMode},
-			{"Capabilities", "External stylesheets", "unsupported"},
+			{"Capabilities", "External stylesheets", "bounded hosted"},
 
 			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
 			{"Backends", "HTTP backend", "guide_web_http hosted TCP byte-stream with Schannel TLS wrapper for https"},
@@ -2754,6 +2790,7 @@ namespace {
 			{"Current Document", "CSS unsupported external stylesheets", std::to_string(cssUnsupportedExternalStylesheetCount)},
 			{"Current Document", "CSS unsupported rules", std::to_string(cssUnsupportedRuleCount)},
 			{"Current Document", "CSS unsupported declarations", std::to_string(cssUnsupportedDeclarationCount)},
+			{"Current Document", "CSS unsupported selectors", std::to_string(cssUnsupportedSelectorCount)},
 			{"Current Document", "CSS parse errors", std::to_string(cssParseErrorCount)},
 			{"Current Document", "CSS style block capped", yesNo(cssStyleBlockCapped)},
 			{"Current Document", "CSS style bytes processed", std::to_string(cssStyleBytesProcessed)},
@@ -2794,6 +2831,23 @@ namespace {
 			{"Current Document", "CSS image size clamps", std::to_string(cssImageSizeClamps)},
 			{"Current Document", "CSS nested layout clamps", std::to_string(cssNestedLayoutClamps)},
 			{"Current Document", "CSS max wrapper ancestor depth", std::to_string(cssMaxWrapperAncestorDepth)},
+			{"Current Document", "CSS selector groups parsed", std::to_string(cssSelectorGroupsParsed)},
+			{"Current Document", "CSS compound selectors parsed", std::to_string(cssCompoundSelectorsParsed)},
+			{"Current Document", "CSS child combinators", std::to_string(cssChildCombinators)},
+			{"Current Document", "CSS descendant combinators", std::to_string(cssDescendantCombinators)},
+			{"Current Document", "CSS selector matches", std::to_string(cssSelectorMatches)},
+			{"Current Document", "CSS specificity overrides", std::to_string(cssSpecificityOverrides)},
+			{"Current Document", "CSS source-order overrides", std::to_string(cssSourceOrderOverrides)},
+			{"Current Document", "CSS inline overrides", std::to_string(cssInlineOverrides)},
+			{"Current Document", "CSS inherited properties applied", std::to_string(cssInheritedPropertiesApplied)},
+			{"Current Document", "CSS selector depth clamps", std::to_string(cssSelectorDepthClamps)},
+			{"Current Document", "CSS selector group clamps", std::to_string(cssSelectorGroupClamps)},
+			{"Current Document", "CSS cascade property resolutions", std::to_string(cssCascadePropertyResolutions)},
+			{"Current Document", "CSS !important declarations applied", std::to_string(cssImportantDeclarationsApplied)},
+			{"Current Document", "CSS rule cap count", std::to_string(cssRuleCapCount)},
+			{"Current Document", "CSS declaration cap count", std::to_string(cssDeclarationCapCount)},
+			{"Current Document", "CSS inheritance depth clamps", std::to_string(cssInheritanceDepthClamps)},
+			{"Current Document", "CSS computed style evidence", cssComputedStyleEvidence.empty() ? "(none)" : cssComputedStyleEvidence},
 			{"Current Document", "text_metrics_model", "baseline/descent aware system font"},
 			{"Current Document", "text_backend", textMetrics.backend},
 			{"Current Document", "text_ascent_px", std::to_string(textMetrics.ascent)},
@@ -3216,6 +3270,7 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.unsupportedExternalStylesheetCount,
 		s_pageMetadata.unsupportedCssRuleCount,
 		s_pageMetadata.unsupportedCssDeclarationCount,
+		s_pageMetadata.cssUnsupportedSelectorCount,
 		s_pageMetadata.cssParseErrorCount,
 		s_pageMetadata.cssStyleBlockCapped,
 		s_pageMetadata.cssStyleBytesProcessed,
@@ -3256,6 +3311,23 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssImageSizeClamps,
 		s_pageMetadata.cssNestedLayoutClamps,
 		s_pageMetadata.cssMaxWrapperAncestorDepth,
+		s_pageMetadata.cssSelectorGroupsParsed,
+		s_pageMetadata.cssCompoundSelectorsParsed,
+		s_pageMetadata.cssChildCombinators,
+		s_pageMetadata.cssDescendantCombinators,
+		s_pageMetadata.cssSelectorMatches,
+		s_pageMetadata.cssSpecificityOverrides,
+		s_pageMetadata.cssSourceOrderOverrides,
+		s_pageMetadata.cssInlineOverrides,
+		s_pageMetadata.cssInheritedPropertiesApplied,
+		s_pageMetadata.cssSelectorDepthClamps,
+		s_pageMetadata.cssSelectorGroupClamps,
+		s_pageMetadata.cssCascadePropertyResolutions,
+		s_pageMetadata.cssImportantDeclarationsApplied,
+		s_pageMetadata.cssRuleCapCount,
+		s_pageMetadata.cssDeclarationCapCount,
+		s_pageMetadata.cssInheritanceDepthClamps,
+		s_pageMetadata.cssComputedStyleEvidence,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -5817,6 +5889,7 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.unsupportedExternalStylesheetCount,
 		s_pageMetadata.unsupportedCssRuleCount,
 		s_pageMetadata.unsupportedCssDeclarationCount,
+		s_pageMetadata.cssUnsupportedSelectorCount,
 		s_pageMetadata.cssParseErrorCount,
 		s_pageMetadata.cssStyleBlockCapped,
 		s_pageMetadata.cssStyleBytesProcessed,
@@ -5857,6 +5930,23 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssImageSizeClamps,
 		s_pageMetadata.cssNestedLayoutClamps,
 		s_pageMetadata.cssMaxWrapperAncestorDepth,
+		s_pageMetadata.cssSelectorGroupsParsed,
+		s_pageMetadata.cssCompoundSelectorsParsed,
+		s_pageMetadata.cssChildCombinators,
+		s_pageMetadata.cssDescendantCombinators,
+		s_pageMetadata.cssSelectorMatches,
+		s_pageMetadata.cssSpecificityOverrides,
+		s_pageMetadata.cssSourceOrderOverrides,
+		s_pageMetadata.cssInlineOverrides,
+		s_pageMetadata.cssInheritedPropertiesApplied,
+		s_pageMetadata.cssSelectorDepthClamps,
+		s_pageMetadata.cssSelectorGroupClamps,
+		s_pageMetadata.cssCascadePropertyResolutions,
+		s_pageMetadata.cssImportantDeclarationsApplied,
+		s_pageMetadata.cssRuleCapCount,
+		s_pageMetadata.cssDeclarationCapCount,
+		s_pageMetadata.cssInheritanceDepthClamps,
+		s_pageMetadata.cssComputedStyleEvidence,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,

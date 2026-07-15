@@ -394,6 +394,54 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p class=\"serif\">Serif fallback marker.</p>"
                              b"</main></body></html>")
             return
+        if path == "/navigator-smoke/css-phase2a.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><link rel=\"stylesheet\" href=\"/navigator-smoke/css-phase2a-linked.css\"><style>"
+                             b"* { color:#111827; }"
+                             b"body { background:#f8fafc; color:#334155; font-size:16px; line-height:1.4; }"
+                             b"p { color:#475569; padding:2px; margin:2px 0; }"
+                             b".note { color:#2563eb; padding:4px; background:#e0f2fe; }"
+                             b".note.important { color:#be123c; }"
+                             b"p.note { border-top:1px solid #64748b; }"
+                             b"#phase2a-id { color:#7c3aed; }"
+                             b"article p { padding:6px; background:#fef3c7; }"
+                             b"article > p { padding:10px; }"
+                             b"h1, h2, h3 { margin:3px 0; }"
+                             b"#phase2a-order { color:#c2410c; }"
+                             b"#phase2a-partial { color:#0f766e; background:#dcfce7; padding:8px; border:2px solid #166534; }"
+                             b"#phase2a-partial { background:#fef3c7; }"
+                             b"#phase2a-duplicate { padding:2px; padding:11px; }"
+                             b"#phase2a-inline { color:#991b1b; background:#dbeafe; padding:4px; border:2px solid #1d4ed8; }"
+                             b".inherit-wrap { color:#0369a1; font-size:20px; line-height:1.8; background:#fce7f3; padding:12px; }"
+                             b".inherit-wrap .child-override { color:#15803d; }"
+                             b".deep-one { color:#7e22ce; } .deep-two { color:#7e22ce; }"
+                             b".table-parent { color:#92400e; font-size:18px; line-height:1.5; }"
+                             b".warning { background:#fee2e2; }"
+                             b"p + p { color:#dc2626; } p[data-phase2a='bad'] { color:#dc2626; }"
+                             b"#phase2a-important { color:#111827; } .important-class { color:#9333ea !important; }"
+                             b"#phase2a-malformed { color:#dc2626 !importantx; }"
+                             b".g1, .g2, .g3, .g4, .g5, .g6, .g7, .g8, .g9, .g10, .g11, .g12, .g13, .g14, .g15, .g16, .g17, .g18 { color:#0f766e; }"
+                             b"article section div p span em strong code kbd { color:#dc2626; }"
+                             b"</style></head><body>"
+                             b"<h1 id=\"phase2a-heading\">Phase 2A Selector Cascade</h1>"
+                             b"<p id=\"phase2a-universal\" class=\"notebook\">Universal and exact class token marker.</p>"
+                             b"<p id=\"phase2a-multi\" class=\"wide note important\">Multiple class matching marker.</p>"
+                             b"<p id=\"phase2a-id\" class=\"note\">Exact ID and compound selector marker.</p>"
+                             b"<article class=\"article-wrap\"><div class=\"nested-wrap\"><p id=\"phase2a-desc\" class=\"warning\">Descendant selector marker.</p></div><p id=\"phase2a-child\">Direct child selector marker.</p></article>"
+                             b"<p id=\"phase2a-order\">Equal specificity source-order marker.</p>"
+                             b"<p id=\"phase2a-partial\">Property-level partial cascade marker.</p>"
+                             b"<p id=\"phase2a-duplicate\">Duplicate declaration marker.</p>"
+                             b"<p id=\"phase2a-inline\" style=\"color:#1d4ed8;padding:12px;\">Inline precedence marker.</p>"
+                             b"<div class=\"inherit-wrap\"><section class=\"deep-one\"><article class=\"deep-two\"><p id=\"phase2a-inherited\">Wrapper inheritance marker.</p><p id=\"phase2a-inherit-override\" class=\"child-override\">Child inheritance override marker.</p></article></section></div>"
+                             b"<table class=\"table-parent\"><tr><td id=\"phase2a-cell\">Table cell text inheritance marker.</td></tr></table>"
+                             b"<p id=\"phase2a-important\" class=\"important-class\">Important precedence marker.</p>"
+                             b"<p id=\"phase2a-malformed\">Malformed important marker.</p>"
+                             b"<p id=\"phase2a-group\" class=\"g17\">Selector group cap marker.</p>"
+                             b"</body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2a-linked.css":
+            self.write_bytes(200, "text/css; charset=utf-8", b"#phase2a-order { color:#166534; }")
+            return
         if path == "/navigator-smoke/css-external-safety.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head>"

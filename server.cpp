@@ -360,7 +360,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("Forms-lite bare-metal POST marker remains unsupported", contains(runtimeReport, "Capabilities.Forms-lite POST forms bare-metal=unsupported"), "expected honest unsupported bare-metal marker");
     add("Forms-lite focus navigation enabled", contains(runtimeReport, "Capabilities.Forms-lite focus navigation=Tab/Shift+Tab, Enter, Space"), "expected focus navigation capability");
     add("Find in Page enabled", contains(runtimeReport, "Capabilities.Find in Page=enabled"), "expected enabled");
-    add("external stylesheets unsupported", contains(runtimeReport, "Capabilities.External stylesheets=unsupported"), "expected unsupported");
+    add("bounded hosted external stylesheets", contains(runtimeReport, "Capabilities.External stylesheets=bounded hosted"), "expected bounded hosted support");
     add("bookmark persistence enabled", contains(runtimeReport, "Capabilities.Bookmark persistence=enabled"), "expected enabled");
 
     auto hasPositiveCount = [&](const std::string& report, const std::string& prefix) {
@@ -384,6 +384,12 @@ static std::string navigatorHostedSmokeDiagnostic() {
         } catch (...) {
             return -1;
         }
+    };
+    auto reportLine = [](const std::string& report, const std::string& prefix) {
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = report.find('\n', pos);
+        return report.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
     };
 
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
@@ -543,7 +549,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(cssTableWideReport, "Current Document.CSS enabled=yes") &&
         hasPositiveCount(cssTableWideReport, "Current Document.CSS table layout fallbacks=") &&
         hasPositiveCount(cssTableWideReport, "Current Document.CSS tables rendered="),
-        "report=\"" + summarizeText(cssTableWideReport, 260) + "\"");
+        "fallbacks=" + reportLine(cssTableWideReport, "Current Document.CSS table layout fallbacks=") +
+        "; tables=" + reportLine(cssTableWideReport, "Current Document.CSS tables rendered=") +
+        "; report=\"" + summarizeText(cssTableWideReport, 260) + "\"");
 
     bool cssInlinePolishLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline-polish.html");
     std::string cssInlinePolishText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -752,6 +760,81 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS table layout fallbacks=") &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS table captions rendered="),
         cssPhase1fDetail);
+
+    bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
+    std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2aReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2aReport.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = cssPhase2aReport.find('\n', pos);
+        return cssPhase2aReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 2A fixture loads",
+        cssPhase2aLoaded &&
+        contains(cssPhase2aText, "Phase 2A Selector Cascade") &&
+        contains(cssPhase2aText, "Universal and exact class token marker.") &&
+        contains(cssPhase2aText, "Multiple class matching marker.") &&
+        contains(cssPhase2aText, "Descendant selector marker.") &&
+        contains(cssPhase2aText, "Direct child selector marker.") &&
+        contains(cssPhase2aText, "Wrapper inheritance marker.") &&
+        contains(cssPhase2aText, "Table cell text inheritance marker."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2A selector and cascade diagnostics",
+        contains(cssPhase2aReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS selector groups parsed=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS compound selectors parsed=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS child combinators=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS descendant combinators=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS selector matches=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS specificity overrides=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS source-order overrides=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS cascade property resolutions=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS style blocks=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS external stylesheets loaded=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS inherited properties applied=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS unsupported selectors=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS selector group clamps=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS selector depth clamps=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS !important declarations applied=") &&
+        contains(cssPhase2aReport, "id=phase2a-partial") &&
+        contains(cssPhase2aReport, "id=phase2a-inherited") &&
+        contains(cssPhase2aReport, "id=phase2a-cell"),
+        "counts=" + cssPhase2aReportLine("Current Document.CSS selector groups parsed=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS compound selectors parsed=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS child combinators=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS descendant combinators=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS selector matches=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS specificity overrides=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS source-order overrides=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS inherited properties applied=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS unsupported selectors=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS selector group clamps=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS selector depth clamps=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS !important declarations applied=") +
+        "; evidence=" + summarizeText(cssPhase2aReportLine("Current Document.CSS computed style evidence="), 1200));
+    add("CSS phase 2A property-level evidence",
+        contains(cssPhase2aReport, "id=phase2a-partial") &&
+        contains(cssPhase2aReport, "background=#fef3c7") &&
+        contains(cssPhase2aReport, "border-top-width=2") &&
+        contains(cssPhase2aReport, "id=phase2a-inline") &&
+        contains(cssPhase2aReport, "background=#dbeafe") &&
+        contains(cssPhase2aReport, "id=phase2a-inherited") &&
+        contains(cssPhase2aReport, "font-size=20") &&
+        contains(cssPhase2aReport, "line-height=36") &&
+        contains(cssPhase2aReport, "id=phase2a-inherit-override") &&
+        contains(cssPhase2aReport, "color=#15803d"),
+        std::string("partial=") + yesNo(contains(cssPhase2aReport, "id=phase2a-partial")) +
+        ",partial-background=" + yesNo(contains(cssPhase2aReport, "background=#fef3c7")) +
+        ",partial-border=" + yesNo(contains(cssPhase2aReport, "border-top-width=2")) +
+        ",inline=" + yesNo(contains(cssPhase2aReport, "id=phase2a-inline")) +
+        ",inline-background=" + yesNo(contains(cssPhase2aReport, "background=#dbeafe")) +
+        ",inherited=" + yesNo(contains(cssPhase2aReport, "id=phase2a-inherited")) +
+        ",font-size-20=" + yesNo(contains(cssPhase2aReport, "font-size=20")) +
+        ",line-height-36=" + yesNo(contains(cssPhase2aReport, "line-height=36")) +
+        ",override=" + yesNo(contains(cssPhase2aReport, "id=phase2a-inherit-override")) +
+        ",override-color=" + yesNo(contains(cssPhase2aReport, "color=#15803d")) +
+        "; evidence=" + summarizeText(cssPhase2aReportLine("Current Document.CSS computed style evidence="), 1800));
 
     bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
     std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();

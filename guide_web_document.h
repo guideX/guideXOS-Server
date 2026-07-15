@@ -111,6 +111,17 @@ struct HtmlElementRef {
 	uint64_t    serial = 0;
 };
 
+enum class CssCombinator : uint8_t {
+	Descendant = 0,
+	Child      = 1,
+};
+
+struct CssSpecificity {
+	uint16_t idCount = 0;
+	uint16_t classCount = 0;
+	uint16_t elementCount = 0;
+};
+
 struct CssSelectorPart {
 	std::string tagName;
 	std::vector<std::string> classNames;
@@ -118,6 +129,12 @@ struct CssSelectorPart {
 };
 
 struct WebStyle {
+	// CSS parser bookkeeping.  These masks are bounded to the supported
+	// property subset and let the cascade distinguish an explicit false/zero
+	// value from an unspecified property.
+	uint64_t specifiedProperties = 0;
+	uint64_t importantProperties = 0;
+	uint64_t inheritedProperties = 0;
 	bool     hasColor = false;
 	uint32_t color = 0;
 	bool     hasBackgroundColor = false;
@@ -179,9 +196,12 @@ struct WebStyle {
 struct WebStyleRule {
 	StyleSelectorType selectorType = StyleSelectorType::Element;
 	std::string       selector;
-	int               specificity = 0;
+	int               specificity = 0; // legacy score for diagnostics/backward compatibility
+	CssSpecificity    specificityTuple;
 	std::vector<CssSelectorPart> selectorParts;
+	std::vector<CssCombinator> combinators;
 	WebStyle          style;
+	uint32_t          sourceOrder = 0;
 };
 
 struct CssDiagnostics {
@@ -194,6 +214,7 @@ struct CssDiagnostics {
 	int    unsupportedExternalStylesheetCount = 0;
 	int    unsupportedRuleCount = 0;
 	int    unsupportedDeclarationCount = 0;
+	int    unsupportedSelectorCount = 0;
 	int    parseErrorCount = 0;
 	bool   styleBlockCapped = false;
 	size_t styleBytesProcessed = 0;
@@ -201,6 +222,25 @@ struct CssDiagnostics {
 	int    borderWidthClampCount = 0;
 	int    borderSpacingClampCount = 0;
 	int    lineBreakCount = 0;
+	int    selectorGroupsParsed = 0;
+	int    compoundSelectorsParsed = 0;
+	int    childCombinatorCount = 0;
+	int    descendantCombinatorCount = 0;
+	int    selectorMatches = 0;
+	int    specificityOverrides = 0;
+	int    sourceOrderOverrides = 0;
+	int    inlineOverrides = 0;
+	int    inheritedPropertiesApplied = 0;
+	int    selectorDepthClamps = 0;
+	int    selectorGroupClamps = 0;
+	int    cascadePropertyResolutions = 0;
+	int    importantDeclarationsApplied = 0;
+	int    ruleCapCount = 0;
+	int    declarationCapCount = 0;
+	int    declarationsProcessed = 0;
+	int    inheritanceDepthClamps = 0;
+	uint32_t nextSourceOrder = 1;
+	std::string computedStyleEvidence;
 };
 
 struct FormsDiagnostics {

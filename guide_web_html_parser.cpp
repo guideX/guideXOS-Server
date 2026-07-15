@@ -19,9 +19,11 @@
 #include "guide_web_http.h"
 #endif
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <cstdio>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -43,6 +45,93 @@ namespace {
 	constexpr int kCssLiteMaxLineHeightPx = 96;
 	constexpr int kCssLiteMaxWidthPx = 2048;
 	constexpr int kCssLiteMaxBorderWidthPx = 12;
+	constexpr size_t kCssLiteMaxStyleBlocks = 32;
+	constexpr size_t kCssLiteMaxRules = 256;
+	constexpr size_t kCssLiteMaxSelectorGroups = 16;
+	constexpr size_t kCssLiteMaxSelectorLength = 256;
+	constexpr size_t kCssLiteMaxSelectorComponents = 8;
+	constexpr size_t kCssLiteMaxSelectorClasses = 8;
+	constexpr size_t kCssLiteMaxCombinatorDepth = 6;
+	constexpr size_t kCssLiteMaxDeclarationsPerRule = 64;
+	constexpr size_t kCssLiteMaxTotalDeclarations = 2048;
+	constexpr size_t kCssLiteMaxCascadeApplicationsPerNode = 512;
+	constexpr size_t kCssLiteMaxTotalStyleBytes = 64u * 1024u;
+	constexpr size_t kCssLiteMaxInheritanceDepth = 12;
+	constexpr size_t kCssLiteMaxEvidenceEntries = 16;
+
+	enum class CssProperty : uint8_t {
+		Color = 0,
+		Background,
+		Bold,
+		Italic,
+		TextDecoration,
+		Display,
+		ListStyle,
+		BorderCollapse,
+		BorderSpacingHorizontal,
+		BorderSpacingVertical,
+		GenericFontFamily,
+		TextAlign,
+		LineHeight,
+		MarginTop,
+		MarginRight,
+		MarginBottom,
+		MarginLeft,
+		PaddingTop,
+		PaddingRight,
+		PaddingBottom,
+		PaddingLeft,
+		FontSize,
+		Width,
+		Height,
+		MaxWidth,
+		MaxHeight,
+		WhiteSpace,
+		OverflowWrap,
+		WordBreak,
+		BorderTopWidth,
+		BorderTopStyle,
+		BorderTopColor,
+		BorderRightWidth,
+		BorderRightStyle,
+		BorderRightColor,
+		BorderBottomWidth,
+		BorderBottomStyle,
+		BorderBottomColor,
+		BorderLeftWidth,
+		BorderLeftStyle,
+		BorderLeftColor,
+		Count,
+	};
+
+	constexpr uint64_t cssPropertyBit(CssProperty property)
+	{
+		return uint64_t(1) << static_cast<unsigned>(property);
+	}
+
+	constexpr uint64_t cssPropertyMask(CssProperty first, CssProperty last)
+	{
+		uint64_t mask = 0;
+		for (unsigned i = static_cast<unsigned>(first); i <= static_cast<unsigned>(last); ++i)
+			mask |= uint64_t(1) << i;
+		return mask;
+	}
+
+	static bool cssAccepted(WebStyle& style, uint64_t properties, bool important)
+	{
+		style.specifiedProperties |= properties;
+		if (important) style.importantProperties |= properties;
+		return true;
+	}
+
+	static void saturatingIncrement(int& value, int amount = 1)
+	{
+		if (amount <= 0 || value >= std::numeric_limits<int>::max() - amount) {
+			value = std::numeric_limits<int>::max();
+			return;
+		}
+		value += amount;
+	}
 
 // ASCII lower-case without locale dependency.
 static std::string toLower(const std::string& s)
@@ -274,6 +363,7 @@ static bool parseCssColor(const std::string& rawValue, uint32_t& outColor)
 }
 
 static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDiagnostics& diag);
+static uint32_t allocateCssSourceOrder(CssDiagnostics& diag);
 
 static bool parseCssNumber(const std::string& rawValue, double& out)
 {
@@ -364,49 +454,33 @@ static bool parseCssLengthValue(const std::string& rawValue,
 	return true;
 }
 
-static bool parseCssSimpleSelectorPart(const std::string& rawPart, CssSelectorPart& part, int& specificity)
+static bool parseCssSimpleSelectorPart(const std::string& rawPart,
+	CssSelectorPart& part,
+	CssSpecificity& specificity,
+	CssDiagnostics& diag)
 {
 	std::string selector = toLower(trim(rawPart));
 	part = {};
-	specificity = 0;
-	if (selector.empty()) return false;
-	if (selector.find_first_of(">+~") != std::string::npos) return false;
-
-	std::string cleaned;
-	cleaned.reserve(selector.size());
-	bool inAttr = false;
-	for (size_t i = 0; i < selector.size(); ++i) {
-		char c = selector[i];
-		if (inAttr) {
-			if (c == ']') inAttr = false;
-			continue;
-		}
-		if (c == '[') {
-			inAttr = true;
-			continue;
-		}
-		cleaned += c;
-	}
-	selector = trim(cleaned);
-	if (selector.empty()) return false;
-	size_t pseudo = selector.find(':');
-	if (pseudo != std::string::npos) {
-		selector = trim(selector.substr(0, pseudo));
-	}
-	if (selector.empty()) return false;
+	specificity = {};
+	if (selector.empty() || selector.find_first_of("+~[]:") != std::string::npos) return false;
 
 	size_t pos = 0;
 	auto isIdentChar = [](char c) {
-		return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '*';
+		return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
 	};
 	if (selector[pos] != '.' && selector[pos] != '#') {
 		size_t start = pos;
 		while (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') {
+			if (selector[pos] == '*') {
+				if (pos != start || selector.size() != 1) return false;
+				++pos;
+				break;
+			}
 			if (!isIdentChar(selector[pos])) return false;
 			++pos;
 		}
 		part.tagName = selector.substr(start, pos - start);
-		if (!part.tagName.empty()) specificity += 1;
+		if (part.tagName != "*" && !part.tagName.empty()) ++specificity.elementCount;
 	}
 	while (pos < selector.size()) {
 		char prefix = selector[pos];
@@ -420,34 +494,89 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart, CssSelectorPa
 		std::string token = selector.substr(start, pos - start);
 		if (token.empty()) return false;
 		if (prefix == '.') {
+			if (part.classNames.size() >= kCssLiteMaxSelectorClasses) {
+				++diag.selectorDepthClamps;
+				return false;
+			}
 			part.classNames.push_back(token);
-			specificity += 10;
+			++specificity.classCount;
 		} else {
 			if (!part.id.empty()) return false;
 			part.id = token;
-			specificity += 100;
+			++specificity.idCount;
 		}
 	}
 	if (part.tagName.empty() && part.classNames.empty() && part.id.empty()) return false;
 	return true;
 }
 
-static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRule)
+static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRule, CssDiagnostics& diag)
 {
 	std::string selectorText = trim(rawSelector);
-	if (selectorText.empty()) return false;
-	std::stringstream ss(selectorText);
-	std::string partText;
+	if (selectorText.empty() || selectorText.size() > kCssLiteMaxSelectorLength) return false;
 	outRule.selectorParts.clear();
+	outRule.combinators.clear();
 	outRule.specificity = 0;
-	while (ss >> partText) {
+	outRule.specificityTuple = {};
+	size_t cursor = 0;
+	bool needCompound = true;
+	while (cursor < selectorText.size()) {
+		while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
+		if (cursor >= selectorText.size()) break;
+		if (selectorText[cursor] == '+' || selectorText[cursor] == '~' || selectorText[cursor] == '[' || selectorText[cursor] == ':') return false;
+		size_t start = cursor;
+		while (cursor < selectorText.size() &&
+			!std::isspace(static_cast<unsigned char>(selectorText[cursor])) &&
+			selectorText[cursor] != '>') ++cursor;
+		if (start == cursor) return false;
+		if (outRule.selectorParts.size() >= kCssLiteMaxSelectorComponents) {
+			++diag.selectorDepthClamps;
+			return false;
+		}
 		CssSelectorPart part;
-		int partSpecificity = 0;
-		if (!parseCssSimpleSelectorPart(partText, part, partSpecificity)) return false;
+		CssSpecificity partSpecificity;
+		if (!parseCssSimpleSelectorPart(selectorText.substr(start, cursor - start), part, partSpecificity, diag)) return false;
 		outRule.selectorParts.push_back(std::move(part));
-		outRule.specificity += partSpecificity;
+		outRule.specificityTuple.idCount = static_cast<uint16_t>(std::min<uint32_t>(
+			std::numeric_limits<uint16_t>::max(),
+			static_cast<uint32_t>(outRule.specificityTuple.idCount) + partSpecificity.idCount));
+		outRule.specificityTuple.classCount = static_cast<uint16_t>(std::min<uint32_t>(
+			std::numeric_limits<uint16_t>::max(),
+			static_cast<uint32_t>(outRule.specificityTuple.classCount) + partSpecificity.classCount));
+		outRule.specificityTuple.elementCount = static_cast<uint16_t>(std::min<uint32_t>(
+			std::numeric_limits<uint16_t>::max(),
+			static_cast<uint32_t>(outRule.specificityTuple.elementCount) + partSpecificity.elementCount));
+		needCompound = false;
+		bool hadWhitespace = false;
+		while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) {
+			hadWhitespace = true;
+			++cursor;
+		}
+		if (cursor >= selectorText.size()) break;
+		if (selectorText[cursor] == '>') {
+			++cursor;
+			while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
+			if (cursor >= selectorText.size() || selectorText[cursor] == '>') return false;
+			outRule.combinators.push_back(CssCombinator::Child);
+			saturatingIncrement(diag.childCombinatorCount);
+		} else if (hadWhitespace) {
+			outRule.combinators.push_back(CssCombinator::Descendant);
+			saturatingIncrement(diag.descendantCombinatorCount);
+		} else {
+			return false;
+		}
+		if (outRule.combinators.size() > kCssLiteMaxCombinatorDepth) {
+			++diag.selectorDepthClamps;
+			return false;
+		}
 	}
-	if (outRule.selectorParts.empty()) return false;
+	if (outRule.selectorParts.empty() || needCompound ||
+		outRule.combinators.size() + 1 != outRule.selectorParts.size()) return false;
+	outRule.specificity = static_cast<int>(std::min<uint32_t>(
+		std::numeric_limits<int>::max(),
+		static_cast<uint32_t>(outRule.specificityTuple.idCount) * 100u +
+		static_cast<uint32_t>(outRule.specificityTuple.classCount) * 10u +
+		static_cast<uint32_t>(outRule.specificityTuple.elementCount)));
 	outRule.selector = toLower(selectorText);
 	const CssSelectorPart& last = outRule.selectorParts.back();
 	if (!last.id.empty()) outRule.selectorType = StyleSelectorType::Id;
@@ -883,13 +1012,22 @@ static void parseEmbeddedCss(WebDocument& doc, const std::string& cssText)
 {
 	if (cssText.empty()) return;
 	doc.cssDiagnostics.cssDetected = true;
-	doc.cssDiagnostics.styleBlockCount++;
+	if (doc.cssDiagnostics.styleBlockCount >= static_cast<int>(kCssLiteMaxStyleBlocks)) {
+		doc.cssDiagnostics.styleBlockCapped = true;
+		saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
+		return;
+	}
+	++doc.cssDiagnostics.styleBlockCount;
 	std::string css = cssText;
-	if (css.size() > kCssLiteMaxStyleBytes) {
-		css.resize(kCssLiteMaxStyleBytes);
+	const size_t totalRemaining = doc.cssDiagnostics.styleBytesProcessed >= kCssLiteMaxTotalStyleBytes
+		? 0 : kCssLiteMaxTotalStyleBytes - doc.cssDiagnostics.styleBytesProcessed;
+	const size_t byteLimit = std::min(kCssLiteMaxStyleBytes, totalRemaining);
+	if (css.size() > byteLimit) {
+		css.resize(byteLimit);
 		doc.cssDiagnostics.styleBlockCapped = true;
 	}
 	doc.cssDiagnostics.styleBytesProcessed += css.size();
+	if (css.empty()) return;
 	auto stripCssComments = [](const std::string& input) {
 		std::string out;
 		out.reserve(input.size());
@@ -953,17 +1091,31 @@ static void parseEmbeddedCss(WebDocument& doc, const std::string& cssText)
 
 		std::stringstream selectors(selectorText);
 		std::string selector;
+		size_t groupCount = 0;
 		while (std::getline(selectors, selector, ',')) {
+			if (groupCount >= kCssLiteMaxSelectorGroups) {
+				saturatingIncrement(doc.cssDiagnostics.selectorGroupClamps);
+				break;
+			}
+			++groupCount;
+			saturatingIncrement(doc.cssDiagnostics.selectorGroupsParsed);
 			selector = trim(selector);
 			if (selector.empty()) continue;
+			if (doc.styleRules.size() >= kCssLiteMaxRules) {
+				saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
+				continue;
+			}
 			WebStyleRule rule;
-			if (!parseCssSelector(selector, rule)) {
-				++doc.cssDiagnostics.unsupportedRuleCount;
+			if (!parseCssSelector(selector, rule, doc.cssDiagnostics)) {
+				saturatingIncrement(doc.cssDiagnostics.unsupportedRuleCount);
+				saturatingIncrement(doc.cssDiagnostics.unsupportedSelectorCount);
 				continue;
 			}
 			parseCssDeclarations(bodyText, rule.style, doc.cssDiagnostics);
+			rule.sourceOrder = allocateCssSourceOrder(doc.cssDiagnostics);
 			doc.styleRules.push_back(rule);
-			++doc.cssDiagnostics.styleRuleCount;
+			saturatingIncrement(doc.cssDiagnostics.styleRuleCount);
+			saturatingIncrement(doc.cssDiagnostics.compoundSelectorsParsed, static_cast<int>(rule.selectorParts.size()));
 		}
 	}
 }
@@ -993,23 +1145,35 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element, const CssS
 	return true;
 }
 
+static bool selectorMatchesPathAt(const std::vector<HtmlElementRef>& path,
+	const WebStyleRule& rule,
+	int partIndex,
+	int pathIndex)
+{
+	if (partIndex < 0 || pathIndex < 0 ||
+		partIndex >= static_cast<int>(rule.selectorParts.size()) ||
+		pathIndex >= static_cast<int>(path.size())) return false;
+	if (!selectorPartMatchesElement(path[static_cast<size_t>(pathIndex)],
+		rule.selectorParts[static_cast<size_t>(partIndex)])) return false;
+	if (partIndex == 0) return true;
+	const CssCombinator combinator = rule.combinators[static_cast<size_t>(partIndex - 1)];
+	if (combinator == CssCombinator::Child) {
+		return selectorMatchesPathAt(path, rule, partIndex - 1, pathIndex - 1);
+	}
+	for (int ancestorIndex = pathIndex - 1; ancestorIndex >= 0; --ancestorIndex) {
+		if (selectorMatchesPathAt(path, rule, partIndex - 1, ancestorIndex)) return true;
+	}
+	return false;
+}
+
 static bool selectorMatchesPath(const std::vector<HtmlElementRef>& path, const WebStyleRule& rule)
 {
-	if (rule.selectorParts.empty() || path.empty()) return false;
-	int pathIndex = static_cast<int>(path.size()) - 1;
-	for (int partIndex = static_cast<int>(rule.selectorParts.size()) - 1; partIndex >= 0; --partIndex) {
-		const CssSelectorPart& part = rule.selectorParts[static_cast<size_t>(partIndex)];
-		bool matched = false;
-		for (int i = pathIndex; i >= 0; --i) {
-			if (selectorPartMatchesElement(path[static_cast<size_t>(i)], part)) {
-				pathIndex = i - 1;
-				matched = true;
-				break;
-			}
-		}
-		if (!matched) return false;
-	}
-	return true;
+	if (rule.selectorParts.empty() || path.empty() ||
+		rule.selectorParts.size() != rule.combinators.size() + 1 ||
+		rule.combinators.size() > kCssLiteMaxCombinatorDepth) return false;
+	return selectorMatchesPathAt(path, rule,
+		static_cast<int>(rule.selectorParts.size()) - 1,
+		static_cast<int>(path.size()) - 1);
 }
 
 static bool parseInlineStyleDeclaration(WebStyle& style,
@@ -1020,18 +1184,28 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	std::string prop = toLower(trim(property));
 	std::string val = trim(value);
 	if (prop.empty() || val.empty()) return false;
-	while (!val.empty() && val.back() == '!') val.pop_back();
-	if (val.size() >= 10 && toLower(val.substr(val.size() - 10)) == "!important") {
+	bool important = false;
+	if (val.size() >= 10 && toLower(val.substr(val.size() - 10)) == "!important" &&
+		(val.size() == 10 || std::isspace(static_cast<unsigned char>(val[val.size() - 11])))) {
+		important = true;
 		val = trim(val.substr(0, val.size() - 10));
 	}
+	if (val.empty()) return false;
+	auto accept = [&](CssProperty propertyId) {
+		return cssAccepted(style, cssPropertyBit(propertyId), important);
+	};
+	auto acceptMask = [&](uint64_t properties) {
+		return cssAccepted(style, properties, important);
+	};
 	if (prop == "color" || prop == "background-color" || prop == "background") {
 		const std::string lower = toLower(val);
 		if (lower == "transparent" || lower == "inherit" || lower == "initial" || lower == "unset" || lower == "none" || lower == "0 0") {
 			if (prop != "color") {
 				style.hasBackgroundColor = false;
-				return true;
+				return accept(CssProperty::Background);
 			}
-			return true;
+			return lower == "inherit" || lower == "initial" || lower == "unset"
+				? true : accept(CssProperty::Color);
 		}
 		uint32_t color = 0;
 		if (parseCssColor(val, color)) {
@@ -1042,7 +1216,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 				style.hasBackgroundColor = true;
 				style.backgroundColor = color;
 			}
-			return true;
+			return accept(prop == "color" ? CssProperty::Color : CssProperty::Background);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -1051,11 +1225,11 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		std::string lower = toLower(val);
 		if (lower == "bold" || lower == "700" || lower == "800" || lower == "900") {
 			style.bold = true;
-			return true;
+			return accept(CssProperty::Bold);
 		}
 		if (lower == "normal" || lower == "400") {
 			style.bold = false;
-			return true;
+			return accept(CssProperty::Bold);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -1064,11 +1238,11 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		std::string lower = toLower(val);
 		if (lower == "italic" || lower == "oblique") {
 			style.italic = true;
-			return true;
+			return accept(CssProperty::Italic);
 		}
 		if (lower == "normal") {
 			style.italic = false;
-			return true;
+			return accept(CssProperty::Italic);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -1082,7 +1256,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			style.hasTextDecoration = true;
 			style.underline = false;
 			style.lineThrough = false;
-			return true;
+			return accept(CssProperty::TextDecoration);
 		}
 		std::vector<std::string> tokens = splitCssTokens(lower);
 		if (tokens.empty()) {
@@ -1109,7 +1283,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		style.hasTextDecoration = true;
 		style.underline = underline;
 		style.lineThrough = lineThrough;
-		return true;
+		return accept(CssProperty::TextDecoration);
 	}
 	if (prop == "text-decoration-line") {
 		std::string lower = toLower(val);
@@ -1120,7 +1294,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			style.hasTextDecoration = true;
 			style.underline = false;
 			style.lineThrough = false;
-			return true;
+			return accept(CssProperty::TextDecoration);
 		}
 		std::vector<std::string> tokens = splitCssTokens(lower);
 		if (tokens.empty()) {
@@ -1147,7 +1321,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		style.hasTextDecoration = true;
 		style.underline = underline;
 		style.lineThrough = lineThrough;
-		return true;
+		return accept(CssProperty::TextDecoration);
 	}
 	if (prop == "text-align") {
 		std::string lower = toLower(val);
@@ -1156,17 +1330,17 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		else if (lower == "right") style.textAlign = TextAlign::Right;
 		else if (lower == "inherit") style.textAlign = TextAlign::Inherit;
 		else ++diag.unsupportedDeclarationCount;
-		return true;
+		return lower == "inherit" ? true : accept(CssProperty::TextAlign);
 	}
 	if (prop == "display") {
 		std::string lower = toLower(val);
 		if (lower == "none") {
 			style.displayNone = true;
-			return true;
+			return accept(CssProperty::Display);
 		}
 		if (lower == "block" || lower == "inline" || lower == "inline-block") {
 			style.displayNone = false;
-			return true;
+			return accept(CssProperty::Display);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -1190,7 +1364,14 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		else if (prop == "padding-right") style.paddingRight = px;
 		else if (prop == "padding-bottom") style.paddingBottom = px;
 		else if (prop == "padding-left") style.paddingLeft = px;
-		return true;
+		if (prop == "margin-top") return accept(CssProperty::MarginTop);
+		if (prop == "margin-right") return accept(CssProperty::MarginRight);
+		if (prop == "margin-bottom") return accept(CssProperty::MarginBottom);
+		if (prop == "margin-left") return accept(CssProperty::MarginLeft);
+		if (prop == "padding-top") return accept(CssProperty::PaddingTop);
+		if (prop == "padding-right") return accept(CssProperty::PaddingRight);
+		if (prop == "padding-bottom") return accept(CssProperty::PaddingBottom);
+		return accept(CssProperty::PaddingLeft);
 	}
 	if (prop == "margin" || prop == "padding") {
 		std::vector<std::string> values = splitCssTokens(val);
@@ -1201,7 +1382,8 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		if (!applyLengthList(style, values, prop, diag)) {
 			return false;
 		}
-		return true;
+		return acceptMask(cssPropertyMask(prop == "margin" ? CssProperty::MarginTop : CssProperty::PaddingTop,
+			prop == "margin" ? CssProperty::MarginLeft : CssProperty::PaddingLeft));
 	}
 	if (prop == "font-size") {
 		bool autoValue = false;
@@ -1215,26 +1397,25 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			return false;
 		}
 		style.fontScaleOrSize = clampCssValue(diag, px, 8, kCssLiteMaxFontSizePx);
-		return true;
+		return accept(CssProperty::FontSize);
 	}
 	if (prop == "line-height") {
 		std::string lower = toLower(val);
 		if (lower == "normal") {
 			style.lineHeightNormal = true;
 			style.lineHeight = -1;
-			return true;
+			return accept(CssProperty::LineHeight);
 		}
 		bool autoValue = false;
 		int px = 0;
 		const int lineHeightBase = style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16;
-		if (!parseCssLengthValue(val, lineHeightBase, px, autoValue, true)) {
-			double numeric = 0.0;
-			if (parseCssNumber(val, numeric)) {
-				px = roundCssNumber(numeric * static_cast<double>(lineHeightBase));
-			} else {
-				++diag.unsupportedDeclarationCount;
-				return false;
-			}
+		double numeric = 0.0;
+		// A unitless line-height is a multiplier, unlike a unitless length.
+		if (parseCssNumber(val, numeric)) {
+			px = roundCssNumber(numeric * static_cast<double>(lineHeightBase));
+		} else if (!parseCssLengthValue(val, lineHeightBase, px, autoValue, true)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
 		}
 		if (autoValue) {
 			++diag.unsupportedDeclarationCount;
@@ -1242,7 +1423,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		style.lineHeightNormal = false;
 		style.lineHeight = clampCssValue(diag, px, 8, kCssLiteMaxLineHeightPx);
-		return true;
+		return accept(CssProperty::LineHeight);
 	}
 	if (prop == "width" || prop == "max-width" || prop == "height" || prop == "max-height") {
 		std::string lower = toLower(val);
@@ -1260,7 +1441,9 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			else if (prop == "max-width") style.maxWidthPercent = percent;
 			else if (prop == "height") style.heightPercent = percent;
 			else style.maxHeightPercent = percent;
-			return true;
+			return accept(prop == "width" ? CssProperty::Width :
+				prop == "height" ? CssProperty::Height :
+				prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
 		}
 		if (!parseCssLengthValue(val, 320, px, autoValue, false)) {
 			++diag.unsupportedDeclarationCount;
@@ -1280,14 +1463,18 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 				style.maxHeightPercent = -1;
 				style.maxHeight = 0;
 			}
-			return true;
+			return accept(prop == "width" ? CssProperty::Width :
+				prop == "height" ? CssProperty::Height :
+				prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
 		}
 		px = clampCssValue(diag, px, 1, kCssLiteMaxWidthPx);
 		if (prop == "width") style.width = px;
 		else if (prop == "max-width") style.maxWidth = px;
 		else if (prop == "height") style.height = px;
 		else style.maxHeight = px;
-		return true;
+		return accept(prop == "width" ? CssProperty::Width :
+			prop == "height" ? CssProperty::Height :
+			prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
 	}
 	if (prop == "white-space") {
 		std::string lower = toLower(val);
@@ -1297,15 +1484,15 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		if (lower == "normal") {
 			style.whiteSpace = WhiteSpaceMode::Normal;
-			return true;
+			return accept(CssProperty::WhiteSpace);
 		}
 		if (lower == "pre") {
 			style.whiteSpace = WhiteSpaceMode::Pre;
-			return true;
+			return accept(CssProperty::WhiteSpace);
 		}
 		if (lower == "pre-wrap") {
 			style.whiteSpace = WhiteSpaceMode::PreWrap;
-			return true;
+			return accept(CssProperty::WhiteSpace);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -1318,11 +1505,11 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		if (lower == "normal") {
 			style.overflowWrap = OverflowWrapMode::Normal;
-			return true;
+			return accept(CssProperty::OverflowWrap);
 		}
 		if (lower == "break-word") {
 			style.overflowWrap = OverflowWrapMode::BreakWord;
-			return true;
+			return accept(CssProperty::OverflowWrap);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -1335,11 +1522,11 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		if (lower == "normal") {
 			style.wordBreak = WordBreakMode::Normal;
-			return true;
+			return accept(CssProperty::WordBreak);
 		}
 		if (lower == "break-all") {
 			style.wordBreak = WordBreakMode::BreakAll;
-			return true;
+			return accept(CssProperty::WordBreak);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -1352,7 +1539,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			if (parseGenericFontFamily(family, genericFamily)) {
 				style.genericFontFamily = genericFamily;
 				sawGeneric = true;
-				return true;
+				return accept(CssProperty::GenericFontFamily);
 			}
 		}
 		if (!sawGeneric) {
@@ -1429,21 +1616,21 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			}
 			++diag.unsupportedDeclarationCount;
 		}
-		return sawSupported;
+		return sawSupported ? accept(CssProperty::ListStyle) : false;
 	}
 	if (prop == "border-collapse") {
 		std::string lower = toLower(val);
 		if (lower == "inherit" || lower == "initial" || lower == "unset") {
 			style.borderCollapse = TableBorderCollapseMode::Inherit;
-			return true;
+			return accept(CssProperty::BorderCollapse);
 		}
 		if (lower == "collapse") {
 			style.borderCollapse = TableBorderCollapseMode::Collapse;
-			return true;
+			return accept(CssProperty::BorderCollapse);
 		}
 		if (lower == "separate") {
 			style.borderCollapse = TableBorderCollapseMode::Separate;
-			return true;
+			return accept(CssProperty::BorderCollapse);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -1454,7 +1641,8 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		return true;
+		return acceptMask(cssPropertyBit(CssProperty::BorderSpacingHorizontal) |
+			cssPropertyBit(CssProperty::BorderSpacingVertical));
 	}
 	if (prop == "border-width") {
 		std::vector<std::string> values = splitCssTokens(val);
@@ -1462,7 +1650,10 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		return true;
+		return acceptMask(cssPropertyBit(CssProperty::BorderTopWidth) |
+			cssPropertyBit(CssProperty::BorderRightWidth) |
+			cssPropertyBit(CssProperty::BorderBottomWidth) |
+			cssPropertyBit(CssProperty::BorderLeftWidth));
 	}
 	if (prop == "border-style") {
 		std::vector<std::string> values = splitCssTokens(val);
@@ -1470,7 +1661,10 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		return true;
+		return acceptMask(cssPropertyBit(CssProperty::BorderTopStyle) |
+			cssPropertyBit(CssProperty::BorderRightStyle) |
+			cssPropertyBit(CssProperty::BorderBottomStyle) |
+			cssPropertyBit(CssProperty::BorderLeftStyle));
 	}
 	if (prop == "border-color") {
 		std::vector<std::string> values = splitCssTokens(val);
@@ -1478,7 +1672,10 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		return true;
+		return acceptMask(cssPropertyBit(CssProperty::BorderTopColor) |
+			cssPropertyBit(CssProperty::BorderRightColor) |
+			cssPropertyBit(CssProperty::BorderBottomColor) |
+			cssPropertyBit(CssProperty::BorderLeftColor));
 	}
 	if (prop == "border" || prop == "border-top" || prop == "border-right" || prop == "border-bottom" || prop == "border-left") {
 		BorderSideValue borderValue;
@@ -1491,22 +1688,30 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			applyBorderSideValue(style, BorderSideIndex::Right, borderValue);
 			applyBorderSideValue(style, BorderSideIndex::Bottom, borderValue);
 			applyBorderSideValue(style, BorderSideIndex::Left, borderValue);
-			return true;
+			return acceptMask(
+				cssPropertyBit(CssProperty::BorderTopWidth) | cssPropertyBit(CssProperty::BorderTopStyle) | cssPropertyBit(CssProperty::BorderTopColor) |
+				cssPropertyBit(CssProperty::BorderRightWidth) | cssPropertyBit(CssProperty::BorderRightStyle) | cssPropertyBit(CssProperty::BorderRightColor) |
+				cssPropertyBit(CssProperty::BorderBottomWidth) | cssPropertyBit(CssProperty::BorderBottomStyle) | cssPropertyBit(CssProperty::BorderBottomColor) |
+				cssPropertyBit(CssProperty::BorderLeftWidth) | cssPropertyBit(CssProperty::BorderLeftStyle) | cssPropertyBit(CssProperty::BorderLeftColor));
 		}
 		if (prop == "border-top") {
 			applyBorderSideValue(style, BorderSideIndex::Top, borderValue);
-			return true;
+			return acceptMask(cssPropertyBit(CssProperty::BorderTopWidth) |
+				cssPropertyBit(CssProperty::BorderTopStyle) | cssPropertyBit(CssProperty::BorderTopColor));
 		}
 		if (prop == "border-right") {
 			applyBorderSideValue(style, BorderSideIndex::Right, borderValue);
-			return true;
+			return acceptMask(cssPropertyBit(CssProperty::BorderRightWidth) |
+				cssPropertyBit(CssProperty::BorderRightStyle) | cssPropertyBit(CssProperty::BorderRightColor));
 		}
 		if (prop == "border-bottom") {
 			applyBorderSideValue(style, BorderSideIndex::Bottom, borderValue);
-			return true;
+			return acceptMask(cssPropertyBit(CssProperty::BorderBottomWidth) |
+				cssPropertyBit(CssProperty::BorderBottomStyle) | cssPropertyBit(CssProperty::BorderBottomColor));
 		}
 		applyBorderSideValue(style, BorderSideIndex::Left, borderValue);
-		return true;
+		return acceptMask(cssPropertyBit(CssProperty::BorderLeftWidth) |
+			cssPropertyBit(CssProperty::BorderLeftStyle) | cssPropertyBit(CssProperty::BorderLeftColor));
 	}
 	if (prop == "border-top-width" || prop == "border-right-width" || prop == "border-bottom-width" || prop == "border-left-width" ||
 		prop == "border-top-style" || prop == "border-right-style" || prop == "border-bottom-style" || prop == "border-left-style" ||
@@ -1553,23 +1758,121 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			borderValue.color = color;
 		}
 		applyBorderSideValue(style, side, borderValue);
-		return true;
+		CssProperty propertyId = CssProperty::BorderTopWidth;
+		if (side == BorderSideIndex::Right) propertyId = CssProperty::BorderRightWidth;
+		else if (side == BorderSideIndex::Bottom) propertyId = CssProperty::BorderBottomWidth;
+		else if (side == BorderSideIndex::Left) propertyId = CssProperty::BorderLeftWidth;
+		if (prop.find("-style") != std::string::npos) {
+			propertyId = propertyId == CssProperty::BorderTopWidth ? CssProperty::BorderTopStyle :
+				propertyId == CssProperty::BorderRightWidth ? CssProperty::BorderRightStyle :
+				propertyId == CssProperty::BorderBottomWidth ? CssProperty::BorderBottomStyle : CssProperty::BorderLeftStyle;
+		} else if (prop.find("-color") != std::string::npos) {
+			propertyId = propertyId == CssProperty::BorderTopWidth ? CssProperty::BorderTopColor :
+				propertyId == CssProperty::BorderRightWidth ? CssProperty::BorderRightColor :
+				propertyId == CssProperty::BorderBottomWidth ? CssProperty::BorderBottomColor : CssProperty::BorderLeftColor;
+		}
+		return accept(propertyId);
 	}
 	++diag.unsupportedDeclarationCount;
 	return false;
 }
 
+static void applyStyleProperty(WebStyle& destination, const WebStyle& source, CssProperty property)
+{
+	switch (property) {
+	case CssProperty::Color: destination.hasColor = source.hasColor; destination.color = source.color; break;
+	case CssProperty::Background: destination.hasBackgroundColor = source.hasBackgroundColor; destination.backgroundColor = source.backgroundColor; break;
+	case CssProperty::Bold: destination.bold = source.bold; break;
+	case CssProperty::Italic: destination.italic = source.italic; break;
+	case CssProperty::TextDecoration:
+		destination.hasTextDecoration = source.hasTextDecoration;
+		destination.underline = source.underline;
+		destination.lineThrough = source.lineThrough;
+		break;
+	case CssProperty::Display: destination.displayNone = source.displayNone; break;
+	case CssProperty::ListStyle:
+		destination.listStyleNone = source.listStyleNone;
+		destination.listStyleType = source.listStyleType;
+		break;
+	case CssProperty::BorderCollapse: destination.borderCollapse = source.borderCollapse; break;
+	case CssProperty::BorderSpacingHorizontal: destination.borderSpacingHorizontal = source.borderSpacingHorizontal; break;
+	case CssProperty::BorderSpacingVertical: destination.borderSpacingVertical = source.borderSpacingVertical; break;
+	case CssProperty::GenericFontFamily: destination.genericFontFamily = source.genericFontFamily; break;
+	case CssProperty::TextAlign: destination.textAlign = source.textAlign; break;
+	case CssProperty::LineHeight:
+		destination.lineHeightNormal = source.lineHeightNormal;
+		destination.lineHeight = source.lineHeight;
+		break;
+	case CssProperty::MarginTop: destination.marginTop = source.marginTop; break;
+	case CssProperty::MarginRight: destination.marginRight = source.marginRight; break;
+	case CssProperty::MarginBottom: destination.marginBottom = source.marginBottom; break;
+	case CssProperty::MarginLeft: destination.marginLeft = source.marginLeft; break;
+	case CssProperty::PaddingTop: destination.paddingTop = source.paddingTop; break;
+	case CssProperty::PaddingRight: destination.paddingRight = source.paddingRight; break;
+	case CssProperty::PaddingBottom: destination.paddingBottom = source.paddingBottom; break;
+	case CssProperty::PaddingLeft: destination.paddingLeft = source.paddingLeft; break;
+	case CssProperty::FontSize: destination.fontScaleOrSize = source.fontScaleOrSize; break;
+	case CssProperty::Width: destination.width = source.width; destination.widthPercent = source.widthPercent; break;
+	case CssProperty::Height: destination.height = source.height; destination.heightPercent = source.heightPercent; break;
+	case CssProperty::MaxWidth: destination.maxWidth = source.maxWidth; destination.maxWidthPercent = source.maxWidthPercent; break;
+	case CssProperty::MaxHeight: destination.maxHeight = source.maxHeight; destination.maxHeightPercent = source.maxHeightPercent; break;
+	case CssProperty::WhiteSpace: destination.whiteSpace = source.whiteSpace; break;
+	case CssProperty::OverflowWrap: destination.overflowWrap = source.overflowWrap; break;
+	case CssProperty::WordBreak: destination.wordBreak = source.wordBreak; break;
+	case CssProperty::BorderTopWidth: destination.hasBorderTop = source.hasBorderTop; destination.borderTopWidth = source.borderTopWidth; break;
+	case CssProperty::BorderTopStyle: destination.hasBorderTop = source.hasBorderTop; destination.borderTopStyle = source.borderTopStyle; break;
+	case CssProperty::BorderTopColor: destination.hasBorderTop = source.hasBorderTop; destination.borderTopColor = source.borderTopColor; break;
+	case CssProperty::BorderRightWidth: destination.hasBorderRight = source.hasBorderRight; destination.borderRightWidth = source.borderRightWidth; break;
+	case CssProperty::BorderRightStyle: destination.hasBorderRight = source.hasBorderRight; destination.borderRightStyle = source.borderRightStyle; break;
+	case CssProperty::BorderRightColor: destination.hasBorderRight = source.hasBorderRight; destination.borderRightColor = source.borderRightColor; break;
+	case CssProperty::BorderBottomWidth: destination.hasBorderBottom = source.hasBorderBottom; destination.borderBottomWidth = source.borderBottomWidth; break;
+	case CssProperty::BorderBottomStyle: destination.hasBorderBottom = source.hasBorderBottom; destination.borderBottomStyle = source.borderBottomStyle; break;
+	case CssProperty::BorderBottomColor: destination.hasBorderBottom = source.hasBorderBottom; destination.borderBottomColor = source.borderBottomColor; break;
+	case CssProperty::BorderLeftWidth: destination.hasBorderLeft = source.hasBorderLeft; destination.borderLeftWidth = source.borderLeftWidth; break;
+	case CssProperty::BorderLeftStyle: destination.hasBorderLeft = source.hasBorderLeft; destination.borderLeftStyle = source.borderLeftStyle; break;
+	case CssProperty::BorderLeftColor: destination.hasBorderLeft = source.hasBorderLeft; destination.borderLeftColor = source.borderLeftColor; break;
+	case CssProperty::Count: break;
+	}
+}
+
+static void mergeParsedDeclaration(WebStyle& destination, const WebStyle& source)
+{
+	for (unsigned i = 0; i < static_cast<unsigned>(CssProperty::Count); ++i) {
+		const CssProperty property = static_cast<CssProperty>(i);
+		const uint64_t bit = cssPropertyBit(property);
+		if ((source.specifiedProperties & bit) == 0) continue;
+		const bool sourceImportant = (source.importantProperties & bit) != 0;
+		const bool destinationImportant = (destination.importantProperties & bit) != 0;
+		if ((destination.specifiedProperties & bit) != 0 && destinationImportant && !sourceImportant) continue;
+		applyStyleProperty(destination, source, property);
+		destination.specifiedProperties |= bit;
+		if (sourceImportant) destination.importantProperties |= bit;
+		else destination.importantProperties &= ~bit;
+	}
+}
+
 static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDiagnostics& diag)
 {
 	size_t cursor = 0;
+	size_t declarationCount = 0;
 	while (cursor < body.size()) {
+		if (declarationCount >= kCssLiteMaxDeclarationsPerRule ||
+			diag.declarationsProcessed >= static_cast<int>(kCssLiteMaxTotalDeclarations)) {
+			saturatingIncrement(diag.declarationCapCount);
+			break;
+		}
 		size_t semi = body.find(';', cursor);
 		std::string decl = body.substr(cursor, semi == std::string::npos ? std::string::npos : semi - cursor);
 		size_t colon = decl.find(':');
 		if (colon != std::string::npos) {
-			if (!parseInlineStyleDeclaration(style, decl.substr(0, colon), decl.substr(colon + 1), diag)) {
-				// parseInlineStyleDeclaration already recorded unsupported declarations.
-			}
+			++declarationCount;
+			saturatingIncrement(diag.declarationsProcessed);
+			WebStyle parsed;
+			// Unitless line-height is relative to the font size established by
+			// an earlier declaration in this same bounded declaration list.
+			parsed.fontScaleOrSize = style.fontScaleOrSize;
+			parseInlineStyleDeclaration(parsed, decl.substr(0, colon), decl.substr(colon + 1), diag);
+			mergeParsedDeclaration(style, parsed);
 		}
 		cursor = semi == std::string::npos ? body.size() : semi + 1;
 	}
@@ -1872,6 +2175,44 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 	return style;
 }
 
+static void markDefaultStyleProperties(WebStyle& style)
+{
+	if (style.hasColor) style.specifiedProperties |= cssPropertyBit(CssProperty::Color);
+	if (style.hasBackgroundColor) style.specifiedProperties |= cssPropertyBit(CssProperty::Background);
+	if (style.bold) style.specifiedProperties |= cssPropertyBit(CssProperty::Bold);
+	if (style.italic) style.specifiedProperties |= cssPropertyBit(CssProperty::Italic);
+	if (style.hasTextDecoration) style.specifiedProperties |= cssPropertyBit(CssProperty::TextDecoration);
+	if (style.displayNone) style.specifiedProperties |= cssPropertyBit(CssProperty::Display);
+	if (style.listStyleNone || style.listStyleType != ListStyleType::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::ListStyle);
+	if (style.borderCollapse != TableBorderCollapseMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderCollapse);
+	if (style.borderSpacingHorizontal != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderSpacingHorizontal);
+	if (style.borderSpacingVertical != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderSpacingVertical);
+	if (style.genericFontFamily != GenericFontFamily::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::GenericFontFamily);
+	if (style.textAlign != TextAlign::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::TextAlign);
+	if (style.lineHeightNormal || style.lineHeight > 0) style.specifiedProperties |= cssPropertyBit(CssProperty::LineHeight);
+	if (style.marginTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginTop);
+	if (style.marginRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginRight);
+	if (style.marginBottom != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginBottom);
+	if (style.marginLeft != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginLeft);
+	if (style.padding != -1) style.specifiedProperties |= cssPropertyMask(CssProperty::PaddingTop, CssProperty::PaddingLeft);
+	if (style.paddingTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingTop);
+	if (style.paddingRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingRight);
+	if (style.paddingBottom != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingBottom);
+	if (style.paddingLeft != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingLeft);
+	if (style.fontScaleOrSize > 0) style.specifiedProperties |= cssPropertyBit(CssProperty::FontSize);
+	if (style.width != -1 || style.widthPercent != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::Width);
+	if (style.height != -1 || style.heightPercent != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::Height);
+	if (style.maxWidth != -1 || style.maxWidthPercent != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MaxWidth);
+	if (style.maxHeight != -1 || style.maxHeightPercent != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MaxHeight);
+	if (style.whiteSpace != WhiteSpaceMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::WhiteSpace);
+	if (style.overflowWrap != OverflowWrapMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::OverflowWrap);
+	if (style.wordBreak != WordBreakMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::WordBreak);
+	if (style.hasBorderTop) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderTopWidth) | cssPropertyBit(CssProperty::BorderTopStyle) | cssPropertyBit(CssProperty::BorderTopColor);
+	if (style.hasBorderRight) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderRightWidth) | cssPropertyBit(CssProperty::BorderRightStyle) | cssPropertyBit(CssProperty::BorderRightColor);
+	if (style.hasBorderBottom) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderBottomWidth) | cssPropertyBit(CssProperty::BorderBottomStyle) | cssPropertyBit(CssProperty::BorderBottomColor);
+	if (style.hasBorderLeft) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderLeftWidth) | cssPropertyBit(CssProperty::BorderLeftStyle) | cssPropertyBit(CssProperty::BorderLeftColor);
+}
+
 static std::string pathSignature(const std::vector<HtmlElementRef>& path)
 {
 	std::ostringstream oss;
@@ -1880,6 +2221,109 @@ static std::string pathSignature(const std::vector<HtmlElementRef>& path)
 			<< "." << toLower(element.className) << "{" << element.inlineStyle << "}";
 	}
 	return oss.str();
+}
+
+struct CssCascadeWinner {
+	bool valid = false;
+	bool important = false;
+	bool inlineDeclaration = false;
+	bool inherited = false;
+	CssSpecificity specificity;
+	uint32_t sourceOrder = 0;
+};
+
+static bool specificityGreater(const CssSpecificity& left, const CssSpecificity& right)
+{
+	if (left.idCount != right.idCount) return left.idCount > right.idCount;
+	if (left.classCount != right.classCount) return left.classCount > right.classCount;
+	return left.elementCount > right.elementCount;
+}
+
+static bool specificityEqual(const CssSpecificity& left, const CssSpecificity& right)
+{
+	return left.idCount == right.idCount && left.classCount == right.classCount &&
+		left.elementCount == right.elementCount;
+}
+
+static bool cascadeCandidateWins(const CssCascadeWinner& candidate, const CssCascadeWinner& current)
+{
+	if (!current.valid) return true;
+	if (candidate.important != current.important) return candidate.important;
+	if (candidate.inlineDeclaration != current.inlineDeclaration) return candidate.inlineDeclaration;
+	if (specificityGreater(candidate.specificity, current.specificity)) return true;
+	if (specificityEqual(candidate.specificity, current.specificity)) return candidate.sourceOrder >= current.sourceOrder;
+	return false;
+}
+
+static uint32_t allocateCssSourceOrder(CssDiagnostics& diag)
+{
+	if (diag.nextSourceOrder == std::numeric_limits<uint32_t>::max()) return diag.nextSourceOrder;
+	return diag.nextSourceOrder++;
+}
+
+static bool styleHasEffectiveProperty(const WebStyle& style, CssProperty property)
+{
+	const uint64_t bit = cssPropertyBit(property);
+	return (style.specifiedProperties & bit) != 0 || (style.inheritedProperties & bit) != 0;
+}
+
+static void applyInheritedProperties(WebStyle& style, const WebStyle& parent, CssDiagnostics& diag)
+{
+	const CssProperty inherited[] = {
+		CssProperty::Color, CssProperty::Bold, CssProperty::Italic,
+		CssProperty::GenericFontFamily, CssProperty::FontSize, CssProperty::LineHeight,
+		CssProperty::TextAlign, CssProperty::WhiteSpace, CssProperty::OverflowWrap,
+		CssProperty::WordBreak,
+	};
+	for (CssProperty property : inherited) {
+		const uint64_t bit = cssPropertyBit(property);
+		if (styleHasEffectiveProperty(style, property) ||
+			(!styleHasEffectiveProperty(parent, property))) continue;
+		applyStyleProperty(style, parent, property);
+		style.inheritedProperties |= bit;
+		saturatingIncrement(diag.inheritedPropertiesApplied);
+	}
+}
+
+static std::string cssColorEvidence(bool present, uint32_t color)
+{
+	if (!present) return "none";
+	std::ostringstream oss;
+	oss << "#" << std::hex << std::setw(6) << std::setfill('0') << (color & 0xFFFFFFu);
+	return oss.str();
+}
+
+static void appendComputedStyleEvidence(WebDocument& doc,
+	const HtmlElementRef& element,
+	const WebStyle& style,
+	const std::array<CssCascadeWinner, static_cast<size_t>(CssProperty::Count)>& winners)
+{
+	const std::string id = toLower(element.id);
+	if (id.rfind("phase2a-", 0) != 0 && id.rfind("css2a-", 0) != 0) return;
+	if (doc.cssDiagnostics.computedStyleEvidence.size() >= 8192 ||
+		std::count(doc.cssDiagnostics.computedStyleEvidence.begin(),
+			doc.cssDiagnostics.computedStyleEvidence.end(), ';') >= static_cast<int>(kCssLiteMaxEvidenceEntries - 1)) return;
+	const CssCascadeWinner& colorWinner = winners[static_cast<size_t>(CssProperty::Color)];
+	const CssCascadeWinner& paddingWinner = winners[static_cast<size_t>(CssProperty::PaddingTop)];
+	const CssCascadeWinner& fontWinner = winners[static_cast<size_t>(CssProperty::FontSize)];
+	const CssCascadeWinner& borderWinner = winners[static_cast<size_t>(CssProperty::BorderTopWidth)];
+	std::ostringstream oss;
+	oss << "id=" << element.id << ",tag=" << toLower(element.tagName)
+		<< ",classes=" << collapseWs(element.className)
+		<< ",color=" << cssColorEvidence(style.hasColor, style.color)
+		<< ",background=" << cssColorEvidence(style.hasBackgroundColor, style.backgroundColor)
+		<< ",font-size=" << style.fontScaleOrSize
+		<< ",line-height=" << (style.lineHeightNormal ? "normal" : std::to_string(style.lineHeight))
+		<< ",padding-top=" << style.paddingTop
+		<< ",border-top-width=" << style.borderTopWidth
+		<< ",color-specificity=" << colorWinner.specificity.idCount << "." << colorWinner.specificity.classCount << "." << colorWinner.specificity.elementCount
+		<< ",color-source-order=" << colorWinner.sourceOrder
+		<< ",color-inherited=" << (colorWinner.inherited ? "yes" : "no")
+		<< ",padding-source-order=" << paddingWinner.sourceOrder
+		<< ",font-size-source-order=" << fontWinner.sourceOrder
+		<< ",border-source-order=" << borderWinner.sourceOrder << ";";
+	if (doc.cssDiagnostics.computedStyleEvidence.size() + oss.str().size() <= 8192)
+		doc.cssDiagnostics.computedStyleEvidence += oss.str();
 }
 
 static WebStyle computePathStyle(WebDocument& doc,
@@ -1892,23 +2336,88 @@ static WebStyle computePathStyle(WebDocument& doc,
 	if (it != cache.end()) return it->second;
 
 	WebStyle style = defaultStyleForTag(path.back().tagName);
-	auto applyBucket = [&](int minSpecificity, int maxSpecificity) {
-		for (const WebStyleRule& rule : doc.styleRules) {
-			if (rule.specificity < minSpecificity || rule.specificity >= maxSpecificity) continue;
-			if (selectorMatchesPath(path, rule)) {
-				style = mergeStyles(style, rule.style);
+	markDefaultStyleProperties(style);
+	std::array<CssCascadeWinner, static_cast<size_t>(CssProperty::Count)> winners{};
+	WebStyle parent;
+	bool hasParent = path.size() > 1 && path.size() <= kCssLiteMaxInheritanceDepth + 1;
+	size_t cascadeApplications = 0;
+	bool cascadeApplicationsCapped = false;
+	if (path.size() > kCssLiteMaxInheritanceDepth + 1) saturatingIncrement(doc.cssDiagnostics.inheritanceDepthClamps);
+	if (hasParent) {
+		std::vector<HtmlElementRef> parentPath(path.begin(), path.end() - 1);
+		parent = computePathStyle(doc, parentPath, cache);
+		applyInheritedProperties(style, parent, doc.cssDiagnostics);
+	}
+
+	for (const WebStyleRule& rule : doc.styleRules) {
+		if (!selectorMatchesPath(path, rule)) continue;
+		saturatingIncrement(doc.cssDiagnostics.selectorMatches);
+		for (unsigned i = 0; i < static_cast<unsigned>(CssProperty::Count); ++i) {
+			const CssProperty property = static_cast<CssProperty>(i);
+			const uint64_t bit = cssPropertyBit(property);
+			if ((rule.style.specifiedProperties & bit) == 0) continue;
+			if (cascadeApplications >= kCssLiteMaxCascadeApplicationsPerNode) {
+				saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
+				cascadeApplicationsCapped = true;
+				break;
 			}
+			++cascadeApplications;
+			CssCascadeWinner candidate;
+			candidate.valid = true;
+			candidate.important = (rule.style.importantProperties & bit) != 0;
+			candidate.specificity = rule.specificityTuple;
+			candidate.sourceOrder = rule.sourceOrder;
+			if (!cascadeCandidateWins(candidate, winners[i])) continue;
+			if (winners[i].valid) {
+				if (specificityGreater(candidate.specificity, winners[i].specificity)) saturatingIncrement(doc.cssDiagnostics.specificityOverrides);
+				else if (specificityEqual(candidate.specificity, winners[i].specificity) && candidate.sourceOrder > winners[i].sourceOrder) saturatingIncrement(doc.cssDiagnostics.sourceOrderOverrides);
+			}
+			applyStyleProperty(style, rule.style, property);
+			style.specifiedProperties |= bit;
+			style.inheritedProperties &= ~bit;
+			style.importantProperties = (style.importantProperties & ~bit) | (candidate.important ? bit : 0);
+			winners[i] = candidate;
+			saturatingIncrement(doc.cssDiagnostics.cascadePropertyResolutions);
+			if (candidate.important) saturatingIncrement(doc.cssDiagnostics.importantDeclarationsApplied);
 		}
-	};
-	applyBucket(0, 10);
-	applyBucket(10, 100);
-	applyBucket(100, 1000000);
+		if (cascadeApplicationsCapped) break;
+	}
 
 	if (!path.back().inlineStyle.empty()) {
 		WebStyle inlineStyle;
 		parseCssDeclarations(path.back().inlineStyle, inlineStyle, doc.cssDiagnostics);
-		style = mergeStyles(style, inlineStyle);
+		const uint32_t inlineOrder = allocateCssSourceOrder(doc.cssDiagnostics);
+		for (unsigned i = 0; i < static_cast<unsigned>(CssProperty::Count); ++i) {
+			const CssProperty property = static_cast<CssProperty>(i);
+			const uint64_t bit = cssPropertyBit(property);
+			if ((inlineStyle.specifiedProperties & bit) == 0) continue;
+			if (cascadeApplications >= kCssLiteMaxCascadeApplicationsPerNode) {
+				saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
+				break;
+			}
+			++cascadeApplications;
+			CssCascadeWinner candidate;
+			candidate.valid = true;
+			candidate.important = (inlineStyle.importantProperties & bit) != 0;
+			candidate.inlineDeclaration = true;
+			candidate.specificity = {};
+			candidate.sourceOrder = inlineOrder;
+			if (!cascadeCandidateWins(candidate, winners[i])) continue;
+			if (winners[i].valid) {
+				if (candidate.inlineDeclaration) saturatingIncrement(doc.cssDiagnostics.inlineOverrides);
+				else if (specificityGreater(candidate.specificity, winners[i].specificity)) saturatingIncrement(doc.cssDiagnostics.specificityOverrides);
+			}
+			applyStyleProperty(style, inlineStyle, property);
+			style.specifiedProperties |= bit;
+			style.inheritedProperties &= ~bit;
+			style.importantProperties = (style.importantProperties & ~bit) | (candidate.important ? bit : 0);
+			winners[i] = candidate;
+			saturatingIncrement(doc.cssDiagnostics.cascadePropertyResolutions);
+			if (candidate.important) saturatingIncrement(doc.cssDiagnostics.importantDeclarationsApplied);
+		}
 	}
+	if (hasParent && parent.displayNone) style.displayNone = true;
+	appendComputedStyleEvidence(doc, path.back(), style, winners);
 
 	cache.emplace(key, style);
 	return style;
@@ -1925,10 +2434,10 @@ static void applyDocumentStyles(WebDocument& doc)
 		doc.bodyStyle = computePathStyle(doc, bodyPath, cache);
 	} else {
 		doc.bodyStyle = defaultStyleForTag("body");
+		markDefaultStyleProperties(doc.bodyStyle);
 	}
 
 	for (DocBlock& block : doc.blocks) {
-		WebStyle style = doc.bodyStyle;
 		std::vector<HtmlElementRef> path;
 		if (doc.hasBodyElement) {
 			path.push_back(doc.bodyElement);
@@ -1940,19 +2449,71 @@ static void applyDocumentStyles(WebDocument& doc)
 			startIndex = 1;
 		}
 
-		for (size_t i = startIndex; i < block.ancestors.size(); ++i) {
-			path.push_back(block.ancestors[i]);
-			style = mergeStyles(style, computePathStyle(doc, path, cache));
-		}
+		for (size_t i = startIndex; i < block.ancestors.size(); ++i) path.push_back(block.ancestors[i]);
 
 		HtmlElementRef selfRef;
 		selfRef.tagName = block.tagName;
 		selfRef.className = block.className;
 		selfRef.id = block.id;
-		selfRef.inlineStyle = block.inlineStyle;
-		path.push_back(selfRef);
-		style = mergeStyles(style, computePathStyle(doc, path, cache));
-		block.style = style;
+	selfRef.inlineStyle = block.inlineStyle;
+	path.push_back(selfRef);
+		block.style = computePathStyle(doc, path, cache);
+		// Table geometry and wrapper borders are renderer metadata rather than
+		// inherited CSS.  Resolve them from bounded computed prefixes only when
+		// the block itself has no value, preserving explicit child declarations.
+		for (size_t prefixLength = path.size(); prefixLength > 1; --prefixLength) {
+			std::vector<HtmlElementRef> prefix(path.begin(), path.begin() + prefixLength - 1);
+			const WebStyle ancestorStyle = computePathStyle(doc, prefix, cache);
+			const std::string ancestorTag = toLower(prefix.back().tagName);
+			if (ancestorTag == "table" && block.style.borderCollapse == TableBorderCollapseMode::Inherit) {
+				block.style.borderCollapse = ancestorStyle.borderCollapse;
+				block.style.borderSpacingHorizontal = ancestorStyle.borderSpacingHorizontal;
+				block.style.borderSpacingVertical = ancestorStyle.borderSpacingVertical;
+			}
+			if (ancestorTag == "table") {
+				// The compact renderer represents a table through its cell blocks.
+				// Project only table sizing/placement metadata needed by that
+				// representation; backgrounds and text properties remain non-inherited.
+				if (block.style.width == -1 && block.style.widthPercent == -1) {
+					block.style.width = ancestorStyle.width;
+					block.style.widthPercent = ancestorStyle.widthPercent;
+				}
+				if (block.style.maxWidth == -1 && block.style.maxWidthPercent == -1) {
+					block.style.maxWidth = ancestorStyle.maxWidth;
+					block.style.maxWidthPercent = ancestorStyle.maxWidthPercent;
+				}
+				if (block.style.marginLeft == -1) block.style.marginLeft = ancestorStyle.marginLeft;
+				if (block.style.marginRight == -1) block.style.marginRight = ancestorStyle.marginRight;
+			}
+			if ((ancestorTag == "ul" || ancestorTag == "ol") && block.style.listStyleType == ListStyleType::Inherit) {
+				block.style.listStyleType = ancestorStyle.listStyleType;
+				block.style.listStyleNone = ancestorStyle.listStyleNone;
+			}
+			if (!block.style.hasBorderTop && ancestorStyle.hasBorderTop) {
+				block.style.hasBorderTop = true;
+				block.style.borderTopWidth = ancestorStyle.borderTopWidth;
+				block.style.borderTopStyle = ancestorStyle.borderTopStyle;
+				block.style.borderTopColor = ancestorStyle.borderTopColor;
+			}
+			if (!block.style.hasBorderRight && ancestorStyle.hasBorderRight) {
+				block.style.hasBorderRight = true;
+				block.style.borderRightWidth = ancestorStyle.borderRightWidth;
+				block.style.borderRightStyle = ancestorStyle.borderRightStyle;
+				block.style.borderRightColor = ancestorStyle.borderRightColor;
+			}
+			if (!block.style.hasBorderBottom && ancestorStyle.hasBorderBottom) {
+				block.style.hasBorderBottom = true;
+				block.style.borderBottomWidth = ancestorStyle.borderBottomWidth;
+				block.style.borderBottomStyle = ancestorStyle.borderBottomStyle;
+				block.style.borderBottomColor = ancestorStyle.borderBottomColor;
+			}
+			if (!block.style.hasBorderLeft && ancestorStyle.hasBorderLeft) {
+				block.style.hasBorderLeft = true;
+				block.style.borderLeftWidth = ancestorStyle.borderLeftWidth;
+				block.style.borderLeftStyle = ancestorStyle.borderLeftStyle;
+				block.style.borderLeftColor = ancestorStyle.borderLeftColor;
+			}
+		}
 	}
 }
 
@@ -2099,6 +2660,11 @@ static void loadStylesheetForDocument(ParserState& st, const std::string& href)
 {
 	if (href.empty()) {
 		++st.doc.cssDiagnostics.unsupportedExternalStylesheetCount;
+		return;
+	}
+	if (st.doc.cssDiagnostics.externalStylesheetLoadedCount >= 8) {
+		++st.doc.cssDiagnostics.unsupportedExternalStylesheetCount;
+		st.doc.cssDiagnostics.styleBlockCapped = true;
 		return;
 	}
 	const std::string url = resolveRelativeUrl(st.doc.url, href);
