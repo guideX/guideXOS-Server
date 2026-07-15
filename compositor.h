@@ -241,6 +241,10 @@ namespace gxos { namespace gui {
         static uint64_t g_modalWindow;
         static bool g_dragActive; static int g_dragOffX; static int g_dragOffY; static uint64_t g_dragWin; static int g_dragStartX; static int g_dragStartY;
         static bool g_dragPending; static uint64_t g_dragPendingWin;
+        // Last compositor-space pointer position. In synthetic Extend this
+        // is virtual-desktop space; hosted paint may only expose the primary
+        // viewport until real multi-output presentation exists.
+        static int g_virtualMouseX; static int g_virtualMouseY;
         static bool g_resizeActive; static int g_resizeStartW; static int g_resizeStartH; static int g_resizeStartMX; static int g_resizeStartMY; static uint64_t g_resizeWin;
         static bool g_resizePreviewActive; static int g_resizePreviewW; static int g_resizePreviewH;
         static bool g_snapPreviewActive;

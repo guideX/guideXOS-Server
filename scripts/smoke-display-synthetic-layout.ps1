@@ -35,6 +35,14 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeSyntheticDualMonitorDesktop';
     },
     [pscustomobject]@{
+        Name = 'display model mode-aware synthetic desktop helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeSyntheticDualMonitorDesktopForMode';
+    },
+    [pscustomobject]@{
+        Name = 'display model synthetic arrangement validation';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'hasSyntheticDualMonitorArrangement';
+    },
+    [pscustomobject]@{
         Name = 'display model diagnostic framebuffer helper';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeDiagnosticFramebufferMonitor';
     },
@@ -139,8 +147,24 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'monitorWorkAreaForPoint';
     },
     [pscustomobject]@{
+        Name = 'compositor window drag virtual desktop clamp';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'const WorkRect moveClamp = virtualExtendMode';
+    },
+    [pscustomobject]@{
+        Name = 'compositor outside-primary window diagnostic';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'window placement virtual-desktop aware';
+    },
+    [pscustomobject]@{
         Name = 'compositor synthetic layout log';
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'dualWindowOutput=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor virtual mouse diagnostic';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'mouseVisibleInViewport=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor hosted input clamp helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'mapHostedInputPointToVirtual';
     },
     [pscustomobject]@{
         Name = 'compositor dual-window log';
@@ -292,7 +316,7 @@ $checks = @(
     },
     [pscustomobject]@{
         Name = 'display options viewport primary taskbar note';
-        Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'wallpaper/taskbar follow the selected primary monitor';
+        Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'one framebuffer; secondary cursor/window content is model-only';
     },
     [pscustomobject]@{
         Name = 'display options synthetic preview gate';

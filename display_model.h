@@ -14,6 +14,8 @@ namespace gui {
 
 inline constexpr int kSyntheticTestMonitorWidth = 1920;
 inline constexpr int kSyntheticTestMonitorHeight = 1080;
+inline constexpr const char* kHostedSyntheticDualMonitorEnvironment = "GXOS_SYNTHETIC_DUAL_MONITOR";
+inline constexpr const char* kHostedSyntheticDualWindowEnvironment = "GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT";
 
 struct DisplayViewport;
 
@@ -100,14 +102,14 @@ inline bool parseEnvironmentFlagValue(const char* value)
 
 inline bool hostedSyntheticDualMonitorEnabled()
 {
-    return parseEnvironmentFlagValue(std::getenv("GXOS_SYNTHETIC_DUAL_MONITOR"));
+    return parseEnvironmentFlagValue(std::getenv(kHostedSyntheticDualMonitorEnvironment));
 }
 
 inline bool hostedSyntheticDualWindowOutputEnabled()
 {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
     return hostedSyntheticDualMonitorEnabled()
-        && parseEnvironmentFlagValue(std::getenv("GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT"));
+        && parseEnvironmentFlagValue(std::getenv(kHostedSyntheticDualWindowEnvironment));
 #else
     return false;
 #endif
@@ -301,6 +303,26 @@ inline std::string serializeDisplayArrangement(const std::vector<DisplayMonitorD
         out << serializeDisplayMonitorDescriptor(monitors[i]);
     }
     return out.str();
+}
+
+// Source metadata is not persisted in the compact arrangement format. Stable
+// logical ids let hosted startup recognize a prior synthetic Mirror layout
+// while rejecting a stale single-output arrangement as the synthetic default.
+inline bool hasSyntheticDualMonitorArrangement(const std::vector<DisplayMonitorDescriptor>& monitors)
+{
+    bool hasPrimary = false;
+    bool hasSecondary = false;
+    for (const auto& monitor : monitors) {
+        if (!monitor.isActive()) {
+            continue;
+        }
+        if (monitor.id == "display-1") {
+            hasPrimary = true;
+        } else if (monitor.id == "display-2") {
+            hasSecondary = true;
+        }
+    }
+    return hasPrimary && hasSecondary;
 }
 
 struct DisplayVirtualDesktop {
@@ -1189,6 +1211,53 @@ inline DisplayVirtualDesktop makeSyntheticDualMonitorDesktop(
     desktop.monitors.push_back(makeDisplayMonitor("display-2", "Synthetic Display 2", monitorWidth, 0, monitorWidth, monitorHeight, framebufferBase, pitch, true, false));
     desktop.recomputeBounds();
     return desktop;
+}
+
+inline DisplayVirtualDesktop makeSyntheticDualMonitorDesktopForMode(
+    DisplayModeKind mode,
+    uint32_t* framebufferBase = nullptr,
+    int monitorWidth = kSyntheticTestMonitorWidth,
+    int monitorHeight = kSyntheticTestMonitorHeight,
+    int pitch = 0)
+{
+    DisplayVirtualDesktop desktop = makeSyntheticDualMonitorDesktop(
+        framebufferBase,
+        monitorWidth,
+        monitorHeight,
+        pitch);
+    desktop.mode = mode;
+    if (mode == DisplayModeKind::Mirror) {
+        // Mirror keeps both descriptors enabled but gives them one logical
+        // viewport. No second framebuffer is implied by this model change.
+        for (auto& monitor : desktop.monitors) {
+            if (!monitor.isActive()) {
+                continue;
+            }
+            monitor.virtualX = 0;
+            monitor.virtualY = 0;
+            monitor.assignedX = 0;
+            monitor.assignedY = 0;
+        }
+    }
+    desktop.recomputeBounds();
+    return desktop;
+}
+
+inline void setDisplayVirtualDesktopPrimary(DisplayVirtualDesktop& desktop, const std::string& primaryId)
+{
+    bool matched = false;
+    for (auto& monitor : desktop.monitors) {
+        monitor.primary = !primaryId.empty() && monitor.id == primaryId;
+        matched = matched || monitor.primary;
+    }
+    if (!matched) {
+        for (auto& monitor : desktop.monitors) {
+            if (monitor.isActive()) {
+                monitor.primary = true;
+                break;
+            }
+        }
+    }
 }
 
 inline DisplayViewport makeHostedDisplayViewport(

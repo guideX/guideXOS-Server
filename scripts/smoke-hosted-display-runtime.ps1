@@ -476,6 +476,12 @@ function Invoke-HostedDisplayModeSmoke {
     Assert-Check -Mode $ModeName -Name 'active viewport origin' -Condition ($activeViewportOrigin -eq '0,0') -Detail ("activeViewportOrigin={0}" -f $activeViewportOrigin)
     Assert-Check -Mode $ModeName -Name 'desktop mode' -Condition ($desktopSummaryLine -match ('mode=' + [regex]::Escape($ExpectedDesktopMode))) -Detail ("line={0}" -f $desktopSummaryLine)
 
+    if ($ModeName -eq 'synthetic-only' -or $ModeName -eq 'dual-window') {
+        Assert-Check -Mode $ModeName -Name 'synthetic monitor count' -Condition ($desktopSummaryLine -match 'monitorCount=2') -Detail ("line={0}" -f $desktopSummaryLine)
+        Assert-Check -Mode $ModeName -Name 'synthetic virtual desktop size' -Condition ($desktopSummaryLine -match 'virtualDesktop=3840x1080') -Detail ("line={0}" -f $desktopSummaryLine)
+        Assert-Check -Mode $ModeName -Name 'synthetic monitor rectangles' -Condition ($desktopSummaryLine -match 'display-1.*@0,0 1920x1080.*display-2.*@1920,0 1920x1080') -Detail ("line={0}" -f $desktopSummaryLine)
+    }
+
     if ($ModeName -eq 'no-gates') {
         Assert-Check -Mode $ModeName -Name 'single target origin' -Condition ($summaryLine -match 'display-target-1 .* origin=0,0 .* backed=true') -Detail ("line={0}" -f $summaryLine)
         Assert-Check -Mode $ModeName -Name 'no secondary target' -Condition ($summaryLine -notmatch 'display-target-2 ') -Detail ("line={0}" -f $summaryLine)
