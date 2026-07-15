@@ -11,7 +11,7 @@ function Get-ManagedHostLogMapSymbolAddress([string]$Path, [string]$Symbol, [str
     throw "$Label symbol not found in map: $Symbol"
 }
 
-function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$MapPath, [string]$PeDumpPath, [switch]$GuideXosRuntimePack, [switch]$ManagedAllocation) {
+function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$MapPath, [string]$PeDumpPath, [switch]$GuideXosRuntimePack, [switch]$ManagedAllocation, [switch]$RepeatedAllocation) {
     $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
     $reversePInvoke = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvoke" "RhpReversePInvoke"
     $reverseReturn = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvokeReturn" "RhpReversePInvokeReturn"
@@ -72,6 +72,18 @@ function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$Map
             'g_guideXosManagedHeap',
             'g_guideXosAllocationDiagnostics'
         ) "Managed allocation runtime-pack evidence"
+        if ($RepeatedAllocation) {
+            Assert-ManagedHostLogFileContains $MapPath @(
+                'guideXosManagedAllocationCanFit\s+[0-9A-Fa-f]{16}',
+                'guideXosManagedAllocationValidateObject\s+[0-9A-Fa-f]{16}',
+                'guideXosManagedAllocationRecordFailure\s+[0-9A-Fa-f]{16}',
+                'guideXosManagedAllocationReport\s+[0-9A-Fa-f]{16}',
+                '__pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationCanFit__Ansi',
+                '__pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi',
+                '__pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationRecordFailure__Ansi',
+                '__pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationReport__Ansi'
+            ) "Repeated allocation proof helper binding evidence"
+        }
     }
 
     if (-not $GuideXosRuntimePack) {
@@ -298,11 +310,12 @@ function Assert-ManagedHostLogElfEnvelope(
     [string]$ElfDumpPath,
     [string]$RuntimeSupportSourcePath,
     [switch]$GuideXosRuntimePack,
-    [switch]$ManagedAllocation) {
+    [switch]$ManagedAllocation,
+    [switch]$RepeatedAllocation) {
     $elf = Read-ManagedHostLogElfEnvelope $ElfPath
     $pe = Get-ManagedHostLogPeImageEnvelope $PePath
     $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
-    $null = Assert-ManagedHostLogReversePInvokeChain $ElfPath $MapPath $PeDumpPath -GuideXosRuntimePack:$GuideXosRuntimePack -ManagedAllocation:$ManagedAllocation
+    $null = Assert-ManagedHostLogReversePInvokeChain $ElfPath $MapPath $PeDumpPath -GuideXosRuntimePack:$GuideXosRuntimePack -ManagedAllocation:$ManagedAllocation -RepeatedAllocation:$RepeatedAllocation
 
     if ($elf.Entry -ne $managedMain) { throw ("ELF entry 0x{0:X} is not ManagedMain 0x{1:X}." -f $elf.Entry, $managedMain) }
     if ($elf.LoadSegments.Count -eq 0) { throw "ELF has no PT_LOAD segments." }
@@ -339,16 +352,30 @@ function Assert-ManagedHostLogElfEnvelope(
     Assert-ManagedHostLogFileNotContains $ElfReadelfPath @('NEEDED', 'PT_INTERP', 'rwx') "ELF dependency scan"
 
     if ($ManagedAllocation) {
-        Assert-ManagedHostLogFileContains $NativeObjectDumpPath @(
-            'HostLogProof_HostLogProof_Program__ManagedMain>',
-            'movups\s+\(%rcx\),%xmm0',
-            'movups\s+%xmm0,0x10\(%rsi\)',
-            'call\s+[0-9A-Fa-f]+\s+<HostLogProof_HostLogProof_Program__GuideXosManagedArrayHostLog>'
-        ) "Managed array population and opaque helper call evidence"
-        Assert-ManagedHostLogFileContains $MapPath @(
-            'guideXosManagedArrayHostLog\s+[0-9A-Fa-f]{16}',
-            '__pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi'
-        ) "Managed array host-helper binding evidence"
+        if ($RepeatedAllocation) {
+            Assert-ManagedHostLogFileContains $NativeObjectDumpPath @(
+                'HostLogProof_HostLogProof_Program__ManagedMain>',
+                'guideXosManagedAllocationCanFit',
+                'guideXosManagedAllocationValidateObject',
+                'guideXosManagedAllocationReport'
+            ) "Repeated managed allocation and proof-helper call evidence"
+            Assert-ManagedHostLogFileContains $MapPath @(
+                'guideXosManagedAllocationCanFit\s+[0-9A-Fa-f]{16}',
+                'guideXosManagedAllocationValidateObject\s+[0-9A-Fa-f]{16}',
+                'guideXosManagedAllocationReport\s+[0-9A-Fa-f]{16}'
+            ) "Repeated managed allocation helper map evidence"
+        } else {
+            Assert-ManagedHostLogFileContains $NativeObjectDumpPath @(
+                'HostLogProof_HostLogProof_Program__ManagedMain>',
+                'movups\s+\(%rcx\),%xmm0',
+                'movups\s+%xmm0,0x10\(%rsi\)',
+                'call\s+[0-9A-Fa-f]+\s+<HostLogProof_HostLogProof_Program__GuideXosManagedArrayHostLog>'
+            ) "Managed array population and opaque helper call evidence"
+            Assert-ManagedHostLogFileContains $MapPath @(
+                'guideXosManagedArrayHostLog\s+[0-9A-Fa-f]{16}',
+                '__pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi'
+            ) "Managed array host-helper binding evidence"
+        }
     } else {
         Assert-ManagedHostLogFileContains $NativeObjectDumpPath @(
             'HostLogProof_HostLogProof_Program__ManagedMain>',

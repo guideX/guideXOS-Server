@@ -5,9 +5,13 @@ param(
     [string]$StageScript = "",
     [string]$ServerExe = "",
     [string]$RuntimePackRoot = "",
-    [ValidateSet("NonAllocating", "Allocating")]
+    [ValidateSet("NonAllocating", "Allocating", "Repeated")]
     [string]$AllocationMode = "NonAllocating",
+    [string]$RuntimePackOutputRoot = "",
+    [ValidateSet("Primary64KiB", "Small4KiB")]
+    [string]$HeapConfiguration = "Primary64KiB",
     [switch]$UseGuideXosRuntimePack,
+    [switch]$EnableFaultDiagnostics,
     [int]$TimeoutSeconds = 240,
     [switch]$SkipFailureProbe,
     [switch]$SkipBuild
@@ -166,7 +170,7 @@ $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $StageRoot = [System.IO.Path]::GetFullPath($StageRoot)
 $StageScript = [System.IO.Path]::GetFullPath($StageScript)
 $ServerExe = [System.IO.Path]::GetFullPath($ServerExe)
-$expectedMessage = if ($AllocationMode -eq "Allocating") { "Hello from managed heap" } else { "Hello from managed guideXOS code" }
+$expectedMessage = if ($AllocationMode -eq "Allocating") { "Hello from managed heap" } elseif ($AllocationMode -eq "Repeated") { "Managed allocations completed:" } else { "Hello from managed guideXOS code" }
 
 if (-not (Test-Path -LiteralPath $StageScript)) {
     throw "Stage script not found: $StageScript"
@@ -175,6 +179,7 @@ if (-not (Test-Path -LiteralPath $StageScript)) {
 $mingwBin = "C:\mingw64\bin"
 $oldPath = $env:PATH
 $originalStageRoot = $env:GXOS_NATIVE_ELF_STAGE_ROOT
+$originalFaultDiagnostics = $env:GX_NATIVE_ELF_FAULT_DIAGNOSTICS
 if (Test-Path -LiteralPath $mingwBin) {
     $env:PATH = "$mingwBin;$env:PATH"
 }
@@ -211,6 +216,8 @@ try {
         $stageArguments += @("-RuntimePackRoot", $RuntimePackRoot, "-UseGuideXosRuntimePack")
     }
     $stageArguments += @("-AllocationMode", $AllocationMode)
+    if (-not [string]::IsNullOrWhiteSpace($RuntimePackOutputRoot)) { $stageArguments += @("-RuntimePackOutputRoot", $RuntimePackOutputRoot) }
+    if ($HeapConfiguration -ne "Primary64KiB") { $stageArguments += @("-HeapConfiguration", $HeapConfiguration) }
     if ($SkipBuild) { $stageArguments += "-SkipBuild" }
     $stageOutput = & powershell -ExecutionPolicy Bypass -File $StageScript @stageArguments
     if ($LASTEXITCODE -ne 0) {
@@ -292,7 +299,7 @@ try {
         }
     }
     if ($UseGuideXosRuntimePack) {
-        $expectedRuntimePackIdentity = if ($AllocationMode -eq "Allocating") { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+        $expectedRuntimePackIdentity = if ($AllocationMode -eq "Allocating") { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } elseif ($AllocationMode -eq "Repeated") { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
         if ([string]::IsNullOrWhiteSpace([string]$stageEnvelope.runtimePackIdentity) -or
             [string]$stageEnvelope.runtimePackIdentity -ne $expectedRuntimePackIdentity) {
             throw "Stage envelope does not identify the locked guideXOS runtime pack."
@@ -319,6 +326,9 @@ try {
         Assert-Contains -Text $preflight.StdOut -Needle "Result: app not found" -Reason "default inventory isolation"
 
         Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $stageAppsRoot
+        if ($EnableFaultDiagnostics) {
+            Set-EnvValue -Name "GX_NATIVE_ELF_FAULT_DIAGNOSTICS" -Value "1"
+        }
 
         $positiveCommands = @(
             "nativeapp.capabilities",
@@ -350,7 +360,31 @@ try {
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionSuccess:\s+true$' -Expected 2 -Reason "successful executions"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionAttempted:\s+true$' -Expected 2 -Reason "attempted executions"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: .*Host log call count:\s+1' -Expected 2 -Reason "one host log call per launch"
-        Assert-RegexCountExactly -Text $output -Pattern ("(?m)^executionDiagnostics: .*Last host log message:\s+" + [regex]::Escape($expectedMessage)) -Expected 2 -Reason "managed message in executor diagnostics"
+        $expectedMessagePattern = if ($AllocationMode -eq "Repeated") { [regex]::Escape($expectedMessage) + ".*" } else { [regex]::Escape($expectedMessage) }
+        Assert-RegexCountExactly -Text $output -Pattern ("(?m)^executionDiagnostics: .*Last host log message:\s+" + $expectedMessagePattern) -Expected 2 -Reason "managed message in executor diagnostics"
+        if ($AllocationMode -eq "Repeated") {
+            $expectedHeapBytes = [int]$stageEnvelope.heapBytes
+            $expectedObjectSize = [int]$stageEnvelope.expectedObjectSize
+            $expectedAllocationCount = [math]::Floor($expectedHeapBytes / $expectedObjectSize)
+            $expectedRemainingBytes = $expectedHeapBytes - ($expectedAllocationCount * $expectedObjectSize)
+            $repeatedSummaryPattern = "Managed allocations completed:\s+$expectedAllocationCount; heap=$expectedHeapBytes; object=$expectedObjectSize; remaining=$expectedRemainingBytes;"
+            Assert-RegexCountExactly -Text $output -Pattern ("(?m)^executionDiagnostics: .*" + $repeatedSummaryPattern) -Expected 2 -Reason "repeated allocation envelope"
+            Assert-RegexCountExactly -Text $output -Pattern ("(?m)^executionDiagnostics: .*pointerBeforeFailure=(0x[0-9a-fA-F]+); pointerAfterFailure=\1;") -Expected 2 -Reason "allocation pointer unchanged after OOM"
+            foreach ($field in @("monotonicity=PASS", "nonOverlap=PASS", "sampledIntegrity=PASS", "zeroInit=PASS", "collectionEntered=0", "heapExpansionOccurred=0", "controlledOom=1")) {
+                Assert-RegexCountExactly -Text $output -Pattern ("(?m)^executionDiagnostics: .*" + [regex]::Escape($field)) -Expected 2 -Reason $field
+            }
+            Write-Host "Expected usable heap bytes: $expectedHeapBytes"
+            Write-Host "Expected allocation count: $expectedAllocationCount"
+            Write-Host "Observed allocation count: $expectedAllocationCount"
+            Write-Host "Allocation monotonicity: PASS"
+            Write-Host "Object non-overlap: PASS"
+            Write-Host "Sampled object integrity: PASS"
+            Write-Host "Controlled OOM reached: PASS"
+            Write-Host "Allocation pointer unchanged after OOM: PASS"
+            Write-Host "Collection entered: no"
+            Write-Host "Heap expansion occurred: no"
+            Write-Host "Second in-process OOM run: PASS"
+        }
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^returnCode:\s+0$' -Expected 2 -Reason "return code"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^gxMainReturnCode:\s+0$' -Expected 2 -Reason "managed return code"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^trampolineUsed:\s+true$' -Expected 2 -Reason "trampoline use"
@@ -359,7 +393,7 @@ try {
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^preferredBaseMappingSuccess:\s+true$' -Expected 2 -Reason "preferred-base success"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: Native ELF TLS bootstrap installed' -Expected 2 -Reason "TLS bootstrap success"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: .*Preferred-base mapping:\s+success' -Expected 2 -Reason "preferred-base diagnostic"
-        Assert-RegexCountExactly -Text $output -Pattern ("\[NativeAppHost\].*log: " + [regex]::Escape($expectedMessage)) -Expected 2 -Reason "host callback output"
+        Assert-RegexCountExactly -Text $output -Pattern ("\[NativeAppHost\].*log: " + $expectedMessagePattern) -Expected 2 -Reason "host callback output"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^cleanupAttempted:\s+true$' -Expected 2 -Reason "cleanup"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^lifecycleStateAfterExecution:\s+Exited$' -Expected 2 -Reason "exit state"
         Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^preferredBase:\s+0x10000000$' -Minimum 2 -Reason "preferred base"
@@ -371,7 +405,8 @@ try {
         $message = $expectedMessage
         $messageLines = @($output -replace "`r", "" -split "`n" | Where-Object { $_ -like "*$message*" })
         foreach ($line in $messageLines) {
-            if ($line -notmatch ("^\[NativeAppHost\].*log: " + [regex]::Escape($expectedMessage) + '$') -and
+            $approvedMessagePattern = if ($AllocationMode -eq "Repeated") { [regex]::Escape($expectedMessage) + '.*' } else { [regex]::Escape($expectedMessage) + '$' }
+            if ($line -notmatch ("^\[NativeAppHost\].*log: " + $approvedMessagePattern) -and
                 $line -notmatch ("Last host log message: " + [regex]::Escape($expectedMessage)) -and
                 $line -notmatch ("executionDiagnostics: .*" + [regex]::Escape($expectedMessage))) {
                 throw "Managed success message appeared through an unapproved output path: $line"
@@ -416,6 +451,7 @@ try {
 } finally {
     $env:PATH = $oldPath
     Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $originalStageRoot
+    Set-EnvValue -Name "GX_NATIVE_ELF_FAULT_DIAGNOSTICS" -Value $originalFaultDiagnostics
 }
 
 

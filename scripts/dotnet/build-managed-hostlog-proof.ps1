@@ -7,8 +7,11 @@
     [string]$OutputRoot = "",
     [string]$RuntimePackRoot = "",
     [switch]$UseGuideXosRuntimePack,
-    [ValidateSet("NonAllocating", "Allocating")]
+    [ValidateSet("NonAllocating", "Allocating", "Repeated")]
     [string]$AllocationMode = "NonAllocating",
+    [string]$RuntimePackOutputRoot = "",
+    [ValidateSet("Primary64KiB", "Small4KiB")]
+    [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
 )
 
@@ -133,14 +136,20 @@ if ($UseGuideXosRuntimePack) {
     if (-not (Test-Path -LiteralPath $runtimePackBuild)) {
         throw "GuideXOS runtime-pack build script not found: $runtimePackBuild"
     }
-    $runtimePackOutputRoot = Join-Path $RepoRoot "out\dotnet\runtime-pack"
+    if ([string]::IsNullOrWhiteSpace($RuntimePackOutputRoot)) {
+        $RuntimePackOutputRoot = Join-Path $RepoRoot "out\dotnet\runtime-pack"
+    }
+    $runtimePackOutputRoot = [System.IO.Path]::GetFullPath($RuntimePackOutputRoot)
+    Assert-WithinRoot $runtimePackOutputRoot (Join-Path $RepoRoot "out\dotnet") "Runtime-pack output"
     $runtimePackBuildArguments = @(
         "-RepoRoot", $RepoRoot,
         "-RuntimePackRoot", $RuntimePackRoot,
         "-OutputRoot", $runtimePackOutputRoot
     )
     if ($Clean) { $runtimePackBuildArguments += "-Clean" }
-    if ($AllocationMode -eq "Allocating") { $runtimePackBuildArguments += "-ManagedAllocation" }
+    if ($AllocationMode -eq "Repeated") { $runtimePackBuildArguments += "-ManagedRepeatedAllocation" }
+    elseif ($AllocationMode -eq "Allocating") { $runtimePackBuildArguments += "-ManagedAllocation" }
+    if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
     if ($LASTEXITCODE -ne 0) {
         throw "GuideXOS runtime-pack build failed with exit code $LASTEXITCODE"
@@ -297,6 +306,8 @@ $toolchainLines = @(
         "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
         "AllocationMode=$AllocationMode"
     "RuntimePackRoot=$RuntimePackRoot"
+    "RuntimePackOutputRoot=$RuntimePackOutputRoot"
+    "HeapConfiguration=$HeapConfiguration"
     "RuntimePackManifest=$runtimePackManifest"
     "RuntimePackObject=$runtimePackObject"
     "RuntimePackSdkPath=$runtimePackSdkPath"
@@ -435,7 +446,7 @@ if ($UseGuideXosRuntimePack) {
     }
 }
 Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
-Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -eq "Allocating") | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated")) -RepeatedAllocation:($AllocationMode -eq "Repeated") | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan

@@ -451,3 +451,9 @@ The focused checks are:
 
 Generated runtime objects, libraries, PE files, and ELF files remain ignored
 and are not tracked by Git.
+
+## Later status
+
+The original single-allocation milestone above is preserved unchanged. The
+follow-up bounded repeated-allocation/OOM result is documented in
+[`MANAGED_BOUNDED_ALLOCATION_OOM_PROOF.md`](MANAGED_BOUNDED_ALLOCATION_OOM_PROOF.md).

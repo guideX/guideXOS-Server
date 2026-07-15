@@ -5,6 +5,9 @@ param(
     [string]$StockRuntimePackRoot = "",
     [string]$ExternalRuntimeRoot = "",
     [switch]$ManagedAllocation,
+    [switch]$ManagedRepeatedAllocation,
+    [ValidateSet("Primary64KiB", "Small4KiB")]
+    [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
 )
 
@@ -133,6 +136,8 @@ $lock = Read-Lock
 $stockRoot = Find-StockRuntimePack $StockRuntimePackRoot
 Assert-StockPack $stockRoot $lock
 $externalCommit = $null
+$managedHeapBytes = if ($HeapConfiguration -eq "Primary64KiB") { 65536 } else { 4096 }
+if ($ManagedRepeatedAllocation) { $ManagedAllocation = $true }
 
 if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
     $ExternalRuntimeRoot = [System.IO.Path]::GetFullPath($ExternalRuntimeRoot)
@@ -247,7 +252,7 @@ $lines = @(
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION' } else { '' }) /Fo:`"$object`" `"$source`"",
+    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' })" } else { '' }) /Fo:`"$object`" `"$source`"",
     "exit /b %errorlevel%"
 )
 $lines | Set-Content -LiteralPath $batch -Encoding ASCII
@@ -260,7 +265,7 @@ $objectHash = Get-Hash $object
 $lockPath = Join-Path $RuntimePackRoot "runtime-pack.lock.json"
 $manifest = [ordered]@{
     schemaVersion = 1
-    identity = if ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     architecture = $lock.architecture
     targetFramework = $lock.targetFramework
     runtimeIdentifier = $lock.runtimeIdentifier
@@ -294,8 +299,12 @@ $manifest = [ordered]@{
     platformObject = $lock.platformObject
     liveWindowsImportsReplaced = @("FlsGetValue", "FlsSetValue", "RhpReversePInvoke", "RhpReversePInvokeReturn")
     managedAllocation = [bool]$ManagedAllocation
-    allocationStrategy = if ($ManagedAllocation) { "bounded-static-image-backed-no-collection" } else { "none" }
-    managedHeapBytes = if ($ManagedAllocation) { 65536 } else { 0 }
+    allocationMode = if ($ManagedRepeatedAllocation) { "Repeated" } elseif ($ManagedAllocation) { "Allocating" } else { "NonAllocating" }
+    allocationStrategy = if ($ManagedRepeatedAllocation) { "bounded-static-image-backed-no-collection-with-proof-specific-preflight-oom" } elseif ($ManagedAllocation) { "bounded-static-image-backed-no-collection" } else { "none" }
+    managedHeapConfiguration = if ($ManagedAllocation) { $HeapConfiguration } else { "None" }
+    managedHeapBytes = if ($ManagedAllocation) { $managedHeapBytes } else { 0 }
+    managedArrayLength = if ($ManagedRepeatedAllocation) { 256 } elseif ($ManagedAllocation) { 24 } else { 0 }
+    managedObjectSize = if ($ManagedRepeatedAllocation) { 280 } elseif ($ManagedAllocation) { 40 } else { 0 }
     managedExceptions = $false
     managedThreads = $false
 }

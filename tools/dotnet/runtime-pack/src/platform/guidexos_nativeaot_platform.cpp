@@ -24,9 +24,28 @@ constexpr gx_uint32 kFlsCellOffset = 0x80u;
 constexpr gx_uint32 kFlsCellCount = 8u;
 constexpr gx_uint32 kMinimumTlsBlockSize = 0x110u;
 
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
+constexpr gx_uint32 kReadyToRunDehydratedDataSection = 0xCFu;
+constexpr gx_uint32 kReadyToRunHeaderSectionCountOffset = 0x0Cu;
+constexpr gx_uint32 kReadyToRunHeaderSectionsOffset = 0x10u;
+constexpr gx_uint32 kReadyToRunSectionEntrySize = 0x18u;
+constexpr gx_uint32 kReadyToRunSectionTypeOffset = 0x00u;
+constexpr gx_uint32 kReadyToRunSectionStartOffset = 0x08u;
+constexpr gx_uint32 kReadyToRunSectionEndOffset = 0x10u;
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-constexpr gx_size kManagedHeapBytes = 0x10000u;
+#ifndef GUIDEXOS_MANAGED_HEAP_BYTES
+#define GUIDEXOS_MANAGED_HEAP_BYTES 0x10000u
+#endif
+constexpr gx_size kManagedHeapBytes = static_cast<gx_size>(GUIDEXOS_MANAGED_HEAP_BYTES);
 constexpr gx_uint32 kManagedArrayDataOffset = 0x10u;
+// The hydrated NativeAOT byte[] EEType reports a 0x18-byte base size. The
+// array data still begins at +0x10; the extra eight bytes are part of the
+// generated allocation envelope and must be included in the boundary check.
+constexpr gx_uint32 kManagedArrayBaseSize = 0x18u;
+constexpr gx_uint32 kManagedArrayComponentSize = 1u;
+static_assert(kManagedHeapBytes >= 0x1000u, "The bounded diagnostic heap must leave room for runtime setup and several arrays.");
 
 struct GuideXosAllocationDiagnostics {
     gx_uint32 heapInitialized;
@@ -41,8 +60,25 @@ struct GuideXosAllocationDiagnostics {
     gx_uintptr heapSize;
     gx_uintptr initialAllocationPointer;
     gx_uintptr allocationPointerAfter;
+    gx_uintptr allocationPointerBeforeFailure;
+    gx_uintptr allocationPointerAfterFailure;
+    gx_uintptr remainingBytesBeforeFailure;
+    gx_uintptr previousObject;
+    gx_uintptr lastObject;
+    gx_uintptr lastObjectSize;
     gx_uintptr returnedObject;
     gx_uintptr arrayData;
+    gx_uint32 controlledOutOfMemory;
+    gx_uint32 pointerContractFailures;
+    gx_uint32 objectAlignmentFailures;
+    gx_uint32 objectRangeFailures;
+    gx_uint32 objectLayoutFailures;
+    gx_uint32 zeroInitializationChecks;
+    gx_uint32 zeroInitializationFailures;
+    gx_uint32 patternChecks;
+    gx_uint32 patternFailures;
+    gx_uint32 sampledObjectFailures;
+    gx_uint32 heapExpansionOccurred;
 };
 
 // The allocation experiment uses a bounded, image-backed region. The mapped
@@ -59,6 +95,13 @@ extern "C" gx_uint32 _tls_index;
 extern "C" gx_uint32 g_flsIndex = kGuideXosFlsIndex;
 
 volatile gx_uint32 g_guideXosRuntimeStartupState = 0;
+
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
+extern "C" void __cdecl S_P_CoreLib_Internal_Runtime_CompilerHelpers_StartupCodeHelpers__RehydrateData(void* dehydratedData, gx_uint32 size);
+extern "C" unsigned char __dehydrated_data[];
+extern "C" unsigned char __ReadyToRunHeader[];
+volatile gx_uint32 g_guideXosGeneratedMetadataHydrated = 0;
+#endif
 
 [[noreturn]] void guideXosFailFast(gx_uint32 reason) {
     (void)reason;
@@ -89,10 +132,96 @@ unsigned char* runtimeCell(unsigned char* block) {
     return block + kRuntimeCellOffset;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
+void hydrateGeneratedMetadata() {
+    if (g_guideXosGeneratedMetadataHydrated != 0u) {
+        return;
+    }
+
+    const unsigned char* header = __ReadyToRunHeader;
+    const gx_uint32 sectionCount = *reinterpret_cast<const gx_uint16*>(header + kReadyToRunHeaderSectionCountOffset);
+    if (sectionCount > 0x1000u) {
+        guideXosFailFast(9u);
+    }
+
+    for (gx_uint32 i = 0; i < sectionCount; ++i) {
+        const unsigned char* section = header + kReadyToRunHeaderSectionsOffset +
+            (static_cast<gx_size>(i) * kReadyToRunSectionEntrySize);
+        const gx_uint32 sectionType = *reinterpret_cast<const gx_uint32*>(section + kReadyToRunSectionTypeOffset);
+        if (sectionType != kReadyToRunDehydratedDataSection) {
+            continue;
+        }
+
+        const gx_uintptr sectionStart = *reinterpret_cast<const gx_uintptr*>(section + kReadyToRunSectionStartOffset);
+        const gx_uintptr sectionEnd = *reinterpret_cast<const gx_uintptr*>(section + kReadyToRunSectionEndOffset);
+        const gx_uintptr expectedStart = reinterpret_cast<gx_uintptr>(__dehydrated_data);
+        if (sectionStart != expectedStart || sectionEnd <= sectionStart || sectionEnd - sectionStart > 0xFFFFFFFFu) {
+            guideXosFailFast(9u);
+        }
+
+        S_P_CoreLib_Internal_Runtime_CompilerHelpers_StartupCodeHelpers__RehydrateData(
+            reinterpret_cast<void*>(sectionStart), static_cast<gx_uint32>(sectionEnd - sectionStart));
+        g_guideXosGeneratedMetadataHydrated = 1u;
+        return;
+    }
+
+    guideXosFailFast(9u);
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+gx_size alignedArrayObjectSize(gx_size length) {
+    if (length > ((~static_cast<gx_size>(0)) - kManagedArrayBaseSize - 7u) / kManagedArrayComponentSize) {
+        return 0u;
+    }
+    const gx_size unalignedObjectSize = kManagedArrayBaseSize + (kManagedArrayComponentSize * length);
+    return (unalignedObjectSize + 7u) & ~static_cast<gx_size>(7u);
+}
+
+void markAllocationOutOfMemory(unsigned char* cell, gx_uintptr allocationPointer) {
+    g_guideXosAllocationDiagnostics.outOfMemory = 1u;
+    g_guideXosAllocationDiagnostics.controlledOutOfMemory = 0u;
+    g_guideXosAllocationDiagnostics.allocationPointerBeforeFailure = allocationPointer;
+    g_guideXosAllocationDiagnostics.allocationPointerAfterFailure = allocationPointer;
+    const gx_uintptr allocationLimit = cell == nullptr
+        ? 0u
+        : reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell + sizeof(void*)));
+    g_guideXosAllocationDiagnostics.remainingBytesBeforeFailure = allocationLimit >= allocationPointer
+        ? allocationLimit - allocationPointer
+        : 0u;
+    g_guideXosAllocationDiagnostics.allocationPointerAfter = allocationPointer;
+}
+
+#endif
+
 void initializeRuntimeState(unsigned char* block) {
     if (block == nullptr) {
         guideXosFailFast(1u);
     }
+
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+    // Native ELF launch cleanup may recycle the same TLS block for the next
+    // application launch. Allocation state and proof diagnostics are launch
+    // scoped, so the reverse-P/Invoke entry is the explicit fresh-launch
+    // boundary rather than the stale TLS initialized bit.
+    volatile unsigned char* diagnostics = reinterpret_cast<volatile unsigned char*>(&g_guideXosAllocationDiagnostics);
+    for (gx_size i = 0; i < sizeof(g_guideXosAllocationDiagnostics); ++i) {
+        diagnostics[i] = 0;
+    }
+    for (gx_size i = 0; i < kManagedHeapBytes; ++i) {
+        g_guideXosManagedHeap[i] = 0;
+    }
+    const gx_uintptr heapBase = reinterpret_cast<gx_uintptr>(g_guideXosManagedHeap);
+    const gx_uintptr heapLimit = heapBase + kManagedHeapBytes;
+    *reinterpret_cast<void**>(runtimeCell(block)) = reinterpret_cast<void*>(heapBase);
+    *reinterpret_cast<void**>(runtimeCell(block) + sizeof(void*)) = reinterpret_cast<void*>(heapLimit);
+    g_guideXosAllocationDiagnostics.heapInitialized = 1u;
+    g_guideXosAllocationDiagnostics.heapBase = heapBase;
+    g_guideXosAllocationDiagnostics.heapSize = kManagedHeapBytes;
+    g_guideXosAllocationDiagnostics.initialAllocationPointer = heapBase;
+    g_guideXosAllocationDiagnostics.allocationPointerAfter = heapBase;
+    g_guideXosAllocationDiagnostics.heapExpansionOccurred = 0u;
+#endif
 
     if (g_guideXosRuntimeStartupState == 0) {
         // This is the guideXOS runtime-pack's deterministic FLS namespace.
@@ -112,18 +241,6 @@ void initializeRuntimeState(unsigned char* block) {
         // RhpNewArray/RhpNewFast consume the current thread's allocation
         // context at TLS block + 0x30: pointer at +0 and limit at +8.
         // This is a bounded no-collection allocation context, not a GC heap.
-        for (gx_size i = 0; i < kManagedHeapBytes; ++i) {
-            g_guideXosManagedHeap[i] = 0;
-        }
-        const gx_uintptr heapBase = reinterpret_cast<gx_uintptr>(g_guideXosManagedHeap);
-        const gx_uintptr heapLimit = heapBase + kManagedHeapBytes;
-        *reinterpret_cast<void**>(cell) = reinterpret_cast<void*>(heapBase);
-        *reinterpret_cast<void**>(cell + sizeof(void*)) = reinterpret_cast<void*>(heapLimit);
-        g_guideXosAllocationDiagnostics.heapInitialized = 1u;
-        g_guideXosAllocationDiagnostics.heapBase = heapBase;
-        g_guideXosAllocationDiagnostics.heapSize = kManagedHeapBytes;
-        g_guideXosAllocationDiagnostics.initialAllocationPointer = heapBase;
-        g_guideXosAllocationDiagnostics.allocationPointerAfter = heapBase;
 #else
         *reinterpret_cast<void**>(cell) = cell;
 #endif
@@ -134,16 +251,32 @@ void initializeRuntimeState(unsigned char* block) {
             *value = cell;
         }
     }
+
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
+    hydrateGeneratedMetadata();
+#endif
 }
 
 } // namespace
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 extern "C" __declspec(noinline) int __cdecl guideXosManagedArrayHostLog(void* context, void* arrayObject);
+extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationCanFit(gx_size length);
+extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationValidateObject(void* arrayObject, gx_size length, gx_uint32 sequence, gx_uint32 zeroInitialized, gx_uint32 patternValid);
+extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationRecordFailure(gx_uint32 reason);
+extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationReport(void* context, gx_uint32 status);
 // HostLogProof's generated NativeAOT P/Invoke slot is intentionally bound by
 // the application-scoped runtime pack. The ELF loader does not run the Windows
 // module resolver that would normally populate this slot.
+#if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi;
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationCanFit__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationRecordFailure__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationReport__Ansi;
+#endif
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
@@ -175,20 +308,112 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     const gx_uintptr allocationPointer = reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell));
     const gx_uintptr allocationLimit = reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell + sizeof(void*)));
     if (allocationPointer == 0u || allocationLimit < allocationPointer || objectSize > allocationLimit - allocationPointer) {
-        g_guideXosAllocationDiagnostics.outOfMemory = 1u;
+        markAllocationOutOfMemory(cell, allocationPointer);
         guideXosFailFast(6u);
     }
 
+    g_guideXosAllocationDiagnostics.previousObject = g_guideXosAllocationDiagnostics.lastObject;
     void* result = guideXosStockRhpNewArray(eeType, length);
+    const gx_uintptr allocationPointerAfter = reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell));
+    if (result == nullptr || reinterpret_cast<gx_uintptr>(result) != allocationPointer ||
+        allocationPointerAfter != allocationPointer + objectSize ||
+        allocationPointerAfter > allocationLimit) {
+        g_guideXosAllocationDiagnostics.pointerContractFailures += 1u;
+        guideXosFailFast(8u);
+    }
     g_guideXosAllocationDiagnostics.allocationCount += 1u;
     g_guideXosAllocationDiagnostics.returnedObject = reinterpret_cast<gx_uintptr>(result);
     g_guideXosAllocationDiagnostics.arrayData = reinterpret_cast<gx_uintptr>(result) + kManagedArrayDataOffset;
-    g_guideXosAllocationDiagnostics.allocationPointerAfter = reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell));
-    if (result == nullptr) {
-        g_guideXosAllocationDiagnostics.outOfMemory = 1u;
-        guideXosFailFast(6u);
-    }
+    g_guideXosAllocationDiagnostics.lastObject = reinterpret_cast<gx_uintptr>(result);
+    g_guideXosAllocationDiagnostics.lastObjectSize = objectSize;
+    g_guideXosAllocationDiagnostics.allocationPointerAfter = allocationPointerAfter;
     return result;
+}
+
+extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationCanFit(gx_size length) {
+    const gx_size objectSize = alignedArrayObjectSize(length);
+    g_guideXosAllocationDiagnostics.requestedArrayLength = static_cast<gx_uint32>(length);
+    g_guideXosAllocationDiagnostics.requestedObjectSize = static_cast<gx_uint32>(objectSize);
+    unsigned char* block = currentTlsBlock();
+    unsigned char* cell = runtimeCell(block);
+    if (objectSize == 0u || cell == nullptr) {
+        g_guideXosAllocationDiagnostics.pointerContractFailures += 1u;
+        return -1;
+    }
+
+    const gx_uintptr allocationPointer = reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell));
+    const gx_uintptr allocationLimit = reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell + sizeof(void*)));
+    if (allocationPointer == 0u || allocationLimit < allocationPointer) {
+        g_guideXosAllocationDiagnostics.pointerContractFailures += 1u;
+        return -1;
+    }
+    if (objectSize > allocationLimit - allocationPointer) {
+        markAllocationOutOfMemory(cell, allocationPointer);
+        g_guideXosAllocationDiagnostics.controlledOutOfMemory = 1u;
+        return 0;
+    }
+    return 1;
+}
+
+extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationValidateObject(
+    void* arrayObject,
+    gx_size length,
+    gx_uint32 sequence,
+    gx_uint32 zeroInitialized,
+    gx_uint32 patternValid) {
+    const gx_size objectSize = alignedArrayObjectSize(length);
+    const gx_uintptr objectAddress = reinterpret_cast<gx_uintptr>(arrayObject);
+    const gx_uintptr heapBase = reinterpret_cast<gx_uintptr>(g_guideXosManagedHeap);
+    const gx_uintptr heapLimit = heapBase + kManagedHeapBytes;
+    gx_uint32 failure = 0u;
+
+    g_guideXosAllocationDiagnostics.zeroInitializationChecks += 1u;
+    if (zeroInitialized == 0u) {
+        g_guideXosAllocationDiagnostics.zeroInitializationFailures += 1u;
+        failure = 1u;
+    }
+    g_guideXosAllocationDiagnostics.patternChecks += 1u;
+    if (patternValid == 0u) {
+        g_guideXosAllocationDiagnostics.patternFailures += 1u;
+        failure = 1u;
+    }
+    if (arrayObject == nullptr || (objectAddress & 7u) != 0u) {
+        g_guideXosAllocationDiagnostics.objectAlignmentFailures += 1u;
+        failure = 1u;
+    }
+    if (objectAddress < heapBase || objectSize == 0u || objectAddress > heapLimit - objectSize) {
+        g_guideXosAllocationDiagnostics.objectRangeFailures += 1u;
+        failure = 1u;
+    } else if (objectAddress + objectSize != g_guideXosAllocationDiagnostics.allocationPointerAfter ||
+               objectAddress != g_guideXosAllocationDiagnostics.lastObject) {
+        g_guideXosAllocationDiagnostics.objectRangeFailures += 1u;
+        failure = 1u;
+    }
+    if (arrayObject != nullptr && *reinterpret_cast<gx_uint32*>(reinterpret_cast<unsigned char*>(arrayObject) + 8u) != length) {
+        g_guideXosAllocationDiagnostics.objectLayoutFailures += 1u;
+        failure = 1u;
+    }
+    if (arrayObject != nullptr && objectSize >= kManagedArrayDataOffset + 4u) {
+        const unsigned char* data = reinterpret_cast<const unsigned char*>(arrayObject) + kManagedArrayDataOffset;
+        const gx_uint32 observedSequence = static_cast<gx_uint32>(data[0]) |
+            (static_cast<gx_uint32>(data[1]) << 8u) |
+            (static_cast<gx_uint32>(data[2]) << 16u) |
+            (static_cast<gx_uint32>(data[3]) << 24u);
+        if (observedSequence != sequence) {
+            g_guideXosAllocationDiagnostics.objectLayoutFailures += 1u;
+            failure = 1u;
+        }
+    }
+    if (failure != 0u) {
+        g_guideXosAllocationDiagnostics.sampledObjectFailures += 1u;
+    }
+    return failure == 0u ? 0 : -1;
+}
+
+extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationRecordFailure(gx_uint32 reason) {
+    (void)reason;
+    g_guideXosAllocationDiagnostics.sampledObjectFailures += 1u;
+    return -1;
 }
 
 struct GuideXosNativeHostCallTable {
@@ -203,6 +428,80 @@ struct GuideXosNativeAppContext {
     GuideXosNativeHostCallTable* host;
     void* userData;
 };
+
+void appendReportText(char*& cursor, char* end, const char* text) {
+    while (*text != '\0' && cursor < end) *cursor++ = *text++;
+}
+
+void appendReportUnsigned(char*& cursor, char* end, gx_uintptr value) {
+    char reversed[32];
+    gx_uint32 count = 0u;
+    do {
+        reversed[count++] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && count < sizeof(reversed));
+    while (count != 0u && cursor < end) *cursor++ = reversed[--count];
+}
+
+void appendReportHex(char*& cursor, char* end, gx_uintptr value) {
+    static constexpr char digits[] = "0123456789abcdef";
+    appendReportText(cursor, end, "0x");
+    char reversed[16];
+    gx_uint32 count = 0u;
+    do {
+        reversed[count++] = digits[value & 0xFu];
+        value >>= 4u;
+    } while (value != 0u && count < sizeof(reversed));
+    while (count != 0u && cursor < end) *cursor++ = reversed[--count];
+}
+
+extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationReport(void* context, gx_uint32 status) {
+    auto* appContext = reinterpret_cast<GuideXosNativeAppContext*>(context);
+    if (appContext == nullptr || appContext->host == nullptr || appContext->host->log == nullptr) {
+        guideXosFailFast(7u);
+    }
+    char buffer[1024];
+    char* cursor = buffer;
+    char* end = buffer + sizeof(buffer) - 2;
+    unsigned char* block = currentTlsBlock();
+    unsigned char* cell = runtimeCell(block);
+    const gx_uintptr currentPointer = cell == nullptr ? 0u : reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell));
+    const gx_uintptr currentLimit = cell == nullptr ? 0u : reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell + sizeof(void*)));
+    appendReportText(cursor, end, status == 0u ? "Managed allocations completed: " : "Managed repeated allocation integrity failure: ");
+    appendReportUnsigned(cursor, end, g_guideXosAllocationDiagnostics.allocationCount);
+    appendReportText(cursor, end, "; heap=");
+    appendReportUnsigned(cursor, end, g_guideXosAllocationDiagnostics.heapSize);
+    appendReportText(cursor, end, "; object=");
+    appendReportUnsigned(cursor, end, g_guideXosAllocationDiagnostics.lastObjectSize);
+    appendReportText(cursor, end, "; remaining=");
+    appendReportUnsigned(cursor, end, g_guideXosAllocationDiagnostics.remainingBytesBeforeFailure);
+    appendReportText(cursor, end, "; initial=");
+    appendReportHex(cursor, end, g_guideXosAllocationDiagnostics.initialAllocationPointer);
+    appendReportText(cursor, end, "; pointerBeforeFailure=");
+    appendReportHex(cursor, end, g_guideXosAllocationDiagnostics.allocationPointerBeforeFailure);
+    appendReportText(cursor, end, "; pointerAfterFailure=");
+    appendReportHex(cursor, end, g_guideXosAllocationDiagnostics.allocationPointerAfterFailure);
+    appendReportText(cursor, end, "; monotonicity=");
+    appendReportText(cursor, end, g_guideXosAllocationDiagnostics.pointerContractFailures == 0u ? "PASS" : "FAIL");
+    appendReportText(cursor, end, "; nonOverlap=");
+    appendReportText(cursor, end, g_guideXosAllocationDiagnostics.objectRangeFailures == 0u ? "PASS" : "FAIL");
+    appendReportText(cursor, end, "; sampledIntegrity=");
+    appendReportText(cursor, end, g_guideXosAllocationDiagnostics.sampledObjectFailures == 0u ? "PASS" : "FAIL");
+    appendReportText(cursor, end, "; zeroInit=");
+    appendReportText(cursor, end, g_guideXosAllocationDiagnostics.zeroInitializationFailures == 0u ? "PASS" : "FAIL");
+    appendReportText(cursor, end, "; collectionEntered=0; heapExpansionOccurred=0; controlledOom=");
+    appendReportUnsigned(cursor, end, g_guideXosAllocationDiagnostics.controlledOutOfMemory);
+    appendReportText(cursor, end, "; currentPointer=");
+    appendReportHex(cursor, end, currentPointer);
+    appendReportText(cursor, end, "; currentLimit=");
+    appendReportHex(cursor, end, currentLimit);
+    appendReportText(cursor, end, "; runtimeCell=");
+    appendReportHex(cursor, end, reinterpret_cast<gx_uintptr>(cell));
+    appendReportText(cursor, end, "; requestedObject=");
+    appendReportUnsigned(cursor, end, g_guideXosAllocationDiagnostics.requestedObjectSize);
+    *cursor++ = '\0';
+    return appContext->host->log(context, reinterpret_cast<unsigned char*>(buffer));
+}
 
 // This is an application-scoped runtime helper. The managed object reference
 // never crosses the guideXOS host ABI; only the computed byte-data pointer does.
@@ -255,8 +554,20 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     // Bind the one experimental __Internal P/Invoke slot after the reverse
     // transition has established the current thread state. This is not a
     // general P/Invoke resolver; it is the app-scoped allocation proof hook.
+#if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
     using GuideXosManagedArrayHostLogFn = int (__cdecl*)(void*, void*);
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedArrayHostLogFn>(guideXosManagedArrayHostLog));
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
+    using GuideXosManagedAllocationCanFitFn = int (__cdecl*)(gx_size);
+    using GuideXosManagedAllocationValidateObjectFn = int (__cdecl*)(void*, gx_size, gx_uint32, gx_uint32, gx_uint32);
+    using GuideXosManagedAllocationRecordFailureFn = int (__cdecl*)(gx_uint32);
+    using GuideXosManagedAllocationReportFn = int (__cdecl*)(void*, gx_uint32);
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationCanFit__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationCanFitFn>(guideXosManagedAllocationCanFit));
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationValidateObjectFn>(guideXosManagedAllocationValidateObject));
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationRecordFailure__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationRecordFailureFn>(guideXosManagedAllocationRecordFailure));
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationReport__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationReportFn>(guideXosManagedAllocationReport));
+#endif
 #endif
     unsigned char* cell = runtimeCell(block);
     void** transitionFrame = reinterpret_cast<void**>(frame);

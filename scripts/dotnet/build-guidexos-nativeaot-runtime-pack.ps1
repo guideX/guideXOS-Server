@@ -5,6 +5,9 @@ param(
     [string]$StockRuntimePackRoot = "",
     [string]$ExternalRuntimeRoot = "",
     [switch]$ManagedAllocation,
+    [switch]$ManagedRepeatedAllocation,
+    [ValidateSet("Primary64KiB", "Small4KiB")]
+    [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
 )
 
@@ -33,6 +36,8 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
     $arguments += @('-ExternalRuntimeRoot', ([System.IO.Path]::GetFullPath($ExternalRuntimeRoot)))
 }
 if ($ManagedAllocation) { $arguments += '-ManagedAllocation' }
+if ($ManagedRepeatedAllocation) { $arguments += '-ManagedRepeatedAllocation' }
+if ($HeapConfiguration -ne "Primary64KiB") { $arguments += @('-HeapConfiguration', $HeapConfiguration) }
 if ($Clean) { $arguments += '-Clean' }
 & powershell @arguments
 if ($LASTEXITCODE -ne 0) { throw "guideXOS NativeAOT runtime-pack build failed with exit code $LASTEXITCODE" }

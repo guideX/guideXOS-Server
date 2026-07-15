@@ -73,7 +73,7 @@ $imagePath = Join-Path $artifact "HostLogProof.exe"
 $managedMainStart = "0x{0:X}" -f $managedMain
 $managedMainStop = "0x{0:X}" -f ($managedMain + 0x110)
 $newArrayStart = "0x{0:X}" -f $newArray
-$newArrayStop = "0x{0:X}" -f ($newArray + 0x100)
+$newArrayStop = "0x{0:X}" -f ($newArray + 0x300)
 & objdump -d "--start-address=$managedMainStart" "--stop-address=$managedMainStop" $imagePath | Set-Content -LiteralPath $linkedDisasmPath -Encoding ASCII
 $disasm = Get-Content -LiteralPath $linkedDisasmPath -Raw
 if ($disasm -notmatch ("call\s+0x{0:x}" -f $newArray)) { throw "ManagedMain does not call the linked RhpNewArray wrapper." }

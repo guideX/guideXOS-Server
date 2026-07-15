@@ -29,7 +29,9 @@
 /out/dotnet/managed-hostlog/
 /out/dotnet/reverse-pinvoke-comparison/
 /out/dotnet/managed-hostlog-static-smoke/
+/out/dotnet/managed-single-allocation/
 /out/dotnet/runtime-pack/
 /out/dotnet/allocation-comparison/
+/out/dotnet/repeated-allocation-comparison/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx

@@ -5,6 +5,25 @@ namespace HostLogProof;
 
 public static unsafe class Program
 {
+#if HOSTLOGPROOF_REPEATED_ALLOCATION
+    [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationCanFit")]
+    private static extern int GuideXosManagedAllocationCanFit(uint length);
+
+    [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationValidateObject")]
+    private static extern int GuideXosManagedAllocationValidateObject(
+        nint arrayObject,
+        uint length,
+        uint sequence,
+        uint zeroInitialized,
+        uint patternValid);
+
+    [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationRecordFailure")]
+    private static extern int GuideXosManagedAllocationRecordFailure(uint reason);
+
+    [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationReport")]
+    private static extern int GuideXosManagedAllocationReport(NativeGxAppContext* context, uint status);
+#endif
+
     [DllImport("__Internal", EntryPoint = "guideXosManagedArrayHostLog")]
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
 
@@ -36,6 +55,91 @@ public static unsafe class Program
         }
 
 #if HOSTLOGPROOF_ALLOCATING
+#if HOSTLOGPROOF_REPEATED_ALLOCATION
+        const int arrayLength = 256;
+        const int maximumBoundedAllocations = 512;
+        byte[] sample0 = null;
+        byte[] sample1 = null;
+        byte[] sample2 = null;
+        byte[] sample3 = null;
+        uint completed = 0;
+
+        while (completed < maximumBoundedAllocations)
+        {
+            int fit = GuideXosManagedAllocationCanFit((uint)arrayLength);
+            if (fit == 0)
+            {
+                bool samplesValid = ValidateSample(sample0, 0) &&
+                    ValidateSample(sample1, 1) &&
+                    ValidateSample(sample2, 2) &&
+                    ValidateSample(sample3, 3);
+                if (!samplesValid)
+                {
+                    GuideXosManagedAllocationRecordFailure(1);
+                    int failedResult = GuideXosManagedAllocationReport(ctx, 1);
+                    GC.KeepAlive(sample0);
+                    GC.KeepAlive(sample1);
+                    GC.KeepAlive(sample2);
+                    GC.KeepAlive(sample3);
+                    return failedResult == 0 ? GxAbi.ErrorInvalidArgument : failedResult;
+                }
+
+                int oomResult = GuideXosManagedAllocationReport(ctx, 0);
+                GC.KeepAlive(sample0);
+                GC.KeepAlive(sample1);
+                GC.KeepAlive(sample2);
+                GC.KeepAlive(sample3);
+                return oomResult;
+            }
+
+            if (fit < 0)
+            {
+                int failedResult = GuideXosManagedAllocationReport(ctx, 1);
+                return failedResult == 0 ? GxAbi.ErrorInvalidArgument : failedResult;
+            }
+
+            byte[] current = new byte[arrayLength];
+            bool zeroInitialized = IsZeroInitialized(current);
+            WriteIdentifyingPattern(current, completed);
+            bool patternValid = HasIdentifyingPattern(current, completed);
+            nint objectReference = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(ref current);
+            int objectResult = GuideXosManagedAllocationValidateObject(
+                objectReference,
+                (uint)arrayLength,
+                completed,
+                zeroInitialized ? 1u : 0u,
+                patternValid ? 1u : 0u);
+            bool samplesBeforeNextAllocation = ValidateSample(sample0, 0) &&
+                ValidateSample(sample1, 1) &&
+                ValidateSample(sample2, 2) &&
+                ValidateSample(sample3, 3);
+            if (objectResult != 0 || !samplesBeforeNextAllocation)
+            {
+                GuideXosManagedAllocationRecordFailure(2);
+                int failedResult = GuideXosManagedAllocationReport(ctx, 1);
+                GC.KeepAlive(current);
+                GC.KeepAlive(sample0);
+                GC.KeepAlive(sample1);
+                GC.KeepAlive(sample2);
+                GC.KeepAlive(sample3);
+                return failedResult == 0 ? GxAbi.ErrorInvalidArgument : failedResult;
+            }
+
+            if (completed == 0) sample0 = current;
+            else if (completed == 1) sample1 = current;
+            else if (completed == 2) sample2 = current;
+            else if (completed == 3) sample3 = current;
+            completed++;
+        }
+
+        GuideXosManagedAllocationRecordFailure(3);
+        int boundedResult = GuideXosManagedAllocationReport(ctx, 1);
+        GC.KeepAlive(sample0);
+        GC.KeepAlive(sample1);
+        GC.KeepAlive(sample2);
+        GC.KeepAlive(sample3);
+        return boundedResult == 0 ? GxAbi.ErrorInvalidArgument : boundedResult;
+#else
         // The existing guideXOS host ABI accepts a NUL-terminated byte pointer,
         // so the managed array contains 23 UTF-8 message bytes and one managed
         // terminator. The host callback is synchronous and does not retain it.
@@ -57,6 +161,7 @@ public static unsafe class Program
         int result = GuideXosManagedArrayHostLog(ctx, arrayObject);
         GC.KeepAlive(messageBuffer);
         return result;
+#endif
 #else
         ReadOnlySpan<byte> messageUtf8 = "Hello from managed guideXOS code"u8;
         Span<byte> messageBuffer = stackalloc byte[messageUtf8.Length + 1];
@@ -69,4 +174,46 @@ public static unsafe class Program
         }
 #endif
     }
+
+#if HOSTLOGPROOF_REPEATED_ALLOCATION
+    private static bool IsZeroInitialized(byte[] buffer)
+    {
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            if (buffer[i] != 0) return false;
+        }
+        return true;
+    }
+
+    private static void WriteIdentifyingPattern(byte[] buffer, uint sequence)
+    {
+        buffer[0] = (byte)sequence;
+        buffer[1] = (byte)(sequence >> 8);
+        buffer[2] = (byte)(sequence >> 16);
+        buffer[3] = (byte)(sequence >> 24);
+        for (int i = 4; i < buffer.Length; i++)
+        {
+            buffer[i] = (byte)(((uint)i * 17u + sequence * 31u) & 0xFFu);
+        }
+    }
+
+    private static bool HasIdentifyingPattern(byte[] buffer, uint sequence)
+    {
+        if (buffer.Length != 256) return false;
+        if (buffer[0] != (byte)sequence ||
+            buffer[1] != (byte)(sequence >> 8) ||
+            buffer[2] != (byte)(sequence >> 16) ||
+            buffer[3] != (byte)(sequence >> 24)) return false;
+        for (int i = 4; i < buffer.Length; i++)
+        {
+            if (buffer[i] != (byte)(((uint)i * 17u + sequence * 31u) & 0xFFu)) return false;
+        }
+        return true;
+    }
+
+    private static bool ValidateSample(byte[] buffer, uint sequence)
+    {
+        return buffer == null || HasIdentifyingPattern(buffer, sequence);
+    }
+#endif
 }

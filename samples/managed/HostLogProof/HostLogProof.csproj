@@ -25,6 +25,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Repeated'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING;HOSTLOGPROOF_REPEATED_ALLOCATION</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="9.0.0" PrivateAssets="all" />
   </ItemGroup>
