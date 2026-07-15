@@ -12,8 +12,10 @@ application inventory unchanged.
 The clean custom pack builds reproducibly. The real managed method logs
 `Hello from managed guideXOS code` exactly once per launch and returns `0`.
 Two launches in one Server process and two separately launched Server
-processes pass. This is a bounded proof pack, not a general .NET runtime and
-does not authorize allocation in this pass.
+processes pass. This is a bounded proof pack, not a general .NET runtime. The
+non-allocating milestone remains the baseline; the next opt-in capability is
+documented in [`MANAGED_SINGLE_ALLOCATION_PROOF.md`](MANAGED_SINGLE_ALLOCATION_PROOF.md)
+and is limited to one managed allocation with collection disabled.
 
 **Decision: Outcome A — Minimal guideXOS runtime pack executes managed entry
 correctly.** The result is limited to the non-allocating proof envelope stated

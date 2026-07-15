@@ -30,5 +30,6 @@
 /out/dotnet/reverse-pinvoke-comparison/
 /out/dotnet/managed-hostlog-static-smoke/
 /out/dotnet/runtime-pack/
+/out/dotnet/allocation-comparison/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx

@@ -5,6 +5,8 @@
     [string]$BuildScript = "",
     [string]$RuntimePackRoot = "",
     [switch]$UseGuideXosRuntimePack,
+    [ValidateSet("NonAllocating", "Allocating")]
+    [string]$AllocationMode = "NonAllocating",
     [switch]$Clean,
     [switch]$SkipBuild
 )
@@ -28,7 +30,7 @@ function Get-FileHashHex([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
-function Read-GuideXosRuntimePack([string]$Root) {
+function Read-GuideXosRuntimePack([string]$Root, [bool]$ManagedAllocation) {
     if ([string]::IsNullOrWhiteSpace($Root)) {
         $Root = Join-Path $repoRoot "tools\dotnet\runtime-pack"
     }
@@ -40,7 +42,12 @@ function Read-GuideXosRuntimePack([string]$Root) {
         throw "GuideXOS runtime-pack manifest is missing: $manifestPath"
     }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ([string]$manifest.identity -ne "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1") {
+    $expectedIdentity = if ($ManagedAllocation) {
+        "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1"
+    } else {
+        "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1"
+    }
+    if ([string]$manifest.identity -ne $expectedIdentity) {
         throw "Unexpected guideXOS runtime-pack identity: $($manifest.identity)"
     }
     if ([string]$manifest.sourceRoot -ne $Root) {
@@ -175,6 +182,7 @@ if (-not $SkipBuild) {
     if ($UseGuideXosRuntimePack) {
         $buildArguments += @("-RuntimePackRoot", $RuntimePackRoot, "-UseGuideXosRuntimePack")
     }
+    $buildArguments += @("-AllocationMode", $AllocationMode)
     & powershell -ExecutionPolicy Bypass -File $BuildScript @buildArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Managed proof build failed with exit code $LASTEXITCODE"
@@ -184,7 +192,7 @@ if (-not $SkipBuild) {
 }
 
 if ($UseGuideXosRuntimePack) {
-    $runtimePack = Read-GuideXosRuntimePack $RuntimePackRoot
+    $runtimePack = Read-GuideXosRuntimePack $RuntimePackRoot ($AllocationMode -eq "Allocating")
 }
 
 $artifactRoot = Join-Path $OutputRoot "artifacts"
@@ -213,7 +221,7 @@ if ($tlsEndAddress -le $tlsStartAddress) {
 }
 $tlsBlockSize = $tlsEndAddress - $tlsStartAddress
 $managedMainAddress = Get-MapSymbolAddress -Path $sourceMap -Symbol "ManagedMain" -Label "Managed entry"
-$entryDiagnosis = Assert-ManagedHostLogReversePInvokeChain $sourceElf $sourceMap $sourcePeDump -GuideXosRuntimePack:$UseGuideXosRuntimePack
+$entryDiagnosis = Assert-ManagedHostLogReversePInvokeChain $sourceElf $sourceMap $sourcePeDump -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -eq "Allocating")
 $toolchainText = Get-Content -LiteralPath $sourceToolchain
 $converterPathLine = $toolchainText | Where-Object { $_ -like "PeToElfScript=*" } | Select-Object -First 1
 $converterHashLine = $toolchainText | Where-Object { $_ -like "PeToElfSha256=*" } | Select-Object -First 1
@@ -304,7 +312,7 @@ if ($UseGuideXosRuntimePack) {
 }
 
 $runtimeSupportSource = Join-Path $repoRoot "samples\managed\HostLogProof\runtime_support.c"
-Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath (Join-Path $artifactRoot "HostLogProof.exe") -PeDumpPath $sourcePeDump -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeObjDump -ElfReadelfPath $sourceElfReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $sourceElf -PePath (Join-Path $artifactRoot "HostLogProof.exe") -PeDumpPath $sourcePeDump -MapPath $sourceMap -NativeObjectDumpPath $sourceNativeObjDump -ElfReadelfPath $sourceElfReadelf -ElfDumpPath $sourceElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -eq "Allocating") | Out-Null
 Assert-ManagedHostLogFileNotContains $sourcePeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
 
 $stagedAppsRoot = Join-Path $StageRoot "apps"
@@ -386,7 +394,12 @@ $envelope = [ordered]@{
     stagedElfSha256 = $stagedHash
     expectedEntryAddress = ("0x{0:X}" -f $managedMainAddress)
     expectedManagedSymbol = "ManagedMain"
-    expectedMessage = "Hello from managed guideXOS code"
+    expectedMessage = if ($AllocationMode -eq "Allocating") { "Hello from managed heap" } else { "Hello from managed guideXOS code" }
+    allocationMode = $AllocationMode
+    managedAllocation = ($AllocationMode -eq "Allocating")
+    collectionEnabled = $false
+    expectedArrayLength = if ($AllocationMode -eq "Allocating") { 24 } else { $null }
+    expectedObjectSize = if ($AllocationMode -eq "Allocating") { 40 } else { $null }
     expectedReturnCode = 0
     architecture = "amd64"
     abi = "guidexos-c-abi-v1"

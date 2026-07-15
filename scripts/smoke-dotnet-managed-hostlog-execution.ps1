@@ -5,6 +5,8 @@ param(
     [string]$StageScript = "",
     [string]$ServerExe = "",
     [string]$RuntimePackRoot = "",
+    [ValidateSet("NonAllocating", "Allocating")]
+    [string]$AllocationMode = "NonAllocating",
     [switch]$UseGuideXosRuntimePack,
     [int]$TimeoutSeconds = 240,
     [switch]$SkipFailureProbe,
@@ -164,6 +166,7 @@ $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $StageRoot = [System.IO.Path]::GetFullPath($StageRoot)
 $StageScript = [System.IO.Path]::GetFullPath($StageScript)
 $ServerExe = [System.IO.Path]::GetFullPath($ServerExe)
+$expectedMessage = if ($AllocationMode -eq "Allocating") { "Hello from managed heap" } else { "Hello from managed guideXOS code" }
 
 if (-not (Test-Path -LiteralPath $StageScript)) {
     throw "Stage script not found: $StageScript"
@@ -207,6 +210,7 @@ try {
     if ($UseGuideXosRuntimePack) {
         $stageArguments += @("-RuntimePackRoot", $RuntimePackRoot, "-UseGuideXosRuntimePack")
     }
+    $stageArguments += @("-AllocationMode", $AllocationMode)
     if ($SkipBuild) { $stageArguments += "-SkipBuild" }
     $stageOutput = & powershell -ExecutionPolicy Bypass -File $StageScript @stageArguments
     if ($LASTEXITCODE -ne 0) {
@@ -258,7 +262,7 @@ try {
     $expectedEntryFields = if ($UseGuideXosRuntimePack) {
         @{
             entryCategory = "guidexos-runtime-pack-reverse-pinvoke"
-            converterSha256 = "EAAEFBC8862D6E1A4AC1A679073AF5311A3AF9CE96F45D258617BD4FE0977434"
+            converterSha256 = "5F21B87D343106120EB5CAD1F98DF524404171E084C40F4FC3AFED6BE6F84B96"
             ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
             ilCompilerVersion = "9.0.0"
             runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
@@ -274,7 +278,7 @@ try {
             reversePInvokeAttachAddress = "0x1004B1A0"
             reversePInvokeReturnAddress = "0x1004B290"
             flsGetValueImportThunkAddress = "0x10052108"
-            converterSha256 = "EAAEFBC8862D6E1A4AC1A679073AF5311A3AF9CE96F45D258617BD4FE0977434"
+            converterSha256 = "5F21B87D343106120EB5CAD1F98DF524404171E084C40F4FC3AFED6BE6F84B96"
             ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
             ilCompilerVersion = "9.0.0"
             runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
@@ -288,8 +292,9 @@ try {
         }
     }
     if ($UseGuideXosRuntimePack) {
+        $expectedRuntimePackIdentity = if ($AllocationMode -eq "Allocating") { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
         if ([string]::IsNullOrWhiteSpace([string]$stageEnvelope.runtimePackIdentity) -or
-            [string]$stageEnvelope.runtimePackIdentity -ne "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1") {
+            [string]$stageEnvelope.runtimePackIdentity -ne $expectedRuntimePackIdentity) {
             throw "Stage envelope does not identify the locked guideXOS runtime pack."
         }
         if ([string]::IsNullOrWhiteSpace([string]$stageEnvelope.runtimePackObjectSha256)) {
@@ -345,7 +350,7 @@ try {
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionSuccess:\s+true$' -Expected 2 -Reason "successful executions"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionAttempted:\s+true$' -Expected 2 -Reason "attempted executions"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: .*Host log call count:\s+1' -Expected 2 -Reason "one host log call per launch"
-        Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: .*Last host log message:\s+Hello from managed guideXOS code' -Expected 2 -Reason "managed message in executor diagnostics"
+        Assert-RegexCountExactly -Text $output -Pattern ("(?m)^executionDiagnostics: .*Last host log message:\s+" + [regex]::Escape($expectedMessage)) -Expected 2 -Reason "managed message in executor diagnostics"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^returnCode:\s+0$' -Expected 2 -Reason "return code"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^gxMainReturnCode:\s+0$' -Expected 2 -Reason "managed return code"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^trampolineUsed:\s+true$' -Expected 2 -Reason "trampoline use"
@@ -354,7 +359,7 @@ try {
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^preferredBaseMappingSuccess:\s+true$' -Expected 2 -Reason "preferred-base success"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: Native ELF TLS bootstrap installed' -Expected 2 -Reason "TLS bootstrap success"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^executionDiagnostics: .*Preferred-base mapping:\s+success' -Expected 2 -Reason "preferred-base diagnostic"
-        Assert-RegexCountExactly -Text $output -Pattern '\[NativeAppHost\].*log: Hello from managed guideXOS code' -Expected 2 -Reason "host callback output"
+        Assert-RegexCountExactly -Text $output -Pattern ("\[NativeAppHost\].*log: " + [regex]::Escape($expectedMessage)) -Expected 2 -Reason "host callback output"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^cleanupAttempted:\s+true$' -Expected 2 -Reason "cleanup"
         Assert-RegexCountExactly -Text $output -Pattern '(?m)^lifecycleStateAfterExecution:\s+Exited$' -Expected 2 -Reason "exit state"
         Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^preferredBase:\s+0x10000000$' -Minimum 2 -Reason "preferred base"
@@ -363,12 +368,12 @@ try {
             throw "Live proof output contains a mapping/TLS failure or collision diagnostic."
         }
 
-        $message = "Hello from managed guideXOS code"
+        $message = $expectedMessage
         $messageLines = @($output -replace "`r", "" -split "`n" | Where-Object { $_ -like "*$message*" })
         foreach ($line in $messageLines) {
-            if ($line -notmatch '^\[NativeAppHost\].*log: Hello from managed guideXOS code$' -and
-                $line -notmatch 'Last host log message: Hello from managed guideXOS code' -and
-                $line -notmatch 'executionDiagnostics: .*Hello from managed guideXOS code') {
+            if ($line -notmatch ("^\[NativeAppHost\].*log: " + [regex]::Escape($expectedMessage) + '$') -and
+                $line -notmatch ("Last host log message: " + [regex]::Escape($expectedMessage)) -and
+                $line -notmatch ("executionDiagnostics: .*" + [regex]::Escape($expectedMessage))) {
                 throw "Managed success message appeared through an unapproved output path: $line"
             }
         }

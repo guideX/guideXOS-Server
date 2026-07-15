@@ -15,9 +15,14 @@
     <EntryPointSymbol>ManagedMain</EntryPointSymbol>
     <LangVersion>latest</LangVersion>
     <SelfContained>true</SelfContained>
+    <HostLogProofMode Condition="'$(HostLogProofMode)' == ''">NonAllocating</HostLogProofMode>
     <BaseOutputPath>..\..\..\out\dotnet\managed-hostlog\bin\</BaseOutputPath>
     <BaseIntermediateOutputPath>..\..\..\out\dotnet\managed-hostlog\obj\</BaseIntermediateOutputPath>
     <HostLogProofMapPath Condition="'$(HostLogProofMapPath)' == ''">$(MSBuildProjectDirectory)\..\..\..\out\dotnet\managed-hostlog\artifacts\HostLogProof.map</HostLogProofMapPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Allocating'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +32,7 @@
   <ItemGroup>
     <LinkerArg Include="/fixed /base:0x10000000 /map:&quot;$(HostLogProofMapPath)&quot;" />
     <LinkerArg Include="/INCLUDE:ManagedMain" />
+    <LinkerArg Include="/EXPORT:guideXosManagedArrayHostLog" Condition="'$(HostLogProofMode)' == 'Allocating'" />
   </ItemGroup>
 
   <ItemGroup>

@@ -7,6 +7,8 @@
     [string]$OutputRoot = "",
     [string]$RuntimePackRoot = "",
     [switch]$UseGuideXosRuntimePack,
+    [ValidateSet("NonAllocating", "Allocating")]
+    [string]$AllocationMode = "NonAllocating",
     [switch]$Clean
 )
 
@@ -138,6 +140,7 @@ if ($UseGuideXosRuntimePack) {
         "-OutputRoot", $runtimePackOutputRoot
     )
     if ($Clean) { $runtimePackBuildArguments += "-Clean" }
+    if ($AllocationMode -eq "Allocating") { $runtimePackBuildArguments += "-ManagedAllocation" }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
     if ($LASTEXITCODE -ne 0) {
         throw "GuideXOS runtime-pack build failed with exit code $LASTEXITCODE"
@@ -180,7 +183,7 @@ if (-not (Test-Path -LiteralPath $PeToElfScript)) {
     throw "PE-to-ELF converter not found: $PeToElfScript"
 }
 
-$expectedPeToElfSha256 = "EAAEFBC8862D6E1A4AC1A679073AF5311A3AF9CE96F45D258617BD4FE0977434"
+$expectedPeToElfSha256 = "5F21B87D343106120EB5CAD1F98DF524404171E084C40F4FC3AFED6BE6F84B96"
 $actualPeToElfSha256 = (Get-FileHash -LiteralPath $PeToElfScript -Algorithm SHA256).Hash.ToUpperInvariant()
 if ($actualPeToElfSha256 -ne $expectedPeToElfSha256) {
     throw "PE-to-ELF converter hash mismatch. Expected $expectedPeToElfSha256, got ${actualPeToElfSha256}: $PeToElfScript"
@@ -291,7 +294,8 @@ $toolchainLines = @(
     "VcVars64=$vcvars64"
     "RuntimeSupportSource=$runtimeSupportSource"
     "RuntimeSupportObj=$runtimeSupportObj"
-    "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
+        "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
+        "AllocationMode=$AllocationMode"
     "RuntimePackRoot=$RuntimePackRoot"
     "RuntimePackManifest=$runtimePackManifest"
     "RuntimePackObject=$runtimePackObject"
@@ -318,6 +322,7 @@ try {
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
+        "-p:HostLogProofMode=$AllocationMode",
         "-p:BaseOutputPath=$binRoot\",
         "-p:BaseIntermediateOutputPath=$objRoot\"
     )
@@ -430,7 +435,7 @@ if ($UseGuideXosRuntimePack) {
     }
 }
 Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
-Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -eq "Allocating") | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan

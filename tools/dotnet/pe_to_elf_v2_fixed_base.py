@@ -120,7 +120,16 @@ def find_function_prologue(pe: bytes, symbol_va: int, image_base: int, sections:
     
     offset_in_section = symbol_rva - target_section.vaddr
     symbol_file_offset = target_section.raw_ptr + offset_in_section
-    
+
+    # The map symbol is already the function start for compact NativeAOT
+    # methods whose register-save set differs from the historical full
+    # prologue below (for example a method that calls an internal P/Invoke
+    # helper). Preserve the exact managed symbol instead of selecting the
+    # next unrelated function that happens to match the old prologue.
+    if pe[symbol_file_offset:symbol_file_offset + 1] == b"\x55":
+        print(f"Found function prologue at symbol VA 0x{symbol_va:X} (0 bytes after symbol)")
+        return symbol_va
+
     # Common x64 function prologue: push rbp; push r15; push r14; push r13; push r12
     full_prologue = bytes([0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54])
     

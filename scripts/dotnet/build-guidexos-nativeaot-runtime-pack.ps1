@@ -4,6 +4,7 @@ param(
     [string]$OutputRoot = "",
     [string]$StockRuntimePackRoot = "",
     [string]$ExternalRuntimeRoot = "",
+    [switch]$ManagedAllocation,
     [switch]$Clean
 )
 
@@ -31,6 +32,7 @@ if (-not [string]::IsNullOrWhiteSpace($StockRuntimePackRoot)) {
 if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
     $arguments += @('-ExternalRuntimeRoot', ([System.IO.Path]::GetFullPath($ExternalRuntimeRoot)))
 }
+if ($ManagedAllocation) { $arguments += '-ManagedAllocation' }
 if ($Clean) { $arguments += '-Clean' }
 & powershell @arguments
 if ($LASTEXITCODE -ne 0) { throw "guideXOS NativeAOT runtime-pack build failed with exit code $LASTEXITCODE" }

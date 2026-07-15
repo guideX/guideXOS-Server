@@ -4,6 +4,7 @@ param(
     [string]$OutputRoot = "",
     [string]$StockRuntimePackRoot = "",
     [string]$ExternalRuntimeRoot = "",
+    [switch]$ManagedAllocation,
     [switch]$Clean
 )
 
@@ -185,8 +186,14 @@ $threadMember = Join-Path $OutputRoot "thread.cpp.obj"
 $ehMember = Join-Path $OutputRoot "EHHelpers.cpp.obj"
 $threadRenamedMember = Join-Path $OutputRoot "thread.cpp.obj.renamed.obj"
 $ehRenamedMember = Join-Path $OutputRoot "EHHelpers.cpp.obj.renamed.obj"
+$allocFastMember = Join-Path $OutputRoot "AllocFast.asm.obj"
+$allocFastRenamedMember = Join-Path $OutputRoot "AllocFast.asm.obj.renamed.obj"
+if ($ManagedAllocation) {
+    $removedRuntimeMembers += "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj"
+}
 $threadMemberArguments = "`"$threadMember`""
 $ehMemberArguments = "`"$ehMember`""
+$allocFastMemberArguments = if ($ManagedAllocation) { " `"$allocFastRenamedMember`"" } else { "" }
 $removeArguments = ($removedRuntimeMembers | ForEach-Object { "/REMOVE:`"$_`"" }) -join " "
 $sdkLines = @(
     "@echo off",
@@ -196,24 +203,37 @@ $sdkLines = @(
     "lib.exe /nologo /extract:`"$($removedRuntimeMembers[0])`" `"$stockRuntimeLibrary`" /out:$ehMemberArguments",
     "if errorlevel 1 exit /b %errorlevel%",
     "lib.exe /nologo /extract:`"$($removedRuntimeMembers[1])`" `"$stockRuntimeLibrary`" /out:$threadMemberArguments",
-    "if errorlevel 1 exit /b %errorlevel%",
-    "exit /b %errorlevel%"
+    "if errorlevel 1 exit /b %errorlevel%"
 )
+if ($ManagedAllocation) {
+    $sdkLines += @(
+        "lib.exe /nologo /extract:`"$($removedRuntimeMembers[2])`" `"$stockRuntimeLibrary`" /out:`"$allocFastMember`"",
+        "if errorlevel 1 exit /b %errorlevel%"
+    )
+}
+$sdkLines += "exit /b %errorlevel%"
 $sdkLines | Set-Content -LiteralPath $sdkBatch -Encoding ASCII
 & $sdkBatch
 if ($LASTEXITCODE -ne 0) { throw "GuideXOS runtime-pack runtime-member extraction failed with exit code $LASTEXITCODE" }
 Copy-Item -LiteralPath $threadMember -Destination $threadRenamedMember -Force
 Copy-Item -LiteralPath $ehMember -Destination $ehRenamedMember -Force
+if ($ManagedAllocation) {
+    Copy-Item -LiteralPath $allocFastMember -Destination $allocFastRenamedMember -Force
+}
 & $objcopy --redefine-sym RhpReversePInvoke=guideXosStockRhpReversePInvoke --redefine-sym RhpReversePInvokeReturn=guideXosStockRhpReversePInvokeReturn --redefine-sym RhpReversePInvokeAttachOrTrapThread2=guideXosStockRhpReversePInvokeAttachOrTrapThread2 $threadRenamedMember
 if ($LASTEXITCODE -ne 0) { throw "COFF symbol adaptation failed for thread.cpp.obj" }
 & $objcopy --redefine-sym RhpFallbackFailFast=guideXosStockRhpFallbackFailFast $ehRenamedMember
 if ($LASTEXITCODE -ne 0) { throw "COFF symbol adaptation failed for EHHelpers.cpp.obj" }
+if ($ManagedAllocation) {
+    & $objcopy --redefine-sym RhpNewArray=guideXosStockRhpNewArray $allocFastRenamedMember
+    if ($LASTEXITCODE -ne 0) { throw "COFF symbol adaptation failed for AllocFast.asm.obj" }
+}
 $sdkLines = @(
     "@echo off",
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "lib.exe /nologo /OUT:`"$adaptedRuntimeLibrary`" `"$stockRuntimeLibrary`" $removeArguments `"$threadRenamedMember`" `"$ehRenamedMember`"",
+    "lib.exe /nologo /OUT:`"$adaptedRuntimeLibrary`" `"$stockRuntimeLibrary`" $removeArguments `"$threadRenamedMember`" `"$ehRenamedMember`"$allocFastMemberArguments",
     "exit /b %errorlevel%"
 )
 $sdkLines | Set-Content -LiteralPath $sdkBatch -Encoding ASCII
@@ -227,7 +247,7 @@ $lines = @(
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /Fo:`"$object`" `"$source`"",
+    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION' } else { '' }) /Fo:`"$object`" `"$source`"",
     "exit /b %errorlevel%"
 )
 $lines | Set-Content -LiteralPath $batch -Encoding ASCII
@@ -240,7 +260,7 @@ $objectHash = Get-Hash $object
 $lockPath = Join-Path $RuntimePackRoot "runtime-pack.lock.json"
 $manifest = [ordered]@{
     schemaVersion = 1
-    identity = "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1"
+    identity = if ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     architecture = $lock.architecture
     targetFramework = $lock.targetFramework
     runtimeIdentifier = $lock.runtimeIdentifier
@@ -259,6 +279,7 @@ $manifest = [ordered]@{
         "RhpReversePInvokeReturn" = "guideXosStockRhpReversePInvokeReturn"
         "RhpReversePInvokeAttachOrTrapThread2" = "guideXosStockRhpReversePInvokeAttachOrTrapThread2"
         "RhpFallbackFailFast" = "guideXosStockRhpFallbackFailFast"
+        "RhpNewArray" = if ($ManagedAllocation) { "guideXosStockRhpNewArray" } else { $null }
     }
     objcopy = $objcopy
     objcopySha256 = Get-Hash $objcopy
@@ -272,7 +293,9 @@ $manifest = [ordered]@{
     externalRuntimeCommit = if ([string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) { $null } else { $externalCommit }
     platformObject = $lock.platformObject
     liveWindowsImportsReplaced = @("FlsGetValue", "FlsSetValue", "RhpReversePInvoke", "RhpReversePInvokeReturn")
-    managedAllocation = $false
+    managedAllocation = [bool]$ManagedAllocation
+    allocationStrategy = if ($ManagedAllocation) { "bounded-static-image-backed-no-collection" } else { "none" }
+    managedHeapBytes = if ($ManagedAllocation) { 65536 } else { 0 }
     managedExceptions = $false
     managedThreads = $false
 }
