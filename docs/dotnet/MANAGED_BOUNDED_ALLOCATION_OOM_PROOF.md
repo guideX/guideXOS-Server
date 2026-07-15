@@ -1,5 +1,7 @@
 # Bounded Repeated Managed Allocation with Controlled OOM
 
+Future GC status: this proof remains intentionally no-collection. The Workstation GC feasibility and future one-collection design are documented in [NATIVEAOT_WORKSTATION_GC_FEASIBILITY.md](NATIVEAOT_WORKSTATION_GC_FEASIBILITY.md). No GC behavior is enabled by this proof.
+
 ## 1. Executive summary
 
 The AMD64 NativeAOT `HostLogProof` repeated mode creates real managed

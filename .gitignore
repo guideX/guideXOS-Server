@@ -27,6 +27,7 @@
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
 /out/dotnet/managed-hostlog/
+/out/dotnet/gc-feasibility-baseline/
 /out/dotnet/reverse-pinvoke-comparison/
 /out/dotnet/managed-hostlog-static-smoke/
 /out/dotnet/managed-single-allocation/
