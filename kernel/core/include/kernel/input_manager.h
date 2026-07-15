@@ -15,6 +15,7 @@
 #define KERNEL_INPUT_MANAGER_H
 
 #include "kernel/types.h"
+#include "kernel/display_input_mapper.h"
 
 namespace kernel {
 namespace input {
@@ -64,6 +65,7 @@ struct MouseState {
     PositionMode mode;       // Current positioning mode
     InputSource  source;     // Active input source
     bool         dirty;      // State changed since last clear
+    display_input::DisplayPointerEvent mapping; // Last mapped event
 };
 
 // ================================================================
@@ -84,6 +86,16 @@ struct KeyboardState {
 // Initialize the input manager with screen dimensions.
 // Probes all available input sources and selects the best one.
 void init(uint32_t screen_width, uint32_t screen_height);
+
+// Replace the default single-monitor geometry with the active virtual
+// desktop. This is called by the QEMU-only display probe after virtio-gpu
+// descriptors are known; normal boots retain the single-primary default.
+bool configure_display_layout(
+    int32_t left, int32_t top, int32_t right, int32_t bottom,
+    const display_input::DisplayInputMonitor* monitors, uint8_t monitorCount);
+
+// Diagnostics are bounded and disabled by default for ordinary boots.
+void set_mapping_diagnostics(bool enabled, uint32_t eventLimit);
 
 // Poll all active input sources for new data.
 // Should be called regularly from the main loop or timer interrupt.
@@ -122,6 +134,9 @@ PositionMode mouse_position_mode();
 
 // Get the full mouse state structure
 const MouseState* get_mouse_state();
+const display_input::DisplayPointerEvent* get_last_pointer_event();
+const display_input::DisplayInputMapperCounters* get_mapping_counters();
+const display_input::DisplayInputMapper* get_display_input_mapper();
 
 // ----------------------------------------------------------------
 // Keyboard accessors (for future expansion)

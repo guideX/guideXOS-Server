@@ -3,15 +3,23 @@ REM
 REM guideXOS Experimental QEMU Display Probe Launcher (Windows Batch)
 REM
 REM This launcher is intentionally separate from run-qemu.bat.
-REM It is diagnostic-only and only proves the QEMU-side probe and
-REM scanout-0 2D diagnostic pattern path.
+REM It is diagnostic-only and proves the QEMU-side probe, 2D scanout path,
+REM and the explicitly gated two-scanout live compositor path.
+REM
+REM Input inventory for the default launcher:
+REM   -machine q35,usb=off leaves the guest on QEMU's PS/2 relative mouse path.
+REM   No USB tablet or virtio-input device is added here.
+REM   QMP is optional and is used only by the bounded smoke for input injection;
+REM   the kernel has no QMP dependency.
+REM   QEMU input-send-event targets an input device, not a display head. The
+REM   smoke records whether the installed QEMU schema exposes head routing.
 REM
 REM Usage:
 REM   scripts\run-qemu-display-probe.bat [std|virtio-gpu|virtio-gpu-modern-only|virtio-vga|qxl-vga]
 REM
 REM - std         : legacy VGA / Bochs-style framebuffer probe
-REM - virtio-gpu  : diagnostic virtio-gpu-pci probe (no rendering)
-REM - virtio-gpu-modern-only : diagnostic modern-only virtio-gpu-pci probe (no rendering)
+REM - virtio-gpu  : diagnostic/live virtio-gpu-pci probe, gpu0, max_outputs=2
+REM - virtio-gpu-modern-only : modern-only virtio-gpu-pci diagnostic/live probe
 REM - virtio-vga   : VGA-compatible virtio probe
 REM - qxl-vga      : QXL/SPICE diagnostic probe (no viewer required)
 REM

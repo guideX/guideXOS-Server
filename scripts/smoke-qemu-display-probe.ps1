@@ -1,7 +1,7 @@
 param(
     [string[]]$Backends = @('std', 'virtio-gpu', 'virtio-gpu-modern-only', 'virtio-vga', 'qxl-vga'),
     [int]$TimeoutSeconds = 120,
-    [ValidateSet('diagnostic', 'compositorFrame', 'compositorLiveBounded')]
+    [ValidateSet('diagnostic', 'compositorFrame', 'compositorLiveBounded', 'compositorInputBounded')]
     [string]$Mode = 'diagnostic'
 )
 
@@ -55,6 +55,19 @@ function Find-Qemu {
     }
 
     return $null
+}
+
+function Get-QemuVersionText {
+    $qemu = Find-Qemu
+    if (-not $qemu) {
+        return 'unavailable'
+    }
+
+    $versionLine = & $qemu -version 2>&1 | Select-Object -First 1
+    if ($null -eq $versionLine) {
+        return 'unavailable'
+    }
+    return ([string]$versionLine).Trim()
 }
 
 $script:qemuVirtioGpuHelpText = $null
@@ -559,6 +572,177 @@ function Invoke-QmpScreendump {
     }
 
     [void](Invoke-QmpCommand -Session $Session -Execute 'screendump' -Arguments $arguments -TimeoutSeconds 10)
+}
+
+function Invoke-QmpInputSendEvent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Session,
+        [Parameter(Mandatory = $true)]
+        [hashtable[]]$Events,
+        [string]$DeviceId = ''
+    )
+
+    $arguments = @{ events = @($Events) }
+    if (-not [string]::IsNullOrWhiteSpace($DeviceId)) {
+        $arguments.device = $DeviceId
+    }
+    [void](Invoke-QmpCommand -Session $Session -Execute 'input-send-event' -Arguments $arguments -TimeoutSeconds 10)
+}
+
+function Get-QmpInputRoutingCapability {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Session
+    )
+
+    $schemaText = ''
+    $schemaAvailable = $false
+    try {
+        $schema = Invoke-QmpCommand -Session $Session -Execute 'query-qmp-schema' -TimeoutSeconds 10
+        $schemaText = ($schema.return | ConvertTo-Json -Compress -Depth 16)
+        $schemaAvailable = $true
+    } catch {
+        $schemaText = ''
+    }
+
+    $inputSendEvent = $schemaText -match 'input-send-event'
+    $headRouting = $false
+    if ($inputSendEvent) {
+        # QMP's input-send-event targets an input device, not a display head.
+        # Keep this conservative: only report head routing if the command's
+        # schema explicitly exposes a head member near the command definition.
+        $headRouting = $schemaText -match '(?s)input-send-event.{0,12000}"name"\s*:\s*"head"'
+    }
+
+    $devices = $null
+    $deviceQueryStatus = 'unavailable'
+    try {
+        $deviceQuery = Invoke-QmpCommand -Session $Session -Execute 'query-input-devices' -TimeoutSeconds 10
+        $devices = $deviceQuery.return
+        $deviceQueryStatus = 'available'
+    } catch {
+        $deviceQueryStatus = 'unavailable'
+    }
+
+    $reason = if (-not $inputSendEvent) {
+        'QMP input-send-event is unavailable'
+    } elseif (-not $headRouting) {
+        'QMP input-send-event exposes device routing but no display-head routing; guest path is ps2-relative'
+    } else {
+        'QMP schema advertises head routing'
+    }
+
+    return [pscustomobject]@{
+        SchemaAvailable = $schemaAvailable
+        InputSendEvent = $inputSendEvent
+        HeadRouting = $headRouting
+        Reason = $reason
+        DeviceQueryStatus = $deviceQueryStatus
+        Devices = $devices
+    }
+}
+
+function Invoke-BoundedRelativeMove {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Session,
+        [int]$DeltaX,
+        [int]$DeltaY,
+        [int]$Step = 40,
+        [int]$DelayMilliseconds = 8
+    )
+
+    $remainingX = $DeltaX
+    $remainingY = $DeltaY
+    $eventsSent = 0
+    while ($remainingX -ne 0 -or $remainingY -ne 0) {
+        if ($eventsSent -ge 96) {
+            throw 'bounded relative move exceeded the injected-event limit'
+        }
+        $stepX = [Math]::Max(-$Step, [Math]::Min($Step, $remainingX))
+        $stepY = [Math]::Max(-$Step, [Math]::Min($Step, $remainingY))
+        if ($stepX -eq 0 -and $stepY -eq 0) { break }
+        $events = @()
+        if ($stepX -ne 0) { $events += @{ type = 'rel'; data = @{ axis = 'x'; value = $stepX } } }
+        if ($stepY -ne 0) { $events += @{ type = 'rel'; data = @{ axis = 'y'; value = $stepY } } }
+        Invoke-QmpInputSendEvent -Session $Session -Events $events
+        $remainingX -= $stepX
+        $remainingY -= $stepY
+        $eventsSent++
+        if ($DelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $DelayMilliseconds }
+    }
+    return $eventsSent
+}
+
+function Invoke-QemuInputProofSequence {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Session,
+        [Parameter(Mandatory = $true)]
+        [string]$CaptureRoot
+    )
+
+    $capability = Get-QmpInputRoutingCapability -Session $Session
+    $notes = New-Object System.Collections.Generic.List[string]
+    $notes.Add("inputSendEvent=$($capability.InputSendEvent)")
+    $notes.Add("headRouting=$($capability.HeadRouting)")
+    $notes.Add("reason=$($capability.Reason)")
+    $notes.Add("deviceQuery=$($capability.DeviceQueryStatus)")
+    if (-not $capability.InputSendEvent) {
+        throw $capability.Reason
+    }
+
+    $captures = [ordered]@{}
+    $capture = {
+        param([string]$Name)
+        foreach ($head in @(0, 1)) {
+            $path = Join-Path $CaptureRoot ("input-{0}-head{1}.png" -f $Name, $head)
+            Invoke-QmpScreendump -Session $Session -Filename $path -DeviceId 'gpu0' -Head $head
+            if (-not (Wait-ForCaptureFile -Path $path -TimeoutSeconds 2)) {
+                throw "input proof capture missing: $path"
+            }
+            $captures["$Name-head$head"] = $path
+        }
+    }
+
+    # The guest starts at the virtual-desktop center. The bounded path moves
+    # to the stable titlebar of the ordinary proof window on monitor 1.
+    [void](Invoke-BoundedRelativeMove -Session $Session -DeltaX (-920) -DeltaY (-210) -Step 40 -DelayMilliseconds 36)
+    Invoke-QmpInputSendEvent -Session $Session -Events @(@{ type = 'btn'; data = @{ button = 'left'; down = $true } })
+    Start-Sleep -Milliseconds 160
+    Invoke-QmpInputSendEvent -Session $Session -Events @(@{ type = 'btn'; data = @{ button = 'left'; down = $false } })
+    Start-Sleep -Milliseconds 80
+    & $capture 'click'
+
+    # Revisit the titlebar and perform a bounded drag through the runtime
+    # monitor boundary and into the secondary monitor.
+    Invoke-QmpInputSendEvent -Session $Session -Events @(@{ type = 'btn'; data = @{ button = 'left'; down = $true } })
+    # Let the guest observe the button-down at the titlebar before the first
+    # movement. QEMU may coalesce a button event with the next relative packet.
+    Start-Sleep -Milliseconds 180
+    $dragSteps = @(
+        @{ x = 160; y = 0 },
+        @{ x = 160; y = 0 },
+        @{ x = 160; y = 0 },
+        @{ x = 200; y = 0 },
+        @{ x = 200; y = 0 },
+        @{ x = 200; y = 0 }
+    )
+    $stepIndex = 0
+    foreach ($dragStep in $dragSteps) {
+        [void](Invoke-BoundedRelativeMove -Session $Session -DeltaX ([int]$dragStep.x) -DeltaY ([int]$dragStep.y) -Step 40 -DelayMilliseconds 30)
+        $stepIndex++
+        if ($stepIndex -eq 4) { & $capture 'boundary' }
+    }
+    Invoke-QmpInputSendEvent -Session $Session -Events @(@{ type = 'btn'; data = @{ button = 'left'; down = $false } })
+    Start-Sleep -Milliseconds 100
+    & $capture 'after-drag'
+    return [pscustomobject]@{
+        Capability = $capability
+        Notes = ($notes -join '; ')
+        Captures = $captures
+    }
 }
 
 function Wait-ForCaptureFile {
@@ -1112,10 +1296,27 @@ function Invoke-QemuDisplayProbeBackend {
     $dualOutputVisualProof = 'not-confirmed'
     $captureReason = 'manual-check-required'
     $visualCaptureReason = ''
+    $inputProofStatus = 'not-attempted'
+    $inputProofNotes = ''
+    $inputSendEvent = 'unknown'
+    $inputHeadRouting = 'unknown'
+    $inputClickHead0Path = ''
+    $inputClickHead1Path = ''
+    $inputBoundaryHead0Path = ''
+    $inputBoundaryHead1Path = ''
+    $inputAfterDragHead0Path = ''
+    $inputAfterDragHead1Path = ''
+    $inputBoundaryChecksum0 = ''
+    $inputBoundaryChecksum1 = ''
+    $inputAfterDragChecksum0 = ''
+    $inputAfterDragChecksum1 = ''
+    $inputBoundaryChanged0 = $false
+    $inputBoundaryChanged1 = $false
 
     if (-not (Find-Qemu)) {
         throw 'qemu-system-x86_64 not found.'
     }
+    $qemuVersion = Get-QemuVersionText
 
     if ($spec.PSObject.Properties.Name -contains 'Supported' -and -not $spec.Supported) {
         $supportReason = 'QEMU does not advertise disable-legacy=on for virtio-gpu-pci'
@@ -1153,6 +1354,8 @@ function Invoke-QemuDisplayProbeBackend {
             DistinctPatternsConfirmed = $false
             DualOutputVisualProof = 'not-attempted'
             QemuArgs = $spec.QemuArgs
+            QemuVersion = $qemuVersion
+            QmpPort = $qmpPort
             ProbeNote = $spec.ProbeNote
             Required = $spec.Required
             Supported = $false
@@ -1377,7 +1580,7 @@ function Invoke-QemuDisplayProbeBackend {
         $launcherState = Start-ProbeLauncher -Backend $spec.LauncherBackend -SerialLog $serialLog -LauncherStdOut $launcherStdOut -LauncherStdErr $launcherStdErr -EnableVisualCapture:$EnableVisualCapture -QmpPort $qmpPort
         $proc = $launcherState.Process
 
-        if ($stageLabel -eq 'compositorLiveBounded') {
+        if ($stageLabel -eq 'compositorLiveBounded' -or $stageLabel -eq 'compositorInputBounded') {
             $initialFrameReadySeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern '\[VIRTIO-GPU\] VirtioGPU live presentation: initial frame ready' -TimeoutSeconds $TimeoutSeconds
             if ($initialFrameReadySeen -and $EnableVisualCapture -and -not $proc.HasExited) {
                 $initialQmpSession = $null
@@ -1396,6 +1599,36 @@ function Invoke-QemuDisplayProbeBackend {
                 } finally {
                     if ($initialQmpSession) {
                         Close-QmpSession -Session $initialQmpSession
+                    }
+                }
+            }
+            if ($stageLabel -eq 'compositorInputBounded' -and $initialFrameReadySeen -and $EnableVisualCapture -and -not $proc.HasExited) {
+                $inputQmpSession = $null
+                try {
+                    $inputQmpSession = New-QmpSession -Port $qmpPort -TimeoutSeconds ([Math]::Min([Math]::Max($TimeoutSeconds, 10), 30))
+                    $inputProof = Invoke-QemuInputProofSequence -Session $inputQmpSession -CaptureRoot $captureRoot
+                    $inputProofStatus = 'captured'
+                    $inputProofNotes = $inputProof.Notes
+                    $inputSendEvent = $inputProof.Capability.InputSendEvent.ToString().ToLowerInvariant()
+                    $inputHeadRouting = $inputProof.Capability.HeadRouting.ToString().ToLowerInvariant()
+                    $inputClickHead0Path = $inputProof.Captures['click-head0']
+                    $inputClickHead1Path = $inputProof.Captures['click-head1']
+                    $inputBoundaryHead0Path = $inputProof.Captures['boundary-head0']
+                    $inputBoundaryHead1Path = $inputProof.Captures['boundary-head1']
+                    $inputAfterDragHead0Path = $inputProof.Captures['after-drag-head0']
+                    $inputAfterDragHead1Path = $inputProof.Captures['after-drag-head1']
+                    $inputBoundaryChecksum0 = Get-CaptureChecksum -Path $inputBoundaryHead0Path
+                    $inputBoundaryChecksum1 = Get-CaptureChecksum -Path $inputBoundaryHead1Path
+                    $inputAfterDragChecksum0 = Get-CaptureChecksum -Path $inputAfterDragHead0Path
+                    $inputAfterDragChecksum1 = Get-CaptureChecksum -Path $inputAfterDragHead1Path
+                    $inputBoundaryChanged0 = $inputBoundaryChecksum0 -ne $inputAfterDragChecksum0
+                    $inputBoundaryChanged1 = $inputBoundaryChecksum1 -ne $inputAfterDragChecksum1
+                } catch {
+                    $inputProofStatus = 'failed'
+                    $inputProofNotes = $_.Exception.Message
+                } finally {
+                    if ($inputQmpSession) {
+                        Close-QmpSession -Session $inputQmpSession
                     }
                 }
             }
@@ -1542,7 +1775,7 @@ function Invoke-QemuDisplayProbeBackend {
                                 $captureReason = 'capture assessment unavailable'
                                 $visualCaptureStatus = 'manual-check-required'
                             }
-                        } elseif ($stageLabel -eq 'compositorLiveBounded') {
+                        } elseif ($stageLabel -eq 'compositorLiveBounded' -or $stageLabel -eq 'compositorInputBounded') {
                             $finalScanout0Path = Join-Path $captureRoot 'final-head0.png'
                             $finalScanout1Path = Join-Path $captureRoot 'final-head1.png'
                             Invoke-QmpScreendump -Session $qmpSession -Filename $finalScanout0Path -DeviceId 'gpu0' -Head 0
@@ -1693,6 +1926,7 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuCompositorProofLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU compositor proof: outputs=2 targets=2 frameMode=single-shot target0Render=(ok|failed) target0Transfer=(ok|failed) target0Flush=(ok|failed) target1Render=(ok|failed) target1Transfer=(ok|failed) target1Flush=(ok|failed) virtualDesktop=\d+x\d+ taskbarPrimaryOnly=(yes|no) continuousPresentation=disabled')
     $gpuLiveConfiguredLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU live presentation configured: enabled=yes outputs=2 frameCap=\d+ frameLimit=\d+ timeLimitTicks=\d+ rateIntervalTicks=\d+ overlay=bounded-moving-marker')
     $gpuLiveInitialFrameLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU live presentation: initial frame ready target0Checksum=0x[0-9A-Fa-f]+ target1Checksum=0x[0-9A-Fa-f]+ backingLifetime=static resourceIdsStable=yes scanoutsStable=yes')
+    $gpuLiveCountersLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] live presentation counters: presentationPolls=\d+ eligibleAttempts=\d+ boundedProofIterations=\d+ renderedFrames=\d+ cleanSkips=\d+ rateLimitSkips=\d+ note=rateLimitSkips_counts_scheduler_polls_and_may_exceed_boundedProofIterations')
     $gpuLiveSummaryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU live presentation: enabled=(yes|no) outputs=2 contentMode=compositor-live-bounded frameCap=\d+ frameLimit=\d+ timeLimitTicks=\d+ attempted=\d+ rendered=\d+ dirtyFrames=\d+ cleanSkips=\d+ rateSkips=\d+ target0Frames=\d+ target1Frames=\d+ target0Transfer=\d+ target0Flush=\d+ target1Transfer=\d+ target1Flush=\d+ target0Failures=\d+ target1Failures=\d+ initialChecksum0=0x[0-9A-Fa-f]+ finalChecksum0=0x[0-9A-Fa-f]+ initialChecksum1=0x[0-9A-Fa-f]+ finalChecksum1=0x[0-9A-Fa-f]+ fallbackActivated=(yes|no) fallbackTarget=([^ ]+) fallbackReason=([^ ]+) fallbackResult=([^ ]+) continuousPresentation=bounded stopReason=(frame-limit|time-limit)')
     $gpuLiveFrameCap = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'frameCap=(\d+)' -GroupIndex 1
     $gpuLiveFrameLimit = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'frameLimit=(\d+)' -GroupIndex 1
@@ -1711,6 +1945,11 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuLiveFallbackReason = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'fallbackReason=([^ ]+)' -GroupIndex 1
     $gpuLiveFallbackResult = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'fallbackResult=([^ ]+)' -GroupIndex 1
     $gpuLiveStopReason = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'stopReason=([^ ]+)' -GroupIndex 1
+    $inputPathLine = [regex]::Match($serialText, '\[INPUT\] QEMU input path=ps2-relative virtualDesktop=\d+x\d+ monitors=\d+')
+    $inputMapSummaryLine = [regex]::Match($serialText, '\[INPUT-MAP\] summary eventsSeen=\d+ valid=\d+ invalid=\d+ relative=\d+ headAbsolute=\d+ normalizedAbsolute=\d+ unknownHeadFallbacks=\d+ clamped=\d+')
+    $inputOrdinaryWindowLine = [regex]::Match($serialText, '\[INPUT-PROOF\] ordinaryWindow id=[0-9A-Fa-f]+ title=QEMU Input Proof startRect=-?\d+,-?\d+ \d+x\d+ virtualDesktop=\d+x\d+')
+    $inputBoundaryLine = [regex]::Match($serialText, '\[INPUT-PROOF\] dragCrossedBoundary=yes boundaryX=\d+ windowRect=-?\d+,-?\d+ \d+x\d+')
+    $inputProofLine = [regex]::Match($serialText, 'Dual-monitor input proof: relativeGlobal=ok headAwareAbsolute=unavailable reason=guest-input-path-ps2-relative-no-source-head clickFocus=(ok|failed) dragCrossedBoundary=(yes|no) finalWindowMonitor=-?\d+ virtualDesktop=\d+x\d+ taskbarPrimaryOnly=yes livePresentation=yes captureReleased=(yes|no) finalWindowIntersectsBoth=(yes|no) initialRect=-?\d+,-?\d+ \d+x\d+ finalRect=-?\d+,-?\d+ \d+x\d+')
     $gpuOutputInventoryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU outputs: configured=\d+ operational=\d+ connectorEnabled=\d+ presentationConfirmed=\d+ virtualDesktop=\d+x\d+ targets=\d+ backed=\d+ primaryOutput=\d+ protocolConnectorEnabledCount=\d+ operationalOutputCount=\d+ presentationConfirmedCount=\d+')
     $gpuOutputMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] output\[\d+\]: source=virtio-gpu .*')
     $gpuMonitorMatches = [regex]::Matches($serialText, '\[VIRTIO-GPU\] monitor\[\d+\]: source=virtio-gpu .*')
@@ -2018,9 +2257,10 @@ function Invoke-QemuDisplayProbeBackend {
             ) -Detail $gpuProbeCompleteLine.Value
             $backendStatus = 'complete'
             $interpretation = 'QEMU virtio-gpu compositor frame rendered once into both scanouts and post-render display-info completed'
-        } elseif ($stageLabel -eq 'compositorLiveBounded') {
+        } elseif ($stageLabel -eq 'compositorLiveBounded' -or $stageLabel -eq 'compositorInputBounded') {
             Assert-Condition -Backend $backendName -Name 'virtio-gpu live configured line' -Condition $gpuLiveConfiguredLine.Success -Detail 'expected the explicit bounded live presenter configuration'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu live initial frame line' -Condition $gpuLiveInitialFrameLine.Success -Detail 'expected the initial capture synchronization marker'
+            Assert-Condition -Backend $backendName -Name 'virtio-gpu live counter clarification line' -Condition $gpuLiveCountersLine.Success -Detail 'expected separate presentation poll, eligible attempt, bounded iteration, and skip counters'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu live summary line' -Condition $gpuLiveSummaryLine.Success -Detail 'expected the bounded live presenter summary'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu live frame cap' -Condition ($gpuLiveFrameCap -eq '10') -Detail $gpuLiveSummaryLine.Value
             Assert-Condition -Backend $backendName -Name 'virtio-gpu live bounded frame limit' -Condition ($gpuLiveFrameLimit -eq '60' -and $gpuLiveStopReason -eq 'frame-limit') -Detail $gpuLiveSummaryLine.Value
@@ -2039,8 +2279,24 @@ function Invoke-QemuDisplayProbeBackend {
             Assert-Condition -Backend $backendName -Name 'virtio-gpu live output descriptors' -Condition ($gpuOutputMatches.Count -eq 2 -and $gpuMonitorMatches.Count -eq 2 -and $gpuTargetMatches.Count -eq 2) -Detail ("outputs={0} monitors={1} targets={2}" -f $gpuOutputMatches.Count, $gpuMonitorMatches.Count, $gpuTargetMatches.Count)
             Assert-Condition -Backend $backendName -Name 'virtio-gpu live probe content mode' -Condition ($gpuProbeCompleteContentMode -eq 'compositor-live-bounded' -and $gpuProbeCompleteFrameMode -eq 'bounded' -and $gpuProbeCompleteContinuousPresentation -eq 'enabled') -Detail $gpuProbeCompleteLine.Value
             Assert-Condition -Backend $backendName -Name 'virtio-gpu live single-frame proof retained' -Condition $gpuCompositorProofLine.Success -Detail 'expected the original single-shot compositor proof line to remain available'
-            $backendStatus = 'complete'
-            $interpretation = 'QEMU virtio-gpu compositor live bounded mode repeatedly presented both operational targets with dirty-generation skipping, a hard rate cap, and initial/final capture evidence'
+            if ($stageLabel -eq 'compositorInputBounded') {
+                Assert-Condition -Backend $backendName -Name 'QEMU input proof completed' -Condition ($inputProofStatus -eq 'captured') -Detail $inputProofNotes
+                Assert-Condition -Backend $backendName -Name 'QEMU input path inventory' -Condition $inputPathLine.Success -Detail 'expected the active PS/2-relative QEMU input path line'
+                Assert-Condition -Backend $backendName -Name 'QEMU input routing capability recorded' -Condition ($inputSendEvent -eq 'true' -and $inputHeadRouting -eq 'false') -Detail $inputProofNotes
+                Assert-Condition -Backend $backendName -Name 'input proof ordinary window' -Condition $inputOrdinaryWindowLine.Success -Detail 'expected a normal compositor/window-manager test window'
+                Assert-Condition -Backend $backendName -Name 'input proof boundary transition' -Condition $inputBoundaryLine.Success -Detail 'expected the bounded drag to cross the runtime monitor boundary'
+                Assert-Condition -Backend $backendName -Name 'input proof summary' -Condition ($inputProofLine.Success -and $inputProofLine.Value -match 'clickFocus=ok' -and $inputProofLine.Value -match 'dragCrossedBoundary=yes' -and $inputProofLine.Value -match 'finalWindowMonitor=2' -and $inputProofLine.Value -match 'captureReleased=yes') -Detail $inputProofLine.Value
+                Assert-Condition -Backend $backendName -Name 'input mapping summary' -Condition ($inputMapSummaryLine.Success -and $inputMapSummaryLine.Value -match 'relative=\d+' -and $inputMapSummaryLine.Value -match 'unknownHeadFallbacks=0') -Detail $inputMapSummaryLine.Value
+                Assert-Condition -Backend $backendName -Name 'input proof click captures' -Condition ($EnableVisualCapture -and (Test-Path -LiteralPath $inputClickHead0Path) -and (Test-Path -LiteralPath $inputClickHead1Path)) -Detail ("head0={0} head1={1}" -f $inputClickHead0Path, $inputClickHead1Path)
+                Assert-Condition -Backend $backendName -Name 'input proof boundary captures' -Condition ($EnableVisualCapture -and (Test-Path -LiteralPath $inputBoundaryHead0Path) -and (Test-Path -LiteralPath $inputBoundaryHead1Path)) -Detail ("head0={0} head1={1}" -f $inputBoundaryHead0Path, $inputBoundaryHead1Path)
+                Assert-Condition -Backend $backendName -Name 'input proof after-drag captures' -Condition ($EnableVisualCapture -and (Test-Path -LiteralPath $inputAfterDragHead0Path) -and (Test-Path -LiteralPath $inputAfterDragHead1Path)) -Detail ("head0={0} head1={1}" -f $inputAfterDragHead0Path, $inputAfterDragHead1Path)
+                Assert-Condition -Backend $backendName -Name 'input proof both outputs changed during drag' -Condition ($inputBoundaryChanged0 -and $inputBoundaryChanged1) -Detail ("boundary0={0} after0={1} boundary1={2} after1={3}" -f $inputBoundaryChecksum0, $inputAfterDragChecksum0, $inputBoundaryChecksum1, $inputAfterDragChecksum1)
+                $backendStatus = 'partial'
+                $interpretation = 'QEMU virtio-gpu relative-global input, click/focus, and cross-boundary ordinary-window drag were proven on both live outputs; QMP exposed no source-head routing, so head-aware absolute input remains unavailable'
+            } else {
+                $backendStatus = 'complete'
+                $interpretation = 'QEMU virtio-gpu compositor live bounded mode repeatedly presented both operational targets with dirty-generation skipping, a hard rate cap, and initial/final capture evidence'
+            }
         } else {
             Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B capacity line' -Condition $gpuStageBCapacityLine.Success -Detail 'expected Stage B capacity evidence'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B initial scanout line' -Condition $gpuStageBInitialScanoutLine.Success -Detail 'expected scanout 1 initial state evidence'
@@ -2172,6 +2428,8 @@ function Invoke-QemuDisplayProbeBackend {
         "bootloaderSerialAppeared=$($bootloaderSerialCaptured.ToString().ToLowerInvariant())"
         "launcherExitCode=$(Format-OptionalValue -Value $launcherExitCode)"
         "timeoutSeconds=$TimeoutSeconds"
+        "qemuVersion=$qemuVersion"
+        "qmpPort=$qmpPort"
         "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
         "qemuArgs=$($spec.QemuArgs)"
         "probeNote=$($spec.ProbeNote)"
@@ -2268,6 +2526,7 @@ function Invoke-QemuDisplayProbeBackend {
         "gpuCompositorProofLine=$gpuCompositorProofSummary"
         "gpuLiveConfiguredLine=$($gpuLiveConfiguredLine.Value)"
         "gpuLiveInitialFrameLine=$($gpuLiveInitialFrameLine.Value)"
+        "gpuLiveCountersLine=$($gpuLiveCountersLine.Value)"
         "gpuLiveSummaryLine=$($gpuLiveSummaryLine.Value)"
         "gpuLiveFrameCap=$gpuLiveFrameCap"
         "gpuLiveFrameLimit=$gpuLiveFrameLimit"
@@ -2286,6 +2545,23 @@ function Invoke-QemuDisplayProbeBackend {
         "gpuLiveFallbackReason=$gpuLiveFallbackReason"
         "gpuLiveFallbackResult=$gpuLiveFallbackResult"
         "gpuLiveStopReason=$gpuLiveStopReason"
+        "inputProofStatus=$inputProofStatus"
+        "inputProofNotes=$inputProofNotes"
+        "inputSendEvent=$inputSendEvent"
+        "inputHeadRouting=$inputHeadRouting"
+        "inputPathLine=$($inputPathLine.Value)"
+        "inputMapSummaryLine=$($inputMapSummaryLine.Value)"
+        "inputOrdinaryWindowLine=$($inputOrdinaryWindowLine.Value)"
+        "inputBoundaryLine=$($inputBoundaryLine.Value)"
+        "inputProofLine=$($inputProofLine.Value)"
+        "inputClickHead0Path=$inputClickHead0Path"
+        "inputClickHead1Path=$inputClickHead1Path"
+        "inputBoundaryHead0Path=$inputBoundaryHead0Path"
+        "inputBoundaryHead1Path=$inputBoundaryHead1Path"
+        "inputAfterDragHead0Path=$inputAfterDragHead0Path"
+        "inputAfterDragHead1Path=$inputAfterDragHead1Path"
+        "inputBoundaryChanged0=$inputBoundaryChanged0"
+        "inputBoundaryChanged1=$inputBoundaryChanged1"
         "compositorContentConfirmed0=$compositorContentConfirmed0"
         "compositorContentConfirmed1=$compositorContentConfirmed1"
         "taskbarPrimaryOnlyConfirmed=$taskbarPrimaryOnlyConfirmed"
@@ -2499,6 +2775,7 @@ function Invoke-QemuDisplayProbeBackend {
         GpuCompositorProofLine = $gpuCompositorProofSummary
         GpuLiveConfiguredLine = $gpuLiveConfiguredLine.Value
         GpuLiveInitialFrameLine = $gpuLiveInitialFrameLine.Value
+        GpuLiveCountersLine = $gpuLiveCountersLine.Value
         GpuLiveSummaryLine = $gpuLiveSummaryLine.Value
         GpuLiveFrameCap = $gpuLiveFrameCap
         GpuLiveFrameLimit = $gpuLiveFrameLimit
@@ -2517,6 +2794,27 @@ function Invoke-QemuDisplayProbeBackend {
         GpuLiveFallbackReason = $gpuLiveFallbackReason
         GpuLiveFallbackResult = $gpuLiveFallbackResult
         GpuLiveStopReason = $gpuLiveStopReason
+        InputProofStatus = $inputProofStatus
+        InputProofNotes = $inputProofNotes
+        InputSendEvent = $inputSendEvent
+        InputHeadRouting = $inputHeadRouting
+        InputPathLine = $inputPathLine.Value
+        InputMapSummaryLine = $inputMapSummaryLine.Value
+        InputOrdinaryWindowLine = $inputOrdinaryWindowLine.Value
+        InputBoundaryLine = $inputBoundaryLine.Value
+        InputProofLine = $inputProofLine.Value
+        InputClickHead0Path = $inputClickHead0Path
+        InputClickHead1Path = $inputClickHead1Path
+        InputBoundaryHead0Path = $inputBoundaryHead0Path
+        InputBoundaryHead1Path = $inputBoundaryHead1Path
+        InputAfterDragHead0Path = $inputAfterDragHead0Path
+        InputAfterDragHead1Path = $inputAfterDragHead1Path
+        InputBoundaryChecksum0 = $inputBoundaryChecksum0
+        InputBoundaryChecksum1 = $inputBoundaryChecksum1
+        InputAfterDragChecksum0 = $inputAfterDragChecksum0
+        InputAfterDragChecksum1 = $inputAfterDragChecksum1
+        InputBoundaryChanged0 = $inputBoundaryChanged0
+        InputBoundaryChanged1 = $inputBoundaryChanged1
         GpuProbeCompleteContentMode = $gpuProbeCompleteContentMode
         GpuProbeCompleteFrameMode = $gpuProbeCompleteFrameMode
         GpuProbeCompleteContinuousPresentation = $gpuProbeCompleteContinuousPresentation
@@ -2537,6 +2835,8 @@ function Invoke-QemuDisplayProbeBackend {
         InitialFinalCaptureStatus = $initialFinalCaptureStatus
         GpuSingleOutputProofLine = $gpuSingleOutputProofLine.Value
         GpuDualOutputProofLine = $gpuDualOutputProofLine.Value
+        QemuVersion = $qemuVersion
+        QmpPort = $qmpPort
         Supported = $spec.Supported
         DiagnosticStatus = $backendStatus
         Interpretation = $interpretation
@@ -2547,7 +2847,7 @@ function Invoke-QemuDisplayProbeBackend {
 }
 
 try {
-    if ($Mode -eq 'compositorLiveBounded') {
+    if ($Mode -eq 'compositorLiveBounded' -or $Mode -eq 'compositorInputBounded') {
         Write-Host '[build] rebuilding kernel with QEMU-only bounded virtio-gpu compositor-live probe enabled'
         Invoke-KernelBuildForSmoke -ExtraCFlags '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE_BOUNDED'
         $script:activeSmokeBuild = $true
@@ -2558,18 +2858,18 @@ try {
         }
 
         $backend = $Backends[0]
-        Write-Host ("[{0} compositorLiveBounded] launching display probe smoke" -f $backend)
-        $result = Invoke-QemuDisplayProbeBackend -Backend $backend -TimeoutSeconds $TimeoutSeconds -ProbeStage 'compositorLiveBounded' -EnableVisualCapture
+        Write-Host ("[{0} {1}] launching display probe smoke" -f $backend, $Mode)
+        $result = Invoke-QemuDisplayProbeBackend -Backend $backend -TimeoutSeconds $TimeoutSeconds -ProbeStage $Mode -EnableVisualCapture
         $results += $result
-        Write-Host ("[{0} compositorLiveBounded] completed. serial={1}" -f $backend, $result.SerialLog)
+        Write-Host ("[{0} {1}] completed. serial={2}" -f $backend, $Mode, $result.SerialLog)
         $stageBResult = $result
-        $stageBResultComplete = $result.DiagnosticStatus -eq 'complete'
+        $stageBResultComplete = $result.DiagnosticStatus -eq 'complete' -or ($Mode -eq 'compositorInputBounded' -and $result.DiagnosticStatus -eq 'partial')
         $stageBBlockerReason = if ($stageBResultComplete) {
             ''
         } elseif (-not [string]::IsNullOrWhiteSpace($result.Interpretation)) {
             $result.Interpretation
         } else {
-            'Compositor-live bounded probe failed without a blocker reason'
+            "$Mode probe failed without a blocker reason"
         }
     } elseif ($Mode -eq 'compositorFrame') {
         Write-Host '[build] rebuilding kernel with virtio-gpu compositor-frame probe enabled'
@@ -2663,6 +2963,8 @@ try {
         $evidenceLines += "required=$($result.Required.ToString().ToLowerInvariant())"
         $evidenceLines += "supported=$($result.Supported.ToString().ToLowerInvariant())"
         $evidenceLines += "qemuArgs=$($result.QemuArgs)"
+        $evidenceLines += "qemuVersion=$($result.QemuVersion)"
+        $evidenceLines += "qmpPort=$($result.QmpPort)"
         $evidenceLines += "probeNote=$($result.ProbeNote)"
         $evidenceLines += "launched=$($result.Launched.ToString().ToLowerInvariant())"
         $evidenceLines += "bootloaderSerialAppeared=$($result.BootloaderSerialAppeared.ToString().ToLowerInvariant())"
@@ -2789,6 +3091,27 @@ try {
         $evidenceLines += "gpuCompositorTarget1PlanLine=$($result.GpuCompositorTarget1PlanLine)"
         $evidenceLines += "gpuCompositorTarget1ResultLine=$($result.GpuCompositorTarget1ResultLine)"
         $evidenceLines += "gpuCompositorProofLine=$($result.GpuCompositorProofLine)"
+        $evidenceLines += "gpuLiveConfiguredLine=$($result.GpuLiveConfiguredLine)"
+        $evidenceLines += "gpuLiveInitialFrameLine=$($result.GpuLiveInitialFrameLine)"
+        $evidenceLines += "gpuLiveCountersLine=$($result.GpuLiveCountersLine)"
+        $evidenceLines += "gpuLiveSummaryLine=$($result.GpuLiveSummaryLine)"
+        $evidenceLines += "inputProofStatus=$($result.InputProofStatus)"
+        $evidenceLines += "inputProofNotes=$($result.InputProofNotes)"
+        $evidenceLines += "inputSendEvent=$($result.InputSendEvent)"
+        $evidenceLines += "inputHeadRouting=$($result.InputHeadRouting)"
+        $evidenceLines += "inputPathLine=$($result.InputPathLine)"
+        $evidenceLines += "inputMapSummaryLine=$($result.InputMapSummaryLine)"
+        $evidenceLines += "inputOrdinaryWindowLine=$($result.InputOrdinaryWindowLine)"
+        $evidenceLines += "inputBoundaryLine=$($result.InputBoundaryLine)"
+        $evidenceLines += "inputProofLine=$($result.InputProofLine)"
+        $evidenceLines += "inputClickHead0Path=$($result.InputClickHead0Path)"
+        $evidenceLines += "inputClickHead1Path=$($result.InputClickHead1Path)"
+        $evidenceLines += "inputBoundaryHead0Path=$($result.InputBoundaryHead0Path)"
+        $evidenceLines += "inputBoundaryHead1Path=$($result.InputBoundaryHead1Path)"
+        $evidenceLines += "inputAfterDragHead0Path=$($result.InputAfterDragHead0Path)"
+        $evidenceLines += "inputAfterDragHead1Path=$($result.InputAfterDragHead1Path)"
+        $evidenceLines += "inputBoundaryChanged0=$($result.InputBoundaryChanged0)"
+        $evidenceLines += "inputBoundaryChanged1=$($result.InputBoundaryChanged1)"
         $evidenceLines += "compositorContentConfirmed0=$($result.CompositorContentConfirmed0)"
         $evidenceLines += "compositorContentConfirmed1=$($result.CompositorContentConfirmed1)"
         $evidenceLines += "taskbarPrimaryOnlyConfirmed=$($result.TaskbarPrimaryOnlyConfirmed)"

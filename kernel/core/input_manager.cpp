@@ -48,6 +48,13 @@ static InputSource s_activeKeyboardSource = InputSource::None;
 // Preferred source override (0 = auto)
 static InputSource s_preferredSource = InputSource::None;
 
+static display_input::DisplayInputMapper s_displayMapper;
+static bool s_mappingDiagnosticsEnabled = false;
+static uint32_t s_mappingDiagnosticLimit = 0;
+static uint32_t s_mappingDiagnosticCount = 0;
+static int32_t s_lastPs2X = 0;
+static int32_t s_lastPs2Y = 0;
+
 // ================================================================
 // Helpers
 // ================================================================
@@ -58,11 +65,81 @@ static void memzero(void* dst, uint32_t len)
     for (uint32_t i = 0; i < len; ++i) p[i] = 0;
 }
 
-static int32_t clamp(int32_t v, int32_t lo, int32_t hi)
+static void put_decimal(int32_t value)
 {
-    if (v < lo) return lo;
-    if (v > hi) return hi;
-    return v;
+    char buffer[12];
+    uint32_t index = sizeof(buffer) - 1u;
+    buffer[index] = '\0';
+    bool negative = value < 0;
+    uint32_t magnitude = negative
+        ? static_cast<uint32_t>(-(static_cast<int64_t>(value)))
+        : static_cast<uint32_t>(value);
+    do {
+        buffer[--index] = static_cast<char>('0' + (magnitude % 10u));
+        magnitude /= 10u;
+    } while (magnitude != 0u && index > 0u);
+    if (negative && index > 0u) buffer[--index] = '-';
+    serial::puts(&buffer[index]);
+}
+
+static void log_mapping_event(const display_input::DisplayPointerEvent& event)
+{
+    if (!s_mappingDiagnosticsEnabled ||
+        s_mappingDiagnosticCount >= s_mappingDiagnosticLimit) return;
+    ++s_mappingDiagnosticCount;
+    serial::puts("[INPUT-MAP] seq=");
+    serial::put_hex32(event.sequence);
+    serial::puts(" source=");
+    serial::puts(display_input::pointerSourceName(event.sourceType));
+    serial::puts(" mode=");
+    serial::puts(display_input::pointerCoordinateModeName(event.coordinateMode));
+    serial::puts(" head=");
+    put_decimal(event.sourceHead);
+    serial::puts(" monitor=");
+    put_decimal(event.sourceMonitor);
+    serial::puts(" raw=");
+    put_decimal(event.rawX);
+    serial::puts(",");
+    put_decimal(event.rawY);
+    serial::puts(" local=");
+    put_decimal(event.localX);
+    serial::puts(",");
+    put_decimal(event.localY);
+    serial::puts(" virtual=");
+    put_decimal(event.virtualX);
+    serial::puts(",");
+    put_decimal(event.virtualY);
+    serial::puts(" dxdy=");
+    put_decimal(event.relativeDx);
+    serial::puts(",");
+    put_decimal(event.relativeDy);
+    serial::puts(" buttons=");
+    serial::put_hex8(event.buttonMask);
+    serial::puts(" wheel=");
+    put_decimal(event.wheelDelta);
+    serial::puts(" fallback=");
+    serial::puts(event.fallbackUsed ? "yes" : "no");
+    serial::puts(" clamped=");
+    serial::puts(event.clamped ? "yes" : "no");
+    serial::puts(" capture=external mappingReason=");
+    serial::puts(event.mappingReason);
+    serial::puts(" valid=");
+    serial::puts(event.valid ? "yes\n" : "no\n");
+}
+
+static void apply_mapping_event(const display_input::DisplayPointerEvent& event,
+                                InputSource source)
+{
+    s_mouse.mapping = event;
+    s_mouse.x = event.virtualX;
+    s_mouse.y = event.virtualY;
+    s_mouse.mode = event.coordinateMode == display_input::PointerCoordinateMode::Relative
+        ? PositionMode::Relative : PositionMode::Absolute;
+    s_mouse.source = source;
+    s_mouse.buttons = event.buttonMask;
+    s_mouse.scrollY = static_cast<int8_t>(event.wheelDelta);
+    s_mouse.scrollX = 0;
+    log_mapping_event(event);
 }
 
 // ================================================================
@@ -159,22 +236,21 @@ static void poll_ps2_mouse()
     
     int32_t x = ps2mouse::get_x();
     int32_t y = ps2mouse::get_y();
+    int32_t dx = x - s_lastPs2X;
+    int32_t dy = y - s_lastPs2Y;
+    s_lastPs2X = x;
+    s_lastPs2Y = y;
     uint8_t buttons = ps2mouse::get_buttons();
     int8_t scroll = ps2mouse::get_scroll_delta();
-    
+
+    display_input::DisplayPointerEvent event = s_displayMapper.mapRelativePointer(
+        display_input::PointerSourceType::Ps2Relative, dx, dy, buttons, scroll);
     // Check if anything changed
-    if (x != s_mouse.x || y != s_mouse.y || 
+    if (event.virtualX != s_mouse.x || event.virtualY != s_mouse.y ||
         buttons != s_mouse.buttons || scroll != 0) {
         s_mouse.dirty = true;
     }
-    
-    s_mouse.x = x;
-    s_mouse.y = y;
-    s_mouse.buttons = buttons;
-    s_mouse.scrollY = scroll;
-    s_mouse.scrollX = 0;
-    s_mouse.mode = PositionMode::Relative;
-    s_mouse.source = InputSource::PS2;
+    apply_mapping_event(event, InputSource::PS2);
 }
 #endif
 
@@ -187,30 +263,17 @@ static void poll_usb_hid_mouse()
     const usb_hid::MouseState* usbMouse = usb_hid::get_mouse_state();
     if (!usbMouse) return;
     
-    // USB HID boot mouse reports relative deltas
-    // USB tablet reports absolute coordinates
-    // For now, handle both as relative (boot protocol)
-    
     int32_t dx = usbMouse->dx;
     int32_t dy = usbMouse->dy;
-    
-    // Apply deltas to current position
-    int32_t newX = clamp(s_mouse.x + dx, 0, s_screenWidth - 1);
-    int32_t newY = clamp(s_mouse.y + dy, 0, s_screenHeight - 1);
-    
+    display_input::DisplayPointerEvent event = s_displayMapper.mapRelativePointer(
+        display_input::PointerSourceType::UsbRelative, dx, dy,
+        usbMouse->buttons, usbMouse->wheel);
     // Check if anything changed
-    if (newX != s_mouse.x || newY != s_mouse.y ||
+    if (event.virtualX != s_mouse.x || event.virtualY != s_mouse.y ||
         usbMouse->buttons != s_mouse.buttons || usbMouse->wheel != 0) {
         s_mouse.dirty = true;
     }
-    
-    s_mouse.x = newX;
-    s_mouse.y = newY;
-    s_mouse.buttons = usbMouse->buttons;
-    s_mouse.scrollY = usbMouse->wheel;
-    s_mouse.scrollX = 0;
-    s_mouse.mode = PositionMode::Relative;
-    s_mouse.source = InputSource::USB_HID;
+    apply_mapping_event(event, InputSource::USB_HID);
 }
 #endif // ARCH_HAS_USB && KERNEL_HAS_USB_HID
 
@@ -223,31 +286,22 @@ static void poll_virtio_input()
     if (!vioMouse) return;
     
     // VirtIO input typically provides absolute coordinates
-    int32_t x = static_cast<int32_t>(vioMouse->x);
-    int32_t y = static_cast<int32_t>(vioMouse->y);
-    
-    // Scale to screen dimensions if needed
-    // VirtIO tablet usually reports in 0-32767 range
+    display_input::DisplayPointerEvent event;
     if (vioMouse->is_absolute) {
-        x = (x * s_screenWidth) / 32768;
-        y = (y * s_screenHeight) / 32768;
+        event = s_displayMapper.mapUnknownHeadAbsolute(
+            display_input::PointerSourceType::VirtioInputAbsolute,
+            vioMouse->x, vioMouse->y, 0, 32767, 0, 32767,
+            s_screenWidth, s_screenHeight, vioMouse->buttons, vioMouse->wheel);
+    } else {
+        event = s_displayMapper.mapRelativePointer(
+            display_input::PointerSourceType::VirtioInputRelative,
+            vioMouse->x, vioMouse->y, vioMouse->buttons, vioMouse->wheel);
     }
-    
-    x = clamp(x, 0, s_screenWidth - 1);
-    y = clamp(y, 0, s_screenHeight - 1);
-    
-    if (x != s_mouse.x || y != s_mouse.y ||
-        vioMouse->buttons != s_mouse.buttons) {
+    if (event.virtualX != s_mouse.x || event.virtualY != s_mouse.y ||
+        vioMouse->buttons != s_mouse.buttons || vioMouse->wheel != 0) {
         s_mouse.dirty = true;
     }
-    
-    s_mouse.x = x;
-    s_mouse.y = y;
-    s_mouse.buttons = vioMouse->buttons;
-    s_mouse.scrollY = vioMouse->wheel;
-    s_mouse.scrollX = 0;
-    s_mouse.mode = vioMouse->is_absolute ? PositionMode::Absolute : PositionMode::Relative;
-    s_mouse.source = InputSource::VirtIO;
+    apply_mapping_event(event, InputSource::VirtIO);
 }
 #endif
 
@@ -269,6 +323,13 @@ void init(uint32_t screen_width, uint32_t screen_height)
     // Center mouse on screen
     s_mouse.x = s_screenWidth / 2;
     s_mouse.y = s_screenHeight / 2;
+    s_displayMapper.reset();
+    s_displayMapper.configureVirtualDesktop(0, 0, s_screenWidth, s_screenHeight);
+    s_displayMapper.setMonitor(0, 1, 0, 0, s_screenWidth, s_screenHeight, true);
+    s_displayMapper.setCursor(s_mouse.x, s_mouse.y);
+    s_lastPs2X = s_mouse.x;
+    s_lastPs2Y = s_mouse.y;
+    s_mappingDiagnosticCount = 0;
     
 #if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
     // Initialize USB HID subsystem
@@ -291,6 +352,43 @@ void init(uint32_t screen_width, uint32_t screen_height)
     select_best_source();
     
     serial::puts("[INPUT] Input manager initialized\n");
+}
+
+bool configure_display_layout(
+    int32_t left, int32_t top, int32_t right, int32_t bottom,
+    const display_input::DisplayInputMonitor* monitors, uint8_t monitorCount)
+{
+    if (monitors == nullptr || monitorCount == 0 ||
+        monitorCount > display_input::kDisplayInputMaxMonitors) return false;
+    s_displayMapper.reset();
+    s_displayMapper.configureVirtualDesktop(left, top, right, bottom);
+    for (uint8_t i = 0; i < monitorCount; ++i) {
+        const display_input::DisplayInputMonitor& monitor = monitors[i];
+        if (!s_displayMapper.setMonitor(
+                i, monitor.id, monitor.virtualX, monitor.virtualY,
+                monitor.width, monitor.height, monitor.primary,
+                monitor.enabled, monitor.assignedX, monitor.assignedY,
+                monitor.assignedWidth, monitor.assignedHeight)) {
+            return false;
+        }
+    }
+    s_displayMapper.configureVirtualDesktop(left, top, right, bottom);
+    s_displayMapper.setCursor(s_mouse.x, s_mouse.y);
+#if ARCH_HAS_PS2
+    s_lastPs2X = ps2mouse::get_x();
+    s_lastPs2Y = ps2mouse::get_y();
+#else
+    s_lastPs2X = s_mouse.x;
+    s_lastPs2Y = s_mouse.y;
+#endif
+    return true;
+}
+
+void set_mapping_diagnostics(bool enabled, uint32_t eventLimit)
+{
+    s_mappingDiagnosticsEnabled = enabled;
+    s_mappingDiagnosticLimit = eventLimit;
+    s_mappingDiagnosticCount = 0;
 }
 
 void poll()
@@ -371,6 +469,9 @@ InputSource mouse_source()         { return s_activeMouseSource; }
 PositionMode mouse_position_mode() { return s_mouse.mode; }
 
 const MouseState* get_mouse_state() { return &s_mouse; }
+const display_input::DisplayPointerEvent* get_last_pointer_event() { return &s_mouse.mapping; }
+const display_input::DisplayInputMapperCounters* get_mapping_counters() { return &s_displayMapper.counters(); }
+const display_input::DisplayInputMapper* get_display_input_mapper() { return &s_displayMapper; }
 
 // ----------------------------------------------------------------
 // Keyboard accessors

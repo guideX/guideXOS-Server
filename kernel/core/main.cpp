@@ -22,6 +22,7 @@
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/mmio.h"
+#include "include/kernel/qemu_display_input_proof.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -791,13 +792,85 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::interrupts::init();
         kernel::pit::init(100);
         kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+        int32_t inputLeft = 0;
+        int32_t inputTop = 0;
+        int32_t inputRight = 0;
+        int32_t inputBottom = 0;
+        uint8_t inputMonitorCount = 0;
+        kernel::display_input::DisplayInputMonitor inputMonitors[
+            kernel::display_input::kDisplayInputMaxMonitors];
+        const bool inputLayoutReady = kernel::virtio::gpu::get_display_input_layout(
+            &inputLeft, &inputTop, &inputRight, &inputBottom,
+            inputMonitors, kernel::display_input::kDisplayInputMaxMonitors,
+            &inputMonitorCount);
+        if (inputLayoutReady && inputMonitorCount > 0u) {
+            const int32_t virtualWidth = inputRight - inputLeft;
+            const int32_t virtualHeight = inputBottom - inputTop;
+            kernel::serial::puts("[INPUT] QEMU input path=ps2-relative virtualDesktop=");
+            serial_put_u32_decimal(static_cast<uint32_t>(virtualWidth));
+            kernel::serial::putc('x');
+            serial_put_u32_decimal(static_cast<uint32_t>(virtualHeight));
+            kernel::serial::puts(" monitors=");
+            serial_put_u32_decimal(inputMonitorCount);
+            kernel::serial::putc('\n');
+            kernel::ps2mouse::init(static_cast<uint32_t>(virtualWidth),
+                                   static_cast<uint32_t>(virtualHeight));
+            kernel::interrupts::register_irq(12, kernel::ps2mouse::irq_handler);
+            kernel::input::init(static_cast<uint32_t>(virtualWidth),
+                                static_cast<uint32_t>(virtualHeight));
+            kernel::input::configure_display_layout(
+                inputLeft, inputTop, inputRight, inputBottom,
+                inputMonitors, inputMonitorCount);
+            kernel::input::set_mapping_diagnostics(true, 96u);
+            kernel::qemu_display_input_proof::init(
+                virtualWidth, virtualHeight,
+                kernel::input::get_display_input_mapper());
+        } else {
+            kernel::serial::puts(
+                "[INPUT-PROOF] headAwareAbsolute=unavailable reason=virtio-gpu monitor geometry unavailable; live presentation retained\n");
+        }
         kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu live presentation pump active\n");
         while (!kernel::virtio::gpu::presentation_finished()) {
+            if (inputLayoutReady) {
+                kernel::input::poll();
+                if (kernel::input::mouse_dirty()) {
+                    kernel::input::mouse_clear_dirty();
+                    const kernel::display_input::DisplayPointerEvent* pointer =
+                        kernel::input::get_last_pointer_event();
+                    if (pointer != nullptr) {
+                        kernel::qemu_display_input_proof::handle(*pointer);
+                    }
+                }
+            }
             kernel::virtio::gpu::presentation_tick();
             // Consume the normal compositor invalidation request after the
             // live presenter has observed it, allowing clean-frame skips.
             (void)kernel::desktop::needs_redraw();
             kernel::arch::halt();
+        }
+        if (inputLayoutReady) {
+            kernel::qemu_display_input_proof::finish();
+            const kernel::display_input::DisplayInputMapperCounters* counters =
+                kernel::input::get_mapping_counters();
+            if (counters != nullptr) {
+                kernel::serial::puts("[INPUT-MAP] summary eventsSeen=");
+                serial_put_u32_decimal(counters->eventsSeen);
+                kernel::serial::puts(" valid=");
+                serial_put_u32_decimal(counters->validEvents);
+                kernel::serial::puts(" invalid=");
+                serial_put_u32_decimal(counters->invalidEvents);
+                kernel::serial::puts(" relative=");
+                serial_put_u32_decimal(counters->relativeEvents);
+                kernel::serial::puts(" headAbsolute=");
+                serial_put_u32_decimal(counters->headAbsoluteEvents);
+                kernel::serial::puts(" normalizedAbsolute=");
+                serial_put_u32_decimal(counters->normalizedAbsoluteEvents);
+                kernel::serial::puts(" unknownHeadFallbacks=");
+                serial_put_u32_decimal(counters->unknownHeadFallbacks);
+                kernel::serial::puts(" clamped=");
+                serial_put_u32_decimal(counters->clampedEvents);
+                kernel::serial::putc('\n');
+            }
         }
         kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu bounded live presentation pump stopped\n");
         while (1) {

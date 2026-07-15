@@ -26,6 +26,7 @@
 #include "include/kernel/msi.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/qemu_display_input_proof.h"
 #include "include/kernel/system_font.h"
 #include "include/kernel/serial_debug.h"
 #include "../../virtio_gpu_display_backend.h"
@@ -286,6 +287,9 @@ struct LivePresentationBackendState {
     uint64_t lastPresentedFrame{0};
     uint64_t lastDirtyGeneration{0};
     uint32_t framesAttempted{0};
+    uint32_t eligibleAttempts{0};
+    uint32_t boundedProofIterations{0};
+    uint32_t presentationPolls{0};
     uint32_t dirtyFrames{0};
     uint32_t framesRendered{0};
     uint32_t framesSkippedClean{0};
@@ -1092,6 +1096,54 @@ static void draw_live_diagnostic_overlay(
                              FontRole::SmallBold);
 }
 
+static void draw_qemu_input_proof_overlay(PixelSurface& surface)
+{
+    const qemu_display_input_proof::State* proof =
+        qemu_display_input_proof::state();
+    if (proof == nullptr || !proof->initialized) return;
+
+    // QEMU-only software proof window. It is painted into the ordinary
+    // compositor target backing store; no virtio-gpu cursor queue or hardware
+    // cursor command is used.
+    const uint32_t shadow = 0x00101018;
+    const uint32_t body = 0x002A3038;
+    const uint32_t title = proof->clickFocus ? 0x00416D9A : 0x002C3540;
+    const uint32_t border = proof->windowDominantMonitor == 2
+        ? 0x00E2C46B : 0x008CC8F0;
+    surface_fill_rect_global(surface, proof->windowX + 4, proof->windowY + 4,
+                             proof->windowW, proof->windowH, shadow);
+    surface_fill_rect_global(surface, proof->windowX, proof->windowY,
+                             proof->windowW, proof->windowH, body);
+    surface_draw_rect_global(surface, proof->windowX, proof->windowY,
+                             proof->windowW, proof->windowH, border);
+    surface_fill_rect_global(surface, proof->windowX + 1, proof->windowY + 1,
+                             proof->windowW - 2, 28, title);
+    surface_draw_text_global(surface, proof->windowX + 14, proof->windowY + 8,
+                             "QEMU INPUT PROOF", 0x00FFFFFF, FontRole::Title);
+    surface_draw_text_global(surface, proof->windowX + 22, proof->windowY + 62,
+                             "ordinary window-manager drag state", 0x00E9F2F8,
+                             FontRole::SmallBold);
+    surface_draw_text_global(surface, proof->windowX + 22, proof->windowY + 86,
+                             "move this window across the scanout boundary", 0x00D2E4EF,
+                             FontRole::Small);
+    surface_draw_text_global(surface, proof->windowX + 22, proof->windowY + 122,
+                             proof->dragCrossedBoundary ? "boundary crossed" : "waiting for boundary",
+                             proof->dragCrossedBoundary ? 0x00FFE3A6 : 0x00B7DDF4,
+                             FontRole::SmallBold);
+    surface_draw_text_global(surface, proof->windowX + 22, proof->windowY + 148,
+                             proof->windowDominantMonitor == 2 ? "dominant monitor: 2" : "dominant monitor: 1",
+                             0x00F0F6FC, FontRole::Small);
+
+    const int cursorX = proof->cursorX;
+    const int cursorY = proof->cursorY;
+    surface_fill_rect_global(surface, cursorX, cursorY, 3, 18, 0x00000000);
+    surface_fill_rect_global(surface, cursorX + 2, cursorY + 2, 8, 2, 0x00FFFFFF);
+    surface_fill_rect_global(surface, cursorX + 2, cursorY + 4, 6, 2, 0x00FFFFFF);
+    surface_fill_rect_global(surface, cursorX + 2, cursorY + 6, 4, 2, 0x00FFFFFF);
+    surface_fill_rect_global(surface, cursorX + 2, cursorY + 8, 2, 7, 0x00FFFFFF);
+    surface_draw_rect_global(surface, cursorX, cursorY, 11, 18, 0x00000000);
+}
+
 static bool render_guide_xos_desktop_snapshot(
     PixelSurface& surface,
     const DisplayRenderTarget& target,
@@ -1139,6 +1191,7 @@ static bool render_guide_xos_desktop_snapshot(
 
     fill_virtual_desktop_background(surface, desktopWidth, desktopHeight);
     draw_desktop_windows(surface, target.primary);
+    draw_qemu_input_proof_overlay(surface);
     surface_draw_text_global(surface,
                              surface.viewportOriginX + 20,
                              surface.viewportOriginY + 28,
@@ -5375,6 +5428,19 @@ static void log_live_target_failure(uint64_t frameSequence,
 static void print_live_presentation_summary()
 {
     const LivePresentationBackendState& live = s_livePresentation;
+    kernel::serial::puts("[VIRTIO-GPU] live presentation counters: presentationPolls=");
+    serial_put_u32_decimal(live.presentationPolls);
+    kernel::serial::puts(" eligibleAttempts=");
+    serial_put_u32_decimal(live.eligibleAttempts);
+    kernel::serial::puts(" boundedProofIterations=");
+    serial_put_u32_decimal(live.boundedProofIterations);
+    kernel::serial::puts(" renderedFrames=");
+    serial_put_u32_decimal(live.framesRendered);
+    kernel::serial::puts(" cleanSkips=");
+    serial_put_u32_decimal(live.framesSkippedClean);
+    kernel::serial::puts(" rateLimitSkips=");
+    serial_put_u32_decimal(live.rateLimitSkips);
+    kernel::serial::puts(" note=rateLimitSkips_counts_scheduler_polls_and_may_exceed_boundedProofIterations\n");
     kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation: enabled=");
     kernel::serial::puts(live.enabled ? "yes" : "no");
     kernel::serial::puts(" outputs=2 contentMode=compositor-live-bounded frameCap=");
@@ -5762,6 +5828,8 @@ void presentation_tick()
         return;
     }
 
+    ++live.presentationPolls;
+
     const uint64_t now = kernel::pit::ticks();
     if (!live.initialized) {
         live.initialized = true;
@@ -5801,6 +5869,8 @@ void presentation_tick()
 
     live.lastPresentationTicks = now;
     ++live.framesAttempted;
+    ++live.eligibleAttempts;
+    ++live.boundedProofIterations;
     const bool overlayDue = (live.framesAttempted % kLivePresentationOverlayPeriodAttempts) == 1u;
     if (overlayDue) {
         // The overlay is a diagnostic-only visible state change, routed through
@@ -5948,6 +6018,55 @@ bool presentation_finished()
     return true;
 #else
     return s_livePresentation.stopped;
+#endif
+}
+
+bool get_display_input_layout(
+    int32_t* left, int32_t* top, int32_t* right, int32_t* bottom,
+    display_input::DisplayInputMonitor* monitors, uint8_t capacity,
+    uint8_t* monitorCount)
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+    (void)left;
+    (void)top;
+    (void)right;
+    (void)bottom;
+    (void)monitors;
+    (void)capacity;
+    (void)monitorCount;
+    return false;
+#else
+    if (left == nullptr || top == nullptr || right == nullptr || bottom == nullptr ||
+        monitors == nullptr || monitorCount == nullptr || capacity == 0u ||
+        !s_probeOutcome.valid) {
+        return false;
+    }
+    const VirtioGpuOutputInventory& inventory = s_probeOutcome.outputInventory;
+    if (inventory.monitors.empty() || inventory.monitors.size() > capacity) {
+        return false;
+    }
+    *left = inventory.virtualDesktop.left;
+    *top = inventory.virtualDesktop.top;
+    *right = inventory.virtualDesktop.right;
+    *bottom = inventory.virtualDesktop.bottom;
+    *monitorCount = 0u;
+    for (uint32_t i = 0; i < inventory.monitors.size(); ++i) {
+        const DisplayMonitorDescriptor& source = inventory.monitors[i];
+        display_input::DisplayInputMonitor& destination = monitors[i];
+        destination.id = static_cast<int32_t>(source.id);
+        destination.virtualX = source.virtualX;
+        destination.virtualY = source.virtualY;
+        destination.width = source.width;
+        destination.height = source.height;
+        destination.assignedX = source.assignedX;
+        destination.assignedY = source.assignedY;
+        destination.assignedWidth = source.assignedWidth;
+        destination.assignedHeight = source.assignedHeight;
+        destination.primary = source.primary;
+        destination.enabled = source.enabled && source.width > 0 && source.height > 0;
+        *monitorCount = static_cast<uint8_t>(i + 1u);
+    }
+    return *monitorCount > 0u;
 #endif
 }
 

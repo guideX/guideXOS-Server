@@ -21,6 +21,7 @@
 
 #include "kernel/types.h"
 #include "kernel/virtio.h"
+#include "kernel/display_input_mapper.h"
 
 namespace kernel {
 namespace virtio {
@@ -423,6 +424,13 @@ void presentation_tick();
 // presenter is not compiled.  This is only used by the QEMU text-mode probe
 // pump and is not a product presentation-control API.
 bool presentation_finished();
+
+// Copy the QEMU-only operational monitor geometry into the backend-neutral
+// input mapper representation. No hardware path calls this API.
+bool get_display_input_layout(
+    int32_t* left, int32_t* top, int32_t* right, int32_t* bottom,
+    display_input::DisplayInputMonitor* monitors, uint8_t capacity,
+    uint8_t* monitorCount);
 
 // ================================================================
 // Integration with Kernel Framebuffer
