@@ -1,5 +1,16 @@
 # NativeAOT GC Platform Events
 
+## Completed generic scheduler-backed event status
+
+The runtime-neutral scheduler wait foundation is now implemented under
+`runtime/synchronization/guidexos_scheduler_wait.*`. The AMD64 freestanding
+kernel provides TCB-owned wait nodes, FIFO wake-one/wake-all, absolute PIT
+deadlines, signal-versus-timeout single completion, cancellation, and thread/
+object teardown unlinking. The generic event consumes that contract without
+adding runtime-specific scheduler knowledge. Deterministic bare-metal event
+runtime tests pass; the inactive adapter compile/link/run probe also passes.
+A booted QEMU concurrent test remains a harness limitation.
+
 ## GC event requirements
 
 The selected NativeAOT Workstation GC source and runtime-pack baseline require
@@ -53,9 +64,8 @@ The adapter receives signed millisecond values. Negative values are rejected as
 `WaitResult::Invalid`; zero is a poll; positive values convert to an explicitly
 finite monotonic duration with overflow validation. Indefinite waits use the
 explicit `WaitTimeout::infinite()` value. The hosted implementation uses
-`steady_clock`, and a future bare-metal implementation must convert the
-duration to an absolute monotonic scheduler deadline rather than wall-clock
-time or a polling loop.
+`steady_clock`; bare metal converts the duration to an absolute monotonic PIT
+scheduler deadline rather than wall-clock time or a polling loop.
 
 The bounded adapter exposes non-alertable semantics: there is no callback,
 managed exception, or asynchronous interruption in this pass. If the runtime
@@ -68,8 +78,10 @@ The GC/runtime platform layer owns each opaque `EventHandle`; the handle owns a
 native guideXOS `Event`. Wrapper allocation uses native `new (std::nothrow)`.
 Destroy first closes the event and then releases the wrapper. Hosted close wakes
 active waiters with `Destroyed` while their shared state remains alive. The
-bare-metal owner must establish waiter quiescence before destruction because
-the current scheduler cannot unregister active waiters safely.
+bare-metal owner may close with active waiters: the scheduler-backed event
+marks the object destroyed, wakes all with `Destroyed`, and removes queue/timer
+links before returning. New operations remain invalid. This is proven for the
+single-CPU contract; SMP lifetime synchronization remains future work.
 
 The stock GC source uses long-lived event objects in some paths and deliberately
 avoids destructors. That source-specific policy does not weaken the generic
@@ -110,8 +122,8 @@ initialization test.
 
 The event abstraction does not remove the remaining runtime-pack gaps:
 
-- generic bare-metal wait queue, wake-one/wake-all, and timer wakeup;
 - wait-many/wait-set support for optional GC waits;
+- booted runtime validation of the scheduler-backed event path;
 - critical-section and lock semantics expected by the collector;
 - virtual-memory and allocation policy integration;
 - FLS/thread-store behavior;
@@ -121,14 +133,11 @@ The event abstraction does not remove the remaining runtime-pack gaps:
 The current managed runtime remains the fixed no-collection heap, and no GC
 startup or collection occurs in this pass.
 
-## Exact next experiment
+## Exact next primitive
 
-Because the generic bare-metal scheduler foundation is missing, the next
-bounded experiment is to implement and independently validate the smallest
-generic scheduler wait-queue plus monotonic timer wakeup capability. Once that
-foundation exists, complete bare-metal event timeout/indefinite waits and
-waiter cleanup. Only after those generic primitives pass should the isolated
-NativeAOT platform layer be compiled against them again. Do not initialize the
-Workstation GC in that experiment; the subsequent GC milestone remains a
-non-operational link probe until thread lifecycle and the other platform gaps
-are resolved.
+The next independently testable NativeAOT-facing primitive is native thread
+start/join for the required helper-thread lifecycle, using the completed
+generic event for request/done coordination. Do not initialize the Workstation
+GC, start its finalizer helper, or trigger collection in that experiment; the
+remaining VM, thread-store, stack-bound, module-registration, and GC-owned
+segment blockers must be addressed first.

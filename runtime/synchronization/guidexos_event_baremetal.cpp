@@ -6,53 +6,52 @@
 namespace gxos {
 namespace runtime {
 namespace {
-    baremetal::EventSchedulerHooks g_hooks = {};
-
-    bool canBlock(EventMode mode) {
-        if (g_hooks.enterCritical == nullptr ||
-            g_hooks.leaveCritical == nullptr ||
-            g_hooks.block == nullptr) {
-            return false;
-        }
-        return mode == EventMode::ManualReset
-            ? g_hooks.wakeAll != nullptr
-            : g_hooks.wakeOne != nullptr;
-    }
+    using scheduler_wait::WakeReason;
 
     struct CriticalScope {
         void* token;
         bool active;
 
         CriticalScope()
-            : token(nullptr), active(false) {
-            if (g_hooks.enterCritical != nullptr) {
-                token = g_hooks.enterCritical(g_hooks.context);
-                active = true;
+            : token(nullptr), active(scheduler_wait::schedulerWaitCriticalAvailable()) {
+            if (active) {
+                token = scheduler_wait::enterCritical();
             }
         }
 
         ~CriticalScope() {
-            if (active && g_hooks.leaveCritical != nullptr) {
-                g_hooks.leaveCritical(g_hooks.context, token);
-            }
+            release();
         }
 
         void release() {
-            if (active && g_hooks.leaveCritical != nullptr) {
-                g_hooks.leaveCritical(g_hooks.context, token);
+            if (active) {
+                scheduler_wait::leaveCritical(token);
+                active = false;
+                token = nullptr;
             }
-            active = false;
-            token = nullptr;
         }
     };
 
-    [[noreturn]] void bareMetalLifetimeFailure() {
-#if defined(__GNUC__) || defined(__clang__)
-        __builtin_trap();
-#else
-        for (;;) {
+    WaitResult mapWakeReason(WakeReason reason) {
+        switch (reason) {
+        case WakeReason::Signaled:
+            return WaitResult::Signaled;
+        case WakeReason::TimedOut:
+            return WaitResult::TimedOut;
+        case WakeReason::Destroyed:
+            return WaitResult::Destroyed;
+        case WakeReason::Interrupted:
+            return WaitResult::Interrupted;
+        case WakeReason::Cancelled:
+            return WaitResult::Interrupted;
+        case WakeReason::None:
+        default:
+            return WaitResult::Interrupted;
         }
-#endif
+    }
+
+    scheduler_wait::WaitDuration makeWaitDuration(const WaitTimeout& timeout) {
+        return { timeout.infinite_wait, timeout.nanoseconds };
     }
 }
 
@@ -75,20 +74,18 @@ WaitTimeout WaitTimeout::signedMilliseconds(gxos_event_int64 value) {
 }
 
 Event::Event() noexcept
-    : state_{ EventMode::ManualReset, false, false, 0 }, initialized_(false), closed_(false) {
+    : state_{ EventMode::ManualReset, false, false, { nullptr, nullptr, 0 } },
+      initialized_(false),
+      closed_(false) {
 }
 
 Event::Event(EventMode mode, bool initiallySignaled) noexcept
-    : state_{ mode, initiallySignaled, false, 0 }, initialized_(true), closed_(false) {
+    : state_{ mode, initiallySignaled, false, { nullptr, nullptr, 0 } },
+      initialized_(true),
+      closed_(false) {
 }
 
 Event::~Event() noexcept {
-    if (state_.active_waiters != 0) {
-        // The scheduler contract needed to wake and unregister active waiters
-        // does not exist yet.  Destruction is therefore an asserted contract
-        // violation in the current bare-metal build.
-        bareMetalLifetimeFailure();
-    }
     (void)close();
 }
 
@@ -97,7 +94,7 @@ bool Event::initialize(EventMode mode, bool initiallySignaled) {
     if (initialized_ || closed_) {
         return false;
     }
-    state_ = State{ mode, initiallySignaled, false, 0 };
+    state_ = State{ mode, initiallySignaled, false, { nullptr, nullptr, 0 } };
     initialized_ = true;
     return true;
 }
@@ -114,22 +111,28 @@ EventStatus Event::signal() {
     if (state_.destroyed) {
         return EventStatus::Destroyed;
     }
-    if (state_.active_waiters != 0 &&
-        ((state_.mode == EventMode::ManualReset && g_hooks.wakeAll == nullptr) ||
-         (state_.mode == EventMode::AutoReset && g_hooks.wakeOne == nullptr))) {
+    if (!scheduler_wait::waitQueueEmpty(&state_.waiters) &&
+        !scheduler_wait::schedulerWaitAvailable()) {
         return EventStatus::Invalid;
     }
+
+    if (state_.mode == EventMode::ManualReset) {
+        state_.signaled = true;
+        (void)scheduler_wait::wakeAll(&state_.waiters, WakeReason::Signaled);
+        return EventStatus::Ok;
+    }
+
     if (state_.signaled) {
         return EventStatus::Ok;
     }
+
+    // For auto-reset, a successful wake reserves this signal for the selected
+    // waiter before the critical section is released.  This prevents a later
+    // waiter from consuming the same bit while the awakened thread is still
+    // being scheduled.
     state_.signaled = true;
-    if (state_.mode == EventMode::ManualReset) {
-        if (g_hooks.wakeAll != nullptr) {
-            g_hooks.wakeAll(g_hooks.context, this);
-        }
-    }
-    else if (g_hooks.wakeOne != nullptr) {
-        g_hooks.wakeOne(g_hooks.context, this);
+    if (scheduler_wait::wakeOne(&state_.waiters, WakeReason::Signaled)) {
+        state_.signaled = false;
     }
     return EventStatus::Ok;
 }
@@ -151,16 +154,14 @@ EventStatus Event::close() {
     if (!initialized_ || closed_) {
         return EventStatus::Invalid;
     }
-    if (state_.active_waiters != 0) {
-        // Do not mark the object destroyed while a waiter may still retain
-        // this object's address.  The caller must first establish quiescence.
+    if (!scheduler_wait::waitQueueEmpty(&state_.waiters) &&
+        !scheduler_wait::schedulerWaitAvailable()) {
         return EventStatus::Invalid;
     }
+
     state_.destroyed = true;
     closed_ = true;
-    if (g_hooks.wakeAll != nullptr) {
-        g_hooks.wakeAll(g_hooks.context, this);
-    }
+    (void)scheduler_wait::wakeAll(&state_.waiters, WakeReason::Destroyed);
     return EventStatus::Ok;
 }
 
@@ -180,55 +181,35 @@ WaitResult Event::wait(const WaitTimeout& timeout) {
     if (state_.destroyed) {
         return WaitResult::Destroyed;
     }
-    const auto consumeIfSignaled = [&]() -> WaitResult {
-        if (state_.destroyed) {
-            return WaitResult::Destroyed;
-        }
-        if (!state_.signaled) {
-            return WaitResult::TimedOut;
-        }
+
+    if (state_.signaled) {
         if (state_.mode == EventMode::AutoReset) {
             state_.signaled = false;
         }
         return WaitResult::Signaled;
-    };
-
-    WaitResult immediate = consumeIfSignaled();
-    if (immediate == WaitResult::Signaled || timeout.nanoseconds == 0) {
-        return immediate == WaitResult::Signaled ? immediate : WaitResult::TimedOut;
     }
-    if (!canBlock(state_.mode)) {
-        // No scheduler wait queue/timer is currently available.  Returning
-        // Invalid is intentional; this path never polls or busy-spins.
+    if (timeout.nanoseconds == 0) {
+        return WaitResult::TimedOut;
+    }
+    if (!scheduler_wait::schedulerWaitAvailable()) {
         return WaitResult::Invalid;
     }
 
-    state_.active_waiters += 1;
+    scheduler_wait::WaitNode* node = nullptr;
+    if (!scheduler_wait::prepareWait(&state_.waiters,
+                                     makeWaitDuration(timeout),
+                                     &node)) {
+        return WaitResult::Invalid;
+    }
+
+    // The node is fully published in the object queue and (for finite waits)
+    // in the timer queue before this lock is released.  A signal or timeout
+    // that wins here completes the node, so parkWait returns immediately and
+    // cannot lose the wakeup.
     lock.release();
-    WaitResult result = g_hooks.block(g_hooks.context, this, timeout);
-    CriticalScope afterWait;
-    state_.active_waiters -= 1;
-
-    if (state_.destroyed) {
-        return WaitResult::Destroyed;
-    }
-    if (state_.signaled) {
-        return consumeIfSignaled();
-    }
-    return result;
+    return mapWakeReason(scheduler_wait::parkWait(node));
 }
 
-namespace baremetal {
-
-void installEventSchedulerHooks(const EventSchedulerHooks* hooks) {
-    g_hooks = hooks == nullptr ? EventSchedulerHooks{} : *hooks;
-}
-
-bool eventSchedulerHooksAvailable() {
-    return canBlock(EventMode::ManualReset) && canBlock(EventMode::AutoReset);
-}
-
-} // namespace baremetal
 } // namespace runtime
 } // namespace gxos
 

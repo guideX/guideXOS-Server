@@ -39,22 +39,21 @@ namespace context {
 
 // Thread entry trampoline - called by new threads
 extern "C" void thread_entry_trampoline();
-
-// The actual thread function and argument are stored here
-// during thread creation. The trampoline reads them and calls.
-// (In a real implementation, these would be in the thread's context)
-static void (*s_pending_entry)(void*) = nullptr;
-static void* s_pending_arg = nullptr;
+extern "C" void kernel_thread_exit();
 
 extern "C" void thread_entry_wrapper()
 {
-    // Get the entry point and argument
-    void (*entry)(void*) = s_pending_entry;
-    void* arg = s_pending_arg;
-    
-    // Clear the pending values
-    s_pending_entry = nullptr;
-    s_pending_arg = nullptr;
+    // The first context carries the entry point and argument in the
+    // callee-saved r12/r13 slots.  This is per-thread and supports more than
+    // one newly-created thread without a global pending-entry race.
+    void (*entry)(void*) = nullptr;
+    void* arg = nullptr;
+#if !GXOS_MSVC_STUB
+    asm volatile (
+        "mov %%r12, %0\n"
+        "mov %%r13, %1\n"
+        : "=m"(entry), "=m"(arg));
+#endif
     
     // Enable interrupts for this thread
     enable_interrupts();
@@ -64,12 +63,8 @@ extern "C" void thread_entry_wrapper()
         entry(arg);
     }
     
-    // Thread has returned - should call scheduler to exit
-    // For now, just halt
-    // TODO: Call proper thread exit handler
-    while (1) {
-        halt();
-    }
+    kernel_thread_exit();
+    while (1) halt();
 }
 
 // ================================================================
@@ -85,11 +80,12 @@ SwitchContext* init_context(uint64_t stack_top, void (*entry_point)(void*), void
     stack_top -= sizeof(SwitchContext);
     SwitchContext* ctx = reinterpret_cast<SwitchContext*>(stack_top);
     
-    // Initialize all callee-saved registers to zero
+    // Initialize all callee-saved registers to zero.  r12/r13 carry the
+    // per-thread entry point and argument until the first dispatch.
     ctx->rbx = 0;
     ctx->rbp = 0;
-    ctx->r12 = 0;
-    ctx->r13 = 0;
+    ctx->r12 = reinterpret_cast<uint64_t>(entry_point);
+    ctx->r13 = reinterpret_cast<uint64_t>(arg);
     ctx->r14 = 0;
     ctx->r15 = 0;
     
@@ -99,12 +95,6 @@ SwitchContext* init_context(uint64_t stack_top, void (*entry_point)(void*), void
     
     // Stack pointer points to the context (will be restored)
     ctx->rsp = stack_top;
-    
-    // Store entry point and argument for the wrapper to use
-    // TODO: In a proper implementation, store these in the thread's
-    // private data area, not static variables
-    s_pending_entry = entry_point;
-    s_pending_arg = arg;
     
     return ctx;
 }

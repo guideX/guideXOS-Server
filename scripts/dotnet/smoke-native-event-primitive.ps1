@@ -33,8 +33,9 @@ function Invoke-Compiler {
 
 $compilerCommand = Get-Command g++ -ErrorAction SilentlyContinue
 if ($null -eq $compilerCommand) {
-    Write-Status 'Hosted build' $false
-    Write-Status 'Bare-metal build' $false
+    Write-Status 'Hosted event build' $false
+    Write-Status 'Bare-metal event build' $false
+    Write-Status 'Scheduler park/wake tests' $false
     Write-Status 'NativeAOT adapter compile/link probe' $false
     exit 1
 }
@@ -51,7 +52,7 @@ $hostedArgs = @(
     '-pthread', '-o', $hostedExe
 )
 $hostedBuild = Invoke-Compiler $compiler $hostedArgs
-Write-Status 'Hosted build' ($hostedBuild.ExitCode -eq 0)
+Write-Status 'Hosted event build' ($hostedBuild.ExitCode -eq 0)
 
 $testOutput = @()
 $hostedRunPassed = $false
@@ -71,7 +72,7 @@ $categories = @(
     'Zero-timeout polling',
     'Finite timeout',
     'Signal-timeout race',
-    'Cleanup/leak check'
+    'Cleanup/leak checks'
 )
 foreach ($category in $categories) {
     $line = "${category}: PASS"
@@ -79,6 +80,7 @@ foreach ($category in $categories) {
 }
 
 $baremetalSourceObject = Join-Path $outputRoot 'guidexos_event_baremetal.o'
+$baremetalWaitObject = Join-Path $outputRoot 'guidexos_scheduler_wait.o'
 $baremetalProbeObject = Join-Path $outputRoot 'guidexos_event_baremetal_compile_probe.o'
 $baremetalFlags = @(
     '-std=c++14', '-ffreestanding', '-fno-exceptions', '-fno-rtti',
@@ -89,13 +91,55 @@ $baremetalSourceBuild = Invoke-Compiler $compiler ($baremetalFlags + @(
     '-c', (Join-Path $root 'runtime\synchronization\guidexos_event_baremetal.cpp'),
     '-o', $baremetalSourceObject
 ))
+$baremetalWaitBuild = Invoke-Compiler $compiler ($baremetalFlags + @(
+    '-c', (Join-Path $root 'runtime\synchronization\guidexos_scheduler_wait.cpp'),
+    '-o', $baremetalWaitObject
+))
 $baremetalProbeBuild = Invoke-Compiler $compiler ($baremetalFlags + @(
     '-c', (Join-Path $root 'runtime\tests\guidexos_event_baremetal_compile_probe.cpp'),
     '-o', $baremetalProbeObject
 ))
-$baremetalBuildPassed = ($baremetalSourceBuild.ExitCode -eq 0 -and $baremetalProbeBuild.ExitCode -eq 0)
-Write-Status 'Bare-metal build' $baremetalBuildPassed
-Write-Host 'Bare-metal runtime execution: BLOCKED (generic scheduler wait queue and timer wake hooks are not available)'
+$baremetalBuildPassed = ($baremetalSourceBuild.ExitCode -eq 0 -and
+    $baremetalWaitBuild.ExitCode -eq 0 -and $baremetalProbeBuild.ExitCode -eq 0)
+Write-Status 'Bare-metal event build' $baremetalBuildPassed
+
+$schedulerExe = Join-Path $outputRoot 'guidexos_scheduler_wait_tests.exe'
+$schedulerArgs = @(
+    '-std=c++17', '-O2', '-Wall', '-Wextra', '-Wpedantic', '-DGXOS_BARE_METAL'
+) + $quoteRoot + @(
+    (Join-Path $root 'runtime\synchronization\guidexos_scheduler_wait.cpp'),
+    (Join-Path $root 'runtime\synchronization\guidexos_event_baremetal.cpp'),
+    (Join-Path $root 'runtime\tests\guidexos_scheduler_wait_tests.cpp'),
+    '-pthread', '-o', $schedulerExe
+)
+$schedulerBuild = Invoke-Compiler $compiler $schedulerArgs
+$schedulerOutput = @()
+$schedulerRunPassed = $false
+if ($schedulerBuild.ExitCode -eq 0) {
+    $schedulerOutput = @(& $schedulerExe 2>&1 | ForEach-Object { $_.ToString() })
+    $schedulerRunPassed = ($LASTEXITCODE -eq 0)
+}
+$schedulerCategories = @(
+    'Scheduler park/wake tests',
+    'Wake-one',
+    'Wake-all',
+    'Zero timeout',
+    'Finite timeout',
+    'Signal-before-timeout',
+    'Timeout-before-signal',
+    'Signal-timeout race',
+    'Wait cancellation',
+    'Thread teardown cleanup',
+    'Manual-reset runtime tests',
+    'Auto-reset runtime tests',
+    'Multi-waiter runtime tests',
+    'Reuse',
+    'Cleanup/leak checks'
+)
+foreach ($category in $schedulerCategories) {
+    $line = "${category}: PASS"
+    Write-Status $category ($schedulerRunPassed -and ($schedulerOutput -contains $line))
+}
 
 $adapterExe = Join-Path $outputRoot 'guidexos_event_adapter_probe.exe'
 $adapterArgs = @(
@@ -118,7 +162,9 @@ $genericFiles = @(
     (Join-Path $root 'runtime\synchronization\guidexos_event.h'),
     (Join-Path $root 'runtime\synchronization\guidexos_event.cpp'),
     (Join-Path $root 'runtime\synchronization\guidexos_event_baremetal.h'),
-    (Join-Path $root 'runtime\synchronization\guidexos_event_baremetal.cpp')
+    (Join-Path $root 'runtime\synchronization\guidexos_event_baremetal.cpp'),
+    (Join-Path $root 'runtime\synchronization\guidexos_scheduler_wait.h'),
+    (Join-Path $root 'runtime\synchronization\guidexos_scheduler_wait.cpp')
 )
 $forbiddenGenericPattern = '(?i)\.NET|NativeAOT|\bGC\b|Workstation|Win32|HostLogProof|\bFLS\b|Finalizer'
 $genericCouplingPassed = $true
@@ -145,6 +191,7 @@ foreach ($file in $adapterFiles) {
 Write-Status 'Inactive adapter isolation check' $adapterIsolationPassed
 
 if (-not ($hostedBuild.ExitCode -eq 0 -and $hostedRunPassed -and $baremetalBuildPassed -and
+        $schedulerBuild.ExitCode -eq 0 -and $schedulerRunPassed -and
         $adapterBuild.ExitCode -eq 0 -and $adapterRunPassed -and $genericCouplingPassed -and $adapterIsolationPassed)) {
     exit 1
 }

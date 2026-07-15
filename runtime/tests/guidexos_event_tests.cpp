@@ -277,7 +277,7 @@ namespace {
         require(gxos_event_live_state_count_for_test() == 0,
             "event state remained live after hosted cleanup");
 
-        std::cout << "Cleanup/leak check: PASS\n";
+        std::cout << "Cleanup/leak checks: PASS\n";
     }
 
     bool run(const char* label, void (*test)()) {

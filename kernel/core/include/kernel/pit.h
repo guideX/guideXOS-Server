@@ -27,6 +27,10 @@ void irq_handler();
 // Number of ticks since boot
 uint64_t ticks();
 
+// Convert a positive relative duration to PIT ticks using ceiling rounding.
+// The result is suitable for an absolute monotonic deadline.
+uint64_t ticks_for_nanoseconds(uint64_t nanoseconds, bool* valid);
+
 } // namespace pit
 } // namespace kernel
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "guidexos_event.h"
+#include "guidexos_scheduler_wait.h"
 
 #if defined(GXOS_BARE_METAL)
 
@@ -8,29 +9,21 @@ namespace gxos {
 namespace runtime {
 namespace baremetal {
 
-using EventCriticalEnter = void* (*)(void* context);
-using EventCriticalLeave = void (*)(void* context, void* token);
-using EventBlock = WaitResult (*)(void* context, Event* event, const WaitTimeout& timeout);
-using EventWake = void (*)(void* context, Event* event);
+// Compatibility aliases for callers that used the previous experimental
+// installation point.  The implementation is now the generic scheduler wait
+// contract; no event-specific scheduler state exists here.
+using EventSchedulerHooks = scheduler_wait::SchedulerWaitHooks;
 
-// The current kernel does not yet provide these hooks.  They are deliberately
-// explicit so an event cannot silently fall back to polling or to an unsafe
-// interrupt-only approximation.
-struct EventSchedulerHooks {
-    void* context;
-    EventCriticalEnter enterCritical;
-    EventCriticalLeave leaveCritical;
-    EventBlock block;
-    EventWake wakeOne;
-    EventWake wakeAll;
-};
+inline void installEventSchedulerHooks(const EventSchedulerHooks* hooks) {
+    scheduler_wait::installSchedulerWaitHooks(hooks);
+}
 
-void installEventSchedulerHooks(const EventSchedulerHooks* hooks);
-bool eventSchedulerHooksAvailable();
+inline bool eventSchedulerHooksAvailable() {
+    return scheduler_wait::schedulerWaitAvailable();
+}
 
 } // namespace baremetal
 } // namespace runtime
 } // namespace gxos
 
 #endif
-

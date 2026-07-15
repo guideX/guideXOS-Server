@@ -7,6 +7,7 @@
 // blocking and wakeup to an explicitly installed scheduler hook set.
 
 #if defined(GXOS_BARE_METAL)
+#include "guidexos_scheduler_wait.h"
 #include <stdint.h>
 using gxos_event_uint64 = uint64_t;
 using gxos_event_int64 = int64_t;
@@ -95,7 +96,7 @@ private:
         EventMode mode;
         bool signaled;
         bool destroyed;
-        gxos_event_uint64 active_waiters;
+        scheduler_wait::WaitQueue waiters;
     };
 
     State state_;

@@ -187,6 +187,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // Initialize serial debug output early
     kernel::serial::init();
     kernel::serial::puts("[KERNEL] guideXOS kernel_main entered\n");
+    // Install the allocation-free native scheduler wait foundation before
+    // enabling interrupts or entering any subsystem that may block.
+    kernel::process::init();
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
     kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2\n");
 #endif

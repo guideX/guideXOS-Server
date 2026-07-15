@@ -10,6 +10,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/process.h"
 
 namespace kernel {
 namespace pit {
@@ -24,10 +25,12 @@ static const uint16_t kCommandReg   = 0x43;
 static const uint32_t kBaseFrequency = 1193182;
 
 static volatile uint64_t s_ticks = 0;
+static uint32_t s_hz = 100;
 
 void init(uint32_t hz)
 {
     if (hz == 0) hz = 100;
+    s_hz = hz;
 
     uint32_t divisor = kBaseFrequency / hz;
     if (divisor > 0xFFFF) divisor = 0xFFFF;
@@ -50,6 +53,7 @@ void init(uint32_t hz)
 void irq_handler()
 {
     s_ticks++;
+    kernel::process::timer_tick();
 }
 
 uint64_t ticks()
@@ -57,11 +61,33 @@ uint64_t ticks()
     return s_ticks;
 }
 
+uint64_t ticks_for_nanoseconds(uint64_t nanoseconds, bool* valid)
+{
+    if (valid != nullptr) *valid = false;
+    if (nanoseconds == 0 || s_hz == 0) return 0;
+
+    const uint64_t wholeSeconds = nanoseconds / 1000000000ULL;
+    const uint64_t remainder = nanoseconds % 1000000000ULL;
+    if (wholeSeconds > 0xFFFFFFFFFFFFFFFFULL / s_hz) return 0;
+
+    uint64_t result = wholeSeconds * s_hz;
+    const uint64_t fractional = (remainder * s_hz + 999999999ULL) / 1000000000ULL;
+    if (result > 0xFFFFFFFFFFFFFFFFULL - fractional) return 0;
+    result += fractional;
+    if (result == 0) result = 1;
+    if (valid != nullptr) *valid = true;
+    return result;
+}
+
 #else // !ARCH_HAS_PORT_IO
 
 void     init(uint32_t) { }
 void     irq_handler()  { }
 uint64_t ticks()        { return 0; }
+uint64_t ticks_for_nanoseconds(uint64_t, bool* valid) {
+    if (valid != nullptr) *valid = false;
+    return 0;
+}
 
 #endif // ARCH_HAS_PORT_IO
 
