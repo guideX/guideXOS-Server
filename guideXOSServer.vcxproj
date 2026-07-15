@@ -132,6 +132,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="runtime\synchronization\guidexos_event.h" />
+    <ClInclude Include="runtime\synchronization\guidexos_event_baremetal.h" />
     <ClInclude Include="allocator.h" />
     <ClInclude Include="app_launch_resolver.h" />
     <ClInclude Include="app_manifest.h" />
@@ -370,6 +372,11 @@
     <ClInclude Include="workspace_manager.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="runtime\synchronization\guidexos_event.cpp">
+      <!-- This translation unit uses the hosted C++ library only; do not let
+           kernel compatibility headers shadow the compiler/UCRT headers. -->
+      <AdditionalIncludeDirectories></AdditionalIncludeDirectories>
+    </ClCompile>
     <ClCompile Include="allocator.cpp" />
     <ClCompile Include="app_launch_resolver.cpp" />
     <ClCompile Include="app_manifest.cpp" />

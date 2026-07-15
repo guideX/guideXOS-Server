@@ -15,6 +15,12 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="runtime\synchronization\guidexos_event.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="runtime\synchronization\guidexos_event_baremetal.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="allocator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -725,6 +731,9 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="runtime\synchronization\guidexos_event.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="allocator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

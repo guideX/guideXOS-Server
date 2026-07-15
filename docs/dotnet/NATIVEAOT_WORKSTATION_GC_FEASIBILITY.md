@@ -418,3 +418,9 @@ Following the Outcome B rule, implement and prove the smallest missing generic p
 
 After that native primitive passes, implement only the bounded GC platform-memory and single-thread/event layer required to reach Workstation GC initialization, still without triggering collection. The first real collection remains the section 18 experiment and must wait for initialization-only diagnostics proving the thread store, finalizer helper, module registration, stack bounds, allocation contexts, card-table globals, and GC-owned segments are internally consistent.
 
+Implementation status: the generic hosted event and inactive NativeAOT adapter
+compile/link probe are now implemented; the bare-metal scheduler wait queue and
+monotonic timer wake foundation required for runtime event waits is still
+missing. See [Native guideXOS Event Primitive](../runtime/NATIVE_EVENT_PRIMITIVE.md)
+and [NativeAOT GC Platform Events](NATIVEAOT_GC_PLATFORM_EVENTS.md). No GC
+initialization or collection was added in this pass.

@@ -32,6 +32,7 @@ set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32
 REM Source files (exclude kernel)
 set SOURCES=^
 allocator.cpp ^
+runtime/synchronization/guidexos_event.cpp ^
 app_launch_resolver.cpp ^
 app_manifest.cpp ^
 app_manifest_loader.cpp ^

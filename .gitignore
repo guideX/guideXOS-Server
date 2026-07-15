@@ -34,5 +34,6 @@
 /out/dotnet/runtime-pack/
 /out/dotnet/allocation-comparison/
 /out/dotnet/repeated-allocation-comparison/
+/out/dotnet/native-event/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx
