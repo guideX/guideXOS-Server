@@ -142,6 +142,9 @@ inline const char* displayModeName(DisplayModeKind mode)
 struct DisplayMonitorDescriptor {
     std::string id;
     std::string source;
+    std::string sourceType;
+    std::string backendId;
+    std::string outputId;
     uint32_t* framebufferBase{nullptr};
     uint32_t scanoutId{0};
     uint32_t resourceId{0};
@@ -166,8 +169,12 @@ struct DisplayMonitorDescriptor {
     bool backingAttached{false};
     bool transferReady{false};
     bool presentReady{false};
+    bool presentationReady{false};
     bool presentationConfirmed{false};
     bool primary{false};
+    bool primaryCapable{true};
+    bool mirrorCapable{true};
+    bool extendCapable{true};
     float scale{1.0f};
     int rotation{0};
     int refreshRateHz{0};
@@ -509,6 +516,12 @@ struct DisplayVirtualDesktop {
             out << monitor.id;
             if (!monitor.name.empty()) {
                 out << "(" << monitor.name << ")";
+            }
+            if (!monitor.sourceType.empty()) {
+                out << " source=" << monitor.sourceType;
+            }
+            if (!monitor.outputId.empty()) {
+                out << " output=" << monitor.outputId;
             }
             out << "@" << monitor.virtualX << "," << monitor.virtualY
                 << " " << monitor.width << "x" << monitor.height;
@@ -959,7 +972,8 @@ inline std::vector<DisplayRenderTarget> buildDisplayRenderTargets(
     const bool dualWindowOutput = hostedSyntheticDualWindowOutputEnabled();
     const bool syntheticHosted = viewport.syntheticHosted
         && hostedSyntheticDualMonitorEnabled()
-        && desktop.mode == DisplayModeKind::Extend
+        && (desktop.mode == DisplayModeKind::Extend
+            || (desktop.mode == DisplayModeKind::Mirror && dualWindowOutput))
         && desktop.activeMonitorCount() > 1;
 
     if (!syntheticHosted) {
@@ -1010,7 +1024,9 @@ inline std::vector<DisplayRenderTarget> buildDisplayRenderTargets(
 
     int targetIndex = 1;
     for (const DisplayMonitorDescriptor* monitor : activeMonitors) {
-        const bool isActive = activeMonitor && monitor->id == activeMonitor->id;
+        const bool isActive = desktop.mode == DisplayModeKind::Mirror
+            ? true
+            : (activeMonitor && monitor->id == activeMonitor->id);
         const bool backedByHostedFramebuffer = dualWindowOutput ? true : isActive;
         targets.push_back(makeDisplayRenderTarget(targetIndex++, *monitor, isActive, backedByHostedFramebuffer, true));
     }
@@ -1093,9 +1109,13 @@ inline DisplayMonitorDescriptor makeDisplayMonitor(
     monitor.height = height;
     monitor.framebufferBase = framebufferBase;
     monitor.pitch = pitch;
+    monitor.sourceType = "framebuffer";
+    monitor.backendId = "framebuffer";
+    monitor.outputId = id;
     monitor.enabled = enabled;
     monitor.operational = enabled && width > 0 && height > 0;
     monitor.connectorEnabled = enabled;
+    monitor.presentationReady = enabled && width > 0 && height > 0;
     monitor.preferredX = x;
     monitor.preferredY = y;
     monitor.preferredWidth = width;
@@ -1179,7 +1199,8 @@ inline DisplayViewport makeHostedDisplayViewport(
 {
     DisplayViewport viewport;
     viewport.syntheticHosted = hostedSyntheticDualMonitorEnabled()
-        && desktop.mode == DisplayModeKind::Extend
+        && (desktop.mode == DisplayModeKind::Extend
+            || (desktop.mode == DisplayModeKind::Mirror && hostedSyntheticDualWindowOutputEnabled()))
         && desktop.activeMonitorCount() > 1;
 
     if (!viewport.syntheticHosted) {

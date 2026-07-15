@@ -11,6 +11,7 @@
 #include "process.h"
 #include "logger.h"
 #include "desktop_config.h"
+#include "display_configuration.h"
 #include "desktop_service.h"
 #include "vnc_server.h"
 #include "system_tray.h"
@@ -141,6 +142,13 @@ namespace gxos { namespace gui {
         static std::vector<WindowDebugInfo> debugWindowsSnapshot();
         static std::string displayLayoutDiagnostic();
         static std::string displayViewportDiagnostic();
+        static DetectedDisplayInventory detectedDisplayInventory();
+        static ActiveDisplayConfiguration activeDisplayConfiguration();
+        static DisplayApplyResult applyDisplayConfiguration(
+            const RequestedDisplayConfiguration& requested,
+            bool commitPersistence,
+            const std::string& persistencePath = "display-options.cfg");
+        static void setVirtioGpuDisplayInventory(const DetectedDisplayInventory& inventory);
         static bool setHostedDisplayViewport(int index);
         static int hostedDisplayViewportIndex();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)

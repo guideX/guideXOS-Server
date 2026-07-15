@@ -42,6 +42,7 @@
 #include <iomanip>
 #include <cstdint>
 #include <utility>
+#include <thread>
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
@@ -245,6 +246,15 @@ namespace gxos {
         static TaskbarPosition g_taskbarPosition = TaskbarPosition::Bottom;
         static clocktime::ClockDisplaySettings g_clockDisplaySettings{};
         static std::atomic<int> g_hostedViewportIndex{1};
+        static std::mutex g_displayConfigurationMutex;
+        static std::atomic<bool> g_displayReconfigurationRequested{false};
+        static std::atomic<bool> g_displayReconfigurationInProgress{false};
+        static std::atomic<bool> g_presentationPaused{false};
+        static std::atomic<bool> g_presentationBusy{false};
+        static bool g_hasVirtioGpuDisplayInventory = false;
+        static DetectedDisplayInventory g_virtioGpuDisplayInventory{};
+        static ActiveDisplayConfiguration g_activeDisplayConfiguration{};
+        static DisplayReconfigurationState g_displayReconfigurationState{};
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwndSecondary = nullptr;
 #endif
@@ -284,8 +294,11 @@ namespace gxos {
 
         static const char* hostedPresentationModeName(const DisplayVirtualDesktop& desktop)
         {
-            if (!hostedSyntheticDualMonitorEnabled() || desktop.mode != DisplayModeKind::Extend || desktop.activeMonitorCount() <= 1) {
+            if (!hostedSyntheticDualMonitorEnabled() || desktop.activeMonitorCount() <= 1) {
                 return "normal-single-output";
+            }
+            if (desktop.mode == DisplayModeKind::Mirror) {
+                return hostedSyntheticDualWindowOutputEnabled() ? "synthetic-mirror-two-window-output" : "synthetic-mirror-camera";
             }
             if (hostedSyntheticDualWindowOutputEnabled()) {
                 return "synthetic-two-window-output";
@@ -485,10 +498,11 @@ namespace gxos {
             desktop.monitors = parseDisplayArrangement(cfg.displayArrangement);
 
             bool hasPrimary = false;
+            const bool hasConfiguredPrimary = !cfg.displayPrimaryDisplayId.empty();
             for (auto& monitor : desktop.monitors) {
-                if (!cfg.displayPrimaryDisplayId.empty() && monitor.id == cfg.displayPrimaryDisplayId) {
-                    monitor.primary = true;
-                    hasPrimary = true;
+                if (hasConfiguredPrimary) {
+                    monitor.primary = monitor.id == cfg.displayPrimaryDisplayId;
+                    if (monitor.primary) hasPrimary = true;
                 } else if (monitor.primary) {
                     hasPrimary = true;
                 }
@@ -499,6 +513,26 @@ namespace gxos {
                         monitor.primary = true;
                         break;
                     }
+                }
+            }
+            if (desktop.mode == DisplayModeKind::Mirror && desktop.activeMonitorCount() > 1) {
+                int logicalWidth = 0;
+                int logicalHeight = 0;
+                if (const DisplayMonitorDescriptor* primary = desktop.primaryMonitor()) {
+                    logicalWidth = primary->width;
+                    logicalHeight = primary->height;
+                }
+                for (const auto& monitor : desktop.monitors) {
+                    if (!monitor.isActive()) continue;
+                    logicalWidth = logicalWidth > 0 ? std::min(logicalWidth, monitor.width) : monitor.width;
+                    logicalHeight = logicalHeight > 0 ? std::min(logicalHeight, monitor.height) : monitor.height;
+                }
+                for (auto& monitor : desktop.monitors) {
+                    if (!monitor.isActive()) continue;
+                    monitor.virtualX = 0;
+                    monitor.virtualY = 0;
+                    monitor.width = std::max(1, logicalWidth);
+                    monitor.height = std::max(1, logicalHeight);
                 }
             }
             if (!desktop.monitors.empty()) {
@@ -548,6 +582,61 @@ namespace gxos {
             desktop.monitors = std::move(monitors);
             desktop.recomputeBounds();
             return desktop;
+        }
+
+        static DetectedDisplayInventory buildDefaultDetectedDisplayInventory(const DesktopConfigData& cfg)
+        {
+            DetectedDisplayInventory inventory;
+            const bool syntheticDual = hostedSyntheticDualMonitorEnabled();
+            inventory.backend = syntheticDual ? "hosted-synthetic" : "framebuffer";
+            inventory.qemuOnly = false;
+            inventory.backendGateActive = false;
+            DisplayVirtualDesktop detectedDesktop = syntheticDual
+                ? makeSyntheticDualMonitorDesktop(nullptr, kSyntheticTestMonitorWidth, kSyntheticTestMonitorHeight, 0)
+                : makeSingleMonitorDesktop(nullptr, hostedSurfaceWidth(), hostedSurfaceHeight(), 0);
+            inventory.currentDesktop = detectedDesktop;
+            for (auto& monitor : detectedDesktop.monitors) {
+                monitor.source = syntheticDual ? "hosted-synthetic" : "framebuffer";
+                monitor.sourceType = syntheticDual ? "hosted-synthetic" : "framebuffer";
+                monitor.backendId = inventory.backend;
+                monitor.outputId = monitor.id;
+                monitor.presentationReady = monitor.operational;
+                monitor.primaryCapable = true;
+                monitor.mirrorCapable = true;
+                monitor.extendCapable = true;
+                inventory.monitors.push_back(monitor);
+            }
+            const DisplayVirtualDesktop activeDesktop = buildDisplayVirtualDesktop(cfg);
+            const DisplayViewport viewport = makeHostedDisplayViewport(activeDesktop, 1, hostedSurfaceWidth(), hostedSurfaceHeight());
+            inventory.renderTargets = buildDisplayRenderTargets(activeDesktop, viewport, hostedSurfaceWidth(), hostedSurfaceHeight());
+            return inventory;
+        }
+
+        static RequestedDisplayConfiguration requestedDisplayConfigurationFromConfig(const DesktopConfigData& cfg)
+        {
+            RequestedDisplayConfiguration requested;
+            requested.mode = parseDisplayModeKind(cfg.displayMode);
+            requested.primaryOutputId = cfg.displayPrimaryDisplayId.empty() ? "display-1" : cfg.displayPrimaryDisplayId;
+            requested.arrangement = parseDisplayArrangement(cfg.displayArrangement);
+            for (const auto& monitor : requested.arrangement) {
+                if (monitor.enabled) requested.enabledOutputIds.push_back(monitor.id);
+            }
+            return requested;
+        }
+
+        static void applyActiveDisplayConfigurationToDesktopConfig(
+            const ActiveDisplayConfiguration& active,
+            DesktopConfigData& cfg)
+        {
+            cfg.displayMode = displayModeName(active.mode);
+            cfg.displayPrimaryDisplayId = active.primaryOutputId;
+            std::vector<DisplayMonitorDescriptor> persisted;
+            persisted.reserve(active.monitors.size());
+            for (const auto& monitor : active.monitors) {
+                persisted.push_back(requestedMonitorForPersistence(monitor));
+            }
+            cfg.displayArrangement = serializeDisplayArrangement(persisted);
+            cfg.displayResolution = active.virtualDesktop.resolutionString();
         }
 
         static void ensureDisplayConfigDefaults(DesktopConfigData& cfg) {
@@ -722,6 +811,13 @@ namespace gxos {
                 && desktop.activeMonitorCount() > 1;
         }
 
+        static bool syntheticMirrorModeActive(const DisplayVirtualDesktop& desktop)
+        {
+            return hostedSyntheticDualMonitorEnabled()
+                && desktop.mode == DisplayModeKind::Mirror
+                && desktop.activeMonitorCount() > 1;
+        }
+
         static DisplayRect primaryTaskbarDisplayRect(const DisplayVirtualDesktop& desktop)
         {
             const DisplayMonitorDescriptor* primary = desktop.primaryMonitor();
@@ -838,6 +934,9 @@ namespace gxos {
 
         static bool hostedPrimaryTaskbarVisibleInViewport(const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport)
         {
+            if (syntheticMirrorModeActive(desktop)) {
+                return true;
+            }
             if (!syntheticExtendModeActive(desktop)) {
                 return true;
             }
@@ -4071,6 +4170,11 @@ namespace gxos {
                 const uint64_t paintStartMs = nowMs( );
                 uint64_t vncDurationMs = 0;
                 HDC visibleDc = BeginPaint(h, &ps);
+                if (g_presentationPaused.load(std::memory_order_acquire)) {
+                    EndPaint(h, &ps);
+                    return 0;
+                }
+                g_presentationBusy.store(true, std::memory_order_release);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                 hostedFreezeDiagnosticsOnPaintBegin( );
 #endif
@@ -4672,6 +4776,7 @@ namespace gxos {
                     BitBlt(visibleDc, 0, 0, clientW, clientH, drawDc, 0, 0, SRCCOPY);
                 }
 
+                g_presentationBusy.store(false, std::memory_order_release);
                 EndPaint(h, &ps);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                 hostedFreezeDiagnosticsOnPaintEnd(nowMs( ) - paintStartMs, vncDurationMs);
@@ -5545,7 +5650,25 @@ namespace gxos {
                     applyDisplayOptionsToDesktopConfig(displayStore, cfg);
                 }
                 if (cfgOk || displayOk) {
-                    g_cfg = cfg;
+                    const DisplayApplyResult displayApply = Compositor::applyDisplayConfiguration(
+                        requestedDisplayConfigurationFromConfig(cfg), false);
+                    if (!displayApply.success) {
+                        Logger::write(LogLevel::Warn, "Desktop config display transaction rejected: " + displayApply.summary());
+                    } else {
+                        DesktopConfigData appliedCfg;
+                        {
+                            std::lock_guard<std::mutex> lk(g_lock);
+                            appliedCfg = g_cfg;
+                        }
+                        cfg.displayMode = appliedCfg.displayMode;
+                        cfg.displayPrimaryDisplayId = appliedCfg.displayPrimaryDisplayId;
+                        cfg.displayArrangement = appliedCfg.displayArrangement;
+                        cfg.displayResolution = appliedCfg.displayResolution;
+                    }
+                    {
+                        std::lock_guard<std::mutex> lk(g_lock);
+                        g_cfg = cfg;
+                    }
                     ensureDisplayConfigDefaults(g_cfg);
                     g_clockDisplaySettings = clockDisplaySettingsFromConfig(g_cfg);
                     syncDesktopThemeFromConfig(g_cfg);
@@ -6016,6 +6139,262 @@ namespace gxos {
             return oss.str();
         }
 
+        DetectedDisplayInventory Compositor::detectedDisplayInventory()
+        {
+            std::lock_guard<std::mutex> stateLock(g_displayConfigurationMutex);
+            if (g_hasVirtioGpuDisplayInventory) {
+                return g_virtioGpuDisplayInventory;
+            }
+            DesktopConfigData cfg;
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                cfg = g_cfg;
+            }
+            return buildDefaultDetectedDisplayInventory(cfg);
+        }
+
+        ActiveDisplayConfiguration Compositor::activeDisplayConfiguration()
+        {
+            std::lock_guard<std::mutex> stateLock(g_displayConfigurationMutex);
+            if (g_activeDisplayConfiguration.valid()) {
+                return g_activeDisplayConfiguration;
+            }
+
+            DesktopConfigData cfg;
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                cfg = g_cfg;
+            }
+            const DetectedDisplayInventory inventory = g_hasVirtioGpuDisplayInventory
+                ? g_virtioGpuDisplayInventory
+                : buildDefaultDetectedDisplayInventory(cfg);
+            const RequestedDisplayConfiguration requested = requestedDisplayConfigurationFromConfig(cfg);
+            std::string reason;
+            ActiveDisplayConfiguration active = buildActiveDisplayConfiguration(inventory, requested, reason);
+            if (!active.valid()) {
+                Logger::write(LogLevel::Warn, "Active display configuration unavailable: " + reason);
+            }
+            return active;
+        }
+
+        void Compositor::setVirtioGpuDisplayInventory(const DetectedDisplayInventory& inventory)
+        {
+            std::lock_guard<std::mutex> stateLock(g_displayConfigurationMutex);
+            g_virtioGpuDisplayInventory = inventory;
+            g_hasVirtioGpuDisplayInventory = inventory.backend == "virtio-gpu"
+                && inventory.qemuOnly
+                && inventory.backendGateActive;
+            Logger::write(LogLevel::Info,
+                std::string("Detected display inventory updated backend=") + inventory.backend
+                + " outputs=" + std::to_string(inventory.detectedOutputCount())
+                + " operational=" + std::to_string(inventory.operationalOutputCount())
+                + " connectorEnabled=" + std::to_string(inventory.connectorEnabledCount())
+                + " presentationConfirmed=" + std::to_string(inventory.presentationConfirmedCount()));
+        }
+
+        DisplayApplyResult Compositor::applyDisplayConfiguration(
+            const RequestedDisplayConfiguration& requested,
+            bool commitPersistence,
+            const std::string& persistencePath)
+        {
+            // REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
+            DisplayApplyResult result;
+            result.finalResult = "failed";
+            g_displayReconfigurationRequested.store(true, std::memory_order_release);
+            std::unique_lock<std::mutex> transactionLock(g_displayConfigurationMutex, std::defer_lock);
+            if (!transactionLock.try_lock()) {
+                result.reason = "Backend busy";
+                g_displayReconfigurationRequested.store(false, std::memory_order_release);
+                Logger::write(LogLevel::Warn, "Display configuration apply: result=failed reason=Backend busy rollback=no");
+                return result;
+            }
+            if (g_displayReconfigurationInProgress.exchange(true, std::memory_order_acq_rel)) {
+                result.reason = "Backend busy";
+                result.finalResult = "failed";
+                g_displayReconfigurationRequested.store(false, std::memory_order_release);
+                return result;
+            }
+
+            DesktopConfigData oldConfig;
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                oldConfig = g_cfg;
+            }
+
+            g_displayReconfigurationState = DisplayReconfigurationState{};
+            g_displayReconfigurationState.reconfigurationRequested = true;
+            g_displayReconfigurationState.reconfigurationInProgress = true;
+            g_displayReconfigurationState.requestedConfiguration = requested;
+            g_displayReconfigurationState.oldConfiguration = g_activeDisplayConfiguration;
+
+            const DetectedDisplayInventory inventory = g_hasVirtioGpuDisplayInventory
+                ? g_virtioGpuDisplayInventory
+                : buildDefaultDetectedDisplayInventory(oldConfig);
+            bool reconciled = false;
+            const RequestedDisplayConfiguration reconciledRequest =
+                reconcileRequestedDisplayConfiguration(requested, inventory, &reconciled);
+            result.reconciliationOccurred = reconciled;
+            Logger::write(LogLevel::Info, "Display configuration request: " + reconciledRequest.summary());
+
+            g_presentationPaused.store(true, std::memory_order_release);
+            result.presentationPaused = true;
+            g_displayReconfigurationState.presentationPaused = true;
+            bool presentationIdle = false;
+            for (int attempt = 0; attempt < 32; ++attempt) {
+                if (!g_presentationBusy.load(std::memory_order_acquire)) {
+                    presentationIdle = true;
+                    break;
+                }
+                std::this_thread::yield();
+            }
+            result.presentationIdle = presentationIdle;
+            if (!presentationIdle) {
+                result.reason = "Backend busy";
+                g_displayReconfigurationState.finalResult = result;
+                g_displayReconfigurationState.presentationPaused = false;
+                g_displayReconfigurationState.reconfigurationInProgress = false;
+                g_displayReconfigurationState.reconfigurationRequested = false;
+                g_presentationPaused.store(false, std::memory_order_release);
+                g_displayReconfigurationInProgress.store(false, std::memory_order_release);
+                g_displayReconfigurationRequested.store(false, std::memory_order_release);
+                Logger::write(LogLevel::Warn, "Display configuration apply: result=failed reason=Backend busy rollback=no");
+                return result;
+            }
+
+            std::string buildReason;
+            const ActiveDisplayConfiguration nextActive =
+                buildActiveDisplayConfiguration(inventory, reconciledRequest, buildReason);
+            if (!nextActive.valid()) {
+                result.reason = buildReason.empty() ? "validation failed" : buildReason;
+                result.validationPassed = false;
+                g_displayReconfigurationState.finalResult = result;
+                g_displayReconfigurationState.presentationPaused = false;
+                g_displayReconfigurationState.reconfigurationInProgress = false;
+                g_displayReconfigurationState.reconfigurationRequested = false;
+                g_presentationPaused.store(false, std::memory_order_release);
+                g_displayReconfigurationInProgress.store(false, std::memory_order_release);
+                g_displayReconfigurationRequested.store(false, std::memory_order_release);
+                Logger::write(LogLevel::Warn, "Display configuration apply: result=failed reason=" + result.reason + " rollback=no");
+                return result;
+            }
+            result.validationPassed = true;
+
+            DesktopConfigData nextConfig = oldConfig;
+            applyActiveDisplayConfigurationToDesktopConfig(nextActive, nextConfig);
+            const DisplayVirtualDesktop nextDesktop = nextActive.virtualDesktop;
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                for (auto& kv : g_windows) {
+                    WinInfo& window = kv.second;
+                    const DisplayRect bounds = desktopBoundsRect(nextDesktop);
+                    DisplayRect current{ window.x, window.y, window.x + std::max(1, window.w), window.y + std::max(1, window.h) };
+                    if (displayRectIntersectionArea(current, bounds) == 0) {
+                        const DisplayRect primary = nextDesktop.primaryMonitorBounds();
+                        window.x = primary.left;
+                        window.y = primary.top;
+                    } else {
+                        current = clampRectToBounds(current, bounds);
+                        window.x = current.left;
+                        window.y = current.top;
+                        window.w = std::max(1, current.width());
+                        window.h = std::max(1, current.height());
+                    }
+                    if (window.prevW > 0 && window.prevH > 0) {
+                        const DisplayRect restore = clampRectToBounds(
+                            DisplayRect{ window.prevX, window.prevY, window.prevX + window.prevW, window.prevY + window.prevH },
+                            bounds);
+                        window.prevX = restore.left;
+                        window.prevY = restore.top;
+                        window.prevW = std::max(1, restore.width());
+                        window.prevH = std::max(1, restore.height());
+                    }
+                    window.dirty = true;
+                }
+                if (nextActive.mode == DisplayModeKind::Mirror && g_dragActive) {
+                    g_dragActive = false;
+                    g_dragPending = false;
+                    g_dragWin = 0;
+                    g_dragPendingWin = 0;
+                    Logger::write(LogLevel::Info, "Display configuration corrected cursor/capture state for Mirror bounds");
+                }
+                g_cfg = nextConfig;
+#if !defined(_WIN32) || defined(GXOS_BARE_METAL)
+                g_needsRedraw = true;
+#endif
+            }
+            g_activeDisplayConfiguration = nextActive;
+            g_displayReconfigurationState.appliedConfiguration = nextActive;
+            result.targetsRebuilt = !nextActive.renderTargets.empty();
+            requestRepaint();
+            result.validationFrameResult = nextActive.valid() && result.targetsRebuilt;
+            g_displayReconfigurationState.validationFrameResult = result.validationFrameResult;
+
+            if (!result.validationFrameResult) {
+                result.rollbackAttempted = true;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    g_cfg = oldConfig;
+#if !defined(_WIN32) || defined(GXOS_BARE_METAL)
+                    g_needsRedraw = true;
+#endif
+                }
+                g_activeDisplayConfiguration = ActiveDisplayConfiguration{};
+                result.rollbackSucceeded = true;
+                g_displayReconfigurationState.rollbackAttempted = true;
+                g_displayReconfigurationState.rollbackSucceeded = true;
+                result.reason = "validation frame failed";
+                result.finalResult = "failed";
+                requestRepaint();
+            } else if (commitPersistence) {
+                DisplayOptionsStoreData store;
+                std::string loadError;
+                DisplayOptionsStore::Load(persistencePath, store, loadError);
+                store.displayMode = displayModeName(nextActive.mode);
+                store.displayPrimaryDisplayId = nextActive.primaryOutputId;
+                store.displayArrangement = nextConfig.displayArrangement;
+                store.displayResolution = nextConfig.displayResolution;
+                std::string saveError;
+                if (!DisplayOptionsStore::Save(persistencePath, store, saveError)) {
+                    result.rollbackAttempted = true;
+                    {
+                        std::lock_guard<std::mutex> lk(g_lock);
+                        g_cfg = oldConfig;
+#if !defined(_WIN32) || defined(GXOS_BARE_METAL)
+                        g_needsRedraw = true;
+#endif
+                    }
+                    g_activeDisplayConfiguration = ActiveDisplayConfiguration{};
+                    result.rollbackSucceeded = true;
+                    g_displayReconfigurationState.rollbackAttempted = true;
+                    g_displayReconfigurationState.rollbackSucceeded = true;
+                    result.reason = "persistence commit failed: " + saveError;
+                    result.validationFrameResult = false;
+                    result.finalResult = "failed";
+                    requestRepaint();
+                } else {
+                    result.persistenceCommitted = true;
+                }
+            }
+
+            if (result.validationFrameResult && !result.rollbackAttempted) {
+                result.success = true;
+                result.finalResult = "success";
+                Logger::write(LogLevel::Info,
+                    "Display configuration apply: " + result.summary() + "\nActive display configuration: " + nextActive.summary());
+            } else {
+                Logger::write(LogLevel::Warn,
+                    "Display configuration apply: " + result.summary());
+            }
+            g_displayReconfigurationState.finalResult = result;
+            g_presentationPaused.store(false, std::memory_order_release);
+            g_displayReconfigurationState.presentationPaused = false;
+            g_displayReconfigurationState.reconfigurationInProgress = false;
+            g_displayReconfigurationState.reconfigurationRequested = false;
+            g_displayReconfigurationInProgress.store(false, std::memory_order_release);
+            g_displayReconfigurationRequested.store(false, std::memory_order_release);
+            return result;
+        }
+
         bool Compositor::setHostedDisplayViewport(int index)
         {
             if (!hostedSyntheticDualMonitorEnabled()) {
@@ -6273,14 +6652,20 @@ namespace gxos {
         }
 
         void Compositor::renderToFramebuffer(const DisplayRenderTarget& renderTarget) {
+            if (g_presentationPaused.load(std::memory_order_acquire)) {
+                return;
+            }
+            g_presentationBusy.store(true, std::memory_order_release);
             if (!g_videoBackend) {
                 Logger::write(LogLevel::Error, "renderToFramebuffer: no video backend!");
+                g_presentationBusy.store(false, std::memory_order_release);
                 return;
             }
 
             uint32_t* pixels = g_videoBackend->getPixels();
             if (!pixels) {
                 Logger::write(LogLevel::Error, "renderToFramebuffer: no pixel buffer!");
+                g_presentationBusy.store(false, std::memory_order_release);
                 return;
             }
 
@@ -6580,6 +6965,7 @@ namespace gxos {
             // Present to hardware framebuffer
             g_videoBackend->present();
             g_needsRedraw = false;
+            g_presentationBusy.store(false, std::memory_order_release);
         }
 #endif
     }

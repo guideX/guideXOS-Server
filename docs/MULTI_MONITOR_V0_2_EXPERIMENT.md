@@ -29,6 +29,59 @@ Validated through `2026-07-13`. This note now tracks the implementation path tow
 - The output inventory now reports two operational outputs, two monitors, two backed render targets, and presentation confirmation for scanout 1 when capture validation is available.
 - Latest input-routing run root: `logs\qemu-display-probe-20260713-121002\`.
 
+## Display Options Real-Output Configuration Track
+
+The existing Display Options persistence model is now the requested display
+configuration. Detected backend inventory, requested settings, and active
+applied settings are separate records; a failed request cannot overwrite the
+active layout. The QEMU-only virtio-gpu bridge supplies stable monitor/output
+identity and assigned geometry, while resource IDs, backing addresses, and
+connector state remain runtime diagnostics rather than persisted authority.
+
+Display Options consumes operational virtio-gpu outputs when the gated backend
+inventory is published. Output 2 is shown as `VirtIO-GPU Output 2` and
+`Operational` even when `connectorEnabled` is false; connector state is shown
+on its own diagnostic line. If the backend inventory is unavailable, the
+existing hosted synthetic and single-framebuffer paths remain active.
+
+Apply is a bounded transaction: it snapshots the active configuration, pauses
+new presentation, waits for the current synchronous presentation to become
+idle, validates the request, rebuilds monitor/view/target geometry, clamps
+windows and cursor-related capture state, presents a validation frame, and
+only then commits persistence. Failure restores the prior desktop state and
+reports the exact blocker, with rollback/fallback status in the compact
+summary. UI edits are not live-previewed: Apply commits them, OK follows the
+existing window flow, and Cancel restores the last applied selection.
+
+Extend uses persisted virtual origins and preserves the current horizontal
+2560x800 arrangement for two 1280x800 outputs. Mirror requires compatible
+assigned dimensions, uses one logical 1280x800 viewport at origin `0,0`, and
+keeps independent output resources while presenting the same logical content
+to both outputs. Primary selection updates the taskbar monitor and default
+work-area routing without silently reordering the arrangement. Saved output
+identities are reconciled by stable backend/output identity and then by
+inventory order; stale entries do not create phantom monitors.
+
+The shared configuration transaction and source/runtime contract smoke are:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-display-options.ps1
+powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-options-runtime.ps1
+```
+
+The QEMU runtime wrapper reuses the bounded live virtio-gpu proof to verify the
+two operational targets, both captures, validation counters, and zero target
+failures while the configuration transaction remains bounded and gated.
+
+The current repository still has two presentation surfaces: the hosted
+Display Options/compositor path and the separate bare-metal QEMU kernel app.
+There is not yet an IPC or command bridge that publishes the kernel inventory
+into the hosted settings transaction or sends Apply requests back into the
+kernel presenter. Consequently, the runtime wrapper deliberately proves
+inventory and live presentation only; interactive QEMU Extend/Mirror cycling,
+primary switching, and persistence across separate QEMU launches remain the
+next integration proof rather than being claimed as complete here.
+
 ## Implementation Roadmap
 
 1. Hosted synthetic validation complete.
@@ -46,8 +99,10 @@ Validated through `2026-07-13`. This note now tracks the implementation path tow
 1. Controlled live presentation complete in the explicit QEMU-only `compositor-live-bounded` mode; the default probe remains diagnostic/single-shot.
 1. Backend-independent display input mapping and a bounded QMP input-routing smoke are complete; the current QEMU path proves relative-global pointer movement, ordinary click/focus, and cross-boundary window dragging.
 1. The live presenter retains stable resources, scanouts, backing lifetime, synchronous descriptor reclamation, per-target failure isolation, and static-pattern fallback.
+1. Display Options real-output inventory bridge, separate detected/requested/active configuration records, Apply/Cancel semantics, and compact backend diagnostics are complete.
+1. Bounded transactional Extend/Mirror layout, primary selection, window clamping, rollback, and persistence reconciliation are complete in the shared compositor configuration path.
 1. Full-target transfer/flush remains a temporary whole-target implementation; dirty rectangles are deferred.
-1. Real hardware and Mule Territory later.
+1. Real hardware remains Mule Territory.
 
 ## Gates
 
@@ -69,7 +124,7 @@ Presentation is capped at 10 FPS with a hard PIT-tick interval. Each dirty gener
 
 This phase intentionally uses whole-target transfer/flush rather than dirty rectangles. A failure on one target is recorded with its frame, target, command, response, and timeout state while the other target continues when safe. After a small bounded failure streak, the affected target may repaint the known-good static pattern; the other resource is not reset or collapsed into the primary virtual region. Fallback activation and stop reason are part of the compact live summary.
 
-The bounded QEMU harness captures `initial-head0.png`, `initial-head1.png`, `final-head0.png`, and `final-head1.png`, records SHA-256 checksums and changed status, and verifies guideXOS content, the 2560x800 viewport split, and primary-only taskbar behavior. The `compositorInputBounded` extension additionally captures `input-click-head*.png`, `input-boundary-head*.png`, and `input-after-drag-head*.png`. It must never be used as an unrestricted production boot mode. Cursor queues, cursor commands, display hotplug, per-monitor taskbars, and runtime mode changes remain deferred.
+The bounded QEMU harness captures `initial-head0.png`, `initial-head1.png`, `final-head0.png`, and `final-head1.png`, records SHA-256 checksums and changed status, and verifies guideXOS content, the 2560x800 viewport split, and primary-only taskbar behavior. The `compositorInputBounded` extension additionally captures `input-click-head*.png`, `input-boundary-head*.png`, and `input-after-drag-head*.png`. It must never be used as an unrestricted production boot mode. Cursor queues, cursor commands, display hotplug, per-monitor taskbars, and arbitrary runtime mode setting remain deferred from the low-level probe.
 
 ## Validated Modes
 
@@ -116,6 +171,8 @@ If both gates are unset, `.\run-server.bat` stays in normal single-output mode.
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-mmio-mapping.ps1` | The generic MMIO mapping API contract, safety flags, and virtio-gpu probe wiring stay aligned with the runtime mapping prerequisite. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-diagnostic-source.ps1` | The virtio-gpu probe source keeps the full capability walk, the `cfg_type=0x05` diagnostic-only treatment, QEMU-only gates, bounded polling, response validation, the diagnostic/single-shot modes, the bounded live bridge, and the no-real-hardware constraint. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-output-backend.ps1` | The QEMU-only virtio-gpu output backend keeps connector state separate from operational readiness, bridges into `DisplayMonitor` / `DisplayViewport` / `DisplayRenderTarget`, and preserves the diagnostic, single-shot, live, and fallback boundaries. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-display-options.ps1` | Source contract for QEMU-only gates, separate detected/requested/active models, transactional pause/rebuild/validation/rollback, Extend/Mirror geometry, primary/taskbar routing, and safe persistence. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-options-runtime.ps1` | Bounded QEMU runtime wrapper for the real output inventory, both live targets, output captures, validation counters, and per-target GPU-failure reporting. |
 | `git diff --check` | The working tree is free of whitespace and patch-format issues. |
 
 The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes `display-options.cfg` as part of its cleanup, so validation does not leave those runtime state files dirty.
@@ -219,7 +276,13 @@ The standard `std` mode still validates:
 
 ### Next roadmap milestone
 
-The next implementation track is interactive manual mouse validation, Display Options backed by real virtio-gpu outputs, persistent Extend/Mirror configuration, primary-monitor switching, resolution/output configuration, hotplug/config-change events, and dirty-rectangle optimization. Real-hardware enablement remains Mule Territory.
+The next implementation milestone is resolution and output-mode selection,
+safe resource rebuild/resizing, virtio-gpu display events/config-change
+handling, hotplug, dirty-rectangle presentation, manual interactive QEMU
+validation, and eventual real-hardware backend planning under a separate Mule
+checkpoint. Fixed assigned dimensions, no hotplug, no arbitrary mode setting,
+and no head-aware absolute QMP route remain current limitations. Real-hardware
+GPU enablement remains Mule Territory.
 
 ## Virtio-GPU Driver Investigation
 
@@ -247,13 +310,13 @@ Diagnostic-only probe results from `logs\qemu-display-probe-20260709-211742\virt
 
 Next roadmap milestone:
 
-- Interactive manual mouse validation.
-- Display Options backed by the real virtio-gpu outputs.
-- Persistent Extend/Mirror configuration.
-- Primary-monitor switching.
-- Resolution/output configuration.
-- Hotplug/config-change events.
-- Dirty-rectangle optimization.
+- Resolution and output-mode selection.
+- Safe resource rebuild/resizing.
+- Virtio-gpu display events/config-change handling.
+- Hotplug.
+- Dirty-rectangle presentation.
+- Manual interactive QEMU validation.
+- Eventual real-hardware backend planning under a separate Mule checkpoint.
 - Real hardware stays Mule Territory.
 
 ## Virtio-GPU Transport Milestone
@@ -323,10 +386,11 @@ The kernel now derives a read-only inventory of unique framebuffer-backed displa
 
 - Keep the synthetic path isolated and continue using the existing smoke tests as the regression fence.
 - Keep the diagnostic patterns and single-shot proof as explicit fallbacks while validating the bounded live path.
-- Add QEMU mouse and keyboard routing across the proven outputs, then validate real `2560x800` coordinates and window movement between scanouts.
-- Define focus and active-monitor semantics before integrating Display Options.
-- Add persistent Extend/Mirror configuration only after the QEMU routing milestone is stable.
+- Run manual interactive QEMU validation of the Display Options inventory, Extend/Mirror transaction, primary switch, and persistence across two launches.
+- Add resolution and output-mode selection only with safe resource rebuild/resizing.
+- Add virtio-gpu display events/config-change handling and hotplug after a separate safety review.
 - Optimize whole-target transfers with dirty rectangles later.
+- Keep head-aware absolute QMP routing explicitly unavailable until QEMU exposes a verified source-head path.
 - Keep real hardware enablement marked as Mule Territory and preserve the fallback behavior contract.
 
 ## QEMU Input Routing Milestone (2026-07-13)
@@ -355,4 +419,13 @@ logs\qemu-display-probe-<timestamp>\virtio-gpu-compositorInputBounded\captures\i
 logs\qemu-display-probe-<timestamp>\virtio-gpu-compositorInputBounded\captures\input-after-drag-head1.png
 ```
 
-The remaining limitations are the current PS/2-relative QEMU path, no head-aware absolute source identity, no real-hardware GPU/MMIO path, no virtio-gpu cursor queue, no hardware cursor commands, no QEMU source changes, and no production enablement. The next roadmap milestone is interactive manual mouse validation, Display Options backed by real virtio-gpu outputs, persistent Extend/Mirror configuration, primary-monitor switching, resolution/output configuration, hotplug/config-change events, and dirty-rectangle optimization. Real-hardware GPU enablement remains Mule Territory.
+The remaining limitations are fixed assigned output dimensions, no arbitrary
+mode setting, no display hotplug/config-change path, the current PS/2-relative
+QEMU path with no head-aware absolute source identity, no real-hardware
+GPU/MMIO path, no virtio-gpu cursor queue, no hardware cursor commands, and no
+unrestricted production enablement. The next roadmap milestone is resolution
+and output-mode selection, safe resource rebuild/resizing, virtio-gpu display
+events/config-change handling, hotplug, dirty-rectangle presentation, manual
+interactive QEMU validation, and eventual real-hardware backend planning under
+a separate Mule checkpoint. Real-hardware GPU enablement remains Mule
+Territory.

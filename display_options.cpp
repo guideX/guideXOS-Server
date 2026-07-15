@@ -4,6 +4,7 @@
 #include "compositor.h"
 #include "desktop_config.h"
 #include "display_options_store.h"
+#include "display_configuration.h"
 #include "gui_protocol.h"
 #include "ipc_bus.h"
 #include "logger.h"
@@ -50,8 +51,11 @@ bool DisplayOptions::s_smallLiveDesktopFolderIcons = true;
 std::string DisplayOptions::s_selectedDisplayMode = "mirror";
 std::string DisplayOptions::s_appliedDisplayMode = "mirror";
 std::string DisplayOptions::s_displayPrimaryDisplayId = "display-1";
+std::string DisplayOptions::s_appliedDisplayPrimaryDisplayId = "display-1";
 std::string DisplayOptions::s_displayArrangement = "";
+std::string DisplayOptions::s_appliedDisplayArrangement = "";
 std::string DisplayOptions::s_displayResolution = "";
+std::string DisplayOptions::s_displayStatus = "";
 
 namespace {
     const char* kDisplayOptionsStorePath = "display-options.cfg";
@@ -99,6 +103,8 @@ namespace {
     const int kDisplaySectionY = 132;
     const int kDisplayModeButtonW = 140;
     const int kDisplayModeButtonH = 36;
+    const int kDisplayModeY = 200;
+    const int kDisplayCardY = 320;
     const int kDisplayCardW = 220;
     const int kDisplayCardH = 132;
     const int kDisplayCardGapX = 16;
@@ -749,7 +755,9 @@ void DisplayOptions::loadSelection()
         s_selectedDisplayMode = normalizeDisplayModeName(store.displayMode);
         s_appliedDisplayMode = s_selectedDisplayMode;
         s_displayPrimaryDisplayId = store.displayPrimaryDisplayId.empty() ? "display-1" : store.displayPrimaryDisplayId;
+        s_appliedDisplayPrimaryDisplayId = s_displayPrimaryDisplayId;
         s_displayArrangement = store.displayArrangement;
+        s_appliedDisplayArrangement = s_displayArrangement;
         s_displayResolution = store.displayResolution;
         s_selectedTimeZoneIndex = clockTimeZoneIndexFromId(store.timeZoneId);
         s_appliedTimeZoneIndex = s_selectedTimeZoneIndex;
@@ -765,7 +773,9 @@ void DisplayOptions::loadSelection()
         s_selectedDisplayMode = syntheticDualMonitor ? "extend" : "mirror";
         s_appliedDisplayMode = s_selectedDisplayMode;
         s_displayPrimaryDisplayId = "display-1";
+        s_appliedDisplayPrimaryDisplayId = "display-1";
         s_displayArrangement.clear();
+        s_appliedDisplayArrangement.clear();
         s_displayResolution.clear();
         s_selectedTimeZoneIndex = 0;
         s_appliedTimeZoneIndex = 0;
@@ -822,6 +832,9 @@ void DisplayOptions::loadSelection()
         }
         s_displayArrangement = serializeDisplayArrangement(monitors);
     }
+    s_appliedDisplayPrimaryDisplayId = s_displayPrimaryDisplayId;
+    s_appliedDisplayArrangement = s_displayArrangement;
+    s_displayStatus.clear();
     s_selectedThemeId = selectedThemeIdFromConfig();
     s_appliedThemeId = s_selectedThemeId;
     for (size_t i = 0; i < wallpapers.size(); ++i) {
@@ -1114,7 +1127,7 @@ void DisplayOptions::render()
     } else if (s_activeTab == 4) {
         drawText(s_windowId, 26, kButtonY + 10, "Changes save immediately and apply to the clock display.", DisplayOptionsMutedTextColor());
     } else if (s_activeTab == 5) {
-        drawText(s_windowId, 26, kButtonY + 10, "Mirror and Extend are stored now; the compositor still renders a single output.", DisplayOptionsMutedTextColor());
+        drawText(s_windowId, 26, kButtonY + 10, "Display layout edits apply transactionally; Cancel keeps the active layout.", DisplayOptionsMutedTextColor());
     }
 }
 
@@ -1261,8 +1274,32 @@ namespace {
         }
     }
 
+    RequestedDisplayConfiguration requestedDisplayConfigurationFromUi()
+    {
+        RequestedDisplayConfiguration requested;
+        requested.mode = parseDisplayModeKind(DisplayOptions::s_selectedDisplayMode);
+        requested.primaryOutputId = DisplayOptions::s_displayPrimaryDisplayId.empty()
+            ? "display-1" : DisplayOptions::s_displayPrimaryDisplayId;
+        requested.arrangement = parseDisplayArrangement(DisplayOptions::s_displayArrangement);
+        for (const auto& monitor : requested.arrangement) {
+            if (monitor.enabled) requested.enabledOutputIds.push_back(monitor.id);
+        }
+        return requested;
+    }
+
     std::vector<DisplayMonitorDescriptor> displayPreviewMonitors()
     {
+        const DetectedDisplayInventory detected = Compositor::detectedDisplayInventory();
+        if (detected.backend == "virtio-gpu" && detected.operationalOutputCount() >= 2) {
+            const RequestedDisplayConfiguration requested = requestedDisplayConfigurationFromUi();
+            std::string reason;
+            const ActiveDisplayConfiguration active = buildActiveDisplayConfiguration(detected, requested, reason);
+            if (active.valid()) {
+                return active.monitors;
+            }
+            Logger::write(LogLevel::Warn, "DisplayOptions real output preview rejected: " + reason);
+            return detected.monitors;
+        }
         const bool syntheticDualMonitor = hostedSyntheticDualMonitorEnabled();
         const bool extendSelected = normalizeDisplayModeName(DisplayOptions::s_selectedDisplayMode) == "extend";
 
@@ -1292,9 +1329,9 @@ namespace {
             monitors.end());
         bool hasPrimary = false;
         for (auto& monitor : monitors) {
-            if (!DisplayOptions::s_displayPrimaryDisplayId.empty() && monitor.id == DisplayOptions::s_displayPrimaryDisplayId) {
-                monitor.primary = true;
-                hasPrimary = true;
+            if (!DisplayOptions::s_displayPrimaryDisplayId.empty()) {
+                monitor.primary = monitor.id == DisplayOptions::s_displayPrimaryDisplayId;
+                if (monitor.primary) hasPrimary = true;
             } else if (monitor.primary) {
                 hasPrimary = true;
             }
@@ -1344,7 +1381,7 @@ namespace {
     void drawDisplayMonitorCard(int index, const DisplayMonitorDescriptor& monitor, int x, int y, bool primary, bool selected)
     {
         const uint64_t windowId = DisplayOptions::s_windowId;
-        const bool enabled = monitor.enabled;
+        const bool enabled = monitor.operational && monitor.width > 0 && monitor.height > 0;
         const uint32_t cardFill = enabled ? DisplayOptionsCardColor() : blendColor(DisplayOptionsCardColor(), DisplayOptionsPanelColor(), 42);
         const uint32_t borderColor = primary ? DisplayOptionsSelectedBorderColor()
             : selected ? DisplayOptionsHoverBorderColor()
@@ -1352,36 +1389,47 @@ namespace {
         drawColorRect(windowId, x - 3, y - 3, kDisplayCardW + 6, kDisplayCardH + 6, borderColor);
         drawColorRect(windowId, x, y, kDisplayCardW, kDisplayCardH, cardFill);
         drawText(windowId, x + 12, y + 12, std::string("[") + std::to_string(index + 1) + "] " + (monitor.name.empty() ? monitor.id : monitor.name), DisplayOptionsTextColor());
-        drawText(windowId, x + 12, y + 40, std::string("Resolution: ") + std::to_string(monitor.width) + "x" + std::to_string(monitor.height), DisplayOptionsMutedTextColor());
-        drawText(windowId, x + 12, y + 58, std::string("Refresh: ") + (monitor.refreshRateHz > 0 ? std::to_string(monitor.refreshRateHz) + " Hz" : "n/a"), DisplayOptionsMutedTextColor());
-        drawText(windowId, x + 12, y + 76, std::string("Rotation: ") + std::to_string(monitor.rotation) + " deg", DisplayOptionsMutedTextColor());
-        drawText(windowId, x + 12, y + 94, primary ? "Primary display" : "Secondary display", primary ? DisplayOptionsAccentColor() : DisplayOptionsMutedTextColor());
-        if (!enabled) {
-            drawText(windowId, x + 12, y + 112, "Not active yet", DisplayOptionsMutedTextColor());
-        }
+        drawText(windowId, x + 12, y + 40, std::string("Assigned: ") + std::to_string(monitor.width) + "x" + std::to_string(monitor.height), DisplayOptionsMutedTextColor());
+        drawText(windowId, x + 12, y + 58, std::string("Output: ") + (monitor.outputId.empty() ? monitor.id : monitor.outputId), DisplayOptionsMutedTextColor());
+        drawText(windowId, x + 12, y + 76, primary ? "Primary display" : "Secondary display", primary ? DisplayOptionsAccentColor() : DisplayOptionsMutedTextColor());
+        drawText(windowId, x + 12, y + 94, enabled ? "Operational" : "Unavailable", enabled ? DisplayOptionsAccentColor() : DisplayOptionsMutedTextColor());
+        drawText(windowId, x + 12, y + 112,
+            monitor.connectorEnabled ? "Connector state enabled" : "Connector state unavailable/disabled",
+            monitor.connectorEnabled ? DisplayOptionsMutedTextColor() : DisplayOptionsAccentColor());
     }
 }
 
 void DisplayOptions::drawDisplayTab()
 {
     const std::vector<DisplayMonitorDescriptor> monitors = displayPreviewMonitors();
+    const DetectedDisplayInventory detected = Compositor::detectedDisplayInventory();
     DisplayVirtualDesktop desktop;
     desktop.mode = parseDisplayModeKind(s_selectedDisplayMode);
     desktop.monitors = monitors;
     desktop.recomputeBounds();
 
     drawText(s_windowId, 46, 116, "Display mode and monitor layout:", DisplayOptionsTextColor());
-    drawText(s_windowId, 46, 140, "The compositor still runs as a single framebuffer today. This tab stores the layout model and will drive the multi-output path later.", DisplayOptionsMutedTextColor());
-    if (hostedSyntheticDualMonitorEnabled()) {
+    if (detected.backend == "virtio-gpu") {
+        drawText(s_windowId, 46, 140,
+            std::string("Backend: VirtIO-GPU  Outputs detected: ") + std::to_string(detected.detectedOutputCount())
+                + "  operational: " + std::to_string(detected.operationalOutputCount()),
+            DisplayOptionsAccentColor());
+        drawText(s_windowId, 46, 158,
+            std::string("Connector state is separate from usability; confirmed outputs: ")
+                + std::to_string(detected.presentationConfirmedCount()),
+            DisplayOptionsMutedTextColor());
+    } else if (hostedSyntheticDualMonitorEnabled()) {
         const DisplayViewport viewport = makeHostedDisplayViewport(desktop, Compositor::hostedDisplayViewportIndex(), kSyntheticTestMonitorWidth, kSyntheticTestMonitorHeight);
         drawText(s_windowId, 46, 158, "Synthetic dual-monitor test mode is active in hosted builds; desktop.display.viewport 1/2 selects the visible viewport.", DisplayOptionsMutedTextColor());
-        drawText(s_windowId, 46, 176, std::string("Viewing ") + viewport.summary() + "  (wallpaper/taskbar remain primary-view based; viewport 2 hides the taskbar for now)", DisplayOptionsMutedTextColor());
+        drawText(s_windowId, 46, 176, std::string("Viewing ") + viewport.summary() + "  (wallpaper/taskbar follow the selected primary monitor)", DisplayOptionsMutedTextColor());
+    } else {
+        drawText(s_windowId, 46, 140, "Backend: framebuffer  Outputs detected: 1  operational: 1", DisplayOptionsMutedTextColor());
     }
 
     const bool mirrorSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "mirror";
     const bool extendSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "extend";
-    drawButton(kDisplaySectionX, 200, kDisplayModeButtonW, kDisplayModeButtonH, "Mirror Displays", mirrorSelected, true);
-    drawButton(kDisplaySectionX + kDisplayModeButtonW + 12, 200, kDisplayModeButtonW, kDisplayModeButtonH, "Extend Displays", extendSelected, true);
+    drawButton(kDisplaySectionX, kDisplayModeY, kDisplayModeButtonW, kDisplayModeButtonH, "Mirror Displays", mirrorSelected, true);
+    drawButton(kDisplaySectionX + kDisplayModeButtonW + 12, kDisplayModeY, kDisplayModeButtonW, kDisplayModeButtonH, "Extend Displays", extendSelected, true);
 
     const std::string summary = std::string("Mode: ") + displayModeName(desktop.mode) +
         "  Primary: " + (desktop.primaryMonitor() ? desktop.primaryMonitor()->id : (s_displayPrimaryDisplayId.empty() ? "display-1" : s_displayPrimaryDisplayId)) +
@@ -1392,7 +1440,7 @@ void DisplayOptions::drawDisplayTab()
         drawText(s_windowId, 46, 264, std::string("Arrangement: ") + s_displayArrangement, DisplayOptionsMutedTextColor());
     }
 
-    const int cardY = 320;
+    const int cardY = kDisplayCardY;
     const int cardGapX = kDisplayCardGapX;
     const int cardGapY = kDisplayCardGapY;
     const int maxColumns = 2;
@@ -1406,8 +1454,12 @@ void DisplayOptions::drawDisplayTab()
         drawDisplayMonitorCard(static_cast<int>(i), monitors[i], cardX, cardTop, primary, selected);
     }
 
-    drawText(s_windowId, 46, std::max(kButtonY - 18, cardY + static_cast<int>(((monitors.size() + 1) / 2) * (kDisplayCardH + cardGapY)) + 4),
-        "Resolution and per-monitor controls are informational for now. We keep the existing single-monitor compositor path intact.", DisplayOptionsMutedTextColor());
+    drawButton(kDisplaySectionX, kButtonY, kButtonW, kButtonH, "Apply", false, true);
+    drawButton(kDisplaySectionX + kButtonW + 18, kButtonY, kButtonW, kButtonH, "Cancel", false, true);
+    const std::string status = s_displayStatus.empty()
+        ? (extendSelected ? "Extend uses persisted virtual origins." : "Mirror uses one logical viewport on every output.")
+        : s_displayStatus;
+    drawText(s_windowId, 46, kButtonY + 44, status, s_displayStatus.empty() ? DisplayOptionsMutedTextColor() : DisplayOptionsAccentColor());
 }
 
 void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied)
@@ -1542,21 +1594,29 @@ void DisplayOptions::handleMouseDown(int mx, int my)
     }
 
     if (s_activeTab == 5) {
-        if (hit(mx, my, kDisplaySectionX, 176, kDisplayModeButtonW, kDisplayModeButtonH)) {
+        if (hit(mx, my, kDisplaySectionX, kDisplayModeY, kDisplayModeButtonW, kDisplayModeButtonH)) {
             s_selectedDisplayMode = "mirror";
-            applySelectedDisplayMode();
             render();
             return;
         }
-        if (hit(mx, my, kDisplaySectionX + kDisplayModeButtonW + 12, 176, kDisplayModeButtonW, kDisplayModeButtonH)) {
+        if (hit(mx, my, kDisplaySectionX + kDisplayModeButtonW + 12, kDisplayModeY, kDisplayModeButtonW, kDisplayModeButtonH)) {
             s_selectedDisplayMode = "extend";
-            applySelectedDisplayMode();
             render();
             return;
         }
 
         const std::vector<DisplayMonitorDescriptor> monitors = displayPreviewMonitors();
-        const int cardY = 276;
+        if (hit(mx, my, kDisplaySectionX, kButtonY, kButtonW, kButtonH)) {
+            applySelectedDisplaySettings();
+            render();
+            return;
+        }
+        if (hit(mx, my, kDisplaySectionX + kButtonW + 18, kButtonY, kButtonW, kButtonH)) {
+            cancelSelectedDisplaySettings();
+            render();
+            return;
+        }
+        const int cardY = kDisplayCardY;
         for (size_t i = 0; i < monitors.size(); ++i) {
             const int column = static_cast<int>(i % 2);
             const int row = static_cast<int>(i / 2);
@@ -1567,7 +1627,6 @@ void DisplayOptions::handleMouseDown(int mx, int my)
             }
             if (!monitors[i].id.empty()) {
                 s_displayPrimaryDisplayId = monitors[i].id;
-                saveDisplaySettings();
                 render();
             }
             return;
@@ -1807,12 +1866,18 @@ void DisplayOptions::applySelectedTheme()
     }
 }
 
-void DisplayOptions::saveDisplaySettings()
+bool DisplayOptions::saveDisplaySettings()
 {
     DisplayOptionsStoreData store;
     std::string err;
-    if (!loadPersistedDisplayOptions(store, err)) {
-        Logger::write(LogLevel::Info, "DisplayOptions display save using default display settings because load failed: " + err);
+    DisplayOptionsStoreData previousStore;
+    std::string previousStoreErr;
+    const bool hadPreviousStore = loadPersistedDisplayOptions(previousStore, previousStoreErr);
+    if (!hadPreviousStore) {
+        Logger::write(LogLevel::Info, "DisplayOptions display save using default display settings because load failed: " + previousStoreErr);
+        store = DisplayOptionsStoreData{};
+    } else {
+        store = previousStore;
     }
 
     store.displayMode = normalizeDisplayModeName(s_selectedDisplayMode);
@@ -1828,7 +1893,10 @@ void DisplayOptions::saveDisplaySettings()
     DesktopConfigData cfg;
     std::string legacyErr;
     bool legacySaved = false;
-    if (DesktopConfig::Load("desktop.json", cfg, legacyErr)) {
+    DesktopConfigData previousCfg;
+    const bool legacyRequired = DesktopConfig::Load("desktop.json", previousCfg, legacyErr);
+    if (legacyRequired) {
+        cfg = previousCfg;
         applyDisplayOptionsToDesktopConfig(store, cfg);
         if (!DesktopConfig::Save("desktop.json", cfg, legacyErr)) {
             Logger::write(LogLevel::Warn, "DisplayOptions legacy desktop.json display save failed: " + legacyErr);
@@ -1837,19 +1905,80 @@ void DisplayOptions::saveDisplaySettings()
         }
     }
 
-    if (storeSaved || legacySaved) {
+    const bool committed = storeSaved && (!legacyRequired || legacySaved);
+    if (!committed) {
+        if (storeSaved && hadPreviousStore) {
+            std::string restoreStoreErr;
+            DisplayOptionsStore::Save(kDisplayOptionsStorePath, previousStore, restoreStoreErr);
+        }
+        if (legacyRequired && legacySaved) {
+            std::string restoreLegacyErr;
+            DesktopConfig::Save("desktop.json", previousCfg, restoreLegacyErr);
+        }
+        return false;
+    }
+
+    if (committed) {
         s_appliedDisplayMode = s_selectedDisplayMode;
         Logger::write(LogLevel::Info, std::string("DisplayOptions applied display mode=") + s_appliedDisplayMode +
             " primaryDisplayId=" + s_displayPrimaryDisplayId +
             " arrangement=" + (s_displayArrangement.empty() ? "(empty)" : s_displayArrangement) +
             " resolution=" + (s_displayResolution.empty() ? "(empty)" : s_displayResolution));
-        publish(MsgType::MT_DesktopConfigReload, "");
+        return true;
     }
+    return false;
 }
 
 void DisplayOptions::applySelectedDisplayMode()
 {
-    saveDisplaySettings();
+    applySelectedDisplaySettings();
+}
+
+void DisplayOptions::applySelectedDisplaySettings()
+{
+    const RequestedDisplayConfiguration requested = requestedDisplayConfigurationFromUi();
+    s_displayStatus = "Applying display configuration...";
+    const DisplayApplyResult result = Compositor::applyDisplayConfiguration(requested, false);
+    if (!result.success) {
+        s_displayStatus = std::string("Apply failed: ") + (result.reason.empty() ? result.summary() : result.reason);
+        Logger::write(LogLevel::Warn, "DisplayOptions display apply failed: " + result.summary());
+        return;
+    }
+
+    if (!saveDisplaySettings()) {
+        // The backend is already valid, but persistence is part of the user
+        // visible transaction. Restore the last known-good request when the
+        // store cannot be committed.
+        const std::string selectedMode = s_selectedDisplayMode;
+        const std::string selectedPrimary = s_displayPrimaryDisplayId;
+        const std::string selectedArrangement = s_displayArrangement;
+        s_selectedDisplayMode = s_appliedDisplayMode;
+        s_displayPrimaryDisplayId = s_appliedDisplayPrimaryDisplayId;
+        s_displayArrangement = s_appliedDisplayArrangement;
+        const DisplayApplyResult rollback = Compositor::applyDisplayConfiguration(
+            requestedDisplayConfigurationFromUi(), false);
+        s_selectedDisplayMode = selectedMode;
+        s_displayPrimaryDisplayId = selectedPrimary;
+        s_displayArrangement = selectedArrangement;
+        s_displayStatus = rollback.success
+            ? "Persistence failed; rolled back successfully"
+            : "Persistence failed; rollback failed — fallback activated";
+        return;
+    }
+
+    s_appliedDisplayMode = s_selectedDisplayMode;
+    s_appliedDisplayPrimaryDisplayId = s_displayPrimaryDisplayId;
+    s_appliedDisplayArrangement = s_displayArrangement;
+    s_displayStatus = "Applied successfully";
+    Logger::write(LogLevel::Info, "DisplayOptions display apply: " + result.summary());
+}
+
+void DisplayOptions::cancelSelectedDisplaySettings()
+{
+    s_selectedDisplayMode = s_appliedDisplayMode;
+    s_displayPrimaryDisplayId = s_appliedDisplayPrimaryDisplayId;
+    s_displayArrangement = s_appliedDisplayArrangement;
+    s_displayStatus = "Unapplied display changes canceled";
 }
 
 void DisplayOptions::applySelectedGradient()

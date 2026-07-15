@@ -291,8 +291,8 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'Synthetic dual-monitor test mode is active';
     },
     [pscustomobject]@{
-        Name = 'display options viewport 2 hidden taskbar note';
-        Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'viewport 2 hides the taskbar for now';
+        Name = 'display options viewport primary taskbar note';
+        Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'wallpaper/taskbar follow the selected primary monitor';
     },
     [pscustomobject]@{
         Name = 'display options synthetic preview gate';

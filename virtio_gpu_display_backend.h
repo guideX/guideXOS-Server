@@ -4,6 +4,7 @@
 #include "virtio_gpu_display_backend_kernel.h"
 #else
 #include "display_model.h"
+#include "display_configuration.h"
 
 #include <algorithm>
 #include <sstream>
@@ -108,6 +109,7 @@ inline std::string virtioGpuMonitorSummaryLine(const DisplayMonitorDescriptor& m
         << " resourceBound=" << (monitor.resourceBound ? "yes" : "no")
         << " backingAttached=" << (monitor.backingAttached ? "yes" : "no")
         << " transferReady=" << (monitor.transferReady ? "yes" : "no")
+        << " presentationReady=" << (monitor.presentationReady ? "yes" : "no")
         << " presentReady=" << (monitor.presentReady ? "yes" : "no")
         << " confirmed=" << (monitor.presentationConfirmed ? "yes" : "no")
         << " preferred=" << virtioGpuGeometrySummary(
@@ -210,6 +212,7 @@ inline std::string virtioGpuOutputInventorySummary(const VirtioGpuOutputInventor
 
 class VirtioGpuDisplayBackend {
 public:
+    // REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
     static bool isQemuOnly()
     {
         return true;
@@ -255,8 +258,8 @@ public:
             const int assignedHeight = std::max(1, output.assignedHeight);
 
             DisplayMonitorDescriptor monitor = makeDisplayMonitor(
-                std::to_string(index + 1),
-                std::string("Virtio GPU Output ") + std::to_string(output.scanoutId),
+                std::string("display-") + std::to_string(output.scanoutId + 1u),
+                std::string("VirtIO-GPU Output ") + std::to_string(output.scanoutId + 1u),
                 virtualX,
                 0,
                 assignedWidth,
@@ -266,6 +269,9 @@ public:
                 true,
                 output.primary);
             monitor.source = output.source;
+            monitor.sourceType = "virtio-gpu";
+            monitor.backendId = "virtio-gpu";
+            monitor.outputId = std::string("virtio-gpu-output-") + std::to_string(output.scanoutId);
             monitor.scanoutId = output.scanoutId;
             monitor.resourceId = output.resourceId;
             monitor.preferredX = output.preferredX;
@@ -287,8 +293,12 @@ public:
             monitor.backingAttached = output.backingAttached;
             monitor.transferReady = output.transferReady;
             monitor.presentReady = output.presentReady;
+            monitor.presentationReady = output.presentReady;
             monitor.presentationConfirmed = output.presentationConfirmed;
             monitor.primary = output.primary;
+            monitor.primaryCapable = true;
+            monitor.mirrorCapable = true;
+            monitor.extendCapable = true;
             monitor.backingVirtualAddress = output.backingVirtualAddress;
             monitor.backingByteCount = output.backingByteCount;
             monitor.backingMemEntryCount = output.backingMemEntryCount;
@@ -417,6 +427,18 @@ public:
     static std::vector<DisplayRenderTarget> buildVirtioGpuDisplayTargets(const VirtioGpuOutputInventory& inventory)
     {
         return inventory.renderTargets;
+    }
+
+    static DetectedDisplayInventory makeDetectedDisplayInventory(const VirtioGpuOutputInventory& inventory)
+    {
+        DetectedDisplayInventory detected;
+        detected.backend = "virtio-gpu";
+        detected.qemuOnly = inventory.qemuOnly;
+        detected.backendGateActive = inventory.qemuOnly;
+        detected.monitors = inventory.monitors;
+        detected.renderTargets = inventory.renderTargets;
+        detected.currentDesktop = inventory.virtualDesktop;
+        return detected;
     }
 
     static bool presentVirtioGpuTarget(DisplayRenderTarget& target, const VirtioGpuScanoutState& output)
