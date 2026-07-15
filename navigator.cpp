@@ -2641,6 +2641,8 @@ namespace {
 			{"Capabilities", "Bookmark persistence", "enabled"},
 			{"Capabilities", "HTTPS/TLS", "enabled hosted-only"},
 			{"Capabilities", "TLS backend", tlsBackendInfo.backendName ? tlsBackendInfo.backendName : "(none)"},
+			{"Evidence Lane", "evidence_lane", "hosted"},
+			{"Evidence Lane", "tls_backend", "schannel"},
 			{"Capabilities", "Certificate validation", gxos_tls_certificate_validation_policy()},
 			{"Capabilities", "TLS insertion seam", "active HttpByteStream wrapper"},
 			{"Capabilities", "TLS smoke bypass", "localhost self-signed only; disabled unless GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST=1"},

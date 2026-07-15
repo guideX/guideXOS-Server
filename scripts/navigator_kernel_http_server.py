@@ -37,6 +37,13 @@ def make_smoke_png(width, height):
 SMOKE_PNG = make_smoke_png(2, 2)
 SMOKE_WIDE_PNG = make_smoke_png(640, 160)
 SMOKE_TALL_PNG = make_smoke_png(160, 640)
+CANONICAL_TLS12_SUITES = {
+    0xC02F: "TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256",
+    0xC030: "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
+    0xC02B: "TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256",
+    0xC02C: "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384",
+}
+TLS_SIGNALING_SUITES = {0x00FF}
 INTERACTIVE_FORM_CONTROLS = (
     b"<input type=\"text\" name=\"q\" value=\"\">"
     b"<input type=\"text\" value=\"unnamed control omitted\">"
@@ -793,6 +800,10 @@ class NavigatorTlsSmokeServer(ThreadingHTTPServer):
                 "0x%04x" % struct.unpack(">H", body[index:index + 2])[0]
                 for index in range(offset, offset + cipher_length, 2)
             ]
+            cipher_suite_ids = [int(value, 16) for value in cipher_suites]
+            real_suite_ids = [value for value in cipher_suite_ids if value not in TLS_SIGNALING_SUITES]
+            canonical_offer = any(value in CANONICAL_TLS12_SUITES for value in real_suite_ids)
+            scsv_only = bool(cipher_suite_ids) and not real_suite_ids
             offset += cipher_length
             compression_length = body[offset]
             offset += 1 + compression_length
@@ -821,11 +832,15 @@ class NavigatorTlsSmokeServer(ThreadingHTTPServer):
 
             print(
                 "TLS clienthello metadata record_version=0x%04x legacy_version=%s "
-                "cipher_suites=%s supported_versions=%s signature_algorithms=%s"
+                "cipher_suites=%s real_suite_count=%d scsv_only=%s canonical_offer=%s "
+                "supported_versions=%s signature_algorithms=%s"
                 % (
                     struct.unpack(">H", header[1:3])[0],
                     legacy_version,
                     ",".join(cipher_suites) or "(none)",
+                    len(real_suite_ids),
+                    "yes" if scsv_only else "no",
+                    "yes" if canonical_offer else "no",
                     ",".join(supported_versions) or "(none)",
                     ",".join(signature_algorithms) or "(none)",
                 ),
@@ -842,14 +857,24 @@ class NavigatorTlsSmokeServer(ThreadingHTTPServer):
         try:
             self._log_client_hello(raw_socket)
             tls_socket = self._ssl_context.wrap_socket(raw_socket, server_side=True)
+            negotiated_suite = tls_socket.cipher()[0] if tls_socket.cipher() else None
+            negotiated_contract_name = {
+                "ECDHE-RSA-AES128-GCM-SHA256": "TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256",
+                "ECDHE-RSA-AES256-GCM-SHA384": "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
+                "ECDHE-ECDSA-AES128-GCM-SHA256": "TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256",
+                "ECDHE-ECDSA-AES256-GCM-SHA384": "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384",
+            }.get(negotiated_suite, "(not-in-contract)")
             print(
-                "TLS handshake ok from %s:%s sni=%s protocol=%s cipher=%s"
+                "TLS handshake ok from %s:%s sni=%s protocol=%s cipher=%s "
+                "negotiated_suite=%s fixture_suite_contract=%s"
                 % (
                     client_address[0],
                     client_address[1],
                     getattr(tls_socket, "_guidexos_sni", None),
                     tls_socket.version(),
-                    tls_socket.cipher()[0] if tls_socket.cipher() else None,
+                    negotiated_suite,
+                    negotiated_contract_name,
+                    "yes" if negotiated_contract_name in CANONICAL_TLS12_SUITES.values() else "no",
                 ),
                 flush=True,
             )

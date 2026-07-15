@@ -86,6 +86,15 @@ function Write-NavigatorPublicHttpsProofPack {
         tls_result = [string]$Fields["tls_result"]
         tls_status = [string]$Fields["tls_status"]
         tls_backend = [string]$Fields["tls_backend"]
+        evidence_lane = [string]$Fields["evidence_lane"]
+        tls_suite_contract = [string]$Fields["tls_suite_contract"]
+        tls_suite_contract_count = [string]$Fields["tls_suite_contract_count"]
+        tls_suite_contract_real_count = [string]$Fields["tls_suite_contract_real_count"]
+        tls_suite_contract_installed = [string]$Fields["tls_suite_contract_installed"]
+        tls_clienthello_real_suite_count = [string]$Fields["tls_clienthello_real_suite_count"]
+        tls_clienthello_scsv_only = [string]$Fields["tls_clienthello_scsv_only"]
+        tls_clienthello_contract_match = [string]$Fields["tls_clienthello_contract_match"]
+        tls_negotiated_suite = [string]$Fields["tls_negotiated_suite"]
         tls_version = [string]$Fields["tls_protocol"]
         certificate_validation_result = [string]$Fields["certificate_validation_result"]
         hostname_validation_result = [string]$Fields["hostname_validation_result"]
@@ -1107,6 +1116,15 @@ $fields = [ordered]@{
     transport_policy_reason = "(not-attempted)"
     tls_status = "(not-attempted)"
     tls_backend = "(not-attempted)"
+    evidence_lane = "kernel_public_https"
+    tls_suite_contract = "explicit_bounded"
+    tls_suite_contract_count = "0"
+    tls_suite_contract_real_count = "0"
+    tls_suite_contract_installed = "no"
+    tls_clienthello_real_suite_count = "0"
+    tls_clienthello_scsv_only = "no"
+    tls_clienthello_contract_match = "no"
+    tls_negotiated_suite = "(not-attempted)"
     tls_protocol = "(not-attempted)"
     tls_connect_attempts = "0"
     tls_retry_count = "0"
@@ -1455,7 +1473,17 @@ try {
         "transport_policy_reason",
         "tls_status",
         "tls_backend",
+        "evidence_lane",
+        "tls_suite_contract",
+        "tls_suite_contract_count",
+        "tls_suite_contract_real_count",
+        "tls_suite_contract_installed",
+        "tls_clienthello_real_suite_count",
+        "tls_clienthello_scsv_only",
+        "tls_clienthello_contract_match",
+        "tls_negotiated_suite",
         "protocol",
+        "tls_protocol",
         "tls_connect_attempts",
         "tls_retry_count",
         "tls_retry_reason",

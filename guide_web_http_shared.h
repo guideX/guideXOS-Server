@@ -49,6 +49,7 @@ enum class HttpByteStreamTlsStatus {
     HostnameMismatch,
     TlsWriteFailed,
     TlsReadFailed,
+    CapabilityContractFailure,
     ResponseTooLarge,
     Success,
 };
@@ -94,6 +95,7 @@ inline const char* httpSharedTlsStatusName(HttpByteStreamTlsStatus status)
     case HttpByteStreamTlsStatus::HostnameMismatch: return "HostnameMismatch";
     case HttpByteStreamTlsStatus::TlsWriteFailed: return "TlsWriteFailed";
     case HttpByteStreamTlsStatus::TlsReadFailed: return "TlsReadFailed";
+    case HttpByteStreamTlsStatus::CapabilityContractFailure: return "CapabilityContractFailure";
     case HttpByteStreamTlsStatus::ResponseTooLarge: return "ResponseTooLarge";
     case HttpByteStreamTlsStatus::Success: return "Success";
     default: return "Unknown";

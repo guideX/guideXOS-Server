@@ -8853,7 +8853,7 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_allowlisted_tls_transp
         true,
         true,
         true,
-        "Mbed TLS bare-metal",
+        "mbedtls",
         "Controlled local HTTPS allowlist matched."
     };
 }
@@ -8868,7 +8868,7 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_policy_validated_tls_t
         true,
         true,
         true,
-        "Mbed TLS bare-metal",
+        "mbedtls",
         reason ? reason : "Explicit validated HTTPS policy matched."
     };
 }
@@ -8883,7 +8883,7 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_blocked_https_transpor
         false,
         true,
         true,
-        "Mbed TLS bare-metal",
+        "mbedtls",
         reason ? reason : "General bare-metal HTTPS is disabled by policy."
     };
 }
@@ -12898,6 +12898,8 @@ static bool printNavigatorLocalTlsSmokeCase()
             nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
             error[0] != '\0';
 
+    const gxos::GxosTlsLocalHandshakeResult& tlsResult = s_kernelHttpResponse.tlsResult;
+
     serial::puts("[NAVIGATOR-SMOKE] tls_smoke.url=");
     serial::puts(url);
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.local_ready=");
@@ -12928,12 +12930,32 @@ static bool printNavigatorLocalTlsSmokeCase()
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_status=");
     serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.byte_stream=shared TLS HttpByteStream policy layer");
-    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_backend=Mbed TLS bare-metal");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_backend=mbedtls");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.evidence_lane=kernel_local_fixture");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract=explicit_bounded");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSuiteContractCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_real_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSuiteContractRealCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_installed=");
+    serial::puts(tlsResult.tlsSuiteContractInstalled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_names=");
+    serial::puts(tlsResult.tlsSuiteContractNames[0] ? tlsResult.tlsSuiteContractNames : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_real_suite_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsClientHelloRealSuiteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_scsv_only=");
+    serial::puts(tlsResult.tlsClientHelloScsvOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_contract_match=");
+    serial::puts(tlsResult.tlsClientHelloCanonicalSuiteOffered ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.sni_host=");
     serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.protocol=");
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_negotiated_suite=");
     serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.http_status=");
     serial_put_dec((uint32_t)statusCode);
@@ -13177,6 +13199,44 @@ static bool printNavigatorLocalTlsWrongHostnameFailureCase()
     serial::puts(pass ? "PASS\n" : "FAIL\n");
     return pass;
 }
+
+#if defined(GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE)
+static bool printNavigatorTlsCapabilityContractNegativeCase()
+{
+    gxos::GxosTlsLocalHandshakeResult result{};
+    const bool requestOk = gxos::gxos_tls_capability_contract_negative_test(&result);
+    const bool pass = !requestOk &&
+        result.attempted &&
+        !result.tcpConnected &&
+        !result.tlsClientHelloSent &&
+        result.tlsSuiteContractCount == 1u &&
+        result.tlsSuiteContractRealCount == 0u &&
+        !result.tlsSuiteContractInstalled &&
+        result.transportStatus == gxos::web::HttpByteStreamTlsStatus::CapabilityContractFailure &&
+        nav_smoke_text_equals(result.tlsContractFailureClass, "TLS_CAPABILITY_CONTRACT_FAILURE");
+
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.contract_negative.test_only=yes\n");
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_suite_contract=invalid_signaling_only\n");
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_suite_contract_count=");
+    serial_put_dec64((uint64_t)result.tlsSuiteContractCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_suite_contract_real_count=");
+    serial_put_dec64((uint64_t)result.tlsSuiteContractRealCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_suite_contract_installed=");
+    serial::puts(result.tlsSuiteContractInstalled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_clienthello_sent=");
+    serial::puts(result.tlsClientHelloSent ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_clienthello_real_suite_count=");
+    serial_put_dec64((uint64_t)result.tlsClientHelloRealSuiteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_contract_failure_class=");
+    serial::puts(result.tlsContractFailureClass[0] ? result.tlsContractFailureClass : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_status=");
+    serial::puts(gxos::web::httpSharedTlsStatusName(result.transportStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.plaintext_fallback=no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+#endif
 
 static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int expectedStatus,
                                         const char* expectedFinalUrl, bool expectedFetchOk,
@@ -13796,6 +13856,7 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
         tlsProtocol, sizeof(tlsProtocol), tlsCipherSuite, sizeof(tlsCipherSuite),
         transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
         &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
+    const gxos::GxosTlsLocalHandshakeResult& tlsResult = s_kernelHttpResponse.tlsResult;
 
     const bool contentTypeOk =
         gxos::web::httpSharedEqualsInsensitive(contentType, "text/html") ||
@@ -13865,9 +13926,36 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.allowlist_mode=");
     serial::puts(tlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "explicit-policy validated HTTPS");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_backend=mbedtls");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.evidence_lane=kernel_local_fixture");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract=explicit_bounded");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_count=");
+    serial_put_dec((uint32_t)tlsResult.tlsSuiteContractCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_real_count=");
+    serial_put_dec((uint32_t)tlsResult.tlsSuiteContractRealCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_installed=");
+    serial::puts(tlsResult.tlsSuiteContractInstalled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_real_suite_count=");
+    serial_put_dec((uint32_t)tlsResult.tlsClientHelloRealSuiteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_scsv_only=");
+    serial::puts(tlsResult.tlsClientHelloScsvOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_contract_match=");
+    serial::puts(tlsResult.tlsClientHelloCanonicalSuiteOffered ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.certificate_validated=");
+    serial::puts(tlsValidated ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.hostname_validated=");
+    serial::puts(tlsHostnameValidated ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.body_bytes=");
+    serial_put_dec((uint32_t)bodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.parsed_blocks=");
+    serial_put_dec((uint32_t)parsedBlocks);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=");
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_negotiated_suite=");
     serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.error=");
     serial::puts(error[0] ? error : "(none)");
@@ -14798,11 +14886,29 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec64((uint64_t)verifyFlags);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_backend=");
     serial::puts(tlsBackend[0] ? tlsBackend : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.evidence_lane=kernel_public_https");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_suite_contract=explicit_bounded");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_suite_contract_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSuiteContractCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_suite_contract_real_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSuiteContractRealCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_suite_contract_installed=");
+    serial::puts(tlsResult.tlsSuiteContractInstalled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_clienthello_real_suite_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsClientHelloRealSuiteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_clienthello_scsv_only=");
+    serial::puts(tlsResult.tlsClientHelloScsvOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_clienthello_contract_match=");
+    serial::puts(tlsResult.tlsClientHelloCanonicalSuiteOffered ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.sni_host=");
     serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.protocol=");
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_negotiated_suite=");
     serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_abort_used=");
     serial::puts(tcpAbortUsed ? "yes" : "no");
@@ -15106,6 +15212,9 @@ static bool printNavigatorHttpSmokeCases()
     httpOk = printNavigatorLocalTlsSmokeCase() && httpOk;
     httpOk = printNavigatorLocalTlsRedirectCase() && httpOk;
     httpOk = printNavigatorLocalTlsWrongHostnameFailureCase() && httpOk;
+#if defined(GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE)
+    httpOk = printNavigatorTlsCapabilityContractNegativeCase() && httpOk;
+#endif
     httpOk = printNavigatorLocalTlsBlockedHostCase() && httpOk;
     httpOk = printNavigatorPolicyValidatedTlsSmokeCase() && httpOk;
     httpOk = printNavigatorPolicyValidatedRedirectCase() && httpOk;

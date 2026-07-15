@@ -31,6 +31,7 @@ $RootDir = $PSScriptRoot
 $ProcessEnvironmentScript = Join-Path $RootDir "scripts\process_environment.ps1"
 . $ProcessEnvironmentScript
 Normalize-ProcessEnvironment
+. (Join-Path $RootDir "scripts\build-native-command.ps1")
 $ESPDir = Join-Path $RootDir "ESP"
 $KernelDir = Join-Path $RootDir "kernel"
 $BootloaderDir = Join-Path $RootDir "guideXOSBootLoader"
@@ -299,21 +300,33 @@ if (!$SkipKernel) {
         if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }
+        if ($KernelExtraCFlags -notcontains "-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS") {
+            $KernelExtraCFlags += "-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS"
+        }
         # Keep the default bare-metal build free of boot-time smoke launches.
         # Compiler diagnostics are written to stderr even for successful builds.
         # Keep them visible, but let the native make exit code remain the build
         # result instead of treating a warning as a terminating PowerShell error.
-        $savedMakeErrorActionPreference = $ErrorActionPreference
-        $makeExitCode = 1
-        try {
-            $ErrorActionPreference = "Continue"
-            & $Make "ARCH=$Arch" "EXTRA_CFLAGS=$($KernelExtraCFlags -join ' ')"
-            $makeExitCode = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $savedMakeErrorActionPreference
+        $kernelOutputs = @(
+            (Join-Path $KernelBinDir "kernel.elf")
+        )
+        if ($Arch -eq "amd64") {
+            $kernelOutputs += (Join-Path $KernelBinDir "kernel.pe")
         }
+        $makeResult = Invoke-GxosNativeBuildCommand `
+            -FilePath $Make `
+            -ArgumentList @("ARCH=$Arch", "EXTRA_CFLAGS=$($KernelExtraCFlags -join ' ')") `
+            -ExpectedOutputPaths $kernelOutputs
 
-        if ($makeExitCode -ne 0) {
+        if (-not $makeResult.Succeeded) {
+            if ($makeResult.ExitCode -ne 0) {
+                Write-Host "      ERROR: Kernel build failed with process exit code $($makeResult.ExitCode)" -ForegroundColor Red
+            } else {
+                Write-Host "      ERROR: Kernel build reported success but expected output is missing or empty" -ForegroundColor Red
+                foreach ($missingOutput in $makeResult.MissingOutputs) {
+                    Write-Host "             Missing output: $missingOutput" -ForegroundColor Red
+                }
+            }
             Write-Host "      ERROR: Kernel build failed" -ForegroundColor Red
             Pop-Location   # kernel dir
             Pop-Location   # root dir

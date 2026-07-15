@@ -190,7 +190,28 @@ function Test-NavigatorPublicHttpsPassContract {
     Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "dns_resolved_ip" -Passed $dnsResolvedIpPassed -Detail $(if ($dnsResolvedIpPassed) { "Resolved IP recorded: $dnsResolvedIp" } else { "dns_resolved_ip must be present." })
 
     $tlsBackend = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "tls_backend"
-    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "tls_backend" -Passed ([string]::Equals($tlsBackend, "Mbed TLS bare-metal", [System.StringComparison]::Ordinal)) -Detail "Expected tls_backend=Mbed TLS bare-metal, got '$tlsBackend'."
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "tls_backend" -Passed ([string]::Equals($tlsBackend, "mbedtls", [System.StringComparison]::Ordinal)) -Detail "Expected tls_backend=mbedtls, got '$tlsBackend'."
+
+    $evidenceLane = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "evidence_lane"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "evidence_lane" -Passed ([string]::Equals($evidenceLane, "kernel_public_https", [System.StringComparison]::Ordinal)) -Detail "Expected evidence_lane=kernel_public_https, got '$evidenceLane'."
+    foreach ($contractField in @("tls_suite_contract", "tls_suite_contract_installed", "tls_clienthello_scsv_only", "tls_clienthello_contract_match")) {
+        $contractValue = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name $contractField
+        $expectedValue = switch ($contractField) {
+            "tls_suite_contract" { "explicit_bounded" }
+            "tls_suite_contract_installed" { "yes" }
+            "tls_clienthello_scsv_only" { "no" }
+            default { "yes" }
+        }
+        Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name $contractField -Passed ([string]::Equals($contractValue, $expectedValue, [System.StringComparison]::Ordinal)) -Detail "Expected $contractField=$expectedValue, got '$contractValue'."
+    }
+    foreach ($countField in @("tls_suite_contract_count", "tls_suite_contract_real_count", "tls_clienthello_real_suite_count")) {
+        $countText = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name $countField
+        $countValue = 0
+        $countPassed = [int]::TryParse($countText, [ref]$countValue) -and $countValue -gt 0
+        Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name $countField -Passed $countPassed -Detail "Expected $countField to be positive, got '$countText'."
+    }
+    $negotiatedSuite = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "tls_negotiated_suite"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "tls_negotiated_suite" -Passed (-not [string]::IsNullOrWhiteSpace($negotiatedSuite) -and $negotiatedSuite -ne "(none)") -Detail "Expected a negotiated suite, got '$negotiatedSuite'."
 
     $tlsProtocol = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "tls_protocol"
     $tlsProtocolPassed = -not [string]::IsNullOrWhiteSpace($tlsProtocol) -and $tlsProtocol -match '^TLSv1\.[23]$'
@@ -288,7 +309,16 @@ function Invoke-NavigatorPublicHttpsAssertionSelfTest {
             "[NAVIGATOR-PUBLIC-HTTPS] dns_resolved_ip=104.154.89.105",
             "[NAVIGATOR-PUBLIC-HTTPS] tcp_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] tls_result=PASS",
-            "[NAVIGATOR-PUBLIC-HTTPS] tls_backend=Mbed TLS bare-metal",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_backend=mbedtls",
+            "[NAVIGATOR-PUBLIC-HTTPS] evidence_lane=kernel_public_https",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_suite_contract=explicit_bounded",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_suite_contract_count=4",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_suite_contract_real_count=4",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_suite_contract_installed=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_clienthello_real_suite_count=4",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_clienthello_scsv_only=no",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_clienthello_contract_match=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_negotiated_suite=TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256",
             "[NAVIGATOR-PUBLIC-HTTPS] tls_protocol=TLSv1.2",
             "[NAVIGATOR-PUBLIC-HTTPS] certificate_validation_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] hostname_validation_result=PASS",

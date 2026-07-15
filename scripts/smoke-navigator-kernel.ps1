@@ -27,7 +27,9 @@ $wallpaperPackCaBundleState = Save-NavigatorSmokeFileState -LiteralPath (Join-Pa
 function Invoke-KernelBuildForSmoke {
     param([string]$ExtraCFlags)
     $oldExtra = $env:EXTRA_CFLAGS
-    if ($ExtraCFlags) {
+    if ($ExtraCFlags -and $oldExtra) {
+        $env:EXTRA_CFLAGS = "$oldExtra $ExtraCFlags"
+    } elseif ($ExtraCFlags) {
         $env:EXTRA_CFLAGS = $ExtraCFlags
     } else {
         Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
@@ -155,7 +157,9 @@ if (-not $python) { throw "python not found; required for local Navigator HTTP s
 Write-Host "Building kernel with active Navigator HTTP/PNG smoke diagnostics..."
 $oldSmokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE
 $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = "1"
-Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE"
+$oldTlsDiagnostics = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_TLS_DIAGNOSTICS", "Process")
+$env:GXOS_NAVIGATOR_TLS_DIAGNOSTICS = "1"
+Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE"
 $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = $oldSmokeCaFixture
 $activeSmokeBuild = $true
 
@@ -334,12 +338,14 @@ $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET",
-    "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE"
+    "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE",
+    "GXOS_NAVIGATOR_TLS_DIAGNOSTICS"
 )
 $navigatorSmokeEnvOriginal = @{}
 foreach ($envName in $navigatorSmokeEnvNames) {
     $navigatorSmokeEnvOriginal[$envName] = [Environment]::GetEnvironmentVariable($envName, "Process")
 }
+$navigatorSmokeEnvOriginal["GXOS_NAVIGATOR_TLS_DIAGNOSTICS"] = $oldTlsDiagnostics
 
 function Restore-NavigatorKernelSmokeEnvironment {
     foreach ($envName in $navigatorSmokeEnvNames) {
@@ -584,6 +590,25 @@ function Test-NavigatorKernelSmokeOutput {
     return $missing
 }
 
+function Test-NavigatorKernelSmokeTlsClientHelloEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string]$HttpsLogPath
+    )
+
+    if (-not (Test-Path -LiteralPath $HttpsLogPath -PathType Leaf)) {
+        return @("TLS clienthello evidence log is missing: $HttpsLogPath")
+    }
+    $output = Get-Content -LiteralPath $HttpsLogPath -Raw
+    $missing = @()
+    if (-not [regex]::IsMatch($output, 'TLS clienthello metadata .*real_suite_count=[1-9][0-9]* .*scsv_only=no .*canonical_offer=yes')) {
+        $missing += "TLS clienthello must contain a real canonical suite offer and must not be SCSV-only."
+    }
+    if (-not [regex]::IsMatch($output, 'TLS handshake ok .*protocol=TLSv1\.2 .*fixture_suite_contract=yes')) {
+        $missing += "TLS fixture handshake must negotiate TLS 1.2 with a canonical contract suite."
+    }
+    return $missing
+}
+
 function Merge-CheckMaps {
     param(
         [Parameter(Mandatory = $true)][hashtable]$Base,
@@ -804,6 +829,10 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=yes",
     "[NAVIGATOR-SMOKE] tls_smoke.result=PASS",
+    "[NAVIGATOR-SMOKE] tls_smoke.tls_backend=mbedtls",
+    "[NAVIGATOR-SMOKE] tls_smoke.evidence_lane=kernel_local_fixture",
+    "[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract=explicit_bounded",
+    "[NAVIGATOR-SMOKE] tls_smoke.contract_negative.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=PASS",
     "[NAVIGATOR-SMOKE] tls_smoke.failure.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.local_scope_block.result=PASS",
@@ -884,6 +913,13 @@ $commonRegexChecks = @{
 $localTlsSuccessRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] tls_smoke\.protocol=TLSv1\.[23]' = "[NAVIGATOR-SMOKE] tls_smoke.protocol=<TLSv1.2 or TLSv1.3>"
     '\[NAVIGATOR-SMOKE\] tls_smoke\.cipher_suite=.+' = "[NAVIGATOR-SMOKE] tls_smoke.cipher_suite=<non-empty cipher suite>"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.tls_suite_contract_count=4' = "[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_count=4"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.tls_suite_contract_real_count=4' = "[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_real_count=4"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.tls_suite_contract_installed=yes' = "[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_installed=yes"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.tls_clienthello_real_suite_count=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_real_suite_count=<positive>"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.tls_clienthello_scsv_only=no' = "[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_scsv_only=no"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.tls_clienthello_contract_match=yes' = "[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_contract_match=yes"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.tls_negotiated_suite=.+' = "[NAVIGATOR-SMOKE] tls_smoke.tls_negotiated_suite=<non-empty suite>"
     '\[NAVIGATOR-SMOKE\] tls_smoke\.verify_flags=0' = "[NAVIGATOR-SMOKE] tls_smoke.verify_flags=0"
     '\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=<positive mismatch flags>"
 }
@@ -1148,6 +1184,16 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.transport_selection=PolicyValidatedTlsHttps",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_backend=mbedtls",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.evidence_lane=kernel_local_fixture",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract=explicit_bounded",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_count=4",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_real_count=4",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_installed=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_scsv_only=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_contract_match=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.certificate_validated=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.hostname_validated=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.fault_mode=None",
@@ -1165,6 +1211,12 @@ $scenarioDefinitions = @(
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_computed_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_computed_sha256=<64 hex>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.protocol=TLSv1\.[23]' = "[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=<TLSv1.2 or TLSv1.3>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.cipher_suite=.+' = "[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=<non-empty cipher suite>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.http_status=200' = "[NAVIGATOR-SMOKE] https.case.policy_validated.http_status=200"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.content_type=(text/html|text/plain)' = "[NAVIGATOR-SMOKE] https.case.policy_validated.content_type=<HTML or text>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.body_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated.body_bytes=<positive>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.parsed_blocks=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated.parsed_blocks=<positive>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.tls_clienthello_real_suite_count=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_real_suite_count=<positive>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.tls_negotiated_suite=.+' = "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_negotiated_suite=<non-empty suite>"
         })
     },
     [pscustomobject]@{
@@ -1642,6 +1694,10 @@ try {
                 $scenarioChecks = @($scenarioChecks | Where-Object { $_ -ne "[NAVIGATOR-SMOKE] result=PASS" })
             }
             $missing = Test-NavigatorKernelSmokeOutput -Output $runOutput -Contains $scenarioChecks -RegexChecks $scenario.RegexChecks
+            if ($scenario.Name -eq "production_validated" -and
+                $runOutput.Contains("[NAVIGATOR-SMOKE] tls_smoke.local_ready=yes")) {
+                $missing += Test-NavigatorKernelSmokeTlsClientHelloEvidence -HttpsLogPath $activeServers.HttpsLog
+            }
             if ($enableRealPublicProbeForScenario) {
                 $probeCheck = Test-NavigatorKernelSmokeRealPublicProbeOutput `
                     -Output $runOutput `
