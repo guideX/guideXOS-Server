@@ -1343,6 +1343,19 @@ namespace {
 		metadata.cssRuleCapCount = doc.cssDiagnostics.ruleCapCount;
 		metadata.cssDeclarationCapCount = doc.cssDiagnostics.declarationCapCount;
 		metadata.cssInheritanceDepthClamps = doc.cssDiagnostics.inheritanceDepthClamps;
+		metadata.cssPseudoClassesParsed = doc.cssDiagnostics.pseudoClassesParsed;
+		metadata.cssStructuralPseudoMatches = doc.cssDiagnostics.structuralPseudoMatches;
+		metadata.cssFirstChildMatches = doc.cssDiagnostics.firstChildMatches;
+		metadata.cssLastChildMatches = doc.cssDiagnostics.lastChildMatches;
+		metadata.cssNthChildMatches = doc.cssDiagnostics.nthChildMatches;
+		metadata.cssOfTypeMatches = doc.cssDiagnostics.ofTypeMatches;
+		metadata.cssNotMatches = doc.cssDiagnostics.notMatches;
+		metadata.cssLinkPseudoMatches = doc.cssDiagnostics.linkPseudoMatches;
+		metadata.cssVisitedPseudoMatches = doc.cssDiagnostics.visitedPseudoMatches;
+		metadata.cssPseudoClassClamps = doc.cssDiagnostics.pseudoClassClamps;
+		metadata.cssNthExpressionParseErrors = doc.cssDiagnostics.nthExpressionParseErrors;
+		metadata.cssStructuralMetadataClamps = doc.cssDiagnostics.structuralMetadataClamps;
+		metadata.cssSelectorEvaluationStepClamps = doc.cssDiagnostics.selectorEvaluationStepClamps;
 		metadata.cssComputedStyleEvidence = doc.cssDiagnostics.computedStyleEvidence;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
@@ -2605,6 +2618,19 @@ namespace {
 		int cssRuleCapCount,
 		int cssDeclarationCapCount,
 		int cssInheritanceDepthClamps,
+		int cssPseudoClassesParsed,
+		int cssStructuralPseudoMatches,
+		int cssFirstChildMatches,
+		int cssLastChildMatches,
+		int cssNthChildMatches,
+		int cssOfTypeMatches,
+		int cssNotMatches,
+		int cssLinkPseudoMatches,
+		int cssVisitedPseudoMatches,
+		int cssPseudoClassClamps,
+		int cssNthExpressionParseErrors,
+		int cssStructuralMetadataClamps,
+		int cssSelectorEvaluationStepClamps,
 		const std::string& cssComputedStyleEvidence,
 		int formCount,
 		int formInputCount,
@@ -2847,6 +2873,19 @@ namespace {
 			{"Current Document", "CSS rule cap count", std::to_string(cssRuleCapCount)},
 			{"Current Document", "CSS declaration cap count", std::to_string(cssDeclarationCapCount)},
 			{"Current Document", "CSS inheritance depth clamps", std::to_string(cssInheritanceDepthClamps)},
+			{"Current Document", "CSS pseudo-classes parsed", std::to_string(cssPseudoClassesParsed)},
+			{"Current Document", "CSS structural pseudo matches", std::to_string(cssStructuralPseudoMatches)},
+			{"Current Document", "CSS first-child matches", std::to_string(cssFirstChildMatches)},
+			{"Current Document", "CSS last-child matches", std::to_string(cssLastChildMatches)},
+			{"Current Document", "CSS nth-child matches", std::to_string(cssNthChildMatches)},
+			{"Current Document", "CSS of-type matches", std::to_string(cssOfTypeMatches)},
+			{"Current Document", "CSS :not matches", std::to_string(cssNotMatches)},
+			{"Current Document", "CSS :link pseudo matches", std::to_string(cssLinkPseudoMatches)},
+			{"Current Document", "CSS :visited pseudo matches", std::to_string(cssVisitedPseudoMatches)},
+			{"Current Document", "CSS pseudo-class clamps", std::to_string(cssPseudoClassClamps)},
+			{"Current Document", "CSS nth-expression parse errors", std::to_string(cssNthExpressionParseErrors)},
+			{"Current Document", "CSS structural metadata clamps", std::to_string(cssStructuralMetadataClamps)},
+			{"Current Document", "CSS selector evaluation step clamps", std::to_string(cssSelectorEvaluationStepClamps)},
 			{"Current Document", "CSS computed style evidence", cssComputedStyleEvidence.empty() ? "(none)" : cssComputedStyleEvidence},
 			{"Current Document", "text_metrics_model", "baseline/descent aware system font"},
 			{"Current Document", "text_backend", textMetrics.backend},
@@ -3327,6 +3366,19 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssRuleCapCount,
 		s_pageMetadata.cssDeclarationCapCount,
 		s_pageMetadata.cssInheritanceDepthClamps,
+		s_pageMetadata.cssPseudoClassesParsed,
+		s_pageMetadata.cssStructuralPseudoMatches,
+		s_pageMetadata.cssFirstChildMatches,
+		s_pageMetadata.cssLastChildMatches,
+		s_pageMetadata.cssNthChildMatches,
+		s_pageMetadata.cssOfTypeMatches,
+		s_pageMetadata.cssNotMatches,
+		s_pageMetadata.cssLinkPseudoMatches,
+		s_pageMetadata.cssVisitedPseudoMatches,
+		s_pageMetadata.cssPseudoClassClamps,
+		s_pageMetadata.cssNthExpressionParseErrors,
+		s_pageMetadata.cssStructuralMetadataClamps,
+		s_pageMetadata.cssSelectorEvaluationStepClamps,
 		s_pageMetadata.cssComputedStyleEvidence,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
@@ -5946,6 +5998,19 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssRuleCapCount,
 		s_pageMetadata.cssDeclarationCapCount,
 		s_pageMetadata.cssInheritanceDepthClamps,
+		s_pageMetadata.cssPseudoClassesParsed,
+		s_pageMetadata.cssStructuralPseudoMatches,
+		s_pageMetadata.cssFirstChildMatches,
+		s_pageMetadata.cssLastChildMatches,
+		s_pageMetadata.cssNthChildMatches,
+		s_pageMetadata.cssOfTypeMatches,
+		s_pageMetadata.cssNotMatches,
+		s_pageMetadata.cssLinkPseudoMatches,
+		s_pageMetadata.cssVisitedPseudoMatches,
+		s_pageMetadata.cssPseudoClassClamps,
+		s_pageMetadata.cssNthExpressionParseErrors,
+		s_pageMetadata.cssStructuralMetadataClamps,
+		s_pageMetadata.cssSelectorEvaluationStepClamps,
 		s_pageMetadata.cssComputedStyleEvidence,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
@@ -6512,7 +6577,7 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	}
 
 	if (response.contentType == "text/html") {
-		WebDocument doc = parseHtml(documentUrl, response.body);
+		WebDocument doc = parseHtml(documentUrl, response.body, s_visitedUrls);
 		if (doc.title.empty()) doc.title = documentUrl;
 		return finish(std::move(doc));
 	}
@@ -6735,7 +6800,7 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 	if (isHtml) {
 		// Delegate to the HTML parser; it handles title, headings, paragraphs, links.
 		try {
-			WebDocument doc = parseHtml(url, fr.text);
+		WebDocument doc = parseHtml(url, fr.text, s_visitedUrls);
 			if (doc.title.empty()) {
 				// fallback title from filename
 				size_t slash = path.rfind('/');

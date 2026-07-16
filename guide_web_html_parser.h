@@ -43,6 +43,7 @@
 #include "guide_web_document.h"   // for gxos::web::WebDocument / DocBlock / BlockType
 
 #include <string>
+#include <unordered_set>
 
 namespace gxos {
 namespace web {
@@ -79,7 +80,9 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 // Never throws; on any internal error the returned document may have
 // fewer blocks than expected but will always be usable by renderDocument().
 // ---------------------------------------------------------------------------
-WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText);
+WebDocument parseHtml(const std::string& pageUrl,
+	const std::string& htmlText,
+	const std::unordered_set<std::string>& visitedUrls = {});
 
 } // namespace web
 } // namespace gxos

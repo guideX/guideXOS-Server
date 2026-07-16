@@ -442,6 +442,46 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         if path == "/navigator-smoke/css-phase2a-linked.css":
             self.write_bytes(200, "text/css; charset=utf-8", b"#phase2a-order { color:#166534; }")
             return
+        if path == "/navigator-smoke/css-phase2b.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2B Structural Selectors</title><style>"
+                             b":root { color:#334155; } body { color:#475569; font-size:16px; }"
+                             b"ul#phase2b-list > li { color:#64748b; }"
+                             b"#phase2b-list > li:first-child { color:#b91c1c; background:#fee2e2; }"
+                             b"#phase2b-list > li:last-child { color:#1d4ed8; }"
+                             b"#phase2b-only > p:only-child { color:#7c3aed; }"
+                             b"#phase2b-list > li:nth-child(1) { background:#fef3c7; }"
+                             b"#phase2b-list > li:nth-child(2) { background:#dcfce7; }"
+                             b"#phase2b-list > li:nth-child(odd) { border-top:1px solid #ef4444; }"
+                             b"#phase2b-list > li:nth-child(even) { border-bottom:1px solid #2563eb; }"
+                             b"#phase2b-list > li:nth-child(2n+1) { font-weight:bold; }"
+                             b"#phase2b-list > li:nth-child(3n+2) { text-decoration:underline; }"
+                             b"#phase2b-list > li:nth-child(99) { color:#000000; }"
+                             b"#phase2b-list > li:nth-child(what) { color:#000000; }"
+                             b"#phase2b-list > li:nth-child(999999999999999999999999n) { color:#000000; }"
+                             b"#phase2b-type > p:first-of-type { color:#047857; }"
+                             b"#phase2b-type > p:last-of-type { background:#d1fae5; }"
+                             b"#phase2b-type > p:nth-of-type(2) { border-left:2px solid #059669; }"
+                             b"#phase2b-only-type > p:only-of-type { color:#9333ea; }"
+                             b"p:not(.hidden) { font-size:18px; }"
+                             b"p:not(p.notice) { color:#0f766e; }"
+                             b"p:not(.a.b) { line-height:1.5; }"
+                             b".malformed:not(p .notice), p:has(.nope), p:hover, p:is(.nope), p#phase2b-group-valid { background:#e0f2fe; }"
+                             b"p:first-child:last-child:only-child:nth-child(1):not(.too-many) { color:#000000; }"
+                             b"a:link { color:#1d4ed8; text-decoration:none; }"
+                             b"a:visited { color:#7c3aed; font-weight:bold; background:#ff0000; }"
+                             b"</style></head><body>"
+                             b"<h1 id=\"phase2b-heading\">Phase 2B Structural Selectors</h1>"
+                             b"<ul id=\"phase2b-list\"><li id=\"phase2b-first\">First child marker</li>\n  <li id=\"phase2b-second\">Second child marker</li><li id=\"phase2b-third\">Third child marker</li></ul>"
+                             b"<div id=\"phase2b-only\"><p id=\"phase2b-only-child\">Only child marker</p></div>"
+                             b"<div id=\"phase2b-type\"><p id=\"phase2b-type-first\">First of type marker</p><span>Mixed tag marker</span><p id=\"phase2b-type-second\">Second of type marker</p></div>"
+                             b"<div id=\"phase2b-only-type\"><h2>Mixed heading marker</h2><p id=\"phase2b-only-type-p\">Only of type marker</p></div>"
+                             b"<p id=\"phase2b-not-visible\">Not hidden marker</p><p id=\"phase2b-hidden\" class=\"hidden\">Hidden class marker</p><p id=\"phase2b-not-notice\" class=\"notice\">Not notice marker</p><p id=\"phase2b-not-classes\" class=\"a b\">Multiple class marker</p>"
+                             b"<p id=\"phase2b-group-valid\">Valid selector-group member marker</p>"
+                             b"<a id=\"phase2b-visited\" href=\"/navigator-smoke/basic.html\">Visited link marker</a><a id=\"phase2b-link\" href=\"/navigator-smoke/css-phase2b-never-visited.html\">Unvisited link marker</a>"
+                             b"<img id=\"phase2b-image-url\" src=\"/navigator-smoke/tiny.png\" alt=\"Non-anchor URL marker\">"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-external-safety.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head>"

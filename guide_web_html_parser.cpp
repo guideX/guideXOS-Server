@@ -51,13 +51,21 @@ namespace {
 	constexpr size_t kCssLiteMaxSelectorLength = 256;
 	constexpr size_t kCssLiteMaxSelectorComponents = 8;
 	constexpr size_t kCssLiteMaxSelectorClasses = 8;
+	constexpr size_t kCssLiteMaxPseudoClassesPerCompound = 4;
+	constexpr size_t kCssLiteMaxNotComponents = 8;
+	constexpr size_t kCssLiteMaxNthExpressionLength = 32;
+	constexpr int kCssLiteMaxNthCoefficient = 1024;
+	constexpr int kCssLiteMaxNthOffset = 4096;
 	constexpr size_t kCssLiteMaxCombinatorDepth = 6;
+	constexpr size_t kCssLiteMaxStructuralMetadata = 1024;
+	constexpr size_t kCssLiteMaxSelectorEvaluationSteps = 64;
 	constexpr size_t kCssLiteMaxDeclarationsPerRule = 64;
 	constexpr size_t kCssLiteMaxTotalDeclarations = 2048;
 	constexpr size_t kCssLiteMaxCascadeApplicationsPerNode = 512;
 	constexpr size_t kCssLiteMaxTotalStyleBytes = 64u * 1024u;
 	constexpr size_t kCssLiteMaxInheritanceDepth = 12;
-	constexpr size_t kCssLiteMaxEvidenceEntries = 16;
+	constexpr size_t kCssLiteMaxEvidenceEntries = 32;
+	constexpr size_t kCssLiteMaxEvidenceBytes = 16384;
 
 	enum class CssProperty : uint8_t {
 		Color = 0,
@@ -454,60 +462,259 @@ static bool parseCssLengthValue(const std::string& rawValue,
 	return true;
 }
 
-static bool parseCssSimpleSelectorPart(const std::string& rawPart,
-	CssSelectorPart& part,
+static bool parseCssSignedInteger(const std::string& raw,
+	int maxAbs,
+	int& out,
+	CssDiagnostics& diag)
+{
+	if (raw.empty()) return false;
+	size_t pos = 0;
+	int sign = 1;
+	if (raw[pos] == '+' || raw[pos] == '-') {
+		sign = raw[pos] == '-' ? -1 : 1;
+		if (++pos >= raw.size()) return false;
+	}
+	uint64_t magnitude = 0;
+	for (; pos < raw.size(); ++pos) {
+		const char c = raw[pos];
+		if (c < '0' || c > '9') return false;
+		const uint64_t digit = static_cast<uint64_t>(c - '0');
+		if (magnitude > (static_cast<uint64_t>(std::numeric_limits<int>::max()) - digit) / 10u)
+			return false;
+		magnitude = magnitude * 10u + digit;
+	}
+	if (magnitude > static_cast<uint64_t>(maxAbs)) {
+		magnitude = static_cast<uint64_t>(maxAbs);
+		saturatingIncrement(diag.pseudoClassClamps);
+	}
+	out = sign < 0 ? -static_cast<int>(magnitude) : static_cast<int>(magnitude);
+	return true;
+}
+
+static bool parseCssNthExpression(const std::string& raw,
+	CssNthExpression& out,
+	CssDiagnostics& diag)
+{
+	if (raw.size() > kCssLiteMaxNthExpressionLength) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+	std::string expression;
+	expression.reserve(raw.size());
+	for (unsigned char c : raw) {
+		if (c <= 32) continue;
+		expression += static_cast<char>(std::tolower(c));
+	}
+	if (expression.empty()) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+	if (expression == "odd") { out = { 2, 1 }; return true; }
+	if (expression == "even") { out = { 2, 0 }; return true; }
+
+	const size_t nPos = expression.find('n');
+	if (nPos == std::string::npos) {
+		int position = 0;
+		if (!parseCssSignedInteger(expression, kCssLiteMaxNthOffset, position, diag) || position <= 0) {
+			saturatingIncrement(diag.nthExpressionParseErrors);
+			return false;
+		}
+		out = { 0, position };
+		return true;
+	}
+	if (expression.find('n', nPos + 1) != std::string::npos) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+
+	const std::string coefficientText = expression.substr(0, nPos);
+	const std::string offsetText = expression.substr(nPos + 1);
+	int coefficient = 1;
+	if (coefficientText == "-") coefficient = -1;
+	else if (coefficientText == "+") coefficient = 1;
+	else if (!coefficientText.empty()) {
+		if (!parseCssSignedInteger(coefficientText, kCssLiteMaxNthCoefficient, coefficient, diag)) {
+			saturatingIncrement(diag.nthExpressionParseErrors);
+			return false;
+		}
+	}
+	int offset = 0;
+	if (!offsetText.empty() && !parseCssSignedInteger(offsetText, kCssLiteMaxNthOffset, offset, diag)) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+	if (coefficient == 0 && offset <= 0) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+	out = { coefficient, offset };
+	return true;
+}
+
+static bool parseCssSimpleSelectorCore(const std::string& rawSelector,
+	CssSimpleSelector& out,
 	CssSpecificity& specificity,
 	CssDiagnostics& diag)
 {
-	std::string selector = toLower(trim(rawPart));
-	part = {};
+	const std::string selector = toLower(trim(rawSelector));
+	out = {};
 	specificity = {};
-	if (selector.empty() || selector.find_first_of("+~[]:") != std::string::npos) return false;
-
-	size_t pos = 0;
+	if (selector.empty()) return false;
 	auto isIdentChar = [](char c) {
 		return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
 	};
+	size_t pos = 0;
 	if (selector[pos] != '.' && selector[pos] != '#') {
-		size_t start = pos;
+		const size_t start = pos;
+		if (selector[pos] == '*') {
+			++pos;
+			if (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') return false;
+			out.tagName = "*";
+		} else {
 		while (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') {
-			if (selector[pos] == '*') {
-				if (pos != start || selector.size() != 1) return false;
-				++pos;
-				break;
-			}
 			if (!isIdentChar(selector[pos])) return false;
 			++pos;
 		}
-		part.tagName = selector.substr(start, pos - start);
-		if (part.tagName != "*" && !part.tagName.empty()) ++specificity.elementCount;
+		out.tagName = selector.substr(start, pos - start);
+		if (out.tagName.empty()) {
+			return false;
+		} else {
+			++specificity.elementCount;
+		}
+		}
 	}
 	while (pos < selector.size()) {
-		char prefix = selector[pos];
+		const char prefix = selector[pos];
 		if (prefix != '.' && prefix != '#') return false;
 		++pos;
-		size_t start = pos;
+		const size_t start = pos;
 		while (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') {
 			if (!isIdentChar(selector[pos])) return false;
 			++pos;
 		}
-		std::string token = selector.substr(start, pos - start);
+		const std::string token = selector.substr(start, pos - start);
 		if (token.empty()) return false;
 		if (prefix == '.') {
-			if (part.classNames.size() >= kCssLiteMaxSelectorClasses) {
-				++diag.selectorDepthClamps;
+			if (out.classNames.size() >= kCssLiteMaxSelectorClasses) {
+				saturatingIncrement(diag.selectorDepthClamps);
 				return false;
 			}
-			part.classNames.push_back(token);
+			out.classNames.push_back(token);
 			++specificity.classCount;
 		} else {
-			if (!part.id.empty()) return false;
-			part.id = token;
+			if (!out.id.empty()) return false;
+			out.id = token;
 			++specificity.idCount;
 		}
 	}
-	if (part.tagName.empty() && part.classNames.empty() && part.id.empty()) return false;
-	return true;
+	return !out.tagName.empty() || !out.classNames.empty() || !out.id.empty();
+}
+
+static bool parseCssSimpleSelectorPart(const std::string& rawPart,
+	CssSelectorPart& part,
+	CssSpecificity& specificity,
+	CssDiagnostics& diag,
+	bool allowPseudo = true)
+{
+	const std::string selector = toLower(trim(rawPart));
+	part = {};
+	specificity = {};
+	if (selector.empty()) return false;
+
+	CssSimpleSelector core;
+	CssSpecificity coreSpecificity;
+	std::string coreText;
+	size_t pos = 0;
+	int depth = 0;
+	while (pos < selector.size()) {
+		if (selector[pos] == '(') ++depth;
+		else if (selector[pos] == ')') {
+			if (depth == 0) return false;
+			--depth;
+		}
+		if (depth == 0 && selector[pos] == ':') break;
+		++pos;
+	}
+	coreText = selector.substr(0, pos);
+	if (!coreText.empty()) {
+		if (!parseCssSimpleSelectorCore(coreText, core, coreSpecificity, diag)) return false;
+		part.tagName = core.tagName;
+		part.classNames = core.classNames;
+		part.id = core.id;
+		specificity = coreSpecificity;
+	}
+	if (pos == selector.size()) return !part.tagName.empty() || !part.classNames.empty() || !part.id.empty();
+	if (!allowPseudo) return false;
+	while (pos < selector.size()) {
+		if (selector[pos++] != ':') return false;
+		if (pos >= selector.size() || selector[pos] == ':') return false;
+		const size_t nameStart = pos;
+		while (pos < selector.size() &&
+			(std::isalnum(static_cast<unsigned char>(selector[pos])) || selector[pos] == '-')) ++pos;
+		const std::string name = selector.substr(nameStart, pos - nameStart);
+		if (name.empty() || part.pseudoClasses.size() >= kCssLiteMaxPseudoClassesPerCompound) {
+			saturatingIncrement(diag.pseudoClassClamps);
+			return false;
+		}
+		std::string argument;
+		bool hasArgument = false;
+		if (pos < selector.size() && selector[pos] == '(') {
+			hasArgument = true;
+			const size_t argumentStart = ++pos;
+			int parentheses = 1;
+			while (pos < selector.size() && parentheses > 0) {
+				if (selector[pos] == '(') ++parentheses;
+				else if (selector[pos] == ')') --parentheses;
+				if (parentheses > 0) ++pos;
+			}
+			if (parentheses != 0) return false;
+			argument = selector.substr(argumentStart, pos - argumentStart);
+			++pos;
+		}
+		CssPseudoClassSelector pseudo;
+		if (name == "first-child" || name == "last-child" || name == "only-child" ||
+			name == "first-of-type" || name == "last-of-type" || name == "only-of-type" ||
+			name == "root" || name == "link" || name == "visited") {
+			if (hasArgument) return false;
+			if (name == "first-child") pseudo.type = CssPseudoClass::FirstChild;
+			else if (name == "last-child") pseudo.type = CssPseudoClass::LastChild;
+			else if (name == "only-child") pseudo.type = CssPseudoClass::OnlyChild;
+			else if (name == "first-of-type") pseudo.type = CssPseudoClass::FirstOfType;
+			else if (name == "last-of-type") pseudo.type = CssPseudoClass::LastOfType;
+			else if (name == "only-of-type") pseudo.type = CssPseudoClass::OnlyOfType;
+			else if (name == "root") pseudo.type = CssPseudoClass::Root;
+			else if (name == "link") pseudo.type = CssPseudoClass::Link;
+			else pseudo.type = CssPseudoClass::Visited;
+			++specificity.classCount;
+		} else if (name == "nth-child" || name == "nth-of-type") {
+			if (!hasArgument || !parseCssNthExpression(argument, pseudo.nth, diag)) return false;
+			pseudo.type = name == "nth-child" ? CssPseudoClass::NthChild : CssPseudoClass::NthOfType;
+			++specificity.classCount;
+		} else if (name == "not") {
+			if (!hasArgument || argument.find_first_of(" :+~[]") != std::string::npos) return false;
+			CssSpecificity notSpecificity;
+			if (!parseCssSimpleSelectorCore(argument, pseudo.notSelector, notSpecificity, diag)) return false;
+			const size_t componentCount = pseudo.notSelector.classNames.size() +
+				(pseudo.notSelector.id.empty() ? 0u : 1u) +
+				(pseudo.notSelector.tagName.empty() || pseudo.notSelector.tagName == "*" ? 0u : 1u);
+			if (componentCount > kCssLiteMaxNotComponents) {
+				saturatingIncrement(diag.pseudoClassClamps);
+				return false;
+			}
+			pseudo.type = CssPseudoClass::Not;
+			specificity.idCount = static_cast<uint16_t>(std::min<uint32_t>(
+				std::numeric_limits<uint16_t>::max(), specificity.idCount + notSpecificity.idCount));
+			specificity.classCount = static_cast<uint16_t>(std::min<uint32_t>(
+				std::numeric_limits<uint16_t>::max(), specificity.classCount + notSpecificity.classCount));
+			specificity.elementCount = static_cast<uint16_t>(std::min<uint32_t>(
+				std::numeric_limits<uint16_t>::max(), specificity.elementCount + notSpecificity.elementCount));
+		} else {
+			return false;
+		}
+		saturatingIncrement(diag.pseudoClassesParsed);
+		part.pseudoClasses.push_back(std::move(pseudo));
+	}
+	return !part.tagName.empty() || !part.classNames.empty() || !part.id.empty() || !part.pseudoClasses.empty();
 }
 
 static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRule, CssDiagnostics& diag)
@@ -516,6 +723,7 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 	if (selectorText.empty() || selectorText.size() > kCssLiteMaxSelectorLength) return false;
 	outRule.selectorParts.clear();
 	outRule.combinators.clear();
+	outRule.hasVisitedPseudo = false;
 	outRule.specificity = 0;
 	outRule.specificityTuple = {};
 	size_t cursor = 0;
@@ -523,11 +731,20 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 	while (cursor < selectorText.size()) {
 		while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
 		if (cursor >= selectorText.size()) break;
-		if (selectorText[cursor] == '+' || selectorText[cursor] == '~' || selectorText[cursor] == '[' || selectorText[cursor] == ':') return false;
+		if (selectorText[cursor] == '+' || selectorText[cursor] == '~' || selectorText[cursor] == '[') return false;
 		size_t start = cursor;
-		while (cursor < selectorText.size() &&
-			!std::isspace(static_cast<unsigned char>(selectorText[cursor])) &&
-			selectorText[cursor] != '>') ++cursor;
+		int parentheses = 0;
+		while (cursor < selectorText.size()) {
+			const char c = selectorText[cursor];
+			if (c == '(') ++parentheses;
+			else if (c == ')') {
+				if (parentheses == 0) return false;
+				--parentheses;
+			}
+			if (parentheses == 0 && (std::isspace(static_cast<unsigned char>(c)) || c == '>')) break;
+			++cursor;
+		}
+		if (parentheses != 0) return false;
 		if (start == cursor) return false;
 		if (outRule.selectorParts.size() >= kCssLiteMaxSelectorComponents) {
 			++diag.selectorDepthClamps;
@@ -536,6 +753,9 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 		CssSelectorPart part;
 		CssSpecificity partSpecificity;
 		if (!parseCssSimpleSelectorPart(selectorText.substr(start, cursor - start), part, partSpecificity, diag)) return false;
+		for (const CssPseudoClassSelector& pseudo : part.pseudoClasses) {
+			if (pseudo.type == CssPseudoClass::Visited) outRule.hasVisitedPseudo = true;
+		}
 		outRule.selectorParts.push_back(std::move(part));
 		outRule.specificityTuple.idCount = static_cast<uint16_t>(std::min<uint32_t>(
 			std::numeric_limits<uint16_t>::max(),
@@ -1120,18 +1340,18 @@ static void parseEmbeddedCss(WebDocument& doc, const std::string& cssText)
 	}
 }
 
-static bool selectorPartMatchesElement(const HtmlElementRef& element, const CssSelectorPart& part)
+static bool simpleSelectorMatchesElement(const HtmlElementRef& element, const CssSimpleSelector& selector)
 {
-	std::string tag = toLower(element.tagName);
-	std::string id = toLower(element.id);
-	if (!part.tagName.empty() && part.tagName != "*" && part.tagName != tag) return false;
-	if (!part.id.empty() && part.id != id) return false;
-	if (!part.classNames.empty()) {
+	const std::string tag = toLower(element.tagName);
+	const std::string id = toLower(element.id);
+	if (!selector.tagName.empty() && selector.tagName != "*" && selector.tagName != tag) return false;
+	if (!selector.id.empty() && selector.id != id) return false;
+	if (!selector.classNames.empty()) {
 		std::stringstream classes(toLower(element.className));
 		std::string className;
 		std::vector<std::string> classList;
 		while (classes >> className) classList.push_back(className);
-		for (const std::string& required : part.classNames) {
+		for (const std::string& required : selector.classNames) {
 			bool found = false;
 			for (const std::string& actual : classList) {
 				if (actual == required) {
@@ -1145,35 +1365,136 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element, const CssS
 	return true;
 }
 
+static bool nthExpressionMatches(const CssNthExpression& expression, int index)
+{
+	if (index <= 0) return false;
+	if (expression.a == 0) return index == expression.b;
+	if (expression.a > 0) {
+		if (index < expression.b) return false;
+		return (index - expression.b) % expression.a == 0;
+	}
+	if (index > expression.b) return false;
+	return (expression.b - index) % (-expression.a) == 0;
+}
+
+static void recordPseudoMatch(CssDiagnostics& diag, CssPseudoClass type)
+{
+	saturatingIncrement(diag.structuralPseudoMatches);
+	switch (type) {
+	case CssPseudoClass::FirstChild: saturatingIncrement(diag.firstChildMatches); break;
+	case CssPseudoClass::LastChild: saturatingIncrement(diag.lastChildMatches); break;
+	case CssPseudoClass::NthChild: saturatingIncrement(diag.nthChildMatches); break;
+	case CssPseudoClass::FirstOfType:
+	case CssPseudoClass::LastOfType:
+	case CssPseudoClass::OnlyOfType:
+	case CssPseudoClass::NthOfType: saturatingIncrement(diag.ofTypeMatches); break;
+	case CssPseudoClass::Not: saturatingIncrement(diag.notMatches); break;
+	case CssPseudoClass::Link: saturatingIncrement(diag.linkPseudoMatches); break;
+	case CssPseudoClass::Visited: saturatingIncrement(diag.visitedPseudoMatches); break;
+	default: break;
+	}
+}
+
+static bool selectorPartMatchesElement(const HtmlElementRef& element,
+	const CssSelectorPart& part,
+	const std::vector<HtmlElementRef>& path,
+	size_t pathIndex,
+	const WebDocument& doc,
+	CssDiagnostics& diag)
+{
+	CssSimpleSelector core;
+	core.tagName = part.tagName;
+	core.classNames = part.classNames;
+	core.id = part.id;
+	if (!simpleSelectorMatchesElement(element, core)) return false;
+	for (const CssPseudoClassSelector& pseudo : part.pseudoClasses) {
+		bool matched = false;
+		switch (pseudo.type) {
+		case CssPseudoClass::FirstChild:
+			matched = element.childIndex == 1 && element.siblingCount > 0;
+			break;
+		case CssPseudoClass::LastChild:
+			matched = element.childIndex > 0 && element.childIndex == element.siblingCount;
+			break;
+		case CssPseudoClass::OnlyChild:
+			matched = element.childIndex == 1 && element.siblingCount == 1;
+			break;
+		case CssPseudoClass::NthChild:
+			matched = element.siblingCount > 0 && nthExpressionMatches(pseudo.nth, element.childIndex);
+			break;
+		case CssPseudoClass::FirstOfType:
+			matched = element.typeIndex == 1 && element.typeCount > 0;
+			break;
+		case CssPseudoClass::LastOfType:
+			matched = element.typeIndex > 0 && element.typeIndex == element.typeCount;
+			break;
+		case CssPseudoClass::OnlyOfType:
+			matched = element.typeIndex == 1 && element.typeCount == 1;
+			break;
+		case CssPseudoClass::NthOfType:
+			matched = element.typeCount > 0 && nthExpressionMatches(pseudo.nth, element.typeIndex);
+			break;
+		case CssPseudoClass::Not:
+			matched = !simpleSelectorMatchesElement(element, pseudo.notSelector);
+			break;
+		case CssPseudoClass::Root:
+			matched = pathIndex == 0 && (!doc.hasDocumentElement ||
+				doc.documentElement.serial == 0 || element.serial == doc.documentElement.serial);
+			break;
+		case CssPseudoClass::Link:
+			matched = element.tagName == "a" && element.hasLinkTarget && !element.visited;
+			break;
+		case CssPseudoClass::Visited:
+			matched = element.tagName == "a" && element.hasLinkTarget && element.visited;
+			break;
+		}
+		if (!matched) return false;
+		recordPseudoMatch(diag, pseudo.type);
+	}
+	return true;
+}
+
 static bool selectorMatchesPathAt(const std::vector<HtmlElementRef>& path,
+	const WebDocument& doc,
+	CssDiagnostics& diag,
 	const WebStyleRule& rule,
 	int partIndex,
-	int pathIndex)
+	int pathIndex,
+	size_t& evaluationSteps)
 {
+	if (++evaluationSteps > kCssLiteMaxSelectorEvaluationSteps) {
+		saturatingIncrement(diag.selectorEvaluationStepClamps);
+		return false;
+	}
 	if (partIndex < 0 || pathIndex < 0 ||
 		partIndex >= static_cast<int>(rule.selectorParts.size()) ||
 		pathIndex >= static_cast<int>(path.size())) return false;
 	if (!selectorPartMatchesElement(path[static_cast<size_t>(pathIndex)],
-		rule.selectorParts[static_cast<size_t>(partIndex)])) return false;
+		rule.selectorParts[static_cast<size_t>(partIndex)], path,
+		static_cast<size_t>(pathIndex), doc, diag)) return false;
 	if (partIndex == 0) return true;
 	const CssCombinator combinator = rule.combinators[static_cast<size_t>(partIndex - 1)];
 	if (combinator == CssCombinator::Child) {
-		return selectorMatchesPathAt(path, rule, partIndex - 1, pathIndex - 1);
+		return selectorMatchesPathAt(path, doc, diag, rule, partIndex - 1, pathIndex - 1, evaluationSteps);
 	}
 	for (int ancestorIndex = pathIndex - 1; ancestorIndex >= 0; --ancestorIndex) {
-		if (selectorMatchesPathAt(path, rule, partIndex - 1, ancestorIndex)) return true;
+		if (selectorMatchesPathAt(path, doc, diag, rule, partIndex - 1, ancestorIndex, evaluationSteps)) return true;
 	}
 	return false;
 }
 
-static bool selectorMatchesPath(const std::vector<HtmlElementRef>& path, const WebStyleRule& rule)
+static bool selectorMatchesPath(const std::vector<HtmlElementRef>& path,
+	const WebDocument& doc,
+	CssDiagnostics& diag,
+	const WebStyleRule& rule)
 {
 	if (rule.selectorParts.empty() || path.empty() ||
 		rule.selectorParts.size() != rule.combinators.size() + 1 ||
 		rule.combinators.size() > kCssLiteMaxCombinatorDepth) return false;
-	return selectorMatchesPathAt(path, rule,
+	size_t evaluationSteps = 0;
+	return selectorMatchesPathAt(path, doc, diag, rule,
 		static_cast<int>(rule.selectorParts.size()) - 1,
-		static_cast<int>(path.size()) - 1);
+		static_cast<int>(path.size()) - 1, evaluationSteps);
 }
 
 static bool parseInlineStyleDeclaration(WebStyle& style,
@@ -2218,7 +2539,12 @@ static std::string pathSignature(const std::vector<HtmlElementRef>& path)
 	std::ostringstream oss;
 	for (const HtmlElementRef& element : path) {
 		oss << "|" << toLower(element.tagName) << "#" << toLower(element.id)
-			<< "." << toLower(element.className) << "{" << element.inlineStyle << "}";
+			<< "." << toLower(element.className) << "{" << element.inlineStyle << "}"
+			<< "@" << element.serial << ":" << element.parentSerial
+			<< ":" << element.childIndex << "/" << element.childCount
+			<< ":s" << element.siblingCount
+			<< ":" << element.typeIndex << "/" << element.typeCount
+			<< ":" << (element.hasLinkTarget ? (element.visited ? "visited" : "link") : "");
 	}
 	return oss.str();
 }
@@ -2230,7 +2556,39 @@ struct CssCascadeWinner {
 	bool inherited = false;
 	CssSpecificity specificity;
 	uint32_t sourceOrder = 0;
+	std::string pseudoCategory;
 };
+
+static const char* cssPseudoName(CssPseudoClass type)
+{
+	switch (type) {
+	case CssPseudoClass::FirstChild: return "first-child";
+	case CssPseudoClass::LastChild: return "last-child";
+	case CssPseudoClass::OnlyChild: return "only-child";
+	case CssPseudoClass::NthChild: return "nth-child";
+	case CssPseudoClass::FirstOfType: return "first-of-type";
+	case CssPseudoClass::LastOfType: return "last-of-type";
+	case CssPseudoClass::OnlyOfType: return "only-of-type";
+	case CssPseudoClass::NthOfType: return "nth-of-type";
+	case CssPseudoClass::Not: return "not";
+	case CssPseudoClass::Root: return "root";
+	case CssPseudoClass::Link: return "link";
+	case CssPseudoClass::Visited: return "visited";
+	default: return "unknown";
+	}
+}
+
+static std::string selectorPseudoSummary(const WebStyleRule& rule)
+{
+	std::string summary;
+	for (const CssSelectorPart& part : rule.selectorParts) {
+		for (const CssPseudoClassSelector& pseudo : part.pseudoClasses) {
+			if (!summary.empty()) summary += "+";
+			summary += cssPseudoName(pseudo.type);
+		}
+	}
+	return summary;
+}
 
 static bool specificityGreater(const CssSpecificity& left, const CssSpecificity& right)
 {
@@ -2299,8 +2657,9 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 	const std::array<CssCascadeWinner, static_cast<size_t>(CssProperty::Count)>& winners)
 {
 	const std::string id = toLower(element.id);
-	if (id.rfind("phase2a-", 0) != 0 && id.rfind("css2a-", 0) != 0) return;
-	if (doc.cssDiagnostics.computedStyleEvidence.size() >= 8192 ||
+	if (id.rfind("phase2a-", 0) != 0 && id.rfind("css2a-", 0) != 0 &&
+		id.rfind("phase2b-", 0) != 0 && id.rfind("css2b-", 0) != 0) return;
+	if (doc.cssDiagnostics.computedStyleEvidence.size() >= kCssLiteMaxEvidenceBytes ||
 		std::count(doc.cssDiagnostics.computedStyleEvidence.begin(),
 			doc.cssDiagnostics.computedStyleEvidence.end(), ';') >= static_cast<int>(kCssLiteMaxEvidenceEntries - 1)) return;
 	const CssCascadeWinner& colorWinner = winners[static_cast<size_t>(CssProperty::Color)];
@@ -2321,8 +2680,14 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",color-inherited=" << (colorWinner.inherited ? "yes" : "no")
 		<< ",padding-source-order=" << paddingWinner.sourceOrder
 		<< ",font-size-source-order=" << fontWinner.sourceOrder
-		<< ",border-source-order=" << borderWinner.sourceOrder << ";";
-	if (doc.cssDiagnostics.computedStyleEvidence.size() + oss.str().size() <= 8192)
+		<< ",border-source-order=" << borderWinner.sourceOrder
+		<< ",element-index=" << element.childIndex
+		<< ",element-count=" << element.siblingCount
+		<< ",type-index=" << element.typeIndex
+		<< ",type-count=" << element.typeCount
+		<< ",color-winning-pseudo=" << (colorWinner.pseudoCategory.empty() ? "none" : colorWinner.pseudoCategory)
+		<< ";";
+	if (doc.cssDiagnostics.computedStyleEvidence.size() + oss.str().size() <= kCssLiteMaxEvidenceBytes)
 		doc.cssDiagnostics.computedStyleEvidence += oss.str();
 }
 
@@ -2350,12 +2715,14 @@ static WebStyle computePathStyle(WebDocument& doc,
 	}
 
 	for (const WebStyleRule& rule : doc.styleRules) {
-		if (!selectorMatchesPath(path, rule)) continue;
+		if (!selectorMatchesPath(path, doc, doc.cssDiagnostics, rule)) continue;
 		saturatingIncrement(doc.cssDiagnostics.selectorMatches);
 		for (unsigned i = 0; i < static_cast<unsigned>(CssProperty::Count); ++i) {
 			const CssProperty property = static_cast<CssProperty>(i);
 			const uint64_t bit = cssPropertyBit(property);
 			if ((rule.style.specifiedProperties & bit) == 0) continue;
+			if (rule.hasVisitedPseudo && property != CssProperty::Color &&
+				property != CssProperty::Bold && property != CssProperty::TextDecoration) continue;
 			if (cascadeApplications >= kCssLiteMaxCascadeApplicationsPerNode) {
 				saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
 				cascadeApplicationsCapped = true;
@@ -2367,6 +2734,7 @@ static WebStyle computePathStyle(WebDocument& doc,
 			candidate.important = (rule.style.importantProperties & bit) != 0;
 			candidate.specificity = rule.specificityTuple;
 			candidate.sourceOrder = rule.sourceOrder;
+			candidate.pseudoCategory = selectorPseudoSummary(rule);
 			if (!cascadeCandidateWins(candidate, winners[i])) continue;
 			if (winners[i].valid) {
 				if (specificityGreater(candidate.specificity, winners[i].specificity)) saturatingIncrement(doc.cssDiagnostics.specificityOverrides);
@@ -2430,7 +2798,9 @@ static void applyDocumentStyles(WebDocument& doc)
 
 	if (doc.hasBodyElement) {
 		std::vector<HtmlElementRef> bodyPath;
-		bodyPath.push_back(doc.bodyElement);
+		if (doc.hasDocumentElement) bodyPath.push_back(doc.documentElement);
+		if (bodyPath.empty() || bodyPath.back().serial != doc.bodyElement.serial)
+			bodyPath.push_back(doc.bodyElement);
 		doc.bodyStyle = computePathStyle(doc, bodyPath, cache);
 	} else {
 		doc.bodyStyle = defaultStyleForTag("body");
@@ -2439,24 +2809,22 @@ static void applyDocumentStyles(WebDocument& doc)
 
 	for (DocBlock& block : doc.blocks) {
 		std::vector<HtmlElementRef> path;
-		if (doc.hasBodyElement) {
+		if (doc.hasDocumentElement) path.push_back(doc.documentElement);
+		if (doc.hasBodyElement && (path.empty() || path.back().serial != doc.bodyElement.serial))
 			path.push_back(doc.bodyElement);
+		for (const HtmlElementRef& ancestor : block.ancestors) {
+			if (ancestor.serial != 0 && std::any_of(path.begin(), path.end(), [&](const HtmlElementRef& existing) {
+				return existing.serial == ancestor.serial;
+			})) continue;
+			path.push_back(ancestor);
 		}
 
-		size_t startIndex = 0;
-		if (!block.ancestors.empty() && doc.hasBodyElement &&
-			toLower(block.ancestors.front().tagName) == "body") {
-			startIndex = 1;
-		}
-
-		for (size_t i = startIndex; i < block.ancestors.size(); ++i) path.push_back(block.ancestors[i]);
-
-		HtmlElementRef selfRef;
-		selfRef.tagName = block.tagName;
+		HtmlElementRef selfRef = block.elementMetadata;
+		if (selfRef.tagName.empty()) selfRef.tagName = block.tagName;
 		selfRef.className = block.className;
 		selfRef.id = block.id;
-	selfRef.inlineStyle = block.inlineStyle;
-	path.push_back(selfRef);
+		selfRef.inlineStyle = block.inlineStyle;
+		path.push_back(selfRef);
 		block.style = computePathStyle(doc, path, cache);
 		// Table geometry and wrapper borders are renderer metadata rather than
 		// inherited CSS.  Resolve them from bounded computed prefixes only when
@@ -2524,7 +2892,8 @@ static DocBlock makeTextBlock(BlockType type,
 	const std::string& className,
 	const std::string& id,
 	const std::vector<HtmlElementRef>& ancestors = {},
-	const std::string& inlineStyle = {})
+	const std::string& inlineStyle = {},
+	const HtmlElementRef& elementMetadata = {})
 {
 	DocBlock block;
 	block.type = type;
@@ -2533,6 +2902,7 @@ static DocBlock makeTextBlock(BlockType type,
 	block.id = id;
 	block.inlineStyle = inlineStyle;
 	block.ancestors = ancestors;
+	block.elementMetadata = elementMetadata;
 	block.text = text;
 	block.url = url;
 	return block;
@@ -2557,6 +2927,12 @@ enum class OpenTag : uint8_t {
 	Option,
 };
 
+struct StructuralChildCounter {
+	uint64_t serial = 0;
+	uint16_t childCount = 0;
+	std::vector<std::pair<std::string, uint16_t>> typeCounts;
+};
+
 struct ParserState {
 	WebDocument  doc;
 	std::string  textBuf;   // accumulated character data for current block
@@ -2565,7 +2941,11 @@ struct ParserState {
 	std::string  idBuf;
 	std::string  styleBuf;
 	std::vector<HtmlElementRef> openElements;
+	std::vector<HtmlElementRef> structuralElements;
+	std::vector<StructuralChildCounter> structuralCounters;
 	uint64_t     nextElementSerial = 1;
+	uint64_t     activeBlockSerial = 0;
+	const std::unordered_set<std::string>* visitedUrls = nullptr;
 	OpenTag      open    = OpenTag::None;
 	bool         inScript = false;
 	bool         inStyle  = false;
@@ -2605,31 +2985,81 @@ static HtmlElementRef elementRefFromTagBody(const std::string& tagName, const st
 	return element;
 }
 
+static HtmlElementRef* findStructuralElement(ParserState& st, uint64_t serial)
+{
+	if (serial == 0) return nullptr;
+	for (HtmlElementRef& element : st.structuralElements) {
+		if (element.serial == serial) return &element;
+	}
+	return nullptr;
+}
+
+static StructuralChildCounter* findStructuralCounter(ParserState& st, uint64_t serial)
+{
+	if (serial == 0) return nullptr;
+	for (StructuralChildCounter& counter : st.structuralCounters) {
+		if (counter.serial == serial) return &counter;
+	}
+	return nullptr;
+}
+
+static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef element)
+{
+	element.tagName = toLower(element.tagName);
+	element.serial = st.nextElementSerial++;
+	element.parentSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
+	if (StructuralChildCounter* parent = findStructuralCounter(st, element.parentSerial)) {
+		if (parent->childCount < std::numeric_limits<uint16_t>::max()) {
+			element.childIndex = static_cast<uint16_t>(++parent->childCount);
+		} else {
+			saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+		}
+		uint16_t* typeCount = nullptr;
+		for (auto& type : parent->typeCounts) {
+			if (type.first == element.tagName) {
+				typeCount = &type.second;
+				break;
+			}
+		}
+		if (!typeCount) {
+			if (parent->typeCounts.size() >= kCssLiteMaxNotComponents * 2) {
+				saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+			} else {
+				parent->typeCounts.push_back({ element.tagName, 0 });
+				typeCount = &parent->typeCounts.back().second;
+			}
+		}
+		if (typeCount && *typeCount < std::numeric_limits<uint16_t>::max())
+			element.typeIndex = static_cast<uint16_t>(++(*typeCount));
+	}
+	if (st.structuralElements.size() >= kCssLiteMaxStructuralMetadata) {
+		saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+		return element;
+	}
+	st.structuralElements.push_back(element);
+	st.structuralCounters.push_back({ element.serial, 0, {} });
+	return element;
+}
+
+static HtmlElementRef activeBlockElement(const ParserState& st)
+{
+	for (const HtmlElementRef& element : st.openElements) {
+		if (element.serial == st.activeBlockSerial) return element;
+	}
+	return {};
+}
+
 static std::vector<HtmlElementRef> captureBlockAncestors(const ParserState& st)
 {
-	std::vector<HtmlElementRef> ancestors = st.openElements;
-	switch (st.open) {
-	case OpenTag::H1:
-	case OpenTag::H2:
-	case OpenTag::H3:
-	case OpenTag::P:
-	case OpenTag::A:
-	case OpenTag::Li:
-	case OpenTag::Dt:
-	case OpenTag::Dd:
-	case OpenTag::Figcaption:
-	case OpenTag::Title:
-	case OpenTag::Pre:
-	case OpenTag::Caption:
-	case OpenTag::TableCell:
-	case OpenTag::ButtonSubmit:
-	case OpenTag::Textarea:
-	case OpenTag::Option:
-		if (!ancestors.empty()) ancestors.pop_back();
-		break;
-	default:
-		break;
+	std::vector<HtmlElementRef> ancestors;
+	if (st.activeBlockSerial != 0) {
+		for (const HtmlElementRef& element : st.openElements) {
+			if (element.serial == st.activeBlockSerial) break;
+			ancestors.push_back(element);
+		}
+		return ancestors;
 	}
+	ancestors = st.openElements;
 	return ancestors;
 }
 
@@ -2695,9 +3125,13 @@ static void pushElement(ParserState& st, const HtmlElementRef& element)
 		++st.doc.cssDiagnostics.inlineStyleCount;
 		st.doc.cssDiagnostics.cssDetected = true;
 	}
-	HtmlElementRef pushed = element;
-	pushed.serial = st.nextElementSerial++;
+	HtmlElementRef pushed = registerStructuralElement(st, element);
 	st.openElements.push_back(std::move(pushed));
+}
+
+static void activateCurrentBlock(ParserState& st)
+{
+	st.activeBlockSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
 }
 
 static void popElementByName(ParserState& st, const std::string& tagName)
@@ -2740,6 +3174,7 @@ static void flushText(ParserState& st)
 		return;
 	}
 	std::vector<HtmlElementRef> ancestors = captureBlockAncestors(st);
+	const HtmlElementRef elementMetadata = activeBlockElement(st);
 
 	switch (st.open) {
 	case OpenTag::H1:
@@ -2752,31 +3187,32 @@ static void flushText(ParserState& st)
 			st.classBuf,
 			st.idBuf,
 			ancestors,
-			st.styleBuf));
+			st.styleBuf,
+			elementMetadata));
 		break;
 	case OpenTag::P:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Li:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::ListItem, "li", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::ListItem, "li", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Dt:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "dt", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "dt", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Dd:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "dd", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "dd", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Figcaption:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "figcaption", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "figcaption", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Pre:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::Preformatted, "pre", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Preformatted, "pre", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::A:
 		if (!st.hrefBuf.empty())
-			st.doc.blocks.push_back(makeTextBlock(BlockType::Link, "a", t, st.hrefBuf, st.classBuf, st.idBuf, ancestors, st.styleBuf));
+			st.doc.blocks.push_back(makeTextBlock(BlockType::Link, "a", t, st.hrefBuf, st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		else
-			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Title:
 		st.doc.title = t;
@@ -2793,6 +3229,7 @@ static void flushText(ParserState& st)
 		block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
 		block.formUnsupported = st.currentFormUnsupported;
 		block.ancestors = ancestors;
+		block.elementMetadata = elementMetadata;
 		block.inlineStyle = st.styleBuf;
 		st.doc.blocks.push_back(std::move(block));
 		++st.doc.formsDiagnostics.submitCount;
@@ -2816,6 +3253,7 @@ static void flushText(ParserState& st)
 		block.visibleCols = st.currentTextareaCols > 0 ? st.currentTextareaCols : 40;
 		block.formUnsupported = st.currentFormUnsupported;
 		block.ancestors = ancestors;
+		block.elementMetadata = elementMetadata;
 		block.inlineStyle = st.styleBuf;
 		st.doc.blocks.push_back(std::move(block));
 		++st.doc.formsDiagnostics.textareaCount;
@@ -2865,8 +3303,14 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "body") {
 		st.bodyReached = true;
 		st.doc.hasBodyElement = true;
-		st.doc.bodyElement = elementRef;
 		pushElement(st, elementRef);
+		st.doc.bodyElement = st.openElements.back();
+		return;
+	}
+	if (name == "html") {
+		pushElement(st, elementRef);
+		st.doc.hasDocumentElement = true;
+		st.doc.documentElement = st.openElements.back();
 		return;
 	}
 
@@ -2885,6 +3329,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.styleBuf = extractAttr(tagBody, "style");
 		st.open = name == "dt" ? OpenTag::Dt : (name == "dd" ? OpenTag::Dd : OpenTag::Figcaption);
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		return;
 	}
 
@@ -2897,6 +3342,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		block.className = extractAttr(tagBody, "class");
 		block.id = extractAttr(tagBody, "id");
 		block.inlineStyle = extractAttr(tagBody, "style");
+		block.elementMetadata = registerStructuralElement(st, elementRef);
 		block.ancestors = captureBlockAncestors(st);
 		st.doc.blocks.push_back(std::move(block));
 		return;
@@ -2940,6 +3386,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.idBuf = extractAttr(tagBody, "id");
 		st.styleBuf = extractAttr(tagBody, "style");
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		return;
 	}
 
@@ -2953,6 +3400,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.idBuf = extractAttr(tagBody, "id");
 		st.styleBuf = extractAttr(tagBody, "style");
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		return;
 	}
 
@@ -2969,6 +3417,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		flushText(st);
 		std::string type = toLower(trim(extractAttr(tagBody, "type")));
 		if (type.empty()) type = "text";
+		const HtmlElementRef inputElement = registerStructuralElement(st, elementRef);
 		if (type == "text" || type == "search") {
 			DocBlock block;
 			block.type = BlockType::FormTextInput;
@@ -2985,6 +3434,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.placeholder = decodeEntities(extractAttr(tagBody, "placeholder"));
 			block.formUnsupported = st.currentFormUnsupported;
 			block.text = block.inputValue;
+			block.elementMetadata = inputElement;
 			block.ancestors = captureBlockAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
 			if (!block.inlineStyle.empty()) {
@@ -3009,6 +3459,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.inputType = type;
 			block.checked = hasAttr(tagBody, "checked");
 			block.text = block.inputName.empty() ? block.inputValue : block.inputName;
+			block.elementMetadata = inputElement;
 			block.formUnsupported = st.currentFormUnsupported;
 			block.ancestors = captureBlockAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
@@ -3032,6 +3483,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.submitLabel = decodeEntities(extractAttr(tagBody, "value"));
 			if (block.submitLabel.empty()) block.submitLabel = "Submit";
 			block.text = block.submitLabel;
+			block.elementMetadata = inputElement;
 			block.formUnsupported = st.currentFormUnsupported;
 			block.ancestors = captureBlockAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
@@ -3057,6 +3509,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.currentTextareaCols = parsePositiveIntAttr(tagBody, "cols");
 		st.styleBuf = extractAttr(tagBody, "style");
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		st.textBuf.clear();
 		return;
 	}
@@ -3070,6 +3523,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.currentSelectOptions.clear();
 		st.styleBuf = extractAttr(tagBody, "style");
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		st.open = OpenTag::None;
 		return;
 	}
@@ -3081,6 +3535,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.currentOptionSelected = hasAttr(tagBody, "selected");
 		st.styleBuf = extractAttr(tagBody, "style");
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		st.textBuf.clear();
 		return;
 	}
@@ -3124,6 +3579,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		block.width = parsePositiveIntAttr(tagBody, "width", &widthAttrClamped);
 		block.height = parsePositiveIntAttr(tagBody, "height", &heightAttrClamped);
 		block.imageSizeAttrClamped = widthAttrClamped || heightAttrClamped;
+		block.elementMetadata = registerStructuralElement(st, elementRef);
 		block.ancestors = captureBlockAncestors(st);
 		st.doc.blocks.push_back(std::move(block));
 		st.open = OpenTag::None;
@@ -3141,17 +3597,18 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	st.idBuf = extractAttr(tagBody, "id");
 	st.styleBuf = extractAttr(tagBody, "style");
 
-	if (name == "h1")    { st.open = OpenTag::H1;    pushElement(st, elementRef); return; }
-	if (name == "h2")    { st.open = OpenTag::H2;    pushElement(st, elementRef); return; }
-	if (name == "h3")    { st.open = OpenTag::H3;    pushElement(st, elementRef); return; }
-	if (name == "p")     { st.open = OpenTag::P;     pushElement(st, elementRef); return; }
-	if (name == "li")    { st.open = OpenTag::Li;    pushElement(st, elementRef); return; }
-	if (name == "title") { st.open = OpenTag::Title; pushElement(st, elementRef); return; }
+	if (name == "h1")    { st.open = OpenTag::H1;    pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "h2")    { st.open = OpenTag::H2;    pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "h3")    { st.open = OpenTag::H3;    pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "p")     { st.open = OpenTag::P;     pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "li")    { st.open = OpenTag::Li;    pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "title") { st.open = OpenTag::Title; pushElement(st, elementRef); activateCurrentBlock(st); return; }
 
 	if (name == "pre") {
 		st.open  = OpenTag::Pre;
 		st.inPre = true;
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		return;
 	}
 	// <code>: if a <pre> is already open, stay in it; otherwise treat as plain text.
@@ -3165,6 +3622,8 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		if (!href.empty()) {
 			// Resolve relative URL against the document base.
 			st.hrefBuf = resolveRelativeUrl(st.doc.url, href);
+			elementRef.hasLinkTarget = true;
+			elementRef.visited = st.visitedUrls && st.visitedUrls->find(st.hrefBuf) != st.visitedUrls->end();
 			if (st.open == OpenTag::TableCell) {
 				st.currentTableCellHref = st.hrefBuf;
 			}
@@ -3175,6 +3634,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			st.open = OpenTag::A;
 		}
 		pushElement(st, elementRef);
+		if (st.open == OpenTag::A) activateCurrentBlock(st);
 		return;
 	}
 
@@ -3183,6 +3643,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		if (type.empty() || type == "submit") {
 			st.open = OpenTag::ButtonSubmit;
 			pushElement(st, elementRef);
+			activateCurrentBlock(st);
 		} else {
 			++st.doc.formsDiagnostics.unsupportedControlCount;
 		}
@@ -3213,6 +3674,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		flushText(st);
 		popElementByName(st, name);
 		st.open    = OpenTag::None;
+		st.activeBlockSerial = 0;
 		st.hrefBuf.clear();
 		st.classBuf.clear();
 		st.idBuf.clear();
@@ -3232,6 +3694,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			flushText(st);
 			popElementByName(st, name);
 			st.open = OpenTag::None;
+			st.activeBlockSerial = 0;
 			st.hrefBuf.clear();
 			st.classBuf.clear();
 			st.idBuf.clear();
@@ -3251,10 +3714,12 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		if (!st.currentTableCaptionText.empty()) {
 			DocBlock block = makeTextBlock(BlockType::Paragraph, "caption",
 				st.currentTableCaptionText, "", st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+			block.elementMetadata = activeBlockElement(st);
 			st.doc.blocks.push_back(std::move(block));
 		}
 		st.currentTableCaptionText.clear();
 		st.open = OpenTag::None;
+		st.activeBlockSerial = 0;
 		popElementByName(st, name);
 		st.classBuf.clear();
 		st.idBuf.clear();
@@ -3264,6 +3729,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		flushText(st);
 		DocBlock block = makeTextBlock(BlockType::Paragraph, name, st.currentTableCellText, "",
 			st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+		block.elementMetadata = activeBlockElement(st);
 		if (!st.currentTableCellHref.empty()) {
 			block.url = st.currentTableCellHref;
 		}
@@ -3272,6 +3738,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.currentTableCellHeader = false;
 		st.currentTableCellHref.clear();
 		st.open = OpenTag::None;
+		st.activeBlockSerial = 0;
 		popElementByName(st, name);
 		st.classBuf.clear();
 		st.idBuf.clear();
@@ -3305,6 +3772,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		}
 		block.ancestors = st.openElements;
 		if (!block.ancestors.empty()) block.ancestors.pop_back();
+		block.elementMetadata = activeBlockElement(st);
 		block.inlineStyle = st.styleBuf;
 		st.doc.blocks.push_back(std::move(block));
 		++st.doc.formsDiagnostics.selectCount;
@@ -3316,6 +3784,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.styleBuf.clear();
 		popElementByName(st, name);
 		st.open = OpenTag::None;
+		st.activeBlockSerial = 0;
 	}
 	if (name == "form") {
 		flushText(st);
@@ -3330,6 +3799,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	if (name == "pre") {
 		flushText(st);
 		st.open  = OpenTag::None;
+		st.activeBlockSerial = 0;
 		st.inPre = false;
 		st.classBuf.clear();
 		st.idBuf.clear();
@@ -3356,6 +3826,33 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	// </code> inside <pre>: stay in pre context.
 	// </code> outside: nothing to do.
+}
+
+static void finalizeStructuralMetadata(ParserState& st)
+{
+	for (HtmlElementRef& element : st.structuralElements) {
+		if (StructuralChildCounter* counter = findStructuralCounter(st, element.serial)) {
+			element.childCount = counter->childCount;
+		}
+		if (StructuralChildCounter* parent = findStructuralCounter(st, element.parentSerial)) {
+			element.siblingCount = parent->childCount;
+			for (const auto& type : parent->typeCounts) {
+				if (type.first == element.tagName) {
+					element.typeCount = type.second;
+					break;
+				}
+			}
+		}
+	}
+	auto updateRef = [&](HtmlElementRef& ref) {
+		if (HtmlElementRef* stored = findStructuralElement(st, ref.serial)) ref = *stored;
+	};
+	updateRef(st.doc.documentElement);
+	updateRef(st.doc.bodyElement);
+	for (DocBlock& block : st.doc.blocks) {
+		updateRef(block.elementMetadata);
+		for (HtmlElementRef& ancestor : block.ancestors) updateRef(ancestor);
+	}
 }
 
 } // anonymous namespace
@@ -3404,10 +3901,13 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 // ---------------------------------------------------------------------------
 // parseHtml
 // ---------------------------------------------------------------------------
-WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText)
+WebDocument parseHtml(const std::string& pageUrl,
+	const std::string& htmlText,
+	const std::unordered_set<std::string>& visitedUrls)
 {
 	ParserState st;
 	st.doc.url = pageUrl;
+	st.visitedUrls = &visitedUrls;
 
 	const size_t len = htmlText.size();
 	size_t i = 0;
@@ -3473,6 +3973,7 @@ WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText)
 
 	// Flush any trailing text not closed by a tag.
 	flushText(st);
+	finalizeStructuralMetadata(st);
 	applyDocumentStyles(st.doc);
 
 	// If no title was parsed, use the filename from the URL.

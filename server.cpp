@@ -841,6 +841,76 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
 
+    bool cssPhase2bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2b.html");
+    std::string cssPhase2bText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2bReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2bReport.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = cssPhase2bReport.find('\n', pos);
+        return cssPhase2bReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 2B structural fixture loads",
+        cssPhase2bLoaded &&
+        contains(cssPhase2bText, "Phase 2B Structural Selectors") &&
+        contains(cssPhase2bText, "First child marker") &&
+        contains(cssPhase2bText, "Second child marker") &&
+        contains(cssPhase2bText, "Only child marker") &&
+        contains(cssPhase2bText, "First of type marker") &&
+        contains(cssPhase2bText, "Only of type marker") &&
+        contains(cssPhase2bText, "Visited link marker") &&
+        contains(cssPhase2bText, "Unvisited link marker"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2B pseudo diagnostics",
+        contains(cssPhase2bReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS pseudo-classes parsed=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS structural pseudo matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS first-child matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS last-child matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS nth-child matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS of-type matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS :not matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS :link pseudo matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS :visited pseudo matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS pseudo-class clamps=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS nth-expression parse errors=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS unsupported selectors=") &&
+        contains(cssPhase2bReport, "id=phase2b-first") &&
+        contains(cssPhase2bReport, "id=phase2b-type-second") &&
+        contains(cssPhase2bReport, "id=phase2b-visited") &&
+        contains(cssPhase2bReport, "id=phase2b-link"),
+        "pseudo=" + cssPhase2bReportLine("Current Document.CSS pseudo-classes parsed=") +
+        "; structural=" + cssPhase2bReportLine("Current Document.CSS structural pseudo matches=") +
+        "; nth=" + cssPhase2bReportLine("Current Document.CSS nth-child matches=") +
+        "; of-type=" + cssPhase2bReportLine("Current Document.CSS of-type matches=") +
+        "; not=" + cssPhase2bReportLine("Current Document.CSS :not matches=") +
+        "; link=" + cssPhase2bReportLine("Current Document.CSS :link pseudo matches=") +
+        "; visited=" + cssPhase2bReportLine("Current Document.CSS :visited pseudo matches=") +
+        "; clamps=" + cssPhase2bReportLine("Current Document.CSS pseudo-class clamps=") +
+        "; nth-errors=" + cssPhase2bReportLine("Current Document.CSS nth-expression parse errors=") +
+        "; evidence=" + summarizeText(cssPhase2bReportLine("Current Document.CSS computed style evidence="), 1800));
+    add("CSS phase 2B structural evidence",
+        contains(cssPhase2bReport, "id=phase2b-first") &&
+        contains(cssPhase2bReport, "element-index=1") &&
+        contains(cssPhase2bReport, "color-winning-pseudo=first-child") &&
+        contains(cssPhase2bReport, "id=phase2b-type-second") &&
+        contains(cssPhase2bReport, "type-index=2") &&
+        contains(cssPhase2bReport, "type-count=2") &&
+        contains(cssPhase2bReport, "id=phase2b-visited") &&
+        contains(cssPhase2bReport, "color-winning-pseudo=visited") &&
+        contains(cssPhase2bReport, "id=phase2b-link") &&
+        contains(cssPhase2bReport, "color-winning-pseudo=link"),
+        std::string("first=") + yesNo(contains(cssPhase2bReport, "id=phase2b-first")) +
+        ",first-index=" + yesNo(contains(cssPhase2bReport, "element-index=1")) +
+        ",first-pseudo=" + yesNo(contains(cssPhase2bReport, "color-winning-pseudo=first-child")) +
+        ",type-second=" + yesNo(contains(cssPhase2bReport, "id=phase2b-type-second")) +
+        ",type-index=" + yesNo(contains(cssPhase2bReport, "type-index=2")) +
+        ",type-count=" + yesNo(contains(cssPhase2bReport, "type-count=2")) +
+        ",visited=" + yesNo(contains(cssPhase2bReport, "id=phase2b-visited")) +
+        ",visited-pseudo=" + yesNo(contains(cssPhase2bReport, "color-winning-pseudo=visited")) +
+        ",link=" + yesNo(contains(cssPhase2bReport, "id=phase2b-link")) +
+        ",link-pseudo=" + yesNo(contains(cssPhase2bReport, "color-winning-pseudo=link")));
+
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
     std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();

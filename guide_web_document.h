@@ -109,6 +109,14 @@ struct HtmlElementRef {
 	std::string id;
 	std::string inlineStyle;
 	uint64_t    serial = 0;
+	uint64_t    parentSerial = 0;
+	uint16_t    childIndex = 0;
+	uint16_t    childCount = 0;
+	uint16_t    siblingCount = 0;
+	uint16_t    typeIndex = 0;
+	uint16_t    typeCount = 0;
+	bool        hasLinkTarget = false;
+	bool        visited = false;
 };
 
 enum class CssCombinator : uint8_t {
@@ -122,10 +130,43 @@ struct CssSpecificity {
 	uint16_t elementCount = 0;
 };
 
+struct CssSimpleSelector {
+	std::string tagName;
+	std::vector<std::string> classNames;
+	std::string id;
+};
+
+enum class CssPseudoClass : uint8_t {
+	FirstChild = 0,
+	LastChild,
+	OnlyChild,
+	NthChild,
+	FirstOfType,
+	LastOfType,
+	OnlyOfType,
+	NthOfType,
+	Not,
+	Root,
+	Link,
+	Visited,
+};
+
+struct CssNthExpression {
+	int a = 0;
+	int b = 0;
+};
+
+struct CssPseudoClassSelector {
+	CssPseudoClass type = CssPseudoClass::FirstChild;
+	CssNthExpression nth;
+	CssSimpleSelector notSelector;
+};
+
 struct CssSelectorPart {
 	std::string tagName;
 	std::vector<std::string> classNames;
 	std::string id;
+	std::vector<CssPseudoClassSelector> pseudoClasses;
 };
 
 struct WebStyle {
@@ -200,6 +241,7 @@ struct WebStyleRule {
 	CssSpecificity    specificityTuple;
 	std::vector<CssSelectorPart> selectorParts;
 	std::vector<CssCombinator> combinators;
+	bool              hasVisitedPseudo = false;
 	WebStyle          style;
 	uint32_t          sourceOrder = 0;
 };
@@ -239,6 +281,19 @@ struct CssDiagnostics {
 	int    declarationCapCount = 0;
 	int    declarationsProcessed = 0;
 	int    inheritanceDepthClamps = 0;
+	int    pseudoClassesParsed = 0;
+	int    structuralPseudoMatches = 0;
+	int    firstChildMatches = 0;
+	int    lastChildMatches = 0;
+	int    nthChildMatches = 0;
+	int    ofTypeMatches = 0;
+	int    notMatches = 0;
+	int    linkPseudoMatches = 0;
+	int    visitedPseudoMatches = 0;
+	int    pseudoClassClamps = 0;
+	int    nthExpressionParseErrors = 0;
+	int    structuralMetadataClamps = 0;
+	int    selectorEvaluationStepClamps = 0;
 	uint32_t nextSourceOrder = 1;
 	std::string computedStyleEvidence;
 };
@@ -276,6 +331,7 @@ struct DocBlock {
 	std::string id;
 	std::string inlineStyle;
 	std::vector<HtmlElementRef> ancestors;
+	HtmlElementRef elementMetadata;
 	WebStyle    style;
 	int         formIndex = -1;
 	std::string formAction;
@@ -298,6 +354,8 @@ struct WebDocument {
 	std::string           url;
 	std::string           title;
 	std::vector<DocBlock> blocks;
+	HtmlElementRef        documentElement;
+	bool                  hasDocumentElement = false;
 	HtmlElementRef        bodyElement;
 	bool                  hasBodyElement = false;
 	WebStyle              bodyStyle;
