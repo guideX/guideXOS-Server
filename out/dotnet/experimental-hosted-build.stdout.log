@@ -1,0 +1,6 @@
+WARNING: Experimental Native ELF execution is enabled.
+This build is for local hosted runtime validation only.
+Building guideXOS Server experimental Native ELF runtime...
+Using compiler: C:\mingw64\bin\g++.exe
+Compiling experimental hosted runtime...
+Build failed!

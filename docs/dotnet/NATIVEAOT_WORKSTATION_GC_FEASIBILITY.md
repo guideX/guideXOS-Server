@@ -222,6 +222,14 @@ The result is finite, not small: the collector is usable as-is, but the required
 
 ## 8. Windows dependency inventory
 
+### Virtual-memory primitive status
+
+The runtime-neutral region lifecycle and inactive NativeAOT platform mapping
+are documented in [NATIVEAOT_GC_PLATFORM_VIRTUAL_MEMORY.md](NATIVEAOT_GC_PLATFORM_VIRTUAL_MEMORY.md).
+The hosted lifecycle and adapter probe pass, while the current bare-metal
+address-space model still provides only an explicitly documented eager-backed
+compatibility backend; GC initialization remains disabled.
+
 The static library has no PE import table. The current proof PE import report is reachability evidence for the adapted non-collecting link; NativeAOT source and selected archive members identify imports that become live when initialization or collection is enabled.
 
 | API/family | Static source | Current proof PE | Initialization | First collection | Optional/dead in recommended mode | Handling |

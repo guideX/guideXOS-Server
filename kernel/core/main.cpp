@@ -25,6 +25,9 @@
 #if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
 #include "include/kernel/native_thread_qemu_test.h"
 #endif
+#if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
+#include "include/kernel/native_virtual_memory_qemu_test.h"
+#endif
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -234,6 +237,16 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::native_thread_qemu_test::run();
     while (1) {
         kernel::arch::enable_interrupts();
+        kernel::arch::halt();
+    }
+#endif
+
+#if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
+    // The opt-in VM test exercises only the generic runtime-neutral region
+    // contract and exits before desktop, storage, networking, or applications.
+    kernel::native_virtual_memory_qemu_test::run();
+    while (1) {
+        kernel::arch::disable_interrupts();
         kernel::arch::halt();
     }
 #endif

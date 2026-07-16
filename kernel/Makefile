@@ -104,7 +104,7 @@ MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PR
 
 # Runtime-neutral synchronization sources used by the freestanding kernel.
 # They remain outside the .NET tree and are the first scheduler wait consumer.
-RUNTIME_SOURCES := ../runtime/synchronization/guidexos_scheduler_wait.cpp ../runtime/synchronization/guidexos_event_baremetal.cpp ../runtime/thread/guidexos_native_thread_baremetal.cpp
+RUNTIME_SOURCES := ../runtime/synchronization/guidexos_scheduler_wait.cpp ../runtime/synchronization/guidexos_event_baremetal.cpp ../runtime/thread/guidexos_native_thread_baremetal.cpp ../runtime/memory/guidexos_virtual_memory_region.cpp
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
@@ -115,6 +115,7 @@ MBEDTLS_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBE
 MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
 RUNTIME_OBJS := $(patsubst ../runtime/synchronization/%.cpp,$(OBJ_DIR)/runtime/%.o,$(filter ../runtime/synchronization/%,$(RUNTIME_SOURCES)))
 RUNTIME_OBJS += $(patsubst ../runtime/thread/%.cpp,$(OBJ_DIR)/runtime/thread/%.o,$(filter ../runtime/thread/%,$(RUNTIME_SOURCES)))
+RUNTIME_OBJS += $(patsubst ../runtime/memory/%.cpp,$(OBJ_DIR)/runtime/memory/%.o,$(filter ../runtime/memory/%,$(RUNTIME_SOURCES)))
 
 ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(RUNTIME_OBJS)
 DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d) $(RUNTIME_OBJS:.o=.d)
@@ -210,6 +211,11 @@ $(OBJ_DIR)/runtime/%.o: ../runtime/synchronization/%.cpp
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/runtime/thread/%.o: ../runtime/thread/%.cpp
+	@$(call MKDIR,$(dir $@))
+	@echo "Compiling $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/runtime/memory/%.o: ../runtime/memory/%.cpp
 	@$(call MKDIR,$(dir $@))
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
