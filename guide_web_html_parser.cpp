@@ -59,6 +59,7 @@ namespace {
 	constexpr size_t kCssLiteMaxCombinatorDepth = 6;
 	constexpr size_t kCssLiteMaxStructuralMetadata = 1024;
 	constexpr size_t kCssLiteMaxSelectorEvaluationSteps = 64;
+	constexpr size_t kCssLiteMaxSiblingScanSteps = 64;
 	constexpr size_t kCssLiteMaxDeclarationsPerRule = 64;
 	constexpr size_t kCssLiteMaxTotalDeclarations = 2048;
 	constexpr size_t kCssLiteMaxCascadeApplicationsPerNode = 512;
@@ -727,24 +728,35 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 	outRule.specificity = 0;
 	outRule.specificityTuple = {};
 	size_t cursor = 0;
-	bool needCompound = true;
-	while (cursor < selectorText.size()) {
+	while (true) {
 		while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
 		if (cursor >= selectorText.size()) break;
-		if (selectorText[cursor] == '+' || selectorText[cursor] == '~' || selectorText[cursor] == '[') return false;
+		if (selectorText[cursor] == '>' || selectorText[cursor] == '+' || selectorText[cursor] == '~' || selectorText[cursor] == '[')
+			return false;
 		size_t start = cursor;
 		int parentheses = 0;
+		char quote = 0;
 		while (cursor < selectorText.size()) {
 			const char c = selectorText[cursor];
+			if (quote != 0) {
+				if (c == quote) quote = 0;
+				++cursor;
+				continue;
+			}
+			if (c == '\'' || c == '"') {
+				quote = c;
+				++cursor;
+				continue;
+			}
 			if (c == '(') ++parentheses;
 			else if (c == ')') {
 				if (parentheses == 0) return false;
 				--parentheses;
 			}
-			if (parentheses == 0 && (std::isspace(static_cast<unsigned char>(c)) || c == '>')) break;
+			if (parentheses == 0 && (std::isspace(static_cast<unsigned char>(c)) || c == '>' || c == '+' || c == '~')) break;
 			++cursor;
 		}
-		if (parentheses != 0) return false;
+		if (parentheses != 0 || quote != 0) return false;
 		if (start == cursor) return false;
 		if (outRule.selectorParts.size() >= kCssLiteMaxSelectorComponents) {
 			++diag.selectorDepthClamps;
@@ -766,31 +778,47 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 		outRule.specificityTuple.elementCount = static_cast<uint16_t>(std::min<uint32_t>(
 			std::numeric_limits<uint16_t>::max(),
 			static_cast<uint32_t>(outRule.specificityTuple.elementCount) + partSpecificity.elementCount));
-		needCompound = false;
 		bool hadWhitespace = false;
 		while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) {
 			hadWhitespace = true;
 			++cursor;
 		}
 		if (cursor >= selectorText.size()) break;
-		if (selectorText[cursor] == '>') {
+		CssCombinator combinator = CssCombinator::Descendant;
+		const char next = selectorText[cursor];
+		if (next == '>' || next == '+' || next == '~') {
+			if (next == '>') combinator = CssCombinator::Child;
+			else if (next == '+') combinator = CssCombinator::AdjacentSibling;
+			else combinator = CssCombinator::GeneralSibling;
 			++cursor;
 			while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
-			if (cursor >= selectorText.size() || selectorText[cursor] == '>') return false;
-			outRule.combinators.push_back(CssCombinator::Child);
-			saturatingIncrement(diag.childCombinatorCount);
-		} else if (hadWhitespace) {
-			outRule.combinators.push_back(CssCombinator::Descendant);
-			saturatingIncrement(diag.descendantCombinatorCount);
-		} else {
+			if (cursor >= selectorText.size() || selectorText[cursor] == '>' ||
+				selectorText[cursor] == '+' || selectorText[cursor] == '~') return false;
+		} else if (!hadWhitespace) {
 			return false;
+		} else if (outRule.selectorParts.size() == 1 &&
+			outRule.selectorParts.front().tagName == "*" &&
+			outRule.selectorParts.front().classNames.empty() &&
+			outRule.selectorParts.front().id.empty() &&
+			outRule.selectorParts.front().pseudoClasses.empty()) {
+			// Keep the bounded grammar's explicit rejection of the ambiguous
+			// leading-universal descendant form while retaining standalone * and
+			// explicit child/sibling universal compounds.
+			return false;
+		}
+		outRule.combinators.push_back(combinator);
+		switch (combinator) {
+		case CssCombinator::Child: saturatingIncrement(diag.childCombinatorCount); break;
+		case CssCombinator::Descendant: saturatingIncrement(diag.descendantCombinatorCount); break;
+		case CssCombinator::AdjacentSibling: saturatingIncrement(diag.adjacentSiblingCombinatorCount); break;
+		case CssCombinator::GeneralSibling: saturatingIncrement(diag.generalSiblingCombinatorCount); break;
 		}
 		if (outRule.combinators.size() > kCssLiteMaxCombinatorDepth) {
 			++diag.selectorDepthClamps;
 			return false;
 		}
 	}
-	if (outRule.selectorParts.empty() || needCompound ||
+	if (outRule.selectorParts.empty() ||
 		outRule.combinators.size() + 1 != outRule.selectorParts.size()) return false;
 	outRule.specificity = static_cast<int>(std::min<uint32_t>(
 		std::numeric_limits<int>::max(),
@@ -1454,13 +1482,102 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element,
 	return true;
 }
 
+struct CssSelectorMatchTrace {
+	size_t siblingScanSteps = 0;
+};
+
 static bool selectorMatchesPathAt(const std::vector<HtmlElementRef>& path,
 	const WebDocument& doc,
 	CssDiagnostics& diag,
 	const WebStyleRule& rule,
 	int partIndex,
 	int pathIndex,
-	size_t& evaluationSteps)
+	size_t& evaluationSteps,
+	CssSelectorMatchTrace& trace);
+
+static const HtmlElementRef* structuralElementBySerial(const WebDocument& doc,
+	CssDiagnostics& diag,
+	uint64_t serial)
+{
+	if (serial == 0 || serial > doc.structuralElements.size()) {
+		saturatingIncrement(diag.siblingMetadataErrors);
+		return nullptr;
+	}
+	const HtmlElementRef& element = doc.structuralElements[static_cast<size_t>(serial - 1)];
+	if (element.serial != serial) {
+		saturatingIncrement(diag.siblingMetadataErrors);
+		return nullptr;
+	}
+	return &element;
+}
+
+static bool selectorMatchesSiblingRelation(const std::vector<HtmlElementRef>& path,
+	const WebDocument& doc,
+	CssDiagnostics& diag,
+	const WebStyleRule& rule,
+	int partIndex,
+	int pathIndex,
+	CssCombinator combinator,
+	size_t& evaluationSteps,
+	CssSelectorMatchTrace& trace)
+{
+	if (pathIndex <= 0 || pathIndex >= static_cast<int>(path.size())) return false;
+	const HtmlElementRef& candidate = path[static_cast<size_t>(pathIndex)];
+	const HtmlElementRef& parent = path[static_cast<size_t>(pathIndex - 1)];
+	// A flattened text artifact has no structural serial. It is readable, but
+	// is intentionally excluded from element-sibling semantics.
+	if (candidate.serial == 0) return false;
+	if (candidate.parentSerial == 0 || parent.serial == 0 ||
+		candidate.parentSerial != parent.serial) {
+		saturatingIncrement(diag.siblingMetadataErrors);
+		return false;
+	}
+
+	uint64_t previousSerial = candidate.previousSiblingSerial;
+	if (previousSerial == 0) {
+		if (candidate.childIndex > 1 || candidate.childIndex == 0)
+			saturatingIncrement(diag.siblingMetadataErrors);
+		return false;
+	}
+
+	const bool adjacent = combinator == CssCombinator::AdjacentSibling;
+	size_t scanSteps = 0;
+	while (previousSerial != 0) {
+		if (++scanSteps > kCssLiteMaxSiblingScanSteps) {
+			saturatingIncrement(diag.siblingScanClamps);
+			return false;
+		}
+		saturatingIncrement(diag.siblingScanSteps);
+		++trace.siblingScanSteps;
+		const HtmlElementRef* previous = structuralElementBySerial(doc, diag, previousSerial);
+		if (!previous || previous->parentSerial != candidate.parentSerial ||
+			previous->serial >= candidate.serial) {
+			saturatingIncrement(diag.siblingMetadataErrors);
+			return false;
+		}
+
+		std::vector<HtmlElementRef> siblingPath(path.begin(), path.begin() + pathIndex);
+		siblingPath.push_back(*previous);
+		if (selectorMatchesPathAt(siblingPath, doc, diag, rule, partIndex - 1,
+			pathIndex, evaluationSteps, trace)) {
+			if (adjacent) saturatingIncrement(diag.adjacentSiblingMatches);
+			else saturatingIncrement(diag.generalSiblingMatches);
+			return true;
+		}
+		if (adjacent) return false;
+		previousSerial = previous->previousSiblingSerial;
+	}
+	return false;
+}
+
+static bool selectorMatchesPathAt(const std::vector<HtmlElementRef>& path,
+	const WebDocument& doc,
+	CssDiagnostics& diag,
+	const WebStyleRule& rule,
+	int partIndex,
+	int pathIndex,
+	size_t& evaluationSteps,
+	CssSelectorMatchTrace& trace)
 {
 	if (++evaluationSteps > kCssLiteMaxSelectorEvaluationSteps) {
 		saturatingIncrement(diag.selectorEvaluationStepClamps);
@@ -1475,10 +1592,14 @@ static bool selectorMatchesPathAt(const std::vector<HtmlElementRef>& path,
 	if (partIndex == 0) return true;
 	const CssCombinator combinator = rule.combinators[static_cast<size_t>(partIndex - 1)];
 	if (combinator == CssCombinator::Child) {
-		return selectorMatchesPathAt(path, doc, diag, rule, partIndex - 1, pathIndex - 1, evaluationSteps);
+		return selectorMatchesPathAt(path, doc, diag, rule, partIndex - 1, pathIndex - 1, evaluationSteps, trace);
+	}
+	if (combinator == CssCombinator::AdjacentSibling || combinator == CssCombinator::GeneralSibling) {
+		return selectorMatchesSiblingRelation(path, doc, diag, rule, partIndex, pathIndex,
+			combinator, evaluationSteps, trace);
 	}
 	for (int ancestorIndex = pathIndex - 1; ancestorIndex >= 0; --ancestorIndex) {
-		if (selectorMatchesPathAt(path, doc, diag, rule, partIndex - 1, ancestorIndex, evaluationSteps)) return true;
+		if (selectorMatchesPathAt(path, doc, diag, rule, partIndex - 1, ancestorIndex, evaluationSteps, trace)) return true;
 	}
 	return false;
 }
@@ -1486,15 +1607,19 @@ static bool selectorMatchesPathAt(const std::vector<HtmlElementRef>& path,
 static bool selectorMatchesPath(const std::vector<HtmlElementRef>& path,
 	const WebDocument& doc,
 	CssDiagnostics& diag,
-	const WebStyleRule& rule)
+	const WebStyleRule& rule,
+	CssSelectorMatchTrace* traceOut = nullptr)
 {
 	if (rule.selectorParts.empty() || path.empty() ||
 		rule.selectorParts.size() != rule.combinators.size() + 1 ||
 		rule.combinators.size() > kCssLiteMaxCombinatorDepth) return false;
 	size_t evaluationSteps = 0;
-	return selectorMatchesPathAt(path, doc, diag, rule,
+	CssSelectorMatchTrace trace;
+	const bool matched = selectorMatchesPathAt(path, doc, diag, rule,
 		static_cast<int>(rule.selectorParts.size()) - 1,
-		static_cast<int>(path.size()) - 1, evaluationSteps);
+		static_cast<int>(path.size()) - 1, evaluationSteps, trace);
+	if (traceOut) *traceOut = trace;
+	return matched;
 }
 
 static bool parseInlineStyleDeclaration(WebStyle& style,
@@ -2543,6 +2668,7 @@ static std::string pathSignature(const std::vector<HtmlElementRef>& path)
 			<< "@" << element.serial << ":" << element.parentSerial
 			<< ":" << element.childIndex << "/" << element.childCount
 			<< ":s" << element.siblingCount
+			<< ":prev=" << element.previousSiblingSerial
 			<< ":" << element.typeIndex << "/" << element.typeCount
 			<< ":" << (element.hasLinkTarget ? (element.visited ? "visited" : "link") : "");
 	}
@@ -2557,6 +2683,8 @@ struct CssCascadeWinner {
 	CssSpecificity specificity;
 	uint32_t sourceOrder = 0;
 	std::string pseudoCategory;
+	std::string combinatorCategory;
+	size_t siblingScanSteps = 0;
 };
 
 static const char* cssPseudoName(CssPseudoClass type)
@@ -2588,6 +2716,15 @@ static std::string selectorPseudoSummary(const WebStyleRule& rule)
 		}
 	}
 	return summary;
+}
+
+static std::string selectorCombinatorSummary(const WebStyleRule& rule)
+{
+	for (CssCombinator combinator : rule.combinators) {
+		if (combinator == CssCombinator::AdjacentSibling) return "adjacent-sibling";
+		if (combinator == CssCombinator::GeneralSibling) return "general-sibling";
+	}
+	return "none";
 }
 
 static bool specificityGreater(const CssSpecificity& left, const CssSpecificity& right)
@@ -2658,7 +2795,8 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 {
 	const std::string id = toLower(element.id);
 	if (id.rfind("phase2a-", 0) != 0 && id.rfind("css2a-", 0) != 0 &&
-		id.rfind("phase2b-", 0) != 0 && id.rfind("css2b-", 0) != 0) return;
+		id.rfind("phase2b-", 0) != 0 && id.rfind("css2b-", 0) != 0 &&
+		id.rfind("phase2c-", 0) != 0 && id.rfind("css2c-", 0) != 0) return;
 	if (doc.cssDiagnostics.computedStyleEvidence.size() >= kCssLiteMaxEvidenceBytes ||
 		std::count(doc.cssDiagnostics.computedStyleEvidence.begin(),
 			doc.cssDiagnostics.computedStyleEvidence.end(), ';') >= static_cast<int>(kCssLiteMaxEvidenceEntries - 1)) return;
@@ -2666,6 +2804,11 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 	const CssCascadeWinner& paddingWinner = winners[static_cast<size_t>(CssProperty::PaddingTop)];
 	const CssCascadeWinner& fontWinner = winners[static_cast<size_t>(CssProperty::FontSize)];
 	const CssCascadeWinner& borderWinner = winners[static_cast<size_t>(CssProperty::BorderTopWidth)];
+	std::string previousSiblingTag = "none";
+	if (element.previousSiblingSerial > 0 && element.previousSiblingSerial <= doc.structuralElements.size()) {
+		const HtmlElementRef& previous = doc.structuralElements[static_cast<size_t>(element.previousSiblingSerial - 1)];
+		if (previous.serial == element.previousSiblingSerial) previousSiblingTag = toLower(previous.tagName);
+	}
 	std::ostringstream oss;
 	oss << "id=" << element.id << ",tag=" << toLower(element.tagName)
 		<< ",classes=" << collapseWs(element.className)
@@ -2681,6 +2824,11 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",padding-source-order=" << paddingWinner.sourceOrder
 		<< ",font-size-source-order=" << fontWinner.sourceOrder
 		<< ",border-source-order=" << borderWinner.sourceOrder
+		<< ",parent-serial=" << element.parentSerial
+		<< ",previous-sibling-serial=" << element.previousSiblingSerial
+		<< ",previous-sibling-tag=" << previousSiblingTag
+		<< ",winning-combinator=" << (colorWinner.combinatorCategory.empty() ? "none" : colorWinner.combinatorCategory)
+		<< ",sibling-scan-steps=" << colorWinner.siblingScanSteps
 		<< ",element-index=" << element.childIndex
 		<< ",element-count=" << element.siblingCount
 		<< ",type-index=" << element.typeIndex
@@ -2715,7 +2863,8 @@ static WebStyle computePathStyle(WebDocument& doc,
 	}
 
 	for (const WebStyleRule& rule : doc.styleRules) {
-		if (!selectorMatchesPath(path, doc, doc.cssDiagnostics, rule)) continue;
+		CssSelectorMatchTrace matchTrace;
+		if (!selectorMatchesPath(path, doc, doc.cssDiagnostics, rule, &matchTrace)) continue;
 		saturatingIncrement(doc.cssDiagnostics.selectorMatches);
 		for (unsigned i = 0; i < static_cast<unsigned>(CssProperty::Count); ++i) {
 			const CssProperty property = static_cast<CssProperty>(i);
@@ -2735,6 +2884,8 @@ static WebStyle computePathStyle(WebDocument& doc,
 			candidate.specificity = rule.specificityTuple;
 			candidate.sourceOrder = rule.sourceOrder;
 			candidate.pseudoCategory = selectorPseudoSummary(rule);
+			candidate.combinatorCategory = selectorCombinatorSummary(rule);
+			candidate.siblingScanSteps = matchTrace.siblingScanSteps;
 			if (!cascadeCandidateWins(candidate, winners[i])) continue;
 			if (winners[i].valid) {
 				if (specificityGreater(candidate.specificity, winners[i].specificity)) saturatingIncrement(doc.cssDiagnostics.specificityOverrides);
@@ -2929,6 +3080,7 @@ enum class OpenTag : uint8_t {
 
 struct StructuralChildCounter {
 	uint64_t serial = 0;
+	uint64_t lastChildSerial = 0;
 	uint16_t childCount = 0;
 	std::vector<std::pair<std::string, uint16_t>> typeCounts;
 };
@@ -3009,10 +3161,12 @@ static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef 
 	element.serial = st.nextElementSerial++;
 	element.parentSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
 	if (StructuralChildCounter* parent = findStructuralCounter(st, element.parentSerial)) {
+		element.previousSiblingSerial = parent->lastChildSerial;
 		if (parent->childCount < std::numeric_limits<uint16_t>::max()) {
 			element.childIndex = static_cast<uint16_t>(++parent->childCount);
 		} else {
 			saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+			saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataClamps);
 		}
 		uint16_t* typeCount = nullptr;
 		for (auto& type : parent->typeCounts) {
@@ -3031,9 +3185,13 @@ static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef 
 		}
 		if (typeCount && *typeCount < std::numeric_limits<uint16_t>::max())
 			element.typeIndex = static_cast<uint16_t>(++(*typeCount));
+		parent->lastChildSerial = element.serial;
+	} else if (element.parentSerial != 0) {
+		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataErrors);
 	}
 	if (st.structuralElements.size() >= kCssLiteMaxStructuralMetadata) {
 		saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataClamps);
 		return element;
 	}
 	st.structuralElements.push_back(element);
@@ -3853,6 +4011,7 @@ static void finalizeStructuralMetadata(ParserState& st)
 		updateRef(block.elementMetadata);
 		for (HtmlElementRef& ancestor : block.ancestors) updateRef(ancestor);
 	}
+	st.doc.structuralElements = std::move(st.structuralElements);
 }
 
 } // anonymous namespace

@@ -1331,6 +1331,14 @@ namespace {
 		metadata.cssCompoundSelectorsParsed = doc.cssDiagnostics.compoundSelectorsParsed;
 		metadata.cssChildCombinators = doc.cssDiagnostics.childCombinatorCount;
 		metadata.cssDescendantCombinators = doc.cssDiagnostics.descendantCombinatorCount;
+		metadata.cssAdjacentSiblingCombinators = doc.cssDiagnostics.adjacentSiblingCombinatorCount;
+		metadata.cssGeneralSiblingCombinators = doc.cssDiagnostics.generalSiblingCombinatorCount;
+		metadata.cssAdjacentSiblingMatches = doc.cssDiagnostics.adjacentSiblingMatches;
+		metadata.cssGeneralSiblingMatches = doc.cssDiagnostics.generalSiblingMatches;
+		metadata.cssSiblingScanSteps = doc.cssDiagnostics.siblingScanSteps;
+		metadata.cssSiblingScanClamps = doc.cssDiagnostics.siblingScanClamps;
+		metadata.cssSiblingMetadataClamps = doc.cssDiagnostics.siblingMetadataClamps;
+		metadata.cssSiblingMetadataErrors = doc.cssDiagnostics.siblingMetadataErrors;
 		metadata.cssSelectorMatches = doc.cssDiagnostics.selectorMatches;
 		metadata.cssSpecificityOverrides = doc.cssDiagnostics.specificityOverrides;
 		metadata.cssSourceOrderOverrides = doc.cssDiagnostics.sourceOrderOverrides;
@@ -2606,6 +2614,14 @@ namespace {
 		int cssCompoundSelectorsParsed,
 		int cssChildCombinators,
 		int cssDescendantCombinators,
+		int cssAdjacentSiblingCombinators,
+		int cssGeneralSiblingCombinators,
+		int cssAdjacentSiblingMatches,
+		int cssGeneralSiblingMatches,
+		int cssSiblingScanSteps,
+		int cssSiblingScanClamps,
+		int cssSiblingMetadataClamps,
+		int cssSiblingMetadataErrors,
 		int cssSelectorMatches,
 		int cssSpecificityOverrides,
 		int cssSourceOrderOverrides,
@@ -2861,6 +2877,14 @@ namespace {
 			{"Current Document", "CSS compound selectors parsed", std::to_string(cssCompoundSelectorsParsed)},
 			{"Current Document", "CSS child combinators", std::to_string(cssChildCombinators)},
 			{"Current Document", "CSS descendant combinators", std::to_string(cssDescendantCombinators)},
+			{"Current Document", "CSS adjacent-sibling combinators", std::to_string(cssAdjacentSiblingCombinators)},
+			{"Current Document", "CSS general-sibling combinators", std::to_string(cssGeneralSiblingCombinators)},
+			{"Current Document", "CSS adjacent-sibling matches", std::to_string(cssAdjacentSiblingMatches)},
+			{"Current Document", "CSS general-sibling matches", std::to_string(cssGeneralSiblingMatches)},
+			{"Current Document", "CSS sibling scan steps", std::to_string(cssSiblingScanSteps)},
+			{"Current Document", "CSS sibling scan clamps", std::to_string(cssSiblingScanClamps)},
+			{"Current Document", "CSS sibling metadata clamps", std::to_string(cssSiblingMetadataClamps)},
+			{"Current Document", "CSS sibling metadata errors", std::to_string(cssSiblingMetadataErrors)},
 			{"Current Document", "CSS selector matches", std::to_string(cssSelectorMatches)},
 			{"Current Document", "CSS specificity overrides", std::to_string(cssSpecificityOverrides)},
 			{"Current Document", "CSS source-order overrides", std::to_string(cssSourceOrderOverrides)},
@@ -3354,6 +3378,14 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssCompoundSelectorsParsed,
 		s_pageMetadata.cssChildCombinators,
 		s_pageMetadata.cssDescendantCombinators,
+		s_pageMetadata.cssAdjacentSiblingCombinators,
+		s_pageMetadata.cssGeneralSiblingCombinators,
+		s_pageMetadata.cssAdjacentSiblingMatches,
+		s_pageMetadata.cssGeneralSiblingMatches,
+		s_pageMetadata.cssSiblingScanSteps,
+		s_pageMetadata.cssSiblingScanClamps,
+		s_pageMetadata.cssSiblingMetadataClamps,
+		s_pageMetadata.cssSiblingMetadataErrors,
 		s_pageMetadata.cssSelectorMatches,
 		s_pageMetadata.cssSpecificityOverrides,
 		s_pageMetadata.cssSourceOrderOverrides,
@@ -5986,6 +6018,14 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssCompoundSelectorsParsed,
 		s_pageMetadata.cssChildCombinators,
 		s_pageMetadata.cssDescendantCombinators,
+		s_pageMetadata.cssAdjacentSiblingCombinators,
+		s_pageMetadata.cssGeneralSiblingCombinators,
+		s_pageMetadata.cssAdjacentSiblingMatches,
+		s_pageMetadata.cssGeneralSiblingMatches,
+		s_pageMetadata.cssSiblingScanSteps,
+		s_pageMetadata.cssSiblingScanClamps,
+		s_pageMetadata.cssSiblingMetadataClamps,
+		s_pageMetadata.cssSiblingMetadataErrors,
 		s_pageMetadata.cssSelectorMatches,
 		s_pageMetadata.cssSpecificityOverrides,
 		s_pageMetadata.cssSourceOrderOverrides,

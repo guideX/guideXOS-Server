@@ -209,6 +209,11 @@ static std::string navigatorHostedSmokeDiagnostic() {
         if (text.size() > compact.size()) compact += "...";
         return compact;
     };
+    auto evidenceSnippet = [&](const std::string& report, const std::string& needle) {
+        const std::size_t pos = report.find(needle);
+        if (pos == std::string::npos) return std::string("(missing)");
+        return summarizeText(report.substr(pos, 700), 700);
+    };
     auto envIsOne = [](const char* name) {
         const char* value = std::getenv(name);
         return value && std::string(value) == "1";
@@ -910,6 +915,94 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ",visited-pseudo=" + yesNo(contains(cssPhase2bReport, "color-winning-pseudo=visited")) +
         ",link=" + yesNo(contains(cssPhase2bReport, "id=phase2b-link")) +
         ",link-pseudo=" + yesNo(contains(cssPhase2bReport, "color-winning-pseudo=link")));
+
+    bool cssPhase2cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2c.html");
+    std::string cssPhase2cText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2cReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2cReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2cReport.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = cssPhase2cReport.find('\n', pos);
+        return cssPhase2cReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    const bool cssPhase2cVisitedPurple = contains(cssPhase2cReport,
+        "id=phase2c-visited,tag=a,classes=,color=#7c3aed");
+    const bool cssPhase2cVisitedPseudoEvidence =
+        contains(cssPhase2cReport, "color-winning-pseudo=visited") ||
+        contains(cssPhase2cReport, "color-winning-pseudo=link+visited");
+    const bool cssPhase2cCrossParentUnmatched = contains(cssPhase2cReport,
+        "id=phase2c-cross-parent,tag=p,classes=,color=#334155");
+    add("CSS phase 2C sibling fixture loads",
+        cssPhase2cLoaded &&
+        contains(cssPhase2cText, "Phase 2C Sibling Combinators") &&
+        contains(cssPhase2cText, "Immediate paragraph") &&
+        contains(cssPhase2cText, "Later paragraph") &&
+        contains(cssPhase2cText, "Second item") &&
+        contains(cssPhase2cText, "Later note") &&
+        contains(cssPhase2cText, "Cross parent paragraph") &&
+        contains(cssPhase2cText, "Visited sibling") &&
+        contains(cssPhase2cText, "Cascade target"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2C sibling diagnostics",
+        contains(cssPhase2cReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS adjacent-sibling combinators=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS general-sibling combinators=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS adjacent-sibling matches=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS general-sibling matches=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS sibling scan steps=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS sibling scan clamps=") &&
+        contains(cssPhase2cReport, "Current Document.CSS sibling metadata errors=0") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS :visited pseudo matches=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS unsupported selectors=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS selector depth clamps="),
+        "adjacent=" + cssPhase2cReportLine("Current Document.CSS adjacent-sibling matches=") +
+        "; general=" + cssPhase2cReportLine("Current Document.CSS general-sibling matches=") +
+        "; scan=" + cssPhase2cReportLine("Current Document.CSS sibling scan steps=") +
+        "; scan-clamps=" + cssPhase2cReportLine("Current Document.CSS sibling scan clamps=") +
+        "; metadata-errors=" + cssPhase2cReportLine("Current Document.CSS sibling metadata errors=") +
+        "; visited=" + cssPhase2cReportLine("Current Document.CSS :visited pseudo matches=") +
+        "; unsupported=" + cssPhase2cReportLine("Current Document.CSS unsupported selectors=") +
+        "; depth=" + cssPhase2cReportLine("Current Document.CSS selector depth clamps="));
+    add("CSS phase 2C sibling and structural evidence",
+        contains(cssPhase2cReport, "id=phase2c-adj-immediate") &&
+        contains(cssPhase2cReport, "previous-sibling-tag=h2") &&
+        contains(cssPhase2cReport, "winning-combinator=adjacent-sibling") &&
+        contains(cssPhase2cReport, "id=phase2c-general-note") &&
+        contains(cssPhase2cReport, "winning-combinator=general-sibling") &&
+        contains(cssPhase2cReport, "id=phase2c-list-second") &&
+        contains(cssPhase2cReport, "element-index=2") &&
+        contains(cssPhase2cReport, "id=phase2c-visited") &&
+        cssPhase2cVisitedPurple &&
+        cssPhase2cVisitedPseudoEvidence &&
+        cssPhase2cCrossParentUnmatched &&
+        contains(cssPhase2cReport, "id=phase2c-group-valid"),
+        std::string("adjacent-evidence=") + yesNo(contains(cssPhase2cReport, "winning-combinator=adjacent-sibling")) +
+        ",general-evidence=" + yesNo(contains(cssPhase2cReport, "winning-combinator=general-sibling")) +
+        ",previous-tag=" + yesNo(contains(cssPhase2cReport, "previous-sibling-tag=h2")) +
+        ",visited-id=" + yesNo(contains(cssPhase2cReport, "id=phase2c-visited")) +
+        ",visited-required-color=" + yesNo(cssPhase2cVisitedPurple) +
+        ",visited-pseudo=" + yesNo(cssPhase2cVisitedPseudoEvidence) +
+        ",visited=" + yesNo(cssPhase2cVisitedPseudoEvidence) +
+        ",cross-parent-unmatched=" + yesNo(cssPhase2cCrossParentUnmatched) +
+        "; visited-evidence=" + evidenceSnippet(cssPhase2cReport, "id=phase2c-visited") +
+        "; cross-parent-evidence=" + evidenceSnippet(cssPhase2cReport, "id=phase2c-cross-parent") +
+        "; evidence=" + summarizeText(cssPhase2cReportLine("Current Document.CSS computed style evidence="), 2200));
+    add("CSS phase 2C pseudo and cascade evidence",
+        contains(cssPhase2cReport, "id=phase2c-not-target") &&
+        contains(cssPhase2cReport, "font-size=18") &&
+        contains(cssPhase2cReport, "id=phase2c-cascade-target") &&
+        contains(cssPhase2cReport, "padding-top=7") &&
+        contains(cssPhase2cReport, "border-top-width=1") &&
+        contains(cssPhase2cReport, "id=phase2c-inline") &&
+        contains(cssPhase2cReport, "color=#1d4ed8") &&
+        contains(cssPhase2cReport, "id=phase2c-important") &&
+        contains(cssPhase2cReport, "color=#166534"),
+        std::string("not=") + yesNo(contains(cssPhase2cReport, "id=phase2c-not-target")) +
+        ",partial-padding=" + yesNo(contains(cssPhase2cReport, "padding-top=7")) +
+        ",partial-border=" + yesNo(contains(cssPhase2cReport, "border-top-width=1")) +
+        ",inline=" + yesNo(contains(cssPhase2cReport, "color=#1d4ed8")) +
+        ",important=" + yesNo(contains(cssPhase2cReport, "color=#166534")) +
+        "; evidence=" + summarizeText(cssPhase2cReportLine("Current Document.CSS computed style evidence="), 2200));
 
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);

@@ -482,6 +482,51 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<img id=\"phase2b-image-url\" src=\"/navigator-smoke/tiny.png\" alt=\"Non-anchor URL marker\">"
                              b"</body></html>")
             return
+        if path == "/navigator-smoke/css-phase2c.html":
+            scan_items = b"".join(
+                b"<p>bounded scan item %d</p>" % index for index in range(70)
+            )
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2C Sibling Combinators</title><style>"
+                             b"body { color:#334155; font-size:16px; }"
+                             b"h2 + p { color:#dc2626; background:#fef3c7; }"
+                             b"h2+p { border-top:1px solid #ef4444; }"
+                             b"section > h2 + p { padding:6px; }"
+                             b"h2 ~ p { color:#0f766e; background:#fef3c7; }"
+                             b"h2:first-of-type ~ p { border-left:2px solid #2563eb; }"
+                             b".a + .b { color:#7c3aed; }"
+                             b"li + li { text-decoration:underline; }"
+                             b"li:first-child + li { background:#dcfce7; }"
+                             b"li:nth-child(2) + li { border-bottom:1px solid #16a34a; }"
+                             b"li.selected ~ li { color:#0369a1; }"
+                             b"p:not(.hidden) + p { font-size:18px; }"
+                             b"p.warning ~ p.action { color:#b45309; }"
+                             b"a:link + a:visited { color:#7c3aed; }"
+                             b"article h2 ~ p.note { background:#dbeafe; }"
+                             b"#phase2c-cascade-wrap p { padding:7px; border-top:1px solid #64748b; }"
+                             b"h2 + p { color:#b91c1c; }"
+                             b"h2.phase2c-important-heading + p { color:#166534 !important; }"
+                             b".phase2c-group-valid, .bad + { color:#0f766e; }"
+                             b"h2 ++ p { color:#000000; } h2 ~~ p { color:#000000; } h2 + ~ p { color:#000000; }"
+                             b"* p { color:#000000; }"
+                             b"p[data-phase2c='bad'] + p { color:#000000; }"
+                             b"h2 + p + span + em + b + strong + code + i + small { color:#000000; }"
+                             b".phase2c-scan-start ~ p { color:#000000; }"
+                             b"</style></head><body>"
+                             b"<h1 id=\"phase2c-heading\">Phase 2C Sibling Combinators</h1>"
+                             b"<section id=\"phase2c-adj-wrap\"><h2 id=\"phase2c-adj-heading\">Adjacent heading</h2>\n  <p id=\"phase2c-adj-immediate\" class=\"a\">Immediate paragraph</p>\n  <p id=\"phase2c-adj-later\">Later paragraph</p></section>"
+                             b"<h2 class=\"phase2c-cross-source\">Cross parent source</h2><div><p id=\"phase2c-cross-parent\">Cross parent paragraph</p></div>"
+                             b"<ul id=\"phase2c-list\"><li id=\"phase2c-list-first\" class=\"selected a\">First item</li>\n  <li id=\"phase2c-list-second\" class=\"b\">Second item</li><li id=\"phase2c-list-third\">Third item</li></ul>"
+                             b"<article id=\"phase2c-article\"><p id=\"phase2c-general-before\">Earlier paragraph</p><h2 id=\"phase2c-general-heading\">General heading</h2><div>Intervening element</div><p id=\"phase2c-general-note\" class=\"note\">Later note</p><p id=\"phase2c-general-action\" class=\"action\">Later action</p></article>"
+                             b"<div id=\"phase2c-warning-wrap\"><p class=\"warning\">Warning source</p><span>Intervening span</span><p id=\"phase2c-warning-action\" class=\"action\">Warning action</p></div>"
+                             b"<div id=\"phase2c-not-wrap\"><p class=\"source\">Visible source</p><p id=\"phase2c-not-target\">Not hidden target</p><p class=\"hidden\">Hidden source</p><p id=\"phase2c-not-blocked\">Blocked target</p></div>"
+                             b"<div id=\"phase2c-link-wrap\"><a class=\"phase2c-link-source\" href=\"/navigator-smoke/css-phase2c-never-visited.html\">Unvisited source</a><a id=\"phase2c-visited\" href=\"/navigator-smoke/basic.html\">Visited sibling</a></div>"
+                             b"<div id=\"phase2c-cascade-wrap\"><h2>Source</h2><p id=\"phase2c-cascade-target\">Cascade target</p><h2>Inline source</h2><p id=\"phase2c-inline\" style=\"color:#1d4ed8;\">Inline target</p><h2 class=\"phase2c-important-heading\">Important source</h2><p id=\"phase2c-important\">Important target</p></div>"
+                             b"<p id=\"phase2c-group-valid\">Valid group member</p>"
+                             b"<div id=\"phase2c-scan-wrap\"><p class=\"phase2c-scan-start\">Scan source</p>" + scan_items +
+                             b"<p id=\"phase2c-scan-last\">Scan last</p></div>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-external-safety.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head>"

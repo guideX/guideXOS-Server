@@ -151,6 +151,14 @@ struct NavigatorPageMetadata {
 		int         cssCompoundSelectorsParsed = 0;
 		int         cssChildCombinators = 0;
 		int         cssDescendantCombinators = 0;
+		int         cssAdjacentSiblingCombinators = 0;
+		int         cssGeneralSiblingCombinators = 0;
+		int         cssAdjacentSiblingMatches = 0;
+		int         cssGeneralSiblingMatches = 0;
+		int         cssSiblingScanSteps = 0;
+		int         cssSiblingScanClamps = 0;
+		int         cssSiblingMetadataClamps = 0;
+		int         cssSiblingMetadataErrors = 0;
 		int         cssSelectorMatches = 0;
 		int         cssSpecificityOverrides = 0;
 		int         cssSourceOrderOverrides = 0;

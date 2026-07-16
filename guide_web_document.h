@@ -115,6 +115,7 @@ struct HtmlElementRef {
 	uint16_t    siblingCount = 0;
 	uint16_t    typeIndex = 0;
 	uint16_t    typeCount = 0;
+	uint64_t    previousSiblingSerial = 0;
 	bool        hasLinkTarget = false;
 	bool        visited = false;
 };
@@ -122,6 +123,8 @@ struct HtmlElementRef {
 enum class CssCombinator : uint8_t {
 	Descendant = 0,
 	Child      = 1,
+	AdjacentSibling = 2,
+	GeneralSibling = 3,
 };
 
 struct CssSpecificity {
@@ -268,6 +271,14 @@ struct CssDiagnostics {
 	int    compoundSelectorsParsed = 0;
 	int    childCombinatorCount = 0;
 	int    descendantCombinatorCount = 0;
+	int    adjacentSiblingCombinatorCount = 0;
+	int    generalSiblingCombinatorCount = 0;
+	int    adjacentSiblingMatches = 0;
+	int    generalSiblingMatches = 0;
+	int    siblingScanSteps = 0;
+	int    siblingScanClamps = 0;
+	int    siblingMetadataClamps = 0;
+	int    siblingMetadataErrors = 0;
 	int    selectorMatches = 0;
 	int    specificityOverrides = 0;
 	int    sourceOrderOverrides = 0;
@@ -358,6 +369,10 @@ struct WebDocument {
 	bool                  hasDocumentElement = false;
 	HtmlElementRef        bodyElement;
 	bool                  hasBodyElement = false;
+	// Bounded structural-node metadata retained for selector relationships.
+	// This is not a DOM tree: records are compact, serial-addressed, and capped
+	// by the parser's structural metadata limit.
+	std::vector<HtmlElementRef> structuralElements;
 	WebStyle              bodyStyle;
 	std::vector<WebStyleRule> styleRules;
 	CssDiagnostics        cssDiagnostics;
