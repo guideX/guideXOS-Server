@@ -2320,8 +2320,9 @@ bool NotepadApp::updateMenuHover(int x, int y) {
 // ============================================================
 
 DisplayOptionsApp::DisplayOptionsApp()
-    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(520), m_windowH(390), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false} {
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false) {
     strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
+    m_displayStatus[0] = '\0';
 }
 
 DisplayOptionsApp::~DisplayOptionsApp() {
@@ -2343,6 +2344,7 @@ void DisplayOptionsApp::loadSelection() {
     m_activeTab = 0;
     m_desktopIconVisibility = kernel::desktop::get_system_desktop_icon_visibility();
     serial::puts("[display-options] Desktop Icons checkbox state loaded\n");
+    queryDisplayConfiguration();
 
     for (int i = 0; i < kKernelWallpaperCount; ++i) {
         if (streq_local(currentId, s_kernelWallpapers[i].id)) {
@@ -2365,14 +2367,16 @@ void DisplayOptionsApp::loadSelection() {
 }
 
 bool DisplayOptionsApp::init() {
+    ++m_windowGeneration;
+    m_displayRequestPending = false;
     m_window = new app::KernelWindow();
     if (!m_window) return false;
 
     m_window->owner = this;
     m_window->x = 70;
     m_window->y = 50;
-    m_window->w = 520;
-    m_window->h = 390;
+    m_window->w = 720;
+    m_window->h = 460;
     m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_FOCUSED;
     strcopy(m_window->title, "Display Options", app::MAX_TITLE_LEN);
     m_windowW = static_cast<int>(m_window->w);
@@ -2392,7 +2396,14 @@ bool DisplayOptionsApp::init() {
 }
 
 void DisplayOptionsApp::shutdown() {
+    ++m_windowGeneration;
+    m_displayRequestPending = false;
     m_state = app::AppState::Terminated;
+}
+
+void DisplayOptionsApp::onWindowClose() {
+    ++m_windowGeneration;
+    m_displayRequestPending = false;
 }
 
 void DisplayOptionsApp::setActiveTab(int tab)
@@ -2493,7 +2504,7 @@ void DisplayOptionsApp::setActiveSelectionIndex(int index) {
 }
 
 void DisplayOptionsApp::setActiveTabAndClamp(int tab) {
-    if (tab < 0 || tab > 4) return;
+    if (tab < 0 || tab > 3) return;
     m_activeTab = tab;
     clampSelectionToCurrentTab();
     if (tab == 0 || tab == 1) {
@@ -2514,6 +2525,209 @@ void DisplayOptionsApp::setActiveTabAndClamp(int tab) {
     }
 }
 
+static void display_config_number(uint32_t value, char* destination, uint32_t capacity)
+{
+    if (destination == nullptr || capacity == 0u) return;
+    char reverse[16];
+    uint32_t count = 0u;
+    do {
+        reverse[count++] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && count < sizeof(reverse));
+    uint32_t out = 0u;
+    while (count > 0u && out + 1u < capacity) destination[out++] = reverse[--count];
+    destination[out] = '\0';
+}
+
+static void display_config_signed_number(int32_t value, char* destination, uint32_t capacity)
+{
+    if (destination == nullptr || capacity == 0u) return;
+    if (value < 0) {
+        destination[0] = '-';
+        display_config_number(static_cast<uint32_t>(-(value + 1)) + 1u, destination + 1u, capacity - 1u);
+    } else {
+        display_config_number(static_cast<uint32_t>(value), destination, capacity);
+    }
+}
+
+void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    const uint32_t panelX = x + 14u;
+    const uint32_t panelY = y + 74u;
+    const uint32_t panelW = w > 28u ? w - 28u : 1u;
+    const uint32_t panelH = h > 92u ? h - 92u : 1u;
+    framebuffer::fill_rect(panelX, panelY, panelW, panelH, rgb(22, 22, 24));
+
+    appDrawText(x + 18u, y + 58u, "Display configuration", rgb(230, 230, 238));
+    appDrawText(x + 28u, y + 92u, "Mode", rgb(190, 195, 205));
+
+    const auto button = [&](uint32_t bx, uint32_t by, uint32_t bw, const char* label, bool selected) {
+        framebuffer::fill_rect(bx, by, bw, 28u, selected ? rgb(62, 96, 150) : rgb(38, 39, 46));
+        appDrawRect(bx, by, bw, 28u, rgb(112, 120, 140));
+        appDrawText(bx + 10u, by + 9u, label, rgb(235, 238, 246));
+    };
+    button(x + 88u, y + 86u, 92u, "Extend", m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Extend);
+    button(x + 188u, y + 86u, 92u, "Mirror", m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Mirror);
+
+    appDrawText(x + 28u, y + 132u, "Primary monitor", rgb(190, 195, 205));
+    button(x + 150u, y + 126u, 112u, "Display 1", m_selectedPrimaryOutput == 1u);
+    button(x + 270u, y + 126u, 112u, "Display 2", m_selectedPrimaryOutput == 2u);
+
+    char number[16];
+    char geometry[40];
+    display_config_number(static_cast<uint32_t>(m_activeDisplayConfiguration.virtualDesktopWidth), number, sizeof(number));
+    strcopy(geometry, number, sizeof(geometry));
+    strappend(geometry, "x", sizeof(geometry));
+    display_config_number(static_cast<uint32_t>(m_activeDisplayConfiguration.virtualDesktopHeight), number, sizeof(number));
+    strappend(geometry, number, sizeof(geometry));
+    appDrawText(x + 28u, y + 174u, "Active desktop", rgb(190, 195, 205));
+    appDrawText(x + 150u, y + 174u, geometry, rgb(225, 228, 236));
+    appDrawText(x + 28u, y + 198u, "Backend", rgb(190, 195, 205));
+    appDrawText(x + 150u, y + 198u, m_activeDisplayConfiguration.backend[0] != '\0' ? m_activeDisplayConfiguration.backend : "Unavailable", rgb(225, 228, 236));
+
+    appDrawText(x + 28u, y + 230u, "Monitor 1", rgb(190, 195, 205));
+    appDrawText(x + 150u, y + 230u, m_activeDisplayConfiguration.outputCount > 0u ? m_activeDisplayConfiguration.outputs[0].stableId : "Unavailable", rgb(225, 228, 236));
+    if (m_activeDisplayConfiguration.outputCount > 0u) {
+        char origin[32];
+        char originNumber[16];
+        display_config_signed_number(m_activeDisplayConfiguration.outputs[0].virtualX, originNumber, sizeof(originNumber));
+        strcopy(origin, originNumber, sizeof(origin));
+        strappend(origin, ",", sizeof(origin));
+        display_config_signed_number(m_activeDisplayConfiguration.outputs[0].virtualY, originNumber, sizeof(originNumber));
+        strappend(origin, originNumber, sizeof(origin));
+        appDrawText(x + 300u, y + 230u, origin, rgb(185, 190, 202));
+    }
+    appDrawText(x + 28u, y + 254u, "Monitor 2", rgb(190, 195, 205));
+    appDrawText(x + 150u, y + 254u, m_activeDisplayConfiguration.outputCount > 1u ? m_activeDisplayConfiguration.outputs[1].stableId : "Unavailable", rgb(225, 228, 236));
+    if (m_activeDisplayConfiguration.outputCount > 1u) {
+        char origin[32];
+        char originNumber[16];
+        display_config_signed_number(m_activeDisplayConfiguration.outputs[1].virtualX, originNumber, sizeof(originNumber));
+        strcopy(origin, originNumber, sizeof(origin));
+        strappend(origin, ",", sizeof(origin));
+        display_config_signed_number(m_activeDisplayConfiguration.outputs[1].virtualY, originNumber, sizeof(originNumber));
+        strappend(origin, originNumber, sizeof(origin));
+        appDrawText(x + 300u, y + 254u, origin, rgb(185, 190, 202));
+    }
+
+    appDrawText(x + 28u, y + static_cast<uint32_t>(maxInt(292, static_cast<int>(h) - 56u)), m_displayStatus[0] != '\0' ? m_displayStatus : "Ready", rgb(190, 205, 225));
+
+    const uint32_t actionY = y + h - 38u;
+    button(x + 300u, actionY, 88u, "Apply", false);
+    button(x + 396u, actionY, 88u, "OK", false);
+    button(x + 492u, actionY, 88u, "Cancel", false);
+}
+
+bool DisplayOptionsApp::queryDisplayConfiguration()
+{
+    gxos::display::DisplayConfigurationCommand command{};
+    command.version = gxos::display::kDisplayConfigurationContractVersion;
+    command.structureSize = sizeof(command);
+    command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::QueryActiveConfiguration);
+    gxos::display::DisplayConfigurationResponse response{};
+    const uint64_t generation = m_windowGeneration;
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
+    if (generation != m_windowGeneration || response.requestId != command.requestId || response.commandType != command.commandType) return false;
+    if (!submitted || response.success == 0u) {
+        strcopy(m_displayStatus, "Display query failed", sizeof(m_displayStatus));
+        return false;
+    }
+    m_activeDisplayConfiguration = response.activeConfiguration;
+    m_selectedDisplayMode = static_cast<gxos::display::DisplayConfigurationMode>(m_activeDisplayConfiguration.mode);
+    m_appliedDisplayMode = m_selectedDisplayMode;
+    for (uint32_t i = 0u; i < m_activeDisplayConfiguration.outputCount && i < gxos::display::kDisplayConfigurationMaxOutputs; ++i) {
+        if (m_activeDisplayConfiguration.outputs[i].primary != 0u) {
+            m_selectedPrimaryOutput = i + 1u;
+            m_appliedPrimaryOutput = m_selectedPrimaryOutput;
+            break;
+        }
+    }
+    strcopy(m_displayStatus, "Active configuration loaded", sizeof(m_displayStatus));
+    return true;
+}
+
+bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
+{
+    if (m_displayRequestPending) {
+        strcopy(m_displayStatus, "Display configuration is busy", sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+
+    gxos::display::DisplayConfigurationCommand command{};
+    command.version = gxos::display::kDisplayConfigurationContractVersion;
+    command.structureSize = sizeof(command);
+    command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::ApplyConfiguration);
+    command.flags = gxos::display::DisplayConfigurationFlagCommitPersistence;
+    command.requestedConfiguration.mode = static_cast<uint32_t>(m_selectedDisplayMode);
+    command.requestedConfiguration.outputCount = m_activeDisplayConfiguration.outputCount;
+    if (command.requestedConfiguration.outputCount > gxos::display::kDisplayConfigurationMaxOutputs) command.requestedConfiguration.outputCount = gxos::display::kDisplayConfigurationMaxOutputs;
+    for (uint32_t i = 0u; i < command.requestedConfiguration.outputCount; ++i) {
+        command.requestedConfiguration.outputs[i] = m_activeDisplayConfiguration.outputs[i];
+        command.requestedConfiguration.outputs[i].primary = (m_selectedPrimaryOutput == i + 1u) ? 1u : 0u;
+        if (m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Mirror) {
+            command.requestedConfiguration.outputs[i].virtualX = 0;
+            command.requestedConfiguration.outputs[i].virtualY = 0;
+        } else if (i == 0u) {
+            command.requestedConfiguration.outputs[i].virtualX = 0;
+            command.requestedConfiguration.outputs[i].virtualY = 0;
+        } else {
+            command.requestedConfiguration.outputs[i].virtualX = command.requestedConfiguration.outputs[0].width;
+            command.requestedConfiguration.outputs[i].virtualY = 0;
+        }
+    }
+    if (m_selectedPrimaryOutput >= 1u && m_selectedPrimaryOutput <= command.requestedConfiguration.outputCount) {
+        strcopy(command.requestedConfiguration.primaryOutputId,
+                command.requestedConfiguration.outputs[m_selectedPrimaryOutput - 1u].stableId,
+                sizeof(command.requestedConfiguration.primaryOutputId));
+    } else if (command.requestedConfiguration.outputCount > 0u) {
+        strcopy(command.requestedConfiguration.primaryOutputId,
+                command.requestedConfiguration.outputs[0].stableId,
+                sizeof(command.requestedConfiguration.primaryOutputId));
+    }
+
+    const uint64_t generation = m_windowGeneration;
+    m_displayRequestId = command.requestId;
+    m_displayRequestPending = true;
+    strcopy(m_displayStatus, "Applying display configuration...", sizeof(m_displayStatus));
+    invalidate();
+
+    gxos::display::DisplayConfigurationResponse response{};
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
+    m_displayRequestPending = false;
+    if (generation != m_windowGeneration || response.requestId != m_displayRequestId || response.commandType != command.commandType) return false;
+    if (!submitted || response.success == 0u) {
+        strcopy(m_displayStatus, "Display apply failed", sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+    m_activeDisplayConfiguration = response.activeConfiguration;
+    m_selectedDisplayMode = static_cast<gxos::display::DisplayConfigurationMode>(m_activeDisplayConfiguration.mode);
+    m_appliedDisplayMode = m_selectedDisplayMode;
+    for (uint32_t i = 0u; i < m_activeDisplayConfiguration.outputCount && i < gxos::display::kDisplayConfigurationMaxOutputs; ++i) {
+        if (m_activeDisplayConfiguration.outputs[i].primary != 0u) {
+            m_selectedPrimaryOutput = i + 1u;
+            m_appliedPrimaryOutput = m_selectedPrimaryOutput;
+            break;
+        }
+    }
+    strcopy(m_displayStatus, "Display configuration applied", sizeof(m_displayStatus));
+    invalidate();
+    if (closeOnSuccess) requestClose();
+    return true;
+}
+
+void DisplayOptionsApp::cancelDisplayConfiguration()
+{
+    if (!m_displayRequestPending) queryDisplayConfiguration();
+    m_selectedDisplayMode = m_appliedDisplayMode;
+    m_selectedPrimaryOutput = m_appliedPrimaryOutput;
+    m_displayRequestPending = false;
+    requestClose();
+}
+
 void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     m_windowW = static_cast<int>(w);
     m_windowH = static_cast<int>(h);
@@ -2531,7 +2745,11 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     appDrawRect(x + 316, y + 16, 140, 30, rgb(90, 90, 96));
     appDrawText(x + 328, y + 27, "Gradients", m_activeTab == 1 ? rgb(235, 235, 240) : rgb(160, 160, 168));
 
-    appDrawText(x + 18, y + 58, m_activeTab == 2 ? "Choose system icons shown on the desktop:" : (m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"), rgb(230, 230, 238));
+    framebuffer::fill_rect(x + 466, y + 16, 140, 30, m_activeTab == 3 ? rgb(58, 58, 58) : rgb(34, 34, 38));
+    appDrawRect(x + 466, y + 16, 140, 30, rgb(90, 90, 96));
+    appDrawText(x + 478, y + 27, "Displays", m_activeTab == 3 ? rgb(235, 235, 240) : rgb(160, 160, 168));
+
+    appDrawText(x + 18, y + 58, m_activeTab == 3 ? "Configure the QEMU display layout:" : (m_activeTab == 2 ? "Choose system icons shown on the desktop:" : (m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:")), rgb(230, 230, 238));
     const int panelW = maxInt(1, static_cast<int>(w) - 28);
     const int panelH = maxInt(1, static_cast<int>(h) - 92);
     framebuffer::fill_rect(x + 14, y + 74, static_cast<uint32_t>(panelW), static_cast<uint32_t>(panelH), rgb(22, 22, 24));
@@ -2612,7 +2830,7 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 button->h = 28;
             }
         }
-    } else {
+    } else if (m_activeTab == 2) {
         if (m_selectButtonId >= 0) {
             if (app::Widget* button = getWidget(m_selectButtonId)) {
                 button->visible = false;
@@ -2623,6 +2841,14 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH, "File Explorer", m_desktopIconVisibility.showThisSystem || m_desktopIconVisibility.showFileManager);
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 2, "System Settings", m_desktopIconVisibility.showSystemSettings);
         appDrawText(x + kDesktopIconCheckboxX, y + maxInt(292, static_cast<int>(h) - 28), "Changes are saved immediately.", rgb(190, 195, 205));
+    } else {
+        if (m_selectButtonId >= 0) {
+            if (app::Widget* button = getWidget(m_selectButtonId)) {
+                button->visible = false;
+                button->enabled = false;
+            }
+        }
+        drawDisplayTab(x, y, w, h);
     }
 }
 
@@ -2791,6 +3017,17 @@ bool DisplayOptionsApp::handleGalleryKey(uint32_t key) {
 }
 
 void DisplayOptionsApp::onKeyDown(uint32_t key) {
+    if (m_activeTab == 3) {
+        if (key == '\r' || key == '\n') {
+            submitDisplayConfiguration(false);
+            return;
+        }
+        if (key == 0x1Bu) {
+            cancelDisplayConfiguration();
+            return;
+        }
+        return;
+    }
     if (handleGalleryKey(key)) return;
 }
 
@@ -2819,12 +3056,40 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
         invalidate();
         return;
     }
+    if (x >= 466 && x < 606 && y >= 16 && y < 46) {
+        setActiveTab(3);
+        queryDisplayConfiguration();
+        invalidate();
+        return;
+    }
 
     if (m_activeTab == 2) {
         int hit = hitDesktopIconCheckbox(x, y);
         if (hit >= 0) {
             toggleDesktopIconCheckbox(hit);
             invalidate();
+        }
+        return;
+    }
+
+    if (m_activeTab == 3) {
+        if (y >= 86 && y < 114) {
+            if (x >= 88 && x < 180) m_selectedDisplayMode = gxos::display::DisplayConfigurationMode::Extend;
+            else if (x >= 188 && x < 280) m_selectedDisplayMode = gxos::display::DisplayConfigurationMode::Mirror;
+            invalidate();
+            return;
+        }
+        if (y >= 126 && y < 154) {
+            if (x >= 150 && x < 262) m_selectedPrimaryOutput = 1u;
+            else if (x >= 270 && x < 382) m_selectedPrimaryOutput = 2u;
+            invalidate();
+            return;
+        }
+        const int actionY = m_windowH - 38;
+        if (y >= actionY && y < actionY + 28) {
+            if (x >= 300 && x < 388) submitDisplayConfiguration(false);
+            else if (x >= 396 && x < 484) submitDisplayConfiguration(true);
+            else if (x >= 492 && x < 580) cancelDisplayConfiguration();
         }
         return;
     }
@@ -2897,7 +3162,7 @@ void DisplayOptionsApp::onMouseWheel(int x, int y, int wheelDelta)
 }
 
 void DisplayOptionsApp::onWidgetClick(int widgetId) {
-    if (widgetId == m_selectButtonId && m_activeTab != 2) applySelected();
+    if (widgetId == m_selectButtonId && (m_activeTab == 0 || m_activeTab == 1)) applySelected();
 }
 
 void DisplayOptionsApp::applySelected() {

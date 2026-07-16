@@ -53,6 +53,9 @@ public:
     static std::string s_appliedDisplayArrangement;
     static std::string s_displayResolution;
     static std::string s_displayStatus;
+    static uint64_t s_windowGeneration;
+    static uint64_t s_displayRequestId;
+    static bool s_displayRequestPending;
 
     static void loadSelection();
     static void render();
@@ -76,6 +79,7 @@ public:
     static void applySelectedRegionTime();
     static void applySelectedDisplayMode();
     static void applySelectedDisplaySettings();
+    static void applySelectedDisplaySettingsAndClose();
     static void cancelSelectedDisplaySettings();
     static bool saveDisplaySettings();
     static bool toggleDesktopIconSetting(int index);

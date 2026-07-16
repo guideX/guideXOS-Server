@@ -1,6 +1,6 @@
 # guideXOS Server v0.2 Dual-Monitor Implementation Track
 
-Validated through `2026-07-13`. This note now tracks the implementation path toward the QEMU-only virtio-gpu dual-output milestone within the broader dual-monitor effort. Historical "experiment" wording remains only where it describes earlier validation phases.
+Validated through `2026-07-15`. The post-audit recovery preserved the audited QEMU-only advanced virtio-gpu implementation and the intentional removal of the duplicate hosted synthetic document. The new milestone is the typed guest display-configuration control plane; separate-launch persistence restoration remains deferred.
 
 ## Purpose
 
@@ -28,6 +28,8 @@ Validated through `2026-07-13`. This note now tracks the implementation path tow
 - Dual-output rendering is proven, while `GET_DISPLAY_INFO` still reports `enabledScanoutsAfter=1` and `post-render scanout[1] enabled=no`; that connector state is tracked separately from resource assignment and presentation readiness.
 - The output inventory now reports two operational outputs, two monitors, two backed render targets, and presentation confirmation for scanout 1 when capture validation is available.
 - Latest input-routing run root: `logs\qemu-display-probe-20260713-121002\`.
+- The typed guest command/response bridge, authoritative configuration service, bounded safe-point transactions, hosted adapter, and bare-metal adapter are now implemented.
+- The QEMU-only proof coordinator now queries active state, proves Extend -> Mirror -> Extend, switches primary/taskbar routing to Display 2 and back, and injects one validation failure to prove rollback and presentation resume.
 
 ## Display Options Real-Output Configuration Track
 
@@ -73,14 +75,71 @@ The QEMU runtime wrapper reuses the bounded live virtio-gpu proof to verify the
 two operational targets, both captures, validation counters, and zero target
 failures while the configuration transaction remains bounded and gated.
 
-The current repository still has two presentation surfaces: the hosted
-Display Options/compositor path and the separate bare-metal QEMU kernel app.
-There is not yet an IPC or command bridge that publishes the kernel inventory
-into the hosted settings transaction or sends Apply requests back into the
-kernel presenter. Consequently, the runtime wrapper deliberately proves
-inventory and live presentation only; interactive QEMU Extend/Mirror cycling,
-primary switching, and persistence across separate QEMU launches remain the
-next integration proof rather than being claimed as complete here.
+The hosted Display Options surface and the bare-metal QEMU app now submit the
+same fixed-size `DisplayConfigurationCommand` contract to
+`DisplayConfigurationService`. The service owns serialization, active-state
+snapshots, pause/resume, target-layout application, input bounds, primary and
+taskbar routing, validation, rollback, last-known-good state, and persistence
+commit. The current app model runs callbacks on the desktop owner path, so the
+service processes its single bounded mutation slot at that compositor-safe
+point; the explicit safe-point hook remains available for a future process-IPC
+adapter.
+
+The runtime wrapper now proves the real QEMU endpoint rather than calling
+private transaction helpers. Separate-launch restoration is intentionally not
+claimed in this pass.
+
+## Typed Display Configuration Control Plane
+
+`display_configuration_command.h` is the kernel-safe, backend-neutral contract.
+It contains a version, structure size, request ID, command type, flags, a
+fixed output arrangement, and no pointers, UI references, resource IDs,
+physical addresses, backing addresses, or MMIO fields. It supports queries,
+ApplyConfiguration, RestoreLastKnownGood, and ForceValidationFrame. Responses
+carry accepted/completed/success state, stable result codes, validation,
+pause/resume, target rebuild, rollback, persistence, detected and active
+snapshots, and bounded diagnostics.
+
+The service has one serialized mutation slot. Queries read stable snapshots;
+additional mutations receive `BackendBusy`. Apply uses the existing
+transaction sequence: snapshot, validate, pause presentation, wait boundedly,
+rebuild monitor/target geometry, update virtual desktop and input bounds,
+route primary/taskbar state, render and flush a validation frame, resume, then
+persist. Any failure restores the previous layout and reports rollback success
+or failure. The one-shot injected validation failure is accepted only by the
+explicit QEMU control-proof build gate and cannot be enabled by normal boots.
+
+Hosted and bare-metal Display Options are thin adapters. Apply leaves the
+window open, OK closes only after success, and Cancel discards local edits and
+reloads active state without submitting a backend rollback. Window generation,
+request ID, and command type prevent stale responses from updating a newly
+opened window.
+
+The bounded proof coordinator emits request/response diagnostics and host-QMP
+capture markers for `initial`, `mirror`, `extend`, `primary-2`, `primary-1`,
+and `rollback`. QMP remains host-harness-only for QEMU lifecycle, screenshots,
+and evidence collection; it is not guest IPC.
+
+### Runtime control proof
+
+The initial active query must report the operational `virtio-gpu` backend, two
+outputs, Extend mode, Display 1 primary, and the runtime virtual desktop. The
+successful proof then records:
+
+- Extend -> Mirror: both independent resources stay bound, both target
+  viewports become `0,0`, the logical desktop uses the current 1280x800
+  geometry, validation succeeds, and presentation resumes.
+- Mirror -> Extend: Monitor 2 returns to the right at the runtime-equivalent
+  origin, the virtual desktop returns to the extended width, and input bounds
+  are restored.
+- Primary Display 2 -> Display 1: taskbar ownership follows the primary
+  monitor, existing valid windows remain usable, and the active response is
+  checked after each apply.
+- One-shot validation failure: the request is accepted, presentation pauses,
+  rollback restores the previous Extend/primary-1 state, persistence is not
+  committed for the failed request, and presentation resumes.
+
+The separate-launch persistence restoration proof is the next milestone.
 
 ## Implementation Roadmap
 
@@ -101,6 +160,8 @@ next integration proof rather than being claimed as complete here.
 1. The live presenter retains stable resources, scanouts, backing lifetime, synchronous descriptor reclamation, per-target failure isolation, and static-pattern fallback.
 1. Display Options real-output inventory bridge, separate detected/requested/active configuration records, Apply/Cancel semantics, and compact backend diagnostics are complete.
 1. Bounded transactional Extend/Mirror layout, primary selection, window clamping, rollback, and persistence reconciliation are complete in the shared compositor configuration path.
+1. Versioned typed guest display command/response, one-slot service serialization, hosted and bare-metal adapters, safe-point routing, and stale-response protection are complete.
+1. Real QEMU active query, Extend/Mirror cycling, primary/taskbar switching, per-stage captures, and one-shot rollback proof are complete through the public service endpoint.
 1. Full-target transfer/flush remains a temporary whole-target implementation; dirty rectangles are deferred.
 1. Real hardware remains Mule Territory.
 
@@ -173,6 +234,9 @@ If both gates are unset, `.\run-server.bat` stays in normal single-output mode.
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-output-backend.ps1` | The QEMU-only virtio-gpu output backend keeps connector state separate from operational readiness, bridges into `DisplayMonitor` / `DisplayViewport` / `DisplayRenderTarget`, and preserves the diagnostic, single-shot, live, and fallback boundaries. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-display-options.ps1` | Source contract for QEMU-only gates, separate detected/requested/active models, transactional pause/rebuild/validation/rollback, Extend/Mirror geometry, primary/taskbar routing, and safe persistence. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-options-runtime.ps1` | Bounded QEMU runtime wrapper for the real output inventory, both live targets, output captures, validation counters, and per-target GPU-failure reporting. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-display-configuration-control-plane.ps1` | Source contract smoke for the versioned command/response, bounded service, hosted and bare-metal adapters, transaction ordering, rollback, persistence gating, QEMU-only injection, and prohibited-feature exclusions. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-display-configuration-control.ps1` | Bounded QEMU runtime proof for active query, Mirror/Extend cycling, primary/taskbar switching, one-shot rollback, per-stage dual-head captures, and zero GPU failures/fallback. |
+| `build-kernel.bat` | The bare-metal service, adapter, and QEMU coordinator compile and link. |
 | `git diff --check` | The working tree is free of whitespace and patch-format issues. |
 
 The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes `display-options.cfg` as part of its cleanup, so validation does not leave those runtime state files dirty.
@@ -429,3 +493,19 @@ events/config-change handling, hotplug, dirty-rectangle presentation, manual
 interactive QEMU validation, and eventual real-hardware backend planning under
 a separate Mule checkpoint. Real-hardware GPU enablement remains Mule
 Territory.
+
+## Current Next Milestone
+
+The typed control-plane milestone is complete in-process. The next milestone is:
+
+- persistence restoration across two separate QEMU launches;
+- manual interactive Display Options proof;
+- later resource resize/resolution design;
+- configuration-change events and hotplug;
+- dirty-rectangle optimization.
+
+Separate-launch restoration is deliberately deferred from the current runtime
+proof. Resolution changes, resource resizing, display hotplug, EDID, rotation,
+cursor queues, 3D/virgl/Venus/blob/context commands, QMP guest IPC, and
+real-hardware GPU/MMIO enablement remain out of scope. The Mule Territory
+warning remains required near every active service/backend path.

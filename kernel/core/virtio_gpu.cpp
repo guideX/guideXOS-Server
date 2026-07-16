@@ -342,6 +342,11 @@ static int s_deviceCount = 0;
 static ProbeOutcome s_probeOutcome{};
 static LivePresentationBackendState s_livePresentation{};
 static bool s_liveCommandLoggingSuppressed = false;
+static bool s_displayConfigurationPresentationPaused = false;
+static uint32_t s_displayConfigurationMode = static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend);
+static uint32_t s_displayConfigurationPrimaryOutput = 0u;
+static gxos::display::DisplayConfigurationSnapshot s_detectedConfigurationSnapshot{};
+static bool s_detectedConfigurationSnapshotReady = false;
 static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 
 #if defined(_MSC_VER)
@@ -1520,10 +1525,10 @@ static DisplayRenderTarget make_live_target(const LivePresentationTargetDescript
 {
     DisplayRenderTarget target{};
     target.targetIndex = descriptor.targetIndex;
-    target.targetId = descriptor.primary ? "virtio-gpu-target-1" : "virtio-gpu-target-2";
+    target.targetId = descriptor.targetIndex == 1u ? "virtio-gpu-target-1" : "virtio-gpu-target-2";
     target.source = "virtio-gpu";
-    target.monitorId = descriptor.primary ? 1u : 2u;
-    target.monitorName = descriptor.primary ? "Virtio GPU Output 0" : "Virtio GPU Output 1";
+    target.monitorId = descriptor.targetIndex == 1u ? 1u : 2u;
+    target.monitorName = descriptor.targetIndex == 1u ? "Virtio GPU Output 0" : "Virtio GPU Output 1";
     target.scanoutId = descriptor.scanoutId;
     target.resourceId = descriptor.resourceId;
     target.viewportOriginX = descriptor.viewportOriginX;
@@ -5548,6 +5553,11 @@ int probe()
     s_probeOutcome = ProbeOutcome{};
     s_probeOutcome.valid = false;
     s_probeOutcome.reason = "no compatible virtio-gpu PCI function found";
+    s_displayConfigurationPresentationPaused = false;
+    s_displayConfigurationMode = static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend);
+    s_displayConfigurationPrimaryOutput = 0u;
+    s_detectedConfigurationSnapshot = gxos::display::DisplayConfigurationSnapshot{};
+    s_detectedConfigurationSnapshotReady = false;
 #if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
     s_livePresentation = LivePresentationBackendState{};
     s_liveCommandLoggingSuppressed = false;
@@ -5824,7 +5834,7 @@ void presentation_tick()
     return;
 #else
     LivePresentationBackendState& live = s_livePresentation;
-    if (!live.enabled || live.device == nullptr || live.stopped) {
+    if (!live.enabled || live.device == nullptr || live.stopped || s_displayConfigurationPresentationPaused) {
         return;
     }
 
@@ -6067,6 +6077,313 @@ bool get_display_input_layout(
         *monitorCount = static_cast<uint8_t>(i + 1u);
     }
     return *monitorCount > 0u;
+#endif
+}
+
+namespace {
+
+static void copy_display_contract_text(char* destination, uint32_t capacity, const char* source)
+{
+    if (destination == nullptr || capacity == 0u) return;
+    uint32_t index = 0u;
+    if (source != nullptr) {
+        while (source[index] != '\0' && index + 1u < capacity) {
+            destination[index] = source[index];
+            ++index;
+        }
+    }
+    destination[index] = '\0';
+    while (++index < capacity) destination[index] = '\0';
+}
+
+static void copy_display_contract_text(char* destination, uint32_t capacity, const char* prefix, uint32_t ordinal)
+{
+    if (destination == nullptr || capacity == 0u) return;
+    uint32_t index = 0u;
+    if (prefix != nullptr) {
+        while (prefix[index] != '\0' && index + 1u < capacity) {
+            destination[index] = prefix[index];
+            ++index;
+        }
+    }
+    char digits[11];
+    uint32_t digitCount = 0u;
+    do {
+        digits[digitCount++] = static_cast<char>('0' + (ordinal % 10u));
+        ordinal /= 10u;
+    } while (ordinal != 0u && digitCount < sizeof(digits));
+    while (digitCount > 0u && index + 1u < capacity) {
+        destination[index++] = digits[--digitCount];
+    }
+    destination[index] = '\0';
+    while (++index < capacity) destination[index] = '\0';
+}
+
+static void set_backend_diagnostic(DisplayConfigurationBackendResult& result, const char* text)
+{
+    copy_display_contract_text(result.diagnostic, sizeof(result.diagnostic), text);
+}
+
+static uint32_t backend_output_count()
+{
+    return s_probeOutcome.outputInventory.monitors.size();
+}
+
+static void fill_backend_snapshot(gxos::display::DisplayConfigurationSnapshot& snapshot,
+                                  uint32_t mode,
+                                  uint32_t primaryOutput,
+                                  bool presenterActive)
+{
+    snapshot = gxos::display::DisplayConfigurationSnapshot{};
+    snapshot.version = gxos::display::kDisplayConfigurationContractVersion;
+    snapshot.structureSize = sizeof(snapshot);
+    copy_display_contract_text(snapshot.backend, sizeof(snapshot.backend), "virtio-gpu");
+    snapshot.mode = mode;
+    snapshot.outputCount = backend_output_count() > gxos::display::kDisplayConfigurationMaxOutputs
+        ? gxos::display::kDisplayConfigurationMaxOutputs : backend_output_count();
+    snapshot.qemuOnly = 1u;
+    snapshot.presenterActive = presenterActive ? 1u : 0u;
+    for (uint32_t i = 0u; i < snapshot.outputCount; ++i) {
+        const DisplayMonitorDescriptor& monitor = s_probeOutcome.outputInventory.monitors[i];
+        gxos::display::DisplayConfigurationOutput& output = snapshot.outputs[i];
+        output = gxos::display::DisplayConfigurationOutput{};
+        copy_display_contract_text(output.stableId, sizeof(output.stableId), "display-", i + 1u);
+        output.virtualX = monitor.virtualX;
+        output.virtualY = monitor.virtualY;
+        output.width = monitor.width;
+        output.height = monitor.height;
+        output.enabled = monitor.enabled ? 1u : 0u;
+        output.primary = (primaryOutput == monitor.scanoutId) ? 1u : 0u;
+        if (output.primary) {
+            copy_display_contract_text(snapshot.primaryOutputId, sizeof(snapshot.primaryOutputId), output.stableId);
+        }
+    }
+    if (snapshot.primaryOutputId[0] == '\0' && snapshot.outputCount > 0u) {
+        copy_display_contract_text(snapshot.primaryOutputId, sizeof(snapshot.primaryOutputId), "display-", primaryOutput + 1u);
+    }
+    copy_display_contract_text(snapshot.taskbarMonitorId, sizeof(snapshot.taskbarMonitorId), snapshot.primaryOutputId);
+    if (snapshot.outputCount > 0u) {
+        const DisplayMonitorDescriptor& first = s_probeOutcome.outputInventory.monitors[0];
+        snapshot.virtualDesktopX = 0;
+        snapshot.virtualDesktopY = 0;
+        snapshot.virtualDesktopWidth = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
+            ? first.width : first.width * static_cast<int32_t>(snapshot.outputCount);
+        snapshot.virtualDesktopHeight = first.height;
+    }
+}
+
+static bool requested_output_is(const gxos::display::DisplayConfigurationOutput& output, uint32_t ordinal)
+{
+    char expected[gxos::display::kDisplayConfigurationOutputIdBytes]{};
+    copy_display_contract_text(expected, sizeof(expected), "display-", ordinal);
+    for (uint32_t i = 0u; i < sizeof(expected); ++i) {
+        if (output.stableId[i] != expected[i]) return false;
+        if (expected[i] == '\0') break;
+    }
+    return true;
+}
+
+static uint32_t primary_output_from_request(const gxos::display::DisplayConfigurationRequest& request)
+{
+    for (uint32_t i = 0u; i < request.outputCount && i < gxos::display::kDisplayConfigurationMaxOutputs; ++i) {
+        if (request.outputs[i].primary != 0u) return i;
+    }
+    const char* primary = request.primaryOutputId;
+    if (primary != nullptr && primary[0] == 'd' && primary[7] == '-') {
+        const uint32_t ordinal = static_cast<uint32_t>(primary[8] - '0');
+        if (ordinal >= 1u && ordinal <= request.outputCount) return ordinal - 1u;
+    }
+    return 0u;
+}
+
+static void update_backend_layout(uint32_t mode, uint32_t primaryOrdinal)
+{
+    VirtioGpuOutputInventory& inventory = s_probeOutcome.outputInventory;
+    const int firstWidth = inventory.monitors.size() > 0u ? inventory.monitors[0].width : 0;
+    for (uint32_t i = 0u; i < inventory.monitors.size(); ++i) {
+        const int originX = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
+            ? 0 : firstWidth * static_cast<int>(i);
+        const bool primary = i == primaryOrdinal;
+        inventory.monitors[i].virtualX = originX;
+        inventory.monitors[i].virtualY = 0;
+        inventory.monitors[i].primary = primary;
+        if (i < inventory.viewports.size()) {
+            inventory.viewports[i].originX = originX;
+            inventory.viewports[i].originY = 0;
+        }
+        if (i < inventory.renderTargets.size()) {
+            inventory.renderTargets[i].viewportOriginX = originX;
+            inventory.renderTargets[i].viewportOriginY = 0;
+            inventory.renderTargets[i].primary = primary;
+        }
+        if (i < inventory.outputs.size()) {
+            inventory.outputs[i].primary = primary;
+            inventory.outputs[i].assignedX = originX;
+            inventory.outputs[i].assignedY = 0;
+        }
+    }
+    inventory.primaryOutput = primaryOrdinal < inventory.monitors.size()
+        ? inventory.monitors[primaryOrdinal].scanoutId : 0u;
+    inventory.virtualDesktop.left = 0;
+    inventory.virtualDesktop.top = 0;
+    inventory.virtualDesktop.right = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
+        ? firstWidth : firstWidth * static_cast<int>(inventory.monitors.size());
+    inventory.virtualDesktop.bottom = inventory.monitors.size() > 0u ? inventory.monitors[0].height : 0;
+    inventory.virtualDesktop.mode = mode;
+}
+
+} // namespace
+
+bool get_display_configuration_backend_snapshots(
+    gxos::display::DisplayConfigurationSnapshot* detected,
+    gxos::display::DisplayConfigurationSnapshot* active)
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+    (void)detected;
+    (void)active;
+    return false;
+#else
+    if (detected == nullptr || active == nullptr || !s_probeOutcome.valid || !s_livePresentation.enabled || backend_output_count() < 2u) {
+        return false;
+    }
+    if (!s_detectedConfigurationSnapshotReady) {
+        fill_backend_snapshot(s_detectedConfigurationSnapshot,
+                              static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend),
+                              s_probeOutcome.outputInventory.primaryOutput,
+                              true);
+        s_detectedConfigurationSnapshotReady = true;
+    }
+    *detected = s_detectedConfigurationSnapshot;
+    fill_backend_snapshot(*active,
+                          s_displayConfigurationMode,
+                          s_displayConfigurationPrimaryOutput,
+                          s_livePresentation.enabled && !s_livePresentation.stopped && !s_displayConfigurationPresentationPaused);
+    return true;
+#endif
+}
+
+void set_display_configuration_backend_presentation_paused(bool paused)
+{
+    s_displayConfigurationPresentationPaused = paused;
+}
+
+bool display_configuration_backend_presentation_paused()
+{
+    return s_displayConfigurationPresentationPaused;
+}
+
+bool apply_display_configuration_backend_layout(
+    const gxos::display::DisplayConfigurationRequest& requested,
+    bool injectValidationFailure,
+    DisplayConfigurationBackendResult* result)
+{
+    if (result == nullptr) return false;
+    *result = DisplayConfigurationBackendResult{};
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+    set_backend_diagnostic(*result, "QEMU-only display backend is not enabled");
+    return false;
+#else
+    if (!s_probeOutcome.valid || !s_livePresentation.enabled || backend_output_count() < 2u) {
+        set_backend_diagnostic(*result, "virtio-gpu presentation backend unavailable");
+        return false;
+    }
+    if (!s_displayConfigurationPresentationPaused) {
+        set_backend_diagnostic(*result, "presentation was not paused at the safe point");
+        return false;
+    }
+    if (requested.outputCount < 2u || requested.outputCount > gxos::display::kDisplayConfigurationMaxOutputs) {
+        set_backend_diagnostic(*result, "two operational outputs are required");
+        return false;
+    }
+    if (requested.mode != static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) &&
+        requested.mode != static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend)) {
+        set_backend_diagnostic(*result, "unsupported display mode");
+        return false;
+    }
+    for (uint32_t i = 0u; i < 2u; ++i) {
+        if (!requested_output_is(requested.outputs[i], i + 1u)) {
+            set_backend_diagnostic(*result, "stable output id is unavailable");
+            return false;
+        }
+        const DisplayMonitorDescriptor& monitor = s_probeOutcome.outputInventory.monitors[i];
+        if (requested.outputs[i].width != monitor.width || requested.outputs[i].height != monitor.height) {
+            set_backend_diagnostic(*result, "resolution changes are not supported");
+            return false;
+        }
+    }
+    if (requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) &&
+        (s_probeOutcome.outputInventory.monitors[0].width != s_probeOutcome.outputInventory.monitors[1].width ||
+         s_probeOutcome.outputInventory.monitors[0].height != s_probeOutcome.outputInventory.monitors[1].height)) {
+        set_backend_diagnostic(*result, "Mirror dimensions incompatible");
+        return false;
+    }
+    const uint32_t primaryOrdinal = primary_output_from_request(requested);
+    if (primaryOrdinal >= 2u) {
+        set_backend_diagnostic(*result, "primary output is unavailable");
+        return false;
+    }
+    if (injectValidationFailure) {
+        set_backend_diagnostic(*result, "injected-validation-failure");
+        return false;
+    }
+
+    s_displayConfigurationMode = requested.mode;
+    s_displayConfigurationPrimaryOutput = s_probeOutcome.outputInventory.monitors[primaryOrdinal].scanoutId;
+    const int firstWidth = s_probeOutcome.outputInventory.monitors[0].width;
+    s_livePresentation.target0.viewportOriginX = 0;
+    s_livePresentation.target0.viewportOriginY = 0;
+    s_livePresentation.target1.viewportOriginX = requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) ? 0 : firstWidth;
+    s_livePresentation.target1.viewportOriginY = 0;
+    s_livePresentation.target0.primary = primaryOrdinal == 0u;
+    s_livePresentation.target1.primary = primaryOrdinal == 1u;
+    update_backend_layout(requested.mode, primaryOrdinal);
+    result->targetRebuilt = 1u;
+
+    const uint64_t frameSequence = ++s_livePresentation.frameSequence;
+    s_liveCommandLoggingSuppressed = true;
+    const CompositorFrameTargetResult target0 = present_target_once(
+        *s_livePresentation.device,
+        make_live_target(s_livePresentation.target0),
+        s_livePresentation.resource0,
+        s_livePresentation.backing0,
+        s_livePresentation.backingPhysical0,
+        s_livePresentation.totalBackingBytes,
+        diagnostic_pattern_palette(0u),
+        s_livePresentation.resourceFormat,
+        s_livePresentation.selectedWidth,
+        s_livePresentation.selectedHeight,
+        s_livePresentation.bytesPerPixel,
+        s_livePresentation.backingPageCount,
+        frameSequence,
+        false,
+        false);
+    const CompositorFrameTargetResult target1 = present_target_once(
+        *s_livePresentation.device,
+        make_live_target(s_livePresentation.target1),
+        s_livePresentation.resource1,
+        s_livePresentation.backing1,
+        s_livePresentation.backingPhysical1,
+        s_livePresentation.totalBackingBytes,
+        diagnostic_pattern_palette(1u),
+        s_livePresentation.resourceFormat,
+        s_livePresentation.selectedWidth,
+        s_livePresentation.selectedHeight,
+        s_livePresentation.bytesPerPixel,
+        s_livePresentation.backingPageCount,
+        frameSequence,
+        false,
+        false);
+    s_liveCommandLoggingSuppressed = false;
+    if (!target0.renderOk || !target0.transferOk || !target0.flushOk ||
+        !target1.renderOk || !target1.transferOk || !target1.flushOk) {
+        set_backend_diagnostic(*result, "validation frame failed");
+        return false;
+    }
+    result->validationFrame = 1u;
+    result->success = 1u;
+    set_backend_diagnostic(*result, "display layout applied and validation frame flushed");
+    kernel::desktop::request_redraw();
+    return true;
 #endif
 }
 

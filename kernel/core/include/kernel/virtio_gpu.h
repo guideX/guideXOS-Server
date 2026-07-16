@@ -22,6 +22,7 @@
 #include "kernel/types.h"
 #include "kernel/virtio.h"
 #include "kernel/display_input_mapper.h"
+#include "display_configuration_command.h"
 
 namespace kernel {
 namespace virtio {
@@ -431,6 +432,27 @@ bool get_display_input_layout(
     int32_t* left, int32_t* top, int32_t* right, int32_t* bottom,
     display_input::DisplayInputMonitor* monitors, uint8_t capacity,
     uint8_t* monitorCount);
+
+// Typed display-configuration backend adapter. The public service owns the
+// transaction and calls these QEMU-only hooks for resource-preserving target
+// layout changes; no raw backend state crosses the command contract.
+struct DisplayConfigurationBackendResult {
+    uint8_t targetRebuilt;
+    uint8_t validationFrame;
+    uint8_t success;
+    uint8_t reserved;
+    char diagnostic[gxos::display::kDisplayConfigurationDiagnosticBytes];
+};
+
+bool get_display_configuration_backend_snapshots(
+    gxos::display::DisplayConfigurationSnapshot* detected,
+    gxos::display::DisplayConfigurationSnapshot* active);
+void set_display_configuration_backend_presentation_paused(bool paused);
+bool display_configuration_backend_presentation_paused();
+bool apply_display_configuration_backend_layout(
+    const gxos::display::DisplayConfigurationRequest& requested,
+    bool injectValidationFailure,
+    DisplayConfigurationBackendResult* result);
 
 // ================================================================
 // Integration with Kernel Framebuffer

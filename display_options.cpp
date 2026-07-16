@@ -5,6 +5,7 @@
 #include "desktop_config.h"
 #include "display_options_store.h"
 #include "display_configuration.h"
+#include "display_configuration_service.h"
 #include "gui_protocol.h"
 #include "ipc_bus.h"
 #include "logger.h"
@@ -12,12 +13,14 @@
 #include "wallpaper_registry.h"
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <sstream>
 
 namespace gxos {
 namespace apps {
 
 using namespace gxos::gui;
+using namespace gxos::display;
 
 uint64_t DisplayOptions::s_windowId = 0;
 int DisplayOptions::s_selectedIndex = 0;
@@ -56,6 +59,9 @@ std::string DisplayOptions::s_displayArrangement = "";
 std::string DisplayOptions::s_appliedDisplayArrangement = "";
 std::string DisplayOptions::s_displayResolution = "";
 std::string DisplayOptions::s_displayStatus = "";
+uint64_t DisplayOptions::s_windowGeneration = 0;
+uint64_t DisplayOptions::s_displayRequestId = 0;
+bool DisplayOptions::s_displayRequestPending = false;
 
 namespace {
     const char* kDisplayOptionsStorePath = "display-options.cfg";
@@ -125,6 +131,11 @@ namespace {
     const uint32_t kKeySpace = 0x20;
     const uint32_t kKeyEnter = 0x0D;
     const uint32_t kKeyEscape = 0x1B;
+
+    void reloadDisplaySelectionFromResponse(const DisplayConfigurationResponse& response);
+    bool queryActiveDisplayConfiguration(DisplayConfigurationResponse& response);
+    DisplayConfigurationCommand displayConfigurationCommandFromUi(uint64_t requestId, uint32_t flags);
+    void closeDisplayOptionsWindow();
 
     struct GalleryLayout {
         int itemCount{0};
@@ -837,6 +848,11 @@ void DisplayOptions::loadSelection()
     s_appliedDisplayPrimaryDisplayId = s_displayPrimaryDisplayId;
     s_appliedDisplayArrangement = s_displayArrangement;
     s_displayStatus.clear();
+    DisplayConfigurationResponse actualResponse{};
+    if (queryActiveDisplayConfiguration(actualResponse)) {
+        reloadDisplaySelectionFromResponse(actualResponse);
+        Logger::write(LogLevel::Info, "DisplayOptions loaded active state through DisplayConfigurationService");
+    }
     s_selectedThemeId = selectedThemeIdFromConfig();
     s_appliedThemeId = s_selectedThemeId;
     for (size_t i = 0; i < wallpapers.size(); ++i) {
@@ -860,6 +876,8 @@ void DisplayOptions::loadSelection()
 int DisplayOptions::main(int, char**)
 {
     Logger::write(LogLevel::Info, "DisplayOptions starting");
+    ++s_windowGeneration;
+    s_displayRequestPending = false;
     s_windowId = 0;
     s_windowW = kDefaultWindowW;
     s_windowH = kDefaultWindowH;
@@ -1028,6 +1046,8 @@ int DisplayOptions::main(int, char**)
             break;
         }
         case MsgType::MT_Close:
+            ++s_windowGeneration;
+            s_displayRequestPending = false;
             running = false;
             break;
         default:
@@ -1289,6 +1309,114 @@ namespace {
         return requested;
     }
 
+    void copyDisplayContractText(char* destination, size_t capacity, const std::string& value)
+    {
+        if (destination == nullptr || capacity == 0) return;
+        std::memset(destination, 0, capacity);
+        const size_t count = std::min(capacity - 1, value.size());
+        if (count != 0) std::memcpy(destination, value.data(), count);
+    }
+
+    DisplayConfigurationCommand displayConfigurationCommandFromUi(uint64_t requestId, uint32_t flags)
+    {
+        DisplayConfigurationCommand command{};
+        command.version = kDisplayConfigurationContractVersion;
+        command.structureSize = sizeof(DisplayConfigurationCommand);
+        command.requestId = requestId;
+        command.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration);
+        command.flags = flags;
+        const RequestedDisplayConfiguration requested = requestedDisplayConfigurationFromUi();
+        command.requestedConfiguration.mode = requested.mode == DisplayModeKind::Extend
+            ? static_cast<uint32_t>(DisplayConfigurationMode::Extend)
+            : static_cast<uint32_t>(DisplayConfigurationMode::Mirror);
+        copyDisplayContractText(command.requestedConfiguration.primaryOutputId,
+                                sizeof(command.requestedConfiguration.primaryOutputId),
+                                requested.primaryOutputId);
+
+        std::vector<DisplayMonitorDescriptor> monitors = requested.arrangement;
+        if (monitors.empty()) {
+            const DetectedDisplayInventory detected = Compositor::detectedDisplayInventory();
+            monitors = detected.monitors;
+        }
+        command.requestedConfiguration.outputCount = static_cast<uint32_t>(std::min<size_t>(
+            kDisplayConfigurationMaxOutputs, monitors.size()));
+        for (uint32_t i = 0; i < command.requestedConfiguration.outputCount; ++i) {
+            const DisplayMonitorDescriptor& monitor = monitors[i];
+            DisplayConfigurationOutput& output = command.requestedConfiguration.outputs[i];
+            copyDisplayContractText(output.stableId, sizeof(output.stableId), monitor.id);
+            output.virtualX = monitor.virtualX;
+            output.virtualY = monitor.virtualY;
+            output.width = monitor.width;
+            output.height = monitor.height;
+            output.enabled = monitor.enabled ? 1u : 0u;
+            output.primary = monitor.id == requested.primaryOutputId ? 1u : (monitor.primary ? 1u : 0u);
+        }
+        return command;
+    }
+
+    void reloadDisplaySelectionFromResponse(const DisplayConfigurationResponse& response)
+    {
+        const DisplayConfigurationSnapshot& active = response.activeConfiguration;
+        DisplayOptions::s_displayStatus.clear();
+        DisplayOptions::s_selectedDisplayMode = active.mode == static_cast<uint32_t>(DisplayConfigurationMode::Extend)
+            ? "extend" : "mirror";
+        DisplayOptions::s_appliedDisplayMode = DisplayOptions::s_selectedDisplayMode;
+        std::string primary(active.primaryOutputId);
+        if (primary.empty()) primary = "display-1";
+        DisplayOptions::s_displayPrimaryDisplayId = primary;
+        DisplayOptions::s_appliedDisplayPrimaryDisplayId = primary;
+        std::vector<DisplayMonitorDescriptor> monitors;
+        const uint32_t outputCount = std::min(active.outputCount, kDisplayConfigurationMaxOutputs);
+        for (uint32_t i = 0; i < outputCount; ++i) {
+            const DisplayConfigurationOutput& source = active.outputs[i];
+            DisplayMonitorDescriptor monitor = makeDisplayMonitor(
+                std::string(source.stableId),
+                std::string(source.stableId),
+                source.virtualX,
+                source.virtualY,
+                source.width,
+                source.height,
+                nullptr,
+                0,
+                source.enabled != 0,
+                source.primary != 0);
+            monitors.push_back(monitor);
+        }
+        if (!monitors.empty()) {
+            DisplayOptions::s_displayArrangement = serializeDisplayArrangement(monitors);
+            DisplayOptions::s_appliedDisplayArrangement = DisplayOptions::s_displayArrangement;
+        }
+        if (active.virtualDesktopWidth > 0 && active.virtualDesktopHeight > 0) {
+            DisplayOptions::s_displayResolution = std::to_string(active.virtualDesktopWidth) + "x" + std::to_string(active.virtualDesktopHeight);
+        }
+    }
+
+    bool queryActiveDisplayConfiguration(DisplayConfigurationResponse& response)
+    {
+        DisplayConfigurationCommand command{};
+        command.version = kDisplayConfigurationContractVersion;
+        command.structureSize = sizeof(DisplayConfigurationCommand);
+        command.requestId = DisplayConfigurationService::nextRequestId();
+        command.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::QueryActiveConfiguration);
+        if (!DisplayConfigurationService::submit(command, response) ||
+            response.requestId != command.requestId || response.commandType != command.commandType) {
+            return false;
+        }
+        return response.success != 0u;
+    }
+
+    void closeDisplayOptionsWindow()
+    {
+        if (DisplayOptions::s_windowId == 0) return;
+        ipc::Message close;
+        close.type = static_cast<uint32_t>(MsgType::MT_Close);
+        const std::string windowId = std::to_string(DisplayOptions::s_windowId);
+        close.data.assign(windowId.begin(), windowId.end());
+        ipc::Bus::publish("gui.input", std::move(close), false);
+        ++DisplayOptions::s_windowGeneration;
+        DisplayOptions::s_displayRequestPending = false;
+    }
+
     std::vector<DisplayMonitorDescriptor> displayPreviewMonitors()
     {
         const DetectedDisplayInventory detected = Compositor::detectedDisplayInventory();
@@ -1451,6 +1579,7 @@ void DisplayOptions::drawDisplayTab()
 
     drawButton(kDisplaySectionX, kButtonY, kButtonW, kButtonH, "Apply", false, true);
     drawButton(kDisplaySectionX + kButtonW + 18, kButtonY, kButtonW, kButtonH, "Cancel", false, true);
+    drawButton(kDisplaySectionX + 2 * (kButtonW + 18), kButtonY, kButtonW, kButtonH, "OK", false, true);
     const std::string status = s_displayStatus.empty()
         ? (extendSelected ? "Extend uses persisted virtual origins." : "Mirror uses one logical viewport on every output.")
         : s_displayStatus;
@@ -1609,6 +1738,10 @@ void DisplayOptions::handleMouseDown(int mx, int my)
         if (hit(mx, my, kDisplaySectionX + kButtonW + 18, kButtonY, kButtonW, kButtonH)) {
             cancelSelectedDisplaySettings();
             render();
+            return;
+        }
+        if (hit(mx, my, kDisplaySectionX + 2 * (kButtonW + 18), kButtonY, kButtonW, kButtonH)) {
+            applySelectedDisplaySettingsAndClose();
             return;
         }
         const int cardY = kDisplayCardY;
@@ -1944,49 +2077,60 @@ void DisplayOptions::applySelectedDisplaySettings()
         setDisplayVirtualDesktopPrimary(selectedDesktop, s_displayPrimaryDisplayId);
         s_displayArrangement = serializeDisplayArrangement(selectedDesktop.monitors);
     }
-    const RequestedDisplayConfiguration requested = requestedDisplayConfigurationFromUi();
     s_displayStatus = "Applying display configuration...";
-    const DisplayApplyResult result = Compositor::applyDisplayConfiguration(requested, false);
-    if (!result.success) {
-        s_displayStatus = std::string("Apply failed: ") + (result.reason.empty() ? result.summary() : result.reason);
-        Logger::write(LogLevel::Warn, "DisplayOptions display apply failed: " + result.summary());
+    const uint64_t requestId = DisplayConfigurationService::nextRequestId();
+    const uint64_t windowGeneration = s_windowGeneration;
+    const DisplayConfigurationCommand command = displayConfigurationCommandFromUi(
+        requestId,
+        DisplayConfigurationFlagCommitPersistence);
+    s_displayRequestId = requestId;
+    s_displayRequestPending = true;
+    DisplayConfigurationResponse response{};
+    const bool submitted = DisplayConfigurationService::submit(command, response);
+    if (!submitted && response.requestId != requestId) {
+        s_displayRequestPending = false;
+        s_displayStatus = "Apply failed: stale display configuration response";
+        Logger::write(LogLevel::Warn, "DisplayOptions ignored stale display configuration response");
         return;
     }
-
-    if (!saveDisplaySettings()) {
-        // The backend is already valid, but persistence is part of the user
-        // visible transaction. Restore the last known-good request when the
-        // store cannot be committed.
-        const std::string selectedMode = s_selectedDisplayMode;
-        const std::string selectedPrimary = s_displayPrimaryDisplayId;
-        const std::string selectedArrangement = s_displayArrangement;
-        s_selectedDisplayMode = s_appliedDisplayMode;
-        s_displayPrimaryDisplayId = s_appliedDisplayPrimaryDisplayId;
-        s_displayArrangement = s_appliedDisplayArrangement;
-        const DisplayApplyResult rollback = Compositor::applyDisplayConfiguration(
-            requestedDisplayConfigurationFromUi(), false);
-        s_selectedDisplayMode = selectedMode;
-        s_displayPrimaryDisplayId = selectedPrimary;
-        s_displayArrangement = selectedArrangement;
-        s_displayStatus = rollback.success
-            ? "Persistence failed; rolled back successfully"
-            : "Persistence failed; rollback failed — fallback activated";
+    s_displayRequestPending = false;
+    if (response.requestId != requestId || response.commandType != command.commandType || windowGeneration != s_windowGeneration) {
+        s_displayStatus = "Apply response ignored: Display Options window is stale";
         return;
     }
-
-    s_appliedDisplayMode = s_selectedDisplayMode;
-    s_appliedDisplayPrimaryDisplayId = s_displayPrimaryDisplayId;
-    s_appliedDisplayArrangement = s_displayArrangement;
+    if (!response.success) {
+        s_displayStatus = std::string("Apply failed [") +
+            DisplayConfigurationService::resultCodeName(response.resultCode) + "]: " + response.diagnostic;
+        Logger::write(LogLevel::Warn, std::string("DisplayOptions display apply failed request=") +
+            std::to_string(requestId) + " code=" + DisplayConfigurationService::resultCodeName(response.resultCode));
+        return;
+    }
+    reloadDisplaySelectionFromResponse(response);
     s_displayStatus = "Applied successfully";
-    Logger::write(LogLevel::Info, "DisplayOptions display apply: " + result.summary());
+    Logger::write(LogLevel::Info, std::string("DisplayOptions display apply request=") + std::to_string(requestId) + " result=success");
+}
+
+void DisplayOptions::applySelectedDisplaySettingsAndClose()
+{
+    applySelectedDisplaySettings();
+    const DisplayConfigurationResponse result = DisplayConfigurationService::lastResult();
+    if (!s_displayRequestPending && result.requestId == s_displayRequestId && result.success != 0u) {
+        closeDisplayOptionsWindow();
+    }
 }
 
 void DisplayOptions::cancelSelectedDisplaySettings()
 {
-    s_selectedDisplayMode = s_appliedDisplayMode;
-    s_displayPrimaryDisplayId = s_appliedDisplayPrimaryDisplayId;
-    s_displayArrangement = s_appliedDisplayArrangement;
+    DisplayConfigurationResponse response{};
+    if (!queryActiveDisplayConfiguration(response)) {
+        s_selectedDisplayMode = s_appliedDisplayMode;
+        s_displayPrimaryDisplayId = s_appliedDisplayPrimaryDisplayId;
+        s_displayArrangement = s_appliedDisplayArrangement;
+    } else {
+        reloadDisplaySelectionFromResponse(response);
+    }
     s_displayStatus = "Unapplied display changes canceled";
+    closeDisplayOptionsWindow();
 }
 
 void DisplayOptions::applySelectedGradient()

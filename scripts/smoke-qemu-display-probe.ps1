@@ -1,7 +1,7 @@
 param(
     [string[]]$Backends = @('std', 'virtio-gpu', 'virtio-gpu-modern-only', 'virtio-vga', 'qxl-vga'),
     [int]$TimeoutSeconds = 120,
-    [ValidateSet('diagnostic', 'compositorFrame', 'compositorLiveBounded', 'compositorInputBounded')]
+    [ValidateSet('diagnostic', 'compositorFrame', 'compositorLiveBounded', 'compositorInputBounded', 'displayConfigurationControl')]
     [string]$Mode = 'diagnostic'
 )
 
@@ -163,7 +163,11 @@ function Invoke-KernelBuildForSmoke {
             (Join-Path $Root 'kernel\build\amd64\obj\core\main.o'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\main.d'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\mmio.o'),
-            (Join-Path $Root 'kernel\build\amd64\obj\core\mmio.d')
+            (Join-Path $Root 'kernel\build\amd64\obj\core\mmio.d'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\display_configuration_service.o'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\display_configuration_service.d'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\qemu_display_configuration_control_proof.o'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\qemu_display_configuration_control_proof.d')
         )
         Remove-Item -LiteralPath $probeObjectCandidates -ErrorAction SilentlyContinue
 
@@ -1312,6 +1316,8 @@ function Invoke-QemuDisplayProbeBackend {
     $inputAfterDragChecksum1 = ''
     $inputBoundaryChanged0 = $false
     $inputBoundaryChanged1 = $false
+    $displayControlCapturePaths = @()
+    $displayControlProofLine = ''
 
     if (-not (Find-Qemu)) {
         throw 'qemu-system-x86_64 not found.'
@@ -1580,7 +1586,44 @@ function Invoke-QemuDisplayProbeBackend {
         $launcherState = Start-ProbeLauncher -Backend $spec.LauncherBackend -SerialLog $serialLog -LauncherStdOut $launcherStdOut -LauncherStdErr $launcherStdErr -EnableVisualCapture:$EnableVisualCapture -QmpPort $qmpPort
         $proc = $launcherState.Process
 
-        if ($stageLabel -eq 'compositorLiveBounded' -or $stageLabel -eq 'compositorInputBounded') {
+        if ($stageLabel -eq 'displayConfigurationControl') {
+            $initialFrameReadySeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern '\[VIRTIO-GPU\] VirtioGPU live presentation: initial frame ready' -TimeoutSeconds $TimeoutSeconds
+            if ($initialFrameReadySeen -and $EnableVisualCapture -and -not $proc.HasExited) {
+                $displayQmpSession = $null
+                try {
+                    $displayQmpSession = New-QmpSession -Port $qmpPort -TimeoutSeconds ([Math]::Min([Math]::Max($TimeoutSeconds, 10), 30))
+                    $displayStages = @('initial', 'mirror', 'extend', 'primary-2', 'primary-1', 'rollback')
+                    $displaySeen = @{}
+                    $captureDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(10, $TimeoutSeconds))
+                    while ([DateTime]::UtcNow -lt $captureDeadline -and -not $proc.HasExited) {
+                        $displaySerial = Read-LogText -Path $serialLog
+                        foreach ($displayStage in $displayStages) {
+                            if ($displaySeen.ContainsKey($displayStage)) { continue }
+                            if ($displaySerial -notmatch ([regex]::Escape("DISPLAY_CONFIG_CAPTURE=$displayStage"))) { continue }
+                            $headPaths = @()
+                            foreach ($head in @(0, 1)) {
+                                $headPath = Join-Path $captureRoot ("display-{0}-head{1}.png" -f $displayStage, $head)
+                                Invoke-QmpScreendump -Session $displayQmpSession -Filename $headPath -DeviceId 'gpu0' -Head $head
+                                if (Wait-ForCaptureFile -Path $headPath -TimeoutSeconds 2) {
+                                    $headPaths += $headPath
+                                }
+                            }
+                            $displaySeen[$displayStage] = $true
+                            if ($headPaths.Count -eq 2) {
+                                $displayControlCapturePaths += $headPaths
+                            }
+                        }
+                        if ($displaySerial -match 'Display configuration control proof: .*result=success') { break }
+                        Start-Sleep -Milliseconds 200
+                    }
+                } catch {
+                    $visualCaptureReason = $_.Exception.Message
+                } finally {
+                    if ($displayQmpSession) { Close-QmpSession -Session $displayQmpSession }
+                }
+            }
+            $sentinelSeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern 'Display configuration control proof: .*result=success' -TimeoutSeconds $TimeoutSeconds
+        } elseif ($stageLabel -eq 'compositorLiveBounded' -or $stageLabel -eq 'compositorInputBounded') {
             $initialFrameReadySeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern '\[VIRTIO-GPU\] VirtioGPU live presentation: initial frame ready' -TimeoutSeconds $TimeoutSeconds
             if ($initialFrameReadySeen -and $EnableVisualCapture -and -not $proc.HasExited) {
                 $initialQmpSession = $null
@@ -1861,6 +1904,7 @@ function Invoke-QemuDisplayProbeBackend {
 
     $launchRecorded = (-not [string]::IsNullOrWhiteSpace($launcherStdOutText)) -and ($launcherStdOutText -match 'QEMU launch:')
     $bootloaderSerialAppeared = (-not [string]::IsNullOrWhiteSpace($serialText)) -and ($serialText -match $spec.SerialPattern)
+    $displayControlProofLine = [regex]::Match($serialText, 'Display configuration control proof: [^\r\n]+').Value
 
     $bootGopLine = [regex]::Match($serialText, '\[BOOT\] GOP handles discovered: (\d+)')
     $bootSummary = Parse-FramebufferSummary -Text $serialText -Pattern '\[BOOT\] GOP FramebufferCount=(\d+) UniqueFramebufferCount=(\d+) DuplicateFramebufferCount=(\d+) SuspiciousFramebufferCount=(\d+)'
@@ -2297,6 +2341,30 @@ function Invoke-QemuDisplayProbeBackend {
                 $backendStatus = 'complete'
                 $interpretation = 'QEMU virtio-gpu compositor live bounded mode repeatedly presented both operational targets with dirty-generation skipping, a hard rate cap, and initial/final capture evidence'
             }
+        } elseif ($stageLabel -eq 'displayConfigurationControl') {
+            Assert-Condition -Backend $backendName -Name 'display configuration control proof line' -Condition ($displayControlProofLine -match 'query=ok mirrorApply=ok extendRestore=ok primary2Apply=ok taskbarMoved=yes primary1Restore=ok rollbackInjection=ok rollbackSucceeded=yes presentationResumed=yes gpuFailures=0 result=success') -Detail $displayControlProofLine
+            Assert-Condition -Backend $backendName -Name 'display configuration active query bridge' -Condition ($serialText -match 'Display configuration bridge: request=\d+ query=active result=success backend=virtio-gpu mode=Extend primary=1 outputs=2 virtualDesktop=\d+x\d+') -Detail 'expected the real active QEMU state through the typed guest endpoint'
+            Assert-Condition -Backend $backendName -Name 'display configuration stage diagnostics' -Condition (
+                $serialText -match 'Display configuration proof stage=mirror request=\d+ accepted=yes completed=yes success=yes paused=yes targetRebuild=yes validation=passed resumed=yes persisted=yes' -and
+                $serialText -match 'Display configuration proof stage=extend request=\d+ accepted=yes completed=yes success=yes paused=yes targetRebuild=yes validation=passed resumed=yes persisted=yes' -and
+                $serialText -match 'Display configuration proof stage=primary-2 request=\d+ accepted=yes completed=yes success=yes' -and
+                $serialText -match 'Display configuration proof stage=rollback-injection request=\d+ accepted=yes completed=yes success=no paused=yes targetRebuild=no validation=failed resumed=yes persisted=no rollback=yes'
+            ) -Detail 'expected bounded pause, rebuild, validation, persistence, and rollback diagnostics for each transaction'
+            Assert-Condition -Backend $backendName -Name 'display configuration initial output inventory' -Condition (
+                $gpuOutputConfiguredCount -eq '2' -and
+                $gpuOutputOperationalCount -eq '2' -and
+                $gpuOutputConnectorEnabledCount -eq '1' -and
+                $gpuOutputPresentationConfirmedCount -eq '2' -and
+                $gpuOutputTargetCount -eq '2' -and
+                $gpuOutputBackedTargetCount -eq '2' -and
+                $gpuOutputPrimaryOutput -eq '0' -and
+                $gpuOutputOperationalOutputCount -eq '2' -and
+                $gpuOutputPresentationConfirmedCountDetailed -eq '2'
+            ) -Detail $gpuOutputInventoryLine.Value
+            Assert-Condition -Backend $backendName -Name 'display configuration stage captures' -Condition ($EnableVisualCapture -and $displayControlCapturePaths.Count -eq 12 -and (@('initial', 'mirror', 'extend', 'primary-2', 'primary-1', 'rollback') | ForEach-Object { (Test-Path -LiteralPath (Join-Path $captureRoot ("display-{0}-head0.png" -f $_))) -and (Test-Path -LiteralPath (Join-Path $captureRoot ("display-{0}-head1.png" -f $_))) } | Where-Object { -not $_ }).Count -eq 0) -Detail ("captureCount={0} captureRoot={1}" -f $displayControlCapturePaths.Count, $captureRoot)
+            Assert-Condition -Backend $backendName -Name 'display configuration GPU failure and fallback absence' -Condition ($serialText -notmatch 'fallbackPatterns=yes|targetFailures=[1-9]|gpuFailures=[1-9]') -Detail 'display control proof must not activate diagnostic fallback or record GPU failures'
+            $backendStatus = 'complete'
+            $interpretation = 'QEMU-only typed display configuration service proved active query, Mirror/Extend transactions, primary/taskbar switching, and one-shot rollback with per-stage head captures'
         } else {
             Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B capacity line' -Condition $gpuStageBCapacityLine.Success -Detail 'expected Stage B capacity evidence'
             Assert-Condition -Backend $backendName -Name 'virtio-gpu stage B initial scanout line' -Condition $gpuStageBInitialScanoutLine.Success -Detail 'expected scanout 1 initial state evidence'
@@ -2562,6 +2630,9 @@ function Invoke-QemuDisplayProbeBackend {
         "inputAfterDragHead1Path=$inputAfterDragHead1Path"
         "inputBoundaryChanged0=$inputBoundaryChanged0"
         "inputBoundaryChanged1=$inputBoundaryChanged1"
+        "displayControlProofLine=$displayControlProofLine"
+        "displayControlCaptureCount=$($displayControlCapturePaths.Count)"
+        "displayControlCapturePaths=$($displayControlCapturePaths -join ';')"
         "compositorContentConfirmed0=$compositorContentConfirmed0"
         "compositorContentConfirmed1=$compositorContentConfirmed1"
         "taskbarPrimaryOnlyConfirmed=$taskbarPrimaryOnlyConfirmed"
@@ -2815,6 +2886,9 @@ function Invoke-QemuDisplayProbeBackend {
         InputAfterDragChecksum1 = $inputAfterDragChecksum1
         InputBoundaryChanged0 = $inputBoundaryChanged0
         InputBoundaryChanged1 = $inputBoundaryChanged1
+        DisplayControlProofLine = $displayControlProofLine
+        DisplayControlCaptureCount = $displayControlCapturePaths.Count
+        DisplayControlCapturePaths = $displayControlCapturePaths
         GpuProbeCompleteContentMode = $gpuProbeCompleteContentMode
         GpuProbeCompleteFrameMode = $gpuProbeCompleteFrameMode
         GpuProbeCompleteContinuousPresentation = $gpuProbeCompleteContinuousPresentation
@@ -2847,7 +2921,21 @@ function Invoke-QemuDisplayProbeBackend {
 }
 
 try {
-    if ($Mode -eq 'compositorLiveBounded' -or $Mode -eq 'compositorInputBounded') {
+    if ($Mode -eq 'displayConfigurationControl') {
+        Write-Host '[build] rebuilding kernel with the QEMU-only typed display configuration control proof enabled'
+        Invoke-KernelBuildForSmoke -ExtraCFlags '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE_BOUNDED -DGXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE'
+        $script:activeSmokeBuild = $true
+        if ($Backends.Count -ne 1 -or $Backends[0] -notlike 'virtio-gpu*') {
+            throw 'Display configuration control mode only supports a single virtio-gpu backend.'
+        }
+        $backend = $Backends[0]
+        Write-Host ("[{0} displayConfigurationControl] launching display probe smoke" -f $backend)
+        $result = Invoke-QemuDisplayProbeBackend -Backend $backend -TimeoutSeconds $TimeoutSeconds -ProbeStage 'displayConfigurationControl' -EnableVisualCapture
+        $results = @($result)
+        $stageBResult = $result
+        $stageBResultComplete = $result.DiagnosticStatus -eq 'complete' -and $result.DisplayControlProofLine -match 'result=success'
+        $stageBBlockerReason = if ($stageBResultComplete) { '' } elseif (-not [string]::IsNullOrWhiteSpace($result.Interpretation)) { $result.Interpretation } else { 'typed display configuration control proof did not complete' }
+    } elseif ($Mode -eq 'compositorLiveBounded' -or $Mode -eq 'compositorInputBounded') {
         Write-Host '[build] rebuilding kernel with QEMU-only bounded virtio-gpu compositor-live probe enabled'
         Invoke-KernelBuildForSmoke -ExtraCFlags '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE_BOUNDED'
         $script:activeSmokeBuild = $true
@@ -3110,6 +3198,9 @@ try {
         $evidenceLines += "inputBoundaryHead1Path=$($result.InputBoundaryHead1Path)"
         $evidenceLines += "inputAfterDragHead0Path=$($result.InputAfterDragHead0Path)"
         $evidenceLines += "inputAfterDragHead1Path=$($result.InputAfterDragHead1Path)"
+        $evidenceLines += "displayControlProofLine=$($result.DisplayControlProofLine)"
+        $evidenceLines += "displayControlCaptureCount=$($result.DisplayControlCaptureCount)"
+        $evidenceLines += "displayControlCapturePaths=$([string]::Join(';', $result.DisplayControlCapturePaths))"
         $evidenceLines += "inputBoundaryChanged0=$($result.InputBoundaryChanged0)"
         $evidenceLines += "inputBoundaryChanged1=$($result.InputBoundaryChanged1)"
         $evidenceLines += "compositorContentConfirmed0=$($result.CompositorContentConfirmed0)"

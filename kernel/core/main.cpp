@@ -50,6 +50,7 @@
 #include "include/kernel/virtio_block.h"
 #include "include/kernel/virtio_net.h"
 #include "include/kernel/virtio_gpu.h"
+#include "include/kernel/qemu_display_configuration_control_proof.h"
 #include "include/kernel/virtio_rng.h"
 
 // Interrupt support
@@ -829,6 +830,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::serial::puts(
                 "[INPUT-PROOF] headAwareAbsolute=unavailable reason=virtio-gpu monitor geometry unavailable; live presentation retained\n");
         }
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
+        kernel::qemu_display_configuration_control_proof::run();
+#endif
         kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu live presentation pump active\n");
         while (!kernel::virtio::gpu::presentation_finished()) {
             if (inputLayoutReady) {

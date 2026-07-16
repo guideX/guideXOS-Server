@@ -251,6 +251,7 @@ namespace gxos {
         static std::atomic<bool> g_displayReconfigurationInProgress{false};
         static std::atomic<bool> g_presentationPaused{false};
         static std::atomic<bool> g_presentationBusy{false};
+        static std::atomic<bool> g_displayConfigurationInjectedFailureOnce{false};
         static bool g_hasVirtioGpuDisplayInventory = false;
         static DetectedDisplayInventory g_virtioGpuDisplayInventory{};
         static ActiveDisplayConfiguration g_activeDisplayConfiguration{};
@@ -6192,6 +6193,23 @@ namespace gxos {
             return active;
         }
 
+        bool Compositor::forceDisplayValidationFrame()
+        {
+            const ActiveDisplayConfiguration active = activeDisplayConfiguration();
+            if (!active.valid()) {
+                return false;
+            }
+            requestRepaint();
+            return true;
+        }
+
+        void Compositor::injectDisplayConfigurationValidationFailureOnce()
+        {
+            // This hook is only reachable through the typed service's QEMU
+            // gate.  It is consumed exactly once by the next transaction.
+            g_displayConfigurationInjectedFailureOnce.store(true, std::memory_order_release);
+        }
+
         void Compositor::setVirtioGpuDisplayInventory(const DetectedDisplayInventory& inventory)
         {
             std::lock_guard<std::mutex> stateLock(g_displayConfigurationMutex);
@@ -6273,6 +6291,49 @@ namespace gxos {
                 g_displayReconfigurationInProgress.store(false, std::memory_order_release);
                 g_displayReconfigurationRequested.store(false, std::memory_order_release);
                 Logger::write(LogLevel::Warn, "Display configuration apply: result=failed reason=Backend busy rollback=no");
+                return result;
+            }
+
+            if (g_displayConfigurationInjectedFailureOnce.exchange(false, std::memory_order_acq_rel)) {
+                // QEMU-only, one-shot proof hook: fail after presentation has
+                // paused but before the candidate configuration is committed.
+                // Restore the last stable snapshots and exercise the normal
+                // resume path without resetting the virtio-gpu device.
+                result.rollbackAttempted = true;
+                ActiveDisplayConfiguration restored = g_displayReconfigurationState.oldConfiguration;
+                if (!restored.valid()) {
+                    std::string restoreReason;
+                    restored = buildActiveDisplayConfiguration(
+                        inventory,
+                        requestedDisplayConfigurationFromConfig(oldConfig),
+                        restoreReason);
+                }
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    g_cfg = oldConfig;
+#if !defined(_WIN32) || defined(GXOS_BARE_METAL)
+                    g_needsRedraw = true;
+#endif
+                }
+                g_activeDisplayConfiguration = restored;
+                g_displayReconfigurationState.appliedConfiguration = restored;
+                result.rollbackSucceeded = restored.valid();
+                g_displayReconfigurationState.rollbackAttempted = true;
+                g_displayReconfigurationState.rollbackSucceeded = result.rollbackSucceeded;
+                result.validationFrameResult = false;
+                result.reason = "injected-validation-failure";
+                result.finalResult = "failed";
+                requestRepaint();
+                g_displayReconfigurationState.finalResult = result;
+                g_presentationPaused.store(false, std::memory_order_release);
+                g_displayReconfigurationState.presentationPaused = false;
+                g_displayReconfigurationState.reconfigurationInProgress = false;
+                g_displayReconfigurationState.reconfigurationRequested = false;
+                g_displayReconfigurationInProgress.store(false, std::memory_order_release);
+                g_displayReconfigurationRequested.store(false, std::memory_order_release);
+                Logger::write(LogLevel::Warn,
+                    "Display configuration apply: request failure injected after pause rollback=" +
+                    std::string(result.rollbackSucceeded ? "success" : "failed"));
                 return result;
             }
 

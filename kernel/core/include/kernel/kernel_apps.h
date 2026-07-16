@@ -15,6 +15,7 @@
 #include "kernel/block_device.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
+#include "display_configuration_service.h"
 
 // Bare-metal Navigator is a capability-limited adapter.  It mirrors the small
 // guideWeb CSS-lite value types it needs without including the hosted
@@ -244,6 +245,7 @@ public:
     virtual void onMouseUp(int x, int y, uint8_t button) override;
     virtual void onMouseWheel(int x, int y, int wheelDelta) override;
     virtual void onWidgetClick(int widgetId) override;
+    virtual void onWindowClose() override;
 
     static app::KernelApp* create() { return new DisplayOptionsApp(); }
 
@@ -264,6 +266,15 @@ private:
     int m_galleryScrollbarDragStartOffset;
     int m_selectButtonId;
     kernel::desktop::SystemDesktopIconVisibility m_desktopIconVisibility;
+    gxos::display::DisplayConfigurationMode m_selectedDisplayMode;
+    gxos::display::DisplayConfigurationMode m_appliedDisplayMode;
+    uint32_t m_selectedPrimaryOutput;
+    uint32_t m_appliedPrimaryOutput;
+    gxos::display::DisplayConfigurationSnapshot m_activeDisplayConfiguration;
+    char m_displayStatus[96];
+    uint64_t m_windowGeneration;
+    uint64_t m_displayRequestId;
+    bool m_displayRequestPending;
 
     void loadSelection();
     void setActiveTab(int tab);
@@ -285,6 +296,10 @@ private:
     int hitDesktopIconCheckbox(int x, int y) const;
     void drawCheckbox(uint32_t x, uint32_t y, const char* label, bool checked);
     void toggleDesktopIconCheckbox(int index);
+    void drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    bool queryDisplayConfiguration();
+    bool submitDisplayConfiguration(bool closeOnSuccess);
+    void cancelDisplayConfiguration();
 };
 
 // ============================================================

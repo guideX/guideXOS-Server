@@ -53,6 +53,7 @@ desktop_service.cpp ^
 desktop_state.cpp ^
 disk_manager.cpp ^
 display_options.cpp ^
+display_configuration_service.cpp ^
 control_panel.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
