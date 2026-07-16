@@ -1,6 +1,6 @@
 # guideXOS Server v0.2 Dual-Monitor Implementation Track
 
-Validated through `2026-07-15`. The post-audit recovery preserved the audited QEMU-only advanced virtio-gpu implementation and the intentional removal of the duplicate hosted synthetic document. The new milestone is the typed guest display-configuration control plane; separate-launch persistence restoration remains deferred.
+Validated through `2026-07-16`. The base persistence proof is complete, and this milestone adds bounded QEMU-only per-output logical-resolution selection with transactional resource rebuilds and separate-launch restoration. The intentional removal of the duplicate hosted synthetic document remains preserved.
 
 ## Purpose
 
@@ -46,6 +46,15 @@ inventory is published. Output 2 is shown as `VirtIO-GPU Output 2` and
 on its own diagnostic line. If the backend inventory is unavailable, the
 existing hosted synthetic and single-framebuffer paths remain active.
 
+For this milestone, “resolution” means a QEMU logical scanout size: the
+VirtIO-GPU 2D resource, stable backing store, scanout rectangle, monitor
+geometry, render target, and compositor `PixelSurface` all use the selected
+width and height. It is not a physical timing, refresh-rate, EDID mode, host
+display mode, rotation, or real-hardware modeset. The bounded catalog is
+`qemu-1280x800`, `qemu-1024x768`, and `qemu-800x600`, with checked 32-bit
+backing arithmetic and per-output/total memory limits. Display Options shows
+`Refresh rate: Not available` and `Rotation: Not available` for this backend.
+
 Apply is a bounded transaction: it snapshots the active configuration, pauses
 new presentation, waits for the current synchronous presentation to become
 idle, validates the request, rebuilds monitor/view/target geometry, clamps
@@ -55,14 +64,17 @@ reports the exact blocker, with rollback/fallback status in the compact
 summary. UI edits are not live-previewed: Apply commits them, OK follows the
 existing window flow, and Cancel restores the last applied selection.
 
-Extend uses persisted virtual origins and preserves the current horizontal
-2560x800 arrangement for two 1280x800 outputs. Mirror requires compatible
-assigned dimensions, uses one logical 1280x800 viewport at origin `0,0`, and
-keeps independent output resources while presenting the same logical content
-to both outputs. Primary selection updates the taskbar monitor and default
-work-area routing without silently reordering the arrangement. Saved output
-identities are reconciled by stable backend/output identity and then by
-inventory order; stale entries do not create phantom monitors.
+Extend uses persisted virtual origins and derives the complete requested layout
+before changing any scanout. Equal 1280x800 outputs produce `2560x800`;
+mixed Display 1 `1280x800` plus Display 2 `1024x768` produces Display 2 at
+`1280,0` and a `2304x800` virtual desktop. The cursor clamps to the union of
+monitor rectangles, so the lower 32-pixel region outside Display 2 is not a
+dead display area. Mirror requires identical active dimensions, uses one
+logical viewport at `0,0`, and rejects mismatched requests with
+`MirrorGeometryIncompatible`. Primary selection updates the taskbar monitor
+and selected monitor work area without silently reordering the arrangement.
+Saved output identities are reconciled by stable backend/output identity;
+requested logical dimensions are not connector identity.
 
 The shared configuration transaction and source/runtime contract smoke are:
 
@@ -85,9 +97,14 @@ service processes its single bounded mutation slot at that compositor-safe
 point; the explicit safe-point hook remains available for a future process-IPC
 adapter.
 
-The runtime wrapper now proves the real QEMU endpoint rather than calling
-private transaction helpers. Separate-launch restoration is intentionally not
-claimed in this pass.
+The runtime wrapper proves the real QEMU endpoint rather than calling private
+transaction helpers. The authoritative service owns prepare-before-replace:
+new backing, physical coverage audit, nonzero unique resource ID, resource
+creation/attachment, provisional validation frame, scanout bind, post-bind
+validation, atomic inventory publication, active-state commit, and only then
+old-resource cleanup. A failure before or after a scanout bind releases
+provisional resources and, when needed, rebinds and presents the old resources.
+Display Options never owns these GPU operations.
 
 ## Typed Display Configuration Control Plane
 
@@ -340,13 +357,13 @@ The standard `std` mode still validates:
 
 ### Next roadmap milestone
 
-The next implementation milestone is resolution and output-mode selection,
-safe resource rebuild/resizing, virtio-gpu display events/config-change
-handling, hotplug, dirty-rectangle presentation, manual interactive QEMU
+The next implementation milestone is virtio-gpu display configuration-change
+events, safe output hotplug inventory refresh, EDID retrieval where supported,
+mode-catalog refinement, dirty-rectangle presentation, manual interactive QEMU
 validation, and eventual real-hardware backend planning under a separate Mule
-checkpoint. Fixed assigned dimensions, no hotplug, no arbitrary mode setting,
-and no head-aware absolute QMP route remain current limitations. Real-hardware
-GPU enablement remains Mule Territory.
+checkpoint. Physical timing, refresh control, rotation, arbitrary mode setting,
+and head-aware absolute QMP routing remain unavailable. Real-hardware GPU
+enablement remains Mule Territory.
 
 ## Virtio-GPU Driver Investigation
 
@@ -417,8 +434,8 @@ The virtio-gpu discovery path now maps the modern transport MMIO regions into a 
 - Interactive manual mouse validation.
 - Display Options integration with the real virtio-gpu backend.
 - Persistent Extend/Mirror configuration and primary-monitor switching are now complete through the authoritative typed service.
-- Resolution/output configuration.
-- Hotplug/config-change events.
+- VirtIO-GPU display configuration-change events and safe output inventory refresh.
+- EDID retrieval where supported and mode-catalog refinement.
 - Dirty-rectangle optimization.
 - Real hardware remains Mule Territory.
 
@@ -450,8 +467,8 @@ The kernel now derives a read-only inventory of unique framebuffer-backed displa
 - Keep the synthetic path isolated and continue using the existing smoke tests as the regression fence.
 - Keep the diagnostic patterns and single-shot proof as explicit fallbacks while validating the bounded live path.
 - Run manual interactive QEMU validation of the Display Options inventory, Extend/Mirror transaction, primary switch, and persistence across two launches.
-- Add resolution and output-mode selection only with safe resource rebuild/resizing.
-- Add virtio-gpu display events/config-change handling and hotplug after a separate safety review.
+- Add VirtIO-GPU display configuration-change events and safe output inventory refresh.
+- Refine the bounded mode catalog and add EDID retrieval where supported after a separate safety review.
 - Optimize whole-target transfers with dirty rectangles later.
 - Keep head-aware absolute QMP routing explicitly unavailable until QEMU exposes a verified source-head path.
 - Keep real hardware enablement marked as Mule Territory and preserve the fallback behavior contract.
@@ -492,6 +509,54 @@ events/config-change handling, hotplug, dirty-rectangle presentation, manual
 interactive QEMU validation, and eventual real-hardware backend planning under
 a separate Mule checkpoint. Real-hardware GPU enablement remains Mule
 Territory.
+
+## QEMU Logical-Resolution Resource-Rebuild Milestone
+
+The bounded QEMU-only mode catalog is `1280x800`, `1024x768`, and `800x600`.
+Each entry has a stable mode ID, preferred/current/backend-supported flags,
+32-bit XRGB backing estimate, and checked overflow/minimum/maximum arithmetic.
+Per-output backing is bounded to 16 MiB and the two-output total is bounded to
+32 MiB. Unsupported or duplicate persisted modes are rejected without
+advertising a mode the backend cannot allocate and present.
+
+The service builds the complete requested layout first. For Extend, the
+mixed-resolution proof is Display 1 `1280x800` at `0,0` and Display 2
+`1024x768` at `1280,0`, with virtual desktop `2304x800`; the union-aware
+cursor clamp prevents the shorter output’s lower 32 pixels from becoming a
+dead region. Equal-resolution Extend returns to `2560x800`. Mirror is
+compatible only when active dimensions match, with both target viewports at
+`0,0`; mismatched modes are rejected as `MirrorGeometryIncompatible` before
+unnecessary replacement allocation.
+
+`VirtioGpuOutputRebuildPlan` records output identity, scanout, old/new
+resource IDs and dimensions, backing requirements, target geometry, virtual
+origin, preparation/attachment/scanout/validation/commit state, and cleanup
+status. The lifecycle is prepare-before-replace: allocate zeroed kernel-owned
+backing, verify every physical run and byte of bounded mem-entry coverage,
+create and attach the replacement resource, render a validation frame, bind
+and flush it, verify presentation, publish the new inventory atomically,
+commit active configuration, and only then unref the old resource. Old backing
+and resource IDs remain operational for rollback until commit. Lifecycle
+diagnostics track created, committed, rolled-back, unreferenced, active
+backing, and cleanup-failure counts; the repeated-change proof returns to the
+stable two-output level with `activeBacking=2` and `cleanupFailures=0`.
+
+The proof covers equal Extend, mixed Extend, compatible Mirror, mismatch
+rejection, primary/taskbar switching after resize, second-output commit
+rollback, bounded repeated changes, per-output captures, and zero GPU
+failures/fallback. The stay-open manual launcher is
+`scripts\run-qemu-virtio-gpu-resolution-manual.bat`; it reuses the QEMU-only
+probe launcher and does not enable a physical graphics path. Manual Display
+Options validation is `required`: the automated public service endpoint
+exercises the same transaction, but no manual interactive UI check is claimed
+here.
+
+The source and runtime smokes are:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-virtio-gpu-resolution-rebuild-source.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-virtio-gpu-resolution-rebuild.ps1
+```
 
 ## Separate-Launch Display Persistence Milestone
 
@@ -535,11 +600,12 @@ checksum, mode, primary output identity, output count, output records, virtual
 desktop geometry, and presentation requirement. Output records carry the
 backend-neutral stable identity fields `backendType`, `backendDeviceId`,
 `scanoutId`, `logicalOrdinal`, `stableName`, and `stableId`, plus bounded
-geometry and enabled/primary state. `stableId`, backend type/device, scanout
-ID, and assigned dimensions are authoritative matching fields for the QEMU
-virtio-gpu proof; logical ordinal and stable name are diagnostics/reconciliation
-hints. Resource IDs, pointers, MMIO addresses, physical addresses, queue
-addresses, and backing-store details are never serialized.
+requested geometry, stable logical `modeId`, and enabled/primary state. Stable
+ID, backend type/device, and scanout ID are authoritative matching fields;
+requested dimensions are deliberately not connector identity. Logical ordinal
+and stable name are diagnostics/reconciliation hints. Resource IDs, pointers,
+MMIO addresses, physical addresses, queue addresses, and backing-store details
+are never serialized.
 
 Version 1 is tolerated as a legacy mode/primary request and rebuilt against
 the detected inventory. Future versions, bad checksums, truncated data,
@@ -561,7 +627,9 @@ after the real backend transaction and validation frame succeed.
 
 Launch 2 emits `source=persisted-store injectedByHost=no loaded=yes
 reconciled=yes applied=yes mode=Extend primary=display-2
-taskbarMonitor=display-2 virtualDesktop=2560x800 validationFrame=ok fallback=no`.
+taskbarMonitor=display-2 virtualDesktop=2304x800 validationFrame=ok fallback=no`
+for the per-output resolution proof. The base equal-resolution persistence
+proof remains covered separately.
 The launch-2 proof issues only a public active-state query; it fails if a
 test-coordinator `ApplyConfiguration` injection is observed. Startup
 normalization does not rewrite the persisted record.
@@ -593,14 +661,20 @@ write discipline, no host launch-2 injection, and the QEMU-only safety gates.
 
 ## Current Limitations and Next Roadmap Milestone
 
-Current limitations remain fixed resource dimensions, no resolution change,
-no resource resizing, no display hotplug, no EDID parsing, no rotation, no
-head-aware absolute QMP input, no cursor queue, no 3D/virgl/Venus/blob/context
-support, no QMP guest IPC, and no real-hardware GPU/MMIO backend.
+This milestone still has no physical modesetting, refresh-rate control,
+rotation, EDID retrieval, hotplug, cursor queue, 3D/virgl/Venus/blob/context
+support, QMP guest IPC, or real-hardware GPU/MMIO backend. Resolution is only
+the bounded QEMU logical scanout/resource/backing/target/`PixelSurface`
+dimension. Manual UI validation remains `required` and is not claimed as
+completed by the automated proof.
 
-The next roadmap milestone is manual interactive Display Options validation
-in QEMU, followed by safe resolution/resource rebuild design, display
-configuration events, hotplug architecture, dirty-rectangle optimization, and
-eventual real-hardware planning under a separate Mule checkpoint.
+The next roadmap milestone is:
+
+- VirtIO-GPU display configuration-change events.
+- Safe output hotplug inventory refresh.
+- EDID retrieval where supported.
+- Mode-catalog refinement.
+- Dirty-rectangle presentation.
+- Later real-hardware architecture under a separate Mule checkpoint.
 
 REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.

@@ -451,7 +451,7 @@ void set_display_configuration_backend_presentation_paused(bool paused);
 bool display_configuration_backend_presentation_paused();
 bool apply_display_configuration_backend_layout(
     const gxos::display::DisplayConfigurationRequest& requested,
-    bool injectValidationFailure,
+    uint32_t failureInjectionFlags,
     DisplayConfigurationBackendResult* result);
 
 // ================================================================

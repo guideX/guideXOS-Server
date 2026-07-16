@@ -23,6 +23,8 @@
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/mmio.h"
 #include "include/kernel/qemu_display_input_proof.h"
+#include "include/kernel/qemu_display_resolution_rebuild_proof.h"
+#include "include/kernel/qemu_display_resolution_persistence_proof.h"
 #include "display_configuration_service.h"
 
 // Storage subsystem
@@ -869,9 +871,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 "[INPUT-PROOF] headAwareAbsolute=unavailable reason=virtio-gpu monitor geometry unavailable; live presentation retained\n");
         }
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
+        kernel::qemu_display_resolution_rebuild_proof::run();
         kernel::qemu_display_configuration_control_proof::run();
 #elif defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
         kernel::qemu_display_configuration_persistence_proof::run();
+        kernel::qemu_display_resolution_persistence_proof::run();
 #endif
         kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu live presentation pump active\n");
         while (!kernel::virtio::gpu::presentation_finished()) {

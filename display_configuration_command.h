@@ -16,6 +16,7 @@ static constexpr uint32_t kDisplayConfigurationContractVersion = 1u;
 static constexpr uint32_t kDisplayConfigurationMaxOutputs = 4u;
 static constexpr uint32_t kDisplayConfigurationBackendNameBytes = 32u;
 static constexpr uint32_t kDisplayConfigurationOutputIdBytes = 32u;
+static constexpr uint32_t kDisplayConfigurationModeIdBytes = 32u;
 static constexpr uint32_t kDisplayConfigurationDiagnosticBytes = 128u;
 static constexpr uint32_t kDisplayConfigurationPersistenceVersion = 2u;
 static constexpr uint32_t kDisplayConfigurationPersistenceMaxBytes = 2048u;
@@ -99,13 +100,29 @@ enum DisplayConfigurationCommandFlags : uint32_t {
     DisplayConfigurationFlagCommitPersistence = 1u << 0,
     // This bit is accepted only by the explicitly gated QEMU smoke path.
     // Normal builds and non-QEMU backends reject it.
-    DisplayConfigurationFlagTestInjectValidationFailure = 1u << 30
+    DisplayConfigurationFlagTestInjectValidationFailure = 1u << 30,
+    DisplayConfigurationFlagTestInjectBackingAllocationFailure = 1u << 29,
+    DisplayConfigurationFlagTestInjectResourceCreateFailure = 1u << 28,
+    DisplayConfigurationFlagTestInjectAttachBackingFailure = 1u << 27,
+    DisplayConfigurationFlagTestInjectSetScanoutFailure = 1u << 26,
+    DisplayConfigurationFlagTestInjectSecondOutputCommitFailure = 1u << 25,
+    DisplayConfigurationFlagTestInjectValidationFrameFailure = 1u << 24
 };
+
+static constexpr uint32_t kDisplayConfigurationTestFailureMask =
+    DisplayConfigurationFlagTestInjectValidationFailure |
+    DisplayConfigurationFlagTestInjectBackingAllocationFailure |
+    DisplayConfigurationFlagTestInjectResourceCreateFailure |
+    DisplayConfigurationFlagTestInjectAttachBackingFailure |
+    DisplayConfigurationFlagTestInjectSetScanoutFailure |
+    DisplayConfigurationFlagTestInjectSecondOutputCommitFailure |
+    DisplayConfigurationFlagTestInjectValidationFrameFailure;
 
 struct DisplayConfigurationOutput {
     char stableId[kDisplayConfigurationOutputIdBytes];
     char backendType[kDisplayConfigurationBackendNameBytes];
     char backendDeviceId[kDisplayConfigurationOutputIdBytes];
+    char modeId[kDisplayConfigurationModeIdBytes];
     uint32_t scanoutId;
     uint32_t logicalOrdinal;
     char stableName[kDisplayConfigurationOutputIdBytes];

@@ -263,7 +263,7 @@ static bool split_field(char*& cursor, char* field, uint32_t fieldCapacity)
 
 static bool parse_persisted_output(char* value, DisplayConfigurationOutput& output)
 {
-    char fields[12][kDisplayConfigurationOutputIdBytes]{};
+    char fields[13][kDisplayConfigurationOutputIdBytes]{};
     char* cursor = value;
     uint32_t enabled = 0u;
     uint32_t primary = 0u;
@@ -279,6 +279,12 @@ static bool parse_persisted_output(char* value, DisplayConfigurationOutput& outp
     copy_text(output.backendType, sizeof(output.backendType), fields[1]);
     copy_text(output.backendDeviceId, sizeof(output.backendDeviceId), fields[2]);
     copy_text(output.stableName, sizeof(output.stableName), fields[5]);
+    // Per-output logical mode identity was added without invalidating the
+    // bounded version-2 record. Older records simply omit this optional tail.
+    if (cursor != nullptr && cursor[0] != '\0') {
+        if (!split_field(cursor, fields[12], sizeof(fields[12]))) return false;
+        copy_text(output.modeId, sizeof(output.modeId), fields[12]);
+    }
     output.enabled = static_cast<uint8_t>(enabled);
     output.primary = static_cast<uint8_t>(primary);
     output.reserved[0] = output.reserved[1] = 0u;
@@ -429,6 +435,8 @@ static bool persist_configuration(const DisplayConfigurationSnapshot& snapshot)
         ok = ok && append_u32(text, sizeof(text), position, output.enabled ? 1u : 0u);
         ok = ok && append_text(text, sizeof(text), position, "|");
         ok = ok && append_u32(text, sizeof(text), position, output.primary ? 1u : 0u);
+        ok = ok && append_text(text, sizeof(text), position, "|");
+        ok = ok && append_text(text, sizeof(text), position, output.modeId[0] ? output.modeId : "qemu-1280x800");
     }
     ok = ok && append_text(text, sizeof(text), position, "\nvirtualDesktop=");
     ok = ok && append_i32(text, sizeof(text), position, snapshot.virtualDesktopX);
@@ -668,7 +676,9 @@ static bool output_identity_matches(const DisplayConfigurationOutput& saved,
     if (saved.backendType[0] != '\0' && !text_equals(saved.backendType, detected.backendType)) return false;
     if (saved.backendDeviceId[0] != '\0' && !text_equals(saved.backendDeviceId, detected.backendDeviceId)) return false;
     if (saved.scanoutId != detected.scanoutId) return false;
-    if (saved.width != detected.width || saved.height != detected.height) return false;
+    // Requested logical mode dimensions are intentionally not connector
+    // identity. A persisted 1024x768 request must reconcile with the same
+    // stable output when its detected/preferred geometry is still 1280x800.
     return true;
 }
 
@@ -1043,7 +1053,8 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
     DisplayConfigurationSnapshot activeBefore{};
     const bool backendReady = kernel::virtio::gpu::get_display_configuration_backend_snapshots(&detected, &activeBefore);
     const auto type = static_cast<DisplayConfigurationCommandType>(command.commandType);
-    const bool injectionRequested = (command.flags & DisplayConfigurationFlagTestInjectValidationFailure) != 0u;
+    const uint32_t failureInjectionFlags = command.flags & kDisplayConfigurationTestFailureMask;
+    const bool injectionRequested = failureInjectionFlags != 0u;
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
     const bool failureInjectionGate = true;
 #else
@@ -1102,6 +1113,37 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
             request_from_snapshot(activeBefore, applyCommand.requestedConfiguration);
         }
 
+        // Reject a known-invalid QEMU Mirror geometry before pausing the
+        // presenter. No replacement resources are needed for this case and
+        // the current active state remains the last-known-good state.
+        if (type == DisplayConfigurationCommandType::ApplyConfiguration &&
+            applyCommand.requestedConfiguration.mode == static_cast<uint32_t>(DisplayConfigurationMode::Mirror) &&
+            applyCommand.requestedConfiguration.outputCount >= 2u) {
+            const DisplayConfigurationOutput& first = applyCommand.requestedConfiguration.outputs[0];
+            const DisplayConfigurationOutput& second = applyCommand.requestedConfiguration.outputs[1];
+            if (first.width > 0 && first.height > 0 && second.width > 0 && second.height > 0 &&
+                (first.width != second.width || first.height != second.height)) {
+                response.detectedConfiguration = detected;
+                response.activeConfiguration = activeBefore;
+                response.success = 0u;
+                response.completed = 1u;
+                response.rollbackAttempted = 0u;
+                response.rollbackSucceeded = 0u;
+                response.targetRebuildSucceeded = 0u;
+                response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::MirrorGeometryIncompatible);
+                response.validationResult = static_cast<uint32_t>(DisplayConfigurationValidationResult::NotRun);
+                response.presentationPaused = 0u;
+                response.presentationResumed = 1u;
+                set_diagnostic(response, "Mirror dimensions incompatible: all outputs must use the same logical resolution");
+                fill_startup_diagnostics(response);
+                s_lastApplyResponse = response;
+                s_lastResponse = response;
+                s_busy = false;
+                log_response(response);
+                return false;
+            }
+        }
+
         DisplayConfigurationSnapshot oldSnapshot = activeBefore;
         DisplayConfigurationRequest oldRequest{};
         request_from_snapshot(oldSnapshot, oldRequest);
@@ -1114,7 +1156,9 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
         const bool injectFailure = (applyCommand.flags & DisplayConfigurationFlagTestInjectValidationFailure) != 0u;
         kernel::virtio::gpu::DisplayConfigurationBackendResult backendResult{};
         const bool applied = kernel::virtio::gpu::apply_display_configuration_backend_layout(
-            applyCommand.requestedConfiguration, injectFailure, &backendResult);
+            applyCommand.requestedConfiguration,
+            failureInjectionFlags | (injectFailure ? DisplayConfigurationFlagTestInjectValidationFailure : 0u),
+            &backendResult);
         response.validationResult = backendResult.validationFrame
             ? static_cast<uint32_t>(DisplayConfigurationValidationResult::Passed)
             : static_cast<uint32_t>(DisplayConfigurationValidationResult::Failed);
@@ -1151,7 +1195,7 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
 
         if (response.success == 0u) {
             kernel::virtio::gpu::DisplayConfigurationBackendResult rollbackResult{};
-            const bool rolledBack = kernel::virtio::gpu::apply_display_configuration_backend_layout(oldRequest, false, &rollbackResult);
+            const bool rolledBack = kernel::virtio::gpu::apply_display_configuration_backend_layout(oldRequest, 0u, &rollbackResult);
             response.rollbackSucceeded = rolledBack ? 1u : 0u;
             if (rolledBack) {
                 kernel::virtio::gpu::get_display_configuration_backend_snapshots(&detected, &response.activeConfiguration);

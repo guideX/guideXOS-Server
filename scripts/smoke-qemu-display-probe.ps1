@@ -8,6 +8,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
+# The base display-control smoke intentionally remains compatible with the
+# existing control proof. The resolution milestone opts into its additional
+# capture stages and proof object through this inherited child-process flag.
+$resolutionProofEnabled = $env:GXOS_QEMU_DISPLAY_RESOLUTION_REBUILD_PROOF -eq '1'
+
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $LogRoot = Join-Path $Root 'logs'
 New-Item -ItemType Directory -Force -Path $LogRoot | Out-Null
@@ -167,7 +172,9 @@ function Invoke-KernelBuildForSmoke {
             (Join-Path $Root 'kernel\build\amd64\obj\core\display_configuration_service.o'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\display_configuration_service.d'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\qemu_display_configuration_control_proof.o'),
-            (Join-Path $Root 'kernel\build\amd64\obj\core\qemu_display_configuration_control_proof.d')
+            (Join-Path $Root 'kernel\build\amd64\obj\core\qemu_display_configuration_control_proof.d'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\qemu_display_resolution_rebuild_proof.o'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\qemu_display_resolution_rebuild_proof.d')
         )
         Remove-Item -LiteralPath $probeObjectCandidates -ErrorAction SilentlyContinue
 
@@ -1597,13 +1604,25 @@ function Invoke-QemuDisplayProbeBackend {
                 try {
                     $displayQmpSession = New-QmpSession -Port $qmpPort -TimeoutSeconds ([Math]::Min([Math]::Max($TimeoutSeconds, 10), 30))
                     $displayStages = @('initial', 'mirror', 'extend', 'primary-2', 'primary-1', 'rollback')
+                    if ($resolutionProofEnabled) {
+                        $displayStages += @(
+                            'resolution-initial-inventory', 'resolution-equal-extend', 'resolution-mixed-extend',
+                            'resolution-mirror-compatible', 'resolution-mirror-mismatch', 'resolution-primary-2',
+                            'resolution-rollback', 'resolution-final-equal'
+                        )
+                    }
                     $displaySeen = @{}
                     $captureDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(10, $TimeoutSeconds))
                     while ([DateTime]::UtcNow -lt $captureDeadline -and -not $proc.HasExited) {
                         $displaySerial = Read-LogText -Path $serialLog
                         foreach ($displayStage in $displayStages) {
                             if ($displaySeen.ContainsKey($displayStage)) { continue }
-                            if ($displaySerial -notmatch ([regex]::Escape("DISPLAY_CONFIG_CAPTURE=$displayStage"))) { continue }
+                            $captureToken = if ($displayStage.StartsWith('resolution-')) {
+                                "DISPLAY_CONFIG_RESOLUTION_CAPTURE=$displayStage"
+                            } else {
+                                "DISPLAY_CONFIG_CAPTURE=$displayStage"
+                            }
+                            if ($displaySerial -notmatch ([regex]::Escape($captureToken))) { continue }
                             $headPaths = @()
                             foreach ($head in @(0, 1)) {
                                 $headPath = Join-Path $captureRoot ("display-{0}-head{1}.png" -f $displayStage, $head)
@@ -2366,7 +2385,14 @@ function Invoke-QemuDisplayProbeBackend {
                 $gpuOutputOperationalOutputCount -eq '2' -and
                 $gpuOutputPresentationConfirmedCountDetailed -eq '2'
             ) -Detail $gpuOutputInventoryLine.Value
-            Assert-Condition -Backend $backendName -Name 'display configuration stage captures' -Condition ($EnableVisualCapture -and $displayControlCapturePaths.Count -eq 12 -and (@('initial', 'mirror', 'extend', 'primary-2', 'primary-1', 'rollback') | ForEach-Object { (Test-Path -LiteralPath (Join-Path $captureRoot ("display-{0}-head0.png" -f $_))) -and (Test-Path -LiteralPath (Join-Path $captureRoot ("display-{0}-head1.png" -f $_))) } | Where-Object { -not $_ }).Count -eq 0) -Detail ("captureCount={0} captureRoot={1}" -f $displayControlCapturePaths.Count, $captureRoot)
+            $baseDisplayStages = @('initial', 'mirror', 'extend', 'primary-2', 'primary-1', 'rollback')
+            $resolutionDisplayStages = if ($resolutionProofEnabled) {
+                @('resolution-initial-inventory', 'resolution-equal-extend', 'resolution-mixed-extend', 'resolution-mirror-compatible', 'resolution-mirror-mismatch', 'resolution-primary-2', 'resolution-rollback', 'resolution-final-equal')
+            } else {
+                @()
+            }
+            $allDisplayStages = $baseDisplayStages + $resolutionDisplayStages
+            Assert-Condition -Backend $backendName -Name 'display configuration stage captures' -Condition ($EnableVisualCapture -and $displayControlCapturePaths.Count -eq ($allDisplayStages.Count * 2) -and ($allDisplayStages | ForEach-Object { (Test-Path -LiteralPath (Join-Path $captureRoot ("display-{0}-head0.png" -f $_))) -and (Test-Path -LiteralPath (Join-Path $captureRoot ("display-{0}-head1.png" -f $_))) } | Where-Object { -not $_ }).Count -eq 0) -Detail ("captureCount={0} captureRoot={1}" -f $displayControlCapturePaths.Count, $captureRoot)
             Assert-Condition -Backend $backendName -Name 'display configuration GPU failure and fallback absence' -Condition ($serialText -notmatch 'fallbackPatterns=yes|targetFailures=[1-9]|gpuFailures=[1-9]') -Detail 'display control proof must not activate diagnostic fallback or record GPU failures'
             $backendStatus = 'complete'
             $interpretation = 'QEMU-only typed display configuration service proved active query, Mirror/Extend transactions, primary/taskbar switching, and one-shot rollback with per-stage head captures'
@@ -2928,7 +2954,11 @@ function Invoke-QemuDisplayProbeBackend {
 try {
     if ($Mode -eq 'displayConfigurationControl') {
         Write-Host '[build] rebuilding kernel with the QEMU-only typed display configuration control proof enabled'
-        Invoke-KernelBuildForSmoke -ExtraCFlags '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE_BOUNDED -DGXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE'
+        $controlFlags = '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_SCANOUT1_ACTIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE -DGXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE_BOUNDED -DGXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE'
+        if ($resolutionProofEnabled) {
+            $controlFlags += ' -DGXOS_QEMU_VIRTIO_GPU_DISPLAY_RESOLUTION_REBUILD_ACTIVE'
+        }
+        Invoke-KernelBuildForSmoke -ExtraCFlags $controlFlags
         $script:activeSmokeBuild = $true
         if ($Backends.Count -ne 1 -or $Backends[0] -notlike 'virtio-gpu*') {
             throw 'Display configuration control mode only supports a single virtio-gpu backend.'

@@ -74,6 +74,13 @@ static const uint32_t kDiagnosticResourceIdSecondary = kDiagnosticResourceId + 1
 static const size_t kDiagnosticBackingBytes = 16u * 1024u * 1024u;
 static const uint32_t kDiagnosticBackingMaxMemEntries = 64u;
 static const uint64_t kDiagnosticPageSizeBytes = 4096u;
+static const uint32_t kQemuLogicalModeMinWidth = 800u;
+static const uint32_t kQemuLogicalModeMinHeight = 600u;
+static const uint32_t kQemuLogicalModeMaxWidth = 1280u;
+static const uint32_t kQemuLogicalModeMaxHeight = 800u;
+static const uint64_t kQemuLogicalModePerOutputBackingLimit = 16u * 1024u * 1024u;
+static const uint64_t kQemuLogicalModeTotalBackingLimit = 32u * 1024u * 1024u;
+static const uint32_t kFirstReplacementResourceId = 0x47584F90u;
 static const uint16_t kInvalidDescriptorIndex = 0xFFFFu;
 // The live path intentionally starts at a conservative 10 FPS cap.  PIT is
 // configured at 100 Hz by the normal kernel boot path, so this interval is a
@@ -332,6 +339,8 @@ struct LivePresentationBackendState {
     uint64_t backingPageCount{0};
     uint32_t selectedWidth{0};
     uint32_t selectedHeight{0};
+    uint32_t virtualDesktopWidth{0};
+    uint32_t virtualDesktopHeight{0};
     uint32_t bytesPerPixel{0};
     GpuFormat resourceFormat{FORMAT_B8G8R8X8_UNORM};
 };
@@ -343,6 +352,13 @@ static ProbeOutcome s_probeOutcome{};
 static LivePresentationBackendState s_livePresentation{};
 static bool s_liveCommandLoggingSuppressed = false;
 static bool s_displayConfigurationPresentationPaused = false;
+static uint32_t s_nextReplacementResourceId = kFirstReplacementResourceId;
+static uint32_t s_resourcesCreated = 2u;
+static uint32_t s_resourcesCommitted = 2u;
+static uint32_t s_resourcesRolledBack = 0u;
+static uint32_t s_resourcesUnreferenced = 0u;
+static uint32_t s_activeBackingAllocations = 2u;
+static uint32_t s_cleanupFailures = 0u;
 static uint32_t s_displayConfigurationMode = static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend);
 static uint32_t s_displayConfigurationPrimaryOutput = 0u;
 static gxos::display::DisplayConfigurationSnapshot s_detectedConfigurationSnapshot{};
@@ -355,12 +371,20 @@ __declspec(align(4096)) static uint8_t s_commandBuffer[4096];
 __declspec(align(4096)) static uint8_t s_responseBuffer[sizeof(RespDisplayInfo)];
 __declspec(align(4096)) static uint8_t s_diagnosticBackingStorage0[kDiagnosticBackingBytes];
 __declspec(align(4096)) static uint8_t s_diagnosticBackingStorage1[kDiagnosticBackingBytes];
+__declspec(align(4096)) static uint8_t s_rebuildBackingStorage0[kDiagnosticBackingBytes];
+__declspec(align(4096)) static uint8_t s_rebuildBackingStorage1[kDiagnosticBackingBytes];
 #else
 static uint8_t s_queueStorage[16384] __attribute__((aligned(4096)));
 static uint8_t s_commandBuffer[4096] __attribute__((aligned(4096)));
 static uint8_t s_responseBuffer[sizeof(RespDisplayInfo)] __attribute__((aligned(4096)));
 static uint8_t s_diagnosticBackingStorage0[kDiagnosticBackingBytes] __attribute__((aligned(4096)));
 static uint8_t s_diagnosticBackingStorage1[kDiagnosticBackingBytes] __attribute__((aligned(4096)));
+// One bounded replacement slot per operational output. Old backing remains
+// in the diagnostic slot until commit; the replacement slot is never exposed
+// globally before its resource, backing, validation frame, and scanout bind
+// have all succeeded.
+static uint8_t s_rebuildBackingStorage0[kDiagnosticBackingBytes] __attribute__((aligned(4096)));
+static uint8_t s_rebuildBackingStorage1[kDiagnosticBackingBytes] __attribute__((aligned(4096)));
 #endif
 
 static void memzero(void* dst, size_t len)
@@ -369,6 +393,73 @@ static void memzero(void* dst, size_t len)
     for (size_t i = 0; i < len; ++i) {
         p[i] = 0;
     }
+}
+
+struct VirtioGpuOutputRebuildPlan {
+    uint32_t outputIdentity{0};
+    uint32_t scanoutId{0};
+    uint32_t oldResourceId{0};
+    uint32_t newResourceId{0};
+    uint32_t oldWidth{0};
+    uint32_t oldHeight{0};
+    uint32_t newWidth{0};
+    uint32_t newHeight{0};
+    uint64_t newBackingBytes{0};
+    uint64_t newBackingPages{0};
+    uint32_t newBackingMemEntries{0};
+    int targetOriginX{0};
+    int targetOriginY{0};
+    bool prepared{false};
+    bool attached{false};
+    bool scanoutBound{false};
+    bool validationPresented{false};
+    bool committed{false};
+};
+
+static bool checked_qemu_logical_backing_bytes(uint32_t width, uint32_t height, uint64_t& bytesOut)
+{
+    bytesOut = 0u;
+    if (width < kQemuLogicalModeMinWidth || height < kQemuLogicalModeMinHeight ||
+        width > kQemuLogicalModeMaxWidth || height > kQemuLogicalModeMaxHeight) return false;
+    const uint64_t w = width;
+    const uint64_t h = height;
+    if (w > 0xFFFFFFFFFFFFFFFFULL / h) return false;
+    const uint64_t pixels = w * h;
+    if (pixels > 0xFFFFFFFFFFFFFFFFULL / kDiagnosticBytesPerPixel) return false;
+    const uint64_t bytes = pixels * kDiagnosticBytesPerPixel;
+    if (bytes == 0u || bytes > kQemuLogicalModePerOutputBackingLimit || bytes > kDiagnosticBackingBytes) return false;
+    bytesOut = bytes;
+    return true;
+}
+
+static const char* qemu_logical_mode_id(uint32_t width, uint32_t height)
+{
+    if (width == 1280u && height == 800u) return "qemu-1280x800";
+    if (width == 1024u && height == 768u) return "qemu-1024x768";
+    if (width == 800u && height == 600u) return "qemu-800x600";
+    return nullptr;
+}
+
+static bool resource_id_in_use(uint32_t id, const DiagnosticResourceState& resource0,
+                               const DiagnosticResourceState& resource1, uint32_t pending0,
+                               uint32_t pending1)
+{
+    return id == 0u || id == kDiagnosticResourceId || id == kDiagnosticResourceIdSecondary ||
+        id == resource0.resourceId || id == resource1.resourceId || id == pending0 || id == pending1;
+}
+
+static uint32_t allocate_replacement_resource_id(const DiagnosticResourceState& resource0,
+                                                 const DiagnosticResourceState& resource1,
+                                                 uint32_t pending0, uint32_t pending1)
+{
+    // Bounded probe: the replacement namespace is intentionally finite and
+    // never wraps into currently visible or diagnostic resource IDs.
+    for (uint32_t attempt = 0u; attempt < 1024u; ++attempt) {
+        uint32_t candidate = s_nextReplacementResourceId++;
+        if (candidate == 0u) candidate = s_nextReplacementResourceId++;
+        if (!resource_id_in_use(candidate, resource0, resource1, pending0, pending1)) return candidate;
+    }
+    return 0u;
 }
 
 static void serial_put_u32_decimal(uint32_t value)
@@ -1258,7 +1349,10 @@ static CompositorFrameTargetResult present_target_once(
     surface.pixelPointer = reinterpret_cast<uint32_t*>(backingBase);
     surface.width = static_cast<uint32_t>(target.width);
     surface.height = static_cast<uint32_t>(target.height);
-    surface.pitchBytes = static_cast<uint32_t>(selectedWidth) * bytesPerPixel;
+    const uint32_t resourceWidth = resource.width != 0u ? resource.width : static_cast<uint32_t>(target.width);
+    const uint32_t resourceHeight = resource.height != 0u ? resource.height : static_cast<uint32_t>(target.height);
+    const uint64_t actualBackingBytes = resource.backingBytes != 0u ? resource.backingBytes : totalBackingBytes;
+    surface.pitchBytes = resourceWidth * bytesPerPixel;
     surface.bytesPerPixel = static_cast<uint8_t>(bytesPerPixel);
     surface.pixelFormat = pixel_format_from_gpu_format(resourceFormat);
     surface.viewportOriginX = target.viewportOriginX;
@@ -1269,7 +1363,7 @@ static CompositorFrameTargetResult present_target_once(
     surface.primary = target.primary;
     surface.taskbarVisible = target.primary;
     surface.clipRect = makePixelRect(0, 0, static_cast<int>(surface.width), static_cast<int>(surface.height));
-    surface.backingByteCount = totalBackingBytes;
+    surface.backingByteCount = actualBackingBytes;
 
     result.backingValid = pixelSurfaceCanCoverBacking(surface);
     result.renderedByteCount = pixelSurfaceExpectedByteCount(surface);
@@ -1282,17 +1376,17 @@ static CompositorFrameTargetResult present_target_once(
         return result;
     }
 
-    memzero(backingBase, static_cast<size_t>(totalBackingBytes));
+    memzero(backingBase, static_cast<size_t>(actualBackingBytes));
     fill_diagnostic_pattern(surface.pixelPointer,
                             surface.width,
                             surface.height,
-                            surface.width,
+                            resourceWidth,
                             fallbackPalette);
 
     bool conversionRequired = false;
     const char* renderBlocker = nullptr;
-    const uint32_t virtualDesktopWidth = selectedWidth > 0u ? selectedWidth * 2u : surface.width;
-    const uint32_t virtualDesktopHeight = selectedHeight > 0u ? selectedHeight : surface.height;
+    const uint32_t virtualDesktopWidth = selectedWidth > resourceWidth ? selectedWidth : resourceWidth * 2u;
+    const uint32_t virtualDesktopHeight = selectedHeight > resourceHeight ? selectedHeight : resourceHeight;
     result.renderOk = render_guide_xos_desktop_snapshot(surface,
                                                         target,
                                                          virtualDesktopWidth,
@@ -1306,7 +1400,7 @@ static CompositorFrameTargetResult present_target_once(
         fill_diagnostic_pattern(surface.pixelPointer,
                                 surface.width,
                                 surface.height,
-                                surface.width,
+                                resourceWidth,
                                 fallbackPalette);
         result.checksum = checksum_diagnostic_pattern(reinterpret_cast<const uint8_t*>(surface.pixelPointer),
                                                       static_cast<size_t>(pixelSurfaceExpectedByteCount(surface)));
@@ -3974,7 +4068,9 @@ static bool issue_transfer_to_host_2d(DeviceState& state,
         *completionKnownOut = false;
     }
 
-    if (resource.resourceId == 0u || !resource.scanoutSet || resource.width == 0u || resource.height == 0u) {
+    // VirtIO 2D transfer is valid after backing attachment and before
+    // SET_SCANOUT; this is required for prepare-before-replace validation.
+    if (resource.resourceId == 0u || !resource.backingAttached || resource.width == 0u || resource.height == 0u) {
         if (failureReasonOut != nullptr) {
             *failureReasonOut = "transfer resource state is invalid";
         }
@@ -4064,7 +4160,7 @@ static bool issue_resource_flush(DeviceState& state,
         *completionKnownOut = false;
     }
 
-    if (resource.resourceId == 0u || !resource.transferOk || resource.width == 0u || resource.height == 0u) {
+    if (resource.resourceId == 0u || !resource.backingAttached || !resource.transferOk || resource.width == 0u || resource.height == 0u) {
         if (failureReasonOut != nullptr) {
             *failureReasonOut = "flush resource state is invalid";
         }
@@ -4667,6 +4763,8 @@ static bool initialize_device(DeviceState& state)
             s_livePresentation.backingPageCount = backingPageCount;
             s_livePresentation.selectedWidth = selectedWidth;
             s_livePresentation.selectedHeight = selectedHeight;
+            s_livePresentation.virtualDesktopWidth = selectedWidth * 2u;
+            s_livePresentation.virtualDesktopHeight = selectedHeight;
             s_livePresentation.bytesPerPixel = bytesPerPixel;
             s_livePresentation.resourceFormat = static_cast<GpuFormat>(selectedFormat);
             s_livePresentation.initialTarget0Checksum = target0Result.checksum;
@@ -5922,11 +6020,11 @@ void presentation_tick()
                                                                   resource,
                                                                   backing,
                                                                   backingPhysical,
-                                                                  live.totalBackingBytes,
+                                                                  resource.backingBytes,
                                                                   palette,
                                                                   live.resourceFormat,
-                                                                  live.selectedWidth,
-                                                                  live.selectedHeight,
+                                                                  live.virtualDesktopWidth,
+                                                                  live.virtualDesktopHeight,
                                                                   live.bytesPerPixel,
                                                                   live.backingPageCount,
                                                                   frameSequence,
@@ -5955,9 +6053,9 @@ void presentation_tick()
                                                                         resource,
                                                                         descriptor.scanoutId,
                                                                         backing,
-                                                                        live.selectedWidth,
-                                                                        live.selectedHeight,
-                                                                        live.totalBackingBytes,
+                                                                        resource.width,
+                                                                        resource.height,
+                                                                        resource.backingBytes,
                                                                         palette,
                                                                         &fallbackChecksum);
                 live.fallbackActivated = true;
@@ -6161,6 +6259,8 @@ static void fill_backend_snapshot(gxos::display::DisplayConfigurationSnapshot& s
         copy_display_contract_text(output.stableId, sizeof(output.stableId), "display-", i + 1u);
         copy_display_contract_text(output.backendType, sizeof(output.backendType), "virtio-gpu");
         copy_display_contract_text(output.backendDeviceId, sizeof(output.backendDeviceId), "gpu0");
+        copy_display_contract_text(output.modeId, sizeof(output.modeId),
+            qemu_logical_mode_id(static_cast<uint32_t>(monitor.width), static_cast<uint32_t>(monitor.height)));
         output.scanoutId = monitor.scanoutId;
         output.logicalOrdinal = i + 1u;
         copy_display_contract_text(output.stableName, sizeof(output.stableName), "Display ", i + 1u);
@@ -6179,12 +6279,10 @@ static void fill_backend_snapshot(gxos::display::DisplayConfigurationSnapshot& s
     }
     copy_display_contract_text(snapshot.taskbarMonitorId, sizeof(snapshot.taskbarMonitorId), snapshot.primaryOutputId);
     if (snapshot.outputCount > 0u) {
-        const DisplayMonitorDescriptor& first = s_probeOutcome.outputInventory.monitors[0];
         snapshot.virtualDesktopX = 0;
         snapshot.virtualDesktopY = 0;
-        snapshot.virtualDesktopWidth = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
-            ? first.width : first.width * static_cast<int32_t>(snapshot.outputCount);
-        snapshot.virtualDesktopHeight = first.height;
+        snapshot.virtualDesktopWidth = s_probeOutcome.outputInventory.virtualDesktop.width();
+        snapshot.virtualDesktopHeight = s_probeOutcome.outputInventory.virtualDesktop.height();
     }
 }
 
@@ -6212,40 +6310,94 @@ static uint32_t primary_output_from_request(const gxos::display::DisplayConfigur
     return 0u;
 }
 
-static void update_backend_layout(uint32_t mode, uint32_t primaryOrdinal)
+static void refresh_backend_inventory_from_live(uint32_t mode)
 {
-    VirtioGpuOutputInventory& inventory = s_probeOutcome.outputInventory;
-    const int firstWidth = inventory.monitors.size() > 0u ? inventory.monitors[0].width : 0;
-    for (uint32_t i = 0u; i < inventory.monitors.size(); ++i) {
-        const int originX = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
-            ? 0 : firstWidth * static_cast<int>(i);
-        const bool primary = i == primaryOrdinal;
-        inventory.monitors[i].virtualX = originX;
-        inventory.monitors[i].virtualY = 0;
-        inventory.monitors[i].primary = primary;
-        if (i < inventory.viewports.size()) {
-            inventory.viewports[i].originX = originX;
-            inventory.viewports[i].originY = 0;
+    FixedList<VirtioGpuScanoutState, kVirtioGpuMaxOutputs> scanouts;
+    const VirtioGpuOutputInventory oldInventory = s_probeOutcome.outputInventory;
+    for (uint32_t i = 0u; i < 2u; ++i) {
+        const DiagnosticResourceState& resource = i == 0u ? s_livePresentation.resource0 : s_livePresentation.resource1;
+        const LivePresentationTargetDescriptor& target = i == 0u ? s_livePresentation.target0 : s_livePresentation.target1;
+        if (resource.resourceId == 0u) continue;
+        DisplayInfo preferred{};
+        if (i < oldInventory.monitors.size()) {
+            preferred.x = static_cast<uint32_t>(oldInventory.monitors[i].preferredX);
+            preferred.y = static_cast<uint32_t>(oldInventory.monitors[i].preferredY);
+            preferred.width = static_cast<uint32_t>(oldInventory.monitors[i].preferredWidth);
+            preferred.height = static_cast<uint32_t>(oldInventory.monitors[i].preferredHeight);
+            preferred.enabled = oldInventory.monitors[i].connectorEnabled;
         }
-        if (i < inventory.renderTargets.size()) {
-            inventory.renderTargets[i].viewportOriginX = originX;
-            inventory.renderTargets[i].viewportOriginY = 0;
-            inventory.renderTargets[i].primary = primary;
+        scanouts.push_back(make_scanout_state(
+            i,
+            preferred,
+            resource,
+            preferred.enabled,
+            target.viewportOriginX,
+            target.viewportOriginY,
+            target.width,
+            target.height,
+            resource.flushOk && resource.patternChecksum != 0u,
+            resource.flushOk ? "RESOURCE_FLUSH result=ok" : "RESOURCE_FLUSH blocked",
+            target.primary));
+    }
+    s_probeOutcome.outputInventory = VirtioGpuDisplayBackend::getVirtioGpuOutputInventory(
+        scanouts, s_probeOutcome.deviceConfigNumScanouts);
+    if (mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)) {
+        // The generic inventory builder defaults to horizontal Extend. Mirror
+        // is a separate logical layout: both viewports occupy the same origin
+        // while retaining their independent resources and scanouts.
+        for (uint32_t i = 0u; i < s_probeOutcome.outputInventory.monitors.size(); ++i) {
+            auto& monitor = s_probeOutcome.outputInventory.monitors[i];
+            monitor.virtualX = 0;
+            monitor.virtualY = 0;
+            monitor.assignedX = 0;
+            monitor.assignedY = 0;
         }
-        if (i < inventory.outputs.size()) {
-            inventory.outputs[i].primary = primary;
-            inventory.outputs[i].assignedX = originX;
-            inventory.outputs[i].assignedY = 0;
+        for (uint32_t i = 0u; i < s_probeOutcome.outputInventory.viewports.size(); ++i) {
+            auto& viewport = s_probeOutcome.outputInventory.viewports[i];
+            viewport.originX = 0;
+            viewport.originY = 0;
+            viewport.assignedX = 0;
+            viewport.assignedY = 0;
+        }
+        for (uint32_t i = 0u; i < s_probeOutcome.outputInventory.renderTargets.size(); ++i) {
+            auto& target = s_probeOutcome.outputInventory.renderTargets[i];
+            target.viewportOriginX = 0;
+            target.viewportOriginY = 0;
+            target.assignedX = 0;
+            target.assignedY = 0;
+        }
+        if (!s_probeOutcome.outputInventory.monitors.empty()) {
+            s_probeOutcome.outputInventory.virtualDesktop.left = 0;
+            s_probeOutcome.outputInventory.virtualDesktop.top = 0;
+            s_probeOutcome.outputInventory.virtualDesktop.right =
+                s_probeOutcome.outputInventory.monitors[0].width;
+            s_probeOutcome.outputInventory.virtualDesktop.bottom =
+                s_probeOutcome.outputInventory.monitors[0].height;
         }
     }
-    inventory.primaryOutput = primaryOrdinal < inventory.monitors.size()
-        ? inventory.monitors[primaryOrdinal].scanoutId : 0u;
-    inventory.virtualDesktop.left = 0;
-    inventory.virtualDesktop.top = 0;
-    inventory.virtualDesktop.right = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
-        ? firstWidth : firstWidth * static_cast<int>(inventory.monitors.size());
-    inventory.virtualDesktop.bottom = inventory.monitors.size() > 0u ? inventory.monitors[0].height : 0;
-    inventory.virtualDesktop.mode = mode;
+    s_probeOutcome.outputInventory.virtualDesktop.mode = mode;
+}
+
+static void update_backend_layout(uint32_t mode, uint32_t primaryOrdinal,
+                                  uint32_t width0, uint32_t height0,
+                                  uint32_t width1, uint32_t height1)
+{
+    const int origin1 = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
+        ? 0 : static_cast<int>(width0);
+    s_livePresentation.target0.viewportOriginX = 0;
+    s_livePresentation.target0.viewportOriginY = 0;
+    s_livePresentation.target0.width = static_cast<int>(width0);
+    s_livePresentation.target0.height = static_cast<int>(height0);
+    s_livePresentation.target1.viewportOriginX = origin1;
+    s_livePresentation.target1.viewportOriginY = 0;
+    s_livePresentation.target1.width = static_cast<int>(width1);
+    s_livePresentation.target1.height = static_cast<int>(height1);
+    s_livePresentation.target0.primary = primaryOrdinal == 0u;
+    s_livePresentation.target1.primary = primaryOrdinal == 1u;
+    s_livePresentation.virtualDesktopWidth = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
+        ? width0 : width0 + width1;
+    s_livePresentation.virtualDesktopHeight = height0 > height1 ? height0 : height1;
+    refresh_backend_inventory_from_live(mode);
 }
 
 } // namespace
@@ -6290,7 +6442,7 @@ bool display_configuration_backend_presentation_paused()
 
 bool apply_display_configuration_backend_layout(
     const gxos::display::DisplayConfigurationRequest& requested,
-    bool injectValidationFailure,
+    uint32_t failureInjectionFlags,
     DisplayConfigurationBackendResult* result)
 {
     if (result == nullptr) return false;
@@ -6299,6 +6451,9 @@ bool apply_display_configuration_backend_layout(
     set_backend_diagnostic(*result, "QEMU-only display backend is not enabled");
     return false;
 #else
+    // REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
+    // Physical backends: resolution changes are not supported. This bounded
+    // resource rebuild is enabled only by the QEMU virtio-gpu probe gate.
     if (!s_probeOutcome.valid || !s_livePresentation.enabled || backend_output_count() < 2u) {
         set_backend_diagnostic(*result, "virtio-gpu presentation backend unavailable");
         return false;
@@ -6307,7 +6462,7 @@ bool apply_display_configuration_backend_layout(
         set_backend_diagnostic(*result, "presentation was not paused at the safe point");
         return false;
     }
-    if (requested.outputCount < 2u || requested.outputCount > gxos::display::kDisplayConfigurationMaxOutputs) {
+    if (requested.outputCount != 2u || requested.outputCount > gxos::display::kDisplayConfigurationMaxOutputs) {
         set_backend_diagnostic(*result, "two operational outputs are required");
         return false;
     }
@@ -6316,12 +6471,29 @@ bool apply_display_configuration_backend_layout(
         set_backend_diagnostic(*result, "unsupported display mode");
         return false;
     }
+
+    DiagnosticResourceState oldResources[2] = { s_livePresentation.resource0, s_livePresentation.resource1 };
+    DiagnosticResourceState candidateResources[2] = { oldResources[0], oldResources[1] };
+    uint8_t* oldBacking[2] = { s_livePresentation.backing0, s_livePresentation.backing1 };
+    uint8_t* candidateBacking[2] = { oldBacking[0], oldBacking[1] };
+    uint64_t oldPhysical[2] = { s_livePresentation.backingPhysical0, s_livePresentation.backingPhysical1 };
+    uint64_t candidatePhysical[2] = { oldPhysical[0], oldPhysical[1] };
+    LivePresentationTargetDescriptor oldTargets[2] = { s_livePresentation.target0, s_livePresentation.target1 };
+    LivePresentationTargetDescriptor candidateTargets[2] = { oldTargets[0], oldTargets[1] };
+    uint8_t* replacementBacking[2] = { &s_rebuildBackingStorage0[0], &s_rebuildBackingStorage1[0] };
+    MemEntry replacementEntries[2][kDiagnosticBackingMaxMemEntries]{};
+    DiagnosticBackingLayoutAudit replacementAudits[2]{};
+    VirtioGpuOutputRebuildPlan plans[2]{};
+    uint32_t widths[2]{};
+    uint32_t heights[2]{};
+    uint64_t backingBytes[2]{};
+    uint64_t totalBackingBytes = 0u;
+
     for (uint32_t i = 0u; i < 2u; ++i) {
         if (!requested_output_is(requested.outputs[i], i + 1u)) {
             set_backend_diagnostic(*result, "stable output id is unavailable");
             return false;
         }
-        const DisplayMonitorDescriptor& monitor = s_probeOutcome.outputInventory.monitors[i];
         if (requested.outputs[i].backendType[0] != '\0' &&
             !display_contract_text_equals(requested.outputs[i].backendType, "virtio-gpu")) {
             set_backend_diagnostic(*result, "stable output backend identity is unavailable");
@@ -6336,15 +6508,38 @@ bool apply_display_configuration_backend_layout(
             set_backend_diagnostic(*result, "stable output ordinal is unavailable");
             return false;
         }
-        if (requested.outputs[i].width != monitor.width || requested.outputs[i].height != monitor.height) {
-            set_backend_diagnostic(*result, "resolution changes are not supported");
+        widths[i] = requested.outputs[i].width > 0 ? static_cast<uint32_t>(requested.outputs[i].width) : oldResources[i].width;
+        heights[i] = requested.outputs[i].height > 0 ? static_cast<uint32_t>(requested.outputs[i].height) : oldResources[i].height;
+        const char* modeId = qemu_logical_mode_id(widths[i], heights[i]);
+        if (modeId == nullptr || (requested.outputs[i].modeId[0] != '\0' &&
+            !display_contract_text_equals(requested.outputs[i].modeId, modeId))) {
+            set_backend_diagnostic(*result, "unsupported QEMU logical resolution");
             return false;
         }
+        if (!checked_qemu_logical_backing_bytes(widths[i], heights[i], backingBytes[i])) {
+            set_backend_diagnostic(*result, "bounded logical resolution backing validation failed");
+            return false;
+        }
+        if (totalBackingBytes > kQemuLogicalModeTotalBackingLimit - backingBytes[i]) {
+            set_backend_diagnostic(*result, "total logical resolution backing limit exceeded");
+            return false;
+        }
+        totalBackingBytes += backingBytes[i];
+        plans[i].outputIdentity = i + 1u;
+        plans[i].scanoutId = i;
+        plans[i].oldResourceId = oldResources[i].resourceId;
+        plans[i].oldWidth = oldResources[i].width;
+        plans[i].oldHeight = oldResources[i].height;
+        plans[i].newWidth = widths[i];
+        plans[i].newHeight = heights[i];
     }
     if (requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) &&
-        (s_probeOutcome.outputInventory.monitors[0].width != s_probeOutcome.outputInventory.monitors[1].width ||
-         s_probeOutcome.outputInventory.monitors[0].height != s_probeOutcome.outputInventory.monitors[1].height)) {
+        (widths[0] != widths[1] || heights[0] != heights[1])) {
         set_backend_diagnostic(*result, "Mirror dimensions incompatible");
+        return false;
+    }
+    if (widths[0] > 0x7FFFFFFFu - (requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) ? 0u : widths[1])) {
+        set_backend_diagnostic(*result, "virtual desktop geometry overflow");
         return false;
     }
     const uint32_t primaryOrdinal = primary_output_from_request(requested);
@@ -6352,68 +6547,351 @@ bool apply_display_configuration_backend_layout(
         set_backend_diagnostic(*result, "primary output is unavailable");
         return false;
     }
-    if (injectValidationFailure) {
+    const uint32_t virtualDesktopWidth = requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
+        ? widths[0] : widths[0] + widths[1];
+    const uint32_t virtualDesktopHeight = heights[0] > heights[1] ? heights[0] : heights[1];
+    const int originX[2] = { 0, requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
+        ? 0 : static_cast<int>(widths[0]) };
+    const int originY[2] = { 0, 0 };
+    for (uint32_t i = 0u; i < 2u; ++i) {
+        plans[i].targetOriginX = originX[i];
+        plans[i].targetOriginY = originY[i];
+        candidateTargets[i] = oldTargets[i];
+        candidateTargets[i].viewportOriginX = originX[i];
+        candidateTargets[i].viewportOriginY = originY[i];
+        candidateTargets[i].width = widths[i];
+        candidateTargets[i].height = heights[i];
+        candidateTargets[i].primary = i == primaryOrdinal;
+        plans[i].prepared = oldResources[i].width == widths[i] && oldResources[i].height == heights[i];
+        if (plans[i].prepared) {
+            plans[i].newResourceId = oldResources[i].resourceId;
+            plans[i].newBackingBytes = oldResources[i].backingBytes;
+            plans[i].newBackingPages = oldResources[i].backingPageCount;
+            plans[i].newBackingMemEntries = oldResources[i].memEntryCount;
+        }
+    }
+    if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectValidationFailure) != 0u) {
         set_backend_diagnostic(*result, "injected-validation-failure");
         return false;
     }
 
-    s_displayConfigurationMode = requested.mode;
-    s_displayConfigurationPrimaryOutput = s_probeOutcome.outputInventory.monitors[primaryOrdinal].scanoutId;
-    const int firstWidth = s_probeOutcome.outputInventory.monitors[0].width;
-    s_livePresentation.target0.viewportOriginX = 0;
-    s_livePresentation.target0.viewportOriginY = 0;
-    s_livePresentation.target1.viewportOriginX = requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) ? 0 : firstWidth;
-    s_livePresentation.target1.viewportOriginY = 0;
-    s_livePresentation.target0.primary = primaryOrdinal == 0u;
-    s_livePresentation.target1.primary = primaryOrdinal == 1u;
-    update_backend_layout(requested.mode, primaryOrdinal);
-    result->targetRebuilt = 1u;
+    auto releaseProvisional = [&]() {
+        bool released = true;
+        for (uint32_t i = 0u; i < 2u; ++i) {
+            if (plans[i].newResourceId != 0u && plans[i].newResourceId != oldResources[i].resourceId) {
+                const char* reason = nullptr;
+                bool completed = false;
+                if (candidateResources[i].resourceId == 0u) continue;
+                if (!issue_resource_unref(*s_livePresentation.device, candidateResources[i], &reason, &completed)) {
+                    released = false;
+                    ++s_cleanupFailures;
+                } else {
+                    ++s_resourcesUnreferenced;
+                    if (s_activeBackingAllocations > 0u) --s_activeBackingAllocations;
+                }
+            }
+        }
+        return released;
+    };
 
-    const uint64_t frameSequence = ++s_livePresentation.frameSequence;
-    s_liveCommandLoggingSuppressed = true;
-    const CompositorFrameTargetResult target0 = present_target_once(
-        *s_livePresentation.device,
-        make_live_target(s_livePresentation.target0),
-        s_livePresentation.resource0,
-        s_livePresentation.backing0,
-        s_livePresentation.backingPhysical0,
-        s_livePresentation.totalBackingBytes,
-        diagnostic_pattern_palette(0u),
-        s_livePresentation.resourceFormat,
-        s_livePresentation.selectedWidth,
-        s_livePresentation.selectedHeight,
-        s_livePresentation.bytesPerPixel,
-        s_livePresentation.backingPageCount,
-        frameSequence,
-        false,
-        false);
-    const CompositorFrameTargetResult target1 = present_target_once(
-        *s_livePresentation.device,
-        make_live_target(s_livePresentation.target1),
-        s_livePresentation.resource1,
-        s_livePresentation.backing1,
-        s_livePresentation.backingPhysical1,
-        s_livePresentation.totalBackingBytes,
-        diagnostic_pattern_palette(1u),
-        s_livePresentation.resourceFormat,
-        s_livePresentation.selectedWidth,
-        s_livePresentation.selectedHeight,
-        s_livePresentation.bytesPerPixel,
-        s_livePresentation.backingPageCount,
-        frameSequence,
-        false,
-        false);
-    s_liveCommandLoggingSuppressed = false;
-    if (!target0.renderOk || !target0.transferOk || !target0.flushOk ||
-        !target1.renderOk || !target1.transferOk || !target1.flushOk) {
-        set_backend_diagnostic(*result, "validation frame failed");
+    bool prepareOk = true;
+    const char* failureReason = nullptr;
+    bool completionKnown = false;
+    for (uint32_t i = 0u; i < 2u && prepareOk; ++i) {
+        if (plans[i].newResourceId != 0u && plans[i].newResourceId == oldResources[i].resourceId) {
+            continue;
+        }
+        candidateBacking[i] = replacementBacking[i];
+        candidatePhysical[i] = dma_address(candidateBacking[i]);
+        if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectBackingAllocationFailure) != 0u) {
+            failureReason = "injected replacement backing allocation failure";
+            prepareOk = false;
+            break;
+        }
+        if (candidatePhysical[i] == 0u || !build_diagnostic_backing_layout(
+                candidateBacking[i], backingBytes[i], replacementEntries[i],
+                kDiagnosticBackingMaxMemEntries, &replacementAudits[i])) {
+            failureReason = "replacement backing physical coverage validation failed";
+            prepareOk = false;
+            break;
+        }
+        const uint32_t id = allocate_replacement_resource_id(oldResources[0], oldResources[1],
+            plans[0].newResourceId, plans[1].newResourceId);
+        if (id == 0u) {
+            failureReason = "replacement resource id namespace exhausted";
+            prepareOk = false;
+            break;
+        }
+        plans[i].newResourceId = id;
+        candidateResources[i] = DiagnosticResourceState{};
+        if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectResourceCreateFailure) != 0u) {
+            failureReason = "injected RESOURCE_CREATE_2D response failure";
+            prepareOk = false;
+            break;
+        }
+        if (!issue_resource_create_2d(*s_livePresentation.device, candidateResources[i],
+                                      oldResources[0].resourceId, id, widths[i], heights[i],
+                                      s_livePresentation.resourceFormat, false,
+                                      &failureReason, &completionKnown)) {
+            prepareOk = false;
+            break;
+        }
+        ++s_resourcesCreated;
+        ++s_activeBackingAllocations;
+        if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectAttachBackingFailure) != 0u) {
+            failureReason = "injected RESOURCE_ATTACH_BACKING response failure";
+            prepareOk = false;
+            break;
+        }
+        if (!issue_resource_attach_backing(*s_livePresentation.device, candidateResources[i],
+                                            reinterpret_cast<uint64_t>(candidateBacking[i]),
+                                            candidatePhysical[i], backingBytes[i],
+                                            align_up(backingBytes[i], kDiagnosticPageSizeBytes) / kDiagnosticPageSizeBytes,
+                                            replacementEntries[i], replacementAudits[i].totalMemEntries,
+                                            replacementAudits[i], &failureReason, &completionKnown)) {
+            prepareOk = false;
+            break;
+        }
+        plans[i].newBackingMemEntries = candidateResources[i].memEntryCount;
+        plans[i].newBackingBytes = backingBytes[i];
+        plans[i].newBackingPages = candidateResources[i].backingPageCount;
+        plans[i].attached = true;
+        plans[i].prepared = true;
+        kernel::serial::puts("Display mode rebuild: output=");
+        serial_put_u32_decimal(plans[i].outputIdentity);
+        kernel::serial::puts(" scanout=");
+        serial_put_u32_decimal(plans[i].scanoutId);
+        kernel::serial::puts(" old=");
+        serial_put_u32_decimal(plans[i].oldWidth);
+        kernel::serial::putc('x');
+        serial_put_u32_decimal(plans[i].oldHeight);
+        kernel::serial::puts(" new=");
+        serial_put_u32_decimal(plans[i].newWidth);
+        kernel::serial::putc('x');
+        serial_put_u32_decimal(plans[i].newHeight);
+        kernel::serial::puts(" oldResource=");
+        serial_put_u32_decimal(plans[i].oldResourceId);
+        kernel::serial::puts(" newResource=");
+        serial_put_u32_decimal(plans[i].newResourceId);
+        kernel::serial::puts(" backingBytes=");
+        serial_put_u64_decimal(plans[i].newBackingBytes);
+        kernel::serial::puts(" pages=");
+        serial_put_u64_decimal(plans[i].newBackingPages);
+        kernel::serial::puts(" memEntries=");
+        serial_put_u32_decimal(replacementAudits[i].totalMemEntries);
+        kernel::serial::puts(" physicalCoverage=valid prepared=yes\n");
+    }
+    if (!prepareOk) {
+        const bool released = releaseProvisional();
+        set_backend_diagnostic(*result, failureReason != nullptr ? failureReason : "replacement preparation failed");
+        kernel::serial::puts("Display mode rebuild: result=failed stage=prepare rollback=no provisionalReleased=");
+        kernel::serial::puts(released ? "yes\n" : "no\n");
         return false;
     }
+
+    for (uint32_t i = 0u; i < 2u; ++i) {
+        candidateTargets[i].resourceId = candidateResources[i].resourceId;
+    }
+
+    // Render and transfer into every candidate before any replacement scanout
+    // is bound. No provisional target is published into the global inventory.
+    s_liveCommandLoggingSuppressed = true;
+    const uint64_t validationSequence = ++s_livePresentation.frameSequence;
+    bool validationOk = true;
+    for (uint32_t i = 0u; i < 2u && validationOk; ++i) {
+        if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectValidationFrameFailure) != 0u && i == 1u) {
+            failureReason = "injected validation-frame failure";
+            validationOk = false;
+            break;
+        }
+        const CompositorFrameTargetResult validation = present_target_once(
+            *s_livePresentation.device, make_live_target(candidateTargets[i]),
+            candidateResources[i], candidateBacking[i], candidatePhysical[i], backingBytes[i],
+            diagnostic_pattern_palette(i), s_livePresentation.resourceFormat,
+            virtualDesktopWidth, virtualDesktopHeight, s_livePresentation.bytesPerPixel,
+            candidateResources[i].backingPageCount,
+            validationSequence, false, false);
+        validationOk = validation.renderOk && validation.transferOk && validation.flushOk;
+        plans[i].validationPresented = validationOk;
+        if (!validationOk) failureReason = validation.blocker != nullptr ? validation.blocker : "validation frame failed";
+    }
+    s_liveCommandLoggingSuppressed = false;
+    if (!validationOk) {
+        const bool released = releaseProvisional();
+        set_backend_diagnostic(*result, failureReason != nullptr ? failureReason : "validation frame failed");
+        kernel::serial::puts("Display mode rebuild: result=failed stage=validation-frame rollback=no provisionalReleased=");
+        kernel::serial::puts(released ? "yes\n" : "no\n");
+        return false;
+    }
+
+    // Bind replacements only after all independent backing stores have been
+    // verified and presented. The old resources remain alive for rollback.
+    bool bindOk = true;
+    for (uint32_t i = 0u; i < 2u && bindOk; ++i) {
+        if (plans[i].newResourceId == oldResources[i].resourceId) continue;
+        if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectSetScanoutFailure) != 0u && i == 1u) {
+            failureReason = "injected SET_SCANOUT response failure";
+            bindOk = false;
+            break;
+        }
+        if (!issue_set_scanout(*s_livePresentation.device, candidateResources[i], i,
+                               widths[i], heights[i], &failureReason, &completionKnown)) {
+            bindOk = false;
+            break;
+        }
+        plans[i].scanoutBound = true;
+    }
+    if (!bindOk) {
+        bool restored = true;
+        for (uint32_t i = 0u; i < 2u; ++i) {
+            if (plans[i].scanoutBound) {
+                if (!issue_set_scanout(*s_livePresentation.device, oldResources[i], i,
+                                       oldResources[i].width, oldResources[i].height,
+                                       &failureReason, &completionKnown)) restored = false;
+            }
+        }
+        s_liveCommandLoggingSuppressed = true;
+        for (uint32_t i = 0u; i < 2u && restored; ++i) {
+            const CompositorFrameTargetResult rollbackFrame = present_target_once(
+                *s_livePresentation.device, make_live_target(oldTargets[i]), oldResources[i],
+                oldBacking[i], oldPhysical[i], oldResources[i].backingBytes,
+                diagnostic_pattern_palette(i), s_livePresentation.resourceFormat,
+                s_livePresentation.virtualDesktopWidth, s_livePresentation.virtualDesktopHeight,
+                s_livePresentation.bytesPerPixel, oldResources[i].backingPageCount,
+                ++s_livePresentation.frameSequence, false, false);
+            if (!rollbackFrame.renderOk || !rollbackFrame.transferOk || !rollbackFrame.flushOk) restored = false;
+        }
+        s_liveCommandLoggingSuppressed = false;
+        const bool released = releaseProvisional();
+        ++s_resourcesRolledBack;
+        set_backend_diagnostic(*result, failureReason != nullptr ? failureReason : "SET_SCANOUT failed");
+        kernel::serial::puts("Display mode rebuild: result=failed stage=set-scanout rollback=");
+        kernel::serial::puts(restored ? "yes" : "no");
+        kernel::serial::puts(" oldResourceRestored=");
+        kernel::serial::puts(restored ? "yes" : "no");
+        kernel::serial::puts(" provisionalReleased=");
+        kernel::serial::puts(released ? "yes\n" : "no\n");
+        return false;
+    }
+
+    // Verify the actual post-bind scanouts before publishing the candidate
+    // target inventory. This closes the old/new target mixing window.
+    s_liveCommandLoggingSuppressed = true;
+    bool postBindOk = true;
+    for (uint32_t i = 0u; i < 2u && postBindOk; ++i) {
+        const CompositorFrameTargetResult boundFrame = present_target_once(
+            *s_livePresentation.device, make_live_target(candidateTargets[i]), candidateResources[i],
+            candidateBacking[i], candidatePhysical[i], backingBytes[i], diagnostic_pattern_palette(i),
+            s_livePresentation.resourceFormat, virtualDesktopWidth, virtualDesktopHeight,
+            s_livePresentation.bytesPerPixel, candidateResources[i].backingPageCount,
+            ++s_livePresentation.frameSequence, false, false);
+        postBindOk = boundFrame.renderOk && boundFrame.transferOk && boundFrame.flushOk;
+        if (!postBindOk) failureReason = boundFrame.blocker != nullptr ? boundFrame.blocker : "post-bind validation failed";
+    }
+    s_liveCommandLoggingSuppressed = false;
+    if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectSecondOutputCommitFailure) != 0u) {
+        failureReason = "injected second-output commit failure";
+        postBindOk = false;
+    }
+    if (!postBindOk) {
+        bool restored = true;
+        for (uint32_t i = 0u; i < 2u; ++i) {
+            if (plans[i].scanoutBound && !issue_set_scanout(*s_livePresentation.device, oldResources[i], i,
+                    oldResources[i].width, oldResources[i].height, &failureReason, &completionKnown)) restored = false;
+        }
+        s_liveCommandLoggingSuppressed = true;
+        for (uint32_t i = 0u; i < 2u && restored; ++i) {
+            const CompositorFrameTargetResult rollbackFrame = present_target_once(
+                *s_livePresentation.device, make_live_target(oldTargets[i]), oldResources[i],
+                oldBacking[i], oldPhysical[i], oldResources[i].backingBytes,
+                diagnostic_pattern_palette(i), s_livePresentation.resourceFormat,
+                s_livePresentation.virtualDesktopWidth, s_livePresentation.virtualDesktopHeight,
+                s_livePresentation.bytesPerPixel, oldResources[i].backingPageCount,
+                ++s_livePresentation.frameSequence, false, false);
+            if (!rollbackFrame.renderOk || !rollbackFrame.transferOk || !rollbackFrame.flushOk) restored = false;
+        }
+        s_liveCommandLoggingSuppressed = false;
+        const bool released = releaseProvisional();
+        ++s_resourcesRolledBack;
+        set_backend_diagnostic(*result, failureReason != nullptr ? failureReason : "post-bind validation failed");
+        kernel::serial::puts("Display mode rebuild: result=failed stage=post-bind-validation rollback=");
+        kernel::serial::puts(restored ? "yes" : "no");
+        kernel::serial::puts(" provisionalReleased=");
+        kernel::serial::puts(released ? "yes\n" : "no\n");
+        return false;
+    }
+
+    for (uint32_t i = 0u; i < 2u; ++i) {
+        plans[i].committed = true;
+    }
+    s_livePresentation.resource0 = candidateResources[0];
+    s_livePresentation.resource1 = candidateResources[1];
+    s_livePresentation.backing0 = candidateBacking[0];
+    s_livePresentation.backing1 = candidateBacking[1];
+    s_livePresentation.backingPhysical0 = candidatePhysical[0];
+    s_livePresentation.backingPhysical1 = candidatePhysical[1];
+    s_livePresentation.target0 = candidateTargets[0];
+    s_livePresentation.target1 = candidateTargets[1];
+    s_livePresentation.selectedWidth = widths[0];
+    s_livePresentation.selectedHeight = heights[0];
+    s_livePresentation.totalBackingBytes = backingBytes[0] > backingBytes[1] ? backingBytes[0] : backingBytes[1];
+    s_livePresentation.backingPageCount = candidateResources[0].backingPageCount > candidateResources[1].backingPageCount
+        ? candidateResources[0].backingPageCount : candidateResources[1].backingPageCount;
+    s_displayConfigurationMode = requested.mode;
+    s_displayConfigurationPrimaryOutput = s_probeOutcome.outputInventory.monitors[primaryOrdinal].scanoutId;
+    update_backend_layout(requested.mode, primaryOrdinal, widths[0], heights[0], widths[1], heights[1]);
+    result->targetRebuilt = 1u;
     result->validationFrame = 1u;
-    result->success = 1u;
-    set_backend_diagnostic(*result, "display layout applied and validation frame flushed");
+
+    bool cleanupOk = true;
+    for (uint32_t i = 0u; i < 2u; ++i) {
+        if (plans[i].newResourceId == oldResources[i].resourceId) continue;
+        const char* cleanupReason = nullptr;
+        bool cleanupKnown = false;
+        if (!issue_resource_unref(*s_livePresentation.device, oldResources[i], &cleanupReason, &cleanupKnown)) {
+            cleanupOk = false;
+            ++s_cleanupFailures;
+        } else {
+            ++s_resourcesUnreferenced;
+            if (s_activeBackingAllocations > 0u) --s_activeBackingAllocations;
+        }
+    }
+    s_resourcesCommitted += (plans[0].newResourceId != oldResources[0].resourceId ? 1u : 0u);
+    s_resourcesCommitted += (plans[1].newResourceId != oldResources[1].resourceId ? 1u : 0u);
+    kernel::serial::puts("Display resource lifecycle: created=");
+    serial_put_u32_decimal(s_resourcesCreated);
+    kernel::serial::puts(" committed=");
+    serial_put_u32_decimal(s_resourcesCommitted);
+    kernel::serial::puts(" rolledBack=");
+    serial_put_u32_decimal(s_resourcesRolledBack);
+    kernel::serial::puts(" unreferenced=");
+    serial_put_u32_decimal(s_resourcesUnreferenced);
+    kernel::serial::puts(" activeBacking=");
+    serial_put_u32_decimal(s_activeBackingAllocations);
+    kernel::serial::puts(" cleanupFailures=");
+    serial_put_u32_decimal(s_cleanupFailures);
+    kernel::serial::putc('\n');
     kernel::desktop::request_redraw();
-    return true;
+    kernel::serial::puts("Display configuration apply: mode=");
+    kernel::serial::puts(requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend) ? "Extend" : "Mirror");
+    kernel::serial::puts(" output1=");
+    serial_put_u32_decimal(widths[0]);
+    kernel::serial::putc('x');
+    serial_put_u32_decimal(heights[0]);
+    kernel::serial::puts(" output2=");
+    serial_put_u32_decimal(widths[1]);
+    kernel::serial::putc('x');
+    serial_put_u32_decimal(heights[1]);
+    kernel::serial::puts(" virtualDesktop=");
+    serial_put_u32_decimal(virtualDesktopWidth);
+    kernel::serial::putc('x');
+    serial_put_u32_decimal(virtualDesktopHeight);
+    kernel::serial::puts(" targets=2 validation=ok cleanup=");
+    kernel::serial::puts(cleanupOk ? "ok\n" : "failed\n");
+    set_backend_diagnostic(*result, cleanupOk ? "display layout applied and validation frame flushed; cleanup=ok"
+                                             : "display layout applied; cleanup failure recorded");
+    result->success = cleanupOk ? 1u : 0u;
+    return cleanupOk;
 #endif
 }
 

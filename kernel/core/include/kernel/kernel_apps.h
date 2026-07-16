@@ -271,6 +271,7 @@ private:
     uint32_t m_selectedPrimaryOutput;
     uint32_t m_appliedPrimaryOutput;
     gxos::display::DisplayConfigurationSnapshot m_activeDisplayConfiguration;
+    gxos::display::DisplayConfigurationSnapshot m_requestedDisplayConfiguration;
     char m_displayStatus[96];
     uint64_t m_windowGeneration;
     uint64_t m_displayRequestId;

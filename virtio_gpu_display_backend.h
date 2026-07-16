@@ -272,6 +272,10 @@ public:
             monitor.sourceType = "virtio-gpu";
             monitor.backendId = "virtio-gpu";
             monitor.outputId = std::string("virtio-gpu-output-") + std::to_string(output.scanoutId);
+            const std::vector<DisplayMode> modeCatalog = qemuVirtioGpuLogicalModeCatalog();
+            if (const DisplayMode* currentMode = findDisplayModeByDimensions(modeCatalog, assignedWidth, assignedHeight)) {
+                monitor.modeId = currentMode->id;
+            }
             monitor.scanoutId = output.scanoutId;
             monitor.resourceId = output.resourceId;
             monitor.preferredX = output.preferredX;
@@ -324,6 +328,7 @@ public:
             viewport.presentationConfirmed = output.presentationConfirmed;
             viewport.monitorId = monitor.id;
             viewport.monitorName = monitor.name;
+            viewport.modeId = monitor.modeId;
             viewport.preferredX = output.preferredX;
             viewport.preferredY = output.preferredY;
             viewport.preferredWidth = output.preferredWidth;
@@ -347,6 +352,7 @@ public:
                 false);
             target.targetId = std::string("virtio-gpu-target-") + std::to_string(index + 1);
             target.source = output.source;
+            target.modeId = monitor.modeId;
             target.scanoutId = output.scanoutId;
             target.resourceId = output.resourceId;
             target.viewportOriginX = virtualX;

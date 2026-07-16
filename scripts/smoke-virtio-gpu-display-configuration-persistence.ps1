@@ -313,7 +313,8 @@ try {
         'mmio.o','mmio.d','virtio_gpu.o','virtio_gpu.d','main.o','main.d',
         'display_configuration_service.o','display_configuration_service.d',
         'qemu_display_configuration_persistence_proof.o','qemu_display_configuration_persistence_proof.d',
-        'qemu_display_configuration_control_proof.o','qemu_display_configuration_control_proof.d'
+        'qemu_display_configuration_control_proof.o','qemu_display_configuration_control_proof.d',
+        'qemu_display_resolution_persistence_proof.o','qemu_display_resolution_persistence_proof.d'
     ) | ForEach-Object { Join-Path $Root ("kernel\build\amd64\obj\core\" + $_) }
     Remove-Item -LiteralPath $probeObjects -ErrorAction SilentlyContinue
     & (Join-Path $Root 'build-kernel.bat')
@@ -327,6 +328,8 @@ try {
     $launch1 = Start-Launch -LaunchName 'launch1' -SerialPath (Join-Path $RunRoot 'launch1.serial.log') -CapturePath $CaptureRoot1 -ConfigDirectory $Artifact
     $launch1Marker = Wait-ForText -Launcher $launch1.Launcher -SerialPath $launch1.Serial -Pattern 'Display persistence proof launch1: [^\r\n]*result=success'
     if (-not $launch1Marker) { throw "launch 1 proof did not complete: $($launch1.Serial)" }
+    $launch1ResolutionMarker = Wait-ForText -Launcher $launch1.Launcher -SerialPath $launch1.Serial -Pattern 'VirtioGPU resolution persistence launch1: mixedExtend=ok[^\r\n]*result=success'
+    if (-not $launch1ResolutionMarker) { throw "launch 1 per-output resolution persistence proof did not complete: $($launch1.Serial)" }
     $launch1.Session = New-QmpSession -Port $launch1.Port
     Capture-Heads -Session $launch1.Session -Destination $launch1.Capture
     Stop-Launch -Launcher $launch1.Launcher -Session $launch1.Session -QemuPid $launch1.QemuPid
@@ -342,6 +345,10 @@ try {
     $launch2 = Start-Launch -LaunchName 'launch2' -SerialPath (Join-Path $RunRoot 'launch2.serial.log') -CapturePath $CaptureRoot2 -ConfigDirectory $Artifact
     $launch2Marker = Wait-ForText -Launcher $launch2.Launcher -SerialPath $launch2.Serial -Pattern 'Display configuration persistence proof: [^\r\n]*result=success'
     if (-not $launch2Marker) { throw "launch 2 automatic restore proof did not complete: $($launch2.Serial)" }
+    $launch2ResolutionMarker = Wait-ForText -Launcher $launch2.Launcher -SerialPath $launch2.Serial -Pattern 'VirtioGPU resolution persistence launch2: [^\r\n]*restored=yes[^\r\n]*result=success'
+    if (-not $launch2ResolutionMarker) { throw "launch 2 per-output resolution restore proof did not complete: $($launch2.Serial)" }
+    $launch2StartupRestoreMarker = Wait-ForText -Launcher $launch2.Launcher -SerialPath $launch2.Serial -Pattern 'Display configuration startup restore: source=persisted-store injectedByHost=no loaded=yes reconciled=yes applied=yes'
+    if (-not $launch2StartupRestoreMarker) { throw "launch 2 startup restore evidence did not flush: $($launch2.Serial)" }
     $launch2.Session = New-QmpSession -Port $launch2.Port
     Capture-Heads -Session $launch2.Session -Destination $launch2.Capture
     $launch2Text = Get-SerialText -Path $launch2.Serial
@@ -362,8 +369,10 @@ try {
     }
     $launch1Primary = $launch1Text -match 'Display persistence proof launch1: [^\r\n]*active=ok[^\r\n]*taskbarMonitor=2'
     $launch2Primary = $launch2Text -match 'Display persistence proof launch2: source=persisted-store injectedByHost=no loaded=yes reconciled=yes applied=yes mode=Extend primary=2 taskbarMonitor=2'
+    $resolutionLaunch1 = $launch1Text -match 'VirtioGPU resolution persistence launch1: mixedExtend=ok primary=display-2 virtualDesktop=2304x800 persisted=yes result=success'
+    $resolutionLaunch2 = $launch2Text -match 'VirtioGPU resolution proof: persistenceLaunch2=ok restoredModes=ok virtualDesktop=2304x800 primary=Display 2 taskbar=Display 2 gpuFailures=0 fallback=no result=success'
     $gpuHealthy = ($launch1Text -notmatch 'targetFailures=[1-9]|gpuFailures=[1-9]') -and ($launch2Text -notmatch 'targetFailures=[1-9]|gpuFailures=[1-9]')
-    if (-not $launch1Primary -or -not $launch2Primary -or -not $gpuHealthy) { throw 'primary/taskbar/live GPU structural evidence failed.' }
+    if (-not $launch1Primary -or -not $launch2Primary -or -not $resolutionLaunch1 -or -not $resolutionLaunch2 -or -not $gpuHealthy) { throw 'primary/taskbar/live GPU structural evidence failed.' }
     if ($launch1.QemuPid -eq $launch2.QemuPid) { throw 'launch 1 and launch 2 did not use distinct QEMU process IDs.' }
 
     $evidence = @(
@@ -395,6 +404,9 @@ try {
         'virtualDesktop=2560x800-or-runtime-equivalent'
         'gpuFailures=0'
         'fallback=no'
+        'resolutionLaunch1=mixedExtend-ok'
+        'resolutionLaunch2=restoredModes-ok'
+        'resolutionVirtualDesktop=2304x800'
     )
     Set-Content -LiteralPath (Join-Path $RunRoot 'summary.txt') -Value $evidence -Encoding UTF8
     $evidence | ForEach-Object { Write-Output $_ }

@@ -204,13 +204,39 @@ const DisplayInputMonitor* DisplayInputMapper::monitorById(int32_t monitorId) co
 void DisplayInputMapper::clampVirtualPoint(int32_t& x, int32_t& y,
                                             bool& clamped) const
 {
-    if (m_right <= m_left || m_bottom <= m_top) return;
-    const int32_t maxX = m_right - 1;
-    const int32_t maxY = m_bottom - 1;
-    if (x < m_left) { x = m_left; clamped = true; }
-    if (x > maxX) { x = maxX; clamped = true; }
-    if (y < m_top) { y = m_top; clamped = true; }
-    if (y > maxY) { y = maxY; clamped = true; }
+    if (monitorFromPoint(x, y) >= 0) return;
+
+    // The virtual bounds are a bounding box. Mixed-height Extend can leave
+    // holes in that box, so clamp to the nearest point in the union of active
+    // monitor rectangles.
+    bool found = false;
+    int64_t bestDistance = 0;
+    int32_t bestX = x;
+    int32_t bestY = y;
+    for (uint8_t i = 0; i < m_monitorCount; ++i) {
+        const DisplayInputMonitor& monitor = m_monitors[i];
+        if (!monitor.isActive()) continue;
+        const int32_t monitorRight = monitor.virtualX + monitor.width;
+        const int32_t monitorBottom = monitor.virtualY + monitor.height;
+        const int32_t candidateX = x < monitor.virtualX ? monitor.virtualX
+            : (x >= monitorRight ? monitorRight - 1 : x);
+        const int32_t candidateY = y < monitor.virtualY ? monitor.virtualY
+            : (y >= monitorBottom ? monitorBottom - 1 : y);
+        const int64_t dx = static_cast<int64_t>(x) - candidateX;
+        const int64_t dy = static_cast<int64_t>(y) - candidateY;
+        const int64_t distance = dx * dx + dy * dy;
+        if (!found || distance < bestDistance) {
+            found = true;
+            bestDistance = distance;
+            bestX = candidateX;
+            bestY = candidateY;
+        }
+    }
+    if (found) {
+        if (x != bestX || y != bestY) clamped = true;
+        x = bestX;
+        y = bestY;
+    }
 }
 
 int32_t DisplayInputMapper::clampInt32(int32_t value, int32_t low,

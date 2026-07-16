@@ -58,6 +58,7 @@ void fillOutput(DisplayConfigurationOutput& output, const gxos::gui::DisplayMoni
 {
     output = DisplayConfigurationOutput{};
     copyText(output.stableId, sizeof(output.stableId), monitor.id);
+    copyText(output.modeId, sizeof(output.modeId), monitor.modeId);
     output.virtualX = monitor.virtualX;
     output.virtualY = monitor.virtualY;
     output.width = monitor.width;
@@ -136,6 +137,7 @@ gxos::gui::RequestedDisplayConfiguration requestedFromContract(
         monitor.id = boundedText(source.stableId, sizeof(source.stableId));
         if (monitor.id.empty()) monitor.id = std::string("display-") + std::to_string(i + 1u);
         monitor.name = monitor.id;
+        monitor.modeId = boundedText(source.modeId, sizeof(source.modeId));
         monitor.virtualX = source.virtualX;
         monitor.virtualY = source.virtualY;
         monitor.width = source.width;

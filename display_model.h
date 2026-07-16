@@ -147,6 +147,9 @@ struct DisplayMonitorDescriptor {
     std::string sourceType;
     std::string backendId;
     std::string outputId;
+    // Backend-neutral logical mode identity. For VirtIO-GPU this is a QEMU
+    // logical scanout mode, never a physical timing or host modeset request.
+    std::string modeId;
     uint32_t* framebufferBase{nullptr};
     uint32_t scanoutId{0};
     uint32_t resourceId{0};
@@ -255,6 +258,7 @@ inline DisplayMonitorDescriptor parseDisplayMonitorDescriptor(const std::string&
         if (fields.size() > 9) monitor.rotation = std::stoi(fields[9]);
         if (fields.size() > 10) monitor.refreshRateHz = std::stoi(fields[10]);
         if (fields.size() > 11) monitor.pixelFormat = fields[11];
+        if (fields.size() > 12) monitor.modeId = fields[12];
     } catch (...) {
         return DisplayMonitorDescriptor{};
     }
@@ -275,7 +279,8 @@ inline std::string serializeDisplayMonitorDescriptor(const DisplayMonitorDescrip
         << monitor.scale << '|'
         << monitor.rotation << '|'
         << monitor.refreshRateHz << '|'
-        << monitor.pixelFormat;
+        << monitor.pixelFormat << '|'
+        << monitor.modeId;
     return out.str();
 }
 
@@ -493,10 +498,35 @@ struct DisplayVirtualDesktop {
             return;
         }
 
-        const int maxX = std::max(left, right - 1);
-        const int maxY = std::max(top, bottom - 1);
-        x = std::max(left, std::min(x, maxX));
-        y = std::max(top, std::min(y, maxY));
+        if (monitorAt(x, y) != nullptr) return;
+
+        // The virtual desktop bounds are a bounding box, not necessarily a
+        // filled rectangle. Select the nearest point in the union of active
+        // monitor rectangles so mixed-height Extend cannot leave the cursor
+        // in the dead region below a shorter output.
+        const DisplayMonitorDescriptor* nearest = nullptr;
+        int nearestX = x;
+        int nearestY = y;
+        int64_t nearestDistance = 0;
+        for (const auto& monitor : monitors) {
+            if (!monitor.isActive()) continue;
+            const DisplayRect bounds = monitor.virtualBounds();
+            const int candidateX = std::max(bounds.left, std::min(x, bounds.right - 1));
+            const int candidateY = std::max(bounds.top, std::min(y, bounds.bottom - 1));
+            const int64_t dx = static_cast<int64_t>(x) - candidateX;
+            const int64_t dy = static_cast<int64_t>(y) - candidateY;
+            const int64_t distance = dx * dx + dy * dy;
+            if (nearest == nullptr || distance < nearestDistance) {
+                nearest = &monitor;
+                nearestX = candidateX;
+                nearestY = candidateY;
+                nearestDistance = distance;
+            }
+        }
+        if (nearest != nullptr) {
+            x = nearestX;
+            y = nearestY;
+        }
     }
 
     int primaryViewportLeft() const
@@ -654,6 +684,7 @@ struct DisplayViewport {
     bool presentationConfirmed{false};
     std::string monitorId;
     std::string monitorName;
+    std::string modeId;
     int preferredX{0};
     int preferredY{0};
     int preferredWidth{0};
@@ -779,6 +810,7 @@ struct DisplayRenderTarget {
     std::string source;
     std::string monitorId;
     std::string monitorName;
+    std::string modeId;
     uint32_t scanoutId{0};
     uint32_t resourceId{0};
     int viewportOriginX{0};
@@ -866,6 +898,7 @@ struct DisplayRenderTarget {
         viewport.presentationConfirmed = presentationConfirmed;
         viewport.monitorId = monitorId;
         viewport.monitorName = monitorName;
+        viewport.modeId = modeId;
         viewport.preferredX = preferredX;
         viewport.preferredY = preferredY;
         viewport.preferredWidth = preferredWidth;
@@ -927,6 +960,7 @@ inline DisplayRenderTarget makeDisplayRenderTarget(
     target.targetId = std::string("display-target-") + std::to_string(target.targetIndex);
     target.monitorId = monitor.id;
     target.monitorName = monitor.name;
+    target.modeId = monitor.modeId;
     target.viewportOriginX = monitor.virtualX;
     target.viewportOriginY = monitor.virtualY;
     target.width = width;
@@ -1147,6 +1181,9 @@ inline DisplayMonitorDescriptor makeDisplayMonitor(
     monitor.assignedWidth = width;
     monitor.assignedHeight = height;
     monitor.primary = primary;
+    if (width == kSyntheticTestMonitorWidth && height == kSyntheticTestMonitorHeight) {
+        monitor.modeId = "hosted-1920x1080";
+    }
     return monitor;
 }
 

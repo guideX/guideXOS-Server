@@ -2320,7 +2320,7 @@ bool NotepadApp::updateMenuHover(int x, int y) {
 // ============================================================
 
 DisplayOptionsApp::DisplayOptionsApp()
-    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false) {
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_requestedDisplayConfiguration{}, m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false) {
     strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
     m_displayStatus[0] = '\0';
 }
@@ -2550,6 +2550,54 @@ static void display_config_signed_number(int32_t value, char* destination, uint3
     }
 }
 
+struct QemuLogicalDisplayMode {
+    const char* id;
+    uint32_t width;
+    uint32_t height;
+};
+
+static const QemuLogicalDisplayMode s_qemuLogicalDisplayModes[] = {
+    { "qemu-1280x800", 1280u, 800u },
+    { "qemu-1024x768", 1024u, 768u },
+    { "qemu-800x600", 800u, 600u }
+};
+
+static const uint32_t s_qemuLogicalDisplayModeCount =
+    static_cast<uint32_t>(sizeof(s_qemuLogicalDisplayModes) / sizeof(s_qemuLogicalDisplayModes[0]));
+
+static int qemu_logical_display_mode_index(const gxos::display::DisplayConfigurationOutput& output)
+{
+    for (uint32_t i = 0u; i < s_qemuLogicalDisplayModeCount; ++i) {
+        if (output.modeId[0] != '\0' && strcmp(output.modeId, s_qemuLogicalDisplayModes[i].id) == 0) {
+            return static_cast<int>(i);
+        }
+        if (output.modeId[0] == '\0' && output.width == static_cast<int32_t>(s_qemuLogicalDisplayModes[i].width) &&
+            output.height == static_cast<int32_t>(s_qemuLogicalDisplayModes[i].height)) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+static bool qemu_logical_resolution_ui_enabled(const gxos::display::DisplayConfigurationSnapshot& snapshot)
+{
+    return strcmp(snapshot.backend, "virtio-gpu") == 0 && snapshot.qemuOnly != 0u;
+}
+
+static void format_qemu_logical_resolution(const gxos::display::DisplayConfigurationOutput& output,
+                                           char* destination,
+                                           uint32_t capacity)
+{
+    if (destination == nullptr || capacity == 0u) return;
+    char width[16];
+    char height[16];
+    display_config_number(static_cast<uint32_t>(output.width > 0 ? output.width : 0), width, sizeof(width));
+    display_config_number(static_cast<uint32_t>(output.height > 0 ? output.height : 0), height, sizeof(height));
+    strcopy(destination, width, capacity);
+    strappend(destination, " x ", capacity);
+    strappend(destination, height, capacity);
+}
+
 void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     const uint32_t panelX = x + 14u;
@@ -2585,30 +2633,53 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
     appDrawText(x + 28u, y + 198u, "Backend", rgb(190, 195, 205));
     appDrawText(x + 150u, y + 198u, m_activeDisplayConfiguration.backend[0] != '\0' ? m_activeDisplayConfiguration.backend : "Unavailable", rgb(225, 228, 236));
 
+    const gxos::display::DisplayConfigurationSnapshot& requested =
+        qemu_logical_resolution_ui_enabled(m_activeDisplayConfiguration)
+            ? m_requestedDisplayConfiguration : m_activeDisplayConfiguration;
+    const bool qemuLogicalResolution = qemu_logical_resolution_ui_enabled(m_activeDisplayConfiguration);
+    char resolution0[32];
+    char resolution1[32];
+    if (requested.outputCount > 0u) format_qemu_logical_resolution(requested.outputs[0], resolution0, sizeof(resolution0));
+    else strcopy(resolution0, "Unavailable", sizeof(resolution0));
+    if (requested.outputCount > 1u) format_qemu_logical_resolution(requested.outputs[1], resolution1, sizeof(resolution1));
+    else strcopy(resolution1, "Unavailable", sizeof(resolution1));
     appDrawText(x + 28u, y + 230u, "Monitor 1", rgb(190, 195, 205));
-    appDrawText(x + 150u, y + 230u, m_activeDisplayConfiguration.outputCount > 0u ? m_activeDisplayConfiguration.outputs[0].stableId : "Unavailable", rgb(225, 228, 236));
-    if (m_activeDisplayConfiguration.outputCount > 0u) {
+    appDrawText(x + 150u, y + 230u, requested.outputCount > 0u ? requested.outputs[0].stableId : "Unavailable", rgb(225, 228, 236));
+    if (requested.outputCount > 0u) {
         char origin[32];
         char originNumber[16];
-        display_config_signed_number(m_activeDisplayConfiguration.outputs[0].virtualX, originNumber, sizeof(originNumber));
+        display_config_signed_number(requested.outputs[0].virtualX, originNumber, sizeof(originNumber));
         strcopy(origin, originNumber, sizeof(origin));
         strappend(origin, ",", sizeof(origin));
-        display_config_signed_number(m_activeDisplayConfiguration.outputs[0].virtualY, originNumber, sizeof(originNumber));
+        display_config_signed_number(requested.outputs[0].virtualY, originNumber, sizeof(originNumber));
         strappend(origin, originNumber, sizeof(origin));
         appDrawText(x + 300u, y + 230u, origin, rgb(185, 190, 202));
     }
     appDrawText(x + 28u, y + 254u, "Monitor 2", rgb(190, 195, 205));
-    appDrawText(x + 150u, y + 254u, m_activeDisplayConfiguration.outputCount > 1u ? m_activeDisplayConfiguration.outputs[1].stableId : "Unavailable", rgb(225, 228, 236));
-    if (m_activeDisplayConfiguration.outputCount > 1u) {
+    appDrawText(x + 150u, y + 254u, requested.outputCount > 1u ? requested.outputs[1].stableId : "Unavailable", rgb(225, 228, 236));
+    if (requested.outputCount > 1u) {
         char origin[32];
         char originNumber[16];
-        display_config_signed_number(m_activeDisplayConfiguration.outputs[1].virtualX, originNumber, sizeof(originNumber));
+        display_config_signed_number(requested.outputs[1].virtualX, originNumber, sizeof(originNumber));
         strcopy(origin, originNumber, sizeof(origin));
         strappend(origin, ",", sizeof(origin));
-        display_config_signed_number(m_activeDisplayConfiguration.outputs[1].virtualY, originNumber, sizeof(originNumber));
+        display_config_signed_number(requested.outputs[1].virtualY, originNumber, sizeof(originNumber));
         strappend(origin, originNumber, sizeof(origin));
         appDrawText(x + 300u, y + 254u, origin, rgb(185, 190, 202));
     }
+    button(x + 430u, y + 216u, 130u, resolution0, qemuLogicalResolution);
+    button(x + 430u, y + 240u, 130u, resolution1, qemuLogicalResolution);
+    appDrawText(x + 28u, y + 284u,
+        qemuLogicalResolution ? "QEMU logical scanout resolution (click a value to cycle)" : "Resolution selection unavailable for this backend",
+        rgb(190, 195, 205));
+    bool mirrorCompatible = requested.outputCount < 2u ||
+        (requested.outputs[0].width == requested.outputs[1].width && requested.outputs[0].height == requested.outputs[1].height);
+    appDrawText(x + 28u, y + 306u,
+        m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Mirror
+            ? (mirrorCompatible ? "Mirror: compatible resolutions" : "Mirror: rejected until resolutions match")
+            : "Extend: unequal logical resolutions are supported",
+        mirrorCompatible ? rgb(190, 205, 225) : rgb(235, 180, 120));
+    appDrawText(x + 28u, y + 328u, "Refresh rate: Not available    Rotation: Not available", rgb(160, 165, 176));
 
     appDrawText(x + 28u, y + static_cast<uint32_t>(maxInt(292, static_cast<int>(h) - 56u)), m_displayStatus[0] != '\0' ? m_displayStatus : "Ready", rgb(190, 205, 225));
 
@@ -2634,6 +2705,7 @@ bool DisplayOptionsApp::queryDisplayConfiguration()
         return false;
     }
     m_activeDisplayConfiguration = response.activeConfiguration;
+    m_requestedDisplayConfiguration = m_activeDisplayConfiguration;
     m_selectedDisplayMode = static_cast<gxos::display::DisplayConfigurationMode>(m_activeDisplayConfiguration.mode);
     m_appliedDisplayMode = m_selectedDisplayMode;
     for (uint32_t i = 0u; i < m_activeDisplayConfiguration.outputCount && i < gxos::display::kDisplayConfigurationMaxOutputs; ++i) {
@@ -2665,7 +2737,7 @@ bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
     command.requestedConfiguration.outputCount = m_activeDisplayConfiguration.outputCount;
     if (command.requestedConfiguration.outputCount > gxos::display::kDisplayConfigurationMaxOutputs) command.requestedConfiguration.outputCount = gxos::display::kDisplayConfigurationMaxOutputs;
     for (uint32_t i = 0u; i < command.requestedConfiguration.outputCount; ++i) {
-        command.requestedConfiguration.outputs[i] = m_activeDisplayConfiguration.outputs[i];
+        command.requestedConfiguration.outputs[i] = m_requestedDisplayConfiguration.outputs[i];
         command.requestedConfiguration.outputs[i].primary = (m_selectedPrimaryOutput == i + 1u) ? 1u : 0u;
         if (m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Mirror) {
             command.requestedConfiguration.outputs[i].virtualX = 0;
@@ -2699,11 +2771,14 @@ bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
     m_displayRequestPending = false;
     if (generation != m_windowGeneration || response.requestId != m_displayRequestId || response.commandType != command.commandType) return false;
     if (!submitted || response.success == 0u) {
-        strcopy(m_displayStatus, "Display apply failed", sizeof(m_displayStatus));
+        strcopy(m_displayStatus, "Apply failed: ", sizeof(m_displayStatus));
+        strappend(m_displayStatus, response.diagnostic[0] != '\0' ? response.diagnostic : "display configuration rejected",
+                  sizeof(m_displayStatus));
         invalidate();
         return false;
     }
     m_activeDisplayConfiguration = response.activeConfiguration;
+    m_requestedDisplayConfiguration = m_activeDisplayConfiguration;
     m_selectedDisplayMode = static_cast<gxos::display::DisplayConfigurationMode>(m_activeDisplayConfiguration.mode);
     m_appliedDisplayMode = m_selectedDisplayMode;
     for (uint32_t i = 0u; i < m_activeDisplayConfiguration.outputCount && i < gxos::display::kDisplayConfigurationMaxOutputs; ++i) {
@@ -2724,6 +2799,7 @@ void DisplayOptionsApp::cancelDisplayConfiguration()
     if (!m_displayRequestPending) queryDisplayConfiguration();
     m_selectedDisplayMode = m_appliedDisplayMode;
     m_selectedPrimaryOutput = m_appliedPrimaryOutput;
+    m_requestedDisplayConfiguration = m_activeDisplayConfiguration;
     m_displayRequestPending = false;
     requestClose();
 }
@@ -3076,12 +3152,37 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
         if (y >= 86 && y < 114) {
             if (x >= 88 && x < 180) m_selectedDisplayMode = gxos::display::DisplayConfigurationMode::Extend;
             else if (x >= 188 && x < 280) m_selectedDisplayMode = gxos::display::DisplayConfigurationMode::Mirror;
+            m_requestedDisplayConfiguration.mode = static_cast<uint32_t>(m_selectedDisplayMode);
             invalidate();
             return;
         }
         if (y >= 126 && y < 154) {
             if (x >= 150 && x < 262) m_selectedPrimaryOutput = 1u;
             else if (x >= 270 && x < 382) m_selectedPrimaryOutput = 2u;
+            invalidate();
+            return;
+        }
+        if (qemu_logical_resolution_ui_enabled(m_activeDisplayConfiguration) && y >= 210 && y < 238 &&
+            x >= 430 && x < 560 && m_requestedDisplayConfiguration.outputCount > 0u) {
+            const int current = qemu_logical_display_mode_index(m_requestedDisplayConfiguration.outputs[0]);
+            const uint32_t next = current < 0 ? 0u : (static_cast<uint32_t>(current) + 1u) % s_qemuLogicalDisplayModeCount;
+            m_requestedDisplayConfiguration.outputs[0].width = static_cast<int32_t>(s_qemuLogicalDisplayModes[next].width);
+            m_requestedDisplayConfiguration.outputs[0].height = static_cast<int32_t>(s_qemuLogicalDisplayModes[next].height);
+            strcopy(m_requestedDisplayConfiguration.outputs[0].modeId, s_qemuLogicalDisplayModes[next].id,
+                    sizeof(m_requestedDisplayConfiguration.outputs[0].modeId));
+            strcopy(m_displayStatus, "Requested monitor 1 resolution; click Apply", sizeof(m_displayStatus));
+            invalidate();
+            return;
+        }
+        if (qemu_logical_resolution_ui_enabled(m_activeDisplayConfiguration) && y >= 238 && y < 266 &&
+            x >= 430 && x < 560 && m_requestedDisplayConfiguration.outputCount > 1u) {
+            const int current = qemu_logical_display_mode_index(m_requestedDisplayConfiguration.outputs[1]);
+            const uint32_t next = current < 0 ? 0u : (static_cast<uint32_t>(current) + 1u) % s_qemuLogicalDisplayModeCount;
+            m_requestedDisplayConfiguration.outputs[1].width = static_cast<int32_t>(s_qemuLogicalDisplayModes[next].width);
+            m_requestedDisplayConfiguration.outputs[1].height = static_cast<int32_t>(s_qemuLogicalDisplayModes[next].height);
+            strcopy(m_requestedDisplayConfiguration.outputs[1].modeId, s_qemuLogicalDisplayModes[next].id,
+                    sizeof(m_requestedDisplayConfiguration.outputs[1].modeId));
+            strcopy(m_displayStatus, "Requested monitor 2 resolution; click Apply", sizeof(m_displayStatus));
             invalidate();
             return;
         }

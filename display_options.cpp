@@ -4,6 +4,7 @@
 #include "compositor.h"
 #include "desktop_config.h"
 #include "display_options_store.h"
+#include "display_mode_catalog.h"
 #include "display_configuration.h"
 #include "display_configuration_service.h"
 #include "gui_protocol.h"
@@ -1344,6 +1345,19 @@ namespace {
             const DisplayMonitorDescriptor& monitor = monitors[i];
             DisplayConfigurationOutput& output = command.requestedConfiguration.outputs[i];
             copyDisplayContractText(output.stableId, sizeof(output.stableId), monitor.id);
+            copyDisplayContractText(output.modeId, sizeof(output.modeId), monitor.modeId);
+            if (output.modeId[0] == '\0' && monitor.width > 0 && monitor.height > 0) {
+                const DetectedDisplayInventory detected = Compositor::detectedDisplayInventory();
+                const std::vector<DisplayMode> catalog = displayModeCatalogForInventory(detected);
+                if (const DisplayMode* mode = findDisplayModeByDimensions(catalog, monitor.width, monitor.height)) {
+                    copyDisplayContractText(output.modeId, sizeof(output.modeId), mode->id);
+                }
+            }
+            copyDisplayContractText(output.backendType, sizeof(output.backendType), monitor.sourceType.empty() ? "virtio-gpu" : monitor.sourceType);
+            copyDisplayContractText(output.backendDeviceId, sizeof(output.backendDeviceId), monitor.backendId);
+            output.scanoutId = monitor.scanoutId;
+            output.logicalOrdinal = i + 1u;
+            copyDisplayContractText(output.stableName, sizeof(output.stableName), monitor.name);
             output.virtualX = monitor.virtualX;
             output.virtualY = monitor.virtualY;
             output.width = monitor.width;
@@ -1380,6 +1394,7 @@ namespace {
                 0,
                 source.enabled != 0,
                 source.primary != 0);
+            monitor.modeId = std::string(source.modeId);
             monitors.push_back(monitor);
         }
         if (!monitors.empty()) {
@@ -1501,6 +1516,35 @@ namespace {
         return monitors;
     }
 
+    bool cycleVirtioGpuResolution(size_t index)
+    {
+        const DetectedDisplayInventory detected = Compositor::detectedDisplayInventory();
+        if (detected.backend != "virtio-gpu" || !detected.qemuOnly || !detected.backendGateActive) return false;
+        std::vector<DisplayMonitorDescriptor> arrangement = parseDisplayArrangement(DisplayOptions::s_displayArrangement);
+        if (index >= arrangement.size()) return false;
+        const std::vector<DisplayMode> catalog = displayModeCatalogForInventory(detected);
+        if (catalog.empty()) return false;
+
+        size_t current = 0;
+        for (size_t i = 0; i < catalog.size(); ++i) {
+            if ((!arrangement[index].modeId.empty() && catalog[i].id == arrangement[index].modeId) ||
+                (arrangement[index].modeId.empty() && catalog[i].width == arrangement[index].width && catalog[i].height == arrangement[index].height)) {
+                current = i;
+                break;
+            }
+        }
+        const DisplayMode& next = catalog[(current + 1u) % catalog.size()];
+        arrangement[index].modeId = next.id;
+        arrangement[index].width = next.width;
+        arrangement[index].height = next.height;
+        arrangement[index].assignedWidth = next.width;
+        arrangement[index].assignedHeight = next.height;
+        DisplayOptions::s_displayArrangement = serializeDisplayArrangement(arrangement);
+        DisplayOptions::s_displayResolution = std::to_string(next.width) + "x" + std::to_string(next.height);
+        DisplayOptions::s_displayStatus = std::string("Requested logical resolution ") + next.label() + ". Click Apply to rebuild resources.";
+        return true;
+    }
+
     void drawDisplayMonitorCard(int index, const DisplayMonitorDescriptor& monitor, int x, int y, bool primary, bool selected)
     {
         const uint64_t windowId = DisplayOptions::s_windowId;
@@ -1512,12 +1556,13 @@ namespace {
         drawColorRect(windowId, x - 3, y - 3, kDisplayCardW + 6, kDisplayCardH + 6, borderColor);
         drawColorRect(windowId, x, y, kDisplayCardW, kDisplayCardH, cardFill);
         drawText(windowId, x + 12, y + 12, std::string("[") + std::to_string(index + 1) + "] " + (monitor.name.empty() ? monitor.id : monitor.name), DisplayOptionsTextColor());
-        drawText(windowId, x + 12, y + 40, std::string("Assigned: ") + std::to_string(monitor.width) + "x" + std::to_string(monitor.height), DisplayOptionsMutedTextColor());
+        drawText(windowId, x + 12, y + 40, std::string("Resolution: ") + std::to_string(monitor.width) + " x " + std::to_string(monitor.height), DisplayOptionsAccentColor());
         drawText(windowId, x + 12, y + 58, std::string("Output: ") + (monitor.outputId.empty() ? monitor.id : monitor.outputId), DisplayOptionsMutedTextColor());
         drawText(windowId, x + 12, y + 76, primary ? "Primary display" : "Secondary display", primary ? DisplayOptionsAccentColor() : DisplayOptionsMutedTextColor());
         drawText(windowId, x + 12, y + 94, enabled ? "Operational" : "Unavailable", enabled ? DisplayOptionsAccentColor() : DisplayOptionsMutedTextColor());
         drawText(windowId, x + 12, y + 112,
-            monitor.connectorEnabled ? "Connector state enabled" : "Connector state unavailable/disabled",
+            monitor.sourceType == "virtio-gpu" ? "Click Resolution to cycle modes" :
+            (monitor.connectorEnabled ? "Connector state enabled" : "Connector state unavailable/disabled"),
             monitor.connectorEnabled ? DisplayOptionsMutedTextColor() : DisplayOptionsAccentColor());
     }
 }
@@ -1559,8 +1604,19 @@ void DisplayOptions::drawDisplayTab()
         "  Virtual desktop: " + desktop.resolutionString();
     drawText(s_windowId, 46, 224, summary, DisplayOptionsMutedTextColor());
     drawText(s_windowId, 46, 244, desktop.detailedSummary(), DisplayOptionsMutedTextColor());
+    if (detected.backend == "virtio-gpu" && detected.qemuOnly && detected.backendGateActive) {
+        bool mirrorCompatible = monitors.size() < 2;
+        if (monitors.size() >= 2) {
+            mirrorCompatible = monitors[0].width == monitors[1].width && monitors[0].height == monitors[1].height;
+        }
+        drawText(s_windowId, 46, 264,
+            std::string("QEMU logical scanout modes: ") + (mirrorCompatible ? "Mirror-compatible" : "Mirror requires matching resolutions"),
+            mirrorCompatible ? DisplayOptionsAccentColor() : DisplayOptionsAccentColor());
+        drawText(s_windowId, 46, 282, "Refresh rate: Not available    Rotation: Not available", DisplayOptionsMutedTextColor());
+    }
     if (!s_displayArrangement.empty()) {
-        drawText(s_windowId, 46, 264, std::string("Arrangement: ") + s_displayArrangement, DisplayOptionsMutedTextColor());
+        drawText(s_windowId, 46, detected.backend == "virtio-gpu" && detected.qemuOnly && detected.backendGateActive ? 300 : 264,
+            std::string("Arrangement: ") + s_displayArrangement, DisplayOptionsMutedTextColor());
     }
 
     const int cardY = kDisplayCardY;
@@ -1752,6 +1808,11 @@ void DisplayOptions::handleMouseDown(int mx, int my)
             const int cardTop = cardY + row * (kDisplayCardH + kDisplayCardGapY);
             if (!hit(mx, my, cardX, cardTop, kDisplayCardW, kDisplayCardH)) {
                 continue;
+            }
+            if (hit(mx, my, cardX + 8, cardTop + 32, kDisplayCardW - 16, 24) &&
+                cycleVirtioGpuResolution(i)) {
+                render();
+                return;
             }
             if (!monitors[i].id.empty()) {
                 s_displayPrimaryDisplayId = monitors[i].id;

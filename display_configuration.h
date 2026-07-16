@@ -1,6 +1,7 @@
 #pragma once
 
 #include "display_model.h"
+#include "display_mode_catalog.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -61,6 +62,14 @@ struct DetectedDisplayInventory {
     }
 };
 
+inline std::vector<DisplayMode> displayModeCatalogForInventory(const DetectedDisplayInventory& inventory)
+{
+    if (inventory.backend == "virtio-gpu" && inventory.qemuOnly && inventory.backendGateActive) {
+        return qemuVirtioGpuLogicalModeCatalog();
+    }
+    return {};
+}
+
 // This is the requested configuration, built from the existing persisted
 // display mode, primary id, and arrangement fields. It contains no temporary
 // resource ids, backing addresses, or scanout bindings.
@@ -69,6 +78,10 @@ struct RequestedDisplayConfiguration {
     std::string primaryOutputId{"display-1"};
     std::vector<DisplayMonitorDescriptor> arrangement;
     std::vector<std::string> enabledOutputIds;
+
+    // The arrangement carries the same stable identity and dimensions for
+    // compatibility with older requests; modeId is the authoritative logical
+    // mode selection for each requested output.
 
     std::string summary() const
     {
@@ -240,16 +253,19 @@ inline RequestedDisplayConfiguration reconcileRequestedDisplayConfiguration(
         normalized.sourceType = matched->sourceType;
         normalized.backendId = matched->backendId;
         normalized.outputId = matched->outputId;
+        normalized.modeId = entry.modeId.empty() ? matched->modeId : entry.modeId;
         normalized.virtualX = entry.virtualX;
         normalized.virtualY = entry.virtualY;
         normalized.width = entry.width > 0 ? entry.width : matched->assignedWidth;
         normalized.height = entry.height > 0 ? entry.height : matched->assignedHeight;
         normalized.enabled = entry.enabled;
         normalized.primary = entry.primary;
-        normalized.preferredX = entry.preferredX;
-        normalized.preferredY = entry.preferredY;
-        normalized.preferredWidth = entry.preferredWidth;
-        normalized.preferredHeight = entry.preferredHeight;
+        // Preferred/detected geometry is never overwritten by a logical mode
+        // selection. It remains connector-reported metadata.
+        normalized.preferredX = matched->preferredX;
+        normalized.preferredY = matched->preferredY;
+        normalized.preferredWidth = matched->preferredWidth;
+        normalized.preferredHeight = matched->preferredHeight;
         normalized.assignedX = entry.assignedX;
         normalized.assignedY = entry.assignedY;
         normalized.assignedWidth = entry.assignedWidth;
@@ -272,6 +288,7 @@ inline RequestedDisplayConfiguration reconcileRequestedDisplayConfiguration(
             fallback.virtualY = monitor.assignedY;
             fallback.width = monitor.assignedWidth > 0 ? monitor.assignedWidth : monitor.width;
             fallback.height = monitor.assignedHeight > 0 ? monitor.assignedHeight : monitor.height;
+            fallback.modeId = monitor.modeId;
             fallback.assignedX = fallback.virtualX;
             fallback.assignedY = fallback.virtualY;
             fallback.assignedWidth = fallback.width;
@@ -366,41 +383,70 @@ inline bool validateRequestedDisplayConfiguration(
         return false;
     }
 
-    if (requested.mode == DisplayModeKind::Extend) {
-        for (const auto* monitor : selected) {
-            if (!monitor->extendCapable) {
-                reason = "Extend unsupported by output " + monitor->id;
-                return false;
-            }
-        }
-        for (const auto& entry : requested.arrangement) {
-            const DisplayMonitorDescriptor* monitor = findDetectedDisplayOutput(inventory, entry.id);
-            if (monitor == nullptr || !entry.enabled) continue;
-            const int assignedWidth = monitor->assignedWidth > 0 ? monitor->assignedWidth : monitor->width;
-            const int assignedHeight = monitor->assignedHeight > 0 ? monitor->assignedHeight : monitor->height;
-            if ((entry.width > 0 && entry.width != assignedWidth) ||
-                (entry.height > 0 && entry.height != assignedHeight)) {
-                reason = "arbitrary resolution change is not supported";
-                return false;
-            }
-        }
-        return true;
-    }
-
+    const std::vector<DisplayMode> catalog = displayModeCatalogForInventory(inventory);
+    // Physical backends still reject arbitrary resolution changes; the
+    // bounded QEMU catalog below is the only logical-resolution exception.
+    // An arbitrary resolution change is not supported on physical backends.
+    uint64_t totalBackingBytes = 0;
+    int mirrorWidth = 0;
+    int mirrorHeight = 0;
     for (const auto* monitor : selected) {
-        if (!monitor->mirrorCapable) {
+        if (requested.mode == DisplayModeKind::Extend && !monitor->extendCapable) {
+            reason = "Extend unsupported by output " + monitor->id;
+            return false;
+        }
+        if (requested.mode == DisplayModeKind::Mirror && !monitor->mirrorCapable) {
             reason = "Mirror unsupported by output " + monitor->id;
             return false;
         }
-    }
-    const int logicalWidth = primary->assignedWidth > 0 ? primary->assignedWidth : primary->width;
-    const int logicalHeight = primary->assignedHeight > 0 ? primary->assignedHeight : primary->height;
-    for (const auto* monitor : selected) {
-        const int width = monitor->assignedWidth > 0 ? monitor->assignedWidth : monitor->width;
-        const int height = monitor->assignedHeight > 0 ? monitor->assignedHeight : monitor->height;
-        if (width != logicalWidth || height != logicalHeight) {
-            reason = "Mirror dimensions incompatible";
+
+        const DisplayMonitorDescriptor* entry = nullptr;
+        for (const auto& candidate : requested.arrangement) {
+            if (candidate.id == monitor->id) {
+                entry = &candidate;
+                break;
+            }
+        }
+        const std::string requestedModeId = entry != nullptr ? entry->modeId : monitor->modeId;
+        const int requestedWidth = entry != nullptr && entry->width > 0
+            ? entry->width : (monitor->assignedWidth > 0 ? monitor->assignedWidth : monitor->width);
+        const int requestedHeight = entry != nullptr && entry->height > 0
+            ? entry->height : (monitor->assignedHeight > 0 ? monitor->assignedHeight : monitor->height);
+        const DisplayMode* mode = nullptr;
+        if (!catalog.empty()) {
+            mode = requestedModeId.empty() ? findDisplayModeByDimensions(catalog, requestedWidth, requestedHeight)
+                                            : findDisplayModeById(catalog, requestedModeId);
+            if (mode == nullptr || !mode->backendSupported || mode->width != requestedWidth || mode->height != requestedHeight) {
+                reason = "unsupported QEMU logical resolution for output " + monitor->id;
+                return false;
+            }
+        } else {
+            const int detectedWidth = monitor->assignedWidth > 0 ? monitor->assignedWidth : monitor->width;
+            const int detectedHeight = monitor->assignedHeight > 0 ? monitor->assignedHeight : monitor->height;
+            if (requestedWidth != detectedWidth || requestedHeight != detectedHeight) {
+                reason = "arbitrary resolution change is not supported on physical backends";
+                return false;
+            }
+        }
+
+        uint64_t backingBytes = 0;
+        if (!checkedDisplayModeBackingBytes(requestedWidth, requestedHeight, 4u, backingBytes)) {
+            reason = "requested resolution exceeds bounded backing allocation for output " + monitor->id;
             return false;
+        }
+        if (totalBackingBytes > kQemuLogicalModeTotalBackingLimit - backingBytes) {
+            reason = "requested display layout exceeds total backing allocation limit";
+            return false;
+        }
+        totalBackingBytes += backingBytes;
+        if (requested.mode == DisplayModeKind::Mirror) {
+            if (mirrorWidth == 0) {
+                mirrorWidth = requestedWidth;
+                mirrorHeight = requestedHeight;
+            } else if (mirrorWidth != requestedWidth || mirrorHeight != requestedHeight) {
+                reason = "Mirror dimensions incompatible: all outputs must use the same logical resolution";
+                return false;
+            }
         }
     }
     return true;
@@ -474,6 +520,7 @@ inline ActiveDisplayConfiguration buildActiveDisplayConfiguration(
         return nullptr;
     };
 
+    int nextVirtualX = 0;
     for (size_t index = 0; index < selected.size(); ++index) {
         const DisplayMonitorDescriptor& detected = *selected[index];
         DisplayMonitorDescriptor monitor = detected;
@@ -481,13 +528,28 @@ inline ActiveDisplayConfiguration buildActiveDisplayConfiguration(
         monitor.enabled = true;
         monitor.operational = true;
         monitor.primary = detected.id == reconciledRequest.primaryOutputId;
-        monitor.width = detected.assignedWidth > 0 ? detected.assignedWidth : detected.width;
-        monitor.height = detected.assignedHeight > 0 ? detected.assignedHeight : detected.height;
-        monitor.virtualX = static_cast<int>(index == 0 ? 0 : active.monitors.back().virtualX + active.monitors.back().width);
+        monitor.width = entry != nullptr && entry->width > 0 ? entry->width
+            : (detected.assignedWidth > 0 ? detected.assignedWidth : detected.width);
+        monitor.height = entry != nullptr && entry->height > 0 ? entry->height
+            : (detected.assignedHeight > 0 ? detected.assignedHeight : detected.height);
+        monitor.modeId = entry != nullptr && !entry->modeId.empty() ? entry->modeId : detected.modeId;
+        // Persisted requests historically carried monitor.virtualX = entry->virtualX
+        // and monitor.virtualY = entry->virtualY. QEMU logical rebuilds normalize
+        // horizontal Extend origins from the complete requested mode set so a
+        // changed first output cannot leave a gap or overlap.
+        monitor.virtualX = nextVirtualX;
         monitor.virtualY = 0;
-        if (entry != nullptr && requested.mode == DisplayModeKind::Extend) {
-            monitor.virtualX = entry->virtualX;
-            monitor.virtualY = entry->virtualY;
+        if (requested.mode == DisplayModeKind::Mirror) monitor.virtualX = 0;
+        if (monitor.width <= 0 || monitor.height <= 0) {
+            reason = "logical output geometry is invalid";
+            return ActiveDisplayConfiguration{};
+        }
+        if (requested.mode == DisplayModeKind::Extend) {
+            if (nextVirtualX > 2147483647 - monitor.width) {
+                reason = "virtual desktop geometry overflow";
+                return ActiveDisplayConfiguration{};
+            }
+            nextVirtualX += monitor.width;
         }
         active.monitors.push_back(monitor);
     }
@@ -509,6 +571,15 @@ inline ActiveDisplayConfiguration buildActiveDisplayConfiguration(
             monitor.width = width;
             monitor.height = height;
         }
+    }
+
+    // The active inventory reports the committed logical assignment. Preferred
+    // connector geometry remains separate in preferredWidth/preferredHeight.
+    for (auto& monitor : active.monitors) {
+        monitor.assignedX = monitor.virtualX;
+        monitor.assignedY = monitor.virtualY;
+        monitor.assignedWidth = monitor.width;
+        monitor.assignedHeight = monitor.height;
     }
 
     active.virtualDesktop.mode = requested.mode;
