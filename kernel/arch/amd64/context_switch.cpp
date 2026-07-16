@@ -76,8 +76,12 @@ SwitchContext* init_context(uint64_t stack_top, void (*entry_point)(void*), void
     // Align stack to 16 bytes (AMD64 ABI requirement)
     stack_top &= ~0xFULL;
     
-    // Reserve space for SwitchContext on the stack
-    stack_top -= sizeof(SwitchContext);
+    // The restore path adds sizeof(SwitchContext) before jumping to the
+    // wrapper. A directly-jumped System V AMD64 callee must observe the same
+    // entry alignment as a normal CALL target: RSP % 16 == 8. Leave one
+    // return-address-sized slot above the saved context so the first wrapper
+    // entry has that ABI alignment while later saved contexts remain unchanged.
+    stack_top -= sizeof(SwitchContext) + sizeof(uint64_t);
     SwitchContext* ctx = reinterpret_cast<SwitchContext*>(stack_top);
     
     // Initialize all callee-saved registers to zero.  r12/r13 carry the
@@ -93,8 +97,11 @@ SwitchContext* init_context(uint64_t stack_top, void (*entry_point)(void*), void
     // The "return address" is the thread entry wrapper
     ctx->rip = reinterpret_cast<uint64_t>(&thread_entry_wrapper);
     
-    // Stack pointer points to the context (will be restored)
-    ctx->rsp = stack_top;
+    // The context frame is restored from ctx itself, while rsp is the stack
+    // pointer visible to the directly-jumped wrapper.  Leave the synthetic
+    // return-address slot below the stack limit so the first entry has the
+    // same alignment as a normal AMD64 call target.
+    ctx->rsp = stack_top + sizeof(SwitchContext);
     
     return ctx;
 }
@@ -164,36 +171,48 @@ asm(
     "    mov     %r14, 32(%rsp)\n"    // r14
     "    mov     %r15, 40(%rsp)\n"    // r15
     
-    // Save stack pointer (after adjustment)
-    "    mov     %rsp, 48(%rsp)\n"    // rsp
+    // Save the post-call stack pointer.  The saved return address remains at
+    // the original stack pointer; a resumed context must skip it because the
+    // restore path jumps to the saved RIP instead of executing RET.
+    "    lea     72(%rsp), %rax\n"
+    "    mov     %rax, 48(%rsp)\n"    // rsp after the switch_context call
     
     // Save return address (from caller's stack frame)
     // The return address is at the original RSP position
     "    mov     64(%rsp), %rax\n"    // Get return address
     "    mov     %rax, 56(%rsp)\n"    // Store as rip
     
-    // Store context pointer to *old_ctx (RDI)
+    // Store context pointer to *old_ctx. MinGW/Windows x64 passes the two
+    // arguments in RCX/RDX; System V ELF uses RDI/RSI.
+#if defined(__MINGW32__) || defined(_WIN64)
+    "    mov     %rsp, (%rcx)\n"      // *old_ctx = current rsp (context)
+#else
     "    mov     %rsp, (%rdi)\n"      // *old_ctx = current rsp (context)
-    
+#endif
+
     // ---- Restore new context ----
-    // Load new stack pointer from new_ctx->rsp
+    // Restore fields through new_ctx.  Its rsp field is the post-call stack
+    // pointer, not the address of the saved context frame.
+#if defined(__MINGW32__) || defined(_WIN64)
+    "    mov     0(%rdx), %rbx\n"
+    "    mov     8(%rdx), %rbp\n"
+    "    mov     16(%rdx), %r12\n"
+    "    mov     24(%rdx), %r13\n"
+    "    mov     32(%rdx), %r14\n"
+    "    mov     40(%rdx), %r15\n"
+    "    mov     56(%rdx), %rax\n"
+    "    mov     48(%rdx), %rsp\n"    // rsp = new_ctx->rsp
+#else
+    "    mov     0(%rsi), %rbx\n"
+    "    mov     8(%rsi), %rbp\n"
+    "    mov     16(%rsi), %r12\n"
+    "    mov     24(%rsi), %r13\n"
+    "    mov     32(%rsi), %r14\n"
+    "    mov     40(%rsi), %r15\n"
+    "    mov     56(%rsi), %rax\n"
     "    mov     48(%rsi), %rsp\n"    // rsp = new_ctx->rsp
-    
-    // Restore callee-saved registers
-    "    mov     0(%rsp), %rbx\n"
-    "    mov     8(%rsp), %rbp\n"
-    "    mov     16(%rsp), %r12\n"
-    "    mov     24(%rsp), %r13\n"
-    "    mov     32(%rsp), %r14\n"
-    "    mov     40(%rsp), %r15\n"
-    
-    // Get return address
-    "    mov     56(%rsp), %rax\n"
-    
-    // Deallocate context frame
-    "    add     $64, %rsp\n"
-    
-    // Jump to new thread's return address
+#endif
+    // Jump to the new thread's saved instruction pointer.
     "    jmp     *%rax\n"
 #if defined(__ELF__)
     ".size switch_context, .-switch_context\n"

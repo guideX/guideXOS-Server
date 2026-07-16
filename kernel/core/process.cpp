@@ -12,6 +12,7 @@
 #include "include/kernel/vga.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/pit.h"
+#include "include/kernel/serial_debug.h"
 #include "runtime/thread/guidexos_native_thread.h"
 
 #if defined(ARCH_AMD64)
@@ -44,6 +45,7 @@ namespace {
         bool exit_result_valid;
         bool teardown;
         bool deferred_reclaim;
+        bool native_started;
         uint32_t generation;
         gxos::runtime::NativeThreadEntry native_entry;
         void* native_context;
@@ -51,6 +53,13 @@ namespace {
         uint32_t requested_stack_size;
         uint8_t* stack_base;
         uint8_t* stack_limit;
+        uintptr_t initial_stack_pointer;
+        uintptr_t initial_instruction_pointer;
+        uintptr_t initial_rbx;
+        uintptr_t initial_r12;
+        uintptr_t initial_r13;
+        uintptr_t initial_r14;
+        uintptr_t initial_r15;
         KernelThread* ready_previous;
         KernelThread* ready_next;
         alignas(16) uint8_t stack[kKernelStackBytes];
@@ -230,7 +239,43 @@ namespace {
 
         thread->state = ThreadState::Runnable;
         enqueue_ready(thread);
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] wake runnable slot=");
+        serial::put_hex32(slot_index(thread));
+        serial::puts(" state=");
+        serial::put_hex32(static_cast<uint32_t>(thread->state));
+        serial::puts(" ready=");
+        serial::put_hex32(thread->ready_linked ? 1U : 0U);
+        serial::putc('\n');
+#endif
     }
+
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+    void trace_first_schedule(KernelThread* thread) {
+        if (thread == nullptr || !thread->native_thread || thread->native_started) {
+            return;
+        }
+        serial::puts("[native-thread-test] first schedule tid=");
+        serial::put_hex64(thread->tid);
+        serial::puts(" slot=");
+        serial::put_hex32(slot_index(thread));
+        serial::puts(" generation=");
+        serial::put_hex32(thread->generation);
+        serial::puts(" stack_low=");
+        serial::put_hex64(reinterpret_cast<uintptr_t>(thread->stack_base));
+        serial::puts(" stack_high=");
+        serial::put_hex64(reinterpret_cast<uintptr_t>(thread->stack_limit));
+        serial::puts(" initial_ip=");
+        serial::put_hex64(thread->initial_instruction_pointer);
+        serial::puts(" initial_sp=");
+        serial::put_hex64(thread->initial_stack_pointer);
+        serial::putc('\n');
+    }
+#else
+    void trace_first_schedule(KernelThread*) {}
+#endif
+
+    void reap_detached_locked();
 
     gxos::runtime::scheduler_wait::WakeReason wait_park(
         void*, gxos::runtime::scheduler_wait::WaitNode* node) {
@@ -239,41 +284,74 @@ namespace {
             return gxos::runtime::scheduler_wait::WakeReason::Interrupted;
         }
 
-        void* token = wait_enter_critical(nullptr);
-        if (node->state != gxos::runtime::scheduler_wait::WaitNodeState::Waiting) {
-            wait_leave_critical(nullptr, token);
-            return node->reason;
-        }
-
-        KernelThread* blocked = current;
-        blocked->state = node->timed ? ThreadState::TimedWait : ThreadState::Blocked;
-        remove_ready(blocked);
-        KernelThread* next = pop_ready();
-
-        if (next == nullptr) {
-            // There is no separate idle TCB yet.  Use the existing HLT idle
-            // behavior while interrupts remain enabled; PIT processing or a
-            // signal marks this same thread runnable and completes its node.
-            while (node->state == gxos::runtime::scheduler_wait::WaitNodeState::Waiting) {
-                arch::enable_interrupts();
-                arch::halt();
-                arch::disable_interrupts();
+        for (;;) {
+            void* token = wait_enter_critical(nullptr);
+            if (node->state != gxos::runtime::scheduler_wait::WaitNodeState::Waiting) {
+                wait_leave_critical(nullptr, token);
+                return node->reason;
             }
-            blocked->state = ThreadState::Running;
+
+            KernelThread* blocked = current;
+            blocked->state = node->timed ? ThreadState::TimedWait : ThreadState::Blocked;
+            remove_ready(blocked);
+            KernelThread* next = pop_ready();
+
+            if (next == nullptr) {
+                // There is no separate idle TCB yet.  Use the existing HLT
+                // behavior while interrupts remain enabled.  A timer or
+                // signal may make a different thread runnable while this
+                // node is still waiting; yield to that thread instead of
+                // sleeping until the current node's much later deadline.
+                while (node->state == gxos::runtime::scheduler_wait::WaitNodeState::Waiting &&
+                       ready_head == nullptr) {
+                    arch::enable_interrupts();
+                    arch::halt();
+                    arch::disable_interrupts();
+                }
+                if (node->state != gxos::runtime::scheduler_wait::WaitNodeState::Waiting) {
+                    blocked->state = ThreadState::Running;
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+                    serial::puts("[native-thread-test] wait resume idle slot=");
+                    serial::put_hex32(slot_index(blocked));
+                    serial::puts(" reason=");
+                    serial::put_hex32(static_cast<uint32_t>(node->reason));
+                    serial::putc('\n');
+#endif
+                    wait_leave_critical(nullptr, token);
+                    return node->reason;
+                }
+                next = pop_ready();
+            }
+
+            if (next == nullptr) {
+                blocked->state = ThreadState::Running;
+                wait_leave_critical(nullptr, token);
+                return gxos::runtime::scheduler_wait::WakeReason::Interrupted;
+            }
+
+            trace_first_schedule(next);
+            next->state = ThreadState::Running;
+            current = next;
             wait_leave_critical(nullptr, token);
-            return node->reason;
+            arch::context::arch_switch_to(&blocked->architecture, &next->architecture);
+
+            // The old stack resumes only after another runnable thread
+            // selects it, normally after this node has completed.
+            blocked->state = ThreadState::Running;
+            void* resume_token = wait_enter_critical(nullptr);
+            reap_detached_locked();
+            wait_leave_critical(nullptr, resume_token);
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+            serial::puts("[native-thread-test] wait resume switch slot=");
+            serial::put_hex32(slot_index(blocked));
+            serial::puts(" state=");
+            serial::put_hex32(static_cast<uint32_t>(node->state));
+            serial::putc('\n');
+#endif
+            if (node->state == gxos::runtime::scheduler_wait::WaitNodeState::Completed) {
+                return node->reason;
+            }
         }
-
-        next->state = ThreadState::Running;
-        current = next;
-        wait_leave_critical(nullptr, token);
-        arch::context::arch_switch_to(&blocked->architecture, &next->architecture);
-
-        // The old stack resumes only after another runnable thread selects it.
-        blocked->state = ThreadState::Running;
-        return node->state == gxos::runtime::scheduler_wait::WaitNodeState::Completed
-            ? node->reason
-            : gxos::runtime::scheduler_wait::WakeReason::Interrupted;
     }
 
     void install_wait_hooks() {
@@ -345,8 +423,25 @@ namespace {
             thread->native_entry == nullptr) {
             return;
         }
+        thread->native_started = true;
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] entry invocation tid=");
+        serial::put_hex64(thread->tid);
+        serial::puts(" slot=");
+        serial::put_hex32(slot_index(thread));
+        serial::puts(" generation=");
+        serial::put_hex32(thread->generation);
+        serial::puts(" context=");
+        serial::put_hex64(reinterpret_cast<uintptr_t>(thread->native_context));
+        serial::putc('\n');
+#endif
         thread->exit_result = thread->native_entry(thread->native_context);
         thread->exit_result_valid = true;
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] exit result=");
+        serial::put_hex64(thread->exit_result);
+        serial::putc('\n');
+#endif
     }
 
     void exit_current_thread() {
@@ -366,6 +461,11 @@ namespace {
                 // The completion Event owns the wake-one operation.  The
                 // result is stored before signal so a resumed joiner sees a
                 // complete exit record.
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+                serial::puts("[native-thread-test] completion signal slot=");
+                serial::put_hex32(slot_index(exiting));
+                serial::putc('\n');
+#endif
                 (void)exiting->completion->signal();
             }
         }
@@ -388,6 +488,17 @@ namespace {
         next->state = ThreadState::Running;
         current = next;
         check_thread_invariants();
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] exit switch next slot=");
+        serial::put_hex32(slot_index(next));
+        serial::puts(" context=");
+        serial::put_hex64(reinterpret_cast<uintptr_t>(next->architecture.context));
+        serial::puts(" rip=");
+        serial::put_hex64(next->architecture.context == nullptr ? 0 : next->architecture.context->rip);
+        serial::puts(" rsp=");
+        serial::put_hex64(next->architecture.context == nullptr ? 0 : next->architecture.context->rsp);
+        serial::putc('\n');
+#endif
         wait_leave_critical(nullptr, token);
         arch::context::arch_switch_to(&exiting->architecture, &next->architecture);
     }
@@ -442,6 +553,40 @@ namespace {
             reinterpret_cast<uint64_t>(slot->stack_limit),
             native_entry_dispatch,
             slot);
+        slot->initial_instruction_pointer = slot->architecture.context == nullptr
+            ? 0
+            : slot->architecture.context->rip;
+        slot->initial_stack_pointer = slot->architecture.context == nullptr
+            ? 0
+            : reinterpret_cast<uintptr_t>(slot->architecture.context) +
+              sizeof(arch::context::SwitchContext);
+        slot->initial_rbx = slot->architecture.context == nullptr
+            ? 0 : slot->architecture.context->rbx;
+        slot->initial_r12 = slot->architecture.context == nullptr
+            ? 0 : slot->architecture.context->r12;
+        slot->initial_r13 = slot->architecture.context == nullptr
+            ? 0 : slot->architecture.context->r13;
+        slot->initial_r14 = slot->architecture.context == nullptr
+            ? 0 : slot->architecture.context->r14;
+        slot->initial_r15 = slot->architecture.context == nullptr
+            ? 0 : slot->architecture.context->r15;
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] created tid=");
+        serial::put_hex64(slot->tid);
+        serial::puts(" slot=");
+        serial::put_hex32(index);
+        serial::puts(" generation=");
+        serial::put_hex32(slot->generation);
+        serial::puts(" stack_low=");
+        serial::put_hex64(reinterpret_cast<uintptr_t>(slot->stack_base));
+        serial::puts(" stack_high=");
+        serial::put_hex64(reinterpret_cast<uintptr_t>(slot->stack_limit));
+        serial::puts(" initial_ip=");
+        serial::put_hex64(slot->initial_instruction_pointer);
+        serial::puts(" initial_sp=");
+        serial::put_hex64(slot->initial_stack_pointer);
+        serial::putc('\n');
+#endif
         enqueue_ready(slot);
         *result = gxos::runtime::ThreadHandle{ index, slot->generation };
         check_thread_invariants();
@@ -461,16 +606,46 @@ namespace {
         KernelThread* target = lookup_handle(handle);
         if (target == nullptr || target == current || target->detached ||
             target->join_consumed) {
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+            serial::puts("[native-thread-test] join rejected slot=");
+            serial::put_hex32(handle.slot);
+            serial::puts(" generation=");
+            serial::put_hex32(handle.generation);
+            serial::puts(" current_slot=");
+            serial::put_hex32(slot_index(current));
+            serial::putc('\n');
+#endif
             wait_leave_critical(nullptr, token);
             return gxos::runtime::WaitResult::Invalid;
         }
         gxos::runtime::Event* completion = target->completion;
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] join timeout valid=");
+        serial::put_hex32(timeout.valid ? 1U : 0U);
+        serial::puts(" infinite=");
+        serial::put_hex32(timeout.infinite_wait ? 1U : 0U);
+        serial::puts(" nanos=");
+        serial::put_hex64(timeout.nanoseconds);
+        serial::putc('\n');
+#endif
         wait_leave_critical(nullptr, token);
 
         const gxos::runtime::WaitResult waitResult = completion->wait(timeout);
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] join wait result=");
+        serial::put_hex32(static_cast<uint32_t>(waitResult));
+        serial::putc('\n');
+#endif
         if (waitResult != gxos::runtime::WaitResult::Signaled) {
             return waitResult;
         }
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] join wake slot=");
+        serial::put_hex32(handle.slot);
+        serial::puts(" generation=");
+        serial::put_hex32(handle.generation);
+        serial::putc('\n');
+#endif
 
         token = wait_enter_critical(nullptr);
         target = lookup_handle(handle);
@@ -491,6 +666,13 @@ namespace {
         }
         target->join_consumed = true;
         target->deferred_reclaim = true;
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+        serial::puts("[native-thread-test] reclamation slot=");
+        serial::put_hex32(handle.slot);
+        serial::puts(" generation=");
+        serial::put_hex32(handle.generation);
+        serial::putc('\n');
+#endif
         reclaim_slot(*target);
         check_thread_invariants();
         wait_leave_critical(nullptr, token);
@@ -517,6 +699,13 @@ namespace {
         if (target->state == ThreadState::Terminated) {
             target->deferred_reclaim = true;
             if (target != current) {
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+                serial::puts("[native-thread-test] detached reclamation slot=");
+                serial::put_hex32(handle.slot);
+                serial::puts(" generation=");
+                serial::put_hex32(handle.generation);
+                serial::putc('\n');
+#endif
                 reclaim_slot(*target);
             }
         }
@@ -618,6 +807,7 @@ void schedule()
         wait_leave_critical(nullptr, token);
         return;
     }
+    trace_first_schedule(next);
     next->state = ThreadState::Running;
     current = next;
     check_thread_invariants();
@@ -766,6 +956,62 @@ tid_t current_thread_id()
     return 0;
 #endif
 }
+
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+
+bool native_thread_test_snapshot_current(NativeThreadTestSnapshot* snapshot) {
+    if (snapshot == nullptr || current == nullptr || !current->allocated) {
+        return false;
+    }
+    snapshot->tid = current->tid;
+    snapshot->slot = slot_index(current);
+    snapshot->generation = current->generation;
+    snapshot->stack_base = reinterpret_cast<uintptr_t>(current->stack_base);
+    snapshot->stack_limit = reinterpret_cast<uintptr_t>(current->stack_limit);
+    snapshot->stack_pointer = arch::context::get_sp();
+    snapshot->initial_stack_pointer = current->initial_stack_pointer;
+    snapshot->initial_instruction_pointer = current->initial_instruction_pointer;
+    snapshot->initial_rbx = current->initial_rbx;
+    snapshot->initial_r12 = current->initial_r12;
+    snapshot->initial_r13 = current->initial_r13;
+    snapshot->initial_r14 = current->initial_r14;
+    snapshot->initial_r15 = current->initial_r15;
+    snapshot->native_started = current->native_started;
+    snapshot->wait_queue_linked = current->wait.queue_linked;
+    snapshot->timer_linked = current->wait.timer_linked;
+    return true;
+}
+
+uint32_t native_thread_test_live_count() {
+    void* token = wait_enter_critical(nullptr);
+    reap_detached_locked();
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < kMaxThreads; ++i) {
+        if (threads[i].allocated) {
+            ++count;
+        }
+    }
+    wait_leave_critical(nullptr, token);
+    return count;
+}
+
+bool native_thread_test_slot_matches(uint32_t slot, uint32_t generation) {
+    void* token = wait_enter_critical(nullptr);
+    const bool matches = slot < kMaxThreads && threads[slot].allocated &&
+        threads[slot].generation == generation;
+    wait_leave_critical(nullptr, token);
+    return matches;
+}
+
+void native_thread_test_set_current_owner(pid_t owner) {
+    void* token = wait_enter_critical(nullptr);
+    if (current != nullptr && current->allocated) {
+        current->owner = owner;
+    }
+    wait_leave_critical(nullptr, token);
+}
+
+#endif
 
 void timer_tick()
 {

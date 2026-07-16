@@ -4,6 +4,21 @@ Status: inactive adapter-probe only. NativeAOT Workstation GC is not
 initialized, no finalizer/helper thread is started, and no collection is
 triggered by this pass.
 
+The generic native thread lifecycle is now also validated on real bare-metal
+AMD64 under QEMU 11.0.0 TCG: opaque context delivery, bounded stack/context
+startup, result capture, join before and after exit, timed join retry, TCB
+generation reuse, stale-handle rejection, detached reclamation, bounded
+multiple workers, wait/timer cleanup, and the existing narrow process-teardown
+policy all passed. This is Outcome A for the generic native thread primitive,
+not activation evidence for NativeAOT GC. The inactive adapter remains the
+only NativeAOT-facing probe.
+
+The GC blockers are unchanged: runtime ThreadStore attachment and managed
+transition state, exact PAL stack/suspension contracts, FLS/TLS behavior,
+critical sections, GC virtual memory, heap/root/write-barrier initialization,
+wait-many/low-memory behavior, and a process-lifetime helper shutdown policy
+still require independent validation.
+
 ## 1. Workstation GC thread requirements
 
 The locked NativeAOT source is the .NET 9.0.0 runtime pack at commit
@@ -184,4 +199,3 @@ the bounded virtual-memory reserve/commit/decommit/release layer used by
 proved outside GC startup before any initialization experiment. Synchronization
 locks remain required immediately after that memory PAL and must be tested as a
 separate generic primitive.
-

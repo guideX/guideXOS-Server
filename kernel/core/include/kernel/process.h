@@ -66,6 +66,34 @@ tid_t current_thread_id();
 // Called by the monotonic timer interrupt.  Work is bounded per tick.
 void timer_tick();
 
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+
+struct NativeThreadTestSnapshot {
+    tid_t tid;
+    uint32_t slot;
+    uint32_t generation;
+    uintptr_t stack_base;
+    uintptr_t stack_limit;
+    uintptr_t stack_pointer;
+    uintptr_t initial_stack_pointer;
+    uintptr_t initial_instruction_pointer;
+    uintptr_t initial_rbx;
+    uintptr_t initial_r12;
+    uintptr_t initial_r13;
+    uintptr_t initial_r14;
+    uintptr_t initial_r15;
+    bool native_started;
+    bool wait_queue_linked;
+    bool timer_linked;
+};
+
+bool native_thread_test_snapshot_current(NativeThreadTestSnapshot* snapshot);
+uint32_t native_thread_test_live_count();
+bool native_thread_test_slot_matches(uint32_t slot, uint32_t generation);
+void native_thread_test_set_current_owner(pid_t owner);
+
+#endif
+
 } // namespace process
 } // namespace kernel
 

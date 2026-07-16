@@ -317,17 +317,16 @@ inactive isolated runtime-pack adapter: one plain native worker waits on one
 Event, returns its opaque context value, is joined, and releases adapter
 resources.
 
-The generic smoke is `scripts/smoke-native-thread-runtime.ps1`. It reports
-hosted build/test, bare-metal object/kernel build, adapter probe, scheduler and
-Event regressions, coupling checks, and QEMU availability independently. The
-current desktop environment has no `qemu-system-x86_64`, so a bare-metal
-concurrent runtime result is explicitly `BLOCKED`, never inferred from a
-successful compilation.
+The generic hosted smoke is `scripts/smoke-native-thread-runtime.ps1`. The
+bounded bare-metal smoke is
+`scripts/smoke-native-thread-runtime-qemu.ps1`; it locates QEMU through an
+explicit parameter, `GXOS_QEMU_X64`, PATH, or documented Windows locations,
+builds private normal and opt-in test images, captures serial/fault logs, and
+requires explicit QEMU PASS markers.
 
 ## 19. Current limitations
 
-- Bare metal remains single CPU and AMD64 runtime-tested only at build level in
-  this pass.
+- Bare metal is validated on one AMD64 TCG CPU; SMP is not supported.
 - The TCB pool is static and limited to 16 slots; hosted validation uses 64.
 - Bare-metal stacks are embedded bounded storage without guard pages or growth.
 - Bare-metal timing has PIT resolution and the existing eight-expiration tick
@@ -337,8 +336,8 @@ successful compilation.
 - Process teardown is the existing bounded owner walk, not a general child
   process/thread supervisor.
 - Hosted per-thread stack sizing is validated but delegated to the host.
-- A booted QEMU concurrent creation/join test is still required before claiming
-  bare-metal execution PASS.
+- The QEMU test mode is opt-in and bypasses ordinary desktop startup; it is not
+  a normal-boot regression test.
 
 ## 20. Future generic consumers
 
@@ -349,3 +348,30 @@ single exit path. A managed runtime adapter may map its own startup/attach
 contract above this API, but it must not import the generic TCB layout or
 change scheduler policy.
 
+## 21. QEMU validation status
+
+On 2026-07-16, the AMD64 path was executed under QEMU 11.0.0 TCG with one
+virtual CPU. The exact executable was
+`C:\Program Files\qemu\qemu-system-x86_64.exe`; it was not on PATH. The
+validation used `-accel tcg,thread=single`, `-machine pc`, OVMF pflash, a
+FAT ESP, `-display none`, serial-file capture, and `-no-reboot -no-shutdown`.
+The QEMU and image identities are recorded in
+`docs/runtime/NATIVE_THREAD_QEMU_VALIDATION.md` and the preserved run
+directory under `out/runtime/native-thread-qemu-validation/`.
+
+An ordinary image booted to `[KERNEL] Entering main loop (waiting for input)`
+before the test image was enabled. The opt-in image then passed the bounded
+single-worker, context/result, join-before-exit, join-after-exit, zero and
+finite timed join, retry, TCB reuse/generation, stale-handle, detach,
+multiple-worker, wait/timer cleanup, process-teardown, and leak checks. The
+serial trace observed first scheduling, entry invocation, result publication,
+completion signaling, join wake, and reclamation. The AMD64 context correction
+was limited to the initial stack frame/ABI and saved-context resume layout;
+the bare-metal Event correction distinguished finite zero polls from infinite
+waits. No GC initialization, collection, finalizer thread, managed thread, or
+default inventory change was made.
+
+The remaining limitations are the documented single-CPU/static-pool/PIT
+constraints, lack of guard pages and dynamic stack growth, and the absence of
+a general forced process-thread kill protocol. The full validation record and
+exact next experiment are in the companion QEMU document.

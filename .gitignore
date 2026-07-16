@@ -36,5 +36,6 @@
 /out/dotnet/repeated-allocation-comparison/
 /out/dotnet/native-event/
 /out/dotnet/native-thread-smoke/
+/out/runtime/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx

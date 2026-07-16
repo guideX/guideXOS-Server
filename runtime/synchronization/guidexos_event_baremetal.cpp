@@ -188,7 +188,9 @@ WaitResult Event::wait(const WaitTimeout& timeout) {
         }
         return WaitResult::Signaled;
     }
-    if (timeout.nanoseconds == 0) {
+    // Infinite waits intentionally carry zero nanoseconds.  Only a finite
+    // zero-duration wait is a poll.
+    if (!timeout.infinite_wait && timeout.nanoseconds == 0) {
         return WaitResult::TimedOut;
     }
     if (!scheduler_wait::schedulerWaitAvailable()) {
