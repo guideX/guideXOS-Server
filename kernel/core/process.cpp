@@ -12,6 +12,7 @@
 #include "include/kernel/vga.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/pit.h"
+#include "runtime/thread/guidexos_native_thread.h"
 
 #if defined(ARCH_AMD64)
 #include <arch/context_switch.h>
@@ -26,23 +27,40 @@ static int process_count = 0;
 #if defined(ARCH_AMD64)
 namespace {
     constexpr uint32_t kMaxThreads = 16;
-    constexpr uint32_t kKernelStackBytes = 8192;
+    constexpr uint32_t kKernelStackBytes =
+        static_cast<uint32_t>(gxos::runtime::kNativeThreadMaximumStackSize);
 
     struct KernelThread {
         tid_t tid;
         pid_t owner;
         const char* name;
         ThreadState state;
-        bool live;
+        bool allocated;
         bool ready_linked;
+        bool native_thread;
+        bool detached;
+        bool join_consumed;
+        bool exit_signaled;
+        bool exit_result_valid;
+        bool teardown;
+        bool deferred_reclaim;
+        uint32_t generation;
+        gxos::runtime::NativeThreadEntry native_entry;
+        void* native_context;
+        uintptr_t exit_result;
+        uint32_t requested_stack_size;
+        uint8_t* stack_base;
+        uint8_t* stack_limit;
         KernelThread* ready_previous;
         KernelThread* ready_next;
         alignas(16) uint8_t stack[kKernelStackBytes];
         arch::context::ArchThreadData architecture;
         gxos::runtime::scheduler_wait::WaitNode wait;
+        gxos::runtime::Event* completion;
     };
 
     KernelThread threads[kMaxThreads] = {};
+    gxos::runtime::Event completion_events[kMaxThreads];
     KernelThread* ready_head = nullptr;
     KernelThread* ready_tail = nullptr;
     KernelThread* current = nullptr;
@@ -50,13 +68,36 @@ namespace {
     uint32_t critical_depth = 0;
     bool initialized = false;
 
+    uint32_t slot_index(const KernelThread* thread) {
+        return thread == nullptr ? kMaxThreads
+            : static_cast<uint32_t>(thread - threads);
+    }
+
     void reset_wait_node(KernelThread& thread) {
         thread.wait = gxos::runtime::scheduler_wait::WaitNode{};
         thread.wait.owner_thread = &thread;
     }
 
+    void reset_slot(KernelThread& thread, uint32_t index) {
+        const uint32_t generation = thread.generation == 0 ? 1 : thread.generation;
+        gxos::runtime::Event* completion = &completion_events[index];
+        thread = KernelThread{};
+        thread.generation = generation;
+        thread.completion = completion;
+        thread.stack_base = thread.stack;
+        thread.stack_limit = thread.stack + kKernelStackBytes;
+        reset_wait_node(thread);
+        (void)completion->reset();
+    }
+
+    void zero_stack(KernelThread& thread) {
+        for (uint32_t i = 0; i < kKernelStackBytes; ++i) {
+            thread.stack[i] = 0;
+        }
+    }
+
     void enqueue_ready(KernelThread* thread) {
-        if (thread == nullptr || !thread->live ||
+        if (thread == nullptr || !thread->allocated ||
             thread->state != ThreadState::Runnable ||
             thread->ready_linked) {
             return;
@@ -102,9 +143,35 @@ namespace {
         return thread;
     }
 
+    // These checks are compiled only for invariant-focused kernel runs.  The
+    // normal image does not pay for production logging or assertion work.
+    void check_thread_invariants() {
+#if defined(GXOS_THREAD_DEBUG_ASSERTS)
+        for (uint32_t i = 0; i < kMaxThreads; ++i) {
+            KernelThread& thread = threads[i];
+            if (thread.generation == 0 ||
+                (thread.ready_linked &&
+                 (!thread.allocated || thread.state != ThreadState::Runnable ||
+                  &thread == current)) ||
+                (thread.state == ThreadState::Terminated && thread.ready_linked) ||
+                (thread.allocated &&
+                 (thread.stack_base != thread.stack ||
+                  thread.stack_limit < thread.stack_base ||
+                  thread.stack_limit > thread.stack + kKernelStackBytes))) {
+                __builtin_trap();
+            }
+        }
+        if (current != nullptr &&
+            (!current->allocated || current->state != ThreadState::Running ||
+             current->ready_linked)) {
+            __builtin_trap();
+        }
+#endif
+    }
+
     KernelThread* find_thread(tid_t tid) {
         for (uint32_t i = 0; i < kMaxThreads; ++i) {
-            if (threads[i].live && threads[i].tid == tid) {
+            if (threads[i].allocated && threads[i].tid == tid) {
                 return &threads[i];
             }
         }
@@ -146,7 +213,7 @@ namespace {
             return;
         }
         KernelThread* thread = static_cast<KernelThread*>(node->owner_thread);
-        if (!thread->live || thread->state == ThreadState::Terminated) {
+        if (!thread->allocated || thread->state == ThreadState::Terminated) {
             return;
         }
 
@@ -222,6 +289,251 @@ namespace {
         };
         gxos::runtime::scheduler_wait::installSchedulerWaitHooks(&hooks);
     }
+
+    KernelThread* lookup_handle(const gxos::runtime::ThreadHandle& handle) {
+        if (!handle.isValid() || handle.slot >= kMaxThreads) {
+            return nullptr;
+        }
+        KernelThread& thread = threads[handle.slot];
+        if (!thread.allocated || thread.generation != handle.generation ||
+            !thread.native_thread) {
+            return nullptr;
+        }
+        return &thread;
+    }
+
+    void reclaim_slot(KernelThread& thread) {
+        if (!thread.allocated || &thread == current || thread.ready_linked ||
+            thread.state == ThreadState::Running ||
+            thread.state == ThreadState::Runnable ||
+            thread.state == ThreadState::Blocked ||
+            thread.state == ThreadState::TimedWait) {
+            return;
+        }
+
+        const uint32_t index = slot_index(&thread);
+        if (index >= kMaxThreads) {
+            return;
+        }
+        arch::context::arch_thread_destroy(&thread.architecture);
+        zero_stack(thread);
+        if (thread.generation != 0xFFFFFFFFu) {
+            ++thread.generation;
+        }
+        thread.allocated = false;
+        thread.state = ThreadState::Terminated;
+        thread.deferred_reclaim = false;
+        thread.join_consumed = false;
+        thread.completion = &completion_events[index];
+        (void)thread.completion->reset();
+        reset_wait_node(thread);
+    }
+
+    void reap_detached_locked() {
+        for (uint32_t i = 0; i < kMaxThreads; ++i) {
+            KernelThread& thread = threads[i];
+            if (thread.allocated && thread.detached &&
+                thread.deferred_reclaim && &thread != current) {
+                reclaim_slot(thread);
+            }
+        }
+    }
+
+    void native_entry_dispatch(void* argument) {
+        KernelThread* thread = static_cast<KernelThread*>(argument);
+        if (thread == nullptr || !thread->native_thread ||
+            thread->native_entry == nullptr) {
+            return;
+        }
+        thread->exit_result = thread->native_entry(thread->native_context);
+        thread->exit_result_valid = true;
+    }
+
+    void exit_current_thread() {
+        if (current == nullptr) {
+            return;
+        }
+
+        KernelThread* exiting = current;
+        void* token = wait_enter_critical(nullptr);
+        gxos::runtime::scheduler_wait::abandonWait(&exiting->wait);
+        remove_ready(exiting);
+        exiting->state = ThreadState::Terminated;
+
+        if (exiting->native_thread && !exiting->exit_signaled) {
+            exiting->exit_signaled = true;
+            if (exiting->completion != nullptr) {
+                // The completion Event owns the wake-one operation.  The
+                // result is stored before signal so a resumed joiner sees a
+                // complete exit record.
+                (void)exiting->completion->signal();
+            }
+        }
+        if (exiting->detached) {
+            // The current stack remains active until the switch below has
+            // completed.  A later scheduler operation reclaims this slot.
+            exiting->deferred_reclaim = true;
+        }
+
+        reap_detached_locked();
+        KernelThread* next = pop_ready();
+        if (next == nullptr) {
+            wait_leave_critical(nullptr, token);
+            for (;;) {
+                arch::enable_interrupts();
+                arch::halt();
+                arch::disable_interrupts();
+            }
+        }
+        next->state = ThreadState::Running;
+        current = next;
+        check_thread_invariants();
+        wait_leave_critical(nullptr, token);
+        arch::context::arch_switch_to(&exiting->architecture, &next->architecture);
+    }
+
+    gxos::runtime::ThreadResult native_create_hook(
+        void*,
+        gxos::runtime::NativeThreadEntry entry,
+        void* context,
+        const gxos::runtime::ThreadCreateOptions& options,
+        gxos::runtime::ThreadHandle* result) {
+        if (result == nullptr || entry == nullptr || !initialized) {
+            return gxos::runtime::ThreadResult::InvalidArgument;
+        }
+        *result = gxos::runtime::ThreadHandle{};
+        if (options.stackSize < gxos::runtime::kNativeThreadMinimumStackSize ||
+            options.stackSize > kKernelStackBytes ||
+            (options.stackSize % 16u) != 0) {
+            return gxos::runtime::ThreadResult::InvalidStackSize;
+        }
+
+        void* token = wait_enter_critical(nullptr);
+        reap_detached_locked();
+        KernelThread* slot = nullptr;
+        uint32_t index = 0;
+        for (; index < kMaxThreads; ++index) {
+            if (!threads[index].allocated) {
+                slot = &threads[index];
+                break;
+            }
+        }
+        if (slot == nullptr) {
+            wait_leave_critical(nullptr, token);
+            return gxos::runtime::ThreadResult::NoResources;
+        }
+
+        reset_slot(*slot, index);
+        zero_stack(*slot);
+        slot->tid = next_tid++;
+        slot->owner = current == nullptr ? 0 : current->owner;
+        slot->name = options.debugName;
+        slot->state = ThreadState::Runnable;
+        slot->allocated = true;
+        slot->native_thread = true;
+        slot->detached = options.detached;
+        slot->native_entry = entry;
+        slot->native_context = context;
+        slot->requested_stack_size = static_cast<uint32_t>(options.stackSize);
+        slot->stack_base = slot->stack;
+        slot->stack_limit = slot->stack + options.stackSize;
+        arch::context::arch_thread_create(
+            &slot->architecture,
+            reinterpret_cast<uint64_t>(slot->stack_limit),
+            native_entry_dispatch,
+            slot);
+        enqueue_ready(slot);
+        *result = gxos::runtime::ThreadHandle{ index, slot->generation };
+        check_thread_invariants();
+        wait_leave_critical(nullptr, token);
+        return gxos::runtime::ThreadResult::Ok;
+    }
+
+    gxos::runtime::WaitResult native_join_hook(
+        void*,
+        gxos::runtime::ThreadHandle handle,
+        const gxos::runtime::WaitTimeout& timeout,
+        uintptr_t* exitResult) {
+        if (exitResult != nullptr) {
+            *exitResult = 0;
+        }
+        void* token = wait_enter_critical(nullptr);
+        KernelThread* target = lookup_handle(handle);
+        if (target == nullptr || target == current || target->detached ||
+            target->join_consumed) {
+            wait_leave_critical(nullptr, token);
+            return gxos::runtime::WaitResult::Invalid;
+        }
+        gxos::runtime::Event* completion = target->completion;
+        wait_leave_critical(nullptr, token);
+
+        const gxos::runtime::WaitResult waitResult = completion->wait(timeout);
+        if (waitResult != gxos::runtime::WaitResult::Signaled) {
+            return waitResult;
+        }
+
+        token = wait_enter_critical(nullptr);
+        target = lookup_handle(handle);
+        if (target == nullptr || target->detached || target->join_consumed) {
+            wait_leave_critical(nullptr, token);
+            return gxos::runtime::WaitResult::Invalid;
+        }
+        if (target->teardown) {
+            wait_leave_critical(nullptr, token);
+            return gxos::runtime::WaitResult::Destroyed;
+        }
+        if (target->state != ThreadState::Terminated || !target->exit_signaled) {
+            wait_leave_critical(nullptr, token);
+            return gxos::runtime::WaitResult::Invalid;
+        }
+        if (exitResult != nullptr) {
+            *exitResult = target->exit_result;
+        }
+        target->join_consumed = true;
+        target->deferred_reclaim = true;
+        reclaim_slot(*target);
+        check_thread_invariants();
+        wait_leave_critical(nullptr, token);
+        return gxos::runtime::WaitResult::Signaled;
+    }
+
+    gxos::runtime::ThreadResult native_detach_hook(
+        void*, gxos::runtime::ThreadHandle handle) {
+        void* token = wait_enter_critical(nullptr);
+        KernelThread* target = lookup_handle(handle);
+        if (target == nullptr) {
+            wait_leave_critical(nullptr, token);
+            return gxos::runtime::ThreadResult::InvalidHandle;
+        }
+        if (target->detached) {
+            wait_leave_critical(nullptr, token);
+            return gxos::runtime::ThreadResult::AlreadyDetached;
+        }
+        if (target->join_consumed) {
+            wait_leave_critical(nullptr, token);
+            return gxos::runtime::ThreadResult::AlreadyJoined;
+        }
+        target->detached = true;
+        if (target->state == ThreadState::Terminated) {
+            target->deferred_reclaim = true;
+            if (target != current) {
+                reclaim_slot(*target);
+            }
+        }
+        check_thread_invariants();
+        wait_leave_critical(nullptr, token);
+        return gxos::runtime::ThreadResult::Ok;
+    }
+
+    void install_native_thread_hooks() {
+        const gxos::runtime::NativeThreadPlatformHooks hooks = {
+            nullptr,
+            native_create_hook,
+            native_join_hook,
+            native_detach_hook
+        };
+        gxos::runtime::installNativeThreadPlatformHooks(&hooks);
+    }
 }
 #endif
 
@@ -238,8 +550,11 @@ void init()
     initialized = true;
 
     for (uint32_t i = 0; i < kMaxThreads; ++i) {
-        threads[i] = KernelThread{};
-        reset_wait_node(threads[i]);
+        if (!completion_events[i].isInitialized()) {
+            (void)completion_events[i].initialize(
+                gxos::runtime::EventMode::ManualReset, false);
+        }
+        reset_slot(threads[i], i);
     }
 
     current = &threads[0];
@@ -247,8 +562,12 @@ void init()
     current->owner = 0;
     current->name = "kernel-bootstrap";
     current->state = ThreadState::Running;
-    current->live = true;
+    current->allocated = true;
+    current->stack_base = current->stack;
+    current->stack_limit = current->stack + kKernelStackBytes;
+    check_thread_invariants();
     install_wait_hooks();
+    install_native_thread_hooks();
 #else
     gxos::runtime::scheduler_wait::installSchedulerWaitHooks(nullptr);
 #endif
@@ -287,6 +606,7 @@ void schedule()
     }
 
     void* token = wait_enter_critical(nullptr);
+    reap_detached_locked();
     KernelThread* previous = current;
     if (previous->state == ThreadState::Running) {
         previous->state = ThreadState::Runnable;
@@ -300,6 +620,7 @@ void schedule()
     }
     next->state = ThreadState::Running;
     current = next;
+    check_thread_invariants();
     wait_leave_critical(nullptr, token);
     arch::context::arch_switch_to(&previous->architecture, &next->architecture);
 #else
@@ -317,7 +638,7 @@ tid_t create_thread(pid_t owner, void (*entry)(void*), void* arg, const char* na
     void* token = wait_enter_critical(nullptr);
     KernelThread* slot = nullptr;
     for (uint32_t i = 0; i < kMaxThreads; ++i) {
-        if (!threads[i].live) {
+        if (!threads[i].allocated) {
             slot = &threads[i];
             break;
         }
@@ -327,13 +648,16 @@ tid_t create_thread(pid_t owner, void (*entry)(void*), void* arg, const char* na
         return 0;
     }
 
-    *slot = KernelThread{};
-    reset_wait_node(*slot);
+    const uint32_t index = static_cast<uint32_t>(slot - threads);
+    reset_slot(*slot, index);
+    zero_stack(*slot);
     slot->tid = next_tid++;
     slot->owner = owner;
     slot->name = name;
     slot->state = ThreadState::Runnable;
-    slot->live = true;
+    slot->allocated = true;
+    slot->stack_base = slot->stack;
+    slot->stack_limit = slot->stack + kKernelStackBytes;
     arch::context::arch_thread_create(
         &slot->architecture,
         reinterpret_cast<uint64_t>(slot->stack + kKernelStackBytes),
@@ -358,26 +682,23 @@ bool terminate_thread(tid_t tid)
     KernelThread* thread = find_thread(tid);
     if (thread == nullptr) return false;
 
+    if (thread->native_thread && thread != current) {
+        // Native threads have no external kill operation.  Only process
+        // teardown may remove a non-current native thread.
+        return false;
+    }
+
+    if (thread == current) {
+        exit_current_thread();
+        return true;
+    }
+
     void* token = wait_enter_critical(nullptr);
     gxos::runtime::scheduler_wait::abandonWait(&thread->wait);
     remove_ready(thread);
     thread->state = ThreadState::Terminated;
-    thread->live = false;
-
-    if (thread != current) {
-        wait_leave_critical(nullptr, token);
-        return true;
-    }
-
-    KernelThread* next = pop_ready();
-    if (next == nullptr) {
-        wait_leave_critical(nullptr, token);
-        return true;
-    }
-    next->state = ThreadState::Running;
-    current = next;
+    reclaim_slot(*thread);
     wait_leave_critical(nullptr, token);
-    arch::context::arch_switch_to(&thread->architecture, &next->architecture);
     return true;
 #else
     (void)tid;
@@ -393,11 +714,20 @@ uint32_t terminate_process_threads(pid_t owner)
     uint32_t terminated = 0;
     for (uint32_t i = 0; i < kMaxThreads; ++i) {
         KernelThread* thread = &threads[i];
-        if (!thread->live || thread->owner != owner) continue;
+        if (!thread->allocated || thread->owner != owner) continue;
         gxos::runtime::scheduler_wait::abandonWait(&thread->wait);
         remove_ready(thread);
         thread->state = ThreadState::Terminated;
-        thread->live = false;
+        if (thread->native_thread) {
+            thread->teardown = true;
+            if (!thread->exit_signaled && thread->completion != nullptr) {
+                thread->exit_signaled = true;
+                (void)thread->completion->signal();
+            }
+        }
+        if (thread != current) {
+            reclaim_slot(*thread);
+        }
         ++terminated;
         if (thread == current) current_match = thread;
     }
@@ -418,6 +748,7 @@ uint32_t terminate_process_threads(pid_t owner)
     }
     next->state = ThreadState::Running;
     current = next;
+    check_thread_invariants();
     wait_leave_critical(nullptr, token);
     arch::context::arch_switch_to(&current_match->architecture, &next->architecture);
     return terminated;

@@ -423,4 +423,6 @@ compile/link probe are now implemented; the bare-metal scheduler wait queue and
 monotonic timer wake foundation required for runtime event waits is still
 missing. See [Native guideXOS Event Primitive](../runtime/NATIVE_EVENT_PRIMITIVE.md)
 and [NativeAOT GC Platform Events](NATIVEAOT_GC_PLATFORM_EVENTS.md). No GC
-initialization or collection was added in this pass.
+initialization or collection was added in this pass. See the current
+[NativeAOT GC Platform Threads](NATIVEAOT_GC_PLATFORM_THREADS.md) status for
+the generic start/join follow-up.

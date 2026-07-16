@@ -104,7 +104,7 @@ MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PR
 
 # Runtime-neutral synchronization sources used by the freestanding kernel.
 # They remain outside the .NET tree and are the first scheduler wait consumer.
-RUNTIME_SOURCES := ../runtime/synchronization/guidexos_scheduler_wait.cpp ../runtime/synchronization/guidexos_event_baremetal.cpp
+RUNTIME_SOURCES := ../runtime/synchronization/guidexos_scheduler_wait.cpp ../runtime/synchronization/guidexos_event_baremetal.cpp ../runtime/thread/guidexos_native_thread_baremetal.cpp
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
@@ -113,7 +113,8 @@ ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
 MBEDTLS_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
-RUNTIME_OBJS := $(patsubst ../runtime/synchronization/%.cpp,$(OBJ_DIR)/runtime/%.o,$(RUNTIME_SOURCES))
+RUNTIME_OBJS := $(patsubst ../runtime/synchronization/%.cpp,$(OBJ_DIR)/runtime/%.o,$(filter ../runtime/synchronization/%,$(RUNTIME_SOURCES)))
+RUNTIME_OBJS += $(patsubst ../runtime/thread/%.cpp,$(OBJ_DIR)/runtime/thread/%.o,$(filter ../runtime/thread/%,$(RUNTIME_SOURCES)))
 
 ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(RUNTIME_OBJS)
 DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d) $(RUNTIME_OBJS:.o=.d)
@@ -204,6 +205,11 @@ $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.s
 	$(AS) $(ASFLAGS) $< -o $@
 
 $(OBJ_DIR)/runtime/%.o: ../runtime/synchronization/%.cpp
+	@$(call MKDIR,$(dir $@))
+	@echo "Compiling $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/runtime/thread/%.o: ../runtime/thread/%.cpp
 	@$(call MKDIR,$(dir $@))
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@

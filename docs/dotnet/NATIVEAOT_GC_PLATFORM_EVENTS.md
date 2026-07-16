@@ -103,8 +103,11 @@ The current pass does not start the finalizer helper and does not call GC
 initialization. In the eventual initialization experiment, the source mapping
 expects the helper request event to be auto-reset and the done event to be
 manual-reset. The helper's thread creation, thread-store registration, process
-cleanup, and any wait-many path remain separate missing capabilities. This
-event work must not be used as evidence that the full Workstation GC is ready.
+cleanup, managed attach, and any wait-many path remain separate missing
+capabilities. The generic start/join lifecycle and inactive adapter probe are
+now documented in [NativeAOT GC Platform Threads](NATIVEAOT_GC_PLATFORM_THREADS.md).
+This event work must not be used as evidence that the full Workstation GC is
+ready.
 
 ## Adapter compile/link probe
 
@@ -127,7 +130,7 @@ The event abstraction does not remove the remaining runtime-pack gaps:
 - critical-section and lock semantics expected by the collector;
 - virtual-memory and allocation policy integration;
 - FLS/thread-store behavior;
-- native thread-start/join and mandatory finalizer-helper lifecycle;
+- managed ThreadStore attachment and the mandatory finalizer-helper lifecycle;
 - exact EE/GC platform ABI wiring and process cleanup.
 
 The current managed runtime remains the fixed no-collection heap, and no GC
@@ -135,9 +138,9 @@ startup or collection occurs in this pass.
 
 ## Exact next primitive
 
-The next independently testable NativeAOT-facing primitive is native thread
-start/join for the required helper-thread lifecycle, using the completed
-generic event for request/done coordination. Do not initialize the Workstation
-GC, start its finalizer helper, or trigger collection in that experiment; the
-remaining VM, thread-store, stack-bound, module-registration, and GC-owned
-segment blockers must be addressed first.
+The next independently testable NativeAOT-facing primitive is the bounded
+virtual-memory reserve/commit/decommit/release layer needed by Workstation GC
+segment setup. Do not initialize the Workstation GC, start its finalizer helper,
+or trigger collection while proving that memory layer. The generic thread
+start/join follow-up is documented separately and remains inactive with
+respect to GC startup.
