@@ -281,7 +281,9 @@ function Start-ProbeLauncher {
         'GXOS_QEMU_DISPLAY_PROBE_CAPTURE',
         'GXOS_QEMU_DISPLAY_PROBE_NO_PAUSE',
         'GXOS_QEMU_DISPLAY_PROBE_QMP_PORT',
-        'GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG'
+        'GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG',
+        'GXOS_QEMU_DISPLAY_PROBE_ESP_DIR',
+        'GXOS_QEMU_DISPLAY_PROBE_CONFIG_DIR'
     )
 
     $env:GXOS_QEMU_DISPLAY_PROBE_HEADLESS = '1'
@@ -1576,7 +1578,9 @@ function Invoke-QemuDisplayProbeBackend {
     $envState = Save-EnvironmentState -Names @(
         'GXOS_QEMU_DISPLAY_PROBE_HEADLESS',
         'GXOS_QEMU_DISPLAY_PROBE_NO_PAUSE',
-        'GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG'
+        'GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG',
+        'GXOS_QEMU_DISPLAY_PROBE_ESP_DIR',
+        'GXOS_QEMU_DISPLAY_PROBE_CONFIG_DIR'
     )
 
     $proc = $null
@@ -1991,7 +1995,8 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuLiveStopReason = Get-TextMatchGroupValue -Text $gpuLiveSummaryLine.Value -Pattern 'stopReason=([^ ]+)' -GroupIndex 1
     $inputPathLine = [regex]::Match($serialText, '\[INPUT\] QEMU input path=ps2-relative virtualDesktop=\d+x\d+ monitors=\d+')
     $inputMapSummaryLine = [regex]::Match($serialText, '\[INPUT-MAP\] summary eventsSeen=\d+ valid=\d+ invalid=\d+ relative=\d+ headAbsolute=\d+ normalizedAbsolute=\d+ unknownHeadFallbacks=\d+ clamped=\d+')
-    $inputOrdinaryWindowLine = [regex]::Match($serialText, '\[INPUT-PROOF\] ordinaryWindow id=[0-9A-Fa-f]+ title=QEMU Input Proof startRect=-?\d+,-?\d+ \d+x\d+ virtualDesktop=\d+x\d+')
+    # A serial line can lose the first bracket when the proof logger interleaves with the IRQ logger.
+    $inputOrdinaryWindowLine = [regex]::Match($serialText, '\[?INPUT-PROOF\] ordinaryWindow id=[0-9A-Fa-f]+ title=QEMU Input Proof startRect=-?\d+,-?\d+ \d+x\d+ virtualDesktop=\d+x\d+')
     $inputBoundaryLine = [regex]::Match($serialText, '\[INPUT-PROOF\] dragCrossedBoundary=yes boundaryX=\d+ windowRect=-?\d+,-?\d+ \d+x\d+')
     $inputProofLine = [regex]::Match($serialText, 'Dual-monitor input proof: relativeGlobal=ok headAwareAbsolute=unavailable reason=guest-input-path-ps2-relative-no-source-head clickFocus=(ok|failed) dragCrossedBoundary=(yes|no) finalWindowMonitor=-?\d+ virtualDesktop=\d+x\d+ taskbarPrimaryOnly=yes livePresentation=yes captureReleased=(yes|no) finalWindowIntersectsBoth=(yes|no) initialRect=-?\d+,-?\d+ \d+x\d+ finalRect=-?\d+,-?\d+ \d+x\d+')
     $gpuOutputInventoryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] VirtioGPU outputs: configured=\d+ operational=\d+ connectorEnabled=\d+ presentationConfirmed=\d+ virtualDesktop=\d+x\d+ targets=\d+ backed=\d+ primaryOutput=\d+ protocolConnectorEnabledCount=\d+ operationalOutputCount=\d+ presentationConfirmedCount=\d+')

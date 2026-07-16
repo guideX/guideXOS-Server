@@ -410,6 +410,19 @@ void DisplayConfigurationService::processPendingAtSafePoint()
     // the same fixed contract without adding a second transaction owner.
 }
 
+void DisplayConfigurationService::requestStartupRestore()
+{
+    // Hosted startup already loads Display Options before the compositor
+    // owner path becomes active. Keep the public hook explicit so QEMU and
+    // hosted callers share the same service surface without a second restore
+    // transaction path.
+}
+
+bool DisplayConfigurationService::startupRestoreComplete()
+{
+    return true;
+}
+
 DisplayConfigurationResponse DisplayConfigurationService::lastResult()
 {
     std::lock_guard<std::mutex> stateLock(s_stateMutex);

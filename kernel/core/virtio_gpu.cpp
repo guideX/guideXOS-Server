@@ -6096,6 +6096,17 @@ static void copy_display_contract_text(char* destination, uint32_t capacity, con
     while (++index < capacity) destination[index] = '\0';
 }
 
+static bool display_contract_text_equals(const char* left, const char* right)
+{
+    if (left == nullptr || right == nullptr) return left == right;
+    uint32_t index = 0u;
+    while (left[index] != '\0' || right[index] != '\0') {
+        if (left[index] != right[index]) return false;
+        ++index;
+    }
+    return true;
+}
+
 static void copy_display_contract_text(char* destination, uint32_t capacity, const char* prefix, uint32_t ordinal)
 {
     if (destination == nullptr || capacity == 0u) return;
@@ -6148,6 +6159,11 @@ static void fill_backend_snapshot(gxos::display::DisplayConfigurationSnapshot& s
         gxos::display::DisplayConfigurationOutput& output = snapshot.outputs[i];
         output = gxos::display::DisplayConfigurationOutput{};
         copy_display_contract_text(output.stableId, sizeof(output.stableId), "display-", i + 1u);
+        copy_display_contract_text(output.backendType, sizeof(output.backendType), "virtio-gpu");
+        copy_display_contract_text(output.backendDeviceId, sizeof(output.backendDeviceId), "gpu0");
+        output.scanoutId = monitor.scanoutId;
+        output.logicalOrdinal = i + 1u;
+        copy_display_contract_text(output.stableName, sizeof(output.stableName), "Display ", i + 1u);
         output.virtualX = monitor.virtualX;
         output.virtualY = monitor.virtualY;
         output.width = monitor.width;
@@ -6306,6 +6322,20 @@ bool apply_display_configuration_backend_layout(
             return false;
         }
         const DisplayMonitorDescriptor& monitor = s_probeOutcome.outputInventory.monitors[i];
+        if (requested.outputs[i].backendType[0] != '\0' &&
+            !display_contract_text_equals(requested.outputs[i].backendType, "virtio-gpu")) {
+            set_backend_diagnostic(*result, "stable output backend identity is unavailable");
+            return false;
+        }
+        if (requested.outputs[i].backendDeviceId[0] != '\0' &&
+            !display_contract_text_equals(requested.outputs[i].backendDeviceId, "gpu0")) {
+            set_backend_diagnostic(*result, "stable output device identity is unavailable");
+            return false;
+        }
+        if (requested.outputs[i].logicalOrdinal != 0u && requested.outputs[i].logicalOrdinal != i + 1u) {
+            set_backend_diagnostic(*result, "stable output ordinal is unavailable");
+            return false;
+        }
         if (requested.outputs[i].width != monitor.width || requested.outputs[i].height != monitor.height) {
             set_backend_diagnostic(*result, "resolution changes are not supported");
             return false;

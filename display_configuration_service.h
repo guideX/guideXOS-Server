@@ -16,6 +16,8 @@ public:
     static bool submit(const DisplayConfigurationCommand& command,
                        DisplayConfigurationResponse& response);
     static void processPendingAtSafePoint();
+    static void requestStartupRestore();
+    static bool startupRestoreComplete();
     static DisplayConfigurationResponse lastResult();
     static bool isBusy();
 
@@ -25,4 +27,3 @@ public:
 
 } // namespace display
 } // namespace gxos
-

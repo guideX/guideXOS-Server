@@ -416,8 +416,7 @@ The virtio-gpu discovery path now maps the modern transport MMIO regions into a 
 
 - Interactive manual mouse validation.
 - Display Options integration with the real virtio-gpu backend.
-- Persistent Extend/Mirror configuration.
-- Primary-monitor switching.
+- Persistent Extend/Mirror configuration and primary-monitor switching are now complete through the authoritative typed service.
 - Resolution/output configuration.
 - Hotplug/config-change events.
 - Dirty-rectangle optimization.
@@ -494,18 +493,114 @@ interactive QEMU validation, and eventual real-hardware backend planning under
 a separate Mule checkpoint. Real-hardware GPU enablement remains Mule
 Territory.
 
-## Current Next Milestone
+## Separate-Launch Display Persistence Milestone
 
-The typed control-plane milestone is complete in-process. The next milestone is:
+The typed, versioned, pointer-free display-configuration control plane and the
+separate-launch persistence proof are complete in the QEMU-only backend. The
+authoritative runtime proof is:
 
-- persistence restoration across two separate QEMU launches;
-- manual interactive Display Options proof;
-- later resource resize/resolution design;
-- configuration-change events and hotplug;
-- dirty-rectangle optimization.
+```text
+Display configuration persistence proof: launch1Commit=ok launch2Load=ok outputReconcile=ok automaticRestore=ok primary2Restored=yes taskbarRestored=yes layoutRestored=yes livePresentation=yes gpuFailures=0 fallback=no result=success
+```
 
-Separate-launch restoration is deliberately deferred from the current runtime
-proof. Resolution changes, resource resizing, display hotplug, EDID, rotation,
-cursor queues, 3D/virgl/Venus/blob/context commands, QMP guest IPC, and
-real-hardware GPU/MMIO enablement remain out of scope. The Mule Territory
-warning remains required near every active service/backend path.
+The passing evidence is under
+`logs\qemu-display-configuration-persistence-20260716-063729\`. Launch 1 and
+launch 2 used distinct QEMU processes (`15824` and `9432` in that run), and
+the four nonempty captures are `launch1\captures\head0.png`,
+`launch1\captures\head1.png`, `launch2\captures\head0.png`, and
+`launch2\captures\head1.png`.
+
+### Storage strategy
+
+The coordinator copies the normal boot ESP once into the timestamped evidence
+root and creates one separate 64 MiB raw FAT32 configuration image. Both
+QEMU launches attach the exact same image as the first emulated IDE disk; the
+boot ESP remains on the second disk. The configuration image is formatted by
+the host before launch 1, but the display settings are created only by the
+guest through the public service in `/display.cfg`. The host does not inspect,
+rewrite, or reinject the display record between launches. Launch 1 changes the
+image checksum; launch 2 starts from the launch-1 checksum and restores from
+the guest-written record. QEMU disk release is awaited before the evidence
+fingerprint is taken.
+
+The ordinary launcher remains q35 when no explicit persistence artifact is
+provided. The persistence/control harness selects the QEMU `pc` machine only
+to expose the existing kernel ATA/FAT path for this bounded storage proof; it
+does not enable a real hardware display path or a new GPU feature.
+
+### Persisted representation and identity
+
+Format version 2 is a bounded line record with serialized size, FNV-1a
+checksum, mode, primary output identity, output count, output records, virtual
+desktop geometry, and presentation requirement. Output records carry the
+backend-neutral stable identity fields `backendType`, `backendDeviceId`,
+`scanoutId`, `logicalOrdinal`, `stableName`, and `stableId`, plus bounded
+geometry and enabled/primary state. `stableId`, backend type/device, scanout
+ID, and assigned dimensions are authoritative matching fields for the QEMU
+virtio-gpu proof; logical ordinal and stable name are diagnostics/reconciliation
+hints. Resource IDs, pointers, MMIO addresses, physical addresses, queue
+addresses, and backing-store details are never serialized.
+
+Version 1 is tolerated as a legacy mode/primary request and rebuilt against
+the detected inventory. Future versions, bad checksums, truncated data,
+impossible counts, overflowing coordinates/dimensions, duplicate identities,
+and invalid primary identities are rejected without creating phantom outputs.
+
+### Startup ordering and restore transaction
+
+Startup restoration is a bounded state machine with separate loaded, validated,
+detected, reconciled, applying, applied, fallback, and complete stages. It
+waits for the persistent mount, compositor/presentation services, the virtio-gpu
+backend, and the operational output inventory. A saved record that arrives
+before those dependencies remains pending and is applied once at the safe
+point. Restore uses the same public transaction service and the named
+`StartupRestore` origin: validate, pause presentation, apply the real backend
+layout, update primary/taskbar/input bounds, present a validation frame, resume
+presentation, and then publish active state. The service reports restored only
+after the real backend transaction and validation frame succeed.
+
+Launch 2 emits `source=persisted-store injectedByHost=no loaded=yes
+reconciled=yes applied=yes mode=Extend primary=display-2
+taskbarMonitor=display-2 virtualDesktop=2560x800 validationFrame=ok fallback=no`.
+The launch-2 proof issues only a public active-state query; it fails if a
+test-coordinator `ApplyConfiguration` injection is observed. Startup
+normalization does not rewrite the persisted record.
+
+If reconciliation or application fails, the service attempts the in-memory
+last-known-good request, then a safe two-output Extend default, then the
+primary-output-only path, and finally the established legacy framebuffer
+fallback. Invalid/stale output identities are source-tested as a bounded case:
+valid detected outputs are matched, no phantom output is created, and the
+documented safe fallback is selected. Malformed-file cases are isolated from
+the successful two-launch evidence artifact.
+
+Persistence writes occur only after a successful user/test apply when the
+commit flag is present, or when an explicit normalization policy requires it.
+Startup restore itself does not commit again. If a write fails after a
+validated active transaction, the active configuration is retained and the
+response reports `persistenceCommitted=no`; it is not falsely reported as
+restart-safe.
+
+The source smoke is:
+
+```text
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-display-configuration-persistence-source.ps1
+```
+
+It covers versioning, stable identity, bounded malformed/stale handling,
+startup ordering, authoritative restore origin, last-known-good fallback,
+write discipline, no host launch-2 injection, and the QEMU-only safety gates.
+
+## Current Limitations and Next Roadmap Milestone
+
+Current limitations remain fixed resource dimensions, no resolution change,
+no resource resizing, no display hotplug, no EDID parsing, no rotation, no
+head-aware absolute QMP input, no cursor queue, no 3D/virgl/Venus/blob/context
+support, no QMP guest IPC, and no real-hardware GPU/MMIO backend.
+
+The next roadmap milestone is manual interactive Display Options validation
+in QEMU, followed by safe resolution/resource rebuild design, display
+configuration events, hotplug architecture, dirty-rectangle optimization, and
+eventual real-hardware planning under a separate Mule checkpoint.
+
+REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.

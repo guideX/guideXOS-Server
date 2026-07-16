@@ -17,6 +17,26 @@ static constexpr uint32_t kDisplayConfigurationMaxOutputs = 4u;
 static constexpr uint32_t kDisplayConfigurationBackendNameBytes = 32u;
 static constexpr uint32_t kDisplayConfigurationOutputIdBytes = 32u;
 static constexpr uint32_t kDisplayConfigurationDiagnosticBytes = 128u;
+static constexpr uint32_t kDisplayConfigurationPersistenceVersion = 2u;
+static constexpr uint32_t kDisplayConfigurationPersistenceMaxBytes = 2048u;
+static constexpr uint32_t kDisplayConfigurationPersistenceMaxCoordinate = 16384u;
+static constexpr uint32_t kDisplayConfigurationPersistenceMaxDimension = 8192u;
+
+// Backend-neutral identity used by persistence and reconciliation.  The
+// stableId is the authoritative logical output identity for this contract.
+// Backend/device/scanout fields strengthen matching when the backend exposes
+// them; logicalOrdinal is only a bounded fallback for older records.
+struct DisplayOutputIdentity {
+    uint32_t version;
+    char backendType[kDisplayConfigurationBackendNameBytes];
+    char backendDeviceId[kDisplayConfigurationOutputIdBytes];
+    char stableId[kDisplayConfigurationOutputIdBytes];
+    uint32_t scanoutId;
+    uint32_t logicalOrdinal;
+    char stableName[kDisplayConfigurationOutputIdBytes];
+    int32_t expectedWidth;
+    int32_t expectedHeight;
+};
 
 enum class DisplayConfigurationCommandType : uint32_t {
     QueryDetectedConfiguration = 1u,
@@ -30,6 +50,22 @@ enum class DisplayConfigurationCommandType : uint32_t {
 enum class DisplayConfigurationMode : uint32_t {
     Mirror = 1u,
     Extend = 2u
+};
+
+enum class DisplayConfigurationRequestOrigin : uint32_t {
+    UserApply = 1u,
+    StartupRestore = 2u,
+    TestCoordinator = 3u,
+    LastKnownGoodRecovery = 4u
+};
+
+enum class DisplayConfigurationReconciliationResult : uint32_t {
+    NotRun = 0u,
+    NoPersistedConfiguration = 1u,
+    Success = 2u,
+    Partial = 3u,
+    Rejected = 4u,
+    Fallback = 5u
 };
 
 enum class DisplayConfigurationValidationResult : uint32_t {
@@ -68,6 +104,11 @@ enum DisplayConfigurationCommandFlags : uint32_t {
 
 struct DisplayConfigurationOutput {
     char stableId[kDisplayConfigurationOutputIdBytes];
+    char backendType[kDisplayConfigurationBackendNameBytes];
+    char backendDeviceId[kDisplayConfigurationOutputIdBytes];
+    uint32_t scanoutId;
+    uint32_t logicalOrdinal;
+    char stableName[kDisplayConfigurationOutputIdBytes];
     int32_t virtualX;
     int32_t virtualY;
     int32_t width;
@@ -108,6 +149,7 @@ struct DisplayConfigurationCommand {
     uint64_t requestId;
     uint32_t commandType;
     uint32_t flags;
+    uint32_t origin;
     DisplayConfigurationRequest requestedConfiguration;
 };
 
@@ -131,6 +173,20 @@ struct DisplayConfigurationResponse {
     uint8_t reserved1[3];
     DisplayConfigurationSnapshot detectedConfiguration;
     DisplayConfigurationSnapshot activeConfiguration;
+    uint8_t persistedLoaded;
+    uint8_t persistedValidated;
+    uint8_t persistedReconciled;
+    uint8_t startupRestoreAttempted;
+    uint8_t activeApplied;
+    uint8_t startupValidationFrame;
+    uint8_t fallbackUsed;
+    uint8_t outputsDetected;
+    uint32_t persistedVersion;
+    uint32_t matchedOutputCount;
+    uint32_t unmatchedSavedOutputs;
+    uint32_t unmatchedDetectedOutputs;
+    uint32_t reconciliationResult;
+    char fallbackReason[kDisplayConfigurationDiagnosticBytes];
     char diagnostic[kDisplayConfigurationDiagnosticBytes];
 };
 

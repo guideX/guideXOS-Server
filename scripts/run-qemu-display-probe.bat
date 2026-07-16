@@ -36,6 +36,23 @@ setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 set "ROOT_DIR=%SCRIPT_DIR%.."
 for %%I in ("%ROOT_DIR%") do set "ROOT_DIR=%%~fI"
+set "ESP_DIR=%ROOT_DIR%\ESP"
+if defined GXOS_QEMU_DISPLAY_PROBE_ESP_DIR set "ESP_DIR=%GXOS_QEMU_DISPLAY_PROBE_ESP_DIR%"
+set "CONFIG_DIR="
+set "CONFIG_DRIVE_ARGS="
+set "QEMU_MACHINE=q35,usb=off"
+set "BOOT_DISK_INDEX=0"
+if not "%~2"=="" set "CONFIG_DIR=%~2"
+if not "%CONFIG_DIR%"=="" goto :config_dir_ready
+if defined GXOS_QEMU_DISPLAY_PROBE_CONFIG_DIR (
+    set "CONFIG_DIR=%GXOS_QEMU_DISPLAY_PROBE_CONFIG_DIR%"
+)
+:config_dir_ready
+if not "%CONFIG_DIR%"=="" (
+    set "QEMU_MACHINE=pc,usb=off"
+    set "BOOT_DISK_INDEX=1"
+    set "CONFIG_DRIVE_ARGS=-drive file=%CONFIG_DIR%,format=raw,if=ide,index=0"
+)
 set "DISPLAY_BACKEND=%~1"
 if "%DISPLAY_BACKEND%"=="" set "DISPLAY_BACKEND=std"
 if /I "%DISPLAY_BACKEND%"=="multimonitor" set "DISPLAY_BACKEND=virtio-gpu"
@@ -74,6 +91,7 @@ echo Guest note: guideXOS still consumes one selected framebuffer in normal mode
 if "%QEMU_HEADLESS%"=="1" echo Headless capture mode: enabled
 if "%QEMU_CAPTURE%"=="1" echo Visual capture mode: enabled
 if not "%QEMU_SERIAL_LOG%"=="" echo Serial log capture: %QEMU_SERIAL_LOG%
+if not "%CONFIG_DIR%"=="" echo Persistent config storage: %CONFIG_DIR% (IDE disk index 0; boot ESP index %BOOT_DISK_INDEX%)
 if "%QEMU_NO_PAUSE%"=="1" echo Pause after exit: disabled
 echo QEMU video args: %QEMU_VIDEO_ARGS%
 if not "%QEMU_SPICE_ARGS%"=="" echo QEMU spice args: %QEMU_SPICE_ARGS%
@@ -136,7 +154,7 @@ exit /b 1
 
 :ovmf_found
 
-if not exist "%ROOT_DIR%\ESP\" (
+if not exist "%ESP_DIR%\" (
     echo ERROR: ESP directory not found!
     echo.
     echo Please run build.ps1 first:
@@ -146,7 +164,7 @@ if not exist "%ROOT_DIR%\ESP\" (
     exit /b 1
 )
 
-if not exist "%ROOT_DIR%\ESP\kernel.elf" (
+if not exist "%ESP_DIR%\kernel.elf" (
     echo ERROR: kernel.elf not found in ESP!
     echo.
     echo The probe needs a staged kernel image before QEMU can boot.
@@ -159,7 +177,7 @@ if not exist "%ROOT_DIR%\ESP\kernel.elf" (
     exit /b 1
 )
 
-if not exist "%ROOT_DIR%\ESP\ramdisk.img" (
+if not exist "%ESP_DIR%\ramdisk.img" (
     echo ERROR: ramdisk.img not found in ESP!
     echo.
     echo The probe needs the boot-time wallpaper/runtime image in ESP.
@@ -255,12 +273,13 @@ cd /d "%ROOT_DIR%"
 
 if "%SPLIT_PFLASH%"=="1" (
     echo Using split pflash: CODE + VARS
-    echo QEMU launch: %QEMU_EXE% -machine q35,usb=off -drive if=pflash,format=raw,unit=0,readonly=on,file="%OVMF_CODE%" -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" -drive file=fat:rw:ESP,format=raw -netdev user,id=net0 -device e1000,netdev=net0 -m 1024M %QEMU_VIDEO_ARGS% %QEMU_SPICE_ARGS% %QEMU_DISPLAY_ARGS% %QEMU_VNC_ARGS% %QEMU_QMP_ARGS% %QEMU_SERIAL_ARGS% -rtc base=utc,clock=host -no-reboot
+    echo QEMU launch: %QEMU_EXE% -machine %QEMU_MACHINE% -drive if=pflash,format=raw,unit=0,readonly=on,file="%OVMF_CODE%" -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" -drive file=fat:rw:%ESP_DIR%,format=raw,if=ide,index=%BOOT_DISK_INDEX% %CONFIG_DRIVE_ARGS% -netdev user,id=net0 -device e1000,netdev=net0 -m 1024M %QEMU_VIDEO_ARGS% %QEMU_SPICE_ARGS% %QEMU_DISPLAY_ARGS% %QEMU_VNC_ARGS% %QEMU_QMP_ARGS% %QEMU_SERIAL_ARGS% -rtc base=utc,clock=host -no-reboot
     "%QEMU_EXE%" ^
-        -machine q35,usb=off ^
+        -machine %QEMU_MACHINE% ^
         -drive if=pflash,format=raw,unit=0,readonly=on,file="%OVMF_CODE%" ^
         -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" ^
-        -drive file=fat:rw:ESP,format=raw ^
+        -drive file=fat:rw:%ESP_DIR%,format=raw,if=ide,index=%BOOT_DISK_INDEX% ^
+        %CONFIG_DRIVE_ARGS% ^
         -netdev user,id=net0 ^
         -device e1000,netdev=net0 ^
         -m 1024M ^
@@ -274,11 +293,12 @@ if "%SPLIT_PFLASH%"=="1" (
         -no-reboot
 ) else (
     echo Using combined pflash: OVMF.fd
-    echo QEMU launch: %QEMU_EXE% -machine q35,usb=off -drive if=pflash,format=raw,readonly=on,file="%OVMF_CODE%" -drive file=fat:rw:ESP,format=raw -netdev user,id=net0 -device e1000,netdev=net0 -m 1024M %QEMU_VIDEO_ARGS% %QEMU_SPICE_ARGS% %QEMU_DISPLAY_ARGS% %QEMU_VNC_ARGS% %QEMU_QMP_ARGS% %QEMU_SERIAL_ARGS% -rtc base=utc,clock=host -no-reboot
+    echo QEMU launch: %QEMU_EXE% -machine %QEMU_MACHINE% -drive if=pflash,format=raw,readonly=on,file="%OVMF_CODE%" -drive file=fat:rw:%ESP_DIR%,format=raw,if=ide,index=%BOOT_DISK_INDEX% %CONFIG_DRIVE_ARGS% -netdev user,id=net0 -device e1000,netdev=net0 -m 1024M %QEMU_VIDEO_ARGS% %QEMU_SPICE_ARGS% %QEMU_DISPLAY_ARGS% %QEMU_VNC_ARGS% %QEMU_QMP_ARGS% %QEMU_SERIAL_ARGS% -rtc base=utc,clock=host -no-reboot
     "%QEMU_EXE%" ^
-        -machine q35,usb=off ^
+        -machine %QEMU_MACHINE% ^
         -drive if=pflash,format=raw,readonly=on,file="%OVMF_CODE%" ^
-        -drive file=fat:rw:ESP,format=raw ^
+        -drive file=fat:rw:%ESP_DIR%,format=raw,if=ide,index=%BOOT_DISK_INDEX% ^
+        %CONFIG_DRIVE_ARGS% ^
         -netdev user,id=net0 ^
         -device e1000,netdev=net0 ^
         -m 1024M ^

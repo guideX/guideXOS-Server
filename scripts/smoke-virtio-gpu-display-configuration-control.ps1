@@ -8,10 +8,27 @@ $ProbeScript = Join-Path $Root 'scripts\smoke-qemu-display-probe.ps1'
 
 Write-Host '[display-control] running the bounded QEMU guest control-plane coordinator'
 $previousErrorAction = $ErrorActionPreference
+$controlConfigStore = Join-Path $Root 'logs\display-control-config-store.img'
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $controlConfigStore) | Out-Null
+$persistenceSmoke = Join-Path $Root 'scripts\smoke-virtio-gpu-display-configuration-persistence.ps1'
+$formatterOutput = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $persistenceSmoke -FormatOnly -ImagePath $controlConfigStore 2>&1 | ForEach-Object { [string]$_ })
+if ($LASTEXITCODE -ne 0) { throw "failed to create the control-plane persistent config image: $($formatterOutput -join ' ')" }
+$previousConfigStore = $env:GXOS_QEMU_DISPLAY_PROBE_CONFIG_DIR
+$env:GXOS_QEMU_DISPLAY_PROBE_CONFIG_DIR = $controlConfigStore
 $ErrorActionPreference = 'Continue'
-$probeOutput = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $ProbeScript `
-    -Backends virtio-gpu -Mode displayConfigurationControl -TimeoutSeconds $TimeoutSeconds 2>&1 | ForEach-Object { [string]$_ })
-$probeExitCode = $LASTEXITCODE
+$probeOutput = @()
+$probeExitCode = 1
+try {
+    $probeOutput = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $ProbeScript `
+        -Backends virtio-gpu -Mode displayConfigurationControl -TimeoutSeconds $TimeoutSeconds 2>&1 | ForEach-Object { [string]$_ })
+    $probeExitCode = $LASTEXITCODE
+} finally {
+    if ([string]::IsNullOrWhiteSpace($previousConfigStore)) {
+        Remove-Item Env:\GXOS_QEMU_DISPLAY_PROBE_CONFIG_DIR -ErrorAction SilentlyContinue
+    } else {
+        $env:GXOS_QEMU_DISPLAY_PROBE_CONFIG_DIR = $previousConfigStore
+    }
+}
 $ErrorActionPreference = $previousErrorAction
 $probeOutput | ForEach-Object { Write-Host $_ }
 if ($probeExitCode -ne 0) { throw "QEMU display probe wrapper failed with exit code $probeExitCode" }

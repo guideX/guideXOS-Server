@@ -86,6 +86,7 @@ static DisplayConfigurationCommand make_query()
     command.structureSize = sizeof(command);
     command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
     command.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::QueryActiveConfiguration);
+    command.origin = static_cast<uint32_t>(gxos::display::DisplayConfigurationRequestOrigin::TestCoordinator);
     return command;
 }
 
@@ -100,6 +101,7 @@ static DisplayConfigurationCommand make_apply(const DisplayConfigurationSnapshot
     command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
     command.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration);
     command.flags = flags;
+    command.origin = static_cast<uint32_t>(gxos::display::DisplayConfigurationRequestOrigin::TestCoordinator);
     DisplayConfigurationRequest& request = command.requestedConfiguration;
     request.mode = static_cast<uint32_t>(mode);
     request.outputCount = current.outputCount > 2u ? 2u : current.outputCount;

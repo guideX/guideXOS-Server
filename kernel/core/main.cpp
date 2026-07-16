@@ -23,6 +23,7 @@
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/mmio.h"
 #include "include/kernel/qemu_display_input_proof.h"
+#include "display_configuration_service.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -51,6 +52,7 @@
 #include "include/kernel/virtio_net.h"
 #include "include/kernel/virtio_gpu.h"
 #include "include/kernel/qemu_display_configuration_control_proof.h"
+#include "include/kernel/qemu_display_configuration_persistence_proof.h"
 #include "include/kernel/virtio_rng.h"
 
 // Interrupt support
@@ -311,6 +313,30 @@ static void log_framebuffer_summary(
 }
 
 } // namespace
+#endif
+
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE) || defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
+static bool initialize_qemu_display_configuration_storage()
+{
+    kernel::serial::puts("[QEMU-PERSISTENCE] initializing writable display configuration store\n");
+    kernel::feature_report::init();
+    kernel::block::init();
+    kernel::fs_fat::init();
+    kernel::msi::init();
+    kernel::virtio::block::init();
+    kernel::ata::init();
+    kernel::nvme::init();
+    kernel::vfs::init();
+
+    bool mounted = kernel::vfs::get_mount("/") != nullptr;
+    for (uint8_t index = 0u; !mounted && index < kernel::block::device_count(); ++index) {
+        if (kernel::vfs::mount("/", index) != 0xFF) mounted = true;
+    }
+    kernel::serial::puts("[QEMU-PERSISTENCE] config store mount=");
+    kernel::serial::puts(mounted ? "ready" : "unavailable");
+    kernel::serial::puts(" writable=expected artifact=ESP\n");
+    return mounted;
+}
 #endif
 
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
@@ -793,6 +819,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::interrupts::init();
         kernel::pit::init(100);
         kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE) || defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
+        const bool displayConfigurationStoreReady = initialize_qemu_display_configuration_storage();
+        (void)displayConfigurationStoreReady;
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
+        gxos::display::DisplayConfigurationService::requestStartupRestore();
+        for (uint32_t restoreAttempt = 0u; restoreAttempt < 8u &&
+             !gxos::display::DisplayConfigurationService::startupRestoreComplete(); ++restoreAttempt) {
+            gxos::display::DisplayConfigurationService::processPendingAtSafePoint();
+            kernel::virtio::gpu::presentation_tick();
+        }
+#endif
+#endif
         int32_t inputLeft = 0;
         int32_t inputTop = 0;
         int32_t inputRight = 0;
@@ -832,6 +870,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
         kernel::qemu_display_configuration_control_proof::run();
+#elif defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
+        kernel::qemu_display_configuration_persistence_proof::run();
 #endif
         kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu live presentation pump active\n");
         while (!kernel::virtio::gpu::presentation_finished()) {
