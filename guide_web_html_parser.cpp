@@ -71,6 +71,7 @@ namespace {
 	constexpr size_t kCssLiteMaxStringScanBytes = 4096;
 	constexpr size_t kCssLiteMaxDelimiterDepth = 4;
 	constexpr size_t kCssLiteMaxContentAggregationOperations = 1024;
+	constexpr size_t kCssLiteMaxOpenElementDepth = 1024;
 	constexpr size_t kCssLiteMaxVisibleTextBytesPerElement = 1024;
 	constexpr size_t kCssLiteMaxRecoveryAttemptsPerGroup = 16;
 	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
@@ -197,12 +198,21 @@ static bool normalizeCssComments(const std::string& input,
 	output.clear();
 	output.reserve(input.size());
 	char quote = 0;
+	size_t quotedBytes = 0;
 	for (size_t i = 0; i < input.size(); ++i) {
 		const char c = input[i];
 		if (quote != 0) {
+			if (quotedBytes++ >= kCssLiteMaxStringScanBytes) {
+				saturatingIncrement(diag.unterminatedStringErrors);
+				return false;
+			}
 			output += c;
 			if (c == '\\' && i + 1 < input.size()) {
 				output += input[++i];
+				if (quotedBytes++ >= kCssLiteMaxStringScanBytes) {
+					saturatingIncrement(diag.unterminatedStringErrors);
+					return false;
+				}
 				continue;
 			}
 			if (c == quote) quote = 0;
@@ -210,6 +220,7 @@ static bool normalizeCssComments(const std::string& input,
 		}
 		if (c == '\'' || c == '"') {
 			quote = c;
+			quotedBytes = 0;
 			output += c;
 			continue;
 		}
@@ -314,55 +325,81 @@ static std::vector<std::string> splitCssSelectorGroups(const std::string& text,
 {
 	std::vector<std::string> groups;
 	std::string current;
+	bool memberCapped = false;
+	auto appendBounded = [&](char c) {
+		if (current.size() < kCssLiteMaxSelectorLength + 1) {
+			current += c;
+		}
+		if (current.size() > kCssLiteMaxSelectorLength) {
+			if (!memberCapped) {
+				memberCapped = true;
+				saturatingIncrement(diag.selectorDepthClamps);
+			}
+		}
+	};
+	auto finishMember = [&]() {
+		groups.push_back(current);
+		current.clear();
+		memberCapped = false;
+	};
 	int parentheses = 0;
 	int brackets = 0;
 	char quote = 0;
 	for (size_t i = 0; i < text.size(); ++i) {
 		const char c = text[i];
 		if (quote != 0) {
-			current += c;
-			if (c == '\\' && i + 1 < text.size()) current += text[++i];
+			appendBounded(c);
+			if (c == '\\' && i + 1 < text.size()) appendBounded(text[++i]);
 			else if (c == quote) quote = 0;
 			continue;
 		}
-		if (c == '\'' || c == '"') { quote = c; current += c; continue; }
+		if (c == '\\') {
+			// Escapes are unsupported by the identifier policy, but the escaped
+			// byte remains part of this member so an escaped comma cannot leak
+			// the suffix into a new, accidentally valid selector.
+			appendBounded(c);
+			if (i + 1 < text.size()) appendBounded(text[++i]);
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; appendBounded(c); continue; }
 		if (c == '(') {
-			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+			if (parentheses < static_cast<int>(kCssLiteMaxDelimiterDepth) + 1) ++parentheses;
+			if (parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
 				saturatingIncrement(diag.unbalancedParenthesisErrors);
-				groups.push_back(current);
-				return groups;
 			}
 		} else if (c == ')') {
 			if (parentheses == 0) {
 				saturatingIncrement(diag.unbalancedParenthesisErrors);
-				groups.push_back(current);
-				return groups;
+			} else {
+				--parentheses;
 			}
-			--parentheses;
 		} else if (c == '[') {
-			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+			if (brackets < static_cast<int>(kCssLiteMaxDelimiterDepth) + 1) ++brackets;
+			if (brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
 				saturatingIncrement(diag.unbalancedBracketErrors);
-				groups.push_back(current);
-				return groups;
 			}
 		} else if (c == ']') {
 			if (brackets == 0) {
 				saturatingIncrement(diag.unbalancedBracketErrors);
-				groups.push_back(current);
-				return groups;
+			} else {
+				--brackets;
 			}
-			--brackets;
 		} else if (c == ',' && parentheses == 0 && brackets == 0) {
-			groups.push_back(current);
-			current.clear();
+			finishMember();
 			continue;
 		}
-		current += c;
+		appendBounded(c);
 	}
-	if (quote != 0) saturatingIncrement(diag.unterminatedStringErrors);
-	if (parentheses != 0) saturatingIncrement(diag.unbalancedParenthesisErrors);
-	if (brackets != 0) saturatingIncrement(diag.unbalancedBracketErrors);
-	groups.push_back(current);
+	if (quote != 0) {
+		saturatingIncrement(diag.unterminatedStringErrors);
+	}
+	if (parentheses != 0) {
+		saturatingIncrement(diag.unbalancedParenthesisErrors);
+	}
+	if (brackets != 0) {
+		saturatingIncrement(diag.unbalancedBracketErrors);
+	}
+	finishMember();
 	return groups;
 }
 
@@ -984,6 +1021,14 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 				++cursor;
 				continue;
 			}
+			if (c == '\\') {
+				// Keep escaped punctuation inside this member.  The bounded
+				// identifier policy rejects the member later, but skipping the
+				// escaped byte here prevents accidental combinator/group recovery.
+				if (cursor + 1 < selectorText.size()) cursor += 2;
+				else ++cursor;
+				continue;
+			}
 			if (c == '(') {
 				if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
 					saturatingIncrement(diag.unbalancedParenthesisErrors);
@@ -1528,6 +1573,17 @@ static BorderLineStyle defaultVisibleBorderStyle(const WebStyle& style, BorderSi
 static const HtmlElementContentMetadata* findContentMetadata(const WebDocument& doc,
 	uint64_t serial);
 
+static bool contentMetadataProvesEmpty(const HtmlElementContentMetadata& metadata)
+{
+	return metadata.contentMetadataComplete &&
+		!metadata.hasElementChild &&
+		!metadata.hasNonWhitespaceText &&
+		!metadata.hasImageOrMediaChild &&
+		!metadata.hasVisibleBreak &&
+		!metadata.hasVisibleReplacedContent &&
+		!metadata.hasRenderableContent;
+}
+
 static std::string stripCssAtRulesBounded(const std::string& input, CssDiagnostics& diag)
 {
 	std::string output;
@@ -1646,9 +1702,15 @@ static bool findCssRuleOpenBrace(const std::string& css,
 			continue;
 		}
 		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '\\') {
+			if (i + 1 < css.size()) ++i;
+			continue;
+		}
 		if (c == '{') {
-			// Keep the rule boundary even when one malformed selector member
-			// left a delimiter open so earlier comma members can recover.
+			// A brace is the bounded rule boundary even when an unsupported
+			// selector fragment left a parenthesis/bracket open.  The affected
+			// member will fail in parseCssSelector, while later comma members
+			// and following rules remain recoverable.
 			outBrace = i;
 			return true;
 		}
@@ -1674,9 +1736,6 @@ static bool findCssRuleOpenBrace(const std::string& css,
 				return false;
 			}
 			--brackets;
-		} else if (c == '{' && parentheses == 0 && brackets == 0) {
-			outBrace = i;
-			return true;
 		} else if (c == '}' && parentheses == 0 && brackets == 0) {
 			saturatingIncrement(diag.parseErrorCount);
 			return false;
@@ -1705,6 +1764,10 @@ static bool findCssRuleCloseBrace(const std::string& css,
 			continue;
 		}
 		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '\\') {
+			if (i + 1 < css.size()) ++i;
+			continue;
+		}
 		if (c == '(') {
 			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
 				saturatingIncrement(diag.unbalancedParenthesisErrors);
@@ -1962,12 +2025,7 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element,
 				matched = false;
 				break;
 			}
-			matched = !metadata->hasElementChild &&
-				!metadata->hasNonWhitespaceText &&
-				!metadata->hasImageOrMediaChild &&
-				!metadata->hasVisibleBreak &&
-				!metadata->hasVisibleReplacedContent &&
-				!metadata->hasRenderableContent;
+			matched = contentMetadataProvesEmpty(*metadata);
 			break;
 		}
 		}
@@ -3424,17 +3482,14 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 	const HtmlElementContentMetadata* content = findContentMetadata(doc, element.serial);
 	const char* computedEmpty = "unknown";
 	if (content && content->contentMetadataComplete) {
-		const bool empty = !content->hasElementChild && !content->hasNonWhitespaceText &&
-			!content->hasImageOrMediaChild && !content->hasVisibleBreak &&
-			!content->hasVisibleReplacedContent && !content->hasRenderableContent;
-		computedEmpty = empty ? "yes" : "no";
+		computedEmpty = contentMetadataProvesEmpty(*content) ? "yes" : "no";
 	}
 	const uint64_t colorBit = cssPropertyBit(CssProperty::Color);
 	const uint64_t paddingBit = cssPropertyBit(CssProperty::PaddingTop);
 	const uint64_t fontBit = cssPropertyBit(CssProperty::FontSize);
 	const uint64_t borderBit = cssPropertyBit(CssProperty::BorderTopWidth);
 	std::ostringstream oss;
-	oss << "id=" << boundedEvidenceToken(element.id) << ",tag=" << toLower(element.tagName)
+	oss << "id=" << boundedEvidenceToken(element.id) << ",tag=" << boundedEvidenceToken(toLower(element.tagName))
 		<< ",classes=" << boundedEvidenceToken(element.className)
 		<< ",color=" << cssColorEvidence(style.hasColor, style.color)
 		<< ",background=" << cssColorEvidence(style.hasBackgroundColor, style.backgroundColor)
@@ -3462,6 +3517,8 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",element-child-count=" << (content ? content->elementChildCount : 0)
 		<< ",has-nonwhitespace-text=" << (content && content->hasNonWhitespaceText ? "yes" : "no")
 		<< ",has-media-replaced=" << (content && (content->hasImageOrMediaChild || content->hasVisibleReplacedContent) ? "yes" : "no")
+		<< ",has-visible-break=" << (content && content->hasVisibleBreak ? "yes" : "no")
+		<< ",has-renderable-content=" << (content && content->hasRenderableContent ? "yes" : "no")
 		<< ",computed-empty=" << computedEmpty
 		<< ",previous-sibling-serial=" << element.previousSiblingSerial
 		<< ",previous-sibling-tag=" << previousSiblingTag
@@ -3747,6 +3804,7 @@ struct ParserState {
 	std::vector<StructuralChildCounter> structuralCounters;
 	uint64_t     nextElementSerial = 1;
 	uint64_t     activeBlockSerial = 0;
+	size_t       uncapturedOpenElementDepth = 0;
 	const std::unordered_set<std::string>* visitedUrls = nullptr;
 	OpenTag      open    = OpenTag::None;
 	bool         inScript = false;
@@ -3890,9 +3948,17 @@ static void markUncertainContent(ParserState& st)
 static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef element)
 {
 	element.tagName = toLower(element.tagName);
+	if (isNonRenderedMetadataElement(element.tagName)) {
+		// Metadata elements remain available to the forgiving HTML state
+		// machine, but they are deliberately not logical structural children.
+		// A zero serial also prevents head/title/style artifacts from affecting
+		// sibling counts or :empty content ownership.
+		element.serial = 0;
+		element.parentSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
+		return element;
+	}
 	element.serial = st.nextElementSerial++;
 	element.parentSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
-	const bool elementLike = !isNonRenderedMetadataElement(element.tagName);
 	if (StructuralChildCounter* parent = findStructuralCounter(st, element.parentSerial)) {
 		element.previousSiblingSerial = parent->lastChildSerial;
 		if (parent->childCount < std::numeric_limits<uint16_t>::max()) {
@@ -3911,6 +3977,8 @@ static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef 
 		if (!typeCount) {
 			if (parent->typeCounts.size() >= kCssLiteMaxNotComponents * 2) {
 				saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+				if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
+					parentMetadata->contentMetadataComplete = false;
 			} else {
 				parent->typeCounts.push_back({ element.tagName, 0 });
 				typeCount = &parent->typeCounts.back().second;
@@ -3919,16 +3987,16 @@ static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef 
 		if (typeCount && *typeCount < std::numeric_limits<uint16_t>::max())
 			element.typeIndex = static_cast<uint16_t>(++(*typeCount));
 		parent->lastChildSerial = element.serial;
-		if (elementLike) {
-			if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial)) {
-				parentMetadata->hasElementChild = true;
-				if (parentMetadata->elementChildCount < std::numeric_limits<uint16_t>::max())
-					++parentMetadata->elementChildCount;
-				else
-					saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
-			} else {
+		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial)) {
+			parentMetadata->hasElementChild = true;
+			if (parentMetadata->elementChildCount < std::numeric_limits<uint16_t>::max())
+				++parentMetadata->elementChildCount;
+			else {
 				saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+				parentMetadata->contentMetadataComplete = false;
 			}
+		} else {
+			saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
 		}
 	} else if (element.parentSerial != 0) {
 		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataErrors);
@@ -4029,14 +4097,22 @@ static void loadStylesheetForDocument(ParserState& st, const std::string& href)
 	}
 }
 
-static void pushElement(ParserState& st, const HtmlElementRef& element)
+static bool pushElement(ParserState& st, const HtmlElementRef& element)
 {
+	if (st.openElements.size() >= kCssLiteMaxOpenElementDepth) {
+		markUncertainContent(st);
+		if (st.uncapturedOpenElementDepth < kCssLiteMaxOpenElementDepth)
+			++st.uncapturedOpenElementDepth;
+		saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+		return false;
+	}
 	if (!element.inlineStyle.empty()) {
 		++st.doc.cssDiagnostics.inlineStyleCount;
 		st.doc.cssDiagnostics.cssDetected = true;
 	}
 	HtmlElementRef pushed = registerStructuralElement(st, element);
 	st.openElements.push_back(std::move(pushed));
+	return true;
 }
 
 static void activateCurrentBlock(ParserState& st)
@@ -4047,6 +4123,13 @@ static void activateCurrentBlock(ParserState& st)
 static void popElementByName(ParserState& st, const std::string& tagName)
 {
 	std::string target = toLower(tagName);
+	if (st.uncapturedOpenElementDepth > 0) {
+		// The bounded stack cannot retain the omitted tag names.  Consume one
+		// matching-depth close conservatively and leave the represented prefix
+		// intact so later sibling metadata cannot look valid by accident.
+		--st.uncapturedOpenElementDepth;
+		return;
+	}
 	for (int i = static_cast<int>(st.openElements.size()) - 1; i >= 0; --i) {
 		if (toLower(st.openElements[static_cast<size_t>(i)].tagName) == target) {
 			st.openElements.resize(static_cast<size_t>(i));
@@ -4217,15 +4300,15 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	// Mark body reached.
 	if (name == "body") {
 		st.bodyReached = true;
-		st.doc.hasBodyElement = true;
-		pushElement(st, elementRef);
-		st.doc.bodyElement = st.openElements.back();
+		st.doc.hasBodyElement = pushElement(st, elementRef);
+		if (st.doc.hasBodyElement && !st.openElements.empty())
+			st.doc.bodyElement = st.openElements.back();
 		return;
 	}
 	if (name == "html") {
-		pushElement(st, elementRef);
-		st.doc.hasDocumentElement = true;
-		st.doc.documentElement = st.openElements.back();
+		st.doc.hasDocumentElement = pushElement(st, elementRef);
+		if (st.doc.hasDocumentElement && !st.openElements.empty())
+			st.doc.documentElement = st.openElements.back();
 		return;
 	}
 
@@ -4761,6 +4844,12 @@ static void finalizeStructuralMetadata(ParserState& st)
 	for (const HtmlElementRef& element : st.openElements) {
 		if (HtmlElementContentMetadata* metadata = findContentMetadata(st, element.serial))
 			metadata->contentMetadataComplete = false;
+	}
+	if (st.uncapturedOpenElementDepth > 0) {
+		for (const HtmlElementRef& element : st.openElements) {
+			if (HtmlElementContentMetadata* metadata = findContentMetadata(st, element.serial))
+				metadata->contentMetadataComplete = false;
+		}
 	}
 	for (HtmlElementRef& element : st.structuralElements) {
 		if (StructuralChildCounter* counter = findStructuralCounter(st, element.serial)) {

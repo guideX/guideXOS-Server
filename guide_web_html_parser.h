@@ -34,6 +34,12 @@
 //
 // Parsed for CSS-lite rules:
 //   <style>          – embedded stylesheet; supported selectors/properties only
+// CSS-lite selectors use bounded group recovery, CSS comments as token
+// separators, and reject escaped identifiers rather than normalizing them.
+// The bounded :empty interpretation matches only complete logical-element
+// metadata with no element-like child, non-whitespace text, image/media,
+// visible break, replaced content, or other renderable content.  Whitespace
+// outside whitespace-preserving blocks is discarded before this test.
 //
 // All other tags: tag token skipped, inner text preserved.
 //

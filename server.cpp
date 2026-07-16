@@ -1017,6 +1017,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
         cssPhase2dLoaded &&
         contains(cssPhase2dText, "Phase 2D Empty and Parser Recovery") &&
         contains(cssPhase2dText, "Empty adjacent marker") &&
+        contains(cssPhase2dText, "duplicate first") &&
+        contains(cssPhase2dText, "multiline target") &&
         contains(cssPhase2dText, "broken image fallback") &&
         contains(cssPhase2dText, "figure caption") &&
         contains(cssPhase2dText, "cell text") &&
@@ -1040,7 +1042,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase2dReport, "Current Document.CSS unbalanced bracket errors=") &&
         hasPositiveCount(cssPhase2dReport, "Current Document.CSS unterminated string errors=") &&
         hasPositiveCount(cssPhase2dReport, "Current Document.CSS invalid combinator sequences=") &&
-        hasPositiveCount(cssPhase2dReport, "Current Document.CSS identifier escape rejections="),
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS identifier escape rejections=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS selector depth clamps="),
         "recoveries=" + cssPhase2dReportLine("Current Document.CSS selector group member recoveries=") +
         "; recovery-success=" + cssPhase2dReportLine("Current Document.CSS selector recovery successes=") +
         "; comments=" + cssPhase2dReportLine("Current Document.CSS unterminated comment errors=") +
@@ -1052,6 +1055,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("CSS phase 2D bounded empty and cascade evidence",
         contains(cssPhase2dReport, "id=phase2d-empty-next") &&
         contains(cssPhase2dReport, "border-top-width=1") &&
+        contains(cssPhase2dReport, "id=phase2d-duplicate") &&
+        contains(cssPhase2dReport, "computed-empty=no") &&
+        contains(cssPhase2dReport, "id=phase2d-multiline-target") &&
+        contains(cssPhase2dReport, "color=#0ea5e9") &&
         contains(cssPhase2dReport, "id=phase2d-cell") &&
         contains(cssPhase2dReport, "content-metadata=complete") &&
         contains(cssPhase2dReport, "id=phase2d-declaration") &&
