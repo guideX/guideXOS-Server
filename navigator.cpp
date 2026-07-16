@@ -1364,6 +1364,20 @@ namespace {
 		metadata.cssNthExpressionParseErrors = doc.cssDiagnostics.nthExpressionParseErrors;
 		metadata.cssStructuralMetadataClamps = doc.cssDiagnostics.structuralMetadataClamps;
 		metadata.cssSelectorEvaluationStepClamps = doc.cssDiagnostics.selectorEvaluationStepClamps;
+		metadata.cssEmptyPseudoParsed = doc.cssDiagnostics.emptyPseudoParsed;
+		metadata.cssEmptyPseudoMatches = doc.cssDiagnostics.emptyPseudoMatches;
+		metadata.cssEmptyMetadataIncomplete = doc.cssDiagnostics.emptyMetadataIncomplete;
+		metadata.cssContentMetadataClamps = doc.cssDiagnostics.contentMetadataClamps;
+		metadata.cssSelectorGroupMemberRecoveries = doc.cssDiagnostics.selectorGroupMemberRecoveries;
+		metadata.cssCommentScanClamps = doc.cssDiagnostics.commentScanClamps;
+		metadata.cssUnterminatedCommentErrors = doc.cssDiagnostics.unterminatedCommentErrors;
+		metadata.cssUnbalancedParenthesisErrors = doc.cssDiagnostics.unbalancedParenthesisErrors;
+		metadata.cssUnbalancedBracketErrors = doc.cssDiagnostics.unbalancedBracketErrors;
+		metadata.cssUnterminatedStringErrors = doc.cssDiagnostics.unterminatedStringErrors;
+		metadata.cssInvalidCombinatorSequences = doc.cssDiagnostics.invalidCombinatorSequences;
+		metadata.cssIdentifierEscapeRejections = doc.cssDiagnostics.identifierEscapeRejections;
+		metadata.cssSelectorMemberParseFailures = doc.cssDiagnostics.selectorMemberParseFailures;
+		metadata.cssSelectorRecoverySuccesses = doc.cssDiagnostics.selectorRecoverySuccesses;
 		metadata.cssComputedStyleEvidence = doc.cssDiagnostics.computedStyleEvidence;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
@@ -2647,6 +2661,20 @@ namespace {
 		int cssNthExpressionParseErrors,
 		int cssStructuralMetadataClamps,
 		int cssSelectorEvaluationStepClamps,
+		int cssEmptyPseudoParsed,
+		int cssEmptyPseudoMatches,
+		int cssEmptyMetadataIncomplete,
+		int cssContentMetadataClamps,
+		int cssSelectorGroupMemberRecoveries,
+		int cssCommentScanClamps,
+		int cssUnterminatedCommentErrors,
+		int cssUnbalancedParenthesisErrors,
+		int cssUnbalancedBracketErrors,
+		int cssUnterminatedStringErrors,
+		int cssInvalidCombinatorSequences,
+		int cssIdentifierEscapeRejections,
+		int cssSelectorMemberParseFailures,
+		int cssSelectorRecoverySuccesses,
 		const std::string& cssComputedStyleEvidence,
 		int formCount,
 		int formInputCount,
@@ -2910,6 +2938,20 @@ namespace {
 			{"Current Document", "CSS nth-expression parse errors", std::to_string(cssNthExpressionParseErrors)},
 			{"Current Document", "CSS structural metadata clamps", std::to_string(cssStructuralMetadataClamps)},
 			{"Current Document", "CSS selector evaluation step clamps", std::to_string(cssSelectorEvaluationStepClamps)},
+			{"Current Document", "CSS :empty pseudo parsed", std::to_string(cssEmptyPseudoParsed)},
+			{"Current Document", "CSS :empty pseudo matches", std::to_string(cssEmptyPseudoMatches)},
+			{"Current Document", "CSS :empty metadata incomplete", std::to_string(cssEmptyMetadataIncomplete)},
+			{"Current Document", "CSS content metadata clamps", std::to_string(cssContentMetadataClamps)},
+			{"Current Document", "CSS selector group member recoveries", std::to_string(cssSelectorGroupMemberRecoveries)},
+			{"Current Document", "CSS comment scan clamps", std::to_string(cssCommentScanClamps)},
+			{"Current Document", "CSS unterminated comment errors", std::to_string(cssUnterminatedCommentErrors)},
+			{"Current Document", "CSS unbalanced parenthesis errors", std::to_string(cssUnbalancedParenthesisErrors)},
+			{"Current Document", "CSS unbalanced bracket errors", std::to_string(cssUnbalancedBracketErrors)},
+			{"Current Document", "CSS unterminated string errors", std::to_string(cssUnterminatedStringErrors)},
+			{"Current Document", "CSS invalid combinator sequences", std::to_string(cssInvalidCombinatorSequences)},
+			{"Current Document", "CSS identifier escape rejections", std::to_string(cssIdentifierEscapeRejections)},
+			{"Current Document", "CSS selector member parse failures", std::to_string(cssSelectorMemberParseFailures)},
+			{"Current Document", "CSS selector recovery successes", std::to_string(cssSelectorRecoverySuccesses)},
 			{"Current Document", "CSS computed style evidence", cssComputedStyleEvidence.empty() ? "(none)" : cssComputedStyleEvidence},
 			{"Current Document", "text_metrics_model", "baseline/descent aware system font"},
 			{"Current Document", "text_backend", textMetrics.backend},
@@ -3411,6 +3453,20 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssNthExpressionParseErrors,
 		s_pageMetadata.cssStructuralMetadataClamps,
 		s_pageMetadata.cssSelectorEvaluationStepClamps,
+		s_pageMetadata.cssEmptyPseudoParsed,
+		s_pageMetadata.cssEmptyPseudoMatches,
+		s_pageMetadata.cssEmptyMetadataIncomplete,
+		s_pageMetadata.cssContentMetadataClamps,
+		s_pageMetadata.cssSelectorGroupMemberRecoveries,
+		s_pageMetadata.cssCommentScanClamps,
+		s_pageMetadata.cssUnterminatedCommentErrors,
+		s_pageMetadata.cssUnbalancedParenthesisErrors,
+		s_pageMetadata.cssUnbalancedBracketErrors,
+		s_pageMetadata.cssUnterminatedStringErrors,
+		s_pageMetadata.cssInvalidCombinatorSequences,
+		s_pageMetadata.cssIdentifierEscapeRejections,
+		s_pageMetadata.cssSelectorMemberParseFailures,
+		s_pageMetadata.cssSelectorRecoverySuccesses,
 		s_pageMetadata.cssComputedStyleEvidence,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
@@ -6051,6 +6107,20 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssNthExpressionParseErrors,
 		s_pageMetadata.cssStructuralMetadataClamps,
 		s_pageMetadata.cssSelectorEvaluationStepClamps,
+		s_pageMetadata.cssEmptyPseudoParsed,
+		s_pageMetadata.cssEmptyPseudoMatches,
+		s_pageMetadata.cssEmptyMetadataIncomplete,
+		s_pageMetadata.cssContentMetadataClamps,
+		s_pageMetadata.cssSelectorGroupMemberRecoveries,
+		s_pageMetadata.cssCommentScanClamps,
+		s_pageMetadata.cssUnterminatedCommentErrors,
+		s_pageMetadata.cssUnbalancedParenthesisErrors,
+		s_pageMetadata.cssUnbalancedBracketErrors,
+		s_pageMetadata.cssUnterminatedStringErrors,
+		s_pageMetadata.cssInvalidCombinatorSequences,
+		s_pageMetadata.cssIdentifierEscapeRejections,
+		s_pageMetadata.cssSelectorMemberParseFailures,
+		s_pageMetadata.cssSelectorRecoverySuccesses,
 		s_pageMetadata.cssComputedStyleEvidence,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,

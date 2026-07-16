@@ -120,6 +120,21 @@ struct HtmlElementRef {
 	bool        visited = false;
 };
 
+// Compact content ownership summary for one logical element serial.  This is
+// intentionally metadata, not a heap-owned DOM node or child collection.
+struct HtmlElementContentMetadata {
+	uint64_t serial = 0;
+	uint16_t elementChildCount = 0;
+	uint16_t visibleTextByteCount = 0;
+	bool     hasElementChild = false;
+	bool     hasNonWhitespaceText = false;
+	bool     hasImageOrMediaChild = false;
+	bool     hasVisibleBreak = false;
+	bool     hasVisibleReplacedContent = false;
+	bool     hasRenderableContent = false;
+	bool     contentMetadataComplete = false;
+};
+
 enum class CssCombinator : uint8_t {
 	Descendant = 0,
 	Child      = 1,
@@ -152,6 +167,7 @@ enum class CssPseudoClass : uint8_t {
 	Root,
 	Link,
 	Visited,
+	Empty,
 };
 
 struct CssNthExpression {
@@ -247,6 +263,9 @@ struct WebStyleRule {
 	bool              hasVisitedPseudo = false;
 	WebStyle          style;
 	uint32_t          sourceOrder = 0;
+	uint16_t          evidenceRuleIndex = 0;
+	uint8_t           evidenceGroupIndex = 0;
+	uint32_t          evidenceSelectorHash = 0;
 };
 
 struct CssDiagnostics {
@@ -305,8 +324,23 @@ struct CssDiagnostics {
 	int    nthExpressionParseErrors = 0;
 	int    structuralMetadataClamps = 0;
 	int    selectorEvaluationStepClamps = 0;
+	int    emptyPseudoParsed = 0;
+	int    emptyPseudoMatches = 0;
+	int    emptyMetadataIncomplete = 0;
+	int    contentMetadataClamps = 0;
+	int    selectorGroupMemberRecoveries = 0;
+	int    commentScanClamps = 0;
+	int    unterminatedCommentErrors = 0;
+	int    unbalancedParenthesisErrors = 0;
+	int    unbalancedBracketErrors = 0;
+	int    unterminatedStringErrors = 0;
+	int    invalidCombinatorSequences = 0;
+	int    identifierEscapeRejections = 0;
+	int    selectorMemberParseFailures = 0;
+	int    selectorRecoverySuccesses = 0;
 	uint32_t nextSourceOrder = 1;
 	std::string computedStyleEvidence;
+	std::vector<uint64_t> computedStyleEvidenceSerials;
 };
 
 struct FormsDiagnostics {
@@ -373,6 +407,9 @@ struct WebDocument {
 	// This is not a DOM tree: records are compact, serial-addressed, and capped
 	// by the parser's structural metadata limit.
 	std::vector<HtmlElementRef> structuralElements;
+	// Bounded content summaries keyed by the same logical serials as
+	// structuralElements.  Entries are capped with the structural registry.
+	std::vector<HtmlElementContentMetadata> contentMetadata;
 	WebStyle              bodyStyle;
 	std::vector<WebStyleRule> styleRules;
 	CssDiagnostics        cssDiagnostics;

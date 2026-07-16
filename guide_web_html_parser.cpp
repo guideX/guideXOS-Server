@@ -66,7 +66,14 @@ namespace {
 	constexpr size_t kCssLiteMaxTotalStyleBytes = 64u * 1024u;
 	constexpr size_t kCssLiteMaxInheritanceDepth = 12;
 	constexpr size_t kCssLiteMaxEvidenceEntries = 32;
-	constexpr size_t kCssLiteMaxEvidenceBytes = 16384;
+	constexpr size_t kCssLiteMaxEvidenceBytes = 32768;
+	constexpr size_t kCssLiteMaxCommentBytes = 1024;
+	constexpr size_t kCssLiteMaxStringScanBytes = 4096;
+	constexpr size_t kCssLiteMaxDelimiterDepth = 4;
+	constexpr size_t kCssLiteMaxContentAggregationOperations = 1024;
+	constexpr size_t kCssLiteMaxVisibleTextBytesPerElement = 1024;
+	constexpr size_t kCssLiteMaxRecoveryAttemptsPerGroup = 16;
+	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
 
 	enum class CssProperty : uint8_t {
 		Color = 0,
@@ -178,6 +185,185 @@ static std::string collapseWs(const std::string& s)
 	// trim trailing space added above
 	if (!out.empty() && out.back() == ' ') out.pop_back();
 	return out;
+}
+
+// Replace CSS comments with one separator while preserving quoted strings.
+// The caller may safely parse the prefix already produced when this returns
+// false; the affected remainder is deliberately ignored.
+static bool normalizeCssComments(const std::string& input,
+	std::string& output,
+	CssDiagnostics& diag)
+{
+	output.clear();
+	output.reserve(input.size());
+	char quote = 0;
+	for (size_t i = 0; i < input.size(); ++i) {
+		const char c = input[i];
+		if (quote != 0) {
+			output += c;
+			if (c == '\\' && i + 1 < input.size()) {
+				output += input[++i];
+				continue;
+			}
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') {
+			quote = c;
+			output += c;
+			continue;
+		}
+		if (c != '/' || i + 1 >= input.size() || input[i + 1] != '*') {
+			output += c;
+			continue;
+		}
+
+		output += ' ';
+		i += 2;
+		bool closed = false;
+		size_t scanned = 0;
+		while (i < input.size()) {
+			if (scanned++ >= kCssLiteMaxCommentBytes) {
+				saturatingIncrement(diag.commentScanClamps);
+				saturatingIncrement(diag.unterminatedCommentErrors);
+				return false;
+			}
+			if (input[i] == '*' && i + 1 < input.size() && input[i + 1] == '/') {
+				i += 1;
+				closed = true;
+				break;
+			}
+			++i;
+		}
+		if (!closed) {
+			saturatingIncrement(diag.unterminatedCommentErrors);
+			return false;
+		}
+	}
+	if (quote != 0) {
+		saturatingIncrement(diag.unterminatedStringErrors);
+		return false;
+	}
+	return true;
+}
+
+static bool scanCssBalancedRange(const std::string& text,
+	size_t start,
+	size_t end,
+	CssDiagnostics& diag,
+	bool allowBraces = false)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	int braces = 0;
+	char quote = 0;
+	for (size_t i = start; i < end; ++i) {
+		const char c = text[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < end) { ++i; continue; }
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+			--brackets;
+		} else if (allowBraces && c == '{') {
+			++braces;
+		} else if (allowBraces && c == '}') {
+			if (braces == 0) return false;
+			--braces;
+		}
+	}
+	if (quote != 0) {
+		saturatingIncrement(diag.unterminatedStringErrors);
+		return false;
+	}
+	if (parentheses != 0) {
+		saturatingIncrement(diag.unbalancedParenthesisErrors);
+		return false;
+	}
+	if (brackets != 0) {
+		saturatingIncrement(diag.unbalancedBracketErrors);
+		return false;
+	}
+	return true;
+}
+
+static std::vector<std::string> splitCssSelectorGroups(const std::string& text,
+	CssDiagnostics& diag)
+{
+	std::vector<std::string> groups;
+	std::string current;
+	int parentheses = 0;
+	int brackets = 0;
+	char quote = 0;
+	for (size_t i = 0; i < text.size(); ++i) {
+		const char c = text[i];
+		if (quote != 0) {
+			current += c;
+			if (c == '\\' && i + 1 < text.size()) current += text[++i];
+			else if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; current += c; continue; }
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				groups.push_back(current);
+				return groups;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				groups.push_back(current);
+				return groups;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				groups.push_back(current);
+				return groups;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				groups.push_back(current);
+				return groups;
+			}
+			--brackets;
+		} else if (c == ',' && parentheses == 0 && brackets == 0) {
+			groups.push_back(current);
+			current.clear();
+			continue;
+		}
+		current += c;
+	}
+	if (quote != 0) saturatingIncrement(diag.unterminatedStringErrors);
+	if (parentheses != 0) saturatingIncrement(diag.unbalancedParenthesisErrors);
+	if (brackets != 0) saturatingIncrement(diag.unbalancedBracketErrors);
+	groups.push_back(current);
+	return groups;
 }
 
 // Decode minimal HTML entities: &amp; &lt; &gt; &quot; &apos; &#nn;
@@ -562,7 +748,8 @@ static bool parseCssSimpleSelectorCore(const std::string& rawSelector,
 	specificity = {};
 	if (selector.empty()) return false;
 	auto isIdentChar = [](char c) {
-		return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
+		return static_cast<unsigned char>(c) < 128 &&
+			(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_');
 	};
 	size_t pos = 0;
 	if (selector[pos] != '.' && selector[pos] != '#') {
@@ -621,6 +808,10 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 	part = {};
 	specificity = {};
 	if (selector.empty()) return false;
+	if (selector.find('\\') != std::string::npos) {
+		saturatingIncrement(diag.identifierEscapeRejections);
+		return false;
+	}
 
 	CssSimpleSelector core;
 	CssSpecificity coreSpecificity;
@@ -628,9 +819,17 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 	size_t pos = 0;
 	int depth = 0;
 	while (pos < selector.size()) {
-		if (selector[pos] == '(') ++depth;
+		if (selector[pos] == '(') {
+			if (++depth > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		}
 		else if (selector[pos] == ')') {
-			if (depth == 0) return false;
+			if (depth == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
 			--depth;
 		}
 		if (depth == 0 && selector[pos] == ':') break;
@@ -663,19 +862,38 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 			hasArgument = true;
 			const size_t argumentStart = ++pos;
 			int parentheses = 1;
+			char argumentQuote = 0;
 			while (pos < selector.size() && parentheses > 0) {
-				if (selector[pos] == '(') ++parentheses;
-				else if (selector[pos] == ')') --parentheses;
+				if (argumentQuote != 0) {
+					if (selector[pos] == '\\' && pos + 1 < selector.size()) { pos += 2; continue; }
+					if (selector[pos] == argumentQuote) argumentQuote = 0;
+					++pos;
+					continue;
+				}
+				if (selector[pos] == '\'' || selector[pos] == '"') argumentQuote = selector[pos];
+				else if (selector[pos] == '(') {
+					if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+						saturatingIncrement(diag.unbalancedParenthesisErrors);
+						return false;
+					}
+				} else if (selector[pos] == ')') --parentheses;
 				if (parentheses > 0) ++pos;
 			}
-			if (parentheses != 0) return false;
+			if (argumentQuote != 0) {
+				saturatingIncrement(diag.unterminatedStringErrors);
+				return false;
+			}
+			if (parentheses != 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
 			argument = selector.substr(argumentStart, pos - argumentStart);
 			++pos;
 		}
 		CssPseudoClassSelector pseudo;
 		if (name == "first-child" || name == "last-child" || name == "only-child" ||
 			name == "first-of-type" || name == "last-of-type" || name == "only-of-type" ||
-			name == "root" || name == "link" || name == "visited") {
+			name == "root" || name == "link" || name == "visited" || name == "empty") {
 			if (hasArgument) return false;
 			if (name == "first-child") pseudo.type = CssPseudoClass::FirstChild;
 			else if (name == "last-child") pseudo.type = CssPseudoClass::LastChild;
@@ -685,7 +903,11 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 			else if (name == "only-of-type") pseudo.type = CssPseudoClass::OnlyOfType;
 			else if (name == "root") pseudo.type = CssPseudoClass::Root;
 			else if (name == "link") pseudo.type = CssPseudoClass::Link;
-			else pseudo.type = CssPseudoClass::Visited;
+			else if (name == "visited") pseudo.type = CssPseudoClass::Visited;
+			else {
+				pseudo.type = CssPseudoClass::Empty;
+				saturatingIncrement(diag.emptyPseudoParsed);
+			}
 			++specificity.classCount;
 		} else if (name == "nth-child" || name == "nth-of-type") {
 			if (!hasArgument || !parseCssNthExpression(argument, pseudo.nth, diag)) return false;
@@ -720,7 +942,9 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 
 static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRule, CssDiagnostics& diag)
 {
-	std::string selectorText = trim(rawSelector);
+	std::string selectorText;
+	if (!normalizeCssComments(rawSelector, selectorText, diag)) return false;
+	selectorText = trim(selectorText);
 	if (selectorText.empty() || selectorText.size() > kCssLiteMaxSelectorLength) return false;
 	outRule.selectorParts.clear();
 	outRule.combinators.clear();
@@ -731,14 +955,26 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 	while (true) {
 		while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
 		if (cursor >= selectorText.size()) break;
-		if (selectorText[cursor] == '>' || selectorText[cursor] == '+' || selectorText[cursor] == '~' || selectorText[cursor] == '[')
+		if (selectorText[cursor] == '>' || selectorText[cursor] == '+' || selectorText[cursor] == '~') {
+			saturatingIncrement(diag.invalidCombinatorSequences);
 			return false;
+		}
+		if (selectorText[cursor] == '[') {
+			// Consume the unsupported attribute fragment as part of this
+			// member, then reject the member without leaking its contents.
+			saturatingIncrement(diag.unsupportedSelectorCount);
+			if (selectorText.find(']', cursor) == std::string::npos)
+				saturatingIncrement(diag.unbalancedBracketErrors);
+			return false;
+		}
 		size_t start = cursor;
 		int parentheses = 0;
+		int brackets = 0;
 		char quote = 0;
 		while (cursor < selectorText.size()) {
 			const char c = selectorText[cursor];
 			if (quote != 0) {
+				if (c == '\\' && cursor + 1 < selectorText.size()) { cursor += 2; continue; }
 				if (c == quote) quote = 0;
 				++cursor;
 				continue;
@@ -748,15 +984,45 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 				++cursor;
 				continue;
 			}
-			if (c == '(') ++parentheses;
-			else if (c == ')') {
-				if (parentheses == 0) return false;
+			if (c == '(') {
+				if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+					saturatingIncrement(diag.unbalancedParenthesisErrors);
+					return false;
+				}
+			} else if (c == '[') {
+				if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+					saturatingIncrement(diag.unbalancedBracketErrors);
+					return false;
+				}
+			} else if (c == ']') {
+				if (brackets == 0) {
+					saturatingIncrement(diag.unbalancedBracketErrors);
+					return false;
+				}
+				--brackets;
+			} else if (c == ')') {
+				if (parentheses == 0) {
+					saturatingIncrement(diag.unbalancedParenthesisErrors);
+					return false;
+				}
 				--parentheses;
 			}
-			if (parentheses == 0 && (std::isspace(static_cast<unsigned char>(c)) || c == '>' || c == '+' || c == '~')) break;
+			if (parentheses == 0 && brackets == 0 &&
+				(std::isspace(static_cast<unsigned char>(c)) || c == '>' || c == '+' || c == '~')) break;
 			++cursor;
 		}
-		if (parentheses != 0 || quote != 0) return false;
+		if (parentheses != 0) {
+			saturatingIncrement(diag.unbalancedParenthesisErrors);
+			return false;
+		}
+		if (brackets != 0) {
+			saturatingIncrement(diag.unbalancedBracketErrors);
+			return false;
+		}
+		if (quote != 0) {
+			saturatingIncrement(diag.unterminatedStringErrors);
+			return false;
+		}
 		if (start == cursor) return false;
 		if (outRule.selectorParts.size() >= kCssLiteMaxSelectorComponents) {
 			++diag.selectorDepthClamps;
@@ -793,7 +1059,10 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 			++cursor;
 			while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
 			if (cursor >= selectorText.size() || selectorText[cursor] == '>' ||
-				selectorText[cursor] == '+' || selectorText[cursor] == '~') return false;
+				selectorText[cursor] == '+' || selectorText[cursor] == '~') {
+				saturatingIncrement(diag.invalidCombinatorSequences);
+				return false;
+			}
 		} else if (!hadWhitespace) {
 			return false;
 		} else if (outRule.selectorParts.size() == 1 &&
@@ -814,7 +1083,7 @@ static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRu
 		case CssCombinator::GeneralSibling: saturatingIncrement(diag.generalSiblingCombinatorCount); break;
 		}
 		if (outRule.combinators.size() > kCssLiteMaxCombinatorDepth) {
-			++diag.selectorDepthClamps;
+			saturatingIncrement(diag.selectorDepthClamps);
 			return false;
 		}
 	}
@@ -1256,6 +1525,227 @@ static BorderLineStyle defaultVisibleBorderStyle(const WebStyle& style, BorderSi
 	return value.style;
 }
 
+static const HtmlElementContentMetadata* findContentMetadata(const WebDocument& doc,
+	uint64_t serial);
+
+static std::string stripCssAtRulesBounded(const std::string& input, CssDiagnostics& diag)
+{
+	std::string output;
+	output.reserve(input.size());
+	size_t i = 0;
+	int outerBraces = 0;
+	char outerQuote = 0;
+	while (i < input.size()) {
+		const char current = input[i];
+		if (outerQuote != 0) {
+			output += current;
+			if (current == '\\' && i + 1 < input.size()) output += input[++i];
+			else if (current == outerQuote) outerQuote = 0;
+			++i;
+			continue;
+		}
+		if (current == '\'' || current == '"') {
+			outerQuote = current;
+			output += current;
+			++i;
+			continue;
+		}
+		if (current == '{') {
+			if (++outerBraces > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.parseErrorCount);
+				return output;
+			}
+			output += current;
+			++i;
+			continue;
+		}
+		if (current == '}') {
+			if (outerBraces > 0) --outerBraces;
+			output += current;
+			++i;
+			continue;
+		}
+		if (current != '@' || outerBraces != 0) {
+			output += input[i++];
+			continue;
+		}
+		size_t j = i + 1;
+		int parentheses = 0;
+		int brackets = 0;
+		int braces = 0;
+		char quote = 0;
+		bool skipped = false;
+		for (; j < input.size(); ++j) {
+			const char c = input[j];
+			if (quote != 0) {
+				if (c == '\\' && j + 1 < input.size()) { ++j; continue; }
+				if (c == quote) quote = 0;
+				continue;
+			}
+			if (c == '\'' || c == '"') { quote = c; continue; }
+			if (c == '(') ++parentheses;
+			else if (c == ')' && parentheses > 0) --parentheses;
+			else if (c == '[') ++brackets;
+			else if (c == ']' && brackets > 0) --brackets;
+			else if (parentheses == 0 && brackets == 0 && c == ';') {
+				i = j + 1;
+				skipped = true;
+				break;
+			} else if (parentheses == 0 && brackets == 0 && c == '{') {
+				braces = 1;
+				++j;
+				for (; j < input.size() && braces > 0; ++j) {
+					const char nested = input[j];
+					if (nested == '\'' || nested == '"') {
+						const char nestedQuote = nested;
+						++j;
+						while (j < input.size()) {
+							if (input[j] == '\\' && j + 1 < input.size()) { ++j; continue; }
+							if (input[j] == nestedQuote) break;
+							++j;
+						}
+					} else if (nested == '{') {
+						if (++braces > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+							saturatingIncrement(diag.selectorDepthClamps);
+							return output;
+						}
+					}
+					else if (nested == '}') --braces;
+				}
+				if (braces != 0) {
+					saturatingIncrement(diag.parseErrorCount);
+					return output;
+				}
+				i = j;
+				skipped = true;
+				break;
+			}
+		}
+		if (quote != 0) saturatingIncrement(diag.unterminatedStringErrors);
+		if (!skipped) {
+			saturatingIncrement(diag.parseErrorCount);
+			break;
+		}
+	}
+	return output;
+}
+
+static bool findCssRuleOpenBrace(const std::string& css,
+	size_t start,
+	size_t& outBrace,
+	CssDiagnostics& diag)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	char quote = 0;
+	for (size_t i = start; i < css.size(); ++i) {
+		const char c = css[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < css.size()) { ++i; continue; }
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '{') {
+			// Keep the rule boundary even when one malformed selector member
+			// left a delimiter open so earlier comma members can recover.
+			outBrace = i;
+			return true;
+		}
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+			--brackets;
+		} else if (c == '{' && parentheses == 0 && brackets == 0) {
+			outBrace = i;
+			return true;
+		} else if (c == '}' && parentheses == 0 && brackets == 0) {
+			saturatingIncrement(diag.parseErrorCount);
+			return false;
+		}
+	}
+	if (quote != 0) saturatingIncrement(diag.unterminatedStringErrors);
+	if (parentheses != 0) saturatingIncrement(diag.unbalancedParenthesisErrors);
+	if (brackets != 0) saturatingIncrement(diag.unbalancedBracketErrors);
+	return false;
+}
+
+static bool findCssRuleCloseBrace(const std::string& css,
+	size_t start,
+	size_t& outBrace,
+	CssDiagnostics& diag)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	int braces = 1;
+	char quote = 0;
+	for (size_t i = start; i < css.size(); ++i) {
+		const char c = css[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < css.size()) { ++i; continue; }
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+			--brackets;
+		} else if (c == '{') {
+			if (++braces > static_cast<int>(kCssLiteMaxCombinatorDepth)) {
+				saturatingIncrement(diag.selectorDepthClamps);
+				return false;
+			}
+		} else if (c == '}' && parentheses == 0 && brackets == 0) {
+			if (--braces == 0) {
+				outBrace = i;
+				return true;
+			}
+		}
+	}
+	if (quote != 0) saturatingIncrement(diag.unterminatedStringErrors);
+	if (parentheses != 0) saturatingIncrement(diag.unbalancedParenthesisErrors);
+	if (brackets != 0) saturatingIncrement(diag.unbalancedBracketErrors);
+	saturatingIncrement(diag.parseErrorCount);
+	return false;
+}
+
 static void parseEmbeddedCss(WebDocument& doc, const std::string& cssText)
 {
 	if (cssText.empty()) return;
@@ -1276,94 +1766,83 @@ static void parseEmbeddedCss(WebDocument& doc, const std::string& cssText)
 	}
 	doc.cssDiagnostics.styleBytesProcessed += css.size();
 	if (css.empty()) return;
-	auto stripCssComments = [](const std::string& input) {
-		std::string out;
-		out.reserve(input.size());
-		for (size_t i = 0; i < input.size(); ++i) {
-			if (i + 1 < input.size() && input[i] == '/' && input[i + 1] == '*') {
-				i += 2;
-				while (i + 1 < input.size() && !(input[i] == '*' && input[i + 1] == '/')) ++i;
-				if (i + 1 < input.size()) ++i;
-				continue;
-			}
-			out += input[i];
-		}
-		return out;
-	};
-	css = stripCssComments(css);
-	auto stripAtRules = [](const std::string& input) {
-		std::string out;
-		out.reserve(input.size());
-		size_t i = 0;
-		while (i < input.size()) {
-			if (input[i] == '@') {
-				size_t semi = input.find(';', i);
-				size_t brace = input.find('{', i);
-				if (semi != std::string::npos && (brace == std::string::npos || semi < brace)) {
-					i = semi + 1;
-					continue;
-				}
-				if (brace != std::string::npos) {
-					int depth = 1;
-					i = brace + 1;
-					while (i < input.size() && depth > 0) {
-						if (input[i] == '{') ++depth;
-						else if (input[i] == '}') --depth;
-						++i;
-					}
-					continue;
-				}
-			}
-			out += input[i++];
-		}
-		return out;
-	};
-	css = stripAtRules(css);
+	std::string normalizedCss;
+	const bool commentsComplete = normalizeCssComments(css, normalizedCss, doc.cssDiagnostics);
+	css = stripCssAtRulesBounded(normalizedCss, doc.cssDiagnostics);
+	if (!commentsComplete && css.empty()) return;
 
 	size_t cursor = 0;
 	while (cursor < css.size()) {
-		size_t brace = css.find('{', cursor);
-		if (brace == std::string::npos) {
-			if (trim(css.substr(cursor)).size() > 0) ++doc.cssDiagnostics.parseErrorCount;
+		size_t brace = 0;
+		if (!findCssRuleOpenBrace(css, cursor, brace, doc.cssDiagnostics)) {
+			if (!trim(css.substr(cursor)).empty()) saturatingIncrement(doc.cssDiagnostics.parseErrorCount);
 			break;
 		}
-		size_t endBrace = css.find('}', brace + 1);
-		if (endBrace == std::string::npos) {
-			++doc.cssDiagnostics.parseErrorCount;
-			break;
-		}
+		size_t endBrace = 0;
+		if (!findCssRuleCloseBrace(css, brace + 1, endBrace, doc.cssDiagnostics)) break;
 		std::string selectorText = trim(css.substr(cursor, brace - cursor));
 		std::string bodyText = css.substr(brace + 1, endBrace - brace - 1);
 		cursor = endBrace + 1;
-		if (selectorText.empty()) continue;
+		if (selectorText.empty()) {
+			saturatingIncrement(doc.cssDiagnostics.selectorMemberParseFailures);
+			continue;
+		}
 
-		std::stringstream selectors(selectorText);
-		std::string selector;
+		const std::vector<std::string> selectors = splitCssSelectorGroups(selectorText, doc.cssDiagnostics);
+		if (selectors.empty()) {
+			saturatingIncrement(doc.cssDiagnostics.selectorMemberParseFailures);
+			continue;
+		}
 		size_t groupCount = 0;
-		while (std::getline(selectors, selector, ',')) {
+		size_t invalidMembers = 0;
+		size_t validMembers = 0;
+		size_t recoveryAttempts = 0;
+		for (const std::string& rawMember : selectors) {
 			if (groupCount >= kCssLiteMaxSelectorGroups) {
+				saturatingIncrement(doc.cssDiagnostics.selectorGroupClamps);
+				break;
+			}
+			if (recoveryAttempts++ >= kCssLiteMaxRecoveryAttemptsPerGroup) {
 				saturatingIncrement(doc.cssDiagnostics.selectorGroupClamps);
 				break;
 			}
 			++groupCount;
 			saturatingIncrement(doc.cssDiagnostics.selectorGroupsParsed);
-			selector = trim(selector);
-			if (selector.empty()) continue;
+			const std::string selector = trim(rawMember);
+			if (selector.empty()) {
+				++invalidMembers;
+				saturatingIncrement(doc.cssDiagnostics.selectorMemberParseFailures);
+				continue;
+			}
 			if (doc.styleRules.size() >= kCssLiteMaxRules) {
 				saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
 				continue;
 			}
 			WebStyleRule rule;
 			if (!parseCssSelector(selector, rule, doc.cssDiagnostics)) {
+				++invalidMembers;
 				saturatingIncrement(doc.cssDiagnostics.unsupportedRuleCount);
 				saturatingIncrement(doc.cssDiagnostics.unsupportedSelectorCount);
+				saturatingIncrement(doc.cssDiagnostics.selectorMemberParseFailures);
 				continue;
 			}
 			parseCssDeclarations(bodyText, rule.style, doc.cssDiagnostics);
 			rule.sourceOrder = allocateCssSourceOrder(doc.cssDiagnostics);
-			doc.styleRules.push_back(rule);
-			saturatingIncrement(doc.cssDiagnostics.styleRuleCount);
+			rule.evidenceRuleIndex = static_cast<uint16_t>(std::min<size_t>(
+			std::numeric_limits<uint16_t>::max(), doc.styleRules.size() + 1));
+			rule.evidenceGroupIndex = static_cast<uint8_t>(std::min<size_t>(255, groupCount));
+		uint32_t hash = 2166136261u;
+		for (unsigned char c : rule.selector) hash = (hash ^ c) * 16777619u;
+		rule.evidenceSelectorHash = hash;
+		doc.styleRules.push_back(rule);
+		saturatingIncrement(doc.cssDiagnostics.styleRuleCount);
 			saturatingIncrement(doc.cssDiagnostics.compoundSelectorsParsed, static_cast<int>(rule.selectorParts.size()));
+			++validMembers;
+		}
+		if (invalidMembers > 0 && validMembers > 0) {
+		saturatingIncrement(doc.cssDiagnostics.selectorGroupMemberRecoveries,
+			static_cast<int>(std::min<size_t>(invalidMembers, std::numeric_limits<int>::max())));
+		saturatingIncrement(doc.cssDiagnostics.selectorRecoverySuccesses);
 		}
 	}
 }
@@ -1419,6 +1898,7 @@ static void recordPseudoMatch(CssDiagnostics& diag, CssPseudoClass type)
 	case CssPseudoClass::Not: saturatingIncrement(diag.notMatches); break;
 	case CssPseudoClass::Link: saturatingIncrement(diag.linkPseudoMatches); break;
 	case CssPseudoClass::Visited: saturatingIncrement(diag.visitedPseudoMatches); break;
+	case CssPseudoClass::Empty: saturatingIncrement(diag.emptyPseudoMatches); break;
 	default: break;
 	}
 }
@@ -1475,6 +1955,21 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element,
 		case CssPseudoClass::Visited:
 			matched = element.tagName == "a" && element.hasLinkTarget && element.visited;
 			break;
+		case CssPseudoClass::Empty: {
+			const HtmlElementContentMetadata* metadata = findContentMetadata(doc, element.serial);
+			if (!metadata || !metadata->contentMetadataComplete) {
+				saturatingIncrement(diag.emptyMetadataIncomplete);
+				matched = false;
+				break;
+			}
+			matched = !metadata->hasElementChild &&
+				!metadata->hasNonWhitespaceText &&
+				!metadata->hasImageOrMediaChild &&
+				!metadata->hasVisibleBreak &&
+				!metadata->hasVisibleReplacedContent &&
+				!metadata->hasRenderableContent;
+			break;
+		}
 		}
 		if (!matched) return false;
 		recordPseudoMatch(diag, pseudo.type);
@@ -1628,7 +2123,9 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	CssDiagnostics& diag)
 {
 	std::string prop = toLower(trim(property));
-	std::string val = trim(value);
+	std::string normalizedValue;
+	if (!normalizeCssComments(value, normalizedValue, diag)) return false;
+	std::string val = trim(normalizedValue);
 	if (prop.empty() || val.empty()) return false;
 	bool important = false;
 	if (val.size() >= 10 && toLower(val.substr(val.size() - 10)) == "!important" &&
@@ -2297,19 +2794,101 @@ static void mergeParsedDeclaration(WebStyle& destination, const WebStyle& source
 	}
 }
 
+static bool findCssDeclarationEnd(const std::string& text,
+	size_t start,
+	size_t& outEnd,
+	CssDiagnostics& diag)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	char quote = 0;
+	for (size_t i = start; i < text.size(); ++i) {
+		const char c = text[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < text.size()) { ++i; continue; }
+			if (c == quote) quote = 0;
+			if (i - start >= kCssLiteMaxStringScanBytes) {
+				saturatingIncrement(diag.unterminatedStringErrors);
+				return false;
+			}
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+			--brackets;
+		} else if (c == ';' && parentheses == 0 && brackets == 0) {
+			outEnd = i;
+			return true;
+		}
+	}
+	if (quote != 0) {
+		saturatingIncrement(diag.unterminatedStringErrors);
+		return false;
+	}
+	if (parentheses != 0) saturatingIncrement(diag.unbalancedParenthesisErrors);
+	if (brackets != 0) saturatingIncrement(diag.unbalancedBracketErrors);
+	outEnd = text.size();
+	return parentheses == 0 && brackets == 0;
+}
+
+static size_t findCssDeclarationColon(const std::string& text)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	char quote = 0;
+	for (size_t i = 0; i < text.size(); ++i) {
+		const char c = text[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < text.size()) { ++i; continue; }
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '(') ++parentheses;
+		else if (c == ')' && parentheses > 0) --parentheses;
+		else if (c == '[') ++brackets;
+		else if (c == ']' && brackets > 0) --brackets;
+		else if (c == ':' && parentheses == 0 && brackets == 0) return i;
+	}
+	return std::string::npos;
+}
+
 static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDiagnostics& diag)
 {
+	std::string normalizedBody;
+	normalizeCssComments(body, normalizedBody, diag);
 	size_t cursor = 0;
 	size_t declarationCount = 0;
-	while (cursor < body.size()) {
+	while (cursor < normalizedBody.size()) {
 		if (declarationCount >= kCssLiteMaxDeclarationsPerRule ||
 			diag.declarationsProcessed >= static_cast<int>(kCssLiteMaxTotalDeclarations)) {
 			saturatingIncrement(diag.declarationCapCount);
 			break;
 		}
-		size_t semi = body.find(';', cursor);
-		std::string decl = body.substr(cursor, semi == std::string::npos ? std::string::npos : semi - cursor);
-		size_t colon = decl.find(':');
+		size_t end = normalizedBody.size();
+		if (!findCssDeclarationEnd(normalizedBody, cursor, end, diag)) break;
+		std::string decl = normalizedBody.substr(cursor, end - cursor);
+		size_t colon = findCssDeclarationColon(decl);
 		if (colon != std::string::npos) {
 			++declarationCount;
 			saturatingIncrement(diag.declarationsProcessed);
@@ -2320,7 +2899,7 @@ static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDi
 			parseInlineStyleDeclaration(parsed, decl.substr(0, colon), decl.substr(colon + 1), diag);
 			mergeParsedDeclaration(style, parsed);
 		}
-		cursor = semi == std::string::npos ? body.size() : semi + 1;
+		cursor = end >= normalizedBody.size() ? normalizedBody.size() : end + 1;
 	}
 }
 
@@ -2684,6 +3263,10 @@ struct CssCascadeWinner {
 	uint32_t sourceOrder = 0;
 	std::string pseudoCategory;
 	std::string combinatorCategory;
+	std::string selectorCategory;
+	uint16_t evidenceRuleIndex = 0;
+	uint8_t evidenceGroupIndex = 0;
+	uint32_t evidenceSelectorHash = 0;
 	size_t siblingScanSteps = 0;
 };
 
@@ -2702,6 +3285,7 @@ static const char* cssPseudoName(CssPseudoClass type)
 	case CssPseudoClass::Root: return "root";
 	case CssPseudoClass::Link: return "link";
 	case CssPseudoClass::Visited: return "visited";
+	case CssPseudoClass::Empty: return "empty";
 	default: return "unknown";
 	}
 }
@@ -2720,11 +3304,25 @@ static std::string selectorPseudoSummary(const WebStyleRule& rule)
 
 static std::string selectorCombinatorSummary(const WebStyleRule& rule)
 {
+	std::string summary;
 	for (CssCombinator combinator : rule.combinators) {
-		if (combinator == CssCombinator::AdjacentSibling) return "adjacent-sibling";
-		if (combinator == CssCombinator::GeneralSibling) return "general-sibling";
+		const char* name = "descendant";
+		if (combinator == CssCombinator::Child) name = "child";
+		else if (combinator == CssCombinator::AdjacentSibling) name = "adjacent-sibling";
+		else if (combinator == CssCombinator::GeneralSibling) name = "general-sibling";
+		if (!summary.empty()) summary += "+";
+		summary += name;
 	}
-	return "none";
+	return summary.empty() ? "none" : summary;
+}
+
+static const char* selectorTypeName(StyleSelectorType type)
+{
+	switch (type) {
+	case StyleSelectorType::Id: return "id";
+	case StyleSelectorType::Class: return "class";
+	default: return "element";
+	}
 }
 
 static bool specificityGreater(const CssSpecificity& left, const CssSpecificity& right)
@@ -2788,6 +3386,17 @@ static std::string cssColorEvidence(bool present, uint32_t color)
 	return oss.str();
 }
 
+static std::string boundedEvidenceToken(const std::string& raw)
+{
+	std::string token = collapseWs(raw);
+	if (token.size() > kCssLiteMaxEvidenceTokenBytes)
+		token.resize(kCssLiteMaxEvidenceTokenBytes);
+	for (char& c : token) {
+		if (c == ';' || c == '\n' || c == '\r') c = '_';
+	}
+	return token;
+}
+
 static void appendComputedStyleEvidence(WebDocument& doc,
 	const HtmlElementRef& element,
 	const WebStyle& style,
@@ -2796,10 +3405,13 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 	const std::string id = toLower(element.id);
 	if (id.rfind("phase2a-", 0) != 0 && id.rfind("css2a-", 0) != 0 &&
 		id.rfind("phase2b-", 0) != 0 && id.rfind("css2b-", 0) != 0 &&
-		id.rfind("phase2c-", 0) != 0 && id.rfind("css2c-", 0) != 0) return;
+		id.rfind("phase2c-", 0) != 0 && id.rfind("css2c-", 0) != 0 &&
+		id.rfind("phase2d-", 0) != 0 && id.rfind("css2d-", 0) != 0) return;
+	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
+		doc.cssDiagnostics.computedStyleEvidenceSerials.end(), element.serial) !=
+		doc.cssDiagnostics.computedStyleEvidenceSerials.end()) return;
 	if (doc.cssDiagnostics.computedStyleEvidence.size() >= kCssLiteMaxEvidenceBytes ||
-		std::count(doc.cssDiagnostics.computedStyleEvidence.begin(),
-			doc.cssDiagnostics.computedStyleEvidence.end(), ';') >= static_cast<int>(kCssLiteMaxEvidenceEntries - 1)) return;
+		doc.cssDiagnostics.computedStyleEvidenceSerials.size() >= kCssLiteMaxEvidenceEntries) return;
 	const CssCascadeWinner& colorWinner = winners[static_cast<size_t>(CssProperty::Color)];
 	const CssCascadeWinner& paddingWinner = winners[static_cast<size_t>(CssProperty::PaddingTop)];
 	const CssCascadeWinner& fontWinner = winners[static_cast<size_t>(CssProperty::FontSize)];
@@ -2809,9 +3421,21 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		const HtmlElementRef& previous = doc.structuralElements[static_cast<size_t>(element.previousSiblingSerial - 1)];
 		if (previous.serial == element.previousSiblingSerial) previousSiblingTag = toLower(previous.tagName);
 	}
+	const HtmlElementContentMetadata* content = findContentMetadata(doc, element.serial);
+	const char* computedEmpty = "unknown";
+	if (content && content->contentMetadataComplete) {
+		const bool empty = !content->hasElementChild && !content->hasNonWhitespaceText &&
+			!content->hasImageOrMediaChild && !content->hasVisibleBreak &&
+			!content->hasVisibleReplacedContent && !content->hasRenderableContent;
+		computedEmpty = empty ? "yes" : "no";
+	}
+	const uint64_t colorBit = cssPropertyBit(CssProperty::Color);
+	const uint64_t paddingBit = cssPropertyBit(CssProperty::PaddingTop);
+	const uint64_t fontBit = cssPropertyBit(CssProperty::FontSize);
+	const uint64_t borderBit = cssPropertyBit(CssProperty::BorderTopWidth);
 	std::ostringstream oss;
-	oss << "id=" << element.id << ",tag=" << toLower(element.tagName)
-		<< ",classes=" << collapseWs(element.className)
+	oss << "id=" << boundedEvidenceToken(element.id) << ",tag=" << toLower(element.tagName)
+		<< ",classes=" << boundedEvidenceToken(element.className)
 		<< ",color=" << cssColorEvidence(style.hasColor, style.color)
 		<< ",background=" << cssColorEvidence(style.hasBackgroundColor, style.backgroundColor)
 		<< ",font-size=" << style.fontScaleOrSize
@@ -2820,14 +3444,32 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",border-top-width=" << style.borderTopWidth
 		<< ",color-specificity=" << colorWinner.specificity.idCount << "." << colorWinner.specificity.classCount << "." << colorWinner.specificity.elementCount
 		<< ",color-source-order=" << colorWinner.sourceOrder
-		<< ",color-inherited=" << (colorWinner.inherited ? "yes" : "no")
+		<< ",color-inherited=" << ((style.inheritedProperties & colorBit) != 0 ? "yes" : "no")
+		<< ",color-explicit=" << ((style.specifiedProperties & colorBit) != 0 ? "yes" : "no")
+		<< ",color-important=" << (colorWinner.important ? "yes" : "no")
 		<< ",padding-source-order=" << paddingWinner.sourceOrder
+		<< ",padding-explicit=" << ((style.specifiedProperties & paddingBit) != 0 ? "yes" : "no")
+		<< ",padding-important=" << (paddingWinner.important ? "yes" : "no")
 		<< ",font-size-source-order=" << fontWinner.sourceOrder
+		<< ",font-size-explicit=" << ((style.specifiedProperties & fontBit) != 0 ? "yes" : "no")
+		<< ",font-size-important=" << (fontWinner.important ? "yes" : "no")
 		<< ",border-source-order=" << borderWinner.sourceOrder
+		<< ",border-explicit=" << ((style.specifiedProperties & borderBit) != 0 ? "yes" : "no")
+		<< ",border-important=" << (borderWinner.important ? "yes" : "no")
+		<< ",logical-serial=" << element.serial
 		<< ",parent-serial=" << element.parentSerial
+		<< ",content-metadata=" << (content ? (content->contentMetadataComplete ? "complete" : "incomplete") : "missing")
+		<< ",element-child-count=" << (content ? content->elementChildCount : 0)
+		<< ",has-nonwhitespace-text=" << (content && content->hasNonWhitespaceText ? "yes" : "no")
+		<< ",has-media-replaced=" << (content && (content->hasImageOrMediaChild || content->hasVisibleReplacedContent) ? "yes" : "no")
+		<< ",computed-empty=" << computedEmpty
 		<< ",previous-sibling-serial=" << element.previousSiblingSerial
 		<< ",previous-sibling-tag=" << previousSiblingTag
 		<< ",winning-combinator=" << (colorWinner.combinatorCategory.empty() ? "none" : colorWinner.combinatorCategory)
+		<< ",color-winning-selector=" << (colorWinner.selectorCategory.empty() ? "none" : colorWinner.selectorCategory)
+		<< ",color-winning-rule-index=" << colorWinner.evidenceRuleIndex
+		<< ",color-winning-group-index=" << static_cast<unsigned>(colorWinner.evidenceGroupIndex)
+		<< ",color-winning-selector-hash=" << (colorWinner.valid ? colorWinner.evidenceSelectorHash : 0)
 		<< ",sibling-scan-steps=" << colorWinner.siblingScanSteps
 		<< ",element-index=" << element.childIndex
 		<< ",element-count=" << element.siblingCount
@@ -2835,8 +3477,11 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",type-count=" << element.typeCount
 		<< ",color-winning-pseudo=" << (colorWinner.pseudoCategory.empty() ? "none" : colorWinner.pseudoCategory)
 		<< ";";
-	if (doc.cssDiagnostics.computedStyleEvidence.size() + oss.str().size() <= kCssLiteMaxEvidenceBytes)
-		doc.cssDiagnostics.computedStyleEvidence += oss.str();
+	const std::string evidence = oss.str();
+	if (doc.cssDiagnostics.computedStyleEvidence.size() + evidence.size() <= kCssLiteMaxEvidenceBytes) {
+		doc.cssDiagnostics.computedStyleEvidence += evidence;
+		doc.cssDiagnostics.computedStyleEvidenceSerials.push_back(element.serial);
+	}
 }
 
 static WebStyle computePathStyle(WebDocument& doc,
@@ -2885,6 +3530,10 @@ static WebStyle computePathStyle(WebDocument& doc,
 			candidate.sourceOrder = rule.sourceOrder;
 			candidate.pseudoCategory = selectorPseudoSummary(rule);
 			candidate.combinatorCategory = selectorCombinatorSummary(rule);
+			candidate.selectorCategory = selectorTypeName(rule.selectorType);
+			candidate.evidenceRuleIndex = rule.evidenceRuleIndex;
+			candidate.evidenceGroupIndex = rule.evidenceGroupIndex;
+			candidate.evidenceSelectorHash = rule.evidenceSelectorHash;
 			candidate.siblingScanSteps = matchTrace.siblingScanSteps;
 			if (!cascadeCandidateWins(candidate, winners[i])) continue;
 			if (winners[i].valid) {
@@ -3094,6 +3743,7 @@ struct ParserState {
 	std::string  styleBuf;
 	std::vector<HtmlElementRef> openElements;
 	std::vector<HtmlElementRef> structuralElements;
+	std::vector<HtmlElementContentMetadata> contentMetadata;
 	std::vector<StructuralChildCounter> structuralCounters;
 	uint64_t     nextElementSerial = 1;
 	uint64_t     activeBlockSerial = 0;
@@ -3155,11 +3805,94 @@ static StructuralChildCounter* findStructuralCounter(ParserState& st, uint64_t s
 	return nullptr;
 }
 
+static HtmlElementContentMetadata* findContentMetadata(ParserState& st, uint64_t serial)
+{
+	if (serial == 0) return nullptr;
+	for (HtmlElementContentMetadata& metadata : st.contentMetadata) {
+		if (metadata.serial == serial) return &metadata;
+	}
+	return nullptr;
+}
+
+static const HtmlElementContentMetadata* findContentMetadata(const WebDocument& doc,
+	uint64_t serial)
+{
+	if (serial == 0) return nullptr;
+	for (const HtmlElementContentMetadata& metadata : doc.contentMetadata) {
+		if (metadata.serial == serial) return &metadata;
+	}
+	return nullptr;
+}
+
+static bool isNonRenderedMetadataElement(const std::string& tagName)
+{
+	const std::string tag = toLower(tagName);
+	return tag == "head" || tag == "title" || tag == "meta" ||
+		tag == "link" || tag == "base" || tag == "style" || tag == "script";
+}
+
+static void markContentMetadata(ParserState& st,
+	uint64_t serial,
+	bool hasText,
+	size_t textBytes,
+	bool hasImageOrMedia,
+	bool hasBreak,
+	bool hasReplaced,
+	bool hasRenderable,
+	bool uncertain = false)
+{
+	HtmlElementContentMetadata* metadata = findContentMetadata(st, serial);
+	if (!metadata) {
+		if (serial != 0) saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+		return;
+	}
+	metadata->hasNonWhitespaceText = metadata->hasNonWhitespaceText || hasText;
+	metadata->hasImageOrMediaChild = metadata->hasImageOrMediaChild || hasImageOrMedia;
+	metadata->hasVisibleBreak = metadata->hasVisibleBreak || hasBreak;
+	metadata->hasVisibleReplacedContent = metadata->hasVisibleReplacedContent || hasReplaced;
+	metadata->hasRenderableContent = metadata->hasRenderableContent || hasRenderable;
+	if (textBytes > 0) {
+		const size_t current = metadata->visibleTextByteCount;
+		const size_t next = std::min(kCssLiteMaxVisibleTextBytesPerElement,
+			current + textBytes);
+		metadata->visibleTextByteCount = static_cast<uint16_t>(next);
+		if (current + textBytes > kCssLiteMaxVisibleTextBytesPerElement)
+			saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+	}
+	if (uncertain) metadata->contentMetadataComplete = false;
+}
+
+static void markContentForOpenElements(ParserState& st,
+	bool hasText,
+	size_t textBytes,
+	bool hasImageOrMedia,
+	bool hasBreak,
+	bool hasReplaced,
+	bool hasRenderable,
+	bool uncertain = false)
+{
+	const size_t limit = std::min(st.openElements.size(), kCssLiteMaxContentAggregationOperations);
+	if (st.openElements.size() > limit)
+		saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+	for (size_t i = 0; i < limit; ++i) {
+		const HtmlElementRef& element = st.openElements[i];
+		if (isNonRenderedMetadataElement(element.tagName)) continue;
+		markContentMetadata(st, element.serial, hasText, textBytes,
+			hasImageOrMedia, hasBreak, hasReplaced, hasRenderable, uncertain);
+	}
+}
+
+static void markUncertainContent(ParserState& st)
+{
+	markContentForOpenElements(st, false, 0, false, false, false, true, true);
+}
+
 static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef element)
 {
 	element.tagName = toLower(element.tagName);
 	element.serial = st.nextElementSerial++;
 	element.parentSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
+	const bool elementLike = !isNonRenderedMetadataElement(element.tagName);
 	if (StructuralChildCounter* parent = findStructuralCounter(st, element.parentSerial)) {
 		element.previousSiblingSerial = parent->lastChildSerial;
 		if (parent->childCount < std::numeric_limits<uint16_t>::max()) {
@@ -3186,15 +3919,34 @@ static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef 
 		if (typeCount && *typeCount < std::numeric_limits<uint16_t>::max())
 			element.typeIndex = static_cast<uint16_t>(++(*typeCount));
 		parent->lastChildSerial = element.serial;
+		if (elementLike) {
+			if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial)) {
+				parentMetadata->hasElementChild = true;
+				if (parentMetadata->elementChildCount < std::numeric_limits<uint16_t>::max())
+					++parentMetadata->elementChildCount;
+				else
+					saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+			} else {
+				saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+			}
+		}
 	} else if (element.parentSerial != 0) {
 		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataErrors);
+		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
+			parentMetadata->contentMetadataComplete = false;
 	}
 	if (st.structuralElements.size() >= kCssLiteMaxStructuralMetadata) {
 		saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
 		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataClamps);
+		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
+			parentMetadata->contentMetadataComplete = false;
 		return element;
 	}
 	st.structuralElements.push_back(element);
+	HtmlElementContentMetadata content;
+	content.serial = element.serial;
+	content.contentMetadataComplete = true;
+	st.contentMetadata.push_back(content);
 	st.structuralCounters.push_back({ element.serial, 0, {} });
 	return element;
 }
@@ -3318,6 +4070,11 @@ static void flushText(ParserState& st)
 		}
 	} else {
 		t = trim(collapseWs(decodeEntities(st.textBuf)));
+	}
+	if (!t.empty()) {
+		markContentForOpenElements(st, true,
+			std::min(t.size(), kCssLiteMaxVisibleTextBytesPerElement),
+			false, false, false, true);
 	}
 	st.textBuf.clear();
 	if (t.empty()) return;
@@ -3494,13 +4251,16 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "hr") {
 		flushText(st);
 		if (!st.bodyReached) return;
+		const HtmlElementRef hrElement = registerStructuralElement(st, elementRef);
+		markContentForOpenElements(st, false, 0, false, false, true, true);
+		markContentMetadata(st, hrElement.serial, false, 0, false, false, true, true);
 		DocBlock block;
 		block.type = BlockType::Paragraph;
 		block.tagName = "hr";
 		block.className = extractAttr(tagBody, "class");
 		block.id = extractAttr(tagBody, "id");
 		block.inlineStyle = extractAttr(tagBody, "style");
-		block.elementMetadata = registerStructuralElement(st, elementRef);
+		block.elementMetadata = hrElement;
 		block.ancestors = captureBlockAncestors(st);
 		st.doc.blocks.push_back(std::move(block));
 		return;
@@ -3576,6 +4336,8 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		std::string type = toLower(trim(extractAttr(tagBody, "type")));
 		if (type.empty()) type = "text";
 		const HtmlElementRef inputElement = registerStructuralElement(st, elementRef);
+		markContentForOpenElements(st, false, 0, true, false, true, true);
+		markContentMetadata(st, inputElement.serial, false, 0, true, false, true, true);
 		if (type == "text" || type == "search") {
 			DocBlock block;
 			block.type = BlockType::FormTextInput;
@@ -3702,6 +4464,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	// line break only if there is pending text (avoids empty Paragraph blocks).
 	if (name == "br") {
 		++st.doc.cssDiagnostics.lineBreakCount;
+		markContentForOpenElements(st, false, 0, false, true, false, true);
 		if (st.inPre) {
 			st.textBuf += '\n';
 		} else if (st.open == OpenTag::TableCell) {
@@ -3716,6 +4479,9 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "img") {
 		flushText(st);
 		std::string src = trim(decodeEntities(extractAttr(tagBody, "src")));
+		const HtmlElementRef imageElement = registerStructuralElement(st, elementRef);
+		markContentForOpenElements(st, false, 0, true, false, true, true);
+		markContentMetadata(st, imageElement.serial, false, 0, true, false, true, true);
 		if (src.empty()) return;
 		std::string alt = decodeEntities(extractAttr(tagBody, "alt"));
 		DocBlock block;
@@ -3737,7 +4503,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		block.width = parsePositiveIntAttr(tagBody, "width", &widthAttrClamped);
 		block.height = parsePositiveIntAttr(tagBody, "height", &heightAttrClamped);
 		block.imageSizeAttrClamped = widthAttrClamped || heightAttrClamped;
-		block.elementMetadata = registerStructuralElement(st, elementRef);
+		block.elementMetadata = imageElement;
 		block.ancestors = captureBlockAncestors(st);
 		st.doc.blocks.push_back(std::move(block));
 		st.open = OpenTag::None;
@@ -3809,7 +4575,9 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	}
 
 	// Unknown open tag: leave current open context unchanged so text inside
-	// unknown tags flows into the current block.
+	// unknown tags flows into the current block.  Its ownership is uncertain,
+	// so :empty must fail closed for the enclosing logical elements.
+	markUncertainContent(st);
 }
 
 // Handle a closing tag.
@@ -3988,6 +4756,12 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 
 static void finalizeStructuralMetadata(ParserState& st)
 {
+	// Any parser state still open at EOF has uncertain ownership.  Preserve
+	// readable blocks, but make content-sensitive selectors fail closed.
+	for (const HtmlElementRef& element : st.openElements) {
+		if (HtmlElementContentMetadata* metadata = findContentMetadata(st, element.serial))
+			metadata->contentMetadataComplete = false;
+	}
 	for (HtmlElementRef& element : st.structuralElements) {
 		if (StructuralChildCounter* counter = findStructuralCounter(st, element.serial)) {
 			element.childCount = counter->childCount;
@@ -4012,6 +4786,7 @@ static void finalizeStructuralMetadata(ParserState& st)
 		for (HtmlElementRef& ancestor : block.ancestors) updateRef(ancestor);
 	}
 	st.doc.structuralElements = std::move(st.structuralElements);
+	st.doc.contentMetadata = std::move(st.contentMetadata);
 }
 
 } // anonymous namespace

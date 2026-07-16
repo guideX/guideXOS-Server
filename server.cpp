@@ -1004,6 +1004,72 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ",important=" + yesNo(contains(cssPhase2cReport, "color=#166534")) +
         "; evidence=" + summarizeText(cssPhase2cReportLine("Current Document.CSS computed style evidence="), 2200));
 
+    bool cssPhase2dLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2d.html");
+    std::string cssPhase2dText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2dReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2dReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2dReport.find(prefix);
+        if (pos == std::string::npos) return std::string();
+        const std::size_t end = cssPhase2dReport.find('\n', pos);
+        return cssPhase2dReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 2D empty and parser fixture loads",
+        cssPhase2dLoaded &&
+        contains(cssPhase2dText, "Phase 2D Empty and Parser Recovery") &&
+        contains(cssPhase2dText, "Empty adjacent marker") &&
+        contains(cssPhase2dText, "broken image fallback") &&
+        contains(cssPhase2dText, "figure caption") &&
+        contains(cssPhase2dText, "cell text") &&
+        contains(cssPhase2dText, "incomplete metadata marker") &&
+        contains(cssPhase2dText, "important target"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2D empty matching diagnostics",
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS :empty pseudo parsed=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS :empty pseudo matches=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS :empty metadata incomplete=") &&
+        contains(cssPhase2dReport, "Current Document.CSS content metadata clamps=0"),
+        "empty-parsed=" + cssPhase2dReportLine("Current Document.CSS :empty pseudo parsed=") +
+        "; empty-matches=" + cssPhase2dReportLine("Current Document.CSS :empty pseudo matches=") +
+        "; incomplete=" + cssPhase2dReportLine("Current Document.CSS :empty metadata incomplete=") +
+        "; content-clamps=" + cssPhase2dReportLine("Current Document.CSS content metadata clamps="));
+    add("CSS phase 2D parser recovery diagnostics",
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS selector group member recoveries=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS selector recovery successes=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS unterminated comment errors=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS unbalanced parenthesis errors=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS unbalanced bracket errors=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS unterminated string errors=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS invalid combinator sequences=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS identifier escape rejections="),
+        "recoveries=" + cssPhase2dReportLine("Current Document.CSS selector group member recoveries=") +
+        "; recovery-success=" + cssPhase2dReportLine("Current Document.CSS selector recovery successes=") +
+        "; comments=" + cssPhase2dReportLine("Current Document.CSS unterminated comment errors=") +
+        "; parentheses=" + cssPhase2dReportLine("Current Document.CSS unbalanced parenthesis errors=") +
+        "; brackets=" + cssPhase2dReportLine("Current Document.CSS unbalanced bracket errors=") +
+        "; strings=" + cssPhase2dReportLine("Current Document.CSS unterminated string errors=") +
+        "; combinators=" + cssPhase2dReportLine("Current Document.CSS invalid combinator sequences=") +
+        "; escapes=" + cssPhase2dReportLine("Current Document.CSS identifier escape rejections="));
+    add("CSS phase 2D bounded empty and cascade evidence",
+        contains(cssPhase2dReport, "id=phase2d-empty-next") &&
+        contains(cssPhase2dReport, "border-top-width=1") &&
+        contains(cssPhase2dReport, "id=phase2d-cell") &&
+        contains(cssPhase2dReport, "content-metadata=complete") &&
+        contains(cssPhase2dReport, "id=phase2d-declaration") &&
+        contains(cssPhase2dReport, "padding-top=5") &&
+        contains(cssPhase2dReport, "id=phase2d-combinator-target") &&
+        contains(cssPhase2dReport, "color=#9333ea") &&
+        contains(cssPhase2dReport, "id=phase2d-inline") &&
+        contains(cssPhase2dReport, "color=#1d4ed8") &&
+        contains(cssPhase2dReport, "id=phase2d-important") &&
+        contains(cssPhase2dReport, "color=#166534"),
+        std::string("empty-adjacent=") + yesNo(contains(cssPhase2dReport, "id=phase2d-empty-next") && contains(cssPhase2dReport, "border-top-width=1")) +
+        "; cell=" + yesNo(contains(cssPhase2dReport, "id=phase2d-cell")) +
+        "; comments=" + yesNo(contains(cssPhase2dReport, "id=phase2d-declaration") && contains(cssPhase2dReport, "padding-top=5")) +
+        "; combinator=" + yesNo(contains(cssPhase2dReport, "id=phase2d-combinator-target") && contains(cssPhase2dReport, "color=#9333ea")) +
+        "; inline=" + yesNo(contains(cssPhase2dReport, "id=phase2d-inline") && contains(cssPhase2dReport, "color=#1d4ed8")) +
+        "; important=" + yesNo(contains(cssPhase2dReport, "id=phase2d-important") && contains(cssPhase2dReport, "color=#166534")) +
+        "; evidence=" + summarizeText(cssPhase2dReportLine("Current Document.CSS computed style evidence="), 2600));
+
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
     std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();
