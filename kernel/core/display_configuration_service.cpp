@@ -1075,6 +1075,32 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
         if (type == DisplayConfigurationCommandType::QueryActiveConfiguration) {
             log_bridge(command.requestId, activeBefore, response.success != 0u);
         }
+    } else if (type == DisplayConfigurationCommandType::QueryDetectedTopologyChange) {
+        response.detectedConfiguration = detected;
+        response.activeConfiguration = activeBefore;
+        const bool observerReady = kernel::virtio::gpu::query_detected_topology_change(
+            &response.detectedTopologyChange);
+        response.success = observerReady ? 1u : 0u;
+        response.resultCode = response.success
+            ? static_cast<uint32_t>(DisplayConfigurationResultCode::Success)
+            : static_cast<uint32_t>(DisplayConfigurationResultCode::BackendUnavailable);
+        set_diagnostic(response, observerReady
+            ? (response.detectedTopologyChange.pending != 0u
+                ? "Display hardware configuration changed. Review settings."
+                : "detected topology query complete")
+            : "QEMU-only display-event observer unavailable");
+    } else if (type == DisplayConfigurationCommandType::RefreshDetectedTopology) {
+        const bool refreshed = kernel::virtio::gpu::refresh_detected_topology_for_service();
+        response.detectedConfiguration = detected;
+        response.activeConfiguration = activeBefore;
+        (void)kernel::virtio::gpu::query_detected_topology_change(&response.detectedTopologyChange);
+        response.success = refreshed ? 1u : 0u;
+        response.resultCode = response.success
+            ? static_cast<uint32_t>(DisplayConfigurationResultCode::Success)
+            : static_cast<uint32_t>(DisplayConfigurationResultCode::BackendBusy);
+        set_diagnostic(response, refreshed
+            ? "detected topology refreshed; active configuration unchanged"
+            : "detected topology refresh deferred or unavailable");
     } else if (type == DisplayConfigurationCommandType::QueryLastApplyResult) {
         response = s_lastApplyResponse;
         response.version = kDisplayConfigurationContractVersion;

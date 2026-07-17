@@ -9,6 +9,8 @@
 
 #include <stdint.h>
 
+#include "virtio_gpu_display_events.h"
+
 namespace gxos {
 namespace display {
 
@@ -45,7 +47,9 @@ enum class DisplayConfigurationCommandType : uint32_t {
     QueryLastApplyResult = 3u,
     ApplyConfiguration = 4u,
     RestoreLastKnownGood = 5u,
-    ForceValidationFrame = 6u
+    ForceValidationFrame = 6u,
+    QueryDetectedTopologyChange = 7u,
+    RefreshDetectedTopology = 8u
 };
 
 enum class DisplayConfigurationMode : uint32_t {
@@ -203,6 +207,7 @@ struct DisplayConfigurationResponse {
     uint32_t unmatchedSavedOutputs;
     uint32_t unmatchedDetectedOutputs;
     uint32_t reconciliationResult;
+    DisplayTopologyChangeQuery detectedTopologyChange;
     char fallbackReason[kDisplayConfigurationDiagnosticBytes];
     char diagnostic[kDisplayConfigurationDiagnosticBytes];
 };
@@ -217,7 +222,7 @@ inline bool displayConfigurationCommandIsMutation(uint32_t commandType)
 inline bool displayConfigurationCommandTypeIsValid(uint32_t commandType)
 {
     return commandType >= static_cast<uint32_t>(DisplayConfigurationCommandType::QueryDetectedConfiguration)
-        && commandType <= static_cast<uint32_t>(DisplayConfigurationCommandType::ForceValidationFrame);
+        && commandType <= static_cast<uint32_t>(DisplayConfigurationCommandType::RefreshDetectedTopology);
 }
 
 } // namespace display

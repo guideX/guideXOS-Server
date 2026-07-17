@@ -65,6 +65,7 @@ uint64_t DisplayOptions::s_displayRequestId = 0;
 bool DisplayOptions::s_displayRequestPending = false;
 
 namespace {
+    bool refreshDetectedTopologyForDisplayOptions(DisplayConfigurationResponse& response);
     const char* kDisplayOptionsStorePath = "display-options.cfg";
     const int kDefaultWindowW = 800;
     const int kDefaultWindowH = 620;
@@ -854,6 +855,15 @@ void DisplayOptions::loadSelection()
         reloadDisplaySelectionFromResponse(actualResponse);
         Logger::write(LogLevel::Info, "DisplayOptions loaded active state through DisplayConfigurationService");
     }
+    DisplayConfigurationResponse topologyResponse{};
+    if (refreshDetectedTopologyForDisplayOptions(topologyResponse) &&
+        topologyResponse.detectedTopologyChange.pending != 0u) {
+        s_displayStatus = "Display hardware configuration changed. Review settings.";
+        Logger::write(LogLevel::Info,
+            std::string("DisplayOptions pending topology classification=") +
+            topologyResponse.detectedTopologyChange.classification +
+            " automaticApplyPerformed=no");
+    }
     s_selectedThemeId = selectedThemeIdFromConfig();
     s_appliedThemeId = s_selectedThemeId;
     for (size_t i = 0; i < wallpapers.size(); ++i) {
@@ -1413,6 +1423,20 @@ namespace {
         command.structureSize = sizeof(DisplayConfigurationCommand);
         command.requestId = DisplayConfigurationService::nextRequestId();
         command.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::QueryActiveConfiguration);
+        if (!DisplayConfigurationService::submit(command, response) ||
+            response.requestId != command.requestId || response.commandType != command.commandType) {
+            return false;
+        }
+        return response.success != 0u;
+    }
+
+    bool refreshDetectedTopologyForDisplayOptions(DisplayConfigurationResponse& response)
+    {
+        DisplayConfigurationCommand command{};
+        command.version = kDisplayConfigurationContractVersion;
+        command.structureSize = sizeof(DisplayConfigurationCommand);
+        command.requestId = DisplayConfigurationService::nextRequestId();
+        command.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::RefreshDetectedTopology);
         if (!DisplayConfigurationService::submit(command, response) ||
             response.requestId != command.requestId || response.commandType != command.commandType) {
             return false;

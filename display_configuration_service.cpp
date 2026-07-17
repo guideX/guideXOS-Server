@@ -289,6 +289,18 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                 ? static_cast<uint32_t>(DisplayConfigurationResultCode::Success)
                 : static_cast<uint32_t>(DisplayConfigurationResultCode::BackendUnavailable);
             std::strncpy(response.diagnostic, response.success ? "active configuration query complete" : "active configuration unavailable", sizeof(response.diagnostic) - 1);
+        } else if (commandType == DisplayConfigurationCommandType::QueryDetectedTopologyChange) {
+            response.detectedTopologyChange = DisplayTopologyChangeQuery{};
+            response.detectedTopologyChange.structureSize = sizeof(DisplayTopologyChangeQuery);
+            response.success = 1u;
+            response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::Success);
+            std::strncpy(response.diagnostic, "detected topology query complete; no QEMU event observer is active", sizeof(response.diagnostic) - 1);
+        } else if (commandType == DisplayConfigurationCommandType::RefreshDetectedTopology) {
+            response.detectedTopologyChange = DisplayTopologyChangeQuery{};
+            response.detectedTopologyChange.structureSize = sizeof(DisplayTopologyChangeQuery);
+            response.success = 1u;
+            response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::Success);
+            std::strncpy(response.diagnostic, "detected topology refresh is not applicable to hosted backend", sizeof(response.diagnostic) - 1);
         } else if (commandType == DisplayConfigurationCommandType::QueryLastApplyResult) {
             std::lock_guard<std::mutex> stateLock(s_stateMutex);
             const DisplayConfigurationResponse previous = s_lastApplyResponse;

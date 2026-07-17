@@ -46,6 +46,7 @@ namespace virtio {
 namespace gpu {
 
 using namespace gxos::gui;
+using namespace gxos::display;
 
 namespace {
 
@@ -91,6 +92,13 @@ static const uint32_t kLivePresentationBoundedAttemptLimit = 60u;
 static const uint64_t kLivePresentationBoundedTimeLimitTicks = 800u;
 static const uint32_t kLivePresentationOverlayPeriodAttempts = 2u;
 static const uint32_t kLivePresentationFallbackFailureThreshold = 2u;
+// The observer is intentionally capped at ten polls/second on the existing
+// 100 Hz PIT path. It never installs a device-config interrupt in this pass.
+static const uint64_t kDisplayEventPollIntervalTicks = 10u;
+static const uint32_t kDisplayEventConfigReadRetries = 3u;
+static const uint32_t kDisplayEventRescanRetryLimit = 3u;
+static const uint64_t kDisplayEventFailedRescanBackoffTicks = 50u;
+static const uint32_t kVirtioGpuKnownEventMask = VIRTIO_GPU_EVENT_DISPLAY;
 // VIRTIO_F_VERSION_1 is required for the modern split-queue control path.
 static const uint64_t kCommonCfgRequiredFeatureBits = FEATURE_VERSION_1;
 
@@ -221,6 +229,53 @@ struct ProbeOutcome {
     const char* reason;
     const DeviceState* state;
     VirtioGpuOutputInventory outputInventory;
+};
+
+struct VirtioGpuProtocolDisplaySnapshot {
+    DisplayInfo slots[MAX_SCANOUTS]{};
+    uint32_t protocolSlotCount{0u};
+    uint32_t enabledCount{0u};
+    uint32_t disabledCount{0u};
+    uint32_t deviceNumScanouts{0u};
+    uint32_t deviceNumCapsets{0u};
+    uint8_t responseValid{0u};
+};
+
+struct VirtioGpuDisplayEventObserver {
+    bool initialized{false};
+    bool enabled{false};
+    uint64_t polls{0u};
+    uint64_t coherentReads{0u};
+    uint64_t incoherentReads{0u};
+    uint64_t eventsObserved{0u};
+    uint64_t displayEventsObserved{0u};
+    uint64_t unknownEventBitsObserved{0u};
+    uint64_t displayEventsProcessed{0u};
+    uint64_t eventClearWrites{0u};
+    uint64_t rescansSubmitted{0u};
+    uint64_t rescansCoalesced{0u};
+    uint64_t rescansSuccessful{0u};
+    uint64_t rescansFailed{0u};
+    uint64_t reassertions{0u};
+    uint32_t lastEventsRead{0u};
+    uint32_t lastEventsCleared{0u};
+    uint8_t lastConfigGeneration{0u};
+    uint64_t lastPollTick{0u};
+    uint64_t nextPollTick{0u};
+    uint64_t nextRetryTick{0u};
+    uint32_t pollInterval{static_cast<uint32_t>(kDisplayEventPollIntervalTicks)};
+    uint32_t pendingRescanRetries{0u};
+    uint32_t topologyGeneration{0u};
+    bool rescanInProgress{false};
+    bool rescanPending{false};
+    bool pendingTopologyChange{false};
+    bool lastReasserted{false};
+    bool injectionInProgress{false};
+    char lastError[128]{"none"};
+    char disabledReason[128]{"none"};
+    gxos::display::VirtioGpuDetectedTopologySnapshot previousTopology{};
+    gxos::display::VirtioGpuDetectedTopologySnapshot detectedTopology{};
+    gxos::display::VirtioGpuDisplayTopologyChange pendingChange{};
 };
 
 struct DiagnosticPatternPalette {
@@ -363,6 +418,7 @@ static uint32_t s_displayConfigurationMode = static_cast<uint32_t>(gxos::display
 static uint32_t s_displayConfigurationPrimaryOutput = 0u;
 static gxos::display::DisplayConfigurationSnapshot s_detectedConfigurationSnapshot{};
 static bool s_detectedConfigurationSnapshotReady = false;
+static VirtioGpuDisplayEventObserver s_displayEventObserver{};
 static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 
 #if defined(_MSC_VER)
@@ -1833,6 +1889,117 @@ static inline uint64_t mmio_read64(uint64_t addr)
     const uint64_t low = mmio_read32(addr);
     const uint64_t high = mmio_read32(addr + 4);
     return low | (high << 32);
+}
+
+static uint32_t le32_to_cpu(uint32_t value)
+{
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    return ((value & 0x000000FFu) << 24u) |
+           ((value & 0x0000FF00u) << 8u) |
+           ((value & 0x00FF0000u) >> 8u) |
+           ((value & 0xFF000000u) >> 24u);
+#else
+    return value;
+#endif
+}
+
+static uint32_t cpu_to_le32(uint32_t value)
+{
+    return le32_to_cpu(value);
+}
+
+static void copy_event_text(char* destination, uint32_t capacity, const char* source)
+{
+    if (destination == nullptr || capacity == 0u) return;
+    uint32_t index = 0u;
+    if (source != nullptr) {
+        while (source[index] != '\0' && index + 1u < capacity) {
+            destination[index] = source[index];
+            ++index;
+        }
+    }
+    destination[index] = '\0';
+    while (++index < capacity) destination[index] = '\0';
+}
+
+static void copy_event_identity(char* destination, const char* prefix, uint32_t ordinal)
+{
+    if (destination == nullptr) return;
+    destination[0] = '\0';
+    if (prefix == nullptr) return;
+    uint32_t position = 0u;
+    while (prefix[position] != '\0' && position + 1u < gxos::display::kVirtioGpuDisplayEventIdentityBytes) {
+        destination[position] = prefix[position];
+        ++position;
+    }
+    char digits[11];
+    uint32_t count = 0u;
+    do {
+        digits[count++] = static_cast<char>('0' + (ordinal % 10u));
+        ordinal /= 10u;
+    } while (ordinal != 0u && count < sizeof(digits));
+    while (count > 0u && position + 1u < gxos::display::kVirtioGpuDisplayEventIdentityBytes) {
+        destination[position++] = digits[--count];
+    }
+    destination[position] = '\0';
+}
+
+static bool text_equal_bounded(const char* left, const char* right, uint32_t capacity)
+{
+    if (left == nullptr || right == nullptr) return left == right;
+    for (uint32_t i = 0u; i < capacity; ++i) {
+        if (left[i] != right[i]) return false;
+        if (left[i] == '\0') return true;
+    }
+    return true;
+}
+
+// Forward declarations for the existing modern PCI capability addressors.
+static uint64_t common_cfg_addr(const ModernTransport& transport, uint32_t fieldOffset);
+static uint64_t device_cfg_addr(const ModernTransport& transport, uint32_t fieldOffset);
+
+static bool read_virtio_gpu_config_snapshot_internal(DeviceState& state,
+                                                       VirtioGpuConfigSnapshot& snapshot)
+{
+    snapshot = VirtioGpuConfigSnapshot{};
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+    (void)state;
+    copy_event_text(snapshot.failureReason, sizeof(snapshot.failureReason), "QEMU-only probe gate is disabled");
+    return false;
+#else
+    ModernTransport& transport = state.transport;
+    if (!state.device.initialized || !transport.modern || !transport.mmioMapped ||
+        !transport.deviceCfg.present || !transport.commonCfg.present) {
+        copy_event_text(snapshot.failureReason, sizeof(snapshot.failureReason), "modern mapped device configuration is unavailable");
+        return false;
+    }
+
+    for (uint32_t attempt = 0u; attempt <= kDisplayEventConfigReadRetries; ++attempt) {
+        const uint8_t first = mmio_read8(common_cfg_addr(transport, pci::COMMON_CFG_GEN));
+        const uint32_t eventsRead = le32_to_cpu(mmio_read32(device_cfg_addr(transport, DEVICE_CONFIG_EVENTS_READ)));
+        const uint32_t numScanouts = le32_to_cpu(mmio_read32(device_cfg_addr(transport, DEVICE_CONFIG_NUM_SCANOUTS)));
+        const uint32_t numCapsets = le32_to_cpu(mmio_read32(device_cfg_addr(transport, DEVICE_CONFIG_NUM_CAPSETS)));
+        const uint8_t final = mmio_read8(common_cfg_addr(transport, pci::COMMON_CFG_GEN));
+        snapshot.firstGeneration = first;
+        snapshot.finalGeneration = final;
+        snapshot.retryCount = static_cast<uint8_t>(attempt);
+        snapshot.eventsRead = eventsRead;
+        snapshot.numScanouts = numScanouts;
+        snapshot.numCapsets = numCapsets;
+        if (first == final) {
+            snapshot.coherent = 1u;
+            snapshot.failureReason[0] = '\0';
+            transport.mmioConfigGeneration = final;
+            transport.mmioDeviceScanouts = numScanouts;
+            transport.mmioDeviceCapsets = numCapsets;
+            return true;
+        }
+    }
+
+    copy_event_text(snapshot.failureReason, sizeof(snapshot.failureReason),
+                    "config_generation changed across bounded device-config read");
+    return false;
+#endif
 }
 
 static const char* capability_name(uint8_t cfgType)
@@ -3692,6 +3859,632 @@ static bool submit_display_info_request(DeviceState& state,
     return true;
 }
 
+// Event rescans use the same bounded control queue and GET_DISPLAY_INFO
+// command as probe/presentation, but parse into a detached snapshot.  This is
+// deliberately separate from submit_display_info_request: the observer must
+// not overwrite the active device/inventory state before the diff is
+// published.
+static bool submit_display_info_snapshot_request(DeviceState& state,
+                                                  const char* phaseLabel,
+                                                  VirtioGpuProtocolDisplaySnapshot& snapshot)
+{
+    snapshot = VirtioGpuProtocolDisplaySnapshot{};
+    ModernTransport& transport = state.transport;
+    Virtqueue& queue = transport.controlQueue;
+    if (queue.desc == nullptr || queue.avail == nullptr || queue.used == nullptr || queue.size < kMinControlQueueSize) {
+        copy_event_text(s_displayEventObserver.lastError,
+                        sizeof(s_displayEventObserver.lastError),
+                        "GET_DISPLAY_INFO control queue is not ready");
+        return false;
+    }
+
+    memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
+    memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
+    CtrlHeader* request = reinterpret_cast<CtrlHeader*>(&s_commandBuffer[0]);
+    request->type = CMD_GET_DISPLAY_INFO;
+    request->flags = 0u;
+    request->fenceId = 0u;
+    request->ctxId = 0u;
+    request->padding = 0u;
+
+    const char* failureReason = nullptr;
+    bool completionKnown = false;
+    const bool submitted = submit_control_command_sync(
+        transport,
+        phaseLabel != nullptr ? phaseLabel : "GET_DISPLAY_INFO rescan",
+        CMD_GET_DISPLAY_INFO,
+        request,
+        sizeof(CtrlHeader),
+        &s_responseBuffer[0],
+        sizeof(RespDisplayInfo),
+        RESP_OK_DISPLAY_INFO,
+        &failureReason,
+        &completionKnown);
+    (void)completionKnown;
+    if (!submitted) {
+        copy_event_text(s_displayEventObserver.lastError,
+                        sizeof(s_displayEventObserver.lastError),
+                        failureReason != nullptr ? failureReason : "GET_DISPLAY_INFO failed");
+        kernel::serial::puts("[VIRTIO-GPU] VirtioGPU display rescan: result=failed reason=");
+        kernel::serial::puts(failureReason != nullptr ? failureReason : "GET_DISPLAY_INFO failed");
+        kernel::serial::putc('\n');
+        return false;
+    }
+
+    const RespDisplayInfo* response = reinterpret_cast<const RespDisplayInfo*>(&s_responseBuffer[0]);
+    if (response->header.type != RESP_OK_DISPLAY_INFO) {
+        copy_event_text(s_displayEventObserver.lastError,
+                        sizeof(s_displayEventObserver.lastError),
+                        "GET_DISPLAY_INFO response validation failed");
+        return false;
+    }
+
+    snapshot.protocolSlotCount = MAX_SCANOUTS;
+    snapshot.deviceNumScanouts = transport.mmioDeviceScanouts;
+    snapshot.deviceNumCapsets = transport.mmioDeviceCapsets;
+    for (uint32_t i = 0u; i < MAX_SCANOUTS; ++i) {
+        const DisplayOne& mode = response->pmodes[i];
+        DisplayInfo& output = snapshot.slots[i];
+        output.x = mode.rect.x;
+        output.y = mode.rect.y;
+        output.width = mode.rect.width;
+        output.height = mode.rect.height;
+        output.enabled = mode.enabled != 0u;
+        if (output.enabled) ++snapshot.enabledCount;
+        else ++snapshot.disabledCount;
+    }
+    snapshot.responseValid = 1u;
+    kernel::serial::puts("[VIRTIO-GPU] VirtioGPU display rescan: GET_DISPLAY_INFO result=success protocolSlots=");
+    serial_put_u32_decimal(snapshot.protocolSlotCount);
+    kernel::serial::puts(" deviceNumScanouts=");
+    serial_put_u32_decimal(snapshot.deviceNumScanouts);
+    kernel::serial::puts(" connectorEnabled=");
+    serial_put_u32_decimal(snapshot.enabledCount);
+    kernel::serial::putc('\n');
+    for (uint32_t i = 0u; i < snapshot.protocolSlotCount; ++i) {
+        const DisplayInfo& output = snapshot.slots[i];
+        kernel::serial::puts("[VIRTIO-GPU] VirtioGPU display rescan: scanout=");
+        serial_put_u32_decimal(i);
+        kernel::serial::puts(" connectorEnabled=");
+        kernel::serial::puts(output.enabled ? "yes" : "no");
+        kernel::serial::puts(" rect=");
+        serial_put_u32_decimal(output.x);
+        kernel::serial::putc(',');
+        serial_put_u32_decimal(output.y);
+        kernel::serial::putc(' ');
+        serial_put_u32_decimal(output.width);
+        kernel::serial::putc('x');
+        serial_put_u32_decimal(output.height);
+        kernel::serial::putc('\n');
+    }
+    return true;
+}
+
+static const VirtioGpuScanoutState* active_scanout_state(uint32_t scanoutId)
+{
+    for (uint32_t i = 0u; i < s_probeOutcome.outputInventory.outputs.size(); ++i) {
+        const VirtioGpuScanoutState& output = s_probeOutcome.outputInventory.outputs[i];
+        if (output.scanoutId == scanoutId) return &output;
+    }
+    return nullptr;
+}
+
+static bool protocol_slot_reported(const DisplayInfo& slot)
+{
+    return slot.enabled || slot.width != 0u || slot.height != 0u;
+}
+
+static void fill_detected_output(VirtioGpuDetectedOutput& detected,
+                                 uint32_t scanoutId,
+                                 const DisplayInfo& protocol,
+                                 const VirtioGpuScanoutState* active)
+{
+    detected = VirtioGpuDetectedOutput{};
+    detected.scanoutId = scanoutId;
+    detected.reported = protocol_slot_reported(protocol) ? 1u : 0u;
+    detected.connectorEnabled = protocol.enabled ? 1u : 0u;
+    detected.reportedX = static_cast<int32_t>(protocol.x);
+    detected.reportedY = static_cast<int32_t>(protocol.y);
+    detected.reportedWidth = static_cast<int32_t>(protocol.width);
+    detected.reportedHeight = static_cast<int32_t>(protocol.height);
+    copy_event_identity(detected.stableIdentity, "display-", scanoutId + 1u);
+    if (active == nullptr) return;
+
+    detected.resourceId = active->resourceId;
+    detected.operational = active->active || active->isOperational(s_probeOutcome.deviceConfigNumScanouts) ? 1u : 0u;
+    detected.presentationReady = active->presentReady ? 1u : 0u;
+    detected.assignedX = active->assignedX;
+    detected.assignedY = active->assignedY;
+    detected.assignedWidth = active->assignedWidth;
+    detected.assignedHeight = active->assignedHeight;
+    detected.currentModeWidth = active->assignedWidth > 0 ? static_cast<uint32_t>(active->assignedWidth) : 0u;
+    detected.currentModeHeight = active->assignedHeight > 0 ? static_cast<uint32_t>(active->assignedHeight) : 0u;
+    copy_event_text(detected.currentModeId,
+                    sizeof(detected.currentModeId),
+                    qemu_logical_mode_id(detected.currentModeWidth, detected.currentModeHeight));
+}
+
+static bool build_detected_topology_snapshot(
+    DeviceState& state,
+    const VirtioGpuConfigSnapshot& config,
+    const VirtioGpuProtocolDisplaySnapshot* protocol,
+    VirtioGpuDetectedTopologySnapshot& snapshot)
+{
+    snapshot = VirtioGpuDetectedTopologySnapshot{};
+    snapshot.version = gxos::display::kVirtioGpuDisplayEventRecordVersion;
+    snapshot.sourceBackend = 1u;
+    snapshot.configGeneration = config.finalGeneration;
+    snapshot.numScanouts = config.numScanouts;
+    snapshot.observedTick = kernel::pit::ticks();
+    copy_event_text(snapshot.sourceBackendName, sizeof(snapshot.sourceBackendName), "virtio-gpu");
+    copy_event_text(snapshot.deviceIdentity, sizeof(snapshot.deviceIdentity), "gpu0");
+
+    if (snapshot.numScanouts > gxos::display::kVirtioGpuDisplayEventMaxScanouts) {
+        s_displayEventObserver.lastError[0] = '\0';
+        copy_event_text(s_displayEventObserver.lastError,
+                        sizeof(s_displayEventObserver.lastError),
+                        "device num_scanouts exceeds bounded topology capacity");
+        return false;
+    }
+
+    snapshot.outputCount = snapshot.numScanouts;
+    for (uint32_t i = 0u; i < snapshot.outputCount; ++i) {
+        DisplayInfo slot{};
+        if (protocol != nullptr && i < protocol->protocolSlotCount) {
+            slot = protocol->slots[i];
+        } else if (i < MAX_SCANOUTS) {
+            slot = state.device.displays[i];
+        }
+        fill_detected_output(snapshot.outputs[i], i, slot, active_scanout_state(i));
+    }
+    return true;
+}
+
+static const VirtioGpuDetectedOutput* topology_output(
+    const VirtioGpuDetectedTopologySnapshot& snapshot,
+    const char* identity)
+{
+    for (uint32_t i = 0u; i < snapshot.outputCount && i < gxos::display::kVirtioGpuDisplayEventMaxScanouts; ++i) {
+        if (text_equal_bounded(snapshot.outputs[i].stableIdentity,
+                               identity,
+                               gxos::display::kVirtioGpuDisplayEventIdentityBytes)) {
+            return &snapshot.outputs[i];
+        }
+    }
+    return nullptr;
+}
+
+static void add_topology_identity(char destination[][gxos::display::kVirtioGpuDisplayEventIdentityBytes],
+                                  uint32_t& count,
+                                  const char* identity)
+{
+    if (identity == nullptr || count >= gxos::display::kVirtioGpuDisplayEventMaxScanouts) return;
+    copy_event_text(destination[count], gxos::display::kVirtioGpuDisplayEventIdentityBytes, identity);
+    ++count;
+}
+
+static bool detected_output_geometry_equal(const VirtioGpuDetectedOutput& left,
+                                           const VirtioGpuDetectedOutput& right)
+{
+    return left.reported == right.reported &&
+        left.reportedX == right.reportedX && left.reportedY == right.reportedY &&
+        left.reportedWidth == right.reportedWidth && left.reportedHeight == right.reportedHeight;
+}
+
+static bool detected_output_runtime_equal(const VirtioGpuDetectedOutput& left,
+                                          const VirtioGpuDetectedOutput& right)
+{
+    return left.operational == right.operational &&
+        left.presentationReady == right.presentationReady &&
+        left.resourceId == right.resourceId &&
+        left.assignedX == right.assignedX && left.assignedY == right.assignedY &&
+        left.assignedWidth == right.assignedWidth && left.assignedHeight == right.assignedHeight;
+}
+
+static VirtioGpuDisplayTopologyChange diff_detected_topologies(
+    const VirtioGpuDetectedTopologySnapshot& oldTopology,
+    const VirtioGpuDetectedTopologySnapshot& newTopology,
+    bool injectedEvent,
+    bool reasserted)
+{
+    VirtioGpuDisplayTopologyChange change{};
+    change.version = gxos::display::kVirtioGpuDisplayEventRecordVersion;
+    change.oldGeneration = oldTopology.configGeneration;
+    change.newGeneration = newTopology.configGeneration;
+    change.oldScanoutCount = oldTopology.numScanouts;
+    change.newScanoutCount = newTopology.numScanouts;
+    change.injectedEvent = injectedEvent ? 1u : 0u;
+    change.reasserted = reasserted ? 1u : 0u;
+
+    for (uint32_t i = 0u; i < oldTopology.outputCount && i < gxos::display::kVirtioGpuDisplayEventMaxScanouts; ++i) {
+        const VirtioGpuDetectedOutput& oldOutput = oldTopology.outputs[i];
+        const VirtioGpuDetectedOutput* newOutput = topology_output(newTopology, oldOutput.stableIdentity);
+        if (newOutput == nullptr || (oldOutput.reported && !newOutput->reported)) {
+            add_topology_identity(change.removedOutputIdentities,
+                                  change.removedOutputCount,
+                                  oldOutput.stableIdentity);
+            if (oldOutput.operational) change.activeConfigurationAffected = 1u;
+            change.persistedConfigurationAffected = 1u;
+            continue;
+        }
+        const bool connectorChanged = oldOutput.connectorEnabled != newOutput->connectorEnabled;
+        const bool geometryChanged = !detected_output_geometry_equal(oldOutput, *newOutput);
+        if (connectorChanged) ++change.connectorEnabledChangeCount;
+        if (geometryChanged) ++change.preferredGeometryChangeCount;
+        if (connectorChanged || geometryChanged) ++change.changedOutputCount;
+        if (oldOutput.operational && newOutput->operational && detected_output_runtime_equal(oldOutput, *newOutput)) {
+            ++change.unchangedOperationalOutputCount;
+        }
+    }
+
+    for (uint32_t i = 0u; i < newTopology.outputCount && i < gxos::display::kVirtioGpuDisplayEventMaxScanouts; ++i) {
+        const VirtioGpuDetectedOutput& newOutput = newTopology.outputs[i];
+        const VirtioGpuDetectedOutput* oldOutput = topology_output(oldTopology, newOutput.stableIdentity);
+        if (oldOutput == nullptr || (!oldOutput->reported && newOutput.reported)) {
+            add_topology_identity(change.addedOutputIdentities,
+                                  change.addedOutputCount,
+                                  newOutput.stableIdentity);
+            change.persistedConfigurationAffected = 1u;
+        }
+    }
+
+    const bool hasAddRemove = change.addedOutputCount != 0u || change.removedOutputCount != 0u;
+    const bool hasGeometry = change.preferredGeometryChangeCount != 0u;
+    const bool hasConnector = change.connectorEnabledChangeCount != 0u;
+    change.requiresResourceRebuild = (hasAddRemove || hasGeometry) ? 1u : 0u;
+    change.requiresLayoutReconciliation = hasAddRemove ? 1u : 0u;
+    change.metadataOnly = (!hasAddRemove && !change.activeConfigurationAffected) ? 1u : 0u;
+    change.supportedAutomatically = 0u;
+
+    if (change.removedOutputCount != 0u) {
+        copy_event_text(change.classification, sizeof(change.classification), "potential-topology-removal");
+        copy_event_text(change.recommendedAction, sizeof(change.recommendedAction),
+                        "Keep last-known-good output; user/service reconciliation required");
+        copy_event_text(change.reason, sizeof(change.reason),
+                        "An observed output became unavailable; active resources remain retained");
+    } else if (change.addedOutputCount != 0u) {
+        copy_event_text(change.classification, sizeof(change.classification), "potential-topology-addition");
+        copy_event_text(change.recommendedAction, sizeof(change.recommendedAction),
+                        "Review Display Options before adding the output");
+        copy_event_text(change.reason, sizeof(change.reason),
+                        "A previously absent scanout is reported; no resource was created automatically");
+    } else if (hasGeometry) {
+        copy_event_text(change.classification, sizeof(change.classification), "preferred-geometry-change");
+        copy_event_text(change.recommendedAction, sizeof(change.recommendedAction),
+                        "Review Display Options; active logical modes remain unchanged");
+        copy_event_text(change.reason, sizeof(change.reason),
+                        "Preferred geometry changed without resizing the active logical resource");
+    } else if (hasConnector) {
+        copy_event_text(change.classification, sizeof(change.classification), "metadata-only");
+        copy_event_text(change.recommendedAction, sizeof(change.recommendedAction),
+                        "Review detected display status");
+        copy_event_text(change.reason, sizeof(change.reason),
+                        "Connector state changed; active guest configuration remains unchanged");
+    } else {
+        copy_event_text(change.classification, sizeof(change.classification), "no-change");
+        copy_event_text(change.recommendedAction, sizeof(change.recommendedAction), "No action required");
+        copy_event_text(change.reason, sizeof(change.reason), "GET_DISPLAY_INFO topology matched the previous snapshot");
+    }
+    return change;
+}
+
+static void publish_detected_topology_change(
+    const VirtioGpuDetectedTopologySnapshot& oldTopology,
+    const VirtioGpuDetectedTopologySnapshot& newTopology,
+    bool injectedEvent,
+    bool reasserted)
+{
+    VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    observer.pendingChange = diff_detected_topologies(oldTopology, newTopology, injectedEvent, reasserted);
+    observer.detectedTopology = newTopology;
+    observer.topologyGeneration = observer.topologyGeneration == 0u ? 1u : observer.topologyGeneration + 1u;
+    observer.pendingTopologyChange = observer.pendingChange.addedOutputCount != 0u ||
+        observer.pendingChange.removedOutputCount != 0u ||
+        observer.pendingChange.changedOutputCount != 0u;
+    observer.lastReasserted = reasserted;
+    kernel::serial::puts("Pending display topology: generation=");
+    serial_put_u32_decimal(observer.topologyGeneration);
+    kernel::serial::puts(" added=");
+    serial_put_u32_decimal(observer.pendingChange.addedOutputCount);
+    kernel::serial::puts(" removed=");
+    serial_put_u32_decimal(observer.pendingChange.removedOutputCount);
+    kernel::serial::puts(" changed=");
+    serial_put_u32_decimal(observer.pendingChange.changedOutputCount);
+    kernel::serial::puts(" activeAffected=");
+    kernel::serial::puts(observer.pendingChange.activeConfigurationAffected ? "yes" : "no");
+    kernel::serial::puts(" automaticApply=no injectedEvent=");
+    kernel::serial::puts(injectedEvent ? "yes\n" : "no\n");
+}
+
+static bool clear_display_event_bit(DeviceState& state,
+                                    VirtioGpuConfigSnapshot& afterClear)
+{
+    ModernTransport& transport = state.transport;
+    // events_read is never written. Only the recognized bit that completed a
+    // successful rescan is written to the device-owned write-to-clear field.
+    mmio_write32(device_cfg_addr(transport, DEVICE_CONFIG_EVENTS_CLEAR),
+                 cpu_to_le32(VIRTIO_GPU_EVENT_DISPLAY));
+    ++s_displayEventObserver.eventClearWrites;
+    s_displayEventObserver.lastEventsCleared = VIRTIO_GPU_EVENT_DISPLAY;
+    const bool rereadOk = read_virtio_gpu_config_snapshot_internal(state, afterClear);
+    const bool reasserted = rereadOk && (afterClear.eventsRead & VIRTIO_GPU_EVENT_DISPLAY) != 0u;
+    s_displayEventObserver.lastReasserted = reasserted;
+    if (reasserted) ++s_displayEventObserver.reassertions;
+    kernel::serial::puts("VirtioGPU config event clear: written=0x");
+    kernel::serial::put_hex32(VIRTIO_GPU_EVENT_DISPLAY);
+    kernel::serial::puts(" eventsAfter=0x");
+    kernel::serial::put_hex32(rereadOk ? afterClear.eventsRead : 0xFFFFFFFFu);
+    kernel::serial::puts(" result=");
+    kernel::serial::puts(rereadOk ? "success" : "reread-failed");
+    kernel::serial::puts(" reasserted=");
+    kernel::serial::puts(reasserted ? "yes\n" : "no\n");
+    return rereadOk;
+}
+
+static bool process_pending_display_rescan(DeviceState& state, uint64_t now)
+{
+    VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    if (!observer.rescanPending || observer.rescanInProgress || now < observer.nextRetryTick) return false;
+    observer.rescanInProgress = true;
+    observer.rescanPending = false;
+    ++observer.rescansSubmitted;
+
+    VirtioGpuProtocolDisplaySnapshot protocol{};
+    const bool getInfoOk = submit_display_info_snapshot_request(state, "display-event", protocol);
+    if (!getInfoOk) {
+        observer.rescanInProgress = false;
+        ++observer.rescansFailed;
+        ++observer.pendingRescanRetries;
+        observer.nextRetryTick = now + kDisplayEventFailedRescanBackoffTicks;
+        copy_event_text(observer.lastError, sizeof(observer.lastError), "GET_DISPLAY_INFO failed; display event retained");
+        return false;
+    }
+
+    VirtioGpuConfigSnapshot afterInfo{};
+    if (!read_virtio_gpu_config_snapshot_internal(state, afterInfo)) {
+        observer.rescanInProgress = false;
+        ++observer.rescansFailed;
+        ++observer.pendingRescanRetries;
+        observer.nextRetryTick = now + kDisplayEventFailedRescanBackoffTicks;
+        copy_event_text(observer.lastError, sizeof(observer.lastError),
+                        "post-GET_DISPLAY_INFO coherent config read failed; display event retained");
+        return false;
+    }
+
+    VirtioGpuDetectedTopologySnapshot newTopology{};
+    if (!build_detected_topology_snapshot(state, afterInfo, &protocol, newTopology)) {
+        observer.rescanInProgress = false;
+        ++observer.rescansFailed;
+        observer.nextRetryTick = now + kDisplayEventFailedRescanBackoffTicks;
+        return false;
+    }
+
+    const VirtioGpuDetectedTopologySnapshot oldTopology = observer.detectedTopology;
+    publish_detected_topology_change(oldTopology, newTopology, false, false);
+    VirtioGpuConfigSnapshot afterClear{};
+    const bool clearRereadOk = clear_display_event_bit(state, afterClear);
+    const bool reasserted = clearRereadOk && (afterClear.eventsRead & VIRTIO_GPU_EVENT_DISPLAY) != 0u;
+    observer.pendingChange.reasserted = reasserted ? 1u : 0u;
+    if (reasserted) {
+        observer.rescanPending = true;
+        observer.nextRetryTick = now + kDisplayEventFailedRescanBackoffTicks;
+    } else {
+        observer.pendingRescanRetries = 0u;
+        observer.nextRetryTick = 0u;
+    }
+    observer.rescanInProgress = false;
+    ++observer.rescansSuccessful;
+    ++observer.displayEventsProcessed;
+    copy_event_text(observer.lastError, sizeof(observer.lastError), clearRereadOk ? "none" : "event clear verification failed");
+    kernel::serial::puts("VirtioGPU display rescan: result=success scanouts=");
+    serial_put_u32_decimal(newTopology.numScanouts);
+    kernel::serial::puts(" connectorEnabled=");
+    serial_put_u32_decimal(protocol.enabledCount);
+    kernel::serial::puts(" changes=");
+    serial_put_u32_decimal(observer.pendingChange.changedOutputCount +
+                            observer.pendingChange.addedOutputCount +
+                            observer.pendingChange.removedOutputCount);
+    kernel::serial::puts(" classification=");
+    kernel::serial::puts(observer.pendingChange.classification);
+    kernel::serial::puts(" activeMutation=no\n");
+    return true;
+}
+
+static void display_event_observer_tick(DeviceState& state)
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+    (void)state;
+    return;
+#else
+    VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    if (!observer.initialized || !observer.enabled || state.transport.mmioStopReason == nullptr ||
+        state.transport.mmioStopReason[0] == '\0') return;
+    if (s_livePresentation.stopped || s_displayConfigurationPresentationPaused) return;
+
+    const uint64_t now = kernel::pit::ticks();
+    if (now < observer.nextPollTick) return;
+    observer.nextPollTick = now + observer.pollInterval;
+    observer.lastPollTick = now;
+    ++observer.polls;
+
+    VirtioGpuConfigSnapshot config{};
+    if (!read_virtio_gpu_config_snapshot_internal(state, config)) {
+        ++observer.incoherentReads;
+        copy_event_text(observer.lastError, sizeof(observer.lastError), config.failureReason);
+        return;
+    }
+    ++observer.coherentReads;
+    observer.lastEventsRead = config.eventsRead;
+    observer.lastConfigGeneration = config.finalGeneration;
+    if (config.eventsRead != 0u) ++observer.eventsObserved;
+    const uint32_t unknownBits = config.eventsRead & ~kVirtioGpuKnownEventMask;
+    if (unknownBits != 0u) ++observer.unknownEventBitsObserved;
+    const bool displayEvent = (config.eventsRead & VIRTIO_GPU_EVENT_DISPLAY) != 0u;
+    if (displayEvent) {
+        ++observer.displayEventsObserved;
+        const bool alreadyPending = observer.rescanPending || observer.rescanInProgress;
+        if (alreadyPending) {
+            ++observer.rescansCoalesced;
+        } else {
+            observer.rescanPending = true;
+        }
+        kernel::serial::puts("VirtioGPU config event: generation=");
+        serial_put_u32_decimal(config.finalGeneration);
+        kernel::serial::puts(" eventsRead=0x");
+        kernel::serial::put_hex32(config.eventsRead);
+        kernel::serial::puts(" display=yes processing=");
+        kernel::serial::puts(s_displayConfigurationPresentationPaused ? "deferred\n" : "scheduled\n");
+    }
+    if (observer.rescanPending && !s_displayConfigurationPresentationPaused) {
+        if (observer.pendingRescanRetries >= kDisplayEventRescanRetryLimit) {
+            observer.nextRetryTick = now + kDisplayEventFailedRescanBackoffTicks;
+            return;
+        }
+        (void)process_pending_display_rescan(state, now);
+    }
+#endif
+}
+
+static bool initialize_display_event_observer(DeviceState& state)
+{
+    s_displayEventObserver = VirtioGpuDisplayEventObserver{};
+    VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    observer.initialized = true;
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+    observer.enabled = false;
+    copy_event_text(observer.disabledReason, sizeof(observer.disabledReason),
+                    "display-event observer requires the QEMU smoke build gate");
+    return false;
+#else
+    if (!state.device.initialized || !state.transport.modern || !state.transport.mmioMapped ||
+        !state.transport.deviceCfg.present) {
+        observer.enabled = false;
+        copy_event_text(observer.disabledReason, sizeof(observer.disabledReason),
+                        "modern mapped QEMU device configuration unavailable");
+        return false;
+    }
+    VirtioGpuConfigSnapshot initialConfig{};
+    if (!read_virtio_gpu_config_snapshot_internal(state, initialConfig)) {
+        observer.enabled = false;
+        copy_event_text(observer.disabledReason, sizeof(observer.disabledReason), initialConfig.failureReason);
+        return false;
+    }
+    observer.enabled = true;
+    observer.lastEventsRead = initialConfig.eventsRead;
+    observer.lastConfigGeneration = initialConfig.finalGeneration;
+    ++observer.coherentReads;
+    if (initialConfig.eventsRead != 0u) ++observer.eventsObserved;
+    if ((initialConfig.eventsRead & ~kVirtioGpuKnownEventMask) != 0u) ++observer.unknownEventBitsObserved;
+    if (!build_detected_topology_snapshot(state, initialConfig, nullptr, observer.detectedTopology)) {
+        observer.enabled = false;
+        copy_event_text(observer.disabledReason, sizeof(observer.disabledReason), observer.lastError);
+        return false;
+    }
+    observer.previousTopology = observer.detectedTopology;
+    observer.topologyGeneration = 1u;
+    kernel::serial::puts("VirtioGPU config snapshot: firstGeneration=");
+    serial_put_u32_decimal(initialConfig.firstGeneration);
+    kernel::serial::puts(" finalGeneration=");
+    serial_put_u32_decimal(initialConfig.finalGeneration);
+    kernel::serial::puts(" retryCount=");
+    serial_put_u32_decimal(initialConfig.retryCount);
+    kernel::serial::puts(" coherent=yes eventsRead=0x");
+    kernel::serial::put_hex32(initialConfig.eventsRead);
+    kernel::serial::puts(" numScanouts=");
+    serial_put_u32_decimal(initialConfig.numScanouts);
+    kernel::serial::puts(" numCapsets=");
+    serial_put_u32_decimal(initialConfig.numCapsets);
+    kernel::serial::putc('\n');
+    kernel::serial::puts("VirtioGPU display-event observer: initialized=yes enabled=yes pollIntervalTicks=");
+    serial_put_u32_decimal(observer.pollInterval);
+    kernel::serial::puts(" qemuOnly=yes activeMutation=no\n");
+    if ((initialConfig.eventsRead & VIRTIO_GPU_EVENT_DISPLAY) != 0u) observer.rescanPending = true;
+    return true;
+#endif
+}
+
+static bool refresh_detected_topology_without_event(DeviceState& state)
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+    (void)state;
+    return false;
+#else
+    VirtioGpuConfigSnapshot before{};
+    if (!read_virtio_gpu_config_snapshot_internal(state, before)) return false;
+    VirtioGpuProtocolDisplaySnapshot protocol{};
+    if (!submit_display_info_snapshot_request(state, "explicit-refresh", protocol)) return false;
+    VirtioGpuConfigSnapshot after{};
+    if (!read_virtio_gpu_config_snapshot_internal(state, after)) return false;
+    VirtioGpuDetectedTopologySnapshot refreshed{};
+    if (!build_detected_topology_snapshot(state, after, &protocol, refreshed)) return false;
+    publish_detected_topology_change(s_displayEventObserver.detectedTopology, refreshed, false, false);
+    s_displayEventObserver.rescanPending = false;
+    kernel::serial::puts("VirtioGPU display refresh: result=success activeMutation=no eventClear=no\n");
+    return true;
+#endif
+}
+
+static bool inject_display_topology_change_internal(uint32_t kind)
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+    (void)kind;
+    return false;
+#else
+    VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    if (!observer.enabled || observer.injectionInProgress || kind < static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::ConnectorState) ||
+        kind > static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::OutputRemoval)) return false;
+    observer.injectionInProgress = true;
+    const VirtioGpuDetectedTopologySnapshot oldTopology = observer.detectedTopology;
+    VirtioGpuDetectedTopologySnapshot nextTopology = oldTopology;
+    nextTopology.configGeneration = oldTopology.configGeneration + 1u;
+    const uint32_t primaryIndex = 0u;
+    if (kind == static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::ConnectorState)) {
+        if (nextTopology.outputCount == 0u) {
+            observer.injectionInProgress = false;
+            return false;
+        }
+        nextTopology.outputs[primaryIndex].connectorEnabled = nextTopology.outputs[primaryIndex].connectorEnabled ? 0u : 1u;
+    } else if (kind == static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::PreferredGeometry)) {
+        if (nextTopology.outputCount == 0u) {
+            observer.injectionInProgress = false;
+            return false;
+        }
+        nextTopology.outputs[primaryIndex].reportedWidth =
+            nextTopology.outputs[primaryIndex].reportedWidth == 1280 ? 1024 : 1280;
+        nextTopology.outputs[primaryIndex].reportedHeight =
+            nextTopology.outputs[primaryIndex].reportedHeight == 800 ? 768 : 800;
+    } else if (kind == static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::OutputAddition)) {
+        if (nextTopology.outputCount >= gxos::display::kVirtioGpuDisplayEventMaxScanouts) {
+            observer.injectionInProgress = false;
+            return false;
+        }
+        const uint32_t index = nextTopology.outputCount++;
+        ++nextTopology.numScanouts;
+        VirtioGpuDetectedOutput& added = nextTopology.outputs[index];
+        added = VirtioGpuDetectedOutput{};
+        added.scanoutId = index;
+        added.reported = 1u;
+        added.connectorEnabled = 1u;
+        added.reportedWidth = 800;
+        added.reportedHeight = 600;
+        copy_event_identity(added.stableIdentity, "display-", index + 1u);
+    } else {
+        if (nextTopology.outputCount <= 1u) {
+            observer.injectionInProgress = false;
+            return false;
+        }
+        --nextTopology.outputCount;
+        --nextTopology.numScanouts;
+    }
+    publish_detected_topology_change(oldTopology, nextTopology, true, false);
+    observer.injectionInProgress = false;
+    kernel::serial::puts("VirtioGPU injected display event: injectedEvent=yes kind=");
+    serial_put_u32_decimal(kind);
+    kernel::serial::puts(" activeMutation=no eventRegisterWrite=no\n");
+    return true;
+#endif
+}
+
 static void mirror_diagnostic_resource_to_framebuffer(DeviceState& state,
                                                       const DiagnosticResourceState& resource)
 {
@@ -4779,6 +5572,11 @@ static bool initialize_device(DeviceState& state)
 #endif
 
             updateOutputInventory();
+#if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
+            if (s_livePresentation.enabled) {
+                (void)initialize_display_event_observer(state);
+            }
+#endif
             record_probe_outcome(state,
                                  true,
                                  DisplayInfoOutcome::Ok,
@@ -5656,6 +6454,7 @@ int probe()
     s_displayConfigurationPrimaryOutput = 0u;
     s_detectedConfigurationSnapshot = gxos::display::DisplayConfigurationSnapshot{};
     s_detectedConfigurationSnapshotReady = false;
+    s_displayEventObserver = VirtioGpuDisplayEventObserver{};
 #if defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
     s_livePresentation = LivePresentationBackendState{};
     s_liveCommandLoggingSuppressed = false;
@@ -5735,6 +6534,97 @@ GpuDevice* get_device(int index)
 int device_count()
 {
     return s_deviceCount;
+}
+
+bool read_virtio_gpu_config_snapshot(GpuDevice* dev, VirtioGpuConfigSnapshot* snapshot)
+{
+    if (snapshot == nullptr) return false;
+    DeviceState* state = active_state(dev);
+    if (state == nullptr) {
+        *snapshot = VirtioGpuConfigSnapshot{};
+        copy_event_text(snapshot->failureReason, sizeof(snapshot->failureReason), "VirtIO-GPU device is unavailable");
+        return false;
+    }
+    return read_virtio_gpu_config_snapshot_internal(*state, *snapshot);
+}
+
+bool query_detected_topology_change(gxos::display::DisplayTopologyChangeQuery* query)
+{
+    if (query == nullptr) return false;
+    *query = gxos::display::DisplayTopologyChangeQuery{};
+    query->structureSize = sizeof(gxos::display::DisplayTopologyChangeQuery);
+    const VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    query->pending = observer.pendingTopologyChange ? 1u : 0u;
+    query->activeConfigurationAffected = observer.pendingChange.activeConfigurationAffected;
+    query->automaticApplyPerformed = 0u;
+    query->injectedEvent = observer.pendingChange.injectedEvent;
+    query->topologyGeneration = observer.topologyGeneration;
+    query->addedOutputCount = observer.pendingChange.addedOutputCount;
+    query->removedOutputCount = observer.pendingChange.removedOutputCount;
+    query->changedOutputCount = observer.pendingChange.changedOutputCount;
+    query->connectorEnabledChangeCount = observer.pendingChange.connectorEnabledChangeCount;
+    query->preferredGeometryChangeCount = observer.pendingChange.preferredGeometryChangeCount;
+    copy_event_text(query->classification, sizeof(query->classification), observer.pendingChange.classification);
+    copy_event_text(query->recommendedAction, sizeof(query->recommendedAction), observer.pendingChange.recommendedAction);
+    copy_event_text(query->reason, sizeof(query->reason), observer.pendingChange.reason);
+    return observer.initialized && observer.enabled;
+}
+
+bool refresh_detected_topology_for_service()
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+    return false;
+#else
+    DeviceState* state = s_livePresentation.device;
+    if (state == nullptr && s_deviceCount > 0) state = &s_devices[0];
+    if (state == nullptr || s_displayConfigurationPresentationPaused || s_livePresentation.stopped) return false;
+    return refresh_detected_topology_without_event(*state);
+#endif
+}
+
+bool inject_display_topology_change_for_test(uint32_t kind)
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+    (void)kind;
+    return false;
+#else
+    return inject_display_topology_change_internal(kind);
+#endif
+}
+
+void get_display_event_observer_status(VirtioGpuDisplayEventObserverStatus* status)
+{
+    if (status == nullptr) return;
+    *status = VirtioGpuDisplayEventObserverStatus{};
+    const VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    status->initialized = observer.initialized ? 1u : 0u;
+    status->enabled = observer.enabled ? 1u : 0u;
+    status->rescanInProgress = observer.rescanInProgress ? 1u : 0u;
+    status->pendingTopologyChange = observer.pendingTopologyChange ? 1u : 0u;
+    status->polls = observer.polls;
+    status->coherentReads = observer.coherentReads;
+    status->incoherentReads = observer.incoherentReads;
+    status->eventsObserved = observer.eventsObserved;
+    status->displayEventsObserved = observer.displayEventsObserved;
+    status->unknownEventBitsObserved = observer.unknownEventBitsObserved;
+    status->displayEventsProcessed = observer.displayEventsProcessed;
+    status->eventClearWrites = observer.eventClearWrites;
+    status->rescansSubmitted = observer.rescansSubmitted;
+    status->rescansCoalesced = observer.rescansCoalesced;
+    status->rescansSuccessful = observer.rescansSuccessful;
+    status->rescansFailed = observer.rescansFailed;
+    status->reassertions = observer.reassertions;
+    status->lastEventsRead = observer.lastEventsRead;
+    status->lastEventsCleared = observer.lastEventsCleared;
+    status->lastConfigGeneration = observer.lastConfigGeneration;
+    status->lastTopologyGeneration = observer.topologyGeneration;
+    status->lastPollTick = observer.lastPollTick;
+    status->pollInterval = observer.pollInterval;
+    status->pendingRescanRetries = observer.pendingRescanRetries;
+    status->lastReasserted = observer.lastReasserted ? 1u : 0u;
+    copy_event_text(status->lastError, sizeof(status->lastError), observer.lastError);
+    copy_event_text(status->disabledReason, sizeof(status->disabledReason), observer.disabledReason);
+    (void)query_detected_topology_change(&status->pendingQuery);
 }
 
 GpuStatus init_device(GpuDevice* dev)
@@ -5935,6 +6825,11 @@ void presentation_tick()
     if (!live.enabled || live.device == nullptr || live.stopped || s_displayConfigurationPresentationPaused) {
         return;
     }
+
+    // The observer runs on this existing bounded service tick. It performs
+    // only coherent config reads and a bounded GET_DISPLAY_INFO rescan; it
+    // never changes live resources or scanout bindings.
+    display_event_observer_tick(*live.device);
 
     ++live.presentationPolls;
 

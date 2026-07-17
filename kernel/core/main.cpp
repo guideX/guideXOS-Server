@@ -55,6 +55,7 @@
 #include "include/kernel/virtio_gpu.h"
 #include "include/kernel/qemu_display_configuration_control_proof.h"
 #include "include/kernel/qemu_display_configuration_persistence_proof.h"
+#include "include/kernel/qemu_display_events_proof.h"
 #include "include/kernel/virtio_rng.h"
 
 // Interrupt support
@@ -876,6 +877,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #elif defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
         kernel::qemu_display_configuration_persistence_proof::run();
         kernel::qemu_display_resolution_persistence_proof::run();
+#endif
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+        kernel::qemu_display_events_proof::run();
 #endif
         kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu live presentation pump active\n");
         while (!kernel::virtio::gpu::presentation_finished()) {

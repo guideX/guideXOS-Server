@@ -659,21 +659,71 @@ It covers versioning, stable identity, bounded malformed/stale handling,
 startup ordering, authoritative restore origin, last-known-good fallback,
 write discipline, no host launch-2 injection, and the QEMU-only safety gates.
 
+## VirtIO-GPU Display Event Observer
+
+The fixed-topology logical-resolution milestone is complete: equal- and
+mixed-resolution Extend, compatible Mirror, mismatch rejection, rollback,
+resource rebuilding, per-output persistence, and launch-2 restoration are
+proven. Manual interactive Display Options validation remains required and is
+not claimed complete by the automated proofs.
+
+The QEMU-only observer models the VirtIO-GPU device configuration as packed,
+little-endian fields. `events_read` is device-owned and read-only;
+`events_clear` is write-to-clear. The observer writes only the recognized
+`VIRTIO_GPU_EVENT_DISPLAY` bit after a successful bounded `GET_DISPLAY_INFO`
+rescan, validated detected-topology publication, and a post-clear coherent
+read. Unknown bits remain pending. No physical GPU/MMIO boot is eligible for
+this path.
+
+Each poll reads `config_generation`, the device configuration fields, and the
+generation again, accepting only a matching bounded snapshot. Polling runs at
+the existing safe backend tick with a hard 10-tick interval, coalesces display
+bits, bounds retries, skips paused/rebuilding/shutdown presentation, and holds
+no compositor lock during MMIO or command completion polling. Device
+configuration interrupts are deliberately not enabled.
+
+A display event obtains a detached `GET_DISPLAY_INFO` snapshot for every
+bounded scanout slot, preserves `connectorEnabled` separately from operational
+guest state, diffs it against the previous detected topology, and publishes a
+bounded pending change through `DisplayConfigurationService`. The query
+reports the generation, added/removed/changed counts, classification,
+recommended action, and `automaticApplyPerformed=no`. The active mode, primary,
+taskbar, assigned resolutions, virtual desktop, input bounds, resources,
+scanout bindings, and persisted configuration remain unchanged. A failed
+rescan retains the event for bounded retry and never clears it.
+
+The installed QEMU 11.0.0 capability probe reports `genuineEventTrigger=unavailable`:
+QMP exposes `display-update` and `display-reload`, but no documented command in
+this build changes a VirtIO-GPU head topology. The runtime proof therefore
+does not claim a real host event. It uses a one-shot QEMU smoke-build-only
+injection path, labeled `injectedEvent=yes`, to exercise connector-state,
+preferred-geometry, addition, and removal diffs through the same publication
+logic.
+
+The observer smoke commands are:
+
+```text
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-virtio-gpu-display-events-source.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-virtio-gpu-display-events.ps1
+```
+
 ## Current Limitations and Next Roadmap Milestone
 
-This milestone still has no physical modesetting, refresh-rate control,
-rotation, EDID retrieval, hotplug, cursor queue, 3D/virgl/Venus/blob/context
-support, QMP guest IPC, or real-hardware GPU/MMIO backend. Resolution is only
-the bounded QEMU logical scanout/resource/backing/target/`PixelSurface`
-dimension. Manual UI validation remains `required` and is not claimed as
-completed by the automated proof.
+This milestone intentionally has no automatic hotplug application, EDID or
+`GET_EDID`, refresh-rate control, rotation, cursor queue, device configuration
+interrupts, physical modesetting, 3D/virgl/Venus/blob/context support, QMP
+guest IPC, or real-hardware GPU/MMIO backend. Resolution is only the bounded
+QEMU logical scanout/resource/backing/target/`PixelSurface` dimension. Manual
+UI validation remains `required` and is not claimed as completed by the
+automated proof.
 
 The next roadmap milestone is:
 
-- VirtIO-GPU display configuration-change events.
-- Safe output hotplug inventory refresh.
-- EDID retrieval where supported.
-- Mode-catalog refinement.
+- Transactional application of detected output additions/removals.
+- Safe primary-output fallback on removal.
+- User-confirmed topology reconciliation.
+- Later VirtIO-GPU device configuration interrupts.
+- EDID retrieval if negotiated.
 - Dirty-rectangle presentation.
 - Later real-hardware architecture under a separate Mule checkpoint.
 

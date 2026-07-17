@@ -237,13 +237,26 @@ struct MoveCursor {
     CursorPos  pos;
 } GPU_PACKED;
 
-// Device configuration (read from config space)
+// Device configuration (read from config space).  These fields are packed
+// little-endian device data.  eventsRead is device-owned/read-only and
+// eventsClear is write-to-clear; MMIO access uses the explicit offsets below.
+enum GpuDeviceConfigOffset : uint32_t {
+    DEVICE_CONFIG_EVENTS_READ = 0x00u,
+    DEVICE_CONFIG_EVENTS_CLEAR = 0x04u,
+    DEVICE_CONFIG_NUM_SCANOUTS = 0x08u,
+    DEVICE_CONFIG_NUM_CAPSETS = 0x0Cu
+};
+
+static const uint32_t VIRTIO_GPU_EVENT_DISPLAY = 1u << 0;
+
 struct GpuConfig {
-    uint32_t eventsRead;         // Events read by driver
-    uint32_t eventsClear;        // Events to clear
-    uint32_t numScanouts;        // Number of scanouts
-    uint32_t numCapsets;         // Number of capability sets (3D)
+    uint32_t eventsReadLe;
+    uint32_t eventsClearLe;
+    uint32_t numScanoutsLe;
+    uint32_t numCapsetsLe;
 } GPU_PACKED;
+
+static_assert(sizeof(GpuConfig) == 16u, "VirtIO-GPU device config layout must remain packed");
 
 #if !defined(__GNUC__) && !defined(__clang__)
 #pragma pack(pop)
@@ -444,6 +457,49 @@ struct DisplayConfigurationBackendResult {
     char diagnostic[gxos::display::kDisplayConfigurationDiagnosticBytes];
 };
 
+struct VirtioGpuConfigSnapshot {
+    uint8_t firstGeneration{0u};
+    uint8_t finalGeneration{0u};
+    uint8_t retryCount{0u};
+    uint8_t coherent{0u};
+    uint32_t eventsRead{0u};
+    uint32_t numScanouts{0u};
+    uint32_t numCapsets{0u};
+    char failureReason[128]{};
+};
+
+struct VirtioGpuDisplayEventObserverStatus {
+    uint8_t initialized{0u};
+    uint8_t enabled{0u};
+    uint8_t rescanInProgress{0u};
+    uint8_t pendingTopologyChange{0u};
+    uint64_t polls{0u};
+    uint64_t coherentReads{0u};
+    uint64_t incoherentReads{0u};
+    uint64_t eventsObserved{0u};
+    uint64_t displayEventsObserved{0u};
+    uint64_t unknownEventBitsObserved{0u};
+    uint64_t displayEventsProcessed{0u};
+    uint64_t eventClearWrites{0u};
+    uint64_t rescansSubmitted{0u};
+    uint64_t rescansCoalesced{0u};
+    uint64_t rescansSuccessful{0u};
+    uint64_t rescansFailed{0u};
+    uint64_t reassertions{0u};
+    uint32_t lastEventsRead{0u};
+    uint32_t lastEventsCleared{0u};
+    uint32_t lastConfigGeneration{0u};
+    uint32_t lastTopologyGeneration{0u};
+    uint64_t lastPollTick{0u};
+    uint32_t pollInterval{0u};
+    uint32_t pendingRescanRetries{0u};
+    uint8_t lastReasserted{0u};
+    uint8_t reserved[3]{};
+    char lastError[128]{};
+    char disabledReason[128]{};
+    gxos::display::DisplayTopologyChangeQuery pendingQuery{};
+};
+
 bool get_display_configuration_backend_snapshots(
     gxos::display::DisplayConfigurationSnapshot* detected,
     gxos::display::DisplayConfigurationSnapshot* active);
@@ -453,6 +509,15 @@ bool apply_display_configuration_backend_layout(
     const gxos::display::DisplayConfigurationRequest& requested,
     uint32_t failureInjectionFlags,
     DisplayConfigurationBackendResult* result);
+
+// QEMU-only display-event observation and read-only publication. These APIs
+// never apply a detected topology, destroy a resource, rebind a scanout, or
+// mutate persisted configuration.
+bool read_virtio_gpu_config_snapshot(GpuDevice* dev, VirtioGpuConfigSnapshot* snapshot);
+bool query_detected_topology_change(gxos::display::DisplayTopologyChangeQuery* query);
+bool refresh_detected_topology_for_service();
+bool inject_display_topology_change_for_test(uint32_t kind);
+void get_display_event_observer_status(VirtioGpuDisplayEventObserverStatus* status);
 
 // ================================================================
 // Integration with Kernel Framebuffer
