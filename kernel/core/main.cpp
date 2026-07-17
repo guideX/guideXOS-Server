@@ -21,6 +21,7 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
+#include "include/kernel/address_space.h"
 
 #if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
 #include "include/kernel/native_thread_qemu_test.h"
@@ -218,6 +219,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            if (kernel::memory::address_space::initialize(bootinfo)) {
+                kernel::serial::puts("[KERNEL] Generic address-space frame pool initialized\n");
+            } else {
+                kernel::serial::puts("[KERNEL] Generic address-space frame pool unavailable\n");
+            }
         }
     }
     
@@ -244,6 +250,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
     // The opt-in VM test exercises only the generic runtime-neutral region
     // contract and exits before desktop, storage, networking, or applications.
+    kernel::interrupts::init();
     kernel::native_virtual_memory_qemu_test::run();
     while (1) {
         kernel::arch::disable_interrupts();

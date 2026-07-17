@@ -71,6 +71,11 @@ namespace guideXOS
         // NIC information (uses former Reserved space)
         NicInfo  Nic;
         uint64_t KernelPhysicalBase;
+        // Kernel-owned, page-aligned physical-frame pool.  The pool is
+        // explicitly mapped by the bootloader and is consumed by the generic
+        // address-space layer for VM data and page-table pages.
+        uint64_t RuntimeFramePoolBase;
+        uint64_t RuntimeFramePoolPages;
     };
 }
 

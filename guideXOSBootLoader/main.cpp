@@ -673,6 +673,31 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         SetMem((void*)(UINTN)preMemMapPhys, preMemMapPages * EFI_PAGE_SIZE, 0);
     }
 
+    // --- Allocate the generic runtime frame pool ---
+    // The pool is deliberately explicit and bounded.  It is the only source
+    // used by the kernel address-space layer for VM data and page-table pages;
+    // reservation itself never consumes these pages.
+    constexpr UINTN runtimeFramePoolPages = 512; // 2 MiB, test-visible bound
+    EFI_PHYSICAL_ADDRESS runtimeFramePoolPhys = 0;
+    {
+        EFI_STATUS st = SystemTable->BootServices->AllocatePages(
+            AllocateAnyPages,
+            EfiLoaderData,
+            runtimeFramePoolPages,
+            &runtimeFramePoolPhys);
+        if (EFI_ERROR(st)) {
+            Print(L"Failed to allocate generic runtime frame pool\n");
+            return st;
+        }
+        SetMem((void*)(UINTN)runtimeFramePoolPhys,
+               runtimeFramePoolPages * EFI_PAGE_SIZE, 0);
+        v1BootInfo->RuntimeFramePoolBase = runtimeFramePoolPhys;
+        v1BootInfo->RuntimeFramePoolPages = runtimeFramePoolPages;
+        Print(L"Runtime frame pool: %p pages=%u\n",
+              (VOID*)(UINTN)runtimeFramePoolPhys,
+              (UINT32)runtimeFramePoolPages);
+    }
+
     // --- Build comprehensive identity mappings ---
     // CRITICAL: Map ALL regions the kernel needs access to after ExitBootServices:
     // 1. Low 1MB - legacy compatibility (interrupt vectors, BIOS data area references)
@@ -720,7 +745,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     sizes[rangeCount] = preMemMapBytes;
     rangeCount++;
 
-    // 6. Framebuffer - CRITICAL for any display output after ExitBootServices
+    // 6. Generic runtime frame pool.  It must be identity-mapped so the
+    // kernel can zero and edit page-table frames after ExitBootServices.
+    ranges[rangeCount] = runtimeFramePoolPhys;
+    sizes[rangeCount] = runtimeFramePoolPages * EFI_PAGE_SIZE;
+    rangeCount++;
+
+    // 7. Framebuffer - CRITICAL for any display output after ExitBootServices
     if (v1BootInfo->FramebufferBase != 0 && v1BootInfo->FramebufferSize != 0) {
         ranges[rangeCount] = (EFI_PHYSICAL_ADDRESS)v1BootInfo->FramebufferBase;
         sizes[rangeCount] = (UINTN)v1BootInfo->FramebufferSize;
@@ -729,7 +760,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
               (VOID*)(UINTN)v1BootInfo->FramebufferBase, v1BootInfo->FramebufferSize);
     }
 
-    // 7. Ramdisk - if loaded
+    // 8. Ramdisk - if loaded
     if (ramdiskPhys != 0 && ramdiskSize != 0) {
         ranges[rangeCount] = ramdiskPhys;
         sizes[rangeCount] = (UINTN)ramdiskSize;
@@ -737,7 +768,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ramdisk: %p size %Lu\n", (VOID*)(UINTN)ramdiskPhys, ramdiskSize);
     }
 
-    // 8. ACPI RSDP region (map at least one page for RSDP, kernel will map more as needed)
+    // 9. ACPI RSDP region (map at least one page for RSDP, kernel will map more as needed)
     if (rsdp != nullptr) {
         ranges[rangeCount] = (EFI_PHYSICAL_ADDRESS)(UINTN)rsdp & ~0xFFFull; // Page-align down
         sizes[rangeCount] = EFI_PAGE_SIZE * 4; // Map a few pages for RSDP + nearby tables
@@ -745,7 +776,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ACPI RSDP region: %p\n", (VOID*)(UINTN)rsdp);
     }
 
-    // 9. CRITICAL: Map the bootloader/trampoline code region
+    // 10. CRITICAL: Map the bootloader/trampoline code region
     // After we load CR3 with new page tables, the CPU is still executing in the
     // trampoline code. If that code isn't mapped, we triple-fault immediately!
     // We need to identity-map the bootloader's loaded image.
@@ -775,12 +806,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         }
     }
 
-    // 10. Trampoline executable buffer
+    // 11. Trampoline executable buffer
     ranges[rangeCount] = trampolinePhys;
     sizes[rangeCount] = trampolinePages * EFI_PAGE_SIZE;
     rangeCount++;
 
-    // 11. CRITICAL: Map the allocator region the kernel will use
+    // 12. CRITICAL: Map the allocator region the kernel will use
     // The kernel's Allocator.Initialize() uses 0x4000000 (64MB) as the base
     // Map a large region starting there for heap allocations
     ranges[rangeCount] = 0x4000000ULL;  // 64MB
@@ -788,14 +819,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     rangeCount++;
     Print(L"Mapping allocator region: 0x4000000 size 64MB\n");
 
-    // 12. Map additional stack regions we might use
+    // 13. Map additional stack regions we might use
     // The preferred stack location is around 2MB mark
     ranges[rangeCount] = 0x100000ULL; // 1MB
     sizes[rangeCount] = 2u * 1024u * 1024u; // 2MB (covers 1MB-3MB region)
     rangeCount++;
     Print(L"Mapping low memory stack region: 0x100000 size 2MB\n");
 
-    // 13. NIC MMIO region - CRITICAL for network driver
+    // 14. NIC MMIO region - CRITICAL for network driver
     // Map the NIC's BAR0 MMIO region so the kernel can access hardware registers
     if (nicMmioPhys != 0 && nicMmioSize != 0) {
         // Align to page boundary

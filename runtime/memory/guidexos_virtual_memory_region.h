@@ -60,12 +60,26 @@ struct VirtualMemoryInfo {
     gxos_vm_uint64 generation = 0;
     bool reserved = false;
     bool committed = false;
+    bool mappingPresent = false;
+    gxos_vm_uint64 physicalFrame = 0;
     MemoryProtection protection = MemoryProtection::NoAccess;
 };
 
 struct VirtualMemoryStats {
     gxos_vm_size activeRegions = 0;
     gxos_vm_size committedPages = 0;
+    gxos_vm_size totalKnownFrames = 0;
+    gxos_vm_size freeFrames = 0;
+    gxos_vm_size allocatedFrames = 0;
+    gxos_vm_size regionOwnedFrames = 0;
+    gxos_vm_size pageTableFrames = 0;
+    gxos_vm_size framesReleasedByDecommit = 0;
+    gxos_vm_size framesReleasedByRelease = 0;
+    gxos_vm_size tlbInvalidations = 0;
+    gxos_vm_size activeMetadataEntries = 0;
+    gxos_vm_size metadataCapacity = 0;
+    gxos_vm_size mappingCount = 0;
+    bool trueReservation = false;
     bool physicalBackingAccounting = false;
     bool protectionEnforced = false;
 };
@@ -122,6 +136,11 @@ VmResult protect(VirtualMemoryRegion& region,
 VmResult release(VirtualMemoryRegion& region);
 
 VmResult query(const void* address, VirtualMemoryInfo* information);
+
+// Narrow current-address-space teardown hook used by the kernel smoke and
+// future process teardown integration. It invalidates all active region state
+// and releases committed backing before destroying the current owner.
+VmResult teardownAddressSpace();
 
 gxos_vm_size pageSize();
 gxos_vm_size allocationGranularity();

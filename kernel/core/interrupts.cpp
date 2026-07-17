@@ -18,14 +18,34 @@
 namespace kernel {
 namespace interrupts {
 
+namespace {
+expected_page_fault_handler_t s_expected_page_fault_handler = nullptr;
+}
+
+void set_expected_page_fault_handler(expected_page_fault_handler_t handler) {
+    s_expected_page_fault_handler = handler;
+}
+
+void clear_expected_page_fault_handler() {
+    s_expected_page_fault_handler = nullptr;
+}
+
+bool dispatch_expected_page_fault(uint64_t fault_address,
+                                  uint64_t error_code,
+                                  uint64_t fault_rip,
+                                  uint64_t* resume_rip) {
+    return s_expected_page_fault_handler != nullptr &&
+        s_expected_page_fault_handler(fault_address, error_code, fault_rip, resume_rip);
+}
+
 // ================================================================
-// x86 / amd64  —  IDT + 8259 PIC implementation
+// x86 / amd64  â€”  IDT + 8259 PIC implementation
 // ================================================================
 
 #if ARCH_HAS_PIC_8259
 
 // ----------------------------------------------------------------
-// IDT structures — architecture-dependent
+// IDT structures â€” architecture-dependent
 // ----------------------------------------------------------------
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -434,6 +454,97 @@ MAKE_IRQ_STUB(13)
 MAKE_IRQ_STUB(14)
 MAKE_IRQ_STUB(15)
 
+// Page faults push an error code before entering this stub. The expected-fault
+// hook may return a replacement RIP; all other page faults remain fatal in
+// the architecture dispatcher. This is deliberately separate from IRQ stubs.
+extern "C" void page_fault_stub();
+extern "C" uint64_t exception_dispatch(uint64_t vector, uint64_t error_code,
+                                        uint64_t rip, uint64_t rflags);
+
+#if defined(__MINGW32__) || defined(__MINGW64__) || defined(_WIN64)
+asm(
+    ".global page_fault_stub\n"
+    "page_fault_stub:\n"
+    "    push %rax\n"
+    "    push %rcx\n"
+    "    push %rdx\n"
+    "    push %rsi\n"
+    "    push %rdi\n"
+    "    push %r8\n"
+    "    push %r9\n"
+    "    push %r10\n"
+    "    push %r11\n"
+    // MinGW uses the Windows x64 calling convention: reserve the 32-byte
+    // home area in addition to the alignment slot before calling C++.
+    "    sub $40, %rsp\n"
+    "    mov 112(%rsp), %rdx\n"
+    "    mov 120(%rsp), %r8\n"
+    "    mov 136(%rsp), %r9\n"
+    "    mov $14, %ecx\n"
+    "    call exception_dispatch\n"
+    "    add $40, %rsp\n"
+    "    test %rax, %rax\n"
+    "    jz 1f\n"
+    "    mov %rax, 80(%rsp)\n"
+    "    pop %r11\n"
+    "    pop %r10\n"
+    "    pop %r9\n"
+    "    pop %r8\n"
+    "    pop %rdi\n"
+    "    pop %rsi\n"
+    "    pop %rdx\n"
+    "    pop %rcx\n"
+    "    pop %rax\n"
+    "    add $8, %rsp\n"
+    "    iretq\n"
+    "1:\n"
+    "    cli\n"
+    "2:\n"
+    "    hlt\n"
+    "    jmp 2b\n"
+);
+#else
+asm(
+    ".global page_fault_stub\n"
+    "page_fault_stub:\n"
+    "    push %rax\n"
+    "    push %rcx\n"
+    "    push %rdx\n"
+    "    push %rsi\n"
+    "    push %rdi\n"
+    "    push %r8\n"
+    "    push %r9\n"
+    "    push %r10\n"
+    "    push %r11\n"
+    "    sub $8, %rsp\n"
+    "    mov 80(%rsp), %rsi\n"
+    "    mov 88(%rsp), %rdx\n"
+    "    mov 104(%rsp), %rcx\n"
+    "    mov $14, %edi\n"
+    "    call exception_dispatch\n"
+    "    add $8, %rsp\n"
+    "    test %rax, %rax\n"
+    "    jz 1f\n"
+    "    mov %rax, 80(%rsp)\n"
+    "    pop %r11\n"
+    "    pop %r10\n"
+    "    pop %r9\n"
+    "    pop %r8\n"
+    "    pop %rdi\n"
+    "    pop %rsi\n"
+    "    pop %rdx\n"
+    "    pop %rcx\n"
+    "    pop %rax\n"
+    "    add $8, %rsp\n"
+    "    iretq\n"
+    "1:\n"
+    "    cli\n"
+    "2:\n"
+    "    hlt\n"
+    "    jmp 2b\n"
+);
+#endif
+
 typedef void (*stub_fn)();
 static stub_fn s_stubs[16] = {
     irq_stub_0,  irq_stub_1,  irq_stub_2,  irq_stub_3,
@@ -509,6 +620,9 @@ void init()
                       0x8E);
 #endif
     }
+#if defined(__x86_64__) || defined(_M_X64)
+    set_idt_entry(14, reinterpret_cast<uint64_t>(page_fault_stub), 0x8E);
+#endif
 
     load_idt();
     arch::enable_interrupts();
@@ -544,7 +658,7 @@ void register_irq(uint8_t irq, irq_handler_t handler)
 #else // !ARCH_HAS_PIC_8259
 
 // ================================================================
-// Non-x86 implementation  —  SPARC / SPARC64 / generic stub
+// Non-x86 implementation  â€”  SPARC / SPARC64 / generic stub
 // ================================================================
 
 static irq_handler_t s_handlers[16] = { 0 };

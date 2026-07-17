@@ -11,9 +11,13 @@ struct VirtualMemoryHandle {
 };
 
 VmResult reserveVirtualMemory(std::size_t size, std::size_t alignment,
-                              void* preferredBase, VirtualMemoryHandle** handle) {
+                              void* preferredBase, VirtualMemoryHandle** handle,
+                              bool requireTrueReservation) {
     if (handle == nullptr) return VmResult::InvalidArgument;
     if (*handle != nullptr) return VmResult::AlreadyReserved;
+    if (requireTrueReservation && !trueReservationSemantics()) {
+        return VmResult::Unsupported;
+    }
     VirtualMemoryHandle* result = new (std::nothrow) VirtualMemoryHandle();
     if (result == nullptr) return VmResult::OutOfMemory;
     const VmResult status = gxos::runtime::virtual_memory::reserve(
@@ -79,6 +83,14 @@ bool memoryAvailable(std::size_t size) {
 
 bool supportsLargePages() { return false; }
 bool supportsNumaPlacement() { return false; }
+
+bool trueReservationSemantics() {
+    return gxos::runtime::virtual_memory::stats().trueReservation;
+}
+
+const char* backendModeName() {
+    return trueReservationSemantics() ? "true-reservation" : "eager-compatibility";
+}
 
 } // namespace virtual_memory
 } // namespace nativeaot

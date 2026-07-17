@@ -75,7 +75,7 @@ MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS := \
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
 CFLAGS += -nostdlib -nostdinc++ -fno-builtin
-CFLAGS += -DGXOS_BARE_METAL
+CFLAGS += -DGXOS_BARE_METAL -DGXOS_TRUE_VIRTUAL_MEMORY
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
 ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)
@@ -105,6 +105,7 @@ MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PR
 # Runtime-neutral synchronization sources used by the freestanding kernel.
 # They remain outside the .NET tree and are the first scheduler wait consumer.
 RUNTIME_SOURCES := ../runtime/synchronization/guidexos_scheduler_wait.cpp ../runtime/synchronization/guidexos_event_baremetal.cpp ../runtime/thread/guidexos_native_thread_baremetal.cpp ../runtime/memory/guidexos_virtual_memory_region.cpp
+RUNTIME_SOURCES += ../runtime/memory/guidexos_virtual_memory_region_baremetal.cpp
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))

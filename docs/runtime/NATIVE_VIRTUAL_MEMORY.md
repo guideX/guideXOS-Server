@@ -1,321 +1,241 @@
-# guideXOS Virtual-Memory Regions
+# guideXOS Native Virtual-Memory Regions
 
-## 1. Purpose
+Status: true bare-metal reserve/commit lifecycle implemented for the opt-in
+AMD64 kernel path. The generic API remains runtime-neutral. No GC is initialized,
+no finalizer/helper thread is started, and no collection is triggered.
 
-This document describes the runtime-neutral virtual-memory region primitive used
-by future native subsystems, executable loaders, allocators, language runtimes,
-and isolated platform adapters. The public abstraction is in
-`runtime/memory/guidexos_virtual_memory_region.h`; it does not expose host
-handles or name a particular operating system or runtime.
+## 1. Scope and boundary
 
-The first implementation deliberately stops at the smallest lifecycle:
+The public API is `runtime/memory/guidexos_virtual_memory_region.h`. It models
+an owning reservation capability and the lifecycle
 
 ```text
-reserve -> commit -> decommit -> recommit -> release
-                         \-> query/protect
+reserve -> commit -> protect/query -> decommit -> recommit -> release
 ```
 
-The managed proof heap is not routed through this API. Workstation GC remains
-uninitialized, no finalizer/helper thread is started, and no collection is
-triggered.
+The bare-metal implementation is selected by `GXOS_TRUE_VIRTUAL_MEMORY` in
+`kernel/Makefile`. The older eager compatibility implementation remains
+available only when that define is absent; it is not used by the experimental
+kernel build.
 
-## 2. Existing memory infrastructure
+## 2. Design invariant
 
-The audit found a useful hosted executable-memory wrapper and a hosted malloc
-page-accounting wrapper, but neither is a general reserve/commit abstraction.
-The kernel has a fixed heap and a special huge-page facility. AMD64 boot creates
-identity mappings and the kernel can read CR3, but there is no general kernel
-physical-frame allocator, page-table mapper, address-space reservation index,
-or recoverable page-fault service.
+Reservation owns only a virtual interval. Commitment owns one physical frame
+per committed page and one page-table mapping per committed page. These are
+separate states and are independently visible through `VirtualMemoryInfo` and
+`VirtualMemoryStats`.
 
-### Capability inventory
+The bare-metal backend uses one explicit current `AddressSpace`. It has no
+collector-specific state, no GC callbacks, no finalizer logic, and no second
+allocator hidden behind the generic VM API.
 
-| Capability | Source path | Hosted | Bare metal | Suitable as-is? | Required adaptation |
-| --- | --- | ---: | ---: | ---: | --- |
-| Physical-frame allocation | `kernel/core/hugepages.cpp`; bootloader page allocations | Partial | No general 4 KiB allocator | No | Add an address-space-owned frame allocator before true commitment accounting |
-| Physical-frame release | `kernel/core/hugepages.cpp` | Partial | No general release path | No | Pair frame ownership with page-table unmap and release |
-| Virtual-address selection | `runtime/memory/guidexos_virtual_memory_region.cpp`; host APIs | Yes | Bounded static arena only | Partial | Replace arena selection with address-space metadata |
-| Fixed-address mapping | `executable_memory.cpp`; bootloader identity maps | Yes | Bootloader-only mappings | No | Add generic kernel mapping primitive |
-| Anonymous mapping | `executable_memory.cpp` via `VirtualAlloc`/`mmap` | Yes | No | No | Map anonymous frames through the kernel address-space layer |
-| Zero-filled pages | `executable_memory.cpp`; host OS commitment | Yes | Compatibility arena is zeroed explicitly | Partial | Zero every newly mapped frame at commitment |
-| Mapping removal | `executable_memory.cpp` release | Yes | No generic unmap | No | Remove PTEs, invalidate TLB, release frames |
-| Page protection | `executable_memory.cpp` (`VirtualProtect`/`mprotect`) | Yes | No page-table protection API | No | Add per-page permission updates and TLB invalidation |
-| Read/write/execute flags | `executable_memory.cpp` | Yes | No | No | Define page-table permission translation; first collector surface needs only R/RW/NA |
-| Guard/no-access mappings | Host `PAGE_NOACCESS`/`PROT_NONE` | Yes | No recoverable fault test | No | Add no-access PTEs and an isolated expected-fault harness |
-| Address-space queries | Host query/list metadata | Yes | No generic query index | No | Query reservation and page metadata owned by the address space |
-| Reserve without backing | `VirtualAlloc(MEM_RESERVE)`/`mmap(PROT_NONE)` | Yes | No | No | Implement unbacked interval reservation |
-| Commit with backing | Host `MEM_COMMIT`/`mprotect` | Yes | No physical-frame mapping | No | Allocate, zero, map, and record frames |
-| Decommit retaining reservation | Host `MEM_DECOMMIT`/`madvise` | Yes | Metadata-only compatibility behavior | No | Unmap and release frames while retaining interval metadata |
-| Full release | `VirtualFree(MEM_RELEASE)`/`munmap` | Yes | Static arena metadata release only | Partial | Release mappings, frames, and interval metadata |
-| Page size | host query; bare boot convention | Yes | 4096 bytes in current AMD64 path | Yes for first primitive | Make the architecture page-size source authoritative |
-| Allocation granularity | Windows host reports 64 KiB; POSIX host page size | Yes | 4096-byte compatibility granularity | Partial | Do not claim 64 KiB on bare metal; define future policy when true reservation exists |
-| Address alignment | checked arithmetic in region implementation | Yes | 4096-byte arena alignment | Partial | Align absolute addresses for all requested power-of-two alignments |
-| Per-process ownership | host process ID in region metadata | Yes | Current address space is implicit and single CPU | Partial | Attach region metadata to an explicit address-space owner |
-| Hosted equivalent | private OS calls in `runtime/memory/...cpp` | Yes | N/A | Yes | Keep host details behind the generic result contract |
+## 3. Boot-time frame supply
 
-The important distinction is explicit: a reservation owns an interval of
-virtual addresses; commitment owns backing pages for a subrange. The hosted
-backend implements that distinction. The current bare-metal backend cannot.
-
-## 3. Public generic API
-
-The API is in `gxos::runtime::virtual_memory`:
+The UEFI bootloader allocates 512 pages (2 MiB) of `EfiLoaderData` immediately
+before the final memory map and passes the identity-mapped range through:
 
 ```cpp
-enum class MemoryProtection {
-    NoAccess, ReadOnly, ReadWrite, ReadExecute, ReadWriteExecute
-};
-
-struct VirtualMemoryRegion {
-    void* base;
-    size_t reservedSize;
-    size_t committedSize;
-    // opaque private ownership and generation state
-};
-
-VmResult reserve(size_t size, size_t alignment, void* preferredBase,
-                VirtualMemoryRegion* region);
-VmResult commit(VirtualMemoryRegion&, size_t offset, size_t size,
-                MemoryProtection protection);
-VmResult decommit(VirtualMemoryRegion&, size_t offset, size_t size);
-VmResult protect(VirtualMemoryRegion&, size_t offset, size_t size,
-                 MemoryProtection protection);
-VmResult release(VirtualMemoryRegion&);
-VmResult query(const void* address, VirtualMemoryInfo* information);
+BootInfo::RuntimeFramePoolBase
+BootInfo::RuntimeFramePoolPages
 ```
 
-`VmResult` is a stable contract-level result type. Host error codes are kept
-only in `lastDiagnostic()` diagnostics and are not exposed as API semantics.
+`kernel/core/address_space.cpp` is the sole owner of this pool for VM-region
+and page-table frames. The bootloader maps the pool before `ExitBootServices`,
+so the kernel can zero and inspect every frame through its identity mapping.
 
-## 4. Region ownership
+## 4. Address-space ownership
 
-`VirtualMemoryRegion` is an owning, non-copyable, non-movable capability. Its
-opaque state and generation are private. A successful reservation records the
-owning host process or the current bare-metal address-space owner. The caller
-must release it explicitly or its destructor performs best-effort cleanup.
+`kernel/core/include/kernel/address_space.h` defines the generic owner and
+accounting surface. The current implementation is deliberately one-address-
+space and one-CPU, but the owner pointer is retained in every region record so
+stale handles cannot operate after teardown.
 
-Release clears the public fields and invalidates the private state. Operations
-on the cleared object return `AlreadyReleased`; an address query after release
-returns `NotFound`. The generation check prevents an old region object from
-being accepted against a reused metadata slot.
+The address-space layer owns frame state, page-table edits, physical zeroing,
+raw PTE queries, protection flags, and local TLB invalidation. The region layer
+owns interval metadata and lifecycle policy.
 
-The current implementation is single-process and single-address-space aware;
-host operations are serialized by the region metadata lock. It does not claim
-SMP safety for the kernel backend.
+## 5. Virtual-range allocation policy
 
-## 5. Page and alignment rules
+The true backend uses a bounded first-fit range:
 
-- Native page size is 4096 bytes for the current AMD64 bare-metal path. Hosted
-  builds query the host page size.
-- The first implementation uses one page as the minimum region alignment.
-- A requested alignment must be a nonzero power of two and at least one page.
-- Reservation sizes are rounded up to a page with checked arithmetic.
-- Commit, decommit, and protection offsets and sizes must already be nonzero
-  page multiples; they are not silently truncated.
-- Preferred addresses must be page-aligned, satisfy the requested absolute
-  alignment, and be inside the supported address range. A supplied preferred
-  address is an exact-placement request; it is not a hint.
-- Empty sizes, null output pointers, range overflow, outside-region ranges, and
-  unsupported protection values are rejected with explicit results.
-- The hosted maximum region is bounded to 1 TiB on 64-bit hosts (1 GiB on
-  32-bit hosts). The bare-metal compatibility arena is 256 KiB with eight
-  metadata slots and is intentionally not a general allocator.
-- No Windows-style 64 KiB allocation granularity is claimed for bare metal.
+| Property | Value |
+| --- | ---: |
+| Range base | `0x0000000100000000` |
+| Range size | 64 MiB |
+| Page size | 4096 bytes |
+| Metadata slots | 32 regions |
+| Maximum region | 1024 pages / 4 MiB |
+
+Requested preferred addresses are exact placements. Candidate intervals must
+be page-aligned, satisfy the absolute requested alignment, not overlap an
+owned reservation, and contain no already-present page-table mapping.
 
 ## 6. Reservation semantics
 
-Hosted reservation selects and exclusively owns a non-overlapping virtual
-interval with no-access protection and no committed backing. It can later be
-partially committed, decommitted without losing the interval, queried, and
-released. Overlapping exact preferred-base requests fail with
-`AddressUnavailable`.
+`reserve` rounds the requested size to a page, allocates one metadata record,
+and claims only the virtual interval. It allocates zero ordinary VM data
+frames, does not install present PTEs, and reports `mappingPresent=false` for
+an uncommitted page. Exact, beginning, ending, containing, and adjacent
+overlap cases are covered by the QEMU test.
 
-Bare metal currently uses Strategy C: a bounded, eagerly-backed arena. The
-arena storage exists before `reserve`, so the implementation provides exclusive
-reservation metadata and later commitment metadata, but it does not provide a
-true unbacked reservation. This is reported by `VirtualMemoryStats` and
-`lastDiagnostic()` and is not presented as collector-grade reservation
-semantics.
+This is a true unbacked reservation, not an arena over pre-existing storage.
 
 ## 7. Commit semantics
 
-Commit must remain within an owned region and uses checked range arithmetic.
-Newly committed pages are explicitly zero-filled before becoming readable or
-writable. A repeated commit of already committed pages is idempotent when the
-protection is unchanged. A repeated commit with a different protection applies
-that protection as an explicit transition, equivalent to a commit followed by
-`protect`.
+`commit` processes each page independently:
 
-The hosted implementation tracks commitment per page and rolls back newly
-committed pages if a multi-page operation fails. Bare metal records committed
-pages in the bounded compatibility metadata and only accepts `ReadWrite`, the
-one protection that its current non-paged kernel can honestly support.
+1. allocate a frame from the shared pool as `FrameOwner::VmRegion`;
+2. zero the frame before making it accessible;
+3. allocate and zero missing page-table pages from the same pool;
+4. install the PTE and invalidate the local translation;
+5. publish the committed metadata only after mapping succeeds.
+
+Repeated commit is idempotent when protection is unchanged. A protection
+change on an already committed page is applied as a page-table flag update.
+Multi-page commit has bounded rollback: frames and PTEs newly created by the
+failed operation are removed and returned.
 
 ## 8. Decommit semantics
 
-Decommit retains the reservation interval, clears commitment metadata, and
-permits a later recommit. Hosted decommit removes usable access and discards
-the host backing where supported. Recommitted pages are explicitly zeroed and
-therefore do not expose stale contents.
-
-On bare metal, decommit clears the compatibility commitment bit and zeros the
-arena bytes, but cannot remove a page-table mapping because the kernel has no
-generic mapping layer. It therefore must not be described as releasing a
-physical frame or making a page fault. This limitation is part of the selected
-Strategy C contract.
+`decommit` retains the reservation metadata but removes each committed PTE,
+zeros the owned frame, and returns it to the shared frame pool with release
+reason `Decommit`. It invalidates the affected translation before the frame is
+reused. A later recommit obtains a frame and explicitly zeroes it, so stale
+contents are not exposed.
 
 ## 9. Release semantics
 
-Hosted release removes all committed mappings and the reservation, releases
-host backing, clears ownership state, and invalidates the region. Double
-release and stale use are reported safely. Release is never an arbitrary
-address-range operation; only the owning region can release its interval.
-
-Bare-metal release clears the arena metadata and invalidates the region. It
-does not yet release physical frames because no general frame ownership exists.
-The active-stack and active-code cases are not accepted as special release
-operations; the future address-space layer must reject such ranges before
-unmapping them.
+`release` unmaps every committed page, verifies the removed physical frame
+matches region metadata, zeroes and returns each frame with release reason
+`Release`, and clears the interval metadata and generation. The released range
+can be reserved again at the same preferred address. Double release and stale
+handle use return explicit results.
 
 ## 10. Protection semantics
 
-Hosted regions support no-access, read-only, read/write, read/execute, and
-read/write/execute transitions through private host calls. The generic API does
-not require RWX for the first collector surface. Protection applies only to
-committed pages; uncommitted pages remain inaccessible.
+The true AMD64 backend enforces:
 
-The hosted tests verify read/write, read-only write rejection, restoration to
-read/write, and no-access transitions. The bare-metal backend returns
-`ProtectionUnsupported` for non-read/write requests and reports
-`protectionEnforced=false`. No global kernel mapping is changed.
-
-## 11. Query semantics
-
-`query(address, information)` accepts an address within an owned region and
-reports the containing page, page size, reservation range, committed byte
-count, generation, committed state, and protection. It reports reservation
-metadata even when the queried page is not committed. An address outside an
-active region or after release returns `NotFound`; a null output pointer is
-`InvalidArgument`.
-
-## 12. Hosted implementation
-
-The hosted implementation is private to
-`runtime/memory/guidexos_virtual_memory_region.cpp`:
-
-- Windows uses native reservation/commit/decommit/release/protection calls,
-  with `PAGE_NOACCESS` for reserved and decommitted pages.
-- POSIX uses anonymous `mmap`, `mprotect`, `madvise(MADV_DONTNEED)` where
-  available, and `munmap`.
-- Metadata is process-owned, page-granular, and protected by a mutex.
-- Host-specific failures are converted to `VmResult` and retained as a short
-  diagnostic only.
-- Preferred-base requests are exact when supplied; a host that cannot honor
-  the address returns `AddressUnavailable`.
-
-The public header contains none of the host API names and exposes no raw host
-handle.
-
-## 13. Bare-metal implementation
-
-The bare-metal branch uses a static 256 KiB, 4096-byte-aligned compatibility
-arena and eight bounded reservation records. It detects overlap, records
-generation ownership, zeroes new and recommitted pages, supports partial
-commit/decommit, and supports release/reuse of reservation metadata.
-
-The audit found no existing generic physical-frame allocator, PTE editor,
-address-space object, TLB invalidation service, or expected-fault recovery
-path. The implementation consequently does not introduce a parallel page-table
-manager or hardcode a collector address. It reports its missing enforcement and
-physical accounting explicitly.
-
-## 14. Physical-page ownership
-
-Hosted physical backing belongs to the host VM subsystem and is released by
-decommit or release. `VirtualMemoryStats::physicalBackingAccounting` is true
-for the hosted implementation.
-
-The bare-metal compatibility arena is static storage, not a page-frame pool.
-Its statistics deliberately report `physicalBackingAccounting=false`. A true
-implementation requires one owner record per mapped frame, unmap-on-decommit,
-release-on-release, and a zero-on-recommit invariant.
-
-## 15. TLB behavior
-
-Hosted TLB behavior is delegated to the host protection and mapping calls. The
-bare-metal backend performs no page-table changes and therefore has no TLB
-invalidation policy. The future address-space implementation must invalidate
-the affected AMD64 translation after PTE permission or presence changes,
-following the existing interrupt/scheduler locking rules and adding an SMP
-shootdown policy before claiming SMP support.
-
-## 16. Guard/no-access feasibility
-
-The hosted backend can reserve boundary pages as no-access and the generic
-metadata can identify an uncommitted middle/boundary layout. The current
-hosted probe intentionally does not crash the normal test process; it reports
-the expected-fault harness as blocked.
-
-The QEMU test leaves boundary pages uncommitted and reports expected-fault
-validation as `BLOCKED`. Bare-metal page faults currently log and halt, with no
-recoverable expected-fault mode. Compile/mapping evidence is therefore
-recorded, but normal validation never intentionally faults.
-
-## 17. Tests
-
-`runtime/tests/guidexos_virtual_memory_tests.cpp` independently covers reserve,
-query, zero initialization, read/write, partial commit, partial decommit,
-recommit zeroing, protection transitions, alignment/overflow/out-of-range
-validation, overlap rejection, stale use, double release, range reuse, and
-bounded cleanup cycles. The hosted smoke is
-`scripts/smoke-native-virtual-memory.ps1`.
-
-The inactive platform adapter probe is
-`runtime/tests/guidexos_nativeaot_virtual_memory_adapter_probe.cpp` and uses
-the real adapter functions under
-`tools/dotnet/runtime-pack/src/platform/`.
-
-The opt-in bare-metal test is built with
-`GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST` and run by
-`scripts/smoke-native-virtual-memory-qemu.ps1`. It runs an ordinary baseline
-boot first and then parses independent serial markers for each VM operation.
-
-Observed validation on 2026-07-16:
-
-| Test | Result |
+| Generic protection | PTE behavior |
 | --- | --- |
-| Hosted generic lifecycle | PASS |
-| Hosted protection enforcement | PASS |
-| Hosted cleanup/accounting | PASS |
-| Hosted expected-fault guard harness | BLOCKED |
-| Inactive adapter probe | PASS |
-| QEMU baseline boot | PASS |
-| QEMU reserve/overlap/commit/zero/read-write | PASS |
-| QEMU partial commit/decommit/recommit zeroing | PASS |
-| QEMU release/reuse/metadata cleanup | PASS |
-| QEMU protection transition | BLOCKED |
-| QEMU physical-page accounting | BLOCKED |
-| QEMU expected-fault guard test | BLOCKED |
+| `NoAccess` | physical identity retained, `Present=0`, `NX=1` |
+| `ReadOnly` | `Present=1`, `Writable=0`, `NX=1` |
+| `ReadWrite` | `Present=1`, `Writable=1`, `NX=1` |
 
-## 18. Known limitations
+Executable protections are rejected as `ProtectionUnsupported`. CR0.WP is set
+when the address-space layer initializes so supervisor writes honor read-only
+PTEs. Physical ownership is preserved during protection transitions.
 
-- Bare-metal reservation is eagerly backed; it is not true virtual
-  reservation/commit separation.
-- Bare-metal backing is a static 256 KiB compatibility arena.
-- There is no generic physical-frame allocator, page-table manager, guard-page
-  fault recovery, or TLB update service.
-- Bare-metal protection is not enforced, and only read/write is accepted.
-- The implementation is single CPU and does not claim SMP safety.
-- No swapping, file-backed mappings, shared memory, copy-on-write, NUMA,
-  large-page, write-watch, or arbitrary fixed-address replacement support is
-  added.
-- The current primitive is not yet sufficient for Workstation GC initialization
-  despite the hosted adapter probe passing.
+## 11. Page-table ownership and mapping queries
 
-## 19. Future generic users
+`address_space.cpp` walks the existing AMD64 four-level tables rooted at CR3.
+Missing PML4/PDPT/PD/PT pages are allocated from the same explicit pool,
+zeroed, marked present/writable, and counted as `FrameOwner::PageTable`.
+Large-page entries are rejected by the 4 KiB mapping path.
 
-Potential users are native loaders, future allocators, native subsystems, and
-language runtimes that need an owned region lifecycle. Each user must choose
-its own policy for executable permissions, guard pages, large pages, and
-address placement. The generic region API must remain independent of those
-users and must not acquire collector-specific state.
+The raw mapping query distinguishes no page-table entry from a non-present
+PTE. VM query cross-checks the raw physical address and presence bit against
+region metadata before returning success.
+
+## 12. TLB behavior
+
+Every map, unmap, and permission update executes local AMD64 `invlpg` and
+increments `VirtualMemoryStats::tlbInvalidations`. The test asserts a nonzero
+counter after the lifecycle. SMP shootdown is not implemented; the backend
+must not be presented as SMP-safe until that policy exists.
+
+## 13. Query and accounting contract
+
+`query` reports reservation, commitment, physical frame, protection, page
+range, and generation. `stats` reports total/free/allocated frames, region
+frames, page-table frames, decommit/release return counts, mapping count,
+metadata capacity, and active entries. A reservation-only operation leaves
+the region-owned frame count unchanged.
+
+## 14. Exhaustion and rollback
+
+The bounded metadata pool returns `OutOfMemory` after 32 active records. The
+64 MiB virtual range returns `AddressUnavailable` after sixteen maximum-size
+4 MiB reservations. A test-only frame-allocation limit makes a four-page
+commit fail after two allowed VM frames; the test verifies no committed pages,
+no leaked region frames, and no present mappings remain.
+
+## 15. Expected page faults
+
+The normal page-fault path remains fatal for unexpected faults. The QEMU test
+installs a temporary opt-in callback through `kernel/core/interrupts.h`.
+The AMD64 stub preserves the interrupted frame, calls `exception_dispatch`,
+and resumes only when the callback validates the exact address, read/write
+bit, protection bit, and instruction length.
+
+The test validates direct read/write access plus expected faults for read-only
+writes, no-access reads, reserved-uncommitted pages, decommitted pages, and
+released pages. The hook is not active outside the test window.
+
+## 16. Teardown
+
+`teardownAddressSpace` releases full, partially committed, and reservation-
+only regions owned by the current address space, then invalidates the owner.
+Stale region operations return `AlreadyReleased` or `NotFound`. The teardown
+test verifies zero active regions, zero mappings, zero region-owned frames,
+and free-plus-page-table frames equal to the known pool total.
+
+## 17. Hosted implementation
+
+The hosted branch remains in
+`runtime/memory/guidexos_virtual_memory_region.cpp`. Windows uses
+`VirtualAlloc`/`VirtualFree`/`VirtualProtect`; POSIX uses `mmap`/`mprotect`/
+`madvise`/`munmap`. It preserves the same generic lifecycle but delegates
+physical and TLB behavior to the host. Hosted expected-fault execution remains
+intentionally blocked in the normal process smoke.
+
+## 18. NativeAOT adapter boundary
+
+`tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_virtual_memory_adapter.*`
+wraps one `VirtualMemoryRegion`. The adapter exposes `trueReservationSemantics`
+and `backendModeName`, and a caller can require true reservation semantics at
+reserve time. The inactive probe uses the real adapter and passes in hosted
+mode. It does not initialize Workstation GC or create a managed heap.
+
+## 19. Validation
+
+Validation run on 2026-07-16:
+
+| Check | Result |
+| --- | --- |
+| Hosted generic VM smoke | PASS |
+| Hosted adapter probe / true-mode contract | PASS |
+| UEFI bootloader rebuild with frame-pool fields | PASS |
+| Experimental AMD64 kernel build | PASS |
+| QEMU baseline boot | PASS in the default run |
+| QEMU true VM smoke / `ALL_PASS` | PASS |
+| Frame allocation/release | PASS |
+| Metadata and virtual-range exhaustion | PASS |
+| Protection and expected-fault cases | PASS |
+| Rollback and teardown | PASS |
+| TLB and leak checks | PASS |
+| Hosted thread lifecycle / scheduler-event regressions | PASS |
+| Bare-metal native-thread QEMU lifecycle | PASS |
+| Generic ELF smoke | PASS |
+| Managed static artifact and bounded-allocation proofs | PASS |
+| Managed live execution proof | BLOCKED by pre-existing `RhpReversePInvokeAttachOrTrapThread2` map symbol |
+
+The reproducible entry points are
+`scripts/smoke-native-virtual-memory.ps1` and
+`scripts/smoke-native-virtual-memory-qemu.ps1`. The QEMU script now reports
+kernel build, QEMU discovery, native `ALL_PASS`, allocation/release,
+capacity/exhaustion, protection faults, rollback, teardown, TLB, leaks, and
+direct read/write as separate fields.
+
+## 20. Limitations and decision
+
+This completes the requested VM substrate, not full NativeAOT readiness. The
+implementation has no SMP shootdown, process isolation beyond one explicit
+owner, swapping, file-backed/shared mappings, COW, NUMA, large pages, write
+watch, execute permissions, or generic critical-section integration. Existing
+managed proof and broader scheduler/thread/ELF regression suites are separate
+from this focused VM validation and must remain gated before GC initialization.
+
+Decision for this VM pass: **Outcome A — true bare-metal reserve/commit
+lifecycle complete**. The exact next experiment is the generic critical
+section/mutex primitive needed by the inactive Workstation GC boundary; do not
+initialize GC yet.

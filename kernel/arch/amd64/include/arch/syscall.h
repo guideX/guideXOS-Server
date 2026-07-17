@@ -203,8 +203,8 @@ int64_t dispatch(SyscallArgs* args);
 
 // Main exception dispatcher (called from IDT stub).
 // Determines exception type and routes to appropriate handler.
-extern "C" void exception_dispatch(uint64_t vector, uint64_t error_code,
-                                   uint64_t rip, uint64_t rflags);
+extern "C" uint64_t exception_dispatch(uint64_t vector, uint64_t error_code,
+                                       uint64_t rip, uint64_t rflags);
 
 // Specific exception handlers
 void handle_syscall();                              // Via SYSCALL instruction

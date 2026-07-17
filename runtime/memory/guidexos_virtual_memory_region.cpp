@@ -1,6 +1,6 @@
 #include "guidexos_virtual_memory_region.h"
 
-#if defined(GXOS_BARE_METAL)
+#if defined(GXOS_BARE_METAL) && !defined(GXOS_TRUE_VIRTUAL_MEMORY)
 namespace gxos_vm_compat {
 using size_t = ::size_t;
 using uint8_t = ::uint8_t;
@@ -10,7 +10,7 @@ using uintptr_t = ::uintptr_t;
 #define std gxos_vm_compat
 #endif
 
-#if defined(GXOS_BARE_METAL)
+#if defined(GXOS_BARE_METAL) && !defined(GXOS_TRUE_VIRTUAL_MEMORY)
 
 namespace gxos {
 namespace runtime {
@@ -263,6 +263,15 @@ VmResult release(VirtualMemoryRegion& region) {
     return VmResult::Ok;
 }
 
+VmResult teardownAddressSpace() {
+    for (std::size_t index = 0; index < kMaxRegions; ++index) {
+        if (g_regions[index].active) {
+            g_regions[index] = BareRegionState{};
+        }
+    }
+    return VmResult::Ok;
+}
+
 VmResult query(const void* address, VirtualMemoryInfo* information) {
     if (address == nullptr || information == nullptr) return VmResult::InvalidArgument;
     *information = VirtualMemoryInfo{};
@@ -310,7 +319,7 @@ const char* lastDiagnostic() {
 } // namespace runtime
 } // namespace gxos
 
-#else
+#elif !defined(GXOS_BARE_METAL)
 
 #define WIN32_LEAN_AND_MEAN
 #if defined(_WIN32)
@@ -875,6 +884,28 @@ VmResult release(VirtualMemoryRegion& region) {
     return VmResult::Ok;
 }
 
+VmResult teardownAddressSpace() {
+    std::lock_guard<std::mutex> guard(g_lock);
+    while (g_regions != nullptr) {
+        HostRegionState* state = g_regions;
+#if defined(_WIN32)
+        if (!VirtualFree(state->base, 0, MEM_RELEASE)) {
+            setDiagnosticWithCode("VirtualFree(MEM_RELEASE)", static_cast<long>(GetLastError()));
+            return VmResult::HostFailure;
+        }
+#else
+        if (munmap(state->base, state->size) != 0) {
+            setDiagnosticWithCode("munmap", errno);
+            return VmResult::HostFailure;
+        }
+#endif
+        g_regions = state->next;
+        releaseMetadata(state);
+    }
+    setDiagnostic("ok");
+    return VmResult::Ok;
+}
+
 VmResult query(const void* address, VirtualMemoryInfo* information) {
     if (address == nullptr || information == nullptr) return VmResult::InvalidArgument;
     std::lock_guard<std::mutex> guard(g_lock);
@@ -892,6 +923,8 @@ VmResult query(const void* address, VirtualMemoryInfo* information) {
     information->generation = state->generation;
     information->reserved = true;
     information->committed = state->committed[pageIndex] != 0;
+    information->mappingPresent = information->committed;
+    information->physicalFrame = 0;
     information->protection = static_cast<MemoryProtection>(state->protections[pageIndex]);
     return VmResult::Ok;
 }
@@ -921,6 +954,7 @@ VirtualMemoryStats stats() {
     }
     result.physicalBackingAccounting = true;
     result.protectionEnforced = true;
+    result.trueReservation = true;
     return result;
 }
 

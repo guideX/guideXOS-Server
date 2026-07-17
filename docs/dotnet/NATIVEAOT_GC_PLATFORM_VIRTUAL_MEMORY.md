@@ -4,162 +4,141 @@ Status: inactive adapter-probe only. Workstation GC is not initialized, no GC
 heap is created, no finalizer/helper thread is started, and no collection is
 triggered.
 
-The locked matching source is the NativeAOT/runtime-pack baseline at commit
-`9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3`. The source extract is under
-`out/dotnet/gc-feasibility-baseline/source-extract`.
+## 1. Selected collector boundary
 
-## 1. GC VM requirements
+The future target remains one-node Workstation GC with background/concurrent GC,
+Server GC, NUMA placement, large pages, and write-watch disabled. The only
+platform surface advanced in this pass is virtual-memory reserve/commit/
+decommit/release/protection. This is not permission to make the collector
+reachable.
 
-The collector separates virtual-address reservation from commitment and
-release. It also exposes reset/discard, page-size and granularity queries,
-memory-status discovery, optional write-watch, large-page, and NUMA paths, and
-platform protection through the NativeAOT PAL. The selected target is:
+## 2. Required NativeAOT VM contract
 
-- Workstation GC
-- one heap/node
-- background/concurrent GC disabled
-- one managed application thread during the future first probe
-- finalizer/helper thread required later
-- no Server GC, NUMA placement, large pages, or write-watch mode
+The matching runtime-pack surface separates reservation from commitment and
+requires page size, allocation granularity, reserve, commit, decommit, release,
+protection, and memory-status queries. Reset/discard remains a distinct
+optional operation. The generic guideXOS API intentionally has no reset method;
+the adapter returns `VmResult::Unsupported` rather than aliasing reset to
+decommit.
 
-This pass implements only an inactive VM adapter probe. It does not make the
-collector reachable.
+## 3. Generic boundary
 
-## 2. Matching source symbols
+The adapter at
+`tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_virtual_memory_adapter.*`
+owns one `VirtualMemoryRegion` and forwards lifecycle calls to
+`runtime/memory/guidexos_virtual_memory_region.*`. It exposes:
 
-The collector declarations are in
-`src/coreclr/gc/env/gcenv.os.h`, with the Windows behavior in
-`src/coreclr/gc/windows/gcenv.windows.cpp`. The relevant declarations are at
-approximately lines 253-319 and 431-434 in the locked extract; the Windows
-implementations are approximately lines 685-834 and 1006.
-
-The platform-facing protection entry is
-`src/coreclr/nativeaot/Runtime/windows/PalRedhawkMinWin.cpp`:
-`PalVirtualProtect` at approximately line 998. The matching source uses
-`VirtualAlloc` reserve/commit, `VirtualFree` decommit/release, `MEM_RESET` for
-reset, and native protection calls.
-
-## 3. Mandatory/optional classification
-
-Classification is for the selected one-node, Workstation, no-background,
-no-large-page, no-NUMA configuration:
-
-| Collector surface | Matching source symbol | First initialization | First collection | Class | Adapter status |
-| --- | --- | --- | --- | --- | --- |
-| Page size | `GCToOSInterface::GetPageSize` | Required | Required | M | Maps to `pageSize()` |
-| Allocation granularity | `GCToOSInterface::Initialize` / system-info query | Required | Required | M | Maps to `allocationGranularity()` |
-| Reserve | `GCToOSInterface::VirtualReserve` | Required | Required | M | Maps to owned region reserve |
-| Commit | `GCToOSInterface::VirtualCommit` | Required | Required | M | Maps to region commit |
-| Decommit | `GCToOSInterface::VirtualDecommit` | Setup/lifecycle | Segment lifecycle | M | Maps to region decommit |
-| Release | `GCToOSInterface::VirtualRelease` | Setup/lifecycle | Segment lifecycle | M | Maps to region release |
-| Reset/discard | `GCToOSInterface::VirtualReset` | Not reached in selected startup proof | Not proven reachable in selected first collection | N | Precise `Unsupported`; not aliased |
-| Protection | `PalVirtualProtect` | PAL/runtime setup only | Mode-dependent | C | Generic hosted support; bare enforcement unavailable |
-| Memory availability | `GCToOSInterface::GetMemoryStatus` | Required policy input | Low-memory policy | M | Bounded `memoryAvailable` probe only |
-| Large pages | `VirtualReserveAndCommitLargePages` | Disabled | Disabled | N | `supportsLargePages() == false` |
-| NUMA-aware reserve/commit | node parameter / `VirtualAllocExNuma` | One node selected | Disabled | N | `supportsNumaPlacement() == false` |
-| Write-watch capability | `SupportsWriteWatch` | Disabled | Disabled with selected mode | N | Not implemented |
-| Write-watch query/reset | `GetWriteWatch` | Disabled | Disabled with selected mode | N | Not implemented |
-| Unknown extra mode surface | future configuration-dependent entry points | Unknown | Unknown | U | Not exposed |
-
-`M` does not mean GC initialization is safe today; it means the symbol is
-required once that initialization is intentionally attempted. The generic
-bare-metal implementation is currently an eager-backed compatibility backend,
-so it cannot satisfy the collector's true reserve/commit contract.
-
-## 4. Mapping to generic guideXOS VM
-
-The inactive adapter is under
-`tools/dotnet/runtime-pack/src/platform/` and owns an opaque
-`VirtualMemoryHandle` containing one generic `VirtualMemoryRegion`:
-
-| Adapter operation | Generic operation |
-| --- | --- |
-| `reserveVirtualMemory` | `reserve` |
-| `commitVirtualMemory` | `commit` |
-| `decommitVirtualMemory` | `decommit` |
-| `releaseVirtualMemory` | `release` |
-| `baseAddress` | region base |
-| `getPageSize` | `pageSize` |
-| `getAllocationGranularity` | `allocationGranularity` |
-| `memoryAvailable` | bounded maximum-region query |
-| large pages/NUMA | explicit false/unsupported capability |
-
-The adapter does not duplicate test-only operations. The probe calls these
-same adapter functions and verifies reserve, commit, zeroing, decommit,
-recommit, release, stale release, page size, granularity, and preferred-base
-behavior.
-
-## 5. Page size and granularity
-
-The current AMD64 bare-metal page size is 4096 bytes. Hosted builds query the
-host page size. The generic API requires page-aligned commit/decommit ranges.
-Windows hosted allocation granularity is reported by the host implementation;
-the bare-metal compatibility backend reports 4096 bytes and does not claim a
-Windows-style 64 KiB granularity.
-
-## 6. Preferred-address requirements
-
-The generic API treats a non-null preferred base as exact placement. The
-address must be absolutely aligned and the entire rounded reservation must be
-available. Hosted failure to honor it returns `AddressUnavailable` rather than
-silently relocating the region. The inactive adapter forwards the request.
-
-The bare-metal compatibility arena accepts exact addresses only inside its
-bounded arena. It is not a replacement for collector segment placement and no
-collector proof base is hardcoded.
-
-## 7. Decommit/reset/release distinctions
-
-The matching source explicitly documents `VirtualReset` as a discard hint for
-contents that are no longer of interest while the range remains committed; it
-is not decommit. The Windows implementation calls `MEM_RESET` and optionally
-`VirtualUnlock`. `VirtualDecommit` instead uses `MEM_DECOMMIT`, and
-`VirtualRelease` uses `MEM_RELEASE` for the complete reservation.
-
-The generic API currently has no reset/discard operation. The adapter returns
-`VmResult::Unsupported` for reset, with the source distinction preserved. It
-does not alias reset to decommit, because that would change commitment and
-addressing semantics without source evidence for the generic implementation.
-Reset should be added only if it becomes mandatory for the selected
-initialization or first-collection path.
-
-## 8. Inactive adapter probe
-
-The independent hosted command is:
-
-```text
-scripts/smoke-native-virtual-memory.ps1
+```cpp
+bool trueReservationSemantics();
+const char* backendModeName();
 ```
 
-It reports the generic lifecycle and then runs
-`guidexos_nativeaot_virtual_memory_adapter_probe`. The probe passed on
-2026-07-16 for page size, allocation granularity, reserve, commit/zeroing,
-decommit/recommit, reset classification, release, and stale release. The
-probe does not initialize GC, create a heap, start a helper thread, collect, or
-modify managed proof execution.
+`reserveVirtualMemory(..., requireTrueReservation=true)` refuses an
+eager-compatibility backend. No collector-specific behavior was added to the
+frame allocator, page-table layer, process model, page-fault handler, or
+generic VM API.
 
-The QEMU VM test independently passed the compatibility lifecycle, but records
-protection, physical-page accounting, and expected-fault guard validation as
-blocked. Consequently the adapter probe is a hosted contract probe, not GC
-readiness evidence.
+## 4. True bare-metal mode
 
-## 9. Remaining GC initialization blockers
+The experimental AMD64 kernel compiles `GXOS_TRUE_VIRTUAL_MEMORY`. The UEFI
+bootloader supplies a 2 MiB identity-mapped frame pool. The generic address-
+space layer owns both VM data frames and page-table frames. Reservation alone
+uses zero VM data frames; commit allocates, zeroes, maps, and accounts frames;
+decommit unmaps and returns them; release removes mappings and metadata.
 
-The exact next blocker is true generic bare-metal reservation/commit ownership:
-an address-space-owned interval index, physical-frame allocator, page-table
-mapping/unmapping, zero-on-commit, permission updates, and TLB invalidation.
-That is the smallest correction required before claiming the collector's VM
-contract honestly.
+The runtime reservation range is bounded to 64 MiB with 32 metadata slots and
+4 MiB maximum regions. This is sufficient for the lifecycle proof and is not a
+claim of a production process VM or a GC heap policy.
 
-After that, the previously identified GC blockers remain: critical sections,
-GC event/wait semantics, FLS/TLS lifetime, ThreadStore attachment, stack
-bounds/context contracts, finalizer/helper startup, heap/root/write-barrier
-initialization, and controlled teardown. None are activated by this pass.
+## 5. Adapter mapping
 
-## 10. Exact next primitive
+| Adapter operation | Generic guideXOS operation | Status |
+| --- | --- | --- |
+| page size | `pageSize()` | Implemented |
+| allocation granularity | `allocationGranularity()` | Implemented |
+| reserve | `reserve()` | Implemented; true mode can be required |
+| commit | `commit()` | Implemented; zero-on-commit |
+| decommit | `decommit()` | Implemented; unmap and frame release |
+| release | `release()` | Implemented; unmap, release, metadata clear |
+| protection | `protect()` | Implemented for R/RW/NoAccess in bare AMD64 |
+| reset/discard | none | Explicit `Unsupported` |
+| memory available | bounded maximum-region check | Probe only |
+| large pages / NUMA / write-watch | none | Explicitly unsupported/disabled |
 
-Because the current bare-metal address-space model provides only eager backing,
-the decision is Outcome C for this VM pass. The next experiment is to add the
-smallest address-space-owned reservation metadata and physical-frame/page-table
-mapping invariant, including decommit/recommit zeroing and TLB updates. Keep it
-generic, bounded, and independent of NativeAOT; do not initialize GC yet.
+## 6. Protection and fault evidence
+
+Bare-metal protection maps NoAccess to a non-present PTE, ReadOnly to a
+present non-writable PTE, and ReadWrite to a present writable PTE. CR0.WP is
+enabled. The opt-in QEMU fault hook validates exact fault address, read/write
+error bit, protection error bit, and instruction resume address. It tests
+read-only writes, no-access reads, reserved-uncommitted pages, decommitted
+pages, and released pages. Unexpected faults still use the normal fatal path.
+
+## 7. Inactive adapter probe
+
+Run:
+
+```text
+powershell -ExecutionPolicy Bypass -File scripts/smoke-native-virtual-memory.ps1
+```
+
+The hosted generic lifecycle and real adapter probe passed on 2026-07-16,
+including page size, granularity, true-mode reserve request, commit/zeroing,
+decommit/recommit zeroing, reset classification, release, and stale release.
+The probe does not initialize GC or create managed objects.
+
+## 8. QEMU evidence
+
+Run:
+
+```text
+powershell -ExecutionPolicy Bypass -File scripts/smoke-native-virtual-memory-qemu.ps1
+```
+
+The default run rebuilt the kernel, ran the QEMU baseline boot, and ran the
+true VM test. The result was `ALL_PASS`. Separate reported fields passed for
+frame allocation/release, metadata capacity, virtual-range exhaustion,
+protection-fault handling, rollback, teardown, TLB invalidation, no leaks, and
+direct read/write behavior.
+
+The hosted thread lifecycle, scheduler/event regressions, bare-metal
+native-thread QEMU lifecycle, generic ELF smoke, and managed static
+artifact/bounded-allocation proofs also passed. The managed live execution
+proof remains blocked before execution by the existing missing
+`RhpReversePInvokeAttachOrTrapThread2` map symbol; this pass does not modify
+that runtime/GC boundary.
+
+## 9. Reset/discard distinction
+
+NativeAOT `VirtualReset` is a discard hint while the reservation remains
+committed. It is not decommit and it is not release. The current generic API
+has no source-backed discard primitive, so the adapter returns
+`VmResult::Unsupported` and preserves the distinction.
+
+## 10. Current initialization blockers
+
+The VM lifecycle blocker addressed by this pass was the absence of generic
+frame ownership, page-table mapping/unmapping, zero-on-commit, protection,
+TLB invalidation, bounded rollback, and address-space teardown. Those pieces
+are now proven by the focused QEMU test.
+
+The remaining blockers for actual Workstation GC initialization are outside
+this VM pass: generic critical sections/mutexes, GC event/wait semantics,
+FLS/TLS lifetime, ThreadStore attachment, stack/context contracts,
+finalizer/helper startup, heap/root/write-barrier initialization, and a
+controlled managed teardown policy.
+
+## 11. No GC activation
+
+No code in this pass calls GC initialization, creates an allocation context,
+starts managed threads, invokes a finalizer, or triggers collection. The
+adapter probe is a contract probe only. It must not be cited as evidence that
+NativeAOT managed allocation or GC is ready.
+
+## 12. Decision and next experiment
+
+Decision for the VM pass: **Outcome A — true bare-metal reserve/commit
+lifecycle complete**. The next experiment is the generic critical-section/
+mutex primitive required by the inactive Workstation GC boundary. Keep GC
+initialization disabled until that primitive and the remaining managed startup
+contracts are independently validated.

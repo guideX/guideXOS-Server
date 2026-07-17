@@ -12,12 +12,18 @@ int main() {
     const std::size_t page = getPageSize();
     bool passed = page != 0 && getAllocationGranularity() >= page &&
         memoryAvailable(page) && !supportsLargePages() && !supportsNumaPlacement();
+    const bool trueMode = trueReservationSemantics();
+    std::cout << "Adapter backend mode: " << backendModeName() << "\n";
+    std::cout << "True reserve/commit separation: "
+              << (trueMode ? "PASS" : "FAIL") << "\n";
+    passed = passed && trueMode;
     std::cout << "Page size: " << (passed ? "PASS" : "FAIL") << "\n";
     std::cout << "Allocation granularity: "
               << (passed ? "PASS" : "FAIL") << "\n";
 
     VirtualMemoryHandle* handle = nullptr;
-    const VmResult reserved = reserveVirtualMemory(page * 3, page, nullptr, &handle);
+    const VmResult reserved = reserveVirtualMemory(
+        page * 3, page, nullptr, &handle, true);
     passed = passed && reserved == VmResult::Ok && handle != nullptr;
     std::cout << "Adapter reserve: " << (reserved == VmResult::Ok ? "PASS" : "FAIL") << "\n";
 

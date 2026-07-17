@@ -2,6 +2,8 @@
 
 #if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
 
+#include "include/kernel/address_space.h"
+#include "include/kernel/interrupts.h"
 #include "include/kernel/serial_debug.h"
 #include "runtime/memory/guidexos_virtual_memory_region.h"
 
@@ -14,11 +16,9 @@ using gxos::runtime::virtual_memory::VmResult;
 using gxos::runtime::virtual_memory::VirtualMemoryInfo;
 using gxos::runtime::virtual_memory::VirtualMemoryRegion;
 using gxos::runtime::virtual_memory::VirtualMemoryStats;
-
 using vm_size = gxos_vm_size;
 
 bool g_hasFailure = false;
-bool g_hasBlocked = false;
 
 void status(const char* name, bool passed) {
     kernel::serial::puts("[native-virtual-memory-test] ");
@@ -27,18 +27,100 @@ void status(const char* name, bool passed) {
     if (!passed) g_hasFailure = true;
 }
 
-void blocked(const char* name) {
+void metric(const char* name, vm_size value) {
     kernel::serial::puts("[native-virtual-memory-test] ");
     kernel::serial::puts(name);
-    kernel::serial::puts(": BLOCKED\n");
-    g_hasBlocked = true;
+    kernel::serial::puts(": ");
+    kernel::serial::put_hex64(static_cast<uint64_t>(value));
+    kernel::serial::puts("\n");
 }
 
-bool zero(const uint8_t* address, vm_size size) {
+bool zero(const volatile uint8_t* address, vm_size size) {
     for (vm_size index = 0; index < size; ++index) {
         if (address[index] != 0) return false;
     }
     return true;
+}
+
+// These helpers contain one deliberately faulting instruction. The expected
+// page-fault hook advances over that instruction and returns to the helper's
+// caller, so an incorrect fault still follows the normal fatal path.
+extern "C" void gxos_expected_read(volatile uint8_t* address);
+extern "C" void gxos_expected_write(volatile uint8_t* address);
+
+#if defined(__MINGW32__) || defined(__MINGW64__) || defined(_WIN64)
+asm(
+    ".global gxos_expected_read\n"
+    "gxos_expected_read:\n"
+    "    movb (%rcx), %al\n"
+    "    ret\n"
+    ".global gxos_expected_write\n"
+    "gxos_expected_write:\n"
+    "    movb $0xA5, (%rcx)\n"
+    "    ret\n"
+);
+constexpr uint64_t kReadInstructionLength = 2;
+constexpr uint64_t kWriteInstructionLength = 3;
+#else
+asm(
+    ".global gxos_expected_read\n"
+    "gxos_expected_read:\n"
+    "    movb (%rdi), %al\n"
+    "    ret\n"
+    ".global gxos_expected_write\n"
+    "gxos_expected_write:\n"
+    "    movb $0xA5, (%rdi)\n"
+    "    ret\n"
+);
+constexpr uint64_t kReadInstructionLength = 2;
+constexpr uint64_t kWriteInstructionLength = 3;
+#endif
+
+struct ExpectedFault {
+    uintptr_t address;
+    bool write;
+    bool protection;
+    uint64_t instructionLength;
+    bool active;
+    bool passed;
+};
+
+ExpectedFault g_expectedFault{};
+
+bool expectedFaultHandler(uint64_t faultAddress, uint64_t errorCode,
+                          uint64_t faultRip, uint64_t* resumeRip) {
+    const bool isWrite = (errorCode & 0x2) != 0;
+    const bool isProtection = (errorCode & 0x1) != 0;
+    if (!g_expectedFault.active ||
+        faultAddress != g_expectedFault.address ||
+        isWrite != g_expectedFault.write ||
+        isProtection != g_expectedFault.protection ||
+        resumeRip == nullptr) {
+        return false;
+    }
+    g_expectedFault.passed = true;
+    *resumeRip = faultRip + g_expectedFault.instructionLength;
+    return true;
+}
+
+bool expectedFault(const char* name, volatile uint8_t* address, bool write,
+                   bool protection) {
+    g_expectedFault = ExpectedFault{
+        reinterpret_cast<uintptr_t>(address), write, protection,
+        write ? kWriteInstructionLength : kReadInstructionLength, true, false};
+    kernel::interrupts::set_expected_page_fault_handler(expectedFaultHandler);
+    if (write) gxos_expected_write(address);
+    else gxos_expected_read(address);
+    kernel::interrupts::clear_expected_page_fault_handler();
+    g_expectedFault.active = false;
+    status(name, g_expectedFault.passed);
+    return g_expectedFault.passed;
+}
+
+bool reserveAt(VirtualMemoryRegion* region, vm_size size, void* base,
+               VmResult expected) {
+    return gxos::runtime::virtual_memory::reserve(size, gxos::runtime::virtual_memory::pageSize(),
+                                                   base, region) == expected;
 }
 
 } // namespace
@@ -47,98 +129,286 @@ void run() {
     kernel::serial::puts("[native-virtual-memory-test] BEGIN\n");
     const vm_size page = gxos::runtime::virtual_memory::pageSize();
     const VirtualMemoryStats initial = gxos::runtime::virtual_memory::stats();
-    status("Initial metadata", initial.activeRegions == 0 && initial.committedPages == 0);
+    status("Initial metadata", kernel::memory::address_space::isInitialized() &&
+        initial.activeRegions == 0 && initial.committedPages == 0 &&
+        initial.regionOwnedFrames == 0);
 
     VirtualMemoryRegion region;
+    const VirtualMemoryStats beforeReservation = gxos::runtime::virtual_memory::stats();
     const VmResult reserved = gxos::runtime::virtual_memory::reserve(
         page * 4, page, nullptr, &region);
-    status("Reservation", reserved == VmResult::Ok && region.base != nullptr);
-
+    const VirtualMemoryStats afterReservation = gxos::runtime::virtual_memory::stats();
     VirtualMemoryInfo info{};
-    const bool queried = reserved == VmResult::Ok &&
+    const bool reservationQuery = reserved == VmResult::Ok &&
         gxos::runtime::virtual_memory::query(region.base, &info) == VmResult::Ok &&
-        info.reserved && !info.committed;
-    status("Query", queried);
+        info.reserved && !info.committed && !info.mappingPresent &&
+        info.physicalFrame == 0;
+    const bool trueUnbacked = reserved == VmResult::Ok && reservationQuery &&
+        afterReservation.regionOwnedFrames == beforeReservation.regionOwnedFrames &&
+        afterReservation.freeFrames == beforeReservation.freeFrames &&
+        afterReservation.pageTableFrames == beforeReservation.pageTableFrames;
+    status("True unbacked reservation", trueUnbacked);
+    metric("Reservation data-frame delta",
+           afterReservation.regionOwnedFrames - beforeReservation.regionOwnedFrames);
+    status("Query distinguishes reserved and committed", reservationQuery);
 
-    VirtualMemoryRegion overlap;
-    const bool overlapRejected = reserved == VmResult::Ok &&
-        gxos::runtime::virtual_memory::reserve(page, page, region.base, &overlap) ==
-            VmResult::AddressUnavailable;
-    status("Overlap rejection", overlapRejected);
+    const void* base = region.base;
+    VirtualMemoryRegion exactOverlap;
+    VirtualMemoryRegion beginningOverlap;
+    VirtualMemoryRegion endingOverlap;
+    VirtualMemoryRegion containingOverlap;
+    const bool exact = reserved == VmResult::Ok && reserveAt(
+        &exactOverlap, page * 4, const_cast<void*>(base), VmResult::AddressUnavailable);
+    const bool beginning = reserved == VmResult::Ok && reserveAt(
+        &beginningOverlap, page * 2,
+        static_cast<uint8_t*>(const_cast<void*>(base)) + page,
+        VmResult::AddressUnavailable);
+    const bool ending = reserved == VmResult::Ok && reserveAt(
+        &endingOverlap, page * 2,
+        static_cast<uint8_t*>(const_cast<void*>(base)) + page * 2,
+        VmResult::AddressUnavailable);
+    const bool containing = reserved == VmResult::Ok && reserveAt(
+        &containingOverlap, page * 6, const_cast<void*>(base),
+        VmResult::AddressUnavailable);
+    status("Preferred-base reservation", reserved == VmResult::Ok && base != nullptr);
+    status("Overlap rejection", exact && beginning && ending && containing);
+
+    VirtualMemoryRegion adjacent;
+    const bool adjacentResult = reserved == VmResult::Ok &&
+        reserveAt(&adjacent, page, static_cast<uint8_t*>(const_cast<void*>(base)) + page * 4,
+                  VmResult::Ok);
+    status("Adjacent non-overlapping reservation", adjacentResult);
+    if (adjacentResult) (void)gxos::runtime::virtual_memory::release(adjacent);
 
     bool committed = false;
     bool zeroInitialized = false;
-    bool readableWritable = false;
+    bool directReadWrite = false;
+    bool mappingInvariant = false;
     if (reserved == VmResult::Ok) {
+        const VirtualMemoryStats beforeCommit = gxos::runtime::virtual_memory::stats();
         uint8_t* bytes = static_cast<uint8_t*>(region.base);
-        const VmResult result = gxos::runtime::virtual_memory::commit(
-            region, 0, page, MemoryProtection::ReadWrite);
-        committed = result == VmResult::Ok;
-        zeroInitialized = committed && zero(bytes, page);
+        committed = gxos::runtime::virtual_memory::commit(
+            region, 0, page, MemoryProtection::ReadWrite) == VmResult::Ok;
+        const VirtualMemoryStats afterCommit = gxos::runtime::virtual_memory::stats();
+        VirtualMemoryInfo committedInfo{};
+        zeroInitialized = committed && zero(bytes, page) &&
+            gxos::runtime::virtual_memory::query(bytes, &committedInfo) == VmResult::Ok &&
+            committedInfo.committed && committedInfo.mappingPresent &&
+            committedInfo.physicalFrame != 0 &&
+            afterCommit.regionOwnedFrames == beforeCommit.regionOwnedFrames + 1;
         if (committed) {
-            bytes[0] = 0xA5;
-            bytes[page - 1] = 0x5A;
+            bytes[0] = 0x5A;
+            directReadWrite = bytes[0] == 0x5A;
         }
-        readableWritable = committed && bytes[0] == 0xA5 && bytes[page - 1] == 0x5A;
+        mappingInvariant = committed && committedInfo.mappingPresent;
+        metric("Committed-frame delta", afterCommit.regionOwnedFrames - beforeCommit.regionOwnedFrames);
     }
-    status("Commit", committed);
+    status("Partial commit", committed);
     status("Zero initialization", zeroInitialized);
-    status("Read/write access", readableWritable);
+    status("Direct read/write behavior", directReadWrite);
+    status("Page-table mapping invariant", mappingInvariant);
 
     bool partial = false;
+    bool decommitReleased = false;
     bool recommitZero = false;
     if (reserved == VmResult::Ok) {
         uint8_t* bytes = static_cast<uint8_t*>(region.base);
-        const bool partialCommit =
+        const bool selected =
             gxos::runtime::virtual_memory::commit(region, page, page,
                                                    MemoryProtection::ReadWrite) == VmResult::Ok &&
             gxos::runtime::virtual_memory::commit(region, page * 3, page,
                                                    MemoryProtection::ReadWrite) == VmResult::Ok;
-        if (partialCommit) bytes[page * 3] = 0x3C;
-        const bool partialQuery = partialCommit &&
-            gxos::runtime::virtual_memory::query(bytes + page * 3, &info) == VmResult::Ok &&
-            info.committed;
-        const bool decommitted = partialCommit &&
-            gxos::runtime::virtual_memory::decommit(region, page, page) == VmResult::Ok &&
-            gxos::runtime::virtual_memory::query(bytes + page, &info) == VmResult::Ok &&
-            !info.committed && bytes[page * 3] == 0x3C;
-        const bool recommitted = decommitted &&
-            gxos::runtime::virtual_memory::commit(region, page, page,
-                                                   MemoryProtection::ReadWrite) == VmResult::Ok;
-        recommitZero = recommitted && zero(bytes + page, page);
-        partial = partialCommit && partialQuery && decommitted;
-    }
-    status("Partial commit", partial);
-    status("Partial decommit", partial);
-    status("Recommit zeroing", recommitZero);
+        if (selected) {
+            bytes[page] = 0x31;
+            bytes[page * 3] = 0x3C;
+        }
+        VirtualMemoryInfo third{};
+        const bool queryThird = selected &&
+            gxos::runtime::virtual_memory::query(bytes + page * 3, &third) == VmResult::Ok &&
+            third.committed && third.mappingPresent;
+        const VirtualMemoryStats beforeDecommit = gxos::runtime::virtual_memory::stats();
+        const bool removed = selected &&
+            gxos::runtime::virtual_memory::decommit(region, page, page) == VmResult::Ok;
+        VirtualMemoryInfo removedInfo{};
+        const bool retained = removed &&
+            gxos::runtime::virtual_memory::query(bytes + page, &removedInfo) == VmResult::Ok &&
+            removedInfo.reserved && !removedInfo.committed &&
+            !removedInfo.mappingPresent && bytes[page * 3] == 0x3C;
+        const VirtualMemoryStats afterDecommit = gxos::runtime::virtual_memory::stats();
+        decommitReleased = removed &&
+            afterDecommit.regionOwnedFrames + 1 == beforeDecommit.regionOwnedFrames;
+        partial = selected && queryThird && retained;
+        status("Partial decommit", partial);
+        status("Reserved range retained after decommit", retained);
+        status("Decommit releases physical frame", decommitReleased);
 
-    if (!gxos::runtime::virtual_memory::protectionIsEnforced()) {
-        blocked("Protection transition");
-        blocked("Expected-fault guard test");
-        blocked("Physical-page leak check");
+        const bool recommitted = gxos::runtime::virtual_memory::commit(
+            region, page, page, MemoryProtection::ReadWrite) == VmResult::Ok;
+        recommitZero = recommitted && zero(bytes + page, page);
+        status("Recommit zeroing", recommitZero);
+    } else {
+        status("Partial decommit", false);
+        status("Reserved range retained after decommit", false);
+        status("Decommit releases physical frame", false);
+        status("Recommit zeroing", false);
     }
-    else {
-        status("Protection transition", false);
-        status("Expected-fault guard test", false);
-        status("Physical-page leak check", false);
+
+    bool protection = false;
+    if (reserved == VmResult::Ok) {
+        uint8_t* bytes = static_cast<uint8_t*>(region.base);
+        VirtualMemoryInfo beforeProtection{};
+        const bool havePhysical = gxos::runtime::virtual_memory::query(
+            bytes, &beforeProtection) == VmResult::Ok && beforeProtection.committed;
+        const bool readOnly = gxos::runtime::virtual_memory::protect(
+            region, 0, page, MemoryProtection::ReadOnly) == VmResult::Ok &&
+            gxos::runtime::virtual_memory::query(bytes, &info) == VmResult::Ok &&
+            info.protection == MemoryProtection::ReadOnly && info.mappingPresent &&
+            info.physicalFrame == beforeProtection.physicalFrame;
+        const bool readOnlyFault = expectedFault(
+            "Read-only enforcement", bytes, true, true);
+        const bool restored = gxos::runtime::virtual_memory::protect(
+            region, 0, page, MemoryProtection::ReadWrite) == VmResult::Ok;
+        const bool noAccess = gxos::runtime::virtual_memory::protect(
+            region, 0, page, MemoryProtection::NoAccess) == VmResult::Ok &&
+            gxos::runtime::virtual_memory::query(bytes, &info) == VmResult::Ok &&
+            info.committed && !info.mappingPresent &&
+            info.physicalFrame == beforeProtection.physicalFrame;
+        const bool noAccessFault = expectedFault(
+            "No-access enforcement", bytes, false, false);
+        const bool restoredAgain = gxos::runtime::virtual_memory::protect(
+            region, 0, page, MemoryProtection::ReadWrite) == VmResult::Ok;
+        const bool reservedFault = expectedFault(
+            "Reserved-uncommitted fault", bytes + page * 2, false, false);
+
+        const bool decommitForFault = gxos::runtime::virtual_memory::decommit(
+            region, page, page) == VmResult::Ok;
+        const bool decommittedFault = decommitForFault && expectedFault(
+            "Decommitted-page fault", bytes + page, false, false);
+        const bool restoreAfterFault = gxos::runtime::virtual_memory::commit(
+            region, page, page, MemoryProtection::ReadWrite) == VmResult::Ok &&
+            zero(bytes + page, page);
+        protection = havePhysical && readOnly && readOnlyFault && restored &&
+            noAccess && noAccessFault && restoredAgain && reservedFault &&
+            decommittedFault && restoreAfterFault;
     }
+    status("Protection transitions", protection);
+
+    // Deterministic physical-frame rollback: only two VM frames are allowed
+    // for a four-page commit; all newly mapped pages must be rolled back.
+    VirtualMemoryRegion exhaustion;
+    const bool exhaustionReserved = gxos::runtime::virtual_memory::reserve(
+        page * 4, page, nullptr, &exhaustion) == VmResult::Ok;
+    const VirtualMemoryStats beforeExhaustion = gxos::runtime::virtual_memory::stats();
+    kernel::memory::address_space::setVmRegionFrameLimitForTests(2);
+    const VmResult exhaustionResult = exhaustionReserved
+        ? gxos::runtime::virtual_memory::commit(
+            exhaustion, 0, page * 4, MemoryProtection::ReadWrite)
+        : VmResult::HostFailure;
+    kernel::memory::address_space::clearVmRegionFrameLimitForTests();
+    VirtualMemoryInfo exhaustionInfo{};
+    const VirtualMemoryStats afterExhaustion = gxos::runtime::virtual_memory::stats();
+    const bool rollback = exhaustionReserved && exhaustionResult == VmResult::OutOfMemory &&
+        exhaustion.committedSize == 0 && afterExhaustion.regionOwnedFrames ==
+            beforeExhaustion.regionOwnedFrames &&
+        gxos::runtime::virtual_memory::query(exhaustion.base, &exhaustionInfo) == VmResult::Ok &&
+        !exhaustionInfo.committed && !exhaustionInfo.mappingPresent;
+    status("Physical-frame exhaustion rollback", rollback);
+    if (exhaustionReserved) (void)gxos::runtime::virtual_memory::release(exhaustion);
 
     const void* oldBase = region.base;
+    const VirtualMemoryStats beforeRelease = gxos::runtime::virtual_memory::stats();
     const VmResult released = gxos::runtime::virtual_memory::release(region);
-    status("Release", released == VmResult::Ok && region.base == nullptr);
-    status("Range reuse", gxos::runtime::virtual_memory::reserve(
-        page, page, const_cast<void*>(oldBase), &region) == VmResult::Ok);
-    if (region.base != nullptr) (void)gxos::runtime::virtual_memory::release(region);
-    const VirtualMemoryStats final = gxos::runtime::virtual_memory::stats();
-    status("Reservation-metadata leak check", final.activeRegions == 0);
+    const VirtualMemoryStats afterRelease = gxos::runtime::virtual_memory::stats();
+    const bool releaseOk = released == VmResult::Ok && region.base == nullptr &&
+        afterRelease.activeRegions == 0 && afterRelease.mappingCount == 0 &&
+        afterRelease.regionOwnedFrames == 0 &&
+        afterRelease.freeFrames + afterRelease.pageTableFrames ==
+            afterRelease.totalKnownFrames;
+    status("Release", releaseOk);
+    metric("Released-frame delta",
+           beforeRelease.regionOwnedFrames - afterRelease.regionOwnedFrames);
+    const bool releaseFault = releaseOk && expectedFault(
+        "Released-page fault", static_cast<volatile uint8_t*>(const_cast<void*>(oldBase)),
+        false, false);
+    (void)releaseFault;
+
+    VirtualMemoryRegion reused;
+    const bool rangeReuse = releaseOk && gxos::runtime::virtual_memory::reserve(
+        page, page, const_cast<void*>(oldBase), &reused) == VmResult::Ok &&
+        reused.base == oldBase &&
+        gxos::runtime::virtual_memory::release(reused) == VmResult::Ok;
+    status("Range reuse", rangeReuse);
+
+    // Force metadata-pool exhaustion without consuming backing frames.
+    VirtualMemoryRegion metadataRegions[32];
+    bool metadataReserved = true;
+    for (vm_size index = 0; index < 32; ++index) {
+        metadataReserved = metadataReserved &&
+            gxos::runtime::virtual_memory::reserve(page, page, nullptr,
+                                                   &metadataRegions[index]) == VmResult::Ok;
+    }
+    VirtualMemoryRegion metadataOverflow;
+    const bool metadataExhausted = metadataReserved &&
+        gxos::runtime::virtual_memory::reserve(page, page, nullptr,
+                                               &metadataOverflow) == VmResult::OutOfMemory;
+    status("Metadata exhaustion", metadataExhausted);
+    for (vm_size index = 0; index < 32; ++index) {
+        (void)gxos::runtime::virtual_memory::release(metadataRegions[index]);
+    }
+
+    // Fill the bounded runtime virtual range with max-sized reservations.
+    VirtualMemoryRegion rangeRegions[16];
+    bool rangeReserved = true;
+    for (vm_size index = 0; index < 16; ++index) {
+        rangeReserved = rangeReserved &&
+            gxos::runtime::virtual_memory::reserve(
+                gxos::runtime::virtual_memory::maximumRegionSize(), page, nullptr,
+                &rangeRegions[index]) == VmResult::Ok;
+    }
+    VirtualMemoryRegion rangeOverflow;
+    const bool rangeExhausted = rangeReserved &&
+        gxos::runtime::virtual_memory::reserve(page, page, nullptr,
+                                               &rangeOverflow) == VmResult::AddressUnavailable;
+    status("Virtual-range exhaustion", rangeExhausted);
+    for (vm_size index = 0; index < 16; ++index) {
+        (void)gxos::runtime::virtual_memory::release(rangeRegions[index]);
+    }
+
+    // Process/address-space teardown: full, partial, and uncommitted regions
+    // all belong to the one explicit current owner in this pass.
+    VirtualMemoryRegion ownerFull;
+    VirtualMemoryRegion ownerPartial;
+    VirtualMemoryRegion ownerUncommitted;
+    const bool ownersReserved =
+        gxos::runtime::virtual_memory::reserve(page * 2, page, nullptr, &ownerFull) == VmResult::Ok &&
+        gxos::runtime::virtual_memory::reserve(page * 2, page, nullptr, &ownerPartial) == VmResult::Ok &&
+        gxos::runtime::virtual_memory::reserve(page, page, nullptr, &ownerUncommitted) == VmResult::Ok;
+    const bool ownersCommitted = ownersReserved &&
+        gxos::runtime::virtual_memory::commit(ownerFull, 0, page,
+                                              MemoryProtection::ReadWrite) == VmResult::Ok &&
+        gxos::runtime::virtual_memory::commit(ownerPartial, 0, page,
+                                              MemoryProtection::ReadWrite) == VmResult::Ok;
+    const void* staleOwnerBase = ownerFull.base;
+    const VmResult teardown = gxos::runtime::virtual_memory::teardownAddressSpace();
+    const VirtualMemoryStats afterTeardown = gxos::runtime::virtual_memory::stats();
+    const bool teardownOk = ownersCommitted && teardown == VmResult::Ok &&
+        afterTeardown.activeRegions == 0 && afterTeardown.mappingCount == 0 &&
+        afterTeardown.regionOwnedFrames == 0 &&
+        gxos::runtime::virtual_memory::commit(ownerFull, 0, page,
+            MemoryProtection::ReadWrite) == VmResult::AlreadyReleased &&
+        gxos::runtime::virtual_memory::query(staleOwnerBase, &info) == VmResult::NotFound;
+    status("Process/address-space teardown", teardownOk);
+
+    const bool physicalLeakCheck = afterTeardown.regionOwnedFrames == 0 &&
+        afterTeardown.freeFrames + afterTeardown.pageTableFrames ==
+            afterTeardown.totalKnownFrames;
+    status("Physical-frame leak check", physicalLeakCheck);
+    status("Mapping leak check", afterTeardown.mappingCount == 0);
+    status("TLB invalidation", afterTeardown.tlbInvalidations != 0);
 
     if (g_hasFailure) {
         kernel::serial::puts("[native-virtual-memory-test] ALL_FAIL\n");
-    }
-    else if (g_hasBlocked) {
-        kernel::serial::puts("[native-virtual-memory-test] ALL_BLOCKED\n");
-    }
-    else {
+    } else {
         kernel::serial::puts("[native-virtual-memory-test] ALL_PASS\n");
     }
 }

@@ -18,6 +18,7 @@
 #include "include/arch/syscall.h"
 #include "include/arch/amd64.h"
 #include "include/arch/context_switch.h"
+#include "kernel/interrupts.h"
 
 #if defined(_MSC_VER)
 #define GXOS_MSVC_STUB 1
@@ -273,8 +274,8 @@ int64_t dispatch(SyscallArgs* args)
 // Exception dispatcher (called from IDT stubs)
 // ================================================================
 
-extern "C" void exception_dispatch(uint64_t vector, uint64_t error_code,
-                                   uint64_t rip, uint64_t rflags)
+extern "C" uint64_t exception_dispatch(uint64_t vector, uint64_t error_code,
+                                        uint64_t rip, uint64_t rflags)
 {
     (void)rflags;
     
@@ -303,6 +304,11 @@ extern "C" void exception_dispatch(uint64_t vector, uint64_t error_code,
 #else
                 fault_addr = read_cr2();
 #endif
+                uint64_t resume_rip = 0;
+                if (kernel::interrupts::dispatch_expected_page_fault(
+                        fault_addr, error_code, rip, &resume_rip)) {
+                    return resume_rip;
+                }
                 handle_page_fault(error_code, fault_addr);
             }
             break;
@@ -321,6 +327,7 @@ extern "C" void exception_dispatch(uint64_t vector, uint64_t error_code,
             }
             break;
     }
+    return 0;
 }
 
 // ================================================================

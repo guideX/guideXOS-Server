@@ -121,55 +121,134 @@ foreach ($candidate in $ovmfCandidates) {
 }
 $bootloaderPath = Join-Path $Root 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
 $ramdiskPath = Join-Path $Root 'ESP\ramdisk.img'
-if ($null -eq $QemuPath -or $null -eq $make -or $null -eq $OvmfPath -or
-    -not (Test-Path $bootloaderPath) -or -not (Test-Path $ramdiskPath)) {
+$buildLog = Join-Path $RunRoot 'build.log'
+$baselineBuild = if ($SkipBuild) { 'SKIPPED' } else { 'FAIL' }
+if (-not $SkipBuild) {
+    if ($null -ne $make) {
+        try {
+            Invoke-Make $make $buildLog
+            $baselineBuild = 'PASS'
+        } catch {
+            Write-Host ('Baseline kernel build error: ' + $_.Exception.Message)
+        }
+    } else {
+        Write-Host 'Baseline kernel build error: mingw32-make.exe not found'
+    }
+}
+Write-Host ('Kernel build (baseline): ' + $baselineBuild)
+$normalKernel = if ([string]::IsNullOrWhiteSpace($NormalKernelPath)) {
+    Join-Path $Root 'kernel\build\amd64\bin\kernel.elf'
+} else { (Resolve-Path $NormalKernelPath).Path }
+$baselineKernelSnapshot = Join-Path $RunRoot 'baseline-kernel.elf'
+if (Test-Path $normalKernel) {
+    Copy-Item -LiteralPath $normalKernel -Destination $baselineKernelSnapshot -Force
+}
+$baseline = [pscustomobject]@{ MarkerFound = $false; SerialPath = ''; DebugPath = '' }
+
+$testBuild = if ($SkipBuild) { 'SKIPPED' } else { 'FAIL' }
+if (-not $SkipBuild) {
+    if ($null -ne $make) {
+        try {
+            Invoke-Make $make $buildLog @('-DGXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST')
+            $testBuild = 'PASS'
+        } catch {
+            Write-Host ('Native VM kernel build error: ' + $_.Exception.Message)
+        }
+    } else {
+        Write-Host 'Native VM kernel build error: mingw32-make.exe not found'
+    }
+}
+Write-Host ('Kernel build (true VM test): ' + $testBuild)
+$testKernel = if ([string]::IsNullOrWhiteSpace($TestKernelPath)) {
+    Join-Path $Root 'kernel\build\amd64\bin\kernel.elf'
+} else { (Resolve-Path $TestKernelPath).Path }
+$test = [pscustomobject]@{ MarkerFound = $false; SerialPath = ''; DebugPath = '' }
+
+$qemuReady = $null -ne $QemuPath -and $null -ne $OvmfPath -and
+    (Test-Path $bootloaderPath) -and (Test-Path $ramdiskPath) -and
+    (Test-Path $normalKernel) -and (Test-Path $testKernel) -and
+    ($SkipBuild -or (Test-Path $baselineKernelSnapshot)) -and
+    ($SkipBuild -or ($baselineBuild -eq 'PASS' -and $testBuild -eq 'PASS'))
+if (-not $qemuReady) {
     Write-Host 'QEMU located: FAIL'
+    Write-Host ('Baseline boot: ' + $(if ($SkipBuild) { 'SKIPPED' } elseif ($baselineBuild -eq 'FAIL') { 'BLOCKED (kernel build failed)' } else { 'BLOCKED (QEMU/boot assets unavailable)' }))
+    Write-Host ('Native VM ALL_PASS: BLOCKED (QEMU/boot assets unavailable)')
+    Write-Host 'Frame allocation/release: BLOCKED'
+    Write-Host 'Metadata capacity: BLOCKED'
+    Write-Host 'Virtual-range exhaustion: BLOCKED'
+    Write-Host 'Protection-fault handling: BLOCKED'
+    Write-Host 'Rollback: BLOCKED'
+    Write-Host 'Teardown: BLOCKED'
+    Write-Host 'TLB invalidation: BLOCKED'
+    Write-Host 'No leaks: BLOCKED'
+    Write-Host 'Adapter true mode: BLOCKED (run by hosted smoke separately)'
+    Write-Host 'Expected direct-read/write behavior: BLOCKED'
     exit 1
 }
 Write-Host 'QEMU located: PASS'
 Write-Host ('QEMU version: ' + ((& $QemuPath --version 2>&1 | Out-String).Trim()))
 Write-Host ('QEMU SHA256: ' + (Get-FileHash $QemuPath -Algorithm SHA256).Hash)
 
-$buildLog = Join-Path $RunRoot 'build.log'
-if (-not $SkipBuild) { Invoke-Make $make $buildLog }
-$normalKernel = if ([string]::IsNullOrWhiteSpace($NormalKernelPath)) {
-    Join-Path $Root 'kernel\build\amd64\bin\kernel.elf'
-} else { (Resolve-Path $NormalKernelPath).Path }
-if (-not (Test-Path $normalKernel)) { throw "Normal kernel image missing: $normalKernel" }
-$baselineEsp = Join-Path $RunRoot 'baseline-ESP'
-Stage-Esp $baselineEsp $normalKernel $bootloaderPath $ramdiskPath
-$baseline = Invoke-QemuBoot $baselineEsp (Join-Path $RunRoot 'baseline-serial.log') `
-    (Join-Path $RunRoot 'baseline-qemu-debug.log') (Join-Path $RunRoot 'baseline.stdout.log') `
-    (Join-Path $RunRoot 'baseline.stderr.log') '\[KERNEL\] Entering main loop \(waiting for input\)'
-Write-Host ('Baseline boot: ' + $(if ($baseline.MarkerFound) { 'PASS' } else { 'FAIL' }))
+if (-not $SkipBuild) {
+    $baselineEsp = Join-Path $RunRoot 'baseline-ESP'
+    Stage-Esp $baselineEsp $baselineKernelSnapshot $bootloaderPath $ramdiskPath
+    $baseline = Invoke-QemuBoot $baselineEsp (Join-Path $RunRoot 'baseline-serial.log') `
+        (Join-Path $RunRoot 'baseline-qemu-debug.log') (Join-Path $RunRoot 'baseline.stdout.log') `
+        (Join-Path $RunRoot 'baseline.stderr.log') '\[KERNEL\] Entering main loop \(waiting for input\)'
+    $baselineStatus = if ($baseline.MarkerFound) { 'PASS' } else { 'FAIL' }
+} else {
+    $baselineStatus = 'SKIPPED'
+}
+Write-Host ('Baseline boot: ' + $baselineStatus)
 
-if (-not $SkipBuild) { Invoke-Make $make $buildLog @('-DGXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST') }
-$testKernel = if ([string]::IsNullOrWhiteSpace($TestKernelPath)) {
-    Join-Path $Root 'kernel\build\amd64\bin\kernel.elf'
-} else { (Resolve-Path $TestKernelPath).Path }
-if (-not (Test-Path $testKernel)) { throw "VM test kernel image missing: $testKernel" }
 $testEsp = Join-Path $RunRoot 'test-ESP'
 Stage-Esp $testEsp $testKernel $bootloaderPath $ramdiskPath
 $test = Invoke-QemuBoot $testEsp (Join-Path $RunRoot 'native-virtual-memory-serial.log') `
     (Join-Path $RunRoot 'native-virtual-memory-qemu-debug.log') (Join-Path $RunRoot 'test.stdout.log') `
-    (Join-Path $RunRoot 'test.stderr.log') '\[native-virtual-memory-test\] (ALL_PASS|ALL_BLOCKED|ALL_FAIL)'
+    (Join-Path $RunRoot 'test.stderr.log') '\[native-virtual-memory-test\] ALL_(PASS|FAIL)'
 $serial = if (Test-Path $test.SerialPath) { Get-Content $test.SerialPath -Raw } else { '' }
 
 $summary = [ordered]@{
+    'Kernel build (baseline)' = $baselineBuild
+    'Kernel build (true VM test)' = $testBuild
     'QEMU located' = 'PASS'
-    'Baseline boot' = if ($baseline.MarkerFound) { 'PASS' } else { 'FAIL' }
-    'Reservation' = 'FAIL'; 'Overlap rejection' = 'FAIL'; 'Commit' = 'FAIL'
-    'Zero initialization' = 'FAIL'; 'Read/write access' = 'FAIL'
-    'Partial commit' = 'FAIL'; 'Partial decommit' = 'FAIL'; 'Recommit zeroing' = 'FAIL'
-    'Protection transition' = 'FAIL'; 'Release' = 'FAIL'; 'Range reuse' = 'FAIL'
-    'Physical-page leak check' = 'FAIL'; 'Reservation-metadata leak check' = 'FAIL'
-    'Expected-fault guard test' = 'FAIL'
+    'Baseline boot' = $baselineStatus
+    'Native VM ALL_PASS' = if ($test.MarkerFound -and $serial -match '\[native-virtual-memory-test\] ALL_PASS') { 'PASS' } else { 'FAIL' }
+    'Frame allocation/release' = 'FAIL'
+    'Metadata capacity' = 'FAIL'
+    'Virtual-range exhaustion' = 'FAIL'
+    'Protection-fault handling' = 'FAIL'
+    'Rollback' = 'FAIL'
+    'Teardown' = 'FAIL'
+    'TLB invalidation' = 'FAIL'
+    'No leaks' = 'FAIL'
+    'Adapter true mode' = 'NOT_IN_QEMU (see hosted smoke)'
+    'Expected direct-read/write behavior' = 'FAIL'
 }
-foreach ($name in @($summary.Keys | Select-Object -Skip 2)) {
-    $match = [regex]::Match($serial, '\[native-virtual-memory-test\]\s+' +
-        [regex]::Escape($name) + ':\s+(PASS|FAIL|BLOCKED)')
-    if ($match.Success) { $summary[$name] = $match.Groups[1].Value }
+
+function Test-SerialPass([string[]]$Labels) {
+    foreach ($label in $Labels) {
+        $match = [regex]::Match($serial, '\[native-virtual-memory-test\]\s+' +
+            [regex]::Escape($label) + ':\s+(PASS)')
+        if (-not $match.Success) { return $false }
+    }
+    return $true
 }
+
+$summary['Frame allocation/release'] = if (Test-SerialPass @(
+    'Partial commit', 'Zero initialization', 'Direct read/write behavior',
+    'Decommit releases physical frame', 'Release')) { 'PASS' } else { 'FAIL' }
+$summary['Metadata capacity'] = if (Test-SerialPass @('Metadata exhaustion')) { 'PASS' } else { 'FAIL' }
+$summary['Virtual-range exhaustion'] = if (Test-SerialPass @('Virtual-range exhaustion')) { 'PASS' } else { 'FAIL' }
+$summary['Protection-fault handling'] = if (Test-SerialPass @(
+    'Protection transitions', 'Read-only enforcement', 'No-access enforcement',
+    'Reserved-uncommitted fault', 'Decommitted-page fault', 'Released-page fault')) { 'PASS' } else { 'FAIL' }
+$summary['Rollback'] = if (Test-SerialPass @('Physical-frame exhaustion rollback')) { 'PASS' } else { 'FAIL' }
+$summary['Teardown'] = if (Test-SerialPass @('Process/address-space teardown')) { 'PASS' } else { 'FAIL' }
+$summary['TLB invalidation'] = if (Test-SerialPass @('TLB invalidation')) { 'PASS' } else { 'FAIL' }
+$summary['No leaks'] = if (Test-SerialPass @('Physical-frame leak check', 'Mapping leak check')) { 'PASS' } else { 'FAIL' }
+$summary['Expected direct-read/write behavior'] = if (Test-SerialPass @(
+    'Direct read/write behavior', 'Read-only enforcement', 'No-access enforcement')) { 'PASS' } else { 'FAIL' }
 foreach ($entry in $summary.GetEnumerator()) { Write-Host ("{0}: {1}" -f $entry.Key, $entry.Value) }
 Write-Host ('Serial log: ' + $test.SerialPath)
 Write-Host ('QEMU debug log: ' + $test.DebugPath)
