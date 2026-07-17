@@ -1077,6 +1077,90 @@ static std::string navigatorHostedSmokeDiagnostic() {
         "; important=" + yesNo(contains(cssPhase2dReport, "id=phase2d-important") && contains(cssPhase2dReport, "color=#166534")) +
         "; evidence=" + summarizeText(cssPhase2dReportLine("Current Document.CSS computed style evidence="), 2600));
 
+    bool cssPhase2eLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2e.html");
+    std::string cssPhase2eText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2eReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2eReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2eReport.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = cssPhase2eReport.find('\n', pos);
+        return cssPhase2eReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 2E bounded forms fixture loads",
+        cssPhase2eLoaded &&
+        contains(cssPhase2eText, "Phase 2E Bounded Static Forms") &&
+        contains(cssPhase2eText, "Wrapping choice") &&
+        contains(cssPhase2eText, "Associated checked choice") &&
+        contains(cssPhase2eText, "Static textarea marker") &&
+        contains(cssPhase2eText, "Selected option marker") &&
+        contains(cssPhase2eText, "Default first enabled option") &&
+        contains(cssPhase2eText, "Element button") &&
+        contains(cssPhase2eText, "[password field]") &&
+        !contains(cssPhase2eText, "secret-phase2e-value") &&
+        !contains(cssPhase2eText, "hidden-secret-must-not-render"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2E form and state diagnostics",
+        contains(cssPhase2eReport, "Current Document.Forms=1") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML forms parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML fieldsets parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML labels parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML inputs parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML buttons parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML textareas parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML selects parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML options parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML hidden controls=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML control metadata clamps=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML control text truncations=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :checked pseudo parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :checked pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :disabled pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :enabled pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :required pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :read-only pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :read-write pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.Form controls rendered=") &&
+        contains(cssPhase2eReport, "Current Document.Form interactions deferred=") &&
+        !contains(cssPhase2eReport, "secret-phase2e-value") &&
+        !contains(cssPhase2eReport, "hidden-secret-must-not-render"),
+        "forms=" + cssPhase2eReportLine("Current Document.HTML forms parsed=") +
+        "; fieldsets=" + cssPhase2eReportLine("Current Document.HTML fieldsets parsed=") +
+        "; inputs=" + cssPhase2eReportLine("Current Document.HTML inputs parsed=") +
+        "; options=" + cssPhase2eReportLine("Current Document.HTML options parsed=") +
+        "; clamps=" + cssPhase2eReportLine("Current Document.HTML control metadata clamps=") +
+        "; truncations=" + cssPhase2eReportLine("Current Document.HTML control text truncations=") +
+        "; checked=" + cssPhase2eReportLine("Current Document.CSS :checked pseudo matches=") +
+        "; disabled=" + cssPhase2eReportLine("Current Document.CSS :disabled pseudo matches=") +
+        "; enabled=" + cssPhase2eReportLine("Current Document.CSS :enabled pseudo matches=") +
+        "; required=" + cssPhase2eReportLine("Current Document.CSS :required pseudo matches=") +
+        "; readonly=" + cssPhase2eReportLine("Current Document.CSS :read-only pseudo matches=") +
+        "; readwrite=" + cssPhase2eReportLine("Current Document.CSS :read-write pseudo matches="));
+    const bool cssPhase2eAssociatedEvidence = contains(cssPhase2eReport, "id=phase2e-associated");
+    const bool cssPhase2eCheckedEvidence = contains(cssPhase2eReport, "checked=yes");
+    const bool cssPhase2eDisabledEvidence = contains(cssPhase2eReport, "control-disabled=yes");
+    const bool cssPhase2eRequiredEvidence = contains(cssPhase2eReport, "id=phase2e-required") &&
+        contains(cssPhase2eReport, "required=yes");
+    const bool cssPhase2eInlineEvidence = contains(cssPhase2eReport, "id=phase2e-inline") &&
+        contains(cssPhase2eReport, "color=#1d4ed8");
+    const bool cssPhase2eImportantEvidence = contains(cssPhase2eReport, "id=phase2e-important") &&
+        contains(cssPhase2eReport, "color=#166534");
+    const bool cssPhase2eOrderEvidence = contains(cssPhase2eReport, "id=phase2e-source-order");
+    const bool cssPhase2eOptionEvidence = contains(cssPhase2eReport, "id=phase2e-option-clamp");
+    add("CSS phase 2E state and cascade evidence",
+        cssPhase2eAssociatedEvidence && cssPhase2eCheckedEvidence && cssPhase2eDisabledEvidence &&
+        cssPhase2eRequiredEvidence && cssPhase2eInlineEvidence && cssPhase2eImportantEvidence &&
+        cssPhase2eOrderEvidence && cssPhase2eOptionEvidence &&
+        contains(cssPhase2eReport, "phase2e-"),
+        std::string("associated=") + yesNo(cssPhase2eAssociatedEvidence) +
+        ",checked=" + yesNo(cssPhase2eCheckedEvidence) +
+        ",disabled=" + yesNo(cssPhase2eDisabledEvidence) +
+        ",required=" + yesNo(cssPhase2eRequiredEvidence) +
+        ",inline=" + yesNo(cssPhase2eInlineEvidence) +
+        ",important=" + yesNo(cssPhase2eImportantEvidence) +
+        ",order=" + yesNo(cssPhase2eOrderEvidence) +
+        ",option=" + yesNo(cssPhase2eOptionEvidence) +
+        "; evidence=" + summarizeText(cssPhase2eReportLine("Current Document.CSS computed style evidence="), 3200));
+
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
     std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();

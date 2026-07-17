@@ -75,6 +75,15 @@ namespace {
 	constexpr size_t kCssLiteMaxVisibleTextBytesPerElement = 1024;
 	constexpr size_t kCssLiteMaxRecoveryAttemptsPerGroup = 16;
 	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
+	constexpr size_t kFormMaxControls = 128;
+	constexpr size_t kFormMaxValueBytes = 256;
+	constexpr size_t kFormMaxPlaceholderBytes = 128;
+	constexpr size_t kFormMaxLabelBytes = 128;
+	constexpr size_t kFormMaxOptions = 64;
+	constexpr size_t kFormMaxOptionTextBytes = 128;
+	constexpr int kFormMaxRows = 12;
+	constexpr int kFormMaxCols = 80;
+	constexpr int kFormMaxSize = 64;
 
 	enum class CssProperty : uint8_t {
 		Color = 0,
@@ -519,6 +528,43 @@ static int parsePositiveIntAttr(const std::string& tagBody, const std::string& a
 	return result > 0 ? result : 0;
 }
 
+static std::string boundedDecodedFormText(const std::string& raw,
+	size_t cap,
+	FormsDiagnostics& diagnostics)
+{
+	std::string decoded = decodeEntities(raw);
+	if (decoded.size() <= cap) return decoded;
+	++diagnostics.controlTextTruncations;
+	decoded.resize(cap);
+	return decoded;
+}
+
+static int parseBoundedFormInt(const std::string& tagBody,
+	const std::string& attr,
+	int maximum,
+	FormsDiagnostics& diagnostics)
+{
+	const std::string raw = trim(extractAttr(tagBody, attr));
+	if (raw.empty()) return 0;
+	int result = 0;
+	bool sawDigit = false;
+	for (char c : raw) {
+		if (c < '0' || c > '9') break;
+		sawDigit = true;
+		if (result > maximum / 10) {
+			++diagnostics.controlMetadataClamps;
+			return maximum;
+		}
+		result = result * 10 + (c - '0');
+		if (result > maximum) {
+			++diagnostics.controlMetadataClamps;
+			return maximum;
+		}
+	}
+	if (!sawDigit || result <= 0) return 0;
+	return result;
+}
+
 static bool isHexDigit(char c)
 {
 	return (c >= '0' && c <= '9') ||
@@ -930,7 +976,9 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 		CssPseudoClassSelector pseudo;
 		if (name == "first-child" || name == "last-child" || name == "only-child" ||
 			name == "first-of-type" || name == "last-of-type" || name == "only-of-type" ||
-			name == "root" || name == "link" || name == "visited" || name == "empty") {
+			name == "root" || name == "link" || name == "visited" || name == "empty" ||
+			name == "checked" || name == "disabled" || name == "enabled" || name == "required" ||
+			name == "read-only" || name == "read-write") {
 			if (hasArgument) return false;
 			if (name == "first-child") pseudo.type = CssPseudoClass::FirstChild;
 			else if (name == "last-child") pseudo.type = CssPseudoClass::LastChild;
@@ -941,9 +989,27 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 			else if (name == "root") pseudo.type = CssPseudoClass::Root;
 			else if (name == "link") pseudo.type = CssPseudoClass::Link;
 			else if (name == "visited") pseudo.type = CssPseudoClass::Visited;
-			else {
+			else if (name == "empty") {
 				pseudo.type = CssPseudoClass::Empty;
 				saturatingIncrement(diag.emptyPseudoParsed);
+			} else if (name == "checked") {
+				pseudo.type = CssPseudoClass::Checked;
+				saturatingIncrement(diag.checkedPseudoParsed);
+			} else if (name == "disabled") {
+				pseudo.type = CssPseudoClass::Disabled;
+				saturatingIncrement(diag.disabledPseudoParsed);
+			} else if (name == "enabled") {
+				pseudo.type = CssPseudoClass::Enabled;
+				saturatingIncrement(diag.enabledPseudoParsed);
+			} else if (name == "required") {
+				pseudo.type = CssPseudoClass::Required;
+				saturatingIncrement(diag.requiredPseudoParsed);
+			} else if (name == "read-only") {
+				pseudo.type = CssPseudoClass::ReadOnly;
+				saturatingIncrement(diag.readonlyPseudoParsed);
+			} else {
+				pseudo.type = CssPseudoClass::ReadWrite;
+				saturatingIncrement(diag.readwritePseudoParsed);
 			}
 			++specificity.classCount;
 		} else if (name == "nth-child" || name == "nth-of-type") {
@@ -1962,6 +2028,12 @@ static void recordPseudoMatch(CssDiagnostics& diag, CssPseudoClass type)
 	case CssPseudoClass::Link: saturatingIncrement(diag.linkPseudoMatches); break;
 	case CssPseudoClass::Visited: saturatingIncrement(diag.visitedPseudoMatches); break;
 	case CssPseudoClass::Empty: saturatingIncrement(diag.emptyPseudoMatches); break;
+	case CssPseudoClass::Checked: saturatingIncrement(diag.checkedPseudoMatches); break;
+	case CssPseudoClass::Disabled: saturatingIncrement(diag.disabledPseudoMatches); break;
+	case CssPseudoClass::Enabled: saturatingIncrement(diag.enabledPseudoMatches); break;
+	case CssPseudoClass::Required: saturatingIncrement(diag.requiredPseudoMatches); break;
+	case CssPseudoClass::ReadOnly: saturatingIncrement(diag.readonlyPseudoMatches); break;
+	case CssPseudoClass::ReadWrite: saturatingIncrement(diag.readwritePseudoMatches); break;
 	default: break;
 	}
 }
@@ -2028,6 +2100,47 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element,
 			matched = contentMetadataProvesEmpty(*metadata);
 			break;
 		}
+		case CssPseudoClass::Checked:
+			matched = element.formControl.metadataComplete && element.formControl.supported &&
+				(element.formControl.type == FormControlType::Checkbox ||
+				 element.formControl.type == FormControlType::Radio ||
+				 element.formControl.type == FormControlType::Option) &&
+				(element.formControl.type == FormControlType::Option
+					? element.formControl.selected : element.formControl.checked);
+			break;
+		case CssPseudoClass::Disabled:
+			matched = element.formControl.metadataComplete && element.formControl.disabled;
+			break;
+		case CssPseudoClass::Enabled:
+			matched = element.formControl.metadataComplete && element.formControl.supported &&
+				!element.formControl.disabled;
+			break;
+		case CssPseudoClass::Required:
+			matched = element.formControl.metadataComplete && element.formControl.supported &&
+				element.formControl.required;
+			break;
+		case CssPseudoClass::ReadOnly:
+			matched = element.formControl.metadataComplete &&
+				(element.formControl.readOnly || !element.formControl.supported ||
+				 element.formControl.type == FormControlType::Checkbox ||
+				 element.formControl.type == FormControlType::Radio ||
+				 element.formControl.type == FormControlType::Button ||
+				 element.formControl.type == FormControlType::Submit ||
+				 element.formControl.type == FormControlType::Reset ||
+				 element.formControl.type == FormControlType::Select ||
+				 element.formControl.type == FormControlType::Option);
+			break;
+		case CssPseudoClass::ReadWrite:
+			matched = element.formControl.metadataComplete && element.formControl.supported &&
+				!element.formControl.readOnly &&
+				(element.formControl.type == FormControlType::Text ||
+				 element.formControl.type == FormControlType::Password ||
+				 element.formControl.type == FormControlType::Search ||
+				 element.formControl.type == FormControlType::Email ||
+				 element.formControl.type == FormControlType::Url ||
+				 element.formControl.type == FormControlType::Number ||
+				 element.formControl.type == FormControlType::Textarea);
+			break;
 		}
 		if (!matched) return false;
 		recordPseudoMatch(diag, pseudo.type);
@@ -2052,16 +2165,15 @@ static const HtmlElementRef* structuralElementBySerial(const WebDocument& doc,
 	CssDiagnostics& diag,
 	uint64_t serial)
 {
-	if (serial == 0 || serial > doc.structuralElements.size()) {
+	if (serial == 0) {
 		saturatingIncrement(diag.siblingMetadataErrors);
 		return nullptr;
 	}
-	const HtmlElementRef& element = doc.structuralElements[static_cast<size_t>(serial - 1)];
-	if (element.serial != serial) {
-		saturatingIncrement(diag.siblingMetadataErrors);
-		return nullptr;
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.serial == serial) return &element;
 	}
-	return &element;
+	saturatingIncrement(diag.siblingMetadataErrors);
+	return nullptr;
 }
 
 static bool selectorMatchesSiblingRelation(const std::vector<HtmlElementRef>& path,
@@ -3082,6 +3194,57 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.fontScaleOrSize = 24;
 		return style;
 	}
+	if (tagName == "form") {
+		style.marginTop = 4;
+		style.marginBottom = 8;
+		return style;
+	}
+	if (tagName == "fieldset") {
+		style.marginTop = 8;
+		style.marginBottom = 10;
+		style.padding = 8;
+		style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+		style.borderTopWidth = style.borderRightWidth = style.borderBottomWidth = style.borderLeftWidth = 1;
+		style.borderTopStyle = style.borderRightStyle = style.borderBottomStyle = style.borderLeftStyle = BorderLineStyle::Solid;
+		style.borderTopColor = style.borderRightColor = style.borderBottomColor = style.borderLeftColor = 0xFFB8C0CCu;
+		return style;
+	}
+	if (tagName == "legend") {
+		style.bold = true;
+		style.marginTop = 2;
+		style.marginBottom = 4;
+		style.fontScaleOrSize = 14;
+		return style;
+	}
+	if (tagName == "label") {
+		style.marginTop = 3;
+		style.marginBottom = 3;
+		return style;
+	}
+	if (tagName == "input" || tagName == "textarea" || tagName == "select") {
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFFFFFFFu;
+		style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+		style.borderTopWidth = style.borderRightWidth = style.borderBottomWidth = style.borderLeftWidth = 1;
+		style.borderTopStyle = style.borderRightStyle = style.borderBottomStyle = style.borderLeftStyle = BorderLineStyle::Solid;
+		style.borderTopColor = style.borderRightColor = style.borderBottomColor = style.borderLeftColor = 0xFF9AA6B2u;
+		style.padding = 4;
+		style.marginTop = 3;
+		style.marginBottom = 5;
+		return style;
+	}
+	if (tagName == "button") {
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFE6E8EEu;
+		style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+		style.borderTopWidth = style.borderRightWidth = style.borderBottomWidth = style.borderLeftWidth = 1;
+		style.borderTopStyle = style.borderRightStyle = style.borderBottomStyle = style.borderLeftStyle = BorderLineStyle::Solid;
+		style.borderTopColor = style.borderRightColor = style.borderBottomColor = style.borderLeftColor = 0xFF8D99A8u;
+		style.padding = 4;
+		style.marginTop = 3;
+		style.marginBottom = 5;
+		return style;
+	}
 	if (tagName == "h2") {
 		style.bold = true;
 		style.marginTop = 12;
@@ -3307,6 +3470,12 @@ static std::string pathSignature(const std::vector<HtmlElementRef>& path)
 			<< ":s" << element.siblingCount
 			<< ":prev=" << element.previousSiblingSerial
 			<< ":" << element.typeIndex << "/" << element.typeCount
+			<< ":form=" << static_cast<unsigned>(element.formControl.type)
+			<< ":state=" << (element.formControl.checked ? "c" : "-")
+			<< (element.formControl.disabled ? "d" : "-")
+			<< (element.formControl.required ? "r" : "-")
+			<< (element.formControl.readOnly ? "o" : "-")
+			<< (element.formControl.selected ? "s" : "-")
 			<< ":" << (element.hasLinkTarget ? (element.visited ? "visited" : "link") : "");
 	}
 	return oss.str();
@@ -3344,6 +3513,12 @@ static const char* cssPseudoName(CssPseudoClass type)
 	case CssPseudoClass::Link: return "link";
 	case CssPseudoClass::Visited: return "visited";
 	case CssPseudoClass::Empty: return "empty";
+	case CssPseudoClass::Checked: return "checked";
+	case CssPseudoClass::Disabled: return "disabled";
+	case CssPseudoClass::Enabled: return "enabled";
+	case CssPseudoClass::Required: return "required";
+	case CssPseudoClass::ReadOnly: return "read-only";
+	case CssPseudoClass::ReadWrite: return "read-write";
 	default: return "unknown";
 	}
 }
@@ -3464,7 +3639,8 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 	if (id.rfind("phase2a-", 0) != 0 && id.rfind("css2a-", 0) != 0 &&
 		id.rfind("phase2b-", 0) != 0 && id.rfind("css2b-", 0) != 0 &&
 		id.rfind("phase2c-", 0) != 0 && id.rfind("css2c-", 0) != 0 &&
-		id.rfind("phase2d-", 0) != 0 && id.rfind("css2d-", 0) != 0) return;
+		id.rfind("phase2d-", 0) != 0 && id.rfind("css2d-", 0) != 0 &&
+		id.rfind("phase2e-", 0) != 0 && id.rfind("css2e-", 0) != 0) return;
 	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
 		doc.cssDiagnostics.computedStyleEvidenceSerials.end(), element.serial) !=
 		doc.cssDiagnostics.computedStyleEvidenceSerials.end()) return;
@@ -3532,6 +3708,13 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",element-count=" << element.siblingCount
 		<< ",type-index=" << element.typeIndex
 		<< ",type-count=" << element.typeCount
+		<< ",control-type=" << static_cast<unsigned>(element.formControl.type)
+		<< ",control-supported=" << (element.formControl.supported ? "yes" : "no")
+		<< ",control-checked=" << (element.formControl.checked || element.formControl.selected ? "yes" : "no")
+		<< ",control-disabled=" << (element.formControl.disabled ? "yes" : "no")
+		<< ",control-enabled=" << (element.formControl.supported && !element.formControl.disabled ? "yes" : "no")
+		<< ",control-required=" << (element.formControl.required ? "yes" : "no")
+		<< ",control-readonly=" << (element.formControl.readOnly ? "yes" : "no")
 		<< ",color-winning-pseudo=" << (colorWinner.pseudoCategory.empty() ? "none" : colorWinner.pseudoCategory)
 		<< ";";
 	const std::string evidence = oss.str();
@@ -3539,6 +3722,30 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		doc.cssDiagnostics.computedStyleEvidence += evidence;
 		doc.cssDiagnostics.computedStyleEvidenceSerials.push_back(element.serial);
 	}
+}
+
+static bool buildStructuralPath(const WebDocument& doc,
+	uint64_t serial,
+	std::vector<HtmlElementRef>& outPath)
+{
+	outPath.clear();
+	if (serial == 0) return false;
+	uint64_t current = serial;
+	for (size_t depth = 0; depth < kCssLiteMaxInheritanceDepth + 2 && current != 0; ++depth) {
+		const HtmlElementRef* found = nullptr;
+		for (const HtmlElementRef& candidate : doc.structuralElements) {
+			if (candidate.serial == current) {
+				found = &candidate;
+				break;
+			}
+		}
+		if (!found) return false;
+		outPath.push_back(*found);
+		current = found->parentSerial;
+	}
+	if (current != 0) return false;
+	std::reverse(outPath.begin(), outPath.end());
+	return !outPath.empty();
 }
 
 static WebStyle computePathStyle(WebDocument& doc,
@@ -3652,6 +3859,16 @@ static void applyDocumentStyles(WebDocument& doc)
 {
 	doc.cssDiagnostics.cssEnabled = true;
 	std::unordered_map<std::string, WebStyle> cache;
+	for (FormContainerMetadata& container : doc.formContainers) {
+		std::vector<HtmlElementRef> path;
+		if (buildStructuralPath(doc, container.serial, path)) {
+			container.style = computePathStyle(doc, path, cache);
+		} else {
+			container.metadataComplete = false;
+			container.style = defaultStyleForTag(container.tagName);
+			markDefaultStyleProperties(container.style);
+		}
+	}
 
 	if (doc.hasBodyElement) {
 		std::vector<HtmlElementRef> bodyPath;
@@ -3681,6 +3898,7 @@ static void applyDocumentStyles(WebDocument& doc)
 		selfRef.className = block.className;
 		selfRef.id = block.id;
 		selfRef.inlineStyle = block.inlineStyle;
+		selfRef.formControl = block.formControl;
 		path.push_back(selfRef);
 		block.style = computePathStyle(doc, path, cache);
 		// Table geometry and wrapper borders are renderer metadata rather than
@@ -3740,6 +3958,17 @@ static void applyDocumentStyles(WebDocument& doc)
 			}
 		}
 	}
+	// Options do not become standalone layout blocks, but they still carry
+	// bounded state metadata.  Resolve their paths so option:checked and
+	// option:disabled participate in deterministic selector diagnostics without
+	// creating any popup or hidden layout surface.
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.formControl.type != FormControlType::Option || element.serial == 0)
+			continue;
+		std::vector<HtmlElementRef> path;
+		if (buildStructuralPath(doc, element.serial, path))
+			(void)computePathStyle(doc, path, cache);
+	}
 }
 
 static DocBlock makeTextBlock(BlockType type,
@@ -3782,6 +4011,8 @@ enum class OpenTag : uint8_t {
 	ButtonSubmit,
 	Textarea,
 	Option,
+	Legend,
+	Label,
 };
 
 struct StructuralChildCounter {
@@ -3817,18 +4048,35 @@ struct ParserState {
 	std::string  currentFormMethod;
 	std::string  currentFormEncoding;
 	bool         currentFormUnsupported = false;
+	uint64_t     currentFormSerial = 0;
 	std::string  currentTextareaName;
 	std::string  currentTextareaClass;
 	std::string  currentTextareaId;
+	std::string  currentTextareaPlaceholder;
+	bool         currentTextareaDisabled = false;
+	bool         currentTextareaRequired = false;
+	bool         currentTextareaReadOnly = false;
 	int          currentTextareaRows = 0;
 	int          currentTextareaCols = 0;
 	bool         inSelect = false;
 	std::string  currentSelectName;
 	std::string  currentSelectClass;
 	std::string  currentSelectId;
+	std::string  currentSelectInputType;
+	bool         currentSelectDisabled = false;
+	bool         currentSelectRequired = false;
+	bool         currentSelectMultiple = false;
+	int          currentSelectSize = 0;
+	uint64_t     currentSelectSerial = 0;
 	std::vector<FormOption> currentSelectOptions;
 	std::string  currentOptionValue;
 	bool         currentOptionSelected = false;
+	bool         currentOptionDisabled = false;
+	std::string  currentLabelFor;
+	std::string  currentLabelClass;
+	std::string  currentLabelId;
+	std::string  currentLegendText;
+	uint64_t     currentLegendSerial = 0;
 	std::string  currentTableCellText;
 	std::string  currentTableCaptionText;
 	bool         currentTableCellHeader = false;
@@ -4041,6 +4289,69 @@ static std::vector<HtmlElementRef> captureBlockAncestors(const ParserState& st)
 	return ancestors;
 }
 
+static uint64_t nearestAncestorSerial(const ParserState& st, const std::string& tagName)
+{
+	const std::string wanted = toLower(tagName);
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (toLower(it->tagName) == wanted && it->serial != 0) return it->serial;
+	}
+	return 0;
+}
+
+static bool disabledByFieldset(const ParserState& st)
+{
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (toLower(it->tagName) != "fieldset") continue;
+		return it->formControl.disabled;
+	}
+	return false;
+}
+
+static FormControlMetadata makeFormControlMetadata(const ParserState& st,
+	const HtmlElementRef& element,
+	FormControlType type,
+	const std::string& inputType,
+	bool supported)
+{
+	FormControlMetadata metadata;
+	metadata.type = type;
+	metadata.logicalSerial = element.serial;
+	metadata.parentFormSerial = nearestAncestorSerial(st, "form");
+	metadata.parentFieldsetSerial = nearestAncestorSerial(st, "fieldset");
+	metadata.inputType = inputType;
+	metadata.supported = supported;
+	metadata.metadataComplete = element.serial != 0 && st.uncapturedOpenElementDepth == 0;
+	metadata.disabled = disabledByFieldset(st);
+	return metadata;
+}
+
+static void registerFormContainer(ParserState& st,
+	const HtmlElementRef& element,
+	const std::string& tagName)
+{
+	if (st.doc.formContainers.size() >= kFormMaxControls) {
+		++st.doc.formsDiagnostics.controlMetadataClamps;
+		return;
+	}
+	FormContainerMetadata container;
+	container.tagName = toLower(tagName);
+	container.className = element.className;
+	container.id = element.id;
+	container.inlineStyle = element.inlineStyle;
+	container.serial = element.serial;
+	container.parentSerial = element.parentSerial;
+	container.metadataComplete = element.serial != 0;
+	st.doc.formContainers.push_back(std::move(container));
+}
+
+static FormContainerMetadata* findFormContainer(ParserState& st, uint64_t serial)
+{
+	for (FormContainerMetadata& container : st.doc.formContainers) {
+		if (container.serial == serial) return &container;
+	}
+	return nullptr;
+}
+
 static std::string openTagName(OpenTag tag)
 {
 	switch (tag) {
@@ -4060,6 +4371,8 @@ static std::string openTagName(OpenTag tag)
 	case OpenTag::ButtonSubmit: return "button";
 	case OpenTag::Textarea: return "textarea";
 	case OpenTag::Option: return "option";
+	case OpenTag::Legend: return "legend";
+	case OpenTag::Label: return "label";
 	default: return "";
 	}
 }
@@ -4154,6 +4467,10 @@ static void flushText(ParserState& st)
 	} else {
 		t = trim(collapseWs(decodeEntities(st.textBuf)));
 	}
+	if (st.open == OpenTag::Textarea && t.size() > kFormMaxValueBytes) {
+		++st.doc.formsDiagnostics.controlTextTruncations;
+		t.resize(kFormMaxValueBytes);
+	}
 	if (!t.empty()) {
 		markContentForOpenElements(st, true,
 			std::min(t.size(), kCssLiteMaxVisibleTextBytesPerElement),
@@ -4219,13 +4536,25 @@ static void flushText(ParserState& st)
 		DocBlock block;
 		block.type = BlockType::FormSubmit;
 		block.tagName = "button";
-		block.text = t.empty() ? "Submit" : t;
+		std::string buttonType = elementMetadata.formControl.inputType.empty() ? "submit" : elementMetadata.formControl.inputType;
+		block.text = t.empty() ? (buttonType == "reset" ? "Reset" : (buttonType == "button" ? "Button" : "Submit")) : t;
+		if (block.text.size() > kFormMaxLabelBytes) {
+			++st.doc.formsDiagnostics.controlTextTruncations;
+			block.text.resize(kFormMaxLabelBytes);
+		}
 		block.submitLabel = block.text;
+		block.inputType = buttonType;
 		block.formIndex = st.currentFormIndex;
 		block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 		block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
 		block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
 		block.formUnsupported = st.currentFormUnsupported;
+		block.formControl = elementMetadata.formControl;
+		block.formControl.type = buttonType == "button" ? FormControlType::Button :
+			buttonType == "reset" ? FormControlType::Reset : FormControlType::Submit;
+		block.formControl.logicalSerial = elementMetadata.serial;
+		block.formControl.label = block.text;
+		block.formControl.metadataComplete = elementMetadata.serial != 0 && st.uncapturedOpenElementDepth == 0;
 		block.ancestors = ancestors;
 		block.elementMetadata = elementMetadata;
 		block.inlineStyle = st.styleBuf;
@@ -4249,7 +4578,23 @@ static void flushText(ParserState& st)
 		block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
 		block.visibleRows = st.currentTextareaRows > 0 ? st.currentTextareaRows : 4;
 		block.visibleCols = st.currentTextareaCols > 0 ? st.currentTextareaCols : 40;
+		block.placeholder = st.currentTextareaPlaceholder;
 		block.formUnsupported = st.currentFormUnsupported;
+		block.formControl.type = FormControlType::Textarea;
+		block.formControl.logicalSerial = elementMetadata.serial;
+		block.formControl.parentFormSerial = nearestAncestorSerial(st, "form");
+		block.formControl.parentFieldsetSerial = nearestAncestorSerial(st, "fieldset");
+		block.formControl.inputType = "textarea";
+		block.formControl.name = block.inputName;
+		block.formControl.value = block.inputValue;
+		block.formControl.placeholder = block.placeholder;
+		block.formControl.supported = true;
+		block.formControl.metadataComplete = elementMetadata.serial != 0 && st.uncapturedOpenElementDepth == 0;
+		block.formControl.disabled = st.currentTextareaDisabled;
+		block.formControl.required = st.currentTextareaRequired;
+		block.formControl.readOnly = st.currentTextareaReadOnly;
+		block.formControl.rows = block.visibleRows;
+		block.formControl.cols = block.visibleCols;
 		block.ancestors = ancestors;
 		block.elementMetadata = elementMetadata;
 		block.inlineStyle = st.styleBuf;
@@ -4258,11 +4603,47 @@ static void flushText(ParserState& st)
 		break;
 	}
 	case OpenTag::Option: {
+		if (st.currentSelectOptions.size() >= kFormMaxOptions) {
+			++st.doc.formsDiagnostics.controlMetadataClamps;
+			break;
+		}
+		if (t.size() > kFormMaxOptionTextBytes) {
+			++st.doc.formsDiagnostics.controlTextTruncations;
+			t.resize(kFormMaxOptionTextBytes);
+		}
 		FormOption option;
 		option.text = t;
 		option.value = st.currentOptionValue.empty() ? t : st.currentOptionValue;
 		option.selected = st.currentOptionSelected;
+		option.disabled = st.currentOptionDisabled;
 		st.currentSelectOptions.push_back(std::move(option));
+		break;
+	}
+	case OpenTag::Legend:
+		if (st.currentLegendText.size() + t.size() > kFormMaxLabelBytes) {
+			++st.doc.formsDiagnostics.controlTextTruncations;
+			const size_t remaining = st.currentLegendText.size() < kFormMaxLabelBytes
+				? kFormMaxLabelBytes - st.currentLegendText.size() : 0;
+			st.currentLegendText += t.substr(0, remaining);
+		} else {
+			st.currentLegendText += t;
+		}
+		break;
+	case OpenTag::Label: {
+		DocBlock block;
+		block.type = BlockType::FormLabel;
+		block.tagName = "label";
+		block.text = t;
+		block.className = st.currentLabelClass;
+		block.id = st.currentLabelId;
+		block.labelFor = st.currentLabelFor;
+		block.formIndex = st.currentFormIndex;
+		block.formControl.type = FormControlType::None;
+		block.formControl.metadataComplete = elementMetadata.serial != 0 && st.uncapturedOpenElementDepth == 0;
+		block.ancestors = ancestors;
+		block.elementMetadata = elementMetadata;
+		block.inlineStyle = st.styleBuf;
+		st.doc.blocks.push_back(std::move(block));
 		break;
 	}
 	default:
@@ -4357,11 +4738,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		name == "kbd" || name == "samp" || name == "section" ||
 		name == "article" || name == "header" || name == "footer" || name == "nav" ||
 		name == "main" || name == "table" || name == "thead" || name == "tbody" ||
-		name == "tfoot" || name == "tr" || name == "noscript" || name == "form") {
+		name == "tfoot" || name == "tr" || name == "noscript" || name == "form" || name == "fieldset") {
 		if (name == "form") {
 			flushText(st);
 			st.inForm = true;
 			st.currentFormIndex = st.doc.formsDiagnostics.formCount++;
+			++st.doc.formsDiagnostics.htmlFormsParsed;
 			st.currentFormAction = trim(decodeEntities(extractAttr(tagBody, "action")));
 			if (st.currentFormAction.empty()) st.currentFormAction = st.doc.url;
 			st.currentFormAction = resolveRelativeUrl(st.doc.url, st.currentFormAction);
@@ -4374,6 +4756,22 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			st.currentFormUnsupported = unsupportedMethod || unsupportedEncoding;
 			if (unsupportedMethod) st.doc.formsDiagnostics.hasUnsupportedMethod = true;
 			if (unsupportedEncoding) st.doc.formsDiagnostics.hasUnsupportedEncoding = true;
+			const bool pushed = pushElement(st, elementRef);
+			st.currentFormSerial = pushed && !st.openElements.empty() ? st.openElements.back().serial : 0;
+			return;
+		}
+		if (name == "fieldset") {
+			flushText(st);
+			elementRef.formControl.type = FormControlType::None;
+			elementRef.formControl.disabled = hasAttr(tagBody, "disabled");
+			elementRef.formControl.metadataComplete = true;
+			const bool pushed = pushElement(st, elementRef);
+			if (pushed && !st.openElements.empty()) {
+				const HtmlElementRef& fieldset = st.openElements.back();
+				registerFormContainer(st, fieldset, "fieldset");
+			}
+			++st.doc.formsDiagnostics.htmlFieldsetsParsed;
+			return;
 		}
 		pushElement(st, elementRef);
 		return;
@@ -4388,6 +4786,36 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.styleBuf = extractAttr(tagBody, "style");
 		pushElement(st, elementRef);
 		activateCurrentBlock(st);
+		return;
+	}
+
+	if (name == "legend") {
+		flushText(st);
+		st.open = OpenTag::Legend;
+		st.currentLegendText.clear();
+		st.classBuf = extractAttr(tagBody, "class");
+		st.idBuf = extractAttr(tagBody, "id");
+		st.styleBuf = extractAttr(tagBody, "style");
+		if (pushElement(st, elementRef) && !st.openElements.empty()) {
+			registerFormContainer(st, st.openElements.back(), "legend");
+			st.currentLegendSerial = st.openElements.back().serial;
+			st.activeBlockSerial = st.currentLegendSerial;
+		}
+		return;
+	}
+
+	if (name == "label") {
+		flushText(st);
+		st.open = OpenTag::Label;
+		st.currentLabelFor = boundedDecodedFormText(extractAttr(tagBody, "for"), kFormMaxLabelBytes, st.doc.formsDiagnostics);
+		st.currentLabelClass = extractAttr(tagBody, "class");
+		st.currentLabelId = extractAttr(tagBody, "id");
+		st.classBuf = st.currentLabelClass;
+		st.idBuf = st.currentLabelId;
+		st.styleBuf = extractAttr(tagBody, "style");
+		if (pushElement(st, elementRef) && !st.openElements.empty())
+			st.activeBlockSerial = st.openElements.back().serial;
+		++st.doc.formsDiagnostics.htmlLabelsParsed;
 		return;
 	}
 
@@ -4418,10 +4846,63 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		flushText(st);
 		std::string type = toLower(trim(extractAttr(tagBody, "type")));
 		if (type.empty()) type = "text";
+		const bool hidden = type == "hidden";
+		const bool supported = type == "text" || type == "password" || type == "search" ||
+			type == "email" || type == "url" || type == "number" || type == "checkbox" ||
+			type == "radio" || type == "button" || type == "submit" || type == "reset";
+		FormControlType controlType = FormControlType::Unsupported;
+		if (type == "text") controlType = FormControlType::Text;
+		else if (type == "password") controlType = FormControlType::Password;
+		else if (type == "search") controlType = FormControlType::Search;
+		else if (type == "email") controlType = FormControlType::Email;
+		else if (type == "url") controlType = FormControlType::Url;
+		else if (type == "number") controlType = FormControlType::Number;
+		else if (type == "checkbox") controlType = FormControlType::Checkbox;
+		else if (type == "radio") controlType = FormControlType::Radio;
+		else if (type == "button") controlType = FormControlType::Button;
+		else if (type == "submit") controlType = FormControlType::Submit;
+		else if (type == "reset") controlType = FormControlType::Reset;
+
+		const int parsedControls = st.doc.formsDiagnostics.textInputCount +
+			st.doc.formsDiagnostics.checkboxCount + st.doc.formsDiagnostics.radioCount +
+			st.doc.formsDiagnostics.textareaCount + st.doc.formsDiagnostics.selectCount +
+			st.doc.formsDiagnostics.submitCount + st.doc.formsDiagnostics.htmlHiddenControls +
+			st.doc.formsDiagnostics.unsupportedControlCount;
+		if (parsedControls >= static_cast<int>(kFormMaxControls)) {
+			++st.doc.formsDiagnostics.controlMetadataClamps;
+			return;
+		}
+
+		elementRef.formControl.type = controlType;
+		elementRef.formControl.inputType = type;
+		elementRef.formControl.supported = supported;
+		elementRef.formControl.metadataComplete = true;
+		elementRef.formControl.disabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
+		elementRef.formControl.required = hasAttr(tagBody, "required");
+		elementRef.formControl.readOnly = hasAttr(tagBody, "readonly");
+		elementRef.formControl.hidden = hidden;
+		elementRef.formControl.checked = (type == "checkbox" || type == "radio") && hasAttr(tagBody, "checked");
+		elementRef.formControl.name = boundedDecodedFormText(extractAttr(tagBody, "name"), kFormMaxLabelBytes, st.doc.formsDiagnostics);
+		elementRef.formControl.value = boundedDecodedFormText(extractAttr(tagBody, "value"), kFormMaxValueBytes, st.doc.formsDiagnostics);
+		elementRef.formControl.placeholder = boundedDecodedFormText(extractAttr(tagBody, "placeholder"), kFormMaxPlaceholderBytes, st.doc.formsDiagnostics);
+		elementRef.formControl.size = parseBoundedFormInt(tagBody, "size", kFormMaxSize, st.doc.formsDiagnostics);
 		const HtmlElementRef inputElement = registerStructuralElement(st, elementRef);
-		markContentForOpenElements(st, false, 0, true, false, true, true);
-		markContentMetadata(st, inputElement.serial, false, 0, true, false, true, true);
-		if (type == "text" || type == "search") {
+		for (HtmlElementRef& stored : st.structuralElements) {
+			if (stored.serial == inputElement.serial) stored.formControl.logicalSerial = inputElement.serial;
+		}
+		if (hidden) {
+			markContentForOpenElements(st, false, 0, false, false, false, false);
+			markContentMetadata(st, inputElement.serial, false, 0, false, false, false, false);
+		} else {
+			markContentForOpenElements(st, false, 0, true, false, true, true);
+			markContentMetadata(st, inputElement.serial, false, 0, true, false, true, true);
+		}
+		++st.doc.formsDiagnostics.htmlInputsParsed;
+		if (hidden) {
+			++st.doc.formsDiagnostics.htmlHiddenControls;
+			return;
+		}
+		if (type == "text" || type == "password" || type == "search" || type == "email" || type == "url" || type == "number" || !supported) {
 			DocBlock block;
 			block.type = BlockType::FormTextInput;
 			block.tagName = "input";
@@ -4431,12 +4912,21 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
 			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
-			block.inputName = decodeEntities(extractAttr(tagBody, "name"));
-			block.inputValue = decodeEntities(extractAttr(tagBody, "value"));
+			block.inputName = inputElement.formControl.name;
+			block.inputValue = supported ? inputElement.formControl.value : std::string();
 			block.inputType = type;
-			block.placeholder = decodeEntities(extractAttr(tagBody, "placeholder"));
+			block.visibleCols = inputElement.formControl.size;
+			block.placeholder = inputElement.formControl.placeholder;
 			block.formUnsupported = st.currentFormUnsupported;
-			block.text = block.inputValue;
+			block.text = block.inputValue.empty() && !block.placeholder.empty() ? block.placeholder : block.inputValue;
+			if (!supported) {
+				block.inputType = "unsupported";
+				block.placeholder = "[unsupported input]";
+				++st.doc.formsDiagnostics.unsupportedControlCount;
+				++st.doc.formsDiagnostics.formControlsUnsupported;
+			}
+			block.formControl = inputElement.formControl;
+			block.formControl.logicalSerial = inputElement.serial;
 			block.elementMetadata = inputElement;
 			block.ancestors = captureBlockAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
@@ -4456,12 +4946,15 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
 			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
-			block.inputName = decodeEntities(extractAttr(tagBody, "name"));
-			block.inputValue = decodeEntities(extractAttr(tagBody, "value"));
+			block.inputName = inputElement.formControl.name;
+			block.inputValue = inputElement.formControl.value;
 			if (block.inputValue.empty()) block.inputValue = "on";
 			block.inputType = type;
 			block.checked = hasAttr(tagBody, "checked");
 			block.text = block.inputName.empty() ? block.inputValue : block.inputName;
+			block.formControl = inputElement.formControl;
+			block.formControl.logicalSerial = inputElement.serial;
+			block.formControl.checked = block.checked;
 			block.elementMetadata = inputElement;
 			block.formUnsupported = st.currentFormUnsupported;
 			block.ancestors = captureBlockAncestors(st);
@@ -4473,7 +4966,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			st.doc.blocks.push_back(std::move(block));
 			if (type == "checkbox") ++st.doc.formsDiagnostics.checkboxCount;
 			else ++st.doc.formsDiagnostics.radioCount;
-		} else if (type == "submit") {
+		} else if (type == "button" || type == "submit" || type == "reset") {
 			DocBlock block;
 			block.type = BlockType::FormSubmit;
 			block.tagName = "input";
@@ -4483,9 +4976,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
 			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
-			block.submitLabel = decodeEntities(extractAttr(tagBody, "value"));
-			if (block.submitLabel.empty()) block.submitLabel = "Submit";
+			block.submitLabel = inputElement.formControl.value;
+			if (block.submitLabel.empty()) block.submitLabel = type == "reset" ? "Reset" : (type == "button" ? "Button" : "Submit");
 			block.text = block.submitLabel;
+			block.inputType = type;
+			block.formControl = inputElement.formControl;
+			block.formControl.logicalSerial = inputElement.serial;
 			block.elementMetadata = inputElement;
 			block.formUnsupported = st.currentFormUnsupported;
 			block.ancestors = captureBlockAncestors(st);
@@ -4496,22 +4992,46 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			}
 			st.doc.blocks.push_back(std::move(block));
 			++st.doc.formsDiagnostics.submitCount;
+			++st.doc.formsDiagnostics.htmlButtonsParsed;
 		} else {
 			++st.doc.formsDiagnostics.unsupportedControlCount;
+			++st.doc.formsDiagnostics.formControlsUnsupported;
 		}
 		return;
 	}
 
 	if (name == "textarea") {
 		flushText(st);
+		const int parsedControls = st.doc.formsDiagnostics.textInputCount +
+			st.doc.formsDiagnostics.checkboxCount + st.doc.formsDiagnostics.radioCount +
+			st.doc.formsDiagnostics.textareaCount + st.doc.formsDiagnostics.selectCount +
+			st.doc.formsDiagnostics.submitCount + st.doc.formsDiagnostics.htmlHiddenControls +
+			st.doc.formsDiagnostics.unsupportedControlCount;
+		if (parsedControls >= static_cast<int>(kFormMaxControls)) {
+			++st.doc.formsDiagnostics.controlMetadataClamps;
+			return;
+		}
 		st.open = OpenTag::Textarea;
-		st.currentTextareaName = decodeEntities(extractAttr(tagBody, "name"));
+		st.currentTextareaName = boundedDecodedFormText(extractAttr(tagBody, "name"), kFormMaxLabelBytes, st.doc.formsDiagnostics);
 		st.currentTextareaClass = extractAttr(tagBody, "class");
 		st.currentTextareaId = extractAttr(tagBody, "id");
-		st.currentTextareaRows = parsePositiveIntAttr(tagBody, "rows");
-		st.currentTextareaCols = parsePositiveIntAttr(tagBody, "cols");
+		st.currentTextareaPlaceholder = boundedDecodedFormText(extractAttr(tagBody, "placeholder"), kFormMaxPlaceholderBytes, st.doc.formsDiagnostics);
+		st.currentTextareaDisabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
+		st.currentTextareaRequired = hasAttr(tagBody, "required");
+		st.currentTextareaReadOnly = hasAttr(tagBody, "readonly");
+		st.currentTextareaRows = parseBoundedFormInt(tagBody, "rows", kFormMaxRows, st.doc.formsDiagnostics);
+		st.currentTextareaCols = parseBoundedFormInt(tagBody, "cols", kFormMaxCols, st.doc.formsDiagnostics);
 		st.styleBuf = extractAttr(tagBody, "style");
+		elementRef.formControl = makeFormControlMetadata(st, elementRef, FormControlType::Textarea, "textarea", true);
+		elementRef.formControl.name = st.currentTextareaName;
+		elementRef.formControl.placeholder = st.currentTextareaPlaceholder;
+		elementRef.formControl.disabled = st.currentTextareaDisabled;
+		elementRef.formControl.required = st.currentTextareaRequired;
+		elementRef.formControl.readOnly = st.currentTextareaReadOnly;
+		elementRef.formControl.rows = st.currentTextareaRows;
+		elementRef.formControl.cols = st.currentTextareaCols;
 		pushElement(st, elementRef);
+		++st.doc.formsDiagnostics.htmlTextareasParsed;
 		activateCurrentBlock(st);
 		st.textBuf.clear();
 		return;
@@ -4519,13 +5039,35 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 
 	if (name == "select") {
 		flushText(st);
+		const int parsedControls = st.doc.formsDiagnostics.textInputCount +
+			st.doc.formsDiagnostics.checkboxCount + st.doc.formsDiagnostics.radioCount +
+			st.doc.formsDiagnostics.textareaCount + st.doc.formsDiagnostics.selectCount +
+			st.doc.formsDiagnostics.submitCount + st.doc.formsDiagnostics.htmlHiddenControls +
+			st.doc.formsDiagnostics.unsupportedControlCount;
+		if (parsedControls >= static_cast<int>(kFormMaxControls)) {
+			++st.doc.formsDiagnostics.controlMetadataClamps;
+			return;
+		}
 		st.inSelect = true;
-		st.currentSelectName = decodeEntities(extractAttr(tagBody, "name"));
+		st.currentSelectName = boundedDecodedFormText(extractAttr(tagBody, "name"), kFormMaxLabelBytes, st.doc.formsDiagnostics);
 		st.currentSelectClass = extractAttr(tagBody, "class");
 		st.currentSelectId = extractAttr(tagBody, "id");
+		st.currentSelectInputType = "select";
+		st.currentSelectDisabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
+		st.currentSelectRequired = hasAttr(tagBody, "required");
+		st.currentSelectMultiple = hasAttr(tagBody, "multiple");
+		st.currentSelectSize = parseBoundedFormInt(tagBody, "size", kFormMaxSize, st.doc.formsDiagnostics);
 		st.currentSelectOptions.clear();
 		st.styleBuf = extractAttr(tagBody, "style");
-		pushElement(st, elementRef);
+		elementRef.formControl = makeFormControlMetadata(st, elementRef, FormControlType::Select, "select", true);
+		elementRef.formControl.name = st.currentSelectName;
+		elementRef.formControl.disabled = st.currentSelectDisabled;
+		elementRef.formControl.required = st.currentSelectRequired;
+		elementRef.formControl.multiple = st.currentSelectMultiple;
+		elementRef.formControl.size = st.currentSelectSize;
+		if (pushElement(st, elementRef) && !st.openElements.empty())
+			st.currentSelectSerial = st.openElements.back().serial;
+		++st.doc.formsDiagnostics.htmlSelectsParsed;
 		activateCurrentBlock(st);
 		st.open = OpenTag::None;
 		return;
@@ -4534,10 +5076,16 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "option" && st.inSelect) {
 		flushText(st);
 		st.open = OpenTag::Option;
-		st.currentOptionValue = decodeEntities(extractAttr(tagBody, "value"));
+		st.currentOptionValue = boundedDecodedFormText(extractAttr(tagBody, "value"), kFormMaxOptionTextBytes, st.doc.formsDiagnostics);
 		st.currentOptionSelected = hasAttr(tagBody, "selected");
+		st.currentOptionDisabled = hasAttr(tagBody, "disabled") || st.currentSelectDisabled;
 		st.styleBuf = extractAttr(tagBody, "style");
+		elementRef.formControl = makeFormControlMetadata(st, elementRef, FormControlType::Option, "option", true);
+		elementRef.formControl.selected = st.currentOptionSelected;
+		elementRef.formControl.checked = st.currentOptionSelected;
+		elementRef.formControl.disabled = st.currentOptionDisabled;
 		pushElement(st, elementRef);
+		++st.doc.formsDiagnostics.htmlOptionsParsed;
 		activateCurrentBlock(st);
 		st.textBuf.clear();
 		return;
@@ -4647,9 +5195,14 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 
 	if (name == "button") {
 		std::string type = toLower(trim(extractAttr(tagBody, "type")));
-		if (type.empty() || type == "submit") {
+		if (type.empty()) type = "submit";
+		if (type == "submit" || type == "button" || type == "reset") {
+			elementRef.formControl = makeFormControlMetadata(st, elementRef,
+				type == "button" ? FormControlType::Button : (type == "reset" ? FormControlType::Reset : FormControlType::Submit),
+				type, true);
+			elementRef.formControl.disabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
 			st.open = OpenTag::ButtonSubmit;
-			pushElement(st, elementRef);
+			if (pushElement(st, elementRef)) ++st.doc.formsDiagnostics.htmlButtonsParsed;
 			activateCurrentBlock(st);
 		} else {
 			++st.doc.formsDiagnostics.unsupportedControlCount;
@@ -4679,8 +5232,16 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	// Close block-level contexts.
 	if (name == "h1" || name == "h2" || name == "h3" ||
 		name == "p"  || name == "li" || name == "dt" || name == "dd" || name == "figcaption" || name == "title" ||
-		name == "button" || name == "textarea" || name == "option") {
+		name == "button" || name == "textarea" || name == "option" || name == "legend" || name == "label") {
+		const uint64_t closingSerial = st.activeBlockSerial;
 		flushText(st);
+		if (name == "legend") {
+			if (FormContainerMetadata* container = findFormContainer(st, closingSerial)) {
+				container->legendText = st.currentLegendText;
+				if (FormContainerMetadata* fieldset = findFormContainer(st, container->parentSerial))
+					fieldset->legendText = st.currentLegendText;
+			}
+		}
 		popElementByName(st, name);
 		st.open    = OpenTag::None;
 		st.activeBlockSerial = 0;
@@ -4692,10 +5253,24 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			st.currentTextareaName.clear();
 			st.currentTextareaClass.clear();
 			st.currentTextareaId.clear();
+			st.currentTextareaPlaceholder.clear();
+			st.currentTextareaDisabled = false;
+			st.currentTextareaRequired = false;
+			st.currentTextareaReadOnly = false;
 		}
 		if (name == "option") {
 			st.currentOptionValue.clear();
 			st.currentOptionSelected = false;
+			st.currentOptionDisabled = false;
+		}
+		if (name == "legend") {
+			st.currentLegendText.clear();
+			st.currentLegendSerial = 0;
+		}
+		if (name == "label") {
+			st.currentLabelFor.clear();
+			st.currentLabelClass.clear();
+			st.currentLabelId.clear();
 		}
 	}
 	if (name == "a") {
@@ -4767,6 +5342,8 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		block.inputName = st.currentSelectName;
 		block.inputType = "select";
 		block.options = st.currentSelectOptions;
+		block.visibleRows = st.currentSelectSize;
+		block.visibleCols = 0;
 		block.formUnsupported = st.currentFormUnsupported;
 		for (int i = 0; i < static_cast<int>(block.options.size()); ++i) {
 			if (block.options[i].selected) {
@@ -4774,21 +5351,50 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 				break;
 			}
 		}
-		if (block.selectedOption < 0 && !block.options.empty()) block.selectedOption = 0;
+		if (block.selectedOption < 0) {
+			for (int i = 0; i < static_cast<int>(block.options.size()); ++i) {
+				if (!block.options[static_cast<size_t>(i)].disabled) {
+					block.selectedOption = i;
+					break;
+				}
+			}
+		}
 		if (block.selectedOption >= 0 && block.selectedOption < static_cast<int>(block.options.size())) {
 			block.inputValue = block.options[static_cast<size_t>(block.selectedOption)].value;
 			block.text = block.options[static_cast<size_t>(block.selectedOption)].text;
 		}
 		block.ancestors = st.openElements;
 		if (!block.ancestors.empty()) block.ancestors.pop_back();
-		block.elementMetadata = activeBlockElement(st);
+		block.elementMetadata = {};
+		if (const HtmlElementRef* selectElement = findStructuralElement(st, st.currentSelectSerial))
+			block.elementMetadata = *selectElement;
 		block.inlineStyle = st.styleBuf;
+		block.formControl.type = FormControlType::Select;
+		block.formControl.logicalSerial = block.elementMetadata.serial;
+		block.formControl.parentFormSerial = nearestAncestorSerial(st, "form");
+		block.formControl.parentFieldsetSerial = nearestAncestorSerial(st, "fieldset");
+		block.formControl.inputType = "select";
+		block.formControl.name = block.inputName;
+		block.formControl.supported = true;
+		block.formControl.metadataComplete = block.elementMetadata.serial != 0 && st.uncapturedOpenElementDepth == 0;
+		block.formControl.disabled = st.currentSelectDisabled;
+		block.formControl.required = st.currentSelectRequired;
+		block.formControl.multiple = st.currentSelectMultiple;
+		block.formControl.size = st.currentSelectSize;
+		block.formControl.optionCount = static_cast<int>(block.options.size());
+		block.formControl.selectedOptionIndex = block.selectedOption;
 		st.doc.blocks.push_back(std::move(block));
 		++st.doc.formsDiagnostics.selectCount;
 		st.inSelect = false;
 		st.currentSelectName.clear();
 		st.currentSelectClass.clear();
 		st.currentSelectId.clear();
+		st.currentSelectInputType.clear();
+		st.currentSelectDisabled = false;
+		st.currentSelectRequired = false;
+		st.currentSelectMultiple = false;
+		st.currentSelectSize = 0;
+		st.currentSelectSerial = 0;
 		st.currentSelectOptions.clear();
 		st.styleBuf.clear();
 		popElementByName(st, name);
@@ -4803,6 +5409,11 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.currentFormMethod.clear();
 		st.currentFormEncoding.clear();
 		st.currentFormUnsupported = false;
+		st.currentFormSerial = 0;
+		popElementByName(st, name);
+	}
+	if (name == "fieldset") {
+		flushText(st);
 		popElementByName(st, name);
 	}
 	if (name == "pre") {

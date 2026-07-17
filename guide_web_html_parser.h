@@ -16,10 +16,18 @@
 //   <code>           – inside <pre>: stays in Preformatted; elsewhere: plain text
 //   <form method="GET|POST" action="...">
 //                    – starts a simple GET form scope
-//   <input type="text" name="..." value="..." placeholder="...">
-//                    – FormTextInput block
+//   <fieldset><legend>...</legend>...</fieldset>
+//                    – bounded bordered form group
+//   <label for="...">...</label>
+//                    – bounded label text and association metadata
+//   <input type="text|password|search|email|url|number" ...>
+//                    – static text-like control block
 //   <input type="checkbox|radio" name="..." value="..." checked>
 //                    - FormCheckbox/FormRadio block
+//   <input type="button|submit|reset" value="...">
+//                    – visual button block; no submission is added by this phase
+//   <input type="hidden" ...>
+//                    – metadata only, no visible block
 //   <textarea name="...">Text</textarea>
 //                    - FormTextarea block
 //   <select name="..."><option value="..." selected>Text</option></select>
@@ -27,7 +35,7 @@
 //   <input type="submit" value="...">
 //                    – FormSubmit block
 //   <button type="submit">Text</button>
-//                    – FormSubmit block
+//                    – bounded visual button block
 //
 // Ignored with content stripped:
 //   <script>

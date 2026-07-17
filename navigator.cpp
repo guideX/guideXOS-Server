@@ -36,6 +36,7 @@ using gxos::web::BorderLineStyle;
 using gxos::web::GenericFontFamily;
 using gxos::web::ListStyleType;
 using gxos::web::TableBorderCollapseMode;
+using gxos::web::FormControlType;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -887,6 +888,8 @@ namespace {
 	static int blockBodyMarginLeft(const WebDocument& doc);
 	static int blockBodyMarginRight(const WebDocument& doc);
 	static int blockAvailableWidth(const DocBlock& block, const WebDocument& doc);
+	static bool isFormControlBlock(const DocBlock& block);
+	static int blockFormControlWidth(const DocBlock& block, int availableWidth);
 	static int blockOuterWidth(const DocBlock& block, int availableWidth, bool* outClamped = nullptr);
 	static int blockOuterX(const DocBlock& block, const WebDocument& doc, int availableWidth, int outerWidth);
 	static int blockWrapWidth(const DocBlock& block, int outerWidth);
@@ -1378,6 +1381,18 @@ namespace {
 		metadata.cssIdentifierEscapeRejections = doc.cssDiagnostics.identifierEscapeRejections;
 		metadata.cssSelectorMemberParseFailures = doc.cssDiagnostics.selectorMemberParseFailures;
 		metadata.cssSelectorRecoverySuccesses = doc.cssDiagnostics.selectorRecoverySuccesses;
+		metadata.cssCheckedPseudoParsed = doc.cssDiagnostics.checkedPseudoParsed;
+		metadata.cssCheckedPseudoMatches = doc.cssDiagnostics.checkedPseudoMatches;
+		metadata.cssDisabledPseudoParsed = doc.cssDiagnostics.disabledPseudoParsed;
+		metadata.cssDisabledPseudoMatches = doc.cssDiagnostics.disabledPseudoMatches;
+		metadata.cssEnabledPseudoParsed = doc.cssDiagnostics.enabledPseudoParsed;
+		metadata.cssEnabledPseudoMatches = doc.cssDiagnostics.enabledPseudoMatches;
+		metadata.cssRequiredPseudoParsed = doc.cssDiagnostics.requiredPseudoParsed;
+		metadata.cssRequiredPseudoMatches = doc.cssDiagnostics.requiredPseudoMatches;
+		metadata.cssReadonlyPseudoParsed = doc.cssDiagnostics.readonlyPseudoParsed;
+		metadata.cssReadonlyPseudoMatches = doc.cssDiagnostics.readonlyPseudoMatches;
+		metadata.cssReadwritePseudoParsed = doc.cssDiagnostics.readwritePseudoParsed;
+		metadata.cssReadwritePseudoMatches = doc.cssDiagnostics.readwritePseudoMatches;
 		metadata.cssComputedStyleEvidence = doc.cssDiagnostics.computedStyleEvidence;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
@@ -1386,6 +1401,20 @@ namespace {
 		metadata.formTextareaCount = doc.formsDiagnostics.textareaCount;
 		metadata.formSelectCount = doc.formsDiagnostics.selectCount;
 		metadata.unsupportedFormControlCount = doc.formsDiagnostics.unsupportedControlCount;
+		metadata.htmlFormsParsed = doc.formsDiagnostics.htmlFormsParsed;
+		metadata.htmlFieldsetsParsed = doc.formsDiagnostics.htmlFieldsetsParsed;
+		metadata.htmlLabelsParsed = doc.formsDiagnostics.htmlLabelsParsed;
+		metadata.htmlInputsParsed = doc.formsDiagnostics.htmlInputsParsed;
+		metadata.htmlButtonsParsed = doc.formsDiagnostics.htmlButtonsParsed;
+		metadata.htmlTextareasParsed = doc.formsDiagnostics.htmlTextareasParsed;
+		metadata.htmlSelectsParsed = doc.formsDiagnostics.htmlSelectsParsed;
+		metadata.htmlOptionsParsed = doc.formsDiagnostics.htmlOptionsParsed;
+		metadata.htmlHiddenControls = doc.formsDiagnostics.htmlHiddenControls;
+		metadata.controlMetadataClamps = doc.formsDiagnostics.controlMetadataClamps;
+		metadata.controlTextTruncations = doc.formsDiagnostics.controlTextTruncations;
+		metadata.formControlsRendered = 0;
+		metadata.formControlsUnsupported = doc.formsDiagnostics.formControlsUnsupported;
+		metadata.formInteractionsDeferred = doc.formsDiagnostics.formInteractionsDeferred;
 		metadata.unsupportedFormMethod = doc.formsDiagnostics.hasUnsupportedMethod;
 		metadata.unsupportedFormEncoding = doc.formsDiagnostics.hasUnsupportedEncoding;
 		metadata.postSupportedHosted = true;
@@ -1413,6 +1442,7 @@ namespace {
 				++metadata.cssDisplayNoneBlockCount;
 				continue;
 			}
+			if (isFormControlBlock(block)) ++metadata.formControlsRendered;
 			if (blockHasWrapperAncestor(block)) {
 				++metadata.cssWrapperRenderCount;
 			}
@@ -2331,6 +2361,7 @@ namespace {
 			const int outerWidth = imageW + paddingLeft + paddingRight;
 			return std::max(1, std::min(outerWidth, availableWidth));
 		}
+		if (isFormControlBlock(block)) return blockFormControlWidth(block, availableWidth);
 		int outerWidth = cssWidthPx(block.style, availableWidth, availableWidth);
 		outerWidth = std::min(outerWidth, cssMaxWidthPx(block.style, availableWidth, outerWidth));
 		const int safeMinWidth = std::min(availableWidth, kMinReadableBlockWidth);
@@ -2400,12 +2431,50 @@ namespace {
 
 	static int blockFormControlHeight(const DocBlock& block)
 	{
+		int fallback = kFormControlH;
 		if (block.type == BlockType::FormTextarea) {
 			int rows = block.visibleRows > 0 ? block.visibleRows : 4;
 			rows = std::max(kTextareaMinRows, std::min(kTextareaMaxRows, rows));
-			return std::max(kFormControlH, rows * kLineH + 10);
+			fallback = std::max(kFormControlH, rows * kLineH + 10);
+		} else if (block.type == BlockType::FormSelect && block.formControl.multiple) {
+			int rows = block.visibleRows > 0 ? block.visibleRows : static_cast<int>(block.options.size());
+			rows = std::max(2, std::min(6, rows));
+			fallback = std::max(kFormControlH, rows * kLineH + 10);
 		}
-		return kFormControlH;
+		const int cssHeight = cssHeightPx(block.style, 240, -1);
+		if (cssHeight > 0) return std::max(kFormControlH, std::min(240, cssHeight));
+		return fallback;
+	}
+
+	static bool isFormControlBlock(const DocBlock& block)
+	{
+		return block.type == BlockType::FormTextInput ||
+			block.type == BlockType::FormCheckbox ||
+			block.type == BlockType::FormRadio ||
+			block.type == BlockType::FormTextarea ||
+			block.type == BlockType::FormSelect ||
+			block.type == BlockType::FormSubmit;
+	}
+
+	static int blockFormControlWidth(const DocBlock& block, int availableWidth)
+	{
+		int fallback = 280;
+		if (block.type == BlockType::FormSubmit) fallback = 132;
+		else if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) fallback = 300;
+		else if (block.type == BlockType::FormTextarea && block.visibleCols > 0)
+			fallback = std::min(640, block.visibleCols * kCharW + 20);
+		else if (block.formControl.size > 0 &&
+			(block.formControl.type == FormControlType::Text ||
+			 block.formControl.type == FormControlType::Password ||
+			 block.formControl.type == FormControlType::Search ||
+			 block.formControl.type == FormControlType::Email ||
+			 block.formControl.type == FormControlType::Url ||
+			 block.formControl.type == FormControlType::Number ||
+			 block.formControl.type == FormControlType::Unsupported))
+			fallback = std::min(640, block.formControl.size * kCharW + 20);
+		int width = cssWidthPx(block.style, availableWidth, fallback);
+		width = std::min(width, cssMaxWidthPx(block.style, availableWidth, width));
+		return std::max(80, std::min(std::min(availableWidth, 720), width));
 	}
 
 	static int blockTotalHeight(const DocBlock& block, const WebDocument& doc, bool nextIsHeading)
@@ -2470,6 +2539,9 @@ namespace {
 			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::Preformatted:
+			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
+			break;
+		case BlockType::FormLabel:
 			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::FormTextInput:
@@ -3010,6 +3082,44 @@ namespace {
 		return out.str();
 	}
 
+	static void appendFormPhase2EDiagnostics(std::string& out, const NavigatorPageMetadata& metadata)
+	{
+		const auto add = [&](const char* label, int value) {
+			out += std::string("Current Document.") + label + "=" + std::to_string(value) + "\n";
+		};
+		add("HTML forms parsed", metadata.htmlFormsParsed);
+		add("HTML fieldsets parsed", metadata.htmlFieldsetsParsed);
+		add("HTML labels parsed", metadata.htmlLabelsParsed);
+		add("HTML inputs parsed", metadata.htmlInputsParsed);
+		add("HTML buttons parsed", metadata.htmlButtonsParsed);
+		add("HTML textareas parsed", metadata.htmlTextareasParsed);
+		add("HTML selects parsed", metadata.htmlSelectsParsed);
+		add("HTML options parsed", metadata.htmlOptionsParsed);
+		add("HTML hidden controls", metadata.htmlHiddenControls);
+		add("HTML control metadata clamps", metadata.controlMetadataClamps);
+		add("HTML control text truncations", metadata.controlTextTruncations);
+		add("CSS :checked pseudo parsed", metadata.cssCheckedPseudoParsed);
+		add("CSS :checked pseudo matches", metadata.cssCheckedPseudoMatches);
+		add("CSS :disabled pseudo matches", metadata.cssDisabledPseudoMatches);
+		add("CSS :enabled pseudo matches", metadata.cssEnabledPseudoMatches);
+		add("CSS :required pseudo matches", metadata.cssRequiredPseudoMatches);
+		add("CSS :read-only pseudo matches", metadata.cssReadonlyPseudoMatches);
+		add("CSS :read-write pseudo matches", metadata.cssReadwritePseudoMatches);
+		add("Form controls rendered", metadata.formControlsRendered);
+		add("Form controls unsupported", metadata.formControlsUnsupported);
+		add("Form interactions deferred", metadata.formInteractionsDeferred);
+	}
+
+	static void appendFormPhase2EBlocks(WebDocument& doc, const NavigatorPageMetadata& metadata)
+	{
+		doc.blocks.push_back({BlockType::Heading, "CSS Phase 2E Form Diagnostics", ""});
+		std::string report;
+		appendFormPhase2EDiagnostics(report, metadata);
+		std::istringstream lines(report);
+		std::string line;
+		while (std::getline(lines, line)) doc.blocks.push_back({BlockType::ListItem, line, ""});
+	}
+
 	static std::string filePathFromUrl(const std::string& url)
 	{
 		if (url.rfind("file://", 0) != 0) return "";
@@ -3361,7 +3471,7 @@ bool Navigator::SmokeDragFirstLinkSelectsWithoutNavigation()
 std::string Navigator::SmokeRuntimeReport()
 {
 	const std::string inspected = s_pageMetadata.finalUrl.empty() ? "" : s_pageMetadata.finalUrl;
-	return formatRuntimeReport(hostedRuntimeReportEntries(
+	std::string report = formatRuntimeReport(hostedRuntimeReportEntries(
 		s_currentDoc.url,
 		s_currentDoc.title,
 		static_cast<int>(s_currentDoc.blocks.size()),
@@ -3491,6 +3601,8 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.tlsCredentialAcquired,
 		s_pageMetadata.tlsHandshakeStarted,
 		s_pageMetadata.tlsSmokeSelfSignedBypass));
+	appendFormPhase2EDiagnostics(report, s_pageMetadata);
+	return report;
 }
 
 std::string Navigator::SmokeCurrentUrl()
@@ -3753,6 +3865,66 @@ void Navigator::renderDocument()
 	drawThemeRect(s_windowId, kContentX, kToolbarH + 6, kContentW, 1, NavigatorContentBorderColor());
 	// Scroll-track slot
 	drawThemeRect(s_windowId, kContentX + kContentW - 12, kToolbarH + 6, 8, kContentH, NavigatorScrollTrackColor());
+	auto formFillColor = [&](const DocBlock& block, bool focused, bool disabled) -> uint32_t {
+		if (disabled) return 0xFFE3E6EAu;
+		if (block.style.hasBackgroundColor) return block.style.backgroundColor;
+		return NavigatorFieldFillColor(focused);
+	};
+	auto formBorderColor = [&](const DocBlock& block, bool focused, bool disabled) -> uint32_t {
+		if (disabled) return 0xFF9AA1A9u;
+		if (block.style.hasBorderTop && block.style.borderTopColor != 0) return block.style.borderTopColor;
+		return NavigatorFieldBorderColor(focused);
+	};
+	auto formTextColor = [&](const DocBlock& block, bool disabled, bool placeholder) -> uint32_t {
+		if (disabled || placeholder) return NavigatorFieldMutedTextColor();
+		if (block.style.hasColor) return block.style.color;
+		return NavigatorFieldTextColor();
+	};
+	auto blockHasAncestorSerial = [](const DocBlock& block, uint64_t serial) {
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			if (ancestor.serial == serial) return true;
+		}
+		return false;
+	};
+	auto renderFieldsetAt = [&](int currentIndex) {
+		for (const gxos::web::FormContainerMetadata& container : s_currentDoc.formContainers) {
+			if (container.tagName != "fieldset" || container.serial == 0 || container.style.displayNone) continue;
+			int first = -1;
+			int last = -1;
+			for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+				const DocBlock& candidate = s_currentDoc.blocks[static_cast<size_t>(i)];
+				if (!blockHasAncestorSerial(candidate, container.serial) || !blockHasVisibleCss(candidate)) continue;
+				if (first < 0) first = i;
+				last = i;
+			}
+			if (first != currentIndex || last < first) continue;
+			const int top = kContentY + blockLayoutY(first) - s_scrollOffset + 1;
+			const int lastHeight = blockTotalHeight(s_currentDoc.blocks[static_cast<size_t>(last)], s_currentDoc, false);
+			const int bottom = kContentY + blockLayoutY(last) - s_scrollOffset + lastHeight - 2;
+			const int available = std::max(1, kContentW - blockBodyMarginLeft(s_currentDoc) - blockBodyMarginRight(s_currentDoc) - 16);
+			const int width = std::max(120, std::min(available, cssMaxWidthPx(container.style, available,
+				cssWidthPx(container.style, available, available))));
+			const int x = kContentX + blockBodyMarginLeft(s_currentDoc) + 8;
+			const int height = std::max(28, bottom - top);
+			if (container.style.hasBackgroundColor) drawThemeRect(s_windowId, x, top, width, height, container.style.backgroundColor);
+			drawBlockBox(s_windowId, x, top, width, height, container.style);
+			std::string legendText = container.legendText;
+			const gxos::web::FormContainerMetadata* legend = nullptr;
+			for (const auto& candidate : s_currentDoc.formContainers) {
+				if (candidate.tagName == "legend" && candidate.parentSerial == container.serial) {
+					legend = &candidate;
+					break;
+				}
+			}
+			if (legend && !legend->legendText.empty()) legendText = legend->legendText;
+			if (!legendText.empty()) {
+				const int legendW = std::min(width - 20, std::max(kCharW, static_cast<int>(legendText.size()) * kCharW + 8));
+				drawThemeRect(s_windowId, x + 8, top - 2, legendW, kLineH + 2, contentColor);
+				drawThemeText(s_windowId, x + 12, top, legendText.substr(0, static_cast<size_t>(std::max(1, (legendW - 8) / kCharW))),
+					legend ? (legend->style.hasColor ? legend->style.color : contentTextColor) : contentTextColor);
+			}
+		}
+	};
 
 	int blockIndex = 0;
 	for (const DocBlock& block : s_currentDoc.blocks) {
@@ -3760,6 +3932,7 @@ void Navigator::renderDocument()
 			++blockIndex;
 			continue;
 		}
+		renderFieldsetAt(blockIndex);
 		int relY  = blockLayoutY(blockIndex);
 		int drawY = kContentY + relY - s_scrollOffset;
 		const int blockMarginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
@@ -3916,6 +4089,7 @@ void Navigator::renderDocument()
 		case BlockType::Link:         blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, wrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::ListItem:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, listWrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::Preformatted: blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, preWrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::FormLabel:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, wrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom); break;
 		case BlockType::FormTextInput:
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio:
@@ -4014,6 +4188,17 @@ void Navigator::renderDocument()
 			break;
 		}
 
+		case BlockType::FormLabel: {
+			auto lines = wrapTextForBlock(block, wrapCols);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
+			for (const std::string& ln : lines) {
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, static_cast<int>(ln.size()) * kCharW), lineY,
+					ln, block.style, contentTextColor, lineHeight);
+				lineY += lineHeight;
+			}
+			break;
+		}
+
 		case BlockType::Link: {
 			// Full wrapped link block: underline + blue text
 			// The entire bounding rect is clickable (TODO: per-line hit testing).
@@ -4079,27 +4264,30 @@ void Navigator::renderDocument()
 			const int inputX = contentX;
 			const int inputY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, kFormControlH, NavigatorFieldFillColor(focused));
-			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, 1, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, inputX, inputY + kFormControlH - 1, kFormInputW, 1, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, inputX, inputY, 1, kFormControlH, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, kFormControlH, NavigatorFieldBorderColor(focused));
-			std::string text = block.inputValue;
+			const bool disabled = block.formControl.disabled;
+			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
+			const int controlH = formControlHeight(block);
+			const uint32_t fill = formFillColor(block, focused, disabled);
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, inputX, inputY, controlW, controlH, fill);
+			drawThemeRect(s_windowId, inputX, inputY, controlW, 1, border);
+			drawThemeRect(s_windowId, inputX, inputY + controlH - 1, controlW, 1, border);
+			drawThemeRect(s_windowId, inputX, inputY, 1, controlH, border);
+			drawThemeRect(s_windowId, inputX + controlW - 1, inputY, 1, controlH, border);
+		std::string text = block.inputValue;
 			bool placeholder = text.empty() && !block.placeholder.empty();
 			if (placeholder) text = block.placeholder;
-			const int maxChars = (kFormInputW - 16) / kCharW;
+			const bool password = block.formControl.type == FormControlType::Password || block.inputType == "password";
+			const int maxChars = std::max(1, (controlW - 16) / kCharW);
+			if (password && !placeholder) text.assign(std::min(static_cast<int>(block.inputValue.size()), maxChars), '*');
 			if (static_cast<int>(text.size()) > maxChars) {
 				text = text.substr(text.size() - static_cast<size_t>(maxChars));
 			}
-			if (placeholder) {
-				drawThemeText(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, NavigatorFieldMutedTextColor());
-			} else {
-				drawThemeText(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, NavigatorFieldTextColor());
-			}
+			drawThemeText(s_windowId, inputX + 8, centeredChromeTextY(inputY, controlH), text, formTextColor(block, disabled, placeholder));
 			if (focused) {
 				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
 				int visibleCaret = std::min(caretPos, maxChars);
-				drawThemeRect(s_windowId, inputX + 8 + visibleCaret * kCharW, inputY + 5, 1, kFormControlH - 10, NavigatorAccentColor());
+				if (!disabled && !password) drawThemeRect(s_windowId, inputX + 8 + visibleCaret * kCharW, inputY + 5, 1, controlH - 10, NavigatorAccentColor());
 			}
 			break;
 		}
@@ -4109,14 +4297,18 @@ void Navigator::renderDocument()
 			const int inputY = boxY + borderTop + paddingTop;
 			const int inputH = formControlHeight(block);
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, inputH, NavigatorFieldFillColor(focused));
-			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, 1, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, inputX, inputY + inputH - 1, kFormInputW, 1, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, inputX, inputY, 1, inputH, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, inputH, NavigatorFieldBorderColor(focused));
+			const bool disabled = block.formControl.disabled;
+			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
+			const uint32_t fill = formFillColor(block, focused, disabled);
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, inputX, inputY, controlW, inputH, fill);
+			drawThemeRect(s_windowId, inputX, inputY, controlW, 1, border);
+			drawThemeRect(s_windowId, inputX, inputY + inputH - 1, controlW, 1, border);
+			drawThemeRect(s_windowId, inputX, inputY, 1, inputH, border);
+			drawThemeRect(s_windowId, inputX + controlW - 1, inputY, 1, inputH, border);
 			const bool placeholder = block.inputValue.empty() && !block.placeholder.empty();
 			const std::string rawText = placeholder ? block.placeholder : block.inputValue;
-			const int maxChars = (kFormInputW - 16) / kCharW;
+			const int maxChars = std::max(1, (controlW - 16) / kCharW);
 			const int maxVisibleRows = std::max(1, (inputH - 10) / kLineH);
 			std::vector<std::string> lines = textareaLines(rawText);
 			int firstVisibleLine = 0;
@@ -4132,10 +4324,10 @@ void Navigator::renderDocument()
 					lineText = lineText.substr(static_cast<size_t>(std::max(0, static_cast<int>(lineText.size()) - maxChars)));
 				}
 				drawThemeText(s_windowId, inputX + 8, lineY, lineText,
-					placeholder ? NavigatorFieldMutedTextColor() : NavigatorFieldTextColor());
+					formTextColor(block, disabled, placeholder));
 				lineY += lineHeight;
 			}
-			if (focused && !placeholder) {
+			if (focused && !placeholder && !disabled && !block.formControl.readOnly) {
 				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
 				int caretLine = 0;
 				int caretColumn = 0;
@@ -4161,22 +4353,26 @@ void Navigator::renderDocument()
 			const int controlX = contentX;
 			const int controlY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const bool disabled = block.formControl.disabled;
 			const int box = 14;
 			const int boxY = controlY + (kFormControlH - box) / 2;
-			drawThemeRect(s_windowId, controlX, boxY, box, box, NavigatorFieldFillColor(focused));
-			drawThemeRect(s_windowId, controlX, boxY, box, 1, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, controlX, boxY + box - 1, box, 1, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, controlX, boxY, 1, box, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, controlX + box - 1, boxY, 1, box, NavigatorFieldBorderColor(focused));
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, controlX, boxY, box, box, formFillColor(block, focused, disabled));
+			drawThemeRect(s_windowId, controlX, boxY, box, 1, border);
+			drawThemeRect(s_windowId, controlX, boxY + box - 1, box, 1, border);
+			drawThemeRect(s_windowId, controlX, boxY, 1, box, border);
+			drawThemeRect(s_windowId, controlX + box - 1, boxY, 1, box, border);
 			if (block.checked) {
 				if (block.type == BlockType::FormRadio) {
-					drawThemeRect(s_windowId, controlX + 4, boxY + 4, box - 8, box - 8, NavigatorAccentColor());
+					drawThemeRect(s_windowId, controlX + 4, boxY + 4, box - 8, box - 8, disabled ? border : NavigatorAccentColor());
 				} else {
-					drawThemeText(s_windowId, controlX + 3, boxY - 2, "x", NavigatorAccentColor());
+					drawThemeText(s_windowId, controlX + 3, boxY - 2, "x", disabled ? border : NavigatorAccentColor());
 				}
 			}
 			std::string label = block.text.empty() ? block.inputName : block.text;
-			drawThemeText(s_windowId, controlX + box + 8, centeredChromeTextY(controlY, kFormControlH), label, NavigatorFieldTextColor());
+			const int labelMax = std::max(1, (std::min(innerWidth, blockFormControlWidth(block, availableWidth)) - box - 8) / kCharW);
+			if (static_cast<int>(label.size()) > labelMax) label.resize(static_cast<size_t>(labelMax));
+			drawThemeText(s_windowId, controlX + box + 8, centeredChromeTextY(controlY, kFormControlH), label, formTextColor(block, disabled, false));
 			break;
 		}
 
@@ -4184,14 +4380,36 @@ void Navigator::renderDocument()
 			const int selectX = contentX;
 			const int selectY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawThemeRect(s_windowId, selectX, selectY, kFormInputW, kFormControlH, NavigatorFieldFillColor(focused));
-			drawThemeRect(s_windowId, selectX, selectY, kFormInputW, 1, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, selectX, selectY + kFormControlH - 1, kFormInputW, 1, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, selectX, selectY, 1, kFormControlH, NavigatorFieldBorderColor(focused));
-			drawThemeRect(s_windowId, selectX + kFormInputW - 1, selectY, 1, kFormControlH, NavigatorFieldBorderColor(focused));
-			std::string label = block.text.empty() ? "(select)" : block.text;
-			drawThemeText(s_windowId, selectX + 8, centeredChromeTextY(selectY, kFormControlH), label, NavigatorFieldTextColor());
-			drawThemeText(s_windowId, selectX + kFormInputW - 20, centeredChromeTextY(selectY, kFormControlH), "v", NavigatorFieldMutedTextColor());
+			const bool disabled = block.formControl.disabled;
+			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
+			const int controlH = formControlHeight(block);
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, selectX, selectY, controlW, controlH, formFillColor(block, focused, disabled));
+			drawThemeRect(s_windowId, selectX, selectY, controlW, 1, border);
+			drawThemeRect(s_windowId, selectX, selectY + controlH - 1, controlW, 1, border);
+			drawThemeRect(s_windowId, selectX, selectY, 1, controlH, border);
+			drawThemeRect(s_windowId, selectX + controlW - 1, selectY, 1, controlH, border);
+			if (block.formControl.multiple) {
+				const int maxRows = std::max(1, (controlH - 8) / kLineH);
+				int row = 0;
+				for (const gxos::web::FormOption& option : block.options) {
+					if (row >= maxRows) break;
+					std::string optionText = option.text.empty() ? option.value : option.text;
+					const int maxChars = std::max(1, (controlW - 16) / kCharW);
+					if (static_cast<int>(optionText.size()) > maxChars) optionText.resize(static_cast<size_t>(maxChars));
+					const bool selected = block.selectedOption == row;
+					if (selected) optionText = "> " + optionText;
+					drawThemeText(s_windowId, selectX + 8, selectY + 4 + row * kLineH, optionText,
+						formTextColor(block, disabled || option.disabled, false));
+					++row;
+				}
+			} else {
+				std::string label = block.text.empty() ? "(select)" : block.text;
+				const int maxChars = std::max(1, (controlW - 28) / kCharW);
+				if (static_cast<int>(label.size()) > maxChars) label.resize(static_cast<size_t>(maxChars));
+				drawThemeText(s_windowId, selectX + 8, centeredChromeTextY(selectY, controlH), label, formTextColor(block, disabled, false));
+				drawThemeText(s_windowId, selectX + controlW - 20, centeredChromeTextY(selectY, controlH), "v", NavigatorFieldMutedTextColor());
+			}
 			break;
 		}
 
@@ -4199,16 +4417,21 @@ void Navigator::renderDocument()
 			const int buttonX = contentX;
 			const int buttonY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			const bool disabled = block.formUnsupported;
-			drawThemeRect(s_windowId, buttonX, buttonY, kFormSubmitW, kFormControlH, NavigatorButtonFillColor(focused, disabled));
-			drawThemeRect(s_windowId, buttonX, buttonY, kFormSubmitW, 1, NavigatorButtonBorderColor(focused, disabled));
-			drawThemeRect(s_windowId, buttonX, buttonY + kFormControlH - 1, kFormSubmitW, 1, NavigatorButtonBorderColor(focused, disabled));
-			drawThemeRect(s_windowId, buttonX, buttonY, 1, kFormControlH, NavigatorButtonBorderColor(focused, disabled));
-			drawThemeRect(s_windowId, buttonX + kFormSubmitW - 1, buttonY, 1, kFormControlH, NavigatorButtonBorderColor(focused, disabled));
+			const bool disabled = block.formControl.disabled;
+			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
+			const int controlH = formControlHeight(block);
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, buttonX, buttonY, controlW, controlH,
+				disabled ? 0xFFE3E6EAu : (block.style.hasBackgroundColor ? block.style.backgroundColor : NavigatorButtonFillColor(focused, false)));
+			drawThemeRect(s_windowId, buttonX, buttonY, controlW, 1, border);
+			drawThemeRect(s_windowId, buttonX, buttonY + controlH - 1, controlW, 1, border);
+			drawThemeRect(s_windowId, buttonX, buttonY, 1, controlH, border);
+			drawThemeRect(s_windowId, buttonX + controlW - 1, buttonY, 1, controlH, border);
 			std::string label = block.submitLabel.empty() ? "Submit" : block.submitLabel;
-			int labelMax = (kFormSubmitW - 14) / kCharW;
+			int labelMax = std::max(1, (controlW - 14) / kCharW);
 			if (static_cast<int>(label.size()) > labelMax) label = label.substr(0, static_cast<size_t>(labelMax));
-			drawThemeText(s_windowId, buttonX + 10, centeredChromeTextY(buttonY, kFormControlH), label, NavigatorButtonTextColor(disabled));
+			drawThemeText(s_windowId, buttonX + 10, centeredChromeTextY(buttonY, controlH), label,
+				block.style.hasColor && !disabled ? block.style.color : NavigatorButtonTextColor(disabled));
 			break;
 		}
 		}
@@ -4610,11 +4833,14 @@ std::string Navigator::searchableTextForBlock(const DocBlock& block)
 	case BlockType::Link:
 	case BlockType::ListItem:
 	case BlockType::Preformatted:
+	case BlockType::FormLabel:
 		return block.text;
 	case BlockType::Image:
 		return !block.alt.empty() ? block.alt : block.text;
 	case BlockType::FormTextInput:
 	case BlockType::FormTextarea:
+		if (block.formControl.type == FormControlType::Password || block.inputType == "password")
+			return "[password field]";
 		if (!block.inputValue.empty()) return block.inputValue;
 		if (!block.placeholder.empty()) return block.placeholder;
 		return block.inputName;
@@ -4637,6 +4863,7 @@ bool Navigator::isSelectableBlock(const DocBlock& block)
 	case BlockType::Link:
 	case BlockType::ListItem:
 	case BlockType::Preformatted:
+	case BlockType::FormLabel:
 		return true;
 	default:
 		return false;
@@ -4893,6 +5120,7 @@ std::string Navigator::findMatchStatusText()
 
 bool Navigator::isFocusableFormControl(const DocBlock& block)
 {
+	if (block.formControl.hidden || block.formControl.disabled) return false;
 	return block.type == BlockType::FormTextInput ||
 		block.type == BlockType::FormTextarea ||
 		block.type == BlockType::FormCheckbox ||
@@ -4903,12 +5131,7 @@ bool Navigator::isFocusableFormControl(const DocBlock& block)
 
 int Navigator::formControlHeight(const DocBlock& block)
 {
-	if (block.type == BlockType::FormTextarea) {
-		int rows = block.visibleRows > 0 ? block.visibleRows : 4;
-		rows = std::max(kTextareaMinRows, std::min(kTextareaMaxRows, rows));
-		return std::max(kFormControlH, rows * kLineH + 10);
-	}
-	return kFormControlH;
+	return blockFormControlHeight(block);
 }
 
 void Navigator::focusNextFormControl(bool reverse)
@@ -4934,6 +5157,10 @@ void Navigator::activateFormControl(int blockIndex)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
 	DocBlock& block = s_currentDoc.blocks[blockIndex];
+	if (block.formControl.disabled) {
+		updateStatus("Disabled form control.");
+		return;
+	}
 	if (block.type == BlockType::FormCheckbox) {
 		block.checked = !block.checked;
 		s_focusedInputBlockIndex = blockIndex;
@@ -5039,6 +5266,10 @@ void Navigator::submitFormForBlock(int blockIndex)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
 	const DocBlock& source = s_currentDoc.blocks[blockIndex];
+	if (source.formControl.disabled) {
+		updateStatus("Disabled form control.");
+		return;
+	}
 	std::string method = toLowerAscii(source.formMethod.empty() ? "get" : source.formMethod);
 	const std::string encoding = toLowerAscii(source.formEncoding.empty() ? "application/x-www-form-urlencoded" : source.formEncoding);
 	if (source.formUnsupported || (method != "get" && method != "post")) {
@@ -6145,6 +6376,7 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.tlsCredentialAcquired,
 		s_pageMetadata.tlsHandshakeStarted,
 		s_pageMetadata.tlsSmokeSelfSignedBypass));
+	appendFormPhase2EBlocks(doc, s_pageMetadata);
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
@@ -6250,8 +6482,15 @@ static std::string extractDocumentText(const WebDocument& doc)
 		case BlockType::Image:
 			if (!block.alt.empty()) out << "[Image: " << block.alt << "]\n";
 			break;
+		case BlockType::FormLabel:
+			if (!block.text.empty()) out << block.text << "\n";
+			break;
 		case BlockType::FormTextInput:
 		case BlockType::FormTextarea: {
+			if (block.formControl.type == FormControlType::Password || block.inputType == "password") {
+				out << "[password field]\n";
+				break;
+			}
 			const std::string& text = block.inputValue.empty() ? block.placeholder : block.inputValue;
 			if (!text.empty()) out << text << "\n";
 			break;
@@ -6814,7 +7053,6 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	const int blockMarginLeft = cssMarginLeftPx(block.style, 0);
 	const int blockMarginRight = cssMarginRightPx(block.style, 0);
 	const int blockMarginTop = cssMarginTopPx(block.style, 4);
-	const int paddingLeft = cssPaddingLeftPx(block.style, 0);
 	const int paddingTop = cssPaddingTopPx(block.style, 0);
 	const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
 		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
@@ -6822,9 +7060,7 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	const int relY = blockLayoutY(blockIndex);
 	const int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + paddingTop;
-	int w = kFormInputW;
-	if (block.type == BlockType::FormSubmit) w = kFormSubmitW;
-	else if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) w = 260;
+	const int w = blockFormControlWidth(block, availableWidth);
 	return Rect{ blockContentLeftX(block, outerX), drawY, w, formControlHeight(block) };
 }
 

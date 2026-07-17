@@ -34,6 +34,56 @@ enum class BlockType : uint8_t {
 	FormRadio     = 9,
 	FormTextarea  = 10,
 	FormSelect    = 11,
+	FormLabel     = 12,
+};
+
+// Bounded form metadata. This is a value object rather than a DOM node or a
+// live submission model. Values are retained only for the existing local
+// text-control primitive and are excluded from diagnostics/evidence.
+enum class FormControlType : uint8_t {
+	None = 0,
+	Text,
+	Password,
+	Search,
+	Email,
+	Url,
+	Number,
+	Checkbox,
+	Radio,
+	Button,
+	Submit,
+	Reset,
+	Textarea,
+	Select,
+	Option,
+	Unsupported,
+};
+
+struct FormControlMetadata {
+	FormControlType type = FormControlType::None;
+	uint64_t logicalSerial = 0;
+	uint64_t parentFormSerial = 0;
+	uint64_t parentFieldsetSerial = 0;
+	std::string name;
+	std::string value;
+	std::string placeholder;
+	std::string label;
+	std::string inputType;
+	std::string associatedId;
+	bool metadataComplete = false;
+	bool supported = false;
+	bool checked = false;
+	bool disabled = false;
+	bool required = false;
+	bool readOnly = false;
+	bool selected = false;
+	bool multiple = false;
+	bool hidden = false;
+	int size = 0;
+	int rows = 0;
+	int cols = 0;
+	int optionCount = 0;
+	int selectedOptionIndex = -1;
 };
 
 enum class StyleSelectorType : uint8_t {
@@ -118,6 +168,7 @@ struct HtmlElementRef {
 	uint64_t    previousSiblingSerial = 0;
 	bool        hasLinkTarget = false;
 	bool        visited = false;
+	FormControlMetadata formControl;
 };
 
 // Compact content ownership summary for one logical element serial.  This is
@@ -168,6 +219,12 @@ enum class CssPseudoClass : uint8_t {
 	Link,
 	Visited,
 	Empty,
+	Checked,
+	Disabled,
+	Enabled,
+	Required,
+	ReadOnly,
+	ReadWrite,
 };
 
 struct CssNthExpression {
@@ -251,6 +308,18 @@ struct WebStyle {
 	int      borderLeftWidth = 0;
 	uint32_t borderLeftColor = 0;
 	BorderLineStyle borderLeftStyle = BorderLineStyle::Inherit;
+};
+
+struct FormContainerMetadata {
+	std::string tagName;
+	std::string className;
+	std::string id;
+	std::string inlineStyle;
+	std::string legendText;
+	uint64_t serial = 0;
+	uint64_t parentSerial = 0;
+	WebStyle style;
+	bool metadataComplete = false;
 };
 
 struct WebStyleRule {
@@ -338,6 +407,18 @@ struct CssDiagnostics {
 	int    identifierEscapeRejections = 0;
 	int    selectorMemberParseFailures = 0;
 	int    selectorRecoverySuccesses = 0;
+	int    checkedPseudoParsed = 0;
+	int    checkedPseudoMatches = 0;
+	int    disabledPseudoParsed = 0;
+	int    disabledPseudoMatches = 0;
+	int    enabledPseudoParsed = 0;
+	int    enabledPseudoMatches = 0;
+	int    requiredPseudoParsed = 0;
+	int    requiredPseudoMatches = 0;
+	int    readonlyPseudoParsed = 0;
+	int    readonlyPseudoMatches = 0;
+	int    readwritePseudoParsed = 0;
+	int    readwritePseudoMatches = 0;
 	uint32_t nextSourceOrder = 1;
 	std::string computedStyleEvidence;
 	std::vector<uint64_t> computedStyleEvidenceSerials;
@@ -354,12 +435,27 @@ struct FormsDiagnostics {
 	int  unsupportedControlCount = 0;
 	bool hasUnsupportedMethod = false;
 	bool hasUnsupportedEncoding = false;
+	int  htmlFormsParsed = 0;
+	int  htmlFieldsetsParsed = 0;
+	int  htmlLabelsParsed = 0;
+	int  htmlInputsParsed = 0;
+	int  htmlButtonsParsed = 0;
+	int  htmlTextareasParsed = 0;
+	int  htmlSelectsParsed = 0;
+	int  htmlOptionsParsed = 0;
+	int  htmlHiddenControls = 0;
+	int  controlMetadataClamps = 0;
+	int  controlTextTruncations = 0;
+	int  formControlsRendered = 0;
+	int  formControlsUnsupported = 0;
+	int  formInteractionsDeferred = 0;
 };
 
 struct FormOption {
 	std::string value;
 	std::string text;
 	bool selected = false;
+	bool disabled = false;
 };
 
 struct DocBlock {
@@ -393,6 +489,8 @@ struct DocBlock {
 	int         visibleRows = 0;
 	int         visibleCols = 0;
 	bool        formUnsupported = false;
+	FormControlMetadata formControl;
+	std::string labelFor;
 };
 
 struct WebDocument {
@@ -414,6 +512,7 @@ struct WebDocument {
 	std::vector<WebStyleRule> styleRules;
 	CssDiagnostics        cssDiagnostics;
 	FormsDiagnostics      formsDiagnostics;
+	std::vector<FormContainerMetadata> formContainers;
 };
 
 } // namespace web
