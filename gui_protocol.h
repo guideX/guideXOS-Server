@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <cstring>
 #include "ipc.h"
 #include <sstream>
 namespace gxos {
@@ -47,6 +48,20 @@ namespace gxos {
         struct KeyEvent { int keyCode; bool down; };
         struct MouseEvent { int x; int y; int dx; int dy; uint32_t buttons; };
         struct DrawImageSpec { uint64_t winId; int x; int y; int w; int h; std::string path; };
+        struct FramePresentSpec {
+            uint64_t winId{0};
+            int x{0};
+            int y{0};
+            int w{0};
+            int h{0};
+            uint32_t strideBytes{0};
+            uint32_t pixelFormat{0};
+            std::vector<uint8_t> pixels;
+        };
+        constexpr uint32_t kFramePresentMagic = 0x31465847u; // "GXF1"
+        constexpr uint32_t kFramePresentVersion = 1u;
+        constexpr uint32_t kPixelFormatXrgb8888 = 1u;
+        constexpr uint32_t kWindowCreateFlagResizable = 1u << 0;
         inline std::vector<uint8_t> packString(const std::string& s) { return std::vector<uint8_t>(s.begin( ), s.end( )); }
         inline std::string unpackString(const std::vector<uint8_t>& d) { return std::string(d.begin( ), d.end( )); }
 
@@ -100,6 +115,62 @@ namespace gxos {
             } catch (...) {
                 return false;
             }
+        }
+        inline void appendFrameU32(std::vector<uint8_t>& out, uint32_t value) {
+            out.push_back(static_cast<uint8_t>(value & 0xFFu));
+            out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
+            out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
+            out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
+        }
+        inline void appendFrameU64(std::vector<uint8_t>& out, uint64_t value) {
+            appendFrameU32(out, static_cast<uint32_t>(value & 0xFFFFFFFFull));
+            appendFrameU32(out, static_cast<uint32_t>(value >> 32));
+        }
+        inline uint32_t readFrameU32(const std::vector<uint8_t>& data, size_t offset) {
+            return static_cast<uint32_t>(data[offset]) |
+                (static_cast<uint32_t>(data[offset + 1]) << 8) |
+                (static_cast<uint32_t>(data[offset + 2]) << 16) |
+                (static_cast<uint32_t>(data[offset + 3]) << 24);
+        }
+        inline uint64_t readFrameU64(const std::vector<uint8_t>& data, size_t offset) {
+            return static_cast<uint64_t>(readFrameU32(data, offset)) |
+                (static_cast<uint64_t>(readFrameU32(data, offset + 4)) << 32);
+        }
+        inline std::vector<uint8_t> packFramePresent(uint64_t winId, int x, int y, int w, int h,
+                                                      uint32_t strideBytes, uint32_t pixelFormat,
+                                                      const void* pixels, uint32_t pixelBytes) {
+            std::vector<uint8_t> out;
+            out.reserve(44u + pixelBytes);
+            appendFrameU32(out, kFramePresentMagic);
+            appendFrameU32(out, kFramePresentVersion);
+            appendFrameU64(out, winId);
+            appendFrameU32(out, static_cast<uint32_t>(x));
+            appendFrameU32(out, static_cast<uint32_t>(y));
+            appendFrameU32(out, static_cast<uint32_t>(w));
+            appendFrameU32(out, static_cast<uint32_t>(h));
+            appendFrameU32(out, strideBytes);
+            appendFrameU32(out, pixelFormat);
+            appendFrameU32(out, pixelBytes);
+            if (pixels && pixelBytes > 0) {
+                const uint8_t* bytes = static_cast<const uint8_t*>(pixels);
+                out.insert(out.end(), bytes, bytes + pixelBytes);
+            }
+            return out;
+        }
+        inline bool unpackFramePresent(const std::vector<uint8_t>& data, FramePresentSpec& spec) {
+            constexpr size_t headerBytes = 44u;
+            if (data.size() < headerBytes || readFrameU32(data, 0) != kFramePresentMagic || readFrameU32(data, 4) != kFramePresentVersion) return false;
+            const uint32_t pixelBytes = readFrameU32(data, 40);
+            if (pixelBytes > data.size() - headerBytes) return false;
+            spec.winId = readFrameU64(data, 8);
+            spec.x = static_cast<int32_t>(readFrameU32(data, 16));
+            spec.y = static_cast<int32_t>(readFrameU32(data, 20));
+            spec.w = static_cast<int32_t>(readFrameU32(data, 24));
+            spec.h = static_cast<int32_t>(readFrameU32(data, 28));
+            spec.strideBytes = readFrameU32(data, 32);
+            spec.pixelFormat = readFrameU32(data, 36);
+            spec.pixels.assign(data.begin() + headerBytes, data.begin() + headerBytes + pixelBytes);
+            return spec.winId != 0 && spec.w > 0 && spec.h > 0 && !spec.pixels.empty();
         }
         inline std::string packDrawTextAt(uint64_t winId, int x, int y, const std::string& text) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << text; return oss.str( ); }
         inline std::string packDrawTextAtColor(uint64_t winId, int x, int y, uint8_t r, uint8_t g, uint8_t b, const std::string& text) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << static_cast<int>(r) << "|" << static_cast<int>(g) << "|" << static_cast<int>(b) << "|" << text; return oss.str( ); }

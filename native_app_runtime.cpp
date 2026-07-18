@@ -37,6 +37,7 @@ constexpr int kMinPollEventTimeoutMs = 0;
 constexpr int kMaxPollEventTimeoutMs = 30000;
 constexpr uint32_t kMaxFilePathLength = 240;
 constexpr uint32_t kMaxFileReadBytes = 64u * 1024u;
+constexpr uint64_t kMaxPresentFrameBytes = 16ull * 1024ull * 1024ull;
 
 std::string appLabel(const NativeAppRuntimeContext* context) {
     if (!context) return "<unknown>";
@@ -449,7 +450,59 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
     return context->lastFileIoResult;
 }
 
-gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) {
+gx_result hostFileRead(NativeGxAppContext* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) return GX_ERROR_INVALID_ARGUMENT;
+
+    ++context->fileReadChunkCallCount;
+    context->lastFileReadOffset = offset;
+    context->lastFileReadBytes = 0;
+    context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
+    if (outBytesRead) *outBytesRead = 0;
+    if (!buffer || bufferSize == 0 || !outBytesRead || bufferSize > kMaxFileReadBytes) return context->lastFileIoResult;
+    if (!hasPermission(*context, "file.read")) {
+        context->lastFileIoResult = GX_ERROR_PERMISSION_DENIED;
+        return context->lastFileIoResult;
+    }
+
+    std::string resolvedPath;
+    context->lastFileIoResult = resolveFileReadPath(*context, path, resolvedPath);
+    if (context->lastFileIoResult != GX_OK) return context->lastFileIoResult;
+
+    try {
+        std::ifstream input(resolvedPath.c_str(), std::ios::binary);
+        if (!input) {
+            context->lastFileIoResult = GX_ERROR_FAILED;
+        } else {
+            input.seekg(0, std::ios::end);
+            const std::streamoff streamSize = input.tellg();
+            if (streamSize < 0 || offset > static_cast<uint64_t>(streamSize)) {
+                context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
+            } else {
+                const uint64_t available = static_cast<uint64_t>(streamSize) - offset;
+                const uint32_t bytesToRead = static_cast<uint32_t>(std::min<uint64_t>(available, bufferSize));
+                input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+                if (!input || (bytesToRead > 0 && (!input.read(static_cast<char*>(buffer), bytesToRead) || static_cast<uint32_t>(input.gcount()) != bytesToRead))) {
+                    context->lastFileIoResult = GX_ERROR_FAILED;
+                } else {
+                    *outBytesRead = bytesToRead;
+                    context->lastFileReadBytes = bytesToRead;
+                    context->lastFileIoResult = GX_OK;
+                }
+            }
+        }
+    } catch (...) {
+        context->lastFileIoResult = GX_ERROR_FAILED;
+    }
+
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, context->lastFileIoResult == GX_OK ? "info" : "warn",
+        "file_read path=\"" + context->lastFilePath + "\" offset=" + std::to_string(offset) + " bytes=" + std::to_string(context->lastFileReadBytes) +
+        " result=" + std::to_string(context->lastFileIoResult));
+    return context->lastFileIoResult;
+}
+
+gx_result hostRequestWindowEx(NativeGxAppContext* ctx, const char* title, int width, int height, uint32_t flags, gx_handle* outWindow) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
         Logger::write(LogLevel::Warn, "[NativeAppHost] request_window rejected: invalid app context or host table");
@@ -482,7 +535,7 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
     ipc::Message request;
     request.srcPid = nativeAppPid;
     request.type = static_cast<uint32_t>(gui::MsgType::MT_Create);
-    std::string payload = std::string(title) + "|" + std::to_string(width) + "|" + std::to_string(height);
+    std::string payload = std::string(title) + "|" + std::to_string(width) + "|" + std::to_string(height) + "|" + std::to_string(flags);
     request.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(request), false);
 
@@ -509,6 +562,10 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
     Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " request_window failed: compositor unavailable or no MT_Create ack");
     NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "request_window failed: compositor unavailable or no MT_Create ack");
     return context->lastRequestWindowResult;
+}
+
+gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) {
+    return hostRequestWindowEx(ctx, title, width, height, 1u, outWindow);
 }
 
 gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, const char* text) {
@@ -632,6 +689,56 @@ gx_result hostDrawRect(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
     NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", "draw_rect windowId=" + std::to_string(window) + " size=" + std::to_string(width) + "x" + std::to_string(height));
     Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " draw_rect windowId=" + std::to_string(window) + " rect=" + std::to_string(x) + "," + std::to_string(y) + " " + std::to_string(width) + "x" + std::to_string(height) + " color=0x" + std::to_string(rgb));
     return GX_OK;
+}
+
+gx_result hostPresentFrame(NativeGxAppContext* ctx, gx_handle window, int x, int y, int width, int height,
+                           uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) return GX_ERROR_INVALID_ARGUMENT;
+
+    ++context->presentFrameCallCount;
+    context->lastPresentFrameWindow = window;
+    context->lastPresentFrameX = x;
+    context->lastPresentFrameY = y;
+    context->lastPresentFrameWidth = width;
+    context->lastPresentFrameHeight = height;
+    context->lastPresentFrameStrideBytes = strideBytes;
+    context->lastPresentFramePixelFormat = pixelFormat;
+    context->lastPresentFrameBytes = pixelBytes;
+    context->lastPresentFrameResult = GX_ERROR_INVALID_ARGUMENT;
+
+    if (window == 0 || !pixels || x < 0 || y < 0 || width < 1 || height < 1 || width > kMaxWindowWidth || height > kMaxWindowHeight ||
+        pixelFormat != gui::kPixelFormatXrgb8888 || strideBytes < static_cast<uint32_t>(width * 4)) return context->lastPresentFrameResult;
+    if (!ownsWindow(*context, window)) {
+        context->lastPresentFrameResult = GX_ERROR_PERMISSION_DENIED;
+        return context->lastPresentFrameResult;
+    }
+    if (!hasPermission(*context, "draw") && !hasPermission(*context, "window")) {
+        context->lastPresentFrameResult = GX_ERROR_PERMISSION_DENIED;
+        return context->lastPresentFrameResult;
+    }
+
+    const uint64_t requiredBytes = static_cast<uint64_t>(strideBytes) * static_cast<uint64_t>(height);
+    if (requiredBytes > kMaxPresentFrameBytes || requiredBytes != pixelBytes) {
+        context->lastPresentFrameResult = GX_ERROR_UNSUPPORTED;
+        return context->lastPresentFrameResult;
+    }
+
+    try {
+        ipc::Message request;
+        request.srcPid = Allocator::currentPid();
+        request.type = static_cast<uint32_t>(gui::MsgType::MT_FramePresent);
+        request.data = gui::packFramePresent(window, x, y, width, height, strideBytes, pixelFormat, pixels, pixelBytes);
+        ipc::Bus::publish("gui.input", std::move(request), false);
+        context->lastPresentFrameResult = GX_OK;
+    } catch (...) {
+        context->lastPresentFrameResult = GX_ERROR_INTERNAL;
+    }
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, context->lastPresentFrameResult == GX_OK ? "info" : "warn",
+        "present_frame windowId=" + std::to_string(window) + " size=" + std::to_string(width) + "x" + std::to_string(height) +
+        " bytes=" + std::to_string(pixelBytes) + " result=" + std::to_string(context->lastPresentFrameResult));
+    return context->lastPresentFrameResult;
 }
 
 gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeoutMs) {
@@ -878,6 +985,9 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.exit = hostExit;
     context.hostCalls.file_read_all = hostFileReadAll;
     context.hostCalls.file_exists = hostFileExists;
+    context.hostCalls.request_window_ex = hostRequestWindowEx;
+    context.hostCalls.file_read = hostFileRead;
+    context.hostCalls.present_frame = hostPresentFrame;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");

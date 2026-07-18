@@ -30,6 +30,15 @@
 namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
     struct DrawImageItem { int x; int y; int w; int h; std::string path; ImageBitmap image; std::vector<ImageBitmap> frames; };
+    struct FrameSurfaceItem {
+        int x{0};
+        int y{0};
+        int w{0};
+        int h{0};
+        uint32_t strideBytes{0};
+        uint32_t pixelFormat{0};
+        std::vector<uint8_t> pixels;
+    };
     struct DrawTextItem { int x; int y; std::string text; bool hasColor{false}; uint8_t r{220}; uint8_t g{220}; uint8_t b{220}; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; std::string iconPath; ImageBitmap icon; bool hover=false; bool pressed=false; };
@@ -41,6 +50,8 @@ namespace gxos { namespace gui {
         std::vector<DrawTextItem> positionedTexts;
         std::vector<DrawRectItem> rects; 
         std::vector<DrawImageItem> images;
+        FrameSurfaceItem frame;
+        bool hasFrame{false};
         std::vector<Widget> widgets; 
         bool minimized{false}; 
         bool maximized{false}; 
@@ -61,6 +72,7 @@ namespace gxos { namespace gui {
         // Animation state - ported from guideXOS.Legacy Window.cs
         WindowAnimState animState{};
         bool visible{true};
+        bool resizable{true};
     };
     enum class DesktopItemKind {
         SystemObject,

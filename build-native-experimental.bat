@@ -26,7 +26,7 @@ if not defined CXX (
 )
 
 echo Using compiler: %CXX%
-set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -DGX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
+set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -Ithird_party/mbedtls/include -Ithird_party/mbedtls/tf-psa-crypto/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/src -Ithird_party/mbedtls/tf-psa-crypto/dispatch -Ithird_party/mbedtls/tf-psa-crypto/extras -Ithird_party/mbedtls/tf-psa-crypto/platform -Ithird_party/mbedtls/tf-psa-crypto/utilities -DMBEDTLS_CONFIG_FILE=\"third_party/mbedtls/guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"third_party/mbedtls/guidexos/crypto_config.h\" -DGX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
 set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)
@@ -42,6 +42,7 @@ clock.cpp ^
 compositor.cpp ^
 console_service.cpp ^
 console_window.cpp ^
+desktop_theme.cpp ^
 desktop_service.cpp ^
 desktop_state.cpp ^
 disk_manager.cpp ^
@@ -58,6 +59,7 @@ gxapp_container.cpp ^
 gxapp_loader.cpp ^
 gxm_loader.cpp ^
 gxos_tls_prerequisites.cpp ^
+gxos_tls_foundation.cpp ^
 image.cpp ^
 image_adapter.cpp ^
 image_renderer.cpp ^
@@ -66,7 +68,9 @@ icon_theme_manager.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
 guide_web_html_parser.cpp ^
+guide_web_http.cpp ^
 kernel/core/architecture_detector.cpp ^
+kernel/core/system_font.cpp ^
 lifecycle.cpp ^
 logger.cpp ^
 message_box.cpp ^

@@ -74,6 +74,10 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *exit)(gx_app_context* ctx, gx_result exitCode);
     gx_result (GX_CALL *file_read_all)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
     gx_result (GX_CALL *file_exists)(gx_app_context* ctx, const char* path, uint32_t* outExists);
+    /* v1 extensions are appended so existing v1 tables keep their layout. */
+    gx_result (GX_CALL *request_window_ex)(gx_app_context* ctx, const char* title, int width, int height, uint32_t flags, gx_handle* outWindow);
+    gx_result (GX_CALL *file_read)(gx_app_context* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
+    gx_result (GX_CALL *present_frame)(gx_app_context* ctx, gx_handle window, int x, int y, int width, int height, uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes);
 } gx_host_calls;
 
 #ifdef __cplusplus

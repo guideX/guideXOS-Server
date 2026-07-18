@@ -89,6 +89,9 @@ struct NativeHostCallTable {
     gx_result (*exit)(NativeGxAppContext* ctx, gx_result exitCode) = nullptr;
     gx_result (*file_read_all)(NativeGxAppContext* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) = nullptr;
     gx_result (*file_exists)(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) = nullptr;
+    gx_result (*request_window_ex)(NativeGxAppContext* ctx, const char* title, int width, int height, uint32_t flags, gx_handle* outWindow) = nullptr;
+    gx_result (*file_read)(NativeGxAppContext* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) = nullptr;
+    gx_result (*present_frame)(NativeGxAppContext* ctx, gx_handle window, int x, int y, int width, int height, uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes) = nullptr;
 };
 
 enum class NativeAppLifecycleState {
@@ -167,10 +170,22 @@ struct NativeAppRuntimeContext {
     int lastMousePackedButtonAction = 0;
     int lastMouseModifiers = 0;
     uint32_t fileReadCallCount = 0;
+    uint32_t fileReadChunkCallCount = 0;
     uint32_t fileExistsCallCount = 0;
     std::string lastFilePath;
     uint32_t lastFileReadBytes = 0;
     gx_result lastFileIoResult = GX_OK;
+    uint64_t lastFileReadOffset = 0;
+    uint32_t presentFrameCallCount = 0;
+    gx_handle lastPresentFrameWindow = 0;
+    int lastPresentFrameX = 0;
+    int lastPresentFrameY = 0;
+    int lastPresentFrameWidth = 0;
+    int lastPresentFrameHeight = 0;
+    uint32_t lastPresentFrameStrideBytes = 0;
+    uint32_t lastPresentFramePixelFormat = 0;
+    uint32_t lastPresentFrameBytes = 0;
+    gx_result lastPresentFrameResult = GX_OK;
 };
 
 struct NativeGxAppContext {

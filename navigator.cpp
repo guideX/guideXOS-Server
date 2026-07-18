@@ -4887,7 +4887,11 @@ void Navigator::recomputeFormControlStyles()
 {
 	++s_currentDoc.cssDiagnostics.checkedRuntimeRecomputations;
 	gxos::web::recomputeDocumentStyles(s_currentDoc);
-	storePageMetadata(s_pageMetadata, s_currentDoc);
+	// Generated about: pages such as Page Info and Save Page Text are views of
+	// the inspected document.  Their load-time style recomputation must not
+	// replace the inspected document with the diagnostics view.
+	if (s_currentDoc.url == s_pageMetadata.finalUrl)
+		storePageMetadata(s_pageMetadata, s_currentDoc);
 }
 
 void Navigator::clearMousePressState()

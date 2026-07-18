@@ -1,0 +1,1811 @@
+WARNING: Experimental Native ELF execution is enabled.
+This build is for local hosted runtime validation only.
+Building guideXOS Server experimental Native ELF runtime...
+Using compiler: C:\mingw64\bin\g++.exe
+Compiling experimental hosted runtime...
+allocator.cpp: In static member function 'static void gxos::Allocator::free(void*)':
+allocator.cpp:63:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   63 |         if (!ptr) return; std::lock_guard<std::mutex> _g(g_lock);
+      |         ^~
+allocator.cpp:63:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   63 |         if (!ptr) return; std::lock_guard<std::mutex> _g(g_lock);
+      |                           ^~~
+In file included from process.h:12,
+                 from calculator.h:2,
+                 from calculator.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from calculator.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from clock.h:2,
+                 from clock.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from clock.cpp:3:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from clock.cpp:6:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from ipc_bus.h:8,
+                 from compositor.h:9,
+                 from compositor.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+compositor.cpp: In static member function 'static LRESULT gxos::gui::Compositor::WndProc(HWND, UINT, WPARAM, LPARAM)':
+compositor.cpp:3412:26: warning: unused variable 'wrect' [-Wunused-variable]
+ 3412 |                     RECT wrect{ winfo.x, winfo.y, winfo.x + winfo.w, winfo.y + winfo.h };
+      |                          ^~~~~
+compositor.cpp:3735:25: warning: unused variable 'rightColW' [-Wunused-variable]
+ 3735 |                     int rightColW = 160; // right column for shortcuts
+      |                         ^~~~~~~~~
+compositor.cpp:3982:40: warning: unused variable 'tmActions' [-Wunused-variable]
+ 3982 |                     static const char* tmActions[] = { "TaskManager", "Reboot", "LogOff" };
+      |                                        ^~~~~~~~~
+compositor.cpp: At global scope:
+compositor.cpp:1565:25: warning: 'uint32_t gxos::gui::startMenuFallbackIconColor32(const std::string&)' defined but not used [-Wunused-function]
+ 1565 |         static uint32_t startMenuFallbackIconColor32(const std::string& label) {
+      |                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compositor.cpp:838:21: warning: 'void gxos::gui::drawBackgroundImageToPixels(uint32_t*, int, int, int, const ImagePtr&, BackgroundScaleMode)' defined but not used [-Wunused-function]
+  838 |         static void drawBackgroundImageToPixels(uint32_t* pixels, int fbW, int fbH, int pitch, const ImagePtr& image, BackgroundScaleMode mode)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+compositor.cpp:816:21: warning: 'void gxos::gui::drawBackgroundGradientToPixels(uint32_t*, int, int, int, uint32_t, uint32_t)' defined but not used [-Wunused-function]
+  816 |         static void drawBackgroundGradientToPixels(uint32_t* pixels, int fbW, int fbH, int pitch, uint32_t topColor, uint32_t bottomColor)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from console_service.h:5,
+                 from console_service.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from process.h:12,
+                 from console_window.h:2,
+                 from console_window.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from console_window.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from desktop_service.cpp:7:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from ipc_bus.h:8,
+                 from compositor.h:9,
+                 from desktop_service.cpp:13:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+desktop_state.cpp: In static member function 'static bool gxos::gui::DesktopState::Load(const std::string&, std::vector<gxos::gui::SavedWindow>&, std::string&)':
+desktop_state.cpp:25:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   25 |             if(line.empty()) continue; std::istringstream iss(line); std::string idS,title,xs,ys,ws,hs,ms,maxS,zS,fS,snapS; std::getline(iss,idS,'|'); std::getline(iss,title,'|'); std::getline(iss,xs,'|'); std::getline(iss,ys,'|'); std::getline(iss,ws,'|'); std::getline(iss,hs,'|'); std::getline(iss,ms,'|'); std::getline(iss,maxS,'|'); std::getline(iss,zS,'|'); std::getline(iss,fS,'|'); std::getline(iss,snapS,'|'); SavedWindow sw{}; try{ sw.id=std::stoull(idS); sw.title=title; sw.x=std::stoi(xs); sw.y=std::stoi(ys); sw.w=std::stoi(ws); sw.h=std::stoi(hs); sw.minimized=(ms=="1"); sw.maximized=(maxS=="1"); sw.z=std::stoi(zS); sw.focused=(fS=="1"); sw.snap=std::stoi(snapS); }catch(...){ continue; } wins.push_back(sw);
+      |             ^~
+desktop_state.cpp:25:40: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   25 |             if(line.empty()) continue; std::istringstream iss(line); std::string idS,title,xs,ys,ws,hs,ms,maxS,zS,fS,snapS; std::getline(iss,idS,'|'); std::getline(iss,title,'|'); std::getline(iss,xs,'|'); std::getline(iss,ys,'|'); std::getline(iss,ws,'|'); std::getline(iss,hs,'|'); std::getline(iss,ms,'|'); std::getline(iss,maxS,'|'); std::getline(iss,zS,'|'); std::getline(iss,fS,'|'); std::getline(iss,snapS,'|'); SavedWindow sw{}; try{ sw.id=std::stoull(idS); sw.title=title; sw.x=std::stoi(xs); sw.y=std::stoi(ys); sw.w=std::stoi(ws); sw.h=std::stoi(hs); sw.minimized=(ms=="1"); sw.maximized=(maxS=="1"); sw.z=std::stoi(zS); sw.focused=(fS=="1"); sw.snap=std::stoi(snapS); }catch(...){ continue; } wins.push_back(sw);
+      |                                        ^~~
+In file included from gui_protocol.h:6,
+                 from disk_manager.cpp:10:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+disk_manager.cpp: In static member function 'static void gxos::apps::DiskManager::tryCreatePartitionLargestFree()':
+disk_manager.cpp:847:16: warning: unused variable 'sel' [-Wunused-variable]
+  847 |     DiskEntry* sel = getSelected();
+      |                ^~~
+In file included from display_options.cpp:4:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from gui_protocol.h:6,
+                 from display_options.cpp:6:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+display_options.cpp: At global scope:
+display_options.cpp:282:10: warning: 'bool gxos::apps::{anonymous}::isGalleryKey(uint32_t)' defined but not used [-Wunused-function]
+  282 |     bool isGalleryKey(uint32_t key)
+      |          ^~~~~~~~~~~~
+In file included from gui_protocol.h:6,
+                 from control_panel.cpp:9:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from file_explorer.h:2,
+                 from file_explorer.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from file_explorer.h:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13,
+                 from file_explorer.cpp:7:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from file_explorer.h:2,
+                 from file_icon_provider.cpp:2:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from file_explorer.h:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+gxapp_container.cpp:118:22: warning: 'gxos::GXAppMetadata gxos::{anonymous}::parseMetadataJson(const std::string&)' defined but not used [-Wunused-function]
+  118 | static GXAppMetadata parseMetadataJson(const std::string& json){
+      |                      ^~~~~~~~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from gxm_loader.cpp:3:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from gxm_loader.cpp:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from gxos_tls_foundation.cpp:58:
+third_party/mbedtls/tf-psa-crypto/include/tf-psa-crypto/build_info.h:116:10: fatal error: psa/crypto_config.h: No such file or directory
+  116 | #include "psa/crypto_config.h"
+      |          ^~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+In file included from process.h:12,
+                 from image_viewer.h:2,
+                 from image_viewer.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from image_viewer.cpp:6:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+image_viewer.cpp: At global scope:
+image_viewer.cpp:74:13: warning: 'void gxos::apps::{anonymous}::publishWindowText(uint64_t, int, int, const std::string&, bool)' defined but not used [-Wunused-function]
+   74 | static void publishWindowText(uint64_t windowId, int x, int y, const std::string& text, bool colored = false) {
+      |             ^~~~~~~~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from ipc_bus.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+guide_web_html_parser.cpp:4418:20: warning: 'std::string gxos::web::{anonymous}::openTagName(OpenTag)' defined but not used [-Wunused-function]
+ 4418 | static std::string openTagName(OpenTag tag)
+      |                    ^~~~~~~~~~~
+guide_web_html_parser.cpp:3102:17: warning: 'gxos::web::WebStyle gxos::web::{anonymous}::mergeStyles(const gxos::web::WebStyle&, const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 3102 | static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideStyle)
+      |                 ^~~~~~~~~~~
+guide_web_html_parser.cpp:1630:24: warning: 'gxos::web::BorderLineStyle gxos::web::{anonymous}::defaultVisibleBorderStyle(const gxos::web::WebStyle&, BorderSideIndex)' defined but not used [-Wunused-function]
+ 1630 | static BorderLineStyle defaultVisibleBorderStyle(const WebStyle& style, BorderSideIndex side)
+      |                        ^~~~~~~~~~~~~~~~~~~~~~~~~
+guide_web_html_parser.cpp:270:13: warning: 'bool gxos::web::{anonymous}::scanCssBalancedRange(const std::string&, size_t, size_t, gxos::web::CssDiagnostics&, bool)' defined but not used [-Wunused-function]
+  270 | static bool scanCssBalancedRange(const std::string& text,
+      |             ^~~~~~~~~~~~~~~~~~~~
+guide_web_http.cpp:21: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   21 | #pragma comment(lib, "ws2_32.lib")
+guide_web_http.cpp:22: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   22 | #pragma comment(lib, "secur32.lib")
+guide_web_http.cpp:23: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   23 | #pragma comment(lib, "crypt32.lib")
+kernel/core/system_font.cpp:114:13: warning: 'bool gxos::gui::{anonymous}::stringEquals(const char*, const char*)' defined but not used [-Wunused-function]
+  114 | static bool stringEquals(const char* a, const char* b)
+      |             ^~~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from lifecycle.cpp:6:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10,
+                 from lifecycle.cpp:9:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from message_box.h:9,
+                 from message_box.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from message_box.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from notepad.h:2,
+                 from module_manager.cpp:3:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from file_explorer.h:4,
+                 from module_manager.cpp:9:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from navigator.cpp:13:
+navigator_file_io.h:52:1: warning: multi-line comment [-Wcomment]
+   52 | // the process working directory so that running from D:\dev\guideXOSServer\
+      | ^
+In file included from process.h:12,
+                 from navigator.h:3,
+                 from navigator.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from navigator.cpp:5:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+navigator.cpp: At global scope:
+navigator.cpp:2606:21: warning: 'bool gxos::apps::{anonymous}::isHiddenByDisplay(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 2606 |         static bool isHiddenByDisplay(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~
+navigator.cpp:2601:21: warning: 'bool gxos::apps::{anonymous}::isRightAlignedText(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 2601 |         static bool isRightAlignedText(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~
+navigator.cpp:2596:21: warning: 'bool gxos::apps::{anonymous}::isCenteredText(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 2596 |         static bool isCenteredText(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~
+navigator.cpp:2412:20: warning: 'int gxos::apps::{anonymous}::blockWrapWidth(const gxos::web::DocBlock&, int)' defined but not used [-Wunused-function]
+ 2412 |         static int blockWrapWidth(const DocBlock& block, int outerWidth)
+      |                    ^~~~~~~~~~~~~~
+navigator.cpp:2319:41: warning: 'std::vector<std::__cxx11::basic_string<char> > gxos::apps::{anonymous}::tableRowTextLines(const TableGroupLayout&, const TableRowLayout&)' defined but not used [-Wunused-function]
+ 2319 |         static std::vector<std::string> tableRowTextLines(const TableGroupLayout& layout, const TableRowLayout& row)
+      |                                         ^~~~~~~~~~~~~~~~~
+navigator.cpp:2066:20: warning: 'int gxos::apps::{anonymous}::textLineCountForTableCell(const std::string&)' defined but not used [-Wunused-function]
+ 2066 |         static int textLineCountForTableCell(const std::string& text)
+      |                    ^~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:2059:28: warning: 'std::string gxos::apps::{anonymous}::tableRowSignature(const gxos::web::DocBlock&)' defined but not used [-Wunused-function]
+ 2059 |         static std::string tableRowSignature(const DocBlock& block)
+      |                            ^~~~~~~~~~~~~~~~~
+navigator.cpp:2035:21: warning: 'bool gxos::apps::{anonymous}::isTableCaptionLikeBlock(const gxos::web::DocBlock&)' defined but not used [-Wunused-function]
+ 2035 |         static bool isTableCaptionLikeBlock(const DocBlock& block)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1853:21: warning: 'bool gxos::apps::{anonymous}::cssBorderLeftVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 1853 |         static bool cssBorderLeftVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1847:21: warning: 'bool gxos::apps::{anonymous}::cssBorderBottomVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 1847 |         static bool cssBorderBottomVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1841:21: warning: 'bool gxos::apps::{anonymous}::cssBorderRightVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 1841 |         static bool cssBorderRightVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1835:21: warning: 'bool gxos::apps::{anonymous}::cssBorderTopVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 1835 |         static bool cssBorderTopVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~
+navigator.cpp:1696:20: warning: 'int gxos::apps::{anonymous}::cssMarginSideOrDefault(int, int, int)' defined but not used [-Wunused-function]
+ 1696 |         static int cssMarginSideOrDefault(int sideValue, int uniformValue, int fallbackValue)
+      |                    ^~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1691:20: warning: 'int gxos::apps::{anonymous}::cssMarginOrDefault(const gxos::web::WebStyle&, int)' defined but not used [-Wunused-function]
+ 1691 |         static int cssMarginOrDefault(const WebStyle& style, int fallbackValue)
+      |                    ^~~~~~~~~~~~~~~~~~
+navigator.cpp:1681:25: warning: 'gxos::web::DocBlock gxos::apps::{anonymous}::makeBlock(gxos::web::BlockType, const std::string&, const std::string&, const std::string&)' defined but not used [-Wunused-function]
+ 1681 |         static DocBlock makeBlock(BlockType type, const std::string& text, const std::string& url, const std::string& tagName)
+      |                         ^~~~~~~~~
+navigator.cpp:629:18: warning: 'uint32_t gxos::apps::{anonymous}::NavigatorButtonBorderColor(bool, bool)' defined but not used [-Wunused-function]
+  629 |         uint32_t NavigatorButtonBorderColor(bool focused, bool disabled)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:188:14: warning: 'void gxos::apps::{anonymous}::drawTextAt(uint64_t, int, int, const std::string&)' defined but not used [-Wunused-function]
+  188 |         void drawTextAt(uint64_t windowId, int x, int y, const std::string& text)
+      |              ^~~~~~~~~~
+In file included from navigator_file_io.cpp:6:
+navigator_file_io.h:52:1: warning: multi-line comment [-Wcomment]
+   52 | // the process working directory so that running from D:\dev\guideXOSServer\
+      | ^
+In file included from gui_protocol.h:6,
+                 from native_app_runtime.cpp:4:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+native_app_runtime.cpp: At global scope:
+native_app_runtime.cpp:67:6: warning: 'bool gxos::apps::{anonymous}::experimentalExecutionEnabled()' defined but not used [-Wunused-function]
+   67 | bool experimentalExecutionEnabled() {
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from process.h:12,
+                 from native_elf_executor.cpp:9:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from process.h:12,
+                 from notepad.h:2,
+                 from notepad.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from notepad.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+notepad.cpp: In static member function 'static int gxos::apps::Notepad::main(int, char**)':
+notepad.cpp:299:53: warning: unused variable 'kGuiChanIn' [-Wunused-variable]
+  299 |                                         const char* kGuiChanIn = "gui.input";
+      |                                                     ^~~~~~~~~~
+In file included from process.h:12,
+                 from onscreen_keyboard.h:2,
+                 from onscreen_keyboard.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from onscreen_keyboard.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from open_dialog.h:2,
+                 from open_dialog.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from open_dialog.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from paint.h:2,
+                 from paint.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from paint.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+paint.cpp: In static member function 'static void gxos::apps::Paint::updateDisplay()':
+paint.cpp:239:13: warning: unused variable 'r' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |             ^
+paint.cpp:239:35: warning: unused variable 'g' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |                                   ^
+paint.cpp:239:56: warning: unused variable 'b' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |                                                        ^
+In file included from process.h:12,
+                 from process.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+process.cpp: In static member function 'static bool gxos::ProcessTable::wait(uint64_t, uint64_t, int*)':
+process.cpp:268:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  268 |         if(exitCodeOut) *exitCodeOut = proc->exitCode; return true;
+      |         ^~
+process.cpp:268:56: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  268 |         if(exitCodeOut) *exitCodeOut = proc->exitCode; return true;
+      |                                                        ^~~~~~
+In file included from png_loader.cpp:61:
+third_party/stb/stb_image.h: In function 'int stbi__parse_png_file(stbi__png*, int, int)':
+third_party/stb/stb_image.h:5247:28: warning: variable 'invalid_chunk' set but not used [-Wunused-but-set-variable]
+ 5247 |                static char invalid_chunk[] = "XXXX PNG chunk not known";
+      |                            ^~~~~~~~~~~~~
+third_party/stb/stb_image.h: At global scope:
+third_party/stb/stb_image.h:1078:12: warning: 'int stbi__mul2shorts_valid(int, int)' defined but not used [-Wunused-function]
+ 1078 | static int stbi__mul2shorts_valid(int a, int b)
+      |            ^~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1070:12: warning: 'int stbi__addints_valid(int, int)' defined but not used [-Wunused-function]
+ 1070 | static int stbi__addints_valid(int a, int b)
+      |            ^~~~~~~~~~~~~~~~~~~
+png_loader.cpp:42:14: warning: 'void* gxos_stbi_realloc(void*, size_t)' defined but not used [-Wunused-function]
+   42 | static void* gxos_stbi_realloc(void* ptr, size_t newSize)
+      |              ^~~~~~~~~~~~~~~~~
+In file included from process.h:12,
+                 from right_click_menu.h:3,
+                 from right_click_menu.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10,
+                 from right_click_menu.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from save_changes_dialog.h:2,
+                 from save_changes_dialog.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from save_changes_dialog.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from save_dialog.h:2,
+                 from save_dialog.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from save_dialog.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from server.cpp:69:
+navigator_file_io.h:52:1: warning: multi-line comment [-Wcomment]
+   52 | // the process working directory so that running from D:\dev\guideXOSServer\
+      | ^
+In file included from process.h:12,
+                 from server.cpp:45:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10,
+                 from server.cpp:49:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from shutdown_dialog.h:2,
+                 from shutdown_dialog.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from shutdown_dialog.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from task_manager.h:2,
+                 from task_manager.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from task_manager.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13,
+                 from task_manager.cpp:7:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+task_manager.cpp: At global scope:
+task_manager.cpp:375:21: warning: 'void gxos::apps::{anonymous}::publishRect(uint64_t, int, int, int, int, uint8_t, uint8_t, uint8_t)' defined but not used [-Wunused-function]
+  375 |         static void publishRect(uint64_t windowId, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b) {
+      |                     ^~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from compositor.h:9,
+                 from trash.cpp:3:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+trash.cpp: At global scope:
+trash.cpp:54:17: warning: 'std::string gxos::apps::{anonymous}::readOriginalPath(const std::filesystem::__cxx11::path&)' defined but not used [-Wunused-function]
+   54 |     std::string readOriginalPath(const std::filesystem::path& infoPath) {
+      |                 ^~~~~~~~~~~~~~~~
+In file included from C:/mingw64/include/c++/15.2.0/string:56,
+                 from trash.h:4,
+                 from trash.cpp:1:
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:742:7: warning: array subscript 1 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  742 |       basic_string(basic_string&& __str) noexcept
+      |       ^~~~~~~~~~~~
+In file included from C:/mingw64/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++allocator.h:33,
+                 from C:/mingw64/include/c++/15.2.0/bits/allocator.h:46,
+                 from C:/mingw64/include/c++/15.2.0/string:45:
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_Alloc_hider::_Alloc_hider(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::pointer, _Alloc&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:743:9,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:208:9: warning: array subscript 4 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  208 |         _Alloc_hider(pointer __dat, _Alloc&& __a = _Alloc())
+      |         ^~~~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_Alloc_hider::_Alloc_hider(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::pointer, _Alloc&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:743:9,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:209:43: warning: array subscript 4 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  209 |         : allocator_type(std::move(__a)), _M_p(__dat) { }
+      |                                           ^~~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In member function 'void std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_M_length(size_type) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:760:11,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:234:26: warning: array subscript 1 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  234 |       { _M_string_length = __length; }
+      |         ~~~~~~~~~~~~~~~~~^~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+vnc_server.cpp:13: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   13 | #pragma comment(lib, "ws2_32.lib")
+In file included from ipc_bus.h:8,
+                 from compositor.h:9,
+                 from vnc_server.cpp:3:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from welcome.h:2,
+                 from welcome.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from welcome.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+'p' is not recognized as an internal or external command,
+operable program or batch file.
+Compiling experimental hosted runtime...
+allocator.cpp: In static member function 'static void gxos::Allocator::free(void*)':
+allocator.cpp:63:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   63 |         if (!ptr) return; std::lock_guard<std::mutex> _g(g_lock);
+      |         ^~
+allocator.cpp:63:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   63 |         if (!ptr) return; std::lock_guard<std::mutex> _g(g_lock);
+      |                           ^~~
+In file included from process.h:12,
+                 from calculator.h:2,
+                 from calculator.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from calculator.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from clock.h:2,
+                 from clock.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from clock.cpp:3:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from clock.cpp:6:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from ipc_bus.h:8,
+                 from compositor.h:9,
+                 from compositor.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+compositor.cpp: In static member function 'static LRESULT gxos::gui::Compositor::WndProc(HWND, UINT, WPARAM, LPARAM)':
+compositor.cpp:3412:26: warning: unused variable 'wrect' [-Wunused-variable]
+ 3412 |                     RECT wrect{ winfo.x, winfo.y, winfo.x + winfo.w, winfo.y + winfo.h };
+      |                          ^~~~~
+compositor.cpp:3735:25: warning: unused variable 'rightColW' [-Wunused-variable]
+ 3735 |                     int rightColW = 160; // right column for shortcuts
+      |                         ^~~~~~~~~
+compositor.cpp:3982:40: warning: unused variable 'tmActions' [-Wunused-variable]
+ 3982 |                     static const char* tmActions[] = { "TaskManager", "Reboot", "LogOff" };
+      |                                        ^~~~~~~~~
+compositor.cpp: At global scope:
+compositor.cpp:1565:25: warning: 'uint32_t gxos::gui::startMenuFallbackIconColor32(const std::string&)' defined but not used [-Wunused-function]
+ 1565 |         static uint32_t startMenuFallbackIconColor32(const std::string& label) {
+      |                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compositor.cpp:838:21: warning: 'void gxos::gui::drawBackgroundImageToPixels(uint32_t*, int, int, int, const ImagePtr&, BackgroundScaleMode)' defined but not used [-Wunused-function]
+  838 |         static void drawBackgroundImageToPixels(uint32_t* pixels, int fbW, int fbH, int pitch, const ImagePtr& image, BackgroundScaleMode mode)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+compositor.cpp:816:21: warning: 'void gxos::gui::drawBackgroundGradientToPixels(uint32_t*, int, int, int, uint32_t, uint32_t)' defined but not used [-Wunused-function]
+  816 |         static void drawBackgroundGradientToPixels(uint32_t* pixels, int fbW, int fbH, int pitch, uint32_t topColor, uint32_t bottomColor)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from console_service.h:5,
+                 from console_service.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from process.h:12,
+                 from console_window.h:2,
+                 from console_window.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from console_window.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from desktop_service.cpp:7:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from ipc_bus.h:8,
+                 from compositor.h:9,
+                 from desktop_service.cpp:13:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+desktop_state.cpp: In static member function 'static bool gxos::gui::DesktopState::Load(const std::string&, std::vector<gxos::gui::SavedWindow>&, std::string&)':
+desktop_state.cpp:25:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   25 |             if(line.empty()) continue; std::istringstream iss(line); std::string idS,title,xs,ys,ws,hs,ms,maxS,zS,fS,snapS; std::getline(iss,idS,'|'); std::getline(iss,title,'|'); std::getline(iss,xs,'|'); std::getline(iss,ys,'|'); std::getline(iss,ws,'|'); std::getline(iss,hs,'|'); std::getline(iss,ms,'|'); std::getline(iss,maxS,'|'); std::getline(iss,zS,'|'); std::getline(iss,fS,'|'); std::getline(iss,snapS,'|'); SavedWindow sw{}; try{ sw.id=std::stoull(idS); sw.title=title; sw.x=std::stoi(xs); sw.y=std::stoi(ys); sw.w=std::stoi(ws); sw.h=std::stoi(hs); sw.minimized=(ms=="1"); sw.maximized=(maxS=="1"); sw.z=std::stoi(zS); sw.focused=(fS=="1"); sw.snap=std::stoi(snapS); }catch(...){ continue; } wins.push_back(sw);
+      |             ^~
+desktop_state.cpp:25:40: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   25 |             if(line.empty()) continue; std::istringstream iss(line); std::string idS,title,xs,ys,ws,hs,ms,maxS,zS,fS,snapS; std::getline(iss,idS,'|'); std::getline(iss,title,'|'); std::getline(iss,xs,'|'); std::getline(iss,ys,'|'); std::getline(iss,ws,'|'); std::getline(iss,hs,'|'); std::getline(iss,ms,'|'); std::getline(iss,maxS,'|'); std::getline(iss,zS,'|'); std::getline(iss,fS,'|'); std::getline(iss,snapS,'|'); SavedWindow sw{}; try{ sw.id=std::stoull(idS); sw.title=title; sw.x=std::stoi(xs); sw.y=std::stoi(ys); sw.w=std::stoi(ws); sw.h=std::stoi(hs); sw.minimized=(ms=="1"); sw.maximized=(maxS=="1"); sw.z=std::stoi(zS); sw.focused=(fS=="1"); sw.snap=std::stoi(snapS); }catch(...){ continue; } wins.push_back(sw);
+      |                                        ^~~
+In file included from gui_protocol.h:6,
+                 from disk_manager.cpp:10:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+disk_manager.cpp: In static member function 'static void gxos::apps::DiskManager::tryCreatePartitionLargestFree()':
+disk_manager.cpp:847:16: warning: unused variable 'sel' [-Wunused-variable]
+  847 |     DiskEntry* sel = getSelected();
+      |                ^~~
+In file included from display_options.cpp:4:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from gui_protocol.h:6,
+                 from display_options.cpp:6:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+display_options.cpp: At global scope:
+display_options.cpp:282:10: warning: 'bool gxos::apps::{anonymous}::isGalleryKey(uint32_t)' defined but not used [-Wunused-function]
+  282 |     bool isGalleryKey(uint32_t key)
+      |          ^~~~~~~~~~~~
+In file included from gui_protocol.h:6,
+                 from control_panel.cpp:9:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from file_explorer.h:2,
+                 from file_explorer.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from file_explorer.h:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13,
+                 from file_explorer.cpp:7:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from file_explorer.h:2,
+                 from file_icon_provider.cpp:2:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from file_explorer.h:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+gxapp_container.cpp:118:22: warning: 'gxos::GXAppMetadata gxos::{anonymous}::parseMetadataJson(const std::string&)' defined but not used [-Wunused-function]
+  118 | static GXAppMetadata parseMetadataJson(const std::string& json){
+      |                      ^~~~~~~~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from gxm_loader.cpp:3:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from gxm_loader.cpp:4:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from gxos_tls_foundation.cpp:58:
+third_party/mbedtls/tf-psa-crypto/include/tf-psa-crypto/build_info.h:116:10: fatal error: psa/crypto_config.h: No such file or directory
+  116 | #include "psa/crypto_config.h"
+      |          ^~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+In file included from process.h:12,
+                 from image_viewer.h:2,
+                 from image_viewer.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from image_viewer.cpp:6:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+image_viewer.cpp: At global scope:
+image_viewer.cpp:74:13: warning: 'void gxos::apps::{anonymous}::publishWindowText(uint64_t, int, int, const std::string&, bool)' defined but not used [-Wunused-function]
+   74 | static void publishWindowText(uint64_t windowId, int x, int y, const std::string& text, bool colored = false) {
+      |             ^~~~~~~~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from ipc_bus.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+guide_web_html_parser.cpp:4418:20: warning: 'std::string gxos::web::{anonymous}::openTagName(OpenTag)' defined but not used [-Wunused-function]
+ 4418 | static std::string openTagName(OpenTag tag)
+      |                    ^~~~~~~~~~~
+guide_web_html_parser.cpp:3102:17: warning: 'gxos::web::WebStyle gxos::web::{anonymous}::mergeStyles(const gxos::web::WebStyle&, const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 3102 | static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideStyle)
+      |                 ^~~~~~~~~~~
+guide_web_html_parser.cpp:1630:24: warning: 'gxos::web::BorderLineStyle gxos::web::{anonymous}::defaultVisibleBorderStyle(const gxos::web::WebStyle&, BorderSideIndex)' defined but not used [-Wunused-function]
+ 1630 | static BorderLineStyle defaultVisibleBorderStyle(const WebStyle& style, BorderSideIndex side)
+      |                        ^~~~~~~~~~~~~~~~~~~~~~~~~
+guide_web_html_parser.cpp:270:13: warning: 'bool gxos::web::{anonymous}::scanCssBalancedRange(const std::string&, size_t, size_t, gxos::web::CssDiagnostics&, bool)' defined but not used [-Wunused-function]
+  270 | static bool scanCssBalancedRange(const std::string& text,
+      |             ^~~~~~~~~~~~~~~~~~~~
+guide_web_http.cpp:21: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   21 | #pragma comment(lib, "ws2_32.lib")
+guide_web_http.cpp:22: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   22 | #pragma comment(lib, "secur32.lib")
+guide_web_http.cpp:23: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   23 | #pragma comment(lib, "crypt32.lib")
+kernel/core/system_font.cpp:114:13: warning: 'bool gxos::gui::{anonymous}::stringEquals(const char*, const char*)' defined but not used [-Wunused-function]
+  114 | static bool stringEquals(const char* a, const char* b)
+      |             ^~~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from lifecycle.cpp:6:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10,
+                 from lifecycle.cpp:9:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from message_box.h:9,
+                 from message_box.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from message_box.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from notepad.h:2,
+                 from module_manager.cpp:3:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from file_explorer.h:4,
+                 from module_manager.cpp:9:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from navigator.cpp:13:
+navigator_file_io.h:52:1: warning: multi-line comment [-Wcomment]
+   52 | // the process working directory so that running from D:\dev\guideXOSServer\
+      | ^
+In file included from process.h:12,
+                 from navigator.h:3,
+                 from navigator.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from navigator.cpp:5:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+navigator.cpp: At global scope:
+navigator.cpp:2606:21: warning: 'bool gxos::apps::{anonymous}::isHiddenByDisplay(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 2606 |         static bool isHiddenByDisplay(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~
+navigator.cpp:2601:21: warning: 'bool gxos::apps::{anonymous}::isRightAlignedText(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 2601 |         static bool isRightAlignedText(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~
+navigator.cpp:2596:21: warning: 'bool gxos::apps::{anonymous}::isCenteredText(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 2596 |         static bool isCenteredText(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~
+navigator.cpp:2412:20: warning: 'int gxos::apps::{anonymous}::blockWrapWidth(const gxos::web::DocBlock&, int)' defined but not used [-Wunused-function]
+ 2412 |         static int blockWrapWidth(const DocBlock& block, int outerWidth)
+      |                    ^~~~~~~~~~~~~~
+navigator.cpp:2319:41: warning: 'std::vector<std::__cxx11::basic_string<char> > gxos::apps::{anonymous}::tableRowTextLines(const TableGroupLayout&, const TableRowLayout&)' defined but not used [-Wunused-function]
+ 2319 |         static std::vector<std::string> tableRowTextLines(const TableGroupLayout& layout, const TableRowLayout& row)
+      |                                         ^~~~~~~~~~~~~~~~~
+navigator.cpp:2066:20: warning: 'int gxos::apps::{anonymous}::textLineCountForTableCell(const std::string&)' defined but not used [-Wunused-function]
+ 2066 |         static int textLineCountForTableCell(const std::string& text)
+      |                    ^~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:2059:28: warning: 'std::string gxos::apps::{anonymous}::tableRowSignature(const gxos::web::DocBlock&)' defined but not used [-Wunused-function]
+ 2059 |         static std::string tableRowSignature(const DocBlock& block)
+      |                            ^~~~~~~~~~~~~~~~~
+navigator.cpp:2035:21: warning: 'bool gxos::apps::{anonymous}::isTableCaptionLikeBlock(const gxos::web::DocBlock&)' defined but not used [-Wunused-function]
+ 2035 |         static bool isTableCaptionLikeBlock(const DocBlock& block)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1853:21: warning: 'bool gxos::apps::{anonymous}::cssBorderLeftVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 1853 |         static bool cssBorderLeftVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1847:21: warning: 'bool gxos::apps::{anonymous}::cssBorderBottomVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 1847 |         static bool cssBorderBottomVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1841:21: warning: 'bool gxos::apps::{anonymous}::cssBorderRightVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 1841 |         static bool cssBorderRightVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1835:21: warning: 'bool gxos::apps::{anonymous}::cssBorderTopVisible(const gxos::web::WebStyle&)' defined but not used [-Wunused-function]
+ 1835 |         static bool cssBorderTopVisible(const WebStyle& style)
+      |                     ^~~~~~~~~~~~~~~~~~~
+navigator.cpp:1696:20: warning: 'int gxos::apps::{anonymous}::cssMarginSideOrDefault(int, int, int)' defined but not used [-Wunused-function]
+ 1696 |         static int cssMarginSideOrDefault(int sideValue, int uniformValue, int fallbackValue)
+      |                    ^~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:1691:20: warning: 'int gxos::apps::{anonymous}::cssMarginOrDefault(const gxos::web::WebStyle&, int)' defined but not used [-Wunused-function]
+ 1691 |         static int cssMarginOrDefault(const WebStyle& style, int fallbackValue)
+      |                    ^~~~~~~~~~~~~~~~~~
+navigator.cpp:1681:25: warning: 'gxos::web::DocBlock gxos::apps::{anonymous}::makeBlock(gxos::web::BlockType, const std::string&, const std::string&, const std::string&)' defined but not used [-Wunused-function]
+ 1681 |         static DocBlock makeBlock(BlockType type, const std::string& text, const std::string& url, const std::string& tagName)
+      |                         ^~~~~~~~~
+navigator.cpp:629:18: warning: 'uint32_t gxos::apps::{anonymous}::NavigatorButtonBorderColor(bool, bool)' defined but not used [-Wunused-function]
+  629 |         uint32_t NavigatorButtonBorderColor(bool focused, bool disabled)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~
+navigator.cpp:188:14: warning: 'void gxos::apps::{anonymous}::drawTextAt(uint64_t, int, int, const std::string&)' defined but not used [-Wunused-function]
+  188 |         void drawTextAt(uint64_t windowId, int x, int y, const std::string& text)
+      |              ^~~~~~~~~~
+In file included from navigator_file_io.cpp:6:
+navigator_file_io.h:52:1: warning: multi-line comment [-Wcomment]
+   52 | // the process working directory so that running from D:\dev\guideXOSServer\
+      | ^
+In file included from gui_protocol.h:6,
+                 from native_app_runtime.cpp:4:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+native_app_runtime.cpp: At global scope:
+native_app_runtime.cpp:67:6: warning: 'bool gxos::apps::{anonymous}::experimentalExecutionEnabled()' defined but not used [-Wunused-function]
+   67 | bool experimentalExecutionEnabled() {
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from process.h:12,
+                 from native_elf_executor.cpp:9:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from process.h:12,
+                 from notepad.h:2,
+                 from notepad.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from notepad.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+notepad.cpp: In static member function 'static int gxos::apps::Notepad::main(int, char**)':
+notepad.cpp:299:53: warning: unused variable 'kGuiChanIn' [-Wunused-variable]
+  299 |                                         const char* kGuiChanIn = "gui.input";
+      |                                                     ^~~~~~~~~~
+In file included from process.h:12,
+                 from onscreen_keyboard.h:2,
+                 from onscreen_keyboard.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from onscreen_keyboard.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from open_dialog.h:2,
+                 from open_dialog.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from open_dialog.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from paint.h:2,
+                 from paint.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from paint.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+paint.cpp: In static member function 'static void gxos::apps::Paint::updateDisplay()':
+paint.cpp:239:13: warning: unused variable 'r' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |             ^
+paint.cpp:239:35: warning: unused variable 'g' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |                                   ^
+paint.cpp:239:56: warning: unused variable 'b' [-Wunused-variable]
+  239 |         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      |                                                        ^
+In file included from process.h:12,
+                 from process.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+process.cpp: In static member function 'static bool gxos::ProcessTable::wait(uint64_t, uint64_t, int*)':
+process.cpp:268:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  268 |         if(exitCodeOut) *exitCodeOut = proc->exitCode; return true;
+      |         ^~
+process.cpp:268:56: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  268 |         if(exitCodeOut) *exitCodeOut = proc->exitCode; return true;
+      |                                                        ^~~~~~
+In file included from png_loader.cpp:61:
+third_party/stb/stb_image.h: In function 'int stbi__parse_png_file(stbi__png*, int, int)':
+third_party/stb/stb_image.h:5247:28: warning: variable 'invalid_chunk' set but not used [-Wunused-but-set-variable]
+ 5247 |                static char invalid_chunk[] = "XXXX PNG chunk not known";
+      |                            ^~~~~~~~~~~~~
+third_party/stb/stb_image.h: At global scope:
+third_party/stb/stb_image.h:1078:12: warning: 'int stbi__mul2shorts_valid(int, int)' defined but not used [-Wunused-function]
+ 1078 | static int stbi__mul2shorts_valid(int a, int b)
+      |            ^~~~~~~~~~~~~~~~~~~~~~
+third_party/stb/stb_image.h:1070:12: warning: 'int stbi__addints_valid(int, int)' defined but not used [-Wunused-function]
+ 1070 | static int stbi__addints_valid(int a, int b)
+      |            ^~~~~~~~~~~~~~~~~~~
+png_loader.cpp:42:14: warning: 'void* gxos_stbi_realloc(void*, size_t)' defined but not used [-Wunused-function]
+   42 | static void* gxos_stbi_realloc(void* ptr, size_t newSize)
+      |              ^~~~~~~~~~~~~~~~~
+In file included from process.h:12,
+                 from right_click_menu.h:3,
+                 from right_click_menu.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10,
+                 from right_click_menu.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from save_changes_dialog.h:2,
+                 from save_changes_dialog.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from save_changes_dialog.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from save_dialog.h:2,
+                 from save_dialog.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from save_dialog.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from server.cpp:69:
+navigator_file_io.h:52:1: warning: multi-line comment [-Wcomment]
+   52 | // the process working directory so that running from D:\dev\guideXOSServer\
+      | ^
+In file included from process.h:12,
+                 from server.cpp:45:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10,
+                 from server.cpp:49:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from shutdown_dialog.h:2,
+                 from shutdown_dialog.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from shutdown_dialog.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from process.h:12,
+                 from task_manager.h:2,
+                 from task_manager.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from task_manager.cpp:3:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13,
+                 from task_manager.cpp:7:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+task_manager.cpp: At global scope:
+task_manager.cpp:375:21: warning: 'void gxos::apps::{anonymous}::publishRect(uint64_t, int, int, int, int, uint8_t, uint8_t, uint8_t)' defined but not used [-Wunused-function]
+  375 |         static void publishRect(uint64_t windowId, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b) {
+      |                     ^~~~~~~~~~~
+In file included from ipc_bus.h:8,
+                 from compositor.h:9,
+                 from trash.cpp:3:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+trash.cpp: At global scope:
+trash.cpp:54:17: warning: 'std::string gxos::apps::{anonymous}::readOriginalPath(const std::filesystem::__cxx11::path&)' defined but not used [-Wunused-function]
+   54 |     std::string readOriginalPath(const std::filesystem::path& infoPath) {
+      |                 ^~~~~~~~~~~~~~~~
+In file included from C:/mingw64/include/c++/15.2.0/string:56,
+                 from trash.h:4,
+                 from trash.cpp:1:
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:742:7: warning: array subscript 1 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  742 |       basic_string(basic_string&& __str) noexcept
+      |       ^~~~~~~~~~~~
+In file included from C:/mingw64/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++allocator.h:33,
+                 from C:/mingw64/include/c++/15.2.0/bits/allocator.h:46,
+                 from C:/mingw64/include/c++/15.2.0/string:45:
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_Alloc_hider::_Alloc_hider(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::pointer, _Alloc&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:743:9,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:208:9: warning: array subscript 4 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  208 |         _Alloc_hider(pointer __dat, _Alloc&& __a = _Alloc())
+      |         ^~~~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In constructor 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_Alloc_hider::_Alloc_hider(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::pointer, _Alloc&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:743:9,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:209:43: warning: array subscript 4 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  209 |         : allocator_type(std::move(__a)), _M_p(__dat) { }
+      |                                           ^~~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+In member function 'void std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::_M_length(size_type) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]',
+    inlined from 'std::__cxx11::basic_string<_CharT, _Traits, _Alloc>::basic_string(std::__cxx11::basic_string<_CharT, _Traits, _Alloc>&&) [with _CharT = char; _Traits = std::char_traits<char>; _Alloc = std::allocator<char>]' at C:/mingw64/include/c++/15.2.0/bits/basic_string.h:760:11,
+    inlined from 'void std::__new_allocator<_Tp>::construct(_Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:191:4,
+    inlined from 'static void std::allocator_traits<std::allocator<_CharT> >::construct(allocator_type&, _Up*, _Args&& ...) [with _Up = std::__cxx11::basic_string<char>; _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:674:17,
+    inlined from 'std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::emplace_back(_Args&& ...) [with _Args = {std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/vector.tcc:117:30,
+    inlined from 'void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1434:21,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:208:23:
+C:/mingw64/include/c++/15.2.0/bits/basic_string.h:234:26: warning: array subscript 1 is outside array bounds of 'std::__cxx11::basic_string<char> [1]' [-Warray-bounds=]
+  234 |       { _M_string_length = __length; }
+      |         ~~~~~~~~~~~~~~~~~^~~~~~~~~~
+In member function '_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::__cxx11::basic_string<char>]',
+    inlined from 'static _Tp* std::allocator_traits<std::allocator<_CharT> >::allocate(allocator_type&, size_type) [with _Tp = std::__cxx11::basic_string<char>]' at C:/mingw64/include/c++/15.2.0/bits/alloc_traits.h:614:28,
+    inlined from 'std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:387:33,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize_n(_Iterator, _Sentinel, size_type) [with _Iterator = const char* const*; _Sentinel = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1985:23,
+    inlined from 'void std::vector<_Tp, _Alloc>::_M_range_initialize(_ForwardIterator, _ForwardIterator, std::forward_iterator_tag) [with _ForwardIterator = const char* const*; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:1974:25,
+    inlined from 'std::vector<_Tp, _Alloc>::vector(_InputIterator, _InputIterator, const allocator_type&) [with _InputIterator = const char* const*; <template-parameter-2-2> = void; _Tp = std::__cxx11::basic_string<char>; _Alloc = std::allocator<std::__cxx11::basic_string<char> >]' at C:/mingw64/include/c++/15.2.0/bits/stl_vector.h:751:23,
+    inlined from 'static uint64_t gxos::apps::Trash::Launch(bool)' at trash.cpp:206:47:
+C:/mingw64/include/c++/15.2.0/bits/new_allocator.h:151:73: note: at offset 32 into object of size 32 allocated by 'operator new'
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                                         ^
+vnc_server.cpp:13: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   13 | #pragma comment(lib, "ws2_32.lib")
+In file included from ipc_bus.h:8,
+                 from compositor.h:9,
+                 from vnc_server.cpp:3:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from compositor.h:10:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+In file included from compositor.h:13:
+desktop_config.h: In static member function 'static bool gxos::gui::DesktopConfig::Load(const std::string&, gxos::gui::DesktopConfigData&, std::string&)':
+desktop_config.h:53:18: warning: variable 'trim' set but not used [-Wunused-but-set-variable]
+   53 |             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
+      |                  ^~~~
+In file included from process.h:12,
+                 from welcome.h:2,
+                 from welcome.cpp:1:
+ipc.h: In member function 'bool gxos::ipc::Mailbox::try_pop(gxos::ipc::Message&)':
+ipc.h:38:13: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |             ^~
+ipc.h:38:43: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   38 |             if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+      |                                           ^~~
+In file included from welcome.cpp:2:
+gui_protocol.h: In function 'std::string gxos::gui::packPins(const std::vector<std::pair<bool, std::__cxx11::basic_string<char> > >&)':
+gui_protocol.h:73:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+   73 |                 if (!first)
+      |                 ^~
+gui_protocol.h:74:33: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+   74 |                     oss << ";"; first = false;
+      |                                 ^~~~~
+Build failed!
