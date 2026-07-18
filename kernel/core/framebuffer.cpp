@@ -476,6 +476,33 @@ bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
     return true;
 }
 
+bool init_virtual(uint32_t width, uint32_t height)
+{
+    reset_diagnostic_framebuffer_inventory();
+    if (width == 0u || height == 0u) return false;
+
+    const uint64_t totalPixels = static_cast<uint64_t>(width) * height;
+    if (totalPixels > MAX_BACKBUFFER_PIXELS) return false;
+
+    // The software canvas is deliberately backed by the existing bounded
+    // framebuffer storage.  Keeping front and draw pointers on the same
+    // storage lets the normal desktop double-buffering and presentation code
+    // remain the owner of all drawing operations.
+    g_buffer = g_backBufferStorage;
+    g_backBuffer = nullptr;
+    g_drawTarget = g_buffer;
+    g_width = width;
+    g_height = height;
+    g_pitch = width * sizeof(uint32_t);
+    g_bpp = 32u;
+    g_available = true;
+    g_doubleBuffered = false;
+    for (uint64_t i = 0u; i < totalPixels; ++i) {
+        g_backBufferStorage[i] = 0u;
+    }
+    return true;
+}
+
 uint32_t get_width()
 {
     return g_width;
@@ -499,6 +526,11 @@ uint8_t get_bpp()
 uint32_t* get_buffer()
 {
     return g_buffer;
+}
+
+uint32_t* get_draw_buffer()
+{
+    return g_drawTarget;
 }
 
 bool is_available()

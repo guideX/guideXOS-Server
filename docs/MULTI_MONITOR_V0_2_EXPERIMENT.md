@@ -758,8 +758,8 @@ persistence store, so its topology proof uses `persistence=not-requested`;
 the service still gates persistence after successful commit, and the existing
 separate-launch persistence smokes cover the writable persistence path.
 
-Manual UI validation is `required`, not completed: use
-`scripts\run-qemu-virtio-gpu-topology-manual.bat`, open Display Options, use the
+Manual UI validation is `required`, not completed: use the authoritative
+`scripts\run-qemu-virtio-gpu-dual-monitor-manual.bat`, open Display Options, use the
 QEMU-only Test Remove/Test Restore controls, review or keep the pending change,
 then explicitly apply it and check taskbar, pointer, window dragging, and
 resolution behavior. No manual interaction success is claimed here.
@@ -774,27 +774,61 @@ feature or use QMP as guest IPC. The authoritative launcher is:
 scripts\run-qemu-virtio-gpu-dual-monitor-manual.bat
 ```
 
-It reuses `scripts\run-qemu-display-probe.bat`, creates a timestamped writable
-configuration artifact, keeps QEMU open for interaction, and builds with the
-manual-validation gate. The QEMU version is:
+It reuses `scripts\run-qemu-display-probe.bat`, keeps a clearly identified
+writable configuration artifact at
+`logs\manual-validation\display-config-store.img`, keeps QEMU open for
+interaction, and builds with separate QEMU backend/manual/proof gates. Use
+`-Fresh` for a new artifact or `-ImagePath path` for an explicit artifact. The
+QEMU version is:
 
 ```text
 QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)
 ```
 
-The launcher starts with an empty writable configuration artifact and performs
-no automatic configuration change. The expected initial topology is two live
-VirtIO-GPU outputs in Extend with Display 1 primary; the active preferred
-resolutions and virtual desktop are guest-reported after boot. In the captured
-QEMU 11.0.0 session they were 640x480 per output and 1280x480 virtual desktop.
+The previous manual checkpoint correctly created two GTK heads but selected a
+limited live-probe lifecycle: it skipped the normal desktop/App Model path,
+rendered a diagnostic snapshot, and therefore did not expose Display Options.
+That was a validation-environment limitation, not a fixed-topology
+dual-monitor feature regression. The corrected manual path initializes the
+normal VFS, compositor, shell, taskbar, Start Menu, built-in app registry,
+typed App Model dispatch, input routing, and live presenter. Display Options is
+registered and verified by creating a real window through the normal public App
+Model route before readiness is reported.
+
+The expected fresh-artifact state is two live VirtIO-GPU outputs in Extend
+with Display 1 primary, Display 1 at 1280x800, Display 2 at 1280x800, and a
+2560x800 virtual desktop. A valid persisted configuration is restored honestly
+instead of being silently replaced. Host GTK window dimensions are reported
+separately from guest resource dimensions and active logical dimensions.
 The guest and host banners identify
 `mode=manual-dual-monitor-validation`, `backend=virtio-gpu`, `outputs=2`, the
 active mode and primary, per-output resolutions, virtual desktop dimensions,
 the persistence artifact, `topologyTestControls=enabled=yes`,
 `topologyInjectionAvailable=yes`, `automaticProof=disabled`, and
-`realHardware=no`. The guest banner also states that Display Options is not
-exposed by the current live probe; this is a validation blocker, not a claim
-that the UI passed.
+`realHardware=no`, plus `displayOptionsRegistered=yes` and
+`displayOptionsLaunchPath=normal-app-model`.
+
+Before a human session, the bounded readiness smoke is:
+
+```text
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-virtio-gpu-manual-readiness.ps1
+```
+
+It launches QEMU headlessly, verifies two operational outputs, the normal
+desktop, Start Menu, real Display Options launchability, valid logical modes,
+writable persistence, available topology controls, and disabled proof, then
+stops QEMU cleanly. Expected proof:
+
+```text
+Manual validation readiness: outputs=2 normalDesktop=ok displayOptions=available logicalModes=valid persistence=ready automaticProof=disabled topologyControls=available result=pass
+```
+
+Manual topology controls are injected test events and never claim genuine host
+hotplug: F9 injects secondary-output removal, F10 injects secondary-output
+restoration, F11 injects the bounded preferred-geometry test, and F12 clears or
+dismisses pending topology state through the public service. Primary-output
+removal is not exposed by this control set; record that optional case as
+unsupported rather than treating secondary removal as primary removal.
 
 The exact manual checklist is reproduced below. The launcher prints the same
 item headings in the host console. Every result must be entered by a human with
@@ -947,29 +981,28 @@ meaningful interval was actually observed.
 ### Manual checkpoint record
 
 No human Display Options session was performed in this checkpoint. Therefore
-A-K are `NOT TESTED` or `BLOCKED`, not PASS. The current live QEMU probe still
-renders its diagnostic compositor snapshot and does not expose the real Display
-Options surface or a manual topology-control window, so interactive UI items
-cannot be honestly completed through this launcher. The installed QEMU 11.0.0
-control surface also cannot trigger a genuine host-generated VirtIO-GPU
-topology change. Automated topology reconciliation remains green and is labeled
-`injectedTopologyProof=ok genuineHotplugValidated=no`.
+A-K are `NOT TESTED` or `BLOCKED`, not PASS. The corrected manual environment is
+READY FOR HUMAN VALIDATION; the readiness smoke and infrastructure checks do
+not complete the human checklist. Injected topology reconciliation remains
+explicitly labeled test-only, and the installed QEMU control surface does not
+claim a genuine host-generated VirtIO-GPU topology event.
 
 The manual evidence root for the automated preflight is:
 
 ```text
-logs\manual-preflight-20260718-060349
+logs\qemu-virtio-gpu-manual-readiness-20260718-093519
 ```
 
 The launcher/screenshot evidence root exercised during this checkpoint is:
 
 ```text
-logs\manual-validation-20260718-070649
+logs\manual-validation-20260718-095401
 ```
 
-Its explicit non-inference record is
-`manual-result-20260718-070936.txt`; the captured initial Extend and final
-observation screenshots and the guest serial log are retained there.
+Its captured authoritative head screenshots are
+`authoritative-head0-head0.png` and `authoritative-head1-head1.png`; the guest
+serial log and readiness evidence are retained there. No human checklist result
+was inferred.
 
 The manual result recorder writes timestamped text records under a selected
 `logs\manual-validation-*` root and records date/time, QEMU version, branch,
@@ -981,20 +1014,21 @@ for `screendump` and optional clean shutdown.
 Validation infrastructure defects found and fixed in this checkpoint were
 limited to: a fixed shared-launcher VNC `:0` collision, compile-time gate
 contamination when switching flags without a clean generated-object rebuild,
-and the GTK `show-tabs` surface stalling this QEMU session before guest boot.
-The fixes are respectively an opt-in VNC disable, a manual-launch clean build,
-and a simple GTK override. These were launcher/infrastructure defects; no
-manual product defect was fixed, and no interactive checklist result was
-inferred from them.
+the GTK surface startup issue, and the manual launcher’s probe-only lifecycle.
+The corrected launcher uses the normal desktop lifecycle, a QEMU-only software
+canvas feeding the existing live VirtIO-GPU resources, public display
+configuration initialization, reusable persistence, and explicit injected test
+controls. These are validation-environment fixes; no interactive checklist
+result is inferred from them.
 
 Completed automated preflight and regression items: hosted, framebuffer, MMIO,
 VirtIO-GPU backend/compositor/presentation/input, Display Options source/runtime,
-control-plane, persistence, resolution, event observer, and topology
-reconciliation smokes. No manual defect was fixed because no human result was
-available to validate one. The implementation is classified as:
+control-plane, persistence, resolution, event observer, topology reconciliation,
+and manual-readiness smokes. No manual checklist result was inferred. The
+environment is classified as:
 
 ```text
-Automated proof complete; manual validation still required
+Ready for human manual validation; A-K still require explicit human completion
 ```
 
 ### Safety and remaining limitations

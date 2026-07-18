@@ -705,6 +705,8 @@ static int32_t s_mouseY = 0;
 static int s_rightClickHover = -1;
 static uint32_t s_screenW = 0;
 static uint32_t s_screenH = 0;
+static uint32_t s_taskbarScreenW = 0;
+static uint32_t s_taskbarScreenH = 0;
 static volatile bool s_needsRedraw = false;
 static volatile uint64_t s_redrawGeneration = 1;
 
@@ -838,12 +840,16 @@ static bool point_in_rect(int32_t mx, int32_t my, const DesktopRect& r)
 
 static DesktopRect get_current_taskbar_rect()
 {
-    return get_taskbar_rect(s_screenW, s_screenH, s_taskbarDockPosition);
+    return get_taskbar_rect(s_taskbarScreenW != 0u ? s_taskbarScreenW : s_screenW,
+                            s_taskbarScreenH != 0u ? s_taskbarScreenH : s_screenH,
+                            s_taskbarDockPosition);
 }
 
 static DesktopRect get_current_work_area()
 {
-    return get_desktop_work_area(s_screenW, s_screenH, s_taskbarDockPosition);
+    return get_desktop_work_area(s_taskbarScreenW != 0u ? s_taskbarScreenW : s_screenW,
+                                 s_taskbarScreenH != 0u ? s_taskbarScreenH : s_screenH,
+                                 s_taskbarDockPosition);
 }
 
 static DesktopRect get_start_button_rect()
@@ -8118,10 +8124,34 @@ bool is_compositor_available()
            compositor::KernelCompositor::getWindowCount() >= 0;
 }
 
+bool is_initialized()
+{
+    return s_initialized;
+}
+
+void reconcile_display_topology(uint32_t virtualDesktopWidth,
+                                uint32_t virtualDesktopHeight,
+                                uint32_t primaryWidth,
+                                uint32_t primaryHeight)
+{
+    if (!s_initialized || virtualDesktopWidth == 0u || virtualDesktopHeight == 0u) {
+        return;
+    }
+
+    s_screenW = virtualDesktopWidth;
+    s_screenH = virtualDesktopHeight;
+    s_taskbarScreenW = primaryWidth != 0u ? primaryWidth : virtualDesktopWidth;
+    s_taskbarScreenH = primaryHeight != 0u ? primaryHeight : virtualDesktopHeight;
+    apply_taskbar_layout();
+    request_redraw();
+}
+
 void init()
 {
     s_screenW = framebuffer::get_width();
     s_screenH = framebuffer::get_height();
+    s_taskbarScreenW = s_screenW;
+    s_taskbarScreenH = s_screenH;
     s_startMenuOpen = false;
     s_rightClickMenuOpen = false;
     s_notification.visible = true;

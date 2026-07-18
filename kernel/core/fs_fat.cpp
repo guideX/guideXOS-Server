@@ -121,12 +121,27 @@ static uint32_t next_cluster(const FATVolume& vol, uint32_t cluster)
     return 0xFFFFFFFF;
 }
 
+static bool valid_data_cluster(const FATVolume& vol, uint32_t cluster)
+{
+    if (vol.type == FAT_TYPE_FAT32) {
+        return cluster >= 2u && cluster < vol.totalDataClusters + 2u;
+    }
+    if (vol.type == FAT_TYPE_EXFAT) {
+        return cluster >= 2u && cluster < vol.exfatClusterCount + 2u;
+    }
+    return false;
+}
+
 static bool is_end_of_chain(const FATVolume& vol, uint32_t cluster)
 {
+    // A fresh FAT32 artifact can have a free/zero next link after the empty
+    // root directory. Treat malformed/free links as a bounded chain end.
+    if (!valid_data_cluster(vol, cluster)) return true;
     if (vol.type == FAT_TYPE_FAT32) return cluster >= FAT32_CLUSTER_END;
     if (vol.type == FAT_TYPE_EXFAT) return cluster >= 0xFFFFFFF8;
     return true;
 }
+
 
 // ================================================================
 // Mount — detect FAT32 or exFAT and fill volume descriptor

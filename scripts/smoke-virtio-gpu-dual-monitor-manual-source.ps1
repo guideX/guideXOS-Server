@@ -37,6 +37,9 @@ Assert-Contains $launcher 'mingw32-make ARCH=amd64 clean' 'manual launcher must 
 Assert-Contains $launcher 'DISPLAY_PROBE_SERIAL_LOG' 'manual launcher must retain a guest serial log'
 Assert-Contains $launcher 'DISPLAY_PROBE_DISABLE_VNC' 'manual launcher must avoid a fixed VNC display collision'
 Assert-Contains $launcher 'DISPLAY_PROBE_SIMPLE_GTK' 'manual launcher must use the simple interactive GTK surface'
+Assert-Contains $launcher 'BACKEND_ACTIVE' 'manual launcher must activate the explicit QEMU backend gate'
+Assert-Contains $launcher 'MANUAL_MODE' 'manual launcher must select the explicit manual-mode gate'
+Assert-Contains $launcher 'smoke-virtio-gpu-manual-readiness.ps1' 'manual launcher must publish the readiness smoke'
 Assert-Contains $launcher 'no guest IPC' 'manual launcher must restrict QMP to lifecycle/screenshots'
 Assert-Contains $sharedLauncher 'GXOS_QEMU_DISPLAY_PROBE_DISABLE_VNC' 'shared launcher must support opt-in VNC suppression'
 Assert-Contains $sharedLauncher 'GXOS_QEMU_DISPLAY_PROBE_SIMPLE_GTK' 'shared launcher must support the manual GTK override'
@@ -53,14 +56,15 @@ foreach ($needle in @(
     'topologyTestControls=enabled=yes',
     'topologyInjectionAvailable=yes',
     'automaticProof=disabled',
-    'displayOptions=not-exposed-by-current-live-probe',
+    'displayOptionsRegistered=yes',
+    'displayOptionsLaunchPath=normal-app-model',
     'GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE')) {
     Assert-Contains $main $needle "manual guest banner/gate missing: $needle"
 }
 Assert-Contains $main 'DISPLAY_CONFIGURATION_CONTROL_ACTIVE)' 'manual gate must coexist with the existing control build'
-Assert-Contains $main 'DISPLAY_EVENTS_ACTIVE) && !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)' 'manual mode must not run injected event proof'
+Assert-Contains $main 'DISPLAY_EVENTS_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_PROOF_ACTIVE) && !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)' 'manual mode must not run injected event proof'
 
-foreach ($needle in @('compositor-live-manual', 'continuousPresentation=manual', 'MANUAL_VALIDATION_ACTIVE', 'return false;')) {
+foreach ($needle in @('compositor-live-manual', 'continuousPresentation=manual', 'MANUAL_VALIDATION_ACTIVE', 'render_manual_desktop_surface', 'get_display_readiness', 'return false;')) {
     Assert-Contains $gpu $needle "manual presentation gate missing: $needle"
 }
 if ($launcher -match 'input-send-event|guest.*QMP.*(state|input)|QMP.*(inject|change|apply)') { throw 'manual launcher must not use QMP as guest IPC' }

@@ -57,6 +57,14 @@ static StartupRestoreDiagnostics s_startupRestore{};
 // The QEMU FAT32 proof store is intentionally constrained to the existing
 // bounded 8.3 writer; the serialized contents remain versioned and complete.
 static constexpr const char* kDisplayConfigurationPersistencePath = "/display.cfg";
+// These buffers are static because the bare-metal boot stack is intentionally
+// small (16 KiB).  Startup restore can run from the normal desktop boot path,
+// where several compositor/input frames are already live; keeping the bounded
+// persistence parser off the stack prevents a validation-only boot failure.
+static char s_persistenceSerializeBuffer[kDisplayConfigurationPersistenceMaxBytes + 1u]{};
+static char s_persistenceTextBuffer[kDisplayConfigurationPersistenceMaxBytes + 1u]{};
+static char s_persistenceRawTextBuffer[kDisplayConfigurationPersistenceMaxBytes + 1u]{};
+static char s_persistenceChecksumInput[kDisplayConfigurationPersistenceMaxBytes + 1u]{};
 
 struct PersistedDisplayConfiguration {
     DisplayConfigurationSnapshot snapshot{};
@@ -64,6 +72,11 @@ struct PersistedDisplayConfiguration {
     bool hasOutputs{false};
     bool legacyV1{false};
 };
+// Startup restore is invoked from the normal desktop boot path, whose stack is
+// intentionally small.  Keep its fixed-size snapshots out of that stack too.
+static DisplayConfigurationSnapshot s_startupDetectedSnapshot{};
+static DisplayConfigurationSnapshot s_startupActiveSnapshot{};
+static PersistedDisplayConfiguration s_startupPersistedConfiguration{};
 
 static void clear_text(char* destination, uint32_t capacity)
 {
@@ -94,6 +107,26 @@ static bool text_equals(const char* left, const char* right)
         ++i;
     }
     return true;
+}
+
+static void reconcile_desktop_topology_from_snapshot(const DisplayConfigurationSnapshot& snapshot)
+{
+    uint32_t primaryIndex = 0u;
+    for (uint32_t index = 0u; index < snapshot.outputCount && index < kDisplayConfigurationMaxOutputs; ++index) {
+        if (snapshot.outputs[index].primary != 0u) {
+            primaryIndex = index;
+            break;
+        }
+    }
+    const uint32_t primaryWidth = snapshot.outputCount > primaryIndex && snapshot.outputs[primaryIndex].width > 0
+        ? static_cast<uint32_t>(snapshot.outputs[primaryIndex].width) : 0u;
+    const uint32_t primaryHeight = snapshot.outputCount > primaryIndex && snapshot.outputs[primaryIndex].height > 0
+        ? static_cast<uint32_t>(snapshot.outputs[primaryIndex].height) : 0u;
+    kernel::desktop::reconcile_display_topology(
+        static_cast<uint32_t>(snapshot.virtualDesktopWidth),
+        static_cast<uint32_t>(snapshot.virtualDesktopHeight),
+        primaryWidth,
+        primaryHeight);
 }
 
 static uint32_t text_length(const char* value, uint32_t capacity = 0xFFFFFFFFu)
@@ -687,7 +720,8 @@ static bool update_input_layout(const DisplayConfigurationSnapshot& snapshot)
 
 static bool persist_configuration(const DisplayConfigurationSnapshot& snapshot)
 {
-    char text[kDisplayConfigurationPersistenceMaxBytes + 1u]{};
+    char (&text)[kDisplayConfigurationPersistenceMaxBytes + 1u] = s_persistenceSerializeBuffer;
+    clear_text(text, sizeof(text));
     uint32_t position = 0u;
     const uint32_t serializedSizeOffset = 25u; // version=2\nserializedSize=
     const uint32_t checksumOffset = 40u;      // serializedSize=00000\nchecksum=
@@ -784,6 +818,28 @@ static bool parse_virtual_desktop(char* value, DisplayConfigurationSnapshot& sna
         snapshot.virtualDesktopHeight <= static_cast<int32_t>(kDisplayConfigurationPersistenceMaxDimension);
 }
 
+static bool persisted_configuration_file_present()
+{
+    // Avoid the legacy FAT path lookup for a missing root entry.  A freshly
+    // formatted validation artifact can legitimately have no display.cfg;
+    // enumerating the bounded root directory lets startup restore distinguish
+    // that case without following an uninitialized free-cluster link.
+    const uint8_t iterator = kernel::vfs::opendir("/");
+    if (iterator == 0xFFu) return false;
+
+    bool present = false;
+    kernel::vfs::DirEntry entry{};
+    uint32_t remainingEntries = 64u;
+    while (remainingEntries-- > 0u && kernel::vfs::readdir(iterator, &entry)) {
+        if (text_equals(entry.name, "display.cfg")) {
+            present = true;
+            break;
+        }
+    }
+    kernel::vfs::closedir(iterator);
+    return present;
+}
+
 static bool persisted_identity_duplicate(const DisplayConfigurationSnapshot& snapshot, uint32_t index)
 {
     for (uint32_t i = 0u; i < index; ++i) {
@@ -799,6 +855,9 @@ static bool parse_persisted_configuration(PersistedDisplayConfiguration& persist
     found = false;
     failureReason = "not found";
     persisted = PersistedDisplayConfiguration{};
+    if (!persisted_configuration_file_present()) {
+        return true;
+    }
     kernel::vfs::FileInfo info{};
     if (kernel::vfs::stat(kDisplayConfigurationPersistencePath, &info) != kernel::vfs::VFS_OK) {
         return true;
@@ -809,7 +868,12 @@ static bool parse_persisted_configuration(PersistedDisplayConfiguration& persist
         return false;
     }
 
-    char text[kDisplayConfigurationPersistenceMaxBytes + 1u]{};
+    char (&text)[kDisplayConfigurationPersistenceMaxBytes + 1u] = s_persistenceTextBuffer;
+    char (&rawText)[kDisplayConfigurationPersistenceMaxBytes + 1u] = s_persistenceRawTextBuffer;
+    char (&checksumInput)[kDisplayConfigurationPersistenceMaxBytes + 1u] = s_persistenceChecksumInput;
+    clear_text(text, sizeof(text));
+    clear_text(rawText, sizeof(rawText));
+    clear_text(checksumInput, sizeof(checksumInput));
     const int32_t read = kernel::vfs::read_file(kDisplayConfigurationPersistencePath, text,
         kDisplayConfigurationPersistenceMaxBytes);
     if (read <= 0 || static_cast<uint32_t>(read) != info.size) {
@@ -818,7 +882,6 @@ static bool parse_persisted_configuration(PersistedDisplayConfiguration& persist
     }
     const uint32_t length = static_cast<uint32_t>(read);
     text[length] = '\0';
-    char rawText[kDisplayConfigurationPersistenceMaxBytes + 1u]{};
     for (uint32_t i = 0u; i < length; ++i) rawText[i] = text[i];
     rawText[length] = '\0';
 
@@ -945,7 +1008,6 @@ static bool parse_persisted_configuration(PersistedDisplayConfiguration& persist
         failureReason = "invalid primary output identity";
         return false;
     }
-    char checksumInput[kDisplayConfigurationPersistenceMaxBytes + 1u]{};
     for (uint32_t i = 0u; i < length; ++i) checksumInput[i] = rawText[i];
     checksumInput[length] = '\0';
     if (checksumValueOffset == 0u || checksumValueOffset + 8u > length) {
@@ -1190,9 +1252,10 @@ static void attempt_startup_restore()
         kernel::serial::puts("Display persistence startup restore: waitingForPersistentStore=yes\n");
         return;
     }
-
-    DisplayConfigurationSnapshot detected{};
-    DisplayConfigurationSnapshot active{};
+    DisplayConfigurationSnapshot& detected = s_startupDetectedSnapshot;
+    DisplayConfigurationSnapshot& active = s_startupActiveSnapshot;
+    detected = DisplayConfigurationSnapshot{};
+    active = DisplayConfigurationSnapshot{};
     if (!kernel::virtio::gpu::get_display_configuration_backend_snapshots(&detected, &active)) {
         s_startupRestore.state = StartupRestoreState::WaitingForBackend;
         kernel::serial::puts("Display persistence startup restore: waitingForBackend=yes\n");
@@ -1201,7 +1264,8 @@ static void attempt_startup_restore()
     s_startupRestore.outputsDetected = detected.outputCount >= 2u ? 1u : 0u;
     s_startupRestore.state = StartupRestoreState::Loading;
 
-    PersistedDisplayConfiguration persisted{};
+    PersistedDisplayConfiguration& persisted = s_startupPersistedConfiguration;
+    persisted = PersistedDisplayConfiguration{};
     bool found = false;
     const char* failureReason = "unknown";
     const bool valid = parse_persisted_configuration(persisted, found, failureReason);
@@ -1498,6 +1562,7 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                         kernel::compositor::KernelCompositor::reconcileDisplayTopology(
                             static_cast<uint32_t>(response.activeConfiguration.virtualDesktopWidth),
                             static_cast<uint32_t>(response.activeConfiguration.virtualDesktopHeight));
+                        reconcile_desktop_topology_from_snapshot(response.activeConfiguration);
                     } else {
                         response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::TargetRebuildFailed);
                         set_diagnostic(response, "topology reconciliation input update failed");
@@ -1537,6 +1602,7 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                         kernel::compositor::KernelCompositor::reconcileDisplayTopology(
                             static_cast<uint32_t>(response.activeConfiguration.virtualDesktopWidth),
                             static_cast<uint32_t>(response.activeConfiguration.virtualDesktopHeight));
+                        reconcile_desktop_topology_from_snapshot(response.activeConfiguration);
                         set_diagnostic(response, "topology reconciliation failed; complete rollback succeeded");
                         copy_text(response.rollbackResult, sizeof(response.rollbackResult),
                                   "scanouts, resources, layout, primary, windows, cursor restored");
@@ -1686,6 +1752,7 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                 kernel::compositor::KernelCompositor::reconcileDisplayTopology(
                     static_cast<uint32_t>(response.activeConfiguration.virtualDesktopWidth),
                     static_cast<uint32_t>(response.activeConfiguration.virtualDesktopHeight));
+                reconcile_desktop_topology_from_snapshot(response.activeConfiguration);
             }
             if (response.success != 0u && (applyCommand.flags & DisplayConfigurationFlagCommitPersistence) != 0u) {
                 if (persist_configuration(response.activeConfiguration)) {

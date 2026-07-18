@@ -188,6 +188,17 @@ void run_test_mode();
 // Check if compositor and IPC are available for GUI apps
 bool is_compositor_available();
 
+// True after the normal shell, taskbar, Start Menu state, built-in app
+// registry, and compositor have all been initialized.
+bool is_initialized();
+
+// Keep normal desktop layout state aligned with the committed virtual
+// desktop dimensions reported by the QEMU-only display configuration service.
+void reconcile_display_topology(uint32_t virtualDesktopWidth,
+                                uint32_t virtualDesktopHeight,
+                                uint32_t primaryWidth = 0u,
+                                uint32_t primaryHeight = 0u);
+
 #if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY)
 // Diagnostic-only smoke hook for SHADOW_ONLY FileOpen observation. Does not launch apps.
 void run_launch_shadow_folder_fileopen_smoke();

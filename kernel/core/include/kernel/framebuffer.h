@@ -47,6 +47,12 @@ bool init_riscv_ramfb(uint64_t lfbBase, uint32_t width, uint32_t height,
 bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
                  uint32_t pitch, uint8_t bpp);
 
+// Initialize a QEMU-only software canvas when VirtIO-GPU owns the visible
+// scanouts and firmware did not provide a GOP framebuffer.  This is not a
+// hardware framebuffer or an MMIO path; the live VirtIO-GPU presenter copies
+// the canvas into its already-established 2D resources.
+bool init_virtual(uint32_t width, uint32_t height);
+
 // Get framebuffer dimensions
 uint32_t get_width();
 uint32_t get_height();
@@ -55,6 +61,9 @@ uint8_t get_bpp();
 
 // Get framebuffer pointer
 uint32_t* get_buffer();
+
+// Get the buffer currently used by normal desktop drawing.
+uint32_t* get_draw_buffer();
 
 // Check if framebuffer is available
 bool is_available();

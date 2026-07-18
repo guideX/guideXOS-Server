@@ -24,6 +24,17 @@
 #include "kernel/display_input_mapper.h"
 #include "display_configuration_command.h"
 
+// Keep backend activation, manual mode, and proof activation conceptually
+// separate.  The compatibility aliases preserve the existing internal probe
+// implementation while allowing launchers to select the explicit QEMU-only
+// backend/manual gates without affecting the normal product path.
+#if defined(GXOS_QEMU_VIRTIO_GPU_BACKEND_ACTIVE) && !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+#define GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE
+#endif
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_MODE) && !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+#define GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE
+#endif
+
 namespace kernel {
 namespace virtio {
 namespace gpu {
@@ -438,6 +449,23 @@ void presentation_tick();
 // presenter is not compiled.  This is only used by the QEMU text-mode probe
 // pump and is not a product presentation-control API.
 bool presentation_finished();
+
+// Read-only QEMU manual-readiness snapshot.  Counts come from the live
+// backend inventory and presenter state; this does not activate any proof
+// coordinator or mutate display configuration.
+struct VirtioGpuDisplayReadiness {
+    uint32_t displayMonitorCount{0u};
+    uint32_t displayRenderTargetCount{0u};
+    uint32_t operationalOutputCount{0u};
+    uint32_t virtualDesktopWidth{0u};
+    uint32_t virtualDesktopHeight{0u};
+    uint8_t backendInitialized{0u};
+    uint8_t presenterActive{0u};
+    uint8_t topologyControlsAvailable{0u};
+    uint8_t reserved{0u};
+};
+
+bool get_display_readiness(VirtioGpuDisplayReadiness* readiness);
 
 // Copy the QEMU-only operational monitor geometry into the backend-neutral
 // input mapper representation. No hardware path calls this API.

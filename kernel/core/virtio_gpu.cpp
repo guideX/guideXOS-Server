@@ -26,6 +26,7 @@
 #include "include/kernel/msi.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/framebuffer.h"
 #include "include/kernel/qemu_display_input_proof.h"
 #include "include/kernel/system_font.h"
 #include "include/kernel/serial_debug.h"
@@ -1364,6 +1365,55 @@ static bool render_guide_xos_desktop_snapshot(
     return true;
 }
 
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+static bool render_manual_desktop_surface(
+    PixelSurface& surface,
+    const DisplayRenderTarget& target,
+    bool* conversionRequiredOut,
+    const char** blockerOut)
+{
+    if (conversionRequiredOut != nullptr) {
+        *conversionRequiredOut = false;
+    }
+    if (blockerOut != nullptr) {
+        *blockerOut = nullptr;
+    }
+
+    uint32_t* source = kernel::framebuffer::get_draw_buffer();
+    const uint32_t sourceWidth = kernel::framebuffer::get_width();
+    const uint32_t sourceHeight = kernel::framebuffer::get_height();
+    if (!kernel::framebuffer::is_available() || source == nullptr || sourceWidth == 0u || sourceHeight == 0u) {
+        if (blockerOut != nullptr) *blockerOut = "normal desktop canvas is not initialized";
+        return false;
+    }
+    if (target.viewportOriginX < 0 || target.viewportOriginY < 0 ||
+        static_cast<uint64_t>(target.viewportOriginX) + surface.width > sourceWidth ||
+        static_cast<uint64_t>(target.viewportOriginY) + surface.height > sourceHeight) {
+        if (blockerOut != nullptr) *blockerOut = "normal desktop canvas does not cover target viewport";
+        return false;
+    }
+
+    const PixelFormatKind compositorFormat = PixelFormatKind::B8G8R8X8_UNORM;
+    const bool conversionRequired = pixelSurfaceRequiresConversion(compositorFormat, surface.pixelFormat);
+    if (conversionRequiredOut != nullptr) *conversionRequiredOut = conversionRequired;
+
+    const uint32_t destinationStride = surface.pitchBytes / sizeof(uint32_t);
+    for (uint32_t y = 0u; y < surface.height; ++y) {
+        const uint32_t* sourceRow = source +
+            (static_cast<uint32_t>(target.viewportOriginY) + y) * sourceWidth +
+            static_cast<uint32_t>(target.viewportOriginX);
+        uint32_t* destinationRow = reinterpret_cast<uint32_t*>(
+            reinterpret_cast<uint8_t*>(surface.pixelPointer) +
+            static_cast<size_t>(y) * surface.pitchBytes);
+        for (uint32_t x = 0u; x < surface.width; ++x) {
+            destinationRow[x] = pixelSurfaceConvertBgrxToFormat(sourceRow[x], surface.pixelFormat);
+        }
+        (void)destinationStride;
+    }
+    return true;
+}
+#endif
+
 static bool issue_transfer_to_host_2d(DeviceState& state,
                                       DiagnosticResourceState& resource,
                                       uint32_t scanoutId,
@@ -1445,14 +1495,30 @@ static CompositorFrameTargetResult present_target_once(
     const char* renderBlocker = nullptr;
     const uint32_t virtualDesktopWidth = selectedWidth > resourceWidth ? selectedWidth : resourceWidth * 2u;
     const uint32_t virtualDesktopHeight = selectedHeight > resourceHeight ? selectedHeight : resourceHeight;
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+    // The first probe frame is emitted before the normal desktop canvas exists.
+    // Retain a bounded diagnostic resource pattern for that initialization
+    // transaction, then switch to the real desktop surface as soon as the
+    // manual virtual canvas and shell are initialized.
+    if (!kernel::framebuffer::is_available()) {
+        result.renderOk = true;
+        resource.patternName = "initial-resource-probe";
+    } else {
+        result.renderOk = render_manual_desktop_surface(surface,
+                                                         target,
+                                                         &conversionRequired,
+                                                         &renderBlocker);
+    }
+#else
     result.renderOk = render_guide_xos_desktop_snapshot(surface,
-                                                        target,
+                                                         target,
                                                          virtualDesktopWidth,
                                                          virtualDesktopHeight,
                                                          &conversionRequired,
                                                          &renderBlocker,
                                                          diagnosticFrameSequence,
                                                          liveDiagnosticOverlay);
+#endif
     result.conversionRequired = conversionRequired;
     auto restore_fallback_pattern = [&]() {
         fill_diagnostic_pattern(surface.pixelPointer,
@@ -6986,7 +7052,12 @@ void presentation_tick()
         live.initialized = true;
         live.presentationStartTicks = now;
         live.lastPresentationTicks = now;
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+        const uint64_t currentDirtyGeneration = kernel::desktop::redraw_generation();
+        live.lastDirtyGeneration = currentDirtyGeneration > 0u ? currentDirtyGeneration - 1u : 0u;
+#else
         live.lastDirtyGeneration = kernel::desktop::redraw_generation();
+#endif
         live.initialFrameReadyLogged = true;
         kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation configured: enabled=yes outputs=");
         serial_put_u32_decimal(live.activeOutputCount);
@@ -6998,7 +7069,11 @@ void presentation_tick()
         serial_put_u64_decimal(live.boundedTimeLimitTicks);
         kernel::serial::puts(" rateIntervalTicks=");
         serial_put_u64_decimal(kLivePresentationIntervalTicks);
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+        kernel::serial::puts(" overlay=normal-desktop-surface\n");
+#else
         kernel::serial::puts(" overlay=bounded-moving-marker\n");
+#endif
         kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation: initial frame ready target0Checksum=0x");
         kernel::serial::put_hex64(live.initialTarget0Checksum);
         kernel::serial::puts(" target1Checksum=0x");
@@ -7193,6 +7268,30 @@ bool presentation_finished()
 #else
     return s_livePresentation.stopped;
 #endif
+#endif
+}
+
+bool get_display_readiness(VirtioGpuDisplayReadiness* readiness)
+{
+    if (readiness == nullptr) return false;
+    *readiness = VirtioGpuDisplayReadiness{};
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+    return false;
+#else
+    const VirtioGpuOutputInventory& inventory = s_probeOutcome.outputInventory;
+    readiness->displayMonitorCount = static_cast<uint32_t>(inventory.monitors.size());
+    readiness->displayRenderTargetCount = static_cast<uint32_t>(inventory.renderTargets.size());
+    readiness->operationalOutputCount = inventory.operationalOutputCount;
+    readiness->virtualDesktopWidth = static_cast<uint32_t>(inventory.virtualDesktop.width());
+    readiness->virtualDesktopHeight = static_cast<uint32_t>(inventory.virtualDesktop.height());
+    readiness->backendInitialized = s_probeOutcome.valid && s_probeOutcome.initialized ? 1u : 0u;
+    readiness->presenterActive = s_livePresentation.enabled && !s_livePresentation.stopped ? 1u : 0u;
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE) || defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
+    readiness->topologyControlsAvailable = 1u;
+#else
+    readiness->topologyControlsAvailable = 0u;
+#endif
+    return readiness->backendInitialized != 0u;
 #endif
 }
 

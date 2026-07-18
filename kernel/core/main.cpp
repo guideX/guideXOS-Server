@@ -13,6 +13,8 @@
 #include "include/kernel/process.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/kernel_apps.h"
+#include "include/kernel/kernel_app.h"
+#include "include/kernel/kernel_compositor.h"
 #include "include/kernel/interrupts.h"
 #include "include/kernel/ps2mouse.h"
 #include "include/kernel/ps2keyboard.h"
@@ -71,6 +73,16 @@
 #include "include/kernel/multiboot.h"
 // Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
+#endif
+
+// Existing proof builds historically selected their coordinator through the
+// control/persistence flags.  Preserve that behavior while making proof
+// activation a distinct internal concept that is never inferred for manual
+// mode.
+#if !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_MODE) && \
+    (defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE) || \
+     defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE))
+#define GXOS_QEMU_VIRTIO_GPU_PROOF_ACTIVE
 #endif
 
 #if defined(ARCH_SPARC)
@@ -203,6 +215,200 @@ static void serial_put_u32_decimal(uint32_t value)
 }
 
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+static bool manual_logical_mode_supported(int32_t width, int32_t height)
+{
+    return (width == 1280 && height == 800) ||
+           (width == 1024 && height == 768) ||
+           (width == 800 && height == 600);
+}
+
+static void manual_copy_text(char* destination, uint32_t capacity, const char* source)
+{
+    if (destination == nullptr || capacity == 0u) return;
+    uint32_t index = 0u;
+    if (source != nullptr) {
+        while (source[index] != '\0' && index + 1u < capacity) {
+            destination[index] = source[index];
+            ++index;
+        }
+    }
+    destination[index] = '\0';
+}
+
+static bool manual_active_configuration_has_valid_modes(
+    const gxos::display::DisplayConfigurationSnapshot& snapshot)
+{
+    if (snapshot.outputCount != 2u) return false;
+    for (uint32_t index = 0u; index < 2u; ++index) {
+        const gxos::display::DisplayConfigurationOutput& output = snapshot.outputs[index];
+        if (output.enabled == 0u || !manual_logical_mode_supported(output.width, output.height)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool initialize_manual_logical_configuration()
+{
+    gxos::display::DisplayConfigurationCommand query{};
+    query.version = gxos::display::kDisplayConfigurationContractVersion;
+    query.structureSize = sizeof(query);
+    query.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    query.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::QueryActiveConfiguration);
+    gxos::display::DisplayConfigurationResponse activeResponse{};
+    const bool queried = gxos::display::DisplayConfigurationService::submit(query, activeResponse) &&
+        activeResponse.success != 0u;
+    if (!queried || activeResponse.activeConfiguration.outputCount != 2u) {
+        kernel::serial::puts("[QEMU-MANUAL] logical configuration initialization=blocked reason=two operational outputs are not active\n");
+        return false;
+    }
+
+    if (manual_active_configuration_has_valid_modes(activeResponse.activeConfiguration) &&
+        activeResponse.persistedLoaded != 0u) {
+        kernel::serial::puts("[QEMU-MANUAL] logical configuration source=persistence-or-active result=preserved\n");
+        return true;
+    }
+
+    if (manual_active_configuration_has_valid_modes(activeResponse.activeConfiguration)) {
+        kernel::serial::puts("[QEMU-MANUAL] logical configuration source=validated-default result=committing-through-public-service\n");
+    }
+
+    gxos::display::DisplayConfigurationCommand apply{};
+    apply.version = gxos::display::kDisplayConfigurationContractVersion;
+    apply.structureSize = sizeof(apply);
+    apply.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    apply.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::ApplyConfiguration);
+    apply.flags = gxos::display::DisplayConfigurationFlagCommitPersistence;
+    apply.origin = static_cast<uint32_t>(gxos::display::DisplayConfigurationRequestOrigin::UserApply);
+    apply.requestedConfiguration.mode = static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend);
+    apply.requestedConfiguration.outputCount = 2u;
+    manual_copy_text(apply.requestedConfiguration.primaryOutputId,
+                     sizeof(apply.requestedConfiguration.primaryOutputId),
+                     activeResponse.activeConfiguration.primaryOutputId);
+
+    bool primaryFound = false;
+    for (uint32_t index = 0u; index < 2u; ++index) {
+        apply.requestedConfiguration.outputs[index] = activeResponse.activeConfiguration.outputs[index];
+        gxos::display::DisplayConfigurationOutput& output = apply.requestedConfiguration.outputs[index];
+        output.width = 1280;
+        output.height = 800;
+        output.virtualX = index == 0u ? 0 : 1280;
+        output.virtualY = 0;
+        manual_copy_text(output.modeId, sizeof(output.modeId), "qemu-1280x800");
+        output.enabled = 1u;
+        output.primary = (!primaryFound && activeResponse.activeConfiguration.outputs[index].primary != 0u) ? 1u : 0u;
+        if (output.primary != 0u) primaryFound = true;
+    }
+    if (!primaryFound) {
+        apply.requestedConfiguration.outputs[0].primary = 1u;
+        manual_copy_text(apply.requestedConfiguration.primaryOutputId,
+                         sizeof(apply.requestedConfiguration.primaryOutputId),
+                         apply.requestedConfiguration.outputs[0].stableId);
+    }
+
+    gxos::display::DisplayConfigurationResponse response{};
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(apply, response);
+    const bool configurationReady = submitted && response.success != 0u &&
+        response.activeConfiguration.outputCount == 2u &&
+        response.activeConfiguration.outputs[0].width == 1280 &&
+        response.activeConfiguration.outputs[0].height == 800 &&
+        response.activeConfiguration.outputs[1].width == 1280 &&
+        response.activeConfiguration.outputs[1].height == 800;
+    kernel::serial::puts("[QEMU-MANUAL] logical configuration initialization=public-service result=");
+    kernel::serial::puts(configurationReady ? "ready" : "blocked");
+    kernel::serial::puts(" persistenceCommitted=");
+    kernel::serial::puts(response.persistenceCommitted != 0u ? "yes" : "no");
+    kernel::serial::puts(" diagnostic=");
+    kernel::serial::puts(response.diagnostic[0] != '\0' ? response.diagnostic : "none");
+    kernel::serial::putc('\n');
+    return configurationReady;
+}
+
+static bool verify_manual_display_options_launch()
+{
+    if (!kernel::app::AppManager::isAppAvailable("DisplayOptions")) return false;
+
+    kernel::app::KernelApp* existing = nullptr;
+    for (int index = 0; index < kernel::app::AppManager::getRunningAppCount(); ++index) {
+        kernel::app::KernelApp* app = kernel::app::AppManager::getRunningApp(index);
+        if (app != nullptr && app->getName() != nullptr &&
+            app->getName()[0] == 'D' && app->getName()[1] == 'i') {
+            existing = app;
+            break;
+        }
+    }
+    if (existing != nullptr) return existing->getWindow() != nullptr;
+
+    const int windowsBefore = kernel::compositor::KernelCompositor::getWindowCount();
+    if (!kernel::desktop::launch_app("DisplayOptions")) return false;
+    kernel::app::KernelApp* launched = nullptr;
+    for (int index = 0; index < kernel::app::AppManager::getRunningAppCount(); ++index) {
+        kernel::app::KernelApp* app = kernel::app::AppManager::getRunningApp(index);
+        if (app != nullptr && app->getName() != nullptr &&
+            app->getName()[0] == 'D' && app->getName()[1] == 'i') {
+            launched = app;
+            break;
+        }
+    }
+    const bool createdWindow = launched != nullptr && launched->getWindow() != nullptr &&
+        kernel::compositor::KernelCompositor::getWindowCount() > windowsBefore;
+    if (launched != nullptr) kernel::app::AppManager::closeApp(launched);
+    return createdWindow;
+}
+
+static bool handle_manual_topology_control_key(uint32_t key)
+{
+    // PS/2 F9..F12 are 0x118..0x11B in ps2keyboard.cpp.  These are explicit
+    // QEMU-only test controls; they never claim genuine host hotplug.
+    uint32_t injectedKind = 0u;
+    const char* label = nullptr;
+    if (key == 0x118u) {
+        injectedKind = static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::OutputRemoval);
+        label = "secondary-removal-injected";
+    } else if (key == 0x119u) {
+        injectedKind = static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::OutputAddition);
+        label = "secondary-restoration-injected";
+    } else if (key == 0x11Au) {
+        injectedKind = static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::PreferredGeometry);
+        label = "preferred-geometry-change-injected";
+    } else if (key == 0x11Bu) {
+        gxos::display::DisplayConfigurationCommand query{};
+        query.version = gxos::display::kDisplayConfigurationContractVersion;
+        query.structureSize = sizeof(query);
+        query.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+        query.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::QueryPendingTopologyChange);
+        gxos::display::DisplayConfigurationResponse pending{};
+        if (!gxos::display::DisplayConfigurationService::submit(query, pending) ||
+            pending.pendingTopology == 0u) {
+            kernel::serial::puts("[QEMU-MANUAL] topology control=clear-pending result=no-pending-state\n");
+            return true;
+        }
+        gxos::display::DisplayConfigurationCommand dismiss{};
+        dismiss.version = gxos::display::kDisplayConfigurationContractVersion;
+        dismiss.structureSize = sizeof(dismiss);
+        dismiss.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+        dismiss.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::DismissPendingTopologyChange);
+        dismiss.origin = static_cast<uint32_t>(gxos::display::DisplayConfigurationRequestOrigin::UserApply);
+        dismiss.topologyGeneration = pending.detectedTopologyChange.topologyGeneration;
+        gxos::display::DisplayConfigurationResponse response{};
+        const bool cleared = gxos::display::DisplayConfigurationService::submit(dismiss, response) && response.success != 0u;
+        kernel::serial::puts("[QEMU-MANUAL] topology control=clear-pending result=");
+        kernel::serial::puts(cleared ? "cleared" : "blocked");
+        kernel::serial::puts(" injectedEvent=no\n");
+        return true;
+    } else {
+        return false;
+    }
+
+    const bool injected = kernel::virtio::gpu::inject_display_topology_change_for_test(injectedKind);
+    kernel::serial::puts("[QEMU-MANUAL] topology control=");
+    kernel::serial::puts(label);
+    kernel::serial::puts(" result=");
+    kernel::serial::puts(injected ? "pending" : "blocked");
+    kernel::serial::puts(" injectedEvent=yes automaticApply=no genuineDeviceEvent=no\n");
+    return true;
+}
+
 static void log_manual_dual_monitor_validation_banner()
 {
     gxos::display::DisplayConfigurationCommand command{};
@@ -248,7 +454,80 @@ static void log_manual_dual_monitor_validation_banner()
     }
     kernel::serial::puts(" persistence=/display.cfg topologyTestControls=enabled=yes");
     kernel::serial::puts(" topologyInjectionAvailable=yes automaticProof=disabled realHardware=no");
-    kernel::serial::puts(" displayOptions=not-exposed-by-current-live-probe\n");
+    kernel::serial::puts(" displayOptionsRegistered=yes displayOptionsLaunchPath=normal-app-model\n");
+}
+
+static bool emit_manual_readiness_report(bool persistenceReady)
+{
+    kernel::virtio::gpu::VirtioGpuDisplayReadiness backendReadiness{};
+    const bool backendQueried = kernel::virtio::gpu::get_display_readiness(&backendReadiness);
+    gxos::display::DisplayConfigurationCommand query{};
+    query.version = gxos::display::kDisplayConfigurationContractVersion;
+    query.structureSize = sizeof(query);
+    query.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    query.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::QueryActiveConfiguration);
+    gxos::display::DisplayConfigurationResponse active{};
+    const bool activeReady = gxos::display::DisplayConfigurationService::submit(query, active) && active.success != 0u;
+    const bool desktopReady = kernel::desktop::is_initialized() && kernel::desktop::is_compositor_available();
+    const bool displayOptionsRegistered = kernel::app::AppManager::isAppAvailable("DisplayOptions");
+    const bool displayOptionsLaunchable = displayOptionsRegistered && verify_manual_display_options_launch();
+    const bool logicalModesValid = activeReady && manual_active_configuration_has_valid_modes(active.activeConfiguration);
+    const bool outputsReady = backendQueried && backendReadiness.operationalOutputCount == 2u &&
+        backendReadiness.displayMonitorCount == 2u && backendReadiness.displayRenderTargetCount == 2u &&
+        activeReady && active.activeConfiguration.outputCount == 2u;
+    const bool ready = backendReadiness.backendInitialized != 0u && outputsReady && desktopReady &&
+        displayOptionsRegistered && displayOptionsLaunchable && logicalModesValid &&
+        backendReadiness.presenterActive != 0u && persistenceReady &&
+        backendReadiness.topologyControlsAvailable != 0u;
+
+    kernel::serial::puts("[QEMU-MANUAL] DisplayMonitor count=");
+    serial_put_u32_decimal(backendReadiness.displayMonitorCount);
+    kernel::serial::puts(" DisplayRenderTarget count=");
+    serial_put_u32_decimal(backendReadiness.displayRenderTargetCount);
+    kernel::serial::puts(" presenter=");
+    kernel::serial::puts(backendReadiness.presenterActive != 0u ? "live" : "inactive");
+    kernel::serial::puts(" logicalModes=");
+    kernel::serial::puts(logicalModesValid ? "valid" : "invalid");
+    kernel::serial::puts(" virtualDesktop=");
+    serial_put_u32_decimal(activeReady ? static_cast<uint32_t>(active.activeConfiguration.virtualDesktopWidth) : 0u);
+    kernel::serial::putc('x');
+    serial_put_u32_decimal(activeReady ? static_cast<uint32_t>(active.activeConfiguration.virtualDesktopHeight) : 0u);
+    kernel::serial::puts(" hostGtkWindowSize=host-managed-qemu-gtk resourceDimensions=guest-reported logicalActiveResolution=service-reported\n");
+
+    kernel::serial::puts("Manual dual-monitor readiness: backend=virtio-gpu outputs=");
+    serial_put_u32_decimal(backendReadiness.operationalOutputCount);
+    kernel::serial::puts(" desktop=");
+    kernel::serial::puts(desktopReady ? "ready" : "blocked");
+    kernel::serial::puts(" shell=");
+    kernel::serial::puts(desktopReady ? "ready" : "blocked");
+    kernel::serial::puts(" startMenu=");
+    kernel::serial::puts(desktopReady ? "ready" : "blocked");
+    kernel::serial::puts(" displayOptionsRegistered=");
+    kernel::serial::puts(displayOptionsRegistered ? "yes" : "no");
+    kernel::serial::puts(" displayOptionsLaunchable=");
+    kernel::serial::puts(displayOptionsLaunchable ? "yes" : "no");
+    kernel::serial::puts(" presenter=");
+    kernel::serial::puts(backendReadiness.presenterActive != 0u ? "live" : "inactive");
+    kernel::serial::puts(" proofCoordinator=disabled persistence=");
+    kernel::serial::puts(persistenceReady ? "ready" : "blocked");
+    kernel::serial::puts(" topologyTestControls=");
+    kernel::serial::puts(backendReadiness.topologyControlsAvailable != 0u ? "yes" : "no");
+    kernel::serial::puts(" realHardware=no result=");
+    kernel::serial::puts(ready ? "ready\n" : "blocked\n");
+    if (!ready) {
+        kernel::serial::puts("[QEMU-MANUAL] readiness blocker=");
+        if (!backendReadiness.backendInitialized) kernel::serial::puts("backend-not-initialized");
+        else if (!outputsReady) kernel::serial::puts("two-operational-outputs-or-target-inventory-unavailable");
+        else if (!desktopReady) kernel::serial::puts("normal-desktop-not-initialized");
+        else if (!displayOptionsRegistered) kernel::serial::puts("DisplayOptions-not-registered");
+        else if (!displayOptionsLaunchable) kernel::serial::puts("DisplayOptions-window-launch-failed");
+        else if (!logicalModesValid) kernel::serial::puts("active-logical-modes-invalid");
+        else if (!backendReadiness.presenterActive) kernel::serial::puts("live-presenter-inactive");
+        else if (!persistenceReady) kernel::serial::puts("persistent-storage-not-writable");
+        else kernel::serial::puts("topology-test-controls-unavailable");
+        kernel::serial::putc('\n');
+    }
+    return ready;
 }
 #endif
 
@@ -433,6 +712,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     
     // Initialize framebuffer for graphics mode
     bool has_fb = false;
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+    bool manualPersistenceReady = false;
+    bool manualReadinessReported = false;
+#endif
     
     if (is_bootinfo) {
         has_fb = kernel::framebuffer::init_from_bootinfo(bootinfo);
@@ -444,9 +727,24 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // handoff success so QEMU display discovery logs are still captured
     // on GOP/BootInfo paths that do not expose a usable framebuffer array.
     kernel::virtio::gpu::init();
+
+    bool qemuManualVirtualFramebuffer = false;
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+    if (!has_fb) {
+        // VirtIO-GPU owns the visible scanouts in this explicitly QEMU-only
+        // validation build.  Give the normal desktop lifecycle the bounded
+        // software canvas it expects; the live presenter copies this canvas
+        // into the already-active VirtIO-GPU resources.
+        qemuManualVirtualFramebuffer = kernel::framebuffer::init_virtual(2560u, 800u);
+        has_fb = qemuManualVirtualFramebuffer;
+        kernel::serial::puts("[QEMU-MANUAL] softwareCanvas=2560x800 hostGtkWindowSize=host-managed-qemu-gtk realHardware=no\n");
+    }
+#endif
     
     if (has_fb) {
-        if (is_bootinfo && bootinfo) {
+        if (qemuManualVirtualFramebuffer) {
+            kernel::serial::puts("[KERNEL] QEMU-only VirtIO-GPU manual virtual framebuffer ready; firmware GOP remains disabled\n");
+        } else if (is_bootinfo && bootinfo) {
             uint32_t framebufferCount = bootinfo->FramebufferCount;
             if (framebufferCount > guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS) {
                 kernel::serial::puts("[KERNEL] WARNING: BootInfo framebufferCount exceeds array bound; truncating log\n");
@@ -650,6 +948,17 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
+
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
+        manualPersistenceReady = mounted;
+        if (manualPersistenceReady) {
+            gxos::display::DisplayConfigurationService::requestStartupRestore();
+        }
+#else
+        manualPersistenceReady = false;
+#endif
+#endif
         
         // ============================================================
         
@@ -798,6 +1107,32 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         while (1) {
             uint64_t workStartTicks = kernel::pit::ticks();
 
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+            if (!manualReadinessReported) {
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
+                for (uint32_t restoreAttempt = 0u; restoreAttempt < 8u; ++restoreAttempt) {
+                    gxos::display::DisplayConfigurationService::processPendingAtSafePoint();
+                    kernel::virtio::gpu::presentation_tick();
+                    if (gxos::display::DisplayConfigurationService::startupRestoreComplete()) break;
+                }
+#endif
+                if (gxos::display::DisplayConfigurationService::startupRestoreComplete()) {
+                    const bool manualLogicalConfigurationReady = initialize_manual_logical_configuration();
+                    (void)manualLogicalConfigurationReady;
+                    kernel::desktop::request_redraw();
+                    log_manual_dual_monitor_validation_banner();
+                    const bool manualReadinessReady = emit_manual_readiness_report(manualPersistenceReady);
+                    (void)manualReadinessReady;
+                    manualReadinessReported = true;
+                } else {
+                    manualPersistenceReady = false;
+                    const bool manualReadinessReady = emit_manual_readiness_report(false);
+                    (void)manualReadinessReady;
+                    manualReadinessReported = true;
+                }
+            }
+#endif
+
             // Poll input manager for updates (handles USB HID polling)
             kernel::input::poll();
             
@@ -825,6 +1160,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             if (kernel::ps2keyboard::has_key()) {
                 uint32_t key = kernel::ps2keyboard::get_key();
                 if (key != 0) {
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+                    if (handle_manual_topology_control_key(key)) {
+                        kernel::desktop::request_redraw();
+                    } else
+#endif
                     kernel::desktop::handle_key(key);
                     // handle_key calls draw() internally; redraw cursor overlay
                     kernel::desktop::draw_cursor(
@@ -925,14 +1265,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
         log_manual_dual_monitor_validation_banner();
-#elif defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
+#elif defined(GXOS_QEMU_VIRTIO_GPU_PROOF_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
         kernel::qemu_display_resolution_rebuild_proof::run();
         kernel::qemu_display_configuration_control_proof::run();
-#elif defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
+#elif defined(GXOS_QEMU_VIRTIO_GPU_PROOF_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
         kernel::qemu_display_configuration_persistence_proof::run();
         kernel::qemu_display_resolution_persistence_proof::run();
 #endif
-#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE) && !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_PROOF_ACTIVE) && !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
         kernel::qemu_display_events_proof::run();
 #endif
         kernel::serial::puts(
