@@ -247,6 +247,10 @@ if /I "%DISPLAY_BACKEND%"=="qxl-vga" (
     set "QEMU_PROBE_NOTE=qxl-vga diagnostic probe with SPICE server"
 )
 
+if "%GXOS_QEMU_DISPLAY_PROBE_SIMPLE_GTK%"=="1" (
+    set "QEMU_DISPLAY_ARGS=-display gtk"
+)
+
 if "%QEMU_HEADLESS%"=="1" (
     set "QEMU_DISPLAY_ARGS=-display none"
     if "%QEMU_CAPTURE%"=="0" set "QEMU_VNC_ARGS="
@@ -254,6 +258,10 @@ if "%QEMU_HEADLESS%"=="1" (
 
 if not "%QEMU_SERIAL_LOG%"=="" (
     set "QEMU_SERIAL_ARGS=-serial file:%QEMU_SERIAL_LOG%"
+)
+
+if "%GXOS_QEMU_DISPLAY_PROBE_DISABLE_VNC%"=="1" (
+    set "QEMU_VNC_ARGS="
 )
 
 if defined GXOS_QEMU_DISPLAY_PROBE_QMP_PORT (

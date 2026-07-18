@@ -764,6 +764,249 @@ QEMU-only Test Remove/Test Restore controls, review or keep the pending change,
 then explicitly apply it and check taskbar, pointer, window dragging, and
 resolution behavior. No manual interaction success is claimed here.
 
+## Manual QEMU Validation
+
+This release-style checkpoint adds a QEMU-only manual launcher, a human-entered
+result recorder, and a QMP screenshot helper. It does not add a new display
+feature or use QMP as guest IPC. The authoritative launcher is:
+
+```text
+scripts\run-qemu-virtio-gpu-dual-monitor-manual.bat
+```
+
+It reuses `scripts\run-qemu-display-probe.bat`, creates a timestamped writable
+configuration artifact, keeps QEMU open for interaction, and builds with the
+manual-validation gate. The QEMU version is:
+
+```text
+QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)
+```
+
+The launcher starts with an empty writable configuration artifact and performs
+no automatic configuration change. The expected initial topology is two live
+VirtIO-GPU outputs in Extend with Display 1 primary; the active preferred
+resolutions and virtual desktop are guest-reported after boot. In the captured
+QEMU 11.0.0 session they were 640x480 per output and 1280x480 virtual desktop.
+The guest and host banners identify
+`mode=manual-dual-monitor-validation`, `backend=virtio-gpu`, `outputs=2`, the
+active mode and primary, per-output resolutions, virtual desktop dimensions,
+the persistence artifact, `topologyTestControls=enabled=yes`,
+`topologyInjectionAvailable=yes`, `automaticProof=disabled`, and
+`realHardware=no`. The guest banner also states that Display Options is not
+exposed by the current live probe; this is a validation blocker, not a claim
+that the UI passed.
+
+The exact manual checklist is reproduced below. The launcher prints the same
+item headings in the host console. Every result must be entered by a human with
+`scripts\record-virtio-gpu-dual-monitor-manual-result.ps1`; the recorder never
+infers PASS.
+
+### A. Initial Extend state
+
+Verify:
+
+- both QEMU outputs show guideXOS desktop content;
+- neither output shows an old diagnostic test pattern;
+- taskbar appears only on the primary output;
+- secondary output has no taskbar;
+- wallpaper/background renders correctly on both;
+- mouse crosses between outputs without jumping;
+- cursor does not enter dead space;
+- windows can be clicked and focused on both outputs.
+
+### B. Cross-monitor window interaction
+
+Verify:
+
+- open or select a normal window;
+- drag it from Display 1 to Display 2;
+- release it on Display 2;
+- focus remains correct;
+- maximize targets Display 2;
+- restore returns to a valid Display 2 rectangle;
+- drag it back to Display 1;
+- a window spanning both displays clips correctly;
+- no rendering stall or static fallback occurs.
+
+### C. Display Options inventory
+
+Open Display Options and verify:
+
+- two real VirtIO-GPU outputs appear;
+- outputs are not duplicated by synthetic monitor entries;
+- both show operational status;
+- connector state is shown separately where applicable;
+- current Extend/Mirror mode is correct;
+- current primary output is correct;
+- active resolutions are correct;
+- unavailable refresh rate is clearly shown as unavailable;
+- unavailable rotation is clearly shown as unavailable;
+- no stale pending request is shown.
+
+### D. Primary switching
+
+In Extend mode:
+
+- select Display 2 as primary;
+- click Apply;
+- taskbar moves to Display 2;
+- taskbar disappears from Display 1;
+- windows remain reachable;
+- mouse still crosses correctly;
+- open Display Options again and confirm Display 2 is active primary;
+- switch primary back to Display 1 and verify the reverse.
+
+### E. Mixed-resolution Extend
+
+Apply Display 1 at 1280x800, Display 2 at 1024x768, Extend, and Display 1
+primary. Verify:
+
+- both outputs remain live;
+- secondary output uses the selected logical size;
+- virtual desktop reflects mixed dimensions;
+- pointer does not enter the dead lower-right region outside Display 2;
+- windows drag between outputs;
+- maximize on Display 2 respects its smaller work area;
+- no stride, color, or clipping corruption appears.
+
+### F. Mirror validation
+
+First attempt Mirror with mismatched resolutions. Verify Apply is rejected
+clearly, the current Extend layout remains active, no output becomes black, and
+no persistence change occurs. Then set both outputs to 1024x768 and apply
+Mirror. Verify:
+
+- both outputs show the same logical desktop;
+- taskbar appears in the mirrored image on both;
+- cursor appears at the same logical position;
+- clicks/focus are consistent;
+- no side-by-side virtual region remains accessible;
+- return to Extend.
+
+### G. Apply/OK/Cancel semantics
+
+Verify:
+
+- changing a field and clicking Cancel leaves active configuration unchanged;
+- Apply changes configuration without closing Display Options;
+- OK applies and closes;
+- failed Apply leaves the window open;
+- reopening Display Options shows actual active values;
+- a previously successful Apply is not undone by later Cancel.
+
+### H. Persistence
+
+Apply Extend, Display 2 primary, Display 1 at 1280x800, and Display 2 at
+1024x768. Exit QEMU cleanly, launch again with the same persistence artifact,
+and verify:
+
+- configuration restores automatically;
+- Display 2 remains primary;
+- taskbar appears on Display 2;
+- mixed resolutions return;
+- no host reinjection occurs;
+- no fallback occurs.
+
+### I. Pending topology UI
+
+Using only the QEMU test controls:
+
+1. inject a secondary-output removal;
+2. open Display Options;
+3. verify the pending-change banner;
+4. review the proposal;
+5. choose Keep Current;
+6. verify active desktop does not change;
+7. inject the removal again;
+8. choose Apply Detected Changes;
+9. verify guideXOS becomes a live one-output desktop;
+10. inject secondary-output addition;
+11. preview and apply;
+12. verify dual-output Extend returns.
+
+Verify injected changes are visibly identified as test events. Do not describe
+this as genuine host hotplug.
+
+### J. Primary-removal fallback
+
+If the manual test control supports it safely, make Display 2 primary, inject
+removal of Display 2, preview and explicitly apply the proposed reconciliation,
+then verify Display 1 becomes primary, the taskbar moves to Display 1, and
+windows and cursor remain reachable. Restore Display 2 afterward. If the
+control is not exposed manually, record this item as automated-only rather than
+adding a new feature.
+
+### K. Stability
+
+Leave live dual-output presentation running for a bounded manual observation
+period. Verify no frozen output, black output, visible resource corruption,
+uncontrolled CPU spin, unresponsive mouse, repaint failure, repeated fallback,
+or GPU failure diagnostics. Do not claim long-duration soak testing unless a
+meaningful interval was actually observed.
+
+### Manual checkpoint record
+
+No human Display Options session was performed in this checkpoint. Therefore
+A-K are `NOT TESTED` or `BLOCKED`, not PASS. The current live QEMU probe still
+renders its diagnostic compositor snapshot and does not expose the real Display
+Options surface or a manual topology-control window, so interactive UI items
+cannot be honestly completed through this launcher. The installed QEMU 11.0.0
+control surface also cannot trigger a genuine host-generated VirtIO-GPU
+topology change. Automated topology reconciliation remains green and is labeled
+`injectedTopologyProof=ok genuineHotplugValidated=no`.
+
+The manual evidence root for the automated preflight is:
+
+```text
+logs\manual-preflight-20260718-060349
+```
+
+The launcher/screenshot evidence root exercised during this checkpoint is:
+
+```text
+logs\manual-validation-20260718-070649
+```
+
+Its explicit non-inference record is
+`manual-result-20260718-070936.txt`; the captured initial Extend and final
+observation screenshots and the guest serial log are retained there.
+
+The manual result recorder writes timestamped text records under a selected
+`logs\manual-validation-*` root and records date/time, QEMU version, branch,
+HEAD, persistence artifact, checklist item, explicit status, notes, screenshot
+paths, and serial-log path. Screenshot capture uses
+`scripts\capture-virtio-gpu-dual-monitor-manual-screenshot.ps1` with QMP only
+for `screendump` and optional clean shutdown.
+
+Validation infrastructure defects found and fixed in this checkpoint were
+limited to: a fixed shared-launcher VNC `:0` collision, compile-time gate
+contamination when switching flags without a clean generated-object rebuild,
+and the GTK `show-tabs` surface stalling this QEMU session before guest boot.
+The fixes are respectively an opt-in VNC disable, a manual-launch clean build,
+and a simple GTK override. These were launcher/infrastructure defects; no
+manual product defect was fixed, and no interactive checklist result was
+inferred from them.
+
+Completed automated preflight and regression items: hosted, framebuffer, MMIO,
+VirtIO-GPU backend/compositor/presentation/input, Display Options source/runtime,
+control-plane, persistence, resolution, event observer, and topology
+reconciliation smokes. No manual defect was fixed because no human result was
+available to validate one. The implementation is classified as:
+
+```text
+Automated proof complete; manual validation still required
+```
+
+### Safety and remaining limitations
+
+This checkpoint remains QEMU-only. It does not add physical GPU support,
+hardware MMIO, new VirtIO features, automatic topology application, EDID,
+interrupt delivery, 3D/blobs/virgl/Venus/contexts, cursor queue support, new
+resolution modes, refresh-rate control, rotation, physical modesetting, or
+unrelated UI redesign.
+
+REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
+
 ## Current Limitations and Next Roadmap Milestone
 
 This milestone intentionally has no automatic hotplug application, EDID or

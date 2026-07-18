@@ -202,6 +202,56 @@ static void serial_put_u32_decimal(uint32_t value)
     kernel::serial::puts(&buffer[index]);
 }
 
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+static void log_manual_dual_monitor_validation_banner()
+{
+    gxos::display::DisplayConfigurationCommand command{};
+    command.version = gxos::display::kDisplayConfigurationContractVersion;
+    command.structureSize = sizeof(command);
+    command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::QueryActiveConfiguration);
+    gxos::display::DisplayConfigurationResponse response{};
+    const bool queried = gxos::display::DisplayConfigurationService::submit(command, response) &&
+        response.success != 0u;
+
+    kernel::serial::puts("Manual dual-monitor validation: backend=virtio-gpu outputs=");
+    if (!queried) {
+        kernel::serial::puts("unknown mode=unknown primary=unknown resolutions=unknown virtualDesktop=unknown");
+    } else {
+        serial_put_u32_decimal(response.activeConfiguration.outputCount);
+        kernel::serial::puts(" mode=");
+        kernel::serial::puts(response.activeConfiguration.mode ==
+            static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Extend) ? "Extend" : "Mirror");
+        kernel::serial::puts(" primary=");
+        uint32_t primary = 0u;
+        for (uint32_t index = 0u; index < response.activeConfiguration.outputCount; ++index) {
+            if (response.activeConfiguration.outputs[index].primary != 0u) {
+                primary = index + 1u;
+                break;
+            }
+        }
+        serial_put_u32_decimal(primary);
+        kernel::serial::puts(" resolutions=");
+        for (uint32_t index = 0u; index < response.activeConfiguration.outputCount; ++index) {
+            if (index != 0u) kernel::serial::putc(',');
+            kernel::serial::puts("Display ");
+            serial_put_u32_decimal(index + 1u);
+            kernel::serial::putc(':');
+            serial_put_u32_decimal(static_cast<uint32_t>(response.activeConfiguration.outputs[index].width));
+            kernel::serial::putc('x');
+            serial_put_u32_decimal(static_cast<uint32_t>(response.activeConfiguration.outputs[index].height));
+        }
+        kernel::serial::puts(" virtualDesktop=");
+        serial_put_u32_decimal(static_cast<uint32_t>(response.activeConfiguration.virtualDesktopWidth));
+        kernel::serial::putc('x');
+        serial_put_u32_decimal(static_cast<uint32_t>(response.activeConfiguration.virtualDesktopHeight));
+    }
+    kernel::serial::puts(" persistence=/display.cfg topologyTestControls=enabled=yes");
+    kernel::serial::puts(" topologyInjectionAvailable=yes automaticProof=disabled realHardware=no");
+    kernel::serial::puts(" displayOptions=not-exposed-by-current-live-probe\n");
+}
+#endif
+
 static const char* framebuffer_format_name(guideXOS::FramebufferFormat format)
 {
     switch (format) {
@@ -864,24 +914,34 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 inputLeft, inputTop, inputRight, inputBottom,
                 inputMonitors, inputMonitorCount);
             kernel::input::set_mapping_diagnostics(true, 96u);
+#if !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
             kernel::qemu_display_input_proof::init(
                 virtualWidth, virtualHeight,
                 kernel::input::get_display_input_mapper());
+#endif
         } else {
             kernel::serial::puts(
                 "[INPUT-PROOF] headAwareAbsolute=unavailable reason=virtio-gpu monitor geometry unavailable; live presentation retained\n");
         }
-#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+        log_manual_dual_monitor_validation_banner();
+#elif defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
         kernel::qemu_display_resolution_rebuild_proof::run();
         kernel::qemu_display_configuration_control_proof::run();
 #elif defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
         kernel::qemu_display_configuration_persistence_proof::run();
         kernel::qemu_display_resolution_persistence_proof::run();
 #endif
-#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+#if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE) && !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
         kernel::qemu_display_events_proof::run();
 #endif
-        kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu live presentation pump active\n");
+        kernel::serial::puts(
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+            "[KERNEL] QEMU-only virtio-gpu manual presentation pump active; automatic proof disabled\n"
+#else
+            "[KERNEL] QEMU-only virtio-gpu live presentation pump active\n"
+#endif
+        );
         while (!kernel::virtio::gpu::presentation_finished()) {
             if (inputLayoutReady) {
                 kernel::input::poll();
@@ -890,7 +950,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     const kernel::display_input::DisplayPointerEvent* pointer =
                         kernel::input::get_last_pointer_event();
                     if (pointer != nullptr) {
+#if !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
                         kernel::qemu_display_input_proof::handle(*pointer);
+#endif
                     }
                 }
             }
@@ -901,7 +963,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::arch::halt();
         }
         if (inputLayoutReady) {
+#if !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
             kernel::qemu_display_input_proof::finish();
+#endif
             const kernel::display_input::DisplayInputMapperCounters* counters =
                 kernel::input::get_mapping_counters();
             if (counters != nullptr) {
@@ -924,7 +988,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 kernel::serial::putc('\n');
             }
         }
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+        kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu manual presentation pump remains active until QEMU exit\n");
+#else
         kernel::serial::puts("[KERNEL] QEMU-only virtio-gpu bounded live presentation pump stopped\n");
+#endif
         while (1) {
             kernel::arch::halt();
         }

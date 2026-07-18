@@ -5638,8 +5638,13 @@ static bool initialize_device(DeviceState& state)
             s_livePresentation.finalTarget0Checksum = target0Result.checksum;
             s_livePresentation.finalTarget1Checksum = target1Result.checksum;
             if (liveResourcesReady) {
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+                s_probeOutcome.contentMode = "compositor-live-manual";
+                s_probeOutcome.frameMode = "manual";
+#else
                 s_probeOutcome.contentMode = "compositor-live-bounded";
                 s_probeOutcome.frameMode = "bounded";
+#endif
                 s_probeOutcome.continuousPresentationEnabled = true;
             }
 #endif
@@ -6406,7 +6411,11 @@ static void print_live_presentation_summary()
     serial_put_u32_decimal(live.presentationPolls);
     kernel::serial::puts(" eligibleAttempts=");
     serial_put_u32_decimal(live.eligibleAttempts);
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+    kernel::serial::puts(" manualPresentationIterations=");
+#else
     kernel::serial::puts(" boundedProofIterations=");
+#endif
     serial_put_u32_decimal(live.boundedProofIterations);
     kernel::serial::puts(" renderedFrames=");
     serial_put_u32_decimal(live.framesRendered);
@@ -6417,12 +6426,16 @@ static void print_live_presentation_summary()
     kernel::serial::puts(" note=rateLimitSkips_counts_scheduler_polls_and_may_exceed_boundedProofIterations\n");
     kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation: enabled=");
     kernel::serial::puts(live.enabled ? "yes" : "no");
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+    kernel::serial::puts(" outputs=2 contentMode=compositor-live-manual frameCap=unbounded frameLimit=disabled timeLimitTicks=disabled");
+#else
     kernel::serial::puts(" outputs=2 contentMode=compositor-live-bounded frameCap=");
     serial_put_u32_decimal(live.configuredFrameCap);
     kernel::serial::puts(" frameLimit=");
     serial_put_u32_decimal(live.boundedRunLimit);
     kernel::serial::puts(" timeLimitTicks=");
     serial_put_u64_decimal(live.boundedTimeLimitTicks);
+#endif
     kernel::serial::puts(" attempted=");
     serial_put_u32_decimal(live.framesAttempted);
     kernel::serial::puts(" rendered=");
@@ -6469,7 +6482,11 @@ static void print_live_presentation_summary()
     kernel::serial::puts(live.fallbackReason != nullptr ? live.fallbackReason : "none");
     kernel::serial::puts(" fallbackResult=");
     kernel::serial::puts(live.fallbackResult != nullptr ? live.fallbackResult : "not-used");
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+    kernel::serial::puts(" continuousPresentation=manual stopReason=");
+#else
     kernel::serial::puts(" continuousPresentation=bounded stopReason=");
+#endif
     kernel::serial::puts(live.stoppedReason != nullptr ? live.stoppedReason : "unknown");
     kernel::serial::putc('\n');
 }
@@ -6990,6 +7007,7 @@ void presentation_tick()
         return;
     }
 
+#if !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
     if (now - live.presentationStartTicks >= live.boundedTimeLimitTicks) {
         stop_live_presentation("time-limit");
         return;
@@ -6998,6 +7016,7 @@ void presentation_tick()
         stop_live_presentation("frame-limit");
         return;
     }
+#endif
     if (now - live.lastPresentationTicks < kLivePresentationIntervalTicks) {
         ++live.rateLimitSkips;
         return;
@@ -7007,7 +7026,11 @@ void presentation_tick()
     ++live.framesAttempted;
     ++live.eligibleAttempts;
     ++live.boundedProofIterations;
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+    const bool overlayDue = false;
+#else
     const bool overlayDue = (live.framesAttempted % kLivePresentationOverlayPeriodAttempts) == 1u;
+#endif
     if (overlayDue) {
         // The overlay is a diagnostic-only visible state change, routed through
         // the normal desktop invalidation flag and rendered by this presenter.
@@ -7022,9 +7045,11 @@ void presentation_tick()
     }
     if (dirtyGeneration == live.lastDirtyGeneration) {
         ++live.framesSkippedClean;
+#if !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
         if (live.framesAttempted >= live.boundedRunLimit) {
             stop_live_presentation("frame-limit");
         }
+#endif
         return;
     }
 
@@ -7056,8 +7081,12 @@ void presentation_tick()
                                                                   live.bytesPerPixel,
                                                                   live.backingPageCount,
                                                                   frameSequence,
-                                                                  true,
-                                                                  false);
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+                                                                   false,
+#else
+                                                                   true,
+#endif
+                                                                   false);
         if (result.transferOk) {
             ++transferCount;
         }
@@ -7146,9 +7175,11 @@ void presentation_tick()
         live.finalTarget1Checksum = live.resource1.patternChecksum;
     }
 
+#if !defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
     if (live.framesAttempted >= live.boundedRunLimit) {
         stop_live_presentation("frame-limit");
     }
+#endif
 #endif
 }
 
@@ -7157,7 +7188,11 @@ bool presentation_finished()
 #if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_COMPOSITOR_LIVE)
     return true;
 #else
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+    return false;
+#else
     return s_livePresentation.stopped;
+#endif
 #endif
 }
 
