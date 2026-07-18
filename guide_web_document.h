@@ -11,6 +11,7 @@
 // It depends only on the C++ standard library.
 
 #include <cstdint>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -84,6 +85,29 @@ struct FormControlMetadata {
 	int cols = 0;
 	int optionCount = 0;
 	int selectedOptionIndex = -1;
+};
+
+// Session-local form state.  The fixed table is intentionally part of the
+// current document rather than the parsed author metadata: it is discarded
+// when Navigator replaces the document and is never serialized or shared.
+constexpr size_t kFormRuntimeControlCap = 128;
+
+struct FormRuntimeControlState {
+	uint64_t logicalSerial = 0;
+	FormControlType type = FormControlType::None;
+	uint64_t parentFormSerial = 0;
+	uint64_t parentFieldsetSerial = 0;
+	bool checked = false;
+	bool initialChecked = false;
+	bool disabled = false;
+	uint32_t activationCount = 0;
+	bool metadataValid = false;
+};
+
+struct FormRuntimeStateTable {
+	std::array<FormRuntimeControlState, kFormRuntimeControlCap> controls{};
+	size_t count = 0;
+	bool initialized = false;
 };
 
 enum class StyleSelectorType : uint8_t {
@@ -419,6 +443,7 @@ struct CssDiagnostics {
 	int    readonlyPseudoMatches = 0;
 	int    readwritePseudoParsed = 0;
 	int    readwritePseudoMatches = 0;
+	int    checkedRuntimeRecomputations = 0;
 	uint32_t nextSourceOrder = 1;
 	std::string computedStyleEvidence;
 	std::vector<uint64_t> computedStyleEvidenceSerials;
@@ -449,6 +474,20 @@ struct FormsDiagnostics {
 	int  formControlsRendered = 0;
 	int  formControlsUnsupported = 0;
 	int  formInteractionsDeferred = 0;
+	int  formRuntimeControlsInitialized = 0;
+	int  formCheckboxActivations = 0;
+	int  formCheckboxToggles = 0;
+	int  formRadioActivations = 0;
+	int  formRadioGroupUnchecks = 0;
+	int  formLabelActivations = 0;
+	int  formButtonActivations = 0;
+	int  formDisabledActivationBlocks = 0;
+	int  formHiddenHitTargetsSuppressed = 0;
+	int  formDuplicateActivationSuppressed = 0;
+	int  formRuntimeStateResets = 0;
+	int  formHitTargetsRegistered = 0;
+	int  formHitTargetClamps = 0;
+	std::string formInteractionMode = "session_local_non_submitting";
 };
 
 struct FormOption {
@@ -513,6 +552,7 @@ struct WebDocument {
 	CssDiagnostics        cssDiagnostics;
 	FormsDiagnostics      formsDiagnostics;
 	std::vector<FormContainerMetadata> formContainers;
+	FormRuntimeStateTable formRuntimeState;
 };
 
 } // namespace web

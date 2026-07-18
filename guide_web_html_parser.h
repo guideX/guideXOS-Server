@@ -98,5 +98,9 @@ WebDocument parseHtml(const std::string& pageUrl,
 	const std::string& htmlText,
 	const std::unordered_set<std::string>& visitedUrls = {});
 
+// Recompute bounded document styles after Navigator changes its session-local
+// form state table.  Parsed author metadata is not rewritten.
+void recomputeDocumentStyles(WebDocument& document);
+
 } // namespace web
 } // namespace gxos

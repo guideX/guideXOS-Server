@@ -682,6 +682,38 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<button id=\"phase2e-overflow-button\" type=\"button\">" + oversized_button + b"</button>"
                              b"</fieldset></form></body></html>")
             return
+        if path == "/navigator-smoke/css-phase2f.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2F Session Local Forms</title><style>"
+                             b"body { color:#334155; background:#f8fafc; }"
+                             b"form { padding:6px; } fieldset { padding:8px; border:2px solid #64748b; }"
+                             b"input, button { color:#111827; background:#ffffff; border:1px solid #94a3b8; padding:3px; }"
+                             b"input:checked { color:#166534; background:#dcfce7; font-weight:bold; }"
+                             b"fieldset input:checked { border-color:#2563eb; }"
+                             b"input:checked + label { color:#7c3aed; }"
+                             b"#phase2f-important { color:#b91c1c; } #phase2f-important { color:#166534 !important; }"
+                             b"</style></head><body><h1>Phase 2F Session Local Forms</h1>"
+                             b"<form id=\"phase2f-form-one\" action=\"/navigator-smoke/phase2f-submit\" method=\"post\"><fieldset>"
+                             b"<input id=\"phase2f-checkbox\" type=\"checkbox\"><label id=\"phase2f-checkbox-label\" for=\"phase2f-checkbox\">Phase 2F checkbox</label>"
+                             b"<input id=\"phase2f-disabled-checkbox\" type=\"checkbox\" checked disabled><label id=\"phase2f-disabled-checkbox-label\" for=\"phase2f-disabled-checkbox\">Disabled checkbox</label>"
+                             b"<input id=\"phase2f-radio-a\" type=\"radio\" name=\"choice\" checked><label id=\"phase2f-radio-a-label\" for=\"phase2f-radio-a\">Radio A</label>"
+                             b"<input id=\"phase2f-radio-b\" type=\"radio\" name=\"choice\"><label id=\"phase2f-radio-b-label\" for=\"phase2f-radio-b\">Radio B</label>"
+                             b"<input id=\"phase2f-disabled-radio\" type=\"radio\" name=\"choice\" checked disabled><label id=\"phase2f-disabled-radio-label\" for=\"phase2f-disabled-radio\">Disabled radio</label>"
+                             b"<input id=\"phase2f-nameless-a\" type=\"radio\"><input id=\"phase2f-nameless-b\" type=\"radio\">"
+                             b"<label id=\"phase2f-wrapping-label\"><input id=\"phase2f-wrapped-checkbox\" type=\"checkbox\"> Wrapping label checkbox</label>"
+                             b"<label id=\"phase2f-missing-label\" for=\"phase2f-missing\">Malformed association</label><label id=\"phase2f-duplicate-label\" for=\"phase2f-duplicate\">Duplicate association</label>"
+                             b"<input id=\"phase2f-duplicate\" type=\"text\" value=\"one\"><input id=\"phase2f-duplicate\" type=\"text\" value=\"two\">"
+                             b"<label id=\"phase2f-unrelated-label\" for=\"phase2f-unrelated\">Unrelated label</label>"
+                             b"<input id=\"phase2f-hidden\" type=\"hidden\" value=\"phase2f-secret\">"
+                             b"<button id=\"phase2f-button\" type=\"button\">Inert button</button>"
+                             b"<input id=\"phase2f-input-button\" type=\"button\" value=\"Input inert button\">"
+                             b"<input id=\"phase2f-submit\" type=\"submit\" value=\"Visual submit\"><input id=\"phase2f-reset\" type=\"reset\" value=\"Visual reset\">"
+                             b"<button id=\"phase2f-disabled-button\" type=\"button\" disabled>Disabled button</button>"
+                             b"<p id=\"phase2f-important\">Important cascade marker</p>"
+                             b"</fieldset></form>"
+                             b"<form id=\"phase2f-form-two\"><input id=\"phase2f-other-form-radio\" type=\"radio\" name=\"choice\" checked><label for=\"phase2f-other-form-radio\">Other form radio</label></form>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-external-safety.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head>"

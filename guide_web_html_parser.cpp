@@ -2038,6 +2038,33 @@ static void recordPseudoMatch(CssDiagnostics& diag, CssPseudoClass type)
 	}
 }
 
+static const FormRuntimeControlState* runtimeControlState(const WebDocument& doc,
+	uint64_t logicalSerial)
+{
+	if (!doc.formRuntimeState.initialized || logicalSerial == 0) return nullptr;
+	const size_t count = std::min(doc.formRuntimeState.count, kFormRuntimeControlCap);
+	for (size_t i = 0; i < count; ++i) {
+		const FormRuntimeControlState& state = doc.formRuntimeState.controls[i];
+		if (state.logicalSerial == logicalSerial && state.metadataValid) return &state;
+	}
+	return nullptr;
+}
+
+static bool effectiveChecked(const WebDocument& doc, const HtmlElementRef& element)
+{
+	if (const FormRuntimeControlState* state = runtimeControlState(doc, element.serial))
+		return state->checked;
+	return element.formControl.type == FormControlType::Option
+		? element.formControl.selected : element.formControl.checked;
+}
+
+static bool effectiveDisabled(const WebDocument& doc, const HtmlElementRef& element)
+{
+	if (const FormRuntimeControlState* state = runtimeControlState(doc, element.serial))
+		return state->disabled;
+	return element.formControl.disabled;
+}
+
 static bool selectorPartMatchesElement(const HtmlElementRef& element,
 	const CssSelectorPart& part,
 	const std::vector<HtmlElementRef>& path,
@@ -2105,15 +2132,14 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element,
 				(element.formControl.type == FormControlType::Checkbox ||
 				 element.formControl.type == FormControlType::Radio ||
 				 element.formControl.type == FormControlType::Option) &&
-				(element.formControl.type == FormControlType::Option
-					? element.formControl.selected : element.formControl.checked);
+				effectiveChecked(doc, element);
 			break;
 		case CssPseudoClass::Disabled:
-			matched = element.formControl.metadataComplete && element.formControl.disabled;
+			matched = element.formControl.metadataComplete && effectiveDisabled(doc, element);
 			break;
 		case CssPseudoClass::Enabled:
 			matched = element.formControl.metadataComplete && element.formControl.supported &&
-				!element.formControl.disabled;
+				!effectiveDisabled(doc, element);
 			break;
 		case CssPseudoClass::Required:
 			matched = element.formControl.metadataComplete && element.formControl.supported &&
@@ -3630,6 +3656,25 @@ static std::string boundedEvidenceToken(const std::string& raw)
 	return token;
 }
 
+static uint32_t formRadioGroupEvidenceHash(const HtmlElementRef& element)
+{
+	if (element.formControl.type != FormControlType::Radio) return 0;
+	uint32_t hash = 2166136261u;
+	auto mix = [&](uint64_t value) {
+		for (unsigned i = 0; i < sizeof(value); ++i) {
+			hash ^= static_cast<uint32_t>((value >> (i * 8)) & 0xFFu);
+			hash *= 16777619u;
+		}
+	};
+	mix(element.formControl.parentFormSerial);
+	mix(element.formControl.parentFieldsetSerial);
+	for (unsigned char c : element.formControl.name) {
+		hash ^= static_cast<uint32_t>(c);
+		hash *= 16777619u;
+	}
+	return hash;
+}
+
 static void appendComputedStyleEvidence(WebDocument& doc,
 	const HtmlElementRef& element,
 	const WebStyle& style,
@@ -3640,7 +3685,8 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		id.rfind("phase2b-", 0) != 0 && id.rfind("css2b-", 0) != 0 &&
 		id.rfind("phase2c-", 0) != 0 && id.rfind("css2c-", 0) != 0 &&
 		id.rfind("phase2d-", 0) != 0 && id.rfind("css2d-", 0) != 0 &&
-		id.rfind("phase2e-", 0) != 0 && id.rfind("css2e-", 0) != 0) return;
+		id.rfind("phase2e-", 0) != 0 && id.rfind("css2e-", 0) != 0 &&
+		id.rfind("phase2f-", 0) != 0 && id.rfind("css2f-", 0) != 0) return;
 	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
 		doc.cssDiagnostics.computedStyleEvidenceSerials.end(), element.serial) !=
 		doc.cssDiagnostics.computedStyleEvidenceSerials.end()) return;
@@ -3664,6 +3710,9 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 	const uint64_t paddingBit = cssPropertyBit(CssProperty::PaddingTop);
 	const uint64_t fontBit = cssPropertyBit(CssProperty::FontSize);
 	const uint64_t borderBit = cssPropertyBit(CssProperty::BorderTopWidth);
+	const FormRuntimeControlState* runtime = runtimeControlState(doc, element.serial);
+	const bool checked = effectiveChecked(doc, element);
+	const bool disabled = effectiveDisabled(doc, element);
 	std::ostringstream oss;
 	oss << "id=" << boundedEvidenceToken(element.id) << ",tag=" << boundedEvidenceToken(toLower(element.tagName))
 		<< ",classes=" << boundedEvidenceToken(element.className)
@@ -3710,9 +3759,14 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",type-count=" << element.typeCount
 		<< ",control-type=" << static_cast<unsigned>(element.formControl.type)
 		<< ",control-supported=" << (element.formControl.supported ? "yes" : "no")
-		<< ",control-checked=" << (element.formControl.checked || element.formControl.selected ? "yes" : "no")
-		<< ",control-disabled=" << (element.formControl.disabled ? "yes" : "no")
-		<< ",control-enabled=" << (element.formControl.supported && !element.formControl.disabled ? "yes" : "no")
+		<< ",control-checked=" << (checked ? "yes" : "no")
+		<< ",control-disabled=" << (disabled ? "yes" : "no")
+		<< ",control-enabled=" << (element.formControl.supported && !disabled ? "yes" : "no")
+		<< ",parsed-checked=" << ((element.formControl.checked || element.formControl.selected) ? "yes" : "no")
+		<< ",runtime-checked=" << (runtime ? (runtime->checked ? "yes" : "no") : "absent")
+		<< ",runtime-activation-count=" << (runtime ? runtime->activationCount : 0)
+		<< ",runtime-metadata-valid=" << (runtime ? (runtime->metadataValid ? "yes" : "no") : "no")
+		<< ",radio-group-hash=" << formRadioGroupEvidenceHash(element)
 		<< ",control-required=" << (element.formControl.required ? "yes" : "no")
 		<< ",control-readonly=" << (element.formControl.readOnly ? "yes" : "no")
 		<< ",color-winning-pseudo=" << (colorWinner.pseudoCategory.empty() ? "none" : colorWinner.pseudoCategory)
@@ -4289,6 +4343,15 @@ static std::vector<HtmlElementRef> captureBlockAncestors(const ParserState& st)
 	return ancestors;
 }
 
+static std::vector<HtmlElementRef> captureControlAncestors(const ParserState& st)
+{
+	// <input> is a void element and is registered without being pushed onto
+	// openElements.  Preserve every represented wrapper here, including a
+	// wrapping <label>, so descendant selectors and label association retain
+	// their bounded structural path.
+	return st.openElements;
+}
+
 static uint64_t nearestAncestorSerial(const ParserState& st, const std::string& tagName)
 {
 	const std::string wanted = toLower(tagName);
@@ -4536,6 +4599,8 @@ static void flushText(ParserState& st)
 		DocBlock block;
 		block.type = BlockType::FormSubmit;
 		block.tagName = "button";
+		block.className = elementMetadata.className;
+		block.id = elementMetadata.id;
 		std::string buttonType = elementMetadata.formControl.inputType.empty() ? "submit" : elementMetadata.formControl.inputType;
 		block.text = t.empty() ? (buttonType == "reset" ? "Reset" : (buttonType == "button" ? "Button" : "Submit")) : t;
 		if (block.text.size() > kFormMaxLabelBytes) {
@@ -4928,7 +4993,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formControl = inputElement.formControl;
 			block.formControl.logicalSerial = inputElement.serial;
 			block.elementMetadata = inputElement;
-			block.ancestors = captureBlockAncestors(st);
+			block.ancestors = captureControlAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
 			if (!block.inlineStyle.empty()) {
 				++st.doc.cssDiagnostics.inlineStyleCount;
@@ -4957,7 +5022,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formControl.checked = block.checked;
 			block.elementMetadata = inputElement;
 			block.formUnsupported = st.currentFormUnsupported;
-			block.ancestors = captureBlockAncestors(st);
+			block.ancestors = captureControlAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
 			if (!block.inlineStyle.empty()) {
 				++st.doc.cssDiagnostics.inlineStyleCount;
@@ -4984,7 +5049,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formControl.logicalSerial = inputElement.serial;
 			block.elementMetadata = inputElement;
 			block.formUnsupported = st.currentFormUnsupported;
-			block.ancestors = captureBlockAncestors(st);
+			block.ancestors = captureControlAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
 			if (!block.inlineStyle.empty()) {
 				++st.doc.cssDiagnostics.inlineStyleCount;
@@ -5530,6 +5595,16 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 	size_t lastSlash = baseNoQuery.rfind('/');
 	if (lastSlash == std::string::npos) return "file:///" + href;
 	return baseNoQuery.substr(0, lastSlash + 1) + href;
+}
+
+void recomputeDocumentStyles(WebDocument& document)
+{
+	// Evidence is a snapshot of the current computed state.  Drop the prior
+	// bounded snapshot before recomputing so runtime :checked changes are
+	// observable without retaining an unbounded history.
+	document.cssDiagnostics.computedStyleEvidence.clear();
+	document.cssDiagnostics.computedStyleEvidenceSerials.clear();
+	applyDocumentStyles(document);
 }
 
 // ---------------------------------------------------------------------------

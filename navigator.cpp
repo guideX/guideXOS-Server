@@ -37,6 +37,9 @@ using gxos::web::GenericFontFamily;
 using gxos::web::ListStyleType;
 using gxos::web::TableBorderCollapseMode;
 using gxos::web::FormControlType;
+using gxos::web::FormControlMetadata;
+using gxos::web::FormRuntimeControlState;
+using gxos::web::kFormRuntimeControlCap;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -1415,6 +1418,21 @@ namespace {
 		metadata.formControlsRendered = 0;
 		metadata.formControlsUnsupported = doc.formsDiagnostics.formControlsUnsupported;
 		metadata.formInteractionsDeferred = doc.formsDiagnostics.formInteractionsDeferred;
+		metadata.formRuntimeControlsInitialized = doc.formsDiagnostics.formRuntimeControlsInitialized;
+		metadata.formCheckboxActivations = doc.formsDiagnostics.formCheckboxActivations;
+		metadata.formCheckboxToggles = doc.formsDiagnostics.formCheckboxToggles;
+		metadata.formRadioActivations = doc.formsDiagnostics.formRadioActivations;
+		metadata.formRadioGroupUnchecks = doc.formsDiagnostics.formRadioGroupUnchecks;
+		metadata.formLabelActivations = doc.formsDiagnostics.formLabelActivations;
+		metadata.formButtonActivations = doc.formsDiagnostics.formButtonActivations;
+		metadata.formDisabledActivationBlocks = doc.formsDiagnostics.formDisabledActivationBlocks;
+		metadata.formHiddenHitTargetsSuppressed = doc.formsDiagnostics.formHiddenHitTargetsSuppressed;
+		metadata.formDuplicateActivationSuppressed = doc.formsDiagnostics.formDuplicateActivationSuppressed;
+		metadata.formRuntimeStateResets = doc.formsDiagnostics.formRuntimeStateResets;
+		metadata.formHitTargetsRegistered = doc.formsDiagnostics.formHitTargetsRegistered;
+		metadata.formHitTargetClamps = doc.formsDiagnostics.formHitTargetClamps;
+		metadata.cssCheckedRuntimeRecomputations = doc.cssDiagnostics.checkedRuntimeRecomputations;
+		metadata.formInteractionMode = doc.formsDiagnostics.formInteractionMode;
 		metadata.unsupportedFormMethod = doc.formsDiagnostics.hasUnsupportedMethod;
 		metadata.unsupportedFormEncoding = doc.formsDiagnostics.hasUnsupportedEncoding;
 		metadata.postSupportedHosted = true;
@@ -3108,6 +3126,21 @@ namespace {
 		add("Form controls rendered", metadata.formControlsRendered);
 		add("Form controls unsupported", metadata.formControlsUnsupported);
 		add("Form interactions deferred", metadata.formInteractionsDeferred);
+		add("form_runtime_controls_initialized", metadata.formRuntimeControlsInitialized);
+		add("form_checkbox_activations", metadata.formCheckboxActivations);
+		add("form_checkbox_toggles", metadata.formCheckboxToggles);
+		add("form_radio_activations", metadata.formRadioActivations);
+		add("form_radio_group_unchecks", metadata.formRadioGroupUnchecks);
+		add("form_label_activations", metadata.formLabelActivations);
+		add("form_button_activations", metadata.formButtonActivations);
+		add("form_disabled_activation_blocks", metadata.formDisabledActivationBlocks);
+		add("form_hidden_hit_targets_suppressed", metadata.formHiddenHitTargetsSuppressed);
+		add("form_duplicate_activation_suppressed", metadata.formDuplicateActivationSuppressed);
+		add("form_runtime_state_resets", metadata.formRuntimeStateResets);
+		add("form_hit_targets_registered", metadata.formHitTargetsRegistered);
+		add("form_hit_target_clamps", metadata.formHitTargetClamps);
+		add("css_checked_runtime_recomputations", metadata.cssCheckedRuntimeRecomputations);
+		out += "Current Document.form_interaction_mode=" + metadata.formInteractionMode + "\n";
 	}
 
 	static void appendFormPhase2EBlocks(WebDocument& doc, const NavigatorPageMetadata& metadata)
@@ -3628,6 +3661,82 @@ std::string Navigator::SmokeCurrentLinkUrl(const std::string& text)
 		}
 	}
 	return "";
+}
+
+bool Navigator::SmokeClickFormControlById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex >= 0 && smokeClickBlock(blockIndex, false);
+}
+
+bool Navigator::SmokeClickFormLabelById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, true);
+	return blockIndex >= 0 && smokeClickBlock(blockIndex, true);
+}
+
+bool Navigator::SmokeFormControlCheckedById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex >= 0 && runtimeChecked(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+}
+
+bool Navigator::SmokeFormControlDisabledById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex >= 0 && runtimeDisabled(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+}
+
+bool Navigator::SmokeFormHitTargetById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	s_scrollOffset = std::max(0, blockLayoutY(blockIndex) - kContentH / 2);
+	clampScrollOffset();
+	const Rect rect = formControlRect(blockIndex);
+	if (rect.w <= 0 || rect.h <= 0) return false;
+	int hitIndex = -1;
+	const HitTarget target = hitTest(rect.x + rect.w / 2, rect.y + rect.h / 2, hitIndex);
+	return hitIndex == blockIndex &&
+		(target == HitTarget::FormCheckbox || target == HitTarget::FormRadio ||
+		 target == HitTarget::FormSubmit || target == HitTarget::FormInput ||
+		 target == HitTarget::FormTextarea || target == HitTarget::FormSelect);
+}
+
+int Navigator::SmokeFormActivationCountById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return -1;
+	const FormRuntimeControlState* state = runtimeStateForBlock(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+	return state ? static_cast<int>(state->activationCount) : 0;
+}
+
+bool Navigator::SmokeFormMouseSafetyById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	s_scrollOffset = std::max(0, blockLayoutY(blockIndex) - kContentH / 2);
+	clampScrollOffset();
+	const Rect rect = formControlRect(blockIndex);
+	if (rect.w <= 0 || rect.h <= 0) return false;
+	const int insideX = rect.x + rect.w / 2;
+	const int insideY = rect.y + rect.h / 2;
+	const int outsideX = std::min(kWindowW - 1, rect.x + rect.w + 32);
+	const int outsideY = std::min(kWindowH - kStatusBarH - 1, rect.y + rect.h + 32);
+	const int before = SmokeFormActivationCountById(id);
+	handleMouseInput(insideX, insideY, 1, "down");
+	handleMouseInput(outsideX, outsideY, 1, "up");
+	handleMouseInput(outsideX, outsideY, 1, "down");
+	handleMouseInput(insideX, insideY, 1, "up");
+	return SmokeFormActivationCountById(id) == before;
+}
+
+bool Navigator::SmokeReloadCurrentDocument()
+{
+	if (s_windowId == 0 || s_currentDoc.url.empty()) return false;
+	const std::string url = s_currentDoc.url;
+	loadUrl(url, false);
+	return s_currentDoc.url == url;
 }
 
 std::vector<int> Navigator::SmokeToolbarWidgetIds()
@@ -4264,7 +4373,7 @@ void Navigator::renderDocument()
 			const int inputX = contentX;
 			const int inputY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			const bool disabled = block.formControl.disabled;
+			const bool disabled = runtimeDisabled(block);
 			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
 			const int controlH = formControlHeight(block);
 			const uint32_t fill = formFillColor(block, focused, disabled);
@@ -4297,7 +4406,7 @@ void Navigator::renderDocument()
 			const int inputY = boxY + borderTop + paddingTop;
 			const int inputH = formControlHeight(block);
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			const bool disabled = block.formControl.disabled;
+			const bool disabled = runtimeDisabled(block);
 			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
 			const uint32_t fill = formFillColor(block, focused, disabled);
 			const uint32_t border = formBorderColor(block, focused, disabled);
@@ -4353,7 +4462,7 @@ void Navigator::renderDocument()
 			const int controlX = contentX;
 			const int controlY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			const bool disabled = block.formControl.disabled;
+			const bool disabled = runtimeDisabled(block);
 			const int box = 14;
 			const int boxY = controlY + (kFormControlH - box) / 2;
 			const uint32_t border = formBorderColor(block, focused, disabled);
@@ -4362,7 +4471,7 @@ void Navigator::renderDocument()
 			drawThemeRect(s_windowId, controlX, boxY + box - 1, box, 1, border);
 			drawThemeRect(s_windowId, controlX, boxY, 1, box, border);
 			drawThemeRect(s_windowId, controlX + box - 1, boxY, 1, box, border);
-			if (block.checked) {
+			if (runtimeChecked(block)) {
 				if (block.type == BlockType::FormRadio) {
 					drawThemeRect(s_windowId, controlX + 4, boxY + 4, box - 8, box - 8, disabled ? border : NavigatorAccentColor());
 				} else {
@@ -4380,7 +4489,7 @@ void Navigator::renderDocument()
 			const int selectX = contentX;
 			const int selectY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			const bool disabled = block.formControl.disabled;
+			const bool disabled = runtimeDisabled(block);
 			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
 			const int controlH = formControlHeight(block);
 			const uint32_t border = formBorderColor(block, focused, disabled);
@@ -4417,7 +4526,7 @@ void Navigator::renderDocument()
 			const int buttonX = contentX;
 			const int buttonY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			const bool disabled = block.formControl.disabled;
+			const bool disabled = runtimeDisabled(block);
 			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
 			const int controlH = formControlHeight(block);
 			const uint32_t border = formBorderColor(block, focused, disabled);
@@ -4508,8 +4617,9 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 	case HitTarget::FormTextarea: next = "Click to edit textarea"; break;
 	case HitTarget::FormCheckbox: next = "Toggle checkbox"; break;
 	case HitTarget::FormRadio:   next = "Select radio option"; break;
+	case HitTarget::FormLabel:   next = "Activate associated choice"; break;
 	case HitTarget::FormSelect:  next = "Cycle select option"; break;
-	case HitTarget::FormSubmit:  next = "Submit form"; break;
+	case HitTarget::FormSubmit:  next = "Activate inert button"; break;
 	case HitTarget::Link:
 		if (linkBlockIndex >= 0 &&
 			linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
@@ -4581,6 +4691,246 @@ void Navigator::handleToolbarAction(int widgetId)
 	}
 }
 
+bool Navigator::isRuntimeCheckable(const DocBlock& block)
+{
+	return (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) &&
+		block.formControl.metadataComplete && block.formControl.supported &&
+		block.formControl.logicalSerial != 0 &&
+		(block.formControl.type == FormControlType::Checkbox ||
+		 block.formControl.type == FormControlType::Radio);
+}
+
+bool Navigator::isRuntimeButton(const DocBlock& block)
+{
+	return block.type == BlockType::FormSubmit &&
+		block.formControl.metadataComplete && block.formControl.supported &&
+		block.formControl.logicalSerial != 0 &&
+		(block.formControl.type == FormControlType::Button ||
+		 block.formControl.type == FormControlType::Submit ||
+		 block.formControl.type == FormControlType::Reset);
+}
+
+bool Navigator::isRuntimeFormControl(const DocBlock& block)
+{
+	return isRuntimeCheckable(block) || isRuntimeButton(block);
+}
+
+const FormRuntimeControlState* Navigator::runtimeStateForBlock(const DocBlock& block)
+{
+	if (!s_currentDoc.formRuntimeState.initialized || block.formControl.logicalSerial == 0)
+		return nullptr;
+	const size_t count = std::min(s_currentDoc.formRuntimeState.count, kFormRuntimeControlCap);
+	for (size_t i = 0; i < count; ++i) {
+		const FormRuntimeControlState& state = s_currentDoc.formRuntimeState.controls[i];
+		if (state.logicalSerial == block.formControl.logicalSerial && state.metadataValid)
+			return &state;
+	}
+	return nullptr;
+}
+
+FormRuntimeControlState* Navigator::runtimeStateForBlock(DocBlock& block)
+{
+	return const_cast<FormRuntimeControlState*>(runtimeStateForBlock(static_cast<const DocBlock&>(block)));
+}
+
+bool Navigator::runtimeChecked(const DocBlock& block)
+{
+	if (const FormRuntimeControlState* state = runtimeStateForBlock(block)) return state->checked;
+	return block.checked;
+}
+
+bool Navigator::runtimeDisabled(const DocBlock& block)
+{
+	if (const FormRuntimeControlState* state = runtimeStateForBlock(block)) return state->disabled;
+	return block.formControl.disabled;
+}
+
+int Navigator::blockIndexForControlSerial(uint64_t serial)
+{
+	if (serial == 0) return -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.formControl.logicalSerial == serial && isRuntimeCheckable(block)) return i;
+	}
+	return -1;
+}
+
+int Navigator::findBlockById(const std::string& id, bool labelOnly)
+{
+	if (id.empty()) return -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.id != id) continue;
+		if (labelOnly ? block.type == BlockType::FormLabel : isRuntimeFormControl(block)) return i;
+	}
+	return -1;
+}
+
+uint64_t Navigator::associatedControlSerialForLabel(const DocBlock& label)
+{
+	if (label.type != BlockType::FormLabel || !label.formControl.metadataComplete ||
+		label.elementMetadata.serial == 0) return 0;
+	uint64_t targetSerial = 0;
+	int matches = 0;
+	if (!label.labelFor.empty()) {
+		for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+			if (element.id != label.labelFor) continue;
+			++matches;
+			if (element.formControl.type == FormControlType::Checkbox ||
+				element.formControl.type == FormControlType::Radio) {
+				targetSerial = element.serial;
+			}
+		}
+		// Duplicate ids, including a duplicate non-control element, fail closed.
+		return matches == 1 ? targetSerial : 0;
+	}
+
+	for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.formControl.type != FormControlType::Checkbox &&
+			element.formControl.type != FormControlType::Radio) continue;
+		uint64_t parent = element.parentSerial;
+		for (size_t depth = 0; depth < kFormRuntimeControlCap && parent != 0; ++depth) {
+			if (parent == label.elementMetadata.serial) {
+				targetSerial = element.serial;
+				++matches;
+				break;
+			}
+			const gxos::web::HtmlElementRef* found = nullptr;
+			for (const gxos::web::HtmlElementRef& candidate : s_currentDoc.structuralElements) {
+				if (candidate.serial == parent) { found = &candidate; break; }
+			}
+			if (!found) break;
+			parent = found->parentSerial;
+		}
+	}
+	return matches == 1 ? targetSerial : 0;
+}
+
+bool Navigator::radioGroupMatches(const DocBlock& left, const DocBlock& right)
+{
+	if (left.type != BlockType::FormRadio || right.type != BlockType::FormRadio) return false;
+	if (left.formControl.name.empty() || right.formControl.name.empty())
+		return left.formControl.logicalSerial == right.formControl.logicalSerial;
+	if (left.formIndex >= 0 || right.formIndex >= 0)
+		return left.formIndex >= 0 && right.formIndex == left.formIndex &&
+			left.formControl.name == right.formControl.name;
+	if (left.formControl.parentFormSerial != 0 || right.formControl.parentFormSerial != 0)
+		return left.formControl.parentFormSerial != 0 &&
+			right.formControl.parentFormSerial == left.formControl.parentFormSerial &&
+			left.formControl.name == right.formControl.name;
+	if (left.formControl.parentFieldsetSerial != 0 || right.formControl.parentFieldsetSerial != 0)
+		return left.formControl.parentFieldsetSerial != 0 &&
+			right.formControl.parentFieldsetSerial == left.formControl.parentFieldsetSerial &&
+			left.formControl.name == right.formControl.name;
+	return left.formControl.name == right.formControl.name;
+}
+
+void Navigator::initializeFormRuntimeState()
+{
+	s_currentDoc.formRuntimeState = gxos::web::FormRuntimeStateTable{};
+	s_currentDoc.formRuntimeState.initialized = true;
+	++s_currentDoc.formsDiagnostics.formRuntimeStateResets;
+	for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+		const FormControlMetadata& metadata = element.formControl;
+		if (element.serial == 0 || !metadata.metadataComplete || !metadata.supported) continue;
+		if (s_currentDoc.formRuntimeState.count >= kFormRuntimeControlCap) {
+			++s_currentDoc.formsDiagnostics.controlMetadataClamps;
+			break;
+		}
+		FormRuntimeControlState& state = s_currentDoc.formRuntimeState.controls[
+			s_currentDoc.formRuntimeState.count++];
+		state.logicalSerial = element.serial;
+		state.type = metadata.type;
+		state.parentFormSerial = metadata.parentFormSerial;
+		state.parentFieldsetSerial = metadata.parentFieldsetSerial;
+		state.checked = metadata.type == FormControlType::Option ? metadata.selected : metadata.checked;
+		state.initialChecked = state.checked;
+		state.disabled = metadata.disabled;
+		state.metadataValid = true;
+		++s_currentDoc.formsDiagnostics.formRuntimeControlsInitialized;
+	}
+	// Some forgiving HTML paths retain a valid rendered control block even when
+	// its structural registration was not retained.  Recover only those bounded
+	// runtime controls from their copied metadata; names and values remain out of
+	// the runtime table.
+	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (!isRuntimeFormControl(block) || block.formControl.logicalSerial == 0) continue;
+		bool alreadyInitialized = false;
+		for (size_t i = 0; i < s_currentDoc.formRuntimeState.count; ++i) {
+			if (s_currentDoc.formRuntimeState.controls[i].logicalSerial == block.formControl.logicalSerial) {
+				alreadyInitialized = true;
+				break;
+			}
+		}
+		if (alreadyInitialized) continue;
+		if (s_currentDoc.formRuntimeState.count >= kFormRuntimeControlCap) {
+			++s_currentDoc.formsDiagnostics.controlMetadataClamps;
+			break;
+		}
+		FormRuntimeControlState& state = s_currentDoc.formRuntimeState.controls[
+			s_currentDoc.formRuntimeState.count++];
+		state.logicalSerial = block.formControl.logicalSerial;
+		state.type = block.formControl.type;
+		state.parentFormSerial = block.formControl.parentFormSerial;
+		state.parentFieldsetSerial = block.formControl.parentFieldsetSerial;
+		state.checked = block.formControl.type == FormControlType::Checkbox ||
+			block.formControl.type == FormControlType::Radio
+			? block.formControl.checked : false;
+		state.initialChecked = state.checked;
+		state.disabled = block.formControl.disabled;
+		state.metadataValid = true;
+		++s_currentDoc.formsDiagnostics.formRuntimeControlsInitialized;
+	}
+}
+
+void Navigator::recomputeFormControlStyles()
+{
+	++s_currentDoc.cssDiagnostics.checkedRuntimeRecomputations;
+	gxos::web::recomputeDocumentStyles(s_currentDoc);
+	storePageMetadata(s_pageMetadata, s_currentDoc);
+}
+
+void Navigator::clearMousePressState()
+{
+	s_mouseLeftDown = false;
+	s_mouseMode = MouseMode::None;
+	s_mouseDownHitTarget = HitTarget::None;
+	s_mouseDownLinkBlockIndex = -1;
+	s_mouseDownLinkUrl.clear();
+	s_mouseDragThresholdExceeded = false;
+}
+
+bool Navigator::activateLabelBlock(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
+	const DocBlock& label = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	const uint64_t serial = associatedControlSerialForLabel(label);
+	const int controlIndex = blockIndexForControlSerial(serial);
+	if (controlIndex < 0) return false;
+	++s_currentDoc.formsDiagnostics.formLabelActivations;
+	activateFormControl(controlIndex);
+	return true;
+}
+
+bool Navigator::smokeClickBlock(int blockIndex, bool label)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
+	s_scrollOffset = std::max(0, blockLayoutY(blockIndex) - kContentH / 2);
+	clampScrollOffset();
+	const Rect rect = label ? selectableBlockRect(blockIndex) : formControlRect(blockIndex);
+	if (rect.w <= 0 || rect.h <= 0) return false;
+	const int x = rect.x + rect.w / 2;
+	const int y = rect.y + rect.h / 2;
+	int hitIndex = -1;
+	const HitTarget expected = hitTest(x, y, hitIndex);
+	if (hitIndex != blockIndex || (label ? expected != HitTarget::FormLabel :
+		(expected != HitTarget::FormCheckbox && expected != HitTarget::FormRadio &&
+		 expected != HitTarget::FormSubmit))) return false;
+	handleMouseInput(x, y, 1, "down");
+	handleMouseInput(x, y, 1, "up");
+	return true;
+}
+
 void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 {
 	if (target == HitTarget::Link &&
@@ -4588,6 +4938,11 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
 		navigateTo(s_currentDoc.blocks[linkBlockIndex].url);
+	} else if (target == HitTarget::FormLabel &&
+		linkBlockIndex >= 0 &&
+		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
+	{
+		activateLabelBlock(linkBlockIndex);
 	} else if ((target == HitTarget::FormCheckbox ||
 				target == HitTarget::FormRadio ||
 				target == HitTarget::FormSelect) &&
@@ -4599,7 +4954,9 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
-		submitFormForBlock(linkBlockIndex);
+		// Phase 2F buttons are deliberately inert.  The existing Forms-lite
+		// submit path remains available to its explicit legacy callers.
+		activateFormControl(linkBlockIndex);
 	}
 }
 
@@ -4708,10 +5065,12 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 		if (target == HitTarget::FormCheckbox ||
 			target == HitTarget::FormRadio ||
 			target == HitTarget::FormSelect ||
-			target == HitTarget::FormSubmit) {
+			target == HitTarget::FormSubmit ||
+			target == HitTarget::FormLabel) {
 			s_mouseMode = MouseMode::FormInputInteraction;
 			if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
-			if (target != HitTarget::FormSubmit) s_focusedInputBlockIndex = linkIdx;
+			if (target != HitTarget::FormSubmit && target != HitTarget::FormLabel)
+				s_focusedInputBlockIndex = linkIdx;
 			clearSelection();
 			updateDisplay();
 			return;
@@ -4953,6 +5312,7 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 		break;
 	case BlockType::Paragraph:
 	case BlockType::Link:
+	case BlockType::FormLabel:
 		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block));
 		break;
@@ -5120,7 +5480,7 @@ std::string Navigator::findMatchStatusText()
 
 bool Navigator::isFocusableFormControl(const DocBlock& block)
 {
-	if (block.formControl.hidden || block.formControl.disabled) return false;
+	if (block.formControl.hidden || runtimeDisabled(block)) return false;
 	return block.type == BlockType::FormTextInput ||
 		block.type == BlockType::FormTextarea ||
 		block.type == BlockType::FormCheckbox ||
@@ -5157,44 +5517,47 @@ void Navigator::activateFormControl(int blockIndex)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
 	DocBlock& block = s_currentDoc.blocks[blockIndex];
-	if (block.formControl.disabled) {
+	if (!isRuntimeFormControl(block)) return;
+	if (runtimeDisabled(block)) {
+		++s_currentDoc.formsDiagnostics.formDisabledActivationBlocks;
 		updateStatus("Disabled form control.");
 		return;
 	}
+	FormRuntimeControlState* state = runtimeStateForBlock(block);
+	if (!state) return; // Fail closed if bounded runtime metadata is incomplete.
 	if (block.type == BlockType::FormCheckbox) {
-		block.checked = !block.checked;
+		++state->activationCount;
+		++s_currentDoc.formsDiagnostics.formCheckboxActivations;
+		state->checked = !state->checked;
+		++s_currentDoc.formsDiagnostics.formCheckboxToggles;
 		s_focusedInputBlockIndex = blockIndex;
+		recomputeFormControlStyles();
 		updateDisplay();
 		return;
 	}
 	if (block.type == BlockType::FormRadio) {
+		++state->activationCount;
+		++s_currentDoc.formsDiagnostics.formRadioActivations;
 		for (DocBlock& candidate : s_currentDoc.blocks) {
-			if (candidate.type == BlockType::FormRadio &&
-				candidate.formIndex == block.formIndex &&
-				candidate.inputName == block.inputName) {
-				candidate.checked = false;
+			if (&candidate == &block || !radioGroupMatches(candidate, block)) continue;
+			FormRuntimeControlState* candidateState = runtimeStateForBlock(candidate);
+			if (candidateState && candidateState->checked) {
+				candidateState->checked = false;
+				++s_currentDoc.formsDiagnostics.formRadioGroupUnchecks;
 			}
 		}
-		block.checked = true;
+		state->checked = true;
 		s_focusedInputBlockIndex = blockIndex;
-		updateDisplay();
-		return;
-	}
-	if (block.type == BlockType::FormSelect) {
-		if (!block.options.empty()) {
-			int next = block.selectedOption < 0 ? 0 : block.selectedOption + 1;
-			if (next >= static_cast<int>(block.options.size())) next = 0;
-			block.selectedOption = next;
-			const gxos::web::FormOption& option = block.options[static_cast<size_t>(next)];
-			block.inputValue = option.value;
-			block.text = option.text;
-		}
-		s_focusedInputBlockIndex = blockIndex;
+		recomputeFormControlStyles();
 		updateDisplay();
 		return;
 	}
 	if (block.type == BlockType::FormSubmit) {
-		submitFormForBlock(blockIndex);
+		++state->activationCount;
+		++s_currentDoc.formsDiagnostics.formButtonActivations;
+		s_focusedInputBlockIndex = blockIndex;
+		updateStatus("Button activated (session-local; no submission).");
+		storePageMetadata(s_pageMetadata, s_currentDoc);
 	}
 }
 
@@ -5304,7 +5667,7 @@ void Navigator::submitFormForBlock(int blockIndex)
 			break;
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio:
-			if (block.checked) appendField(block.inputName, block.inputValue.empty() ? "on" : block.inputValue);
+			if (runtimeChecked(block)) appendField(block.inputName, block.inputValue.empty() ? "on" : block.inputValue);
 			break;
 		case BlockType::FormSelect:
 			if (block.selectedOption >= 0 && block.selectedOption < static_cast<int>(block.options.size())) {
@@ -5626,28 +5989,61 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 		if (addrRect.contains(x, y)) return HitTarget::AddressBar;
 	}
 
+	// Controls win over labels when their rectangles overlap.  This makes a
+	// wrapping label produce one activation rather than a control toggle plus a
+	// second label activation.
+	int bestControlIndex = -1;
+	HitTarget bestControlTarget = HitTarget::None;
+	int bestControlDistance = std::numeric_limits<int>::max();
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		Rect controlRect{0, 0, 0, 0};
+		HitTarget controlTarget = HitTarget::None;
 		if (s_currentDoc.blocks[i].type == BlockType::FormTextInput ||
 			s_currentDoc.blocks[i].type == BlockType::FormCheckbox ||
 			s_currentDoc.blocks[i].type == BlockType::FormRadio ||
 			s_currentDoc.blocks[i].type == BlockType::FormTextarea ||
 			s_currentDoc.blocks[i].type == BlockType::FormSelect) {
-			if (formControlRect(i).contains(x, y)) {
-				outLinkBlockIndex = i;
-				switch (s_currentDoc.blocks[i].type) {
-				case BlockType::FormCheckbox: return HitTarget::FormCheckbox;
-				case BlockType::FormRadio: return HitTarget::FormRadio;
-				case BlockType::FormTextarea: return HitTarget::FormTextarea;
-				case BlockType::FormSelect: return HitTarget::FormSelect;
-				default: return HitTarget::FormInput;
-				}
+			controlRect = formControlRect(i);
+			switch (s_currentDoc.blocks[i].type) {
+			case BlockType::FormCheckbox: controlTarget = HitTarget::FormCheckbox; break;
+			case BlockType::FormRadio: controlTarget = HitTarget::FormRadio; break;
+			case BlockType::FormTextarea: controlTarget = HitTarget::FormTextarea; break;
+			case BlockType::FormSelect: controlTarget = HitTarget::FormSelect; break;
+			default: controlTarget = HitTarget::FormInput; break;
 			}
 		} else if (s_currentDoc.blocks[i].type == BlockType::FormSubmit) {
-			if (formControlRect(i).contains(x, y)) {
-				outLinkBlockIndex = i;
-				return HitTarget::FormSubmit;
+			controlRect = formControlRect(i);
+			controlTarget = HitTarget::FormSubmit;
+		}
+		if (controlTarget != HitTarget::None && controlRect.contains(x, y)) {
+			const int dx = x - (controlRect.x + controlRect.w / 2);
+			const int dy = y - (controlRect.y + controlRect.h / 2);
+			const int distance = dx * dx + dy * dy;
+			if (distance < bestControlDistance) {
+				bestControlDistance = distance;
+				bestControlIndex = i;
+				bestControlTarget = controlTarget;
 			}
-		} else if (s_currentDoc.blocks[i].type == BlockType::Link) {
+		}
+	}
+	if (bestControlIndex >= 0) {
+		outLinkBlockIndex = bestControlIndex;
+		++s_currentDoc.formsDiagnostics.formHitTargetsRegistered;
+		return bestControlTarget;
+	}
+
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[i].type != BlockType::FormLabel ||
+			associatedControlSerialForLabel(s_currentDoc.blocks[i]) == 0) continue;
+		if (selectableBlockRect(i).contains(x, y)) {
+			outLinkBlockIndex = i;
+			++s_currentDoc.formsDiagnostics.formHitTargetsRegistered;
+			return HitTarget::FormLabel;
+		}
+	}
+
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[i].type == BlockType::Link) {
 			if (linkBlockRect(i).contains(x, y)) {
 				outLinkBlockIndex = i;
 				return HitTarget::Link;
@@ -5858,6 +6254,7 @@ WebDocument Navigator::buildBookmarksDocument()
 void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	clearMousePressState();
 	s_loading = true;
 	if (s_windowId != 0) updateDisplay();
 	cleanupRemoteImageTempFiles();
@@ -5912,6 +6309,15 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 	}
 
 	s_currentDoc      = std::move(doc);
+	initializeFormRuntimeState();
+	for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.formControl.hidden &&
+			(element.formControl.type == FormControlType::Checkbox ||
+			 element.formControl.type == FormControlType::Radio)) {
+			++s_currentDoc.formsDiagnostics.formHiddenHitTargetsSuppressed;
+		}
+	}
+	recomputeFormControlStyles();
 	if (!s_currentDoc.url.empty()) {
 		s_visitedUrls.insert(s_currentDoc.url);
 	}
@@ -7060,7 +7466,13 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	const int relY = blockLayoutY(blockIndex);
 	const int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + paddingTop;
-	const int w = blockFormControlWidth(block, availableWidth);
+	int w = blockFormControlWidth(block, availableWidth);
+	if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) {
+		// Keep the logical control hit box on the indicator.  Label text gets a
+		// separate bounded target and therefore cannot double-toggle a wrapping
+		// control when the two rendered blocks overlap.
+		w = 22;
+	}
 	return Rect{ blockContentLeftX(block, outerX), drawY, w, formControlHeight(block) };
 }
 

@@ -1161,6 +1161,127 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ",option=" + yesNo(cssPhase2eOptionEvidence) +
         "; evidence=" + summarizeText(cssPhase2eReportLine("Current Document.CSS computed style evidence="), 3200));
 
+    bool cssPhase2fLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2f.html");
+    const std::string cssPhase2fUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    const std::string cssPhase2fText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool phase2fInitialState =
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-a") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-radio") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-other-form-radio");
+    const bool phase2fCheckboxClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-checkbox") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox");
+    const bool phase2fDisabledCheckbox =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-disabled-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-checkbox");
+    const bool phase2fRadioBClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-radio-b");
+    const bool phase2fRadioClick =
+        phase2fRadioBClick &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-a") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-radio") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-other-form-radio");
+    const int radioBActivationsBeforeStable = gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-radio-b");
+    const bool phase2fCheckedRadioStable =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-radio-b") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-radio-b") == radioBActivationsBeforeStable + 1;
+    const bool phase2fNamelessFallback =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-nameless-a") &&
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-nameless-b") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-nameless-a") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-nameless-b");
+    const bool phase2fLabelActivation =
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-checkbox-label") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-wrapping-label") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-wrapped-checkbox");
+    const int wrappedBeforeNestedClick = gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-wrapped-checkbox");
+    const bool phase2fNestedControlDedup =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-wrapped-checkbox") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-wrapped-checkbox") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-wrapped-checkbox") == wrappedBeforeNestedClick + 1;
+    const bool phase2fDisabledLabel =
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-disabled-checkbox-label") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-checkbox");
+    const bool phase2fMalformedLabels =
+        !gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-missing-label") &&
+        !gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-duplicate-label") &&
+        !gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-unrelated-label");
+    const int buttonActivationBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-button");
+    const bool phase2fButtonClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-button");
+    const bool phase2fInputButtonClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-input-button");
+    const bool phase2fSubmitClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-submit");
+    const bool phase2fResetClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-reset");
+    const bool phase2fInertButtons =
+        phase2fButtonClick && phase2fInputButtonClick && phase2fSubmitClick && phase2fResetClick &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-button") == buttonActivationBefore + 1 &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2fUrl;
+    const bool phase2fDisabledButton =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-disabled-button") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-disabled-button") == 0;
+    const std::string cssPhase2fReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 2F bounded fixture loads",
+        cssPhase2fLoaded && cssPhase2fUrl == "http://127.0.0.1:8080/navigator-smoke/css-phase2f.html" &&
+        contains(cssPhase2fText, "Phase 2F Session Local Forms") &&
+        contains(cssPhase2fText, "Wrapping label checkbox") &&
+        contains(cssPhase2fText, "Inert button") &&
+        !contains(cssPhase2fText, "phase2f-secret"),
+        "currentUrl=" + cssPhase2fUrl);
+    add("CSS phase 2F checkbox and disabled behavior",
+        phase2fInitialState && phase2fCheckboxClick && phase2fDisabledCheckbox,
+        std::string("initial=") + yesNo(phase2fInitialState) + ",toggle=" + yesNo(phase2fCheckboxClick) +
+        ",disabled=" + yesNo(phase2fDisabledCheckbox));
+    add("CSS phase 2F radio groups and nameless fallback",
+        phase2fRadioClick && phase2fCheckedRadioStable && phase2fNamelessFallback,
+        std::string("radio=") + yesNo(phase2fRadioClick) + ",click=" + yesNo(phase2fRadioBClick) +
+        ",b=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b")) +
+        ",a=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-a")) +
+        ",disabled=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-radio")) +
+        ",other-form=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-other-form-radio")) +
+        ",stable=" + yesNo(phase2fCheckedRadioStable) + ",nameless=" + yesNo(phase2fNamelessFallback));
+    add("CSS phase 2F label association and deduplication",
+        phase2fLabelActivation && phase2fNestedControlDedup && phase2fDisabledLabel && phase2fMalformedLabels,
+        std::string("labels=") + yesNo(phase2fLabelActivation) + ",nested-dedup=" + yesNo(phase2fNestedControlDedup) +
+        ",disabled=" + yesNo(phase2fDisabledLabel) + ",malformed=" + yesNo(phase2fMalformedLabels));
+    add("CSS phase 2F inert buttons preserve URL and reset semantics",
+        phase2fInertButtons && phase2fDisabledButton,
+        std::string("inert=") + yesNo(phase2fInertButtons) + ",button=" + yesNo(phase2fButtonClick) +
+        ",input-button=" + yesNo(phase2fInputButtonClick) + ",submit=" + yesNo(phase2fSubmitClick) +
+        ",reset=" + yesNo(phase2fResetClick) + ",count-before=" + std::to_string(buttonActivationBefore) +
+        ",count-after=" + std::to_string(gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-button")) +
+        ",url-same=" + yesNo(gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2fUrl) +
+        ",disabled=" + yesNo(phase2fDisabledButton));
+    add("CSS phase 2F hit targets and mouse release safety",
+        gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-checkbox") &&
+        !gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-hidden") &&
+        gxos::apps::Navigator::SmokeFormMouseSafetyById("phase2f-checkbox"),
+        std::string("checkbox-target=") + yesNo(gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-checkbox")) +
+        ",hidden-target=" + yesNo(gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-hidden")));
+    add("CSS phase 2F live state diagnostics and cascade evidence",
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_runtime_controls_initialized=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_checkbox_toggles=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_radio_group_unchecks=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_label_activations=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_button_activations=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.css_checked_runtime_recomputations=") &&
+        contains(cssPhase2fReport, "id=phase2f-important") &&
+        contains(cssPhase2fReport, "radio-group-hash=") &&
+        contains(cssPhase2fReport, "runtime-activation-count="),
+        "report=" + summarizeText(cssPhase2fReport, 3600));
+    const bool phase2fReloaded = gxos::apps::Navigator::SmokeReloadCurrentDocument();
+    add("CSS phase 2F reload resets session-local state",
+        phase2fReloaded && !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-a") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-checkbox") == 0,
+        std::string("reloaded=") + yesNo(phase2fReloaded));
+
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
     std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();

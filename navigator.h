@@ -235,6 +235,21 @@ struct NavigatorPageMetadata {
 		int         formControlsRendered = 0;
 		int         formControlsUnsupported = 0;
 		int         formInteractionsDeferred = 0;
+		int         formRuntimeControlsInitialized = 0;
+		int         formCheckboxActivations = 0;
+		int         formCheckboxToggles = 0;
+		int         formRadioActivations = 0;
+		int         formRadioGroupUnchecks = 0;
+		int         formLabelActivations = 0;
+		int         formButtonActivations = 0;
+		int         formDisabledActivationBlocks = 0;
+		int         formHiddenHitTargetsSuppressed = 0;
+		int         formDuplicateActivationSuppressed = 0;
+		int         formRuntimeStateResets = 0;
+		int         formHitTargetsRegistered = 0;
+		int         formHitTargetClamps = 0;
+		int         cssCheckedRuntimeRecomputations = 0;
+		std::string formInteractionMode = "session_local_non_submitting";
 	bool        unsupportedFormMethod = false;
 	bool        unsupportedFormEncoding = false;
 	bool        postSupportedHosted = true;
@@ -271,6 +286,14 @@ public:
 	static int SmokeCurrentBlockCount();
 	static std::string SmokeCurrentDocumentText();
 	static std::string SmokeCurrentLinkUrl(const std::string& text);
+	static bool SmokeClickFormControlById(const std::string& id);
+	static bool SmokeClickFormLabelById(const std::string& id);
+	static bool SmokeFormControlCheckedById(const std::string& id);
+	static bool SmokeFormControlDisabledById(const std::string& id);
+	static bool SmokeFormHitTargetById(const std::string& id);
+	static int SmokeFormActivationCountById(const std::string& id);
+	static bool SmokeFormMouseSafetyById(const std::string& id);
+	static bool SmokeReloadCurrentDocument();
 	// Returns the widget IDs registered with the compositor toolbar.
 	// Used by hosted smoke to verify the full modern toolbar (7 buttons) is
 	// present and that the old stale four-button placeholder is not active.
@@ -326,6 +349,7 @@ private:
 		FormTextarea,
 		FormSelect,
 		FormSubmit,
+		FormLabel,
 	};
 
 	enum class MouseMode : uint8_t {
@@ -412,6 +436,22 @@ private:
 	static bool isFocusableFormControl(const DocBlock& block);
 	static int formControlHeight(const DocBlock& block);
 	static void activateFormControl(int blockIndex);
+	static void initializeFormRuntimeState();
+	static void recomputeFormControlStyles();
+	static void clearMousePressState();
+	static bool isRuntimeFormControl(const DocBlock& block);
+	static bool isRuntimeCheckable(const DocBlock& block);
+	static bool isRuntimeButton(const DocBlock& block);
+	static bool runtimeChecked(const DocBlock& block);
+	static bool runtimeDisabled(const DocBlock& block);
+	static gxos::web::FormRuntimeControlState* runtimeStateForBlock(DocBlock& block);
+	static const gxos::web::FormRuntimeControlState* runtimeStateForBlock(const DocBlock& block);
+	static int findBlockById(const std::string& id, bool labelOnly);
+	static uint64_t associatedControlSerialForLabel(const DocBlock& label);
+	static int blockIndexForControlSerial(uint64_t serial);
+	static bool radioGroupMatches(const DocBlock& left, const DocBlock& right);
+	static bool activateLabelBlock(int blockIndex);
+	static bool smokeClickBlock(int blockIndex, bool label);
 	static void openFindMode();
 	static void closeFindMode();
 	static void updateFindMatches(bool keepCurrent);
