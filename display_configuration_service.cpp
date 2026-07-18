@@ -199,6 +199,7 @@ void prepareResponse(const DisplayConfigurationCommand& command,
     response.commandType = command.commandType;
     response.validationResult = static_cast<uint32_t>(DisplayConfigurationValidationResult::NotRun);
     response.presentationResumed = 1u;
+    response.activeConfigurationGeneration = 1u;
 }
 
 void completeResponse(DisplayConfigurationResponse& response,
@@ -258,6 +259,14 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
         std::strncpy(response.diagnostic, "display configuration command is invalid", sizeof(response.diagnostic) - 1);
         return false;
     }
+    if (displayConfigurationCommandRequiresTopologyGeneration(command.commandType) &&
+        (command.topologyGeneration == 0u || command.activeConfigurationGeneration == 0u)) {
+        response.accepted = 0u;
+        response.completed = 1u;
+        response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::TopologyGenerationStale);
+        std::strncpy(response.diagnostic, "TopologyGenerationStale: topology and active generations are required", sizeof(response.diagnostic) - 1);
+        return false;
+    }
     if (s_busy.exchange(true, std::memory_order_acq_rel)) {
         response.accepted = 0u;
         response.completed = 1u;
@@ -289,12 +298,19 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                 ? static_cast<uint32_t>(DisplayConfigurationResultCode::Success)
                 : static_cast<uint32_t>(DisplayConfigurationResultCode::BackendUnavailable);
             std::strncpy(response.diagnostic, response.success ? "active configuration query complete" : "active configuration unavailable", sizeof(response.diagnostic) - 1);
-        } else if (commandType == DisplayConfigurationCommandType::QueryDetectedTopologyChange) {
+        } else if (commandType == DisplayConfigurationCommandType::QueryDetectedTopologyChange ||
+                   commandType == DisplayConfigurationCommandType::QueryPendingTopologyChange) {
             response.detectedTopologyChange = DisplayTopologyChangeQuery{};
             response.detectedTopologyChange.structureSize = sizeof(DisplayTopologyChangeQuery);
             response.success = 1u;
             response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::Success);
             std::strncpy(response.diagnostic, "detected topology query complete; no QEMU event observer is active", sizeof(response.diagnostic) - 1);
+        } else if (commandType == DisplayConfigurationCommandType::PreviewTopologyReconciliation ||
+                   commandType == DisplayConfigurationCommandType::ApplyPendingTopologyChange ||
+                   commandType == DisplayConfigurationCommandType::DismissPendingTopologyChange) {
+            response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::TopologyReconciliationUnavailable);
+            std::strncpy(response.diagnostic, "QEMU-only topology reconciliation is unavailable on hosted backend", sizeof(response.diagnostic) - 1);
+            accepted = false;
         } else if (commandType == DisplayConfigurationCommandType::RefreshDetectedTopology) {
             response.detectedTopologyChange = DisplayTopologyChangeQuery{};
             response.detectedTopologyChange.structureSize = sizeof(DisplayTopologyChangeQuery);
@@ -396,7 +412,8 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                 " virtualDesktop=" + std::to_string(response.activeConfiguration.virtualDesktopWidth) + "x" + std::to_string(response.activeConfiguration.virtualDesktopHeight));
         }
         if (commandType == DisplayConfigurationCommandType::ApplyConfiguration ||
-            commandType == DisplayConfigurationCommandType::RestoreLastKnownGood) {
+            commandType == DisplayConfigurationCommandType::RestoreLastKnownGood ||
+            commandType == DisplayConfigurationCommandType::ApplyPendingTopologyChange) {
             std::lock_guard<std::mutex> stateLock(s_stateMutex);
             s_lastApplyResponse = response;
         }
@@ -468,6 +485,9 @@ const char* DisplayConfigurationService::resultCodeName(uint32_t resultCode)
     case DisplayConfigurationResultCode::RollbackFailed: return "RollbackFailed";
     case DisplayConfigurationResultCode::QemuOnlyGateRequired: return "QemuOnlyGateRequired";
     case DisplayConfigurationResultCode::UnsupportedBackend: return "UnsupportedBackend";
+    case DisplayConfigurationResultCode::TopologyGenerationStale: return "TopologyGenerationStale";
+    case DisplayConfigurationResultCode::TopologyReconciliationUnavailable: return "TopologyReconciliationUnavailable";
+    case DisplayConfigurationResultCode::LocalConfigurationConflict: return "LocalConfigurationConflict";
     default: return "Unknown";
     }
 }

@@ -517,6 +517,8 @@ bool read_virtio_gpu_config_snapshot(GpuDevice* dev, VirtioGpuConfigSnapshot* sn
 bool query_detected_topology_change(gxos::display::DisplayTopologyChangeQuery* query);
 bool refresh_detected_topology_for_service();
 bool inject_display_topology_change_for_test(uint32_t kind);
+bool dismiss_detected_topology_for_service(uint32_t topologyGeneration);
+bool apply_detected_topology_for_service(uint32_t topologyGeneration);
 void get_display_event_observer_status(VirtioGpuDisplayEventObserverStatus* status);
 
 // ================================================================

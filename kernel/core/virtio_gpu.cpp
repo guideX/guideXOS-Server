@@ -394,6 +394,7 @@ struct LivePresentationBackendState {
     uint64_t backingPageCount{0};
     uint32_t selectedWidth{0};
     uint32_t selectedHeight{0};
+    uint32_t activeOutputCount{0};
     uint32_t virtualDesktopWidth{0};
     uint32_t virtualDesktopHeight{0};
     uint32_t bytesPerPixel{0};
@@ -468,6 +469,7 @@ struct VirtioGpuOutputRebuildPlan {
     bool prepared{false};
     bool attached{false};
     bool scanoutBound{false};
+    bool scanoutUnbound{false};
     bool validationPresented{false};
     bool committed{false};
 };
@@ -4085,7 +4087,8 @@ static VirtioGpuDisplayTopologyChange diff_detected_topologies(
     const VirtioGpuDetectedTopologySnapshot& oldTopology,
     const VirtioGpuDetectedTopologySnapshot& newTopology,
     bool injectedEvent,
-    bool reasserted)
+    bool reasserted,
+    bool genuineDeviceEvent)
 {
     VirtioGpuDisplayTopologyChange change{};
     change.version = gxos::display::kVirtioGpuDisplayEventRecordVersion;
@@ -4095,6 +4098,10 @@ static VirtioGpuDisplayTopologyChange diff_detected_topologies(
     change.newScanoutCount = newTopology.numScanouts;
     change.injectedEvent = injectedEvent ? 1u : 0u;
     change.reasserted = reasserted ? 1u : 0u;
+    change.genuineDeviceEvent = genuineDeviceEvent ? 1u : 0u;
+    change.injectedTopologyGeneration = newTopology.configGeneration;
+    copy_event_text(change.source, sizeof(change.source), injectedEvent ? "injected-test" :
+        (genuineDeviceEvent ? "virtio-gpu-device-event" : "explicit-refresh"));
 
     for (uint32_t i = 0u; i < oldTopology.outputCount && i < gxos::display::kVirtioGpuDisplayEventMaxScanouts; ++i) {
         const VirtioGpuDetectedOutput& oldOutput = oldTopology.outputs[i];
@@ -4135,6 +4142,15 @@ static VirtioGpuDisplayTopologyChange diff_detected_topologies(
     change.requiresLayoutReconciliation = hasAddRemove ? 1u : 0u;
     change.metadataOnly = (!hasAddRemove && !change.activeConfigurationAffected) ? 1u : 0u;
     change.supportedAutomatically = 0u;
+    change.changeType = hasAddRemove
+        ? (change.addedOutputCount != 0u && change.removedOutputCount != 0u
+            ? static_cast<uint32_t>(gxos::display::VirtioGpuTopologyChangeType::Mixed)
+            : change.addedOutputCount != 0u
+                ? static_cast<uint32_t>(gxos::display::VirtioGpuTopologyChangeType::OutputAddition)
+                : static_cast<uint32_t>(gxos::display::VirtioGpuTopologyChangeType::OutputRemoval))
+        : (change.changedOutputCount != 0u
+            ? static_cast<uint32_t>(gxos::display::VirtioGpuTopologyChangeType::MetadataOnly)
+            : static_cast<uint32_t>(gxos::display::VirtioGpuTopologyChangeType::None));
 
     if (change.removedOutputCount != 0u) {
         copy_event_text(change.classification, sizeof(change.classification), "potential-topology-removal");
@@ -4165,6 +4181,12 @@ static VirtioGpuDisplayTopologyChange diff_detected_topologies(
         copy_event_text(change.recommendedAction, sizeof(change.recommendedAction), "No action required");
         copy_event_text(change.reason, sizeof(change.reason), "GET_DISPLAY_INFO topology matched the previous snapshot");
     }
+    if (injectedEvent) {
+        copy_event_text(change.injectedChangeType, sizeof(change.injectedChangeType),
+            change.addedOutputCount != 0u ? "output-addition" :
+            change.removedOutputCount != 0u ? "output-removal" :
+            change.preferredGeometryChangeCount != 0u ? "preferred-geometry" : "connector-state");
+    }
     return change;
 }
 
@@ -4172,12 +4194,16 @@ static void publish_detected_topology_change(
     const VirtioGpuDetectedTopologySnapshot& oldTopology,
     const VirtioGpuDetectedTopologySnapshot& newTopology,
     bool injectedEvent,
-    bool reasserted)
+    bool reasserted,
+    bool genuineDeviceEvent = false)
 {
     VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
-    observer.pendingChange = diff_detected_topologies(oldTopology, newTopology, injectedEvent, reasserted);
+    observer.pendingChange = diff_detected_topologies(oldTopology, newTopology, injectedEvent, reasserted, genuineDeviceEvent);
     observer.detectedTopology = newTopology;
     observer.topologyGeneration = observer.topologyGeneration == 0u ? 1u : observer.topologyGeneration + 1u;
+    observer.pendingChange.dismissed = 0u;
+    observer.pendingChange.acknowledged = 0u;
+    observer.pendingChange.applied = 0u;
     observer.pendingTopologyChange = observer.pendingChange.addedOutputCount != 0u ||
         observer.pendingChange.removedOutputCount != 0u ||
         observer.pendingChange.changedOutputCount != 0u;
@@ -4260,7 +4286,7 @@ static bool process_pending_display_rescan(DeviceState& state, uint64_t now)
     }
 
     const VirtioGpuDetectedTopologySnapshot oldTopology = observer.detectedTopology;
-    publish_detected_topology_change(oldTopology, newTopology, false, false);
+    publish_detected_topology_change(oldTopology, newTopology, false, false, true);
     VirtioGpuConfigSnapshot afterClear{};
     const bool clearRereadOk = clear_display_event_bit(state, afterClear);
     const bool reasserted = clearRereadOk && (afterClear.eventsRead & VIRTIO_GPU_EVENT_DISPLAY) != 0u;
@@ -4844,6 +4870,52 @@ static bool issue_set_scanout(DeviceState& state,
     if (completionKnownOut != nullptr) {
         *completionKnownOut = true;
     }
+    return true;
+}
+
+// VirtIO-GPU clears a scanout by issuing SET_SCANOUT with resourceId=0 and a
+// zero rectangle. This is used only inside the explicit QEMU reconciliation
+// transaction; event observation never calls it.
+static bool issue_clear_scanout(DeviceState& state,
+                                uint32_t scanoutId,
+                                const char** failureReasonOut,
+                                bool* completionKnownOut)
+{
+    ModernTransport& transport = state.transport;
+    if (failureReasonOut != nullptr) *failureReasonOut = nullptr;
+    if (completionKnownOut != nullptr) *completionKnownOut = false;
+    if (scanoutId > 1u) {
+        if (failureReasonOut != nullptr) *failureReasonOut = "scanout id is not permitted";
+        return false;
+    }
+    memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
+    memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
+    SetScanout* request = reinterpret_cast<SetScanout*>(&s_commandBuffer[0]);
+    request->header.type = CMD_SET_SCANOUT;
+    request->header.flags = 0u;
+    request->header.fenceId = 0u;
+    request->header.ctxId = 0u;
+    request->header.padding = 0u;
+    request->rect.x = 0u;
+    request->rect.y = 0u;
+    request->rect.width = 0u;
+    request->rect.height = 0u;
+    request->scanoutId = scanoutId;
+    request->resourceId = 0u;
+    const char* submitReason = nullptr;
+    bool completionKnown = false;
+    if (!submit_control_command_sync(transport, "SET_SCANOUT clear", CMD_SET_SCANOUT,
+                                     request, sizeof(SetScanout), &s_responseBuffer[0],
+                                     sizeof(CtrlHeader), RESP_OK_NODATA, &submitReason,
+                                     &completionKnown)) {
+        if (failureReasonOut != nullptr) *failureReasonOut = submitReason;
+        if (completionKnownOut != nullptr) *completionKnownOut = completionKnown;
+        return false;
+    }
+    if (completionKnownOut != nullptr) *completionKnownOut = true;
+    kernel::serial::puts("[VIRTIO-GPU] SET_SCANOUT clear result=ok scanoutId=");
+    serial_put_u32_decimal(scanoutId);
+    kernel::serial::puts(" resourceRetention=rollback-safe\n");
     return true;
 }
 
@@ -5548,6 +5620,7 @@ static bool initialize_device(DeviceState& state)
             s_livePresentation.stoppedReason = liveResourcesReady ? "awaiting-scheduler" : "initial-frame-failed";
             s_livePresentation.resource0 = resource1;
             s_livePresentation.resource1 = resource2;
+            s_livePresentation.activeOutputCount = 2u;
             s_livePresentation.backing0 = &s_diagnosticBackingStorage0[0];
             s_livePresentation.backing1 = &s_diagnosticBackingStorage1[0];
             s_livePresentation.backingPhysical0 = primaryBackingPhysical;
@@ -6558,7 +6631,15 @@ bool query_detected_topology_change(gxos::display::DisplayTopologyChangeQuery* q
     query->activeConfigurationAffected = observer.pendingChange.activeConfigurationAffected;
     query->automaticApplyPerformed = 0u;
     query->injectedEvent = observer.pendingChange.injectedEvent;
+    query->genuineDeviceEvent = observer.pendingChange.genuineDeviceEvent;
+    query->requiresUserAction = observer.pendingTopologyChange ? 1u : 0u;
+    query->acknowledged = observer.pendingChange.acknowledged;
+    query->dismissed = observer.pendingChange.dismissed;
+    query->applied = observer.pendingChange.applied;
+    query->metadataOnly = observer.pendingChange.metadataOnly;
     query->topologyGeneration = observer.topologyGeneration;
+    query->injectedTopologyGeneration = observer.pendingChange.injectedTopologyGeneration;
+    query->changeType = observer.pendingChange.changeType;
     query->addedOutputCount = observer.pendingChange.addedOutputCount;
     query->removedOutputCount = observer.pendingChange.removedOutputCount;
     query->changedOutputCount = observer.pendingChange.changedOutputCount;
@@ -6567,6 +6648,14 @@ bool query_detected_topology_change(gxos::display::DisplayTopologyChangeQuery* q
     copy_event_text(query->classification, sizeof(query->classification), observer.pendingChange.classification);
     copy_event_text(query->recommendedAction, sizeof(query->recommendedAction), observer.pendingChange.recommendedAction);
     copy_event_text(query->reason, sizeof(query->reason), observer.pendingChange.reason);
+    copy_event_text(query->source, sizeof(query->source), observer.pendingChange.source);
+    copy_event_text(query->injectedChangeType, sizeof(query->injectedChangeType), observer.pendingChange.injectedChangeType);
+    for (uint32_t i = 0u; i < gxos::display::kVirtioGpuDisplayEventMaxScanouts; ++i) {
+        copy_event_text(query->addedOutputIdentities[i], sizeof(query->addedOutputIdentities[i]),
+                        observer.pendingChange.addedOutputIdentities[i]);
+        copy_event_text(query->removedOutputIdentities[i], sizeof(query->removedOutputIdentities[i]),
+                        observer.pendingChange.removedOutputIdentities[i]);
+    }
     return observer.initialized && observer.enabled;
 }
 
@@ -6589,6 +6678,48 @@ bool inject_display_topology_change_for_test(uint32_t kind)
     return false;
 #else
     return inject_display_topology_change_internal(kind);
+#endif
+}
+
+bool dismiss_detected_topology_for_service(uint32_t topologyGeneration)
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+    (void)topologyGeneration;
+    return false;
+#else
+    VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    if (!observer.initialized || !observer.enabled || !observer.pendingTopologyChange ||
+        topologyGeneration == 0u || topologyGeneration != observer.topologyGeneration) return false;
+    observer.pendingTopologyChange = false;
+    observer.pendingChange.acknowledged = 1u;
+    observer.pendingChange.dismissed = 1u;
+    observer.pendingChange.applied = 0u;
+    kernel::serial::puts("VirtioGPU pending topology dismissed: generation=");
+    serial_put_u32_decimal(topologyGeneration);
+    kernel::serial::puts(" activeMutation=no automaticApply=no injectedEvent=");
+    kernel::serial::puts(observer.pendingChange.injectedEvent ? "yes\n" : "no\n");
+    return true;
+#endif
+}
+
+bool apply_detected_topology_for_service(uint32_t topologyGeneration)
+{
+#if !defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) || !defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_EVENTS_ACTIVE)
+    (void)topologyGeneration;
+    return false;
+#else
+    VirtioGpuDisplayEventObserver& observer = s_displayEventObserver;
+    if (!observer.initialized || !observer.enabled || !observer.pendingTopologyChange ||
+        topologyGeneration == 0u || topologyGeneration != observer.topologyGeneration) return false;
+    observer.pendingTopologyChange = false;
+    observer.pendingChange.acknowledged = 1u;
+    observer.pendingChange.applied = 1u;
+    observer.pendingChange.dismissed = 0u;
+    kernel::serial::puts("VirtioGPU pending topology applied: generation=");
+    serial_put_u32_decimal(topologyGeneration);
+    kernel::serial::puts(" activeMutation=authorized automaticApply=no injectedEvent=");
+    kernel::serial::puts(observer.pendingChange.injectedEvent ? "yes\n" : "no\n");
+    return true;
 #endif
 }
 
@@ -6840,7 +6971,9 @@ void presentation_tick()
         live.lastPresentationTicks = now;
         live.lastDirtyGeneration = kernel::desktop::redraw_generation();
         live.initialFrameReadyLogged = true;
-        kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation configured: enabled=yes outputs=2 frameCap=");
+        kernel::serial::puts("[VIRTIO-GPU] VirtioGPU live presentation configured: enabled=yes outputs=");
+        serial_put_u32_decimal(live.activeOutputCount);
+        kernel::serial::puts(" frameCap=");
         serial_put_u32_decimal(live.configuredFrameCap);
         kernel::serial::puts(" frameLimit=");
         serial_put_u32_decimal(live.boundedRunLimit);
@@ -6988,19 +7121,23 @@ void presentation_tick()
                                                                live.target0FlushCount,
                                                                live.target0Failures,
                                                                live.target0FailureStreak);
-    CompositorFrameTargetResult target1Result = render_target(1u,
-                                                               live.target1,
-                                                               live.resource1,
-                                                               live.backing1,
-                                                               live.backingPhysical1,
-                                                               diagnostic_pattern_palette(1u),
-                                                               live.target1TransferCount,
-                                                               live.target1FlushCount,
-                                                               live.target1Failures,
-                                                               live.target1FailureStreak);
+    CompositorFrameTargetResult target1Result{};
+    if (live.activeOutputCount > 1u && live.resource1.resourceId != 0u) {
+        target1Result = render_target(1u,
+                                      live.target1,
+                                      live.resource1,
+                                      live.backing1,
+                                      live.backingPhysical1,
+                                      diagnostic_pattern_palette(1u),
+                                      live.target1TransferCount,
+                                      live.target1FlushCount,
+                                      live.target1Failures,
+                                      live.target1FailureStreak);
+    }
 
     const bool target0Presented = target0Result.renderOk && target0Result.transferOk && target0Result.flushOk;
-    const bool target1Presented = target1Result.renderOk && target1Result.transferOk && target1Result.flushOk;
+    const bool target1Presented = live.activeOutputCount <= 1u ||
+        (target1Result.renderOk && target1Result.transferOk && target1Result.flushOk);
     if (target0Presented || target1Presented) {
         ++live.framesRendered;
         live.lastPresentedFrame = frameSequence;
@@ -7209,7 +7346,7 @@ static void refresh_backend_inventory_from_live(uint32_t mode)
 {
     FixedList<VirtioGpuScanoutState, kVirtioGpuMaxOutputs> scanouts;
     const VirtioGpuOutputInventory oldInventory = s_probeOutcome.outputInventory;
-    for (uint32_t i = 0u; i < 2u; ++i) {
+    for (uint32_t i = 0u; i < s_livePresentation.activeOutputCount; ++i) {
         const DiagnosticResourceState& resource = i == 0u ? s_livePresentation.resource0 : s_livePresentation.resource1;
         const LivePresentationTargetDescriptor& target = i == 0u ? s_livePresentation.target0 : s_livePresentation.target1;
         if (resource.resourceId == 0u) continue;
@@ -7220,6 +7357,10 @@ static void refresh_backend_inventory_from_live(uint32_t mode)
             preferred.width = static_cast<uint32_t>(oldInventory.monitors[i].preferredWidth);
             preferred.height = static_cast<uint32_t>(oldInventory.monitors[i].preferredHeight);
             preferred.enabled = oldInventory.monitors[i].connectorEnabled;
+        } else {
+            preferred.enabled = true;
+            preferred.width = static_cast<uint32_t>(target.width);
+            preferred.height = static_cast<uint32_t>(target.height);
         }
         scanouts.push_back(make_scanout_state(
             i,
@@ -7274,6 +7415,7 @@ static void refresh_backend_inventory_from_live(uint32_t mode)
 }
 
 static void update_backend_layout(uint32_t mode, uint32_t primaryOrdinal,
+                                  uint32_t outputCount,
                                   uint32_t width0, uint32_t height0,
                                   uint32_t width1, uint32_t height1)
 {
@@ -7283,15 +7425,16 @@ static void update_backend_layout(uint32_t mode, uint32_t primaryOrdinal,
     s_livePresentation.target0.viewportOriginY = 0;
     s_livePresentation.target0.width = static_cast<int>(width0);
     s_livePresentation.target0.height = static_cast<int>(height0);
-    s_livePresentation.target1.viewportOriginX = origin1;
+    s_livePresentation.target1.viewportOriginX = outputCount > 1u ? origin1 : 0;
     s_livePresentation.target1.viewportOriginY = 0;
-    s_livePresentation.target1.width = static_cast<int>(width1);
-    s_livePresentation.target1.height = static_cast<int>(height1);
+    s_livePresentation.target1.width = outputCount > 1u ? static_cast<int>(width1) : 0;
+    s_livePresentation.target1.height = outputCount > 1u ? static_cast<int>(height1) : 0;
     s_livePresentation.target0.primary = primaryOrdinal == 0u;
-    s_livePresentation.target1.primary = primaryOrdinal == 1u;
+    s_livePresentation.target1.primary = outputCount > 1u && primaryOrdinal == 1u;
+    s_livePresentation.activeOutputCount = outputCount;
     s_livePresentation.virtualDesktopWidth = mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
-        ? width0 : width0 + width1;
-    s_livePresentation.virtualDesktopHeight = height0 > height1 ? height0 : height1;
+        ? width0 : (outputCount > 1u ? width0 + width1 : width0);
+    s_livePresentation.virtualDesktopHeight = outputCount > 1u && height1 > height0 ? height1 : height0;
     refresh_backend_inventory_from_live(mode);
 }
 
@@ -7306,7 +7449,7 @@ bool get_display_configuration_backend_snapshots(
     (void)active;
     return false;
 #else
-    if (detected == nullptr || active == nullptr || !s_probeOutcome.valid || !s_livePresentation.enabled || backend_output_count() < 2u) {
+    if (detected == nullptr || active == nullptr || !s_probeOutcome.valid || !s_livePresentation.enabled || backend_output_count() < 1u) {
         return false;
     }
     if (!s_detectedConfigurationSnapshotReady) {
@@ -7349,7 +7492,7 @@ bool apply_display_configuration_backend_layout(
     // REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
     // Physical backends: resolution changes are not supported. This bounded
     // resource rebuild is enabled only by the QEMU virtio-gpu probe gate.
-    if (!s_probeOutcome.valid || !s_livePresentation.enabled || backend_output_count() < 2u) {
+    if (!s_probeOutcome.valid || !s_livePresentation.enabled || backend_output_count() < 1u) {
         set_backend_diagnostic(*result, "virtio-gpu presentation backend unavailable");
         return false;
     }
@@ -7357,8 +7500,9 @@ bool apply_display_configuration_backend_layout(
         set_backend_diagnostic(*result, "presentation was not paused at the safe point");
         return false;
     }
-    if (requested.outputCount != 2u || requested.outputCount > gxos::display::kDisplayConfigurationMaxOutputs) {
-        set_backend_diagnostic(*result, "two operational outputs are required");
+    if (requested.outputCount == 0u || requested.outputCount > 2u ||
+        requested.outputCount > gxos::display::kDisplayConfigurationMaxOutputs) {
+        set_backend_diagnostic(*result, "one or two operational outputs are required");
         return false;
     }
     if (requested.mode != static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) &&
@@ -7384,7 +7528,7 @@ bool apply_display_configuration_backend_layout(
     uint64_t backingBytes[2]{};
     uint64_t totalBackingBytes = 0u;
 
-    for (uint32_t i = 0u; i < 2u; ++i) {
+    for (uint32_t i = 0u; i < requested.outputCount; ++i) {
         if (!requested_output_is(requested.outputs[i], i + 1u)) {
             set_backend_diagnostic(*result, "stable output id is unavailable");
             return false;
@@ -7429,29 +7573,32 @@ bool apply_display_configuration_backend_layout(
         plans[i].newHeight = heights[i];
     }
     if (requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) &&
+        requested.outputCount >= 2u &&
         (widths[0] != widths[1] || heights[0] != heights[1])) {
         set_backend_diagnostic(*result, "Mirror dimensions incompatible");
         return false;
     }
-    if (widths[0] > 0x7FFFFFFFu - (requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) ? 0u : widths[1])) {
+    if (widths[0] > 0x7FFFFFFFu - (requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) || requested.outputCount < 2u ? 0u : widths[1])) {
         set_backend_diagnostic(*result, "virtual desktop geometry overflow");
         return false;
     }
     const uint32_t primaryOrdinal = primary_output_from_request(requested);
-    if (primaryOrdinal >= 2u) {
+    if (primaryOrdinal >= requested.outputCount) {
         set_backend_diagnostic(*result, "primary output is unavailable");
         return false;
     }
-    const uint32_t virtualDesktopWidth = requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
+    const uint32_t virtualDesktopWidth = requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror) || requested.outputCount < 2u
         ? widths[0] : widths[0] + widths[1];
-    const uint32_t virtualDesktopHeight = heights[0] > heights[1] ? heights[0] : heights[1];
+    const uint32_t virtualDesktopHeight = requested.outputCount < 2u || heights[0] > heights[1] ? heights[0] : heights[1];
     const int originX[2] = { 0, requested.mode == static_cast<uint32_t>(gxos::display::DisplayConfigurationMode::Mirror)
         ? 0 : static_cast<int>(widths[0]) };
     const int originY[2] = { 0, 0 };
-    for (uint32_t i = 0u; i < 2u; ++i) {
+    for (uint32_t i = 0u; i < requested.outputCount; ++i) {
         plans[i].targetOriginX = originX[i];
         plans[i].targetOriginY = originY[i];
         candidateTargets[i] = oldTargets[i];
+        candidateTargets[i].targetIndex = i + 1u;
+        candidateTargets[i].scanoutId = i;
         candidateTargets[i].viewportOriginX = originX[i];
         candidateTargets[i].viewportOriginY = originY[i];
         candidateTargets[i].width = widths[i];
@@ -7464,6 +7611,18 @@ bool apply_display_configuration_backend_layout(
             plans[i].newBackingPages = oldResources[i].backingPageCount;
             plans[i].newBackingMemEntries = oldResources[i].memEntryCount;
         }
+    }
+    for (uint32_t i = requested.outputCount; i < 2u; ++i) {
+        candidateResources[i] = DiagnosticResourceState{};
+        candidateBacking[i] = nullptr;
+        candidatePhysical[i] = 0u;
+        candidateTargets[i] = LivePresentationTargetDescriptor{};
+        plans[i].outputIdentity = i + 1u;
+        plans[i].scanoutId = i;
+        plans[i].oldResourceId = oldResources[i].resourceId;
+        plans[i].oldWidth = oldResources[i].width;
+        plans[i].oldHeight = oldResources[i].height;
+        plans[i].newResourceId = 0u;
     }
     if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectValidationFailure) != 0u) {
         set_backend_diagnostic(*result, "injected-validation-failure");
@@ -7493,6 +7652,7 @@ bool apply_display_configuration_backend_layout(
     const char* failureReason = nullptr;
     bool completionKnown = false;
     for (uint32_t i = 0u; i < 2u && prepareOk; ++i) {
+        if (i >= requested.outputCount) continue;
         if (plans[i].newResourceId != 0u && plans[i].newResourceId == oldResources[i].resourceId) {
             continue;
         }
@@ -7593,7 +7753,7 @@ bool apply_display_configuration_backend_layout(
     s_liveCommandLoggingSuppressed = true;
     const uint64_t validationSequence = ++s_livePresentation.frameSequence;
     bool validationOk = true;
-    for (uint32_t i = 0u; i < 2u && validationOk; ++i) {
+    for (uint32_t i = 0u; i < requested.outputCount && validationOk; ++i) {
         if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectValidationFrameFailure) != 0u && i == 1u) {
             failureReason = "injected validation-frame failure";
             validationOk = false;
@@ -7622,7 +7782,15 @@ bool apply_display_configuration_backend_layout(
     // Bind replacements only after all independent backing stores have been
     // verified and presented. The old resources remain alive for rollback.
     bool bindOk = true;
-    for (uint32_t i = 0u; i < 2u && bindOk; ++i) {
+    for (uint32_t i = requested.outputCount; i < 2u && bindOk; ++i) {
+        if (oldResources[i].resourceId == 0u) continue;
+        if (!issue_clear_scanout(*s_livePresentation.device, i, &failureReason, &completionKnown)) {
+            bindOk = false;
+            break;
+        }
+        plans[i].scanoutUnbound = true;
+    }
+    for (uint32_t i = 0u; i < requested.outputCount && bindOk; ++i) {
         if (plans[i].newResourceId == oldResources[i].resourceId) continue;
         if ((failureInjectionFlags & gxos::display::DisplayConfigurationFlagTestInjectSetScanoutFailure) != 0u && i == 1u) {
             failureReason = "injected SET_SCANOUT response failure";
@@ -7639,10 +7807,14 @@ bool apply_display_configuration_backend_layout(
     if (!bindOk) {
         bool restored = true;
         for (uint32_t i = 0u; i < 2u; ++i) {
-            if (plans[i].scanoutBound) {
-                if (!issue_set_scanout(*s_livePresentation.device, oldResources[i], i,
-                                       oldResources[i].width, oldResources[i].height,
-                                       &failureReason, &completionKnown)) restored = false;
+            if (plans[i].scanoutBound || plans[i].scanoutUnbound) {
+                if (oldResources[i].resourceId != 0u) {
+                    if (!issue_set_scanout(*s_livePresentation.device, oldResources[i], i,
+                                           oldResources[i].width, oldResources[i].height,
+                                           &failureReason, &completionKnown)) restored = false;
+                } else if (!issue_clear_scanout(*s_livePresentation.device, i, &failureReason, &completionKnown)) {
+                    restored = false;
+                }
             }
         }
         s_liveCommandLoggingSuppressed = true;
@@ -7673,7 +7845,7 @@ bool apply_display_configuration_backend_layout(
     // target inventory. This closes the old/new target mixing window.
     s_liveCommandLoggingSuppressed = true;
     bool postBindOk = true;
-    for (uint32_t i = 0u; i < 2u && postBindOk; ++i) {
+    for (uint32_t i = 0u; i < requested.outputCount && postBindOk; ++i) {
         const CompositorFrameTargetResult boundFrame = present_target_once(
             *s_livePresentation.device, make_live_target(candidateTargets[i]), candidateResources[i],
             candidateBacking[i], candidatePhysical[i], backingBytes[i], diagnostic_pattern_palette(i),
@@ -7691,8 +7863,14 @@ bool apply_display_configuration_backend_layout(
     if (!postBindOk) {
         bool restored = true;
         for (uint32_t i = 0u; i < 2u; ++i) {
-            if (plans[i].scanoutBound && !issue_set_scanout(*s_livePresentation.device, oldResources[i], i,
-                    oldResources[i].width, oldResources[i].height, &failureReason, &completionKnown)) restored = false;
+            if (plans[i].scanoutBound || plans[i].scanoutUnbound) {
+                if (oldResources[i].resourceId != 0u) {
+                    if (!issue_set_scanout(*s_livePresentation.device, oldResources[i], i,
+                            oldResources[i].width, oldResources[i].height, &failureReason, &completionKnown)) restored = false;
+                } else if (!issue_clear_scanout(*s_livePresentation.device, i, &failureReason, &completionKnown)) {
+                    restored = false;
+                }
+            }
         }
         s_liveCommandLoggingSuppressed = true;
         for (uint32_t i = 0u; i < 2u && restored; ++i) {
@@ -7734,13 +7912,15 @@ bool apply_display_configuration_backend_layout(
         ? candidateResources[0].backingPageCount : candidateResources[1].backingPageCount;
     s_displayConfigurationMode = requested.mode;
     s_displayConfigurationPrimaryOutput = s_probeOutcome.outputInventory.monitors[primaryOrdinal].scanoutId;
-    update_backend_layout(requested.mode, primaryOrdinal, widths[0], heights[0], widths[1], heights[1]);
+    update_backend_layout(requested.mode, primaryOrdinal, requested.outputCount,
+                          widths[0], heights[0], widths[1], heights[1]);
     result->targetRebuilt = 1u;
     result->validationFrame = 1u;
 
     bool cleanupOk = true;
     for (uint32_t i = 0u; i < 2u; ++i) {
         if (plans[i].newResourceId == oldResources[i].resourceId) continue;
+        if (oldResources[i].resourceId == 0u) continue;
         const char* cleanupReason = nullptr;
         bool cleanupKnown = false;
         if (!issue_resource_unref(*s_livePresentation.device, oldResources[i], &cleanupReason, &cleanupKnown)) {
@@ -7781,7 +7961,9 @@ bool apply_display_configuration_backend_layout(
     serial_put_u32_decimal(virtualDesktopWidth);
     kernel::serial::putc('x');
     serial_put_u32_decimal(virtualDesktopHeight);
-    kernel::serial::puts(" targets=2 validation=ok cleanup=");
+    kernel::serial::puts(" targets=");
+    serial_put_u32_decimal(requested.outputCount);
+    kernel::serial::puts(" validation=ok cleanup=");
     kernel::serial::puts(cleanupOk ? "ok\n" : "failed\n");
     set_backend_diagnostic(*result, cleanupOk ? "display layout applied and validation frame flushed; cleanup=ok"
                                              : "display layout applied; cleanup failure recorded");

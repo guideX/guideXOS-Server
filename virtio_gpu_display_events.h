@@ -24,6 +24,14 @@ enum class VirtioGpuInjectedTopologyChangeKind : uint32_t {
     OutputRemoval = 4u
 };
 
+enum class VirtioGpuTopologyChangeType : uint32_t {
+    None = 0u,
+    MetadataOnly = 1u,
+    OutputAddition = 2u,
+    OutputRemoval = 3u,
+    Mixed = 4u
+};
+
 // One detected protocol scanout.  `reported` describes the latest
 // GET_DISPLAY_INFO response, while `operational` and the runtime fields
 // describe the still-active guest state.  They must not be conflated.
@@ -80,6 +88,14 @@ struct VirtioGpuDisplayTopologyChange {
     uint8_t supportedAutomatically{0u};
     uint8_t injectedEvent{0u};
     uint8_t reasserted{0u};
+    uint8_t genuineDeviceEvent{0u};
+    uint8_t dismissed{0u};
+    uint8_t acknowledged{0u};
+    uint8_t applied{0u};
+    uint32_t changeType{static_cast<uint32_t>(VirtioGpuTopologyChangeType::None)};
+    uint32_t injectedTopologyGeneration{0u};
+    char source[kVirtioGpuDisplayEventIdentityBytes]{};
+    char injectedChangeType[kVirtioGpuDisplayEventClassificationBytes]{};
     char classification[kVirtioGpuDisplayEventClassificationBytes]{};
     char recommendedAction[kVirtioGpuDisplayEventActionBytes]{};
     char reason[kVirtioGpuDisplayEventReasonBytes]{};
@@ -98,7 +114,16 @@ struct DisplayTopologyChangeQuery {
     uint8_t activeConfigurationAffected{0u};
     uint8_t automaticApplyPerformed{0u};
     uint8_t injectedEvent{0u};
+    uint8_t genuineDeviceEvent{0u};
+    uint8_t requiresUserAction{0u};
+    uint8_t acknowledged{0u};
+    uint8_t dismissed{0u};
+    uint8_t applied{0u};
+    uint8_t metadataOnly{0u};
+    uint8_t reserved0{0u};
     uint32_t topologyGeneration{0u};
+    uint32_t injectedTopologyGeneration{0u};
+    uint32_t changeType{static_cast<uint32_t>(VirtioGpuTopologyChangeType::None)};
     uint32_t addedOutputCount{0u};
     uint32_t removedOutputCount{0u};
     uint32_t changedOutputCount{0u};
@@ -107,6 +132,10 @@ struct DisplayTopologyChangeQuery {
     char classification[kVirtioGpuDisplayEventClassificationBytes]{};
     char recommendedAction[kVirtioGpuDisplayEventActionBytes]{};
     char reason[kVirtioGpuDisplayEventReasonBytes]{};
+    char source[kVirtioGpuDisplayEventIdentityBytes]{};
+    char injectedChangeType[kVirtioGpuDisplayEventClassificationBytes]{};
+    char addedOutputIdentities[kVirtioGpuDisplayEventMaxScanouts][kVirtioGpuDisplayEventIdentityBytes]{};
+    char removedOutputIdentities[kVirtioGpuDisplayEventMaxScanouts][kVirtioGpuDisplayEventIdentityBytes]{};
 };
 
 } // namespace display

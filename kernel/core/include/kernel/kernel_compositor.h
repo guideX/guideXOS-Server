@@ -85,6 +85,9 @@ public:
     // Initialize the compositor
     static void init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH);
     static void setWorkArea(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    // Reconcile windows, drag state, and the primary taskbar work area after
+    // an explicitly committed QEMU-only display topology transaction.
+    static void reconcileDisplayTopology(uint32_t screenW, uint32_t screenH);
     
     // Shutdown the compositor
     static void shutdown();

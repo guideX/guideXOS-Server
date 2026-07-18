@@ -21,6 +21,7 @@
 #include "include/kernel/tcp.h"
 #include "include/kernel/dns.h"
 #include "include/kernel/virtio_rng.h"
+#include "include/kernel/virtio_gpu.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
@@ -2320,7 +2321,7 @@ bool NotepadApp::updateMenuHover(int x, int y) {
 // ============================================================
 
 DisplayOptionsApp::DisplayOptionsApp()
-    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_requestedDisplayConfiguration{}, m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false) {
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(720), m_windowH(460), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false}, m_selectedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_appliedDisplayMode(gxos::display::DisplayConfigurationMode::Extend), m_selectedPrimaryOutput(0), m_appliedPrimaryOutput(0), m_activeDisplayConfiguration{}, m_requestedDisplayConfiguration{}, m_pendingTopologyChange{}, m_activeConfigurationGeneration(1), m_displayLocalEdits(false), m_displayStatus{}, m_windowGeneration(0), m_displayRequestId(0), m_displayRequestPending(false) {
     strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
     m_displayStatus[0] = '\0';
 }
@@ -2681,9 +2682,27 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
         mirrorCompatible ? rgb(190, 205, 225) : rgb(235, 180, 120));
     appDrawText(x + 28u, y + 328u, "Refresh rate: Not available    Rotation: Not available", rgb(160, 165, 176));
 
+    if (m_pendingTopologyChange.pending != 0u) {
+        framebuffer::fill_rect(x + 18u, y + 348u, w > 36u ? w - 36u : 1u, 54u, rgb(76, 52, 36));
+        appDrawRect(x + 18u, y + 348u, w > 36u ? w - 36u : 1u, 54u, rgb(190, 132, 72));
+        appDrawText(x + 28u, y + 356u, "Display hardware configuration changed.", rgb(248, 220, 174));
+        appDrawText(x + 28u, y + 374u,
+            m_pendingTopologyChange.removedOutputCount > 0u ? "Review proposes removing an output; active state is unchanged."
+                : "Review proposes restoring an output; active state is unchanged.",
+            rgb(232, 216, 192));
+        button(x + 430u, y + 350u, 76u, "Review", false);
+        button(x + 512u, y + 350u, 76u, "Apply", false);
+        button(x + 430u, y + 382u, 76u, "Refresh", false);
+        button(x + 512u, y + 382u, 76u, "Keep", false);
+    }
+
     appDrawText(x + 28u, y + static_cast<uint32_t>(maxInt(292, static_cast<int>(h) - 56u)), m_displayStatus[0] != '\0' ? m_displayStatus : "Ready", rgb(190, 205, 225));
 
     const uint32_t actionY = y + h - 38u;
+#if defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
+    button(x + 18u, actionY, 126u, "Test Remove", false);
+    button(x + 152u, actionY, 126u, "Test Restore", false);
+#endif
     button(x + 300u, actionY, 88u, "Apply", false);
     button(x + 396u, actionY, 88u, "OK", false);
     button(x + 492u, actionY, 88u, "Cancel", false);
@@ -2705,18 +2724,179 @@ bool DisplayOptionsApp::queryDisplayConfiguration()
         return false;
     }
     m_activeDisplayConfiguration = response.activeConfiguration;
-    m_requestedDisplayConfiguration = m_activeDisplayConfiguration;
-    m_selectedDisplayMode = static_cast<gxos::display::DisplayConfigurationMode>(m_activeDisplayConfiguration.mode);
-    m_appliedDisplayMode = m_selectedDisplayMode;
-    for (uint32_t i = 0u; i < m_activeDisplayConfiguration.outputCount && i < gxos::display::kDisplayConfigurationMaxOutputs; ++i) {
-        if (m_activeDisplayConfiguration.outputs[i].primary != 0u) {
-            m_selectedPrimaryOutput = i + 1u;
-            m_appliedPrimaryOutput = m_selectedPrimaryOutput;
-            break;
+    m_activeConfigurationGeneration = response.activeConfigurationGeneration != 0u
+        ? response.activeConfigurationGeneration : 1u;
+    if (!m_displayLocalEdits) {
+        m_requestedDisplayConfiguration = m_activeDisplayConfiguration;
+        m_selectedDisplayMode = static_cast<gxos::display::DisplayConfigurationMode>(m_activeDisplayConfiguration.mode);
+        m_appliedDisplayMode = m_selectedDisplayMode;
+        for (uint32_t i = 0u; i < m_activeDisplayConfiguration.outputCount && i < gxos::display::kDisplayConfigurationMaxOutputs; ++i) {
+            if (m_activeDisplayConfiguration.outputs[i].primary != 0u) {
+                m_selectedPrimaryOutput = i + 1u;
+                m_appliedPrimaryOutput = m_selectedPrimaryOutput;
+                break;
+            }
         }
     }
-    strcopy(m_displayStatus, "Active configuration loaded", sizeof(m_displayStatus));
+    queryPendingTopologyChange();
+    if (m_pendingTopologyChange.pending != 0u) {
+        strcopy(m_displayStatus, m_displayLocalEdits
+            ? "Pending topology change; resolve local edits"
+            : "Display hardware configuration changed", sizeof(m_displayStatus));
+    } else if (!m_displayLocalEdits) {
+        strcopy(m_displayStatus, "Active configuration loaded", sizeof(m_displayStatus));
+    }
     return true;
+}
+
+bool DisplayOptionsApp::queryPendingTopologyChange()
+{
+    gxos::display::DisplayConfigurationCommand command{};
+    command.version = gxos::display::kDisplayConfigurationContractVersion;
+    command.structureSize = sizeof(command);
+    command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::QueryPendingTopologyChange);
+    gxos::display::DisplayConfigurationResponse response{};
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
+    if (!submitted || response.success == 0u) return false;
+    m_pendingTopologyChange = response.detectedTopologyChange;
+    if (response.activeConfigurationGeneration != 0u) m_activeConfigurationGeneration = response.activeConfigurationGeneration;
+    return true;
+}
+
+bool DisplayOptionsApp::previewPendingTopologyChange()
+{
+    if (m_pendingTopologyChange.pending == 0u || m_displayLocalEdits) {
+        strcopy(m_displayStatus, m_displayLocalEdits ? "Reload or resolve local edits first" : "No pending topology change", sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+    gxos::display::DisplayConfigurationCommand command{};
+    command.version = gxos::display::kDisplayConfigurationContractVersion;
+    command.structureSize = sizeof(command);
+    command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::PreviewTopologyReconciliation);
+    command.topologyGeneration = m_pendingTopologyChange.topologyGeneration;
+    command.activeConfigurationGeneration = m_activeConfigurationGeneration;
+    gxos::display::DisplayConfigurationResponse response{};
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
+    if (!submitted || response.success == 0u) {
+        strcopy(m_displayStatus, "Review failed: ", sizeof(m_displayStatus));
+        strappend(m_displayStatus, response.diagnostic, sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+    strcopy(m_displayStatus, response.removedOutputCount > 0u ? "Review: secondary output will be removed" :
+        "Review: output will be added to the right", sizeof(m_displayStatus));
+    invalidate();
+    return true;
+}
+
+bool DisplayOptionsApp::applyPendingTopologyChange()
+{
+    if (m_pendingTopologyChange.pending == 0u || m_displayLocalEdits) {
+        strcopy(m_displayStatus, m_displayLocalEdits ? "Reload or resolve local edits first" : "No pending topology change", sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+    gxos::display::DisplayConfigurationCommand command{};
+    command.version = gxos::display::kDisplayConfigurationContractVersion;
+    command.structureSize = sizeof(command);
+    command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::ApplyPendingTopologyChange);
+    command.flags = gxos::display::DisplayConfigurationFlagCommitPersistence;
+    command.origin = static_cast<uint32_t>(gxos::display::DisplayConfigurationRequestOrigin::UserApply);
+    command.topologyGeneration = m_pendingTopologyChange.topologyGeneration;
+    command.activeConfigurationGeneration = m_activeConfigurationGeneration;
+    gxos::display::DisplayConfigurationResponse response{};
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
+    if (!submitted || response.success == 0u) {
+        strcopy(m_displayStatus, "Topology apply failed: ", sizeof(m_displayStatus));
+        strappend(m_displayStatus, response.diagnostic, sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+    m_activeDisplayConfiguration = response.activeConfiguration;
+    m_requestedDisplayConfiguration = response.activeConfiguration;
+    m_selectedDisplayMode = static_cast<gxos::display::DisplayConfigurationMode>(response.activeConfiguration.mode);
+    m_appliedDisplayMode = m_selectedDisplayMode;
+    m_selectedPrimaryOutput = 1u;
+    for (uint32_t i = 0u; i < response.activeConfiguration.outputCount; ++i) {
+        if (response.activeConfiguration.outputs[i].primary != 0u) m_selectedPrimaryOutput = i + 1u;
+    }
+    m_appliedPrimaryOutput = m_selectedPrimaryOutput;
+    m_activeConfigurationGeneration = response.activeConfigurationGeneration;
+    m_pendingTopologyChange = gxos::display::DisplayTopologyChangeQuery{};
+    m_displayLocalEdits = false;
+    strcopy(m_displayStatus, "Detected topology applied", sizeof(m_displayStatus));
+    invalidate();
+    return true;
+}
+
+bool DisplayOptionsApp::dismissPendingTopologyChange()
+{
+    if (m_pendingTopologyChange.pending == 0u) {
+        strcopy(m_displayStatus, "No pending topology change", sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+    gxos::display::DisplayConfigurationCommand command{};
+    command.version = gxos::display::kDisplayConfigurationContractVersion;
+    command.structureSize = sizeof(command);
+    command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::DismissPendingTopologyChange);
+    command.topologyGeneration = m_pendingTopologyChange.topologyGeneration;
+    command.activeConfigurationGeneration = m_activeConfigurationGeneration;
+    gxos::display::DisplayConfigurationResponse response{};
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
+    if (!submitted || response.success == 0u) {
+        strcopy(m_displayStatus, "Keep current failed: ", sizeof(m_displayStatus));
+        strappend(m_displayStatus, response.diagnostic, sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+    m_pendingTopologyChange = gxos::display::DisplayTopologyChangeQuery{};
+    strcopy(m_displayStatus, "Keeping current configuration", sizeof(m_displayStatus));
+    invalidate();
+    return true;
+}
+
+bool DisplayOptionsApp::refreshPendingTopologyChange()
+{
+    gxos::display::DisplayConfigurationCommand command{};
+    command.version = gxos::display::kDisplayConfigurationContractVersion;
+    command.structureSize = sizeof(command);
+    command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
+    command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::RefreshDetectedTopology);
+    gxos::display::DisplayConfigurationResponse response{};
+    const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
+    queryPendingTopologyChange();
+    strcopy(m_displayStatus, submitted && response.success ? "Displays refreshed; review pending change" : "Display refresh failed", sizeof(m_displayStatus));
+    invalidate();
+    return submitted && response.success != 0u;
+}
+
+bool DisplayOptionsApp::injectPendingTopologyForTest(uint32_t kind)
+{
+#if defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
+    if (m_displayLocalEdits) {
+        strcopy(m_displayStatus, "Reload or resolve local edits first", sizeof(m_displayStatus));
+        invalidate();
+        return false;
+    }
+    const bool injected = kernel::virtio::gpu::inject_display_topology_change_for_test(kind);
+    queryPendingTopologyChange();
+    strcopy(m_displayStatus, injected
+        ? "Injected pending change; review before applying"
+        : "Topology test injection rejected", sizeof(m_displayStatus));
+    invalidate();
+    return injected;
+#else
+    (void)kind;
+    strcopy(m_displayStatus, "Topology tests require the QEMU-only control build", sizeof(m_displayStatus));
+    invalidate();
+    return false;
+#endif
 }
 
 bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
@@ -2778,6 +2958,8 @@ bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
         return false;
     }
     m_activeDisplayConfiguration = response.activeConfiguration;
+    m_activeConfigurationGeneration = response.activeConfigurationGeneration != 0u
+        ? response.activeConfigurationGeneration : m_activeConfigurationGeneration;
     m_requestedDisplayConfiguration = m_activeDisplayConfiguration;
     m_selectedDisplayMode = static_cast<gxos::display::DisplayConfigurationMode>(m_activeDisplayConfiguration.mode);
     m_appliedDisplayMode = m_selectedDisplayMode;
@@ -2789,6 +2971,7 @@ bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
         }
     }
     strcopy(m_displayStatus, "Display configuration applied", sizeof(m_displayStatus));
+    m_displayLocalEdits = false;
     invalidate();
     if (closeOnSuccess) requestClose();
     return true;
@@ -2801,6 +2984,7 @@ void DisplayOptionsApp::cancelDisplayConfiguration()
     m_selectedPrimaryOutput = m_appliedPrimaryOutput;
     m_requestedDisplayConfiguration = m_activeDisplayConfiguration;
     m_displayRequestPending = false;
+    m_displayLocalEdits = false;
     requestClose();
 }
 
@@ -3149,16 +3333,47 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
     }
 
     if (m_activeTab == 3) {
+        if (m_pendingTopologyChange.pending != 0u) {
+            if (y >= 350 && y < 378 && x >= 430 && x < 506) {
+                previewPendingTopologyChange();
+                return;
+            }
+            if (y >= 350 && y < 378 && x >= 512 && x < 588) {
+                applyPendingTopologyChange();
+                return;
+            }
+            if (y >= 382 && y < 410 && x >= 430 && x < 506) {
+                refreshPendingTopologyChange();
+                return;
+            }
+            if (y >= 382 && y < 410 && x >= 512 && x < 588) {
+                dismissPendingTopologyChange();
+                return;
+            }
+        }
+        const uint32_t testActionY = static_cast<uint32_t>(m_windowH - 38);
+        if (y >= static_cast<int>(testActionY) && y < static_cast<int>(testActionY + 28u)) {
+            if (x >= 18 && x < 144) {
+                injectPendingTopologyForTest(static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::OutputRemoval));
+                return;
+            }
+            if (x >= 152 && x < 278) {
+                injectPendingTopologyForTest(static_cast<uint32_t>(gxos::display::VirtioGpuInjectedTopologyChangeKind::OutputAddition));
+                return;
+            }
+        }
         if (y >= 86 && y < 114) {
             if (x >= 88 && x < 180) m_selectedDisplayMode = gxos::display::DisplayConfigurationMode::Extend;
             else if (x >= 188 && x < 280) m_selectedDisplayMode = gxos::display::DisplayConfigurationMode::Mirror;
             m_requestedDisplayConfiguration.mode = static_cast<uint32_t>(m_selectedDisplayMode);
+            m_displayLocalEdits = true;
             invalidate();
             return;
         }
         if (y >= 126 && y < 154) {
             if (x >= 150 && x < 262) m_selectedPrimaryOutput = 1u;
-            else if (x >= 270 && x < 382) m_selectedPrimaryOutput = 2u;
+            else if (x >= 270 && x < 382 && m_activeDisplayConfiguration.outputCount > 1u) m_selectedPrimaryOutput = 2u;
+            m_displayLocalEdits = true;
             invalidate();
             return;
         }
@@ -3171,6 +3386,7 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
             strcopy(m_requestedDisplayConfiguration.outputs[0].modeId, s_qemuLogicalDisplayModes[next].id,
                     sizeof(m_requestedDisplayConfiguration.outputs[0].modeId));
             strcopy(m_displayStatus, "Requested monitor 1 resolution; click Apply", sizeof(m_displayStatus));
+            m_displayLocalEdits = true;
             invalidate();
             return;
         }
@@ -3183,6 +3399,7 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
             strcopy(m_requestedDisplayConfiguration.outputs[1].modeId, s_qemuLogicalDisplayModes[next].id,
                     sizeof(m_requestedDisplayConfiguration.outputs[1].modeId));
             strcopy(m_displayStatus, "Requested monitor 2 resolution; click Apply", sizeof(m_displayStatus));
+            m_displayLocalEdits = true;
             invalidate();
             return;
         }

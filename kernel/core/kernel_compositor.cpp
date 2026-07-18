@@ -187,6 +187,38 @@ void KernelCompositor::setWorkArea(uint32_t x, uint32_t y, uint32_t w, uint32_t 
     s_workH = h;
 }
 
+void KernelCompositor::reconcileDisplayTopology(uint32_t screenW, uint32_t screenH) {
+    if (screenW == 0u || screenH == 0u) return;
+    s_screenW = screenW;
+    s_screenH = screenH;
+    const uint32_t workH = screenH > s_taskbarH ? screenH - s_taskbarH : screenH;
+    setWorkArea(0u, 0u, screenW, workH);
+
+    // A topology change invalidates an in-flight drag/capture target.  Keep
+    // the window alive and make its title bar reachable in the surviving
+    // monitor work area.
+    s_dragState = DragState();
+    s_buttonPressActive = false;
+    for (int i = 0; i < MAX_WINDOWS; ++i) {
+        if (!s_windows[i].valid || s_windows[i].window == nullptr) continue;
+        app::KernelWindow* window = s_windows[i].window;
+        if (window->w < MIN_WINDOW_WIDTH) window->w = MIN_WINDOW_WIDTH;
+        if (window->h < MIN_WINDOW_HEIGHT) window->h = MIN_WINDOW_HEIGHT;
+        if ((uint32_t)window->w > s_workW) window->w = (int)s_workW;
+        if ((uint32_t)window->h > s_workH) window->h = (int)s_workH;
+        const int maxX = (int)(s_workX + s_workW) - window->w;
+        const int maxY = (int)(s_workY + s_workH) - window->h;
+        if (window->x < (int)s_workX) window->x = (int)s_workX;
+        if (window->y < (int)s_workY) window->y = (int)s_workY;
+        if (window->x > maxX) window->x = maxX >= (int)s_workX ? maxX : (int)s_workX;
+        if (window->y > maxY) window->y = maxY >= (int)s_workY ? maxY : (int)s_workY;
+        window->dirty = true;
+    }
+
+    TaskbarManager::setLayout(0u, workH, screenW, s_taskbarH, false, 8u, workH + 6u);
+    TaskbarManager::updateButtons();
+}
+
 void KernelCompositor::shutdown() {
     for (int i = 0; i < MAX_WINDOWS; i++) {
         s_windows[i].valid = false;

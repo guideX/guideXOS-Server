@@ -707,6 +707,63 @@ powershell -ExecutionPolicy Bypass -File .\scripts\smoke-virtio-gpu-display-even
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke-virtio-gpu-display-events.ps1
 ```
 
+## User-confirmed topology reconciliation
+
+The observer is now complete as a non-destructive publication path. Detected,
+pending, requested, and active state remain separate. A pending record carries
+its topology generation, change classification, added/removed identities,
+active-configuration impact, user-action requirement, source, and explicit
+`genuineDeviceEvent` / `injectedTestEvent` labels. Observing or refreshing a
+change does not alter active resources, scanout bindings, layout, input bounds,
+or persistence.
+
+The existing typed `DisplayConfigurationService` is the only topology control
+plane. It exposes bounded `QueryPendingTopologyChange`,
+`PreviewTopologyReconciliation`, `ApplyPendingTopologyChange`,
+`DismissPendingTopologyChange`, and `RefreshDetectedTopology` commands.
+Preview is planner-only and performs no GPU mutation. Apply requires both the
+pending topology generation and active configuration generation, rejects stale
+requests, pauses presentation, reuses the existing transactional resource and
+scanout machinery, reconciles the compositor windows/cursor/primary/taskbar,
+validates a live frame, commits active state, and persists only after success.
+Dismiss is generation-protected and leaves active resources and persistence
+unchanged. A failed apply restores scanout bindings, resources, layout, input,
+window/cursor state, and presentation while retaining the pending notification.
+
+For an explicitly applied injected removal of secondary output 1, the bounded
+proof starts in two-output Extend, clears the removed scanout provisionally,
+retains its resource through validation, commits a live one-output desktop with
+Display 1 still primary and hosting the taskbar, then retires the detached
+resource. An explicit addition places Display 2 to the right, uses 1280x800 or
+the saved supported mode, validates both targets, and restores the two-output
+Extend desktop. Primary removal uses a retained-output fallback in stable
+topology order before falling back to a single-output path. Invalid drag/capture
+state, windows outside the monitor union, and pointers outside the union are
+reconciled to valid work areas without deleting windows.
+
+The QEMU-only coordinator uses the public service endpoint for metadata preview,
+dismissal, removal, addition, and an injected post-bind failure. The passing
+proof is recorded as:
+
+```text
+VirtioGPU topology reconciliation proof: metadataPreview=ok metadataDismiss=ok removalPreview=ok removalApply=ok singleOutputLive=ok additionPreview=ok additionApply=ok dualOutputRestored=ok rollback=ok activeResourcesStable=yes gpuFailures=0 genuineHotplugValidated=no injectedTopologyProof=ok result=success
+```
+
+All coordinator mutations are labeled `genuineDeviceEvent=no`,
+`injectedTestEvent=yes`, and carry an injected change type and topology
+generation. The one-output capture records that QEMU may still expose the
+inactive host head in detected inventory; that is not treated as an active
+guideXOS monitor. The standard bounded probe image has no writable guest
+persistence store, so its topology proof uses `persistence=not-requested`;
+the service still gates persistence after successful commit, and the existing
+separate-launch persistence smokes cover the writable persistence path.
+
+Manual UI validation is `required`, not completed: use
+`scripts\run-qemu-virtio-gpu-topology-manual.bat`, open Display Options, use the
+QEMU-only Test Remove/Test Restore controls, review or keep the pending change,
+then explicitly apply it and check taskbar, pointer, window dragging, and
+resolution behavior. No manual interaction success is claimed here.
+
 ## Current Limitations and Next Roadmap Milestone
 
 This milestone intentionally has no automatic hotplug application, EDID or
@@ -719,12 +776,11 @@ automated proof.
 
 The next roadmap milestone is:
 
-- Transactional application of detected output additions/removals.
-- Safe primary-output fallback on removal.
-- User-confirmed topology reconciliation.
-- Later VirtIO-GPU device configuration interrupts.
-- EDID retrieval if negotiated.
+- Genuine topology-event testing when QEMU exposes a supported trigger.
+- VirtIO-GPU device configuration interrupt delivery.
+- EDID negotiation and retrieval if useful.
 - Dirty-rectangle presentation.
-- Later real-hardware architecture under a separate Mule checkpoint.
+- Manual fixed-topology release validation.
+- Eventual real-hardware architecture under a separate Mule checkpoint.
 
 REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.

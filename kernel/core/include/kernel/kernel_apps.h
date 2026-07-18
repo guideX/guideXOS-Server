@@ -272,6 +272,9 @@ private:
     uint32_t m_appliedPrimaryOutput;
     gxos::display::DisplayConfigurationSnapshot m_activeDisplayConfiguration;
     gxos::display::DisplayConfigurationSnapshot m_requestedDisplayConfiguration;
+    gxos::display::DisplayTopologyChangeQuery m_pendingTopologyChange;
+    uint32_t m_activeConfigurationGeneration;
+    bool m_displayLocalEdits;
     char m_displayStatus[96];
     uint64_t m_windowGeneration;
     uint64_t m_displayRequestId;
@@ -299,6 +302,12 @@ private:
     void toggleDesktopIconCheckbox(int index);
     void drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     bool queryDisplayConfiguration();
+    bool queryPendingTopologyChange();
+    bool previewPendingTopologyChange();
+    bool applyPendingTopologyChange();
+    bool dismissPendingTopologyChange();
+    bool refreshPendingTopologyChange();
+    bool injectPendingTopologyForTest(uint32_t kind);
     bool submitDisplayConfiguration(bool closeOnSuccess);
     void cancelDisplayConfiguration();
 };

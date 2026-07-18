@@ -14,12 +14,14 @@
 namespace gxos {
 namespace display {
 
-static constexpr uint32_t kDisplayConfigurationContractVersion = 1u;
+static constexpr uint32_t kDisplayConfigurationContractVersion = 2u;
 static constexpr uint32_t kDisplayConfigurationMaxOutputs = 4u;
 static constexpr uint32_t kDisplayConfigurationBackendNameBytes = 32u;
 static constexpr uint32_t kDisplayConfigurationOutputIdBytes = 32u;
 static constexpr uint32_t kDisplayConfigurationModeIdBytes = 32u;
 static constexpr uint32_t kDisplayConfigurationDiagnosticBytes = 128u;
+static constexpr uint32_t kDisplayConfigurationArrangementBytes = 256u;
+static constexpr uint32_t kDisplayConfigurationSourceBytes = 32u;
 static constexpr uint32_t kDisplayConfigurationPersistenceVersion = 2u;
 static constexpr uint32_t kDisplayConfigurationPersistenceMaxBytes = 2048u;
 static constexpr uint32_t kDisplayConfigurationPersistenceMaxCoordinate = 16384u;
@@ -49,7 +51,11 @@ enum class DisplayConfigurationCommandType : uint32_t {
     RestoreLastKnownGood = 5u,
     ForceValidationFrame = 6u,
     QueryDetectedTopologyChange = 7u,
-    RefreshDetectedTopology = 8u
+    RefreshDetectedTopology = 8u,
+    QueryPendingTopologyChange = 9u,
+    PreviewTopologyReconciliation = 10u,
+    ApplyPendingTopologyChange = 11u,
+    DismissPendingTopologyChange = 12u
 };
 
 enum class DisplayConfigurationMode : uint32_t {
@@ -96,7 +102,10 @@ enum class DisplayConfigurationResultCode : uint32_t {
     RollbackSucceeded = 13u,
     RollbackFailed = 14u,
     QemuOnlyGateRequired = 15u,
-    UnsupportedBackend = 16u
+    UnsupportedBackend = 16u,
+    TopologyGenerationStale = 17u,
+    TopologyReconciliationUnavailable = 18u,
+    LocalConfigurationConflict = 19u
 };
 
 enum DisplayConfigurationCommandFlags : uint32_t {
@@ -157,6 +166,35 @@ struct DisplayConfigurationSnapshot {
     DisplayConfigurationOutput outputs[kDisplayConfigurationMaxOutputs];
 };
 
+// Planner output is fixed-size and backend-neutral. It is intentionally
+// suitable for the typed service response and contains no resource pointers,
+// backing addresses, UI objects, MMIO addresses, or QEMU private state.
+struct DisplayTopologyReconciliationPlan {
+    uint32_t version;
+    uint32_t sourceTopologyGeneration;
+    uint32_t activeConfigurationGeneration;
+    uint32_t changeType;
+    DisplayConfigurationSnapshot currentActiveConfiguration;
+    DisplayConfigurationSnapshot proposedRequestedConfiguration;
+    uint32_t addedOutputCount;
+    uint32_t removedOutputCount;
+    uint32_t retainedOutputCount;
+    uint8_t windowReconciliationRequired;
+    uint8_t cursorReconciliationRequired;
+    uint8_t persistenceChangeRequired;
+    uint8_t valid;
+    DisplayConfigurationOutput addedOutputs[kDisplayConfigurationMaxOutputs];
+    DisplayConfigurationOutput removedOutputs[kDisplayConfigurationMaxOutputs];
+    DisplayConfigurationOutput retainedOutputs[kDisplayConfigurationMaxOutputs];
+    char oldPrimaryOutputId[kDisplayConfigurationOutputIdBytes];
+    char proposedPrimaryOutputId[kDisplayConfigurationOutputIdBytes];
+    char monitorRectanglesBefore[kDisplayConfigurationArrangementBytes];
+    char monitorRectanglesAfter[kDisplayConfigurationArrangementBytes];
+    char resourceActions[kDisplayConfigurationDiagnosticBytes];
+    char scanoutActions[kDisplayConfigurationDiagnosticBytes];
+    char rejectionReason[kDisplayConfigurationDiagnosticBytes];
+};
+
 struct DisplayConfigurationRequest {
     uint32_t mode;
     uint32_t outputCount;
@@ -171,6 +209,8 @@ struct DisplayConfigurationCommand {
     uint32_t commandType;
     uint32_t flags;
     uint32_t origin;
+    uint32_t topologyGeneration;
+    uint32_t activeConfigurationGeneration;
     DisplayConfigurationRequest requestedConfiguration;
 };
 
@@ -192,6 +232,41 @@ struct DisplayConfigurationResponse {
     uint8_t presentationPaused;
     uint8_t presentationResumed;
     uint8_t reserved1[3];
+    uint32_t topologyGeneration;
+    uint32_t activeConfigurationGeneration;
+    uint32_t pendingChangeType;
+    uint32_t injectedTopologyGeneration;
+    uint8_t pendingTopology;
+    uint8_t pendingAffectsActiveConfiguration;
+    uint8_t pendingRequiresUserAction;
+    uint8_t pendingAcknowledged;
+    uint8_t pendingDismissed;
+    uint8_t pendingApplied;
+    uint8_t genuineDeviceEvent;
+    uint8_t injectedTestEvent;
+    uint8_t rollbackOldOutputsRestored;
+    uint8_t rollbackOldPrimaryRestored;
+    uint8_t rollbackOldLayoutRestored;
+    uint8_t rollbackPresentationResumed;
+    uint8_t provisionalResourcesReleased;
+    uint8_t windowReconciliationRequired;
+    uint8_t cursorReconciliationRequired;
+    uint8_t reserved2;
+    uint32_t addedOutputCount;
+    uint32_t removedOutputCount;
+    uint32_t retainedOutputCount;
+    DisplayConfigurationSnapshot requestedConfiguration;
+    DisplayConfigurationSnapshot proposedConfiguration;
+    DisplayConfigurationOutput addedOutputs[kDisplayConfigurationMaxOutputs];
+    DisplayConfigurationOutput removedOutputs[kDisplayConfigurationMaxOutputs];
+    DisplayConfigurationOutput retainedOutputs[kDisplayConfigurationMaxOutputs];
+    char proposedPrimaryOutputId[kDisplayConfigurationOutputIdBytes];
+    char proposedArrangement[kDisplayConfigurationArrangementBytes];
+    char resourceActions[kDisplayConfigurationDiagnosticBytes];
+    char persistenceImpact[kDisplayConfigurationDiagnosticBytes];
+    char rollbackResult[kDisplayConfigurationDiagnosticBytes];
+    char pendingSource[kDisplayConfigurationSourceBytes];
+    char injectedChangeType[kVirtioGpuDisplayEventClassificationBytes];
     DisplayConfigurationSnapshot detectedConfiguration;
     DisplayConfigurationSnapshot activeConfiguration;
     uint8_t persistedLoaded;
@@ -215,14 +290,22 @@ struct DisplayConfigurationResponse {
 inline bool displayConfigurationCommandIsMutation(uint32_t commandType)
 {
     return commandType == static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration)
+        || commandType == static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyPendingTopologyChange)
         || commandType == static_cast<uint32_t>(DisplayConfigurationCommandType::RestoreLastKnownGood)
         || commandType == static_cast<uint32_t>(DisplayConfigurationCommandType::ForceValidationFrame);
+}
+
+inline bool displayConfigurationCommandRequiresTopologyGeneration(uint32_t commandType)
+{
+    return commandType == static_cast<uint32_t>(DisplayConfigurationCommandType::PreviewTopologyReconciliation)
+        || commandType == static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyPendingTopologyChange)
+        || commandType == static_cast<uint32_t>(DisplayConfigurationCommandType::DismissPendingTopologyChange);
 }
 
 inline bool displayConfigurationCommandTypeIsValid(uint32_t commandType)
 {
     return commandType >= static_cast<uint32_t>(DisplayConfigurationCommandType::QueryDetectedConfiguration)
-        && commandType <= static_cast<uint32_t>(DisplayConfigurationCommandType::RefreshDetectedTopology);
+        && commandType <= static_cast<uint32_t>(DisplayConfigurationCommandType::DismissPendingTopologyChange);
 }
 
 } // namespace display
