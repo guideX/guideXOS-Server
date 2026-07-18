@@ -3,7 +3,9 @@
 //
 // The process table remains intentionally small.  This file now also owns the
 // single-CPU runnable queue and the adapter from the runtime-neutral wait
-// queue to architecture context switching.
+// queue to architecture context switching.  Synchronization adapters use
+// the same scheduler-owned thread generation as their opaque owner token;
+// the mutex probe keeps that claim opaque to the scheduler during validation.
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -13,6 +15,7 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
+#include "runtime/synchronization/guidexos_mutex.h"
 #include "runtime/thread/guidexos_native_thread.h"
 
 #if defined(ARCH_AMD64)
@@ -366,6 +369,20 @@ namespace {
             wait_make_runnable
         };
         gxos::runtime::scheduler_wait::installSchedulerWaitHooks(&hooks);
+    }
+
+    gxos::runtime::MutexOwnerIdentity mutex_current_owner(void*) {
+        return current == nullptr
+            ? gxos::runtime::MutexOwnerIdentity{ 0, 0 }
+            : gxos::runtime::MutexOwnerIdentity{ current->tid, current->generation };
+    }
+
+    void install_mutex_hooks() {
+        const gxos::runtime::MutexPlatformHooks hooks = {
+            nullptr,
+            mutex_current_owner
+        };
+        gxos::runtime::installMutexPlatformHooks(&hooks);
     }
 
     KernelThread* lookup_handle(const gxos::runtime::ThreadHandle& handle) {
@@ -756,9 +773,11 @@ void init()
     current->stack_limit = current->stack + kKernelStackBytes;
     check_thread_invariants();
     install_wait_hooks();
+    install_mutex_hooks();
     install_native_thread_hooks();
 #else
     gxos::runtime::scheduler_wait::installSchedulerWaitHooks(nullptr);
+    gxos::runtime::installMutexPlatformHooks(nullptr);
 #endif
 }
 

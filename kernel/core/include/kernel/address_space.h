@@ -29,6 +29,10 @@ struct FrameAccounting {
     uint64_t allocatedFrames;
     uint64_t regionOwnedFrames;
     uint64_t pageTableFrames;
+    // Leaf mappings installed through this address-space API. A committed
+    // NoAccess page still owns a non-present PTE, so this counts mapping
+    // ownership rather than only translations currently usable by the CPU.
+    uint64_t mappingCount;
     uint64_t framesReleasedByDecommit;
     uint64_t framesReleasedByRelease;
     uint64_t tlbInvalidations;

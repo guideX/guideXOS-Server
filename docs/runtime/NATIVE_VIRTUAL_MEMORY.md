@@ -130,7 +130,10 @@ PTEs. Physical ownership is preserved during protection transitions.
 `address_space.cpp` walks the existing AMD64 four-level tables rooted at CR3.
 Missing PML4/PDPT/PD/PT pages are allocated from the same explicit pool,
 zeroed, marked present/writable, and counted as `FrameOwner::PageTable`.
-Large-page entries are rejected by the 4 KiB mapping path.
+Large-page entries are rejected by the 4 KiB mapping path. VM data frames are
+marked mapped in the frame ledger; release is rejected while a frame is still
+mapped, and `FrameAccounting::mappingCount` is cross-checked against region
+metadata after each focused test.
 
 The raw mapping query distinguishes no page-table entry from a non-present
 PTE. VM query cross-checks the raw physical address and presence bit against
@@ -198,7 +201,7 @@ mode. It does not initialize Workstation GC or create a managed heap.
 
 ## 19. Validation
 
-Validation run on 2026-07-16:
+Validation run on 2026-07-17:
 
 | Check | Result |
 | --- | --- |
@@ -217,7 +220,8 @@ Validation run on 2026-07-16:
 | Bare-metal native-thread QEMU lifecycle | PASS |
 | Generic ELF smoke | PASS |
 | Managed static artifact and bounded-allocation proofs | PASS |
-| Managed live execution proof | BLOCKED by pre-existing `RhpReversePInvokeAttachOrTrapThread2` map symbol |
+| Managed live single-allocation execution | PASS; two launches, host callback, cleanup |
+| Managed live repeated-allocation/OOM execution | PASS; two launches, bounded 4 KiB heap, controlled OOM |
 
 The reproducible entry points are
 `scripts/smoke-native-virtual-memory.ps1` and

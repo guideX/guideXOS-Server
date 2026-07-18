@@ -39,6 +39,8 @@ FrameState g_frameState[kMaxFramePoolPages] = {};
 uint64_t g_allocatedFrames = 0;
 uint64_t g_regionOwnedFrames = 0;
 uint64_t g_pageTableFrames = 0;
+bool g_frameMapped[kMaxFramePoolPages] = {};
+uint64_t g_mappingCount = 0;
 uint64_t g_releasedByDecommit = 0;
 uint64_t g_releasedByRelease = 0;
 uint64_t g_tlbInvalidations = 0;
@@ -75,6 +77,7 @@ uint64_t allocateFrameInternal(FrameOwner owner) {
         if (g_frameState[index] != FrameState::Free) continue;
         g_frameState[index] = owner == FrameOwner::VmRegion
             ? FrameState::VmRegion : FrameState::PageTable;
+        g_frameMapped[index] = false;
         ++g_allocatedFrames;
         if (owner == FrameOwner::VmRegion) {
             ++g_regionOwnedFrames;
@@ -175,6 +178,10 @@ bool initialize(const guideXOS::BootInfo* bootInfo) {
     g_allocatedFrames = 0;
     g_regionOwnedFrames = 0;
     g_pageTableFrames = 0;
+    for (uint64_t index = 0; index < kMaxFramePoolPages; ++index) {
+        g_frameMapped[index] = false;
+    }
+    g_mappingCount = 0;
     g_releasedByDecommit = 0;
     g_releasedByRelease = 0;
     g_tlbInvalidations = 0;
@@ -205,7 +212,8 @@ bool releaseFrame(uint64_t physicalAddress, FrameOwner owner,
                   FrameReleaseReason reason) {
     uint64_t index = 0;
     if (!poolIndex(physicalAddress, &index) ||
-        !frameOwnerMatches(g_frameState[index], owner)) return false;
+        !frameOwnerMatches(g_frameState[index], owner) ||
+        g_frameMapped[index]) return false;
     g_frameState[index] = FrameState::Free;
     --g_allocatedFrames;
     if (owner == FrameOwner::VmRegion) {
@@ -230,12 +238,18 @@ bool zeroFrame(uint64_t physicalAddress) {
 bool mapPage(AddressSpace* owner, uintptr_t virtualAddress,
              uint64_t physicalAddress, uint64_t flags) {
 #if defined(ARCH_AMD64)
+    uint64_t frameIndex = 0;
     if (owner == nullptr || owner != &g_current || !owner->alive ||
         !aligned(virtualAddress) || !aligned(physicalAddress) ||
-        (flags & kPtePageSize) != 0) return false;
+        (flags & kPtePageSize) != 0 ||
+        !poolIndex(physicalAddress, &frameIndex) ||
+        g_frameState[frameIndex] != FrameState::VmRegion ||
+        g_frameMapped[frameIndex]) return false;
     uint64_t* entry = nullptr;
     if (!pageTableEntry(virtualAddress, &entry, true) || *entry != 0) return false;
     *entry = (physicalAddress & kPageMask) | (flags & ~kPageMask);
+    g_frameMapped[frameIndex] = true;
+    ++g_mappingCount;
     invalidateTlb(virtualAddress);
     return true;
 #else
@@ -262,6 +276,12 @@ bool unmapPage(AddressSpace* owner, uintptr_t virtualAddress,
         removed->flags = value & ~kPageMask;
     }
     *entry = 0;
+    uint64_t frameIndex = 0;
+    if (poolIndex(value & kPageMask, &frameIndex) &&
+        g_frameMapped[frameIndex]) {
+        g_frameMapped[frameIndex] = false;
+        if (g_mappingCount != 0) --g_mappingCount;
+    }
     invalidateTlb(virtualAddress);
     return true;
 #else
@@ -336,6 +356,7 @@ FrameAccounting accounting() {
         ? g_poolPages - g_allocatedFrames : 0;
     result.regionOwnedFrames = g_regionOwnedFrames;
     result.pageTableFrames = g_pageTableFrames;
+    result.mappingCount = g_mappingCount;
     result.framesReleasedByDecommit = g_releasedByDecommit;
     result.framesReleasedByRelease = g_releasedByRelease;
     result.tlbInvalidations = g_tlbInvalidations;

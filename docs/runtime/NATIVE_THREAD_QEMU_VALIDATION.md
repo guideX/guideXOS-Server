@@ -1,6 +1,6 @@
 # Native Thread QEMU Validation
 
-Date: 2026-07-16  
+Date: 2026-07-17
 Decision: Outcome A — bare-metal native thread lifecycle validated.
 
 ## 1. Objective
@@ -213,16 +213,13 @@ with the explicit normal/test kernel artifacts.
 ## 17. Managed regression status
 
 The non-allocating managed proof, single-allocation proof, bounded 64 KiB and
-4 KiB static proofs, runtime-pack state smoke, and host-log artifact smoke
-passed. Allocation counts remain 234 for the 64 KiB proof and 14 for the 4 KiB
-proof; collection remains disabled.
+4 KiB static proofs, runtime-pack state smoke, host-log artifact smoke, and
+the current repeated execution proofs passed. Allocation counts remain 234
+for the 64 KiB proof and 14 for the 4 KiB proof; collection remains disabled.
 
-Two repeated execution proofs still fail on the pre-existing PE import
-assertion mismatch. A bounded single-allocation repetition reproduced
-`0xC0000374` once, while later repetitions passed or showed an unresolved
-`0xC0000005`. These failures are in the managed proof/artifact path and have
-no QEMU serial or lifecycle correlation; they are preserved as existing
-managed regressions rather than attributed to native-thread work.
+Historical managed-proof failures (`0xC0000374` and unresolved
+`0xC0000005`) remain preserved as prior diagnostics. They have no QEMU serial
+or native-thread lifecycle correlation, and the current repeated replays pass.
 
 ## 18. Remaining limitations
 

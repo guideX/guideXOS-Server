@@ -146,7 +146,8 @@ void run() {
     const bool trueUnbacked = reserved == VmResult::Ok && reservationQuery &&
         afterReservation.regionOwnedFrames == beforeReservation.regionOwnedFrames &&
         afterReservation.freeFrames == beforeReservation.freeFrames &&
-        afterReservation.pageTableFrames == beforeReservation.pageTableFrames;
+        afterReservation.pageTableFrames == beforeReservation.pageTableFrames &&
+        afterReservation.mappingCount == beforeReservation.mappingCount;
     status("True unbacked reservation", trueUnbacked);
     metric("Reservation data-frame delta",
            afterReservation.regionOwnedFrames - beforeReservation.regionOwnedFrames);
@@ -195,7 +196,8 @@ void run() {
             gxos::runtime::virtual_memory::query(bytes, &committedInfo) == VmResult::Ok &&
             committedInfo.committed && committedInfo.mappingPresent &&
             committedInfo.physicalFrame != 0 &&
-            afterCommit.regionOwnedFrames == beforeCommit.regionOwnedFrames + 1;
+            afterCommit.regionOwnedFrames == beforeCommit.regionOwnedFrames + 1 &&
+            afterCommit.mappingCount == beforeCommit.mappingCount + 1;
         if (committed) {
             bytes[0] = 0x5A;
             directReadWrite = bytes[0] == 0x5A;
@@ -236,7 +238,8 @@ void run() {
             !removedInfo.mappingPresent && bytes[page * 3] == 0x3C;
         const VirtualMemoryStats afterDecommit = gxos::runtime::virtual_memory::stats();
         decommitReleased = removed &&
-            afterDecommit.regionOwnedFrames + 1 == beforeDecommit.regionOwnedFrames;
+            afterDecommit.regionOwnedFrames + 1 == beforeDecommit.regionOwnedFrames &&
+            afterDecommit.mappingCount + 1 == beforeDecommit.mappingCount;
         partial = selected && queryThird && retained;
         status("Partial decommit", partial);
         status("Reserved range retained after decommit", retained);
@@ -355,6 +358,12 @@ void run() {
     for (vm_size index = 0; index < 32; ++index) {
         (void)gxos::runtime::virtual_memory::release(metadataRegions[index]);
     }
+    VirtualMemoryRegion metadataReuseRegion;
+    const bool metadataReuse =
+        gxos::runtime::virtual_memory::reserve(page, page, nullptr,
+                                               &metadataReuseRegion) == VmResult::Ok &&
+        gxos::runtime::virtual_memory::release(metadataReuseRegion) == VmResult::Ok;
+    status("Metadata reuse", metadataReuse);
 
     // Fill the bounded runtime virtual range with max-sized reservations.
     VirtualMemoryRegion rangeRegions[16];
@@ -391,12 +400,14 @@ void run() {
     const void* staleOwnerBase = ownerFull.base;
     const VmResult teardown = gxos::runtime::virtual_memory::teardownAddressSpace();
     const VirtualMemoryStats afterTeardown = gxos::runtime::virtual_memory::stats();
+    const bool staleHandle = ownersCommitted &&
+        gxos::runtime::virtual_memory::commit(ownerFull, 0, page,
+            MemoryProtection::ReadWrite) == VmResult::AlreadyReleased;
     const bool teardownOk = ownersCommitted && teardown == VmResult::Ok &&
         afterTeardown.activeRegions == 0 && afterTeardown.mappingCount == 0 &&
         afterTeardown.regionOwnedFrames == 0 &&
-        gxos::runtime::virtual_memory::commit(ownerFull, 0, page,
-            MemoryProtection::ReadWrite) == VmResult::AlreadyReleased &&
         gxos::runtime::virtual_memory::query(staleOwnerBase, &info) == VmResult::NotFound;
+    status("Stale-handle rejection", staleHandle);
     status("Process/address-space teardown", teardownOk);
 
     const bool physicalLeakCheck = afterTeardown.regionOwnedFrames == 0 &&

@@ -118,6 +118,8 @@ namespace {
         node->timer_previous = nullptr;
         node->timer_next = nullptr;
         node->deadline = 0;
+        node->handoff_owner = 0;
+        node->handoff_generation = 0;
         node->reason = WakeReason::None;
         node->state = WaitNodeState::Idle;
         node->timed = false;
@@ -203,6 +205,8 @@ bool prepareWait(WaitQueue* queue, const WaitDuration& duration, WaitNode** node
     node->timer_previous = nullptr;
     node->timer_next = nullptr;
     node->deadline = now + ticks;
+    node->handoff_owner = 0;
+    node->handoff_generation = 0;
     node->generation = generation;
     node->reason = WakeReason::None;
     node->state = WaitNodeState::Waiting;

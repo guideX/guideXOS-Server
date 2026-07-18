@@ -82,7 +82,7 @@ Run:
 powershell -ExecutionPolicy Bypass -File scripts/smoke-native-virtual-memory.ps1
 ```
 
-The hosted generic lifecycle and real adapter probe passed on 2026-07-16,
+The hosted generic lifecycle and real adapter probe passed on 2026-07-17,
 including page size, granularity, true-mode reserve request, commit/zeroing,
 decommit/recommit zeroing, reset classification, release, and stale release.
 The probe does not initialize GC or create managed objects.
@@ -102,11 +102,10 @@ protection-fault handling, rollback, teardown, TLB invalidation, no leaks, and
 direct read/write behavior.
 
 The hosted thread lifecycle, scheduler/event regressions, bare-metal
-native-thread QEMU lifecycle, generic ELF smoke, and managed static
-artifact/bounded-allocation proofs also passed. The managed live execution
-proof remains blocked before execution by the existing missing
-`RhpReversePInvokeAttachOrTrapThread2` map symbol; this pass does not modify
-that runtime/GC boundary.
+native-thread QEMU lifecycle, generic ELF smoke, managed static artifact,
+single-allocation live proof, and bounded repeated-allocation/OOM live proof
+also passed. These are no-collection execution proofs only; they do not prove
+Workstation GC initialization or collection.
 
 ## 9. Reset/discard distinction
 

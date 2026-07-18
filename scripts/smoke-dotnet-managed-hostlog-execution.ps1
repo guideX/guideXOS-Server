@@ -23,6 +23,7 @@ Set-StrictMode -Version Latest
 $Root = [System.IO.Path]::GetFullPath($RepoRoot)
 . (Join-Path $Root "scripts\process_environment.ps1")
 Normalize-ProcessEnvironment
+$powershell = (Get-Command powershell -ErrorAction Stop).Source
 
 $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null

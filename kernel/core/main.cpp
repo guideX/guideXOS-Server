@@ -29,6 +29,9 @@
 #if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
 #include "include/kernel/native_virtual_memory_qemu_test.h"
 #endif
+#if defined(GXOS_NATIVE_MUTEX_QEMU_TEST)
+#include "include/kernel/native_mutex_qemu_test.h"
+#endif
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -233,7 +236,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         while(1) { }
     }
 
-#if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
+#if defined(GXOS_NATIVE_THREAD_QEMU_TEST) && !defined(GXOS_NATIVE_MUTEX_QEMU_TEST)
     // The opt-in lifecycle test intentionally skips the desktop and storage
     // path, but timed waits still require the ordinary PIC/PIT services.
     kernel::interrupts::init();
@@ -241,6 +244,20 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
     kernel::serial::puts("[native-thread-test] timer services ready\n");
     kernel::native_thread_qemu_test::run();
+    while (1) {
+        kernel::arch::enable_interrupts();
+        kernel::arch::halt();
+    }
+#endif
+
+#if defined(GXOS_NATIVE_MUTEX_QEMU_TEST)
+    // The opt-in mutex test exercises only the runtime-neutral mutex and
+    // scheduler wait contract, then leaves the normal desktop path untouched.
+    kernel::interrupts::init();
+    kernel::pit::init(100);
+    kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+    kernel::serial::puts("[native-mutex-test] timer services ready\n");
+    kernel::native_mutex_qemu_test::run();
     while (1) {
         kernel::arch::enable_interrupts();
         kernel::arch::halt();

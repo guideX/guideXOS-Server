@@ -55,6 +55,12 @@ struct WaitNode {
     WaitNode* timer_next;
     gxos_wait_uint64 deadline;
     gxos_wait_uint32 generation;
+    // An optional opaque ownership claim carried by a synchronization
+    // primitive across a direct-handoff wake.  The scheduler never interprets
+    // these fields; they prevent a woken waiter from having to race new
+    // contenders to establish ownership.
+    gxos_wait_uint64 handoff_owner;
+    gxos_wait_uint32 handoff_generation;
     WakeReason reason;
     WaitNodeState state;
     bool timed;

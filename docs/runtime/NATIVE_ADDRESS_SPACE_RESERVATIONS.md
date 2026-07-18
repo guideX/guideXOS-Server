@@ -56,6 +56,12 @@ the 4 KiB path. The current implementation does not reclaim empty
 intermediate page-table pages; they remain address-space-owned until a future
 page-table compaction policy exists.
 
+The frame ledger also records whether a VM data frame currently has a leaf
+mapping. `mapPage` rejects non-VM frames, duplicate mappings, and frames already
+marked mapped; `releaseFrame` rejects a mapped frame. `unmapPage` clears that
+ledger bit and decrements the address-space `mappingCount`, which is the
+cross-check used by the VM-region statistics and QEMU leak assertions.
+
 ## Protection policy
 
 The first true backend supports NoAccess, ReadOnly, and ReadWrite. All pages
@@ -83,4 +89,6 @@ The focused QEMU test passes reservation without a VM-frame delta, commit
 frame allocation and zeroing, partial commit/decommit, recommit zeroing,
 protection faults, deterministic rollback, metadata/range exhaustion, release
 and range reuse, page-table agreement, TLB invalidation, and teardown leak
-checks. The hosted adapter probe passes independently. GC remains inactive.
+checks. The hosted adapter probe, managed single-allocation proof, bounded
+repeated-allocation/OOM proof, native-thread QEMU lifecycle, event/scheduler
+regressions, and generic ELF smoke also pass. GC remains inactive.

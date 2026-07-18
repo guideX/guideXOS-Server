@@ -172,17 +172,20 @@ $qemuReady = $null -ne $QemuPath -and $null -ne $OvmfPath -and
 if (-not $qemuReady) {
     Write-Host 'QEMU located: FAIL'
     Write-Host ('Baseline boot: ' + $(if ($SkipBuild) { 'SKIPPED' } elseif ($baselineBuild -eq 'FAIL') { 'BLOCKED (kernel build failed)' } else { 'BLOCKED (QEMU/boot assets unavailable)' }))
-    Write-Host ('Native VM ALL_PASS: BLOCKED (QEMU/boot assets unavailable)')
-    Write-Host 'Frame allocation/release: BLOCKED'
-    Write-Host 'Metadata capacity: BLOCKED'
-    Write-Host 'Virtual-range exhaustion: BLOCKED'
-    Write-Host 'Protection-fault handling: BLOCKED'
-    Write-Host 'Rollback: BLOCKED'
-    Write-Host 'Teardown: BLOCKED'
-    Write-Host 'TLB invalidation: BLOCKED'
-    Write-Host 'No leaks: BLOCKED'
-    Write-Host 'Adapter true mode: BLOCKED (run by hosted smoke separately)'
-    Write-Host 'Expected direct-read/write behavior: BLOCKED'
+    foreach ($name in @(
+        'True unbacked reservation', 'Reservation data-frame delta',
+        'Preferred-base reservation', 'Overlap rejection', 'Partial commit',
+        'Committed-frame delta', 'Zero initialization', 'Partial decommit',
+        'Released-frame delta', 'Reserved range retained after decommit',
+        'Recommit zeroing', 'Read-only enforcement', 'No-access enforcement',
+        'Reserved-uncommitted fault', 'Decommitted-page fault', 'Release',
+        'Range reuse', 'Metadata reuse', 'Stale-handle rejection',
+        'Process/address-space teardown', 'Physical-frame leak check',
+        'Mapping leak check')) {
+        Write-Host ("{0}: BLOCKED" -f $name)
+    }
+    Write-Host 'Native VM ALL_PASS: BLOCKED (QEMU/boot assets unavailable)'
+    Write-Host ('Preserved logs: ' + $RunRoot)
     exit 1
 }
 Write-Host 'QEMU located: PASS'
@@ -209,21 +212,28 @@ $test = Invoke-QemuBoot $testEsp (Join-Path $RunRoot 'native-virtual-memory-seri
 $serial = if (Test-Path $test.SerialPath) { Get-Content $test.SerialPath -Raw } else { '' }
 
 $summary = [ordered]@{
-    'Kernel build (baseline)' = $baselineBuild
-    'Kernel build (true VM test)' = $testBuild
     'QEMU located' = 'PASS'
     'Baseline boot' = $baselineStatus
+    'True unbacked reservation' = 'FAIL'
+    'Preferred-base reservation' = 'FAIL'
+    'Overlap rejection' = 'FAIL'
+    'Partial commit' = 'FAIL'
+    'Zero initialization' = 'FAIL'
+    'Partial decommit' = 'FAIL'
+    'Reserved range retained after decommit' = 'FAIL'
+    'Recommit zeroing' = 'FAIL'
+    'Read-only enforcement' = 'FAIL'
+    'No-access enforcement' = 'FAIL'
+    'Reserved-uncommitted fault' = 'FAIL'
+    'Decommitted-page fault' = 'FAIL'
+    'Release' = 'FAIL'
+    'Range reuse' = 'FAIL'
+    'Metadata reuse' = 'FAIL'
+    'Stale-handle rejection' = 'FAIL'
+    'Process/address-space teardown' = 'FAIL'
+    'Physical-frame leak check' = 'FAIL'
+    'Mapping leak check' = 'FAIL'
     'Native VM ALL_PASS' = if ($test.MarkerFound -and $serial -match '\[native-virtual-memory-test\] ALL_PASS') { 'PASS' } else { 'FAIL' }
-    'Frame allocation/release' = 'FAIL'
-    'Metadata capacity' = 'FAIL'
-    'Virtual-range exhaustion' = 'FAIL'
-    'Protection-fault handling' = 'FAIL'
-    'Rollback' = 'FAIL'
-    'Teardown' = 'FAIL'
-    'TLB invalidation' = 'FAIL'
-    'No leaks' = 'FAIL'
-    'Adapter true mode' = 'NOT_IN_QEMU (see hosted smoke)'
-    'Expected direct-read/write behavior' = 'FAIL'
 }
 
 function Test-SerialPass([string[]]$Labels) {
@@ -235,20 +245,39 @@ function Test-SerialPass([string[]]$Labels) {
     return $true
 }
 
-$summary['Frame allocation/release'] = if (Test-SerialPass @(
-    'Partial commit', 'Zero initialization', 'Direct read/write behavior',
-    'Decommit releases physical frame', 'Release')) { 'PASS' } else { 'FAIL' }
-$summary['Metadata capacity'] = if (Test-SerialPass @('Metadata exhaustion')) { 'PASS' } else { 'FAIL' }
-$summary['Virtual-range exhaustion'] = if (Test-SerialPass @('Virtual-range exhaustion')) { 'PASS' } else { 'FAIL' }
-$summary['Protection-fault handling'] = if (Test-SerialPass @(
-    'Protection transitions', 'Read-only enforcement', 'No-access enforcement',
-    'Reserved-uncommitted fault', 'Decommitted-page fault', 'Released-page fault')) { 'PASS' } else { 'FAIL' }
-$summary['Rollback'] = if (Test-SerialPass @('Physical-frame exhaustion rollback')) { 'PASS' } else { 'FAIL' }
-$summary['Teardown'] = if (Test-SerialPass @('Process/address-space teardown')) { 'PASS' } else { 'FAIL' }
-$summary['TLB invalidation'] = if (Test-SerialPass @('TLB invalidation')) { 'PASS' } else { 'FAIL' }
-$summary['No leaks'] = if (Test-SerialPass @('Physical-frame leak check', 'Mapping leak check')) { 'PASS' } else { 'FAIL' }
-$summary['Expected direct-read/write behavior'] = if (Test-SerialPass @(
-    'Direct read/write behavior', 'Read-only enforcement', 'No-access enforcement')) { 'PASS' } else { 'FAIL' }
+$summary['True unbacked reservation'] = if (Test-SerialPass @('True unbacked reservation')) { 'PASS' } else { 'FAIL' }
+$summary['Preferred-base reservation'] = if (Test-SerialPass @('Preferred-base reservation')) { 'PASS' } else { 'FAIL' }
+$summary['Overlap rejection'] = if (Test-SerialPass @('Overlap rejection')) { 'PASS' } else { 'FAIL' }
+$summary['Partial commit'] = if (Test-SerialPass @('Partial commit')) { 'PASS' } else { 'FAIL' }
+$summary['Zero initialization'] = if (Test-SerialPass @('Zero initialization')) { 'PASS' } else { 'FAIL' }
+$summary['Partial decommit'] = if (Test-SerialPass @('Partial decommit', 'Decommit releases physical frame')) { 'PASS' } else { 'FAIL' }
+$summary['Reserved range retained after decommit'] = if (Test-SerialPass @('Reserved range retained after decommit')) { 'PASS' } else { 'FAIL' }
+$summary['Recommit zeroing'] = if (Test-SerialPass @('Recommit zeroing')) { 'PASS' } else { 'FAIL' }
+$summary['Read-only enforcement'] = if (Test-SerialPass @('Read-only enforcement')) { 'PASS' } else { 'FAIL' }
+$summary['No-access enforcement'] = if (Test-SerialPass @('No-access enforcement')) { 'PASS' } else { 'FAIL' }
+$summary['Reserved-uncommitted fault'] = if (Test-SerialPass @('Reserved-uncommitted fault')) { 'PASS' } else { 'FAIL' }
+$summary['Decommitted-page fault'] = if (Test-SerialPass @('Decommitted-page fault')) { 'PASS' } else { 'FAIL' }
+$summary['Release'] = if (Test-SerialPass @('Release', 'Released-page fault')) { 'PASS' } else { 'FAIL' }
+$summary['Range reuse'] = if (Test-SerialPass @('Range reuse')) { 'PASS' } else { 'FAIL' }
+$summary['Metadata reuse'] = if (Test-SerialPass @('Metadata reuse')) { 'PASS' } else { 'FAIL' }
+$summary['Stale-handle rejection'] = if (Test-SerialPass @('Stale-handle rejection')) { 'PASS' } else { 'FAIL' }
+$summary['Process/address-space teardown'] = if (Test-SerialPass @('Process/address-space teardown')) { 'PASS' } else { 'FAIL' }
+$summary['Physical-frame leak check'] = if (Test-SerialPass @('Physical-frame leak check')) { 'PASS' } else { 'FAIL' }
+$summary['Mapping leak check'] = if (Test-SerialPass @('Mapping leak check')) { 'PASS' } else { 'FAIL' }
+
+function Get-SerialMetric([string]$Label) {
+    $match = [regex]::Match($serial, '(?m)^\[native-virtual-memory-test\]\s+' +
+        [regex]::Escape($Label) + ':\s+([0-9A-Fa-f]+)\s*$')
+    if ($match.Success) { return $match.Groups[1].Value }
+    return 'UNAVAILABLE'
+}
+
+$reservationDelta = Get-SerialMetric 'Reservation data-frame delta'
+$committedDelta = Get-SerialMetric 'Committed-frame delta'
+$releasedDelta = Get-SerialMetric 'Released-frame delta'
+Write-Host ('Reservation data-frame delta: ' + $reservationDelta)
+Write-Host ('Committed-frame delta: ' + $committedDelta)
+Write-Host ('Released-frame delta: ' + $releasedDelta)
 foreach ($entry in $summary.GetEnumerator()) { Write-Host ("{0}: {1}" -f $entry.Key, $entry.Value) }
 Write-Host ('Serial log: ' + $test.SerialPath)
 Write-Host ('QEMU debug log: ' + $test.DebugPath)

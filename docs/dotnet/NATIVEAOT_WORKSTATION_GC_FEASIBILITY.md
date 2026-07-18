@@ -226,9 +226,17 @@ The result is finite, not small: the collector is usable as-is, but the required
 
 The runtime-neutral region lifecycle and inactive NativeAOT platform mapping
 are documented in [NATIVEAOT_GC_PLATFORM_VIRTUAL_MEMORY.md](NATIVEAOT_GC_PLATFORM_VIRTUAL_MEMORY.md).
-The hosted lifecycle and adapter probe pass, while the current bare-metal
-address-space model still provides only an explicitly documented eager-backed
-compatibility backend; GC initialization remains disabled.
+The hosted lifecycle, true bare-metal QEMU lifecycle, and adapter probe pass;
+GC initialization remains disabled because the broader thread, event, FLS,
+stack, and collector-startup contracts are still outside this VM pass.
+
+### Critical-section primitive status
+
+The runtime-neutral mutex, single-CPU scheduler integration, inactive recursive
+NativeAOT critical-section adapter, hosted probe, and AMD64 QEMU validation are
+documented in [NATIVEAOT_GC_PLATFORM_CRITICAL_SECTIONS.md](NATIVEAOT_GC_PLATFORM_CRITICAL_SECTIONS.md).
+This closes the generic critical-section primitive experiment only; it does not
+claim that the complete Workstation GC startup contract is live.
 
 The static library has no PE import table. The current proof PE import report is reachability evidence for the adapted non-collecting link; NativeAOT source and selected archive members identify imports that become live when initialization or collection is enabled.
 

@@ -368,4 +368,4 @@ in this pass.
 | Normal Server build | PASS |
 | Experimental Server build | PASS |
 | Default inventory isolation | PASS |
-| Historical `0xC0000409` | Reproduced but not fully diagnosed; not reproduced in three current bounded replays |
+| Historical `0xC0000409` | Reproduced but not fully diagnosed; not reproduced in current bounded replays |

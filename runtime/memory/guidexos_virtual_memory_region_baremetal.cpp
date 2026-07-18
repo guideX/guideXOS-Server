@@ -171,10 +171,15 @@ bool mappingMatches(const BareRegionState& state, std::size_t pageIndex,
     const bool hasMapping = kernel::memory::address_space::queryPage(
         state.owner, state.base + pageIndex * kPageSize, mapping);
     const PageRecord& page = state.pages[pageIndex];
-    if (!page.committed) return !hasMapping || !mapping->present;
+    // Reservation does not create a leaf PTE.  Accepting a stale non-present
+    // entry here would hide disagreement between metadata and page tables.
+    if (!page.committed) return !hasMapping;
+    const std::uint64_t expectedFlags = pageFlags(page.protection);
     return hasMapping && mapping->hasEntry &&
         mapping->physicalAddress == page.physicalAddress &&
-        mapping->present == (page.protection != MemoryProtection::NoAccess);
+        mapping->present == (page.protection != MemoryProtection::NoAccess) &&
+        (mapping->flags & (kPtePresent | kPteWritable | kPteNoExecute)) ==
+            expectedFlags;
 }
 
 bool mapCommittedPage(BareRegionState& state, std::size_t pageIndex,
@@ -354,10 +359,17 @@ VmResult commit(VirtualMemoryRegion& region, std::size_t offset,
         if (state->pages[pageIndex].committed) continue;
         const std::uint64_t physical = kernel::memory::address_space::allocateFrame(
             FrameOwner::VmRegion);
-        if (physical == 0 || !kernel::memory::address_space::zeroFrame(physical)) {
+        if (physical == 0) {
             rollbackNewPages(*state, newly, firstPage, pageCount);
             diagnostic("physical frame allocation exhausted during commit");
             return VmResult::OutOfMemory;
+        }
+        if (!kernel::memory::address_space::zeroFrame(physical)) {
+            (void)kernel::memory::address_space::releaseFrame(
+                physical, FrameOwner::VmRegion, FrameReleaseReason::Other);
+            rollbackNewPages(*state, newly, firstPage, pageCount);
+            diagnostic("physical frame zeroing failed during commit");
+            return VmResult::HostFailure;
         }
         state->pages[pageIndex].physicalAddress = physical;
         if (!mapCommittedPage(*state, pageIndex, physical, protection)) {
@@ -571,6 +583,10 @@ VirtualMemoryStats stats() {
     result.allocatedFrames = frames.allocatedFrames;
     result.regionOwnedFrames = frames.regionOwnedFrames;
     result.pageTableFrames = frames.pageTableFrames;
+    if (frames.mappingCount != result.mappingCount) {
+        diagnostic("mapping accounting disagrees with region metadata");
+    }
+    result.mappingCount = frames.mappingCount;
     result.framesReleasedByDecommit = frames.framesReleasedByDecommit;
     result.framesReleasedByRelease = frames.framesReleasedByRelease;
     result.tlbInvalidations = frames.tlbInvalidations;
