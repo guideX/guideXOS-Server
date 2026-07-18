@@ -1,0 +1,19 @@
+
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-startup-dry-run\baseline\single-allocation\artifacts\HostLogProof.elf:     file format elf64-x86-64
+
+Program Header:
+    LOAD off    0x0000000000000000 vaddr 0x0000000010000000 paddr 0x0000000010000000 align 2**12
+         filesz 0x0000000000000000 memsz 0x0000000000001000 flags r--
+    LOAD off    0x0000000000001000 vaddr 0x0000000010001000 paddr 0x0000000010001000 align 2**12
+         filesz 0x0000000000059400 memsz 0x0000000000059400 flags r-x
+    LOAD off    0x000000000005b000 vaddr 0x000000001005b000 paddr 0x000000001005b000 align 2**12
+         filesz 0x0000000000042200 memsz 0x0000000000042200 flags r--
+    LOAD off    0x000000000009e000 vaddr 0x000000001009e000 paddr 0x000000001009e000 align 2**12
+         filesz 0x0000000000001000 memsz 0x0000000000036eb0 flags rw-
+    LOAD off    0x000000000009f000 vaddr 0x00000000100d5000 paddr 0x00000000100d5000 align 2**12
+         filesz 0x0000000000006600 memsz 0x0000000000006600 flags r--
+    LOAD off    0x00000000000a6000 vaddr 0x00000000100dc000 paddr 0x00000000100dc000 align 2**12
+         filesz 0x0000000000000200 memsz 0x0000000000000200 flags r--
+    LOAD off    0x00000000000a7000 vaddr 0x00000000100dd000 paddr 0x00000000100dd000 align 2**12
+         filesz 0x0000000000000600 memsz 0x0000000000000600 flags r--
+

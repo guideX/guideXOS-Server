@@ -1,6 +1,6 @@
 # NativeAOT Workstation GC Feasibility
 
-Status: feasibility and dependency-mapping pass only. No garbage collection was enabled or executed by this pass.
+Status: readiness audit complete; no garbage collection was enabled or executed. Outcome B remains the current status at the NativeAOT FLS lifecycle boundary. See [NativeAOT GC Startup Readiness](NATIVEAOT_GC_STARTUP_READINESS.md) and the machine report at `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`.
 
 Date: 2026-07-15
 
@@ -442,3 +442,12 @@ and [NativeAOT GC Platform Events](NATIVEAOT_GC_PLATFORM_EVENTS.md). No GC
 initialization or collection was added in this pass. See the current
 [NativeAOT GC Platform Threads](NATIVEAOT_GC_PLATFORM_THREADS.md) status for
 the generic start/join follow-up.
+
+## 25. Current readiness status
+
+The gated 2026-07-18 readiness audit stopped before `RhInitialize`: the current
+proof adapter has no dynamic NativeAOT FLS index/lifetime manager with detach
+callbacks. No live startup or GC dry-run report was produced. See
+[NativeAOT GC Startup Readiness](NATIVEAOT_GC_STARTUP_READINESS.md) for the
+pass/fail matrix and the machine-readable report at
+`out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`.
