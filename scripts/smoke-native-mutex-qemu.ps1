@@ -4,6 +4,7 @@ param(
     [string]$QemuImgPath = "",
     [int]$TimeoutSeconds = 60,
     [switch]$SkipBuild,
+    [switch]$SkipBaseline,
     [string]$OutputRoot = "",
     [string]$NormalKernelPath = "",
     [string]$TestKernelPath = ""
@@ -15,7 +16,7 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $Root "out\runtime\native-mutex-qemu-validation"
 }
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
-$RunRoot = Join-Path $OutputRoot ("smoke-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+$RunRoot = Join-Path $OutputRoot ("smoke-" + (Get-Date -Format "yyyyMMdd-HHmmss-fff") + "-" + (Get-Random -Minimum 1000 -Maximum 10000))
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
 function Find-Executable {
@@ -96,7 +97,22 @@ function Invoke-QemuBoot {
         $process.WaitForExit(5000) | Out-Null
     }
     $process.Refresh()
-    [pscustomobject]@{ MarkerFound = $found; SerialPath = $SerialPath; DebugPath = $DebugPath }
+    # The polling match only shortens a successful run.  Recompute the final
+    # guest result from this run's complete serial file so partial output or a
+    # stale substring cannot satisfy the runner.
+    $finalText = if (Test-Path -LiteralPath $SerialPath) {
+        Get-Content -LiteralPath $SerialPath -Raw -ErrorAction SilentlyContinue
+    } else { "" }
+    $finalMarkerFound = $finalText -match $MarkerPattern
+    $guestPass = $finalText -match '(?m)^\[native-mutex-test\]\s+ALL_PASS:\s+PASS\s*$'
+    $guestFail = $finalText -match '(?m)^\[native-mutex-test\]\s+ALL_FAIL:\s+FAIL\s*$'
+    [pscustomobject]@{
+        MarkerFound = [bool]$finalMarkerFound
+        GuestPass = [bool]($guestPass -and -not $guestFail)
+        GuestFail = [bool]$guestFail
+        SerialPath = $SerialPath
+        DebugPath = $DebugPath
+    }
 }
 
 $QemuPath = Find-Executable $QemuPath "GXOS_QEMU_X64" "qemu-system-x86_64.exe" @(
@@ -135,15 +151,20 @@ $normalKernel = if ([string]::IsNullOrWhiteSpace($NormalKernelPath)) {
     Join-Path $Root "kernel\build\amd64\bin\kernel.elf"
 } else { (Resolve-Path -LiteralPath $NormalKernelPath).Path }
 $buildLog = Join-Path $RunRoot "build.log"
-if (-not $SkipBuild) { Invoke-Make $make $buildLog }
-if (-not (Test-Path -LiteralPath $normalKernel -PathType Leaf)) { throw "Normal kernel image missing." }
-$baselineEsp = Join-Path $RunRoot "baseline-ESP"
-Stage-Esp $baselineEsp $normalKernel $bootloaderPath $ramdiskPath
-$baseline = Invoke-QemuBoot $baselineEsp (Join-Path $RunRoot "baseline.serial.log") `
-    (Join-Path $RunRoot "baseline.debug.log") (Join-Path $RunRoot "baseline.stdout.log") `
-    (Join-Path $RunRoot "baseline.stderr.log") "\[KERNEL\] Entering main loop \(waiting for input\)"
-Write-Host ("Baseline boot: " + ($(if ($baseline.MarkerFound) { "PASS" } else { "FAIL" })))
-if (-not $baseline.MarkerFound) { exit 1 }
+if (-not $SkipBaseline) {
+    if (-not $SkipBuild) { Invoke-Make $make $buildLog }
+    if (-not (Test-Path -LiteralPath $normalKernel -PathType Leaf)) { throw "Normal kernel image missing." }
+    $baselineEsp = Join-Path $RunRoot "baseline-ESP"
+    Stage-Esp $baselineEsp $normalKernel $bootloaderPath $ramdiskPath
+    $baseline = Invoke-QemuBoot $baselineEsp (Join-Path $RunRoot "baseline.serial.log") `
+        (Join-Path $RunRoot "baseline.debug.log") (Join-Path $RunRoot "baseline.stdout.log") `
+        (Join-Path $RunRoot "baseline.stderr.log") "\[KERNEL\] Entering main loop \(waiting for input\)"
+    Write-Host ("Baseline boot: " + ($(if ($baseline.MarkerFound) { "PASS" } else { "FAIL" })))
+    if (-not $baseline.MarkerFound) { exit 1 }
+}
+else {
+    Write-Host "Baseline boot: SKIPPED (separately validated)"
+}
 
 if (-not $SkipBuild) {
     # Reuse the existing native-thread diagnostic trace for scheduler lifecycle
@@ -176,9 +197,10 @@ foreach ($name in $names) {
 }
 $metric = [regex]::Match($serial, "Protected counter: expected=3 observed=([0-9A-Fa-f]+)")
 Write-Host ("Protected counter metric: " + ($(if ($metric.Success) { $metric.Value } else { "MISSING" })))
-Write-Host ("QEMU mutex ALL_PASS: " + ($(if ($test.MarkerFound -and $failed -eq 0) { "PASS" } else { "FAIL" })))
+Write-Host ("Guest marker: " + ($(if ($test.GuestPass) { "PASS" } elseif ($test.GuestFail) { "FAIL" } else { "MISSING" })))
+Write-Host ("Runner parsed result: " + ($(if ($test.GuestPass -and $failed -eq 0) { "PASS" } else { "FAIL" })))
 Write-Host "Serial log: $($test.SerialPath)"
 Write-Host "Fault/debug log: $($test.DebugPath)"
 Write-Host "Artifacts: $RunRoot"
-if (-not $test.MarkerFound -or $failed -ne 0) { exit 1 }
+if (-not $test.GuestPass -or $failed -ne 0) { exit 1 }
 exit 0

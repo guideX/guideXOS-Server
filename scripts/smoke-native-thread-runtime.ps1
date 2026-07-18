@@ -36,6 +36,7 @@ $quoteRoot = @('-iquote', $root)
 $hostedExe = Join-Path $outputRoot 'guidexos_native_thread_tests.exe'
 $hostedBuild = Invoke-Compiler $compiler (@('-std=c++17','-O2','-Wall','-Wextra','-Wpedantic') + $quoteRoot + @(
     (Join-Path $root 'runtime\synchronization\guidexos_event.cpp'),
+    (Join-Path $root 'runtime\local_storage\guidexos_local_storage.cpp'),
     (Join-Path $root 'runtime\thread\guidexos_native_thread.cpp'),
     (Join-Path $root 'runtime\tests\guidexos_native_thread_tests.cpp'),
     '-pthread', '-o', $hostedExe
@@ -72,6 +73,7 @@ $baremetalObjects = @(
     @{ Source = 'runtime\synchronization\guidexos_scheduler_wait.cpp'; Name = 'scheduler_wait.o' },
     @{ Source = 'runtime\synchronization\guidexos_event_baremetal.cpp'; Name = 'event_baremetal.o' },
     @{ Source = 'runtime\thread\guidexos_native_thread_baremetal.cpp'; Name = 'native_thread_baremetal.o' },
+    @{ Source = 'runtime\local_storage\guidexos_local_storage.cpp'; Name = 'local_storage.o' },
     @{ Source = 'kernel\core\process.cpp'; Name = 'process.o' }
 )
 $baremetalCompilePassed = $true
@@ -102,6 +104,7 @@ if ($null -eq $qemu) {
 $adapterExe = Join-Path $outputRoot 'guidexos_native_thread_adapter_probe.exe'
 $adapterBuild = Invoke-Compiler $compiler (@('-std=c++17','-O2','-Wall','-Wextra','-Wpedantic') + $quoteRoot + @(
     (Join-Path $root 'runtime\synchronization\guidexos_event.cpp'),
+    (Join-Path $root 'runtime\local_storage\guidexos_local_storage.cpp'),
     (Join-Path $root 'runtime\thread\guidexos_native_thread.cpp'),
     (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_thread_adapter.cpp'),
     (Join-Path $root 'runtime\tests\guidexos_native_thread_adapter_probe.cpp'),

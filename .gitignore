@@ -34,6 +34,7 @@
 /out/dotnet/runtime-pack/
 /out/dotnet/allocation-comparison/
 /out/dotnet/repeated-allocation-comparison/
+/out/dotnet/gc-startup-dry-run/
 /out/dotnet/native-event/
 /out/dotnet/native-thread-smoke/
 /out/runtime/

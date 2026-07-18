@@ -26,6 +26,9 @@
 #if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
 #include "include/kernel/native_thread_qemu_test.h"
 #endif
+#if defined(GXOS_NATIVE_LOCAL_STORAGE_QEMU_TEST)
+#include "include/kernel/native_local_storage_qemu_test.h"
+#endif
 #if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
 #include "include/kernel/native_virtual_memory_qemu_test.h"
 #endif
@@ -244,6 +247,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
     kernel::serial::puts("[native-thread-test] timer services ready\n");
     kernel::native_thread_qemu_test::run();
+    while (1) {
+        kernel::arch::enable_interrupts();
+        kernel::arch::halt();
+    }
+#endif
+
+#if defined(GXOS_NATIVE_LOCAL_STORAGE_QEMU_TEST)
+    kernel::interrupts::init();
+    kernel::pit::init(100);
+    kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+    kernel::serial::puts("[native-local-storage-test] timer services ready\n");
+    kernel::native_local_storage_qemu_test::run();
     while (1) {
         kernel::arch::enable_interrupts();
         kernel::arch::halt();

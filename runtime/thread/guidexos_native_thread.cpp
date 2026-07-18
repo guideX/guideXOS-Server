@@ -1,4 +1,5 @@
 #include "guidexos_native_thread.h"
+#include "../local_storage/guidexos_local_storage.h"
 
 #if !defined(GXOS_BARE_METAL)
 
@@ -90,7 +91,29 @@ namespace {
 
     void workerMain(ThreadSlot* slot, ThreadHandle handle) {
         g_currentHandle = handle;
-        const gxos_thread_uintptr result = slot->entry(slot->context);
+        const bool localStorageRequired = gxos::runtime::isLocalStorageInitialized();
+        bool localStorageAttached = false;
+        if (localStorageRequired) {
+            const gxos::runtime::LocalStorageResult attachResult =
+                gxos::runtime::attachLocalStorage();
+            if (attachResult != gxos::runtime::LocalStorageResult::Success) {
+                // A manager-enabled worker cannot enter user code without a
+                // clean per-thread context.  The ordinary thread primitive
+                // remains usable when the manager is not initialized.
+                localStorageAttached = false;
+            }
+            else {
+                localStorageAttached = true;
+            }
+        }
+
+        const gxos_thread_uintptr result = (!localStorageRequired || localStorageAttached)
+            ? slot->entry(slot->context)
+            : 0;
+
+        if (localStorageAttached) {
+            (void)gxos::runtime::detachLocalStorage();
+        }
 
         std::unique_lock<std::mutex> lock(g_mutex);
         // The slot cannot be reused before this worker exits: join and detach

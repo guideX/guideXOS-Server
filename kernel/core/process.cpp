@@ -16,6 +16,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
 #include "runtime/synchronization/guidexos_mutex.h"
+#include "runtime/local_storage/guidexos_local_storage.h"
 #include "runtime/thread/guidexos_native_thread.h"
 
 #if defined(ARCH_AMD64)
@@ -69,6 +70,8 @@ namespace {
         arch::context::ArchThreadData architecture;
         gxos::runtime::scheduler_wait::WaitNode wait;
         gxos::runtime::Event* completion;
+        gxos::runtime::LocalStorageContext local_storage;
+        bool local_storage_attached;
     };
 
     KernelThread threads[kMaxThreads] = {};
@@ -385,6 +388,30 @@ namespace {
         gxos::runtime::installMutexPlatformHooks(&hooks);
     }
 
+    gxos::runtime::LocalStorageContext* local_storage_current(void*) {
+        return current == nullptr ? nullptr : &current->local_storage;
+    }
+
+    bool local_storage_is_attached(void*) {
+        return current != nullptr && current->local_storage_attached;
+    }
+
+    void local_storage_set_attached(void*, bool attached) {
+        if (current != nullptr) {
+            current->local_storage_attached = attached;
+        }
+    }
+
+    void install_local_storage_hooks() {
+        const gxos::runtime::LocalStoragePlatformHooks hooks = {
+            nullptr,
+            local_storage_current,
+            local_storage_is_attached,
+            local_storage_set_attached
+        };
+        gxos::runtime::installLocalStoragePlatformHooks(&hooks);
+    }
+
     KernelThread* lookup_handle(const gxos::runtime::ThreadHandle& handle) {
         if (!handle.isValid() || handle.slot >= kMaxThreads) {
             return nullptr;
@@ -409,6 +436,10 @@ namespace {
         const uint32_t index = slot_index(&thread);
         if (index >= kMaxThreads) {
             return;
+        }
+        if (gxos::runtime::isLocalStorageInitialized()) {
+            (void)gxos::runtime::forceClearLocalStorageContext(&thread.local_storage);
+            thread.local_storage_attached = false;
         }
         arch::context::arch_thread_destroy(&thread.architecture);
         zero_stack(thread);
@@ -452,7 +483,18 @@ namespace {
         serial::put_hex64(reinterpret_cast<uintptr_t>(thread->native_context));
         serial::putc('\n');
 #endif
-        thread->exit_result = thread->native_entry(thread->native_context);
+        const bool localStorageRequired = gxos::runtime::isLocalStorageInitialized();
+        bool localStorageAttached = false;
+        if (localStorageRequired) {
+            localStorageAttached = gxos::runtime::attachLocalStorage() ==
+                gxos::runtime::LocalStorageResult::Success;
+        }
+        thread->exit_result = (!localStorageRequired || localStorageAttached)
+            ? thread->native_entry(thread->native_context)
+            : 0;
+        if (localStorageAttached) {
+            (void)gxos::runtime::detachLocalStorage();
+        }
         thread->exit_result_valid = true;
 #if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
         serial::puts("[native-thread-test] exit result=");
@@ -774,6 +816,7 @@ void init()
     check_thread_invariants();
     install_wait_hooks();
     install_mutex_hooks();
+    install_local_storage_hooks();
     install_native_thread_hooks();
 #else
     gxos::runtime::scheduler_wait::installSchedulerWaitHooks(nullptr);
@@ -918,6 +961,27 @@ bool terminate_thread(tid_t tid)
 uint32_t terminate_process_threads(pid_t owner)
 {
 #if defined(ARCH_AMD64)
+    // Cooperative native exits detach on their own stack.  A process teardown
+    // can also remove a non-current native TCB, so stage its callback cleanup
+    // before taking the scheduler critical section and before any slot or
+    // stack reclamation.  Forced teardown callbacks must be independent of
+    // current-thread identity.
+    if (gxos::runtime::isLocalStorageInitialized()) {
+        for (uint32_t i = 0; i < kMaxThreads; ++i) {
+            KernelThread& thread = threads[i];
+            if (!thread.allocated || thread.owner != owner ||
+                !thread.local_storage_attached) {
+                continue;
+            }
+            if (&thread == current) {
+                (void)gxos::runtime::detachLocalStorage();
+            }
+            else {
+                (void)gxos::runtime::detachLocalStorageContext(&thread.local_storage);
+                thread.local_storage_attached = false;
+            }
+        }
+    }
     void* token = wait_enter_critical(nullptr);
     KernelThread* current_match = nullptr;
     uint32_t terminated = 0;
