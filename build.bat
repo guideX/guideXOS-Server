@@ -53,6 +53,8 @@ file_icon_provider.cpp ^
 firewall.cpp ^
 focus_indicator.cpp ^
 fs.cpp ^
+background_service.cpp ^
+background_store.cpp ^
 gxapp_container.cpp ^
 gxapp_loader.cpp ^
 gxm_loader.cpp ^
@@ -90,6 +92,7 @@ package_manager.cpp ^
 paint.cpp ^
 process.cpp ^
 png_loader.cpp ^
+png_codec.cpp ^
 right_click_menu.cpp ^
 save_changes_dialog.cpp ^
 save_dialog.cpp ^

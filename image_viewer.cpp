@@ -3,9 +3,11 @@
 #include "open_dialog.h"
 #include "save_dialog.h"
 #include "desktop_theme.h"
+#include "desktop_service.h"
 #include "gui_protocol.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "logger.h"
+#include "png_codec.h"
 #include "vfs.h"
 
 #include <algorithm>
@@ -250,70 +252,6 @@ static std::string joinStatusText(const std::string& base, const std::string& ex
     return base + " | " + extra;
 }
 
-static void appendByte(std::vector<uint8_t>& out, uint8_t value) {
-    out.push_back(value);
-}
-
-static void appendUint16LE(std::vector<uint8_t>& out, uint16_t value) {
-    out.push_back(static_cast<uint8_t>(value & 0xFF));
-    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
-}
-
-static void appendUint32BE(std::vector<uint8_t>& out, uint32_t value) {
-    out.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
-    out.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
-    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
-    out.push_back(static_cast<uint8_t>(value & 0xFF));
-}
-
-static uint32_t crc32ForBytes(const uint8_t* data, size_t size) {
-    static uint32_t table[256];
-    static bool initialized = false;
-    if (!initialized) {
-        for (uint32_t i = 0; i < 256; ++i) {
-            uint32_t c = i;
-            for (int bit = 0; bit < 8; ++bit) {
-                if (c & 1u) {
-                    c = 0xEDB88320u ^ (c >> 1);
-                } else {
-                    c >>= 1;
-                }
-            }
-            table[i] = c;
-        }
-        initialized = true;
-    }
-
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < size; ++i) {
-        crc = table[(crc ^ data[i]) & 0xFFu] ^ (crc >> 8);
-    }
-    return crc ^ 0xFFFFFFFFu;
-}
-
-static uint32_t adler32ForBytes(const uint8_t* data, size_t size) {
-    const uint32_t kMod = 65521u;
-    uint32_t a = 1u;
-    uint32_t b = 0u;
-    for (size_t i = 0; i < size; ++i) {
-        a = (a + data[i]) % kMod;
-        b = (b + a) % kMod;
-    }
-    return (b << 16) | a;
-}
-
-static void appendPngChunk(std::vector<uint8_t>& out, const char type[4], const std::vector<uint8_t>& data) {
-    appendUint32BE(out, static_cast<uint32_t>(data.size()));
-    const size_t start = out.size();
-    out.push_back(static_cast<uint8_t>(type[0]));
-    out.push_back(static_cast<uint8_t>(type[1]));
-    out.push_back(static_cast<uint8_t>(type[2]));
-    out.push_back(static_cast<uint8_t>(type[3]));
-    out.insert(out.end(), data.begin(), data.end());
-    const uint32_t crc = crc32ForBytes(out.data() + start, 4u + data.size());
-    appendUint32BE(out, crc);
-}
-
 static std::string sanitizePathComponent(std::string value) {
     for (char& ch : value) {
         switch (ch) {
@@ -430,71 +368,9 @@ static bool clampCropRectToImage(const gui::ImagePtr& image, int& x, int& y, int
     return width > 0 && height > 0;
 }
 
-static bool encodePng(const gui::ImagePtr& image, std::vector<uint8_t>& bytes, std::string& error) {
-    bytes.clear();
-    error.clear();
-
-    if (!image || !image->isValid() || image->Channels < 4) {
-        error = "Current image is not a valid RGBA image";
-        return false;
-    }
-    if (image->Width <= 0 || image->Height <= 0) {
-        error = "Current image has invalid dimensions";
-        return false;
-    }
-
-    bytes.insert(bytes.end(), { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' });
-
-    std::vector<uint8_t> ihdr;
-    ihdr.reserve(13);
-    appendUint32BE(ihdr, static_cast<uint32_t>(image->Width));
-    appendUint32BE(ihdr, static_cast<uint32_t>(image->Height));
-    appendByte(ihdr, 8);  // bit depth
-    appendByte(ihdr, 6);  // color type RGBA
-    appendByte(ihdr, 0);  // compression
-    appendByte(ihdr, 0);  // filter
-    appendByte(ihdr, 0);  // interlace
-    appendPngChunk(bytes, "IHDR", ihdr);
-
-    std::vector<uint8_t> raw;
-    const size_t rowBytes = 1u + static_cast<size_t>(image->Width) * 4u;
-    raw.reserve(rowBytes * static_cast<size_t>(image->Height));
-    for (int y = 0; y < image->Height; ++y) {
-        raw.push_back(0);  // filter type 0
-        for (int x = 0; x < image->Width; ++x) {
-            const uint8_t* src = image->Pixels + (static_cast<size_t>(y) * image->Width + x) * image->Channels;
-            raw.push_back(src[0]);
-            raw.push_back(src[1]);
-            raw.push_back(src[2]);
-            raw.push_back(src[3]);
-        }
-    }
-
-    std::vector<uint8_t> zlibData;
-    zlibData.reserve(raw.size() + (raw.size() / 65535u + 2u) * 5u + 6u);
-    zlibData.push_back(0x78);
-    zlibData.push_back(0x01);
-
-    size_t offset = 0;
-    while (offset < raw.size()) {
-        const size_t blockLen = std::min<size_t>(65535u, raw.size() - offset);
-        const bool finalBlock = offset + blockLen >= raw.size();
-        zlibData.push_back(finalBlock ? 0x01 : 0x00);
-        appendUint16LE(zlibData, static_cast<uint16_t>(blockLen));
-        appendUint16LE(zlibData, static_cast<uint16_t>(~static_cast<uint16_t>(blockLen)));
-        zlibData.insert(zlibData.end(), raw.begin() + offset, raw.begin() + offset + blockLen);
-        offset += blockLen;
-    }
-
-    appendUint32BE(zlibData, adler32ForBytes(raw.data(), raw.size()));
-    appendPngChunk(bytes, "IDAT", zlibData);
-    appendPngChunk(bytes, "IEND", {});
-    return true;
-}
-
 static bool writePngToVfs(const std::string& path, const gui::ImagePtr& image, std::string& error) {
     std::vector<uint8_t> bytes;
-    if (!encodePng(image, bytes, error)) {
+    if (!gui::PngCodec::EncodeRgba8(image, bytes, error)) {
         return false;
     }
     if (!Vfs::instance().writeFile(path, bytes)) {
@@ -1116,11 +992,13 @@ bool ImageViewer::trySetCurrentImageAsWallpaper() {
         return false;
     }
 
-    ipc::Message msg;
-    msg.type = static_cast<uint32_t>(gui::MsgType::MT_DesktopWallpaperSet);
-    msg.data.assign(s_originalPath.begin(), s_originalPath.end());
-    ipc::Bus::publish("gui.input", std::move(msg), false);
-    setNoticeText("Wallpaper update requested");
+    std::string error;
+    if (!gui::DesktopService::DispatchSetAsDesktopBackground(s_originalPath, "ImageViewer", error)) {
+        setNoticeText(error.empty() ? "Unable to set desktop background" : error);
+        updateDisplayImage();
+        return false;
+    }
+    setNoticeText("Desktop background updated");
     updateDisplayImage();
     return true;
 }

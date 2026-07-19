@@ -53,6 +53,7 @@
 #include "gxos_tls_prerequisites.h"
 #include "desktop_config.h"
 #include "desktop_service.h"
+#include "background_service.h"
 #include "notepad.h"
 #include "calculator.h"
 #include "console_window.h"
@@ -1773,7 +1774,7 @@ static void help(){
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
+                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
                  " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
@@ -1977,8 +1978,23 @@ using namespace gxos;
         }
         // Desktop and Taskbar convenience commands
         else if (cmd=="desktop.wallpaper"){
-            if(!requireCompositor()) continue;
-            std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopWallpaperSet; m.data.assign(path.begin(), path.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop wallpaper set request sent: "<<path<<std::endl; }
+            std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; }
+            std::string error;
+            if (gui::DesktopBackgroundService::ImportAndSetDesktopBackground(path, error)) {
+                std::cout<<"Desktop background imported and selected: "<<path<<std::endl;
+            } else {
+                std::cout<<"Desktop background import failed: "<<error<<std::endl;
+            }
+        }
+        else if (cmd=="desktop.background.remove"){
+            std::string id; iss>>id; if(id.empty()){ std::cout<<"desktop.background.remove <id>"<<std::endl; continue; }
+            std::string error;
+            if (gui::DesktopBackgroundService::RemoveBackground(id, error)) {
+                std::cout<<"Desktop background removed: "<<id<<std::endl;
+            } else {
+                std::cout<<"Desktop background removal failed: "<<error<<std::endl;
+            }
+        }
         else if (cmd=="desktop.launch.resolve"){
             std::string label; std::getline(iss, label); if(label.size()>0 && label[0]==' ') label.erase(0,1); if(label.empty()){ std::cout<<"desktop.launch.resolve <label>"<<std::endl; continue; }
             std::cout << gui::DesktopService::ResolveLaunchTargetDiagnostic(label);

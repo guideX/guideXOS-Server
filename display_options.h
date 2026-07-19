@@ -44,6 +44,8 @@ public:
     static bool s_showDesktopFileManager;
     static bool s_showDesktopSystemSettings;
     static bool s_smallLiveDesktopFolderIcons;
+    static bool s_removeConfirmationVisible;
+    static std::string s_removeTargetId;
 
     static void loadSelection();
     static void render();
