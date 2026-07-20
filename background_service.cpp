@@ -16,11 +16,22 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <system_error>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 #endif
 
 namespace gxos {
@@ -89,7 +100,14 @@ bool readRegularSource(const std::string& sourceVfsPath, std::vector<uint8_t>& b
         error = "source is not a regular PNG file";
         return false;
     }
-    if (Vfs::instance().readFile(sourceVfsPath, bytes)) return true;
+    if (Vfs::instance().readFile(sourceVfsPath, bytes)) {
+        if (bytes.size() > gui::DefaultImageSafetyLimits().maxBytes) {
+            bytes.clear();
+            error = "source exceeds the PNG size limit";
+            return false;
+        }
+        return true;
+    }
 
     const std::string hostPath = sourceHostPath(sourceVfsPath);
     std::error_code ec;
@@ -127,7 +145,38 @@ std::string boundedDisplayName(const std::string& sourceVfsPath)
 
 std::string transactionSuffix()
 {
-    return std::to_string(s_transactionCounter.fetch_add(1));
+    const uint64_t ticks = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+#if defined(_WIN32)
+    const uint64_t processId = static_cast<uint64_t>(GetCurrentProcessId());
+#else
+    const uint64_t processId = static_cast<uint64_t>(getpid());
+#endif
+    return std::to_string(processId) + "-" + std::to_string(ticks) + "-" +
+        std::to_string(s_transactionCounter.fetch_add(1));
+}
+
+std::string storageFile(const std::string& name)
+{
+    const std::string directory = BackgroundStore::HostStorageDirectory();
+    if (directory.empty() || name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string::npos) {
+        return std::string();
+    }
+    return (std::filesystem::path(directory) / name).lexically_normal().string();
+}
+
+bool isOwnedStorageFile(const std::string& path)
+{
+    const std::string directory = BackgroundStore::HostStorageDirectory();
+    if (directory.empty()) return false;
+    const std::filesystem::path root = std::filesystem::path(directory).lexically_normal();
+    const std::filesystem::path candidate = std::filesystem::path(path).lexically_normal();
+    if (candidate.parent_path() != root) return false;
+    const std::string name = candidate.filename().string();
+    if (name.empty() || name == "." || name == "..") return false;
+    for (unsigned char c : name) {
+        if (c < 0x20u || c == 0x7Fu || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') return false;
+    }
+    return true;
 }
 
 bool readOwnedFile(const std::string& logicalPath, std::vector<uint8_t>& bytes)
@@ -138,7 +187,8 @@ bool readOwnedFile(const std::string& logicalPath, std::vector<uint8_t>& bytes)
 
 bool cleanupOwnedFile(const std::string& path)
 {
-    if (path.empty() || !FS::removeFile(path)) {
+    std::error_code ec;
+    if (!isOwnedStorageFile(path) || !std::filesystem::is_regular_file(std::filesystem::path(path), ec) || ec || !FS::removeFile(path)) {
         diagnostic("cleanup-failure", path);
         return false;
     }
@@ -216,15 +266,23 @@ void notifySelectionChanged(const std::string& id)
     publishBackgroundMessage(MsgType::MT_DesktopBackgroundInventoryChanged, id);
 }
 
+void notifyInventoryChanged(const std::string& id)
+{
+    publishBackgroundMessage(MsgType::MT_DesktopBackgroundInventoryChanged, id);
+}
+
 bool replaceManifest(const std::vector<BackgroundEntry>& records, const std::string& suffix, std::string& error)
 {
     std::string manifestText;
     if (!BackgroundStore::SerializeManifest(records, manifestText, error)) return false;
-    if (!FS::createDirectories("user-data\\backgrounds")) {
+    const std::string storageDirectory = BackgroundStore::HostStorageDirectory();
+    const std::string manifestPath = BackgroundStore::HostPathForOwned(kUserBackgroundManifestPath);
+    const std::string tempPath = storageFile(".manifest-" + suffix + ".tmp");
+    const std::string backupPath = storageFile(".manifest-" + suffix + ".bak");
+    if (storageDirectory.empty() || manifestPath.empty() || tempPath.empty() || backupPath.empty() || !FS::createDirectories(storageDirectory)) {
         error = "unable to create user background directory";
         return false;
     }
-    const std::string tempPath = "user-data\\backgrounds\\.manifest-" + suffix + ".tmp";
     if (!FS::writeAll(tempPath, std::vector<uint8_t>(manifestText.begin(), manifestText.end()))) {
         error = "unable to write temporary manifest";
         return false;
@@ -236,10 +294,44 @@ bool replaceManifest(const std::vector<BackgroundEntry>& records, const std::str
         error = parseError.empty() ? "temporary manifest verification failed" : parseError;
         return false;
     }
-    if (!FS::renameFile(tempPath, "user-data\\backgrounds\\manifest.cfg", true)) {
+
+    std::vector<uint8_t> previousManifest;
+    const bool hadPrevious = FS::exists(manifestPath);
+    if (hadPrevious && !FS::readAll(manifestPath, previousManifest, kMaxUserBackgroundManifestBytes).success) {
+        cleanupOwnedFile(tempPath);
+        error = "existing manifest is not a readable regular file";
+        return false;
+    }
+    if (hadPrevious && !FS::renameFile(manifestPath, backupPath, false)) {
+        cleanupOwnedFile(tempPath);
+        error = "unable to preserve previous manifest";
+        return false;
+    }
+    if (!FS::renameFile(tempPath, manifestPath, false)) {
+        if (hadPrevious && !FS::renameFile(backupPath, manifestPath, false)) {
+            diagnostic("rollback", "previous manifest restore failed");
+        }
         cleanupOwnedFile(tempPath);
         error = "unable to replace manifest";
         return false;
+    }
+
+    std::vector<uint8_t> committedBytes;
+    std::vector<BackgroundEntry> committedRecords;
+    std::string committedError;
+    const bool committedOk = FS::readAll(manifestPath, committedBytes, kMaxUserBackgroundManifestBytes).success &&
+        BackgroundStore::ParseManifestText(std::string(committedBytes.begin(), committedBytes.end()), committedRecords, committedError) &&
+        committedRecords.size() == records.size();
+    if (!committedOk) {
+        cleanupOwnedFile(manifestPath);
+        if (hadPrevious && !FS::renameFile(backupPath, manifestPath, false)) {
+            diagnostic("rollback", "previous manifest restore failed");
+        }
+        error = committedError.empty() ? "committed manifest verification failed" : committedError;
+        return false;
+    }
+    if (hadPrevious && !cleanupOwnedFile(backupPath)) {
+        diagnostic("cleanup-failure", "previous manifest backup retained");
     }
     return true;
 }
@@ -308,16 +400,22 @@ bool DesktopBackgroundService::ImportAndSetDesktopBackground(const std::string& 
         return false;
     }
 
-    if (!FS::createDirectories("user-data\\backgrounds")) {
+    const std::string storageDirectory = BackgroundStore::HostStorageDirectory();
+    if (storageDirectory.empty() || !FS::createDirectories(storageDirectory)) {
         error = "Unable to create user background storage";
         diagnostic("manifest-failure", error);
         return false;
     }
     const std::string suffix = transactionSuffix();
-    const std::string tempFull = "user-data\\backgrounds\\." + id + "-" + suffix + ".png.tmp";
-    const std::string tempThumb = "user-data\\backgrounds\\." + id + "-" + suffix + "_thumb.png.tmp";
+    const std::string tempFull = storageFile("." + id + "-" + suffix + ".png.tmp");
+    const std::string tempThumb = storageFile("." + id + "-" + suffix + "_thumb.png.tmp");
     const std::string finalFull = BackgroundStore::HostPathForOwned(BackgroundStore::CanonicalFullImagePath(id));
     const std::string finalThumb = BackgroundStore::HostPathForOwned(BackgroundStore::CanonicalThumbnailPath(id));
+    if (tempFull.empty() || tempThumb.empty() || finalFull.empty() || finalThumb.empty()) {
+        error = "Unable to resolve user background storage paths";
+        diagnostic("manifest-failure", error);
+        return false;
+    }
     bool fullCommitted = false;
     bool thumbCommitted = false;
 
@@ -348,10 +446,18 @@ bool DesktopBackgroundService::ImportAndSetDesktopBackground(const std::string& 
     }
 
     std::vector<uint8_t> verifyBytes;
-    if (!FS::readAll(tempFull, verifyBytes) || verifyBytes != sourceBytes ||
-        ImageAdapter::LoadFromBytes(verifyBytes, tempFull).status != ImageLoadStatus::Ok ||
-        !FS::readAll(tempThumb, verifyBytes) ||
-        ImageAdapter::LoadFromBytes(verifyBytes, tempThumb).status != ImageLoadStatus::Ok) {
+    const ImageBitmap verifiedFull = FS::readAll(tempFull, verifyBytes)
+        ? ImageAdapter::LoadFromBytes(verifyBytes, tempFull)
+        : ImageBitmap{};
+    const bool fullVerified = verifiedFull.status == ImageLoadStatus::Ok && verifyBytes == sourceBytes;
+    verifyBytes.clear();
+    const ImageBitmap verifiedThumb = FS::readAll(tempThumb, verifyBytes)
+        ? ImageAdapter::LoadFromBytes(verifyBytes, tempThumb)
+        : ImageBitmap{};
+    const bool thumbVerified = verifiedThumb.status == ImageLoadStatus::Ok &&
+        verifiedThumb.width >= 1 && verifiedThumb.height >= 1 &&
+        verifiedThumb.width <= kUserBackgroundThumbnailMaxWidth && verifiedThumb.height <= kUserBackgroundThumbnailMaxHeight;
+    if (!fullVerified || !thumbVerified) {
         cleanupTemps();
         error = "temporary background verification failed";
         diagnostic("rollback", error);
@@ -416,7 +522,8 @@ bool DesktopBackgroundService::ImportAndSetDesktopBackground(const std::string& 
     if (!persistSelection(id, error)) {
         // The record is valid and durable; retaining it is safer than rolling
         // back a committed manifest.  The prior selection remains active.
-        diagnostic("success", "id=" + id + " partial=selection-persistence-failed");
+        notifyInventoryChanged(id);
+        diagnostic("selection-persistence-failure", "id=" + id + " record-retained=true");
         error = "Background imported, but active selection persistence failed: " + error;
         return false;
     }
@@ -512,7 +619,11 @@ bool DesktopBackgroundService::RemoveBackground(const std::string& backgroundId,
         return false;
     }
 
-    BackgroundStore::Reload(reloadError);
+    if (!BackgroundStore::Reload(reloadError)) {
+        diagnostic("manifest-failure", "post-removal inventory reload failed=" + reloadError);
+        error = "Background removed, but inventory reload failed: " + reloadError;
+        return false;
+    }
     notifySelectionChanged(wasActive ? fallbackId : activeId);
     diagnostic("success", "removed=" + backgroundId + (wasActive ? " fallback=" + fallbackId : std::string()));
     return true;

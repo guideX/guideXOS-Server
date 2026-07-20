@@ -931,6 +931,23 @@ int DisplayOptions::main(int, char**)
             try {
                 if (!action.empty() && action == "down") {
                     const uint32_t key = static_cast<uint32_t>(std::stoul(keyS));
+                    if (s_removeConfirmationVisible) {
+                        if (key == kKeyEscape) {
+                            s_removeConfirmationVisible = false;
+                            s_removeTargetId.clear();
+                            render();
+                        } else if (key == kKeyEnter) {
+                            std::string error;
+                            if (!DesktopBackgroundService::RemoveBackground(s_removeTargetId, error) && !error.empty()) {
+                                Logger::write(LogLevel::Warn, "DisplayOptions background removal failed: " + error);
+                            }
+                            s_removeConfirmationVisible = false;
+                            s_removeTargetId.clear();
+                            loadSelection();
+                            render();
+                        }
+                        break;
+                    }
                     if (handleGalleryKey(key)) {
                         break;
                     }

@@ -4420,6 +4420,7 @@ namespace gxos {
             g_gradientTopColor = entry->topColor;
             g_gradientBottomColor = entry->bottomColor;
             g_gradientAccentColor = entry->accentColor;
+            const bool wasUserImported = entry->owner == BackgroundOwner::UserImported;
             Logger::write(LogLevel::Info, std::string("Compositor wallpaper select id=") + g_wallpaperId + " full=" + g_wallpaperPath + " thumb=" + entry->thumbnailPath);
             g_wallpaperImage = ImageAdapter::LoadFromFile(g_wallpaperPath).image;
             if (!g_wallpaperImage) {
@@ -4442,6 +4443,12 @@ namespace gxos {
                 }
             } else {
                 Logger::write(LogLevel::Info, std::string("Compositor wallpaper decode succeeded id=") + g_wallpaperId + " full=" + g_wallpaperPath);
+            }
+            if (wasUserImported && g_wallpaperId != entry->id) {
+                Logger::write(LogLevel::Warn, std::string("[UserBackground] marker=active-fallback missing-id=") + entry->id + " fallback-id=" + g_wallpaperId);
+                g_cfg.wallpaperId = g_wallpaperId;
+                g_cfg.wallpaperPath = g_wallpaperImage ? g_wallpaperPath : std::string();
+                saveDesktopConfig();
             }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             if (g_wallpaperBmp) { DeleteObject(g_wallpaperBmp); g_wallpaperBmp = nullptr; }

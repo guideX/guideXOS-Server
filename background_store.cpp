@@ -3,9 +3,22 @@
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
+
+#if !defined(GXOS_BARE_METAL)
+#include <filesystem>
+#endif
+
+#if !defined(GXOS_BARE_METAL) && defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #if !defined(GXOS_BARE_METAL)
 #include "fs.h"
@@ -92,6 +105,47 @@ std::string normalizeLogicalPath(std::string path)
     return path;
 }
 
+bool isSafeManifestKey(const std::string& key)
+{
+    if (key == "version" || key == "count") return true;
+    const std::string prefix = "background.";
+    if (key.rfind(prefix, 0) != 0) return false;
+    const size_t indexBegin = prefix.size();
+    const size_t indexEnd = key.find('.', indexBegin);
+    if (indexEnd == std::string::npos || indexEnd == indexBegin || indexEnd + 1 >= key.size()) return false;
+    const std::string indexText = key.substr(indexBegin, indexEnd - indexBegin);
+    uint64_t index = 0;
+    if (!parseUnsigned(indexText, index) || index > kMaxUserBackgroundRecords) return false;
+    const std::string field = key.substr(indexEnd + 1);
+    return field == "id" || field == "displayName" || field == "kind" || field == "owner" ||
+        field == "fullImagePath" || field == "thumbnailPath" || field == "sourceName" ||
+        field == "contentHash" || field == "contentSize";
+}
+
+#if !defined(GXOS_BARE_METAL)
+std::string hostedExecutableDirectory()
+{
+#if defined(_WIN32)
+    char modulePath[32768] = {};
+    const DWORD length = GetModuleFileNameA(nullptr, modulePath, static_cast<DWORD>(sizeof(modulePath)));
+    if (length > 0 && length < sizeof(modulePath)) {
+        std::error_code ec;
+        const std::filesystem::path directory = std::filesystem::path(std::string(modulePath, length)).parent_path();
+        if (!directory.empty()) return directory.string();
+    }
+#elif defined(__linux__)
+    std::error_code ec;
+    const std::filesystem::path modulePath = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec && !modulePath.parent_path().empty()) return modulePath.parent_path().string();
+#endif
+
+    std::error_code ec;
+    const std::filesystem::path current = std::filesystem::current_path(ec);
+    if (!ec) return current.string();
+    return std::string();
+}
+#endif
+
 std::string quote(const std::string& value)
 {
     std::ostringstream out;
@@ -134,14 +188,36 @@ std::string BackgroundStore::CanonicalThumbnailPath(const std::string& id)
     return std::string(kUserBackgroundRoot) + id + "_thumb.png";
 }
 
+std::string BackgroundStore::HostStorageDirectory()
+{
+#if defined(GXOS_BARE_METAL)
+    return std::string();
+#else
+    const std::string executableDirectory = hostedExecutableDirectory();
+    if (executableDirectory.empty()) return std::string();
+    return (std::filesystem::path(executableDirectory) / "user-data" / "backgrounds").lexically_normal().string();
+#endif
+}
+
 std::string BackgroundStore::HostPathForOwned(const std::string& logicalPath)
 {
     std::string normalized = normalizeLogicalPath(logicalPath);
     const std::string root(kUserBackgroundRoot);
     if (normalized.rfind(root, 0) != 0) return std::string();
     const std::string relative = normalized.substr(root.size());
-    if (relative.empty() || relative.find('/') != std::string::npos || relative.find("..") != std::string::npos) return std::string();
+    if (relative.empty() || relative == "." || relative == ".." || relative.find('/') != std::string::npos || relative.find("..") != std::string::npos) return std::string();
+    for (unsigned char c : relative) {
+        if (c < 0x20u || c == 0x7Fu || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+            return std::string();
+        }
+    }
+#if defined(GXOS_BARE_METAL)
     return std::string("user-data\\backgrounds\\") + relative;
+#else
+    const std::string storageDirectory = HostStorageDirectory();
+    if (storageDirectory.empty()) return std::string();
+    return (std::filesystem::path(storageDirectory) / relative).lexically_normal().string();
+#endif
 }
 
 bool BackgroundStore::IsValidUserId(const std::string& id)
@@ -175,18 +251,48 @@ bool BackgroundStore::ParseManifestText(const std::string& text, std::vector<Bac
         error = "manifest exceeds 64 KiB";
         return false;
     }
+    if (text.empty()) {
+        error = "manifest is empty";
+        return false;
+    }
+    if (text.back() != '\n') {
+        error = "manifest has a truncated final line";
+        return false;
+    }
+    if (text.find('\0') != std::string::npos) {
+        error = "manifest contains an embedded NUL";
+        return false;
+    }
 
     std::map<std::string, std::string> values;
     std::istringstream input(text);
     std::string line;
     while (std::getline(input, line)) {
+        if (line.size() > kMaxUserBackgroundManifestLineBytes) {
+            error = "manifest line exceeds 2048 bytes";
+            records.clear();
+            return false;
+        }
         line = trim(line);
         if (line.empty() || line[0] == '#' || line[0] == ';') continue;
         const size_t separator = line.find('=');
-        if (separator == std::string::npos) continue;
+        if (separator == std::string::npos) {
+            error = "manifest line is missing '='";
+            records.clear();
+            return false;
+        }
         const std::string key = trim(line.substr(0, separator));
-        if (key.empty() || key.size() > 128) continue;
-        values[key] = line.substr(separator + 1);
+        if (key.empty() || key.size() > 128 || !isSafeManifestKey(key)) {
+            error = "manifest contains an unknown field";
+            records.clear();
+            return false;
+        }
+        if (values.find(key) != values.end()) {
+            error = "manifest contains a duplicate field";
+            records.clear();
+            return false;
+        }
+        values.emplace(key, line.substr(separator + 1));
     }
 
     uint64_t version = 0;
@@ -202,6 +308,25 @@ bool BackgroundStore::ParseManifestText(const std::string& text, std::vector<Bac
     }
     if (!parseUnsigned(countText, count) || count > kMaxUserBackgroundRecords) {
         error = "manifest record count exceeds 64";
+        return false;
+    }
+
+    std::set<uint64_t> recordIndexes;
+    for (const auto& value : values) {
+        const std::string prefix = "background.";
+        if (value.first.rfind(prefix, 0) != 0) continue;
+        const size_t indexEnd = value.first.find('.', prefix.size());
+        uint64_t index = 0;
+        if (indexEnd == std::string::npos || !parseUnsigned(value.first.substr(prefix.size(), indexEnd - prefix.size()), index) || index >= count) {
+            error = "manifest contains a record outside the declared count";
+            records.clear();
+            return false;
+        }
+        recordIndexes.insert(index);
+    }
+    if (recordIndexes.size() != static_cast<size_t>(count)) {
+        error = "manifest declared records are missing";
+        records.clear();
         return false;
     }
 
@@ -236,7 +361,9 @@ bool BackgroundStore::ParseManifestText(const std::string& text, std::vector<Bac
         valid = valid && normalizeLogicalPath(record.fullImagePath) == CanonicalFullImagePath(record.id) &&
             normalizeLogicalPath(record.thumbnailPath) == CanonicalThumbnailPath(record.id);
         if (!valid || WallpaperRegistry::FindBackgroundById(record.id) != nullptr || !ids.insert(record.id).second) {
-            continue; // Malformed, colliding, or unusable rows are safely ignored.
+            records.clear();
+            error = "manifest contains an invalid, colliding, or duplicate record";
+            return false;
         }
 
         record.kind = BackgroundKind::Image;
@@ -262,11 +389,18 @@ bool BackgroundStore::SerializeManifest(const std::vector<BackgroundEntry>& reco
         return false;
     }
 
+    std::vector<const BackgroundEntry*> ordered;
+    ordered.reserve(records.size());
+    for (const auto& record : records) ordered.push_back(&record);
+    std::sort(ordered.begin(), ordered.end(), [](const BackgroundEntry* left, const BackgroundEntry* right) {
+        return left->id < right->id;
+    });
+
     std::set<std::string> ids;
     std::ostringstream out;
-    out << "version=1\ncount=" << records.size() << "\n";
-    for (size_t i = 0; i < records.size(); ++i) {
-        const BackgroundEntry& record = records[i];
+    out << "version=1\ncount=" << ordered.size() << "\n";
+    for (size_t i = 0; i < ordered.size(); ++i) {
+        const BackgroundEntry& record = *ordered[i];
         if (record.owner != BackgroundOwner::UserImported || record.kind != BackgroundKind::Image ||
             !IsValidUserId(record.id) || WallpaperRegistry::FindBackgroundById(record.id) != nullptr || !ids.insert(record.id).second ||
             !boundedString(record.displayName, 128) || !boundedString(record.sourceName, 255) ||

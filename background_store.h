@@ -17,6 +17,7 @@ static constexpr const char* kUserBackgroundManifestPath = "/user-data/backgroun
 static constexpr size_t kUserBackgroundManifestVersion = 1;
 static constexpr size_t kMaxUserBackgroundRecords = 64;
 static constexpr size_t kMaxUserBackgroundManifestBytes = 64u * 1024u;
+static constexpr size_t kMaxUserBackgroundManifestLineBytes = 2048u;
 static constexpr int kUserBackgroundThumbnailMaxWidth = 160;
 static constexpr int kUserBackgroundThumbnailMaxHeight = 120;
 
@@ -31,6 +32,7 @@ public:
 
     static std::string CanonicalFullImagePath(const std::string& id);
     static std::string CanonicalThumbnailPath(const std::string& id);
+    static std::string HostStorageDirectory();
     static std::string HostPathForOwned(const std::string& logicalPath);
     static bool IsValidUserId(const std::string& id);
     static std::string ComputeContentHash(const std::vector<uint8_t>& bytes);
