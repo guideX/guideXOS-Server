@@ -1,0 +1,87 @@
+Compositor created window id=1000 sending ack to pid=0
+Compositor created window id=1001 sending ack to pid=0
+Hosted title input diag: WndProc msg=513 capture=0 flags=1 x=200 y=112
+Hosted title input diag: WM_LBUTTONDOWN entry hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=200 y=112 captureBefore=0x0
+Hosted title input diag: WM_LBUTTONDOWN before compositor handleMouse hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=200 y=112
+Hosted title input diag: handleMouse entry action=down x=200 y=112
+Hosted title input diag: handleMouse hit=1001
+Hosted title input diag: WM_LBUTTONDOWN after compositor handleMouse captureRequested=0 hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN return hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 captureAtReturn=0x0
+Hosted title input diag: WndProc msg=514 capture=0 flags=0 x=528 y=72
+Hosted title input diag: WM_LBUTTONUP entry hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=528 y=72 state=targetWindow=1001 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP before compositor handleMouse hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: handleMouse entry action=up x=528 y=72
+Hosted title input diag: handleMouse hit=1001
+Hosted title input diag: WM_LBUTTONUP after compositor handleMouse captureRequested=0 hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 state=targetWindow=1001 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP return hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Compositor created window id=1002 sending ack to pid=0
+Hosted title input diag: WndProc msg=513 capture=0 flags=1 x=568 y=112
+Hosted title input diag: WM_LBUTTONDOWN entry hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=568 y=112 captureBefore=0x0
+Hosted title input diag: WM_LBUTTONDOWN before compositor handleMouse hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=568 y=112
+Hosted title input diag: handleMouse entry action=down x=568 y=112
+Hosted title input diag: handleMouse hit=1002
+Hosted title input diag: title down window=1002 close=1 tomb=0 max=0 min=0
+Hosted title input diag: WM_LBUTTONDOWN after compositor handleMouse captureRequested=1 hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN before SetCapture hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN after SetCapture hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN return hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 captureAtReturn=0x1551648
+Hosted title input diag: WndProc msg=533 capture=1 flags=0
+Hosted title input diag: WM_CAPTURECHANGED hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 newCapture=0x0 state=targetWindow=1002 pressedClose=1 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=close releaseOverPressedControl=0 action=cancel
+Hosted title input diag: capture lost; cleared pressed, drag, and resize state
+Hosted title input diag: WndProc msg=514 capture=1 flags=0 x=568 y=112
+Hosted title input diag: WM_LBUTTONUP entry hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 x=568 y=112 state=targetWindow=1002 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP before compositor handleMouse hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348
+Hosted title input diag: handleMouse entry action=up x=568 y=112
+Hosted title input diag: handleMouse hit=1002
+Hosted title input diag: WM_LBUTTONUP after compositor handleMouse captureRequested=0 hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 state=targetWindow=1002 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP before ReleaseCapture hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348
+Hosted title input diag: WndProc msg=533 capture=0 flags=0
+Hosted title input diag: WM_CAPTURECHANGED hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 newCapture=0x0 state=targetWindow=0 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP return hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Compositor created window id=1003 sending ack to pid=0
+Hosted title input diag: WndProc msg=513 capture=0 flags=1 x=608 y=152
+Hosted title input diag: WM_LBUTTONDOWN entry hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=608 y=152 captureBefore=0x0
+Hosted title input diag: WM_LBUTTONDOWN before compositor handleMouse hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=608 y=152
+Hosted title input diag: handleMouse entry action=down x=608 y=152
+Hosted title input diag: handleMouse hit=1003
+Hosted title input diag: title down window=1003 close=1 tomb=0 max=0 min=0
+Hosted title input diag: WM_LBUTTONDOWN after compositor handleMouse captureRequested=1 hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN before SetCapture hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN after SetCapture hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN return hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 captureAtReturn=0x1551648
+Hosted title input diag: WndProc msg=31 capture=1 flags=0
+Hosted title input diag: WM_CANCELMODE hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 state=targetWindow=1003 pressedClose=1 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=close releaseOverPressedControl=0 action=cancel
+Hosted title input diag: capture lost; cleared pressed, drag, and resize state
+Hosted title input diag: WndProc msg=533 capture=0 flags=0
+Hosted title input diag: WM_CAPTURECHANGED hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 newCapture=0x0 state=targetWindow=0 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WndProc msg=512 capture=0 flags=1 x=608 y=152
+Hosted title input diag: WndProc msg=514 capture=0 flags=0 x=608 y=152
+Hosted title input diag: WM_LBUTTONUP entry hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=608 y=152 state=targetWindow=1003 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP before compositor handleMouse hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: handleMouse entry action=up x=608 y=152
+Hosted title input diag: handleMouse hit=1003
+Hosted title input diag: WM_LBUTTONUP after compositor handleMouse captureRequested=0 hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 state=targetWindow=1003 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP return hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Compositor created window id=1004 sending ack to pid=0
+Hosted title input diag: WndProc msg=513 capture=0 flags=1 x=648 y=192
+Hosted title input diag: WM_LBUTTONDOWN entry hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=648 y=192 captureBefore=0x0
+Hosted title input diag: WM_LBUTTONDOWN before compositor handleMouse hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 x=648 y=192
+Hosted title input diag: handleMouse entry action=down x=648 y=192
+Hosted title input diag: handleMouse hit=1004
+Hosted title input diag: title down window=1004 close=1 tomb=0 max=0 min=0
+Hosted title input diag: WM_LBUTTONDOWN after compositor handleMouse captureRequested=1 hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN before SetCapture hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN after SetCapture hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348
+Hosted title input diag: WM_LBUTTONDOWN return hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 captureAtReturn=0x1551648
+Hosted title input diag: WndProc msg=514 capture=1 flags=0 x=648 y=192
+Hosted title input diag: WM_LBUTTONUP entry hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 x=648 y=192 state=targetWindow=1004 pressedClose=1 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=close releaseOverPressedControl=1 action=activate
+Hosted title input diag: WM_LBUTTONUP before compositor handleMouse hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348
+Hosted title input diag: handleMouse entry action=up x=648 y=192
+Hosted title input diag: handleMouse hit=1004
+Hosted title input diag: title release window=1004 control=close pressed=1 over=1 x=648 y=192
+Hosted title input diag: WM_LBUTTONUP after compositor handleMouse captureRequested=1 hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348 state=targetWindow=0 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP before ReleaseCapture hwnd=0x1551648 currentTid=25348 capture=0x1551648 owningPid=22032 owningTid=25348
+Hosted title input diag: WndProc msg=533 capture=0 flags=0
+Hosted title input diag: WM_CAPTURECHANGED hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348 newCapture=0x0 state=targetWindow=0 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WM_LBUTTONUP return hwnd=0x1551648 currentTid=25348 capture=0x0 owningPid=22032 owningTid=25348
+guideXOSServer server exiting.

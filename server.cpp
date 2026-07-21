@@ -53,7 +53,6 @@
 #include "gxos_tls_prerequisites.h"
 #include "desktop_config.h"
 #include "desktop_service.h"
-#include "background_service.h"
 #include "notepad.h"
 #include "calculator.h"
 #include "console_window.h"
@@ -1283,6 +1282,408 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-checkbox") == 0,
         std::string("reloaded=") + yesNo(phase2fReloaded));
 
+    const bool cssPhase2gLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2g.html");
+    const std::string cssPhase2gUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    const std::string cssPhase2gText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool phase2gInitialFocus =
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "none";
+    const int phase2gFocusableCount = gxos::apps::Navigator::SmokeFormFocusableCount();
+    auto phase2gTab = [&](bool reverse = false) {
+        if (reverse) gxos::apps::Navigator::SmokeKeyPress(16, "down");
+        gxos::apps::Navigator::SmokeKeyPress(9, "down");
+        gxos::apps::Navigator::SmokeKeyPress(9, "up");
+        if (reverse) gxos::apps::Navigator::SmokeKeyPress(16, "up");
+    };
+    auto phase2gKeyTap = [&](int keyCode) {
+        gxos::apps::Navigator::SmokeKeyPress(keyCode, "down");
+        gxos::apps::Navigator::SmokeKeyPress(keyCode, "up");
+    };
+    const bool phase2gFirstTab =
+        gxos::apps::Navigator::SmokeKeyPress(9, "down") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-checkbox" &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "up");
+    const bool phase2gSecondTab =
+        (phase2gTab(), gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-radio-a");
+    const bool phase2gShiftTab =
+        (phase2gTab(true), gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-checkbox");
+    std::vector<std::string> phase2gFocusOrder;
+    phase2gFocusOrder.push_back(gxos::apps::Navigator::SmokeFocusedFormControlId());
+    for (int i = 0; i < phase2gFocusableCount; ++i) {
+        phase2gTab();
+        phase2gFocusOrder.push_back(gxos::apps::Navigator::SmokeFocusedFormControlId());
+    }
+    const std::vector<std::string> phase2gExpectedFocusOrder = {
+        "phase2g-checkbox", "phase2g-radio-a", "phase2g-radio-b", "phase2g-text",
+        "phase2g-textarea", "phase2g-select", "phase2g-button", "phase2g-submit",
+        "phase2g-reset", "phase2g-source-order", "phase2g-inline", "phase2g-important",
+        "phase2g-checkbox"
+    };
+    const bool phase2gOrderedTraversal = phase2gFocusOrder == phase2gExpectedFocusOrder;
+    const bool phase2gBackwardBoundary =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        (phase2gTab(true), gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-important");
+    const bool phase2gRepeatBounded =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "up") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-radio-a";
+    add("CSS phase 2G fixture and bounded focus order",
+        cssPhase2gLoaded && cssPhase2gUrl == "http://127.0.0.1:8080/navigator-smoke/css-phase2g.html" &&
+        contains(cssPhase2gText, "Phase 2G Bounded Keyboard Focus") &&
+        phase2gInitialFocus && phase2gFocusableCount == 12 && phase2gFirstTab &&
+        phase2gSecondTab && phase2gShiftTab && phase2gOrderedTraversal &&
+        phase2gBackwardBoundary && phase2gRepeatBounded,
+        "loaded=" + std::string(yesNo(cssPhase2gLoaded)) +
+        ",initial=" + yesNo(phase2gInitialFocus) +
+        ",focusable=" + std::to_string(phase2gFocusableCount) +
+        ",order=" + yesNo(phase2gOrderedTraversal) +
+        ",backward-boundary=" + yesNo(phase2gBackwardBoundary) +
+        ",repeat=" + yesNo(phase2gRepeatBounded));
+
+    const bool phase2gMouseCheckbox =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2g-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-checkbox") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse" &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-checkbox");
+    const bool phase2gMouseLabel =
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2g-radio-a-label") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-radio-a") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse" &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-radio-a");
+    const bool phase2gDisabledMouse =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2g-disabled") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-checkbox") &&
+        !gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-disabled");
+    const bool phase2gHiddenHit = !gxos::apps::Navigator::SmokeFormHitTargetById("phase2g-hidden") &&
+        !gxos::apps::Navigator::SmokeFormHitTargetById("phase2g-css-hidden");
+    add("CSS phase 2G mouse focus, labels, and bounded hit targets",
+        phase2gMouseCheckbox && phase2gMouseLabel && phase2gDisabledMouse && phase2gHiddenHit,
+        "checkbox=" + std::string(yesNo(phase2gMouseCheckbox)) +
+        ",label=" + yesNo(phase2gMouseLabel) +
+        ",disabled=" + yesNo(phase2gDisabledMouse) +
+        ",hidden-targets=" + yesNo(phase2gHiddenHit));
+
+    const bool phase2gReloadBeforeKeyboard = gxos::apps::Navigator::SmokeReloadCurrentDocument();
+    const int phase2gCheckboxActivationsBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-checkbox");
+    const bool phase2gSpaceCheckbox =
+        phase2gReloadBeforeKeyboard &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-checkbox")) &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-checkbox") == phase2gCheckboxActivationsBefore + 1 &&
+        (phase2gKeyTap(32), !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-checkbox"));
+    const bool phase2gSpaceRadio =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-radio-b", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-radio-b"));
+    const int phase2gButtonBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button");
+    const bool phase2gSpaceButton =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-button", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button") == phase2gButtonBefore + 1) &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2gUrl;
+    const int phase2gSubmitBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-submit");
+    const int phase2gResetBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-reset");
+    const bool phase2gSpaceVisualButtons =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-submit", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-submit") == phase2gSubmitBefore + 1) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-reset", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-reset") == phase2gResetBefore + 1) &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2gUrl;
+    const int phase2gTextLength = gxos::apps::Navigator::SmokeFormControlInputLengthById("phase2g-text");
+    const int phase2gTextareaLength = gxos::apps::Navigator::SmokeFormControlInputLengthById("phase2g-textarea");
+    const bool phase2gNonActivatingTextControls =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-text", true) &&
+        (phase2gKeyTap(32), phase2gKeyTap(13),
+         gxos::apps::Navigator::SmokeFormControlInputLengthById("phase2g-text") == phase2gTextLength) &&
+        phase2gTextareaLength >= 0 &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-textarea", true) &&
+        (phase2gKeyTap(32), phase2gKeyTap(13),
+         gxos::apps::Navigator::SmokeFormControlInputLengthById("phase2g-textarea") == phase2gTextareaLength) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-select", true) &&
+        (phase2gKeyTap(32), phase2gKeyTap(13), gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2gUrl);
+    const bool phase2gEnterButton =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-button", true) &&
+        (phase2gKeyTap(13), gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button") == phase2gButtonBefore + 2) &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2gUrl;
+    add("CSS phase 2G Space and Enter activation stays inert",
+        phase2gSpaceCheckbox && phase2gSpaceRadio && phase2gSpaceButton &&
+        phase2gSpaceVisualButtons && phase2gNonActivatingTextControls && phase2gEnterButton,
+        "checkbox=" + std::string(yesNo(phase2gSpaceCheckbox)) +
+        ",radio=" + yesNo(phase2gSpaceRadio) +
+        ",button-space=" + yesNo(phase2gSpaceButton) +
+        ",visual-buttons=" + yesNo(phase2gSpaceVisualButtons) +
+        ",text-controls=" + yesNo(phase2gNonActivatingTextControls) +
+        ",button-enter=" + yesNo(phase2gEnterButton));
+
+    const bool phase2gRepeatActivation =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-checkbox") == phase2gCheckboxActivationsBefore + 3;
+    const bool phase2gDisabledStaleActivation =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeSetFormControlDisabledById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-checkbox") &&
+        gxos::apps::Navigator::SmokeSetFormControlDisabledById("phase2g-checkbox", false);
+    add("CSS phase 2G key-repeat and disabled stale-event safety",
+        phase2gRepeatActivation && phase2gDisabledStaleActivation,
+        "repeat=" + std::string(yesNo(phase2gRepeatActivation)) +
+        ",disabled-stale=" + yesNo(phase2gDisabledStaleActivation));
+
+    const bool phase2gKeyboardFocusForEvidence = gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true);
+    const std::string cssPhase2gKeyboardReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2gKeyboardEvidence =
+        phase2gKeyboardFocusForEvidence &&
+        contains(cssPhase2gKeyboardReport, "id=phase2g-checkbox") &&
+        contains(cssPhase2gKeyboardReport, "focusable=yes") &&
+        contains(cssPhase2gKeyboardReport, "focused=yes") &&
+        contains(cssPhase2gKeyboardReport, "focus-origin=keyboard") &&
+        contains(cssPhase2gKeyboardReport, "focus-pseudo-match=yes") &&
+        contains(cssPhase2gKeyboardReport, "focus-visible-pseudo-match=yes") &&
+        contains(cssPhase2gKeyboardReport, "css_focus_pseudo_parsed=") &&
+        contains(cssPhase2gKeyboardReport, "css_focus_pseudo_matches=") &&
+        contains(cssPhase2gKeyboardReport, "css_focus_visible_pseudo_matches=") &&
+        contains(cssPhase2gKeyboardReport, "form_focusable_controls=") &&
+        contains(cssPhase2gKeyboardReport, "form_focus_changes=") &&
+        contains(cssPhase2gKeyboardReport, "form_tab_forward=") &&
+        contains(cssPhase2gKeyboardReport, "form_tab_backward=") &&
+        contains(cssPhase2gKeyboardReport, "form_keyboard_activations=") &&
+        contains(cssPhase2gKeyboardReport, "form_space_activations=") &&
+        contains(cssPhase2gKeyboardReport, "form_enter_activations=") &&
+        contains(cssPhase2gKeyboardReport, "form_key_repeat_suppressed=") &&
+        contains(cssPhase2gKeyboardReport, "form_focus_mode=session_local_non_editing");
+    const bool phase2gSourceOrderFocused = gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-source-order", true);
+    const std::string phase2gSourceOrderReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2gInlineFocused = gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-inline", true);
+    const std::string phase2gInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2gImportantFocused = gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-important", true);
+    const std::string phase2gImportantReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2gCascadeEvidence =
+        phase2gSourceOrderFocused && phase2gInlineFocused && phase2gImportantFocused &&
+        contains(phase2gSourceOrderReport, "id=phase2g-source-order") &&
+        contains(phase2gSourceOrderReport, "focused=yes") &&
+        contains(phase2gSourceOrderReport, "color=#0f766e") &&
+        contains(phase2gInlineReport, "id=phase2g-inline") &&
+        contains(phase2gInlineReport, "focused=yes") &&
+        contains(phase2gInlineReport, "color=#1d4ed8") &&
+        contains(phase2gImportantReport, "id=phase2g-important") &&
+        contains(phase2gImportantReport, "focused=yes") &&
+        contains(phase2gImportantReport, "color=#b91c1c") &&
+        contains(phase2gImportantReport, "color-important=yes") &&
+        contains(cssPhase2gKeyboardReport, "padding-top=5");
+    const bool phase2gMouseFocusVisibleDeferral =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2g-checkbox") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse" &&
+        contains(gxos::apps::Navigator::SmokeRuntimeReport(), "id=phase2g-checkbox") &&
+        !contains(gxos::apps::Navigator::SmokeRuntimeReport(), "focus-visible-pseudo-match=yes");
+    add("CSS phase 2G focus pseudos, origin, and cascade evidence",
+        phase2gKeyboardEvidence && phase2gCascadeEvidence && phase2gMouseFocusVisibleDeferral,
+        "keyboard-evidence=" + std::string(yesNo(phase2gKeyboardEvidence)) +
+        ",cascade=" + yesNo(phase2gCascadeEvidence) +
+        ",mouse-focus-visible=" + yesNo(phase2gMouseFocusVisibleDeferral) +
+        "; source=" + evidenceSnippet(phase2gSourceOrderReport, "id=phase2g-source-order") +
+        "; inline=" + evidenceSnippet(phase2gInlineReport, "id=phase2g-inline") +
+        "; important=" + evidenceSnippet(phase2gImportantReport, "id=phase2g-important") +
+        "; report=" + summarizeText(cssPhase2gKeyboardReport, 1200));
+
+    const int phase2gLifecycleButtonBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button");
+    const bool phase2gNavigationClearsFocus =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2gUrl) &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button") == 0;
+    const bool phase2gReloadClearsFocus =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeReloadCurrentDocument() &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-checkbox");
+    const bool phase2gAddressBarClearsFocus =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        (gxos::apps::Navigator::SmokeFocusAddressBar(),
+         gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+         gxos::apps::Navigator::SmokeFormFocusOrigin() == "none");
+    add("CSS phase 2G focus lifecycle and stale key-up guards",
+        phase2gNavigationClearsFocus && phase2gReloadClearsFocus && phase2gAddressBarClearsFocus,
+        "navigation=" + std::string(yesNo(phase2gNavigationClearsFocus)) +
+        ",reload=" + yesNo(phase2gReloadClearsFocus) +
+        ",address-bar=" + yesNo(phase2gAddressBarClearsFocus) +
+        ",old-button-count=" + std::to_string(phase2gLifecycleButtonBefore));
+    const std::string cssPhase2gFinalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 2G focus diagnostics are bounded and private",
+        contains(cssPhase2gFinalReport, "form_focus_mode=session_local_non_editing") &&
+        contains(cssPhase2gFinalReport, "form_focus_state_resets=") &&
+        contains(cssPhase2gFinalReport, "form_stale_key_activation_blocks=") &&
+        !contains(cssPhase2gFinalReport, "stable text marker") &&
+        !contains(cssPhase2gFinalReport, "phase2g-hidden-marker"),
+        "report=" + summarizeText(cssPhase2gFinalReport, 3600));
+
+    const std::string cssPhase2hUrl = "http://127.0.0.1:8080/navigator-smoke/css-phase2h.html";
+    const bool cssPhase2hLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2hUrl);
+    const bool phase2hEscapeCheckbox =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(27, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-checkbox") == 0;
+    const int phase2hButtonBeforeEscape = gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button");
+    const bool phase2hEscapeButton =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(27, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button") == phase2hButtonBeforeEscape;
+    const bool phase2hFocusChangeCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-radio", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox");
+    const bool phase2hKeyMismatchCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox");
+    const bool phase2hStateChangeCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeSetFormControlDisabledById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeSetFormControlDisabledById("phase2h-checkbox", false);
+    const bool phase2hHiddenCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeSetFormControlHiddenById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeSetFormControlHiddenById("phase2h-checkbox", false);
+    const bool phase2hGenerationCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeForceFormFocusGenerationMismatch() &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox");
+    const bool phase2hDeactivationCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        (gxos::apps::Navigator::SmokeDeactivateWindow(), true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox");
+    const int phase2hCheckboxBeforeRepeat = gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-checkbox");
+    const bool phase2hSpaceRepeat =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-checkbox") == phase2hCheckboxBeforeRepeat + 1 &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-checkbox") == phase2hCheckboxBeforeRepeat + 1;
+    const int phase2hButtonBeforeRepeat = gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button");
+    const bool phase2hEnterRepeat =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button") == phase2hButtonBeforeRepeat + 1;
+    const bool phase2hAlternatingKeysSafe =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button") == phase2hButtonBeforeRepeat + 1;
+    const bool phase2hKeyboardOrigin =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "keyboard";
+    const bool phase2hMouseOrigin =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse";
+    const bool phase2hLabelMouseOrigin =
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2h-radio-label") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse";
+    const bool phase2hLaterTabRestoresKeyboard =
+        gxos::apps::Navigator::SmokeKeyPress(9, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "up") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "keyboard";
+    const std::string cssPhase2hReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2hAccessibilityEvidence =
+        contains(cssPhase2hReport, "form_accessibility_records=") &&
+        contains(cssPhase2hReport, "role=checkbox") &&
+        contains(cssPhase2hReport, "role=radio") &&
+        contains(cssPhase2hReport, "role=button") &&
+        contains(cssPhase2hReport, "role=textbox") &&
+        contains(cssPhase2hReport, "role=password textbox") &&
+        contains(cssPhase2hReport, "role=textarea") &&
+        contains(cssPhase2hReport, "role=select") &&
+        contains(cssPhase2hReport, "label-source=wrapping") &&
+        contains(cssPhase2hReport, "label-source=for/id") &&
+        contains(cssPhase2hReport, "form_label_associations_invalid=") &&
+        contains(cssPhase2hReport, "form_accessibility_aria=deferred_native_bounded_only") &&
+        contains(cssPhase2hReport, "specificity=") &&
+        contains(cssPhase2hReport, "source-order=") &&
+        !contains(cssPhase2hReport, "do-not-log") &&
+        !contains(cssPhase2hReport, "Text placeholder") &&
+        !contains(cssPhase2hReport, "Phase 2H checkbox");
+    add("CSS phase 2H cancellation, repeat, and focus-origin fixture",
+        cssPhase2hLoaded && phase2hEscapeCheckbox && phase2hEscapeButton && phase2hFocusChangeCancel &&
+        phase2hKeyMismatchCancel && phase2hStateChangeCancel && phase2hHiddenCancel &&
+        phase2hGenerationCancel && phase2hDeactivationCancel && phase2hSpaceRepeat &&
+        phase2hEnterRepeat && phase2hAlternatingKeysSafe && phase2hKeyboardOrigin &&
+        phase2hMouseOrigin && phase2hLabelMouseOrigin && phase2hLaterTabRestoresKeyboard,
+        std::string("loaded=") + yesNo(cssPhase2hLoaded) +
+        ",escape-checkbox=" + yesNo(phase2hEscapeCheckbox) +
+        ",escape-button=" + yesNo(phase2hEscapeButton) +
+        ",focus-change=" + yesNo(phase2hFocusChangeCancel) +
+        ",key-mismatch=" + yesNo(phase2hKeyMismatchCancel) +
+        ",state-change=" + yesNo(phase2hStateChangeCancel) +
+        ",hidden=" + yesNo(phase2hHiddenCancel) +
+        ",generation=" + yesNo(phase2hGenerationCancel) +
+        ",deactivation=" + yesNo(phase2hDeactivationCancel) +
+        ",space-repeat=" + yesNo(phase2hSpaceRepeat) +
+        ",enter-repeat=" + yesNo(phase2hEnterRepeat) +
+        ",alternating=" + yesNo(phase2hAlternatingKeysSafe) +
+        ",keyboard-origin=" + yesNo(phase2hKeyboardOrigin) +
+        ",mouse-origin=" + yesNo(phase2hMouseOrigin) +
+        ",label-mouse-origin=" + yesNo(phase2hLabelMouseOrigin) +
+        ",tab-origin=" + yesNo(phase2hLaterTabRestoresKeyboard));
+    add("CSS phase 2H bounded accessibility and style evidence",
+        phase2hAccessibilityEvidence && contains(cssPhase2hReport, "form_focus_ring_draws=") &&
+        contains(cssPhase2hReport, "form_focus_reveal_noops=") &&
+        contains(cssPhase2hReport, "form_focus_visible_matches=") &&
+        contains(cssPhase2hReport, "form_accessible_name_missing="),
+        std::string("evidence=") + yesNo(phase2hAccessibilityEvidence) +
+        ",report=" + summarizeText(cssPhase2hReport, 5200));
+    const bool phase2hNavigationStaleKeyUp =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2hUrl) &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button") == 0;
+    const bool phase2hReloadStaleKeyUp =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeReloadCurrentDocument() &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    add("CSS phase 2H navigation/reload stale-key guards",
+        phase2hNavigationStaleKeyUp && phase2hReloadStaleKeyUp,
+        std::string("navigation=") + yesNo(phase2hNavigationStaleKeyUp) +
+        ",reload=" + yesNo(phase2hReloadStaleKeyUp));
+
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
     std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -1774,7 +2175,7 @@ static void help(){
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
+                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
                  " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
@@ -1978,23 +2379,8 @@ using namespace gxos;
         }
         // Desktop and Taskbar convenience commands
         else if (cmd=="desktop.wallpaper"){
-            std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; }
-            std::string error;
-            if (gui::DesktopBackgroundService::ImportAndSetDesktopBackground(path, error)) {
-                std::cout<<"Desktop background imported and selected: "<<path<<std::endl;
-            } else {
-                std::cout<<"Desktop background import failed: "<<error<<std::endl;
-            }
-        }
-        else if (cmd=="desktop.background.remove"){
-            std::string id; iss>>id; if(id.empty()){ std::cout<<"desktop.background.remove <id>"<<std::endl; continue; }
-            std::string error;
-            if (gui::DesktopBackgroundService::RemoveBackground(id, error)) {
-                std::cout<<"Desktop background removed: "<<id<<std::endl;
-            } else {
-                std::cout<<"Desktop background removal failed: "<<error<<std::endl;
-            }
-        }
+            if(!requireCompositor()) continue;
+            std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopWallpaperSet; m.data.assign(path.begin(), path.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop wallpaper set request sent: "<<path<<std::endl; }
         else if (cmd=="desktop.launch.resolve"){
             std::string label; std::getline(iss, label); if(label.size()>0 && label[0]==' ') label.erase(0,1); if(label.empty()){ std::cout<<"desktop.launch.resolve <label>"<<std::endl; continue; }
             std::cout << gui::DesktopService::ResolveLaunchTargetDiagnostic(label);

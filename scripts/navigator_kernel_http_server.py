@@ -714,6 +714,74 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<form id=\"phase2f-form-two\"><input id=\"phase2f-other-form-radio\" type=\"radio\" name=\"choice\" checked><label for=\"phase2f-other-form-radio\">Other form radio</label></form>"
                              b"</body></html>")
             return
+        if path == "/navigator-smoke/css-phase2g.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2G Bounded Keyboard Focus</title><style>"
+                             b"body { color:#334155; background:#f8fafc; }"
+                             b"form { padding:6px; } fieldset { padding:8px; border:2px solid #64748b; }"
+                             b"input, textarea, select, button { color:#111827; background:#ffffff; border:1px solid #94a3b8; padding:3px; }"
+                             b"input:focus { color:#1d4ed8; background:#dbeafe; padding:5px; }"
+                             b"input:focus-visible { background:#e0f2fe; }"
+                             b"button:focus { color:#be123c; background:#fce7f3; }"
+                             b"input:checked:focus { border:3px solid #7c3aed; }"
+                             b"fieldset input:focus { border-color:#2563eb; }"
+                             b"label + input:focus { color:#166534; }"
+                             b"input:focus + label { color:#7c3aed; }"
+                             b".phase2g-choice:focus { border-color:#c026d3; }"
+                             b"#phase2g-source-order:focus { color:#f59e0b; } #phase2g-source-order:focus { color:#0f766e; }"
+                             b"#phase2g-inline:focus { color:#b91c1c; }"
+                             b"#phase2g-important:focus { color:#b91c1c !important; }"
+                             b"#phase2g-css-hidden { display:none; }"
+                             b"</style></head><body><h1>Phase 2G Bounded Keyboard Focus</h1>"
+                             b"<form id=\"phase2g-form\" action=\"/navigator-smoke/phase2g-submit\" method=\"post\"><fieldset id=\"phase2g-fieldset\">"
+                             b"<input id=\"phase2g-checkbox\" class=\"phase2g-choice\" type=\"checkbox\"><label id=\"phase2g-checkbox-label\" for=\"phase2g-checkbox\">Phase 2G checkbox</label>"
+                             b"<label id=\"phase2g-radio-a-label\" for=\"phase2g-radio-a\">Radio A</label><input id=\"phase2g-radio-a\" class=\"phase2g-choice\" type=\"radio\" name=\"phase2g-choice\">"
+                             b"<input id=\"phase2g-radio-b\" class=\"phase2g-choice\" type=\"radio\" name=\"phase2g-choice\"><label id=\"phase2g-radio-b-label\" for=\"phase2g-radio-b\">Radio B</label>"
+                             b"<input id=\"phase2g-disabled\" type=\"checkbox\" disabled><label id=\"phase2g-disabled-label\" for=\"phase2g-disabled\">Disabled checkbox</label>"
+                             b"<input id=\"phase2g-css-hidden\" type=\"checkbox\"><input id=\"phase2g-hidden\" type=\"hidden\" value=\"phase2g-hidden-marker\">"
+                             b"<input id=\"phase2g-malformed\" type=\"bogus\" value=\"unsupported marker\">"
+                             b"<input id=\"phase2g-text\" type=\"text\" value=\"stable text marker\"><textarea id=\"phase2g-textarea\">Stable textarea marker</textarea>"
+                             b"<select id=\"phase2g-select\"><option>First select option</option><option>Second select option</option></select>"
+                             b"<button id=\"phase2g-button\" type=\"button\">Inert button</button>"
+                             b"<input id=\"phase2g-submit\" type=\"submit\" value=\"Visual submit only\"><input id=\"phase2g-reset\" type=\"reset\" value=\"Visual reset only\">"
+                             b"<button id=\"phase2g-disabled-button\" type=\"button\" disabled>Disabled button</button>"
+                             b"<input id=\"phase2g-source-order\" type=\"checkbox\"><input id=\"phase2g-inline\" type=\"checkbox\" style=\"color:#1d4ed8;\"><input id=\"phase2g-important\" type=\"checkbox\">"
+                             b"</fieldset></form></body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2h.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2H Bounded Focus and Accessibility</title><style>"
+                             b"body { color:#334155; background:#f8fafc; }"
+                             b"form { padding:6px; } fieldset { padding:8px; border:2px solid #64748b; }"
+                             b"input, textarea, select, button { color:#111827; background:#ffffff; border:1px solid #94a3b8; padding:3px; }"
+                             b"input:focus, textarea:focus, select:focus, button:focus { background:#dbeafe; }"
+                             b"input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { color:#1d4ed8; }"
+                             b"#phase2h-thick:focus { border:4px solid #7c3aed; }"
+                             b"#phase2h-tiny:focus { width:1px; height:1px; padding:0; }"
+                             b"#phase2h-hidden { display:none; }"
+                             b".phase2h-nested { padding:12px; border:2px solid #cbd5e1; }"
+                             b".phase2h-table { border:2px solid #94a3b8; padding:4px; }"
+                             b"</style></head><body><h1>Phase 2H Bounded Focus and Accessibility</h1>"
+                             b'<form id="phase2h-form"><fieldset id="phase2h-fieldset"><legend>Bounded controls</legend>'
+                             b'<input id="phase2h-checkbox" type="checkbox"><label id="phase2h-checkbox-label" for="phase2h-checkbox">Phase 2H checkbox</label>'
+                             b'<label id="phase2h-wrapping-label"><input id="phase2h-wrapped" type="checkbox"> Wrapped checkbox</label>'
+                             b'<label id="phase2h-radio-label" for="phase2h-radio">Phase 2H radio</label><input id="phase2h-radio" type="radio" name="phase2h-choice">'
+                             b'<button id="phase2h-button" type="button">Phase 2H button</button>'
+                             b'<input id="phase2h-input-button" type="button" value="Input button">'
+                             b'<input id="phase2h-text" type="text" placeholder="Text placeholder" required readonly>'
+                             b'<input id="phase2h-password" type="password" placeholder="Password placeholder" value="do-not-log">'
+                             b'<textarea id="phase2h-textarea" placeholder="Textarea placeholder" required readonly>Stable textarea</textarea>'
+                             b'<select id="phase2h-select" required><option>First option</option><option selected>Second option</option></select>'
+                             b'<input id="phase2h-thick" type="checkbox"><label for="phase2h-thick">Thick border checkbox</label>'
+                             b'<div class="phase2h-nested"><input id="phase2h-tiny" type="checkbox"><label for="phase2h-tiny">Tiny control</label></div>'
+                             b'<table class="phase2h-table"><tr><td><input id="phase2h-table-control" type="radio" name="phase2h-table-choice"></td></tr></table>'
+                             b'<input id="phase2h-hidden" type="checkbox"><input id="phase2h-disabled" type="checkbox" disabled>'
+                             b'<label id="phase2h-missing-label" for="phase2h-missing">Missing association</label>'
+                             b'<label id="phase2h-duplicate-label" for="phase2h-duplicate">Duplicate association</label>'
+                             b'<input id="phase2h-duplicate" type="text" value="one"><input id="phase2h-duplicate" type="text" value="two">'
+                             b'<input id="phase2h-unnamed" type="checkbox">'
+                             b'</fieldset></form></body></html>')
+            return
         if path == "/navigator-smoke/css-external-safety.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head>"

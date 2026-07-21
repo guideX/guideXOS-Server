@@ -5,6 +5,9 @@
 #include "network_telemetry.h"
 #include <cstring>
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <sstream>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -31,6 +34,12 @@ constexpr uint8_t SECURITY_TYPE_NONE = 1;
 constexpr uint8_t SECURITY_RESULT_OK[4] = {0, 0, 0, 0};
 
 namespace {
+    bool hostedInputDiagnosticsEnabled( ) {
+        const char* value = std::getenv("GXOS_HOSTED_INPUT_DIAGNOSTICS");
+        return value && *value && std::strcmp(value, "0") != 0 &&
+            std::strcmp(value, "false") != 0 && std::strcmp(value, "off") != 0;
+    }
+
     inline int sendTracked(SOCKET socket, const void* buffer, int length, int flags) {
 #ifdef _WIN32
         const int result = ::send(socket, reinterpret_cast<const char*>(buffer), length, flags);
@@ -54,6 +63,72 @@ namespace {
         }
         return result;
     }
+
+#ifdef _WIN32
+    bool hostedTitleInputDiagnosticsEnabled( ) {
+        static const bool enabled = [] ( ) {
+            const char* value = std::getenv("GXOS_HOSTED_TITLE_INPUT_DIAGNOSTICS");
+            if (!value || !*value) value = std::getenv("GXOS_HOSTED_INPUT_DIAGNOSTICS");
+            if (!value || !*value) return false;
+            std::string lower;
+            lower.reserve(std::strlen(value));
+            for (const char* p = value; *p; ++p) {
+                lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
+            }
+            return !(lower == "0" || lower == "false" || lower == "off" || lower == "no");
+        }( );
+        return enabled;
+    }
+
+    std::string hostedInputHandle(HWND hwnd) {
+        std::ostringstream oss;
+        oss << "0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd) << std::dec;
+        return oss.str( );
+    }
+
+    HWND resolveHostedCompositorWindow( ) {
+        const DWORD currentProcessId = GetCurrentProcessId( );
+        auto isCurrentLiveWindow = [currentProcessId](HWND hwnd) {
+            if (!hwnd || !IsWindow(hwnd)) return false;
+            DWORD ownerProcessId = 0;
+            GetWindowThreadProcessId(hwnd, &ownerProcessId);
+            return ownerProcessId == currentProcessId;
+        };
+
+        HWND hwnd = gui::Compositor::g_hwnd;
+        if (isCurrentLiveWindow(hwnd)) return hwnd;
+
+        // Refresh the target if the exposed handle was cleared or became stale
+        // during a compositor restart. Restrict the fallback to this process.
+        HWND live = FindWindowA("GXOS_COMPOSITOR", "guideXOSCpp Compositor");
+        return isCurrentLiveWindow(live) ? live : nullptr;
+    }
+
+    BOOL postHostedInputMessage(HWND target, UINT message, WPARAM wParam, LPARAM lParam,
+        uint8_t currentMask, uint8_t previousMask, uint16_t x, uint16_t y) {
+        const BOOL isWindow = IsWindow(target);
+        DWORD ownerProcessId = 0;
+        const DWORD ownerThreadId = target ? GetWindowThreadProcessId(target, &ownerProcessId) : 0;
+        SetLastError(ERROR_SUCCESS);
+        const BOOL posted = PostMessage(target, message, wParam, lParam);
+        const DWORD postError = posted ? ERROR_SUCCESS : GetLastError();
+        if (hostedTitleInputDiagnosticsEnabled( )) {
+            std::ostringstream oss;
+            oss << "VNC post transition=" << static_cast<unsigned int>(previousMask)
+                << "->" << static_cast<unsigned int>(currentMask)
+                << " target=" << hostedInputHandle(target)
+                << " IsWindow=" << (isWindow ? 1 : 0)
+                << " owningPid=" << ownerProcessId
+                << " owningTid=" << ownerThreadId
+                << " message=0x" << std::hex << message << std::dec
+                << " x=" << x << " y=" << y
+                << " result=" << (posted ? 1 : 0);
+            if (!posted) oss << " lastError=" << postError;
+            Logger::write(LogLevel::Info, oss.str( ));
+        }
+        return posted;
+    }
+#endif
 }
 
 // Static member initialization
@@ -431,18 +506,33 @@ void VncServer::HandleClient(int clientSocket) {
 
 void VncServer::InjectPointerEvent(uint8_t buttonMask, uint16_t x, uint16_t y) {
 #ifdef _WIN32
-    // Forward VNC pointer events to the compositor window
-    HWND hwnd = gui::Compositor::g_hwnd;
-    if (!hwnd) return;
+    const uint8_t previousMask = s_lastButtonMask;
+    HWND hwnd = resolveHostedCompositorWindow( );
+    if (!hwnd) {
+        if (hostedTitleInputDiagnosticsEnabled( )) {
+            Logger::write(LogLevel::Info, "VNC pointer transition=" + std::to_string(previousMask) +
+                "->" + std::to_string(buttonMask) + " target=none cached=" + hostedInputHandle(gui::Compositor::g_hwnd));
+        }
+        return;
+    }
     
     LPARAM lParam = MAKELPARAM(x, y);
     
     // Check for button state changes (comparing with last state)
     bool leftDown = (buttonMask & 0x01) != 0;
-    bool leftWasDown = (s_lastButtonMask & 0x01) != 0;
+    bool leftWasDown = (previousMask & 0x01) != 0;
     bool rightDown = (buttonMask & 0x04) != 0;
-    bool rightWasDown = (s_lastButtonMask & 0x04) != 0;
+    bool rightWasDown = (previousMask & 0x04) != 0;
     bool middleDown = (buttonMask & 0x02) != 0;
+
+    if (hostedInputDiagnosticsEnabled( )) {
+        Logger::write(LogLevel::Info,
+            std::string("VNC pointer mask=") + std::to_string(buttonMask) +
+            " previousMask=" + std::to_string(s_lastButtonMask) +
+            " leftDown=" + (leftDown ? "1" : "0") +
+            " leftWasDown=" + (leftWasDown ? "1" : "0") +
+            " x=" + std::to_string(x) + " y=" + std::to_string(y));
+    }
     
     // Build wParam with current button states for WM_MOUSEMOVE
     // This is critical for drag operations to work correctly
@@ -454,7 +544,7 @@ void VncServer::InjectPointerEvent(uint8_t buttonMask, uint16_t x, uint16_t y) {
     // IMPORTANT: Send button DOWN events BEFORE mouse move so drag state is set up first
     // Left button down
     if (leftDown && !leftWasDown) {
-        PostMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
+        postHostedInputMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam, buttonMask, previousMask, x, y);
     }
     // Right button down
     if (rightDown && !rightWasDown) {
@@ -466,7 +556,11 @@ void VncServer::InjectPointerEvent(uint8_t buttonMask, uint16_t x, uint16_t y) {
     
     // Send button UP events AFTER mouse move
     if (!leftDown && leftWasDown) {
-        PostMessage(hwnd, WM_LBUTTONUP, 0, lParam);
+        postHostedInputMessage(hwnd, WM_LBUTTONUP, 0, lParam, buttonMask, previousMask, x, y);
+        // Harmless same-window receipt probe. The WndProc logs this private
+        // message but never maps it to input or a close action.
+        postHostedInputMessage(hwnd, gui::Compositor::kHostedTitleInputDiagnosticMessage, 0, lParam,
+            buttonMask, previousMask, x, y);
     }
     if (!rightDown && rightWasDown) {
         PostMessage(hwnd, WM_RBUTTONUP, 0, lParam);

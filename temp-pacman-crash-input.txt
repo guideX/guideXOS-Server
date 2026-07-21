@@ -1,0 +1,3 @@
+gui.start
+desktop.launch Nexgen PacMan
+exit

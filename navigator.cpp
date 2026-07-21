@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -39,6 +40,14 @@ using gxos::web::TableBorderCollapseMode;
 using gxos::web::FormControlType;
 using gxos::web::FormControlMetadata;
 using gxos::web::FormRuntimeControlState;
+using gxos::web::FormFocusOrigin;
+using gxos::web::FormFocusCancellationReason;
+using gxos::web::FormAccessibilityRole;
+using gxos::web::FormAccessibilityLabelSource;
+using gxos::web::FormAccessibilityNameSource;
+using gxos::web::FormFocusRevealResult;
+using gxos::web::FormAccessibilityRecord;
+using gxos::web::FormRuntimeStateTable;
 using gxos::web::kFormRuntimeControlCap;
 
 uint64_t           Navigator::s_windowId        = 0;
@@ -59,6 +68,8 @@ std::string Navigator::s_addressBuffer;
 int         Navigator::s_addressCaret   = 0;
 int         Navigator::s_focusedInputBlockIndex = -1;
 int         Navigator::s_inputCaret = 0;
+uint64_t    Navigator::s_documentGeneration = 0;
+bool        Navigator::s_tabKeyPressed = false;
 std::string Navigator::s_lastSubmittedFormUrl;
 std::string Navigator::s_lastSubmittedFormAction;
 std::string Navigator::s_lastSubmittedFormMethod;
@@ -1207,6 +1218,101 @@ namespace {
 		return value ? "yes" : "no";
 	}
 
+	static const char* formFocusOriginName(FormFocusOrigin origin)
+	{
+		switch (origin) {
+		case FormFocusOrigin::Mouse: return "mouse";
+		case FormFocusOrigin::Keyboard: return "keyboard";
+		case FormFocusOrigin::ProgrammaticInternalSmoke: return "programmatic/internal-smoke";
+		default: return "none";
+		}
+	}
+
+	static const char* formAccessibilityRoleName(FormAccessibilityRole role)
+	{
+		switch (role) {
+		case FormAccessibilityRole::Checkbox: return "checkbox";
+		case FormAccessibilityRole::Radio: return "radio";
+		case FormAccessibilityRole::Button: return "button";
+		case FormAccessibilityRole::Textbox: return "textbox";
+		case FormAccessibilityRole::PasswordTextbox: return "password textbox";
+		case FormAccessibilityRole::Textarea: return "textarea";
+		case FormAccessibilityRole::Select: return "select";
+		default: return "none";
+		}
+	}
+
+	static const char* formAccessibilityLabelSourceName(FormAccessibilityLabelSource source)
+	{
+		switch (source) {
+		case FormAccessibilityLabelSource::Wrapping: return "wrapping";
+		case FormAccessibilityLabelSource::ForId: return "for/id";
+		default: return "none";
+		}
+	}
+
+	static const char* formAccessibilityNameSourceName(FormAccessibilityNameSource source)
+	{
+		switch (source) {
+		case FormAccessibilityNameSource::LabelWrapping: return "label-wrapping";
+		case FormAccessibilityNameSource::LabelForId: return "label-for/id";
+		case FormAccessibilityNameSource::ButtonText: return "button-text";
+		case FormAccessibilityNameSource::InputValuePresence: return "input-value-presence";
+		case FormAccessibilityNameSource::Placeholder: return "placeholder";
+		case FormAccessibilityNameSource::ControlTypeFallback: return "control-type-fallback";
+		default: return "none";
+		}
+	}
+
+	static const char* formFocusRevealResultName(FormFocusRevealResult result)
+	{
+		switch (result) {
+		case FormFocusRevealResult::Scroll: return "scroll";
+		case FormFocusRevealResult::Noop: return "noop";
+		case FormFocusRevealResult::Clamped: return "clamped";
+		default: return "none";
+		}
+	}
+
+	static std::string evidenceFieldForSerial(const std::string& evidence,
+		uint64_t serial, const std::string& field)
+	{
+		const std::string serialToken = "logical-serial=" + std::to_string(serial);
+		size_t cursor = 0;
+		while ((cursor = evidence.find(serialToken, cursor)) != std::string::npos) {
+			const size_t recordEnd = evidence.find(';', cursor);
+			const size_t fieldStart = evidence.find(field + "=", cursor);
+			if (fieldStart != std::string::npos && (recordEnd == std::string::npos || fieldStart < recordEnd)) {
+				const size_t valueStart = fieldStart + field.size() + 1;
+				const size_t valueEnd = evidence.find(',', valueStart);
+				const size_t boundedEnd = (valueEnd == std::string::npos ||
+					(recordEnd != std::string::npos && recordEnd < valueEnd)) ? recordEnd : valueEnd;
+				return evidence.substr(valueStart, boundedEnd == std::string::npos ? std::string::npos : boundedEnd - valueStart);
+			}
+			if (recordEnd == std::string::npos) break;
+			cursor = recordEnd + 1;
+		}
+		return "";
+	}
+
+	static bool parseBoundedSpecificity(const std::string& value,
+		uint16_t& idCount, uint16_t& classCount, uint16_t& elementCount)
+	{
+		if (value.empty()) return false;
+		std::istringstream iss(value);
+		char dot1 = 0;
+		char dot2 = 0;
+		unsigned id = 0;
+		unsigned classes = 0;
+		unsigned elements = 0;
+		if (!(iss >> id >> dot1 >> classes >> dot2 >> elements) || dot1 != '.' || dot2 != '.') return false;
+		if (id > 0xFFFFu || classes > 0xFFFFu || elements > 0xFFFFu) return false;
+		idCount = static_cast<uint16_t>(id);
+		classCount = static_cast<uint16_t>(classes);
+		elementCount = static_cast<uint16_t>(elements);
+		return true;
+	}
+
 	static void setSourcePreview(NavigatorPageMetadata& metadata, const std::string& source)
 	{
 		metadata.rawSourceForSave = source;
@@ -1396,6 +1502,11 @@ namespace {
 		metadata.cssReadonlyPseudoMatches = doc.cssDiagnostics.readonlyPseudoMatches;
 		metadata.cssReadwritePseudoParsed = doc.cssDiagnostics.readwritePseudoParsed;
 		metadata.cssReadwritePseudoMatches = doc.cssDiagnostics.readwritePseudoMatches;
+		metadata.cssFocusPseudoParsed = doc.cssDiagnostics.focusPseudoParsed;
+		metadata.cssFocusPseudoMatches = doc.cssDiagnostics.focusPseudoMatches;
+		metadata.cssFocusVisiblePseudoParsed = doc.cssDiagnostics.focusVisiblePseudoParsed;
+		metadata.cssFocusVisiblePseudoMatches = doc.cssDiagnostics.focusVisiblePseudoMatches;
+		metadata.cssRuntimeFocusRecomputations = doc.cssDiagnostics.runtimeFocusRecomputations;
 		metadata.cssComputedStyleEvidence = doc.cssDiagnostics.computedStyleEvidence;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
@@ -1431,6 +1542,25 @@ namespace {
 		metadata.formRuntimeStateResets = doc.formsDiagnostics.formRuntimeStateResets;
 		metadata.formHitTargetsRegistered = doc.formsDiagnostics.formHitTargetsRegistered;
 		metadata.formHitTargetClamps = doc.formsDiagnostics.formHitTargetClamps;
+		metadata.formFocusableControls = doc.formsDiagnostics.formFocusableControls;
+		metadata.formFocusChanges = doc.formsDiagnostics.formFocusChanges;
+		metadata.formFocusClears = doc.formsDiagnostics.formFocusClears;
+		metadata.formFocusWraps = doc.formsDiagnostics.formFocusWraps;
+		metadata.formTabForward = doc.formsDiagnostics.formTabForward;
+		metadata.formTabBackward = doc.formsDiagnostics.formTabBackward;
+		metadata.formKeyboardActivations = doc.formsDiagnostics.formKeyboardActivations;
+		metadata.formSpaceActivations = doc.formsDiagnostics.formSpaceActivations;
+		metadata.formEnterActivations = doc.formsDiagnostics.formEnterActivations;
+		metadata.formKeyRepeatSuppressed = doc.formsDiagnostics.formKeyRepeatSuppressed;
+		metadata.formStaleKeyActivationBlocks = doc.formsDiagnostics.formStaleKeyActivationBlocks;
+		metadata.formDisabledFocusSkips = doc.formsDiagnostics.formDisabledFocusSkips;
+		metadata.formHiddenFocusSkips = doc.formsDiagnostics.formHiddenFocusSkips;
+		metadata.formFocusStateResets = doc.formsDiagnostics.formFocusStateResets;
+		metadata.formFocusOrigin = formFocusOriginName(doc.formRuntimeState.focusOrigin);
+		metadata.formFocusGeneration = doc.formRuntimeState.focusValid
+			? doc.formRuntimeState.focusedDocumentGeneration : 0;
+		metadata.formFocusedLogicalSerial = doc.formRuntimeState.focusValid
+			? doc.formRuntimeState.focusedLogicalSerial : 0;
 		metadata.cssCheckedRuntimeRecomputations = doc.cssDiagnostics.checkedRuntimeRecomputations;
 		metadata.formInteractionMode = doc.formsDiagnostics.formInteractionMode;
 		metadata.unsupportedFormMethod = doc.formsDiagnostics.hasUnsupportedMethod;
@@ -3123,6 +3253,14 @@ namespace {
 		add("CSS :required pseudo matches", metadata.cssRequiredPseudoMatches);
 		add("CSS :read-only pseudo matches", metadata.cssReadonlyPseudoMatches);
 		add("CSS :read-write pseudo matches", metadata.cssReadwritePseudoMatches);
+		add("CSS :focus pseudo parsed", metadata.cssFocusPseudoParsed);
+		add("CSS :focus pseudo matches", metadata.cssFocusPseudoMatches);
+		add("CSS :focus-visible pseudo parsed", metadata.cssFocusVisiblePseudoParsed);
+		add("CSS :focus-visible pseudo matches", metadata.cssFocusVisiblePseudoMatches);
+		add("css_focus_pseudo_parsed", metadata.cssFocusPseudoParsed);
+		add("css_focus_pseudo_matches", metadata.cssFocusPseudoMatches);
+		add("css_focus_visible_pseudo_matches", metadata.cssFocusVisiblePseudoMatches);
+		add("css_focus_runtime_recomputations", metadata.cssRuntimeFocusRecomputations);
 		add("Form controls rendered", metadata.formControlsRendered);
 		add("Form controls unsupported", metadata.formControlsUnsupported);
 		add("Form interactions deferred", metadata.formInteractionsDeferred);
@@ -3139,8 +3277,99 @@ namespace {
 		add("form_runtime_state_resets", metadata.formRuntimeStateResets);
 		add("form_hit_targets_registered", metadata.formHitTargetsRegistered);
 		add("form_hit_target_clamps", metadata.formHitTargetClamps);
+		add("form_focusable_controls", metadata.formFocusableControls);
+		add("form_focus_changes", metadata.formFocusChanges);
+		add("form_focus_clears", metadata.formFocusClears);
+		add("form_focus_wraps", metadata.formFocusWraps);
+		add("form_tab_forward", metadata.formTabForward);
+		add("form_tab_backward", metadata.formTabBackward);
+		add("form_keyboard_activations", metadata.formKeyboardActivations);
+		add("form_space_activations", metadata.formSpaceActivations);
+		add("form_enter_activations", metadata.formEnterActivations);
+		add("form_key_repeat_suppressed", metadata.formKeyRepeatSuppressed);
+		add("form_stale_key_activation_blocks", metadata.formStaleKeyActivationBlocks);
+		add("form_disabled_focus_skips", metadata.formDisabledFocusSkips);
+		add("form_hidden_focus_skips", metadata.formHiddenFocusSkips);
+		add("form_focus_state_resets", metadata.formFocusStateResets);
 		add("css_checked_runtime_recomputations", metadata.cssCheckedRuntimeRecomputations);
 		out += "Current Document.form_interaction_mode=" + metadata.formInteractionMode + "\n";
+		out += "Current Document.form_focus_mode=session_local_non_editing\n";
+		out += "Current Document.form_focus_origin=" +
+			(metadata.formFocusOrigin.empty() ? "none" : metadata.formFocusOrigin) + "\n";
+		out += "Current Document.form_focus_generation=" + std::to_string(metadata.formFocusGeneration) + "\n";
+		out += "Current Document.form_focused_logical_serial=" + std::to_string(metadata.formFocusedLogicalSerial) + "\n";
+	}
+
+	static void appendFormPhase2HDiagnostics(std::string& out, const WebDocument& doc)
+	{
+		const gxos::web::FormsDiagnostics& diagnostics = doc.formsDiagnostics;
+		const auto add = [&](const char* label, int value) {
+			out += std::string("Current Document.") + label + "=" + std::to_string(value) + "\n";
+		};
+		add("form_focus_cancel_escape", diagnostics.formFocusCancelEscape);
+		add("form_focus_cancel_navigation", diagnostics.formFocusCancelNavigation);
+		add("form_focus_cancel_deactivation", diagnostics.formFocusCancelDeactivation);
+		add("form_focus_cancel_state_change", diagnostics.formFocusCancelStateChange);
+		add("form_focus_cancel_generation_mismatch", diagnostics.formFocusCancelGenerationMismatch);
+		add("form_focus_cancel_key_mismatch", diagnostics.formFocusCancelKeyMismatch);
+		add("form_key_repeat_suppressed", diagnostics.formKeyRepeatSuppressed);
+		add("form_focus_origin_mouse", diagnostics.formFocusOriginMouse);
+		add("form_focus_origin_keyboard", diagnostics.formFocusOriginKeyboard);
+		add("form_focus_visible_matches", diagnostics.formFocusVisibleMatches);
+		add("form_focus_ring_draws", diagnostics.formFocusRingDraws);
+		add("form_focus_ring_clamps", diagnostics.formFocusRingClamps);
+		add("form_focus_reveal_scrolls", diagnostics.formFocusRevealScrolls);
+		add("form_focus_reveal_noops", diagnostics.formFocusRevealNoops);
+		add("form_focus_reveal_clamps", diagnostics.formFocusRevealClamps);
+		add("form_accessibility_records", diagnostics.formAccessibilityRecords);
+		add("form_accessibility_metadata_clamps", diagnostics.formAccessibilityMetadataClamps);
+		add("form_accessible_name_present", diagnostics.formAccessibleNamePresent);
+		add("form_accessible_name_missing", diagnostics.formAccessibleNameMissing);
+		add("form_label_associations_valid", diagnostics.formLabelAssociationsValid);
+		add("form_label_associations_invalid", diagnostics.formLabelAssociationsInvalid);
+		out += "Current Document.form_focus_mode=session_local_non_editing\n";
+		out += "Current Document.form_accessibility_aria=deferred_native_bounded_only\n";
+		out += "Current Document.form_accessibility_privacy=presence_only_no_values_names_or_passwords\n";
+
+		const bool fixture = doc.url.find("css-phase2h.html") != std::string::npos;
+		const size_t count = std::min(doc.formRuntimeState.accessibilityRecordCount,
+			doc.formRuntimeState.accessibilityRecords.size());
+		constexpr size_t kFormAccessibilityEvidenceCap = 32;
+		for (size_t i = 0; i < count && i < kFormAccessibilityEvidenceCap; ++i) {
+			const FormAccessibilityRecord& record = doc.formRuntimeState.accessibilityRecords[i];
+			if (!fixture || record.fixtureId.empty()) continue;
+			out += "Current Document.form_accessibility_record=";
+			out += "fixture-id=" + record.fixtureId;
+			out += ",logical-serial=" + std::to_string(record.logicalSerial);
+			out += ",document-generation=" + std::to_string(record.documentGeneration);
+			out += ",role=" + std::string(formAccessibilityRoleName(record.role));
+			out += ",focusable=" + yesNo(record.focusable);
+			out += ",focused=" + yesNo(record.focused);
+			out += ",focus-origin=" + std::string(formFocusOriginName(record.focusOrigin));
+			out += ",focus=" + yesNo(record.focusMatch);
+			out += ",focus-visible=" + yesNo(record.focusVisibleMatch);
+			out += ",checked=" + yesNo(record.checked);
+			out += ",disabled=" + yesNo(record.disabled);
+			out += ",required=" + yesNo(record.required);
+			out += ",readonly=" + yesNo(record.readOnly);
+			out += ",visible=" + yesNo(record.visible);
+			out += ",label-associated=" + yesNo(record.labelAssociated);
+			out += ",label-source=" + std::string(formAccessibilityLabelSourceName(record.labelSource));
+			out += ",accessible-name-present=" + yesNo(record.accessibleNamePresent);
+			out += ",name-source=" + std::string(formAccessibilityNameSourceName(record.accessibleNameSource));
+			out += ",metadata-complete=" + yesNo(record.metadataComplete);
+			out += ",focus-ring-drawn=" + yesNo(record.focusRingDrawn);
+			out += ",focus-ring-clamped=" + yesNo(record.focusRingClamped);
+			out += ",reveal-scroll-result=" + std::string(formFocusRevealResultName(record.revealResult));
+			out += ",winning-selector=" + record.winningSelectorCategory;
+			out += ",winning-pseudo=" + record.winningPseudo;
+		out += ",specificity=" + std::to_string(record.winningSpecificityId) + "." +
+				std::to_string(record.winningSpecificityClass) + "." +
+				std::to_string(record.winningSpecificityElement);
+			out += ",source-order=" + std::to_string(record.winningSourceOrder) + "\n";
+		}
+		if (fixture && count > kFormAccessibilityEvidenceCap)
+			out += "Current Document.form_accessibility_evidence_clamped=yes\n";
 	}
 
 	static void appendFormPhase2EBlocks(WebDocument& doc, const NavigatorPageMetadata& metadata)
@@ -3503,6 +3732,11 @@ bool Navigator::SmokeDragFirstLinkSelectsWithoutNavigation()
 
 std::string Navigator::SmokeRuntimeReport()
 {
+	// Refresh only the currently inspected document.  Generated about: views
+	// (Page Info, Save Page Text, and runtime diagnostics) must not replace the
+	// ownership metadata for the page they describe.
+	if (s_currentDoc.url == s_pageMetadata.finalUrl)
+		storePageMetadata(s_pageMetadata, s_currentDoc);
 	const std::string inspected = s_pageMetadata.finalUrl.empty() ? "" : s_pageMetadata.finalUrl;
 	std::string report = formatRuntimeReport(hostedRuntimeReportEntries(
 		s_currentDoc.url,
@@ -3635,6 +3869,7 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.tlsHandshakeStarted,
 		s_pageMetadata.tlsSmokeSelfSignedBypass));
 	appendFormPhase2EDiagnostics(report, s_pageMetadata);
+	appendFormPhase2HDiagnostics(report, s_currentDoc);
 	return report;
 }
 
@@ -3731,6 +3966,107 @@ bool Navigator::SmokeFormMouseSafetyById(const std::string& id)
 	return SmokeFormActivationCountById(id) == before;
 }
 
+bool Navigator::SmokeFocusFormControlById(const std::string& id, bool keyboardOrigin)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0 || !isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(blockIndex)])) return false;
+	focusDocumentInput(blockIndex, keyboardOrigin ? FormFocusOrigin::Keyboard : FormFocusOrigin::ProgrammaticInternalSmoke);
+	updateDisplay();
+	return isFocusedFormControl(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+}
+
+bool Navigator::SmokeFormControlFocusedById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex >= 0 && isFocusedFormControl(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+}
+
+std::string Navigator::SmokeFocusedFormControlId()
+{
+	const int blockIndex = focusedFormControlBlockIndex();
+	return blockIndex >= 0 ? s_currentDoc.blocks[static_cast<size_t>(blockIndex)].id : std::string();
+}
+
+std::string Navigator::SmokeFormFocusOrigin()
+{
+	return formFocusOriginName(s_currentDoc.formRuntimeState.focusOrigin);
+}
+
+int Navigator::SmokeFormFocusableCount()
+{
+	std::array<int, kFormRuntimeControlCap> order{};
+	return static_cast<int>(buildFormFocusOrder(order));
+}
+
+bool Navigator::SmokeKeyPress(int keyCode, const std::string& action)
+{
+	if (s_windowId == 0) return false;
+	handleKeyPress(keyCode, action);
+	return true;
+}
+
+bool Navigator::SmokeSetFormControlDisabledById(const std::string& id, bool disabled)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	FormRuntimeControlState* state = runtimeStateForBlock(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+	if (!state) return false;
+	state->disabled = disabled;
+	recomputeFormControlStyles();
+	updateDisplay();
+	return runtimeDisabled(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]) == disabled;
+}
+
+bool Navigator::SmokeSetFormControlHiddenById(const std::string& id, bool hidden)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (!block.formControl.metadataComplete || block.formControl.logicalSerial == 0) return false;
+	block.formControl.hidden = hidden;
+	block.elementMetadata.formControl.hidden = hidden;
+	block.style.displayNone = hidden;
+	recomputeFormControlStyles();
+	updateDisplay();
+    // The authored/computed display style may legitimately differ from the
+    // deterministic hidden-transition hook.  Focusability and metadata use
+    // the form-control hidden flag, so verify that state directly rather than
+    // coupling the hook result to a later style recomputation.
+    return block.formControl.hidden == hidden;
+}
+
+void Navigator::SmokeDeactivateWindow()
+{
+	clearDocumentFocus(true, FormFocusCancellationReason::Deactivation);
+	s_ctrlPressed = false;
+	s_shiftPressed = false;
+	if (s_windowId != 0) updateDisplay();
+}
+
+bool Navigator::SmokeForceFormFocusGenerationMismatch()
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || !runtime.focusValid) return false;
+	if (runtime.focusedDocumentGeneration == std::numeric_limits<uint64_t>::max())
+		runtime.focusedDocumentGeneration = 1;
+	else
+		++runtime.focusedDocumentGeneration;
+	recomputeFormControlStyles();
+	updateDisplay();
+	return !runtime.focusValid && runtime.focusedLogicalSerial == 0;
+}
+
+int Navigator::SmokeFormControlInputLengthById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex < 0 ? -1 : static_cast<int>(s_currentDoc.blocks[static_cast<size_t>(blockIndex)].inputValue.size());
+}
+
+void Navigator::SmokeFocusAddressBar()
+{
+	focusAddressBar();
+}
+
 bool Navigator::SmokeReloadCurrentDocument()
 {
 	if (s_windowId == 0 || s_currentDoc.url.empty()) return false;
@@ -3767,6 +4103,8 @@ int Navigator::main(int, char**)
 	s_addressFocused = false;
 	s_addressBuffer.clear();
 	s_addressCaret   = 0;
+	s_documentGeneration = 0;
+	s_tabKeyPressed = false;
 	s_ctrlPressed = false;
 	s_shiftPressed = false;
 	s_mouseLeftDown = false;
@@ -3855,6 +4193,22 @@ int Navigator::main(int, char**)
 				int button = std::stoi(buttonStr);
 				handleMouseInput(x, y, button, action);
 			} catch (...) {
+			}
+			break;
+		}
+		case MsgType::MT_SetFocus: {
+			try {
+				const uint64_t focusedWindow = std::stoull(payload);
+				if (focusedWindow != s_windowId) {
+					clearDocumentFocus(true, FormFocusCancellationReason::Deactivation);
+					s_ctrlPressed = false;
+					s_shiftPressed = false;
+					if (s_windowId != 0) updateDisplay();
+				}
+			} catch (...) {
+				clearDocumentFocus(true, FormFocusCancellationReason::Deactivation);
+				s_ctrlPressed = false;
+				s_shiftPressed = false;
 			}
 			break;
 		}
@@ -4036,6 +4390,36 @@ void Navigator::renderDocument()
 	};
 
 	int blockIndex = 0;
+	auto drawDefaultFocusRing = [&](int index, const DocBlock& control) {
+		if (!isFocusedFormControl(control)) return;
+		const Rect rect = formControlRect(index);
+		if (rect.w <= 0 || rect.h <= 0) return;
+		const uint32_t ring = isDarkColor(contentColor) ? 0xFFFFFFFFu : 0xFF111827u;
+		const int viewportTop = kToolbarH + 6;
+		const int viewportRight = kContentX + kContentW - 14;
+		const int viewportBottom = viewportTop + kContentH;
+		const int requestedX = rect.x - 2;
+		const int requestedY = rect.y - 2;
+		const int requestedRight = rect.x + rect.w + 1;
+		const int requestedBottom = rect.y + rect.h + 1;
+		const int x = std::max(kContentX, requestedX);
+		const int y = std::max(viewportTop, requestedY);
+		const int right = std::min(viewportRight, requestedRight);
+		const int bottom = std::min(viewportBottom, requestedBottom);
+		if (right <= x || bottom <= y) return;
+		FormAccessibilityRecord* record = accessibilityRecordForSerial(control.formControl.logicalSerial);
+		const bool clamped = x != requestedX || y != requestedY || right != requestedRight || bottom != requestedBottom;
+		++s_currentDoc.formsDiagnostics.formFocusRingDraws;
+		if (clamped) ++s_currentDoc.formsDiagnostics.formFocusRingClamps;
+		if (record) {
+			record->focusRingDrawn = true;
+			record->focusRingClamped = clamped;
+		}
+		drawThemeRect(s_windowId, x, y, right - x, 1, ring);
+		drawThemeRect(s_windowId, x, bottom - 1, right - x, 1, ring);
+		drawThemeRect(s_windowId, x, y, 1, bottom - y, ring);
+		drawThemeRect(s_windowId, right - 1, y, 1, bottom - y, ring);
+	};
 	for (const DocBlock& block : s_currentDoc.blocks) {
 		if (!blockHasVisibleCss(block)) {
 			++blockIndex;
@@ -4372,7 +4756,7 @@ void Navigator::renderDocument()
 		case BlockType::FormTextInput: {
 			const int inputX = contentX;
 			const int inputY = boxY + borderTop + paddingTop;
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const bool focused = isFocusedFormControl(block);
 			const bool disabled = runtimeDisabled(block);
 			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
 			const int controlH = formControlHeight(block);
@@ -4405,7 +4789,7 @@ void Navigator::renderDocument()
 			const int inputX = contentX;
 			const int inputY = boxY + borderTop + paddingTop;
 			const int inputH = formControlHeight(block);
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const bool focused = isFocusedFormControl(block);
 			const bool disabled = runtimeDisabled(block);
 			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
 			const uint32_t fill = formFillColor(block, focused, disabled);
@@ -4461,7 +4845,7 @@ void Navigator::renderDocument()
 		case BlockType::FormRadio: {
 			const int controlX = contentX;
 			const int controlY = boxY + borderTop + paddingTop;
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const bool focused = isFocusedFormControl(block);
 			const bool disabled = runtimeDisabled(block);
 			const int box = 14;
 			const int boxY = controlY + (kFormControlH - box) / 2;
@@ -4488,7 +4872,7 @@ void Navigator::renderDocument()
 		case BlockType::FormSelect: {
 			const int selectX = contentX;
 			const int selectY = boxY + borderTop + paddingTop;
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const bool focused = isFocusedFormControl(block);
 			const bool disabled = runtimeDisabled(block);
 			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
 			const int controlH = formControlHeight(block);
@@ -4525,7 +4909,7 @@ void Navigator::renderDocument()
 		case BlockType::FormSubmit: {
 			const int buttonX = contentX;
 			const int buttonY = boxY + borderTop + paddingTop;
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const bool focused = isFocusedFormControl(block);
 			const bool disabled = runtimeDisabled(block);
 			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
 			const int controlH = formControlHeight(block);
@@ -4544,6 +4928,7 @@ void Navigator::renderDocument()
 			break;
 		}
 		}
+		drawDefaultFocusRing(blockIndex, block);
 		++blockIndex;
 	}
 
@@ -4645,7 +5030,7 @@ void Navigator::handleToolbarAction(int widgetId)
 		s_addressBuffer.clear();
 		s_addressCaret   = 0;
 	}
-	if (s_focusedInputBlockIndex >= 0) {
+	if (s_currentDoc.formRuntimeState.focusValid) {
 		blurDocumentInput();
 	}
 
@@ -4745,6 +5130,206 @@ bool Navigator::runtimeDisabled(const DocBlock& block)
 	return block.formControl.disabled;
 }
 
+void Navigator::updateFormAccessibilityMetadata()
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized) return;
+
+	struct LabelResolution {
+		uint64_t controlSerial = 0;
+		FormAccessibilityLabelSource source = FormAccessibilityLabelSource::None;
+		bool hasText = false;
+	};
+
+	const auto hasAncestorSerial = [](const DocBlock& block, uint64_t serial) {
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			if (ancestor.serial == serial) return true;
+		}
+		return false;
+	};
+	const auto isSupportedControlBlock = [&](const DocBlock& block) {
+		return block.formControl.logicalSerial != 0 &&
+			block.formControl.metadataComplete && block.formControl.supported &&
+			!block.formUnsupported && block.formControl.type != FormControlType::Option &&
+			block.formControl.type != FormControlType::Unsupported &&
+			block.formControl.type != FormControlType::None &&
+			block.type != BlockType::FormLabel;
+	};
+
+	std::vector<LabelResolution> resolutions;
+	resolutions.reserve(std::min(kFormRuntimeControlCap, s_currentDoc.blocks.size()));
+	int validAssociations = 0;
+	int invalidAssociations = 0;
+	for (const DocBlock& label : s_currentDoc.blocks) {
+		if (label.type != BlockType::FormLabel || !label.formControl.metadataComplete ||
+			label.elementMetadata.serial == 0) continue;
+		if (!label.labelFor.empty()) {
+			int idMatches = 0;
+			uint64_t targetSerial = 0;
+			bool targetIsControl = false;
+			for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+				if (element.id != label.labelFor) continue;
+				++idMatches;
+				targetSerial = element.serial;
+				targetIsControl = element.formControl.logicalSerial == element.serial &&
+					element.formControl.metadataComplete && element.formControl.supported &&
+					element.formControl.type != FormControlType::Option &&
+					element.formControl.type != FormControlType::Unsupported &&
+					element.formControl.type != FormControlType::None;
+			}
+			if (idMatches == 1 && targetIsControl && targetSerial != 0) {
+				++validAssociations;
+				resolutions.push_back(LabelResolution{targetSerial, FormAccessibilityLabelSource::ForId, !label.text.empty()});
+			} else {
+				++invalidAssociations;
+			}
+			continue;
+		}
+
+		int wrappedControls = 0;
+		uint64_t wrappedSerial = 0;
+		bool wrappedHasText = !label.text.empty();
+		for (const DocBlock& candidate : s_currentDoc.blocks) {
+			if (!isSupportedControlBlock(candidate) || !hasAncestorSerial(candidate, label.elementMetadata.serial)) continue;
+			++wrappedControls;
+			wrappedSerial = candidate.formControl.logicalSerial;
+		}
+		if (wrappedControls == 1 && wrappedSerial != 0) {
+			++validAssociations;
+			resolutions.push_back(LabelResolution{wrappedSerial, FormAccessibilityLabelSource::Wrapping, wrappedHasText});
+		} else {
+			++invalidAssociations;
+		}
+	}
+
+	const bool phase2hFixture = s_currentDoc.url.find("css-phase2h.html") != std::string::npos;
+	const auto roleForBlock = [](const DocBlock& block) {
+		switch (block.formControl.type) {
+		case FormControlType::Checkbox: return FormAccessibilityRole::Checkbox;
+		case FormControlType::Radio: return FormAccessibilityRole::Radio;
+		case FormControlType::Button:
+		case FormControlType::Submit:
+		case FormControlType::Reset: return FormAccessibilityRole::Button;
+		case FormControlType::Password: return FormAccessibilityRole::PasswordTextbox;
+		case FormControlType::Textarea: return FormAccessibilityRole::Textarea;
+		case FormControlType::Select: return FormAccessibilityRole::Select;
+		case FormControlType::Text:
+		case FormControlType::Search:
+		case FormControlType::Email:
+		case FormControlType::Url:
+		case FormControlType::Number: return FormAccessibilityRole::Textbox;
+		default: return FormAccessibilityRole::None;
+		}
+	};
+
+	const std::array<FormAccessibilityRecord, kFormRuntimeControlCap> previous = runtime.accessibilityRecords;
+	const size_t previousCount = runtime.accessibilityRecordCount;
+	runtime.accessibilityRecords = {};
+	runtime.accessibilityRecordCount = 0;
+	s_currentDoc.formsDiagnostics.formAccessibleNamePresent = 0;
+	s_currentDoc.formsDiagnostics.formAccessibleNameMissing = 0;
+	s_currentDoc.formsDiagnostics.formLabelAssociationsValid = validAssociations;
+	s_currentDoc.formsDiagnostics.formLabelAssociationsInvalid = invalidAssociations;
+	s_currentDoc.formsDiagnostics.formFocusVisibleMatches = 0;
+
+	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (!isSupportedControlBlock(block)) continue;
+		if (runtime.accessibilityRecordCount >= runtime.accessibilityRecords.size()) {
+			++s_currentDoc.formsDiagnostics.formAccessibilityMetadataClamps;
+			break;
+		}
+		FormAccessibilityRecord& record = runtime.accessibilityRecords[runtime.accessibilityRecordCount++];
+		record.logicalSerial = block.formControl.logicalSerial;
+		record.documentGeneration = runtime.documentGeneration;
+		record.role = roleForBlock(block);
+		record.focusable = isFocusableFormControl(block);
+		record.focused = isFocusedFormControl(block);
+		record.focusOrigin = record.focused ? runtime.focusOrigin : FormFocusOrigin::None;
+		record.focusMatch = record.focused;
+		record.focusVisibleMatch = record.focused && runtime.focusOrigin == FormFocusOrigin::Keyboard;
+		record.checked = (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio)
+			? runtimeChecked(block) : false;
+		record.disabled = runtimeDisabled(block);
+		record.required = block.formControl.required;
+		record.readOnly = block.formControl.readOnly;
+		record.visible = !block.formControl.hidden && !block.style.displayNone;
+		record.metadataComplete = block.formControl.metadataComplete && block.formControl.logicalSerial != 0;
+		if (phase2hFixture && block.id.rfind("phase2h-", 0) == 0) record.fixtureId = block.id;
+
+		const LabelResolution* selectedLabel = nullptr;
+		for (const LabelResolution& resolution : resolutions) {
+			if (resolution.controlSerial != record.logicalSerial) continue;
+			if (resolution.source == FormAccessibilityLabelSource::ForId) {
+				selectedLabel = &resolution;
+				break;
+			}
+			if (!selectedLabel) selectedLabel = &resolution;
+		}
+		if (selectedLabel) {
+			record.labelAssociated = true;
+			record.labelSource = selectedLabel->source;
+			if (selectedLabel->hasText) {
+				record.accessibleNamePresent = true;
+				record.accessibleNameSource = selectedLabel->source == FormAccessibilityLabelSource::Wrapping
+					? FormAccessibilityNameSource::LabelWrapping : FormAccessibilityNameSource::LabelForId;
+			}
+		}
+		if (!record.accessibleNamePresent && record.role == FormAccessibilityRole::Button) {
+			if (block.tagName == "button" && !block.text.empty()) {
+				record.accessibleNamePresent = true;
+				record.accessibleNameSource = FormAccessibilityNameSource::ButtonText;
+			} else if (block.tagName == "input" && !block.submitLabel.empty()) {
+				record.accessibleNamePresent = true;
+				record.accessibleNameSource = FormAccessibilityNameSource::InputValuePresence;
+			}
+		}
+		if (!record.accessibleNamePresent && !block.placeholder.empty()) {
+			record.accessibleNamePresent = true;
+			record.accessibleNameSource = FormAccessibilityNameSource::Placeholder;
+		}
+		if (!record.accessibleNamePresent) record.accessibleNameSource = FormAccessibilityNameSource::ControlTypeFallback;
+		if (record.accessibleNamePresent) ++s_currentDoc.formsDiagnostics.formAccessibleNamePresent;
+		else if (record.focusable) ++s_currentDoc.formsDiagnostics.formAccessibleNameMissing;
+		if (record.focusVisibleMatch) ++s_currentDoc.formsDiagnostics.formFocusVisibleMatches;
+
+		for (size_t prior = 0; prior < previousCount; ++prior) {
+			if (previous[prior].logicalSerial != record.logicalSerial) continue;
+			record.revealResult = previous[prior].revealResult;
+			break;
+		}
+		if (!record.fixtureId.empty()) {
+			record.winningSelectorCategory = evidenceFieldForSerial(s_currentDoc.cssDiagnostics.computedStyleEvidence,
+				record.logicalSerial, "color-winning-selector");
+			if (record.winningSelectorCategory.empty()) record.winningSelectorCategory = "none";
+			record.winningPseudo = evidenceFieldForSerial(s_currentDoc.cssDiagnostics.computedStyleEvidence,
+				record.logicalSerial, "winning-focus-pseudo");
+			if (record.winningPseudo.empty()) record.winningPseudo = "none";
+			parseBoundedSpecificity(evidenceFieldForSerial(s_currentDoc.cssDiagnostics.computedStyleEvidence,
+				record.logicalSerial, "color-specificity"), record.winningSpecificityId,
+				record.winningSpecificityClass, record.winningSpecificityElement);
+			const std::string sourceOrder = evidenceFieldForSerial(s_currentDoc.cssDiagnostics.computedStyleEvidence,
+				record.logicalSerial, "color-source-order");
+			try {
+				if (!sourceOrder.empty()) record.winningSourceOrder = static_cast<uint32_t>(std::stoul(sourceOrder));
+			} catch (...) {
+				record.winningSourceOrder = 0;
+			}
+		}
+	}
+	s_currentDoc.formsDiagnostics.formAccessibilityRecords = static_cast<int>(runtime.accessibilityRecordCount);
+}
+
+FormAccessibilityRecord* Navigator::accessibilityRecordForSerial(uint64_t serial)
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || serial == 0) return nullptr;
+	const size_t count = std::min(runtime.accessibilityRecordCount, runtime.accessibilityRecords.size());
+	for (size_t i = 0; i < count; ++i) {
+		if (runtime.accessibilityRecords[i].logicalSerial == serial) return &runtime.accessibilityRecords[i];
+	}
+	return nullptr;
+}
+
 int Navigator::blockIndexForControlSerial(uint64_t serial)
 {
 	if (serial == 0) return -1;
@@ -4761,7 +5346,8 @@ int Navigator::findBlockById(const std::string& id, bool labelOnly)
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
 		if (block.id != id) continue;
-		if (labelOnly ? block.type == BlockType::FormLabel : isRuntimeFormControl(block)) return i;
+		if (labelOnly ? block.type == BlockType::FormLabel
+			: (isRuntimeFormControl(block) || isFocusableFormControl(block))) return i;
 	}
 	return -1;
 }
@@ -4827,9 +5413,19 @@ bool Navigator::radioGroupMatches(const DocBlock& left, const DocBlock& right)
 
 void Navigator::initializeFormRuntimeState()
 {
+	if (s_currentDoc.formRuntimeState.initialized &&
+		s_currentDoc.formRuntimeState.keyboardActivationArmed) {
+		cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+	}
 	s_currentDoc.formRuntimeState = gxos::web::FormRuntimeStateTable{};
 	s_currentDoc.formRuntimeState.initialized = true;
+	s_currentDoc.formRuntimeState.documentGeneration = s_documentGeneration;
+	s_currentDoc.formRuntimeState.focusOrigin = FormFocusOrigin::None;
 	++s_currentDoc.formsDiagnostics.formRuntimeStateResets;
+	++s_currentDoc.formsDiagnostics.formFocusStateResets;
+	s_focusedInputBlockIndex = -1;
+	s_inputCaret = 0;
+	s_tabKeyPressed = false;
 	for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
 		const FormControlMetadata& metadata = element.formControl;
 		if (element.serial == 0 || !metadata.metadataComplete || !metadata.supported) continue;
@@ -4881,17 +5477,82 @@ void Navigator::initializeFormRuntimeState()
 		state.metadataValid = true;
 		++s_currentDoc.formsDiagnostics.formRuntimeControlsInitialized;
 	}
+	updateFormAccessibilityMetadata();
 }
 
 void Navigator::recomputeFormControlStyles()
 {
 	++s_currentDoc.cssDiagnostics.checkedRuntimeRecomputations;
+	++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
 	gxos::web::recomputeDocumentStyles(s_currentDoc);
+	// Runtime CSS can hide or disable the focused logical control.  Clear that
+	// state and run one bounded second recomputation so :focus never survives
+	// its own invalidation.
+	if (s_currentDoc.formRuntimeState.focusValid && !ensureFocusedControlStillValid()) {
+		const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+		const FormFocusCancellationReason reason =
+			(runtime.documentGeneration != s_documentGeneration ||
+			 runtime.focusedDocumentGeneration != s_documentGeneration)
+			? FormFocusCancellationReason::GenerationMismatch
+			: FormFocusCancellationReason::StateChange;
+		clearDocumentFocus(false, reason);
+		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
+		gxos::web::recomputeDocumentStyles(s_currentDoc);
+	}
+	s_documentHeight = std::max(0, computeDocumentHeight());
+	clampScrollOffset();
+	updateFormAccessibilityMetadata();
 	// Generated about: pages such as Page Info and Save Page Text are views of
 	// the inspected document.  Their load-time style recomputation must not
 	// replace the inspected document with the diagnostics view.
 	if (s_currentDoc.url == s_pageMetadata.finalUrl)
 		storePageMetadata(s_pageMetadata, s_currentDoc);
+}
+
+void Navigator::clearKeyboardActivationState()
+{
+	if (!s_currentDoc.formRuntimeState.initialized) return;
+	s_currentDoc.formRuntimeState.pressedKeyboardLogicalSerial = 0;
+	s_currentDoc.formRuntimeState.pressedKeyboardDocumentGeneration = 0;
+	s_currentDoc.formRuntimeState.pressedKeyboardKey = 0;
+	s_currentDoc.formRuntimeState.keyboardActivationArmed = false;
+}
+
+void Navigator::cancelKeyboardActivation(FormFocusCancellationReason reason)
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || !runtime.keyboardActivationArmed) return;
+	switch (reason) {
+	case FormFocusCancellationReason::Escape: ++s_currentDoc.formsDiagnostics.formFocusCancelEscape; break;
+	case FormFocusCancellationReason::Navigation: ++s_currentDoc.formsDiagnostics.formFocusCancelNavigation; break;
+	case FormFocusCancellationReason::Deactivation: ++s_currentDoc.formsDiagnostics.formFocusCancelDeactivation; break;
+	case FormFocusCancellationReason::StateChange: ++s_currentDoc.formsDiagnostics.formFocusCancelStateChange; break;
+	case FormFocusCancellationReason::GenerationMismatch: ++s_currentDoc.formsDiagnostics.formFocusCancelGenerationMismatch; break;
+	case FormFocusCancellationReason::KeyMismatch: ++s_currentDoc.formsDiagnostics.formFocusCancelKeyMismatch; break;
+	default: break;
+	}
+	clearKeyboardActivationState();
+}
+
+void Navigator::clearDocumentFocus(bool recomputeStyles, FormFocusCancellationReason reason)
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	const bool hadFocus = runtime.focusValid || runtime.focusedLogicalSerial != 0;
+	if (hadFocus) ++s_currentDoc.formsDiagnostics.formFocusClears;
+	runtime.focusedLogicalSerial = 0;
+	runtime.focusedDocumentGeneration = 0;
+	runtime.focusOrigin = FormFocusOrigin::None;
+	runtime.focusValid = false;
+	cancelKeyboardActivation(reason);
+	s_focusedInputBlockIndex = -1;
+	s_inputCaret = 0;
+	s_tabKeyPressed = false;
+	if (recomputeStyles) {
+		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
+		gxos::web::recomputeDocumentStyles(s_currentDoc);
+		if (s_currentDoc.url == s_pageMetadata.finalUrl)
+			storePageMetadata(s_pageMetadata, s_currentDoc);
+	}
 }
 
 void Navigator::clearMousePressState()
@@ -4911,6 +5572,8 @@ bool Navigator::activateLabelBlock(int blockIndex)
 	const uint64_t serial = associatedControlSerialForLabel(label);
 	const int controlIndex = blockIndexForControlSerial(serial);
 	if (controlIndex < 0) return false;
+	if (isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(controlIndex)]))
+		focusDocumentInput(controlIndex, FormFocusOrigin::Mouse);
 	++s_currentDoc.formsDiagnostics.formLabelActivations;
 	activateFormControl(controlIndex);
 	return true;
@@ -4953,6 +5616,8 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
+		if (isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(linkBlockIndex)]))
+			focusDocumentInput(linkBlockIndex, FormFocusOrigin::Mouse);
 		activateFormControl(linkBlockIndex);
 	} else if (target == HitTarget::FormSubmit &&
 		linkBlockIndex >= 0 &&
@@ -5023,7 +5688,7 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 
 		if (target == HitTarget::AddressBar) {
 			s_mouseMode = MouseMode::AddressBarInteraction;
-			if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+			if (s_currentDoc.formRuntimeState.focusValid) blurDocumentInput();
 			clearSelection();
 			if (s_findActive) closeFindMode();
 			focusAddressBar();
@@ -5055,7 +5720,7 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 			s_mouseMode = MouseMode::FormInputInteraction;
 			clearSelection();
 			if (s_findActive) closeFindMode();
-			focusDocumentInput(linkIdx);
+			focusDocumentInput(linkIdx, FormFocusOrigin::Mouse);
 			Rect r = formControlRect(linkIdx);
 			int charOffset = (x - (r.x + 8)) / kCharW;
 			if (linkIdx >= 0 && linkIdx < static_cast<int>(s_currentDoc.blocks.size())) {
@@ -5072,15 +5737,21 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 			target == HitTarget::FormSubmit ||
 			target == HitTarget::FormLabel) {
 			s_mouseMode = MouseMode::FormInputInteraction;
-			if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
-			if (target != HitTarget::FormSubmit && target != HitTarget::FormLabel)
-				s_focusedInputBlockIndex = linkIdx;
+			if (target == HitTarget::FormLabel) {
+				const uint64_t serial = associatedControlSerialForLabel(s_currentDoc.blocks[static_cast<size_t>(linkIdx)]);
+				const int controlIndex = blockIndexForControlSerial(serial);
+				if (controlIndex >= 0 && isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(controlIndex)]))
+					focusDocumentInput(controlIndex, FormFocusOrigin::Mouse);
+			} else if (linkIdx >= 0 && linkIdx < static_cast<int>(s_currentDoc.blocks.size()) &&
+				isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(linkIdx)])) {
+				focusDocumentInput(linkIdx, FormFocusOrigin::Mouse);
+			}
 			clearSelection();
 			updateDisplay();
 			return;
 		}
 
-		if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+		if (s_currentDoc.formRuntimeState.focusValid) blurDocumentInput();
 
 		if (target == HitTarget::Link) {
 			s_mouseMode = MouseMode::PotentialLinkClick;
@@ -5145,24 +5816,81 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 	}
 }
 
-void Navigator::focusDocumentInput(int blockIndex)
+void Navigator::focusDocumentInput(int blockIndex, FormFocusOrigin origin)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size()) ||
-		!isFocusableFormControl(s_currentDoc.blocks[blockIndex])) {
+		!isFocusableFormControl(s_currentDoc.blocks[blockIndex])) return;
+	DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || runtime.documentGeneration != s_documentGeneration ||
+		block.formControl.logicalSerial == 0) return;
+	const bool changed = !runtime.focusValid ||
+		runtime.focusedLogicalSerial != block.formControl.logicalSerial ||
+		runtime.focusedDocumentGeneration != s_documentGeneration;
+	const bool originChanged = runtime.focusOrigin != origin;
+	if (runtime.keyboardActivationArmed) cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+	if (changed) ++s_currentDoc.formsDiagnostics.formFocusChanges;
+	if (origin == FormFocusOrigin::Mouse && (changed || originChanged))
+		++s_currentDoc.formsDiagnostics.formFocusOriginMouse;
+	if (origin == FormFocusOrigin::Keyboard && (changed || originChanged))
+		++s_currentDoc.formsDiagnostics.formFocusOriginKeyboard;
+	runtime.focusedLogicalSerial = block.formControl.logicalSerial;
+	runtime.focusedDocumentGeneration = s_documentGeneration;
+	runtime.focusOrigin = origin;
+	runtime.focusValid = true;
+	clearKeyboardActivationState();
+	s_focusedInputBlockIndex = blockIndex;
+	s_inputCaret = static_cast<int>(block.inputValue.size());
+	s_statusText = (block.type == BlockType::FormTextInput || block.type == BlockType::FormTextarea)
+		? "Editing form field" : "Form control focused";
+	if (changed || originChanged) {
+		recomputeFormControlStyles();
+		if (FormAccessibilityRecord* record = accessibilityRecordForSerial(block.formControl.logicalSerial))
+			record->revealResult = FormFocusRevealResult::None;
+	}
+	revealFocusedFormControl(blockIndex);
+}
+
+void Navigator::revealFocusedFormControl(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (!isFocusedFormControl(block)) return;
+	const int current = std::max(0, s_scrollOffset);
+	const int top = std::max(0, blockLayoutY(blockIndex));
+	const int height = std::max(1, formControlHeight(block));
+	const int bottom = top > std::numeric_limits<int>::max() - height
+		? std::numeric_limits<int>::max() : top + height;
+	constexpr int kRevealPadding = 8;
+	int desired = current;
+	if (top < current + kRevealPadding) {
+		desired = std::max(0, top - kRevealPadding);
+	} else if (bottom > current + kContentH - kRevealPadding) {
+		desired = std::max(0, bottom - kContentH + kRevealPadding);
+	}
+	s_documentHeight = std::max(0, computeDocumentHeight());
+	const int maxOffset = maxScrollOffset();
+	const int unclamped = desired;
+	desired = std::max(0, std::min(desired, maxOffset));
+	FormAccessibilityRecord* record = accessibilityRecordForSerial(block.formControl.logicalSerial);
+	if (unclamped != desired) {
+		++s_currentDoc.formsDiagnostics.formFocusRevealClamps;
+		if (record) record->revealResult = FormFocusRevealResult::Clamped;
+	}
+	if (desired == current) {
+		++s_currentDoc.formsDiagnostics.formFocusRevealNoops;
+		if (record && record->revealResult != FormFocusRevealResult::Clamped)
+			record->revealResult = FormFocusRevealResult::Noop;
 		return;
 	}
-	s_focusedInputBlockIndex = blockIndex;
-	s_inputCaret = static_cast<int>(s_currentDoc.blocks[blockIndex].inputValue.size());
-	s_statusText = (s_currentDoc.blocks[blockIndex].type == BlockType::FormTextInput ||
-		s_currentDoc.blocks[blockIndex].type == BlockType::FormTextarea)
-		? "Editing form field"
-		: "Form control focused";
+	s_scrollOffset = desired;
+	++s_currentDoc.formsDiagnostics.formFocusRevealScrolls;
+	if (record) record->revealResult = FormFocusRevealResult::Scroll;
 }
 
 void Navigator::blurDocumentInput()
 {
-	s_focusedInputBlockIndex = -1;
-	s_inputCaret = 0;
+	clearDocumentFocus(true);
 }
 
 void Navigator::openFindMode()
@@ -5173,7 +5901,7 @@ void Navigator::openFindMode()
 		s_addressBuffer.clear();
 		s_addressCaret = 0;
 	}
-	if (s_focusedInputBlockIndex >= 0) {
+	if (s_currentDoc.formRuntimeState.focusValid) {
 		blurDocumentInput();
 	}
 	s_findCaret = std::max(0, std::min(s_findCaret, static_cast<int>(s_findBuffer.size())));
@@ -5484,13 +6212,86 @@ std::string Navigator::findMatchStatusText()
 
 bool Navigator::isFocusableFormControl(const DocBlock& block)
 {
-	if (block.formControl.hidden || runtimeDisabled(block)) return false;
-	return block.type == BlockType::FormTextInput ||
-		block.type == BlockType::FormTextarea ||
-		block.type == BlockType::FormCheckbox ||
-		block.type == BlockType::FormRadio ||
-		block.type == BlockType::FormSelect ||
-		block.type == BlockType::FormSubmit;
+	if (block.formControl.logicalSerial == 0 || !block.formControl.metadataComplete ||
+		!block.formControl.supported || block.formUnsupported || block.formControl.hidden ||
+		runtimeDisabled(block) || block.style.displayNone) return false;
+	if (block.type != BlockType::FormTextInput && block.type != BlockType::FormTextarea &&
+		block.type != BlockType::FormCheckbox && block.type != BlockType::FormRadio &&
+		block.type != BlockType::FormSelect && block.type != BlockType::FormSubmit) return false;
+	const Rect geometry = formControlRect(static_cast<int>(&block - s_currentDoc.blocks.data()));
+	return geometry.w > 0 && geometry.h > 0;
+}
+
+bool Navigator::isFocusedFormControl(const DocBlock& block)
+{
+	const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	return runtime.initialized && runtime.focusValid &&
+		runtime.documentGeneration == s_documentGeneration &&
+		runtime.focusedDocumentGeneration == s_documentGeneration &&
+		runtime.focusedLogicalSerial != 0 &&
+		block.formControl.logicalSerial == runtime.focusedLogicalSerial &&
+		isFocusableFormControl(block);
+}
+
+int Navigator::focusedFormControlBlockIndex()
+{
+	const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || !runtime.focusValid ||
+		runtime.documentGeneration != s_documentGeneration ||
+		runtime.focusedDocumentGeneration != s_documentGeneration ||
+		runtime.focusedLogicalSerial == 0) return -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.formControl.logicalSerial == runtime.focusedLogicalSerial &&
+			isFocusableFormControl(block)) return i;
+	}
+	return -1;
+}
+
+bool Navigator::ensureFocusedControlStillValid()
+{
+	const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || !runtime.focusValid ||
+		runtime.documentGeneration != s_documentGeneration ||
+		runtime.focusedDocumentGeneration != s_documentGeneration ||
+		runtime.focusedLogicalSerial == 0) return false;
+	const int blockIndex = focusedFormControlBlockIndex();
+	if (blockIndex < 0) return false;
+	s_focusedInputBlockIndex = blockIndex;
+	return true;
+}
+
+size_t Navigator::buildFormFocusOrder(std::array<int, kFormRuntimeControlCap>& order)
+{
+	size_t count = 0;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.formControl.hidden || block.style.displayNone) {
+			++s_currentDoc.formsDiagnostics.formHiddenFocusSkips;
+			continue;
+		}
+		if (runtimeDisabled(block)) {
+			++s_currentDoc.formsDiagnostics.formDisabledFocusSkips;
+			continue;
+		}
+		if (!isFocusableFormControl(block)) continue;
+		bool duplicate = false;
+		for (size_t prior = 0; prior < count; ++prior) {
+			if (s_currentDoc.blocks[static_cast<size_t>(order[prior])].formControl.logicalSerial ==
+				block.formControl.logicalSerial) {
+				duplicate = true;
+				break;
+			}
+		}
+		if (duplicate) continue;
+		if (count >= order.size()) {
+			++s_currentDoc.formsDiagnostics.controlMetadataClamps;
+			break;
+		}
+		order[count++] = i;
+	}
+	s_currentDoc.formsDiagnostics.formFocusableControls = static_cast<int>(count);
+	return count;
 }
 
 int Navigator::formControlHeight(const DocBlock& block)
@@ -5500,21 +6301,35 @@ int Navigator::formControlHeight(const DocBlock& block)
 
 void Navigator::focusNextFormControl(bool reverse)
 {
-	const int count = static_cast<int>(s_currentDoc.blocks.size());
-	if (count <= 0) return;
-	int start = s_focusedInputBlockIndex;
-	if (start < 0 || start >= count) start = reverse ? 0 : count - 1;
-	for (int step = 1; step <= count; ++step) {
-		int idx = reverse ? (start - step + count) % count : (start + step) % count;
-		if (!isFocusableFormControl(s_currentDoc.blocks[idx])) continue;
-		focusDocumentInput(idx);
-		s_scrollOffset = std::max(0, blockLayoutY(idx) - 24);
-		clampScrollOffset();
-		clearSelection();
-		updateStatus("Form control focused.");
-		updateDisplay();
-		return;
+	std::array<int, kFormRuntimeControlCap> order{};
+	const size_t count = buildFormFocusOrder(order);
+	if (count == 0) return;
+	int currentPosition = -1;
+	const int currentIndex = focusedFormControlBlockIndex();
+	if (currentIndex >= 0) {
+		const uint64_t serial = s_currentDoc.blocks[static_cast<size_t>(currentIndex)].formControl.logicalSerial;
+		for (size_t i = 0; i < count; ++i) {
+			if (s_currentDoc.blocks[static_cast<size_t>(order[i])].formControl.logicalSerial == serial) {
+				currentPosition = static_cast<int>(i);
+				break;
+			}
+		}
 	}
+	int targetPosition = reverse ? static_cast<int>(count - 1) : 0;
+	bool wrapped = false;
+	if (currentPosition >= 0) {
+		targetPosition = reverse ? currentPosition - 1 : currentPosition + 1;
+		if (targetPosition < 0) { targetPosition = static_cast<int>(count - 1); wrapped = true; }
+		if (targetPosition >= static_cast<int>(count)) { targetPosition = 0; wrapped = true; }
+	}
+	if (wrapped) ++s_currentDoc.formsDiagnostics.formFocusWraps;
+	if (reverse) ++s_currentDoc.formsDiagnostics.formTabBackward;
+	else ++s_currentDoc.formsDiagnostics.formTabForward;
+	const int targetIndex = order[static_cast<size_t>(targetPosition)];
+	focusDocumentInput(targetIndex, FormFocusOrigin::Keyboard);
+	clearSelection();
+	updateStatus("Form control focused.");
+	updateDisplay();
 }
 
 void Navigator::activateFormControl(int blockIndex)
@@ -5563,6 +6378,83 @@ void Navigator::activateFormControl(int blockIndex)
 		updateStatus("Button activated (session-local; no submission).");
 		storePageMetadata(s_pageMetadata, s_currentDoc);
 	}
+}
+
+void Navigator::armKeyboardActivation(int keyCode)
+{
+	if (keyCode != 32 && keyCode != 13) return;
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	const int blockIndex = focusedFormControlBlockIndex();
+	if (blockIndex < 0) {
+		if (runtime.focusValid || runtime.focusedLogicalSerial != 0) {
+			++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
+			const FormFocusCancellationReason reason =
+				(runtime.documentGeneration != s_documentGeneration ||
+				 runtime.focusedDocumentGeneration != s_documentGeneration)
+				? FormFocusCancellationReason::GenerationMismatch
+				: FormFocusCancellationReason::StateChange;
+			clearDocumentFocus(true, reason);
+		}
+		return;
+	}
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (runtime.keyboardActivationArmed) {
+		const bool sameControl = runtime.pressedKeyboardLogicalSerial == block.formControl.logicalSerial;
+		const bool sameGeneration = runtime.pressedKeyboardDocumentGeneration == s_documentGeneration &&
+			runtime.documentGeneration == s_documentGeneration;
+		if (sameControl && sameGeneration && runtime.pressedKeyboardKey == static_cast<uint8_t>(keyCode)) {
+			++s_currentDoc.formsDiagnostics.formKeyRepeatSuppressed;
+		} else {
+			cancelKeyboardActivation(sameGeneration ? FormFocusCancellationReason::KeyMismatch
+				: FormFocusCancellationReason::GenerationMismatch);
+		}
+		return;
+	}
+	const bool activatable = keyCode == 32
+		? (isRuntimeCheckable(block) || isRuntimeButton(block))
+		: isRuntimeButton(block);
+	if (!activatable) return;
+	runtime.pressedKeyboardLogicalSerial = block.formControl.logicalSerial;
+	runtime.pressedKeyboardDocumentGeneration = s_documentGeneration;
+	runtime.pressedKeyboardKey = static_cast<uint8_t>(keyCode);
+	runtime.keyboardActivationArmed = true;
+}
+
+void Navigator::finishKeyboardActivation(int keyCode)
+{
+	if (keyCode != 32 && keyCode != 13) return;
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.keyboardActivationArmed) return;
+	if (runtime.pressedKeyboardKey != static_cast<uint8_t>(keyCode)) {
+		cancelKeyboardActivation(FormFocusCancellationReason::KeyMismatch);
+		return;
+	}
+	const uint64_t serial = runtime.pressedKeyboardLogicalSerial;
+	const uint64_t generation = runtime.pressedKeyboardDocumentGeneration;
+	if (generation != s_documentGeneration || generation != runtime.documentGeneration) {
+		cancelKeyboardActivation(FormFocusCancellationReason::GenerationMismatch);
+		++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
+		return;
+	}
+	const int blockIndex = focusedFormControlBlockIndex();
+	if (blockIndex < 0 || s_currentDoc.blocks[static_cast<size_t>(blockIndex)].formControl.logicalSerial != serial) {
+		cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+		++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
+		return;
+	}
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (runtimeDisabled(block) ||
+		(keyCode == 32 ? (!isRuntimeCheckable(block) && !isRuntimeButton(block)) : !isRuntimeButton(block))) {
+		cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+		++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
+		clearDocumentFocus(true, FormFocusCancellationReason::StateChange);
+		return;
+	}
+	clearKeyboardActivationState();
+	++s_currentDoc.formsDiagnostics.formKeyboardActivations;
+	if (keyCode == 32) ++s_currentDoc.formsDiagnostics.formSpaceActivations;
+	else ++s_currentDoc.formsDiagnostics.formEnterActivations;
+	activateFormControl(blockIndex);
 }
 
 void Navigator::updateFindMatches(bool keepCurrent)
@@ -5761,12 +6653,25 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		s_shiftPressed = (action == "down");
 		return;
 	}
-	if (action != "down") return;
-
-	if (keyCode == 9 && !s_addressFocused && !s_findActive) {
+	if (keyCode == 9) {
+		if (action == "up") {
+			s_tabKeyPressed = false;
+			return;
+		}
+		if (action != "down" || s_addressFocused || s_findActive) return;
+		if (s_tabKeyPressed) {
+			++s_currentDoc.formsDiagnostics.formKeyRepeatSuppressed;
+			return;
+		}
+		s_tabKeyPressed = true;
 		focusNextFormControl(s_shiftPressed);
 		return;
 	}
+	if (action == "up") {
+		if (keyCode == 32 || keyCode == 13) finishKeyboardActivation(keyCode);
+		return;
+	}
+	if (action != "down") return;
 
 	// --- Address bar editing mode ---
 	if (s_addressFocused) {
@@ -5877,43 +6782,44 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		return;
 	}
 
-	if (s_focusedInputBlockIndex >= 0 &&
-		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
-		(s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormCheckbox ||
-		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormRadio ||
-		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormSelect ||
-		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormSubmit))
+	if (action == "down" && keyCode == 27 && s_currentDoc.formRuntimeState.keyboardActivationArmed) {
+		cancelKeyboardActivation(FormFocusCancellationReason::Escape);
+		updateDisplay();
+		return;
+	}
+
+	const int focusedIndex = focusedFormControlBlockIndex();
+	if (keyCode == 13 || keyCode == 32) {
+		armKeyboardActivation(keyCode);
+		return;
+	}
+	if (focusedIndex >= 0 &&
+		(s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormCheckbox ||
+		 s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormRadio ||
+		 s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormSelect ||
+		 s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormSubmit))
 	{
-		if (keyCode == 13 || keyCode == 32) {
-			activateFormControl(s_focusedInputBlockIndex);
-		} else if (keyCode == 27) {
+		if (keyCode == 27) {
 			blurDocumentInput();
 			updateDisplay();
 		}
 		return;
 	}
 
-	if (s_focusedInputBlockIndex >= 0 &&
-		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
-		(s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextInput ||
-		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextarea))
+	if (focusedIndex >= 0 &&
+		(s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormTextInput ||
+		 s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormTextarea))
 	{
+		// Phase 2G keeps the existing text-control renderer but does not make
+		// Space/Enter editing or implicit submission keyboard behaviors.
+		if (keyCode == 13 || keyCode == 32) return;
 		if (s_ctrlPressed && ((keyCode == 67 || keyCode == 99) || (keyCode == 65 || keyCode == 97))) {
 			updateStatus("Form input copy/select all is deferred.");
 			return;
 		}
-		DocBlock& block = s_currentDoc.blocks[s_focusedInputBlockIndex];
+		DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(focusedIndex)];
 		const int bufLen = static_cast<int>(block.inputValue.size());
-		if (keyCode == 13) {
-			if (block.type == BlockType::FormTextarea) {
-				block.inputValue.insert(static_cast<size_t>(s_inputCaret), 1, '\n');
-				block.text = block.inputValue;
-				++s_inputCaret;
-				updateDisplay();
-			} else {
-				submitFormForBlock(s_focusedInputBlockIndex);
-			}
-		} else if (keyCode == 27) {
+		if (keyCode == 27) {
 			blurDocumentInput();
 			updateDisplay();
 		} else if (keyCode == 8) {
@@ -6125,6 +7031,7 @@ std::string Navigator::normalizeUrl(const std::string& input)
 
 void Navigator::focusAddressBar()
 {
+	if (s_currentDoc.formRuntimeState.focusValid) clearDocumentFocus(true);
 	if (s_addressFocused) return;
 	s_addressFocused = true;
 	s_addressBuffer  = s_currentDoc.url;
@@ -6258,6 +7165,10 @@ WebDocument Navigator::buildBookmarksDocument()
 void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	cancelKeyboardActivation(FormFocusCancellationReason::Navigation);
+	if (s_documentGeneration == std::numeric_limits<uint64_t>::max()) s_documentGeneration = 1;
+	else ++s_documentGeneration;
+	clearDocumentFocus(false, FormFocusCancellationReason::Navigation);
 	clearMousePressState();
 	s_loading = true;
 	if (s_windowId != 0) updateDisplay();

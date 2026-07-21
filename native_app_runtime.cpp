@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 
@@ -38,6 +39,7 @@ constexpr int kMaxPollEventTimeoutMs = 30000;
 constexpr uint32_t kMaxFilePathLength = 240;
 constexpr uint32_t kMaxFileReadBytes = 64u * 1024u;
 constexpr uint64_t kMaxPresentFrameBytes = 16ull * 1024ull * 1024ull;
+constexpr uint64_t kMaxNativeAppStackBytes = 8ull * 1024ull * 1024ull;
 
 std::string appLabel(const NativeAppRuntimeContext* context) {
     if (!context) return "<unknown>";
@@ -74,10 +76,139 @@ bool experimentalExecutionEnabled() {
 
 NativeAppRuntimeContext* runtimeContextFor(NativeGxAppContext* ctx) {
     if (!ctx) return nullptr;
+    if (!g_activeRuntimeContext || ctx != g_activeRuntimeContext->activeGxContext) return nullptr;
     if (!ctx->host) return nullptr;
     if (ctx->size < sizeof(NativeGxAppContext)) return nullptr;
-    if (g_activeRuntimeContext && ctx->host == &g_activeRuntimeContext->hostCalls) return g_activeRuntimeContext;
+    if (ctx->host == &g_activeRuntimeContext->hostCalls) return g_activeRuntimeContext;
     return nullptr;
+}
+
+std::string pointerText(const void* pointer) {
+    std::ostringstream oss;
+    oss << "0x" << std::hex << reinterpret_cast<uintptr_t>(pointer) << std::dec;
+    return oss.str();
+}
+
+bool addressRangeContains(uint64_t base, uint64_t end, uint64_t address, uint64_t bytes) {
+    return end > base && address >= base && address < end && bytes <= end - address;
+}
+
+bool nativeBufferRangeContains(const NativeAppRuntimeContext& context, const void* pointer, uint64_t bytes) {
+    if (!pointer || bytes == 0) return false;
+
+    const uint64_t address = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer));
+    return addressRangeContains(context.nativeImageBaseAddress, context.nativeImageEndAddress, address, bytes) ||
+        addressRangeContains(context.nativeStackBaseAddress, context.nativeStackEndAddress, address, bytes);
+}
+
+std::string nativeImageRangeClassification(const NativeAppRuntimeContext& context, const void* pointer, uint64_t bytes) {
+    if (!pointer) return "null";
+    if (bytes == 0) return "zero-length";
+    const uint64_t address = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer));
+    if (addressRangeContains(context.nativeImageBaseAddress, context.nativeImageEndAddress, address, bytes)) return "inside-native-image";
+    if (addressRangeContains(context.nativeStackBaseAddress, context.nativeStackEndAddress, address, bytes)) return "inside-active-native-stack";
+    if (context.nativeImageEndAddress <= context.nativeImageBaseAddress && context.nativeStackEndAddress <= context.nativeStackBaseAddress) return "native-memory-ranges-unavailable";
+    return "outside-native-memory";
+}
+
+bool copyNativePath(const NativeAppRuntimeContext& context, const char* path, std::string& output, std::string& failureReason) {
+    output.clear();
+    failureReason.clear();
+    if (!path) {
+        failureReason = "null-path";
+        return false;
+    }
+
+    const uint64_t start = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(path));
+    for (uint32_t i = 0; i <= kMaxFilePathLength; ++i) {
+        if (start > std::numeric_limits<uint64_t>::max() - i) {
+            failureReason = "path-address-overflow";
+            return false;
+        }
+
+        const char* current = reinterpret_cast<const char*>(static_cast<uintptr_t>(start + i));
+        if (!nativeBufferRangeContains(context, current, 1)) {
+            failureReason = "path-outside-native-image";
+            return false;
+        }
+
+        const char value = *current;
+        if (value == '\0') return true;
+        output.push_back(value);
+    }
+
+    failureReason = "path-not-null-terminated-within-limit";
+    return false;
+}
+
+void logInvalidFileReadContext(
+    NativeGxAppContext* ctx,
+    const char* operation,
+    uint64_t offset,
+    uint32_t requestedBytes,
+    const void* destination,
+    const uint32_t* outBytesRead,
+    gx_result result) {
+    const bool active = g_activeRuntimeContext != nullptr;
+    const bool contextPointerMatches = active && ctx != nullptr && ctx == g_activeRuntimeContext->activeGxContext;
+    std::ostringstream oss;
+    oss << "[NativeAppHost] " << operation
+        << " phase=context-resolution"
+        << " runtimeId=" << (active ? std::to_string(g_activeRuntimeContext->runtimeId) : "<none>")
+        << " appId=" << (active ? g_activeRuntimeContext->appId : "<none>")
+        << " processId=" << (active && g_activeRuntimeContext->processId != 0 ? std::to_string(g_activeRuntimeContext->processId) : std::to_string(Allocator::currentPid()))
+        << " contextActive=" << (active ? "yes" : "no")
+        << " contextPointerMatched=" << (contextPointerMatches ? "yes" : "no")
+        << " requestedPath=<unavailable>"
+        << " offset=" << offset
+        << " length=" << requestedBytes
+        << " destination=" << pointerText(destination)
+        << " destinationRange=<unavailable>"
+        << " outBytesRead=" << pointerText(outBytesRead)
+        << " result=" << result
+        << " actualHostRead=not-started"
+        << " returnPropagation=about-to-return";
+    Logger::write(LogLevel::Warn, oss.str());
+}
+
+void logFileReadBoundary(
+    const NativeAppRuntimeContext& context,
+    const char* operation,
+    const std::string& requestedPath,
+    const std::string& resolvedPath,
+    uint64_t offset,
+    uint32_t requestedBytes,
+    const void* destination,
+    uint32_t bytesRead,
+    const uint32_t* outBytesRead,
+    const char* phase,
+    const char* actualHostRead,
+    bool contextActive,
+    bool contextMatched,
+    gx_result result) {
+    std::ostringstream oss;
+    oss << "[NativeAppHost] " << operation
+        << " phase=" << phase
+        << " runtimeId=" << context.runtimeId
+        << " appId=" << context.appId
+        << " processId=" << (context.processId != 0 ? context.processId : Allocator::currentPid())
+        << " contextActive=" << (contextActive ? "yes" : "no")
+        << " contextPointerMatched=" << (contextMatched ? "yes" : "no")
+        << " requestedPath=\"" << (requestedPath.empty() ? "<unavailable>" : requestedPath) << "\""
+        << " offset=" << offset
+        << " length=" << requestedBytes
+        << " destination=" << pointerText(destination)
+        << " destinationRange=" << nativeImageRangeClassification(context, destination, requestedBytes)
+        << " outBytesRead=" << pointerText(outBytesRead)
+        << " outBytesReadRange=" << nativeImageRangeClassification(context, outBytesRead, sizeof(uint32_t))
+        << " resolvedPackagePath=\"" << context.appDirectory << "\""
+        << " resolvedPath=\"" << (resolvedPath.empty() ? "<none>" : resolvedPath) << "\""
+        << " bytesRead=" << bytesRead
+        << " result=" << result
+        << " actualHostRead=" << actualHostRead
+        << " returnPropagation=about-to-return";
+    Logger::write(result == GX_OK ? LogLevel::Info : LogLevel::Warn, oss.str());
+    NativeAppDebugLog::Add(context.runtimeId, context.appId, result == GX_OK ? "info" : "warn", oss.str());
 }
 
 bool hasPermission(const NativeAppRuntimeContext& context, const std::string& permission) {
@@ -100,12 +231,15 @@ bool pathContainsTraversal(const std::string& path) {
 gx_result resolveFileReadPath(NativeAppRuntimeContext& context, const char* path, std::string& resolvedPath) {
     context.lastFilePath.clear();
 
-    if (!path || !path[0]) return GX_ERROR_INVALID_ARGUMENT;
+    std::string requestedPath;
+    std::string pathFailure;
+    if (!copyNativePath(context, path, requestedPath, pathFailure) || requestedPath.empty()) {
+        context.lastFilePath = pathFailure.empty() ? "<empty-path>" : "<" + pathFailure + ">";
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
 
-    std::string requestedPath(path);
     context.lastFilePath = requestedPath;
     if (requestedPath.size() > kMaxFilePathLength) return GX_ERROR_INVALID_ARGUMENT;
-    if (requestedPath.find('\0') != std::string::npos) return GX_ERROR_INVALID_ARGUMENT;
     if (requestedPath.find(':') != std::string::npos) return GX_ERROR_PERMISSION_DENIED;
     if (!context.appDirectory.empty() && requestedPath.rfind(context.appDirectory, 0) == 0) return GX_ERROR_PERMISSION_DENIED;
     if (requestedPath[0] == '/' || requestedPath[0] == static_cast<char>(92)) return GX_ERROR_PERMISSION_DENIED;
@@ -328,9 +462,10 @@ gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* ou
     ++context->fileExistsCallCount;
     context->lastFileReadBytes = 0;
     context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
-    if (outExists) *outExists = 0;
+    const bool outputPointerValid = nativeBufferRangeContains(*context, outExists, sizeof(uint32_t));
+    if (outputPointerValid) *outExists = 0;
 
-    if (!outExists) {
+    if (!outputPointerValid) {
         Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists rejected: null output pointer");
         NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_exists failed: null output pointer");
         NativeAppProcessTable::UpdateFromRuntime(*context);
@@ -373,9 +508,9 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
     ++context->fileReadCallCount;
     context->lastFileReadBytes = 0;
     context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
-    if (outBytesRead) *outBytesRead = 0;
-
-    if (!buffer || bufferSize == 0 || !outBytesRead) {
+    const bool outputPointerValid = nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t));
+    if (outputPointerValid) *outBytesRead = 0;
+    if (!buffer || bufferSize == 0 || !outputPointerValid || !nativeBufferRangeContains(*context, buffer, bufferSize)) {
         Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all rejected: invalid buffer or output pointer");
         NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_read_all failed: invalid buffer or output pointer");
         NativeAppProcessTable::UpdateFromRuntime(*context);
@@ -451,55 +586,79 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
 }
 
 gx_result hostFileRead(NativeGxAppContext* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
+    const bool contextActive = g_activeRuntimeContext != nullptr;
+    const bool contextPointerMatched = contextActive && ctx != nullptr && ctx == g_activeRuntimeContext->activeGxContext;
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
-    if (!context) return GX_ERROR_INVALID_ARGUMENT;
+    if (!context) {
+        logInvalidFileReadContext(ctx, "file_read", offset, bufferSize, buffer, outBytesRead, GX_ERROR_INVALID_ARGUMENT);
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
 
     ++context->fileReadChunkCallCount;
     context->lastFileReadOffset = offset;
     context->lastFileReadBytes = 0;
     context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
-    if (outBytesRead) *outBytesRead = 0;
-    if (!buffer || bufferSize == 0 || !outBytesRead || bufferSize > kMaxFileReadBytes) return context->lastFileIoResult;
+    std::string resolvedPath;
+    std::string requestedPath;
+    std::string pathFailure;
+    if (copyNativePath(*context, path, requestedPath, pathFailure)) context->lastFilePath = requestedPath;
+    else context->lastFilePath = pathFailure.empty() ? "<unavailable>" : "<" + pathFailure + ">";
+
+    auto finish = [&](gx_result result, const char* phase, const char* actualHostRead) -> gx_result {
+        context->lastFileReadBytes = (outBytesRead && nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t))) ? *outBytesRead : 0;
+        context->lastFileIoResult = result;
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        logFileReadBoundary(*context, "file_read", requestedPath, resolvedPath, offset, bufferSize, buffer,
+            context->lastFileReadBytes, outBytesRead, phase, actualHostRead, contextActive, contextPointerMatched, result);
+        return result;
+    };
+
+    const bool outputPointerValid = nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t));
+    if (outputPointerValid) *outBytesRead = 0;
+    if (!buffer || bufferSize == 0 || !outputPointerValid || bufferSize > kMaxFileReadBytes) {
+        return finish(context->lastFileIoResult, "destination-validation", "not-started");
+    }
+    if (!nativeBufferRangeContains(*context, buffer, bufferSize)) {
+        return finish(GX_ERROR_INVALID_ARGUMENT, "destination-validation", "not-started");
+    }
     if (!hasPermission(*context, "file.read")) {
-        context->lastFileIoResult = GX_ERROR_PERMISSION_DENIED;
-        return context->lastFileIoResult;
+        return finish(GX_ERROR_PERMISSION_DENIED, "permission-validation", "not-started");
     }
 
-    std::string resolvedPath;
     context->lastFileIoResult = resolveFileReadPath(*context, path, resolvedPath);
-    if (context->lastFileIoResult != GX_OK) return context->lastFileIoResult;
+    if (context->lastFileIoResult != GX_OK) {
+        return finish(context->lastFileIoResult, "package-path-validation", "not-started");
+    }
 
     try {
         std::ifstream input(resolvedPath.c_str(), std::ios::binary);
         if (!input) {
-            context->lastFileIoResult = GX_ERROR_FAILED;
+            return finish(GX_ERROR_FAILED, "file-open", "open-failed");
         } else {
             input.seekg(0, std::ios::end);
             const std::streamoff streamSize = input.tellg();
-            if (streamSize < 0 || offset > static_cast<uint64_t>(streamSize)) {
-                context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
-            } else {
-                const uint64_t available = static_cast<uint64_t>(streamSize) - offset;
-                const uint32_t bytesToRead = static_cast<uint32_t>(std::min<uint64_t>(available, bufferSize));
-                input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-                if (!input || (bytesToRead > 0 && (!input.read(static_cast<char*>(buffer), bytesToRead) || static_cast<uint32_t>(input.gcount()) != bytesToRead))) {
-                    context->lastFileIoResult = GX_ERROR_FAILED;
-                } else {
-                    *outBytesRead = bytesToRead;
-                    context->lastFileReadBytes = bytesToRead;
-                    context->lastFileIoResult = GX_OK;
+            if (streamSize < 0) return finish(GX_ERROR_FAILED, "file-size", "open-complete");
+            const uint64_t fileSize = static_cast<uint64_t>(streamSize);
+            if (offset > fileSize) return finish(GX_ERROR_INVALID_ARGUMENT, "offset-validation", "open-complete");
+
+            const uint64_t available = fileSize - offset;
+            const uint32_t bytesToRead = static_cast<uint32_t>(std::min<uint64_t>(available, bufferSize));
+            input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+            if (!input) return finish(GX_ERROR_FAILED, "file-seek", "open-complete");
+
+            if (bytesToRead > 0) {
+                if (!input.read(static_cast<char*>(buffer), static_cast<std::streamsize>(bytesToRead)) ||
+                    static_cast<uint32_t>(input.gcount()) != bytesToRead) {
+                    return finish(GX_ERROR_FAILED, "file-read", "read-attempt-failed");
                 }
             }
+
+            *outBytesRead = bytesToRead;
+            return finish(GX_OK, "return", "read-complete");
         }
     } catch (...) {
-        context->lastFileIoResult = GX_ERROR_FAILED;
+        return finish(GX_ERROR_FAILED, "file-read-exception", "read-attempt-failed");
     }
-
-    NativeAppProcessTable::UpdateFromRuntime(*context);
-    NativeAppDebugLog::Add(context->runtimeId, context->appId, context->lastFileIoResult == GX_OK ? "info" : "warn",
-        "file_read path=\"" + context->lastFilePath + "\" offset=" + std::to_string(offset) + " bytes=" + std::to_string(context->lastFileReadBytes) +
-        " result=" + std::to_string(context->lastFileIoResult));
-    return context->lastFileIoResult;
 }
 
 gx_result hostRequestWindowEx(NativeGxAppContext* ctx, const char* title, int width, int height, uint32_t flags, gx_handle* outWindow) {
@@ -721,6 +880,10 @@ gx_result hostPresentFrame(NativeGxAppContext* ctx, gx_handle window, int x, int
     const uint64_t requiredBytes = static_cast<uint64_t>(strideBytes) * static_cast<uint64_t>(height);
     if (requiredBytes > kMaxPresentFrameBytes || requiredBytes != pixelBytes) {
         context->lastPresentFrameResult = GX_ERROR_UNSUPPORTED;
+        return context->lastPresentFrameResult;
+    }
+    if (!nativeBufferRangeContains(*context, pixels, requiredBytes)) {
+        context->lastPresentFrameResult = GX_ERROR_INVALID_ARGUMENT;
         return context->lastPresentFrameResult;
     }
 
@@ -963,6 +1126,10 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.architecture = launchResult.architecture.empty() ? launchDecision.architecture : launchResult.architecture;
     context.processId = 0;
     context.appDirectory = app.appDirectory.string();
+    context.nativeImageBaseAddress = image.preferredBaseAddress;
+    if (image.imageSize <= std::numeric_limits<uint64_t>::max() - context.nativeImageBaseAddress) {
+        context.nativeImageEndAddress = context.nativeImageBaseAddress + image.imageSize;
+    }
     context.permissions = app.manifest.permissions;
     context.arguments.push_back(context.displayName.empty() ? context.appId : context.displayName);
     context.environment["GX_APP_ID"] = context.appId;
@@ -1020,6 +1187,12 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
 }
 
 void NativeAppRuntime::BeginHostCallDispatch(NativeAppRuntimeContext& context) {
+    if (context.processId == 0) context.processId = Allocator::currentPid();
+    volatile uint8_t stackMarker = 0;
+    const uint64_t stackAddress = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&stackMarker));
+    context.nativeStackBaseAddress = stackAddress > kMaxNativeAppStackBytes ? stackAddress - kMaxNativeAppStackBytes : 0;
+    context.nativeStackEndAddress = stackAddress <= std::numeric_limits<uint64_t>::max() - kMaxNativeAppStackBytes
+        ? stackAddress + kMaxNativeAppStackBytes : std::numeric_limits<uint64_t>::max();
     context.lifecycleState = NativeAppLifecycleState::Running;
     context.startTime = std::chrono::steady_clock::now();
     g_hostLifecycleState = NativeAppLifecycleState::Running;

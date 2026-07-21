@@ -1,0 +1,23 @@
+Compositor service started (native window)
+Desktop launch failed: Native app launch requires the experimental hosted runtime. Build with build-native-experimental.bat and run with run-server-experimental.bat: Nexgen PacMan
+Desktop launch failed: Native app launch requires the experimental hosted runtime. Build with build-native-experimental.bat and run with run-server-experimental.bat: Nexgen PacMan
+Hosted title input diag: WndProc msg=513 capture=0 flags=1 x=523 y=85
+Hosted title input diag: WM_LBUTTONDOWN entry hwnd=0x1120704 currentTid=13256 capture=0x0 owningPid=25412 owningTid=13256 x=523 y=85 captureBefore=0x0
+Hosted title input diag: WndProc msg=512 capture=1 flags=1 x=522 y=88
+Hosted title input diag: WndProc msg=512 capture=1 flags=1 x=530 y=76
+Hosted title input diag: WndProc msg=512 capture=1 flags=1 x=537 y=65
+Hosted title input diag: WndProc msg=512 capture=1 flags=1 x=557 y=23
+Hosted title input diag: WndProc msg=512 capture=1 flags=1 x=557 y=22
+Hosted title input diag: WndProc msg=514 capture=1 flags=0 x=557 y=22
+Hosted title input diag: WM_LBUTTONUP entry hwnd=0x1120704 currentTid=13256 capture=0x1120704 owningPid=25412 owningTid=13256 x=557 y=22 state=targetWindow=0 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WndProc msg=533 capture=0 flags=0
+Hosted title input diag: WM_CAPTURECHANGED hwnd=0x1120704 currentTid=13256 capture=0x0 owningPid=25412 owningTid=13256 newCapture=0x0 state=targetWindow=0 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Desktop launch failed: Native app launch requires the experimental hosted runtime. Build with build-native-experimental.bat and run with run-server-experimental.bat: Nexgen PacMan
+Hosted title input diag: WndProc msg=513 capture=0 flags=1 x=568 y=112
+Hosted title input diag: WM_LBUTTONDOWN entry hwnd=0x1120704 currentTid=13256 capture=0x0 owningPid=25412 owningTid=13256 x=568 y=112 captureBefore=0x0
+Hosted title input diag: WndProc msg=514 capture=1 flags=0 x=568 y=112
+Hosted title input diag: WM_LBUTTONUP entry hwnd=0x1120704 currentTid=13256 capture=0x1120704 owningPid=25412 owningTid=13256 x=568 y=112 state=targetWindow=0 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Hosted title input diag: WndProc msg=533 capture=0 flags=0
+Hosted title input diag: WM_CAPTURECHANGED hwnd=0x1120704 currentTid=13256 capture=0x0 owningPid=25412 owningTid=13256 newCapture=0x0 state=targetWindow=0 pressedClose=0 pressedTomb=0 pressedMax=0 pressedMin=0 pressedControl=none releaseOverPressedControl=n/a action=none
+Compositor service stopping
+guideXOSServer server exiting.

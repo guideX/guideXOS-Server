@@ -332,6 +332,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     appContext.host = &runtimeContext.hostCalls;
     appContext.userData = nullptr;
     gx_entry_fn entry = reinterpret_cast<gx_entry_fn>(entryAddress);
+    runtimeContext.activeGxContext = &appContext;
     NativeAppProcessTable::RegisterPrepared(runtimeContext, true, hostArchitecture());
     NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
     NativeAppProcessTable::MarkRunning(runtimeContext.runtimeId);
@@ -378,6 +379,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
 #endif
     if (smokeTestCloseThread.joinable()) smokeTestCloseThread.join();
     NativeAppRuntime::EndHostCallDispatch(runtimeContext);
+    runtimeContext.activeGxContext = nullptr;
     if (runtimeContext.lastWaitResult == GX_ERROR_TIMEOUT && result.exitCode == GX_OK) addDiagnostic(result, "wait_for_close timed out; cleaning up remaining owned windows");
     NativeAppRuntime::Cleanup(runtimeContext, (executionFailed || result.exitCode != GX_OK) ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited, result.exitCode, failureReason);
     const gxos::ProcessTombstoneRecord tombstone = makeNativeTombstoneRecord(runtimeContext, executionFailed, failureReason);

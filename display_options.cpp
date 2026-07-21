@@ -8,8 +8,6 @@
 #include "logger.h"
 #include "process.h"
 #include "wallpaper_registry.h"
-#include "background_store.h"
-#include "background_service.h"
 #include <algorithm>
 #include <chrono>
 #include <sstream>
@@ -48,8 +46,6 @@ bool DisplayOptions::s_showDesktopThisSystem = true;
 bool DisplayOptions::s_showDesktopFileManager = true;
 bool DisplayOptions::s_showDesktopSystemSettings = false;
 bool DisplayOptions::s_smallLiveDesktopFolderIcons = true;
-bool DisplayOptions::s_removeConfirmationVisible = false;
-std::string DisplayOptions::s_removeTargetId;
 
 namespace {
     const char* kDisplayOptionsStorePath = "display-options.cfg";
@@ -200,7 +196,7 @@ namespace {
     int activeGalleryItemCount()
     {
         return DisplayOptions::s_activeTab == 0
-            ? static_cast<int>(BackgroundStore::MergedImageBackgrounds().size())
+            ? static_cast<int>(WallpaperRegistry::BuiltInWallpapers().size())
             : static_cast<int>(WallpaperRegistry::BuiltInGradients().size());
     }
 
@@ -232,7 +228,7 @@ namespace {
 
     void clampSelectionToCurrentTab()
     {
-        const auto& wallpapers = BackgroundStore::MergedImageBackgrounds();
+        const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
         const auto& gradients = WallpaperRegistry::BuiltInGradients();
         if (DisplayOptions::s_activeTab == 0) {
             if (wallpapers.empty()) {
@@ -483,9 +479,9 @@ namespace {
     {
         std::string err;
         DisplayOptionsStoreData store;
-        if (!loadPersistedDisplayOptions(store, err)) return WallpaperRegistry::DefaultBackground().id;
-        if (!store.wallpaperId.empty()) return BackgroundStore::ResolveIdOrDefault(store.wallpaperId);
-        return WallpaperRegistry::DefaultBackground().id;
+        if (!loadPersistedDisplayOptions(store, err)) return WallpaperRegistry::DefaultWallpaper().id;
+        if (!store.wallpaperId.empty()) return WallpaperRegistry::ResolveIdOrDefault(store.wallpaperId);
+        return WallpaperRegistry::DefaultWallpaper().id;
     }
 
     DesktopThemeId selectedThemeIdFromConfig()
@@ -702,14 +698,10 @@ uint64_t DisplayOptions::Launch()
 
 void DisplayOptions::loadSelection()
 {
-    std::string inventoryError;
-    if (!BackgroundStore::Reload(inventoryError) && !inventoryError.empty()) {
-        Logger::write(LogLevel::Warn, "DisplayOptions background inventory reload failed: " + inventoryError);
-    }
     std::string selectedId = selectedWallpaperIdFromConfig();
     Logger::write(LogLevel::Info, std::string("DisplayOptions loaded saved background id=") + selectedId);
     const auto& gradients = WallpaperRegistry::BuiltInGradients();
-    const auto& wallpapers = BackgroundStore::MergedImageBackgrounds();
+    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
     s_selectedIndex = 0;
     s_appliedIndex = 0;
     s_selectedBackgroundIndex = 0;
@@ -718,8 +710,6 @@ void DisplayOptions::loadSelection()
     s_appliedGradientIndex = 0;
     s_backgroundGalleryScrollOffset = 0;
     s_gradientGalleryScrollOffset = 0;
-    s_removeConfirmationVisible = false;
-    s_removeTargetId.clear();
     s_activeTab = WallpaperRegistry::IsGradientId(selectedId) ? 1 : 0;
     s_galleryScrollbarDragging = false;
     s_galleryScrollbarDragStartY = 0;
@@ -931,38 +921,12 @@ int DisplayOptions::main(int, char**)
             try {
                 if (!action.empty() && action == "down") {
                     const uint32_t key = static_cast<uint32_t>(std::stoul(keyS));
-                    if (s_removeConfirmationVisible) {
-                        if (key == kKeyEscape) {
-                            s_removeConfirmationVisible = false;
-                            s_removeTargetId.clear();
-                            render();
-                        } else if (key == kKeyEnter) {
-                            std::string error;
-                            if (!DesktopBackgroundService::RemoveBackground(s_removeTargetId, error) && !error.empty()) {
-                                Logger::write(LogLevel::Warn, "DisplayOptions background removal failed: " + error);
-                            }
-                            s_removeConfirmationVisible = false;
-                            s_removeTargetId.clear();
-                            loadSelection();
-                            render();
-                        }
-                        break;
-                    }
                     if (handleGalleryKey(key)) {
                         break;
                     }
                 }
             } catch (...) {
             }
-            break;
-        }
-        case MsgType::MT_DesktopBackgroundInventoryChanged: {
-            std::string inventoryError;
-            if (!BackgroundStore::Reload(inventoryError) && !inventoryError.empty()) {
-                Logger::write(LogLevel::Warn, "DisplayOptions inventory refresh failed: " + inventoryError);
-            }
-            loadSelection();
-            render();
             break;
         }
         case MsgType::MT_Close:
@@ -1000,7 +964,7 @@ void DisplayOptions::render()
 
     if (s_activeTab == 0 || s_activeTab == 1) {
         const bool showWallpapers = s_activeTab == 0;
-        const auto& wallpapers = BackgroundStore::MergedImageBackgrounds();
+        const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
         const auto& gradients = WallpaperRegistry::BuiltInGradients();
         const int itemCount = showWallpapers ? static_cast<int>(wallpapers.size()) : static_cast<int>(gradients.size());
         GalleryLayout layout = layoutForWindow(s_windowW, s_windowH, itemCount);
@@ -1054,14 +1018,7 @@ void DisplayOptions::render()
     if (s_activeTab == 0 || s_activeTab == 1) {
         GalleryLayout layout = layoutForWindow(s_windowW, s_windowH, activeGalleryItemCount());
         drawButton(kSelectButtonX, layout.buttonY, kButtonW, kButtonH, s_activeTab == 0 ? "Select Background" : "Apply Gradient", false, true);
-        if (s_activeTab == 0) {
-            const auto& images = BackgroundStore::MergedImageBackgrounds();
-            const bool removable = s_selectedBackgroundIndex >= 0 && s_selectedBackgroundIndex < static_cast<int>(images.size()) &&
-                images[static_cast<size_t>(s_selectedBackgroundIndex)].owner == BackgroundOwner::UserImported;
-            drawButton(kSelectButtonX + 200, layout.buttonY, kButtonW, kButtonH, "Remove Background", false, removable);
-        } else {
-            drawButton(kSelectButtonX + 200, kButtonY, kButtonW, kButtonH, "Choose Color", false, false);
-        }
+        drawButton(kSelectButtonX + 200, kButtonY, kButtonW, kButtonH, "Choose Color", false, false);
         drawButton(kSelectButtonX + 400, kButtonY, kButtonW, kButtonH, "Visual Effects", false, false);
     } else if (s_activeTab == 2) {
         drawText(s_windowId, 26, kButtonY + 10, "Changes are saved immediately.", DisplayOptionsMutedTextColor());
@@ -1069,17 +1026,6 @@ void DisplayOptions::render()
         drawText(s_windowId, 26, kButtonY + 10, "Selecting a theme saves immediately and reloads the compositor.", DisplayOptionsMutedTextColor());
     } else if (s_activeTab == 4) {
         drawText(s_windowId, 26, kButtonY + 10, "Changes save immediately and apply to the clock display.", DisplayOptionsMutedTextColor());
-    }
-
-    if (s_removeConfirmationVisible) {
-        drawColorRect(s_windowId, 190, 214, 420, 270, DisplayOptionsCardColor());
-        drawColorRect(s_windowId, 190, 214, 420, 1, DisplayOptionsSelectedBorderColor());
-        drawText(s_windowId, 220, 244, "Remove this background?", DisplayOptionsTextColor());
-        drawText(s_windowId, 220, 284, "The imported background and its generated thumbnail", DisplayOptionsMutedTextColor());
-        drawText(s_windowId, 220, 304, "will be deleted from guideXOS Server.", DisplayOptionsMutedTextColor());
-        drawText(s_windowId, 220, 324, "The original PNG will not be changed.", DisplayOptionsMutedTextColor());
-        drawButton(245, 414, 150, 34, "Remove", false, true);
-        drawButton(415, 414, 150, 34, "Cancel", false, true);
     }
 }
 
@@ -1136,7 +1082,7 @@ void DisplayOptions::drawDesktopIconsTab()
 
 void DisplayOptions::drawWallpaperTile(int index, int x, int y, bool hover, bool selected, bool applied)
 {
-    const auto& entry = BackgroundStore::MergedImageBackgrounds()[static_cast<size_t>(index)];
+    const auto& entry = WallpaperRegistry::BuiltInWallpapers()[static_cast<size_t>(index)];
     if (selected) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsSelectedBorderColor());
     else if (hover) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsHoverBorderColor());
     drawColorRect(s_windowId, x, y, kTileW, kTileH, DisplayOptionsCardColor());
@@ -1211,7 +1157,7 @@ void DisplayOptions::drawRegionTimeTab()
 
 void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied)
 {
-    const auto& entry = BackgroundStore::MergedBackgrounds()[static_cast<size_t>(index)];
+    const auto& entry = WallpaperRegistry::BuiltInBackgrounds()[static_cast<size_t>(index)];
     if (selected) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsSelectedBorderColor());
     else if (hover) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsHoverBorderColor());
     drawColorRect(s_windowId, x, y, kTileW, kTileH, DisplayOptionsCardColor());
@@ -1275,27 +1221,6 @@ void DisplayOptions::handleMouseMove(int, int)
 
 void DisplayOptions::handleMouseDown(int mx, int my)
 {
-    if (s_removeConfirmationVisible) {
-        if (hit(mx, my, 245, 414, 150, 34)) {
-            std::string error;
-            if (!DesktopBackgroundService::RemoveBackground(s_removeTargetId, error)) {
-                Logger::write(LogLevel::Warn, "DisplayOptions background removal failed: " + error);
-            }
-            s_removeConfirmationVisible = false;
-            s_removeTargetId.clear();
-            loadSelection();
-            render();
-            return;
-        }
-        if (hit(mx, my, 415, 414, 150, 34)) {
-            s_removeConfirmationVisible = false;
-            s_removeTargetId.clear();
-            render();
-            return;
-        }
-        return;
-    }
-
     if (hit(mx, my, kBackgroundTabX, kTabY, kTabW, kTabH)) {
         setActiveTabAndClamp(0);
         render();
@@ -1396,21 +1321,7 @@ void DisplayOptions::handleMouseDown(int mx, int my)
     }
 
     if (s_activeTab == 0) {
-        const auto& images = BackgroundStore::MergedImageBackgrounds();
-        const GalleryLayout layout = layoutForWindow(s_windowW, s_windowH, static_cast<int>(images.size()));
-        if (hit(mx, my, kSelectButtonX, layout.buttonY, kButtonW, kButtonH)) {
-            applySelectedBackground();
-            render();
-            return;
-        }
-        if (hit(mx, my, kSelectButtonX + 200, layout.buttonY, kButtonW, kButtonH) &&
-            s_selectedBackgroundIndex >= 0 && s_selectedBackgroundIndex < static_cast<int>(images.size()) &&
-            images[static_cast<size_t>(s_selectedBackgroundIndex)].owner == BackgroundOwner::UserImported) {
-            s_removeTargetId = images[static_cast<size_t>(s_selectedBackgroundIndex)].id;
-            s_removeConfirmationVisible = true;
-            render();
-            return;
-        }
+        const GalleryLayout layout = layoutForWindow(s_windowW, s_windowH, static_cast<int>(WallpaperRegistry::BuiltInWallpapers().size()));
         const int scrollbarHit = hitTestGalleryScrollbar(mx, my, layout);
         if (scrollbarHit == 1) {
             s_galleryScrollbarDragging = true;
@@ -1454,7 +1365,7 @@ void DisplayOptions::handleDoubleClick(int mx, int my)
     }
 
     if (s_activeTab == 0) {
-        const GalleryLayout layout = layoutForWindow(s_windowW, s_windowH, static_cast<int>(BackgroundStore::MergedImageBackgrounds().size()));
+        const GalleryLayout layout = layoutForWindow(s_windowW, s_windowH, static_cast<int>(WallpaperRegistry::BuiltInWallpapers().size()));
         const int hitIndex = hitTestActiveGalleryTile(mx, my, layout);
         if (hitIndex >= 0) {
             setActiveSelectionIndex(hitIndex);
@@ -1616,9 +1527,9 @@ void DisplayOptions::applySelectedGradient()
 
 void DisplayOptions::applySelectedWallpaper()
 {
-    const auto& wallpapers = BackgroundStore::MergedImageBackgrounds();
+    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
     if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(wallpapers.size())) return;
-    const BackgroundEntry& selected = wallpapers[static_cast<size_t>(s_selectedIndex)];
+    const WallpaperEntry& selected = wallpapers[static_cast<size_t>(s_selectedIndex)];
     ipc::Message msg;
     msg.type = static_cast<uint32_t>(MsgType::MT_DesktopWallpaperSet);
     msg.data.assign(selected.id.begin(), selected.id.end());
@@ -1629,9 +1540,9 @@ void DisplayOptions::applySelectedWallpaper()
 
 void DisplayOptions::applySelectedBackground()
 {
-    const auto& wallpapers = BackgroundStore::MergedImageBackgrounds();
+    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
     if (s_selectedBackgroundIndex < 0 || s_selectedBackgroundIndex >= static_cast<int>(wallpapers.size())) return;
-    const BackgroundEntry& selected = wallpapers[static_cast<size_t>(s_selectedBackgroundIndex)];
+    const WallpaperEntry& selected = wallpapers[static_cast<size_t>(s_selectedBackgroundIndex)];
     ipc::Message msg;
     msg.type = static_cast<uint32_t>(MsgType::MT_DesktopWallpaperSet);
     msg.data.assign(selected.id.begin(), selected.id.end());

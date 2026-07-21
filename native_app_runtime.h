@@ -112,6 +112,11 @@ struct NativeAppRuntimeContext {
     std::string architecture;
     uint64_t processId = 0;
     std::string appDirectory;
+    uint64_t nativeImageBaseAddress = 0;
+    uint64_t nativeImageEndAddress = 0;
+    uint64_t nativeStackBaseAddress = 0;
+    uint64_t nativeStackEndAddress = 0;
+    NativeGxAppContext* activeGxContext = nullptr;
     std::vector<std::string> permissions;
     NativeHostCallTable hostCalls;
     std::map<std::string, std::string> environment;

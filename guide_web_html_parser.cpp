@@ -978,7 +978,8 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 			name == "first-of-type" || name == "last-of-type" || name == "only-of-type" ||
 			name == "root" || name == "link" || name == "visited" || name == "empty" ||
 			name == "checked" || name == "disabled" || name == "enabled" || name == "required" ||
-			name == "read-only" || name == "read-write") {
+			name == "read-only" || name == "read-write" || name == "focus" ||
+			name == "focus-visible") {
 			if (hasArgument) return false;
 			if (name == "first-child") pseudo.type = CssPseudoClass::FirstChild;
 			else if (name == "last-child") pseudo.type = CssPseudoClass::LastChild;
@@ -1007,9 +1008,15 @@ static bool parseCssSimpleSelectorPart(const std::string& rawPart,
 			} else if (name == "read-only") {
 				pseudo.type = CssPseudoClass::ReadOnly;
 				saturatingIncrement(diag.readonlyPseudoParsed);
-			} else {
+			} else if (name == "read-write") {
 				pseudo.type = CssPseudoClass::ReadWrite;
 				saturatingIncrement(diag.readwritePseudoParsed);
+			} else if (name == "focus") {
+				pseudo.type = CssPseudoClass::Focus;
+				saturatingIncrement(diag.focusPseudoParsed);
+			} else {
+				pseudo.type = CssPseudoClass::FocusVisible;
+				saturatingIncrement(diag.focusVisiblePseudoParsed);
 			}
 			++specificity.classCount;
 		} else if (name == "nth-child" || name == "nth-of-type") {
@@ -2034,6 +2041,8 @@ static void recordPseudoMatch(CssDiagnostics& diag, CssPseudoClass type)
 	case CssPseudoClass::Required: saturatingIncrement(diag.requiredPseudoMatches); break;
 	case CssPseudoClass::ReadOnly: saturatingIncrement(diag.readonlyPseudoMatches); break;
 	case CssPseudoClass::ReadWrite: saturatingIncrement(diag.readwritePseudoMatches); break;
+	case CssPseudoClass::Focus: saturatingIncrement(diag.focusPseudoMatches); break;
+	case CssPseudoClass::FocusVisible: saturatingIncrement(diag.focusVisiblePseudoMatches); break;
 	default: break;
 	}
 }
@@ -2063,6 +2072,23 @@ static bool effectiveDisabled(const WebDocument& doc, const HtmlElementRef& elem
 	if (const FormRuntimeControlState* state = runtimeControlState(doc, element.serial))
 		return state->disabled;
 	return element.formControl.disabled;
+}
+
+static bool effectiveFocused(const WebDocument& doc, const HtmlElementRef& element)
+{
+	if (!doc.formRuntimeState.initialized || !doc.formRuntimeState.focusValid ||
+		element.serial == 0 || !element.formControl.metadataComplete ||
+		!element.formControl.supported || element.formControl.hidden ||
+		effectiveDisabled(doc, element)) return false;
+	return doc.formRuntimeState.documentGeneration != 0 &&
+		doc.formRuntimeState.focusedDocumentGeneration == doc.formRuntimeState.documentGeneration &&
+		doc.formRuntimeState.focusedLogicalSerial == element.serial;
+}
+
+static bool effectiveFocusVisible(const WebDocument& doc, const HtmlElementRef& element)
+{
+	return effectiveFocused(doc, element) &&
+		doc.formRuntimeState.focusOrigin == FormFocusOrigin::Keyboard;
 }
 
 static bool selectorPartMatchesElement(const HtmlElementRef& element,
@@ -2166,6 +2192,12 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element,
 				 element.formControl.type == FormControlType::Url ||
 				 element.formControl.type == FormControlType::Number ||
 				 element.formControl.type == FormControlType::Textarea);
+			break;
+		case CssPseudoClass::Focus:
+			matched = effectiveFocused(doc, element);
+			break;
+		case CssPseudoClass::FocusVisible:
+			matched = effectiveFocusVisible(doc, element);
 			break;
 		}
 		if (!matched) return false;
@@ -3545,6 +3577,8 @@ static const char* cssPseudoName(CssPseudoClass type)
 	case CssPseudoClass::Required: return "required";
 	case CssPseudoClass::ReadOnly: return "read-only";
 	case CssPseudoClass::ReadWrite: return "read-write";
+	case CssPseudoClass::Focus: return "focus";
+	case CssPseudoClass::FocusVisible: return "focus-visible";
 	default: return "unknown";
 	}
 }
@@ -3675,6 +3709,16 @@ static uint32_t formRadioGroupEvidenceHash(const HtmlElementRef& element)
 	return hash;
 }
 
+static const char* formFocusOriginName(FormFocusOrigin origin)
+{
+	switch (origin) {
+	case FormFocusOrigin::Mouse: return "mouse";
+	case FormFocusOrigin::Keyboard: return "keyboard";
+	case FormFocusOrigin::ProgrammaticInternalSmoke: return "programmatic/internal-smoke";
+	default: return "none";
+	}
+}
+
 static void appendComputedStyleEvidence(WebDocument& doc,
 	const HtmlElementRef& element,
 	const WebStyle& style,
@@ -3686,7 +3730,11 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		id.rfind("phase2c-", 0) != 0 && id.rfind("css2c-", 0) != 0 &&
 		id.rfind("phase2d-", 0) != 0 && id.rfind("css2d-", 0) != 0 &&
 		id.rfind("phase2e-", 0) != 0 && id.rfind("css2e-", 0) != 0 &&
-		id.rfind("phase2f-", 0) != 0 && id.rfind("css2f-", 0) != 0) return;
+		id.rfind("phase2f-", 0) != 0 && id.rfind("css2f-", 0) != 0 &&
+		id.rfind("phase2g-", 0) != 0 && id.rfind("css2g-", 0) != 0 &&
+		id.rfind("phase2h-", 0) != 0 && id.rfind("css2h-", 0) != 0) return;
+	const bool phase2gEvidence = id.rfind("phase2g-", 0) == 0 || id.rfind("css2g-", 0) == 0;
+	const bool phase2hEvidence = id.rfind("phase2h-", 0) == 0 || id.rfind("css2h-", 0) == 0;
 	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
 		doc.cssDiagnostics.computedStyleEvidenceSerials.end(), element.serial) !=
 		doc.cssDiagnostics.computedStyleEvidenceSerials.end()) return;
@@ -3713,6 +3761,13 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 	const FormRuntimeControlState* runtime = runtimeControlState(doc, element.serial);
 	const bool checked = effectiveChecked(doc, element);
 	const bool disabled = effectiveDisabled(doc, element);
+	const bool focused = effectiveFocused(doc, element);
+	const bool focusVisible = effectiveFocusVisible(doc, element);
+	const bool focusable = element.serial != 0 && element.formControl.metadataComplete &&
+		element.formControl.supported && !element.formControl.hidden && !disabled &&
+		element.formControl.type != FormControlType::Option &&
+		element.formControl.type != FormControlType::Unsupported &&
+		element.formControl.type != FormControlType::None;
 	std::ostringstream oss;
 	oss << "id=" << boundedEvidenceToken(element.id) << ",tag=" << boundedEvidenceToken(toLower(element.tagName))
 		<< ",classes=" << boundedEvidenceToken(element.className)
@@ -3765,12 +3820,24 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",parsed-checked=" << ((element.formControl.checked || element.formControl.selected) ? "yes" : "no")
 		<< ",runtime-checked=" << (runtime ? (runtime->checked ? "yes" : "no") : "absent")
 		<< ",runtime-activation-count=" << (runtime ? runtime->activationCount : 0)
-		<< ",runtime-metadata-valid=" << (runtime ? (runtime->metadataValid ? "yes" : "no") : "no")
-		<< ",radio-group-hash=" << formRadioGroupEvidenceHash(element)
+		<< ",runtime-metadata-valid=" << (runtime ? (runtime->metadataValid ? "yes" : "no") : "no");
+	if (phase2gEvidence || phase2hEvidence) {
+		oss << ",document-generation=" << doc.formRuntimeState.documentGeneration
+			<< ",focusable=" << (focusable ? "yes" : "no")
+			<< ",focused=" << (focused ? "yes" : "no")
+			<< ",focus-origin=" << formFocusOriginName(doc.formRuntimeState.focusOrigin)
+			<< ",focus-document-generation=" << doc.formRuntimeState.focusedDocumentGeneration
+			<< ",focus-pseudo-match=" << (focused ? "yes" : "no")
+			<< ",focus-visible-pseudo-match=" << (focusVisible ? "yes" : "no");
+	}
+	oss << ",radio-group-hash=" << formRadioGroupEvidenceHash(element)
 		<< ",control-required=" << (element.formControl.required ? "yes" : "no")
 		<< ",control-readonly=" << (element.formControl.readOnly ? "yes" : "no")
-		<< ",color-winning-pseudo=" << (colorWinner.pseudoCategory.empty() ? "none" : colorWinner.pseudoCategory)
-		<< ";";
+		<< ",color-winning-pseudo=" << (colorWinner.pseudoCategory.empty() ? "none" : colorWinner.pseudoCategory);
+	if (phase2gEvidence || phase2hEvidence) {
+		oss << ",winning-focus-pseudo=" << ((colorWinner.pseudoCategory.find("focus") != std::string::npos) ? colorWinner.pseudoCategory : "none");
+	}
+	oss << ";";
 	const std::string evidence = oss.str();
 	if (doc.cssDiagnostics.computedStyleEvidence.size() + evidence.size() <= kCssLiteMaxEvidenceBytes) {
 		doc.cssDiagnostics.computedStyleEvidence += evidence;

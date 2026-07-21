@@ -2,6 +2,7 @@
 
 #include "process.h"
 #include "guide_web_document.h"   // BlockType, DocBlock, WebDocument (gxos::web)
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -210,6 +211,11 @@ struct NavigatorPageMetadata {
 		int         cssReadonlyPseudoMatches = 0;
 		int         cssReadwritePseudoParsed = 0;
 		int         cssReadwritePseudoMatches = 0;
+		int         cssFocusPseudoParsed = 0;
+		int         cssFocusPseudoMatches = 0;
+		int         cssFocusVisiblePseudoParsed = 0;
+		int         cssFocusVisiblePseudoMatches = 0;
+		int         cssRuntimeFocusRecomputations = 0;
 		std::string cssComputedStyleEvidence;
 	bool        downloaded = false;
 	std::string downloadSavedPath;
@@ -248,6 +254,23 @@ struct NavigatorPageMetadata {
 		int         formRuntimeStateResets = 0;
 		int         formHitTargetsRegistered = 0;
 		int         formHitTargetClamps = 0;
+		int         formFocusableControls = 0;
+		int         formFocusChanges = 0;
+		int         formFocusClears = 0;
+		int         formFocusWraps = 0;
+		int         formTabForward = 0;
+		int         formTabBackward = 0;
+		int         formKeyboardActivations = 0;
+		int         formSpaceActivations = 0;
+		int         formEnterActivations = 0;
+		int         formKeyRepeatSuppressed = 0;
+		int         formStaleKeyActivationBlocks = 0;
+		int         formDisabledFocusSkips = 0;
+		int         formHiddenFocusSkips = 0;
+		int         formFocusStateResets = 0;
+		std::string formFocusOrigin;
+		uint64_t    formFocusGeneration = 0;
+		uint64_t    formFocusedLogicalSerial = 0;
 		int         cssCheckedRuntimeRecomputations = 0;
 		std::string formInteractionMode = "session_local_non_submitting";
 	bool        unsupportedFormMethod = false;
@@ -293,6 +316,18 @@ public:
 	static bool SmokeFormHitTargetById(const std::string& id);
 	static int SmokeFormActivationCountById(const std::string& id);
 	static bool SmokeFormMouseSafetyById(const std::string& id);
+	static bool SmokeFocusFormControlById(const std::string& id, bool keyboardOrigin = true);
+	static bool SmokeFormControlFocusedById(const std::string& id);
+	static std::string SmokeFocusedFormControlId();
+	static std::string SmokeFormFocusOrigin();
+	static int SmokeFormFocusableCount();
+	static bool SmokeKeyPress(int keyCode, const std::string& action);
+	static bool SmokeSetFormControlDisabledById(const std::string& id, bool disabled);
+	static bool SmokeSetFormControlHiddenById(const std::string& id, bool hidden);
+	static void SmokeDeactivateWindow();
+	static bool SmokeForceFormFocusGenerationMismatch();
+	static int SmokeFormControlInputLengthById(const std::string& id);
+	static void SmokeFocusAddressBar();
 	static bool SmokeReloadCurrentDocument();
 	// Returns the widget IDs registered with the compositor toolbar.
 	// Used by hosted smoke to verify the full modern toolbar (7 buttons) is
@@ -429,14 +464,28 @@ private:
 	static void handleDocumentClick(HitTarget target, int linkBlockIndex);
 	static void handleMouseInput(int x, int y, int button, const std::string& action);
 	static void handleKeyPress(int keyCode, const std::string& action);
-	static void focusDocumentInput(int blockIndex);
+	static void focusDocumentInput(int blockIndex,
+		gxos::web::FormFocusOrigin origin = gxos::web::FormFocusOrigin::ProgrammaticInternalSmoke);
 	static void blurDocumentInput();
 	static void submitFormForBlock(int blockIndex);
 	static void focusNextFormControl(bool reverse);
 	static bool isFocusableFormControl(const DocBlock& block);
+	static bool isFocusedFormControl(const DocBlock& block);
+	static int focusedFormControlBlockIndex();
+	static size_t buildFormFocusOrder(std::array<int, gxos::web::kFormRuntimeControlCap>& order);
+	static void clearKeyboardActivationState();
+	static void cancelKeyboardActivation(gxos::web::FormFocusCancellationReason reason);
+	static void armKeyboardActivation(int keyCode);
+	static void finishKeyboardActivation(int keyCode);
+	static void clearDocumentFocus(bool recomputeStyles = true,
+		gxos::web::FormFocusCancellationReason reason = gxos::web::FormFocusCancellationReason::StateChange);
+	static bool ensureFocusedControlStillValid();
+	static void revealFocusedFormControl(int blockIndex);
 	static int formControlHeight(const DocBlock& block);
 	static void activateFormControl(int blockIndex);
 	static void initializeFormRuntimeState();
+	static void updateFormAccessibilityMetadata();
+	static gxos::web::FormAccessibilityRecord* accessibilityRecordForSerial(uint64_t serial);
 	static void recomputeFormControlStyles();
 	static void clearMousePressState();
 	static bool isRuntimeFormControl(const DocBlock& block);
@@ -515,6 +564,8 @@ private:
 	static int         s_addressCaret;     // insertion point index into s_addressBuffer
 	static int         s_focusedInputBlockIndex;
 	static int         s_inputCaret;
+	static uint64_t    s_documentGeneration;
+	static bool        s_tabKeyPressed;
 	static std::string s_lastSubmittedFormUrl;
 	static std::string s_lastSubmittedFormAction;
 	static std::string s_lastSubmittedFormMethod;

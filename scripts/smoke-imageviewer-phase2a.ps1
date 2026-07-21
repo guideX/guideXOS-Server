@@ -133,8 +133,7 @@ try {
     $saveDialogMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'dialogs::SaveDialog::Show\(0, 0, startPath, defaultFileName'
     $openHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'openImageFromDialog\(\)'
     $wallpaperHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'trySetCurrentImageAsWallpaper\(\)'
-    $wallpaperDispatchMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'DesktopService::DispatchSetAsDesktopBackground\(s_originalPath, "ImageViewer"'
-    $wallpaperDirectMessageMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'MT_DesktopWallpaperSet'
+    $wallpaperMessageMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'MT_DesktopWallpaperSet'
     $unsupportedMessageMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'Unsupported image format: only PNG is supported in this version'
     $unsupportedHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'showUnsupportedFormat\(const std::string& path\)'
     $checkerboardMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'drawCheckerboardBackground\(contentLeft, contentTop, contentWidth, contentHeight\)'
@@ -161,7 +160,6 @@ try {
     Assert-NotContains $sourceText "Paint" "viewer paint feature"
     Assert-NotContains $sourceText "Layer" "viewer layer feature"
     Assert-NotContains $sourceText "Filter" "viewer filter feature"
-    Assert-NotContains $sourceText "MT_DesktopWallpaperSet" "direct wallpaper message bypass"
 
     $report = @(
         "[ImageViewerPhase2ASmoke]",
@@ -179,8 +177,7 @@ try {
         "viewerWallpaperControl=$(Format-EvidenceLine $wallpaperControlMatch)",
         "viewerOpenDialogIntegration=$(Format-EvidenceLine $openDialogMatch) | $(Format-EvidenceLine $openHandlerMatch)",
         "viewerSaveDialogIntegration=$(Format-EvidenceLine $saveDialogMatch) | $(Format-EvidenceLine $saveHelperMatch)",
-        "viewerWallpaperIntegration=$(Format-EvidenceLine $wallpaperHandlerMatch) | $(Format-EvidenceLine $wallpaperDispatchMatch)",
-        "viewerDirectWallpaperMessageBypass=$(Format-EvidenceLine $wallpaperDirectMessageMatch)",
+        "viewerWallpaperIntegration=$(Format-EvidenceLine $wallpaperHandlerMatch) | $(Format-EvidenceLine $wallpaperMessageMatch)",
         "viewerUnsupportedFormat=$(Format-EvidenceLine $unsupportedMessageMatch) | $(Format-EvidenceLine $unsupportedHandlerMatch)",
         "viewerCheckerboardBackground=$(Format-EvidenceLine $checkerboardMatch)",
         "viewerTransparencyDetection=$(Format-EvidenceLine $transparentMatch)",

@@ -119,15 +119,6 @@ void RightClickMenu::buildItems() {
 
         s_items.push_back({"Open", false, false, false});
         if (item) {
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-            const bool isTrash = item->kind == DesktopItemKind::SystemObject && item->systemObject == DesktopSystemObjectKind::Trash;
-            if (!isTrash && (item->kind == DesktopItemKind::FilesystemEntry || item->kind == DesktopItemKind::Shortcut) &&
-                DesktopService::IsSetAsDesktopBackgroundEligible(item->path, item->isDirectory, false)) {
-                s_items.push_back({"Set as Desktop Background", false, false, false});
-                Logger::write(LogLevel::Info, std::string("[ShellActionVisibility] surface=Desktop identity=") +
-                    DesktopService::SetAsDesktopBackgroundActionIdentity() + " path=" + item->path);
-            }
-#endif
             if (item->kind == DesktopItemKind::FilesystemEntry && item->isDirectory) {
                 s_items.push_back({"Rename", false, false, false});
             }
@@ -196,13 +187,6 @@ bool RightClickMenu::HandleClick(int mx, int my) {
                 } else {
                     Logger::write(LogLevel::Info, "Desktop item Open selected");
                     Compositor::openDesktopItem(s_desktopItemIndex);
-                }
-            } else if (s_items[idx].label == "Set as Desktop Background" && s_desktopItemIndex >= 0) {
-                if (s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())) {
-                    const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
-                    std::string error;
-                    (void)DesktopService::DispatchSetAsDesktopBackground(item.path, "Desktop", error);
-                    if (!error.empty()) Logger::write(LogLevel::Warn, "Desktop set-background action failed: " + error);
                 }
             } else if (s_items[idx].label == "Rename" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop folder Rename selected");

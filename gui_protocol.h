@@ -41,8 +41,7 @@ namespace gxos {
             MT_DesktopConfigReload = 28, // payload empty; reload desktop.json and rebuild desktop items
             MT_DrawTextAtColor = 29,     // payload: <winId>|<x>|<y>|<r>|<g>|<b>|<text>
             MT_DrawImageAnimated = 30,   // payload: DrawImageSpec, path contains {frame}
-            MT_WidgetSetIcon = 31,       // payload: <winId>|<widgetId>|<path>
-            MT_DesktopBackgroundInventoryChanged = 32 // payload: active background id
+            MT_WidgetSetIcon = 31        // payload: <winId>|<widgetId>|<path>
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };

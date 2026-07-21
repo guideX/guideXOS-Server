@@ -151,6 +151,7 @@ namespace gxos { namespace gui {
         static std::vector<WindowDebugInfo> debugWindowsSnapshot();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
+        static constexpr UINT kHostedTitleInputDiagnosticMessage = WM_APP + 0x5A1;
 #endif
         static std::vector<DesktopItem> g_items; // expose for icon renderer
 
@@ -166,7 +167,9 @@ namespace gxos { namespace gui {
         static void pumpEvents();
         static void invalidate(uint64_t winId);
         static void sendFocus(uint64_t winId);
-        static void handleMouse(int mx, int my, bool down, bool up);
+        static bool handleMouse(int mx, int my, bool down, bool up);
+        static void handleMouseCaptureLost();
+        static std::string hostedTitleInputStateDiagnostic(int mx, int my);
         static std::string packMousePayloadForTarget(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0);
         static void emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value);
         static WinInfo* hitWindowAt(int mx, int my);

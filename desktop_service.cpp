@@ -1,6 +1,4 @@
 #include "desktop_service.h"
-
-#include "background_service.h"
 #include "app_launch_resolver.h"
 #include "app_manifest_loader.h"
 #include "app_registry.h"
@@ -5452,34 +5450,6 @@ namespace gxos {
             Logger::write(LogLevel::Warn, "Desktop filesystem open failed: " + error);
             NotificationManager::Add(error, NotificationLevel::Error);
             return false;
-        }
-
-        bool DesktopService::IsSetAsDesktopBackgroundEligible(const std::string& path, bool isDirectory, bool isTrashItem) {
-#if defined(GXOS_BARE_METAL)
-            (void)path;
-            (void)isDirectory;
-            (void)isTrashItem;
-            return false;
-#else
-            return DesktopBackgroundService::IsEligiblePngSource(path, isDirectory, isTrashItem);
-#endif
-        }
-
-        bool DesktopService::DispatchSetAsDesktopBackground(const std::string& path, const std::string& sourceSurface, std::string& error) {
-            Logger::write(LogLevel::Info, std::string("[ShellAction] identity=") + DesktopBackgroundService::kSetAsDesktopBackgroundAction +
-                " source=" + sourceSurface + " path=" + path);
-#if defined(GXOS_BARE_METAL)
-            error = "Set as Desktop Background is not available on bare metal in Phase 1";
-            return false;
-#else
-            const bool success = DesktopBackgroundService::ImportAndSetDesktopBackground(path, error);
-            if (!success && !error.empty()) NotificationManager::Add(error, NotificationLevel::Error);
-            return success;
-#endif
-        }
-
-        const char* DesktopService::SetAsDesktopBackgroundActionIdentity() {
-            return DesktopBackgroundService::kSetAsDesktopBackgroundAction;
         }
 
         bool DesktopService::ShowFolderOnHostedDesktop(const std::string& path, std::string& error) {

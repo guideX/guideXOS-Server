@@ -60,6 +60,63 @@ enum class FormControlType : uint8_t {
 	Unsupported,
 };
 
+// Navigator focus is deliberately a small session-local state machine.  The
+// parser owns this enum so :focus matching can use the same bounded runtime
+// table without depending on Navigator.
+enum class FormFocusOrigin : uint8_t {
+	None = 0,
+	Mouse,
+	Keyboard,
+	ProgrammaticInternalSmoke,
+};
+
+// Cancellation is intentionally classified rather than exposed as a DOM
+// event.  The Navigator uses this small enum to prove that an armed keyboard
+// activation was discarded before a document/control lifecycle boundary.
+enum class FormFocusCancellationReason : uint8_t {
+	None = 0,
+	Escape,
+	Navigation,
+	Deactivation,
+	StateChange,
+	GenerationMismatch,
+	KeyMismatch,
+};
+
+enum class FormAccessibilityRole : uint8_t {
+	None = 0,
+	Checkbox,
+	Radio,
+	Button,
+	Textbox,
+	PasswordTextbox,
+	Textarea,
+	Select,
+};
+
+enum class FormAccessibilityLabelSource : uint8_t {
+	None = 0,
+	Wrapping,
+	ForId,
+};
+
+enum class FormAccessibilityNameSource : uint8_t {
+	None = 0,
+	LabelWrapping,
+	LabelForId,
+	ButtonText,
+	InputValuePresence,
+	Placeholder,
+	ControlTypeFallback,
+};
+
+enum class FormFocusRevealResult : uint8_t {
+	None = 0,
+	Scroll,
+	Noop,
+	Clamped,
+};
+
 struct FormControlMetadata {
 	FormControlType type = FormControlType::None;
 	uint64_t logicalSerial = 0;
@@ -104,10 +161,55 @@ struct FormRuntimeControlState {
 	bool metadataValid = false;
 };
 
+// Presence-only accessibility evidence for one supported control.  It never
+// stores author text, values, passwords, form names, or form actions.  The
+// fixture ID is populated only for the fixed Phase 2H fixture.
+struct FormAccessibilityRecord {
+	uint64_t logicalSerial = 0;
+	uint64_t documentGeneration = 0;
+	std::string fixtureId;
+	FormAccessibilityRole role = FormAccessibilityRole::None;
+	bool focusable = false;
+	bool focused = false;
+	FormFocusOrigin focusOrigin = FormFocusOrigin::None;
+	bool focusMatch = false;
+	bool focusVisibleMatch = false;
+	bool checked = false;
+	bool disabled = false;
+	bool required = false;
+	bool readOnly = false;
+	bool visible = false;
+	bool labelAssociated = false;
+	FormAccessibilityLabelSource labelSource = FormAccessibilityLabelSource::None;
+	bool accessibleNamePresent = false;
+	FormAccessibilityNameSource accessibleNameSource = FormAccessibilityNameSource::None;
+	bool metadataComplete = false;
+	bool focusRingDrawn = false;
+	bool focusRingClamped = false;
+	FormFocusRevealResult revealResult = FormFocusRevealResult::None;
+	std::string winningSelectorCategory = "none";
+	std::string winningPseudo = "none";
+	uint16_t winningSpecificityId = 0;
+	uint16_t winningSpecificityClass = 0;
+	uint16_t winningSpecificityElement = 0;
+	uint32_t winningSourceOrder = 0;
+};
+
 struct FormRuntimeStateTable {
 	std::array<FormRuntimeControlState, kFormRuntimeControlCap> controls{};
 	size_t count = 0;
 	bool initialized = false;
+	uint64_t documentGeneration = 0;
+	uint64_t focusedLogicalSerial = 0;
+	uint64_t focusedDocumentGeneration = 0;
+	FormFocusOrigin focusOrigin = FormFocusOrigin::None;
+	bool focusValid = false;
+	uint64_t pressedKeyboardLogicalSerial = 0;
+	uint64_t pressedKeyboardDocumentGeneration = 0;
+	uint8_t pressedKeyboardKey = 0; // 32 = Space, 13 = Enter
+	bool keyboardActivationArmed = false;
+	std::array<FormAccessibilityRecord, kFormRuntimeControlCap> accessibilityRecords{};
+	size_t accessibilityRecordCount = 0;
 };
 
 enum class StyleSelectorType : uint8_t {
@@ -249,6 +351,8 @@ enum class CssPseudoClass : uint8_t {
 	Required,
 	ReadOnly,
 	ReadWrite,
+	Focus,
+	FocusVisible,
 };
 
 struct CssNthExpression {
@@ -443,7 +547,12 @@ struct CssDiagnostics {
 	int    readonlyPseudoMatches = 0;
 	int    readwritePseudoParsed = 0;
 	int    readwritePseudoMatches = 0;
+	int    focusPseudoParsed = 0;
+	int    focusPseudoMatches = 0;
+	int    focusVisiblePseudoParsed = 0;
+	int    focusVisiblePseudoMatches = 0;
 	int    checkedRuntimeRecomputations = 0;
+	int    runtimeFocusRecomputations = 0;
 	uint32_t nextSourceOrder = 1;
 	std::string computedStyleEvidence;
 	std::vector<uint64_t> computedStyleEvidenceSerials;
@@ -487,6 +596,40 @@ struct FormsDiagnostics {
 	int  formRuntimeStateResets = 0;
 	int  formHitTargetsRegistered = 0;
 	int  formHitTargetClamps = 0;
+	int  formFocusableControls = 0;
+	int  formFocusChanges = 0;
+	int  formFocusClears = 0;
+	int  formFocusWraps = 0;
+	int  formTabForward = 0;
+	int  formTabBackward = 0;
+	int  formKeyboardActivations = 0;
+	int  formSpaceActivations = 0;
+	int  formEnterActivations = 0;
+	int  formKeyRepeatSuppressed = 0;
+	int  formStaleKeyActivationBlocks = 0;
+	int  formDisabledFocusSkips = 0;
+	int  formHiddenFocusSkips = 0;
+	int  formFocusStateResets = 0;
+	int  formFocusCancelEscape = 0;
+	int  formFocusCancelNavigation = 0;
+	int  formFocusCancelDeactivation = 0;
+	int  formFocusCancelStateChange = 0;
+	int  formFocusCancelGenerationMismatch = 0;
+	int  formFocusCancelKeyMismatch = 0;
+	int  formFocusOriginMouse = 0;
+	int  formFocusOriginKeyboard = 0;
+	int  formFocusVisibleMatches = 0;
+	int  formFocusRingDraws = 0;
+	int  formFocusRingClamps = 0;
+	int  formFocusRevealScrolls = 0;
+	int  formFocusRevealNoops = 0;
+	int  formFocusRevealClamps = 0;
+	int  formAccessibilityRecords = 0;
+	int  formAccessibilityMetadataClamps = 0;
+	int  formAccessibleNamePresent = 0;
+	int  formAccessibleNameMissing = 0;
+	int  formLabelAssociationsValid = 0;
+	int  formLabelAssociationsInvalid = 0;
 	std::string formInteractionMode = "session_local_non_submitting";
 };
 

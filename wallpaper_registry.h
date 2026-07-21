@@ -12,14 +12,6 @@ enum class BackgroundKind {
     SolidColor
 };
 
-// Ownership is intentionally separate from BackgroundKind.  The hosted
-// user-background store can extend the image inventory without making the
-// compiled /system registry mutable.
-enum class BackgroundOwner {
-    BuiltIn,
-    UserImported
-};
-
 enum class BackgroundScaleMode {
     Fill,
     Fit,
@@ -38,10 +30,6 @@ struct BackgroundEntry {
     uint32_t bottomColor;
     uint32_t accentColor;
     uint32_t solidColor;
-    BackgroundOwner owner = BackgroundOwner::BuiltIn;
-    std::string sourceName;
-    std::string contentHash;
-    uint64_t contentSize = 0;
 };
 
 struct WallpaperEntry {
@@ -49,7 +37,6 @@ struct WallpaperEntry {
     std::string displayName;
     std::string fullImagePath;
     std::string thumbnailPath;
-    BackgroundOwner owner = BackgroundOwner::BuiltIn;
 };
 
 struct GradientEntry {
@@ -77,7 +64,6 @@ public:
     static std::string IdForAssetPath(const std::string& assetPath);
     static bool IsGradientId(const std::string& id);
     static const char* KindName(BackgroundKind kind);
-    static const char* OwnerName(BackgroundOwner owner);
     static BackgroundScaleMode ParseScaleMode(const std::string& value);
     static const char* ScaleModeName(BackgroundScaleMode mode);
     static std::string NormalizeScaleModeOrDefault(const std::string& value);

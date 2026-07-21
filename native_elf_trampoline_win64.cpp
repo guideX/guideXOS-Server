@@ -9,10 +9,10 @@ namespace apps {
 gx_result CallNativeElfWin64Entry(NativeElfWin64Entry entry, NativeGxAppContext* context) {
     gx_result result = GX_ERROR_INVALID_ARGUMENT;
     asm volatile(
-        "subq $40, %%rsp\n\t"
+        "subq $32, %%rsp\n\t"
         "movq %[context], %%rcx\n\t"
         "call *%[entry]\n\t"
-        "addq $40, %%rsp\n\t"
+        "addq $32, %%rsp\n\t"
         : "=a"(result)
         : [entry] "r"(entry), [context] "r"(context)
         : "rcx", "rdx", "r8", "r9", "r10", "r11", "memory");
