@@ -3,9 +3,11 @@
 #include "open_dialog.h"
 #include "save_dialog.h"
 #include "desktop_theme.h"
+#include "desktop_service.h"
 #include "gui_protocol.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "logger.h"
+#include "png_codec.h"
 #include "vfs.h"
 
 #include <algorithm>
@@ -1116,11 +1118,13 @@ bool ImageViewer::trySetCurrentImageAsWallpaper() {
         return false;
     }
 
-    ipc::Message msg;
-    msg.type = static_cast<uint32_t>(gui::MsgType::MT_DesktopWallpaperSet);
-    msg.data.assign(s_originalPath.begin(), s_originalPath.end());
-    ipc::Bus::publish("gui.input", std::move(msg), false);
-    setNoticeText("Wallpaper update requested");
+    std::string error;
+    if (!gui::DesktopService::DispatchSetAsDesktopBackground(s_originalPath, "ImageViewer", error)) {
+        setNoticeText(error.empty() ? "Unable to set desktop background" : error);
+        updateDisplayImage();
+        return false;
+    }
+    setNoticeText("Desktop background updated");
     updateDisplayImage();
     return true;
 }

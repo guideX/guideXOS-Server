@@ -150,6 +150,8 @@
     <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
     <ClInclude Include="desktop_wallpaper.h" />
+    <ClInclude Include="background_service.h" />
+    <ClInclude Include="background_store.h" />
     <ClInclude Include="display_options.h" />
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
@@ -343,6 +345,7 @@
     <ClInclude Include="paint.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="png_loader.h" />
+    <ClInclude Include="png_codec.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="right_click_menu.h" />
     <ClInclude Include="sdk\include\guidexos\abi.h" />
@@ -394,6 +397,8 @@
     <ClCompile Include="firewall.cpp" />
     <ClCompile Include="focus_indicator.cpp" />
     <ClCompile Include="fs.cpp" />
+    <ClCompile Include="background_service.cpp" />
+    <ClCompile Include="background_store.cpp" />
     <ClCompile Include="gxapp_container.cpp" />
     <ClCompile Include="gxm_loader.cpp" />
     <ClCompile Include="hd_installer.cpp" />
@@ -579,6 +584,7 @@
     <ClCompile Include="package_manager.cpp" />
     <ClCompile Include="paint.cpp" />
     <ClCompile Include="png_loader.cpp" />
+    <ClCompile Include="png_codec.cpp" />
     <ClCompile Include="process.cpp">
       <ObjectFileName>$(IntDir)process_gxos.obj</ObjectFileName>
     </ClCompile>

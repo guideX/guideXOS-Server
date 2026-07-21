@@ -127,7 +127,7 @@ try {
     $openDialogMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'dialogs::OpenDialog::Show\(0, 0, startPath'
     $openHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'openImageFromDialog\(\)'
     $wallpaperHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'trySetCurrentImageAsWallpaper\(\)'
-    $wallpaperMessageMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'MT_DesktopWallpaperSet'
+    $wallpaperDispatchMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'DesktopService::DispatchSetAsDesktopBackground\(s_originalPath, "ImageViewer"'
     $unsupportedMessageMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'Unsupported image format: only PNG is supported in this version'
     $unsupportedHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'showUnsupportedFormat\(const std::string& path\)'
     $checkerboardMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'drawCheckerboardBackground\(contentLeft, contentTop, contentWidth, contentHeight\)'
@@ -152,7 +152,7 @@ try {
         "viewerZoomControls=$(Format-EvidenceLine $zoomInMatch) | $(Format-EvidenceLine $zoomOutMatch) | $(Format-EvidenceLine $fitMatch) | $(Format-EvidenceLine $actualMatch)",
         "viewerWallpaperControl=$(Format-EvidenceLine $wallpaperControlMatch)",
         "viewerOpenDialogIntegration=$(Format-EvidenceLine $openDialogMatch) | $(Format-EvidenceLine $openHandlerMatch)",
-        "viewerWallpaperIntegration=$(Format-EvidenceLine $wallpaperHandlerMatch) | $(Format-EvidenceLine $wallpaperMessageMatch)",
+        "viewerWallpaperIntegration=$(Format-EvidenceLine $wallpaperHandlerMatch) | $(Format-EvidenceLine $wallpaperDispatchMatch)",
         "viewerUnsupportedFormat=$(Format-EvidenceLine $unsupportedMessageMatch) | $(Format-EvidenceLine $unsupportedHandlerMatch)",
         "viewerCheckerboardBackground=$(Format-EvidenceLine $checkerboardMatch)",
         "viewerTransparencyDetection=$(Format-EvidenceLine $transparentMatch)",

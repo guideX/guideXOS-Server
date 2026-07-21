@@ -19,6 +19,7 @@
 #include "native_app_process_table.h"
 #include "native_elf_executor.h"
 #include "bitmap_font.h"
+#include "background_store.h"
 #include "kernel/core/include/kernel/system_font.h"
 #include "window_renderer.h"
 #include "special_effects.h"
@@ -373,11 +374,11 @@ namespace gxos {
         }
 
         static const BackgroundEntry* resolveConfiguredBackground(const std::string& idOrPath) {
-            const BackgroundEntry* entry = WallpaperRegistry::FindBackgroundById(idOrPath);
+            const BackgroundEntry* entry = BackgroundStore::FindById(idOrPath);
             if (!entry && !idOrPath.empty()) {
                 const std::string mappedId = WallpaperRegistry::IdForAssetPath(idOrPath);
                 if (!mappedId.empty()) {
-                    entry = WallpaperRegistry::FindBackgroundById(mappedId);
+                    entry = BackgroundStore::FindById(mappedId);
                 }
             }
             return entry;
@@ -4562,6 +4563,7 @@ namespace gxos {
             g_gradientTopColor = entry->topColor;
             g_gradientBottomColor = entry->bottomColor;
             g_gradientAccentColor = entry->accentColor;
+            const bool wasUserImported = entry->owner == BackgroundOwner::UserImported;
             Logger::write(LogLevel::Info, std::string("Compositor wallpaper select id=") + g_wallpaperId + " full=" + g_wallpaperPath + " thumb=" + entry->thumbnailPath);
             g_wallpaperImage = ImageAdapter::LoadFromFile(g_wallpaperPath).image;
             if (!g_wallpaperImage) {
@@ -4584,6 +4586,12 @@ namespace gxos {
                 }
             } else {
                 Logger::write(LogLevel::Info, std::string("Compositor wallpaper decode succeeded id=") + g_wallpaperId + " full=" + g_wallpaperPath);
+            }
+            if (wasUserImported && g_wallpaperId != entry->id) {
+                Logger::write(LogLevel::Warn, std::string("[UserBackground] marker=active-fallback missing-id=") + entry->id + " fallback-id=" + g_wallpaperId);
+                g_cfg.wallpaperId = g_wallpaperId;
+                g_cfg.wallpaperPath = g_wallpaperImage ? g_wallpaperPath : std::string();
+                saveDesktopConfig();
             }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             if (g_wallpaperBmp) { DeleteObject(g_wallpaperBmp); g_wallpaperBmp = nullptr; }
@@ -4973,6 +4981,14 @@ namespace gxos {
                 loadWallpaper(s);
                 invalidate(0);
             } break;
+            case MsgType::MT_DesktopBackgroundInventoryChanged: {
+                std::string inventoryError;
+                if (!BackgroundStore::Reload(inventoryError)) {
+                    Logger::write(LogLevel::Warn, "Compositor user background inventory reload failed: " + inventoryError);
+                }
+                publishOut(MsgType::MT_DesktopBackgroundInventoryChanged, s);
+                invalidate(0);
+            } break;
             case MsgType::MT_DesktopConfigReload: {
                 DesktopConfigData cfg;
                 std::string cfgErr;
@@ -5253,13 +5269,29 @@ namespace gxos {
             if (cfgOk) {
                 const std::string savedWallpaperId = cfg.wallpaperId;
                 const std::string savedWallpaperPath = cfg.wallpaperPath;
-                if (!savedWallpaperId.empty()) loadWallpaper(savedWallpaperId);
+                const std::string resolvedWallpaperId = !savedWallpaperId.empty()
+                    ? BackgroundStore::ResolveIdOrDefault(savedWallpaperId)
+                    : std::string();
+                if (!savedWallpaperId.empty()) loadWallpaper(resolvedWallpaperId);
                 else if (!savedWallpaperPath.empty()) loadWallpaper(savedWallpaperPath);
                 else loadWallpaper(WallpaperRegistry::DefaultBackground().id);
-                // Keep the persisted selection intact instead of writing back any
-                // fallback image that may have been used for rendering.
-                g_cfg.wallpaperId = savedWallpaperId;
-                g_cfg.wallpaperPath = savedWallpaperPath;
+                if (!savedWallpaperId.empty() && resolvedWallpaperId != savedWallpaperId) {
+                    Logger::write(LogLevel::Warn, "Compositor persisted wallpaper ID no longer resolves; writing default fallback id=" + resolvedWallpaperId);
+                    g_cfg.wallpaperId = resolvedWallpaperId;
+                    const BackgroundEntry* fallbackEntry = BackgroundStore::FindById(resolvedWallpaperId);
+                    g_cfg.wallpaperPath = fallbackEntry && fallbackEntry->kind == BackgroundKind::Image ? fallbackEntry->fullImagePath : std::string();
+                    DisplayOptionsStoreData fallbackStore = displayOptionsFromDesktopConfig(g_cfg);
+                    std::string fallbackStoreError;
+                    if (!DisplayOptionsStore::Save("display-options.cfg", fallbackStore, fallbackStoreError)) {
+                        Logger::write(LogLevel::Warn, "Compositor fallback selection store write failed: " + fallbackStoreError);
+                    }
+                    saveDesktopConfig();
+                } else {
+                    // Keep the persisted selection intact instead of writing back any
+                    // fallback image that may have been used for rendering.
+                    g_cfg.wallpaperId = savedWallpaperId;
+                    g_cfg.wallpaperPath = savedWallpaperPath;
+                }
                 g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             } else {
                 loadWallpaper(WallpaperRegistry::DefaultBackground().id);

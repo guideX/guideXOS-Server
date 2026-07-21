@@ -55,7 +55,7 @@ namespace gxos { namespace apps {
         constexpr int kFileListScrollbarPad = 2;
         constexpr int kFileListScrollbarMinThumbH = 18;
         constexpr int kWheelScrollRowsPerNotch = 3;
-        constexpr int kContextMenuW = 170;
+        constexpr int kContextMenuW = 230;
         constexpr int kContextMenuItemH = 24;
         constexpr uint64_t kDoubleClickThresholdMs = 450;
 
@@ -67,7 +67,8 @@ namespace gxos { namespace apps {
             PinToDesktop = 1,
             ShowOnDesktop = 2,
             Rename = 3,
-            MoveToTrash = 4
+            MoveToTrash = 4,
+            SetAsDesktopBackground = 5
         };
 
         static const char* contextMenuLabel(ContextMenuAction action) {
@@ -77,6 +78,7 @@ namespace gxos { namespace apps {
                 case ContextMenuAction::ShowOnDesktop: return "Show on Desktop";
                 case ContextMenuAction::Rename: return "Rename";
                 case ContextMenuAction::MoveToTrash: return "Move to Trash";
+                case ContextMenuAction::SetAsDesktopBackground: return "Set as Desktop Background";
                 default: return "";
             }
         }
@@ -1507,6 +1509,13 @@ namespace gxos { namespace apps {
         s_contextMenuOpen = true;
         s_contextMenuActions.clear();
         s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::Open));
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        if (DesktopService::IsSetAsDesktopBackgroundEligible(s_entries[rowIndex].fullPath, s_entries[rowIndex].isDirectory())) {
+            s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::SetAsDesktopBackground));
+            Logger::write(LogLevel::Info, std::string("[ShellActionVisibility] surface=FileExplorer identity=") +
+                DesktopService::SetAsDesktopBackgroundActionIdentity() + " path=" + s_entries[rowIndex].fullPath);
+        }
+#endif
         s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::PinToDesktop));
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         if (s_entries[rowIndex].isDirectory()) {
@@ -1538,6 +1547,17 @@ namespace gxos { namespace apps {
             case ContextMenuAction::ShowOnDesktop: showFolderOnDesktop(); break;
             case ContextMenuAction::Rename: renameSelected(); break;
             case ContextMenuAction::MoveToTrash: showDeleteConfirmation(); break;
+            case ContextMenuAction::SetAsDesktopBackground: {
+                std::string error;
+                if (!DesktopService::DispatchSetAsDesktopBackground(s_entries[s_selectedIndex].fullPath, "FileExplorer", error)) {
+                    s_status = error.empty() ? "Unable to set desktop background" : error;
+                    updateDisplay();
+                } else {
+                    s_status = "Desktop background updated";
+                    updateDisplay();
+                }
+                break;
+            }
             default: break;
         }
         return true;
