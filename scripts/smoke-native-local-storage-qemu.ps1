@@ -162,7 +162,7 @@ if ($testBuilt -and (Test-Path -LiteralPath $testKernel)) {
     Stage-Esp $testEsp $testKernel $bootloader $ramdisk
     $test = Invoke-Qemu $testEsp (Join-Path $runRoot 'native-local-storage.serial.log') `
         (Join-Path $runRoot 'test.stdout.log') (Join-Path $runRoot 'test.stderr.log') `
-        '(?m)^\[native-local-storage-test\]\s+ALL_PASS\s*$' $testTimeout
+        '(?m)^\[native-local-storage-test\]\s+ALL_PASS(?:\s|$|\[)' $testTimeout
 }
 $serial = if ($null -ne $test -and (Test-Path -LiteralPath $test.SerialPath)) {
     Get-Content -LiteralPath $test.SerialPath -Raw
@@ -183,11 +183,15 @@ $summary = [ordered]@{
     'Detach callback value' = Guest-Pass 'Detach callback value'
     'Detach callback count' = Guest-Pass 'Detach callback count'
     'Callback repopulation policy' = Guest-Pass 'Callback repopulation policy'
+    'Detached-thread cleanup' = Guest-Pass 'Detached-thread cleanup'
+    'Index release callback' = Guest-Pass 'Index release callback'
     'Slot-generation reuse' = Guest-Pass 'Slot-generation reuse'
     'Stale-index rejection' = Guest-Pass 'Stale-index rejection'
     'TCB reuse clearing' = Guest-Pass 'TCB reuse clearing'
     'Initial-thread detach' = Guest-Pass 'Initial-thread detach'
     'Runtime shutdown cleanup' = Guest-Pass 'Runtime shutdown cleanup'
+    'Process/runtime teardown' = Guest-Pass 'Process/runtime teardown'
+    'Leak check' = Guest-Pass 'Leak check'
 }
 foreach ($entry in $summary.GetEnumerator()) {
     Write-Host ("{0}: {1}" -f $entry.Key, $(if ($entry.Value) { 'PASS' } else { 'FAIL' }))

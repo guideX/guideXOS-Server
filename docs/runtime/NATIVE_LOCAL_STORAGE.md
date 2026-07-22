@@ -78,9 +78,12 @@ reused.
 
 Get and set require an initialized manager, an attached current context, and a
 currently active generation-valid index. Get writes null to its output on
-failure. Normal get/set do not allocate memory or invoke callbacks. During
-detach they return `Busy`; a set attempted by a detach callback additionally
-records callback failure for the detach result.
+failure. Normal get/set do not allocate memory, acquire the hosted metadata
+mutex, wait, or invoke callbacks. Context values and slot metadata use
+acquire/release accesses on hosted builds. Index release and manager shutdown
+are lifecycle-quiescent operations; callers must not race them with ordinary
+get/set. During detach they return `Busy`; a set attempted by a detach callback
+additionally records callback failure for the detach result.
 
 ## 10. Detach callbacks
 
@@ -101,10 +104,15 @@ not depend on a platform-specific unspecified order.
 
 ## 12. Index release
 
-Release is allowed only when no registered context still holds a non-null
-value at that index. It never invokes the detach callback. If a value remains,
-release returns `Busy`; callers detach or clear contexts first. A stale,
-invalid, uninitialized, or teardown-time release is rejected.
+Release clears every registered context cell at that index and invokes the
+registered callback once for each non-null value, in ascending context-table
+order. The cells are cleared before the first callback. The slot is then
+invalidated and its generation advanced, even when a callback attempted a
+manager set and the result is reported as `CallbackFailed`. Release is a
+bounded, quiescent lifecycle operation; a stale, invalid, uninitialized, or
+teardown-time release is rejected. A release callback is not required to run
+on the context that originally owned the value, so it must not assume current
+thread identity.
 
 ## 13. Thread exit integration
 
@@ -133,10 +141,13 @@ finalizer, or collection path is part of this shutdown operation.
 
 ## 16. Hosted implementation
 
-Hosted metadata transitions use `std::mutex g_metadataMutex`. The lock is not
-held while detach callbacks execute. Thread-local contexts make worker
-isolation direct and allow the tests to exercise the same attach/detach API as
-the runtime. The generic implementation does not use native Windows TLS/FLS.
+Hosted allocation, attach, release, and shutdown transitions use
+`std::mutex g_metadataMutex`; the lock is not held while callbacks execute.
+Ordinary get/set are lock-free with acquire/release metadata and pointer-cell
+accesses, subject to the quiescent release/shutdown contract. Thread-local
+contexts make worker isolation direct and allow the tests to exercise the same
+attach/detach API as the runtime. The generic implementation does not use
+native platform TLS/FLS.
 
 ## 17. Bare-metal implementation
 
@@ -150,20 +161,24 @@ termination detaches before reclaim and retains a force-clear safety guard.
 
 `runtime/tests/guidexos_local_storage_tests.cpp` covers initialization,
 allocation, exhaustion, generation-safe reuse, get/set isolation, callback
-value and order, callback repopulation, worker attach/detach, TCB reuse, and
-shutdown. `scripts/smoke-native-local-storage.ps1` builds/runs the hosted and
-adapter probes and compiles/builds the bare-metal path. The opt-in QEMU test
-is `kernel/core/native_local_storage_qemu_test.cpp`, driven by
-`scripts/smoke-native-local-storage-qemu.ps1`.
+value and order, callback repopulation, index-release callbacks, worker and
+detached-worker attach/detach, TCB reuse, and shutdown. The NativeAOT-shaped
+adapter probe covers the same release/reuse and stale-index behavior.
+`scripts/smoke-native-local-storage.ps1` builds/runs the hosted and adapter
+probes and compiles/builds the bare-metal path. The opt-in QEMU test is
+`kernel/core/native_local_storage_qemu_test.cpp`, driven by
+`scripts/smoke-native-local-storage-qemu.ps1`; its final guest run also checks
+detached-thread cleanup, process/runtime teardown, and the leak marker.
 
 ## 19. Known limitations
 
 The capacity is intentionally eight dynamic indices and 32 contexts. Values
-are opaque pointers, not owning references. The non-current bare-metal
-teardown helper runs callbacks on the current scheduler execution context.
-There is no fiber-specific context migration, wait-free concurrent bare-metal
-metadata protocol, or implicit attachment. These are bounded primitive
-semantics, not a general Windows FLS emulation layer.
+are opaque pointers, not owning references. Release callbacks may execute
+outside the original owner context. The non-current bare-metal teardown helper
+runs callbacks on the current scheduler execution context. There is no
+fiber-specific context migration, wait-free concurrent bare-metal metadata
+protocol, or implicit attachment. These are bounded primitive semantics, not a
+general platform FLS emulation layer.
 
 ## 20. Future generic consumers
 

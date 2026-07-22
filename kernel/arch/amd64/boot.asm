@@ -22,7 +22,7 @@ _start:
     mov ss, ax
     
     ; Set up stack pointer (will be properly configured by bootloader)
-    mov rsp, stack_top
+    mov rsp, boot_stack_top
     
     ; Clear direction flag
     cld
@@ -38,6 +38,8 @@ _start:
 
 section .bss
 align 16
-stack_bottom:
+global boot_stack_bottom
+global boot_stack_top
+boot_stack_bottom:
     resb 16384  ; 16 KB stack
-stack_top:
+boot_stack_top:

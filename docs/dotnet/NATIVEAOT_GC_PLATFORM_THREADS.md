@@ -10,14 +10,15 @@ startup, result capture, join before and after exit, timed join retry, TCB
 generation reuse, stale-handle rejection, detached reclamation, bounded
 multiple workers, wait/timer cleanup, and the existing narrow process-teardown
 policy all passed. This is Outcome A for the generic native thread primitive,
-not activation evidence for NativeAOT GC. The inactive adapter remains the
-only NativeAOT-facing probe.
+not activation evidence for NativeAOT GC. The NativeAOT-facing adapters remain
+inactive probes only.
 
-The GC blockers are unchanged: runtime ThreadStore attachment and managed
-transition state, exact PAL stack/suspension contracts, FLS/TLS behavior,
-critical sections, GC virtual memory, heap/root/write-barrier initialization,
-wait-many/low-memory behavior, and a process-lifetime helper shutdown policy
-still require independent validation.
+The inactive runtime-pack ThreadStore adapter now proves the startup-scoped
+attachment contract, exact stack bounds, current-thread lookup, transition
+sentinels, detach ordering, and bounded shutdown. Collection-safe suspension,
+GC virtual memory, heap/root/write-barrier initialization, wait-many/low-memory
+behavior, and a process-lifetime helper shutdown policy still require
+independent validation.
 
 ## 1. Workstation GC thread requirements
 
@@ -72,12 +73,12 @@ including `PalGetMaximumStackBounds`, `Thread::GcScanRoots`,
 single application-facing finalizer stack byte constant that can be copied
 into the generic Server API.
 
-The guideXOS bare-metal primitive records explicit 4 KiB through 16 KiB
-stack bounds and preserves AMD64 ABI alignment. That is enough for the native
-probe, not evidence that a managed finalizer stack is large or safe enough for
-GC root walking. A future adapter must choose and validate a runtime-specific
-stack policy and publish the bounds to the NativeAOT PAL without exposing the
-Server TCB layout.
+The guideXOS bare-metal primitive records exact TCB-owned bounds and preserves
+AMD64 ABI alignment. The hosted provider uses the matching maximum-reservation
+contract without a guessed range. This is enough for the inactive native
+attachment probe, not evidence that a managed finalizer stack is large or safe
+enough for GC root walking. A future adapter must still validate a
+runtime-specific helper-stack policy without exposing the Server TCB layout.
 
 ## 4. Thread-store and managed-code behavior
 
@@ -169,7 +170,9 @@ The probe:
 6. joins it through the generic completion Event; and
 7. closes the Event and destroys the adapter record.
 
-It has no call to `RhInitialize`, `GC_Initialize`, `RhInitializeFinalization`,
+The separate stack/ThreadStore probe is described in
+[NativeAOT ThreadStore Startup](NATIVEAOT_THREADSTORE_STARTUP.md). It has no
+call to `RhInitialize`, `GC_Initialize`, `RhInitializeFinalization`,
 `ProcessFinalizers`, `RhpCollect`, managed registration, or collection.
 
 ## 9. Remaining GC initialization blockers
@@ -179,8 +182,7 @@ Before the Workstation path can be activated, the platform still needs:
 - GC-owned reserve/commit/decommit/release virtual memory;
 - critical sections/locks and all initialization/destruction ordering;
 - FLS slot allocation and detach callbacks;
-- exact managed stack bounds and AMD64 context/suspension services;
-- real `ThreadStore` attachment for the application and helper threads;
+- AMD64 context/suspension services and collection-safe enumeration;
 - module/type-manager/static/frozen-root registration;
 - collector allocation contexts, write barriers, and card-table setup;
 - optional wait-many/low-memory event behavior;
@@ -194,8 +196,8 @@ not started and collection remains disabled.
 ## Exact next primitive
 
 Following the actual call order, the next independently testable primitive is
-the bounded virtual-memory reserve/commit/decommit/release layer used by
-`GCToOSInterface::Initialize` and Workstation heap segment setup. It should be
-proved outside GC startup before any initialization experiment. Synchronization
-locks remain required immediately after that memory PAL and must be tested as a
+the bounded NativeAOT GC-owned virtual-memory reserve/commit/decommit/release
+and timing layer used by `GCToOSInterface::Initialize` and Workstation heap
+segment setup. It should be proved outside GC startup before any initialization
+experiment. Synchronization locks remain downstream and must be tested as a
 separate generic primitive.

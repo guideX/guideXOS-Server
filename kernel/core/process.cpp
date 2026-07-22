@@ -18,9 +18,12 @@
 #include "runtime/synchronization/guidexos_mutex.h"
 #include "runtime/local_storage/guidexos_local_storage.h"
 #include "runtime/thread/guidexos_native_thread.h"
+#include "runtime/thread/guidexos_native_stack_bounds.h"
 
 #if defined(ARCH_AMD64)
 #include <arch/context_switch.h>
+extern "C" uint8_t boot_stack_bottom[];
+extern "C" uint8_t boot_stack_top[];
 #endif
 
 namespace kernel {
@@ -170,9 +173,14 @@ namespace {
                   &thread == current)) ||
                 (thread.state == ThreadState::Terminated && thread.ready_linked) ||
                 (thread.allocated &&
-                 (thread.stack_base != thread.stack ||
+                 ((&thread == &threads[0]
+                       ? (thread.stack_base != boot_stack_bottom ||
+                          thread.stack_limit != boot_stack_top)
+                       : (thread.stack_base != thread.stack ||
+                          thread.stack_limit > thread.stack + kKernelStackBytes)) ||
                   thread.stack_limit < thread.stack_base ||
-                  thread.stack_limit > thread.stack + kKernelStackBytes))) {
+                  (&thread != &threads[0] &&
+                   thread.stack_limit > thread.stack + kKernelStackBytes)))) {
                 __builtin_trap();
             }
         }
@@ -410,6 +418,28 @@ namespace {
             local_storage_set_attached
         };
         gxos::runtime::installLocalStoragePlatformHooks(&hooks);
+    }
+
+    gxos::runtime::StackBoundsResult stack_bounds_current(
+        void*, gxos::runtime::NativeStackBounds* result) {
+        if (result == nullptr) {
+            return gxos::runtime::StackBoundsResult::InvalidOutput;
+        }
+        if (current == nullptr || !current->allocated) {
+            return gxos::runtime::StackBoundsResult::NoCurrentThread;
+        }
+        result->low = reinterpret_cast<uintptr_t>(current->stack_base);
+        result->high = reinterpret_cast<uintptr_t>(current->stack_limit);
+        result->current = arch::context::get_sp();
+        return gxos::runtime::StackBoundsResult::Success;
+    }
+
+    void install_stack_bounds_hooks() {
+        const gxos::runtime::NativeStackBoundsPlatformHooks hooks = {
+            nullptr,
+            stack_bounds_current
+        };
+        gxos::runtime::installNativeStackBoundsPlatformHooks(&hooks);
     }
 
     KernelThread* lookup_handle(const gxos::runtime::ThreadHandle& handle) {
@@ -811,12 +841,16 @@ void init()
     current->name = "kernel-bootstrap";
     current->state = ThreadState::Running;
     current->allocated = true;
-    current->stack_base = current->stack;
-    current->stack_limit = current->stack + kKernelStackBytes;
+    // kernel_main is still executing on the boot assembly stack.  The
+    // embedded TCB stack is owned by future scheduler occupants and is not a
+    // valid description of the current bootstrap execution stack.
+    current->stack_base = boot_stack_bottom;
+    current->stack_limit = boot_stack_top;
     check_thread_invariants();
     install_wait_hooks();
     install_mutex_hooks();
     install_local_storage_hooks();
+    install_stack_bounds_hooks();
     install_native_thread_hooks();
 #else
     gxos::runtime::scheduler_wait::installSchedulerWaitHooks(nullptr);
@@ -1052,6 +1086,12 @@ bool native_thread_test_snapshot_current(NativeThreadTestSnapshot* snapshot) {
     snapshot->stack_base = reinterpret_cast<uintptr_t>(current->stack_base);
     snapshot->stack_limit = reinterpret_cast<uintptr_t>(current->stack_limit);
     snapshot->stack_pointer = arch::context::get_sp();
+    snapshot->stack_bounds_exact_source =
+        (current == &threads[0])
+            ? (current->stack_base == boot_stack_bottom &&
+               current->stack_limit == boot_stack_top)
+            : (current->stack_base == current->stack &&
+               current->stack_limit <= current->stack + kKernelStackBytes);
     snapshot->initial_stack_pointer = current->initial_stack_pointer;
     snapshot->initial_instruction_pointer = current->initial_instruction_pointer;
     snapshot->initial_rbx = current->initial_rbx;

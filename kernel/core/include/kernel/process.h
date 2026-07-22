@@ -9,6 +9,7 @@
 
 #include "kernel/types.h"
 #include "runtime/synchronization/guidexos_scheduler_wait.h"
+#include "runtime/thread/guidexos_native_stack_bounds.h"
 
 namespace kernel {
 namespace process {
@@ -76,6 +77,7 @@ struct NativeThreadTestSnapshot {
     uintptr_t stack_limit;
     uintptr_t stack_pointer;
     uintptr_t initial_stack_pointer;
+    bool stack_bounds_exact_source;
     uintptr_t initial_instruction_pointer;
     uintptr_t initial_rbx;
     uintptr_t initial_r12;

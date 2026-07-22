@@ -3,99 +3,150 @@
 Status: the bounded dynamic local-storage prerequisite is implemented and
 independently probed. NativeAOT `RhInitialize` remains intentionally gated.
 
-## 1. Matching NativeAOT FLS requirements
+## 1. Source-backed contract
 
-The locked .NET 9.0 NativeAOT Workstation source requires a PAL-managed index
-with allocation, release, per-thread get/set, and detach callback delivery.
-The callback type is a `void*` payload callback. Failure from allocation is
-represented by the out-of-indexes sentinel; get/set operate on the current
-thread's value for the allocated index.
+The locked .NET 9.0 NativeAOT Workstation source uses one process-wide FLS
+index, `g_flsIndex`, to associate the current fiber with the NativeAOT
+`Thread*`. In `PalInit`, the index is allocated once with
+`FlsAlloc(FiberDetachCallback)` before GC configuration, OS-interface, runtime,
+or `ThreadStore` initialization. Allocation failure is the
+`FLS_OUT_OF_INDEXES` sentinel.
 
-## 2. Source call sites
+The callback is exactly `void __stdcall FiberDetachCallback(void*)`. The
+platform API also permits a null callback, but the locked NativeAOT source
+passes this callback so fiber/thread destruction can reach
+`RuntimeThreadShutdown`. The callback checks that its payload still equals the
+current FLS value, then calls the runtime shutdown path for a non-null value.
 
-The matching extracted source has one startup allocation call:
+The source checkout contains no `FlsFree` call for this index. That is distinct
+from the Windows API contract: `FlsFree` releases an index and invokes its
+callback for each fiber with a non-null value. The generic manager and inactive
+adapter therefore prove release cleanup explicitly, but that release path is
+not claimed as a call made by stock NativeAOT.
 
-```text
-Runtime/windows/PalRedhawkMinWin.cpp
-  PalInit -> g_flsIndex = FlsAlloc(FiberDetachCallback)
+Source evidence:
+
+* `out/dotnet/gc-feasibility-baseline/source-extract/src/coreclr/nativeaot/Runtime/windows/PalRedhawkMinWin.cpp:40-57,152-173`;
+* `out/dotnet/gc-feasibility-baseline/source-extract/src/coreclr/nativeaot/Runtime/windows/PalRedhawkMinWin.cpp:176-224`;
+* `out/dotnet/gc-feasibility-baseline/source-extract/src/coreclr/nativeaot/Runtime/startup.cpp:334-359`.
+
+The platform semantics are also described by the official
+[FlsAlloc](https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsalloc),
+[FlsFree](https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsfree),
+and
+[PFLS_CALLBACK_FUNCTION](https://learn.microsoft.com/en-us/windows/win32/api/winnt/nc-winnt-pfls_callback_function)
+documentation.
+
+## 2. Exact source call flow
+
+```mermaid
+flowchart TD
+    A["RhInitialize"] --> B["PalInit"]
+    B --> C["FlsAlloc(FiberDetachCallback)"]
+    C --> D["GCConfig and GCToOSInterface initialization"]
+    D --> E["InitDLL and RuntimeInstance::Initialize"]
+    E --> F["ThreadStore::Create"]
+    F --> G["InitializeGC and later finalization setup"]
+
+    H["ThreadStore::AttachCurrentThread"] --> I["PalAttachThread"]
+    I --> J["FlsGetValue; require NULL"]
+    J --> K["FlsSetValue(g_flsIndex, Thread*)"]
+    K --> L["Thread::Construct and ThreadStore list publication"]
+
+    M["ThreadStore::DetachCurrentThread"] --> N["PalDetachThread"]
+    N --> O["FlsGetValue; validate Thread*"]
+    O --> P["FlsSetValue(g_flsIndex, NULL)"]
+    P --> Q["thread-exit callback and ThreadStore cleanup"]
+
+    R["Home fiber destruction"] --> S["FiberDetachCallback"]
+    S --> T["RuntimeThreadShutdown"]
+    T --> M
 ```
 
-The same source uses `FlsGetValue`/`FlsSetValue` in `PalAttachThread` and
-`PalDetachThread`. `FiberDetachCallback` receives the value, checks it against
-the current FLS value, and calls `RuntimeThreadShutdown` for a non-null value.
-The relevant cleanup reaches `ThreadStore::DetachCurrentThread`.
+`ThreadStore::AttachCurrentThread` calls `PalAttachThread`, constructs the
+thread, and publishes it in the `ThreadStore` list. `PalDetachThread` first
+validates the FLS payload, clears it, and returns success; the subsequent
+`ThreadStore::DetachCurrentThread` path runs the exit callback, removes the
+thread from the list, releases GC-related thread state, and destroys the
+thread. These operations are in
+`nativeaot/Runtime/threadstore.cpp:106-154` and
+`nativeaot/Runtime/windows/PalRedhawkMinWin.cpp:176-224`.
 
-## 3. Startup allocation order
+## 3. Mapping to guideXOS local storage
 
-`PalInit` allocates the callback-bearing index before `RuntimeInstance` and
-`ThreadStore` initialization. The initial NativeAOT thread is attached later
-through the PAL attach path; startup must not assume the fixed proof index is a
-valid substitute for the dynamic allocation contract.
+| Stock source requirement | Generic implementation/evidence |
+| --- | --- |
+| Dynamic index allocation | `allocateLocalStorageIndex`, bounded capacity 8 |
+| Per-context get/set | `LocalStorageContext` with 8 pointer cells |
+| Attach/detach | `attachLocalStorage`, `detachLocalStorage`, and TCB hooks |
+| Detach callback | One staged pass after cells are cleared |
+| Release cleanup | `releaseLocalStorageIndex` clears all registered contexts, calls callbacks, and advances the generation |
+| Stale-handle protection | `{ slot, generation }` validation |
+| NativeAOT-shaped API | `guidexos_nativeaot_fls_adapter.{h,cpp}` maps opaque handles to numeric adapter indexes |
 
-## 4. Required callback semantics
+The manager is runtime-neutral and does not add language-runtime fields to a
+generic TCB. The existing fixed-index proof object in
+`tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp` is a
+separate compatibility path and remains unchanged.
 
-The callback must run once for a non-null value when the owning thread/fiber is
-detached, and it must not lose the value before cleanup receives it. Index
-release must not leave stale per-thread values behind. The generic manager
-clears all cells before invoking callbacks and reports a callback's attempted
-repopulation as `Busy`/`CallbackFailed`, giving this branch deterministic
-bounded behavior for the stock cleanup callback.
+## 4. Callback and release policy
 
-## 5. Mapping to generic guideXOS local storage
+For normal context detach, the manager scans dynamic slots in ascending slot
+order, stages each callback-bearing non-null value, clears all cells, then
+invokes the callbacks outside the hosted metadata lock. A callback that tries
+to set a value during this window receives `Busy`; the detach result records
+`CallbackFailed`. There is no repeated repopulation pass.
 
-`LocalStorageIndex` maps a slot plus generation to a numeric adapter index.
-`LocalStorageContext` is the per-thread value vector. The platform hooks map
-the current scheduler TCB to that context on bare metal; hosted tests use a
-thread-local context. The adapter translates the generic result values to the
-NativeAOT-shaped sentinel and boolean get/set behavior.
+For index release, the manager performs the same clear-before-callback policy
+across all registered contexts, bounded by the 32-context limit. It invokes the
+registered callback once per non-null cell, invalidates the slot, and advances
+the generation even when a callback failure is reported. A release callback
+must not assume it is running on the original value owner. This gives the
+inactive adapter deterministic release behavior without implying that stock
+NativeAOT calls `FlsFree` during ordinary teardown.
 
-## 6. Initial-thread behavior
+## 5. Initial-thread behavior
 
-The adapter probe initializes the manager, attaches the initial thread,
-allocates two indices, and verifies set/get values before detaching. The
-initial thread's values remain isolated from worker values and are cleared by
-its explicit detach.
+The inactive adapter probe initializes the manager, attaches the initial thread,
+allocates two indexes, and verifies set/get values before worker creation. The
+initial values remain isolated from worker values and are cleared by explicit
+detach. The bare-metal QEMU test performs the same bootstrap attach through
+the platform hook.
 
-## 7. Helper-thread behavior
+## 6. Helper and worker behavior
 
 The generic worker wrapper attaches before invoking an entry and detaches after
-return. A newly attached helper/worker context starts null. The adapter probe
-verifies that a worker can set its own values and that its callback observes
-the worker value without changing the initial thread's values. This is only a
-primitive lifecycle probe; it is not proof that NativeAOT's finalizer helper
-thread can start.
+return. A newly attached worker starts with null values. The probe verifies
+worker isolation and callback delivery; the QEMU test additionally exercises a
+detached worker and waits for its callback before checking the initial context.
+This is primitive lifecycle evidence, not proof that the stock NativeAOT
+finalizer helper thread can start.
 
-## 8. Thread detach behavior
+The locked source's finalizer path calls `PalStartFinalizerThread`, and
+`FinalizerStart` calls `ThreadStore::AttachCurrentThread` before waiting. That
+helper lifecycle remains downstream of the current startup gate:
+`nativeaot/Runtime/FinalizerHelpers.cpp:38-43,68-85` and
+`nativeaot/Runtime/windows/PalRedhawkMinWin.cpp:914-917`.
 
-Normal worker exit runs detach before the host/scheduler slot is published as
-reusable. Callbacks receive the staged non-null values exactly once. Bare-metal
-non-current teardown has a separate context API and must use callbacks that do
-not depend on current-thread identity.
-
-## 9. Index release behavior
-
-The adapter's numeric index is released only after all contexts have cleared
-that slot. The generic generation advances on release, and the adapter records
-the next generation handle on reuse. A stale generic handle is rejected even
-when its numeric slot has been reused; a released NativeAOT-shaped index is
-returned to the bounded pool.
-
-## 10. Inactive adapter probe
+## 7. Inactive adapter probe
 
 `runtime/tests/guidexos_nativeaot_fls_adapter_probe.cpp` calls the C adapter
 entry points directly. It covers initial values, two-index allocation, worker
-isolation, callback value/count, detach, release/reuse, stale-index rejection,
-and shutdown. It contains no `RhInitialize`, GC initialization, finalizer, or
-collection call and is not linked into the live NativeAOT proof image.
+isolation, callback value/count, explicit detach, release callbacks,
+generation-safe reuse, stale-index rejection, and shutdown. It contains no
+`RhInitialize`, GC initialization, finalizer, or collection call and is not
+linked into the live NativeAOT proof image.
 
-## 11. Updated startup-readiness status
+## 8. Validation status
 
-The FLS row is now independently PASS for the generic manager, hosted tests,
-bare-metal build, opt-in QEMU test, and inactive adapter probe. The fixed-index
-proof path remains separately compatible. This does not change any startup
-`entered` field: the readiness audit still stops before `RhInitialize`.
+The FLS/local-storage row is PASS for the generic hosted tests, bare-metal
+compile, opt-in QEMU guest, and inactive adapter probe. The final QEMU guest
+also reports PASS for detached-thread cleanup, index-release callback,
+process/runtime teardown, and leak check. The fixed-index proof path remains
+separately compatible. No startup `entered` field changes: the readiness audit
+still stops before `RhInitialize`.
 
-## 12. Exact next blocker or dry-run authorization status
+## 9. Exact next blocker
 
 This branch is Outcome B. The next mandatory blocker is:
 
@@ -103,7 +154,10 @@ This branch is Outcome B. The next mandatory blocker is:
 NativeAOT ThreadStore attachment and exact stack-bound PAL contract
 ```
 
-No NativeAOT startup-and-shutdown dry run is authorized by the FLS result
-alone. The next experiment is to implement and independently prove only that
-ThreadStore/thread registration and stack-bound contract, then rerun the full
-readiness gate. `RhInitialize` remains uncalled in this pass.
+`Thread::Construct` calls `PalGetMaximumStackBounds` and fail-fast handling is
+required if the bounds cannot be reported; the source evidence is
+`nativeaot/Runtime/thread.cpp:287-294`. The next experiment is to implement and
+independently prove only current-thread `ThreadStore` registration,
+stack-bound reporting, generation-safe teardown, and TCB reuse, then rerun the
+full readiness gate. No NativeAOT startup-and-shutdown dry run is authorized by
+the FLS result alone, and `RhInitialize` remains uncalled in this pass.

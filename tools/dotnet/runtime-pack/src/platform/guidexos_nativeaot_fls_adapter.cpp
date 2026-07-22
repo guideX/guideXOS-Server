@@ -24,7 +24,14 @@ void initialize() {
 }
 
 void shutdown() {
-    (void)gxos::runtime::shutdownLocalStorage();
+    const gxos::runtime::LocalStorageResult result =
+        gxos::runtime::shutdownLocalStorage();
+    if (result == gxos::runtime::LocalStorageResult::Success) {
+        for (Index i = 0; i < kCapacity; ++i) {
+            g_handles[i] = gxos::runtime::LocalStorageIndex{};
+            g_handleActive[i] = false;
+        }
+    }
 }
 
 void installPlatformHooks(const gxos::runtime::LocalStoragePlatformHooks* hooks) {
@@ -64,12 +71,13 @@ bool free(Index index) {
     }
     const gxos::runtime::LocalStorageResult result =
         gxos::runtime::releaseLocalStorageIndex(g_handles[index]);
-    if (result != gxos::runtime::LocalStorageResult::Success) {
+    if (result != gxos::runtime::LocalStorageResult::Success &&
+        result != gxos::runtime::LocalStorageResult::CallbackFailed) {
         return false;
     }
     g_handleActive[index] = false;
     g_handles[index] = gxos::runtime::LocalStorageIndex{};
-    return true;
+    return result == gxos::runtime::LocalStorageResult::Success;
 }
 
 void* get(Index index) {
@@ -126,4 +134,3 @@ extern "C" int guidexos_nativeaot_fls_set(unsigned long index, void* value) {
     return guidexos::nativeaot::fls::set(
         static_cast<guidexos::nativeaot::fls::Index>(index), value) ? 1 : 0;
 }
-

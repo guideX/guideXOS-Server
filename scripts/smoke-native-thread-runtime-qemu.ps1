@@ -289,6 +289,16 @@ $summary["Multiple workers"] = "FAIL"
 $summary["Wait/timer cleanup"] = "FAIL"
 $summary["Process teardown"] = "BLOCKED"
 $summary["Stack/TCB leak check"] = "FAIL"
+$summary["Bootstrap bounds available"] = "FAIL"
+$summary["Bootstrap RSP inside bounds"] = "FAIL"
+$summary["Bootstrap bounds exact-source validation"] = "FAIL"
+$summary["Initial-thread exact stack bounds"] = "FAIL"
+$summary["Initial RSP validation"] = "FAIL"
+$summary["Worker bounds available"] = "FAIL"
+$summary["Worker RSP inside bounds"] = "FAIL"
+$summary["Bounds valid during local-storage detach"] = "FAIL"
+$summary["Bounds invalidated before TCB reuse"] = "FAIL"
+$summary["TCB reuse receives new valid bounds"] = "FAIL"
 
 $serialText = if (Test-Path -LiteralPath $testResult.SerialPath) {
     Get-Content -LiteralPath $testResult.SerialPath -Raw

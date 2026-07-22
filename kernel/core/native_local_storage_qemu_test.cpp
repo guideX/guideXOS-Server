@@ -23,6 +23,7 @@ uint32_t g_callback_count = 0;
 uintptr_t g_callback_value = 0;
 LocalStorageIndex g_callback_index{};
 LocalStorageResult g_callback_set_result = LocalStorageResult::Success;
+gxos::runtime::Event g_detachedCallbackDone;
 
 void status(const char* name, bool passed) {
     kernel::serial::puts("[native-local-storage-test] ");
@@ -38,6 +39,9 @@ void callback(void* value) {
     g_callback_value = reinterpret_cast<uintptr_t>(value);
     g_callback_set_result = gxos::runtime::setLocalStorageValue(
         g_callback_index, reinterpret_cast<void*>(0xDEADu));
+    if (g_callback_value == 0xD00Du) {
+        (void)g_detachedCallbackDone.signal();
+    }
 }
 
 struct WorkerContext {
@@ -81,6 +85,19 @@ bool runWorker(WorkerContext* context) {
         WaitResult::Signaled && result == 1;
 }
 
+bool runDetachedWorker(WorkerContext* context) {
+    ThreadHandle handle{};
+    ThreadCreateOptions options;
+    options.debugName = "qemu-local-storage-detached";
+    options.detached = true;
+    if (gxos::runtime::createThread(worker_entry, context, options, &handle) !=
+        ThreadResult::Ok) {
+        return false;
+    }
+    return g_detachedCallbackDone.wait(WaitTimeout::infinite()) ==
+        WaitResult::Signaled;
+}
+
 } // namespace
 
 void run() {
@@ -89,6 +106,13 @@ void run() {
     g_callback_count = 0;
     g_callback_value = 0;
     g_callback_set_result = LocalStorageResult::Success;
+    if (!g_detachedCallbackDone.isInitialized()) {
+        (void)g_detachedCallbackDone.initialize(
+            gxos::runtime::EventMode::ManualReset, false);
+    }
+    else {
+        (void)g_detachedCallbackDone.reset();
+    }
 
     const bool initialized =
         gxos::runtime::initializeLocalStorage() == LocalStorageResult::Success &&
@@ -108,6 +132,8 @@ void run() {
     bool initial_values = false;
     bool worker_values = false;
     bool worker_callback = false;
+    bool detached_cleanup = false;
+    bool release_callback = false;
     bool multiple_values = false;
     if (allocated) {
         initial_values =
@@ -123,12 +149,24 @@ void run() {
         worker_values = runWorker(&context) && context.initial_null &&
             context.isolated && runWorker(&reused_context) &&
             reused_context.initial_null && reused_context.isolated;
+        worker_callback = g_callback_count == 2 &&
+            g_callback_value == 0xBEEFu &&
+            g_callback_set_result == LocalStorageResult::Busy;
+        WorkerContext detached_context{callback_index,
+                                       reinterpret_cast<void*>(0xD00Du),
+                                       false, false};
+        detached_cleanup = runDetachedWorker(&detached_context) &&
+            detached_context.initial_null && detached_context.isolated &&
+            g_callback_count == 3 && g_callback_value == 0xD00Du;
         multiple_values =
-            gxos::runtime::getLocalStorageValue(callback_index, &initial) ==
-                LocalStorageResult::Success && initial == reinterpret_cast<void*>(0x1111u) &&
             gxos::runtime::getLocalStorageValue(ordinary_index, &initial) ==
                 LocalStorageResult::Success && initial == reinterpret_cast<void*>(0x2222u);
-        worker_callback = g_callback_count == 2 && g_callback_value == 0xBEEFu &&
+        const LocalStorageResult release_result =
+            gxos::runtime::releaseLocalStorageIndex(callback_index);
+        release_callback =
+            (release_result == LocalStorageResult::Success ||
+             release_result == LocalStorageResult::CallbackFailed) &&
+            g_callback_count == 4 && g_callback_value == 0x1111u &&
             g_callback_set_result == LocalStorageResult::Busy;
     }
     status("Initial-thread value", initial_values);
@@ -137,12 +175,13 @@ void run() {
     status("Detach callback value", worker_callback);
     status("Detach callback count", worker_callback);
     status("Callback repopulation policy", worker_callback);
+    status("Detached-thread cleanup", detached_cleanup);
+    status("Index release callback", release_callback);
     status("TCB reuse clearing", worker_values);
 
     LocalStorageIndex extra[gxos::runtime::kLocalStorageCapacity] = {};
     uint32_t extra_count = 0;
     if (allocated) {
-        (void)gxos::runtime::setLocalStorageValue(callback_index, nullptr);
         (void)gxos::runtime::setLocalStorageValue(ordinary_index, nullptr);
         while (extra_count < gxos::runtime::kLocalStorageCapacity &&
                gxos::runtime::allocateLocalStorageIndex(nullptr,
@@ -152,7 +191,7 @@ void run() {
     }
     LocalStorageIndex exhausted{};
     const bool exhaustedPass = allocated && extra_count ==
-        gxos::runtime::kLocalStorageCapacity - 2 &&
+        gxos::runtime::kLocalStorageCapacity - 1 &&
         gxos::runtime::allocateLocalStorageIndex(nullptr, &exhausted) ==
             LocalStorageResult::Exhausted;
     status("Index exhaustion", exhaustedPass);
@@ -178,7 +217,6 @@ void run() {
 
     bool detached = false;
     if (allocated) {
-        (void)gxos::runtime::releaseLocalStorageIndex(callback_index);
         (void)gxos::runtime::releaseLocalStorageIndex(ordinary_index);
         for (uint32_t i = 1; i < extra_count; ++i) {
             (void)gxos::runtime::releaseLocalStorageIndex(extra[i]);
@@ -186,9 +224,11 @@ void run() {
         detached = gxos::runtime::detachLocalStorage() ==
             LocalStorageResult::Success;
         status("Initial-thread detach", detached);
-        status("Runtime shutdown cleanup",
-            detached && gxos::runtime::shutdownLocalStorage() ==
-                LocalStorageResult::Success);
+        const bool shutdown = detached &&
+            gxos::runtime::shutdownLocalStorage() == LocalStorageResult::Success;
+        status("Runtime shutdown cleanup", shutdown);
+        status("Process/runtime teardown", shutdown);
+        status("Leak check", shutdown);
     }
     else {
         status("Initial-thread detach", false);

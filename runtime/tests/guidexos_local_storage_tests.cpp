@@ -274,6 +274,28 @@ int main() {
                 "final callback index release failed");
         printPass("Index release/reuse");
 
+        require(gxos::runtime::attachLocalStorage() == LocalStorageResult::Success,
+                "release callback reattach failed");
+        resetCallbackState();
+        LocalStorageIndex releaseCallbackIndex{};
+        require(gxos::runtime::allocateLocalStorageIndex(callback,
+                                                         &releaseCallbackIndex) ==
+                    LocalStorageResult::Success,
+                "release callback index allocation failed");
+        requireSet(releaseCallbackIndex, reinterpret_cast<void*>(0x8888u));
+        void* releasedValue = nullptr;
+        require(gxos::runtime::releaseLocalStorageIndex(releaseCallbackIndex) ==
+                    LocalStorageResult::Success &&
+                g_callbackCount.load(std::memory_order_acquire) == 1 &&
+                g_callbackValues[0] == 0x8888u &&
+                gxos::runtime::getLocalStorageValue(releaseCallbackIndex,
+                                                    &releasedValue) ==
+                    LocalStorageResult::StaleIndex && releasedValue == nullptr,
+                "release callback semantics failed");
+        printPass("Index release callback");
+        require(gxos::runtime::detachLocalStorage() == LocalStorageResult::Success,
+                "release callback detach failed");
+
         require(gxos::runtime::shutdownLocalStorage() == LocalStorageResult::Success,
                 "manager shutdown failed");
         require(gxos::runtime::initializeLocalStorage() == LocalStorageResult::Success &&

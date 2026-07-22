@@ -108,6 +108,7 @@ RUNTIME_SOURCES := ../runtime/synchronization/guidexos_scheduler_wait.cpp ../run
 RUNTIME_SOURCES += ../runtime/memory/guidexos_virtual_memory_region_baremetal.cpp
 RUNTIME_SOURCES += ../runtime/synchronization/guidexos_mutex_baremetal.cpp
 RUNTIME_SOURCES += ../runtime/local_storage/guidexos_local_storage.cpp
+RUNTIME_SOURCES += ../runtime/thread/guidexos_native_stack_bounds.cpp
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))

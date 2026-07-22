@@ -1,6 +1,7 @@
 #include "guidexos_local_storage.h"
 
 #if !defined(GXOS_BARE_METAL)
+#include <atomic>
 #include <mutex>
 #endif
 
@@ -9,15 +10,27 @@ namespace runtime {
 namespace {
 
 struct LocalStorageSlot {
+#if !defined(GXOS_BARE_METAL)
+    std::atomic<LocalStorageDetachCallback> callback;
+    std::atomic<gxos_local_storage_uint32> generation;
+    std::atomic<bool> active;
+#else
     LocalStorageDetachCallback callback;
     gxos_local_storage_uint32 generation;
     bool active;
+#endif
 };
 
 struct LocalStorageDomain {
+#if !defined(GXOS_BARE_METAL)
+    std::atomic<bool> initialized;
+    std::atomic<bool> detaching;
+    std::atomic<bool> callbackFailure;
+#else
     bool initialized;
     bool detaching;
     bool callbackFailure;
+#endif
     gxos_local_storage_uint32 contextCount;
     LocalStorageSlot slots[kLocalStorageCapacity];
     LocalStorageContext* contexts[kLocalStorageMaximumContexts];
@@ -30,8 +43,140 @@ LocalStoragePlatformHooks g_hooks = { nullptr, nullptr, nullptr, nullptr };
 std::mutex g_metadataMutex;
 thread_local LocalStorageContext g_hostContext = {};
 thread_local bool g_hostAttached = false;
-thread_local LocalStorageResult g_hostLastDetach = LocalStorageResult::Success;
 #endif
+
+bool domainInitialized() {
+#if !defined(GXOS_BARE_METAL)
+    return g_domain.initialized.load(std::memory_order_acquire);
+#else
+    return g_domain.initialized;
+#endif
+}
+
+void setDomainInitialized(bool value) {
+#if !defined(GXOS_BARE_METAL)
+    g_domain.initialized.store(value, std::memory_order_release);
+#else
+    g_domain.initialized = value;
+#endif
+}
+
+bool domainDetaching() {
+#if !defined(GXOS_BARE_METAL)
+    return g_domain.detaching.load(std::memory_order_acquire);
+#else
+    return g_domain.detaching;
+#endif
+}
+
+void setDomainDetaching(bool value) {
+#if !defined(GXOS_BARE_METAL)
+    g_domain.detaching.store(value, std::memory_order_release);
+#else
+    g_domain.detaching = value;
+#endif
+}
+
+bool callbackFailureRecorded() {
+#if !defined(GXOS_BARE_METAL)
+    return g_domain.callbackFailure.load(std::memory_order_acquire);
+#else
+    return g_domain.callbackFailure;
+#endif
+}
+
+void recordCallbackFailure() {
+#if !defined(GXOS_BARE_METAL)
+    g_domain.callbackFailure.store(true, std::memory_order_release);
+#else
+    g_domain.callbackFailure = true;
+#endif
+}
+
+void clearCallbackFailure() {
+#if !defined(GXOS_BARE_METAL)
+    g_domain.callbackFailure.store(false, std::memory_order_release);
+#else
+    g_domain.callbackFailure = false;
+#endif
+}
+
+LocalStorageDetachCallback slotCallback(const LocalStorageSlot& slot) {
+#if !defined(GXOS_BARE_METAL)
+    return slot.callback.load(std::memory_order_acquire);
+#else
+    return slot.callback;
+#endif
+}
+
+void setSlotCallback(LocalStorageSlot& slot, LocalStorageDetachCallback callback) {
+#if !defined(GXOS_BARE_METAL)
+    slot.callback.store(callback, std::memory_order_release);
+#else
+    slot.callback = callback;
+#endif
+}
+
+gxos_local_storage_uint32 slotGeneration(const LocalStorageSlot& slot) {
+#if !defined(GXOS_BARE_METAL)
+    return slot.generation.load(std::memory_order_acquire);
+#else
+    return slot.generation;
+#endif
+}
+
+void setSlotGeneration(LocalStorageSlot& slot,
+                       gxos_local_storage_uint32 generation) {
+#if !defined(GXOS_BARE_METAL)
+    slot.generation.store(generation, std::memory_order_release);
+#else
+    slot.generation = generation;
+#endif
+}
+
+bool slotActive(const LocalStorageSlot& slot) {
+#if !defined(GXOS_BARE_METAL)
+    return slot.active.load(std::memory_order_acquire);
+#else
+    return slot.active;
+#endif
+}
+
+void setSlotActive(LocalStorageSlot& slot, bool active) {
+#if !defined(GXOS_BARE_METAL)
+    slot.active.store(active, std::memory_order_release);
+#else
+    slot.active = active;
+#endif
+}
+
+// Values are pointer-sized and fixed in each attached context.  The compiler
+// atomics make release-time scans and lock-free get/set well-defined on hosted
+// builds without changing the freestanding context layout.
+void* loadContextValue(const LocalStorageContext* context,
+                       gxos_local_storage_uint32 slot) {
+    if (context == nullptr || slot >= kLocalStorageCapacity) {
+        return nullptr;
+    }
+#if defined(__GNUC__) || defined(__clang__)
+    return __atomic_load_n(&context->values[slot], __ATOMIC_ACQUIRE);
+#else
+    return context->values[slot];
+#endif
+}
+
+void storeContextValue(LocalStorageContext* context,
+                       gxos_local_storage_uint32 slot,
+                       void* value) {
+    if (context == nullptr || slot >= kLocalStorageCapacity) {
+        return;
+    }
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_store_n(&context->values[slot], value, __ATOMIC_RELEASE);
+#else
+    context->values[slot] = value;
+#endif
+}
 
 bool hasPlatformHooks() {
     return g_hooks.currentContext != nullptr &&
@@ -75,7 +220,7 @@ void clearContext(LocalStorageContext* context) {
         return;
     }
     for (gxos_local_storage_uint32 i = 0; i < kLocalStorageCapacity; ++i) {
-        context->values[i] = nullptr;
+        storeContextValue(context, i, nullptr);
     }
 }
 
@@ -122,7 +267,7 @@ LocalStorageResult validateIndex(LocalStorageIndex index) {
         return LocalStorageResult::Invalid;
     }
     const LocalStorageSlot& slot = g_domain.slots[index.slot];
-    if (!slot.active || slot.generation != index.generation) {
+    if (!slotActive(slot) || slotGeneration(slot) != index.generation) {
         return LocalStorageResult::StaleIndex;
     }
     return LocalStorageResult::Success;
@@ -133,63 +278,66 @@ struct PendingCallback {
     void* value;
 };
 
+LocalStorageResult invokePendingCallbacks(PendingCallback* pending,
+                                          gxos_local_storage_uint32 count) {
+    for (gxos_local_storage_uint32 i = 0; i < count; ++i) {
+        pending[i].callback(pending[i].value);
+    }
+    return callbackFailureRecorded()
+        ? LocalStorageResult::CallbackFailed
+        : LocalStorageResult::Success;
+}
+
 LocalStorageResult detachContextInternal(LocalStorageContext* context) {
 #if !defined(GXOS_BARE_METAL)
     std::unique_lock<std::mutex> lock(g_metadataMutex);
 #endif
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
     if (context == nullptr || findContext(context) < 0) {
         return LocalStorageResult::NoCurrentThread;
     }
-    if (g_domain.detaching) {
+    if (domainDetaching()) {
         return LocalStorageResult::Busy;
     }
 
     PendingCallback pending[kLocalStorageCapacity] = {};
     gxos_local_storage_uint32 pendingCount = 0;
-    g_domain.detaching = true;
-    g_domain.callbackFailure = false;
+    setDomainDetaching(true);
+    clearCallbackFailure();
 
-    // Stage and clear every value before entering user/runtime callbacks.
-    // This gives callbacks a stable snapshot and prevents a callback from
-    // observing a value that is already being torn down.
+    // Stage and clear every value before entering callbacks.  This is the
+    // selected bounded policy for platform teardown callbacks: a callback gets
+    // one pass per non-null slot and repopulation is rejected during the pass.
     for (gxos_local_storage_uint32 i = 0; i < kLocalStorageCapacity; ++i) {
-        pending[i].callback = nullptr;
-        pending[i].value = nullptr;
         const LocalStorageSlot& slot = g_domain.slots[i];
-        if (slot.active && slot.callback != nullptr && context->values[i] != nullptr) {
-            pending[pendingCount].callback = slot.callback;
-            pending[pendingCount].value = context->values[i];
+        const LocalStorageDetachCallback callback = slotCallback(slot);
+        void* value = loadContextValue(context, i);
+        if (slotActive(slot) && callback != nullptr && value != nullptr) {
+            pending[pendingCount].callback = callback;
+            pending[pendingCount].value = value;
             ++pendingCount;
         }
-        context->values[i] = nullptr;
+        storeContextValue(context, i, nullptr);
     }
 
 #if !defined(GXOS_BARE_METAL)
-    // Do not hold the metadata lock while callbacks execute.  The detaching
-    // flag keeps reentrant manager operations deterministic while allowing a
-    // second hosted thread to observe the in-progress teardown safely.
+    // Callbacks may call manager APIs.  They observe detaching and receive
+    // Busy; the metadata mutex is not held across callback code.
     lock.unlock();
 #endif
-
-    // The detaching flag makes allocation/release/get/set report Busy instead
-    // of allowing callback reentrancy to invalidate staged metadata.
-    for (gxos_local_storage_uint32 i = 0; i < pendingCount; ++i) {
-        pending[i].callback(pending[i].value);
-    }
-
+    const LocalStorageResult callbackResult =
+        invokePendingCallbacks(pending, pendingCount);
 #if !defined(GXOS_BARE_METAL)
     lock.lock();
 #endif
-    const bool callbackFailed = g_domain.callbackFailure;
+
     clearContext(context);
     unregisterContext(context);
-    g_domain.detaching = false;
-    g_domain.callbackFailure = false;
-    return callbackFailed ? LocalStorageResult::CallbackFailed
-                          : LocalStorageResult::Success;
+    setDomainDetaching(false);
+    clearCallbackFailure();
+    return callbackResult;
 }
 
 } // namespace
@@ -204,22 +352,22 @@ LocalStorageResult initializeLocalStorage() {
 #if !defined(GXOS_BARE_METAL)
     std::lock_guard<std::mutex> lock(g_metadataMutex);
 #endif
-    if (g_domain.initialized || g_domain.detaching) {
+    if (domainInitialized() || domainDetaching()) {
         return LocalStorageResult::Busy;
     }
-    g_domain.initialized = true;
-    g_domain.callbackFailure = false;
+    setDomainInitialized(true);
+    clearCallbackFailure();
     g_domain.contextCount = 0;
     for (gxos_local_storage_uint32 i = 0; i < kLocalStorageMaximumContexts; ++i) {
         g_domain.contexts[i] = nullptr;
     }
     for (gxos_local_storage_uint32 i = 0; i < kLocalStorageCapacity; ++i) {
         LocalStorageSlot& slot = g_domain.slots[i];
-        if (slot.generation == 0) {
-            slot.generation = 1;
+        if (slotGeneration(slot) == 0) {
+            setSlotGeneration(slot, 1);
         }
-        slot.callback = nullptr;
-        slot.active = false;
+        setSlotCallback(slot, nullptr);
+        setSlotActive(slot, false);
     }
     return LocalStorageResult::Success;
 }
@@ -228,28 +376,28 @@ LocalStorageResult shutdownLocalStorage() {
 #if !defined(GXOS_BARE_METAL)
     std::lock_guard<std::mutex> lock(g_metadataMutex);
 #endif
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
-    if (g_domain.detaching || g_domain.contextCount != 0) {
+    if (domainDetaching() || g_domain.contextCount != 0) {
         return LocalStorageResult::Busy;
     }
     for (gxos_local_storage_uint32 i = 0; i < kLocalStorageCapacity; ++i) {
-        if (g_domain.slots[i].active) {
+        if (slotActive(g_domain.slots[i])) {
             return LocalStorageResult::Busy;
         }
     }
-    // Advance every slot epoch so a pre-shutdown index cannot become valid
-    // after a later initialize/allocate cycle.
     for (gxos_local_storage_uint32 i = 0; i < kLocalStorageCapacity; ++i) {
         LocalStorageSlot& slot = g_domain.slots[i];
-        if (slot.generation != 0xFFFFFFFFu) {
-            ++slot.generation;
+        gxos_local_storage_uint32 generation = slotGeneration(slot);
+        if (generation != 0xFFFFFFFFu) {
+            ++generation;
         }
-        slot.callback = nullptr;
-        slot.active = false;
+        setSlotGeneration(slot, generation);
+        setSlotCallback(slot, nullptr);
+        setSlotActive(slot, false);
     }
-    g_domain.initialized = false;
+    setDomainInitialized(false);
     return LocalStorageResult::Success;
 }
 
@@ -257,14 +405,14 @@ bool isLocalStorageInitialized() {
 #if !defined(GXOS_BARE_METAL)
     std::lock_guard<std::mutex> lock(g_metadataMutex);
 #endif
-    return g_domain.initialized;
+    return domainInitialized();
 }
 
 LocalStorageResult attachLocalStorage() {
 #if !defined(GXOS_BARE_METAL)
     std::lock_guard<std::mutex> lock(g_metadataMutex);
 #endif
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
     LocalStorageContext* context = currentContext();
@@ -272,10 +420,9 @@ LocalStorageResult attachLocalStorage() {
         return LocalStorageResult::NoCurrentThread;
     }
     if (currentAttached()) {
-        if (findContext(context) < 0) {
-            return LocalStorageResult::Busy;
-        }
-        return LocalStorageResult::Success;
+        return findContext(context) < 0
+            ? LocalStorageResult::Busy
+            : LocalStorageResult::Success;
     }
     clearContext(context);
     if (!registerContext(context)) {
@@ -287,19 +434,17 @@ LocalStorageResult attachLocalStorage() {
 
 LocalStorageResult detachLocalStorage() {
     LocalStorageContext* context = currentContext();
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
     if (context == nullptr || !currentAttached()) {
         return LocalStorageResult::NoCurrentThread;
     }
     const LocalStorageResult result = detachContextInternal(context);
-    if (result != LocalStorageResult::Busy && result != LocalStorageResult::NotInitialized) {
+    if (result != LocalStorageResult::Busy &&
+        result != LocalStorageResult::NotInitialized) {
         setCurrentAttached(false);
     }
-#if !defined(GXOS_BARE_METAL)
-    g_hostLastDetach = result;
-#endif
     return result;
 }
 
@@ -311,10 +456,10 @@ LocalStorageResult forceClearLocalStorageContext(LocalStorageContext* context) {
 #if !defined(GXOS_BARE_METAL)
     std::lock_guard<std::mutex> lock(g_metadataMutex);
 #endif
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
-    if (context == nullptr || g_domain.detaching) {
+    if (context == nullptr || domainDetaching()) {
         return LocalStorageResult::Busy;
     }
     clearContext(context);
@@ -331,19 +476,21 @@ LocalStorageResult allocateLocalStorageIndex(LocalStorageDetachCallback callback
 #if !defined(GXOS_BARE_METAL)
     std::lock_guard<std::mutex> lock(g_metadataMutex);
 #endif
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
-    if (g_domain.detaching) {
+    if (domainDetaching()) {
         return LocalStorageResult::Busy;
     }
     for (gxos_local_storage_uint32 i = 0; i < kLocalStorageCapacity; ++i) {
         LocalStorageSlot& slot = g_domain.slots[i];
-        if (!slot.active) {
-            slot.callback = callback;
-            slot.active = true;
+        if (!slotActive(slot)) {
+            // Publish callback metadata before active so lock-free readers
+            // never observe a partially initialized active slot.
+            setSlotCallback(slot, callback);
+            setSlotActive(slot, true);
             result->slot = i;
-            result->generation = slot.generation;
+            result->generation = slotGeneration(slot);
             return LocalStorageResult::Success;
         }
     }
@@ -352,41 +499,70 @@ LocalStorageResult allocateLocalStorageIndex(LocalStorageDetachCallback callback
 
 LocalStorageResult releaseLocalStorageIndex(LocalStorageIndex index) {
 #if !defined(GXOS_BARE_METAL)
-    std::lock_guard<std::mutex> lock(g_metadataMutex);
+    std::unique_lock<std::mutex> lock(g_metadataMutex);
 #endif
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
-    if (g_domain.detaching) {
+    if (domainDetaching()) {
         return LocalStorageResult::Busy;
     }
     const LocalStorageResult validation = validateIndex(index);
     if (validation != LocalStorageResult::Success) {
         return validation;
     }
-    for (gxos_local_storage_uint32 i = 0; i < g_domain.contextCount; ++i) {
-        if (g_domain.contexts[i]->values[index.slot] != nullptr) {
-            return LocalStorageResult::Busy;
-        }
-    }
+
+    // Clear each live context value and invoke the registered callback once
+    // per non-null value.  The operation is bounded by
+    // kLocalStorageMaximumContexts.  A platform adapter may use this as its
+    // index-release cleanup operation.
+    PendingCallback pending[kLocalStorageMaximumContexts] = {};
+    gxos_local_storage_uint32 pendingCount = 0;
     LocalStorageSlot& slot = g_domain.slots[index.slot];
-    slot.active = false;
-    slot.callback = nullptr;
-    if (slot.generation != 0xFFFFFFFFu) {
-        ++slot.generation;
+    const LocalStorageDetachCallback callback = slotCallback(slot);
+    setDomainDetaching(true);
+    clearCallbackFailure();
+    for (gxos_local_storage_uint32 i = 0; i < g_domain.contextCount; ++i) {
+        LocalStorageContext* context = g_domain.contexts[i];
+        void* value = loadContextValue(context, index.slot);
+        if (callback != nullptr && value != nullptr) {
+            pending[pendingCount].callback = callback;
+            pending[pendingCount].value = value;
+            ++pendingCount;
+        }
+        storeContextValue(context, index.slot, nullptr);
     }
-    return LocalStorageResult::Success;
+#if !defined(GXOS_BARE_METAL)
+    lock.unlock();
+#endif
+    const LocalStorageResult callbackResult =
+        invokePendingCallbacks(pending, pendingCount);
+#if !defined(GXOS_BARE_METAL)
+    lock.lock();
+#endif
+    setSlotActive(slot, false);
+    setSlotCallback(slot, nullptr);
+    gxos_local_storage_uint32 generation = slotGeneration(slot);
+    if (generation != 0xFFFFFFFFu) {
+        ++generation;
+    }
+    setSlotGeneration(slot, generation);
+    setDomainDetaching(false);
+    clearCallbackFailure();
+    return callbackResult;
 }
 
+// get/set deliberately do not take g_metadataMutex.  Their contract assumes
+// index release and manager shutdown are quiescent operations, as they are in
+// runtime startup/teardown and the single-CPU guideXOS scheduler.  They still
+// use acquire/release reads for context values and metadata state, so ordinary
+// access performs no allocation, wait, or blocking operation.
 LocalStorageResult setLocalStorageValue(LocalStorageIndex index, void* value) {
-#if !defined(GXOS_BARE_METAL)
-    std::lock_guard<std::mutex> lock(g_metadataMutex);
-#endif
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
-    if (g_domain.detaching) {
-        g_domain.callbackFailure = true;
+    if (domainDetaching()) {
+        recordCallbackFailure();
         return LocalStorageResult::Busy;
     }
     LocalStorageContext* context = currentContext();
@@ -397,7 +573,7 @@ LocalStorageResult setLocalStorageValue(LocalStorageIndex index, void* value) {
     if (validation != LocalStorageResult::Success) {
         return validation;
     }
-    context->values[index.slot] = value;
+    storeContextValue(context, index.slot, value);
     return LocalStorageResult::Success;
 }
 
@@ -406,13 +582,10 @@ LocalStorageResult getLocalStorageValue(LocalStorageIndex index, void** value) {
         return LocalStorageResult::Invalid;
     }
     *value = nullptr;
-#if !defined(GXOS_BARE_METAL)
-    std::lock_guard<std::mutex> lock(g_metadataMutex);
-#endif
-    if (!g_domain.initialized) {
+    if (!domainInitialized()) {
         return LocalStorageResult::NotInitialized;
     }
-    if (g_domain.detaching) {
+    if (domainDetaching()) {
         return LocalStorageResult::Busy;
     }
     LocalStorageContext* context = currentContext();
@@ -423,7 +596,7 @@ LocalStorageResult getLocalStorageValue(LocalStorageIndex index, void** value) {
     if (validation != LocalStorageResult::Success) {
         return validation;
     }
-    *value = context->values[index.slot];
+    *value = loadContextValue(context, index.slot);
     return LocalStorageResult::Success;
 }
 

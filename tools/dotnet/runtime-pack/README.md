@@ -31,6 +31,25 @@ or Windows `FlsGetValue`/`FlsSetValue` thunks. It does not allocate managed
 objects, start a thread, collect, throw a managed exception, or claim support
 for the stock GC/thread-store ABI beyond the exact transition used here.
 
+## Inactive ThreadStore and stack-bound readiness adapter
+
+The isolated `guidexos_nativeaot_threadstore_adapter` and
+`guidexos_nativeaot_stack_bounds_adapter` provide the next startup-boundary
+probe without changing this fixed reverse-P/Invoke path. The adapter owns a
+bounded opaque runtime-thread registry, binds records through the completed
+dynamic FLS manager, stores exact `[low, high)` stack bounds and current RSP,
+initializes the NativeAOT transition sentinels and preemptive state, and
+validates attach, lookup, detach, generation reuse, callback ordering, and
+shutdown. Its worker is an ordinary native worker; it is not the real
+finalizer/helper thread.
+
+The probe remains inactive by design. It never calls `RhInitialize`, creates a
+Workstation heap, enters managed code, starts finalization, allocates through
+the real GC, or triggers collection. The fixed index-zero proof object and its
+reverse-P/Invoke frame behavior remain unchanged. Collection-safe suspension,
+ThreadStore enumeration, and GC-owned virtual-memory integration are still
+outside this adapter; the latter is the single next readiness blocker.
+
 The build also creates an adapted copy of the locked `Runtime.WorkstationGC.lib`
 in the ignored output directory. The matching stock `thread.cpp.obj` and
 `EHHelpers.cpp.obj` members are extracted and their replaced exports are

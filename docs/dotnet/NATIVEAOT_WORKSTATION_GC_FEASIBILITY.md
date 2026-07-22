@@ -1,14 +1,14 @@
 # NativeAOT Workstation GC Feasibility
 
-Status: readiness audit rerun complete; no garbage collection was enabled or executed. Outcome B remains the current status at the NativeAOT ThreadStore/stack-bound boundary. The dynamic FLS/local-storage prerequisite is now PASS. See [NativeAOT GC Startup Readiness](NATIVEAOT_GC_STARTUP_READINESS.md), [NativeAOT GC Platform FLS](NATIVEAOT_GC_PLATFORM_FLS.md), and the machine report at `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`.
+Status: readiness audit rerun complete; no garbage collection was enabled or executed. Outcome B remains the current status with exact stack bounds and minimal ThreadStore attachment complete. The one next mandatory blocker is NativeAOT GC-owned virtual-memory PAL integration. See [NativeAOT GC Startup Readiness](NATIVEAOT_GC_STARTUP_READINESS.md), [NativeAOT ThreadStore Startup](NATIVEAOT_THREADSTORE_STARTUP.md), [Native Stack Bounds](../runtime/NATIVE_STACK_BOUNDS.md), and the machine report at `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`.
 
-Date: 2026-07-18
+Date: 2026-07-19
 
 ## 1. Executive summary
 
 The exact NativeAOT Workstation GC can be mapped reliably to the current AMD64 runtime pack. The archive is a complete linked-in Workstation collector object family, not an allocation-helper-only library, and its GC/EE interface identity matches the locked NativeAOT source. The source contains the normal initialization, synchronous collection, precise stack-map root enumeration, suspension, marking, reclamation, write-barrier, and handle-table paths.
 
-The current guideXOS proof adapter deliberately stops before that surface. It provides a per-thread TLS block, a launch-scoped allocation context, and a fixed image-backed no-collection heap. The new generic local-storage manager and inactive NativeAOT FLS adapter independently prove bounded allocation/release, per-thread values, generation-safe reuse, and detach callbacks. The branch still does not provide the NativeAOT `ThreadStore`/`Thread` registration and exact stack-bound contract, the GC virtual-memory interface, GC events/critical sections, or the context/suspension services required by the stock runtime.
+The current guideXOS proof adapter deliberately stops before that surface. It provides a per-thread TLS block, a launch-scoped allocation context, and a fixed image-backed no-collection heap. The generic local-storage manager, exact stack-bound API, and inactive NativeAOT ThreadStore/FLS adapters now independently prove bounded lifecycle, per-thread values, generation-safe reuse, detach callbacks, exact initial/worker bounds, current-RSP validation, startup-safe registration, and teardown. The branch still does not provide the NativeAOT GC-owned virtual-memory interface or the later collector context/suspension services required by the stock runtime.
 
 The recommended future mode is a separate opt-in Workstation-GC runtime-pack mode:
 
@@ -21,7 +21,7 @@ The recommended future mode is a separate opt-in Workstation-GC runtime-pack mod
 
 The stock source does not support the requested “one managed thread and no finalizer thread” configuration without changing runtime/collector behavior: `InitializeGC` calls `RhInitializeFinalization`, which starts a finalizer thread. The collector itself does not need source modification for the bounded first collection, but the generic Server is missing several generally useful OS primitives.
 
-**Decision: Outcome B — dynamic FLS is complete, but the next NativeAOT startup prerequisite is missing.**
+**Decision: Outcome B — exact stack/ThreadStore readiness is complete, but the next NativeAOT startup prerequisite is missing.**
 
 This pass stops at the platform contract and experiment design. It does not change allocation semantics, enter GC suspension, reclaim objects, or add a GC mode.
 
@@ -199,10 +199,10 @@ Classification: `A` already correct; `B` existing guideXOS facility can be adapt
 | Thread creation | `PalStartFinalizerThread` | no generic primitive | yes: finalizer | isolated thread start plus runtime attach | C |
 | Suspension/resume | `PalSuspendEE`, `SuspendThread`, `ResumeThread` | no GC-safe service | helper thread | bounded AMD64 context/suspension PAL | C |
 | Context capture | `PalGetThreadContext`, `RtlCaptureContext` | no GC-safe service | suspension/hijack | AMD64 context adapter | C |
-| Stack bounds | `PalGetMaximumStackBounds` | not registered | yes | `VirtualQuery`/TEB or explicit bounds | C |
+| Stack bounds | `PalGetMaximumStackBounds` | exact generic PAL plus inactive ThreadStore record | yes | `VirtualQuery`/TEB or explicit bounds | B/C |
 | TLS/FLS | `PalInit`, `PalAttachThread`, `PalDetachThread` | proof TLS/local FLS exists | yes | adapt TLS to FLS slot/lifetime semantics | B/C |
-| Cooperative/preemptive state | `Thread`, `ThreadStore`, transition helpers | proof frame link only | yes | register real `Thread` and frame | C |
-| Thread-store enumeration | `AttachCurrentThread`, `FOREACH_THREAD` | absent in proof path | yes | use stock `ThreadStore` only for managed threads | C |
+| Cooperative/preemptive state | `Thread`, `ThreadStore`, transition helpers | inactive record starts preemptive with transition sentinels | yes | register real `Thread` and frame | B/C |
+| Thread-store enumeration | `AttachCurrentThread`, `FOREACH_THREAD` | bounded startup-safe registry only | yes for startup; no collection safety claim | use stock `ThreadStore` only for managed threads | B/C |
 | Safe-point/trap/hijack | `RhpTrapThreads`, `Thread::Hijack`, `RhpGcProbe` | no GC trap integration | helper suspension | preserve stock helpers; provide PAL | C |
 | Events | `GCEvent`, `PalCreateEventW`, `SetEvent`, `ResetEvent` | no general event abstraction | yes | bounded auto/manual event wrapper | C |
 | Wait-one/wait-many/timeouts | `GCEvent::Wait`, PAL wait APIs | only isolated host use | yes | finite timeout/alertability wrapper | C |
@@ -242,7 +242,7 @@ The static library has no PE import table. The current proof PE import report is
 
 | API/family | Static source | Current proof PE | Initialization | First collection | Optional/dead in recommended mode | Handling |
 | --- | --- | --- | --- | --- | --- | --- |
-| `FlsAlloc`, `FlsFree`, `FlsGetValue`, `FlsSetValue` | `PalRedhawkMinWin.cpp` | Fixed proof cells remain; bounded generic manager and inactive adapter now pass | live | live for attached threads | none | generic manager plus NativeAOT-shaped adapter; stock startup still gated |
+| `FlsAlloc`, `FlsGetValue`, `FlsSetValue` (`FlsFree` not referenced) | `PalRedhawkMinWin.cpp` | Fixed proof cells remain; bounded generic manager and inactive adapter now pass | live | live for attached threads | index release is not on the matched source path | generic manager plus NativeAOT-shaped adapter; stock startup still gated |
 | `VirtualAlloc`, `VirtualFree` | `gcenv.windows.cpp` | present | live for GC segments | live for commit/expansion | none | separate GC PAL; not image heap |
 | `VirtualQuery` | `PalRedhawkCommon.cpp` | present | live for stack bounds | live if query path used | none | bounded stack query/registered bounds |
 | `VirtualProtect` | `PalRedhawkMinWin.cpp` | not observed in current proof list | setup-dependent | not central | likely optional | use through PAL only |
@@ -288,7 +288,7 @@ The matching runtime has a precise path: `RuntimeInstance` registers code/type m
 
 Conservative scanning is not the first-proof design. The source has a conservative fallback for configured/unknown-signature cases, but `gcConservative` defaults false. Keep it false and use generated stack maps.
 
-The current guideXOS trampoline preserves the AMD64 reverse-P/Invoke ABI and a proof frame link, but it does not create the stock `Thread`, record stack bounds, install stock `PInvokeTransitionFrame` state, or register the current thread in `ThreadStore`. It cannot yet prove that retained `A` would be found by a real collection. The future test should keep `A` as a local used after collection and followed by `GC.KeepAlive(A)`, while temporary arrays are created in a helper scope that returns no reference.
+The current guideXOS trampoline preserves the AMD64 reverse-P/Invoke ABI and a proof frame link, but the inactive adapter does not create a stock `Thread`, install stock `PInvokeTransitionFrame` state, or register the current thread in the live `ThreadStore` startup path. The new bounded record proves only startup-scoped attach/lookup/detach and exact stack facts; it cannot yet prove that retained `A` would be found by a real collection. The future test should keep `A` as a local used after collection and followed by `GC.KeepAlive(A)`, while temporary arrays are created in a helper scope that returns no reference.
 
 ## 11. Thread-suspension requirements
 
@@ -336,15 +336,17 @@ No .NET 7/runtime-generation implementation should be copied into the current pa
 | indexed FLS-like cells | eight local cells | not equivalent to FLS allocation/detach |
 | executable memory | combined reserve/commit/protect/release | not GC segment/decommit/reset policy |
 | native host threads | present | must remain outside ThreadStore |
-| managed thread registration | absent in proof path | required |
+| managed thread registration | inactive minimal ThreadStore adapter | required for live startup |
 | event/wait abstraction | no general GC primitive | missing generic primitive |
 | context capture/suspension | no managed-GC service | missing generic primitive |
-| stack bounds | not registered for managed Thread | required |
+| stack bounds | exact generic PAL + inactive ThreadStore record | required for live startup |
 | module/static registration | proof hydration only | normal startup required |
 | fixed image heap | proven no-collection | preserve; do not pass to stock GC |
 | default inventory | unchanged | must remain unchanged |
 
-This comparison supports Outcome B: the runtime/source design is sound, but generic event/thread-context/VM-facing services are missing at the Server boundary.
+This comparison supports Outcome B: the runtime/source design is sound, exact
+stack/ThreadStore attachment is now proven outside startup, and the next
+mandatory live-startup capability is the GC-owned virtual-memory PAL.
 
 ## 17. Transient `0xC0000409` status
 
@@ -373,14 +375,16 @@ Expected evidence: one collection-count increase; unchanged `A`; a measurable de
 | 1 | Freeze source/ABI manifests and GC surface report | lock/build/scripts | wrong source or renamed ABI | no |
 | 2 | Isolated page/segment memory PAL | runtime-pack `src/platform/*` | granularity, guard, decommit, leaks | possibly VM primitive |
 | 3 | Event/wait/critical-section/timing PAL | runtime-pack platform | timeout, reset, lost signal, deadlock | yes for reusable event |
-| 4 | FLS lifetime and exact stack bounds | runtime-pack platform/entry | stale TLS, wrong thread, bad bounds | possibly TLS/FLS primitive |
-| 5 | Attach app thread to stock ThreadStore | reverse-P/Invoke/startup | missing thread/frame/teardown | runtime-pack-local |
-| 6 | Normal module/type/frozen/static startup | runtime-pack startup/bootstrap | roots before registration | runtime-pack-local |
-| 7 | One-heap WKS initialization, concurrent/background off | runtime-pack config/PAL | finalizer/VM/init failure | thread primitive may be needed |
-| 8 | Collector allocation contexts and barriers | runtime-pack allocator binding | object layout/context/card globals | runtime-pack-local |
-| 9 | Primitive-array precise-root validation | managed proof/runtime diagnostics | missed stack/static roots | runtime-pack-local |
-| 10 | One synchronous collection | managed proof and diagnostics | suspension deadlock, missed A | no new surface if prior work works |
-| 11 | Reclaim/reuse and fresh repeat | proof/scripts | bytes/count/A/B/teardown | no |
+| 4 | FLS lifetime and exact stack bounds | runtime-pack platform/entry | stale TLS, wrong thread, bad bounds | PASS in inactive adapters |
+| 5 | Attach app thread to minimal ThreadStore | runtime-pack platform/entry | missing thread/frame/teardown | PASS in inactive adapter |
+| 6 | GC-owned reserve/commit/decommit/release PAL | runtime-pack platform | granularity, guard, decommit, leaks | next blocker |
+| 7 | Event/wait/critical-section/timing PAL integration | runtime-pack platform | timeout, reset, lost signal, deadlock | downstream of VM PAL |
+| 8 | Normal module/type/frozen/static startup | runtime-pack startup/bootstrap | roots before registration | runtime-pack-local |
+| 9 | One-heap WKS initialization, concurrent/background off | runtime-pack config/PAL | finalizer/VM/init failure | thread primitive may be needed |
+| 10 | Collector allocation contexts and barriers | runtime-pack allocator binding | object layout/context/card globals | runtime-pack-local |
+| 11 | Primitive-array precise-root validation | managed proof/runtime diagnostics | missed stack/static roots | runtime-pack-local |
+| 12 | One synchronous collection | managed proof and diagnostics | suspension deadlock, missed A | no new surface if prior work works |
+| 13 | Reclaim/reuse and fresh repeat | proof/scripts | bytes/count/A/B/teardown | no |
 
 No milestone requires changing generic Server allocation, inventory, compositor, VFS, desktop, or normal launch.
 
@@ -424,31 +428,42 @@ This pass changed none of those files and did not add a public runtime type or a
 
 ## 23. Decision outcome
 
-**Outcome B — Feasible, but generic Server primitives are missing.**
+**Outcome B — Feasible, with exact stack/ThreadStore readiness complete and one next live-startup blocker.**
 
-The exact source and binary identity is established. The linked Workstation GC has a finite, understandable platform surface, a valid one-heap synchronous configuration (with the mandatory finalizer helper), and precise NativeAOT root enumeration. The bounded FLS lifecycle is now independently proven; the missing stack-bound, ThreadStore/thread registration, event/VM integration, and thread-context facilities remain startup gates. No collector-source fork is justified by this audit. No collection was entered and the current no-collection allocator remains the only active allocation implementation.
+The exact source and binary identity is established. The linked Workstation GC has a finite, understandable platform surface, a valid one-heap synchronous configuration (with the mandatory finalizer helper), and precise NativeAOT root enumeration. The bounded FLS lifecycle, exact initial/worker stack bounds, and minimal ThreadStore attachment/lookup/detach lifecycle are independently proven in inactive adapters. The single next mandatory blocker is GC-owned virtual-memory PAL integration; later event, module, finalizer, handle, barrier, and collection-safe suspension work remains downstream. No collector-source fork is justified by this audit. No collection was entered and the current no-collection allocator remains the only active allocation implementation.
 
 ## 24. Exact next experiment
 
-Following the Outcome B rule, implement and prove the next NativeAOT-specific prerequisite: current-thread `ThreadStore` attachment plus exact stack-bound PAL reporting, using the already-proven generic thread/local-storage lifecycle. Keep it outside the live GC startup path until the registration, stack bounds, reuse, and teardown evidence is complete.
+Following the Outcome B rule, implement and prove the one next NativeAOT-specific prerequisite: GC-owned virtual-memory PAL integration for reserve, commit, decommit, release, page/granularity, and timing behavior. Keep it outside the live GC startup path and preserve the exact stack/ThreadStore evidence.
 
 After that native primitive passes, implement only the bounded GC platform-memory and single-thread/event layer required to reach Workstation GC initialization, still without triggering collection. The first real collection remains the section 18 experiment and must wait for initialization-only diagnostics proving the thread store, finalizer helper, module registration, stack bounds, allocation contexts, card-table globals, and GC-owned segments are internally consistent.
 
 Implementation status: the generic hosted/bare-metal event, mutex, VM, thread,
 and local-storage primitives and their inactive NativeAOT probes are available.
+The final local-storage QEMU run passed detached-thread cleanup, release
+callbacks, process/runtime teardown, and leak checks; the final mutex QEMU run
+passed the guest marker and anchored runner parser. These results remain
+primitive evidence and do not authorize live GC startup.
 See [Native local storage](../runtime/NATIVE_LOCAL_STORAGE.md),
-[NativeAOT GC Platform FLS](NATIVEAOT_GC_PLATFORM_FLS.md), and the existing
+[NativeAOT GC Platform FLS](NATIVEAOT_GC_PLATFORM_FLS.md),
+[NativeAOT ThreadStore Startup](NATIVEAOT_THREADSTORE_STARTUP.md),
+[Native Stack Bounds](../runtime/NATIVE_STACK_BOUNDS.md), and the existing
 event/VM/thread platform documents. No GC initialization or collection was
 added in this pass. See the current
 [NativeAOT GC Platform Threads](NATIVEAOT_GC_PLATFORM_THREADS.md) status for
-the ThreadStore follow-up.
+the inactive helper-thread boundary.
 
 ## 25. Current readiness status
 
-The gated 2026-07-18 readiness audit stopped before `RhInitialize`: dynamic
-FLS/local-storage now passes, and the next blocker is NativeAOT ThreadStore
-attachment with exact stack bounds. No live startup or GC dry-run report was
-produced. See
+The gated 2026-07-19 readiness audit stopped before `RhInitialize`: dynamic
+FLS/local-storage, exact stack bounds, and minimal ThreadStore attachment now
+pass, and the one next blocker is NativeAOT GC-owned virtual-memory PAL
+integration. No live startup or GC dry-run report was produced. The retained
+guest artifacts are
+`out/runtime/native-local-storage-qemu-validation/smoke-20260719-215002-880-4189/native-local-storage.serial.log`
+and
+`out/runtime/native-mutex-qemu-validation/smoke-20260719-215440-132-9923/native-mutex.serial.log`.
+See
 [NativeAOT GC Startup Readiness](NATIVEAOT_GC_STARTUP_READINESS.md) for the
 pass/fail matrix and the machine-readable report at
 `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`.

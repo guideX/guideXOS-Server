@@ -94,13 +94,17 @@ int main() {
         std::cout << "Detach callback count: expected=1 observed="
                   << g_callbackCount.load(std::memory_order_acquire) << "\n";
 
-        require(guidexos_nativeaot_fls_set(first, nullptr) == 1 &&
-                guidexos_nativeaot_fls_set(second, nullptr) == 1,
+        require(guidexos_nativeaot_fls_free(first) == 1 &&
+                g_callbackCount.load(std::memory_order_acquire) == 2 &&
+                g_callbackValue.load(std::memory_order_acquire) == 0x1111u &&
+                guidexos_nativeaot_fls_get(first) == nullptr,
+                "adapter release callback failed");
+        std::cout << "Index release callback: PASS\n";
+        require(guidexos_nativeaot_fls_set(second, nullptr) == 1,
                 "initial adapter clear failed");
         require(guidexos_nativeaot_fls_detach_current_thread() == 1,
                 "initial adapter detach failed");
-        require(guidexos_nativeaot_fls_free(first) == 1 &&
-                guidexos_nativeaot_fls_free(second) == 1,
+        require(guidexos_nativeaot_fls_free(second) == 1,
                 "adapter release failed");
         std::cout << "Initial-thread detach: PASS\n";
         std::cout << "Index release: PASS\n";
@@ -130,4 +134,3 @@ int main() {
         return 1;
     }
 }
-

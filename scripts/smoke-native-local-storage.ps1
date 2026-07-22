@@ -56,7 +56,8 @@ foreach ($label in @(
     'Detach callback value', 'Exactly-once detach callback', 'Index exhaustion',
     'Index generation/reuse', 'TCB reuse clearing', 'Detach callback order',
     'Callback iteration semantics', 'Callback repopulation policy',
-    'Callback failure reporting', 'Runtime shutdown cleanup')) {
+    'Callback failure reporting', 'Index release callback',
+    'Runtime shutdown cleanup')) {
     Status $label $(if ($hostedRun -and (ContainsPass $hostedOutput $label)) { 'PASS' } else { 'FAIL' })
 }
 Status 'Hosted local-storage tests' $(if ($hostedRun) { 'PASS' } else { 'FAIL' })
@@ -81,6 +82,7 @@ if ($adapterBuild.ExitCode -eq 0) {
 foreach ($label in @(
     'Initial-thread values', 'Adapter dynamic allocation', 'Worker-thread isolation',
     'Detach callback value', 'Initial-thread detach', 'Index release',
+    'Index release callback',
     'Slot-generation reuse', 'Stale-index rejection')) {
     Status "Adapter $label" $(if ($adapterRun -and (ContainsPass $adapterOutput $label)) { 'PASS' } else { 'FAIL' })
 }
