@@ -167,6 +167,7 @@ namespace gxos { namespace gui {
         static void pumpEvents();
         static void invalidate(uint64_t winId);
         static void sendFocus(uint64_t winId);
+        static void sendFocusChange(uint64_t previousWindow, uint64_t nextWindow);
         static bool handleMouse(int mx, int my, bool down, bool up);
         static void handleMouseCaptureLost();
         static std::string hostedTitleInputStateDiagnostic(int mx, int my);

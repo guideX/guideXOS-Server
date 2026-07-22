@@ -17,7 +17,8 @@ enum {
 
 enum {
     GX_WINDOW_FLAG_RESIZABLE = 1u << 0,
-    GX_WINDOW_FLAG_FIXED_SIZE = 0u
+    GX_WINDOW_FLAG_FIXED_SIZE = 0u,
+    GX_WINDOW_FLAG_CENTERED = 1u << 1
 };
 
 enum {

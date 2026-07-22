@@ -49,7 +49,7 @@ Experimental hosted Native ELF execution status:
 - `build-native-experimental.bat` enables execution for trusted local hosted-runtime validation.
 - Supported: amd64 host, amd64 app, static ET_EXEC, no PT_INTERP, no dynamic linking, no relocations, preferred base maps successfully, guideXOS C ABI v1 (`guidexos-c-abi-v1`) only.
 - Unsupported: ET_DYN/PIE, shared libraries, libc-heavy apps, cross-architecture execution, dynamic linker, and arbitrary host filesystem access.
-- Available host calls: log, get_api_version, request_window, draw_text, draw_rect, wait_for_close, poll_event, file_exists, file_read_all.
+- Available host calls: log, get_api_version, request_window, draw_text, draw_rect, wait_for_close, poll_event, file_exists, file_read_all, request_window_ex, file_read, present_frame, and get_ticks_ms (monotonic milliseconds; uint64_t wrap after 2^64 milliseconds).
 
 ================================================================================
 2. DIRECTORY STRUCTURE

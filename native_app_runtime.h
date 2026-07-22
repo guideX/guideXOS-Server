@@ -51,6 +51,13 @@ enum : int {
 };
 
 enum : int {
+    GX_KEY_LEFT = 37,
+    GX_KEY_UP = 38,
+    GX_KEY_RIGHT = 39,
+    GX_KEY_DOWN = 40
+};
+
+enum : int {
     GX_MOUSE_ACTION_MOVE = 0,
     GX_MOUSE_ACTION_DOWN = 1,
     GX_MOUSE_ACTION_UP = 2,
@@ -92,6 +99,7 @@ struct NativeHostCallTable {
     gx_result (*request_window_ex)(NativeGxAppContext* ctx, const char* title, int width, int height, uint32_t flags, gx_handle* outWindow) = nullptr;
     gx_result (*file_read)(NativeGxAppContext* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) = nullptr;
     gx_result (*present_frame)(NativeGxAppContext* ctx, gx_handle window, int x, int y, int width, int height, uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes) = nullptr;
+    uint64_t (*get_ticks_ms)(NativeGxAppContext* ctx) = nullptr;
 };
 
 enum class NativeAppLifecycleState {

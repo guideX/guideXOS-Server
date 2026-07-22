@@ -31,7 +31,10 @@ constexpr int kMinDrawCoordinate = 0;
 constexpr int kMaxDrawCoordinate = 16384;
 constexpr int kMinDrawSize = 1;
 constexpr int kMaxDrawSize = 4096;
-constexpr uint64_t kWindowCreateTimeoutMs = 500;
+// A compositor can briefly drain queued input/paint work between repeated
+// Native ELF launches. Keep window creation bounded, but allow that queue to
+// clear before reporting a false compositor-unavailable result.
+constexpr uint64_t kWindowCreateTimeoutMs = 5000;
 constexpr int kMinWaitForCloseTimeoutMs = 0;
 constexpr int kMaxWaitForCloseTimeoutMs = 300000;
 constexpr int kMinPollEventTimeoutMs = 0;
@@ -406,6 +409,7 @@ void initializeEvent(gx_event* outEvent) {
 gx_event_type eventTypeForMessage(uint32_t messageType) {
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_Close)) return GX_EVENT_WINDOW_CLOSE;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_SetFocus)) return GX_EVENT_WINDOW_FOCUS;
+    if (messageType == static_cast<uint32_t>(gui::MsgType::MT_ClearFocus)) return GX_EVENT_WINDOW_BLUR;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_InputKey)) return GX_EVENT_KEY;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_InputMouse)) return GX_EVENT_MOUSE;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_RequestFrame)) return GX_EVENT_WINDOW_PAINT;
@@ -450,6 +454,18 @@ uint32_t hostGetApiVersion(NativeGxAppContext* ctx) {
 
     context->lastApiVersionReturned = kGuideXOSNativeApiVersion;
     return kGuideXOSNativeApiVersion;
+}
+
+uint64_t hostGetTicksMs(NativeGxAppContext* ctx) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] get_ticks_ms rejected: invalid app context or host table");
+        return 0;
+    }
+
+    static const std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - epoch).count();
+    return elapsed < 0 ? 0u : static_cast<uint64_t>(elapsed);
 }
 
 gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
@@ -972,10 +988,8 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         }
 
         if (!ownsWindow(*context, window)) {
-            context->lastPollEventResult = GX_ERROR_UNSUPPORTED;
-            Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " poll_event unsupported: encountered event for an unowned window");
-            NativeAppProcessTable::UpdateFromRuntime(*context);
-            return context->lastPollEventResult;
+            Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " poll_event skipped event for an unowned window");
+            continue;
         }
 
         outEvent->type = eventType;
@@ -989,6 +1003,8 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             context->lastPaintHeight = paintHeight;
         } else if (eventType == GX_EVENT_WINDOW_FOCUS) {
             context->focusedOwnedWindow = window;
+        } else if (eventType == GX_EVENT_WINDOW_BLUR) {
+            if (context->focusedOwnedWindow == window) context->focusedOwnedWindow = 0;
         } else if (eventType == GX_EVENT_KEY) {
             outEvent->param1 = keyCode;
             outEvent->param2 = keyAction;
@@ -1155,6 +1171,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.request_window_ex = hostRequestWindowEx;
     context.hostCalls.file_read = hostFileRead;
     context.hostCalls.present_frame = hostPresentFrame;
+    context.hostCalls.get_ticks_ms = hostGetTicksMs;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");

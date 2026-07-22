@@ -64,6 +64,11 @@ static inline gx_result gx_present_frame(gx_app_context* ctx, gx_handle window, 
     return ctx->host->present_frame(ctx, window, x, y, width, height, strideBytes, pixelFormat, pixels, pixelBytes);
 }
 
+static inline uint64_t gx_get_ticks_ms(gx_app_context* ctx) {
+    if (!ctx || !ctx->host || !ctx->host->get_ticks_ms) return 0;
+    return ctx->host->get_ticks_ms(ctx);
+}
+
 static inline gx_result gx_draw_button(gx_app_context* ctx, gx_handle window, gx_rect rect, const char* label, int pressed) {
     gx_result result = gx_draw_panel(ctx, window, rect, pressed ? 0x606060u : 0x404040u);
     if (result != GX_OK) return result;

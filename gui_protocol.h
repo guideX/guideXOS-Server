@@ -42,7 +42,8 @@ namespace gxos {
             MT_DrawTextAtColor = 29,     // payload: <winId>|<x>|<y>|<r>|<g>|<b>|<text>
             MT_DrawImageAnimated = 30,   // payload: DrawImageSpec, path contains {frame}
             MT_WidgetSetIcon = 31,       // payload: <winId>|<widgetId>|<path>
-            MT_DesktopBackgroundInventoryChanged = 32 // payload: active background id
+            MT_DesktopBackgroundInventoryChanged = 32, // payload: active background id
+            MT_ClearFocus = 33                 // payload: window id losing focus
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };
@@ -63,6 +64,7 @@ namespace gxos {
         constexpr uint32_t kFramePresentVersion = 1u;
         constexpr uint32_t kPixelFormatXrgb8888 = 1u;
         constexpr uint32_t kWindowCreateFlagResizable = 1u << 0;
+        constexpr uint32_t kWindowCreateFlagCentered = 1u << 1;
         inline std::vector<uint8_t> packString(const std::string& s) { return std::vector<uint8_t>(s.begin( ), s.end( )); }
         inline std::string unpackString(const std::vector<uint8_t>& d) { return std::string(d.begin( ), d.end( )); }
 

@@ -26,7 +26,7 @@ Currently unsupported:
 - dynamic linker
 - arbitrary host filesystem access
 
-The current host call surface is intentionally small and fixed for this experiment: `log`, `get_api_version`, `request_window`, `draw_text`, `draw_rect`, `wait_for_close`, `poll_event`, `file_exists`, and `file_read_all`. ABI v1 now appends reusable extensions for `request_window_ex` (window flags), chunked `file_read`, and retained `present_frame` (copied XRGB8888 pixels). Existing v1 table offsets are preserved.
+The current host call surface is intentionally small and fixed for this experiment: `log`, `get_api_version`, `request_window`, `draw_text`, `draw_rect`, `wait_for_close`, `poll_event`, `file_exists`, and `file_read_all`. ABI v1 now appends reusable extensions for `request_window_ex` (window flags; `GX_WINDOW_FLAG_CENTERED` centers a new window in the usable desktop area), chunked `file_read`, retained `present_frame` (copied XRGB8888 pixels), and `get_ticks_ms` (monotonic milliseconds from a process-local host epoch). The tick value is `uint64_t` and wraps after 2^64 milliseconds. Existing v1 table offsets are preserved.
 
 ## Build all Native ELF samples
 
