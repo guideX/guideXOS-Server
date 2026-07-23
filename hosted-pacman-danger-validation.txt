@@ -1,0 +1,20 @@
+compositor=found
+cycle=1 launch=True
+capture=D:\dev\pacman\guidexos\captures\pacman-four-ghosts.png
+cycle=1 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-death-danger.png
+cycle=1 escape-during-death-cleanup=True
+cycle=2 launch=False
+cycle=2 collision-1=True
+cycle=2 collision-2=True
+cycle=2 collision-3=True
+cycle=2 game-over=True
+capture=D:\dev\pacman\guidexos\captures\pacman-game-over-danger.png
+cycle=2 restart=False
+cycle=2 escape-after-restart-cleanup=False
+cycle=3 launch=False
+cycle=3 collision=False
+cycle=3 escape-cleanup=False
+zero-owned-windows=True
+retained-frame-present-diagnostics=True
+server-exit-code=-1

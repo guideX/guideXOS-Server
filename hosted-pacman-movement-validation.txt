@@ -1,12 +1,5 @@
 compositor=found
+cycle=1 ghost-collision=False
 cycle=1 moved-capture=D:\dev\pacman\guidexos\captures\pacman-moved.png
 cycle=1 launch-move-escape=pass
-cycle=2 launch-move-escape=pass
-cycle=3 launch-move-escape=pass
-discovery-and-elf-validation=True
-focus-loss-log=False
-focus-return-log=True
-tunnel-diagnostic=False
-escape-diagnostic=True
-zero-window-cleanup=True
 server-exit-code=0
