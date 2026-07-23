@@ -154,3 +154,13 @@ contracts are independently validated.
 The preceding decision is historical. The current 2026-07-22 decision is
 Outcome B: VM lifecycle and registry evidence pass, while exact stock
 Workstation GC PAL symbol binding/import elimination remains outstanding.
+
+## 13. Current exact binding result (2026-07-22)
+
+The VM adapter is now bound through the exact Workstation GC symbols in a
+replacement `gcenv` object. See [NativeAOT Workstation GC Platform Object
+Replacement](NATIVEAOT_WORKSTATION_GC_PLATFORM_OBJECT.md). The adapted archive
+has zero missing or duplicate exact definitions and the inactive hosted
+exact-symbol VM lifecycle passes. Remaining Windows imports are contributed by
+the separate PAL/runtime object family, so this document's historical VM
+primitive result does not authorize collector startup or `RhInitialize`.

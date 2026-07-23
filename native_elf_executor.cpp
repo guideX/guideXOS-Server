@@ -40,6 +40,9 @@ struct NativeElfFaultCaptureState {
     volatile uintptr_t tlsBlock = 0;
     volatile uint64_t tlsBlockSize = 0;
     volatile unsigned long tlsSlot = 0xFFFFFFFFul;
+    volatile uintptr_t stackLow = 0;
+    volatile uintptr_t stackHigh = 0;
+    volatile uintptr_t stackPointer = 0;
 };
 
 NativeElfFaultCaptureState g_nativeElfFaultCapture;
@@ -93,6 +96,8 @@ LONG CALLBACK nativeElfFaultHandler(EXCEPTION_POINTERS* exceptionPointers) {
     appendFaultField(cursor, end, "rbx=", context->Rbx);
     appendFaultField(cursor, end, "rcx=", context->Rcx);
     appendFaultField(cursor, end, "rdx=", context->Rdx);
+    appendFaultField(cursor, end, "rsi=", context->Rsi);
+    appendFaultField(cursor, end, "rdi=", context->Rdi);
     appendFaultField(cursor, end, "r8=", context->R8);
     appendFaultField(cursor, end, "r9=", context->R9);
     appendFaultField(cursor, end, "fsSelector=", context->SegFs);
@@ -104,6 +109,9 @@ LONG CALLBACK nativeElfFaultHandler(EXCEPTION_POINTERS* exceptionPointers) {
     appendFaultField(cursor, end, "tlsBlock=", g_nativeElfFaultCapture.tlsBlock);
     appendFaultField(cursor, end, "tlsBlockSize=", g_nativeElfFaultCapture.tlsBlockSize);
     appendFaultField(cursor, end, "tlsSlot=", g_nativeElfFaultCapture.tlsSlot);
+    appendFaultField(cursor, end, "stackLow=", g_nativeElfFaultCapture.stackLow);
+    appendFaultField(cursor, end, "stackHigh=", g_nativeElfFaultCapture.stackHigh);
+    appendFaultField(cursor, end, "stackPointer=", g_nativeElfFaultCapture.stackPointer);
     appendFaultField(cursor, end, "info0=", record->NumberParameters > 0 ? record->ExceptionInformation[0] : 0);
     appendFaultField(cursor, end, "info1=", record->NumberParameters > 1 ? record->ExceptionInformation[1] : 0);
     if (g_nativeElfFaultCapture.appContext != 0) {
@@ -598,6 +606,16 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
         g_nativeElfFaultCapture.entryAddress = reinterpret_cast<uintptr_t>(entryAddress);
         g_nativeElfFaultCapture.mappedBase = reinterpret_cast<uintptr_t>(mapping.base);
         g_nativeElfFaultCapture.appContext = reinterpret_cast<uintptr_t>(&appContext);
+        unsigned char stackMarker = 0;
+        MEMORY_BASIC_INFORMATION stackMemory = {};
+        if (VirtualQuery(&stackMarker, &stackMemory, sizeof(stackMemory)) == sizeof(stackMemory)) {
+            g_nativeElfFaultCapture.stackLow = reinterpret_cast<uintptr_t>(stackMemory.AllocationBase);
+        }
+        NT_TIB* stackTib = reinterpret_cast<NT_TIB*>(NtCurrentTeb());
+        if (stackTib != nullptr) {
+            g_nativeElfFaultCapture.stackHigh = reinterpret_cast<uintptr_t>(stackTib->StackBase);
+        }
+        g_nativeElfFaultCapture.stackPointer = reinterpret_cast<uintptr_t>(&stackMarker);
         InterlockedExchange(&g_nativeElfFaultCapture.enabled, 1);
     }
 #endif

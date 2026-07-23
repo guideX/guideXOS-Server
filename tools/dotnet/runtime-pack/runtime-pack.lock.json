@@ -88,5 +88,29 @@
     "managedExceptions": false,
     "managedThreads": false
   },
+  "adaptedWorkstationGc": {
+    "identity": "guidexos-workstationgc-platform-object-v1",
+    "strategy": "A-complete-gcenv-object",
+    "sourceCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+    "runtimePackVersion": "9.0.0",
+    "architecture": "amd64",
+    "originalRuntimeIdentifier": "win-x64",
+    "gcInterface": "5.3",
+    "eeInterface": "2",
+    "configuration": "Workstation, one heap, server/background/concurrent disabled",
+    "stockArchiveSha256": "0E6A134AD4150CD604317A47860DAE82EB30AAE4D9CDB14144E06454E7BB1948",
+    "stockArchiveLength": 5802942,
+    "adaptedArchiveSha256": "BA847F225439A8D693CD975CCAACDD01264BDA88BE4F2BBF18D5A0E4DB0F1F52",
+    "adaptedArchiveLength": 5936896,
+    "removedMember": "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+    "replacementObjectSha256": "1F255DFCF8CBEB0A93289F0E160C04DA5410EB41F9B06113186BF9D3438F0CCB",
+    "compiler": "Microsoft C/C++ 19.51.36248 for x64",
+    "runtimeLibrary": "MT_StaticRelease",
+    "exactSymbolCount": 53,
+    "missingDefinitions": 0,
+    "duplicateStrongDefinitions": 0,
+    "reproducible": true,
+    "rhInitializeCalled": false
+  },
   "sourceCommitClaim": "The ILCompiler/runtime-pack source commit is proven by the package nuspec. No guideXOS platform fork commit is claimed; the platform object is local source under this directory."
 }

@@ -486,3 +486,15 @@ stock Workstation GC archive still binds its decorated
 and imports Windows VM entry points. The next experiment is to replace that
 stock GC-owned binding with the guideXOS adapter and re-audit the adapted
 archive. `RhInitialize` and collection remain disabled.
+
+## 27. Current platform-object result (2026-07-22)
+
+The former exact stock VM blocker has been replaced at the archive boundary.
+The detailed evidence is in [NativeAOT Workstation GC Platform Object
+Replacement](NATIVEAOT_WORKSTATION_GC_PLATFORM_OBJECT.md). Strategy A removes
+the Windows `gcenv.windows.cpp.obj` member and supplies all 53 exact symbols
+from `guidexos_gcenv.obj`; two clean builds match. Outcome B remains because
+the separate PAL/runtime object family still contributes 19 Windows import
+candidates, exact Workstation execution is blocked by the current QEMU ABI,
+and HostLog remains an unresolved reproducible access violation. The GC
+startup gate stays closed.

@@ -277,3 +277,14 @@ then reassess the separate GC event/critical-section/startup prerequisites.
 
 Do not call `RhInitialize`, start a finalizer/helper thread, allocate through
 the real GC, or trigger a collection as part of this binding experiment.
+
+## 23. Current platform-object replacement result (2026-07-22)
+
+The exact Workstation GC platform-object experiment is now recorded in
+[NativeAOT Workstation GC Platform Object Replacement](NATIVEAOT_WORKSTATION_GC_PLATFORM_OBJECT.md).
+The stock `gcenv.windows.cpp.obj` member was removed from a reproducibly built
+archive and `guidexos_gcenv.obj` supplies all 53 exact required definitions.
+The generic VM and exact hosted probe pass. The exact archive cannot execute in
+the current MinGW QEMU ABI target, and 19 Windows import candidates remain in
+separate NativeAOT PAL/runtime members. This is Outcome B, not a claim of GC
+startup readiness. `RhInitialize` remains disabled.

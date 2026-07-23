@@ -138,3 +138,19 @@ guideXOS raw-address adapter and remove the stock Windows GC VM object/imports.
 
 This is Outcome B. No GC startup, finalizer/helper startup, managed allocation
 through the real collector, or collection was attempted.
+
+## 27. Current exact platform-object gate (2026-07-22)
+
+See [NativeAOT Workstation GC Platform Object Replacement](NATIVEAOT_WORKSTATION_GC_PLATFORM_OBJECT.md)
+for the archive, symbol, import, hosted-probe, QEMU ABI, and reproducibility
+evidence. The Windows `gcenv` object replacement is PASS: 53/53 exact symbols,
+zero missing, zero duplicate, and no Windows gcenv member. The exact hosted
+probe is PASS. The exact Workstation archive QEMU probe is blocked by the
+MSVC COFF/Win64 versus MinGW ELF/SysV ABI boundary, and 19 Windows import
+candidates remain in `PalRedhawkCommon.cpp.obj`, `PalRedhawkMinWin.cpp.obj`,
+`thread.cpp.obj`, and `time.c.obj`.
+
+The no-collection gate is not ready. HostLog still reproduces an unresolved
+`0xC0000005`; repeated allocation passes after a clean corrected stage. No
+`RhInitialize`, real GC heap, finalizer/helper startup, managed collector
+allocation, or collection was entered.
