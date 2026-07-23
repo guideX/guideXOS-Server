@@ -1147,6 +1147,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::input::mouse_x(),
                     kernel::input::mouse_y(),
                     kernel::input::mouse_buttons());
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+                // The manual VirtIO-GPU presenter is dirty-aware and copies
+                // the normal desktop canvas asynchronously.  The legacy
+                // framebuffer path presents directly from handle_mouse();
+                // explicitly publish the same invalidation for QEMU manual
+                // mode so pointer movement and clicks become visible.
+                kernel::desktop::request_redraw();
+#endif
             }
 
             if (wheelDelta != 0) {
@@ -1154,6 +1162,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::input::mouse_x(),
                     kernel::input::mouse_y(),
                     wheelDelta);
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+                kernel::desktop::request_redraw();
+#endif
             }
             
             // Process buffered keyboard input from PS/2 IRQ handler
@@ -1166,6 +1177,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     } else
 #endif
                     kernel::desktop::handle_key(key);
+#if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
+                    // handle_key() redraws the software canvas directly, but
+                    // the live VirtIO-GPU presenter must also observe an
+                    // invalidation before it will transfer that canvas.
+                    kernel::desktop::request_redraw();
+#endif
                     // handle_key calls draw() internally; redraw cursor overlay
                     kernel::desktop::draw_cursor(
                         kernel::input::mouse_x(),

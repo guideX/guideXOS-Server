@@ -1379,7 +1379,12 @@ static bool render_manual_desktop_surface(
         *blockerOut = nullptr;
     }
 
-    uint32_t* source = kernel::framebuffer::get_draw_buffer();
+    // The normal desktop cursor is intentionally composited into the
+    // front/visible framebuffer after the double-buffered desktop draw.
+    // Manual QEMU presentation must copy that completed canvas, otherwise
+    // the guest processes input but the cursor and resulting UI state remain
+    // absent from the VirtIO-GPU resource.
+    uint32_t* source = kernel::framebuffer::get_buffer();
     const uint32_t sourceWidth = kernel::framebuffer::get_width();
     const uint32_t sourceHeight = kernel::framebuffer::get_height();
     if (!kernel::framebuffer::is_available() || source == nullptr || sourceWidth == 0u || sourceHeight == 0u) {
