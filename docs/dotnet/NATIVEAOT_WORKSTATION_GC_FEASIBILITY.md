@@ -1,6 +1,6 @@
 # NativeAOT Workstation GC Feasibility
 
-Status: readiness audit rerun complete; no garbage collection was enabled or executed. Outcome B remains the current status with exact stack bounds and minimal ThreadStore attachment complete. The one next mandatory blocker is NativeAOT GC-owned virtual-memory PAL integration. See [NativeAOT GC Startup Readiness](NATIVEAOT_GC_STARTUP_READINESS.md), [NativeAOT ThreadStore Startup](NATIVEAOT_THREADSTORE_STARTUP.md), [Native Stack Bounds](../runtime/NATIVE_STACK_BOUNDS.md), and the machine report at `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`.
+Status: current 2026-07-22 readiness update; no garbage collection was enabled or executed. Outcome B remains current. Exact stack bounds, minimal ThreadStore attachment, generic VM lifecycle, raw-address registry, and true bare-metal QEMU VM evidence are complete. The one next mandatory blocker is exact stock Workstation GC `GCToOSInterface::Virtual*` binding/import elimination. See [NativeAOT GC-Owned Virtual Memory Boundary](NATIVEAOT_GC_OWNED_VIRTUAL_MEMORY.md), [NativeAOT GC Startup Readiness](NATIVEAOT_GC_STARTUP_READINESS.md), [NativeAOT ThreadStore Startup](NATIVEAOT_THREADSTORE_STARTUP.md), [Native Stack Bounds](../runtime/NATIVE_STACK_BOUNDS.md), and the machine report at `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`.
 
 Date: 2026-07-19
 
@@ -432,7 +432,7 @@ This pass changed none of those files and did not add a public runtime type or a
 
 The exact source and binary identity is established. The linked Workstation GC has a finite, understandable platform surface, a valid one-heap synchronous configuration (with the mandatory finalizer helper), and precise NativeAOT root enumeration. The bounded FLS lifecycle, exact initial/worker stack bounds, and minimal ThreadStore attachment/lookup/detach lifecycle are independently proven in inactive adapters. The single next mandatory blocker is GC-owned virtual-memory PAL integration; later event, module, finalizer, handle, barrier, and collection-safe suspension work remains downstream. No collector-source fork is justified by this audit. No collection was entered and the current no-collection allocator remains the only active allocation implementation.
 
-## 24. Exact next experiment
+## 24. Historical exact next experiment (2026-07-19)
 
 Following the Outcome B rule, implement and prove the one next NativeAOT-specific prerequisite: GC-owned virtual-memory PAL integration for reserve, commit, decommit, release, page/granularity, and timing behavior. Keep it outside the live GC startup path and preserve the exact stack/ThreadStore evidence.
 
@@ -453,6 +453,12 @@ added in this pass. See the current
 [NativeAOT GC Platform Threads](NATIVEAOT_GC_PLATFORM_THREADS.md) status for
 the inactive helper-thread boundary.
 
+Current 2026-07-22 evidence supersedes the older VM blocker wording: the
+generic VM, raw-address registry, hosted adapter probe, and true bare-metal
+QEMU adapter probe pass. The current single blocker is exact stock
+Workstation GC `GCToOSInterface::Virtual*` binding/import elimination, as
+documented in [NativeAOT GC-Owned Virtual Memory Boundary](NATIVEAOT_GC_OWNED_VIRTUAL_MEMORY.md).
+
 ## 25. Current readiness status
 
 The gated 2026-07-19 readiness audit stopped before `RhInitialize`: dynamic
@@ -467,3 +473,16 @@ See
 [NativeAOT GC Startup Readiness](NATIVEAOT_GC_STARTUP_READINESS.md) for the
 pass/fail matrix and the machine-readable report at
 `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`.
+
+## 26. Current 2026-07-22 decision
+
+The generic VM and adapter work described in the older sections is now
+implemented and evidence-backed: hosted reserve/commit/decommit/recommit and
+true bare-metal QEMU raw-address reserve/commit/decommit/release, bounded
+registry capacity/generation checks, protection, rollback, shutdown, and leak
+checks all pass. The current one blocker is not generic VM behavior; the locked
+stock Workstation GC archive still binds its decorated
+`GCToOSInterface::Virtual*` methods through the Windows `gcenv.windows.cpp.obj`
+and imports Windows VM entry points. The next experiment is to replace that
+stock GC-owned binding with the guideXOS adapter and re-audit the adapted
+archive. `RhInitialize` and collection remain disabled.

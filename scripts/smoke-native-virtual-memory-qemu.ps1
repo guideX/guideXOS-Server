@@ -181,7 +181,15 @@ if (-not $qemuReady) {
         'Reserved-uncommitted fault', 'Decommitted-page fault', 'Release',
         'Range reuse', 'Metadata reuse', 'Stale-handle rejection',
         'Process/address-space teardown', 'Physical-frame leak check',
-        'Mapping leak check')) {
+        'Mapping leak check', 'Adapter initialization', 'PAL reserve',
+        'Reserve data-frame delta', 'Preferred-address behavior',
+        'PAL commit', 'Commit frame delta', 'Adapter PAL decommit',
+        'Decommit frame recovery', 'Adapter recommit zeroing',
+        'Adapter protection mapping', 'Adapter query/page size',
+        'Adapter PAL release', 'Adapter range reuse', 'Adapter registry reuse',
+        'Adapter stale record rejection', 'Adapter failure rollback',
+        'Adapter shutdown', 'Adapter frame leak check',
+        'Adapter mapping leak check', 'Adapter registry leak check')) {
         Write-Host ("{0}: BLOCKED" -f $name)
     }
     Write-Host 'Native VM ALL_PASS: BLOCKED (QEMU/boot assets unavailable)'
@@ -233,6 +241,29 @@ $summary = [ordered]@{
     'Process/address-space teardown' = 'FAIL'
     'Physical-frame leak check' = 'FAIL'
     'Mapping leak check' = 'FAIL'
+    'Adapter initialization' = 'FAIL'
+    'Adapter PAL reserve' = 'FAIL'
+    'Adapter reserve data-frame delta' = 'FAIL'
+    'Adapter preferred-address behavior' = 'FAIL'
+    'Adapter PAL commit' = 'FAIL'
+    'Adapter commit frame delta' = 'FAIL'
+    'Adapter partial commit' = 'FAIL'
+    'Adapter zero initialization' = 'FAIL'
+    'Adapter PAL decommit' = 'FAIL'
+    'Adapter decommit frame recovery' = 'FAIL'
+    'Adapter recommit zeroing' = 'FAIL'
+    'Adapter protection mapping' = 'FAIL'
+    'Adapter query/page size' = 'FAIL'
+    'Adapter PAL release' = 'FAIL'
+    'Adapter range reuse' = 'FAIL'
+    'Adapter registry reuse' = 'FAIL'
+    'Adapter stale record rejection' = 'FAIL'
+    'Adapter failure rollback' = 'FAIL'
+    'Adapter shutdown' = 'FAIL'
+    'Adapter frame leak check' = 'FAIL'
+    'Adapter mapping leak check' = 'FAIL'
+    'Adapter registry leak check' = 'FAIL'
+    'Adapter memory status' = 'FAIL'
     'Native VM ALL_PASS' = if ($test.MarkerFound -and $serial -match '\[native-virtual-memory-test\] ALL_PASS') { 'PASS' } else { 'FAIL' }
 }
 
@@ -264,6 +295,30 @@ $summary['Stale-handle rejection'] = if (Test-SerialPass @('Stale-handle rejecti
 $summary['Process/address-space teardown'] = if (Test-SerialPass @('Process/address-space teardown')) { 'PASS' } else { 'FAIL' }
 $summary['Physical-frame leak check'] = if (Test-SerialPass @('Physical-frame leak check')) { 'PASS' } else { 'FAIL' }
 $summary['Mapping leak check'] = if (Test-SerialPass @('Mapping leak check')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter initialization'] = if (Test-SerialPass @('Adapter initialization')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter PAL reserve'] = if (Test-SerialPass @('PAL reserve')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter reserve data-frame delta'] = if (Test-SerialPass @('Reserve data-frame delta')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter preferred-address behavior'] = if (Test-SerialPass @('Preferred-address behavior')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter PAL commit'] = if (Test-SerialPass @('PAL commit')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter commit frame delta'] = if (Test-SerialPass @('Commit frame delta')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter partial commit'] = if (Test-SerialPass @('Partial commit')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter zero initialization'] = if (Test-SerialPass @('Zero initialization')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter PAL decommit'] = if (Test-SerialPass @('PAL decommit')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter decommit frame recovery'] = if (Test-SerialPass @('Decommit frame recovery')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter recommit zeroing'] = if (Test-SerialPass @('Recommit zeroing')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter protection mapping'] = if (Test-SerialPass @('Protection mapping')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter query/page size'] = if (Test-SerialPass @('Query/page size')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter PAL release'] = if (Test-SerialPass @('PAL release')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter range reuse'] = if (Test-SerialPass @('Range reuse')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter registry reuse'] = if (Test-SerialPass @('Registry reuse')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter stale record rejection'] = if (Test-SerialPass @('Stale record rejection')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter failure rollback'] = if (Test-SerialPass @('Failure rollback')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter shutdown'] = if (Test-SerialPass @('Adapter shutdown')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter frame leak check'] = if (Test-SerialPass @('Frame leak check')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter mapping leak check'] = if (Test-SerialPass @('Mapping leak check')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter registry leak check'] = if (Test-SerialPass @('Registry leak check')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter memory status'] = if (Test-SerialPass @('Memory status')) { 'PASS' } else { 'FAIL' }
+$summary['Adapter GC memory-status wrappers'] = if (Test-SerialPass @('GC memory-status wrappers')) { 'PASS' } else { 'FAIL' }
 
 function Get-SerialMetric([string]$Label) {
     $match = [regex]::Match($serial, '(?m)^\[native-virtual-memory-test\]\s+' +
@@ -272,8 +327,8 @@ function Get-SerialMetric([string]$Label) {
     return 'UNAVAILABLE'
 }
 
-$reservationDelta = Get-SerialMetric 'Reservation data-frame delta'
-$committedDelta = Get-SerialMetric 'Committed-frame delta'
+$reservationDelta = Get-SerialMetric 'Adapter reserve data-frame delta'
+$committedDelta = Get-SerialMetric 'Adapter commit frame delta'
 $releasedDelta = Get-SerialMetric 'Released-frame delta'
 Write-Host ('Reservation data-frame delta: ' + $reservationDelta)
 Write-Host ('Committed-frame delta: ' + $committedDelta)

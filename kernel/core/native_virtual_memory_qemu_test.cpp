@@ -6,6 +6,7 @@
 #include "include/kernel/interrupts.h"
 #include "include/kernel/serial_debug.h"
 #include "runtime/memory/guidexos_virtual_memory_region.h"
+#include "../../tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_virtual_memory_adapter.h"
 
 namespace kernel {
 namespace native_virtual_memory_qemu_test {
@@ -123,10 +124,140 @@ bool reserveAt(VirtualMemoryRegion* region, vm_size size, void* base,
                                                    base, region) == expected;
 }
 
+void runNativeAotAdapterProbe() {
+    using namespace guidexos::nativeaot::virtual_memory;
+
+    const vm_size page = gxos::runtime::virtual_memory::pageSize();
+    status("Adapter initialization",
+           initializeVirtualMemoryAdapter() == VmResult::Ok);
+    const VirtualMemoryStats beforeReserve = gxos::runtime::virtual_memory::stats();
+    void* base = nullptr;
+    const VmResult reserved = reserveVirtualMemoryRaw(
+        page * 4, page, 0, kNumaNodeUndefined, &base);
+    const VirtualMemoryStats afterReserve = gxos::runtime::virtual_memory::stats();
+    status("PAL reserve", reserved == VmResult::Ok && base != nullptr);
+    metric("Adapter reserve data-frame delta",
+           afterReserve.regionOwnedFrames - beforeReserve.regionOwnedFrames);
+    status("Reserve data-frame delta",
+           reserved == VmResult::Ok &&
+           afterReserve.regionOwnedFrames == beforeReserve.regionOwnedFrames);
+
+    ReservationDiagnostics oldDiagnostics{};
+    const bool diagnosed = queryReservationDiagnostics(base, &oldDiagnostics);
+    status("Registry ownership record", diagnosed && oldDiagnostics.active);
+    status("Query/page size", getPageSize() == page && getAllocationGranularity() >= page);
+
+    const VirtualMemoryStats beforeCommit = gxos::runtime::virtual_memory::stats();
+    const bool committed = reserved == VmResult::Ok &&
+        commitVirtualMemoryRaw(base, page) &&
+        commitVirtualMemoryRaw(static_cast<uint8_t*>(base) + page * 2, page);
+    const VirtualMemoryStats afterCommit = gxos::runtime::virtual_memory::stats();
+    status("PAL commit", committed);
+    status("Partial commit", committed);
+    metric("Adapter commit frame delta",
+           afterCommit.regionOwnedFrames - beforeCommit.regionOwnedFrames);
+    status("Commit frame delta", committed &&
+           afterCommit.regionOwnedFrames >= beforeCommit.regionOwnedFrames);
+    bool zeroInitialized = true;
+    if (committed) {
+        uint8_t* bytes = static_cast<uint8_t*>(base);
+        for (vm_size index = 0; index < page; ++index) {
+            zeroInitialized = zeroInitialized && bytes[index] == 0 &&
+                bytes[index + page * 2] == 0;
+        }
+        bytes[0] = 0x2D;
+        bytes[page * 2] = 0x6E;
+    }
+    status("Zero initialization", zeroInitialized);
+
+    const VirtualMemoryStats beforeDecommit = gxos::runtime::virtual_memory::stats();
+    const bool decommitted = reserved == VmResult::Ok &&
+        decommitVirtualMemoryRaw(base, page);
+    VirtualMemoryInfo decommittedInfo{};
+    const bool decommitQuery = decommitted &&
+        queryVirtualMemoryRaw(base, &decommittedInfo) == VmResult::Ok &&
+        decommittedInfo.reserved && !decommittedInfo.committed &&
+        !decommittedInfo.mappingPresent;
+    const VirtualMemoryStats afterDecommit = gxos::runtime::virtual_memory::stats();
+    status("PAL decommit", decommitted);
+    status("Decommit query", decommitQuery);
+    status("Decommit frame recovery", decommitted &&
+           afterDecommit.regionOwnedFrames < beforeDecommit.regionOwnedFrames);
+    const bool recommitted = decommitted && commitVirtualMemoryRaw(base, page);
+    bool recommitZero = recommitted;
+    if (recommitted) {
+        const uint8_t* bytes = static_cast<const uint8_t*>(base);
+        for (vm_size index = 0; index < page; ++index) recommitZero = recommitZero && bytes[index] == 0;
+    }
+    status("Recommit zeroing", recommitZero);
+
+    const bool protectedPage = protectVirtualMemoryRaw(
+        static_cast<uint8_t*>(base) + page * 2, page,
+        MemoryProtection::ReadOnly);
+    VirtualMemoryInfo protectedInfo{};
+    const bool protection = protectedPage && queryVirtualMemoryRaw(
+        static_cast<uint8_t*>(base) + page * 2, &protectedInfo) == VmResult::Ok &&
+        protectedInfo.committed && protectedInfo.mappingPresent &&
+        protectedInfo.protection == MemoryProtection::ReadOnly;
+    status("Protection mapping", protection);
+    status("Protection mapping result", protectedPage);
+    status("Protection restore", protectVirtualMemoryRaw(
+        static_cast<uint8_t*>(base) + page * 2, page,
+        MemoryProtection::ReadWrite));
+    status("Reset/discard status", resetVirtualMemoryRaw(base, page, false) ==
+           VmResult::Unsupported);
+    MemoryStatus memoryStatus{};
+    const bool memoryAvailable = getMemoryStatus(0, &memoryStatus);
+    status("Memory status", memoryAvailable);
+    bool restricted = false;
+    nativeaot_vm_uint32 memoryLoad = 0;
+    nativeaot_vm_uint64 availablePhysical = 0;
+    nativeaot_vm_uint64 availablePageFile = 0;
+    gcGetMemoryStatus(0, &memoryLoad, &availablePhysical, &availablePageFile);
+    status("GC memory-status wrappers",
+           memoryAvailable && gcGetVirtualMemoryLimit() != 0 &&
+           gcGetPageSize() == page &&
+           gcGetPhysicalMemoryLimit(&restricted) == memoryStatus.physicalLimit &&
+           !restricted && memoryLoad <= 100 &&
+           availablePhysical <= memoryStatus.physicalLimit &&
+           availablePageFile <= memoryStatus.physicalLimit);
+
+    const bool crossRange = !commitVirtualMemoryRaw(base, page * 5);
+    status("Failure rollback", crossRange);
+    const void* oldBase = base;
+    const bool released = releaseVirtualMemoryRaw(base, page * 4);
+    status("PAL release", released);
+    status("Release", released);
+    status("Mapping leak check", released &&
+           gxos::runtime::virtual_memory::stats().mappingCount ==
+               beforeReserve.mappingCount);
+    status("Frame leak check", released &&
+           gxos::runtime::virtual_memory::stats().regionOwnedFrames ==
+               beforeReserve.regionOwnedFrames);
+
+    void* reused = nullptr;
+    const bool preferredReuse = reserveVirtualMemoryAt(
+        page * 4, page, const_cast<void*>(oldBase), 0,
+        kNumaNodeUndefined, &reused) == VmResult::Ok && reused == oldBase;
+    ReservationDiagnostics newDiagnostics{};
+    const bool registryReuse = preferredReuse &&
+        queryReservationDiagnostics(reused, &newDiagnostics) &&
+        newDiagnostics.reservationGeneration != oldDiagnostics.reservationGeneration;
+    status("Preferred-address behavior", preferredReuse);
+    status("Range reuse", preferredReuse && releaseVirtualMemoryRaw(reused, page * 4));
+    status("Registry reuse", registryReuse);
+    status("Stale record rejection", !reservationIdentityIsActive(
+        const_cast<void*>(oldBase), oldDiagnostics.reservationGeneration));
+
+    status("Adapter shutdown", shutdownVirtualMemoryAdapter() == VmResult::Ok);
+    status("Registry leak check", registryStats().liveReservations == 0);
+}
+
 } // namespace
 
 void run() {
     kernel::serial::puts("[native-virtual-memory-test] BEGIN\n");
+    runNativeAotAdapterProbe();
     const vm_size page = gxos::runtime::virtual_memory::pageSize();
     const VirtualMemoryStats initial = gxos::runtime::virtual_memory::stats();
     status("Initial metadata", kernel::memory::address_space::isInitialized() &&

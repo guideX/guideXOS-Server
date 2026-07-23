@@ -1,8 +1,8 @@
 # NativeAOT Workstation GC Startup Readiness
 
-Status: gated readiness audit rerun complete. The bounded runtime-neutral FLS/local-storage, exact stack-bound, and minimal ThreadStore prerequisites are PASS. The collector was not started. The audit result is Outcome B: one next NativeAOT startup prerequisite remains at GC-owned virtual-memory PAL integration.
+Status: current gate updated 2026-07-22. The bounded runtime-neutral FLS/local-storage, exact stack-bound, minimal ThreadStore, generic VM, raw-address registry, and true bare-metal VM lifecycle prerequisites are PASS. The collector was not started. Current result: Outcome B, with one remaining prerequisite—exact stock Workstation GC `GCToOSInterface::Virtual*` binding/import elimination.
 
-Date: 2026-07-19
+Date: 2026-07-22; the historical 2026-07-19 audit remains preserved below.
 
 Machine-readable result: `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`
 
@@ -10,7 +10,7 @@ Machine-readable result: `out/dotnet/gc-startup-dry-run/readiness/gc-startup-rea
 
 This audit targets the exact locked .NET 9.0 NativeAOT Workstation GC and the current guideXOS AMD64 experimental branch. It validates the runtime-pack lock, source identity, normal and experimental Server baselines, existing no-collection proofs, and the generic event, virtual-memory, thread, mutex, and QEMU regressions. The final local-storage guest artifact is `out/runtime/native-local-storage-qemu-validation/smoke-20260719-215002-880-4189/native-local-storage.serial.log`; the final mutex artifact is `out/runtime/native-mutex-qemu-validation/smoke-20260719-215440-132-9923/native-mutex.serial.log`.
 
-The live startup dry run is permitted only after every mandatory prerequisite is proven. Exact initial/worker stack bounds and startup-safe ThreadStore attachment now pass through an inactive runtime-pack adapter. NativeAOT GC-owned virtual-memory PAL integration is the single next mandatory blocker, so this audit still stops before `RhInitialize`. No startup tracing mode was added, and `NATIVEAOT_GC_STARTUP_DRY_RUN.md` was intentionally not created.
+The live startup dry run is permitted only after every mandatory prerequisite is proven. Exact initial/worker stack bounds, startup-safe ThreadStore attachment, and the generic VM/adapter lifecycle now pass through inactive probes. Exact stock Workstation GC PAL binding is still unproven, so this audit stops before `RhInitialize`. No startup tracing mode was added, and `NATIVEAOT_GC_STARTUP_DRY_RUN.md` was intentionally not created.
 
 ## Exact stock startup order
 
@@ -64,7 +64,7 @@ Relevant source evidence is in the matching extracted checkout under `out/dotnet
 | Startup-safe thread enumeration | PASS | Yes | Yes | Inactive adapter | Yes | Bounded mutex-protected registry/count only; this is not collection-safe enumeration. |
 | Collection-safe suspension/enumeration | BLOCKED | No | No | No | No | Explicitly outside startup attachment scope; no suspension, hijacking, or collection-safe snapshot is claimed. |
 | GC event/critical-section startup lock | BLOCKED | Generic primitive only | Yes for generic event | No | Yes | Generic event/lock evidence passes; NativeAOT platform startup wiring remains downstream of the next GC PAL integration. |
-| GC-owned virtual memory/timing | FAIL | Generic primitive only | Yes for generic VM and QEMU VM | No | Yes | Single next blocker: NativeAOT GC-owned reserve/commit/decommit/release and timing integration is not connected. |
+| GC-owned virtual memory/timing | FAIL for stock binding | Adapter/registry and generic VM complete | Yes for hosted/QEMU adapter and generic VM | No | Yes | Stock `gcenv.windows.cpp.obj` still owns the decorated `GCToOSInterface::Virtual*` symbols and Windows VM imports. |
 | Write barriers/card-table publication | BLOCKED | No | No | No | Yes | Blocked by the GC-owned PAL/startup boundary; current proof heap is not a real GC heap. |
 | Module/type-manager/runtime state | BLOCKED | No | No | No | Yes | Blocked by live GC startup; current proof pack does not register stock NativeAOT module/type-manager state. |
 | Mandatory finalizer/helper thread | BLOCKED | No | No | No | Yes | Blocked by live GC startup; the real helper remains intentionally unstarted. |
@@ -113,6 +113,28 @@ These proofs were not changed by the readiness audit.
 
 Prior diagnostics remain classified as historical and unresolved where previously unresolved: `0xC0000409`, `0xC0000374`, and `0xC0000005`. None was reproduced by this gated audit. They are not evidence of a successful or failed live GC startup because no live startup was attempted.
 
-## Result
+## Historical result (2026-07-19)
 
 Outcome B. Exact stack-bound reporting and minimal ThreadStore lifecycle are complete; the one next mandatory blocker is NativeAOT GC-owned virtual-memory PAL integration. No collector initialization, allocation through the real GC, collection, managed finalizer execution, or GC shutdown was attempted in this pass.
+
+## 26. Current 2026-07-22 gate update
+
+| Evidence | Result |
+| --- | --- |
+| Hosted generic VM and raw adapter probe | PASS; expected hosted fault guard remains BLOCKED without an unsafe fault harness |
+| True bare-metal VM and raw adapter QEMU probe | PASS; `Native VM ALL_PASS` |
+| Native stack bounds, local storage/FLS, and hosted thread runtime | PASS |
+| Local-storage, native-thread, and mutex QEMU regressions | PASS |
+| Runtime-pack static identity and state/hash checks | PASS; expected standalone FLS malformed harness remains BLOCKED/NOT EXECUTED |
+| Managed no-collection proof sweep | Partial: artifact/static and single-allocation execution PASS; host-log execution reproduces `0xC0000005`, repeated-allocation execution fails its PE-import assertion |
+| Stock Workstation GC VM binding audit | FAIL for readiness; stock `gcenv.windows.cpp.obj` still owns the decorated VM symbols and Windows VM imports |
+
+The current exact blocker is only:
+
+```text
+Bind the stock Workstation GC GCToOSInterface::Virtual* symbols to the
+guideXOS raw-address adapter and remove the stock Windows GC VM object/imports.
+```
+
+This is Outcome B. No GC startup, finalizer/helper startup, managed allocation
+through the real collector, or collection was attempted.

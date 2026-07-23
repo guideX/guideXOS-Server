@@ -4,6 +4,15 @@ Status: inactive adapter-probe only. Workstation GC is not initialized, no GC
 heap is created, no finalizer/helper thread is started, and no collection is
 triggered.
 
+Current 2026-07-22 update: the raw-address adapter and bounded ownership
+registry now pass hosted and true bare-metal QEMU lifecycle probes. The generic
+VM integration is no longer the active blocker. See
+[NativeAOT GC-Owned Virtual Memory Boundary](NATIVEAOT_GC_OWNED_VIRTUAL_MEMORY.md)
+for the current contract matrix and evidence. The locked stock Workstation GC
+archive still contains the Windows `gcenv.windows.cpp.obj` VM implementation,
+so exact decorated `GCToOSInterface::Virtual*` binding to the adapter remains
+the one readiness blocker; `RhInitialize` remains uncalled.
+
 ## 1. Selected collector boundary
 
 The future target remains one-node Workstation GC with background/concurrent GC,
@@ -134,10 +143,14 @@ starts managed threads, invokes a finalizer, or triggers collection. The
 adapter probe is a contract probe only. It must not be cited as evidence that
 NativeAOT managed allocation or GC is ready.
 
-## 12. Decision and next experiment
+## 12. Historical decision and next experiment
 
 Decision for the VM pass: **Outcome A — true bare-metal reserve/commit
 lifecycle complete**. The next experiment is the generic critical-section/
 mutex primitive required by the inactive Workstation GC boundary. Keep GC
 initialization disabled until that primitive and the remaining managed startup
 contracts are independently validated.
+
+The preceding decision is historical. The current 2026-07-22 decision is
+Outcome B: VM lifecycle and registry evidence pass, while exact stock
+Workstation GC PAL symbol binding/import elimination remains outstanding.

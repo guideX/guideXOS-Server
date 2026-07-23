@@ -47,8 +47,12 @@ The probe remains inactive by design. It never calls `RhInitialize`, creates a
 Workstation heap, enters managed code, starts finalization, allocates through
 the real GC, or triggers collection. The fixed index-zero proof object and its
 reverse-P/Invoke frame behavior remain unchanged. Collection-safe suspension,
-ThreadStore enumeration, and GC-owned virtual-memory integration are still
-outside this adapter; the latter is the single next readiness blocker.
+ThreadStore enumeration, and exact binding of the stock GC-owned virtual-memory
+symbols are still outside this adapter. The raw VM boundary itself is
+documented and probed in
+`docs/dotnet/NATIVEAOT_GC_OWNED_VIRTUAL_MEMORY.md`; the current single next
+readiness blocker is replacing the stock `gcenv.windows.cpp.obj` binding and
+its Windows VM imports with that adapter.
 
 The build also creates an adapted copy of the locked `Runtime.WorkstationGC.lib`
 in the ignored output directory. The matching stock `thread.cpp.obj` and

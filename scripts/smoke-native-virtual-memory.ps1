@@ -78,10 +78,11 @@ if ($adapterBuild.ExitCode -eq 0) {
     $adapterOutput = @(& $adapterExe 2>&1 | ForEach-Object { $_.ToString() })
     $adapterRun = $LASTEXITCODE -eq 0
 }
-foreach ($label in @('Page size', 'Allocation granularity', 'Adapter reserve',
-                     'Adapter commit/zero', 'Adapter decommit/recommit',
-                     'Adapter reset classification', 'Adapter release',
-                     'Adapter stale release')) {
+foreach ($label in @('Page size', 'Allocation granularity', 'Adapter initialization',
+                     'PAL reserve', 'Zero initialization', 'PAL decommit',
+                     'Recommit zeroing', 'Reset/discard classification',
+                     'PAL release', 'Double release rejection',
+                     'Adapter shutdown', 'GC memory-status wrappers')) {
     Status $label $(if ($adapterRun -and (ContainsPass $adapterOutput $label)) { 'PASS' } else { 'FAIL' })
 }
 Status 'Inactive NativeAOT VM adapter probe' $(if ($adapterRun) { 'PASS' } else { 'FAIL' })

@@ -110,6 +110,10 @@ RUNTIME_SOURCES += ../runtime/synchronization/guidexos_mutex_baremetal.cpp
 RUNTIME_SOURCES += ../runtime/local_storage/guidexos_local_storage.cpp
 RUNTIME_SOURCES += ../runtime/thread/guidexos_native_stack_bounds.cpp
 
+# Inactive NativeAOT PAL ownership adapter used by the opt-in QEMU VM probe.
+# The normal kernel path does not call collector startup.
+RUNTIME_PACK_SOURCES := ../tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_virtual_memory_adapter.cpp
+
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
 ARCH_OBJS := $(patsubst arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
@@ -122,8 +126,10 @@ RUNTIME_OBJS += $(patsubst ../runtime/thread/%.cpp,$(OBJ_DIR)/runtime/thread/%.o
 RUNTIME_OBJS += $(patsubst ../runtime/memory/%.cpp,$(OBJ_DIR)/runtime/memory/%.o,$(filter ../runtime/memory/%,$(RUNTIME_SOURCES)))
 RUNTIME_OBJS += $(patsubst ../runtime/local_storage/%.cpp,$(OBJ_DIR)/runtime/local_storage/%.o,$(filter ../runtime/local_storage/%,$(RUNTIME_SOURCES)))
 
-ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(RUNTIME_OBJS)
-DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d) $(RUNTIME_OBJS:.o=.d)
+RUNTIME_PACK_OBJS := $(patsubst ../tools/dotnet/runtime-pack/src/platform/%.cpp,$(OBJ_DIR)/runtime-pack/%.o,$(RUNTIME_PACK_SOURCES))
+
+ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(RUNTIME_OBJS) $(RUNTIME_PACK_OBJS)
+DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d) $(RUNTIME_OBJS:.o=.d) $(RUNTIME_PACK_OBJS:.o=.d)
 
 # Targets
 .PHONY: all clean info mbedtls-guidexos-compile-probe
@@ -226,6 +232,11 @@ $(OBJ_DIR)/runtime/memory/%.o: ../runtime/memory/%.cpp
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/runtime/local_storage/%.o: ../runtime/local_storage/%.cpp
+	@$(call MKDIR,$(dir $@))
+	@echo "Compiling $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/runtime-pack/%.o: ../tools/dotnet/runtime-pack/src/platform/%.cpp
 	@$(call MKDIR,$(dir $@))
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
