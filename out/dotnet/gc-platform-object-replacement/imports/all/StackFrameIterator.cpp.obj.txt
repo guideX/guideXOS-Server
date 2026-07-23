@@ -1,0 +1,16 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\StackFrameIterator.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+         4A0 .chks64
+        E578 .debug$S
+          88 .debug$T
+          F4 .drectve
+         150 .pdata
+          EF .rdata
+        1B5C .text$mn
+          D8 .tls$
+         1F8 .xdata

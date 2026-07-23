@@ -1,0 +1,17 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\CachedInterfaceDispatch.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          70 .bss
+          F8 .chks64
+          38 .data
+        87D0 .debug$S
+          88 .debug$T
+          F4 .drectve
+          30 .pdata
+         630 .text$mn
+           D .voltbl
+          44 .xdata

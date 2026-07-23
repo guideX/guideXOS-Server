@@ -1,0 +1,12 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\Crst.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          60 .chks64
+        6060 .debug$S
+          88 .debug$T
+          F4 .drectve
+          19 .text$mn

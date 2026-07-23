@@ -1,0 +1,17 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\gcconfig.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+         2AB .bss
+        1250 .chks64
+         138 .data
+       16038 .debug$S
+          88 .debug$T
+          F4 .drectve
+          90 .pdata
+         7E8 .rdata
+        2322 .text$mn
+          90 .xdata

@@ -1,0 +1,16 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\FinalizerHelpers.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          2D .bss
+         140 .chks64
+        97F4 .debug$S
+          88 .debug$T
+          F4 .drectve
+          60 .pdata
+         2FE .text$mn
+          D8 .tls$
+          68 .xdata

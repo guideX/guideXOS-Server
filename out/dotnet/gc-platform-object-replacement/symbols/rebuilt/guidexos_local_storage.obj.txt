@@ -1,0 +1,378 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\guidexos_local_storage.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058D98 ABS    notype       Static       | @comp.id
+001 80010090 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .drectve
+    Section length    3, #relocs    0, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .debug$S
+    Section length   C8, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .text$mn
+    Section length  1EE, #relocs   22, #linenums    0, checksum 25323EF2, selection    1 (pick no duplicates)
+008 00000000 SECT4  notype       Static       | .text$mn
+    Section length  188, #relocs   12, #linenums    0, checksum 93F55DFE, selection    1 (pick no duplicates)
+00A 00000000 SECT5  notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum B2E539EF, selection    1 (pick no duplicates)
+00C 00000000 SECT6  notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum A1545316, selection    1 (pick no duplicates)
+00E 00000000 SECT7  notype       Static       | .text$mn
+    Section length   27, #relocs    0, #linenums    0, checksum 8EAEBC3B, selection    1 (pick no duplicates)
+010 00000000 SECT8  notype       Static       | .text$mn
+    Section length   3F, #relocs    4, #linenums    0, checksum CAAE41A1, selection    1 (pick no duplicates)
+012 00000000 SECT9  notype       Static       | .text$mn
+    Section length   2D, #relocs    4, #linenums    0, checksum 16EB12EF, selection    1 (pick no duplicates)
+014 00000000 SECTA  notype       Static       | .text$mn
+    Section length  356, #relocs   1B, #linenums    0, checksum AAAF7954, selection    1 (pick no duplicates)
+016 00000000 SECTB  notype       Static       | .text$mn
+    Section length   DC, #relocs    E, #linenums    0, checksum 67A98FF9, selection    1 (pick no duplicates)
+018 00000000 SECTC  notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+01A 00000000 SECTD  notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum F545433F, selection    1 (pick no duplicates)
+01C 00000000 SECTE  notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum C8256A8F, selection    1 (pick no duplicates)
+01E 00000000 SECTF  notype       Static       | .text$mn
+    Section length   33, #relocs    2, #linenums    0, checksum 2E14664B, selection    1 (pick no duplicates)
+020 00000000 SECT10 notype       Static       | .text$mn
+    Section length   5C, #relocs    3, #linenums    0, checksum 3B5556F8, selection    1 (pick no duplicates)
+022 00000000 SECT11 notype       Static       | .text$mn
+    Section length  125, #relocs    B, #linenums    0, checksum FC1B2444, selection    1 (pick no duplicates)
+024 00000000 SECT12 notype       Static       | .text$mn
+    Section length   24, #relocs    3, #linenums    0, checksum 7C27EB4B, selection    1 (pick no duplicates)
+026 00000000 SECT13 notype       Static       | .text$mn
+    Section length  16D, #relocs   26, #linenums    0, checksum A3C6D215, selection    1 (pick no duplicates)
+028 00000000 SECT14 notype       Static       | .text$mn
+    Section length   3A, #relocs    4, #linenums    0, checksum B1C67873, selection    1 (pick no duplicates)
+02A 00000000 SECT15 notype       Static       | .text$mn
+    Section length   51, #relocs    1, #linenums    0, checksum  915B2B7, selection    1 (pick no duplicates)
+02C 00000000 SECT16 notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum C8256A8F, selection    1 (pick no duplicates)
+02E 00000000 SECT17 notype       Static       | .text$mn
+    Section length   14, #relocs    0, #linenums    0, checksum A8E57D52, selection    1 (pick no duplicates)
+030 00000000 SECT18 notype       Static       | .text$mn
+    Section length   84, #relocs   13, #linenums    0, checksum AF5FAED6, selection    1 (pick no duplicates)
+032 00000000 SECT19 notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum B84F6257, selection    1 (pick no duplicates)
+034 00000000 SECT1A notype       Static       | .text$mn
+    Section length   51, #relocs    3, #linenums    0, checksum FF1C7795, selection    1 (pick no duplicates)
+036 00000000 SECT1B notype       Static       | .text$mn
+    Section length  1FD, #relocs    9, #linenums    0, checksum 5F9A6BDF, selection    1 (pick no duplicates)
+038 00000000 SECT1C notype       Static       | .text$mn
+    Section length   2E, #relocs    4, #linenums    0, checksum  D24B5A8, selection    1 (pick no duplicates)
+03A 00000000 SECT1D notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 386A0DF1, selection    1 (pick no duplicates)
+03C 00000000 SECT1E notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum  50A2441, selection    1 (pick no duplicates)
+03E 00000000 SECT1F notype       Static       | .text$mn
+    Section length   EA, #relocs    C, #linenums    0, checksum 3D24F571, selection    1 (pick no duplicates)
+040 00000000 SECT20 notype       Static       | .text$mn
+    Section length    4, #relocs    0, #linenums    0, checksum EB4B0655, selection    1 (pick no duplicates)
+042 00000000 SECT21 notype       Static       | .text$mn
+    Section length    4, #relocs    0, #linenums    0, checksum E1F0E0C7, selection    1 (pick no duplicates)
+044 00000000 SECT22 notype       Static       | .text$mn
+    Section length    4, #relocs    0, #linenums    0, checksum 379BA434, selection    1 (pick no duplicates)
+046 00000000 SECT23 notype       Static       | .text$mn
+    Section length  1B2, #relocs   2C, #linenums    0, checksum C2F98FE3, selection    1 (pick no duplicates)
+048 00000000 SECT24 notype       Static       | .text$mn
+    Section length    5, #relocs    0, #linenums    0, checksum 65C9BD66, selection    1 (pick no duplicates)
+04A 00000000 SECT25 notype       Static       | .text$mn
+    Section length    4, #relocs    0, #linenums    0, checksum A8B626F8, selection    1 (pick no duplicates)
+04C 00000000 SECT26 notype       Static       | .text$mn
+    Section length    4, #relocs    0, #linenums    0, checksum 81B4CFCF, selection    1 (pick no duplicates)
+04E 00000000 SECT27 notype       Static       | .text$mn
+    Section length   11, #relocs    0, #linenums    0, checksum 17B3A1D0, selection    1 (pick no duplicates)
+050 00000000 SECT28 notype       Static       | .text$mn
+    Section length   7B, #relocs    4, #linenums    0, checksum C86DB71A, selection    1 (pick no duplicates)
+052 00000000 SECT29 notype       Static       | .text$mn
+    Section length   3B, #relocs    1, #linenums    0, checksum DA7FB2ED, selection    1 (pick no duplicates)
+054 00000000 SECT14 notype ()    External     | ?installLocalStoragePlatformHooks@runtime@gxos@@YAXPEBULocalStoragePlatformHooks@12@@Z (void __cdecl gxos::runtime::installLocalStoragePlatformHooks(struct gxos::runtime::LocalStoragePlatformHooks const *))
+055 00000000 SECT13 notype ()    External     | ?initializeLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::initializeLocalStorage(void))
+056 00000000 SECT23 notype ()    External     | ?shutdownLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::shutdownLocalStorage(void))
+057 00000000 SECT16 notype ()    External     | ?isLocalStorageInitialized@runtime@gxos@@YA_NXZ (bool __cdecl gxos::runtime::isLocalStorageInitialized(void))
+058 00000000 SECT4  notype ()    External     | ?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::attachLocalStorage(void))
+059 00000000 SECTB  notype ()    External     | ?detachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::detachLocalStorage(void))
+05A 00000000 SECTC  notype ()    External     | ?detachLocalStorageContext@runtime@gxos@@YA?AW4LocalStorageResult@12@PEAULocalStorageContext@12@@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::detachLocalStorageContext(struct gxos::runtime::LocalStorageContext *))
+05B 00000000 SECT10 notype ()    External     | ?forceClearLocalStorageContext@runtime@gxos@@YA?AW4LocalStorageResult@12@PEAULocalStorageContext@12@@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::forceClearLocalStorageContext(struct gxos::runtime::LocalStorageContext *))
+05C 00000000 SECT3  notype ()    External     | ?allocateLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@P6AXPEAX@ZPEAULocalStorageIndex@12@@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::allocateLocalStorageIndex(void (__cdecl*)(void *),struct gxos::runtime::LocalStorageIndex *))
+05D 00000000 SECT1B notype ()    External     | ?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::releaseLocalStorageIndex(struct gxos::runtime::LocalStorageIndex))
+05E 00000000 SECT1F notype ()    External     | ?setLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAX@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::setLocalStorageValue(struct gxos::runtime::LocalStorageIndex,void *))
+05F 00000000 SECT11 notype ()    External     | ?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::getLocalStorageValue(struct gxos::runtime::LocalStorageIndex,void * *))
+060 00000000 SECT18 notype ()    External     | ?localStorageResultName@runtime@gxos@@YAPEBDW4LocalStorageResult@12@@Z (char const * __cdecl gxos::runtime::localStorageResultName(enum gxos::runtime::LocalStorageResult))
+061 00000000 SECTE  notype ()    Static       | ?domainInitialized@?A0x3c6ac7df@runtime@gxos@@YA_NXZ (bool __cdecl gxos::runtime::`anonymous namespace'::domainInitialized(void))
+062 00000000 SECT1E notype ()    Static       | ?setDomainInitialized@?A0x3c6ac7df@runtime@gxos@@YAX_N@Z (void __cdecl gxos::runtime::`anonymous namespace'::setDomainInitialized(bool))
+063 00000000 SECTD  notype ()    Static       | ?domainDetaching@?A0x3c6ac7df@runtime@gxos@@YA_NXZ (bool __cdecl gxos::runtime::`anonymous namespace'::domainDetaching(void))
+064 00000000 SECT1D notype ()    Static       | ?setDomainDetaching@?A0x3c6ac7df@runtime@gxos@@YAX_N@Z (void __cdecl gxos::runtime::`anonymous namespace'::setDomainDetaching(bool))
+065 00000000 SECT5  notype ()    Static       | ?callbackFailureRecorded@?A0x3c6ac7df@runtime@gxos@@YA_NXZ (bool __cdecl gxos::runtime::`anonymous namespace'::callbackFailureRecorded(void))
+066 00000000 SECT19 notype ()    Static       | ?recordCallbackFailure@?A0x3c6ac7df@runtime@gxos@@YAXXZ (void __cdecl gxos::runtime::`anonymous namespace'::recordCallbackFailure(void))
+067 00000000 SECT6  notype ()    Static       | ?clearCallbackFailure@?A0x3c6ac7df@runtime@gxos@@YAXXZ (void __cdecl gxos::runtime::`anonymous namespace'::clearCallbackFailure(void))
+068 00000000 SECT25 notype ()    Static       | ?slotCallback@?A0x3c6ac7df@runtime@gxos@@YAP6AXPEAX@ZAEBULocalStorageSlot@123@@Z (void (__cdecl*__cdecl gxos::runtime::`anonymous namespace'::slotCallback(struct gxos::runtime::A0x3c6ac7df::LocalStorageSlot const &))(void *))
+069 00000000 SECT21 notype ()    Static       | ?setSlotCallback@?A0x3c6ac7df@runtime@gxos@@YAXAEAULocalStorageSlot@123@P6AXPEAX@Z@Z (void __cdecl gxos::runtime::`anonymous namespace'::setSlotCallback(struct gxos::runtime::A0x3c6ac7df::LocalStorageSlot &,void (__cdecl*)(void *)))
+06A 00000000 SECT26 notype ()    Static       | ?slotGeneration@?A0x3c6ac7df@runtime@gxos@@YAIAEBULocalStorageSlot@123@@Z (unsigned int __cdecl gxos::runtime::`anonymous namespace'::slotGeneration(struct gxos::runtime::A0x3c6ac7df::LocalStorageSlot const &))
+06B 00000000 SECT22 notype ()    Static       | ?setSlotGeneration@?A0x3c6ac7df@runtime@gxos@@YAXAEAULocalStorageSlot@123@I@Z (void __cdecl gxos::runtime::`anonymous namespace'::setSlotGeneration(struct gxos::runtime::A0x3c6ac7df::LocalStorageSlot &,unsigned int))
+06C 00000000 SECT24 notype ()    Static       | ?slotActive@?A0x3c6ac7df@runtime@gxos@@YA_NAEBULocalStorageSlot@123@@Z (bool __cdecl gxos::runtime::`anonymous namespace'::slotActive(struct gxos::runtime::A0x3c6ac7df::LocalStorageSlot const &))
+06D 00000000 SECT20 notype ()    Static       | ?setSlotActive@?A0x3c6ac7df@runtime@gxos@@YAXAEAULocalStorageSlot@123@_N@Z (void __cdecl gxos::runtime::`anonymous namespace'::setSlotActive(struct gxos::runtime::A0x3c6ac7df::LocalStorageSlot &,bool))
+06E 00000000 SECT17 notype ()    Static       | ?loadContextValue@?A0x3c6ac7df@runtime@gxos@@YAPEAXPEBULocalStorageContext@23@I@Z (void * __cdecl gxos::runtime::`anonymous namespace'::loadContextValue(struct gxos::runtime::LocalStorageContext const *,unsigned int))
+06F 00000000 SECT27 notype ()    Static       | ?storeContextValue@?A0x3c6ac7df@runtime@gxos@@YAXPEAULocalStorageContext@23@IPEAX@Z (void __cdecl gxos::runtime::`anonymous namespace'::storeContextValue(struct gxos::runtime::LocalStorageContext *,unsigned int,void *))
+070 00000000 SECT12 notype ()    Static       | ?hasPlatformHooks@?A0x3c6ac7df@runtime@gxos@@YA_NXZ (bool __cdecl gxos::runtime::`anonymous namespace'::hasPlatformHooks(void))
+071 00000000 SECT9  notype ()    Static       | ?currentContext@?A0x3c6ac7df@runtime@gxos@@YAPEAULocalStorageContext@23@XZ (struct gxos::runtime::LocalStorageContext * __cdecl gxos::runtime::`anonymous namespace'::currentContext(void))
+072 00000000 SECT8  notype ()    Static       | ?currentAttached@?A0x3c6ac7df@runtime@gxos@@YA_NXZ (bool __cdecl gxos::runtime::`anonymous namespace'::currentAttached(void))
+073 00000000 SECT1C notype ()    Static       | ?setCurrentAttached@?A0x3c6ac7df@runtime@gxos@@YAX_N@Z (void __cdecl gxos::runtime::`anonymous namespace'::setCurrentAttached(bool))
+074 00000000 SECT7  notype ()    Static       | ?clearContext@?A0x3c6ac7df@runtime@gxos@@YAXPEAULocalStorageContext@23@@Z (void __cdecl gxos::runtime::`anonymous namespace'::clearContext(struct gxos::runtime::LocalStorageContext *))
+075 00000000 SECTF  notype ()    Static       | ?findContext@?A0x3c6ac7df@runtime@gxos@@YAHPEAULocalStorageContext@23@@Z (int __cdecl gxos::runtime::`anonymous namespace'::findContext(struct gxos::runtime::LocalStorageContext *))
+076 00000000 SECT28 notype ()    Static       | ?unregisterContext@?A0x3c6ac7df@runtime@gxos@@YAXPEAULocalStorageContext@23@@Z (void __cdecl gxos::runtime::`anonymous namespace'::unregisterContext(struct gxos::runtime::LocalStorageContext *))
+077 00000000 SECT1A notype ()    Static       | ?registerContext@?A0x3c6ac7df@runtime@gxos@@YA_NPEAULocalStorageContext@23@@Z (bool __cdecl gxos::runtime::`anonymous namespace'::registerContext(struct gxos::runtime::LocalStorageContext *))
+078 00000000 SECT29 notype ()    Static       | ?validateIndex@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@ULocalStorageIndex@23@@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::`anonymous namespace'::validateIndex(struct gxos::runtime::LocalStorageIndex))
+079 00000000 SECT15 notype ()    Static       | ?invokePendingCallbacks@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAUPendingCallback@123@I@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::`anonymous namespace'::invokePendingCallbacks(struct gxos::runtime::A0x3c6ac7df::PendingCallback *,unsigned int))
+07A 00000000 SECTA  notype ()    Static       | ?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z (enum gxos::runtime::LocalStorageResult __cdecl gxos::runtime::`anonymous namespace'::detachContextInternal(struct gxos::runtime::LocalStorageContext *))
+07B 00000000 UNDEF  notype ()    External     | memset
+07C 00000000 SECT4  notype       Label        | $LN132
+07D 00000000 SECTB  notype       Label        | $LN51
+07E 00000000 SECT10 notype       Label        | $LN50
+07F 00000000 SECT1B notype       Label        | $LN79
+080 00000000 SECT1F notype       Label        | $LN51
+081 00000000 SECT11 notype       Label        | $LN51
+082 00000064 SECT18 notype       Static       | $LN13
+083 0000001B SECT18 notype       Label        | $LN4
+084 00000023 SECT18 notype       Label        | $LN5
+085 0000002B SECT18 notype       Label        | $LN6
+086 00000033 SECT18 notype       Label        | $LN7
+087 0000003B SECT18 notype       Label        | $LN8
+088 00000043 SECT18 notype       Label        | $LN9
+089 0000004B SECT18 notype       Label        | $LN10
+08A 00000053 SECT18 notype       Label        | $LN11
+08B 00000000 SECT2A notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x4)
+08D 00000000 SECT2A notype       Static       | $unwind$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+08E 00000000 SECT2B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 69312319, selection    5 (pick associative Section 0x4)
+090 00000000 SECT2B notype       Static       | $pdata$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+091 00000000 SECT2C notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum  8DA38D2, selection    5 (pick associative Section 0x4)
+093 00000000 SECT2C notype       Static       | $chain$0$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+094 00000000 SECT2D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  E4F651D, selection    5 (pick associative Section 0x4)
+096 00000000 SECT2D notype       Static       | $pdata$0$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+097 00000000 SECT2E notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 4C09687E, selection    5 (pick associative Section 0x4)
+099 00000000 SECT2E notype       Static       | $chain$2$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+09A 00000000 SECT2F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8CA37A8A, selection    5 (pick associative Section 0x4)
+09C 00000000 SECT2F notype       Static       | $pdata$2$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+09D 00000000 SECT30 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 4C09687E, selection    5 (pick associative Section 0x4)
+09F 00000000 SECT30 notype       Static       | $chain$4$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+0A0 00000000 SECT31 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 29FEBBD5, selection    5 (pick associative Section 0x4)
+0A2 00000000 SECT31 notype       Static       | $pdata$4$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+0A3 00000000 SECT32 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 4C09687E, selection    5 (pick associative Section 0x4)
+0A5 00000000 SECT32 notype       Static       | $chain$6$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+0A6 00000000 SECT33 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 5EC4F17E, selection    5 (pick associative Section 0x4)
+0A8 00000000 SECT33 notype       Static       | $pdata$6$?attachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+0A9 00000000 SECT34 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0xB)
+0AB 00000000 SECT34 notype       Static       | $unwind$?detachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+0AC 00000000 SECT35 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 51B26353, selection    5 (pick associative Section 0xB)
+0AE 00000000 SECT35 notype       Static       | $pdata$?detachLocalStorage@runtime@gxos@@YA?AW4LocalStorageResult@12@XZ
+0AF 00000000 SECT36 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x10)
+0B1 00000000 SECT36 notype       Static       | $unwind$?forceClearLocalStorageContext@runtime@gxos@@YA?AW4LocalStorageResult@12@PEAULocalStorageContext@12@@Z
+0B2 00000000 SECT37 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  289E689, selection    5 (pick associative Section 0x10)
+0B4 00000000 SECT37 notype       Static       | $pdata$?forceClearLocalStorageContext@runtime@gxos@@YA?AW4LocalStorageResult@12@PEAULocalStorageContext@12@@Z
+0B5 00000000 SECT38 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F96B39D9, selection    5 (pick associative Section 0x1B)
+0B7 00000000 SECT38 notype       Static       | $unwind$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0B8 00000000 SECT39 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  B42549E, selection    5 (pick associative Section 0x1B)
+0BA 00000000 SECT39 notype       Static       | $pdata$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0BB 00000000 SECT3A notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum A8B190C6, selection    5 (pick associative Section 0x1B)
+0BD 00000000 SECT3A notype       Static       | $chain$0$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0BE 00000000 SECT3B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum BB10ABDF, selection    5 (pick associative Section 0x1B)
+0C0 00000000 SECT3B notype       Static       | $pdata$0$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0C1 00000000 SECT3C notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 452D7FD3, selection    5 (pick associative Section 0x1B)
+0C3 00000000 SECT3C notype       Static       | $chain$1$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0C4 00000000 SECT3D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum C2A95704, selection    5 (pick associative Section 0x1B)
+0C6 00000000 SECT3D notype       Static       | $pdata$1$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0C7 00000000 SECT3E notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 314D18AD, selection    5 (pick associative Section 0x1B)
+0C9 00000000 SECT3E notype       Static       | $chain$2$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0CA 00000000 SECT3F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 330ABBBB, selection    5 (pick associative Section 0x1B)
+0CC 00000000 SECT3F notype       Static       | $pdata$2$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0CD 00000000 SECT40 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 70287018, selection    5 (pick associative Section 0x1B)
+0CF 00000000 SECT40 notype       Static       | $chain$3$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0D0 00000000 SECT41 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 9A58E7DB, selection    5 (pick associative Section 0x1B)
+0D2 00000000 SECT41 notype       Static       | $pdata$3$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0D3 00000000 SECT42 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum   175241, selection    5 (pick associative Section 0x1B)
+0D5 00000000 SECT42 notype       Static       | $chain$4$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0D6 00000000 SECT43 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 324D74C5, selection    5 (pick associative Section 0x1B)
+0D8 00000000 SECT43 notype       Static       | $pdata$4$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0D9 00000000 SECT44 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum E7E51F19, selection    5 (pick associative Section 0x1B)
+0DB 00000000 SECT44 notype       Static       | $chain$5$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0DC 00000000 SECT45 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E0EC1A25, selection    5 (pick associative Section 0x1B)
+0DE 00000000 SECT45 notype       Static       | $pdata$5$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0DF 00000000 SECT46 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum EA75D56C, selection    5 (pick associative Section 0x1B)
+0E1 00000000 SECT46 notype       Static       | $chain$6$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0E2 00000000 SECT47 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum DE0B67A7, selection    5 (pick associative Section 0x1B)
+0E4 00000000 SECT47 notype       Static       | $pdata$6$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0E5 00000000 SECT48 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum F4825637, selection    5 (pick associative Section 0x1B)
+0E7 00000000 SECT48 notype       Static       | $chain$7$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0E8 00000000 SECT49 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D87CE31D, selection    5 (pick associative Section 0x1B)
+0EA 00000000 SECT49 notype       Static       | $pdata$7$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0EB 00000000 SECT4A notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 8B1A9E29, selection    5 (pick associative Section 0x1B)
+0ED 00000000 SECT4A notype       Static       | $chain$8$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0EE 00000000 SECT4B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum C8964190, selection    5 (pick associative Section 0x1B)
+0F0 00000000 SECT4B notype       Static       | $pdata$8$?releaseLocalStorageIndex@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@@Z
+0F1 00000000 SECT4C notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum F3B20EE4, selection    5 (pick associative Section 0x1F)
+0F3 00000000 SECT4C notype       Static       | $unwind$?setLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAX@Z
+0F4 00000000 SECT4D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 5526F3C6, selection    5 (pick associative Section 0x1F)
+0F6 00000000 SECT4D notype       Static       | $pdata$?setLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAX@Z
+0F7 00000000 SECT4E notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 1F5857DD, selection    5 (pick associative Section 0x1F)
+0F9 00000000 SECT4E notype       Static       | $chain$0$?setLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAX@Z
+0FA 00000000 SECT4F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 72862274, selection    5 (pick associative Section 0x1F)
+0FC 00000000 SECT4F notype       Static       | $pdata$0$?setLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAX@Z
+0FD 00000000 SECT50 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 5B8B0771, selection    5 (pick associative Section 0x1F)
+0FF 00000000 SECT50 notype       Static       | $chain$2$?setLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAX@Z
+100 00000000 SECT51 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D60F7B55, selection    5 (pick associative Section 0x1F)
+102 00000000 SECT51 notype       Static       | $pdata$2$?setLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAX@Z
+103 00000000 SECT52 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum EE051E80, selection    5 (pick associative Section 0x11)
+105 00000000 SECT52 notype       Static       | $unwind$?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z
+106 00000000 SECT53 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 980BAEDF, selection    5 (pick associative Section 0x11)
+108 00000000 SECT53 notype       Static       | $pdata$?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z
+109 00000000 SECT54 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 9617958B, selection    5 (pick associative Section 0x11)
+10B 00000000 SECT54 notype       Static       | $chain$0$?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z
+10C 00000000 SECT55 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 50D51479, selection    5 (pick associative Section 0x11)
+10E 00000000 SECT55 notype       Static       | $pdata$0$?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z
+10F 00000000 SECT56 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum D2C4C527, selection    5 (pick associative Section 0x11)
+111 00000000 SECT56 notype       Static       | $chain$2$?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z
+112 00000000 SECT57 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  3E8EE1A, selection    5 (pick associative Section 0x11)
+114 00000000 SECT57 notype       Static       | $pdata$2$?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z
+115 00000000 SECT58 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum D2C4C527, selection    5 (pick associative Section 0x11)
+117 00000000 SECT58 notype       Static       | $chain$4$?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z
+118 00000000 SECT59 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum DA7755BA, selection    5 (pick associative Section 0x11)
+11A 00000000 SECT59 notype       Static       | $pdata$4$?getLocalStorageValue@runtime@gxos@@YA?AW4LocalStorageResult@12@ULocalStorageIndex@12@PEAPEAX@Z
+11B 00000000 SECT5A notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x8)
+11D 00000000 SECT5A notype       Static       | $unwind$?currentAttached@?A0x3c6ac7df@runtime@gxos@@YA_NXZ
+11E 00000000 SECT5B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 5CED41D1, selection    5 (pick associative Section 0x8)
+120 00000000 SECT5B notype       Static       | $pdata$?currentAttached@?A0x3c6ac7df@runtime@gxos@@YA_NXZ
+121 00000000 SECT5C notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum ED4F81A7, selection    5 (pick associative Section 0x15)
+123 00000000 SECT5C notype       Static       | $unwind$?invokePendingCallbacks@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAUPendingCallback@123@I@Z
+124 00000000 SECT5D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 998CF358, selection    5 (pick associative Section 0x15)
+126 00000000 SECT5D notype       Static       | $pdata$?invokePendingCallbacks@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAUPendingCallback@123@I@Z
+127 00000000 SECT5E notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 4279EBEB, selection    5 (pick associative Section 0xA)
+129 00000000 SECT5E notype       Static       | $unwind$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+12A 00000000 SECT5F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 68B67E9E, selection    5 (pick associative Section 0xA)
+12C 00000000 SECT5F notype       Static       | $pdata$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+12D 00000000 SECT60 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum C5BF0DB3, selection    5 (pick associative Section 0xA)
+12F 00000000 SECT60 notype       Static       | $chain$1$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+130 00000000 SECT61 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 112C87F6, selection    5 (pick associative Section 0xA)
+132 00000000 SECT61 notype       Static       | $pdata$1$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+133 00000000 SECT62 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum 5718BF95, selection    5 (pick associative Section 0xA)
+135 00000000 SECT62 notype       Static       | $chain$3$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+136 00000000 SECT63 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 84173B53, selection    5 (pick associative Section 0xA)
+138 00000000 SECT63 notype       Static       | $pdata$3$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+139 00000000 SECT64 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum EF4D6BD3, selection    5 (pick associative Section 0xA)
+13B 00000000 SECT64 notype       Static       | $chain$5$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+13C 00000000 SECT65 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1E2D1F21, selection    5 (pick associative Section 0xA)
+13E 00000000 SECT65 notype       Static       | $pdata$5$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+13F 00000000 SECT66 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 3D40D1BF, selection    5 (pick associative Section 0xA)
+141 00000000 SECT66 notype       Static       | $chain$6$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+142 00000000 SECT67 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B2585AF5, selection    5 (pick associative Section 0xA)
+144 00000000 SECT67 notype       Static       | $pdata$6$?detachContextInternal@?A0x3c6ac7df@runtime@gxos@@YA?AW4LocalStorageResult@23@PEAULocalStorageContext@23@@Z
+145 00000000 SECT68 notype       Static       | .bss
+    Section length  1A8, #relocs    0, #linenums    0, checksum        0
+147 00000000 SECT68 notype       Static       | ?g_domain@?A0x3c6ac7df@runtime@gxos@@3ULocalStorageDomain@123@A (struct gxos::runtime::A0x3c6ac7df::LocalStorageDomain gxos::runtime::`anonymous namespace'::g_domain)
+148 00000188 SECT68 notype       Static       | ?g_hooks@?A0x3c6ac7df@runtime@gxos@@3ULocalStoragePlatformHooks@23@A (struct gxos::runtime::LocalStoragePlatformHooks gxos::runtime::`anonymous namespace'::g_hooks)
+149 00000000 SECT69 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 6B5680CD, selection    2 (pick any)
+14B 00000000 SECT69 notype       External     | ??_C@_07PBILKAFL@Success@ (`string')
+14C 00000000 SECT6A notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum A31548E8, selection    2 (pick any)
+14E 00000000 SECT6A notype       External     | ??_C@_07DJMIGIHO@Invalid@ (`string')
+14F 00000000 SECT6B notype       Static       | .rdata
+    Section length    A, #relocs    0, #linenums    0, checksum 536AC7B8, selection    2 (pick any)
+151 00000000 SECT6B notype       External     | ??_C@_09EPBPFADB@Exhausted@ (`string')
+152 00000000 SECT6C notype       Static       | .rdata
+    Section length    B, #relocs    0, #linenums    0, checksum 18C7D57F, selection    2 (pick any)
+154 00000000 SECT6C notype       External     | ??_C@_0L@IMLPJLGM@StaleIndex@ (`string')
+155 00000000 SECT6D notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum 93509E1A, selection    2 (pick any)
+157 00000000 SECT6D notype       External     | ??_C@_0BA@IABECKLA@NoCurrentThread@ (`string')
+158 00000000 SECT6E notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum EA2702B5, selection    2 (pick any)
+15A 00000000 SECT6E notype       External     | ??_C@_0P@MCALPOKN@NotInitialized@ (`string')
+15B 00000000 SECT6F notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum E39B1A1F, selection    2 (pick any)
+15D 00000000 SECT6F notype       External     | ??_C@_0P@MLLHOGAH@CallbackFailed@ (`string')
+15E 00000000 SECT70 notype       Static       | .rdata
+    Section length    5, #relocs    0, #linenums    0, checksum D6984F31, selection    2 (pick any)
+160 00000000 SECT70 notype       External     | ??_C@_04OPEFEHND@Busy@ (`string')
+161 00000000 SECT71 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 4BFB2306, selection    2 (pick any)
+163 00000000 SECT71 notype       External     | ??_C@_07NBCGADJA@Unknown@ (`string')
+164 00000000 UNDEF  notype       External     | __ImageBase
+165 00000000 SECT72 notype       Static       | .chks64
+    Section length  390, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x24DD bytes
+
+  Summary
+
+         1A8 .bss
+         390 .chks64
+          C8 .debug$S
+           3 .drectve
+         174 .pdata
+          60 .rdata
+        12DE .text$mn
+         218 .xdata

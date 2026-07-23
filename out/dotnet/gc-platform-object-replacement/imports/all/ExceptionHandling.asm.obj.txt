@@ -1,0 +1,14 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\ExceptionHandling.asm.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+           0 .data
+         ED8 .debug$S
+          9C .debug$T
+           4 .gehcont$y
+          48 .pdata
+         84A .text$mn
+         1A8 .xdata

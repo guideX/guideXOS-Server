@@ -1,0 +1,17 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\MiscHelpers.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+           8 .bss
+         228 .chks64
+        9DA4 .debug$S
+          88 .debug$T
+          F4 .drectve
+          78 .pdata
+         346 .text$mn
+          D8 .tls$
+           2 .voltbl
+          74 .xdata

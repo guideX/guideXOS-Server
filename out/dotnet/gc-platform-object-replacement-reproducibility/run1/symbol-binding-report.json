@@ -1,0 +1,330 @@
+﻿{
+    "requiredSymbolCount":  53,
+    "bindings":  [
+                     {
+                         "symbol":  "??0GCEvent@@QEAA@XZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?BoostThreadPriority@GCToOSInterface@@SA_NXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?CanEnableGCCPUGroups@GCToOSInterface@@SA_NXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?CanEnableGCNumaAware@GCToOSInterface@@SA_NXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?CanGetCurrentProcessorNumber@GCToOSInterface@@SA_NXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?CloseEvent@GCEvent@@QEAAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?CreateAutoEventNoThrow@GCEvent@@QEAA_N_N@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?CreateManualEventNoThrow@GCEvent@@QEAA_N_N@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?CreateOSAutoEventNoThrow@GCEvent@@QEAA_N_N@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?CreateOSManualEventNoThrow@GCEvent@@QEAA_N_N@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?DebugBreak@GCToOSInterface@@SAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Destroy@CLRCriticalSection@@QEAAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Enter@CLRCriticalSection@@QEAAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?FlushProcessWriteBuffers@GCToOSInterface@@SAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?g_SystemInfo@@3UGCSystemInfo@@A",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetCurrentProcessId@GCToOSInterface@@SAIXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetCurrentProcessorNumber@GCToOSInterface@@SAIXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetCurrentThreadIdealProc@GCToOSInterface@@SA_NPEAG@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetCurrentThreadIdForLogging@GCToOSInterface@@SA_KXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetLowPrecisionTimeStamp@GCToOSInterface@@SA_KXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetMemoryStatus@GCToOSInterface@@SAX_KPEAIPEA_K2@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetPhysicalMemoryLimit@GCToOSInterface@@SA_KPEA_N@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetTotalProcessorCount@GCToOSInterface@@SAIXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetVirtualMemoryLimit@GCToOSInterface@@SA_KXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetVirtualMemoryMaxAddress@GCToOSInterface@@SA_KXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?GetWriteWatch@GCToOSInterface@@SA_N_NPEAX_KPEAPEAXPEA_K@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Initialize@CLRCriticalSection@@QEAA_NXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Initialize@GCToOSInterface@@SA_NXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Leave@CLRCriticalSection@@QEAAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?ParseGCHeapAffinitizeRangesEntry@GCToOSInterface@@SA_NPEAPEBDPEA_K1@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?QueryPerformanceCounter@GCToOSInterface@@SA_JXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?QueryPerformanceFrequency@GCToOSInterface@@SA_JXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Reset@GCEvent@@QEAAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?ResetWriteWatch@GCToOSInterface@@SAXPEAX_K@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Set@GCEvent@@QEAAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?SetCurrentThreadIdealAffinity@GCToOSInterface@@SA_NGG@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?SetGCThreadsAffinitySet@GCToOSInterface@@SAPEBVAffinitySet@@_KPEBV2@@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?SetThreadAffinity@GCToOSInterface@@SA_NG@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Shutdown@GCToOSInterface@@SAXXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Sleep@GCToOSInterface@@SAXI@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?SupportsWriteWatch@GCToOSInterface@@SA_NXZ",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?VirtualCommit@GCToOSInterface@@SA_NPEAX_KG@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?VirtualDecommit@GCToOSInterface@@SA_NPEAX_K@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?VirtualRelease@GCToOSInterface@@SA_NPEAX_K@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?VirtualReserve@GCToOSInterface@@SAPEAX_K0IG@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?VirtualReserveAndCommitLargePages@GCToOSInterface@@SAPEAX_KG@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?VirtualReset@GCToOSInterface@@SA_NPEAX_K_N@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?Wait@GCEvent@@QEAAII_N@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     },
+                     {
+                         "symbol":  "?YieldThread@GCToOSInterface@@SAXI@Z",
+                         "stockMember":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+                         "replacementObject":  "guidexos_gcenv.obj",
+                         "status":  "replaced"
+                     }
+                 ],
+    "duplicateStrongDefinitions":  [
+
+                                   ],
+    "missingDefinitions":  [
+
+                           ],
+    "windowsGcenvMemberPresent":  false
+}

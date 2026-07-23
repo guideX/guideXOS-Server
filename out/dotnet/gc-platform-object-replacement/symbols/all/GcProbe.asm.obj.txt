@@ -1,0 +1,59 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\GcProbe.asm.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01038413 ABS    notype       Static       | @comp.id
+001 00004010 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .text$mn
+    Section length  132, #relocs    7, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .data
+    Section length    0, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .pdata
+    Section length   24, #relocs    9, #linenums    0, checksum        0
+008 00000000 SECT4  notype       Static       | .xdata
+    Section length   4C, #relocs    1, #linenums    0, checksum        0
+00A 00000000 SECT5  notype       Static       | .debug$S
+    Section length  548, #relocs    E, #linenums    0, checksum        0
+00C 00000000 SECT6  notype       Static       | .debug$T
+    Section length   6C, #relocs    0, #linenums    0, checksum        0
+00E 00000000 UNDEF  notype       External     | RhpGcAlloc
+00F 00000000 UNDEF  notype       External     | RhpValidateExInfoPop
+010 00000000 UNDEF  notype       External     | RhDebugBreak
+011 00000000 UNDEF  notype       External     | RhpWaitForGC2
+012 00000000 UNDEF  notype       External     | RhExceptionHandling_FailedAllocation
+013 00000000 UNDEF  notype       External     | RhThrowHwEx
+014 00000000 UNDEF  notype       External     | RhThrowEx
+015 00000000 UNDEF  notype       External     | RhRethrow
+016 00000000 UNDEF  notype       External     | RhpGcPoll2
+017 00000000 UNDEF  notype       External     | RhpTrapThreads
+018 00000000 UNDEF  notype       External     | g_lowest_address
+019 00000000 UNDEF  notype       External     | g_highest_address
+01A 00000000 UNDEF  notype       External     | g_ephemeral_low
+01B 00000000 UNDEF  notype       External     | g_ephemeral_high
+01C 00000000 UNDEF  notype       External     | g_card_table
+01D 00000000 UNDEF  notype       External     | g_card_bundle_table
+01E 00000000 UNDEF  notype       External     | g_write_watch_table
+01F 00000000 UNDEF  notype       External     | RhpPInvokeExceptionGuard
+020 00000000 UNDEF  notype       External     | _tls_index
+021 00000000 UNDEF  notype       External     | tls_CurrentThread
+022 00000000 UNDEF  notype       External     | RhpThrowHwEx
+023 00000000 SECT1  notype ()    External     | RhpGcProbeHijack
+024 00000000 SECT4  notype       Static       | $xdatasym
+025 00000050 SECT1  notype ()    External     | RhpWaitForGC
+026 000000E0 SECT1  notype ()    External     | RhpGcPoll
+027 000000F0 SECT1  notype ()    External     | RhpGcPollRare
+028 00000000 SECT1  notype       Static       | $$000000
+029 000000B1 SECT1  notype       Label        | Abort
+
+String Table Size = 0x19A bytes
+
+  Summary
+
+           0 .data
+         548 .debug$S
+          6C .debug$T
+          24 .pdata
+         132 .text$mn
+          4C .xdata

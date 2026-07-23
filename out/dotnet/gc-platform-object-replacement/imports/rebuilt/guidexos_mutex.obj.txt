@@ -1,0 +1,14 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\guidexos_mutex.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          10 .bss
+         158 .chks64
+          C0 .debug$S
+           3 .drectve
+          84 .pdata
+         8D8 .text$mn
+          98 .xdata

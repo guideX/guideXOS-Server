@@ -1,0 +1,70 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\ExceptionHandling.asm.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01038413 ABS    notype       Static       | @comp.id
+001 00004010 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .text$mn
+    Section length  84A, #relocs    F, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .data
+    Section length    0, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .pdata
+    Section length   48, #relocs   12, #linenums    0, checksum        0
+008 00000000 SECT4  notype       Static       | .xdata
+    Section length  1A8, #relocs    0, #linenums    0, checksum        0
+00A 00000000 SECT5  notype       Static       | .debug$S
+    Section length  ED8, #relocs   22, #linenums    0, checksum        0
+00C 00000000 SECT6  notype       Static       | .debug$T
+    Section length   9C, #relocs    0, #linenums    0, checksum        0
+00E 00000000 SECT7  notype       Static       | .gehcont$y
+    Section length    4, #relocs    0, #linenums    0, checksum        0
+010 00000000 UNDEF  notype       External     | RhpGcAlloc
+011 00000000 UNDEF  notype       External     | RhpValidateExInfoPop
+012 00000000 UNDEF  notype       External     | RhDebugBreak
+013 00000000 UNDEF  notype       External     | RhpWaitForGC2
+014 00000000 UNDEF  notype       External     | RhExceptionHandling_FailedAllocation
+015 00000000 UNDEF  notype       External     | RhThrowHwEx
+016 00000000 UNDEF  notype       External     | RhThrowEx
+017 00000000 UNDEF  notype       External     | RhRethrow
+018 00000000 UNDEF  notype       External     | RhpGcPoll2
+019 00000000 UNDEF  notype       External     | RhpTrapThreads
+01A 00000000 UNDEF  notype       External     | g_lowest_address
+01B 00000000 UNDEF  notype       External     | g_highest_address
+01C 00000000 UNDEF  notype       External     | g_ephemeral_low
+01D 00000000 UNDEF  notype       External     | g_ephemeral_high
+01E 00000000 UNDEF  notype       External     | g_card_table
+01F 00000000 UNDEF  notype       External     | g_card_bundle_table
+020 00000000 UNDEF  notype       External     | g_write_watch_table
+021 00000000 UNDEF  notype       External     | _tls_index
+022 00000000 UNDEF  notype       External     | tls_CurrentThread
+023 0000030B SECT1  notype       External     | RhpRethrow2
+024 00000000 SECT1  notype ()    External     | RhpThrowHwExGEHCONT
+025 0000021F SECT1  notype       External     | RhpThrowEx2
+026 0000046F SECT1  notype       External     | RhpCallCatchFunclet2
+027 000000F3 SECT1  notype       External     | RhpThrowHwEx2
+028 000007E6 SECT1  notype       External     | RhpCallFilterFunclet2
+029 00000666 SECT1  notype       External     | RhpCallFinallyFunclet2
+02A 00000000 SECT1  notype ()    External     | RhpThrowHwEx
+02B 00000000 SECT4  notype       Static       | $xdatasym
+02C 00000100 SECT1  notype ()    External     | RhpThrowEx
+02D 00000220 SECT1  notype ()    External     | RhpRethrow
+02E 00000310 SECT1  notype ()    External     | RhpCallCatchFunclet
+02F 00000530 SECT1  notype ()    External     | RhpCallFinallyFunclet
+030 00000770 SECT1  notype ()    External     | RhpCallFilterFunclet
+031 00000000 SECT1  notype       Static       | $$000000
+032 0000050F SECT1  notype       Label        | Update_Loop
+033 00000520 SECT1  notype       Label        | No_Ssp_Update
+
+String Table Size = 0x24C bytes
+
+  Summary
+
+           0 .data
+         ED8 .debug$S
+          9C .debug$T
+           4 .gehcont$y
+          48 .pdata
+         84A .text$mn
+         1A8 .xdata

@@ -1,0 +1,13 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\AllocFast.asm.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+           0 .data
+         7E8 .debug$S
+          9C .debug$T
+          18 .pdata
+         203 .text$mn
+          40 .xdata

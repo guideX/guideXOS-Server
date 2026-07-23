@@ -1,0 +1,14 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\handletablescan.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+         4D0 .chks64
+        F4DC .debug$S
+          88 .debug$T
+          F4 .drectve
+         204 .pdata
+        146E .text$mn
+         384 .xdata

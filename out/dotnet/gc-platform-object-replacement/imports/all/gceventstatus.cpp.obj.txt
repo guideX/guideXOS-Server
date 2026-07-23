@@ -1,0 +1,12 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\gceventstatus.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          10 .bss
+          28 .chks64
+        8908 .debug$S
+          88 .debug$T
+          F4 .drectve

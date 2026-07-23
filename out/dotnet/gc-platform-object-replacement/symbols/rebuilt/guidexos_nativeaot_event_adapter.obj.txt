@@ -1,0 +1,110 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\guidexos_nativeaot_event_adapter.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058D98 ABS    notype       Static       | @comp.id
+001 80030090 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .drectve
+    Section length   95, #relocs    0, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .debug$S
+    Section length   D0, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .text$mn
+    Section length   17, #relocs    1, #linenums    0, checksum 285A3876, selection    2 (pick any)
+008 00000000 SECT4  notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    2 (pick any)
+00A 00000000 SECT5  notype       Static       | .text$mn
+    Section length   34, #relocs    2, #linenums    0, checksum 53B70DC7, selection    2 (pick any)
+00C 00000000 SECT6  notype       Static       | .text$mn
+    Section length    D, #relocs    1, #linenums    0, checksum 322E0F54, selection    1 (pick no duplicates)
+00E 00000000 SECT7  notype       Static       | .text$mn
+    Section length   81, #relocs    6, #linenums    0, checksum  F7262C5, selection    1 (pick no duplicates)
+010 00000000 SECT8  notype       Static       | .text$mn
+    Section length    A, #relocs    1, #linenums    0, checksum 8A6AC105, selection    1 (pick no duplicates)
+012 00000000 SECT9  notype       Static       | .text$mn
+    Section length   47, #relocs    3, #linenums    0, checksum 76728E92, selection    1 (pick no duplicates)
+014 00000000 SECTA  notype       Static       | .text$mn
+    Section length   10, #relocs    1, #linenums    0, checksum BC2597ED, selection    1 (pick no duplicates)
+016 00000000 SECTB  notype       Static       | .text$mn
+    Section length   10, #relocs    1, #linenums    0, checksum BC2597ED, selection    1 (pick no duplicates)
+018 00000000 SECTC  notype       Static       | .text$mn
+    Section length   10, #relocs    1, #linenums    0, checksum 57122CEE, selection    1 (pick no duplicates)
+01A 00000000 SECTD  notype       Static       | .text$mn
+    Section length   3E, #relocs    2, #linenums    0, checksum 3FCE3F32, selection    1 (pick no duplicates)
+01C 00000000 UNDEF  notype ()    External     | ??3@YAXPEAX_K@Z (void __cdecl operator delete(void *,unsigned __int64))
+01D 00000000 UNDEF  notype ()    External     | ?signedMilliseconds@WaitTimeout@runtime@gxos@@SA?AU123@_J@Z (public: static struct gxos::runtime::WaitTimeout __cdecl gxos::runtime::WaitTimeout::signedMilliseconds(__int64))
+01E 00000000 UNDEF  notype ()    External     | ??0Event@runtime@gxos@@QEAA@W4EventMode@12@_N@Z (public: __cdecl gxos::runtime::Event::Event(enum gxos::runtime::EventMode,bool))
+01F 00000000 UNDEF  notype ()    External     | ??1Event@runtime@gxos@@QEAA@XZ (public: __cdecl gxos::runtime::Event::~Event(void))
+020 00000000 UNDEF  notype ()    External     | ?isInitialized@Event@runtime@gxos@@QEBA_NXZ (public: bool __cdecl gxos::runtime::Event::isInitialized(void)const )
+021 00000000 UNDEF  notype ()    External     | ?signal@Event@runtime@gxos@@QEAA?AW4EventStatus@23@XZ (public: enum gxos::runtime::EventStatus __cdecl gxos::runtime::Event::signal(void))
+022 00000000 UNDEF  notype ()    External     | ?reset@Event@runtime@gxos@@QEAA?AW4EventStatus@23@XZ (public: enum gxos::runtime::EventStatus __cdecl gxos::runtime::Event::reset(void))
+023 00000000 UNDEF  notype ()    External     | ?close@Event@runtime@gxos@@QEAA?AW4EventStatus@23@XZ (public: enum gxos::runtime::EventStatus __cdecl gxos::runtime::Event::close(void))
+024 00000000 UNDEF  notype ()    External     | ?wait@Event@runtime@gxos@@QEAA?AW4WaitResult@23@XZ (public: enum gxos::runtime::WaitResult __cdecl gxos::runtime::Event::wait(void))
+025 00000000 UNDEF  notype ()    External     | ?wait@Event@runtime@gxos@@QEAA?AW4WaitResult@23@AEBUWaitTimeout@23@@Z (public: enum gxos::runtime::WaitResult __cdecl gxos::runtime::Event::wait(struct gxos::runtime::WaitTimeout const &))
+026 00000000 SECT6  notype ()    External     | ?createAutoResetEvent@nativeaot@guidexos@@YAPEAUEventHandle@12@_N@Z (struct guidexos::nativeaot::EventHandle * __cdecl guidexos::nativeaot::createAutoResetEvent(bool))
+027 00000000 SECT8  notype ()    External     | ?createManualResetEvent@nativeaot@guidexos@@YAPEAUEventHandle@12@_N@Z (struct guidexos::nativeaot::EventHandle * __cdecl guidexos::nativeaot::createManualResetEvent(bool))
+028 00000000 SECTB  notype ()    External     | ?setEvent@nativeaot@guidexos@@YA?AW4EventStatus@runtime@gxos@@PEAUEventHandle@12@@Z (enum gxos::runtime::EventStatus __cdecl guidexos::nativeaot::setEvent(struct guidexos::nativeaot::EventHandle *))
+029 00000000 SECTA  notype ()    External     | ?resetEvent@nativeaot@guidexos@@YA?AW4EventStatus@runtime@gxos@@PEAUEventHandle@12@@Z (enum gxos::runtime::EventStatus __cdecl guidexos::nativeaot::resetEvent(struct guidexos::nativeaot::EventHandle *))
+02A 00000000 SECTC  notype ()    External     | ?waitIndefinitely@nativeaot@guidexos@@YA?AW4WaitResult@runtime@gxos@@PEAUEventHandle@12@@Z (enum gxos::runtime::WaitResult __cdecl guidexos::nativeaot::waitIndefinitely(struct guidexos::nativeaot::EventHandle *))
+02B 00000000 SECTD  notype ()    External     | ?waitMilliseconds@nativeaot@guidexos@@YA?AW4WaitResult@runtime@gxos@@PEAUEventHandle@12@_J@Z (enum gxos::runtime::WaitResult __cdecl guidexos::nativeaot::waitMilliseconds(struct guidexos::nativeaot::EventHandle *,__int64))
+02C 00000000 SECT9  notype ()    External     | ?destroyEvent@nativeaot@guidexos@@YA?AW4EventStatus@runtime@gxos@@PEAUEventHandle@12@@Z (enum gxos::runtime::EventStatus __cdecl guidexos::nativeaot::destroyEvent(struct guidexos::nativeaot::EventHandle *))
+02D 00000000 UNDEF  notype ()    External     | ??2@YAPEAX_KAEBUnothrow_t@std@@@Z (void * __cdecl operator new(unsigned __int64,struct std::nothrow_t const &))
+02E 00000000 SECT3  notype ()    External     | ??0EventHandle@nativeaot@guidexos@@QEAA@W4EventMode@runtime@gxos@@_N@Z (public: __cdecl guidexos::nativeaot::EventHandle::EventHandle(enum gxos::runtime::EventMode,bool))
+02F 00000000 SECT4  notype ()    External     | ??1EventHandle@nativeaot@guidexos@@QEAA@XZ (public: __cdecl guidexos::nativeaot::EventHandle::~EventHandle(void))
+030 00000000 SECT5  notype ()    External     | ??_GEventHandle@nativeaot@guidexos@@QEAAPEAXI@Z (public: void * __cdecl guidexos::nativeaot::EventHandle::`scalar deleting destructor'(unsigned int))
+031 00000000 SECT7  notype ()    Static       | ?createEvent@?A0x804f84d1@nativeaot@guidexos@@YAPEAUEventHandle@23@W4EventMode@runtime@gxos@@_N@Z (struct guidexos::nativeaot::EventHandle * __cdecl guidexos::nativeaot::`anonymous namespace'::createEvent(enum gxos::runtime::EventMode,bool))
+032 00000000 SECTD  notype       Label        | $LN6
+033 00000000 SECT9  notype       Label        | $LN14
+034 00000000 SECT3  notype       Label        | $LN5
+035 00000000 SECT5  notype       Label        | $LN10
+036 00000000 SECTE  notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 84432563, selection    5 (pick associative Section 0xD)
+038 00000000 SECTE  notype       Static       | $unwind$?waitMilliseconds@nativeaot@guidexos@@YA?AW4WaitResult@runtime@gxos@@PEAUEventHandle@12@_J@Z
+039 00000000 SECTF  notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 9047414F, selection    5 (pick associative Section 0xD)
+03B 00000000 SECTF  notype       Static       | $pdata$?waitMilliseconds@nativeaot@guidexos@@YA?AW4WaitResult@runtime@gxos@@PEAUEventHandle@12@_J@Z
+03C 00000000 SECT10 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 8205E933, selection    5 (pick associative Section 0x9)
+03E 00000000 SECT10 notype       Static       | $unwind$?destroyEvent@nativeaot@guidexos@@YA?AW4EventStatus@runtime@gxos@@PEAUEventHandle@12@@Z
+03F 00000000 SECT11 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 63F42A00, selection    5 (pick associative Section 0x9)
+041 00000000 SECT11 notype       Static       | $pdata$?destroyEvent@nativeaot@guidexos@@YA?AW4EventStatus@runtime@gxos@@PEAUEventHandle@12@@Z
+042 00000000 SECT12 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum E371F566, selection    5 (pick associative Section 0x9)
+044 00000000 SECT12 notype       Static       | $chain$0$?destroyEvent@nativeaot@guidexos@@YA?AW4EventStatus@runtime@gxos@@PEAUEventHandle@12@@Z
+045 00000000 SECT13 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B2E91C99, selection    5 (pick associative Section 0x9)
+047 00000000 SECT13 notype       Static       | $pdata$0$?destroyEvent@nativeaot@guidexos@@YA?AW4EventStatus@runtime@gxos@@PEAUEventHandle@12@@Z
+048 00000000 SECT14 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x3)
+04A 00000000 SECT14 notype       Static       | $unwind$??0EventHandle@nativeaot@guidexos@@QEAA@W4EventMode@runtime@gxos@@_N@Z
+04B 00000000 SECT15 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 767E3832, selection    5 (pick associative Section 0x3)
+04D 00000000 SECT15 notype       Static       | $pdata$??0EventHandle@nativeaot@guidexos@@QEAA@W4EventMode@runtime@gxos@@_N@Z
+04E 00000000 SECT16 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x5)
+050 00000000 SECT16 notype       Static       | $unwind$??_GEventHandle@nativeaot@guidexos@@QEAAPEAXI@Z
+051 00000000 SECT17 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  1875D87, selection    5 (pick associative Section 0x5)
+053 00000000 SECT17 notype       Static       | $pdata$??_GEventHandle@nativeaot@guidexos@@QEAAPEAXI@Z
+054 00000000 SECT18 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum ED4F81A7, selection    5 (pick associative Section 0x7)
+056 00000000 SECT18 notype       Static       | $unwind$?createEvent@?A0x804f84d1@nativeaot@guidexos@@YAPEAUEventHandle@23@W4EventMode@runtime@gxos@@_N@Z
+057 00000000 SECT19 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 9F918544, selection    5 (pick associative Section 0x7)
+059 00000000 SECT19 notype       Static       | $pdata$?createEvent@?A0x804f84d1@nativeaot@guidexos@@YAPEAUEventHandle@23@W4EventMode@runtime@gxos@@_N@Z
+05A 00000000 UNDEF  notype       External     | ?nothrow@std@@3Unothrow_t@1@B (struct std::nothrow_t const std::nothrow)
+05B 00000000 SECT1A notype       Static       | .chks64
+    Section length   D0, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x995 bytes
+
+  Summary
+
+          D0 .chks64
+          D0 .debug$S
+          95 .drectve
+          48 .pdata
+         19D .text$mn
+          48 .xdata

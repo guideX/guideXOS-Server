@@ -1,0 +1,22 @@
+﻿{
+    "compiler":  "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\cl.exe",
+    "linker":  "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\lib.exe",
+    "dumpbin":  "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\dumpbin.exe",
+    "target":  "AMD64 COFF/MSVC NativeAOT object ABI",
+    "runtimeLibrary":  "MT_StaticRelease",
+    "exception":  "EHs-c-",
+    "rtti":  "GR-",
+    "securityCookie":  "GS-",
+    "optimization":  "O2 Oi Brepro",
+    "cxx":  "c++17",
+    "defines":  [
+                    "FEATURE_NATIVEAOT",
+                    "NATIVEAOT",
+                    "TARGET_AMD64",
+                    "HOST_AMD64",
+                    "HOST_64BIT",
+                    "_WIN64",
+                    "GXOS_BARE_METAL",
+                    "GXOS_TRUE_VIRTUAL_MEMORY"
+                ]
+}

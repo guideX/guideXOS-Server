@@ -1,0 +1,13 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\GcProbe.asm.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+           0 .data
+         548 .debug$S
+          6C .debug$T
+          24 .pdata
+         132 .text$mn
+          4C .xdata

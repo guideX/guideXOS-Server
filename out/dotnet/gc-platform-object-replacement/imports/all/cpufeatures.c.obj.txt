@@ -1,0 +1,15 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\cpufeatures.c.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          68 .chks64
+        8CE4 .debug$S
+          88 .debug$T
+          5D .drectve
+          18 .pdata
+           D .rdata
+         29A .text$mn
+          24 .xdata

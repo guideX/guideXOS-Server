@@ -1,0 +1,12 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\guidexos_gc_platform_services.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          14 .bss
+          C8 .chks64
+          D0 .debug$S
+         170 .drectve
+          A1 .text$mn

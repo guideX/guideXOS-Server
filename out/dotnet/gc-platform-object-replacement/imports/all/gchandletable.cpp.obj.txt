@@ -1,0 +1,17 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\gchandletable.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+           C .bss
+         370 .chks64
+        B538 .debug$S
+          88 .debug$T
+          F4 .drectve
+          C0 .pdata
+         190 .rdata
+         53D .text$mn
+           3 .voltbl
+          BC .xdata

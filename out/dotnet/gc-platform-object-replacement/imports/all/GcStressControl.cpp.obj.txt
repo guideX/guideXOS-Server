@@ -1,0 +1,11 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\GcStressControl.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          20 .chks64
+        5538 .debug$S
+          88 .debug$T
+          F4 .drectve

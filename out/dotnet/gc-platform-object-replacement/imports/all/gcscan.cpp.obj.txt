@@ -1,0 +1,17 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\gcscan.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+         200 .chks64
+           4 .data
+        A1D8 .debug$S
+          88 .debug$T
+          F4 .drectve
+          60 .pdata
+          26 .rdata
+         245 .text$mn
+           5 .voltbl
+          64 .xdata

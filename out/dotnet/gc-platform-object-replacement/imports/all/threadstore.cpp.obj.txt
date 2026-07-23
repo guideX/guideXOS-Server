@@ -1,0 +1,17 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\threadstore.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          18 .bss
+         3A8 .chks64
+        C1B8 .debug$S
+          88 .debug$T
+          F4 .drectve
+         120 .pdata
+         8F6 .text$mn
+          D8 .tls$
+          25 .voltbl
+         144 .xdata

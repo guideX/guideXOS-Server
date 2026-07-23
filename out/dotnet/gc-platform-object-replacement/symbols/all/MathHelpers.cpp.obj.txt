@@ -1,0 +1,67 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\MathHelpers.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   F4, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 56BC, #relocs    0, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .text$mn
+    Section length   34, #relocs    2, #linenums    0, checksum C8BBC15D, selection    1 (pick no duplicates)
+00B 00000000 SECT5  notype       Static       | .debug$S
+    Section length   E8, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4)
+00D 00000000 SECT6  notype       Static       | .text$mn
+    Section length   3F, #relocs    2, #linenums    0, checksum D6E338BC, selection    1 (pick no duplicates)
+00F 00000000 SECT7  notype       Static       | .debug$S
+    Section length   E8, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x6)
+011 00000000 SECT8  notype       Static       | .text$mn
+    Section length   22, #relocs    1, #linenums    0, checksum FA9584B2, selection    1 (pick no duplicates)
+013 00000000 SECT9  notype       Static       | .debug$S
+    Section length   EC, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x8)
+015 00000000 SECTA  notype       Static       | .text$mn
+    Section length   4E, #relocs    2, #linenums    0, checksum E0A47794, selection    1 (pick no duplicates)
+017 00000000 SECTB  notype       Static       | .debug$S
+    Section length   FC, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0xA)
+019 00000000 SECTA  notype ()    External     | RhpDbl2ULng
+01A 00000000 SECT6  notype ()    External     | RhpDbl2Lng
+01B 00000000 SECT4  notype ()    External     | RhpDbl2Int
+01C 00000000 SECT8  notype ()    External     | RhpDbl2UInt
+01D 00000000 SECTC  notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 5FA582EA, selection    2 (pick any)
+01F 00000000 SECTC  notype       External     | __real@41e0000000000000
+020 00000000 SECTD  notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 64807037, selection    2 (pick any)
+022 00000000 SECTD  notype       External     | __real@41efffffffe00000
+023 00000000 SECTE  notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum B1ABE3C6, selection    2 (pick any)
+025 00000000 SECTE  notype       External     | __real@43e0000000000000
+026 00000000 SECTF  notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum FB69F197, selection    2 (pick any)
+028 00000000 SECTF  notype       External     | __real@43f0000000000000
+029 00000000 SECT10 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum B21D01CA, selection    2 (pick any)
+02B 00000000 SECT10 notype       External     | __real@c1e0000000000000
+02C 00000000 SECT11 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 5C1360E6, selection    2 (pick any)
+02E 00000000 SECT11 notype       External     | __real@c3e0000000000000
+02F 00000000 UNDEF  notype       External     | _fltused
+030 00000000 SECT12 notype       Static       | .chks64
+    Section length   90, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0xC2 bytes
+
+  Summary
+
+          90 .chks64
+        5A74 .debug$S
+          88 .debug$T
+          F4 .drectve
+          30 .rdata
+          E3 .text$mn

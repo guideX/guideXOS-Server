@@ -1,0 +1,19 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\EHHelpers.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          11 .bss
+         208 .chks64
+          60 .data
+        922C .debug$S
+          88 .debug$T
+          F4 .drectve
+          90 .pdata
+          38 .rdata
+         5F4 .text$mn
+          D8 .tls$
+           3 .voltbl
+          B0 .xdata

@@ -1,0 +1,16 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\guidexos_virtual_memory_region.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+       C0700 .bss
+         4C0 .chks64
+          10 .data
+          D0 .debug$S
+           3 .drectve
+         21C .pdata
+         461 .rdata
+        182C .text$mn
+         384 .xdata

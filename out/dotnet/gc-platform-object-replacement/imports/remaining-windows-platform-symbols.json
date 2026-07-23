@@ -1,0 +1,173 @@
+﻿[
+    {
+        "symbol":  "VirtualQuery",
+        "contributingInventory":  "symbols\\all\\PalRedhawkCommon.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_VirtualQuery"
+                             ]
+    },
+    {
+        "symbol":  "GetTickCount64",
+        "contributingInventory":  "symbols\\all\\PalRedhawkCommon.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_GetTickCount64"
+                             ]
+    },
+    {
+        "symbol":  "VirtualAlloc",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_VirtualAlloc"
+                             ]
+    },
+    {
+        "symbol":  "VirtualFree",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_VirtualFree"
+                             ]
+    },
+    {
+        "symbol":  "VirtualProtect",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_VirtualProtect"
+                             ]
+    },
+    {
+        "symbol":  "CreateEventW",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_CreateEventW"
+                             ]
+    },
+    {
+        "symbol":  "CloseHandle",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_CloseHandle"
+                             ]
+    },
+    {
+        "symbol":  "CreateThread",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_CreateThread"
+                             ]
+    },
+    {
+        "symbol":  "FlsAlloc",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_FlsAlloc"
+                             ]
+    },
+    {
+        "symbol":  "FlsGetValue",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_FlsGetValue"
+                             ]
+    },
+    {
+        "symbol":  "FlsSetValue",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_FlsSetValue"
+                             ]
+    },
+    {
+        "symbol":  "GetCurrentThreadId",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_GetCurrentThreadId"
+                             ]
+    },
+    {
+        "symbol":  "GetLastError",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_GetLastError"
+                             ]
+    },
+    {
+        "symbol":  "GetCurrentProcess",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_GetCurrentProcess"
+                             ]
+    },
+    {
+        "symbol":  "SwitchToThread",
+        "contributingInventory":  "symbols\\all\\PalRedhawkMinWin.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_SwitchToThread"
+                             ]
+    },
+    {
+        "symbol":  "GetLastError",
+        "contributingInventory":  "symbols\\all\\thread.cpp.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_GetLastError"
+                             ]
+    },
+    {
+        "symbol":  "QueryPerformanceCounter",
+        "contributingInventory":  "symbols\\all\\time.c.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_QueryPerformanceCounter"
+                             ]
+    },
+    {
+        "symbol":  "QueryPerformanceFrequency",
+        "contributingInventory":  "symbols\\all\\time.c.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_QueryPerformanceFrequency"
+                             ]
+    },
+    {
+        "symbol":  "SleepEx",
+        "contributingInventory":  "symbols\\all\\time.c.obj.txt",
+        "kind":  "Win32 import candidate",
+        "importLike":  true,
+        "undefinedRecords":  [
+                                 "__imp_SleepEx"
+                             ]
+    }
+]

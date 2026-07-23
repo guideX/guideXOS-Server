@@ -1,0 +1,14 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\HandleTableHelpers.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          F0 .chks64
+        8F28 .debug$S
+          88 .debug$T
+          F4 .drectve
+          30 .pdata
+          F4 .text$mn
+          2C .xdata

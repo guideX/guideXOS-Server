@@ -1,0 +1,728 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\guidexos_nativeaot_virtual_memory_adapter.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058D98 ABS    notype       Static       | @comp.id
+001 80010090 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .drectve
+    Section length    3, #relocs    0, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .debug$S
+    Section length   DC, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .text$mn
+    Section length   5A, #relocs    1, #linenums    0, checksum 32E36B1C, selection    2 (pick any)
+008 00000000 SECT4  notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    2 (pick any)
+00A 00000000 SECT5  notype       Static       | .text$mn
+    Section length   37, #relocs    0, #linenums    0, checksum 88BEA134, selection    2 (pick any)
+00C 00000000 SECT6  notype       Static       | .text$mn
+    Section length   37, #relocs    0, #linenums    0, checksum FE3B0407, selection    2 (pick any)
+00E 00000000 SECT7  notype       Static       | .text$di
+    Section length   91, #relocs    4, #linenums    0, checksum  12B1F72, selection    2 (pick any)
+010 00000000 SECT8  notype       Static       | .text$yd
+    Section length   40, #relocs    2, #linenums    0, checksum 2A90AE57, selection    2 (pick any)
+012 00000000 SECT9  notype       Static       | .text$mn
+    Section length   32, #relocs    3, #linenums    0, checksum 47136F6E, selection    1 (pick no duplicates)
+014 00000000 SECTA  notype       Static       | .text$mn
+    Section length   5D, #relocs    1, #linenums    0, checksum CC8FE339, selection    1 (pick no duplicates)
+016 00000000 SECTB  notype       Static       | .text$mn
+    Section length   1D, #relocs    0, #linenums    0, checksum 831E7E98, selection    1 (pick no duplicates)
+018 00000000 SECTC  notype       Static       | .text$mn
+    Section length   1D, #relocs    0, #linenums    0, checksum 831E7E98, selection    1 (pick no duplicates)
+01A 00000000 SECTD  notype       Static       | .text$mn
+    Section length   40, #relocs    0, #linenums    0, checksum 342177A8, selection    1 (pick no duplicates)
+01C 00000000 SECTE  notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+01E 00000000 SECTF  notype       Static       | .text$mn
+    Section length   C7, #relocs    3, #linenums    0, checksum 5A1FB552, selection    1 (pick no duplicates)
+020 00000000 SECT10 notype       Static       | .text$mn
+    Section length   3B, #relocs    2, #linenums    0, checksum 1A9B500F, selection    1 (pick no duplicates)
+022 00000000 SECT11 notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+024 00000000 SECT12 notype       Static       | .text$mn
+    Section length   BB, #relocs    3, #linenums    0, checksum 1F9B80DF, selection    1 (pick no duplicates)
+026 00000000 SECT13 notype       Static       | .text$mn
+    Section length   3C, #relocs    2, #linenums    0, checksum A914DB96, selection    1 (pick no duplicates)
+028 00000000 SECT14 notype       Static       | .text$mn
+    Section length   C0, #relocs    2, #linenums    0, checksum 5B056CE4, selection    1 (pick no duplicates)
+02A 00000000 SECT15 notype       Static       | .text$mn
+    Section length   3A, #relocs    1, #linenums    0, checksum 918A9A03, selection    1 (pick no duplicates)
+02C 00000000 SECT16 notype       Static       | .text$mn
+    Section length   32, #relocs    1, #linenums    0, checksum 6C9F8CD2, selection    1 (pick no duplicates)
+02E 00000000 SECT17 notype       Static       | .text$mn
+    Section length   71, #relocs    1, #linenums    0, checksum CE955E27, selection    1 (pick no duplicates)
+030 00000000 SECT18 notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+032 00000000 SECT19 notype       Static       | .text$mn
+    Section length   64, #relocs    1, #linenums    0, checksum 7082B7F8, selection    1 (pick no duplicates)
+034 00000000 SECT1A notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+036 00000000 SECT1B notype       Static       | .text$mn
+    Section length   3B, #relocs    2, #linenums    0, checksum 1A9B500F, selection    1 (pick no duplicates)
+038 00000000 SECT1C notype       Static       | .text$mn
+    Section length   3C, #relocs    2, #linenums    0, checksum A914DB96, selection    1 (pick no duplicates)
+03A 00000000 SECT1D notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+03C 00000000 SECT1E notype       Static       | .text$mn
+    Section length   3A, #relocs    1, #linenums    0, checksum 2DDA3203, selection    1 (pick no duplicates)
+03E 00000000 SECT1F notype       Static       | .text$mn
+    Section length   54, #relocs    2, #linenums    0, checksum 8A29B43F, selection    1 (pick no duplicates)
+040 00000000 SECT20 notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+042 00000000 SECT21 notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum EFBA1F8D, selection    1 (pick no duplicates)
+044 00000000 SECT22 notype       Static       | .text$mn
+    Section length  15B, #relocs    3, #linenums    0, checksum 7DA25ED7, selection    1 (pick no duplicates)
+046 00000000 SECT23 notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+048 00000000 SECT24 notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum EE7875BA, selection    1 (pick no duplicates)
+04A 00000000 SECT25 notype       Static       | .text$mn
+    Section length  10E, #relocs    C, #linenums    0, checksum A23B5E09, selection    1 (pick no duplicates)
+04C 00000000 SECT26 notype       Static       | .text$mn
+    Section length   1B, #relocs    0, #linenums    0, checksum  57BAE30, selection    1 (pick no duplicates)
+04E 00000000 SECT27 notype       Static       | .text$mn
+    Section length  1E4, #relocs   20, #linenums    0, checksum 78A063F3, selection    1 (pick no duplicates)
+050 00000000 SECT28 notype       Static       | .text$mn
+    Section length   28, #relocs    1, #linenums    0, checksum 3DCAF5DD, selection    1 (pick no duplicates)
+052 00000000 SECT29 notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+054 00000000 SECT2A notype       Static       | .text$mn
+    Section length   3D, #relocs    2, #linenums    0, checksum FED6E4DF, selection    1 (pick no duplicates)
+056 00000000 SECT2B notype       Static       | .text$mn
+    Section length  114, #relocs    1, #linenums    0, checksum 3AF99482, selection    1 (pick no duplicates)
+058 00000000 SECT2C notype       Static       | .text$mn
+    Section length  18F, #relocs    6, #linenums    0, checksum F99536FE, selection    1 (pick no duplicates)
+05A 00000000 SECT2D notype       Static       | .text$mn
+    Section length  1D4, #relocs    6, #linenums    0, checksum 13A52412, selection    1 (pick no duplicates)
+05C 00000000 SECT2E notype       Static       | .text$mn
+    Section length   57, #relocs    1, #linenums    0, checksum 1D8A133E, selection    1 (pick no duplicates)
+05E 00000000 SECT2F notype       Static       | .text$mn
+    Section length   2E, #relocs    1, #linenums    0, checksum 20EC8DAB, selection    1 (pick no duplicates)
+060 00000000 SECT30 notype       Static       | .text$mn
+    Section length   52, #relocs    4, #linenums    0, checksum 7BB03988, selection    1 (pick no duplicates)
+062 00000000 SECT31 notype       Static       | .text$mn
+    Section length   95, #relocs    2, #linenums    0, checksum 1925329B, selection    1 (pick no duplicates)
+064 00000000 SECT32 notype       Static       | .text$mn
+    Section length  33C, #relocs   2B, #linenums    0, checksum 74AC02C4, selection    1 (pick no duplicates)
+066 00000000 SECT33 notype       Static       | .text$mn
+    Section length   56, #relocs    2, #linenums    0, checksum 58E2356C, selection    1 (pick no duplicates)
+068 00000000 SECT34 notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum EFBA1F8D, selection    1 (pick no duplicates)
+06A 00000000 SECT35 notype       Static       | .text$mn
+    Section length  537, #relocs   32, #linenums    0, checksum 8694BB87, selection    1 (pick no duplicates)
+06C 00000000 SECT36 notype       Static       | .text$mn
+    Section length   DC, #relocs    4, #linenums    0, checksum D08C4C34, selection    1 (pick no duplicates)
+06E 00000000 SECT37 notype       Static       | .text$mn
+    Section length    F, #relocs    1, #linenums    0, checksum  DAD866D, selection    1 (pick no duplicates)
+070 00000000 SECT38 notype       Static       | .text$mn
+    Section length   24, #relocs    1, #linenums    0, checksum 3C193C8C, selection    1 (pick no duplicates)
+072 00000000 SECT39 notype       Static       | .text$mn
+    Section length   A2, #relocs    2, #linenums    0, checksum 92CD1189, selection    1 (pick no duplicates)
+074 00000000 SECT3A notype       Static       | .text$mn
+    Section length   5C, #relocs    2, #linenums    0, checksum F5D4B18B, selection    1 (pick no duplicates)
+076 00000000 SECT3B notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum 922B422E, selection    1 (pick no duplicates)
+078 00000000 SECT3C notype       Static       | .text$mn
+    Section length  1AF, #relocs    A, #linenums    0, checksum 96F046BF, selection    1 (pick no duplicates)
+07A 00000000 SECT3D notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum EE7875BA, selection    1 (pick no duplicates)
+07C 00000000 SECT3E notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum EE7875BA, selection    1 (pick no duplicates)
+07E 00000000 SECT3F notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum EE7875BA, selection    1 (pick no duplicates)
+080 00000000 SECT40 notype       Static       | .text$mn
+    Section length  154, #relocs    7, #linenums    0, checksum 6D11D09F, selection    1 (pick no duplicates)
+082 00000000 SECT41 notype       Static       | .text$mn
+    Section length   55, #relocs    2, #linenums    0, checksum EEE06EB5, selection    1 (pick no duplicates)
+084 00000000 SECT42 notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum 22C965E9, selection    1 (pick no duplicates)
+086 00000000 SECT43 notype       Static       | .text$mn
+    Section length   90, #relocs   15, #linenums    0, checksum 3218C482, selection    1 (pick no duplicates)
+088 00000000 SECT44 notype       Static       | .text$mn
+    Section length  16E, #relocs    8, #linenums    0, checksum  2113D31, selection    1 (pick no duplicates)
+08A 00000000 SECT45 notype       Static       | .text$mn
+    Section length   1F, #relocs    1, #linenums    0, checksum 8D130A7E, selection    1 (pick no duplicates)
+08C 00000000 SECT46 notype       Static       | .text$mn
+    Section length   59, #relocs    1, #linenums    0, checksum F08CC243, selection    1 (pick no duplicates)
+08E 00000000 SECT47 notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum C8256A8F, selection    1 (pick no duplicates)
+090 00000000 SECT5  notype ()    External     | ??_H@YAXPEAX_K1P6APEAX0@Z@Z (void __cdecl `vector constructor iterator'(void *,unsigned __int64,unsigned __int64,void * (__cdecl*)(void *)))
+091 00000000 SECT6  notype ()    External     | ??_I@YAXPEAX_K1P6AX0@Z@Z (void __cdecl `vector destructor iterator'(void *,unsigned __int64,unsigned __int64,void (__cdecl*)(void *)))
+092 00000000 UNDEF  notype ()    External     | atexit
+093 00000000 UNDEF  notype ()    External     | ??0VirtualMemoryRegion@virtual_memory@runtime@gxos@@QEAA@XZ (public: __cdecl gxos::runtime::virtual_memory::VirtualMemoryRegion::VirtualMemoryRegion(void))
+094 00000000 UNDEF  notype ()    External     | ??1VirtualMemoryRegion@virtual_memory@runtime@gxos@@QEAA@XZ (public: __cdecl gxos::runtime::virtual_memory::VirtualMemoryRegion::~VirtualMemoryRegion(void))
+095 00000000 UNDEF  notype ()    External     | ?reserve@virtual_memory@runtime@gxos@@YA?AW4VmResult@123@_K0PEAXPEAVVirtualMemoryRegion@123@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl gxos::runtime::virtual_memory::reserve(unsigned __int64,unsigned __int64,void *,class gxos::runtime::virtual_memory::VirtualMemoryRegion *))
+096 00000000 UNDEF  notype ()    External     | ?commit@virtual_memory@runtime@gxos@@YA?AW4VmResult@123@AEAVVirtualMemoryRegion@123@_K1W4MemoryProtection@123@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl gxos::runtime::virtual_memory::commit(class gxos::runtime::virtual_memory::VirtualMemoryRegion &,unsigned __int64,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection))
+097 00000000 UNDEF  notype ()    External     | ?decommit@virtual_memory@runtime@gxos@@YA?AW4VmResult@123@AEAVVirtualMemoryRegion@123@_K1@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl gxos::runtime::virtual_memory::decommit(class gxos::runtime::virtual_memory::VirtualMemoryRegion &,unsigned __int64,unsigned __int64))
+098 00000000 UNDEF  notype ()    External     | ?protect@virtual_memory@runtime@gxos@@YA?AW4VmResult@123@AEAVVirtualMemoryRegion@123@_K1W4MemoryProtection@123@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl gxos::runtime::virtual_memory::protect(class gxos::runtime::virtual_memory::VirtualMemoryRegion &,unsigned __int64,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection))
+099 00000000 UNDEF  notype ()    External     | ?release@virtual_memory@runtime@gxos@@YA?AW4VmResult@123@AEAVVirtualMemoryRegion@123@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl gxos::runtime::virtual_memory::release(class gxos::runtime::virtual_memory::VirtualMemoryRegion &))
+09A 00000000 UNDEF  notype ()    External     | ?query@virtual_memory@runtime@gxos@@YA?AW4VmResult@123@PEBXPEAUVirtualMemoryInfo@123@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl gxos::runtime::virtual_memory::query(void const *,struct gxos::runtime::virtual_memory::VirtualMemoryInfo *))
+09B 00000000 UNDEF  notype ()    External     | ?pageSize@virtual_memory@runtime@gxos@@YA_KXZ (unsigned __int64 __cdecl gxos::runtime::virtual_memory::pageSize(void))
+09C 00000000 UNDEF  notype ()    External     | ?allocationGranularity@virtual_memory@runtime@gxos@@YA_KXZ (unsigned __int64 __cdecl gxos::runtime::virtual_memory::allocationGranularity(void))
+09D 00000000 UNDEF  notype ()    External     | ?maximumRegionSize@virtual_memory@runtime@gxos@@YA_KXZ (unsigned __int64 __cdecl gxos::runtime::virtual_memory::maximumRegionSize(void))
+09E 00000000 UNDEF  notype ()    External     | ?stats@virtual_memory@runtime@gxos@@YA?AUVirtualMemoryStats@123@XZ (struct gxos::runtime::virtual_memory::VirtualMemoryStats __cdecl gxos::runtime::virtual_memory::stats(void))
+09F 00000000 SECT25 notype ()    External     | ?initializeVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@XZ (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::initializeVirtualMemoryAdapter(void))
+0A0 00000000 SECT3C notype ()    External     | ?shutdownVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_N@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::shutdownVirtualMemoryAdapter(bool))
+0A1 00000000 SECT47 notype ()    External     | ?virtualMemoryAdapterInitialized@virtual_memory@nativeaot@guidexos@@YA_NXZ (bool __cdecl guidexos::nativeaot::virtual_memory::virtualMemoryAdapterInitialized(void))
+0A2 00000000 SECT30 notype ()    External     | ?registryStats@virtual_memory@nativeaot@guidexos@@YA?AURegistryStats@123@XZ (struct guidexos::nativeaot::virtual_memory::RegistryStats __cdecl guidexos::nativeaot::virtual_memory::registryStats(void))
+0A3 00000000 SECT2B notype ()    External     | ?queryReservationDiagnostics@virtual_memory@nativeaot@guidexos@@YA_NPEAXPEAUReservationDiagnostics@123@@Z (bool __cdecl guidexos::nativeaot::virtual_memory::queryReservationDiagnostics(void *,struct guidexos::nativeaot::virtual_memory::ReservationDiagnostics *))
+0A4 00000000 SECT33 notype ()    External     | ?reservationIdentityIsActive@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::reservationIdentityIsActive(void *,unsigned __int64))
+0A5 00000000 SECT42 notype ()    External     | ?traceEventCount@virtual_memory@nativeaot@guidexos@@YA_KXZ (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::traceEventCount(void))
+0A6 00000000 SECT41 notype ()    External     | ?traceEventAt@virtual_memory@nativeaot@guidexos@@YA_N_KPEAUTraceEvent@123@@Z (bool __cdecl guidexos::nativeaot::virtual_memory::traceEventAt(unsigned __int64,struct guidexos::nativeaot::virtual_memory::TraceEvent *))
+0A7 00000000 SECT38 notype ()    External     | ?reserveVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_K0IGPEAPEAX@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::reserveVirtualMemoryRaw(unsigned __int64,unsigned __int64,unsigned int,unsigned short,void * *))
+0A8 00000000 SECT37 notype ()    External     | ?reserveVirtualMemoryAt@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_K0PEAXIGPEAPEAX@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::reserveVirtualMemoryAt(unsigned __int64,unsigned __int64,void *,unsigned int,unsigned short,void * *))
+0A9 00000000 SECT10 notype ()    External     | ?commitVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KG@Z (bool __cdecl guidexos::nativeaot::virtual_memory::commitVirtualMemoryRaw(void *,unsigned __int64,unsigned short))
+0AA 00000000 SECT13 notype ()    External     | ?decommitVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::decommitVirtualMemoryRaw(void *,unsigned __int64))
+0AB 00000000 SECT2A notype ()    External     | ?protectVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KW4MemoryProtection@1runtime@gxos@@@Z (bool __cdecl guidexos::nativeaot::virtual_memory::protectVirtualMemoryRaw(void *,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection))
+0AC 00000000 SECT32 notype ()    External     | ?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::releaseVirtualMemoryRaw(void *,unsigned __int64))
+0AD 00000000 SECT3A notype ()    External     | ?resetVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAX_K_N@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::resetVirtualMemoryRaw(void *,unsigned __int64,bool))
+0AE 00000000 SECT2C notype ()    External     | ?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::queryVirtualMemoryRaw(void *,struct gxos::runtime::virtual_memory::VirtualMemoryInfo *))
+0AF 00000000 SECT1E notype ()    External     | ?gcVirtualReserve@virtual_memory@nativeaot@guidexos@@YAPEAX_K0IG@Z (void * __cdecl guidexos::nativeaot::virtual_memory::gcVirtualReserve(unsigned __int64,unsigned __int64,unsigned int,unsigned short))
+0B0 00000000 SECT1B notype ()    External     | ?gcVirtualCommit@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KG@Z (bool __cdecl guidexos::nativeaot::virtual_memory::gcVirtualCommit(void *,unsigned __int64,unsigned short))
+0B1 00000000 SECT1C notype ()    External     | ?gcVirtualDecommit@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::gcVirtualDecommit(void *,unsigned __int64))
+0B2 00000000 SECT1D notype ()    External     | ?gcVirtualRelease@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::gcVirtualRelease(void *,unsigned __int64))
+0B3 00000000 SECT1F notype ()    External     | ?gcVirtualReset@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K_N@Z (bool __cdecl guidexos::nativeaot::virtual_memory::gcVirtualReset(void *,unsigned __int64,bool))
+0B4 00000000 SECT3F notype ()    External     | ?supportsWriteWatch@virtual_memory@nativeaot@guidexos@@YA_NXZ (bool __cdecl guidexos::nativeaot::virtual_memory::supportsWriteWatch(void))
+0B5 00000000 SECT3B notype ()    External     | ?resetWriteWatch@virtual_memory@nativeaot@guidexos@@YAXPEAX_K@Z (void __cdecl guidexos::nativeaot::virtual_memory::resetWriteWatch(void *,unsigned __int64))
+0B6 00000000 SECT24 notype ()    External     | ?getWriteWatch@virtual_memory@nativeaot@guidexos@@YA_N_NPEAX_KPEAPEAXPEA_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::getWriteWatch(bool,void *,unsigned __int64,void * *,unsigned __int64 *))
+0B7 00000000 SECT34 notype ()    External     | ?reserveAndCommitLargePages@virtual_memory@nativeaot@guidexos@@YAPEAX_KG@Z (void * __cdecl guidexos::nativeaot::virtual_memory::reserveAndCommitLargePages(unsigned __int64,unsigned short))
+0B8 00000000 SECT21 notype ()    External     | ?getLargePageSize@virtual_memory@nativeaot@guidexos@@YA_KXZ (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::getLargePageSize(void))
+0B9 00000000 SECT22 notype ()    External     | ?getMemoryStatus@virtual_memory@nativeaot@guidexos@@YA_N_KPEAUMemoryStatus@123@@Z (bool __cdecl guidexos::nativeaot::virtual_memory::getMemoryStatus(unsigned __int64,struct guidexos::nativeaot::virtual_memory::MemoryStatus *))
+0BA 00000000 SECT1A notype ()    External     | ?gcGetVirtualMemoryLimit@virtual_memory@nativeaot@guidexos@@YA_KXZ (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::gcGetVirtualMemoryLimit(void))
+0BB 00000000 SECT19 notype ()    External     | ?gcGetPhysicalMemoryLimit@virtual_memory@nativeaot@guidexos@@YA_KPEA_N@Z (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::gcGetPhysicalMemoryLimit(bool *))
+0BC 00000000 SECT17 notype ()    External     | ?gcGetMemoryStatus@virtual_memory@nativeaot@guidexos@@YAX_KPEAIPEA_K2@Z (void __cdecl guidexos::nativeaot::virtual_memory::gcGetMemoryStatus(unsigned __int64,unsigned int *,unsigned __int64 *,unsigned __int64 *))
+0BD 00000000 SECT18 notype ()    External     | ?gcGetPageSize@virtual_memory@nativeaot@guidexos@@YA_KXZ (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::gcGetPageSize(void))
+0BE 00000000 SECT36 notype ()    External     | ?reserveVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_K0PEAXPEAPEAUVirtualMemoryHandle@123@_N@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::reserveVirtualMemory(unsigned __int64,unsigned __int64,void *,struct guidexos::nativeaot::virtual_memory::VirtualMemoryHandle * *,bool))
+0BF 00000000 SECTF  notype ()    External     | ?commitVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1W4MemoryProtection@156@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::commitVirtualMemory(struct guidexos::nativeaot::virtual_memory::VirtualMemoryHandle *,unsigned __int64,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection))
+0C0 00000000 SECT12 notype ()    External     | ?decommitVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::decommitVirtualMemory(struct guidexos::nativeaot::virtual_memory::VirtualMemoryHandle *,unsigned __int64,unsigned __int64))
+0C1 00000000 SECT31 notype ()    External     | ?releaseVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAPEAUVirtualMemoryHandle@123@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::releaseVirtualMemory(struct guidexos::nativeaot::virtual_memory::VirtualMemoryHandle * *))
+0C2 00000000 SECT39 notype ()    External     | ?resetVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1_N@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::resetVirtualMemory(struct guidexos::nativeaot::virtual_memory::VirtualMemoryHandle *,unsigned __int64,unsigned __int64,bool))
+0C3 00000000 SECTA  notype ()    External     | ?baseAddress@virtual_memory@nativeaot@guidexos@@YAPEAXPEAUVirtualMemoryHandle@123@@Z (void * __cdecl guidexos::nativeaot::virtual_memory::baseAddress(struct guidexos::nativeaot::virtual_memory::VirtualMemoryHandle *))
+0C4 00000000 SECT23 notype ()    External     | ?getPageSize@virtual_memory@nativeaot@guidexos@@YA_KXZ (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::getPageSize(void))
+0C5 00000000 SECT20 notype ()    External     | ?getAllocationGranularity@virtual_memory@nativeaot@guidexos@@YA_KXZ (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::getAllocationGranularity(void))
+0C6 00000000 SECT28 notype ()    External     | ?memoryAvailable@virtual_memory@nativeaot@guidexos@@YA_N_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::memoryAvailable(unsigned __int64))
+0C7 00000000 SECT3D notype ()    External     | ?supportsLargePages@virtual_memory@nativeaot@guidexos@@YA_NXZ (bool __cdecl guidexos::nativeaot::virtual_memory::supportsLargePages(void))
+0C8 00000000 SECT3E notype ()    External     | ?supportsNumaPlacement@virtual_memory@nativeaot@guidexos@@YA_NXZ (bool __cdecl guidexos::nativeaot::virtual_memory::supportsNumaPlacement(void))
+0C9 00000000 SECT45 notype ()    External     | ?trueReservationSemantics@virtual_memory@nativeaot@guidexos@@YA_NXZ (bool __cdecl guidexos::nativeaot::virtual_memory::trueReservationSemantics(void))
+0CA 00000000 SECT9  notype ()    External     | ?backendModeName@virtual_memory@nativeaot@guidexos@@YAPEBDXZ (char const * __cdecl guidexos::nativeaot::virtual_memory::backendModeName(void))
+0CB 00000000 SECT43 notype ()    External     | ?traceOperationName@virtual_memory@nativeaot@guidexos@@YAPEBDW4TraceOperation@123@@Z (char const * __cdecl guidexos::nativeaot::virtual_memory::traceOperationName(enum guidexos::nativeaot::virtual_memory::TraceOperation))
+0CC 00000000 SECT3  notype ()    Static       | ??0RegistryRecord@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@QEAA@XZ (public: __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::RegistryRecord::RegistryRecord(void))
+0CD 00000000 SECT4  notype ()    Static       | ??1RegistryRecord@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@QEAA@XZ (public: __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::RegistryRecord::~RegistryRecord(void))
+0CE 00000000 SECT7  notype ()    Static       | ??__Eg_records@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXXZ (void __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::`dynamic initializer for 'g_records''(void))
+0CF 00000000 SECT8  notype ()    Static       | ??__Fg_records@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXXZ (void __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::`dynamic atexit destructor for 'g_records''(void))
+0D0 00000000 SECTB  notype ()    Static       | ?checkedAdd@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA_N_K0PEA_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::checkedAdd(unsigned __int64,unsigned __int64,unsigned __int64 *))
+0D1 00000000 SECTC  notype ()    Static       | ?checkedAddAddress@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA_NPEBX_KPEA_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::checkedAddAddress(void const *,unsigned __int64,unsigned __int64 *))
+0D2 00000000 SECT26 notype ()    Static       | ?isAligned@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA_NPEBX_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::isAligned(void const *,unsigned __int64))
+0D3 00000000 SECT46 notype ()    Static       | ?validRawRange@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z (bool __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::validRawRange(void *,unsigned __int64))
+0D4 00000000 SECTD  notype ()    Static       | ?clearRecordAfterRelease@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXAEAURegistryRecord@1234@@Z (void __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::clearRecordAfterRelease(struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord &))
+0D5 00000000 SECT27 notype ()    Static       | ?liveRecordCount@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA_KXZ (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::liveRecordCount(void))
+0D6 00000000 SECT2F notype ()    Static       | ?recordIndex@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA_KPEBURegistryRecord@1234@@Z (unsigned __int64 __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::recordIndex(struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord const *))
+0D7 00000000 SECT16 notype ()    Static       | ?freeRecord@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAPEAURegistryRecord@1234@XZ (struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord * __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::freeRecord(void))
+0D8 00000000 SECT14 notype ()    Static       | ?findContaining@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAPEAURegistryRecord@1234@PEAX_K@Z (struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord * __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::findContaining(void *,unsigned __int64))
+0D9 00000000 SECT15 notype ()    Static       | ?findExact@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAPEAURegistryRecord@1234@PEAX@Z (struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord * __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::findExact(void *))
+0DA 00000000 SECT2E notype ()    Static       | ?recordForHandle@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAPEAURegistryRecord@1234@PEAUVirtualMemoryHandle@234@@Z (struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord * __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::recordForHandle(struct guidexos::nativeaot::virtual_memory::VirtualMemoryHandle *))
+0DB 00000000 SECT40 notype ()    Static       | ?trace@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXW4TraceOperation@234@PEAX_KW4MemoryProtection@2runtime@gxos@@PEAURegistryRecord@1234@W4VmResult@278@AEBUVirtualMemoryStats@278@6_N@Z (void __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::trace(enum guidexos::nativeaot::virtual_memory::TraceOperation,void *,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection,struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord *,enum gxos::runtime::virtual_memory::VmResult,struct gxos::runtime::virtual_memory::VirtualMemoryStats const &,struct gxos::runtime::virtual_memory::VirtualMemoryStats const &,bool))
+0DC 00000000 SECT44 notype ()    Static       | ?traceSimple@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXW4TraceOperation@234@PEAX_KW4MemoryProtection@2runtime@gxos@@PEAURegistryRecord@1234@W4VmResult@278@_N@Z (void __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::traceSimple(enum guidexos::nativeaot::virtual_memory::TraceOperation,void *,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection,struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord *,enum gxos::runtime::virtual_memory::VmResult,bool))
+0DD 00000000 SECT35 notype ()    Static       | ?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::reserveInternal(unsigned __int64,unsigned __int64,void *,unsigned int,unsigned short,void * *))
+0DE 00000000 SECT2D notype ()    Static       | ?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::rangeOperation(enum guidexos::nativeaot::virtual_memory::TraceOperation,void *,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection,unsigned short,enum gxos::runtime::virtual_memory::VmResult (__cdecl*)(struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord &,unsigned __int64,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection),unsigned __int64 guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord::*))
+0DF 00000000 SECTE  notype ()    Static       | ?commitCall@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@AEAURegistryRecord@1234@_K1W4MemoryProtection@267@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::commitCall(struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord &,unsigned __int64,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection))
+0E0 00000000 SECT11 notype ()    Static       | ?decommitCall@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@AEAURegistryRecord@1234@_K1W4MemoryProtection@267@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::decommitCall(struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord &,unsigned __int64,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection))
+0E1 00000000 SECT29 notype ()    Static       | ?protectCall@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@AEAURegistryRecord@1234@_K1W4MemoryProtection@267@@Z (enum gxos::runtime::virtual_memory::VmResult __cdecl guidexos::nativeaot::virtual_memory::`anonymous namespace'::protectCall(struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord &,unsigned __int64,unsigned __int64,enum gxos::runtime::virtual_memory::MemoryProtection))
+0E2 00000000 SECT5  notype       Label        | $LN14
+0E3 00000000 SECT6  notype       Label        | $LN14
+0E4 00000000 SECT25 notype       Label        | $LN24
+0E5 00000000 SECT3C notype       Label        | $LN36
+0E6 00000000 SECT30 notype       Label        | $LN4
+0E7 00000000 SECT2B notype       Label        | $LN21
+0E8 00000000 SECT38 notype       Label        | $LN4
+0E9 00000000 SECT10 notype       Label        | $LN4
+0EA 00000000 SECT13 notype       Label        | $LN4
+0EB 00000000 SECT2A notype       Label        | $LN4
+0EC 00000000 SECT32 notype       Label        | $LN59
+0ED 00000000 SECT3A notype       Label        | $LN6
+0EE 00000000 SECT2C notype       Label        | $LN22
+0EF 00000000 SECT1E notype       Label        | $LN6
+0F0 00000000 SECT1B notype       Label        | $LN6
+0F1 00000000 SECT1C notype       Label        | $LN6
+0F2 00000000 SECT1F notype       Label        | $LN8
+0F3 00000000 SECT22 notype       Label        | $LN34
+0F4 00000000 SECT19 notype       Label        | $LN10
+0F5 00000000 SECT17 notype       Label        | $LN10
+0F6 00000000 SECT36 notype       Label        | $LN19
+0F7 00000000 SECTF  notype       Label        | $LN36
+0F8 00000000 SECT12 notype       Label        | $LN36
+0F9 00000000 SECT31 notype       Label        | $LN38
+0FA 00000000 SECT39 notype       Label        | $LN36
+0FB 00000000 SECT28 notype       Label        | $LN8
+0FC 00000000 SECT45 notype       Label        | $LN4
+0FD 00000000 SECT9  notype       Label        | $LN6
+0FE 0000006C SECT43 notype       Static       | $LN14
+0FF 0000001A SECT43 notype       Label        | $LN4
+100 00000022 SECT43 notype       Label        | $LN5
+101 0000002A SECT43 notype       Label        | $LN6
+102 00000032 SECT43 notype       Label        | $LN7
+103 0000003A SECT43 notype       Label        | $LN8
+104 00000042 SECT43 notype       Label        | $LN9
+105 0000004A SECT43 notype       Label        | $LN10
+106 00000052 SECT43 notype       Label        | $LN11
+107 0000005A SECT43 notype       Label        | $LN12
+108 00000000 SECT48 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum B6BDD640, selection    5 (pick associative Section 0x5)
+10A 00000000 SECT48 notype       Static       | $unwind$??_H@YAXPEAX_K1P6APEAX0@Z@Z
+10B 00000000 SECT49 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8F085A64, selection    5 (pick associative Section 0x5)
+10D 00000000 SECT49 notype       Static       | $pdata$??_H@YAXPEAX_K1P6APEAX0@Z@Z
+10E 00000000 SECT4A notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum B6BDD640, selection    5 (pick associative Section 0x6)
+110 00000000 SECT4A notype       Static       | $unwind$??_I@YAXPEAX_K1P6AX0@Z@Z
+111 00000000 SECT4B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8F085A64, selection    5 (pick associative Section 0x6)
+113 00000000 SECT4B notype       Static       | $pdata$??_I@YAXPEAX_K1P6AX0@Z@Z
+114 00000000 SECT4C notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 30231D72, selection    5 (pick associative Section 0x25)
+116 00000000 SECT4C notype       Static       | $unwind$?initializeVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@XZ
+117 00000000 SECT4D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D2624632, selection    5 (pick associative Section 0x25)
+119 00000000 SECT4D notype       Static       | $pdata$?initializeVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@XZ
+11A 00000000 SECT4E notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 408CF747, selection    5 (pick associative Section 0x25)
+11C 00000000 SECT4E notype       Static       | $chain$0$?initializeVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@XZ
+11D 00000000 SECT4F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 86FE1151, selection    5 (pick associative Section 0x25)
+11F 00000000 SECT4F notype       Static       | $pdata$0$?initializeVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@XZ
+120 00000000 SECT50 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 3A3E758D, selection    5 (pick associative Section 0x25)
+122 00000000 SECT50 notype       Static       | $chain$2$?initializeVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@XZ
+123 00000000 SECT51 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  576C40B, selection    5 (pick associative Section 0x25)
+125 00000000 SECT51 notype       Static       | $pdata$2$?initializeVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@XZ
+126 00000000 SECT52 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum A627E971, selection    5 (pick associative Section 0x3C)
+128 00000000 SECT52 notype       Static       | $unwind$?shutdownVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_N@Z
+129 00000000 SECT53 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum AF5E2A9E, selection    5 (pick associative Section 0x3C)
+12B 00000000 SECT53 notype       Static       | $pdata$?shutdownVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_N@Z
+12C 00000000 SECT54 notype       Static       | .xdata
+    Section length   28, #relocs    3, #linenums    0, checksum F140A62E, selection    5 (pick associative Section 0x3C)
+12E 00000000 SECT54 notype       Static       | $chain$5$?shutdownVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_N@Z
+12F 00000000 SECT55 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 71D7128F, selection    5 (pick associative Section 0x3C)
+131 00000000 SECT55 notype       Static       | $pdata$5$?shutdownVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_N@Z
+132 00000000 SECT56 notype       Static       | .xdata
+    Section length   28, #relocs    3, #linenums    0, checksum 230D49D8, selection    5 (pick associative Section 0x3C)
+134 00000000 SECT56 notype       Static       | $chain$7$?shutdownVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_N@Z
+135 00000000 SECT57 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  3CD9C44, selection    5 (pick associative Section 0x3C)
+137 00000000 SECT57 notype       Static       | $pdata$7$?shutdownVirtualMemoryAdapter@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_N@Z
+138 00000000 SECT58 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x30)
+13A 00000000 SECT58 notype       Static       | $unwind$?registryStats@virtual_memory@nativeaot@guidexos@@YA?AURegistryStats@123@XZ
+13B 00000000 SECT59 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1703F4BB, selection    5 (pick associative Section 0x30)
+13D 00000000 SECT59 notype       Static       | $pdata$?registryStats@virtual_memory@nativeaot@guidexos@@YA?AURegistryStats@123@XZ
+13E 00000000 SECT5A notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 857A5C02, selection    5 (pick associative Section 0x2B)
+140 00000000 SECT5A notype       Static       | $unwind$?queryReservationDiagnostics@virtual_memory@nativeaot@guidexos@@YA_NPEAXPEAUReservationDiagnostics@123@@Z
+141 00000000 SECT5B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 5E863465, selection    5 (pick associative Section 0x2B)
+143 00000000 SECT5B notype       Static       | $pdata$?queryReservationDiagnostics@virtual_memory@nativeaot@guidexos@@YA_NPEAXPEAUReservationDiagnostics@123@@Z
+144 00000000 SECT5C notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x38)
+146 00000000 SECT5C notype       Static       | $unwind$?reserveVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_K0IGPEAPEAX@Z
+147 00000000 SECT5D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 7D3C6CAC, selection    5 (pick associative Section 0x38)
+149 00000000 SECT5D notype       Static       | $pdata$?reserveVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_K0IGPEAPEAX@Z
+14A 00000000 SECT5E notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 9E6AAF91, selection    5 (pick associative Section 0x10)
+14C 00000000 SECT5E notype       Static       | $unwind$?commitVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KG@Z
+14D 00000000 SECT5F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D8A74F2B, selection    5 (pick associative Section 0x10)
+14F 00000000 SECT5F notype       Static       | $pdata$?commitVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KG@Z
+150 00000000 SECT60 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 9E6AAF91, selection    5 (pick associative Section 0x13)
+152 00000000 SECT60 notype       Static       | $unwind$?decommitVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+153 00000000 SECT61 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D2624632, selection    5 (pick associative Section 0x13)
+155 00000000 SECT61 notype       Static       | $pdata$?decommitVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+156 00000000 SECT62 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 9E6AAF91, selection    5 (pick associative Section 0x2A)
+158 00000000 SECT62 notype       Static       | $unwind$?protectVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KW4MemoryProtection@1runtime@gxos@@@Z
+159 00000000 SECT63 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1EC846AC, selection    5 (pick associative Section 0x2A)
+15B 00000000 SECT63 notype       Static       | $pdata$?protectVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KW4MemoryProtection@1runtime@gxos@@@Z
+15C 00000000 SECT64 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum 5171FD34, selection    5 (pick associative Section 0x32)
+15E 00000000 SECT64 notype       Static       | $unwind$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+15F 00000000 SECT65 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum ECFC7064, selection    5 (pick associative Section 0x32)
+161 00000000 SECT65 notype       Static       | $pdata$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+162 00000000 SECT66 notype       Static       | .xdata
+    Section length   20, #relocs    3, #linenums    0, checksum 58A4AB9E, selection    5 (pick associative Section 0x32)
+164 00000000 SECT66 notype       Static       | $chain$3$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+165 00000000 SECT67 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E2976CC8, selection    5 (pick associative Section 0x32)
+167 00000000 SECT67 notype       Static       | $pdata$3$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+168 00000000 SECT68 notype       Static       | .xdata
+    Section length   20, #relocs    3, #linenums    0, checksum BC1EDAE6, selection    5 (pick associative Section 0x32)
+16A 00000000 SECT68 notype       Static       | $chain$5$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+16B 00000000 SECT69 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 5B1AE322, selection    5 (pick associative Section 0x32)
+16D 00000000 SECT69 notype       Static       | $pdata$5$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+16E 00000000 SECT6A notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 518C1083, selection    5 (pick associative Section 0x32)
+170 00000000 SECT6A notype       Static       | $chain$6$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+171 00000000 SECT6B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E421C01A, selection    5 (pick associative Section 0x32)
+173 00000000 SECT6B notype       Static       | $pdata$6$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+174 00000000 SECT6C notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum E24D09CE, selection    5 (pick associative Section 0x32)
+176 00000000 SECT6C notype       Static       | $chain$7$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+177 00000000 SECT6D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum A5DB4868, selection    5 (pick associative Section 0x32)
+179 00000000 SECT6D notype       Static       | $pdata$7$?releaseVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+17A 00000000 SECT6E notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum F02B2C92, selection    5 (pick associative Section 0x3A)
+17C 00000000 SECT6E notype       Static       | $unwind$?resetVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAX_K_N@Z
+17D 00000000 SECT6F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  289E689, selection    5 (pick associative Section 0x3A)
+17F 00000000 SECT6F notype       Static       | $pdata$?resetVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAX_K_N@Z
+180 00000000 SECT70 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 963448AB, selection    5 (pick associative Section 0x2C)
+182 00000000 SECT70 notype       Static       | $unwind$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+183 00000000 SECT71 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum C7E85400, selection    5 (pick associative Section 0x2C)
+185 00000000 SECT71 notype       Static       | $pdata$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+186 00000000 SECT72 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum C08FC1F9, selection    5 (pick associative Section 0x2C)
+188 00000000 SECT72 notype       Static       | $chain$0$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+189 00000000 SECT73 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 223C0139, selection    5 (pick associative Section 0x2C)
+18B 00000000 SECT73 notype       Static       | $pdata$0$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+18C 00000000 SECT74 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum BA3D4333, selection    5 (pick associative Section 0x2C)
+18E 00000000 SECT74 notype       Static       | $chain$2$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+18F 00000000 SECT75 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1DE139F4, selection    5 (pick associative Section 0x2C)
+191 00000000 SECT75 notype       Static       | $pdata$2$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+192 00000000 SECT76 notype       Static       | .xdata
+    Section length   1C, #relocs    3, #linenums    0, checksum EE709CED, selection    5 (pick associative Section 0x2C)
+194 00000000 SECT76 notype       Static       | $chain$5$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+195 00000000 SECT77 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum A3FADBDD, selection    5 (pick associative Section 0x2C)
+197 00000000 SECT77 notype       Static       | $pdata$5$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+198 00000000 SECT78 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 22D58E8F, selection    5 (pick associative Section 0x2C)
+19A 00000000 SECT78 notype       Static       | $chain$6$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+19B 00000000 SECT79 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FF11EDE1, selection    5 (pick associative Section 0x2C)
+19D 00000000 SECT79 notype       Static       | $pdata$6$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+19E 00000000 SECT7A notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum C3E008BF, selection    5 (pick associative Section 0x2C)
+1A0 00000000 SECT7A notype       Static       | $chain$8$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+1A1 00000000 SECT7B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 3CA6861B, selection    5 (pick associative Section 0x2C)
+1A3 00000000 SECT7B notype       Static       | $pdata$8$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+1A4 00000000 SECT7C notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 7EBFBEEC, selection    5 (pick associative Section 0x2C)
+1A6 00000000 SECT7C notype       Static       | $chain$9$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+1A7 00000000 SECT7D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 510BB5E6, selection    5 (pick associative Section 0x2C)
+1A9 00000000 SECT7D notype       Static       | $pdata$9$?queryVirtualMemoryRaw@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAXPEAUVirtualMemoryInfo@156@@Z
+1AA 00000000 SECT7E notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 9E6AAF91, selection    5 (pick associative Section 0x1E)
+1AC 00000000 SECT7E notype       Static       | $unwind$?gcVirtualReserve@virtual_memory@nativeaot@guidexos@@YAPEAX_K0IG@Z
+1AD 00000000 SECT7F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 140D4FB5, selection    5 (pick associative Section 0x1E)
+1AF 00000000 SECT7F notype       Static       | $pdata$?gcVirtualReserve@virtual_memory@nativeaot@guidexos@@YAPEAX_K0IG@Z
+1B0 00000000 SECT80 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 9E6AAF91, selection    5 (pick associative Section 0x1B)
+1B2 00000000 SECT80 notype       Static       | $unwind$?gcVirtualCommit@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KG@Z
+1B3 00000000 SECT81 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D8A74F2B, selection    5 (pick associative Section 0x1B)
+1B5 00000000 SECT81 notype       Static       | $pdata$?gcVirtualCommit@virtual_memory@nativeaot@guidexos@@YA_NPEAX_KG@Z
+1B6 00000000 SECT82 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 9E6AAF91, selection    5 (pick associative Section 0x1C)
+1B8 00000000 SECT82 notype       Static       | $unwind$?gcVirtualDecommit@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+1B9 00000000 SECT83 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D2624632, selection    5 (pick associative Section 0x1C)
+1BB 00000000 SECT83 notype       Static       | $pdata$?gcVirtualDecommit@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+1BC 00000000 SECT84 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2201809E, selection    5 (pick associative Section 0x1F)
+1BE 00000000 SECT84 notype       Static       | $unwind$?gcVirtualReset@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K_N@Z
+1BF 00000000 SECT85 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D16CFD3C, selection    5 (pick associative Section 0x1F)
+1C1 00000000 SECT85 notype       Static       | $pdata$?gcVirtualReset@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K_N@Z
+1C2 00000000 SECT86 notype       Static       | .xdata
+    Section length   1C, #relocs    0, #linenums    0, checksum AE24A342, selection    5 (pick associative Section 0x22)
+1C4 00000000 SECT86 notype       Static       | $unwind$?getMemoryStatus@virtual_memory@nativeaot@guidexos@@YA_N_KPEAUMemoryStatus@123@@Z
+1C5 00000000 SECT87 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 62737787, selection    5 (pick associative Section 0x22)
+1C7 00000000 SECT87 notype       Static       | $pdata$?getMemoryStatus@virtual_memory@nativeaot@guidexos@@YA_N_KPEAUMemoryStatus@123@@Z
+1C8 00000000 SECT88 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 4AC3ED49, selection    5 (pick associative Section 0x22)
+1CA 00000000 SECT88 notype       Static       | $chain$0$?getMemoryStatus@virtual_memory@nativeaot@guidexos@@YA_N_KPEAUMemoryStatus@123@@Z
+1CB 00000000 SECT89 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E0793D04, selection    5 (pick associative Section 0x22)
+1CD 00000000 SECT89 notype       Static       | $pdata$0$?getMemoryStatus@virtual_memory@nativeaot@guidexos@@YA_N_KPEAUMemoryStatus@123@@Z
+1CE 00000000 SECT8A notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum DB249D6B, selection    5 (pick associative Section 0x22)
+1D0 00000000 SECT8A notype       Static       | $chain$1$?getMemoryStatus@virtual_memory@nativeaot@guidexos@@YA_N_KPEAUMemoryStatus@123@@Z
+1D1 00000000 SECT8B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4D681C53, selection    5 (pick associative Section 0x22)
+1D3 00000000 SECT8B notype       Static       | $pdata$1$?getMemoryStatus@virtual_memory@nativeaot@guidexos@@YA_N_KPEAUMemoryStatus@123@@Z
+1D4 00000000 SECT8C notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum C88802B5, selection    5 (pick associative Section 0x19)
+1D6 00000000 SECT8C notype       Static       | $unwind$?gcGetPhysicalMemoryLimit@virtual_memory@nativeaot@guidexos@@YA_KPEA_N@Z
+1D7 00000000 SECT8D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 54A1AE41, selection    5 (pick associative Section 0x19)
+1D9 00000000 SECT8D notype       Static       | $pdata$?gcGetPhysicalMemoryLimit@virtual_memory@nativeaot@guidexos@@YA_KPEA_N@Z
+1DA 00000000 SECT8E notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum  E48B3BE, selection    5 (pick associative Section 0x17)
+1DC 00000000 SECT8E notype       Static       | $unwind$?gcGetMemoryStatus@virtual_memory@nativeaot@guidexos@@YAX_KPEAIPEA_K2@Z
+1DD 00000000 SECT8F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 60FA910E, selection    5 (pick associative Section 0x17)
+1DF 00000000 SECT8F notype       Static       | $pdata$?gcGetMemoryStatus@virtual_memory@nativeaot@guidexos@@YAX_KPEAIPEA_K2@Z
+1E0 00000000 SECT90 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum BF7C6135, selection    5 (pick associative Section 0x36)
+1E2 00000000 SECT90 notype       Static       | $unwind$?reserveVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_K0PEAXPEAPEAUVirtualMemoryHandle@123@_N@Z
+1E3 00000000 SECT91 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 51B26353, selection    5 (pick associative Section 0x36)
+1E5 00000000 SECT91 notype       Static       | $pdata$?reserveVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@_K0PEAXPEAPEAUVirtualMemoryHandle@123@_N@Z
+1E6 00000000 SECT92 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2201809E, selection    5 (pick associative Section 0xF)
+1E8 00000000 SECT92 notype       Static       | $unwind$?commitVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1W4MemoryProtection@156@@Z
+1E9 00000000 SECT93 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 70634E2E, selection    5 (pick associative Section 0xF)
+1EB 00000000 SECT93 notype       Static       | $pdata$?commitVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1W4MemoryProtection@156@@Z
+1EC 00000000 SECT94 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 84432563, selection    5 (pick associative Section 0x12)
+1EE 00000000 SECT94 notype       Static       | $unwind$?decommitVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1@Z
+1EF 00000000 SECT95 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8B9CCAF1, selection    5 (pick associative Section 0x12)
+1F1 00000000 SECT95 notype       Static       | $pdata$?decommitVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1@Z
+1F2 00000000 SECT96 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x31)
+1F4 00000000 SECT96 notype       Static       | $unwind$?releaseVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAPEAUVirtualMemoryHandle@123@@Z
+1F5 00000000 SECT97 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6760BA95, selection    5 (pick associative Section 0x31)
+1F7 00000000 SECT97 notype       Static       | $pdata$?releaseVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAPEAUVirtualMemoryHandle@123@@Z
+1F8 00000000 SECT98 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 3E36236E, selection    5 (pick associative Section 0x39)
+1FA 00000000 SECT98 notype       Static       | $unwind$?resetVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1_N@Z
+1FB 00000000 SECT99 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E868E0F1, selection    5 (pick associative Section 0x39)
+1FD 00000000 SECT99 notype       Static       | $pdata$?resetVirtualMemory@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@1runtime@gxos@@PEAUVirtualMemoryHandle@123@_K1_N@Z
+1FE 00000000 SECT9A notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x28)
+200 00000000 SECT9A notype       Static       | $unwind$?memoryAvailable@virtual_memory@nativeaot@guidexos@@YA_N_K@Z
+201 00000000 SECT9B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 2A9379E3, selection    5 (pick associative Section 0x28)
+203 00000000 SECT9B notype       Static       | $pdata$?memoryAvailable@virtual_memory@nativeaot@guidexos@@YA_N_K@Z
+204 00000000 SECT9C notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 544FD876, selection    5 (pick associative Section 0x45)
+206 00000000 SECT9C notype       Static       | $unwind$?trueReservationSemantics@virtual_memory@nativeaot@guidexos@@YA_NXZ
+207 00000000 SECT9D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum A59B2387, selection    5 (pick associative Section 0x45)
+209 00000000 SECT9D notype       Static       | $pdata$?trueReservationSemantics@virtual_memory@nativeaot@guidexos@@YA_NXZ
+20A 00000000 SECT9E notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum B93F8C07, selection    5 (pick associative Section 0x9)
+20C 00000000 SECT9E notype       Static       | $unwind$?backendModeName@virtual_memory@nativeaot@guidexos@@YAPEBDXZ
+20D 00000000 SECT9F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum C7E85400, selection    5 (pick associative Section 0x9)
+20F 00000000 SECT9F notype       Static       | $pdata$?backendModeName@virtual_memory@nativeaot@guidexos@@YAPEBDXZ
+210 00000000 SECTA0 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x3)
+212 00000000 SECTA0 notype       Static       | $unwind$??0RegistryRecord@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@QEAA@XZ
+213 00000000 SECTA1 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum C4E6EF0E, selection    5 (pick associative Section 0x3)
+215 00000000 SECTA1 notype       Static       | $pdata$??0RegistryRecord@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@QEAA@XZ
+216 00000000 SECTA2 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum ED4F81A7, selection    5 (pick associative Section 0x7)
+218 00000000 SECTA2 notype       Static       | $unwind$??__Eg_records@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXXZ
+219 00000000 SECTA3 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E32AB46F, selection    5 (pick associative Section 0x7)
+21B 00000000 SECTA3 notype       Static       | $pdata$??__Eg_records@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXXZ
+21C 00000000 SECTA4 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x8)
+21E 00000000 SECTA4 notype       Static       | $unwind$??__Fg_records@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXXZ
+21F 00000000 SECTA5 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 299DC2ED, selection    5 (pick associative Section 0x8)
+221 00000000 SECTA5 notype       Static       | $pdata$??__Fg_records@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXXZ
+222 00000000 SECTA6 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x46)
+224 00000000 SECTA6 notype       Static       | $unwind$?validRawRange@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+225 00000000 SECTA7 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4A69E8ED, selection    5 (pick associative Section 0x46)
+227 00000000 SECTA7 notype       Static       | $pdata$?validRawRange@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA_NPEAX_K@Z
+228 00000000 SECTA8 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x14)
+22A 00000000 SECTA8 notype       Static       | $unwind$?findContaining@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAPEAURegistryRecord@1234@PEAX_K@Z
+22B 00000000 SECTA9 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 7AA64737, selection    5 (pick associative Section 0x14)
+22D 00000000 SECTA9 notype       Static       | $pdata$?findContaining@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAPEAURegistryRecord@1234@PEAX_K@Z
+22E 00000000 SECTAA notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum E309E091, selection    5 (pick associative Section 0x40)
+230 00000000 SECTAA notype       Static       | $unwind$?trace@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXW4TraceOperation@234@PEAX_KW4MemoryProtection@2runtime@gxos@@PEAURegistryRecord@1234@W4VmResult@278@AEBUVirtualMemoryStats@278@6_N@Z
+231 00000000 SECTAB notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 771BF688, selection    5 (pick associative Section 0x40)
+233 00000000 SECTAB notype       Static       | $pdata$?trace@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXW4TraceOperation@234@PEAX_KW4MemoryProtection@2runtime@gxos@@PEAURegistryRecord@1234@W4VmResult@278@AEBUVirtualMemoryStats@278@6_N@Z
+234 00000000 SECTAC notype       Static       | .xdata
+    Section length   14, #relocs    0, #linenums    0, checksum 6E4E0971, selection    5 (pick associative Section 0x44)
+236 00000000 SECTAC notype       Static       | $unwind$?traceSimple@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXW4TraceOperation@234@PEAX_KW4MemoryProtection@2runtime@gxos@@PEAURegistryRecord@1234@W4VmResult@278@_N@Z
+237 00000000 SECTAD notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6316B93D, selection    5 (pick associative Section 0x44)
+239 00000000 SECTAD notype       Static       | $pdata$?traceSimple@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YAXW4TraceOperation@234@PEAX_KW4MemoryProtection@2runtime@gxos@@PEAURegistryRecord@1234@W4VmResult@278@_N@Z
+23A 00000000 SECTAE notype       Static       | .xdata
+    Section length   14, #relocs    0, #linenums    0, checksum 7B1EA026, selection    5 (pick associative Section 0x35)
+23C 00000000 SECTAE notype       Static       | $unwind$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+23D 00000000 SECTAF notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 5CED41D1, selection    5 (pick associative Section 0x35)
+23F 00000000 SECTAF notype       Static       | $pdata$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+240 00000000 SECTB0 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 7D3ED4E3, selection    5 (pick associative Section 0x35)
+242 00000000 SECTB0 notype       Static       | $chain$0$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+243 00000000 SECTB1 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F3E92528, selection    5 (pick associative Section 0x35)
+245 00000000 SECTB1 notype       Static       | $pdata$0$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+246 00000000 SECTB2 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum D648E76C, selection    5 (pick associative Section 0x35)
+248 00000000 SECTB2 notype       Static       | $chain$2$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+249 00000000 SECTB3 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum BC3BDED4, selection    5 (pick associative Section 0x35)
+24B 00000000 SECTB3 notype       Static       | $pdata$2$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+24C 00000000 SECTB4 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum B28A3A2C, selection    5 (pick associative Section 0x35)
+24E 00000000 SECTB4 notype       Static       | $chain$4$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+24F 00000000 SECTB5 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 405BB402, selection    5 (pick associative Section 0x35)
+251 00000000 SECTB5 notype       Static       | $pdata$4$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+252 00000000 SECTB6 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum  56C3438, selection    5 (pick associative Section 0x35)
+254 00000000 SECTB6 notype       Static       | $chain$5$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+255 00000000 SECTB7 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 3BCE8C9A, selection    5 (pick associative Section 0x35)
+257 00000000 SECTB7 notype       Static       | $pdata$5$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+258 00000000 SECTB8 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 4ABECFC4, selection    5 (pick associative Section 0x35)
+25A 00000000 SECTB8 notype       Static       | $chain$6$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+25B 00000000 SECTB9 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 49FF2E11, selection    5 (pick associative Section 0x35)
+25D 00000000 SECTB9 notype       Static       | $pdata$6$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+25E 00000000 SECTBA notype       Static       | .xdata
+    Section length   24, #relocs    3, #linenums    0, checksum 81710C46, selection    5 (pick associative Section 0x35)
+260 00000000 SECTBA notype       Static       | $chain$8$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+261 00000000 SECTBB notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FAF7BAB6, selection    5 (pick associative Section 0x35)
+263 00000000 SECTBB notype       Static       | $pdata$8$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+264 00000000 SECTBC notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum  78C5629, selection    5 (pick associative Section 0x35)
+266 00000000 SECTBC notype       Static       | $chain$9$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+267 00000000 SECTBD notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 45560A9F, selection    5 (pick associative Section 0x35)
+269 00000000 SECTBD notype       Static       | $pdata$9$?reserveInternal@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@_K0PEAXIGPEAPEAX@Z
+26A 00000000 SECTBE notype       Static       | .xdata
+    Section length   14, #relocs    0, #linenums    0, checksum 52FC5ECF, selection    5 (pick associative Section 0x2D)
+26C 00000000 SECTBE notype       Static       | $unwind$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+26D 00000000 SECTBF notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 617DCC89, selection    5 (pick associative Section 0x2D)
+26F 00000000 SECTBF notype       Static       | $pdata$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+270 00000000 SECTC0 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum E2C52542, selection    5 (pick associative Section 0x2D)
+272 00000000 SECTC0 notype       Static       | $chain$0$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+273 00000000 SECTC1 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 87407411, selection    5 (pick associative Section 0x2D)
+275 00000000 SECTC1 notype       Static       | $pdata$0$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+276 00000000 SECTC2 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 59E96825, selection    5 (pick associative Section 0x2D)
+278 00000000 SECTC2 notype       Static       | $chain$1$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+279 00000000 SECTC3 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum CFBB44BA, selection    5 (pick associative Section 0x2D)
+27B 00000000 SECTC3 notype       Static       | $pdata$1$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+27C 00000000 SECTC4 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 3E179EFD, selection    5 (pick associative Section 0x2D)
+27E 00000000 SECTC4 notype       Static       | $chain$2$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+27F 00000000 SECTC5 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6FBDBC59, selection    5 (pick associative Section 0x2D)
+281 00000000 SECTC5 notype       Static       | $pdata$2$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+282 00000000 SECTC6 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum D82A2665, selection    5 (pick associative Section 0x2D)
+284 00000000 SECTC6 notype       Static       | $chain$3$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+285 00000000 SECTC7 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B50A7482, selection    5 (pick associative Section 0x2D)
+287 00000000 SECTC7 notype       Static       | $pdata$3$?rangeOperation@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@YA?AW4VmResult@2runtime@gxos@@W4TraceOperation@234@PEAX_KW4MemoryProtection@267@GP6A?AW45267@AEAURegistryRecord@1234@223@ZPEQRegistryRecord@1234@_K@Z
+288 00000000 SECTC8 notype       Static       | .bss
+    Section length 1319, #relocs    0, #linenums    0, checksum        0
+28A 00000000 SECTC8 notype       Static       | ?g_records@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3PAURegistryRecord@1234@A (struct guidexos::nativeaot::virtual_memory::A0xea8b3def::RegistryRecord * guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_records)
+28B 00000000 SECTC9 notype       Static       | .data
+    Section length 2C10, #relocs    0, #linenums    0, checksum D5B733F9
+28D 00000000 SECTC9 notype       Static       | ?g_trace@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3PAUTraceEvent@234@A (struct guidexos::nativeaot::virtual_memory::TraceEvent * guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_trace)
+28E 00001300 SECTC8 notype       Static       | ?g_traceCount@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3_KA (unsigned __int64 guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_traceCount)
+28F 00001308 SECTC8 notype       Static       | ?g_traceSequence@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3_KA (unsigned __int64 guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_traceSequence)
+290 00002C00 SECTC9 notype       Static       | ?g_nextReservationGeneration@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3_KA (unsigned __int64 guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_nextReservationGeneration)
+291 00002C08 SECTC9 notype       Static       | ?g_nextAdapterInstance@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3_KA (unsigned __int64 guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_nextAdapterInstance)
+292 00001310 SECTC8 notype       Static       | ?g_adapterInstance@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3_KA (unsigned __int64 guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_adapterInstance)
+293 00001318 SECTC8 notype       Static       | ?g_initialized@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3_NA (bool guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_initialized)
+294 00000000 SECTCA notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum 6F458F50, selection    2 (pick any)
+296 00000000 SECTCA notype       External     | ??_C@_0P@EHGJHDEI@gc?9reservation@ (`string')
+297 00000000 SECTCB notype       Static       | .rdata
+    Section length   11, #relocs    0, #linenums    0, checksum 341995FE, selection    2 (pick any)
+299 00000000 SECTCB notype       External     | ??_C@_0BB@CAJJLLM@true?9reservation@ (`string')
+29A 00000000 SECTCC notype       Static       | .rdata
+    Section length   14, #relocs    0, #linenums    0, checksum 5C56661B, selection    2 (pick any)
+29C 00000000 SECTCC notype       External     | ??_C@_0BE@KMHMACGJ@eager?9compatibility@ (`string')
+29D 00000000 SECTCD notype       Static       | .rdata
+    Section length    B, #relocs    0, #linenums    0, checksum BAEBB183, selection    2 (pick any)
+29F 00000000 SECTCD notype       External     | ??_C@_0L@COJDPPJA@initialize@ (`string')
+2A0 00000000 SECTCE notype       Static       | .rdata
+    Section length    9, #relocs    0, #linenums    0, checksum 41F4FA61, selection    2 (pick any)
+2A2 00000000 SECTCE notype       External     | ??_C@_08FIACBBDA@shutdown@ (`string')
+2A3 00000000 SECTCF notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 625F91EA, selection    2 (pick any)
+2A5 00000000 SECTCF notype       External     | ??_C@_07PIICLBHM@reserve@ (`string')
+2A6 00000000 SECTD0 notype       Static       | .rdata
+    Section length    7, #relocs    0, #linenums    0, checksum E7473B88, selection    2 (pick any)
+2A8 00000000 SECTD0 notype       External     | ??_C@_06IFNEBLAJ@commit@ (`string')
+2A9 00000000 SECTD1 notype       Static       | .rdata
+    Section length    9, #relocs    0, #linenums    0, checksum 7EC345FF, selection    2 (pick any)
+2AB 00000000 SECTD1 notype       External     | ??_C@_08GHDFKOKO@decommit@ (`string')
+2AC 00000000 SECTD2 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 2F6D65A8, selection    2 (pick any)
+2AE 00000000 SECTD2 notype       External     | ??_C@_07LFLAEFDO@protect@ (`string')
+2AF 00000000 SECTD3 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum D4B81B3E, selection    2 (pick any)
+2B1 00000000 SECTD3 notype       External     | ??_C@_07EOGFDLKI@release@ (`string')
+2B2 00000000 SECTD4 notype       Static       | .rdata
+    Section length    6, #relocs    0, #linenums    0, checksum 6BFDEEBC, selection    2 (pick any)
+2B4 00000000 SECTD4 notype       External     | ??_C@_05CFMALAOA@reset@ (`string')
+2B5 00000000 SECTD5 notype       Static       | .rdata
+    Section length    6, #relocs    0, #linenums    0, checksum 543CC86B, selection    2 (pick any)
+2B7 00000000 SECTD5 notype       External     | ??_C@_05BKABJGDH@query@ (`string')
+2B8 00000000 SECTD6 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum B28D4150, selection    2 (pick any)
+2BA 00000000 SECTD6 notype       External     | ??_C@_07CIFAGBMG@unknown@ (`string')
+2BB 00000000 UNDEF  notype       External     | __ImageBase
+2BC 00000000 SECTD7 notype       Static       | .CRT$XCU
+    Section length    8, #relocs    1, #linenums    0, checksum        0
+2BE 00000000 SECTD7 notype       Static       | ?g_records$initializer$@?A0xea8b3def@virtual_memory@nativeaot@guidexos@@3P6AXXZEA (void (__cdecl* guidexos::nativeaot::virtual_memory::`anonymous namespace'::g_records$initializer$)(void))
+2BF 00000000 SECTD8 notype       Static       | .chks64
+    Section length  6C0, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x585A bytes
+
+  Summary
+
+           8 .CRT$XCU
+        1319 .bss
+         6C0 .chks64
+        2C10 .data
+          DC .debug$S
+           3 .drectve
+         300 .pdata
+          84 .rdata
+          91 .text$di
+        2276 .text$mn
+          40 .text$yd
+         41C .xdata

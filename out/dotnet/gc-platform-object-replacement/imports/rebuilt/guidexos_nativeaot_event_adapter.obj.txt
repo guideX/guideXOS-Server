@@ -1,0 +1,13 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\guidexos_nativeaot_event_adapter.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          D0 .chks64
+          D0 .debug$S
+          95 .drectve
+          48 .pdata
+         19D .text$mn
+          48 .xdata

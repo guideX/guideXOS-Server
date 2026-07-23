@@ -1,0 +1,13 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\ObjectLayout.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          A0 .chks64
+        6818 .debug$S
+          88 .debug$T
+          F4 .drectve
+          43 .text$mn
+           2 .voltbl

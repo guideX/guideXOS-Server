@@ -1,0 +1,18 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\gcenv.ee.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+           8 .bss
+         548 .chks64
+        E3C4 .debug$S
+          88 .debug$T
+          F4 .drectve
+          FC .pdata
+         15D .rdata
+         B16 .text$mn
+          D8 .tls$
+           1 .voltbl
+         114 .xdata

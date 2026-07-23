@@ -1,0 +1,3564 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\gcenv.windows.cpp.obj
+
+File Type: COFF OBJECT
+
+FILE HEADER VALUES
+            8664 machine (x64)
+              DA number of sections
+        67204993 time date stamp Mon Oct 28 19:33:55 2024
+           1D197 file pointer to symbol table
+             2C0 number of symbols
+               0 size of optional header
+               0 characteristics
+
+SECTION HEADER #1
+.drectve name
+       0 physical address
+       0 virtual address
+     122 size of raw data
+    2224 file pointer to raw data (00002224 to 00002345)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+  100A00 flags
+         Info
+         Remove
+         1 byte align
+
+SECTION HEADER #2
+.debug$S name
+       0 physical address
+       0 virtual address
+    F19C size of raw data
+    2346 file pointer to raw data (00002346 to 000114E1)
+   114E2 file pointer to relocation table
+       0 file pointer to line numbers
+      1C number of relocations
+       0 number of line numbers
+42100040 flags
+         Initialized Data
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #3
+.debug$T name
+       0 physical address
+       0 virtual address
+      88 size of raw data
+   115FA file pointer to raw data (000115FA to 00011681)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+42100040 flags
+         Initialized Data
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #4
+    .bss name
+       0 physical address
+       0 virtual address
+      A8 size of raw data
+       0 file pointer to raw data
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+C0500080 flags
+         Uninitialized Data
+         16 byte align
+         Read Write
+
+SECTION HEADER #5
+.text$mn name
+       0 physical address
+       0 virtual address
+       B size of raw data
+   11682 file pointer to raw data (00011682 to 0001168C)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: __cdecl GCEvent::GCEvent(void)" (??0GCEvent@@QEAA@XZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #6
+.debug$S name
+       0 physical address
+       0 virtual address
+      D0 size of raw data
+   1168D file pointer to raw data (0001168D to 0001175C)
+   1175D file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #7
+.text$mn name
+       0 physical address
+       0 virtual address
+      22 size of raw data
+   11799 file pointer to raw data (00011799 to 000117BA)
+   117BB file pointer to relocation table
+       0 file pointer to line numbers
+       2 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::BoostThreadPriority(void)" (?BoostThreadPriority@GCToOSInterface@@SA_NXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #8
+.debug$S name
+       0 physical address
+       0 virtual address
+      D4 size of raw data
+   117CF file pointer to raw data (000117CF to 000118A2)
+   118A3 file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #9
+.text$mn name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   118F3 file pointer to raw data (000118F3 to 000118FA)
+   118FB file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::CanEnableGCCPUGroups(void)" (?CanEnableGCCPUGroups@GCToOSInterface@@SA_NXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #A
+.debug$S name
+       0 physical address
+       0 virtual address
+      B4 size of raw data
+   11905 file pointer to raw data (00011905 to 000119B8)
+   119B9 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #B
+.text$mn name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   119E1 file pointer to raw data (000119E1 to 000119E8)
+   119E9 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::CanEnableGCNumaAware(void)" (?CanEnableGCNumaAware@GCToOSInterface@@SA_NXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #C
+.debug$S name
+       0 physical address
+       0 virtual address
+      B4 size of raw data
+   119F3 file pointer to raw data (000119F3 to 00011AA6)
+   11AA7 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #D
+.text$mn name
+       0 physical address
+       0 virtual address
+       3 size of raw data
+   11ACF file pointer to raw data (00011ACF to 00011AD1)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::CanGetCurrentProcessorNumber(void)" (?CanGetCurrentProcessorNumber@GCToOSInterface@@SA_NXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #E
+.debug$S name
+       0 physical address
+       0 virtual address
+      BC size of raw data
+   11AD2 file pointer to raw data (00011AD2 to 00011B8D)
+   11B8E file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #F
+.text$mn name
+       0 physical address
+       0 virtual address
+      1F size of raw data
+   11BB6 file pointer to raw data (00011BB6 to 00011BD4)
+   11BD5 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: void __cdecl GCEvent::CloseEvent(void)" (?CloseEvent@GCEvent@@QEAAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #10
+.debug$S name
+       0 physical address
+       0 virtual address
+     12C size of raw data
+   11BDF file pointer to raw data (00011BDF to 00011D0A)
+   11D0B file pointer to relocation table
+       0 file pointer to line numbers
+       A number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #11
+.text$mn name
+       0 physical address
+       0 virtual address
+      82 size of raw data
+   11D6F file pointer to raw data (00011D6F to 00011DF0)
+   11DF1 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: bool __cdecl GCEvent::CreateAutoEventNoThrow(bool)" (?CreateAutoEventNoThrow@GCEvent@@QEAA_N_N@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #12
+.debug$S name
+       0 physical address
+       0 virtual address
+     284 size of raw data
+   11E19 file pointer to raw data (00011E19 to 0001209C)
+   1209D file pointer to relocation table
+       0 file pointer to line numbers
+      10 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #13
+.text$mn name
+       0 physical address
+       0 virtual address
+      85 size of raw data
+   1213D file pointer to raw data (0001213D to 000121C1)
+   121C2 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: bool __cdecl GCEvent::CreateManualEventNoThrow(bool)" (?CreateManualEventNoThrow@GCEvent@@QEAA_N_N@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #14
+.debug$S name
+       0 physical address
+       0 virtual address
+     284 size of raw data
+   121EA file pointer to raw data (000121EA to 0001246D)
+   1246E file pointer to relocation table
+       0 file pointer to line numbers
+      10 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #15
+.text$mn name
+       0 physical address
+       0 virtual address
+      89 size of raw data
+   1250E file pointer to raw data (0001250E to 00012596)
+   12597 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: bool __cdecl GCEvent::CreateOSAutoEventNoThrow(bool)" (?CreateOSAutoEventNoThrow@GCEvent@@QEAA_N_N@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #16
+.debug$S name
+       0 physical address
+       0 virtual address
+     288 size of raw data
+   125BF file pointer to raw data (000125BF to 00012846)
+   12847 file pointer to relocation table
+       0 file pointer to line numbers
+      10 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #17
+.text$mn name
+       0 physical address
+       0 virtual address
+      8C size of raw data
+   128E7 file pointer to raw data (000128E7 to 00012972)
+   12973 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: bool __cdecl GCEvent::CreateOSManualEventNoThrow(bool)" (?CreateOSManualEventNoThrow@GCEvent@@QEAA_N_N@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #18
+.debug$S name
+       0 physical address
+       0 virtual address
+     288 size of raw data
+   1299B file pointer to raw data (0001299B to 00012C22)
+   12C23 file pointer to relocation table
+       0 file pointer to line numbers
+      10 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #19
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   12CC3 file pointer to raw data (00012CC3 to 00012CC9)
+   12CCA file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void __cdecl GCToOSInterface::DebugBreak(void)" (?DebugBreak@GCToOSInterface@@SAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #1A
+.debug$S name
+       0 physical address
+       0 virtual address
+      B4 size of raw data
+   12CD4 file pointer to raw data (00012CD4 to 00012D87)
+   12D88 file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #1B
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   12DC4 file pointer to raw data (00012DC4 to 00012DCA)
+   12DCB file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: void __cdecl CLRCriticalSection::Destroy(void)" (?Destroy@CLRCriticalSection@@QEAAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #1C
+.debug$S name
+       0 physical address
+       0 virtual address
+      E4 size of raw data
+   12DD5 file pointer to raw data (00012DD5 to 00012EB8)
+   12EB9 file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #1D
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   12F09 file pointer to raw data (00012F09 to 00012F0F)
+   12F10 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: void __cdecl CLRCriticalSection::Enter(void)" (?Enter@CLRCriticalSection@@QEAAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #1E
+.debug$S name
+       0 physical address
+       0 virtual address
+      E4 size of raw data
+   12F1A file pointer to raw data (00012F1A to 00012FFD)
+   12FFE file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #1F
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   1304E file pointer to raw data (0001304E to 00013054)
+   13055 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void __cdecl GCToOSInterface::FlushProcessWriteBuffers(void)" (?FlushProcessWriteBuffers@GCToOSInterface@@SAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #20
+.debug$S name
+       0 physical address
+       0 virtual address
+      C0 size of raw data
+   1305F file pointer to raw data (0001305F to 0001311E)
+   1311F file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #21
+.text$mn name
+       0 physical address
+       0 virtual address
+      78 size of raw data
+   1315B file pointer to raw data (0001315B to 000131D2)
+   131D3 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::GetCPUGroupInfo(unsigned short *,unsigned int *)" (?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #22
+.debug$S name
+       0 physical address
+       0 virtual address
+     2D0 size of raw data
+   131F1 file pointer to raw data (000131F1 to 000134C0)
+   134C1 file pointer to relocation table
+       0 file pointer to line numbers
+      1A number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #23
+.text$mn name
+       0 physical address
+       0 virtual address
+      EC size of raw data
+   135C5 file pointer to raw data (000135C5 to 000136B0)
+   136B1 file pointer to relocation table
+       0 file pointer to line numbers
+       A number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned __int64 __cdecl GCToOSInterface::GetCacheSizePerLogicalCpu(bool)" (?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #24
+.debug$S name
+       0 physical address
+       0 virtual address
+     30C size of raw data
+   13715 file pointer to raw data (00013715 to 00013A20)
+   13A21 file pointer to relocation table
+       0 file pointer to line numbers
+      24 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #25
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   13B89 file pointer to raw data (00013B89 to 00013B8F)
+   13B90 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned int __cdecl GCToOSInterface::GetCurrentProcessId(void)" (?GetCurrentProcessId@GCToOSInterface@@SAIXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #26
+.debug$S name
+       0 physical address
+       0 virtual address
+      BC size of raw data
+   13B9A file pointer to raw data (00013B9A to 00013C55)
+   13C56 file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #27
+.text$mn name
+       0 physical address
+       0 virtual address
+      27 size of raw data
+   13C92 file pointer to raw data (00013C92 to 00013CB8)
+   13CB9 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned int __cdecl GCToOSInterface::GetCurrentProcessorNumber(void)" (?GetCurrentProcessorNumber@GCToOSInterface@@SAIXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #28
+.debug$S name
+       0 physical address
+       0 virtual address
+     14C size of raw data
+   13CC3 file pointer to raw data (00013CC3 to 00013E0E)
+   13E0F file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #29
+.text$mn name
+       0 physical address
+       0 virtual address
+      11 size of raw data
+   13E5F file pointer to raw data (00013E5F to 00013E6F)
+   13E70 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned __int64 __cdecl GCToOSInterface::GetCurrentThreadIdForLogging(void)" (?GetCurrentThreadIdForLogging@GCToOSInterface@@SA_KXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #2A
+.debug$S name
+       0 physical address
+       0 virtual address
+      CC size of raw data
+   13E7A file pointer to raw data (00013E7A to 00013F45)
+   13F46 file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #2B
+.text$mn name
+       0 physical address
+       0 virtual address
+      49 size of raw data
+   13F82 file pointer to raw data (00013F82 to 00013FCA)
+   13FCB file pointer to relocation table
+       0 file pointer to line numbers
+       2 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::GetCurrentThreadIdealProc(unsigned short *)" (?GetCurrentThreadIdealProc@GCToOSInterface@@SA_NPEAG@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #2C
+.debug$S name
+       0 physical address
+       0 virtual address
+     1DC size of raw data
+   13FDF file pointer to raw data (00013FDF to 000141BA)
+   141BB file pointer to relocation table
+       0 file pointer to line numbers
+      12 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #2D
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   1426F file pointer to raw data (0001426F to 00014275)
+   14276 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned __int64 __cdecl GCToOSInterface::GetLowPrecisionTimeStamp(void)" (?GetLowPrecisionTimeStamp@GCToOSInterface@@SA_KXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #2E
+.debug$S name
+       0 physical address
+       0 virtual address
+      C0 size of raw data
+   14280 file pointer to raw data (00014280 to 0001433F)
+   14340 file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #2F
+.text$mn name
+       0 physical address
+       0 virtual address
+     1DC size of raw data
+   1437C file pointer to raw data (0001437C to 00014557)
+   14558 file pointer to relocation table
+       0 file pointer to line numbers
+       7 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void __cdecl GCToOSInterface::GetMemoryStatus(unsigned __int64,unsigned int *,unsigned __int64 *,unsigned __int64 *)" (?GetMemoryStatus@GCToOSInterface@@SAX_KPEAIPEA_K2@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #30
+.debug$S name
+       0 physical address
+       0 virtual address
+     430 size of raw data
+   1459E file pointer to raw data (0001459E to 000149CD)
+   149CE file pointer to relocation table
+       0 file pointer to line numbers
+      26 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #31
+.text$mn name
+       0 physical address
+       0 virtual address
+      A7 size of raw data
+   14B4A file pointer to raw data (00014B4A to 00014BF0)
+   14BF1 file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::GetNumaInfo(unsigned short *,unsigned int *)" (?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #32
+.debug$S name
+       0 physical address
+       0 virtual address
+     344 size of raw data
+   14C2D file pointer to raw data (00014C2D to 00014F70)
+   14F71 file pointer to relocation table
+       0 file pointer to line numbers
+      20 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #33
+.text$mn name
+       0 physical address
+       0 virtual address
+     1AE size of raw data
+   150B1 file pointer to raw data (000150B1 to 0001525E)
+   1525F file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned __int64 __cdecl GCToOSInterface::GetPhysicalMemoryLimit(bool *)" (?GetPhysicalMemoryLimit@GCToOSInterface@@SA_KPEA_N@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #34
+.debug$S name
+       0 physical address
+       0 virtual address
+     508 size of raw data
+   152AF file pointer to raw data (000152AF to 000157B6)
+   157B7 file pointer to relocation table
+       0 file pointer to line numbers
+      30 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #35
+.text$mn name
+       0 physical address
+       0 virtual address
+     145 size of raw data
+   15997 file pointer to raw data (00015997 to 00015ADB)
+   15ADC file pointer to relocation table
+       0 file pointer to line numbers
+       7 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::GetProcessorForHeap(unsigned short,unsigned short *,unsigned short *)" (?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #36
+.debug$S name
+       0 physical address
+       0 virtual address
+     580 size of raw data
+   15B22 file pointer to raw data (00015B22 to 000160A1)
+   160A2 file pointer to relocation table
+       0 file pointer to line numbers
+      36 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #37
+.text$mn name
+       0 physical address
+       0 virtual address
+      15 size of raw data
+   162BE file pointer to raw data (000162BE to 000162D2)
+   162D3 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned int __cdecl GCToOSInterface::GetTotalProcessorCount(void)" (?GetTotalProcessorCount@GCToOSInterface@@SAIXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #38
+.debug$S name
+       0 physical address
+       0 virtual address
+      C4 size of raw data
+   162F1 file pointer to raw data (000162F1 to 000163B4)
+   163B5 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #39
+.text$mn name
+       0 physical address
+       0 virtual address
+      3D size of raw data
+   163DD file pointer to raw data (000163DD to 00016419)
+   1641A file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned __int64 __cdecl GCToOSInterface::GetVirtualMemoryLimit(void)" (?GetVirtualMemoryLimit@GCToOSInterface@@SA_KXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #3A
+.debug$S name
+       0 physical address
+       0 virtual address
+     134 size of raw data
+   16438 file pointer to raw data (00016438 to 0001656B)
+   1656C file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #3B
+.text$mn name
+       0 physical address
+       0 virtual address
+      3D size of raw data
+   165A8 file pointer to raw data (000165A8 to 000165E4)
+   165E5 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static unsigned __int64 __cdecl GCToOSInterface::GetVirtualMemoryMaxAddress(void)" (?GetVirtualMemoryMaxAddress@GCToOSInterface@@SA_KXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #3C
+.debug$S name
+       0 physical address
+       0 virtual address
+     134 size of raw data
+   16603 file pointer to raw data (00016603 to 00016736)
+   16737 file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #3D
+.text$mn name
+       0 physical address
+       0 virtual address
+      2B size of raw data
+   16773 file pointer to raw data (00016773 to 0001679D)
+   1679E file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::GetWriteWatch(bool,void *,unsigned __int64,void * *,unsigned __int64 *)" (?GetWriteWatch@GCToOSInterface@@SA_N_NPEAX_KPEAPEAXPEA_K@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #3E
+.debug$S name
+       0 physical address
+       0 virtual address
+     264 size of raw data
+   167A8 file pointer to raw data (000167A8 to 00016A0B)
+   16A0C file pointer to relocation table
+       0 file pointer to line numbers
+      14 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #3F
+.text$mn name
+       0 physical address
+       0 virtual address
+     1F8 size of raw data
+   16AD4 file pointer to raw data (00016AD4 to 00016CCB)
+   16CCC file pointer to relocation table
+       0 file pointer to line numbers
+       F number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "bool __cdecl `anonymous namespace'::InitCPUGroupInfoArray(void)" (?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #40
+.debug$S name
+       0 physical address
+       0 virtual address
+     4F0 size of raw data
+   16D62 file pointer to raw data (00016D62 to 00017251)
+   17252 file pointer to relocation table
+       0 file pointer to line numbers
+      36 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #41
+.text$mn name
+       0 physical address
+       0 virtual address
+      11 size of raw data
+   1746E file pointer to raw data (0001746E to 0001747E)
+   1747F file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: bool __cdecl CLRCriticalSection::Initialize(void)" (?Initialize@CLRCriticalSection@@QEAA_NXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #42
+.debug$S name
+       0 physical address
+       0 virtual address
+      F8 size of raw data
+   17489 file pointer to raw data (00017489 to 00017580)
+   17581 file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #43
+.text$mn name
+       0 physical address
+       0 virtual address
+     1C0 size of raw data
+   175D1 file pointer to raw data (000175D1 to 00017790)
+   17791 file pointer to relocation table
+       0 file pointer to line numbers
+      17 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::Initialize(void)" (?Initialize@GCToOSInterface@@SA_NXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #44
+.debug$S name
+       0 physical address
+       0 virtual address
+     52C size of raw data
+   17877 file pointer to raw data (00017877 to 00017DA2)
+   17DA3 file pointer to relocation table
+       0 file pointer to line numbers
+      32 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #45
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   17F97 file pointer to raw data (00017F97 to 00017F9D)
+   17F9E file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: void __cdecl CLRCriticalSection::Leave(void)" (?Leave@CLRCriticalSection@@QEAAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #46
+.debug$S name
+       0 physical address
+       0 virtual address
+      E4 size of raw data
+   17FA8 file pointer to raw data (00017FA8 to 0001808B)
+   1808C file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #47
+.text$mn name
+       0 physical address
+       0 virtual address
+      BE size of raw data
+   180DC file pointer to raw data (000180DC to 00018199)
+   1819A file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::ParseGCHeapAffinitizeRangesEntry(char const * *,unsigned __int64 *,unsigned __int64 *)" (?ParseGCHeapAffinitizeRangesEntry@GCToOSInterface@@SA_NPEAPEBDPEA_K1@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #48
+.debug$S name
+       0 physical address
+       0 virtual address
+     30C size of raw data
+   181C2 file pointer to raw data (000181C2 to 000184CD)
+   184CE file pointer to relocation table
+       0 file pointer to line numbers
+      1C number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #49
+.text$mn name
+       0 physical address
+       0 virtual address
+      19 size of raw data
+   185E6 file pointer to raw data (000185E6 to 000185FE)
+   185FF file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static __int64 __cdecl GCToOSInterface::QueryPerformanceCounter(void)" (?QueryPerformanceCounter@GCToOSInterface@@SA_JXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #4A
+.debug$S name
+       0 physical address
+       0 virtual address
+      FC size of raw data
+   18609 file pointer to raw data (00018609 to 00018704)
+   18705 file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #4B
+.text$mn name
+       0 physical address
+       0 virtual address
+      19 size of raw data
+   18755 file pointer to raw data (00018755 to 0001876D)
+   1876E file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static __int64 __cdecl GCToOSInterface::QueryPerformanceFrequency(void)" (?QueryPerformanceFrequency@GCToOSInterface@@SA_JXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #4C
+.debug$S name
+       0 physical address
+       0 virtual address
+     100 size of raw data
+   18778 file pointer to raw data (00018778 to 00018877)
+   18878 file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #4D
+.text$mn name
+       0 physical address
+       0 virtual address
+       D size of raw data
+   188C8 file pointer to raw data (000188C8 to 000188D4)
+   188D5 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: void __cdecl GCEvent::Reset(void)" (?Reset@GCEvent@@QEAAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #4E
+.debug$S name
+       0 physical address
+       0 virtual address
+      FC size of raw data
+   188DF file pointer to raw data (000188DF to 000189DA)
+   189DB file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #4F
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   18A2B file pointer to raw data (00018A2B to 00018A31)
+   18A32 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void __cdecl GCToOSInterface::ResetWriteWatch(void *,unsigned __int64)" (?ResetWriteWatch@GCToOSInterface@@SAXPEAX_K@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #50
+.debug$S name
+       0 physical address
+       0 virtual address
+     120 size of raw data
+   18A3C file pointer to raw data (00018A3C to 00018B5B)
+   18B5C file pointer to relocation table
+       0 file pointer to line numbers
+       A number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #51
+.text$mn name
+       0 physical address
+       0 virtual address
+       D size of raw data
+   18BC0 file pointer to raw data (00018BC0 to 00018BCC)
+   18BCD file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: void __cdecl GCEvent::Set(void)" (?Set@GCEvent@@QEAAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #52
+.debug$S name
+       0 physical address
+       0 virtual address
+      FC size of raw data
+   18BD7 file pointer to raw data (00018BD7 to 00018CD2)
+   18CD3 file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #53
+.text$mn name
+       0 physical address
+       0 virtual address
+      92 size of raw data
+   18D23 file pointer to raw data (00018D23 to 00018DB4)
+   18DB5 file pointer to relocation table
+       0 file pointer to line numbers
+       6 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::SetCurrentThreadIdealAffinity(unsigned short,unsigned short)" (?SetCurrentThreadIdealAffinity@GCToOSInterface@@SA_NGG@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #54
+.debug$S name
+       0 physical address
+       0 virtual address
+     2D4 size of raw data
+   18DF1 file pointer to raw data (00018DF1 to 000190C4)
+   190C5 file pointer to relocation table
+       0 file pointer to line numbers
+      1E number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #55
+.text$mn name
+       0 physical address
+       0 virtual address
+     3B8 size of raw data
+   191F1 file pointer to raw data (000191F1 to 000195A8)
+   195A9 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static class AffinitySet const * __cdecl GCToOSInterface::SetGCThreadsAffinitySet(unsigned __int64,class AffinitySet const *)" (?SetGCThreadsAffinitySet@GCToOSInterface@@SAPEBVAffinitySet@@_KPEBV2@@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #56
+.debug$S name
+       0 physical address
+       0 virtual address
+     5F8 size of raw data
+   195D1 file pointer to raw data (000195D1 to 00019BC8)
+   19BC9 file pointer to relocation table
+       0 file pointer to line numbers
+      18 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #57
+.text$mn name
+       0 physical address
+       0 virtual address
+      8B size of raw data
+   19CB9 file pointer to raw data (00019CB9 to 00019D43)
+   19D44 file pointer to relocation table
+       0 file pointer to line numbers
+       7 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::SetThreadAffinity(unsigned short)" (?SetThreadAffinity@GCToOSInterface@@SA_NG@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #58
+.debug$S name
+       0 physical address
+       0 virtual address
+     224 size of raw data
+   19D8A file pointer to raw data (00019D8A to 00019FAD)
+   19FAE file pointer to relocation table
+       0 file pointer to line numbers
+      14 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #59
+.text$mn name
+       0 physical address
+       0 virtual address
+       3 size of raw data
+   1A076 file pointer to raw data (0001A076 to 0001A078)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void __cdecl GCToOSInterface::Shutdown(void)" (?Shutdown@GCToOSInterface@@SAXXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #5A
+.debug$S name
+       0 physical address
+       0 virtual address
+      A0 size of raw data
+   1A079 file pointer to raw data (0001A079 to 0001A118)
+   1A119 file pointer to relocation table
+       0 file pointer to line numbers
+       4 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #5B
+.text$mn name
+       0 physical address
+       0 virtual address
+       E size of raw data
+   1A141 file pointer to raw data (0001A141 to 0001A14E)
+   1A14F file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void __cdecl GCToOSInterface::Sleep(unsigned int)" (?Sleep@GCToOSInterface@@SAXI@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #5C
+.debug$S name
+       0 physical address
+       0 virtual address
+      F8 size of raw data
+   1A159 file pointer to raw data (0001A159 to 0001A250)
+   1A251 file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #5D
+.text$mn name
+       0 physical address
+       0 virtual address
+      40 size of raw data
+   1A2A1 file pointer to raw data (0001A2A1 to 0001A2E0)
+   1A2E1 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::SupportsWriteWatch(void)" (?SupportsWriteWatch@GCToOSInterface@@SA_NXZ)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #5E
+.debug$S name
+       0 physical address
+       0 virtual address
+     16C size of raw data
+   1A2FF file pointer to raw data (0001A2FF to 0001A46A)
+   1A46B file pointer to relocation table
+       0 file pointer to line numbers
+       C number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #5F
+.text$mn name
+       0 physical address
+       0 virtual address
+      84 size of raw data
+   1A4E3 file pointer to raw data (0001A4E3 to 0001A566)
+   1A567 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::VirtualCommit(void *,unsigned __int64,unsigned short)" (?VirtualCommit@GCToOSInterface@@SA_NPEAX_KG@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #60
+.debug$S name
+       0 physical address
+       0 virtual address
+     1BC size of raw data
+   1A585 file pointer to raw data (0001A585 to 0001A740)
+   1A741 file pointer to relocation table
+       0 file pointer to line numbers
+      14 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #61
+.text$mn name
+       0 physical address
+       0 virtual address
+      1A size of raw data
+   1A809 file pointer to raw data (0001A809 to 0001A822)
+   1A823 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::VirtualDecommit(void *,unsigned __int64)" (?VirtualDecommit@GCToOSInterface@@SA_NPEAX_K@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #62
+.debug$S name
+       0 physical address
+       0 virtual address
+     128 size of raw data
+   1A82D file pointer to raw data (0001A82D to 0001A954)
+   1A955 file pointer to relocation table
+       0 file pointer to line numbers
+       A number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #63
+.text$mn name
+       0 physical address
+       0 virtual address
+      1C size of raw data
+   1A9B9 file pointer to raw data (0001A9B9 to 0001A9D4)
+   1A9D5 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::VirtualRelease(void *,unsigned __int64)" (?VirtualRelease@GCToOSInterface@@SA_NPEAX_K@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #64
+.debug$S name
+       0 physical address
+       0 virtual address
+     130 size of raw data
+   1A9DF file pointer to raw data (0001A9DF to 0001AB0E)
+   1AB0F file pointer to relocation table
+       0 file pointer to line numbers
+       A number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #65
+.text$mn name
+       0 physical address
+       0 virtual address
+      80 size of raw data
+   1AB73 file pointer to raw data (0001AB73 to 0001ABF2)
+   1ABF3 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void * __cdecl GCToOSInterface::VirtualReserve(unsigned __int64,unsigned __int64,unsigned int,unsigned short)" (?VirtualReserve@GCToOSInterface@@SAPEAX_K0IG@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #66
+.debug$S name
+       0 physical address
+       0 virtual address
+     21C size of raw data
+   1AC11 file pointer to raw data (0001AC11 to 0001AE2C)
+   1AE2D file pointer to relocation table
+       0 file pointer to line numbers
+      16 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #67
+.text$mn name
+       0 physical address
+       0 virtual address
+     146 size of raw data
+   1AF09 file pointer to raw data (0001AF09 to 0001B04E)
+   1B04F file pointer to relocation table
+       0 file pointer to line numbers
+       F number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void * __cdecl GCToOSInterface::VirtualReserveAndCommitLargePages(unsigned __int64,unsigned short)" (?VirtualReserveAndCommitLargePages@GCToOSInterface@@SAPEAX_KG@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #68
+.debug$S name
+       0 physical address
+       0 virtual address
+     368 size of raw data
+   1B0E5 file pointer to raw data (0001B0E5 to 0001B44C)
+   1B44D file pointer to relocation table
+       0 file pointer to line numbers
+      2E number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #69
+.text$mn name
+       0 physical address
+       0 virtual address
+      64 size of raw data
+   1B619 file pointer to raw data (0001B619 to 0001B67C)
+   1B67D file pointer to relocation table
+       0 file pointer to line numbers
+       2 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static bool __cdecl GCToOSInterface::VirtualReset(void *,unsigned __int64,bool)" (?VirtualReset@GCToOSInterface@@SA_NPEAX_K_N@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #6A
+.debug$S name
+       0 physical address
+       0 virtual address
+     1D0 size of raw data
+   1B691 file pointer to raw data (0001B691 to 0001B860)
+   1B861 file pointer to relocation table
+       0 file pointer to line numbers
+      16 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #6B
+.text$mn name
+       0 physical address
+       0 virtual address
+       D size of raw data
+   1B93D file pointer to raw data (0001B93D to 0001B949)
+   1B94A file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: unsigned int __cdecl GCEvent::Wait(unsigned int,bool)" (?Wait@GCEvent@@QEAAII_N@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #6C
+.debug$S name
+       0 physical address
+       0 virtual address
+     198 size of raw data
+   1B954 file pointer to raw data (0001B954 to 0001BAEB)
+   1BAEC file pointer to relocation table
+       0 file pointer to line numbers
+       E number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #6D
+.text$mn name
+       0 physical address
+       0 virtual address
+       7 size of raw data
+   1BB78 file pointer to raw data (0001BB78 to 0001BB7E)
+   1BB7F file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+60501020 flags
+         Code
+         COMDAT; sym= "public: static void __cdecl GCToOSInterface::YieldThread(unsigned int)" (?YieldThread@GCToOSInterface@@SAXI@Z)
+         16 byte align
+         Execute Read
+
+SECTION HEADER #6E
+.debug$S name
+       0 physical address
+       0 virtual address
+      FC size of raw data
+   1BB89 file pointer to raw data (0001BB89 to 0001BC84)
+   1BC85 file pointer to relocation table
+       0 file pointer to line numbers
+       8 number of relocations
+       0 number of line numbers
+42101040 flags
+         Initialized Data
+         COMDAT (no symbol)
+         Discardable
+         1 byte align
+         Read Only
+
+SECTION HEADER #6F
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1BCD5 file pointer to raw data (0001BCD5 to 0001BCDC)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?Initialize@CLRCriticalSection@@QEAA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #70
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BCDD file pointer to raw data (0001BCDD to 0001BCE8)
+   1BCE9 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?Initialize@CLRCriticalSection@@QEAA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #71
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1BD07 file pointer to raw data (0001BD07 to 0001BD0E)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?CloseEvent@GCEvent@@QEAAXXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #72
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BD0F file pointer to raw data (0001BD0F to 0001BD1A)
+   1BD1B file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?CloseEvent@GCEvent@@QEAAXXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #73
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1BD39 file pointer to raw data (0001BD39 to 0001BD48)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?CreateManualEventNoThrow@GCEvent@@QEAA_N_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #74
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BD49 file pointer to raw data (0001BD49 to 0001BD54)
+   1BD55 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?CreateManualEventNoThrow@GCEvent@@QEAA_N_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #75
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1BD73 file pointer to raw data (0001BD73 to 0001BD82)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?CreateAutoEventNoThrow@GCEvent@@QEAA_N_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #76
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BD83 file pointer to raw data (0001BD83 to 0001BD8E)
+   1BD8F file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?CreateAutoEventNoThrow@GCEvent@@QEAA_N_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #77
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1BDAD file pointer to raw data (0001BDAD to 0001BDBC)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?CreateOSManualEventNoThrow@GCEvent@@QEAA_N_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #78
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BDBD file pointer to raw data (0001BDBD to 0001BDC8)
+   1BDC9 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?CreateOSManualEventNoThrow@GCEvent@@QEAA_N_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #79
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1BDE7 file pointer to raw data (0001BDE7 to 0001BDF6)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?CreateOSAutoEventNoThrow@GCEvent@@QEAA_N_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #7A
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BDF7 file pointer to raw data (0001BDF7 to 0001BE02)
+   1BE03 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?CreateOSAutoEventNoThrow@GCEvent@@QEAA_N_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #7B
+  .xdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BE21 file pointer to raw data (0001BE21 to 0001BE2C)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?Initialize@GCToOSInterface@@SA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #7C
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BE2D file pointer to raw data (0001BE2D to 0001BE38)
+   1BE39 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?Initialize@GCToOSInterface@@SA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #7D
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1BE57 file pointer to raw data (0001BE57 to 0001BE66)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?VirtualReserve@GCToOSInterface@@SAPEAX_K0IG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #7E
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BE67 file pointer to raw data (0001BE67 to 0001BE72)
+   1BE73 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?VirtualReserve@GCToOSInterface@@SAPEAX_K0IG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #7F
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1BE91 file pointer to raw data (0001BE91 to 0001BE98)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?VirtualRelease@GCToOSInterface@@SA_NPEAX_K@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #80
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BE99 file pointer to raw data (0001BE99 to 0001BEA4)
+   1BEA5 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?VirtualRelease@GCToOSInterface@@SA_NPEAX_K@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #81
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1BEC3 file pointer to raw data (0001BEC3 to 0001BED2)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?VirtualCommit@GCToOSInterface@@SA_NPEAX_KG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #82
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BED3 file pointer to raw data (0001BED3 to 0001BEDE)
+   1BEDF file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?VirtualCommit@GCToOSInterface@@SA_NPEAX_KG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #83
+  .xdata name
+       0 physical address
+       0 virtual address
+      18 size of raw data
+   1BEFD file pointer to raw data (0001BEFD to 0001BF14)
+   1BF15 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?VirtualReserveAndCommitLargePages@GCToOSInterface@@SAPEAX_KG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #84
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BF1F file pointer to raw data (0001BF1F to 0001BF2A)
+   1BF2B file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?VirtualReserveAndCommitLargePages@GCToOSInterface@@SAPEAX_KG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #85
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1BF49 file pointer to raw data (0001BF49 to 0001BF50)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?VirtualDecommit@GCToOSInterface@@SA_NPEAX_K@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #86
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BF51 file pointer to raw data (0001BF51 to 0001BF5C)
+   1BF5D file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?VirtualDecommit@GCToOSInterface@@SA_NPEAX_K@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #87
+  .xdata name
+       0 physical address
+       0 virtual address
+      14 size of raw data
+   1BF7B file pointer to raw data (0001BF7B to 0001BF8E)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?VirtualReset@GCToOSInterface@@SA_NPEAX_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #88
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BF8F file pointer to raw data (0001BF8F to 0001BF9A)
+   1BF9B file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?VirtualReset@GCToOSInterface@@SA_NPEAX_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #89
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1BFB9 file pointer to raw data (0001BFB9 to 0001BFC0)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?SupportsWriteWatch@GCToOSInterface@@SA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #8A
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BFC1 file pointer to raw data (0001BFC1 to 0001BFCC)
+   1BFCD file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?SupportsWriteWatch@GCToOSInterface@@SA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #8B
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1BFEB file pointer to raw data (0001BFEB to 0001BFF2)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetWriteWatch@GCToOSInterface@@SA_N_NPEAX_KPEAPEAXPEA_K@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #8C
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1BFF3 file pointer to raw data (0001BFF3 to 0001BFFE)
+   1BFFF file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetWriteWatch@GCToOSInterface@@SA_N_NPEAX_KPEAPEAXPEA_K@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #8D
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1C01D file pointer to raw data (0001C01D to 0001C024)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetCurrentProcessorNumber@GCToOSInterface@@SAIXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #8E
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C025 file pointer to raw data (0001C025 to 0001C030)
+   1C031 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetCurrentProcessorNumber@GCToOSInterface@@SAIXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #8F
+  .xdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C04F file pointer to raw data (0001C04F to 0001C05A)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?SetCurrentThreadIdealAffinity@GCToOSInterface@@SA_NGG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #90
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C05B file pointer to raw data (0001C05B to 0001C066)
+   1C067 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?SetCurrentThreadIdealAffinity@GCToOSInterface@@SA_NGG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #91
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1C085 file pointer to raw data (0001C085 to 0001C08C)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetCurrentThreadIdealProc@GCToOSInterface@@SA_NPEAG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #92
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C08D file pointer to raw data (0001C08D to 0001C098)
+   1C099 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetCurrentThreadIdealProc@GCToOSInterface@@SA_NPEAG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #93
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1C0B7 file pointer to raw data (0001C0B7 to 0001C0BE)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetCurrentThreadIdForLogging@GCToOSInterface@@SA_KXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #94
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C0BF file pointer to raw data (0001C0BF to 0001C0CA)
+   1C0CB file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetCurrentThreadIdForLogging@GCToOSInterface@@SA_KXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #95
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1C0E9 file pointer to raw data (0001C0E9 to 0001C0F0)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #96
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C0F1 file pointer to raw data (0001C0F1 to 0001C0FC)
+   1C0FD file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #97
+  .xdata name
+       0 physical address
+       0 virtual address
+      14 size of raw data
+   1C11B file pointer to raw data (0001C11B to 0001C12E)
+   1C12F file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$0$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #98
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C14D file pointer to raw data (0001C14D to 0001C158)
+   1C159 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$0$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #99
+  .xdata name
+       0 physical address
+       0 virtual address
+      18 size of raw data
+   1C177 file pointer to raw data (0001C177 to 0001C18E)
+   1C18F file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$2$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #9A
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C1AD file pointer to raw data (0001C1AD to 0001C1B8)
+   1C1B9 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$2$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #9B
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C1D7 file pointer to raw data (0001C1D7 to 0001C1E6)
+   1C1E7 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$3$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #9C
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C205 file pointer to raw data (0001C205 to 0001C210)
+   1C211 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$3$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #9D
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C22F file pointer to raw data (0001C22F to 0001C23E)
+   1C23F file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$4$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #9E
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C25D file pointer to raw data (0001C25D to 0001C268)
+   1C269 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$4$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #9F
+ .voltbl name
+       0 physical address
+       0 virtual address
+       4 size of raw data
+   1C287 file pointer to raw data (0001C287 to 0001C28A)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+  101A00 flags
+         Info
+         Remove
+         COMDAT; sym= _volmd
+         1 byte align
+
+SECTION HEADER #A0
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C28B file pointer to raw data (0001C28B to 0001C29A)
+   1C29B file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?SetThreadAffinity@GCToOSInterface@@SA_NG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #A1
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C2A5 file pointer to raw data (0001C2A5 to 0001C2B0)
+   1C2B1 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?SetThreadAffinity@GCToOSInterface@@SA_NG@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #A2
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1C2CF file pointer to raw data (0001C2CF to 0001C2D6)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?BoostThreadPriority@GCToOSInterface@@SA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #A3
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C2D7 file pointer to raw data (0001C2D7 to 0001C2E2)
+   1C2E3 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?BoostThreadPriority@GCToOSInterface@@SA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #A4
+  .xdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C301 file pointer to raw data (0001C301 to 0001C30C)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?SetGCThreadsAffinitySet@GCToOSInterface@@SAPEBVAffinitySet@@_KPEBV2@@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #A5
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C30D file pointer to raw data (0001C30D to 0001C318)
+   1C319 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?SetGCThreadsAffinitySet@GCToOSInterface@@SAPEBVAffinitySet@@_KPEBV2@@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #A6
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C337 file pointer to raw data (0001C337 to 0001C346)
+   1C347 file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetVirtualMemoryLimit@GCToOSInterface@@SA_KXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #A7
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C351 file pointer to raw data (0001C351 to 0001C35C)
+   1C35D file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetVirtualMemoryLimit@GCToOSInterface@@SA_KXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #A8
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C37B file pointer to raw data (0001C37B to 0001C38A)
+   1C38B file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetVirtualMemoryMaxAddress@GCToOSInterface@@SA_KXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #A9
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C395 file pointer to raw data (0001C395 to 0001C3A0)
+   1C3A1 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetVirtualMemoryMaxAddress@GCToOSInterface@@SA_KXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #AA
+  .xdata name
+       0 physical address
+       0 virtual address
+      20 size of raw data
+   1C3BF file pointer to raw data (0001C3BF to 0001C3DE)
+   1C3DF file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetPhysicalMemoryLimit@GCToOSInterface@@SA_KPEA_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #AB
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C3E9 file pointer to raw data (0001C3E9 to 0001C3F4)
+   1C3F5 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetPhysicalMemoryLimit@GCToOSInterface@@SA_KPEA_N@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #AC
+  .xdata name
+       0 physical address
+       0 virtual address
+      1C size of raw data
+   1C413 file pointer to raw data (0001C413 to 0001C42E)
+   1C42F file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetMemoryStatus@GCToOSInterface@@SAX_KPEAIPEA_K2@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #AD
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C439 file pointer to raw data (0001C439 to 0001C444)
+   1C445 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetMemoryStatus@GCToOSInterface@@SAX_KPEAIPEA_K2@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #AE
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1C463 file pointer to raw data (0001C463 to 0001C46A)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?QueryPerformanceCounter@GCToOSInterface@@SA_JXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #AF
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C46B file pointer to raw data (0001C46B to 0001C476)
+   1C477 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?QueryPerformanceCounter@GCToOSInterface@@SA_JXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #B0
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1C495 file pointer to raw data (0001C495 to 0001C49C)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?QueryPerformanceFrequency@GCToOSInterface@@SA_JXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #B1
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C49D file pointer to raw data (0001C49D to 0001C4A8)
+   1C4A9 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?QueryPerformanceFrequency@GCToOSInterface@@SA_JXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #B2
+  .xdata name
+       0 physical address
+       0 virtual address
+      14 size of raw data
+   1C4C7 file pointer to raw data (0001C4C7 to 0001C4DA)
+   1C4DB file pointer to relocation table
+       0 file pointer to line numbers
+       1 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #B3
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C4E5 file pointer to raw data (0001C4E5 to 0001C4F0)
+   1C4F1 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #B4
+  .xdata name
+       0 physical address
+       0 virtual address
+      18 size of raw data
+   1C50F file pointer to raw data (0001C50F to 0001C526)
+   1C527 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$1$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #B5
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C545 file pointer to raw data (0001C545 to 0001C550)
+   1C551 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$1$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #B6
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C56F file pointer to raw data (0001C56F to 0001C57E)
+   1C57F file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$2$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #B7
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C59D file pointer to raw data (0001C59D to 0001C5A8)
+   1C5A9 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$2$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #B8
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C5C7 file pointer to raw data (0001C5C7 to 0001C5D6)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #B9
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C5D7 file pointer to raw data (0001C5D7 to 0001C5E2)
+   1C5E3 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #BA
+  .xdata name
+       0 physical address
+       0 virtual address
+      14 size of raw data
+   1C601 file pointer to raw data (0001C601 to 0001C614)
+   1C615 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$0$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #BB
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C633 file pointer to raw data (0001C633 to 0001C63E)
+   1C63F file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$0$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #BC
+  .xdata name
+       0 physical address
+       0 virtual address
+      14 size of raw data
+   1C65D file pointer to raw data (0001C65D to 0001C670)
+   1C671 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$2$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #BD
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C68F file pointer to raw data (0001C68F to 0001C69A)
+   1C69B file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$2$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #BE
+  .xdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1C6B9 file pointer to raw data (0001C6B9 to 0001C6C0)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #BF
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C6C1 file pointer to raw data (0001C6C1 to 0001C6CC)
+   1C6CD file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #C0
+  .xdata name
+       0 physical address
+       0 virtual address
+      14 size of raw data
+   1C6EB file pointer to raw data (0001C6EB to 0001C6FE)
+   1C6FF file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$0$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #C1
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C71D file pointer to raw data (0001C71D to 0001C728)
+   1C729 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$0$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #C2
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C747 file pointer to raw data (0001C747 to 0001C756)
+   1C757 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$1$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #C3
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C775 file pointer to raw data (0001C775 to 0001C780)
+   1C781 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$1$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #C4
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C79F file pointer to raw data (0001C79F to 0001C7AE)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?ParseGCHeapAffinitizeRangesEntry@GCToOSInterface@@SA_NPEAPEBDPEA_K1@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #C5
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C7AF file pointer to raw data (0001C7AF to 0001C7BA)
+   1C7BB file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?ParseGCHeapAffinitizeRangesEntry@GCToOSInterface@@SA_NPEAPEBDPEA_K1@Z
+         4 byte align
+         Read Only
+
+SECTION HEADER #C6
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C7D9 file pointer to raw data (0001C7D9 to 0001C7E8)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $unwind$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #C7
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C7E9 file pointer to raw data (0001C7E9 to 0001C7F4)
+   1C7F5 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #C8
+  .xdata name
+       0 physical address
+       0 virtual address
+      18 size of raw data
+   1C813 file pointer to raw data (0001C813 to 0001C82A)
+   1C82B file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$1$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #C9
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C849 file pointer to raw data (0001C849 to 0001C854)
+   1C855 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$1$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #CA
+  .xdata name
+       0 physical address
+       0 virtual address
+      14 size of raw data
+   1C873 file pointer to raw data (0001C873 to 0001C886)
+   1C887 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$2$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #CB
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C8A5 file pointer to raw data (0001C8A5 to 0001C8B0)
+   1C8B1 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$2$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #CC
+  .xdata name
+       0 physical address
+       0 virtual address
+      14 size of raw data
+   1C8CF file pointer to raw data (0001C8CF to 0001C8E2)
+   1C8E3 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$3$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #CD
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C901 file pointer to raw data (0001C901 to 0001C90C)
+   1C90D file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$3$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #CE
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C92B file pointer to raw data (0001C92B to 0001C93A)
+   1C93B file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$4$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #CF
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C959 file pointer to raw data (0001C959 to 0001C964)
+   1C965 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$4$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #D0
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1C983 file pointer to raw data (0001C983 to 0001C992)
+   1C993 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$5$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #D1
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1C9B1 file pointer to raw data (0001C9B1 to 0001C9BC)
+   1C9BD file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$5$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #D2
+  .xdata name
+       0 physical address
+       0 virtual address
+      18 size of raw data
+   1C9DB file pointer to raw data (0001C9DB to 0001C9F2)
+   1C9F3 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$7$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #D3
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1CA11 file pointer to raw data (0001CA11 to 0001CA1C)
+   1CA1D file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$7$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #D4
+  .xdata name
+       0 physical address
+       0 virtual address
+      10 size of raw data
+   1CA3B file pointer to raw data (0001CA3B to 0001CA4A)
+   1CA4B file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $chain$8$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #D5
+  .pdata name
+       0 physical address
+       0 virtual address
+       C size of raw data
+   1CA69 file pointer to raw data (0001CA69 to 0001CA74)
+   1CA75 file pointer to relocation table
+       0 file pointer to line numbers
+       3 number of relocations
+       0 number of line numbers
+40301040 flags
+         Initialized Data
+         COMDAT; sym= $pdata$8$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+         4 byte align
+         Read Only
+
+SECTION HEADER #D6
+  .rdata name
+       0 physical address
+       0 virtual address
+      2C size of raw data
+   1CA93 file pointer to raw data (0001CA93 to 0001CABE)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40401040 flags
+         Initialized Data
+         COMDAT; sym= "`string'" (??_C@_1CM@JPKFCMPM@?$AAS?$AAe?$AAL?$AAo?$AAc?$AAk?$AAM?$AAe?$AAm?$AAo?$AAr?$AAy?$AAP?$AAr?$AAi@)
+         8 byte align
+         Read Only
+
+SECTION HEADER #D7
+    .bss name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+       0 file pointer to raw data
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+C0401080 flags
+         Uninitialized Data
+         COMDAT; sym= "unsigned __int64 volatile `public: static unsigned __int64 __cdecl GCToOSInterface::GetCacheSizePerLogicalCpu(bool)'::`2'::s_maxSize" (?s_maxSize@?1??GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z@4_KC)
+         8 byte align
+         Read Write
+
+SECTION HEADER #D8
+    .bss name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+       0 file pointer to raw data
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+C0401080 flags
+         Uninitialized Data
+         COMDAT; sym= "unsigned __int64 volatile `public: static unsigned __int64 __cdecl GCToOSInterface::GetCacheSizePerLogicalCpu(bool)'::`2'::s_maxTrueSize" (?s_maxTrueSize@?1??GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z@4_KC)
+         8 byte align
+         Read Write
+
+SECTION HEADER #D9
+  .rdata name
+       0 physical address
+       0 virtual address
+       8 size of raw data
+   1CABF file pointer to raw data (0001CABF to 0001CAC6)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40401040 flags
+         Initialized Data
+         COMDAT; sym= __real@4059000000000000
+         8 byte align
+         Read Only
+
+SECTION HEADER #DA
+ .chks64 name
+       0 physical address
+       0 virtual address
+     6D0 size of raw data
+   1CAC7 file pointer to raw data (0001CAC7 to 0001D196)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+     A00 flags
+         Info
+         Remove
+         (no align specified)
+
+  Summary
+
+          B8 .bss
+         6D0 .chks64
+       156C4 .debug$S
+          88 .debug$T
+         122 .drectve
+         264 .pdata
+          34 .rdata
+        17B9 .text$mn
+           4 .voltbl
+         318 .xdata

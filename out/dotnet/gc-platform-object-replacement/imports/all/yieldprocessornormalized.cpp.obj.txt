@@ -1,0 +1,18 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\yieldprocessornormalized.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          54 .bss
+         1B8 .chks64
+          10 .data
+        9884 .debug$S
+          88 .debug$T
+          F4 .drectve
+          9C .pdata
+          30 .rdata
+         6C5 .text$mn
+           5 .voltbl
+          D8 .xdata

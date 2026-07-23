@@ -1,0 +1,11 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\PInvoke.asm.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+           0 .data
+         444 .debug$S
+          3C .debug$T
+          6B .text$mn

@@ -1,0 +1,164 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\guidexos_mutex.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058D98 ABS    notype       Static       | @comp.id
+001 80010090 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .drectve
+    Section length    3, #relocs    0, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .debug$S
+    Section length   C0, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .text$mn
+    Section length   4D, #relocs    1, #linenums    0, checksum 9FC798F9, selection    1 (pick no duplicates)
+008 00000000 SECT4  notype       Static       | .text$mn
+    Section length   1C, #relocs    0, #linenums    0, checksum EE9C05ED, selection    1 (pick no duplicates)
+00A 00000000 SECT5  notype       Static       | .text$mn
+    Section length   5E, #relocs    4, #linenums    0, checksum E605E1EE, selection    1 (pick no duplicates)
+00C 00000000 SECT6  notype       Static       | .text$mn
+    Section length   16, #relocs    0, #linenums    0, checksum 10DDDD57, selection    2 (pick any)
+00E 00000000 SECT7  notype       Static       | .text$mn
+    Section length   5C, #relocs    2, #linenums    0, checksum DADB2969, selection    1 (pick no duplicates)
+010 00000000 SECT8  notype       Static       | .text$mn
+    Section length   9F, #relocs    6, #linenums    0, checksum D24D3E1C, selection    1 (pick no duplicates)
+012 00000000 SECT9  notype       Static       | .text$mn
+    Section length   4D, #relocs    1, #linenums    0, checksum BBC2B229, selection    1 (pick no duplicates)
+014 00000000 SECTA  notype       Static       | .text$mn
+    Section length   2C, #relocs    4, #linenums    0, checksum 38B1B604, selection    1 (pick no duplicates)
+016 00000000 SECTB  notype       Static       | .text$mn
+    Section length   18, #relocs    0, #linenums    0, checksum 9F1564AF, selection    1 (pick no duplicates)
+018 00000000 SECTC  notype       Static       | .text$mn
+    Section length   12, #relocs    0, #linenums    0, checksum 29C62979, selection    2 (pick any)
+01A 00000000 SECTD  notype       Static       | .text$mn
+    Section length  22A, #relocs   11, #linenums    0, checksum E954A6E5, selection    1 (pick no duplicates)
+01C 00000000 SECTE  notype       Static       | .text$mn
+    Section length   FA, #relocs    7, #linenums    0, checksum B2C26C81, selection    1 (pick no duplicates)
+01E 00000000 SECTF  notype       Static       | .text$mn
+    Section length   2D, #relocs    0, #linenums    0, checksum B636ED57, selection    1 (pick no duplicates)
+020 00000000 SECT10 notype       Static       | .text$mn
+    Section length  16D, #relocs    B, #linenums    0, checksum 77935293, selection    1 (pick no duplicates)
+022 00000000 SECT11 notype       Static       | .text$mn
+    Section length  178, #relocs    A, #linenums    0, checksum 5F23C7C9, selection    1 (pick no duplicates)
+024 00000000 SECT12 notype       Static       | .text$mn
+    Section length    7, #relocs    0, #linenums    0, checksum 9EC0D352, selection    1 (pick no duplicates)
+026 00000000 SECT13 notype       Static       | .text$mn
+    Section length   20, #relocs    0, #linenums    0, checksum 8CF9F890, selection    1 (pick no duplicates)
+028 00000000 UNDEF  notype ()    External     | ?initializeWaitQueue@scheduler_wait@runtime@gxos@@YAXPEAUWaitQueue@123@@Z (void __cdecl gxos::runtime::scheduler_wait::initializeWaitQueue(struct gxos::runtime::scheduler_wait::WaitQueue *))
+029 00000000 UNDEF  notype ()    External     | ?schedulerWaitAvailable@scheduler_wait@runtime@gxos@@YA_NXZ (bool __cdecl gxos::runtime::scheduler_wait::schedulerWaitAvailable(void))
+02A 00000000 UNDEF  notype ()    External     | ?schedulerWaitCriticalAvailable@scheduler_wait@runtime@gxos@@YA_NXZ (bool __cdecl gxos::runtime::scheduler_wait::schedulerWaitCriticalAvailable(void))
+02B 00000000 UNDEF  notype ()    External     | ?enterCritical@scheduler_wait@runtime@gxos@@YAPEAXXZ (void * __cdecl gxos::runtime::scheduler_wait::enterCritical(void))
+02C 00000000 UNDEF  notype ()    External     | ?leaveCritical@scheduler_wait@runtime@gxos@@YAXPEAX@Z (void __cdecl gxos::runtime::scheduler_wait::leaveCritical(void *))
+02D 00000000 UNDEF  notype ()    External     | ?prepareWait@scheduler_wait@runtime@gxos@@YA_NPEAUWaitQueue@123@AEBUWaitDuration@123@PEAPEAUWaitNode@123@@Z (bool __cdecl gxos::runtime::scheduler_wait::prepareWait(struct gxos::runtime::scheduler_wait::WaitQueue *,struct gxos::runtime::scheduler_wait::WaitDuration const &,struct gxos::runtime::scheduler_wait::WaitNode * *))
+02E 00000000 UNDEF  notype ()    External     | ?parkWait@scheduler_wait@runtime@gxos@@YA?AW4WakeReason@123@PEAUWaitNode@123@@Z (enum gxos::runtime::scheduler_wait::WakeReason __cdecl gxos::runtime::scheduler_wait::parkWait(struct gxos::runtime::scheduler_wait::WaitNode *))
+02F 00000000 UNDEF  notype ()    External     | ?wakeOne@scheduler_wait@runtime@gxos@@YA_NPEAUWaitQueue@123@W4WakeReason@123@@Z (bool __cdecl gxos::runtime::scheduler_wait::wakeOne(struct gxos::runtime::scheduler_wait::WaitQueue *,enum gxos::runtime::scheduler_wait::WakeReason))
+030 00000000 UNDEF  notype ()    External     | ?waitQueueEmpty@scheduler_wait@runtime@gxos@@YA_NPEBUWaitQueue@123@@Z (bool __cdecl gxos::runtime::scheduler_wait::waitQueueEmpty(struct gxos::runtime::scheduler_wait::WaitQueue const *))
+031 00000000 SECTC  notype ()    External     | ?isValid@MutexOwnerIdentity@runtime@gxos@@QEBA_NXZ (public: bool __cdecl gxos::runtime::MutexOwnerIdentity::isValid(void)const )
+032 00000000 SECT6  notype ()    External     | ??8runtime@gxos@@YA_NAEBUMutexOwnerIdentity@01@0@Z (bool __cdecl gxos::runtime::operator==(struct gxos::runtime::MutexOwnerIdentity const &,struct gxos::runtime::MutexOwnerIdentity const &))
+033 00000000 SECT4  notype ()    External     | ??0Mutex@runtime@gxos@@QEAA@XZ (public: __cdecl gxos::runtime::Mutex::Mutex(void))
+034 00000000 SECT3  notype ()    External     | ??0Mutex@runtime@gxos@@QEAA@W4MutexMode@12@@Z (public: __cdecl gxos::runtime::Mutex::Mutex(enum gxos::runtime::MutexMode))
+035 00000000 SECT5  notype ()    External     | ??1Mutex@runtime@gxos@@QEAA@XZ (public: __cdecl gxos::runtime::Mutex::~Mutex(void))
+036 00000000 SECT9  notype ()    External     | ?initialize@Mutex@runtime@gxos@@QEAA_NW4MutexMode@23@@Z (public: bool __cdecl gxos::runtime::Mutex::initialize(enum gxos::runtime::MutexMode))
+037 00000000 SECTB  notype ()    External     | ?isInitialized@Mutex@runtime@gxos@@QEBA_NXZ (public: bool __cdecl gxos::runtime::Mutex::isInitialized(void)const )
+038 00000000 SECTD  notype ()    External     | ?lock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ (public: enum gxos::runtime::MutexResult __cdecl gxos::runtime::Mutex::lock(void))
+039 00000000 SECT10 notype ()    External     | ?tryLock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ (public: enum gxos::runtime::MutexResult __cdecl gxos::runtime::Mutex::tryLock(void))
+03A 00000000 SECT11 notype ()    External     | ?unlock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ (public: enum gxos::runtime::MutexResult __cdecl gxos::runtime::Mutex::unlock(void))
+03B 00000000 SECT8  notype ()    External     | ?destroy@Mutex@runtime@gxos@@QEAA?AW4MutexStatus@23@XZ (public: enum gxos::runtime::MutexStatus __cdecl gxos::runtime::Mutex::destroy(void))
+03C 00000000 SECTE  notype ()    External     | ?notifyOwnerExit@Mutex@runtime@gxos@@QEAA?AW4MutexStatus@23@XZ (public: enum gxos::runtime::MutexStatus __cdecl gxos::runtime::Mutex::notifyOwnerExit(void))
+03D 00000000 SECTF  notype ()    External     | ?ownerMatches@Mutex@runtime@gxos@@CA_NAEBUMutexOwnerIdentity@23@0@Z (private: static bool __cdecl gxos::runtime::Mutex::ownerMatches(struct gxos::runtime::MutexOwnerIdentity const &,struct gxos::runtime::MutexOwnerIdentity const &))
+03E 00000000 SECT7  notype ()    External     | ?currentOwner@Mutex@runtime@gxos@@CA?AUMutexOwnerIdentity@23@XZ (private: static struct gxos::runtime::MutexOwnerIdentity __cdecl gxos::runtime::Mutex::currentOwner(void))
+03F 00000000 SECTA  notype ()    External     | ?installMutexPlatformHooks@runtime@gxos@@YAXPEBUMutexPlatformHooks@12@@Z (void __cdecl gxos::runtime::installMutexPlatformHooks(struct gxos::runtime::MutexPlatformHooks const *))
+040 00000000 SECT12 notype ()    Static       | ?validMode@?A0x92878e54@runtime@gxos@@YA_NW4MutexMode@23@@Z (bool __cdecl gxos::runtime::`anonymous namespace'::validMode(enum gxos::runtime::MutexMode))
+041 00000000 SECT13 notype ()    Static       | ?wakeReasonToResult@?A0x92878e54@runtime@gxos@@YA?AW4MutexResult@23@W4WakeReason@scheduler_wait@23@@Z (enum gxos::runtime::MutexResult __cdecl gxos::runtime::`anonymous namespace'::wakeReasonToResult(enum gxos::runtime::scheduler_wait::WakeReason))
+042 00000000 SECT3  notype       Label        | $LN16
+043 00000000 SECT5  notype       Label        | $LN20
+044 00000000 SECT9  notype       Label        | $LN15
+045 00000000 SECTD  notype       Label        | $LN122
+046 00000000 SECT10 notype       Label        | $LN64
+047 00000000 SECT11 notype       Label        | $LN72
+048 00000000 SECT8  notype       Label        | $LN19
+049 00000000 SECTE  notype       Label        | $LN56
+04A 00000000 SECT7  notype       Label        | $LN8
+04B 00000000 SECT14 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x3)
+04D 00000000 SECT14 notype       Static       | $unwind$??0Mutex@runtime@gxos@@QEAA@W4MutexMode@12@@Z
+04E 00000000 SECT15 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B298D73C, selection    5 (pick associative Section 0x3)
+050 00000000 SECT15 notype       Static       | $pdata$??0Mutex@runtime@gxos@@QEAA@W4MutexMode@12@@Z
+051 00000000 SECT16 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x5)
+053 00000000 SECT16 notype       Static       | $unwind$??1Mutex@runtime@gxos@@QEAA@XZ
+054 00000000 SECT17 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum AF5E2A9E, selection    5 (pick associative Section 0x5)
+056 00000000 SECT17 notype       Static       | $pdata$??1Mutex@runtime@gxos@@QEAA@XZ
+057 00000000 SECT18 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum E5208E85, selection    5 (pick associative Section 0x5)
+059 00000000 SECT18 notype       Static       | $chain$0$??1Mutex@runtime@gxos@@QEAA@XZ
+05A 00000000 SECT19 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8CD77371, selection    5 (pick associative Section 0x5)
+05C 00000000 SECT19 notype       Static       | $pdata$0$??1Mutex@runtime@gxos@@QEAA@XZ
+05D 00000000 SECT1A notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 1609C072, selection    5 (pick associative Section 0x5)
+05F 00000000 SECT1A notype       Static       | $chain$1$??1Mutex@runtime@gxos@@QEAA@XZ
+060 00000000 SECT1B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 7ADBCD06, selection    5 (pick associative Section 0x5)
+062 00000000 SECT1B notype       Static       | $pdata$1$??1Mutex@runtime@gxos@@QEAA@XZ
+063 00000000 SECT1C notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x9)
+065 00000000 SECT1C notype       Static       | $unwind$?initialize@Mutex@runtime@gxos@@QEAA_NW4MutexMode@23@@Z
+066 00000000 SECT1D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B298D73C, selection    5 (pick associative Section 0x9)
+068 00000000 SECT1D notype       Static       | $pdata$?initialize@Mutex@runtime@gxos@@QEAA_NW4MutexMode@23@@Z
+069 00000000 SECT1E notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum 1ECCACE1, selection    5 (pick associative Section 0xD)
+06B 00000000 SECT1E notype       Static       | $unwind$?lock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ
+06C 00000000 SECT1F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FF296FB7, selection    5 (pick associative Section 0xD)
+06E 00000000 SECT1F notype       Static       | $pdata$?lock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ
+06F 00000000 SECT20 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum CD391EC4, selection    5 (pick associative Section 0x10)
+071 00000000 SECT20 notype       Static       | $unwind$?tryLock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ
+072 00000000 SECT21 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum ED99BEDE, selection    5 (pick associative Section 0x10)
+074 00000000 SECT21 notype       Static       | $pdata$?tryLock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ
+075 00000000 SECT22 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum E03B270B, selection    5 (pick associative Section 0x11)
+077 00000000 SECT22 notype       Static       | $unwind$?unlock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ
+078 00000000 SECT23 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D9C28191, selection    5 (pick associative Section 0x11)
+07A 00000000 SECT23 notype       Static       | $pdata$?unlock@Mutex@runtime@gxos@@QEAA?AW4MutexResult@23@XZ
+07B 00000000 SECT24 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x8)
+07D 00000000 SECT24 notype       Static       | $unwind$?destroy@Mutex@runtime@gxos@@QEAA?AW4MutexStatus@23@XZ
+07E 00000000 SECT25 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F6A0A65D, selection    5 (pick associative Section 0x8)
+080 00000000 SECT25 notype       Static       | $pdata$?destroy@Mutex@runtime@gxos@@QEAA?AW4MutexStatus@23@XZ
+081 00000000 SECT26 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum 815B1B44, selection    5 (pick associative Section 0xE)
+083 00000000 SECT26 notype       Static       | $unwind$?notifyOwnerExit@Mutex@runtime@gxos@@QEAA?AW4MutexStatus@23@XZ
+084 00000000 SECT27 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6EAB0882, selection    5 (pick associative Section 0xE)
+086 00000000 SECT27 notype       Static       | $pdata$?notifyOwnerExit@Mutex@runtime@gxos@@QEAA?AW4MutexStatus@23@XZ
+087 00000000 SECT28 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum BC0E6383, selection    5 (pick associative Section 0x7)
+089 00000000 SECT28 notype       Static       | $unwind$?currentOwner@Mutex@runtime@gxos@@CA?AUMutexOwnerIdentity@23@XZ
+08A 00000000 SECT29 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  289E689, selection    5 (pick associative Section 0x7)
+08C 00000000 SECT29 notype       Static       | $pdata$?currentOwner@Mutex@runtime@gxos@@CA?AUMutexOwnerIdentity@23@XZ
+08D 00000000 SECT2A notype       Static       | .bss
+    Section length   10, #relocs    0, #linenums    0, checksum        0
+08F 00000000 SECT2A notype       Static       | ?g_hooks@?A0x92878e54@runtime@gxos@@3UMutexPlatformHooks@23@A (struct gxos::runtime::MutexPlatformHooks gxos::runtime::`anonymous namespace'::g_hooks)
+090 00000000 SECT2B notype       Static       | .chks64
+    Section length  158, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0xB64 bytes
+
+  Summary
+
+          10 .bss
+         158 .chks64
+          C0 .debug$S
+           3 .drectve
+          84 .pdata
+         8D8 .text$mn
+          98 .xdata

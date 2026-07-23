@@ -1,0 +1,11 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\WriteBarriers.asm.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+           0 .data
+         8A0 .debug$S
+          84 .debug$T
+         26E .text$mn

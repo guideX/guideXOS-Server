@@ -1,0 +1,15 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\extracted\all\gcload.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          58 .chks64
+        8A3C .debug$S
+          88 .debug$T
+          F4 .drectve
+           C .pdata
+           B .rdata
+          A2 .text$mn
+          18 .xdata
