@@ -1,0 +1,18 @@
+run=20260722-204305-911
+server-wrapper-pid=20664
+server-pid=20660
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-204305-911-playing.png
+cycle=1 no-automatic-collision-before-schedule=True
+cycle=1 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-204305-911-dying.png
+cycle=1 dying=True lives-decremented-once=True duplicate-death-suppressed=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-204305-911-ready.png
+cycle=1 actor-reset=True ready-collision-free-window=True
+cycle=1 collisions=True game-over=True lives-zero=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-204305-911-game-over.png
+cycle=1 restart=False
+error=Enter did not restart the Game Over session.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

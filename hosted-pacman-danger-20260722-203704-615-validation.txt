@@ -1,0 +1,28 @@
+run=20260722-203704-615
+server-wrapper-pid=25492
+server-pid=20320
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-203704-615-playing.png
+cycle=1 no-automatic-collision-before-schedule=True
+cycle=1 escape-cleanup=True attempt=1
+cycle=2 launch=True windowId=1001
+cycle=2 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-203704-615-dying.png
+cycle=2 dying=True lives-decremented-once=True
+cycle=2 escape-cleanup=True attempt=1
+cycle=3 launch=True windowId=1002
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-203704-615-ready.png
+cycle=3 collision=True actor-reset=True ready-collision-free-window=True
+cycle=3 escape-cleanup=True attempt=1
+cycle=4 launch=True windowId=1003
+cycle=4 collisions=True game-over=True lives-zero=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-203704-615-game-over.png
+cycle=4 restart=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260722-203704-615-restart.png
+cycle=4 escape-cleanup=True attempt=1
+zero-owned-windows=True
+retained-frame-present-diagnostics=True
+danger-placement-count=7
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0
