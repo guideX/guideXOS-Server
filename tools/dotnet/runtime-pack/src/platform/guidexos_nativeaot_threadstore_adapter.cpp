@@ -9,6 +9,13 @@
 #include <mutex>
 #include <thread>
 
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 namespace guidexos {
 namespace nativeaot {
 namespace threadstore {
@@ -44,8 +51,19 @@ std::int32_t g_head = -1;
 fls::Index g_flsIndex = fls::kOutOfIndexes;
 
 std::uintptr_t currentNativeThreadId() {
+#if defined(_WIN32)
+    // NativeAOT's PalGetCurrentOSThreadId is an OS-thread identity, not a
+    // process-local C++ thread object identity.
+    return static_cast<std::uintptr_t>(GetCurrentThreadId());
+#elif defined(__linux__)
+    return static_cast<std::uintptr_t>(syscall(SYS_gettid));
+#else
+    // Keep a hosted fallback for platforms without a directly available OS
+    // thread-id primitive.  The adapter still validates the identity on
+    // every lookup and callback.
     return static_cast<std::uintptr_t>(
         std::hash<std::thread::id>{}(std::this_thread::get_id()));
+#endif
 }
 
 RuntimeThreadRecord* recordFromPointer(void* pointer) {
@@ -64,7 +82,10 @@ RuntimeThreadRecord* currentRecordLocked() {
     if (!g_initialized || g_flsIndex == fls::kOutOfIndexes) {
         return nullptr;
     }
-    return recordFromPointer(fls::get(g_flsIndex));
+    RuntimeThreadRecord* record = recordFromPointer(fls::get(g_flsIndex));
+    return record != nullptr && record->allocated && record->attached
+        ? record
+        : nullptr;
 }
 
 void unlinkLocked(RuntimeThreadRecord* record) {
@@ -91,10 +112,13 @@ void retireRecordLocked(RuntimeThreadRecord* record) {
     unlinkLocked(record);
     record->attached = false;
     record->allocated = false;
+    record->nativeThreadId = 0;
+    record->stack = gxos::runtime::NativeStackBounds{};
     record->transitionFrame = 0;
     record->deferredTransitionFrame = 0;
     record->cachedTransitionFrame = 0;
     record->allocationContext = 0;
+    record->preemptive = false;
     if (record->generation != 0xFFFFFFFFu) {
         ++record->generation;
     }
