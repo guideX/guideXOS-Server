@@ -52,6 +52,15 @@ namespace gxos { namespace gui {
         std::vector<DrawImageItem> images;
         FrameSurfaceItem frame;
         bool hasFrame{false};
+        uint64_t frameGeneration{0};
+        uint64_t paintGeneration{0};
+        uint64_t captureGeneration{0};
+        uint64_t frameByteCount{0};
+        uint64_t frameSequence{0};
+        bool captureFrozen{false};
+        uint64_t captureFrozenGeneration{0};
+        uint64_t captureFrozenSequence{0};
+        FrameSurfaceItem captureFrozenFrame;
         std::vector<Widget> widgets; 
         bool minimized{false}; 
         bool maximized{false}; 
@@ -163,6 +172,7 @@ namespace gxos { namespace gui {
         static std::vector<std::string> g_hostedDesktopBackHistory;
         static int main(int argc, char** argv);
         static void handleMessage(const ipc::Message& m);
+        static void tryCompleteFrameSync(uint64_t windowId);
         static void drawAll();
         static void pumpEvents();
         static void invalidate(uint64_t winId);
@@ -239,6 +249,8 @@ namespace gxos { namespace gui {
 #endif
         static std::atomic<uint64_t> s_nextWinId;
         static std::unordered_map<uint64_t, WinInfo> g_windows; static std::vector<uint64_t> g_z; static std::mutex g_lock; static uint64_t g_focus;
+        struct PendingFrameSync { uint64_t expectedFrameGeneration{0}; uint64_t expectedFrameSequence{0}; bool freezeForCapture{false}; };
+        static std::unordered_map<uint64_t, PendingFrameSync> g_pendingFrameSync;
         static uint64_t g_modalWindow;
         static bool g_dragActive; static int g_dragOffX; static int g_dragOffY; static uint64_t g_dragWin; static int g_dragStartX; static int g_dragStartY;
         static bool g_dragPending; static uint64_t g_dragPendingWin;

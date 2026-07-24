@@ -1,0 +1,15 @@
+run=20260723-141204-922
+server-wrapper-pid=7920
+server-pid=6320
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-141204-922-playing-seq19-gen19.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0x12214A6 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=19 paintGeneration=19 captureGeneration=1 frameSequence=19 state=Playing score=30 lives=3 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-141204-922-playing-seq19-gen19.png timestampUtc=2026-07-23T21:12:06.9309135Z
+cycle=1 no-automatic-collision-before-schedule=False
+cycle=1 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-141204-922-dying-seq56-gen56.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0x12214A6 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=56 paintGeneration=56 captureGeneration=2 frameSequence=56 state=Dying score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-141204-922-dying-seq56-gen56.png timestampUtc=2026-07-23T21:12:08.9517665Z
+cycle=1 dying=True lives-decremented-once=True duplicate-death-suppressed=False
+error=Painted generation 103 belongs to state=Playing score=60 lives=2, not requested state=Ready score=-1 lives=2 for ready.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

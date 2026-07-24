@@ -2174,7 +2174,7 @@ static void help(){
                  " console.start | console.send <text> | console.pop [timeoutMs]\n"
                  " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>\n"
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
-                 " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
+                 " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
                  " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
                  " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
@@ -2281,7 +2281,29 @@ using namespace gxos;
                 "RECT 1000|20|60|120|40|180|60|60\n"
                 "BTN 1000|1|20|120|110|32|Click Me\n";
             std::string err; if(gui::GxmLoader::ExecuteText(script, err)) std::cout<<"Sample executed"<<std::endl; else std::cout<<"Sample error: "<<err<<std::endl; continue; }
-        if (cmd=="gui.start"){
+        if (cmd=="gui.sync"){
+            if(!requireCompositor()) continue;
+            std::string idS, generationS, sequenceS, freezeS;
+            iss >> idS >> generationS >> sequenceS >> freezeS;
+            if(idS.empty() || generationS.empty()){ std::cout<<"gui.sync <id> <frameGeneration> [frameSequence]"<<std::endl; continue; }
+            ipc::Message m;
+            m.type=(uint32_t)gui::MsgType::MT_SyncFrame;
+            std::string payload = idS + "|" + generationS + (sequenceS.empty() ? "" : "|" + sequenceS) + (freezeS.empty() ? "" : "|" + freezeS);
+            m.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.sync", std::move(m), false);
+            std::cout<<"Frame sync requested: windowId="<<idS<<" expectedFrameGeneration="<<generationS
+                     <<(sequenceS.empty() ? "" : " expectedFrameSequence=" + sequenceS)
+                     <<(freezeS.empty() ? "" : " freezeForCapture=" + freezeS)<<std::endl;
+        } else if (cmd=="gui.unfreeze") {
+            if(!requireCompositor()) continue;
+            std::string idS; iss >> idS;
+            if(idS.empty()){ std::cout<<"gui.unfreeze <id>"<<std::endl; continue; }
+            ipc::Message m;
+            m.type=(uint32_t)gui::MsgType::MT_UnfreezeFrame;
+            m.data.assign(idS.begin(), idS.end());
+            ipc::Bus::publish("gui.sync", std::move(m), false);
+            std::cout<<"Frame capture freeze release requested: windowId="<<idS<<std::endl;
+        } else if (cmd=="gui.start"){
             uint64_t before = Lifecycle::state().compositorPid;
             if(requireCompositor() && before!=0){ std::cout<<"Compositor already running pid="<<Lifecycle::state().compositorPid<<std::endl; }
         } else if (cmd=="gui.open.appmodeldemo"){

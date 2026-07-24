@@ -1,0 +1,18 @@
+run=20260723-142033-699
+server-wrapper-pid=25120
+server-pid=19856
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142033-699-playing-seq18-gen18.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xE30A34 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=18 paintGeneration=18 captureGeneration=1 frameSequence=18 state=Playing score=20 lives=3 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142033-699-playing-seq18-gen18.png timestampUtc=2026-07-23T21:20:35.5924386Z
+cycle=1 no-automatic-collision-before-schedule=False
+cycle=1 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142033-699-dying-seq50-gen50.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xE30A34 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=50 paintGeneration=50 captureGeneration=2 frameSequence=50 state=Dying score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142033-699-dying-seq50-gen50.png timestampUtc=2026-07-23T21:20:37.2258963Z
+cycle=1 dying=True lives-decremented-once=True duplicate-death-suppressed=False
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142033-699-ready-seq102-gen102.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xE30A34 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=102 paintGeneration=102 captureGeneration=3 frameSequence=102 state=Ready score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142033-699-ready-seq102-gen102.png timestampUtc=2026-07-23T21:20:41.5426973Z
+cycle=1 actor-reset=True ready-collision-free-window=True
+error=Danger validation did not preserve the bounded death and Ready-after-death transition.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

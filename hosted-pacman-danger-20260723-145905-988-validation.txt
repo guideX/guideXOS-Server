@@ -1,0 +1,27 @@
+run=20260723-145905-988
+server-wrapper-pid=22324
+server-pid=19696
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-playing-seq21-gen21.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xFD0BEA title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=21 paintGeneration=21 captureGeneration=1 frameSequence=21 state=Playing score=30 lives=3 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-playing-seq21-gen21.png timestampUtc=2026-07-23T21:59:07.4061641Z
+cycle=1 no-automatic-collision-before-schedule=False
+cycle=1 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-dying-seq66-gen66.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xFD0BEA title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=66 paintGeneration=66 captureGeneration=2 frameSequence=66 state=Dying score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-dying-seq66-gen66.png timestampUtc=2026-07-23T21:59:08.3618908Z
+cycle=1 dying=True lives-decremented-once=True duplicate-death-suppressed=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-ready-seq97-gen97.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xFD0BEA title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=97 paintGeneration=97 captureGeneration=3 frameSequence=97 state=Ready score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-ready-seq97-gen97.png timestampUtc=2026-07-23T21:59:09.4792818Z
+cycle=1 actor-reset=True ready-collision-free-window=True
+cycle=1 collisions=True game-over=True lives-zero=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-game-over-seq199-gen199.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xFD0BEA title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=199 paintGeneration=199 captureGeneration=4 frameSequence=199 state=GameOver score=60 lives=0 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-game-over-seq199-gen199.png timestampUtc=2026-07-23T21:59:12.8410247Z
+cycle=1 restart=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-restart-seq204-gen204.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xFD0BEA title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=204 paintGeneration=204 captureGeneration=5 frameSequence=204 state=Playing score=0 lives=3 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-145905-988-restart-seq204-gen204.png timestampUtc=2026-07-23T21:59:14.0262614Z
+cycle=1 escape-cleanup=True attempt=1
+zero-owned-windows=True
+retained-frame-present-diagnostics=True
+danger-placement-count=3
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

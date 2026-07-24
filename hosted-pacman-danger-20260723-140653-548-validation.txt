@@ -1,0 +1,8 @@
+run=20260723-140653-548
+server-wrapper-pid=18880
+server-pid=23144
+compositor=found
+cycle=1 launch=True windowId=1000
+error=Frame lifecycle did not reach compositor paint for playing seq=18.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=-1073741819

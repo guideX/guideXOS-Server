@@ -53,6 +53,7 @@ namespace gxos {
     namespace gui {
         using namespace gxos;
         static const char* kGuiChanIn = "gui.input";
+        static const char* kGuiSyncChanIn = "gui.sync";
         static const char* kGuiChanOut = "gui.output";
         static constexpr int kTaskbarSize = 40;
         static std::unordered_map<std::string, ImageBitmap> g_uiImageCache;
@@ -422,6 +423,7 @@ namespace gxos {
         // Static member definitions
         std::atomic<uint64_t> Compositor::s_nextWinId{ 1000 };
         std::unordered_map<uint64_t, WinInfo> Compositor::g_windows; std::vector<uint64_t> Compositor::g_z; std::mutex Compositor::g_lock; uint64_t Compositor::g_focus = 0;
+        std::unordered_map<uint64_t, Compositor::PendingFrameSync> Compositor::g_pendingFrameSync;
         uint64_t Compositor::g_modalWindow = 0;
         bool Compositor::g_dragActive = false; int Compositor::g_dragOffX = 0; int Compositor::g_dragOffY = 0; uint64_t Compositor::g_dragWin = 0; int Compositor::g_dragStartX = 0; int Compositor::g_dragStartY = 0;
         bool Compositor::g_dragPending = false; uint64_t Compositor::g_dragPendingWin = 0;
@@ -594,6 +596,20 @@ namespace gxos {
         }
 
         static uint64_t nowMs( ) { return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now( ).time_since_epoch( )).count( ); }
+
+        static bool hostedFrameDiagnosticsEnabled( ) {
+            static const bool enabled = [] ( ) {
+                const char* value = std::getenv("GXOS_PACMAN_FRAME_DIAGNOSTICS");
+                if (!value || !*value) return false;
+                std::string lower;
+                lower.reserve(std::strlen(value));
+                for (const char* p = value; *p; ++p) {
+                    lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
+                }
+                return !(lower == "0" || lower == "false" || lower == "off" || lower == "no");
+            }( );
+            return enabled;
+        }
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         namespace {
@@ -3465,11 +3481,13 @@ namespace gxos {
                 HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); 
                 SelectObject(dc, font); 
                 SetBkMode(dc, TRANSPARENT);
+                uint64_t paintedFrameWindowId = 0;
+                uint64_t paintedFrameGeneration = 0;
                 
                 for (size_t i = 0; i < g_z.size( ); ++i) {
                     auto it = g_windows.find(g_z[i]); 
                     if (it == g_windows.end( )) continue; 
-                    const WinInfo& winfo = it->second; 
+                    WinInfo& winfo = it->second;
                     if (winfo.minimized || !winfo.visible) continue;
                     
                     bool isFocused = (winfo.id == g_focus);
@@ -3533,29 +3551,32 @@ namespace gxos {
                     // Draw window content (rects, images, widgets, text)
                     const int contentX = winfo.x + theme.windowPadding;
                     const int contentY = winfo.y + titleBarH + theme.windowPadding;
-                    if (winfo.hasFrame && winfo.frame.pixelFormat == gui::kPixelFormatXrgb8888 &&
-                        winfo.frame.w > 0 && winfo.frame.h > 0 && winfo.frame.strideBytes >= static_cast<uint32_t>(winfo.frame.w * 4) &&
-                        winfo.frame.pixels.size() >= static_cast<size_t>(winfo.frame.strideBytes) * static_cast<size_t>(winfo.frame.h)) {
-                        const uint8_t* framePixels = winfo.frame.pixels.data();
+                    const FrameSurfaceItem& frameToPaint = winfo.captureFrozen ? winfo.captureFrozenFrame : winfo.frame;
+                    if (winfo.hasFrame && frameToPaint.pixelFormat == gui::kPixelFormatXrgb8888 &&
+                        frameToPaint.w > 0 && frameToPaint.h > 0 && frameToPaint.strideBytes >= static_cast<uint32_t>(frameToPaint.w * 4) &&
+                        frameToPaint.pixels.size() >= static_cast<size_t>(frameToPaint.strideBytes) * static_cast<size_t>(frameToPaint.h)) {
+                        paintedFrameWindowId = winfo.id;
+                        paintedFrameGeneration = winfo.captureFrozen ? winfo.captureFrozenGeneration : winfo.frameGeneration;
+                        const uint8_t* framePixels = frameToPaint.pixels.data();
                         std::vector<uint8_t> tightPixels;
-                        const uint32_t tightStride = static_cast<uint32_t>(winfo.frame.w * 4);
-                        if (winfo.frame.strideBytes != tightStride) {
-                            tightPixels.resize(static_cast<size_t>(tightStride) * static_cast<size_t>(winfo.frame.h));
-                            for (int row = 0; row < winfo.frame.h; ++row) {
+                        const uint32_t tightStride = static_cast<uint32_t>(frameToPaint.w * 4);
+                        if (frameToPaint.strideBytes != tightStride) {
+                            tightPixels.resize(static_cast<size_t>(tightStride) * static_cast<size_t>(frameToPaint.h));
+                            for (int row = 0; row < frameToPaint.h; ++row) {
                                 std::memcpy(tightPixels.data() + static_cast<size_t>(row) * tightStride,
-                                    framePixels + static_cast<size_t>(row) * winfo.frame.strideBytes, tightStride);
+                                    framePixels + static_cast<size_t>(row) * frameToPaint.strideBytes, tightStride);
                             }
                             framePixels = tightPixels.data();
                         }
                         BITMAPINFO frameInfo{};
                         frameInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                        frameInfo.bmiHeader.biWidth = winfo.frame.w;
-                        frameInfo.bmiHeader.biHeight = -winfo.frame.h;
+                        frameInfo.bmiHeader.biWidth = frameToPaint.w;
+                        frameInfo.bmiHeader.biHeight = -frameToPaint.h;
                         frameInfo.bmiHeader.biPlanes = 1;
                         frameInfo.bmiHeader.biBitCount = 32;
                         frameInfo.bmiHeader.biCompression = BI_RGB;
-                        StretchDIBits(dc, contentX + winfo.frame.x, contentY + winfo.frame.y,
-                            winfo.frame.w, winfo.frame.h, 0, 0, winfo.frame.w, winfo.frame.h,
+                        StretchDIBits(dc, contentX + frameToPaint.x, contentY + frameToPaint.y,
+                            frameToPaint.w, frameToPaint.h, 0, 0, frameToPaint.w, frameToPaint.h,
                             framePixels, &frameInfo, DIB_RGB_COLORS, SRCCOPY);
                     }
                     for (const auto& ri : winfo.rects) { 
@@ -3588,16 +3609,17 @@ namespace gxos {
                             tx.hasColor ? RGB(tx.r, tx.g, tx.b) : RGB(220, 220, 220), FontRole::Default);
                     }
                     int ty = contentY;
-                    for (const auto& tx : winfo.texts) { 
+                    for (const auto& tx : winfo.texts) {
                         drawUiText(dc, contentX, ty, tx, RGB(220, 220, 220), FontRole::Default);
                         ty += uiTextHeight(FontRole::Default);
                     }
                     
-                    // Draw tombstone overlay
-                    if (winfo.tombstoned) { 
-                        WindowRenderer::DrawTombstoneOverlay(dc, winfo.x, winfo.y, winfo.w, winfo.h);
-                    }
-                }
+                     // Draw tombstone overlay
+                     if (winfo.tombstoned) {
+                         WindowRenderer::DrawTombstoneOverlay(dc, winfo.x, winfo.y, winfo.w, winfo.h);
+                     }
+                     winfo.dirty = false;
+                  }
                 int taskbarH = kTaskbarSize; WorkRect tbWork = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top); RECT tb{ tbWork.left,tbWork.top,tbWork.right,tbWork.bottom }; bool taskbarVertical = (g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right);
                 int taskbarSpan = taskbarVertical ? (tb.right - tb.left) : (tb.bottom - tb.top);
                 const uint32_t taskbarSurface = hostedTaskbarSurfaceColor(theme);
@@ -4022,6 +4044,25 @@ namespace gxos {
                 }
 
                 EndPaint(h, &ps);
+                uint64_t completedPaintGeneration = 0;
+                if (paintedFrameWindowId != 0) {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    auto painted = g_windows.find(paintedFrameWindowId);
+                    if (painted != g_windows.end( ) &&
+                        ((painted->second.captureFrozen && painted->second.captureFrozenGeneration == paintedFrameGeneration) ||
+                         (!painted->second.captureFrozen && painted->second.frameGeneration == paintedFrameGeneration))) {
+                        painted->second.paintGeneration = paintedFrameGeneration;
+                        completedPaintGeneration = painted->second.paintGeneration;
+                    }
+                }
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                if (hostedFrameDiagnosticsEnabled( ) && paintedFrameWindowId != 0) {
+                    Logger::write(LogLevel::Info,
+                        std::string("Compositor paint complete windowId=") + std::to_string(paintedFrameWindowId) +
+                        " frameGeneration=" + std::to_string(paintedFrameGeneration) +
+                        " paintGeneration=" + std::to_string(completedPaintGeneration));
+                }
+#endif
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                 hostedFreezeDiagnosticsOnPaintEnd(nowMs( ) - paintStartMs, vncDurationMs);
 #endif
@@ -4912,6 +4953,74 @@ namespace gxos {
             if (changed) invalidate(0);
         }
 
+        void Compositor::tryCompleteFrameSync(uint64_t windowId) {
+            uint64_t expectedFrameGeneration = 0;
+            uint64_t expectedFrameSequence = 0;
+            uint64_t frameGeneration = 0;
+            uint64_t frameSequence = 0;
+            bool freezeForCapture = false;
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                auto pending = g_pendingFrameSync.find(windowId);
+                auto window = g_windows.find(windowId);
+                if (pending == g_pendingFrameSync.end() || window == g_windows.end()) return;
+                expectedFrameGeneration = pending->second.expectedFrameGeneration;
+                expectedFrameSequence = pending->second.expectedFrameSequence;
+                freezeForCapture = pending->second.freezeForCapture;
+                frameGeneration = window->second.frameGeneration;
+                frameSequence = window->second.frameSequence;
+                if ((expectedFrameGeneration != 0 && frameGeneration < expectedFrameGeneration) ||
+                    (expectedFrameSequence != 0 && frameSequence < expectedFrameSequence)) return;
+                if (freezeForCapture) {
+                    window->second.captureFrozen = true;
+                    window->second.captureFrozenGeneration = frameGeneration;
+                    window->second.captureFrozenSequence = frameSequence;
+                    window->second.captureFrozenFrame = window->second.frame;
+                }
+                g_pendingFrameSync.erase(pending);
+            }
+
+            invalidate(windowId);
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            if (g_hwnd) UpdateWindow(g_hwnd);
+#endif
+
+            uint64_t paintGeneration = 0;
+            uint64_t captureGeneration = 0;
+            std::string title;
+            int width = 0;
+            int height = 0;
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                auto it = g_windows.find(windowId);
+                if (it == g_windows.end()) return;
+                frameGeneration = it->second.captureFrozen ? it->second.captureFrozenGeneration : it->second.frameGeneration;
+                frameSequence = it->second.captureFrozen ? it->second.captureFrozenSequence : it->second.frameSequence;
+                paintGeneration = it->second.paintGeneration;
+                captureGeneration = ++it->second.captureGeneration;
+                title = it->second.title;
+                width = it->second.w;
+                height = it->second.h;
+            }
+            const uint64_t requiredPaintGeneration = freezeForCapture ? frameGeneration : expectedFrameGeneration;
+            const bool passed = frameGeneration >= expectedFrameGeneration &&
+                frameSequence >= expectedFrameSequence &&
+                paintGeneration >= requiredPaintGeneration && frameGeneration != 0 && frameSequence != 0;
+            if (hostedFrameDiagnosticsEnabled()) {
+                Logger::write(passed ? LogLevel::Info : LogLevel::Warn,
+                    std::string("Compositor frame sync windowId=") + std::to_string(windowId) +
+                    " expectedFrameGeneration=" + std::to_string(expectedFrameGeneration) +
+                    " expectedFrameSequence=" + std::to_string(expectedFrameSequence) +
+                    " frameSequence=" + std::to_string(frameSequence) +
+                    " frameGeneration=" + std::to_string(frameGeneration) +
+                    " paintGeneration=" + std::to_string(paintGeneration) +
+                    " captureGeneration=" + std::to_string(captureGeneration) +
+                    " captureFrozen=" + std::to_string(freezeForCapture ? 1 : 0) +
+                    " title=\"" + title + "\" size=" + std::to_string(width) + "x" + std::to_string(height) +
+                    " result=" + (passed ? "PASS" : "FAIL"));
+            }
+        }
+
         void Compositor::handleMessage(const ipc::Message& m) {
             std::string s(m.data.begin( ), m.data.end( )); switch ((MsgType)m.type) {
             case MsgType::MT_Create: { 
@@ -4974,13 +5083,143 @@ namespace gxos {
                 } 
                 Logger::write(LogLevel::Info, std::string("Compositor created window id=") + std::to_string(id) + " sending ack to pid=" + std::to_string(m.srcPid));
                 publishOut(MsgType::MT_Create, std::to_string(id) + "|" + title, m.srcPid); sendFocusChange(previousFocus, id); invalidate(id); } break;
-            case MsgType::MT_RequestFrame: { uint64_t id = 0; uint64_t ownerPid = 0; int width = 0; int height = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && it->second.ownerPid == m.srcPid) { ownerPid = it->second.ownerPid; width = it->second.w; height = it->second.h; it->second.dirty = true; } } if (ownerPid != 0) publishOut(MsgType::MT_RequestFrame, std::to_string(id) + "|" + std::to_string(width) + "|" + std::to_string(height), ownerPid); invalidate(id); } break;
+            case MsgType::MT_RequestFrame: { uint64_t id = 0; uint64_t ownerPid = 0; int width = 0; int height = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && it->second.ownerPid == m.srcPid) { ownerPid = it->second.ownerPid; width = it->second.w; height = it->second.h; } } if (ownerPid != 0) {
+                    // This is the app-side paint request/response handshake.
+                    // Do not invalidate the compositor before the app has
+                    // changed its content; present_frame and draw operations
+                    // perform the actual retained-frame replacement and
+                    // invalidation. This prevents stable windows from creating
+                    // an endless hosted repaint feedback loop.
+                    publishOut(MsgType::MT_RequestFrame, std::to_string(id) + "|" + std::to_string(width) + "|" + std::to_string(height), ownerPid);
+                } } break;
             case MsgType::MT_DrawText: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { if (text == "\f") { it->second.texts.clear(); it->second.positionedTexts.clear(); it->second.rects.clear(); it->second.images.clear(); it->second.hasFrame = false; it->second.frame.pixels.clear(); } else { it->second.texts.push_back(text); } it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawText, std::to_string(id) + "|" + text, ownerPid); invalidate(id); } break;
             case MsgType::MT_DrawTextAt: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawTextItem item{ std::stoi(xs), std::stoi(ys), text }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.positionedTexts.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawTextAt, std::to_string(id), ownerPid); invalidate(id); } break;
             case MsgType::MT_DrawTextAtColor: { std::istringstream iss(s); std::string idS, xs, ys, rs, gs, bs; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, rs, '|'); std::getline(iss, gs, '|'); std::getline(iss, bs, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawTextItem item{ std::stoi(xs), std::stoi(ys), text, true, (uint8_t)std::stoi(rs), (uint8_t)std::stoi(gs), (uint8_t)std::stoi(bs) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.positionedTexts.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawTextAtColor, std::to_string(id), ownerPid); invalidate(id); } break;
-            case MsgType::MT_Close: { uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto wit = g_windows.find(id); if (wit != g_windows.end( )) ownerPid = wit->second.ownerPid; g_windows.erase(id); auto it = std::find(g_z.begin( ), g_z.end( ), id); if (it != g_z.end( )) g_z.erase(it); if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid); invalidate(0); } break;
+            case MsgType::MT_Close: { uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto wit = g_windows.find(id); if (wit != g_windows.end( )) ownerPid = wit->second.ownerPid; g_windows.erase(id); g_pendingFrameSync.erase(id); auto it = std::find(g_z.begin( ), g_z.end( ), id); if (it != g_z.end( )) g_z.erase(it); if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid); invalidate(0); } break;
             case MsgType::MT_DrawRect: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string xs, ys, ws, hs, rs, gs, bs; std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); std::getline(iss, rs, '|'); std::getline(iss, gs, '|'); std::getline(iss, bs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawRectItem item{ std::stoi(xs), std::stoi(ys), std::stoi(ws), std::stoi(hs), (uint8_t)std::stoi(rs),(uint8_t)std::stoi(gs),(uint8_t)std::stoi(bs) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.rects.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawRect, std::to_string(id), ownerPid); invalidate(id); } break;
-            case MsgType::MT_FramePresent: { gui::FramePresentSpec spec{}; uint64_t ownerPid = 0; bool valid = gui::unpackFramePresent(m.data, spec); const uint64_t requiredBytes = valid ? static_cast<uint64_t>(spec.strideBytes) * static_cast<uint64_t>(spec.h) : 0; if (!valid || spec.pixelFormat != gui::kPixelFormatXrgb8888 || spec.x < 0 || spec.y < 0 || spec.w > 4096 || spec.h > 4096 || spec.strideBytes < static_cast<uint32_t>(spec.w * 4) || requiredBytes != spec.pixels.size() || requiredBytes > 16ull * 1024ull * 1024ull) break; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(spec.winId); if (it != g_windows.end( ) && it->second.ownerPid == m.srcPid) { it->second.frame.x = spec.x; it->second.frame.y = spec.y; it->second.frame.w = spec.w; it->second.frame.h = spec.h; it->second.frame.strideBytes = spec.strideBytes; it->second.frame.pixelFormat = spec.pixelFormat; it->second.frame.pixels = std::move(spec.pixels); it->second.hasFrame = true; it->second.dirty = true; ownerPid = it->second.ownerPid; } } if (ownerPid != 0) { publishOut(MsgType::MT_FramePresent, std::to_string(spec.winId), ownerPid); invalidate(spec.winId); } } break;
+            case MsgType::MT_FramePresent: {
+                gui::FramePresentSpec spec{};
+                uint64_t ownerPid = 0;
+                bool valid = gui::unpackFramePresent(m.data, spec);
+                const uint64_t requiredBytes = valid ? static_cast<uint64_t>(spec.strideBytes) * static_cast<uint64_t>(spec.h) : 0;
+                valid = valid && spec.pixelFormat == gui::kPixelFormatXrgb8888 && spec.x >= 0 && spec.y >= 0 &&
+                    spec.w > 0 && spec.h > 0 && spec.w <= 4096 && spec.h <= 4096 &&
+                    spec.strideBytes >= static_cast<uint32_t>(spec.w * 4) &&
+                    requiredBytes == spec.pixels.size() && requiredBytes <= 16ull * 1024ull * 1024ull;
+                if (!valid) {
+                    if (hostedFrameDiagnosticsEnabled( )) {
+                        Logger::write(LogLevel::Warn, "Compositor frame rejected validation=FAIL");
+                    }
+                    break;
+                }
+                uint64_t frameGeneration = 0;
+                bool captureFrozen = false;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    auto it = g_windows.find(spec.winId);
+                    if (it != g_windows.end( ) && it->second.ownerPid == m.srcPid) {
+                        it->second.frame.x = spec.x;
+                        it->second.frame.y = spec.y;
+                        it->second.frame.w = spec.w;
+                        it->second.frame.h = spec.h;
+                        it->second.frame.strideBytes = spec.strideBytes;
+                        it->second.frame.pixelFormat = spec.pixelFormat;
+                        it->second.frame.pixels = std::move(spec.pixels);
+                        it->second.hasFrame = true;
+                        it->second.frameByteCount = requiredBytes;
+                        it->second.frameSequence = spec.frameSequence;
+                        frameGeneration = ++it->second.frameGeneration;
+                        captureFrozen = it->second.captureFrozen;
+                        it->second.dirty = !captureFrozen;
+                        ownerPid = it->second.ownerPid;
+                    }
+                }
+                if (ownerPid != 0) {
+                    if (hostedFrameDiagnosticsEnabled( )) {
+                        Logger::write(LogLevel::Info,
+                            std::string("Compositor frame replaced windowId=") + std::to_string(spec.winId) +
+                            " incomingFrameSeq=" + std::to_string(spec.frameSequence) +
+                            " frameGeneration=" + std::to_string(frameGeneration) +
+                            " storedBytes=" + std::to_string(requiredBytes) +
+                            " width=" + std::to_string(spec.w) + " height=" + std::to_string(spec.h) +
+                            " stride=" + std::to_string(spec.strideBytes) +
+                            " format=" + std::to_string(spec.pixelFormat) +
+                            " validation=PASS");
+                    }
+                    publishOut(MsgType::MT_FramePresent, std::to_string(spec.winId), ownerPid);
+                    if (hostedFrameDiagnosticsEnabled( )) {
+                        Logger::write(LogLevel::Info,
+                            std::string("Compositor invalidation requested windowId=") + std::to_string(spec.winId) +
+                            " frameGeneration=" + std::to_string(frameGeneration));
+                    }
+                    if (!captureFrozen) invalidate(spec.winId);
+                    tryCompleteFrameSync(spec.winId);
+                } else if (hostedFrameDiagnosticsEnabled( )) {
+                    Logger::write(LogLevel::Warn,
+                        std::string("Compositor frame rejected windowId=") + std::to_string(spec.winId) +
+                        " validation=FAIL owner-mismatch-or-window-missing");
+                }
+            } break;
+            case MsgType::MT_SyncFrame: {
+                std::istringstream iss(s);
+                std::string idS, expectedS, sequenceS, freezeS;
+                std::getline(iss, idS, '|');
+                std::getline(iss, expectedS, '|');
+                std::getline(iss, sequenceS, '|');
+                std::getline(iss, freezeS, '|');
+                uint64_t id = 0;
+                uint64_t expected = 0;
+                uint64_t expectedSequence = 0;
+                const bool freezeForCapture = freezeS == "1" || freezeS == "true";
+                try {
+                    id = std::stoull(idS);
+                    expected = expectedS.empty() ? 0 : std::stoull(expectedS);
+                    expectedSequence = sequenceS.empty() ? 0 : std::stoull(sequenceS);
+                } catch (...) {}
+                if (id == 0) break;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    if (g_windows.find(id) != g_windows.end( )) {
+                        g_pendingFrameSync[id] = PendingFrameSync{ expected, expectedSequence, freezeForCapture };
+                    }
+                }
+                if (hostedFrameDiagnosticsEnabled( )) {
+                    Logger::write(LogLevel::Info,
+                        std::string("Compositor frame sync requested windowId=") + std::to_string(id) +
+                        " expectedFrameGeneration=" + std::to_string(expected) +
+                        " expectedFrameSequence=" + std::to_string(expectedSequence) +
+                        " freezeForCapture=" + std::to_string(freezeForCapture ? 1 : 0));
+                }
+                tryCompleteFrameSync(id);
+            } break;
+            case MsgType::MT_UnfreezeFrame: {
+                uint64_t id = 0;
+                try { id = std::stoull(s); } catch (...) { break; }
+                bool unfrozen = false;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    auto it = g_windows.find(id);
+                    if (it != g_windows.end()) {
+                        unfrozen = it->second.captureFrozen;
+                        it->second.captureFrozen = false;
+                        it->second.captureFrozenGeneration = 0;
+                        it->second.captureFrozenSequence = 0;
+                        it->second.captureFrozenFrame = FrameSurfaceItem{};
+                        it->second.dirty = true;
+                    }
+                }
+                if (unfrozen) {
+                    invalidate(id);
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                    if (g_hwnd) UpdateWindow(g_hwnd);
+#endif
+                }
+                if (hostedFrameDiagnosticsEnabled()) {
+                    Logger::write(LogLevel::Info,
+                        std::string("Compositor capture freeze released windowId=") + std::to_string(id) +
+                        " result=" + (unfrozen ? "PASS" : "NOOP"));
+                }
+            } break;
             case MsgType::MT_DrawImage:
             case MsgType::MT_DrawImageAnimated: { DrawImageSpec spec{}; uint64_t ownerPid = 0; if (!unpackDrawImage(s, spec)) break; ImageBitmap image{}; std::vector<ImageBitmap> frames; if ((MsgType)m.type == MsgType::MT_DrawImageAnimated) { const size_t marker = spec.path.find("{frame}"); if (marker != std::string::npos) { for (int frame = 0; frame < 100; ++frame) { std::ostringstream frameName; frameName << std::setw(2) << std::setfill('0') << frame; std::string path = spec.path; path.replace(marker, 7, frameName.str()); ImageBitmap candidate = loadCachedUiImage(path); if (candidate.status != ImageLoadStatus::Ok) break; frames.push_back(candidate); } } if (!frames.empty()) image = frames.front(); } else { image = ImageAdapter::LoadFromFile(spec.path); } if (image.status != ImageLoadStatus::Ok) { Logger::write(LogLevel::Warn, std::string("Compositor: DrawImage skipped, image load failed: ") + spec.path + " status=" + ImageLoadStatusName(image.status)); break; } DrawImageItem item{ spec.x, spec.y, spec.w, spec.h, spec.path, image, std::move(frames) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(spec.winId); if (it != g_windows.end( )) { it->second.images.push_back(std::move(item)); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut((MsgType)m.type, std::to_string(spec.winId), ownerPid); invalidate(spec.winId); } break;
             case MsgType::MT_SetTitle: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string title; std::getline(iss, title); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.title = title; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_SetTitle, std::to_string(id) + "|" + title, ownerPid); invalidate(id); } break;
@@ -5229,7 +5468,18 @@ namespace gxos {
         void Compositor::pumpEvents( ) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             hostedFreezeDiagnosticsOnPump( );
-            MSG msg; while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageA(&msg); if (msg.message == WM_QUIT) break; }
+            // Do not let a continuously invalidated hosted window starve IPC.
+            // Dispatch a bounded batch, then return to gui.input so frame
+            // replacement and synchronization messages can make progress.
+            constexpr int kHostedMessagePumpBudget = 32;
+            MSG msg;
+            int pumped = 0;
+            while (pumped < kHostedMessagePumpBudget && PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessageA(&msg);
+                ++pumped;
+                if (msg.message == WM_QUIT) break;
+            }
 #else
             // On bare-metal, we don't have a native event pump
             // Events come through IPC from the kernel input subsystem
@@ -5260,6 +5510,7 @@ namespace gxos {
         int Compositor::main(int argc, char** argv) {
             Logger::write(LogLevel::Info, "Compositor service started (native window)");
             ipc::Bus::ensure(kGuiChanIn);
+            ipc::Bus::ensure(kGuiSyncChanIn);
             ipc::Bus::ensure(kGuiChanOut);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             initWindow( );
@@ -5362,7 +5613,7 @@ namespace gxos {
             renderToFramebuffer();
 #endif
             
-            bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
+            bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiSyncChanIn, m, 0) || ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_FramePresent), m, 0) || ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; outCfg.windows.push_back(rec); } }
             std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); DisplayOptionsStoreData shutdownDisplayStore = displayOptionsFromDesktopConfig(outCfg); std::string shutdownDisplayErr; DisplayOptionsStore::Save("display-options.cfg", shutdownDisplayStore, shutdownDisplayErr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)

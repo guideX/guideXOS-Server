@@ -43,7 +43,9 @@ namespace gxos {
             MT_DrawImageAnimated = 30,   // payload: DrawImageSpec, path contains {frame}
             MT_WidgetSetIcon = 31,       // payload: <winId>|<widgetId>|<path>
             MT_DesktopBackgroundInventoryChanged = 32, // payload: active background id
-            MT_ClearFocus = 33                 // payload: window id losing focus
+            MT_ClearFocus = 33,                // payload: window id losing focus
+            MT_SyncFrame = 34,                 // payload: <window id>|<expected generation>|<expected app sequence>|<freeze>
+            MT_UnfreezeFrame = 35              // payload: window id; validation capture helper only
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };
@@ -58,6 +60,9 @@ namespace gxos {
             int h{0};
             uint32_t strideBytes{0};
             uint32_t pixelFormat{0};
+            // Diagnostic-only correlation metadata. It is appended only when
+            // frame diagnostics are enabled and is absent from production frames.
+            uint64_t frameSequence{0};
             std::vector<uint8_t> pixels;
         };
         constexpr uint32_t kFramePresentMagic = 0x31465847u; // "GXF1"
@@ -141,9 +146,10 @@ namespace gxos {
         }
         inline std::vector<uint8_t> packFramePresent(uint64_t winId, int x, int y, int w, int h,
                                                       uint32_t strideBytes, uint32_t pixelFormat,
-                                                      const void* pixels, uint32_t pixelBytes) {
+                                                      const void* pixels, uint32_t pixelBytes,
+                                                      uint64_t frameSequence = 0) {
             std::vector<uint8_t> out;
-            out.reserve(44u + pixelBytes);
+            out.reserve(44u + pixelBytes + (frameSequence != 0 ? 8u : 0u));
             appendFrameU32(out, kFramePresentMagic);
             appendFrameU32(out, kFramePresentVersion);
             appendFrameU64(out, winId);
@@ -158,6 +164,7 @@ namespace gxos {
                 const uint8_t* bytes = static_cast<const uint8_t*>(pixels);
                 out.insert(out.end(), bytes, bytes + pixelBytes);
             }
+            if (frameSequence != 0) appendFrameU64(out, frameSequence);
             return out;
         }
         inline bool unpackFramePresent(const std::vector<uint8_t>& data, FramePresentSpec& spec) {
@@ -172,6 +179,8 @@ namespace gxos {
             spec.h = static_cast<int32_t>(readFrameU32(data, 28));
             spec.strideBytes = readFrameU32(data, 32);
             spec.pixelFormat = readFrameU32(data, 36);
+            const size_t metadataOffset = headerBytes + pixelBytes;
+            if (data.size() >= metadataOffset + 8u) spec.frameSequence = readFrameU64(data, metadataOffset);
             spec.pixels.assign(data.begin() + headerBytes, data.begin() + headerBytes + pixelBytes);
             return spec.winId != 0 && spec.w > 0 && spec.h > 0 && !spec.pixels.empty();
         }

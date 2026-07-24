@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -43,6 +45,20 @@ constexpr uint32_t kMaxFilePathLength = 240;
 constexpr uint32_t kMaxFileReadBytes = 64u * 1024u;
 constexpr uint64_t kMaxPresentFrameBytes = 16ull * 1024ull * 1024ull;
 constexpr uint64_t kMaxNativeAppStackBytes = 8ull * 1024ull * 1024ull;
+
+bool frameDiagnosticsEnabled() {
+    static const bool enabled = []() {
+        const char* value = std::getenv("GXOS_PACMAN_FRAME_DIAGNOSTICS");
+        if (!value || !*value) return false;
+        std::string lower;
+        lower.reserve(std::char_traits<char>::length(value));
+        for (const char* p = value; *p; ++p) {
+            lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
+        }
+        return !(lower == "0" || lower == "false" || lower == "off" || lower == "no");
+    }();
+    return enabled;
+}
 
 std::string appLabel(const NativeAppRuntimeContext* context) {
     if (!context) return "<unknown>";
@@ -882,24 +898,48 @@ gx_result hostPresentFrame(NativeGxAppContext* ctx, gx_handle window, int x, int
     context->lastPresentFrameBytes = pixelBytes;
     context->lastPresentFrameResult = GX_ERROR_INVALID_ARGUMENT;
 
+    const auto logFrameBoundary = [&](const char* validation, const char* presentation) {
+        if (!frameDiagnosticsEnabled()) return;
+        std::ostringstream oss;
+        oss << "Native ELF frame boundary runtimeId=" << context->runtimeId
+            << " windowId=" << window
+            << " incomingFrameSeq=" << context->presentFrameCallCount
+            << " width=" << width
+            << " height=" << height
+            << " stride=" << strideBytes
+            << " format=" << pixelFormat
+            << " bytes=" << pixelBytes
+            << " validation=" << validation
+            << " presentation=" << presentation
+            << " result=" << context->lastPresentFrameResult;
+        Logger::write(LogLevel::Info, oss.str());
+    };
+
     if (window == 0 || !pixels || x < 0 || y < 0 || width < 1 || height < 1 || width > kMaxWindowWidth || height > kMaxWindowHeight ||
-        pixelFormat != gui::kPixelFormatXrgb8888 || strideBytes < static_cast<uint32_t>(width * 4)) return context->lastPresentFrameResult;
+        pixelFormat != gui::kPixelFormatXrgb8888 || strideBytes < static_cast<uint32_t>(width * 4)) {
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
+        return context->lastPresentFrameResult;
+    }
     if (!ownsWindow(*context, window)) {
         context->lastPresentFrameResult = GX_ERROR_PERMISSION_DENIED;
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
         return context->lastPresentFrameResult;
     }
     if (!hasPermission(*context, "draw") && !hasPermission(*context, "window")) {
         context->lastPresentFrameResult = GX_ERROR_PERMISSION_DENIED;
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
         return context->lastPresentFrameResult;
     }
 
     const uint64_t requiredBytes = static_cast<uint64_t>(strideBytes) * static_cast<uint64_t>(height);
     if (requiredBytes > kMaxPresentFrameBytes || requiredBytes != pixelBytes) {
         context->lastPresentFrameResult = GX_ERROR_UNSUPPORTED;
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
         return context->lastPresentFrameResult;
     }
     if (!nativeBufferRangeContains(*context, pixels, requiredBytes)) {
         context->lastPresentFrameResult = GX_ERROR_INVALID_ARGUMENT;
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
         return context->lastPresentFrameResult;
     }
 
@@ -907,12 +947,14 @@ gx_result hostPresentFrame(NativeGxAppContext* ctx, gx_handle window, int x, int
         ipc::Message request;
         request.srcPid = Allocator::currentPid();
         request.type = static_cast<uint32_t>(gui::MsgType::MT_FramePresent);
-        request.data = gui::packFramePresent(window, x, y, width, height, strideBytes, pixelFormat, pixels, pixelBytes);
+        request.data = gui::packFramePresent(window, x, y, width, height, strideBytes, pixelFormat, pixels, pixelBytes,
+            frameDiagnosticsEnabled() ? context->presentFrameCallCount : 0);
         ipc::Bus::publish("gui.input", std::move(request), false);
         context->lastPresentFrameResult = GX_OK;
     } catch (...) {
         context->lastPresentFrameResult = GX_ERROR_INTERNAL;
     }
+    logFrameBoundary("PASS", context->lastPresentFrameResult == GX_OK ? "PASS" : "FAIL");
     NativeAppProcessTable::UpdateFromRuntime(*context);
     NativeAppDebugLog::Add(context->runtimeId, context->appId, context->lastPresentFrameResult == GX_OK ? "info" : "warn",
         "present_frame windowId=" + std::to_string(window) + " size=" + std::to_string(width) + "x" + std::to_string(height) +

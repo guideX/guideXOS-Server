@@ -1,0 +1,19 @@
+run=20260723-142239-486
+server-wrapper-pid=19444
+server-pid=22036
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142239-486-playing-seq18-gen18.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0x2650932 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=18 paintGeneration=18 captureGeneration=1 frameSequence=18 state=Playing score=20 lives=3 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142239-486-playing-seq18-gen18.png timestampUtc=2026-07-23T21:22:41.2374638Z
+cycle=1 no-automatic-collision-before-schedule=False
+cycle=1 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142239-486-dying-seq65-gen65.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0x2650932 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=65 paintGeneration=65 captureGeneration=2 frameSequence=65 state=Dying score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142239-486-dying-seq65-gen65.png timestampUtc=2026-07-23T21:22:43.4736774Z
+cycle=1 dying=True lives-decremented-once=True duplicate-death-suppressed=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142239-486-ready-seq103-gen103.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0x2650932 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=103 paintGeneration=103 captureGeneration=3 frameSequence=103 state=Ready score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-142239-486-ready-seq103-gen103.png timestampUtc=2026-07-23T21:22:46.6326592Z
+cycle=1 actor-reset=True ready-collision-free-window=True
+cycle=1 collisions=True game-over=True lives-zero=True
+error=Frame lifecycle did not reach compositor paint for game-over seq=248.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

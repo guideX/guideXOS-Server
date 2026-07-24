@@ -1,0 +1,15 @@
+run=20260723-135336-125
+server-wrapper-pid=19720
+server-pid=14536
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-135336-125-playing-seq5-gen21.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0x8814A6 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=21 paintGeneration=21 captureGeneration=1 frameSequence=5 state=Playing score=0 lives=3 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-135336-125-playing-seq5-gen21.png timestampUtc=2026-07-23T20:53:38.0002452Z
+cycle=1 no-automatic-collision-before-schedule=False
+cycle=1 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-135336-125-dying-seq50-gen99.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0x8814A6 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=99 paintGeneration=99 captureGeneration=6 frameSequence=50 state=Dying score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260723-135336-125-dying-seq50-gen99.png timestampUtc=2026-07-23T20:53:43.3087520Z
+cycle=1 dying=True lives-decremented-once=True duplicate-death-suppressed=False
+error=Frame lifecycle did not reach compositor paint for ready seq=104.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

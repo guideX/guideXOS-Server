@@ -24,6 +24,10 @@ namespace gxos { namespace ipc {
         static void publish(const std::string& name, Message&& msg, bool fanout=true);
         // For host/REPL to read from a named channel
         static bool pop(const std::string& name, Message& out, uint64_t timeoutMs);
+        // Read the first queued message of a given type without disturbing
+        // earlier messages of other types. Used by compositor scheduling to
+        // service complete retained-frame replacements promptly.
+        static bool popType(const std::string& name, uint32_t type, Message& out, uint64_t timeoutMs);
         // New helpers for phase 1
         static bool setCapacity(const std::string& name, size_t cap);
         static size_t pending(const std::string& name);
