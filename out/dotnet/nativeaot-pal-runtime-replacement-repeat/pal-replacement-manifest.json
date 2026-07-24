@@ -1,0 +1,393 @@
+﻿{
+    "schemaVersion":  1,
+    "status":  "ABI-contract-compiled; active-archive-replacement-not-authorized",
+    "reason":  "PalRedhawkMinWin.cpp.obj and thread.cpp.obj contain source families beyond the 19 candidate imports; a partial object surgery would leave duplicate platform state or unresolved optional imports.",
+    "lockFile":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\tools\\dotnet\\runtime-pack\\runtime-pack.lock.json",
+    "lockFileSha256":  "B13F86C33792F5030CA4768F469AA8E96D52586123B289BC32C8DAE659D74267",
+    "stockLibrary":  "C:\\Users\\guideX\\.nuget\\packages\\runtime.win-x64.microsoft.dotnet.ilcompiler\\9.0.0\\sdk\\Runtime.WorkstationGC.lib",
+    "stockLibrarySha256":  "0E6A134AD4150CD604317A47860DAE82EB30AAE4D9CDB14144E06454E7BB1948",
+    "expectedStockLibrarySha256":  "0E6A134AD4150CD604317A47860DAE82EB30AAE4D9CDB14144E06454E7BB1948",
+    "nativeAotSourceCheckout":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-feasibility-baseline\\nativeaot-runtime",
+    "nativeAotSourceHead":  "051c1fd3c13fea8c1e60b68d9c7f63c3173e5593",
+    "lockedSourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+    "objects":  [
+                    {
+                        "object":  "PalRedhawkCommon.cpp.obj",
+                        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\windows\\PalRedhawkCommon.cpp.obj",
+                        "source":  "src/coreclr/nativeaot/Runtime/windows/PalRedhawkCommon.cpp",
+                        "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                        "sourceBlob":  "a805762b462166b00587a45ca9c8113acb707e7e",
+                        "role":  "common PAL: stack bounds, module bounds/name, tick count",
+                        "startupReachability":  "future RhInitialize/thread attach",
+                        "sha256":  "59027D155707F530B298119A212861D9932ADAF508891C750E24E2E21683C35C",
+                        "length":  49418,
+                        "symbols":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkCommon.cpp.obj.symbols.txt",
+                        "imports":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkCommon.cpp.obj.imports.txt"
+                    },
+                    {
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\windows\\PalRedhawkMinWin.cpp.obj",
+                        "source":  "src/coreclr/nativeaot/Runtime/windows/PalRedhawkMinWin.cpp",
+                        "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                        "sourceBlob":  "86013f7a964d2837a280f9522664120e726e90d9",
+                        "role":  "Windows PAL: FLS, VM, events, current thread, thread starts, resolver/fail-fast",
+                        "startupReachability":  "future RhInitialize; optional paths must remain unreachable",
+                        "sha256":  "30FDAF43E2CBEA6F075578F9E27241E36A11FDF481AB470F5942D7ED9FFDED4D",
+                        "length":  120543,
+                        "symbols":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt",
+                        "imports":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.imports.txt"
+                    },
+                    {
+                        "object":  "thread.cpp.obj",
+                        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\thread.cpp.obj",
+                        "source":  "src/coreclr/nativeaot/Runtime/thread.cpp",
+                        "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                        "sourceBlob":  "c2e94a1dc8f383186cce68fffe56489baf691e13",
+                        "role":  "NativeAOT Thread and ThreadStore implementation",
+                        "startupReachability":  "future ThreadStore attach/current lookup",
+                        "sha256":  "7EC7C0E20CEBF63C403EB045458895D36B2DB657DCC46D65EFD9859744D0388D",
+                        "length":  113623,
+                        "symbols":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\thread.cpp.obj.symbols.txt",
+                        "imports":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\thread.cpp.obj.imports.txt"
+                    },
+                    {
+                        "object":  "time.c.obj",
+                        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\D_\\a\\_work\\1\\s\\src\\native\\minipal\\time.c.obj",
+                        "source":  "src/native/minipal/time.c",
+                        "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                        "sourceBlob":  "0a76df5d45342c2f5e4fa2f4b3a3c4c84a8946eb",
+                        "role":  "minipal high-resolution counter and delay",
+                        "startupReachability":  "future ThreadStore/yield/timing paths",
+                        "sha256":  "486ED71D18918FD6E4A32CEB917B36663180F26E9C2A53A639F04CC656A71338",
+                        "length":  36255,
+                        "symbols":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\time.c.obj.symbols.txt",
+                        "imports":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\time.c.obj.imports.txt"
+                    }
+                ],
+    "imports":  [
+                    {
+                        "strategy":  "source replacement; no Windows memory query",
+                        "symbol":  "VirtualQuery",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkCommon.cpp.obj",
+                        "caller":  "PalGetMaximumStackBounds",
+                        "adapter":  "guidexos_nativeaot_pal_hooks.stack_bounds",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "source replacement over guideXOS monotonic clock",
+                        "symbol":  "GetTickCount64",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkCommon.cpp.obj",
+                        "caller":  "PalGetTickCount64",
+                        "adapter":  "guidexos_nativeaot_pal_hooks.counter/frequency",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "opaque VM adapter; exact reserve/commit contract required",
+                        "symbol":  "VirtualAlloc",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalVirtualAlloc",
+                        "adapter":  "guidexos_nativeaot_pal_hooks.virtual_alloc",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "opaque VM adapter",
+                        "symbol":  "VirtualFree",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalVirtualFree",
+                        "adapter":  "guidexos_nativeaot_pal_hooks.virtual_free",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "opaque VM protection adapter",
+                        "symbol":  "VirtualProtect",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalVirtualProtect",
+                        "adapter":  "guidexos_nativeaot_pal_hooks.virtual_protect",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "not replaced until handle/wait ownership is proven",
+                        "symbol":  "CreateEventW",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalCreateEventW",
+                        "adapter":  "pending opaque event ABI",
+                        "before":  "No",
+                        "managed":  "Later",
+                        "initialize":  "Later"
+                    },
+                    {
+                        "strategy":  "optional thread/thunk paths",
+                        "symbol":  "CloseHandle",
+                        "collection":  "Later",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalStartBackgroundWork / PalAllocateThunksFromTemplate",
+                        "adapter":  "pending opaque handle ABI",
+                        "before":  "No",
+                        "managed":  "Later",
+                        "initialize":  "No"
+                    },
+                    {
+                        "strategy":  "plain worker probe only; no helper thread this pass",
+                        "symbol":  "CreateThread",
+                        "collection":  "Later",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalStartBackgroundWork",
+                        "adapter":  "guidexos native-thread C bridge",
+                        "before":  "No",
+                        "managed":  "Later",
+                        "initialize":  "No"
+                    },
+                    {
+                        "strategy":  "completed FLS contract, exact PAL object not yet rebuilt",
+                        "symbol":  "FlsAlloc",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalInit",
+                        "adapter":  "guidexos_nativeaot_pal_fls_alloc",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "completed FLS contract, exact PAL object not yet rebuilt",
+                        "symbol":  "FlsGetValue",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "FiberDetachCallback / PalAttachThread / PalDetachThread",
+                        "adapter":  "guidexos_nativeaot_pal_fls_get",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "completed FLS contract, exact PAL object not yet rebuilt",
+                        "symbol":  "FlsSetValue",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalAttachThread / PalDetachThread",
+                        "adapter":  "guidexos_nativeaot_pal_fls_set",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "native-thread identity callback",
+                        "symbol":  "GetCurrentThreadId",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalGetCurrentOSThreadId",
+                        "adapter":  "guidexos_nativeaot_pal_hooks.current_thread_id",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "optional COM/hijack paths",
+                        "symbol":  "GetLastError",
+                        "collection":  "Later",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalCompatibleWaitAny / PalHijack",
+                        "adapter":  "pending per-thread error slot",
+                        "before":  "No",
+                        "managed":  "Later",
+                        "initialize":  "No"
+                    },
+                    {
+                        "strategy":  "not part of bounded startup contract",
+                        "symbol":  "GetCurrentProcess",
+                        "collection":  "Later",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "InitializeCurrentProcessCpuCount / PalFlushInstructionCache",
+                        "adapter":  "pending process capability ABI",
+                        "before":  "No",
+                        "managed":  "Later",
+                        "initialize":  "Conditional"
+                    },
+                    {
+                        "strategy":  "source replacement over scheduler yield",
+                        "symbol":  "SwitchToThread",
+                        "collection":  "Yes",
+                        "object":  "PalRedhawkMinWin.cpp.obj",
+                        "caller":  "PalSwitchToThread",
+                        "adapter":  "guidexos_nativeaot_pal_yield",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "raw object has an additional SetLastError pair",
+                        "symbol":  "GetLastError",
+                        "collection":  "Later",
+                        "object":  "thread.cpp.obj",
+                        "caller":  "Thread::WaitForGC / error-state helpers",
+                        "adapter":  "pending per-thread error slot",
+                        "before":  "No",
+                        "managed":  "Later",
+                        "initialize":  "Conditional"
+                    },
+                    {
+                        "strategy":  "source replacement over monotonic callback",
+                        "symbol":  "QueryPerformanceCounter",
+                        "collection":  "Yes",
+                        "object":  "time.c.obj",
+                        "caller":  "minipal_hires_ticks",
+                        "adapter":  "guidexos_nativeaot_pal_counter",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "source replacement over monotonic callback",
+                        "symbol":  "QueryPerformanceFrequency",
+                        "collection":  "Yes",
+                        "object":  "time.c.obj",
+                        "caller":  "minipal_hires_tick_frequency",
+                        "adapter":  "guidexos_nativeaot_pal_frequency",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    },
+                    {
+                        "strategy":  "source replacement over scheduler sleep",
+                        "symbol":  "SleepEx",
+                        "collection":  "Yes",
+                        "object":  "time.c.obj",
+                        "caller":  "minipal_microdelay",
+                        "adapter":  "guidexos_nativeaot_pal_sleep",
+                        "before":  "No",
+                        "managed":  "Yes",
+                        "initialize":  "Yes"
+                    }
+                ],
+    "rawCandidateEvidence":  [
+                                 {
+                                     "object":  "PalRedhawkCommon.cpp.obj",
+                                     "symbol":  "VirtualQuery",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkCommon.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkCommon.cpp.obj",
+                                     "symbol":  "GetTickCount64",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkCommon.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "VirtualAlloc",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "VirtualFree",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "VirtualProtect",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "CreateEventW",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "CloseHandle",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "CreateThread",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "FlsAlloc",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "FlsGetValue",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "FlsSetValue",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "GetCurrentThreadId",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "GetLastError",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "GetCurrentProcess",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "PalRedhawkMinWin.cpp.obj",
+                                     "symbol":  "SwitchToThread",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\PalRedhawkMinWin.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "thread.cpp.obj",
+                                     "symbol":  "GetLastError",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\thread.cpp.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "time.c.obj",
+                                     "symbol":  "QueryPerformanceCounter",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\time.c.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "time.c.obj",
+                                     "symbol":  "QueryPerformanceFrequency",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\time.c.obj.symbols.txt"
+                                 },
+                                 {
+                                     "object":  "time.c.obj",
+                                     "symbol":  "SleepEx",
+                                     "importDump":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\stock\\dumpbin\\time.c.obj.symbols.txt"
+                                 }
+                             ],
+    "contractSource":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\tools\\dotnet\\runtime-pack\\src\\platform\\guidexos_nativeaot_pal_contract.cpp",
+    "contractObject":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\nativeaot-pal-runtime-replacement-repeat\\replacement-contract\\guidexos_nativeaot_pal_contract.obj",
+    "contractObjectSha256":  "1727CAA0A38D9451C18C29B727F4504CF3E4B3134BB30BB28AE1E57C7A5F4C5E",
+    "compiler":  "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\cl.exe",
+    "compilerVersion":  "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36248 for x64",
+    "compilerFlags":  [
+                          "/MT",
+                          "/GR-",
+                          "/EHs-c-",
+                          "/GS-",
+                          "/O2",
+                          "/Brepro",
+                          "/std:c++17",
+                          "/DGUIDEXOS_NATIVEAOT_PAL_CONTRACT"
+                      ],
+    "abi":  "MSVC AMD64 / Win64; contract callbacks are C-compatible and pointer-width explicit",
+    "activeArchive":  null,
+    "rhInitializeCalled":  false
+}

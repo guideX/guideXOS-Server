@@ -1,5 +1,7 @@
 # NativeAOT Workstation GC Startup Readiness
 
+Current PAL/runtime status: [NativeAOT PAL/runtime replacement](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md). Current HostLog status: [Managed HostLog access-violation diagnosis](MANAGED_HOSTLOG_ACCESS_VIOLATION_DIAGNOSIS.md).
+
 Status: current gate updated 2026-07-22. The bounded runtime-neutral FLS/local-storage, exact stack-bound, minimal ThreadStore, generic VM, raw-address registry, and true bare-metal VM lifecycle prerequisites are PASS. The collector was not started. Current result: Outcome B, with one remaining prerequisite—exact stock Workstation GC `GCToOSInterface::Virtual*` binding/import elimination.
 
 Date: 2026-07-22; the historical 2026-07-19 audit remains preserved below.

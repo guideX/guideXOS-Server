@@ -1,11 +1,15 @@
 # NativeAOT Workstation GC Platform Object Replacement
 
-Status: current 2026-07-22 validation. No RhInitialize, GC heap construction,
+Current PAL/runtime status: [NativeAOT PAL/runtime replacement](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md). Current HostLog status: [Managed HostLog access-violation diagnosis](MANAGED_HOSTLOG_ACCESS_VIOLATION_DIAGNOSIS.md).
+
+Status: current 2026-07-23 validation. No RhInitialize, GC heap construction,
 finalizer/helper startup, managed allocation through the collector, or
-collection was executed. Decision: Outcome B. The Windows gcenv object was
+collection was executed. Decision: Outcome C. The Windows gcenv object was
 replaced and exact collector symbol binding succeeds, but a separate
 NativeAOT PAL/runtime object family still contributes mandatory Windows import
-candidates. The HostLog proof also remains reproducibly unresolved.
+candidates. The HostLog proof now passes reproducibly with the corrected
+guideXOS runtime pack; the historical stock-artifact fault is diagnosed in the
+linked HostLog report.
 
 ## 1. Objective
 
@@ -310,4 +314,3 @@ proven ABI-compatible QEMU build. Keep RhInitialize, heap construction,
 finalizer/helper startup, managed collector allocation, and collection
 disabled. Diagnose the HostLog indirect-call fault separately before
 reconsidering the startup gate.
-

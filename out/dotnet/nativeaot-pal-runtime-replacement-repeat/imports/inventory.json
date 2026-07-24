@@ -1,0 +1,211 @@
+﻿[
+    {
+        "strategy":  "source replacement; no Windows memory query",
+        "symbol":  "VirtualQuery",
+        "collection":  "Yes",
+        "object":  "PalRedhawkCommon.cpp.obj",
+        "caller":  "PalGetMaximumStackBounds",
+        "adapter":  "guidexos_nativeaot_pal_hooks.stack_bounds",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "source replacement over guideXOS monotonic clock",
+        "symbol":  "GetTickCount64",
+        "collection":  "Yes",
+        "object":  "PalRedhawkCommon.cpp.obj",
+        "caller":  "PalGetTickCount64",
+        "adapter":  "guidexos_nativeaot_pal_hooks.counter/frequency",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "opaque VM adapter; exact reserve/commit contract required",
+        "symbol":  "VirtualAlloc",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalVirtualAlloc",
+        "adapter":  "guidexos_nativeaot_pal_hooks.virtual_alloc",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "opaque VM adapter",
+        "symbol":  "VirtualFree",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalVirtualFree",
+        "adapter":  "guidexos_nativeaot_pal_hooks.virtual_free",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "opaque VM protection adapter",
+        "symbol":  "VirtualProtect",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalVirtualProtect",
+        "adapter":  "guidexos_nativeaot_pal_hooks.virtual_protect",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "not replaced until handle/wait ownership is proven",
+        "symbol":  "CreateEventW",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalCreateEventW",
+        "adapter":  "pending opaque event ABI",
+        "before":  "No",
+        "managed":  "Later",
+        "initialize":  "Later"
+    },
+    {
+        "strategy":  "optional thread/thunk paths",
+        "symbol":  "CloseHandle",
+        "collection":  "Later",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalStartBackgroundWork / PalAllocateThunksFromTemplate",
+        "adapter":  "pending opaque handle ABI",
+        "before":  "No",
+        "managed":  "Later",
+        "initialize":  "No"
+    },
+    {
+        "strategy":  "plain worker probe only; no helper thread this pass",
+        "symbol":  "CreateThread",
+        "collection":  "Later",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalStartBackgroundWork",
+        "adapter":  "guidexos native-thread C bridge",
+        "before":  "No",
+        "managed":  "Later",
+        "initialize":  "No"
+    },
+    {
+        "strategy":  "completed FLS contract, exact PAL object not yet rebuilt",
+        "symbol":  "FlsAlloc",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalInit",
+        "adapter":  "guidexos_nativeaot_pal_fls_alloc",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "completed FLS contract, exact PAL object not yet rebuilt",
+        "symbol":  "FlsGetValue",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "FiberDetachCallback / PalAttachThread / PalDetachThread",
+        "adapter":  "guidexos_nativeaot_pal_fls_get",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "completed FLS contract, exact PAL object not yet rebuilt",
+        "symbol":  "FlsSetValue",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalAttachThread / PalDetachThread",
+        "adapter":  "guidexos_nativeaot_pal_fls_set",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "native-thread identity callback",
+        "symbol":  "GetCurrentThreadId",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalGetCurrentOSThreadId",
+        "adapter":  "guidexos_nativeaot_pal_hooks.current_thread_id",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "optional COM/hijack paths",
+        "symbol":  "GetLastError",
+        "collection":  "Later",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalCompatibleWaitAny / PalHijack",
+        "adapter":  "pending per-thread error slot",
+        "before":  "No",
+        "managed":  "Later",
+        "initialize":  "No"
+    },
+    {
+        "strategy":  "not part of bounded startup contract",
+        "symbol":  "GetCurrentProcess",
+        "collection":  "Later",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "InitializeCurrentProcessCpuCount / PalFlushInstructionCache",
+        "adapter":  "pending process capability ABI",
+        "before":  "No",
+        "managed":  "Later",
+        "initialize":  "Conditional"
+    },
+    {
+        "strategy":  "source replacement over scheduler yield",
+        "symbol":  "SwitchToThread",
+        "collection":  "Yes",
+        "object":  "PalRedhawkMinWin.cpp.obj",
+        "caller":  "PalSwitchToThread",
+        "adapter":  "guidexos_nativeaot_pal_yield",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "raw object has an additional SetLastError pair",
+        "symbol":  "GetLastError",
+        "collection":  "Later",
+        "object":  "thread.cpp.obj",
+        "caller":  "Thread::WaitForGC / error-state helpers",
+        "adapter":  "pending per-thread error slot",
+        "before":  "No",
+        "managed":  "Later",
+        "initialize":  "Conditional"
+    },
+    {
+        "strategy":  "source replacement over monotonic callback",
+        "symbol":  "QueryPerformanceCounter",
+        "collection":  "Yes",
+        "object":  "time.c.obj",
+        "caller":  "minipal_hires_ticks",
+        "adapter":  "guidexos_nativeaot_pal_counter",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "source replacement over monotonic callback",
+        "symbol":  "QueryPerformanceFrequency",
+        "collection":  "Yes",
+        "object":  "time.c.obj",
+        "caller":  "minipal_hires_tick_frequency",
+        "adapter":  "guidexos_nativeaot_pal_frequency",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    },
+    {
+        "strategy":  "source replacement over scheduler sleep",
+        "symbol":  "SleepEx",
+        "collection":  "Yes",
+        "object":  "time.c.obj",
+        "caller":  "minipal_microdelay",
+        "adapter":  "guidexos_nativeaot_pal_sleep",
+        "before":  "No",
+        "managed":  "Yes",
+        "initialize":  "Yes"
+    }
+]
