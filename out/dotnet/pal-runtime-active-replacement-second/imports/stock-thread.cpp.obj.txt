@@ -1,0 +1,18 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-runtime-active-replacement-second\extracted\thread.cpp.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          18 .bss
+         7B8 .chks64
+        F840 .debug$S
+          88 .debug$T
+          F4 .drectve
+         168 .pdata
+          D0 .rdata
+        1123 .text$mn
+          D8 .tls$
+          3D .voltbl
+         1DC .xdata

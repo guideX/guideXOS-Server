@@ -1,0 +1,26 @@
+{
+    "permissions":  [
+                        "log"
+                    ],
+    "id":  "com.guidexos.experimental.nativeaot.palprobe",
+    "kind":  "NativeElf",
+    "version":  "0.1.0",
+    "category":  "Experimental",
+    "description":  "Exact active NativeAOT PAL bridge probe",
+    "supportedArchitectures":  [
+                                   "amd64"
+                               ],
+    "publisher":  "guideXOS Experimental",
+    "entries":  [
+                    {
+                        "entryPoint":  "GuideXosNativeAotPalProbeMain",
+                        "architecture":  "amd64",
+                        "entryCategory":  "guidexos-c-abi-v1",
+                        "path":  "bin/amd64/NativeAotPalProbe.elf",
+                        "abi":  "guidexos-c-abi-v1",
+                        "runtime":  "native-elf"
+                    }
+                ],
+    "schemaVersion":  1,
+    "displayName":  "NativeAOT PAL Probe"
+}

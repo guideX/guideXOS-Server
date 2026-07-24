@@ -1,0 +1,35 @@
+{
+  "date": "2026-07-24",
+  "hosted": {
+    "event": "PASS",
+    "mutex": "PASS",
+    "localStorageFls": "PASS",
+    "stackBounds": "PASS",
+    "virtualMemory": "PASS",
+    "nativeThread": "PASS"
+  },
+  "qemu": {
+    "nativeThreadLifecycle": "PASS",
+    "localStorageFls": "PASS",
+    "trueVirtualMemory": "PASS",
+    "mutex": "PASS"
+  },
+  "exactWorkstationGcenvHostedProbe": "PASS",
+  "collectorStarted": false,
+  "rhInitializeCalled": false,
+  "collectionEntered": 0,
+  "gcBackedAllocations": 0,
+  "heapExpansion": 0,
+  "logFiles": [
+    "../../out/dotnet/smoke-native-event-primitive.log",
+    "../../out/dotnet/smoke-native-mutex.log",
+    "../../out/dotnet/smoke-native-local-storage.log",
+    "../../out/dotnet/smoke-native-stack-bounds.log",
+    "../../out/dotnet/smoke-native-virtual-memory.log",
+    "../../out/dotnet/smoke-native-thread-runtime.log",
+    "../../out/runtime/smoke-native-thread-runtime-qemu.active-pal.log",
+    "../../out/runtime/smoke-native-local-storage-qemu.active-pal.log",
+    "../../out/runtime/smoke-native-virtual-memory-qemu.active-pal.log",
+    "../../out/runtime/smoke-native-mutex-qemu.active-pal.log"
+  ]
+}

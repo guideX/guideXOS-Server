@@ -1,0 +1,230 @@
+﻿[
+    {
+        "symbol":  "VirtualQuery",
+        "originalObject":  "PalRedhawkCommon.cpp.obj",
+        "sourceCaller":  "PalGetMaximumStackBounds",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "GetTickCount64",
+        "originalObject":  "PalRedhawkCommon.cpp.obj",
+        "sourceCaller":  "PalGetTickCount64",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "VirtualAlloc",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalVirtualAlloc",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "VirtualFree",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalVirtualFree",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "VirtualProtect",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalVirtualProtect",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "CreateEventW",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalCreateEventW",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  false,
+        "runtimeReachability":  "optional or later path; exact source caller recorded"
+    },
+    {
+        "symbol":  "CloseHandle",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalStartBackgroundWork/PalAllocateThunksFromTemplate",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  false,
+        "runtimeReachability":  "optional or later path; exact source caller recorded"
+    },
+    {
+        "symbol":  "CreateThread",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalStartBackgroundWork",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  false,
+        "runtimeReachability":  "optional or later path; exact source caller recorded"
+    },
+    {
+        "symbol":  "FlsAlloc",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalInit",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "FlsGetValue",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "FiberDetachCallback/PalAttachThread/PalDetachThread",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "FlsSetValue",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalAttachThread/PalDetachThread",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "GetCurrentThreadId",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalGetCurrentOSThreadId",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "GetLastError",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalCompatibleWaitAny/PalHijack",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  false,
+        "runtimeReachability":  "optional or later path; exact source caller recorded"
+    },
+    {
+        "symbol":  "GetCurrentProcess",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "InitializeCurrentProcessCpuCount/PalFlushInstructionCache",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  false,
+        "runtimeReachability":  "optional or later path; exact source caller recorded"
+    },
+    {
+        "symbol":  "SwitchToThread",
+        "originalObject":  "PalRedhawkMinWin.cpp.obj",
+        "sourceCaller":  "PalSwitchToThread",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "GetLastError",
+        "originalObject":  "thread.cpp.obj",
+        "sourceCaller":  "Thread::WaitForGC/error helpers",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  false,
+        "runtimeReachability":  "optional or later path; exact source caller recorded"
+    },
+    {
+        "symbol":  "QueryPerformanceCounter",
+        "originalObject":  "time.c.obj",
+        "sourceCaller":  "minipal_hires_ticks",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "QueryPerformanceFrequency",
+        "originalObject":  "time.c.obj",
+        "sourceCaller":  "minipal_hires_tick_frequency",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    },
+    {
+        "symbol":  "SleepEx",
+        "originalObject":  "time.c.obj",
+        "sourceCaller":  "minipal_microdelay",
+        "replacementStatus":  "replaced-by-contract",
+        "remainingContributor":  null,
+        "remainingRecords":  [
+
+                             ],
+        "startupMandatory":  true,
+        "runtimeReachability":  "selected PAL startup path"
+    }
+]

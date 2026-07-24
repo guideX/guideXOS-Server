@@ -1,0 +1,65 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-runtime-active-replacement-second\archives\adapted-members\00000-PalRedhawkCommon.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058D98 ABS    notype       Static       | @comp.id
+001 80010090 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .drectve
+    Section length   31, #relocs    0, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .debug$S
+    Section length   C4, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .data
+    Section length    4, #relocs    0, #linenums    0, checksum B8BC6765
+008 00000000 SECT3  notype       External     | ?g_RhNumberOfProcessors@@3IA (unsigned int g_RhNumberOfProcessors)
+009 00000000 SECT4  notype       Static       | .text$mn
+    Section length   7D, #relocs    1, #linenums    0, checksum 1CA00B60, selection    1 (pick no duplicates)
+00B 00000000 SECT5  notype       Static       | .text$mn
+    Section length   66, #relocs    0, #linenums    0, checksum A8A655D0, selection    1 (pick no duplicates)
+00D 00000000 SECT6  notype       Static       | .text$mn
+    Section length   24, #relocs    1, #linenums    0, checksum F3E22BC2, selection    1 (pick no duplicates)
+00F 00000000 SECT7  notype       Static       | .text$mn
+    Section length   11, #relocs    1, #linenums    0, checksum E64F0423, selection    1 (pick no duplicates)
+011 00000000 SECT8  notype       Static       | .text$mn
+    Section length   8B, #relocs    2, #linenums    0, checksum F50C3DBB, selection    1 (pick no duplicates)
+013 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_stack_bounds
+014 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_counter
+015 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_frequency
+016 00000000 SECT5  notype ()    External     | PalGetModuleBounds
+017 00000000 SECT7  notype ()    External     | PalGetProcessCpuCount
+018 00000000 SECT4  notype ()    External     | PalGetMaximumStackBounds
+019 00000000 SECT6  notype ()    External     | PalGetModuleFileName
+01A 00000000 SECT8  notype ()    External     | PalGetTickCount64
+01B 00000000 SECT4  notype       Label        | $LN14
+01C 00000000 SECT8  notype       Label        | $LN8
+01D 00000000 SECT9  notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 7B37AF16, selection    5 (pick associative Section 0x4)
+01F 00000000 SECT9  notype       Static       | $unwind$PalGetMaximumStackBounds
+020 00000000 SECTA  notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 37558441, selection    5 (pick associative Section 0x4)
+022 00000000 SECTA  notype       Static       | $pdata$PalGetMaximumStackBounds
+023 00000000 SECTB  notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x8)
+025 00000000 SECTB  notype       Static       | $unwind$PalGetTickCount64
+026 00000000 SECTC  notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  E51998C, selection    5 (pick associative Section 0x8)
+028 00000000 SECTC  notype       Static       | $pdata$PalGetTickCount64
+029 00000000 SECTD  notype       Static       | .rdata
+    Section length   32, #relocs    0, #linenums    0, checksum  6F1E056, selection    2 (pick any)
+02B 00000000 SECTD  notype       Static       | ?current_image_name@?1??PalGetModuleFileName@@9@4QB_WB (wchar_t const * const `PalGetModuleFileName'::`2'::current_image_name)
+02C 00000000 SECTE  notype       Static       | .chks64
+    Section length   70, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x199 bytes
+
+  Summary
+
+          70 .chks64
+           4 .data
+          C4 .debug$S
+          31 .drectve
+          18 .pdata
+          32 .rdata
+         1A3 .text$mn
+          14 .xdata

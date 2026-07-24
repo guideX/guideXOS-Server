@@ -1,0 +1,56 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-runtime-active-replacement\archives\adapted-members\00031-gcload.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   F4, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 8700, #relocs    4, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .text$mn
+    Section length   88, #relocs    6, #linenums    0, checksum 3DF9BBAB, selection    1 (pick no duplicates)
+00B 00000000 SECT5  notype       Static       | .debug$S
+    Section length  26C, #relocs   16, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4)
+00D 00000000 SECT6  notype       Static       | .text$mn
+    Section length   1A, #relocs    1, #linenums    0, checksum 239D4608, selection    1 (pick no duplicates)
+00F 00000000 SECT7  notype       Static       | .debug$S
+    Section length   D0, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x6)
+011 00000000 UNDEF  notype ()    External     | ?CreateGCHandleManager@@YAPEAVIGCHandleManager@@XZ (class IGCHandleManager * __cdecl CreateGCHandleManager(void))
+012 00000000 UNDEF  notype ()    External     | ?CreateGCHeap@WKS@@YAPEAVIGCHeapInternal@@XZ (class IGCHeapInternal * __cdecl WKS::CreateGCHeap(void))
+013 00000000 UNDEF  notype ()    External     | ?PopulateDacVars@WKS@@YAXPEAUGcDacVars@@@Z (void __cdecl WKS::PopulateDacVars(struct GcDacVars *))
+014 00000000 UNDEF  notype ()    External     | ?PopulateHandleTableDacVars@@YAXPEAUGcDacVars@@@Z (void __cdecl PopulateHandleTableDacVars(struct GcDacVars *))
+015 00000000 SECT6  notype ()    External     | GC_VersionInfo
+016 00000000 SECT4  notype ()    External     | GC_Initialize
+017 00000000 SECT4  notype       Label        | $LN10
+018 00000000 SECT8  notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum 3A3D9038, selection    5 (pick associative Section 0x4)
+01A 00000000 SECT8  notype       Static       | $unwind$GC_Initialize
+01B 00000000 SECT9  notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 80DE9E6F, selection    5 (pick associative Section 0x4)
+01D 00000000 SECT9  notype       Static       | $pdata$GC_Initialize
+01E 00000000 UNDEF  notype       External     | g_gc_heap_type
+01F 00000000 UNDEF  notype       External     | ?g_theGCHeap@@3PEAVIGCHeapInternal@@EA (class IGCHeapInternal * g_theGCHeap)
+020 00000000 SECTA  notype       Static       | .rdata
+    Section length    B, #relocs    0, #linenums    0, checksum 6801747A, selection    2 (pick any)
+022 00000000 SECTA  notype       External     | ??_C@_0L@PMHJDKGJ@CoreCLR?5GC@ (`string')
+023 00000000 SECTB  notype       Static       | .chks64
+    Section length   58, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x15E bytes
+
+  Summary
+
+          58 .chks64
+        8A3C .debug$S
+          88 .debug$T
+          F4 .drectve
+           C .pdata
+           B .rdata
+          A2 .text$mn
+          18 .xdata

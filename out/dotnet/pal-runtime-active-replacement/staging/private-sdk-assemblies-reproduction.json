@@ -1,0 +1,37 @@
+{
+  "classification": "Not reproduced after clean locked build",
+  "date": "2026-07-24",
+  "reportedIssue": "PrivateSdkAssemblies staging error",
+  "exactMissingPath": null,
+  "exactMissingFile": null,
+  "sdkLookup": {
+    "dotnetSdk": "C:\\Program Files\\dotnet\\sdk",
+    "ilcompilerPackage": "C:\\Users\\guideX\\.nuget\\packages\\microsoft.dotnet.ilcompiler\\9.0.0",
+    "stockRuntimePack": "C:\\Users\\guideX\\.nuget\\packages\\runtime.win-x64.microsoft.dotnet.ilcompiler\\9.0.0",
+    "lockedRuntimePackVersion": "9.0.0",
+    "lockedIlCompilerCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+  },
+  "environmentEvidence": [
+    "environment.txt",
+    "dotnet-version.txt",
+    "dotnet-info.txt"
+  ],
+  "buildConfigurations": [
+    "win-x64 / Release / PublishAot=true / self-contained",
+    "NonAllocating",
+    "Allocating",
+    "Repeated / Primary64KiB",
+    "Repeated / Small4KiB"
+  ],
+  "cleanOutputRoots": true,
+  "staleGeneratedOutput": false,
+  "lockedSdkComplete": true,
+  "immutableInputCleanup": "No required immutable input was removed",
+  "managedBuildResults": {
+    "nonAllocating": "PASS",
+    "allocating": "PASS",
+    "repeated64KiB": "PASS",
+    "repeated4KiB": "PASS"
+  },
+  "workaroundApplied": false
+}

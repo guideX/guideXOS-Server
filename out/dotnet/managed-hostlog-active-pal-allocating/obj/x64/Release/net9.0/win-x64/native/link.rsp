@@ -1,0 +1,44 @@
+﻿"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\managed-hostlog-active-pal-allocating\obj\x64\Release\net9.0\win-x64\native\HostLogProof.obj"
+/OUT:"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\managed-hostlog-active-pal-allocating\bin\x64\Release\net9.0\win-x64\native\HostLogProof.exe"
+/DEF:"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\managed-hostlog-active-pal-allocating\obj\x64\Release\net9.0\win-x64\native\HostLogProof.def"
+/fixed /base:0x10000000 /map:"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\managed-hostlog-active-pal-allocating\artifacts\HostLogProof.map"
+/INCLUDE:ManagedMain
+/EXPORT:guideXosManagedArrayHostLog
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\managed-hostlog-active-pal-allocating\artifacts\runtime_support.obj"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\guidexos_nativeaot_platform.obj"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\sdk\bootstrapper.obj"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\sdk\Runtime.WorkstationGC.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\sdk\eventpipe-disabled.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\sdk\Runtime.VxsortEnabled.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\sdk\standalonegc-disabled.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\sdk\zlibstatic.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\sdk\System.Globalization.Native.Aot.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\runtime-pack-active-pal-allocating\sdk\System.IO.Compression.Native.Aot.lib"
+"advapi32.lib"
+"bcrypt.lib"
+"crypt32.lib"
+"iphlpapi.lib"
+"kernel32.lib"
+"mswsock.lib"
+"ncrypt.lib"
+"normaliz.lib"
+"ntdll.lib"
+"ole32.lib"
+"oleaut32.lib"
+"secur32.lib"
+"user32.lib"
+"version.lib"
+"ws2_32.lib"
+/NOLOGO /MANIFEST:NO
+/MERGE:.managedcode=.text /MERGE:hydrated=.bss
+/DEBUG
+/INCREMENTAL:NO
+/SUBSYSTEM:NATIVE
+/ENTRY:ManagedMain /NOEXP /NOIMPLIB /STACK:1572864
+/NATVIS:"C:\Users\guideX\.nuget\packages\microsoft.dotnet.ilcompiler\9.0.0\build\NativeAOT.natvis"
+/IGNORE:4104
+/CETCOMPAT
+/NODEFAULTLIB:libucrt.lib
+/DEFAULTLIB:ucrt.lib
+/OPT:REF
+/OPT:ICF

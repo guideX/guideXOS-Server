@@ -1,12 +1,57 @@
 # NativeAOT Workstation GC Startup Readiness
 
+## Current gate — 2026-07-24
+
+Current authoritative PAL result: [NativeAOT PAL/runtime replacement](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md).
+Bridge details: [NativeAOT PAL Win64/QEMU bridge](NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md).
+Machine evidence: [PAL replacement manifest](../../out/dotnet/pal-runtime-active-replacement/pal-replacement-manifest.json).
+
+Decision: **Outcome B — active PAL replacement complete, QEMU bridge incomplete.**
+The four selected stock PAL members are absent from the adapted archive; exact
+replacement parity is 6/6, 38/38, 74/74, and 3/3 with zero missing,
+unexpected, or duplicate strong definitions. The hosted exact PAL probe passes.
+The converted Win64 PE/ELF probe passes through the Server trampoline with two
+launches in one process and one in a fresh process. The actual system-QEMU PAL
+probe remains blocked because the SysV QEMU side has no versioned C-compatible
+Win64 PAL hook table and callback/worker/ThreadStore bridge.
+
+| Gate | Current status |
+| --- | --- |
+| Workstation `gcenv` replacement | PASS, 53/53 |
+| Active PAL object replacement | PASS, all four together |
+| Stock PAL objects absent | PASS |
+| Exact symbol parity | PASS, missing 0 / duplicate 0 |
+| Remaining mandatory Windows imports | PASS for removed objects; complete archive remains bounded by other families |
+| Hosted exact PAL probe | PASS |
+| Win64 QEMU bridge | Server trampoline PASS; system-QEMU BLOCKED |
+| HostLog live proof | PASS, exact message, one callback, return 0 |
+| Single-allocation live proof | PASS |
+| Repeated-allocation live proof | PASS: 234 at 64 KiB; 14 at 4 KiB; controlled OOM |
+| ThreadStore/FLS | PASS as inactive/generic foundation; exact system-QEMU bridge pending |
+| VM/Event/mutex/thread | PASS hosted and generic QEMU foundations |
+| Runtime lock identity | PASS, locked ILCompiler commit and stock archive hash |
+| Collector startup | NOT AUTHORIZED; `RhInitialize` not called |
+
+The no-collection condition remains: collections entered `0`, GC-backed
+allocations `0`, and heap expansion `0`. The prior `PrivateSdkAssemblies`
+staging error was **not reproduced after a clean locked build**; evidence is in
+[`private-sdk-assemblies-reproduction.json`](../../out/dotnet/pal-runtime-active-replacement/staging/private-sdk-assemblies-reproduction.json).
+
+The exact next experiment is to implement and prove the versioned Win64 PAL
+hook table plus callback/worker/stack/ThreadStore bridge in the guideXOS QEMU
+execution side, then rerun the exact PAL probe. Do not call `RhInitialize`.
+
 Current PAL/runtime status: [NativeAOT PAL/runtime replacement](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md). Current HostLog status: [Managed HostLog access-violation diagnosis](MANAGED_HOSTLOG_ACCESS_VIOLATION_DIAGNOSIS.md).
+
+The older gate paragraph and snapshots below are historical. The authoritative
+current gate is the 2026-07-24 table above.
 
 Status: current gate updated 2026-07-22. The bounded runtime-neutral FLS/local-storage, exact stack-bound, minimal ThreadStore, generic VM, raw-address registry, and true bare-metal VM lifecycle prerequisites are PASS. The collector was not started. Current result: Outcome B, with one remaining prerequisite—exact stock Workstation GC `GCToOSInterface::Virtual*` binding/import elimination.
 
 Date: 2026-07-22; the historical 2026-07-19 audit remains preserved below.
 
 Machine-readable result: `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`
+Current foundation rerun summary: [foundation-rerun-summary.json](../../out/dotnet/pal-runtime-active-replacement/foundation-rerun-summary.json).
 
 ## Scope and stop rule
 
@@ -119,7 +164,7 @@ Prior diagnostics remain classified as historical and unresolved where previousl
 
 Outcome B. Exact stack-bound reporting and minimal ThreadStore lifecycle are complete; the one next mandatory blocker is NativeAOT GC-owned virtual-memory PAL integration. No collector initialization, allocation through the real GC, collection, managed finalizer execution, or GC shutdown was attempted in this pass.
 
-## 26. Current 2026-07-22 gate update
+## 26. Historical 2026-07-22 gate snapshot
 
 | Evidence | Result |
 | --- | --- |
@@ -141,7 +186,7 @@ guideXOS raw-address adapter and remove the stock Windows GC VM object/imports.
 This is Outcome B. No GC startup, finalizer/helper startup, managed allocation
 through the real collector, or collection was attempted.
 
-## 27. Current exact platform-object gate (2026-07-22)
+## 27. Historical exact platform-object gate (2026-07-22)
 
 See [NativeAOT Workstation GC Platform Object Replacement](NATIVEAOT_WORKSTATION_GC_PLATFORM_OBJECT.md)
 for the archive, symbol, import, hosted-probe, QEMU ABI, and reproducibility

@@ -1,0 +1,32 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-runtime-active-replacement-second\archives\adapted-members\00043-portable.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   F4, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 72CC, #relocs    0, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .tls$
+    Section length   D8, #relocs    0, #linenums    0, checksum        0, selection    2 (pick any)
+00B 00000000 SECT4  notype       External     | tls_CurrentThread
+00C 00000000 SECT5  notype       Static       | .debug$S
+    Section length   2C, #relocs    2, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4)
+00E 00000000 SECT6  notype       Static       | .chks64
+    Section length   30, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x16 bytes
+
+  Summary
+
+          30 .chks64
+        72F8 .debug$S
+          88 .debug$T
+          F4 .drectve
+          D8 .tls$

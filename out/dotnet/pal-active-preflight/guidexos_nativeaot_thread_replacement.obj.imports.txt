@@ -1,0 +1,16 @@
+
+Dump of file out\dotnet\pal-active-preflight\guidexos_nativeaot_thread_replacement.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          1C .bss
+         608 .chks64
+          C4 .debug$S
+         102 .drectve
+         1A4 .pdata
+         20C .rdata
+        131F .text$mn
+          D8 .tls$
+         1FC .xdata

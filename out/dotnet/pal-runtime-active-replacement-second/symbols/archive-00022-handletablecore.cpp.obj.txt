@@ -1,0 +1,448 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-runtime-active-replacement-second\archives\adapted-members\00022-handletablecore.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   F4, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 8854, #relocs    4, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .text$mn
+    Section length  106, #relocs    1, #linenums    0, checksum 6A5A8D14, selection    1 (pick no duplicates)
+00B 00000000 SECT5  notype       Static       | .debug$S
+    Section length  50C, #relocs   44, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4)
+00D 00000000 SECT6  notype       Static       | .text$mn
+    Section length   B0, #relocs    1, #linenums    0, checksum E8C98102, selection    1 (pick no duplicates)
+00F 00000000 SECT7  notype       Static       | .debug$S
+    Section length  3E8, #relocs   28, #linenums    0, checksum        0, selection    5 (pick associative Section 0x6)
+011 00000000 SECT8  notype       Static       | .text$mn
+    Section length   A0, #relocs    0, #linenums    0, checksum FC5D5322, selection    1 (pick no duplicates)
+013 00000000 SECT9  notype       Static       | .debug$S
+    Section length  334, #relocs   26, #linenums    0, checksum        0, selection    5 (pick associative Section 0x8)
+015 00000000 SECTA  notype       Static       | .text$mn
+    Section length   1E, #relocs    0, #linenums    0, checksum B7FBC694, selection    1 (pick no duplicates)
+017 00000000 SECTB  notype       Static       | .debug$S
+    Section length  1AC, #relocs    C, #linenums    0, checksum        0, selection    5 (pick associative Section 0xA)
+019 00000000 SECTC  notype       Static       | .text$mn
+    Section length  1B7, #relocs    0, #linenums    0, checksum F579D5F3, selection    1 (pick no duplicates)
+01B 00000000 SECTD  notype       Static       | .debug$S
+    Section length  790, #relocs   5A, #linenums    0, checksum        0, selection    5 (pick associative Section 0xC)
+01D 00000000 SECTE  notype       Static       | .text$mn
+    Section length   D2, #relocs    0, #linenums    0, checksum 5ADE7BF3, selection    1 (pick no duplicates)
+01F 00000000 SECTF  notype       Static       | .debug$S
+    Section length  50C, #relocs   38, #linenums    0, checksum        0, selection    5 (pick associative Section 0xE)
+021 00000000 SECT10 notype       Static       | .text$mn
+    Section length   45, #relocs    0, #linenums    0, checksum 92BAF25C, selection    1 (pick no duplicates)
+023 00000000 SECT11 notype       Static       | .debug$S
+    Section length  1B4, #relocs    C, #linenums    0, checksum        0, selection    5 (pick associative Section 0x10)
+025 00000000 SECT12 notype       Static       | .text$mn
+    Section length   42, #relocs    0, #linenums    0, checksum 85272BED, selection    1 (pick no duplicates)
+027 00000000 SECT13 notype       Static       | .debug$S
+    Section length  160, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x12)
+029 00000000 SECT14 notype       Static       | .text$mn
+    Section length    F, #relocs    0, #linenums    0, checksum 73C3303A, selection    1 (pick no duplicates)
+02B 00000000 SECT15 notype       Static       | .debug$S
+    Section length  12C, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x14)
+02D 00000000 SECT16 notype       Static       | .text$mn
+    Section length   24, #relocs    0, #linenums    0, checksum F87004C5, selection    1 (pick no duplicates)
+02F 00000000 SECT17 notype       Static       | .debug$S
+    Section length  188, #relocs    C, #linenums    0, checksum        0, selection    5 (pick associative Section 0x16)
+031 00000000 SECT18 notype       Static       | .text$mn
+    Section length   50, #relocs    0, #linenums    0, checksum 6D64E001, selection    1 (pick no duplicates)
+033 00000000 SECT19 notype       Static       | .debug$S
+    Section length  240, #relocs   10, #linenums    0, checksum        0, selection    5 (pick associative Section 0x18)
+035 00000000 SECT1A notype       Static       | .text$mn
+    Section length   55, #relocs    0, #linenums    0, checksum E7D64B3B, selection    1 (pick no duplicates)
+037 00000000 SECT1B notype       Static       | .debug$S
+    Section length  290, #relocs   18, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1A)
+039 00000000 SECT1C notype       Static       | .text$mn
+    Section length   70, #relocs    0, #linenums    0, checksum 4876FA51, selection    1 (pick no duplicates)
+03B 00000000 SECT1D notype       Static       | .debug$S
+    Section length  2DC, #relocs   1C, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1C)
+03D 00000000 SECT1E notype       Static       | .text$mn
+    Section length  13F, #relocs    2, #linenums    0, checksum 8089708E, selection    1 (pick no duplicates)
+03F 00000000 SECT1F notype       Static       | .debug$S
+    Section length  380, #relocs   2E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1E)
+041 00000000 SECT20 notype       Static       | .text$mn
+    Section length  17D, #relocs    6, #linenums    0, checksum BD6B12AC, selection    1 (pick no duplicates)
+043 00000000 SECT21 notype       Static       | .debug$S
+    Section length  210, #relocs    C, #linenums    0, checksum        0, selection    5 (pick associative Section 0x20)
+045 00000000 SECT22 notype       Static       | .text$mn
+    Section length  22B, #relocs    2, #linenums    0, checksum B3EAA21D, selection    1 (pick no duplicates)
+047 00000000 SECT23 notype       Static       | .debug$S
+    Section length  864, #relocs   78, #linenums    0, checksum        0, selection    5 (pick associative Section 0x22)
+049 00000000 SECT24 notype       Static       | .text$mn
+    Section length  1C8, #relocs    4, #linenums    0, checksum 8C381559, selection    1 (pick no duplicates)
+04B 00000000 SECT25 notype       Static       | .debug$S
+    Section length  4B8, #relocs   38, #linenums    0, checksum        0, selection    5 (pick associative Section 0x24)
+04D 00000000 SECT26 notype       Static       | .text$mn
+    Section length  1F5, #relocs    1, #linenums    0, checksum CC2CCB0C, selection    1 (pick no duplicates)
+04F 00000000 SECT27 notype       Static       | .debug$S
+    Section length  720, #relocs   60, #linenums    0, checksum        0, selection    5 (pick associative Section 0x26)
+051 00000000 SECT28 notype       Static       | .text$mn
+    Section length    A, #relocs    1, #linenums    0, checksum 1A67B5EA, selection    1 (pick no duplicates)
+053 00000000 SECT29 notype       Static       | .debug$S
+    Section length   D8, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x28)
+055 00000000 SECT2A notype       Static       | .text$mn
+    Section length  26F, #relocs    1, #linenums    0, checksum 78384D9F, selection    1 (pick no duplicates)
+057 00000000 SECT2B notype       Static       | .debug$S
+    Section length  9D8, #relocs   80, #linenums    0, checksum        0, selection    5 (pick associative Section 0x2A)
+059 00000000 SECT2C notype       Static       | .text$mn
+    Section length  146, #relocs    4, #linenums    0, checksum F6AA315C, selection    1 (pick no duplicates)
+05B 00000000 SECT2D notype       Static       | .debug$S
+    Section length  1D4, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x2C)
+05D 00000000 SECT2E notype       Static       | .text$mn
+    Section length   C6, #relocs    4, #linenums    0, checksum 3ACBFBA2, selection    1 (pick no duplicates)
+05F 00000000 SECT2F notype       Static       | .debug$S
+    Section length  308, #relocs   1E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x2E)
+061 00000000 SECT30 notype       Static       | .text$mn
+    Section length  126, #relocs    1, #linenums    0, checksum 8F3A968D, selection    1 (pick no duplicates)
+063 00000000 SECT31 notype       Static       | .debug$S
+    Section length  2A4, #relocs   14, #linenums    0, checksum        0, selection    5 (pick associative Section 0x30)
+065 00000000 SECT32 notype       Static       | .text$mn
+    Section length  1BF, #relocs    0, #linenums    0, checksum 14B3051D, selection    1 (pick no duplicates)
+067 00000000 SECT33 notype       Static       | .debug$S
+    Section length  518, #relocs   36, #linenums    0, checksum        0, selection    5 (pick associative Section 0x32)
+069 00000000 SECT34 notype       Static       | .text$mn
+    Section length  502, #relocs    3, #linenums    0, checksum 29E2B351, selection    1 (pick no duplicates)
+06B 00000000 SECT35 notype       Static       | .debug$S
+    Section length  954, #relocs   50, #linenums    0, checksum        0, selection    5 (pick associative Section 0x34)
+06D 00000000 SECT36 notype       Static       | .text$mn
+    Section length   A4, #relocs    1, #linenums    0, checksum E4298B1C, selection    1 (pick no duplicates)
+06F 00000000 SECT37 notype       Static       | .debug$S
+    Section length  1DC, #relocs   12, #linenums    0, checksum        0, selection    5 (pick associative Section 0x36)
+071 00000000 SECT38 notype       Static       | .text$mn
+    Section length  256, #relocs    8, #linenums    0, checksum 71E120D7, selection    1 (pick no duplicates)
+073 00000000 SECT39 notype       Static       | .debug$S
+    Section length  570, #relocs   36, #linenums    0, checksum        0, selection    5 (pick associative Section 0x38)
+075 00000000 SECT3A notype       Static       | .text$mn
+    Section length   1B, #relocs    0, #linenums    0, checksum 70CAE2D0, selection    1 (pick no duplicates)
+077 00000000 SECT3B notype       Static       | .debug$S
+    Section length  18C, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x3A)
+079 00000000 SECT3C notype       Static       | .text$mn
+    Section length   65, #relocs    2, #linenums    0, checksum ACE59020, selection    1 (pick no duplicates)
+07B 00000000 SECT3D notype       Static       | .debug$S
+    Section length  2A0, #relocs   12, #linenums    0, checksum        0, selection    5 (pick associative Section 0x3C)
+07D 00000000 SECT3E notype       Static       | .text$mn
+    Section length  2C0, #relocs    1, #linenums    0, checksum 8093DABC, selection    1 (pick no duplicates)
+07F 00000000 SECT3F notype       Static       | .debug$S
+    Section length  B54, #relocs   9E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x3E)
+081 00000000 SECT40 notype       Static       | .text$mn
+    Section length  13E, #relocs    9, #linenums    0, checksum 6D54C176, selection    1 (pick no duplicates)
+083 00000000 SECT41 notype       Static       | .debug$S
+    Section length  418, #relocs   28, #linenums    0, checksum        0, selection    5 (pick associative Section 0x40)
+085 00000000 SECT42 notype       Static       | .text$mn
+    Section length   A9, #relocs    4, #linenums    0, checksum 10ED792D, selection    1 (pick no duplicates)
+087 00000000 SECT43 notype       Static       | .debug$S
+    Section length  2E0, #relocs   1C, #linenums    0, checksum        0, selection    5 (pick associative Section 0x42)
+089 00000000 SECT44 notype       Static       | .text$mn
+    Section length   20, #relocs    0, #linenums    0, checksum 3D341590, selection    1 (pick no duplicates)
+08B 00000000 SECT45 notype       Static       | .debug$S
+    Section length  158, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x44)
+08D 00000000 UNDEF  notype ()    External     | ??_V@YAXPEAX@Z (void __cdecl operator delete[](void *))
+08E 00000000 UNDEF  notype ()    External     | ??_U@YAPEAX_KAEBUnothrow_t@std@@@Z (void * __cdecl operator new[](unsigned __int64,struct std::nothrow_t const &))
+08F 00000000 UNDEF  notype ()    External     | ?VirtualReserve@GCToOSInterface@@SAPEAX_K0IG@Z (public: static void * __cdecl GCToOSInterface::VirtualReserve(unsigned __int64,unsigned __int64,unsigned int,unsigned short))
+090 00000000 UNDEF  notype ()    External     | ?VirtualRelease@GCToOSInterface@@SA_NPEAX_K@Z (public: static bool __cdecl GCToOSInterface::VirtualRelease(void *,unsigned __int64))
+091 00000000 UNDEF  notype ()    External     | ?VirtualCommit@GCToOSInterface@@SA_NPEAX_KG@Z (public: static bool __cdecl GCToOSInterface::VirtualCommit(void *,unsigned __int64,unsigned short))
+092 00000000 UNDEF  notype ()    External     | ?VirtualDecommit@GCToOSInterface@@SA_NPEAX_K@Z (public: static bool __cdecl GCToOSInterface::VirtualDecommit(void *,unsigned __int64))
+093 00000000 UNDEF  notype ()    External     | ?Enter@CrstStatic@@SAXPEAV1@@Z (public: static void __cdecl CrstStatic::Enter(class CrstStatic *))
+094 00000000 UNDEF  notype ()    External     | ?Leave@CrstStatic@@SAXPEAV1@@Z (public: static void __cdecl CrstStatic::Leave(class CrstStatic *))
+095 00000000 SECT1E notype ()    External     | ?QuickSort@@YAXPEA_KHHP6AH_K1@Z@Z (void __cdecl QuickSort(unsigned __int64 *,int,int,int (__cdecl*)(unsigned __int64,unsigned __int64)))
+096 00000000 SECT10 notype ()    External     | ?CompareHandlesByFreeOrder@@YAH_K0@Z (int __cdecl CompareHandlesByFreeOrder(unsigned __int64,unsigned __int64))
+097 00000000 SECT3A notype ()    External     | ?TableCanFreeSegmentNow@@YAHPEAUHandleTable@@PEAUTableSegment@@@Z (int __cdecl TableCanFreeSegmentNow(struct HandleTable *,struct TableSegment *))
+098 00000000 SECTA  notype ()    External     | ?BlockFetchUserDataPointer@@YAPEA_KPEAU_TableSegmentHeader@@IH@Z (unsigned __int64 * __cdecl BlockFetchUserDataPointer(struct _TableSegmentHeader *,unsigned int,int))
+099 00000000 SECT1C notype ()    External     | ?HandleValidateAndFetchUserDataPointer@@YAPEA_KPEAUOBJECTHANDLE__@@I@Z (unsigned __int64 * __cdecl HandleValidateAndFetchUserDataPointer(struct OBJECTHANDLE__ *,unsigned int))
+09A 00000000 SECT18 notype ()    External     | ?HandleQuickFetchUserDataPointer@@YAPEA_KPEAUOBJECTHANDLE__@@@Z (unsigned __int64 * __cdecl HandleQuickFetchUserDataPointer(struct OBJECTHANDLE__ *))
+09B 00000000 SECT1A notype ()    External     | ?HandleQuickSetUserData@@YAXPEAUOBJECTHANDLE__@@_K@Z (void __cdecl HandleQuickSetUserData(struct OBJECTHANDLE__ *,unsigned __int64))
+09C 00000000 SECT16 notype ()    External     | ?HandleFetchType@@YAIPEAUOBJECTHANDLE__@@@Z (unsigned int __cdecl HandleFetchType(struct OBJECTHANDLE__ *))
+09D 00000000 SECT14 notype ()    External     | ?HandleFetchHandleTable@@YAPEAUHandleTable@@PEAUOBJECTHANDLE__@@@Z (struct HandleTable * __cdecl HandleFetchHandleTable(struct OBJECTHANDLE__ *))
+09E 00000000 SECT20 notype ()    External     | ?SegmentAlloc@@YAPEAUTableSegment@@PEAUHandleTable@@@Z (struct TableSegment * __cdecl SegmentAlloc(struct HandleTable *))
+09F 00000000 SECT28 notype ()    External     | ?SegmentFree@@YAXPEAUTableSegment@@@Z (void __cdecl SegmentFree(struct TableSegment *))
+0A0 00000000 SECT3C notype ()    External     | ?TableContainHandle@@YAHPEAUHandleTable@@PEAUOBJECTHANDLE__@@@Z (int __cdecl TableContainHandle(struct HandleTable *,struct OBJECTHANDLE__ *))
+0A1 00000000 SECT34 notype ()    External     | ?SegmentResortChains@@YAXPEAUTableSegment@@@Z (void __cdecl SegmentResortChains(struct TableSegment *))
+0A2 00000000 SECT12 notype ()    External     | ?DoesSegmentNeedsToTrimExcessPages@@YAHPEAUTableSegment@@@Z (int __cdecl DoesSegmentNeedsToTrimExcessPages(struct TableSegment *))
+0A3 00000000 SECT36 notype ()    External     | ?SegmentTrimExcessPages@@YAXPEAUTableSegment@@@Z (void __cdecl SegmentTrimExcessPages(struct TableSegment *))
+0A4 00000000 SECT38 notype ()    External     | ?TableAllocBulkHandles@@YAIPEAUHandleTable@@IPEAPEAUOBJECTHANDLE__@@I@Z (unsigned int __cdecl TableAllocBulkHandles(struct HandleTable *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0A5 00000000 SECT3E notype ()    External     | ?TableFreeBulkPreparedHandles@@YAXPEAUHandleTable@@IPEAPEAUOBJECTHANDLE__@@I@Z (void __cdecl TableFreeBulkPreparedHandles(struct HandleTable *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0A6 00000000 SECT40 notype ()    External     | ?TableFreeBulkUnpreparedHandles@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@I@Z (void __cdecl TableFreeBulkUnpreparedHandles(struct HandleTable *,unsigned int,struct OBJECTHANDLE__ * const *,unsigned int))
+0A7 00000000 SECT44 notype ()    External     | ?ZeroHandles@@YAXPEAPEAUOBJECTHANDLE__@@I@Z (void __cdecl ZeroHandles(struct OBJECTHANDLE__ * *,unsigned int))
+0A8 00000000 SECT2C notype ()    External     | ?SegmentInitialize@@YAHPEAUTableSegment@@PEAUHandleTable@@@Z (int __cdecl SegmentInitialize(struct TableSegment *,struct HandleTable *))
+0A9 00000000 SECT32 notype ()    External     | ?SegmentRemoveFreeBlocks@@YAXPEAUTableSegment@@IPEAH@Z (void __cdecl SegmentRemoveFreeBlocks(struct TableSegment *,unsigned int,int *))
+0AA 00000000 SECT30 notype ()    External     | ?SegmentInsertBlockFromFreeListWorker@@YAIPEAUTableSegment@@IH@Z (unsigned int __cdecl SegmentInsertBlockFromFreeListWorker(struct TableSegment *,unsigned int,int))
+0AB 00000000 SECT2E notype ()    External     | ?SegmentInsertBlockFromFreeList@@YAIPEAUTableSegment@@IH@Z (unsigned int __cdecl SegmentInsertBlockFromFreeList(struct TableSegment *,unsigned int,int))
+0AC 00000000 SECT6  notype ()    External     | ?BlockAllocHandlesInMask@@YAIPEAUTableSegment@@IPEAIIPEAPEAUOBJECTHANDLE__@@I@Z (unsigned int __cdecl BlockAllocHandlesInMask(struct TableSegment *,unsigned int,unsigned int *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0AD 00000000 SECT8  notype ()    External     | ?BlockAllocHandlesInitial@@YAIPEAUTableSegment@@IIPEAPEAUOBJECTHANDLE__@@I@Z (unsigned int __cdecl BlockAllocHandlesInitial(struct TableSegment *,unsigned int,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0AE 00000000 SECT4  notype ()    External     | ?BlockAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z (unsigned int __cdecl BlockAllocHandles(struct TableSegment *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0AF 00000000 SECT26 notype ()    External     | ?SegmentAllocHandlesFromTypeChain@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z (unsigned int __cdecl SegmentAllocHandlesFromTypeChain(struct TableSegment *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0B0 00000000 SECT24 notype ()    External     | ?SegmentAllocHandlesFromFreeList@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z (unsigned int __cdecl SegmentAllocHandlesFromFreeList(struct TableSegment *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0B1 00000000 SECT22 notype ()    External     | ?SegmentAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z (unsigned int __cdecl SegmentAllocHandles(struct TableSegment *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0B2 00000000 SECTE  notype ()    External     | ?BlockFreeHandlesInMask@@YAIPEAUTableSegment@@IIPEAPEAUOBJECTHANDLE__@@IPEA_KPEAIPEAH@Z (unsigned int __cdecl BlockFreeHandlesInMask(struct TableSegment *,unsigned int,unsigned int,struct OBJECTHANDLE__ * *,unsigned int,unsigned __int64 *,unsigned int *,int *))
+0B3 00000000 SECTC  notype ()    External     | ?BlockFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@IPEAIPEAH@Z (unsigned int __cdecl BlockFreeHandles(struct TableSegment *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int,unsigned int *,int *))
+0B4 00000000 SECT2A notype ()    External     | ?SegmentFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z (unsigned int __cdecl SegmentFreeHandles(struct TableSegment *,unsigned int,struct OBJECTHANDLE__ * *,unsigned int))
+0B5 00000000 SECT42 notype ()    External     | ?TableFreeBulkUnpreparedHandlesWorker@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@IPEAPEAU2@@Z (void __cdecl TableFreeBulkUnpreparedHandlesWorker(struct HandleTable *,unsigned int,struct OBJECTHANDLE__ * const *,unsigned int,struct OBJECTHANDLE__ * *))
+0B6 00000000 UNDEF  notype ()    External     | __GSHandlerCheck
+0B7 00000000 UNDEF  notype ()    External     | __security_check_cookie
+0B8 00000000 UNDEF  notype ()    External     | memcpy
+0B9 00000000 UNDEF  notype ()    External     | memset
+0BA 00000000 SECT1E notype       Label        | $LN45
+0BB 00000000 SECT1C notype       Label        | $LN16
+0BC 00000000 SECT20 notype       Label        | $LN23
+0BD 00000000 SECT3C notype       Label        | $LN30
+0BE 00000000 SECT34 notype       Label        | $LN138
+0BF 00000000 SECT36 notype       Label        | $LN11
+0C0 00000000 SECT38 notype       Label        | $LN64
+0C1 00000000 SECT3E notype       Label        | $LN77
+0C2 00000000 SECT40 notype       Label        | $LN40
+0C3 00000000 SECT2C notype       Label        | $LN15
+0C4 00000000 SECT32 notype       Label        | $LN56
+0C5 00000000 SECT30 notype       Label        | $LN19
+0C6 00000000 SECT2E notype       Label        | $LN24
+0C7 00000000 SECT6  notype       Label        | $LN22
+0C8 00000000 SECT8  notype       Label        | $LN22
+0C9 00000000 SECT4  notype       Label        | $LN37
+0CA 00000000 SECT26 notype       Label        | $LN57
+0CB 00000000 SECT24 notype       Label        | $LN56
+0CC 00000000 SECT22 notype       Label        | $LN60
+0CD 00000000 SECTE  notype       Label        | $LN23
+0CE 00000000 SECTC  notype       Label        | $LN48
+0CF 00000000 SECT2A notype       Label        | $LN68
+0D0 00000000 SECT42 notype       Label        | $LN13
+0D1 00000000 SECT46 notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum 969C731D, selection    5 (pick associative Section 0x1E)
+0D3 00000000 SECT46 notype       Static       | $unwind$?QuickSort@@YAXPEA_KHHP6AH_K1@Z@Z
+0D4 00000000 SECT47 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FA9A4A65, selection    5 (pick associative Section 0x1E)
+0D6 00000000 SECT47 notype       Static       | $pdata$?QuickSort@@YAXPEA_KHHP6AH_K1@Z@Z
+0D7 00000000 SECT48 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum DEFD020D, selection    5 (pick associative Section 0x1C)
+0D9 00000000 SECT48 notype       Static       | $unwind$?HandleValidateAndFetchUserDataPointer@@YAPEA_KPEAUOBJECTHANDLE__@@I@Z
+0DA 00000000 SECT49 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum AC509190, selection    5 (pick associative Section 0x1C)
+0DC 00000000 SECT49 notype       Static       | $pdata$?HandleValidateAndFetchUserDataPointer@@YAPEA_KPEAUOBJECTHANDLE__@@I@Z
+0DD 00000000 SECT4A notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x20)
+0DF 00000000 SECT4A notype       Static       | $unwind$?SegmentAlloc@@YAPEAUTableSegment@@PEAUHandleTable@@@Z
+0E0 00000000 SECT4B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 91228FF5, selection    5 (pick associative Section 0x20)
+0E2 00000000 SECT4B notype       Static       | $pdata$?SegmentAlloc@@YAPEAUTableSegment@@PEAUHandleTable@@@Z
+0E3 00000000 SECT4C notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum ED4F81A7, selection    5 (pick associative Section 0x3C)
+0E5 00000000 SECT4C notype       Static       | $unwind$?TableContainHandle@@YAHPEAUHandleTable@@PEAUOBJECTHANDLE__@@@Z
+0E6 00000000 SECT4D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 980BAEDF, selection    5 (pick associative Section 0x3C)
+0E8 00000000 SECT4D notype       Static       | $pdata$?TableContainHandle@@YAHPEAUHandleTable@@PEAUOBJECTHANDLE__@@@Z
+0E9 00000000 SECT4E notype       Static       | .xdata
+    Section length   18, #relocs    1, #linenums    0, checksum 1E8C6516, selection    5 (pick associative Section 0x34)
+0EB 00000000 SECT4E notype       Static       | $unwind$?SegmentResortChains@@YAXPEAUTableSegment@@@Z
+0EC 00000000 SECT4F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 101D28DA, selection    5 (pick associative Section 0x34)
+0EE 00000000 SECT4F notype       Static       | $pdata$?SegmentResortChains@@YAXPEAUTableSegment@@@Z
+0EF 00000000 SECT50 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x36)
+0F1 00000000 SECT50 notype       Static       | $unwind$?SegmentTrimExcessPages@@YAXPEAUTableSegment@@@Z
+0F2 00000000 SECT51 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 77F965B5, selection    5 (pick associative Section 0x36)
+0F4 00000000 SECT51 notype       Static       | $pdata$?SegmentTrimExcessPages@@YAXPEAUTableSegment@@@Z
+0F5 00000000 SECT52 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 3D87C1AE, selection    5 (pick associative Section 0x36)
+0F7 00000000 SECT52 notype       Static       | $chain$0$?SegmentTrimExcessPages@@YAXPEAUTableSegment@@@Z
+0F8 00000000 SECT53 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 55A5AFCB, selection    5 (pick associative Section 0x36)
+0FA 00000000 SECT53 notype       Static       | $pdata$0$?SegmentTrimExcessPages@@YAXPEAUTableSegment@@@Z
+0FB 00000000 SECT54 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum CEAE8F59, selection    5 (pick associative Section 0x36)
+0FD 00000000 SECT54 notype       Static       | $chain$1$?SegmentTrimExcessPages@@YAXPEAUTableSegment@@@Z
+0FE 00000000 SECT55 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum ABE9B874, selection    5 (pick associative Section 0x36)
+100 00000000 SECT55 notype       Static       | $pdata$1$?SegmentTrimExcessPages@@YAXPEAUTableSegment@@@Z
+101 00000000 SECT56 notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum 325D83BB, selection    5 (pick associative Section 0x38)
+103 00000000 SECT56 notype       Static       | $unwind$?TableAllocBulkHandles@@YAIPEAUHandleTable@@IPEAPEAUOBJECTHANDLE__@@I@Z
+104 00000000 SECT57 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  4D6EB68, selection    5 (pick associative Section 0x38)
+106 00000000 SECT57 notype       Static       | $pdata$?TableAllocBulkHandles@@YAIPEAUHandleTable@@IPEAPEAUOBJECTHANDLE__@@I@Z
+107 00000000 SECT58 notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum BF76180C, selection    5 (pick associative Section 0x3E)
+109 00000000 SECT58 notype       Static       | $unwind$?TableFreeBulkPreparedHandles@@YAXPEAUHandleTable@@IPEAPEAUOBJECTHANDLE__@@I@Z
+10A 00000000 SECT59 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum ED39561E, selection    5 (pick associative Section 0x3E)
+10C 00000000 SECT59 notype       Static       | $pdata$?TableFreeBulkPreparedHandles@@YAXPEAUHandleTable@@IPEAPEAUOBJECTHANDLE__@@I@Z
+10D 00000000 SECT5A notype       Static       | .xdata
+    Section length   20, #relocs    1, #linenums    0, checksum 46CE5B01, selection    5 (pick associative Section 0x40)
+10F 00000000 SECT5A notype       Static       | $unwind$?TableFreeBulkUnpreparedHandles@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@I@Z
+110 00000000 SECT5B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FBFF84DF, selection    5 (pick associative Section 0x40)
+112 00000000 SECT5B notype       Static       | $pdata$?TableFreeBulkUnpreparedHandles@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@I@Z
+113 00000000 SECT5C notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 59B38BD1, selection    5 (pick associative Section 0x40)
+115 00000000 SECT5C notype       Static       | $chain$0$?TableFreeBulkUnpreparedHandles@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@I@Z
+116 00000000 SECT5D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 7FC6F810, selection    5 (pick associative Section 0x40)
+118 00000000 SECT5D notype       Static       | $pdata$0$?TableFreeBulkUnpreparedHandles@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@I@Z
+119 00000000 SECT5E notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 42A86E33, selection    5 (pick associative Section 0x40)
+11B 00000000 SECT5E notype       Static       | $chain$1$?TableFreeBulkUnpreparedHandles@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@I@Z
+11C 00000000 SECT5F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F8A043B8, selection    5 (pick associative Section 0x40)
+11E 00000000 SECT5F notype       Static       | $pdata$1$?TableFreeBulkUnpreparedHandles@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@I@Z
+11F 00000000 SECT60 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x2C)
+121 00000000 SECT60 notype       Static       | $unwind$?SegmentInitialize@@YAHPEAUTableSegment@@PEAUHandleTable@@@Z
+122 00000000 SECT61 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4985C0DE, selection    5 (pick associative Section 0x2C)
+124 00000000 SECT61 notype       Static       | $pdata$?SegmentInitialize@@YAHPEAUTableSegment@@PEAUHandleTable@@@Z
+125 00000000 SECT62 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 2C29C1AB, selection    5 (pick associative Section 0x32)
+127 00000000 SECT62 notype       Static       | $unwind$?SegmentRemoveFreeBlocks@@YAXPEAUTableSegment@@IPEAH@Z
+128 00000000 SECT63 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 77F965B5, selection    5 (pick associative Section 0x32)
+12A 00000000 SECT63 notype       Static       | $pdata$?SegmentRemoveFreeBlocks@@YAXPEAUTableSegment@@IPEAH@Z
+12B 00000000 SECT64 notype       Static       | .xdata
+    Section length   20, #relocs    3, #linenums    0, checksum C9F847B0, selection    5 (pick associative Section 0x32)
+12D 00000000 SECT64 notype       Static       | $chain$3$?SegmentRemoveFreeBlocks@@YAXPEAUTableSegment@@IPEAH@Z
+12E 00000000 SECT65 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4244C84D, selection    5 (pick associative Section 0x32)
+130 00000000 SECT65 notype       Static       | $pdata$3$?SegmentRemoveFreeBlocks@@YAXPEAUTableSegment@@IPEAH@Z
+131 00000000 SECT66 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum CEAE8F59, selection    5 (pick associative Section 0x32)
+133 00000000 SECT66 notype       Static       | $chain$4$?SegmentRemoveFreeBlocks@@YAXPEAUTableSegment@@IPEAH@Z
+134 00000000 SECT67 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6D53ED95, selection    5 (pick associative Section 0x32)
+136 00000000 SECT67 notype       Static       | $pdata$4$?SegmentRemoveFreeBlocks@@YAXPEAUTableSegment@@IPEAH@Z
+137 00000000 SECT68 notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum 4D92FE4F, selection    5 (pick associative Section 0x30)
+139 00000000 SECT68 notype       Static       | $unwind$?SegmentInsertBlockFromFreeListWorker@@YAIPEAUTableSegment@@IH@Z
+13A 00000000 SECT69 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 996E6065, selection    5 (pick associative Section 0x30)
+13C 00000000 SECT69 notype       Static       | $pdata$?SegmentInsertBlockFromFreeListWorker@@YAIPEAUTableSegment@@IH@Z
+13D 00000000 SECT6A notype       Static       | .xdata
+    Section length   14, #relocs    0, #linenums    0, checksum F4634387, selection    5 (pick associative Section 0x2E)
+13F 00000000 SECT6A notype       Static       | $unwind$?SegmentInsertBlockFromFreeList@@YAIPEAUTableSegment@@IH@Z
+140 00000000 SECT6B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum BCC94EB0, selection    5 (pick associative Section 0x2E)
+142 00000000 SECT6B notype       Static       | $pdata$?SegmentInsertBlockFromFreeList@@YAIPEAUTableSegment@@IH@Z
+143 00000000 SECT6C notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum  E6ADA97, selection    5 (pick associative Section 0x6)
+145 00000000 SECT6C notype       Static       | $unwind$?BlockAllocHandlesInMask@@YAIPEAUTableSegment@@IPEAIIPEAPEAUOBJECTHANDLE__@@I@Z
+146 00000000 SECT6D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D6F6D6A7, selection    5 (pick associative Section 0x6)
+148 00000000 SECT6D notype       Static       | $pdata$?BlockAllocHandlesInMask@@YAIPEAUTableSegment@@IPEAIIPEAPEAUOBJECTHANDLE__@@I@Z
+149 00000000 SECT6E notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum 7B2C45B3, selection    5 (pick associative Section 0x8)
+14B 00000000 SECT6E notype       Static       | $unwind$?BlockAllocHandlesInitial@@YAIPEAUTableSegment@@IIPEAPEAUOBJECTHANDLE__@@I@Z
+14C 00000000 SECT6F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum AA4DE78C, selection    5 (pick associative Section 0x8)
+14E 00000000 SECT6F notype       Static       | $pdata$?BlockAllocHandlesInitial@@YAIPEAUTableSegment@@IIPEAPEAUOBJECTHANDLE__@@I@Z
+14F 00000000 SECT70 notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum 3AD6EF1D, selection    5 (pick associative Section 0x4)
+151 00000000 SECT70 notype       Static       | $unwind$?BlockAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+152 00000000 SECT71 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 60180233, selection    5 (pick associative Section 0x4)
+154 00000000 SECT71 notype       Static       | $pdata$?BlockAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+155 00000000 SECT72 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 28D63C73, selection    5 (pick associative Section 0x26)
+157 00000000 SECT72 notype       Static       | $unwind$?SegmentAllocHandlesFromTypeChain@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+158 00000000 SECT73 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 5526F3C6, selection    5 (pick associative Section 0x26)
+15A 00000000 SECT73 notype       Static       | $pdata$?SegmentAllocHandlesFromTypeChain@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+15B 00000000 SECT74 notype       Static       | .xdata
+    Section length   28, #relocs    3, #linenums    0, checksum 5444549B, selection    5 (pick associative Section 0x26)
+15D 00000000 SECT74 notype       Static       | $chain$5$?SegmentAllocHandlesFromTypeChain@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+15E 00000000 SECT75 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  6936FF2, selection    5 (pick associative Section 0x26)
+160 00000000 SECT75 notype       Static       | $pdata$5$?SegmentAllocHandlesFromTypeChain@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+161 00000000 SECT76 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum EC71192A, selection    5 (pick associative Section 0x26)
+163 00000000 SECT76 notype       Static       | $chain$6$?SegmentAllocHandlesFromTypeChain@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+164 00000000 SECT77 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  54EF723, selection    5 (pick associative Section 0x26)
+166 00000000 SECT77 notype       Static       | $pdata$6$?SegmentAllocHandlesFromTypeChain@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+167 00000000 SECT78 notype       Static       | .xdata
+    Section length   1C, #relocs    0, #linenums    0, checksum  B87DB6D, selection    5 (pick associative Section 0x24)
+169 00000000 SECT78 notype       Static       | $unwind$?SegmentAllocHandlesFromFreeList@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+16A 00000000 SECT79 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  F345736, selection    5 (pick associative Section 0x24)
+16C 00000000 SECT79 notype       Static       | $pdata$?SegmentAllocHandlesFromFreeList@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+16D 00000000 SECT7A notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 9301F4B3, selection    5 (pick associative Section 0x22)
+16F 00000000 SECT7A notype       Static       | $unwind$?SegmentAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+170 00000000 SECT7B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 299DC2ED, selection    5 (pick associative Section 0x22)
+172 00000000 SECT7B notype       Static       | $pdata$?SegmentAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+173 00000000 SECT7C notype       Static       | .xdata
+    Section length   28, #relocs    3, #linenums    0, checksum C949F6A3, selection    5 (pick associative Section 0x22)
+175 00000000 SECT7C notype       Static       | $chain$5$?SegmentAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+176 00000000 SECT7D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 7CF5BA3C, selection    5 (pick associative Section 0x22)
+178 00000000 SECT7D notype       Static       | $pdata$5$?SegmentAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+179 00000000 SECT7E notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 90CA2801, selection    5 (pick associative Section 0x22)
+17B 00000000 SECT7E notype       Static       | $chain$6$?SegmentAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+17C 00000000 SECT7F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 5FB18DE3, selection    5 (pick associative Section 0x22)
+17E 00000000 SECT7F notype       Static       | $pdata$6$?SegmentAllocHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+17F 00000000 SECT80 notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum  1C24D4F, selection    5 (pick associative Section 0xE)
+181 00000000 SECT80 notype       Static       | $unwind$?BlockFreeHandlesInMask@@YAIPEAUTableSegment@@IIPEAPEAUOBJECTHANDLE__@@IPEA_KPEAIPEAH@Z
+182 00000000 SECT81 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 44387161, selection    5 (pick associative Section 0xE)
+184 00000000 SECT81 notype       Static       | $pdata$?BlockFreeHandlesInMask@@YAIPEAUTableSegment@@IIPEAPEAUOBJECTHANDLE__@@IPEA_KPEAIPEAH@Z
+185 00000000 SECT82 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F0A3F52B, selection    5 (pick associative Section 0xC)
+187 00000000 SECT82 notype       Static       | $unwind$?BlockFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@IPEAIPEAH@Z
+188 00000000 SECT83 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D92012AC, selection    5 (pick associative Section 0xC)
+18A 00000000 SECT83 notype       Static       | $pdata$?BlockFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@IPEAIPEAH@Z
+18B 00000000 SECT84 notype       Static       | .xdata
+    Section length   2C, #relocs    3, #linenums    0, checksum A572EC28, selection    5 (pick associative Section 0xC)
+18D 00000000 SECT84 notype       Static       | $chain$6$?BlockFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@IPEAIPEAH@Z
+18E 00000000 SECT85 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B9462749, selection    5 (pick associative Section 0xC)
+190 00000000 SECT85 notype       Static       | $pdata$6$?BlockFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@IPEAIPEAH@Z
+191 00000000 SECT86 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 6077F840, selection    5 (pick associative Section 0xC)
+193 00000000 SECT86 notype       Static       | $chain$7$?BlockFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@IPEAIPEAH@Z
+194 00000000 SECT87 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 3B2E1749, selection    5 (pick associative Section 0xC)
+196 00000000 SECT87 notype       Static       | $pdata$7$?BlockFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@IPEAIPEAH@Z
+197 00000000 SECT88 notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum C1575F1A, selection    5 (pick associative Section 0x2A)
+199 00000000 SECT88 notype       Static       | $unwind$?SegmentFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+19A 00000000 SECT89 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 9E54A33E, selection    5 (pick associative Section 0x2A)
+19C 00000000 SECT89 notype       Static       | $pdata$?SegmentFreeHandles@@YAIPEAUTableSegment@@IPEAPEAUOBJECTHANDLE__@@I@Z
+19D 00000000 SECT8A notype       Static       | .xdata
+    Section length   18, #relocs    0, #linenums    0, checksum C2D1B755, selection    5 (pick associative Section 0x42)
+19F 00000000 SECT8A notype       Static       | $unwind$?TableFreeBulkUnpreparedHandlesWorker@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@IPEAPEAU2@@Z
+1A0 00000000 SECT8B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B502FCA7, selection    5 (pick associative Section 0x42)
+1A2 00000000 SECT8B notype       Static       | $pdata$?TableFreeBulkUnpreparedHandlesWorker@@YAXPEAUHandleTable@@IPEBQEAUOBJECTHANDLE__@@IPEAPEAU2@@Z
+1A3 00000000 UNDEF  notype       External     | ?nothrow@std@@3Unothrow_t@1@B (struct std::nothrow_t const std::nothrow)
+1A4 00000000 SECT8C notype       Static       | .rdata
+    Section length  100, #relocs    0, #linenums    0, checksum 2939EE9C
+1A6 00000000 SECT8C notype       Static       | ?c_rgLowBitIndex@@3QBEB (unsigned char const * const c_rgLowBitIndex)
+1A7 00000000 UNDEF  notype       External     | __security_cookie
+1A8 00000000 SECT8D notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum D3088D4F, selection    2 (pick any)
+1AA 00000000 SECT8D notype       External     | __xmm@ffffffffffffffffffffffffffffffff
+1AB 00000000 SECT8E notype       Static       | .chks64
+    Section length  470, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x1F24 bytes
+
+  Summary
+
+         470 .chks64
+       109BC .debug$S
+          88 .debug$T
+          F4 .drectve
+         1A4 .pdata
+         110 .rdata
+        241D .text$mn
+         2D4 .xdata

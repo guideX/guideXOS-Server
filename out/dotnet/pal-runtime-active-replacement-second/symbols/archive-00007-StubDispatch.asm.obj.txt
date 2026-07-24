@@ -1,0 +1,190 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-runtime-active-replacement-second\archives\adapted-members\00007-StubDispatch.asm.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01038413 ABS    notype       Static       | @comp.id
+001 00004010 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .text$mn
+    Section length  7EF, #relocs    2, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .data
+    Section length    0, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .debug$S
+    Section length 121C, #relocs  124, #linenums    0, checksum        0
+008 00000000 SECT4  notype       Static       | .debug$T
+    Section length   FC, #relocs    0, #linenums    0, checksum        0
+00A 00000000 UNDEF  notype       External     | RhpGcAlloc
+00B 00000000 UNDEF  notype       External     | RhpValidateExInfoPop
+00C 00000000 UNDEF  notype       External     | RhDebugBreak
+00D 00000000 UNDEF  notype       External     | RhpWaitForGC2
+00E 00000000 UNDEF  notype       External     | RhExceptionHandling_FailedAllocation
+00F 00000000 UNDEF  notype       External     | RhThrowHwEx
+010 00000000 UNDEF  notype       External     | RhThrowEx
+011 00000000 UNDEF  notype       External     | RhRethrow
+012 00000000 UNDEF  notype       External     | RhpGcPoll2
+013 00000000 UNDEF  notype       External     | RhpTrapThreads
+014 00000000 UNDEF  notype       External     | g_lowest_address
+015 00000000 UNDEF  notype       External     | g_highest_address
+016 00000000 UNDEF  notype       External     | g_ephemeral_low
+017 00000000 UNDEF  notype       External     | g_ephemeral_high
+018 00000000 UNDEF  notype       External     | g_card_table
+019 00000000 UNDEF  notype       External     | g_card_bundle_table
+01A 00000000 UNDEF  notype       External     | g_write_watch_table
+01B 00000000 UNDEF  notype       External     | RhpCidResolve
+01C 00000000 UNDEF  notype       External     | RhpUniversalTransition_DebugStepTailCall
+01D 00000004 SECT1  notype       External     | RhpInterfaceDispatchAVLocation1
+01E 00000024 SECT1  notype       External     | RhpInterfaceDispatchAVLocation2
+01F 000000F4 SECT1  notype       External     | RhpInterfaceDispatchAVLocation16
+020 00000044 SECT1  notype       External     | RhpInterfaceDispatchAVLocation4
+021 000007D0 SECT1  notype ()    External     | RhpInitialDynamicInterfaceDispatch
+022 00000084 SECT1  notype       External     | RhpInterfaceDispatchAVLocation8
+023 000001E4 SECT1  notype       External     | RhpInterfaceDispatchAVLocation32
+024 000003D4 SECT1  notype       External     | RhpInterfaceDispatchAVLocation64
+025 00000000 SECT1  notype ()    External     | RhpInterfaceDispatch1
+026 00000020 SECT1  notype ()    External     | RhpInterfaceDispatch2
+027 00000040 SECT1  notype ()    External     | RhpInterfaceDispatch4
+028 00000080 SECT1  notype ()    External     | RhpInterfaceDispatch8
+029 000000F0 SECT1  notype ()    External     | RhpInterfaceDispatch16
+02A 000001E0 SECT1  notype ()    External     | RhpInterfaceDispatch32
+02B 000003D0 SECT1  notype ()    External     | RhpInterfaceDispatch64
+02C 000007C0 SECT1  notype ()    External     | RhpVTableOffsetDispatch
+02D 000007D0 SECT1  notype ()    External     | RhpInitialInterfaceDispatch
+02E 000007E0 SECT1  notype ()    External     | RhpInterfaceDispatchSlow
+02F 00000000 SECT1  notype       Static       | $$000000
+030 00000011 SECT1  notype       Label        | Attempt1
+031 00000031 SECT1  notype       Label        | Attempt1
+032 0000003B SECT1  notype       Label        | Attempt2
+033 00000051 SECT1  notype       Label        | Attempt1
+034 0000005B SECT1  notype       Label        | Attempt2
+035 00000065 SECT1  notype       Label        | Attempt3
+036 0000006F SECT1  notype       Label        | Attempt4
+037 000001F1 SECT1  notype       Label        | Attempt1
+038 000001FB SECT1  notype       Label        | Attempt2
+039 00000205 SECT1  notype       Label        | Attempt3
+03A 0000020F SECT1  notype       Label        | Attempt4
+03B 00000219 SECT1  notype       Label        | Attempt5
+03C 00000223 SECT1  notype       Label        | Attempt6
+03D 00000233 SECT1  notype       Label        | Attempt7
+03E 00000243 SECT1  notype       Label        | Attempt8
+03F 00000253 SECT1  notype       Label        | Attempt9
+040 00000263 SECT1  notype       Label        | Attempt10
+041 00000273 SECT1  notype       Label        | Attempt11
+042 00000283 SECT1  notype       Label        | Attempt12
+043 00000293 SECT1  notype       Label        | Attempt13
+044 000002A3 SECT1  notype       Label        | Attempt14
+045 000002B3 SECT1  notype       Label        | Attempt15
+046 000002C3 SECT1  notype       Label        | Attempt16
+047 000002D3 SECT1  notype       Label        | Attempt17
+048 000002E3 SECT1  notype       Label        | Attempt18
+049 000002F3 SECT1  notype       Label        | Attempt19
+04A 00000303 SECT1  notype       Label        | Attempt20
+04B 00000313 SECT1  notype       Label        | Attempt21
+04C 00000323 SECT1  notype       Label        | Attempt22
+04D 00000333 SECT1  notype       Label        | Attempt23
+04E 00000343 SECT1  notype       Label        | Attempt24
+04F 00000353 SECT1  notype       Label        | Attempt25
+050 00000363 SECT1  notype       Label        | Attempt26
+051 00000373 SECT1  notype       Label        | Attempt27
+052 00000383 SECT1  notype       Label        | Attempt28
+053 00000393 SECT1  notype       Label        | Attempt29
+054 000003A3 SECT1  notype       Label        | Attempt30
+055 000003B3 SECT1  notype       Label        | Attempt31
+056 000003C3 SECT1  notype       Label        | Attempt32
+057 00000091 SECT1  notype       Label        | Attempt1
+058 0000009B SECT1  notype       Label        | Attempt2
+059 000000A5 SECT1  notype       Label        | Attempt3
+05A 000000AF SECT1  notype       Label        | Attempt4
+05B 000000B9 SECT1  notype       Label        | Attempt5
+05C 000000C3 SECT1  notype       Label        | Attempt6
+05D 000000D3 SECT1  notype       Label        | Attempt7
+05E 000000E3 SECT1  notype       Label        | Attempt8
+05F 000003E1 SECT1  notype       Label        | Attempt1
+060 000003EB SECT1  notype       Label        | Attempt2
+061 000003F5 SECT1  notype       Label        | Attempt3
+062 000003FF SECT1  notype       Label        | Attempt4
+063 00000409 SECT1  notype       Label        | Attempt5
+064 00000413 SECT1  notype       Label        | Attempt6
+065 00000423 SECT1  notype       Label        | Attempt7
+066 00000433 SECT1  notype       Label        | Attempt8
+067 00000443 SECT1  notype       Label        | Attempt9
+068 00000453 SECT1  notype       Label        | Attempt10
+069 00000463 SECT1  notype       Label        | Attempt11
+06A 00000473 SECT1  notype       Label        | Attempt12
+06B 00000483 SECT1  notype       Label        | Attempt13
+06C 00000493 SECT1  notype       Label        | Attempt14
+06D 000004A3 SECT1  notype       Label        | Attempt15
+06E 000004B3 SECT1  notype       Label        | Attempt16
+06F 000004C3 SECT1  notype       Label        | Attempt17
+070 000004D3 SECT1  notype       Label        | Attempt18
+071 000004E3 SECT1  notype       Label        | Attempt19
+072 000004F3 SECT1  notype       Label        | Attempt20
+073 00000503 SECT1  notype       Label        | Attempt21
+074 00000513 SECT1  notype       Label        | Attempt22
+075 00000523 SECT1  notype       Label        | Attempt23
+076 00000533 SECT1  notype       Label        | Attempt24
+077 00000543 SECT1  notype       Label        | Attempt25
+078 00000553 SECT1  notype       Label        | Attempt26
+079 00000563 SECT1  notype       Label        | Attempt27
+07A 00000573 SECT1  notype       Label        | Attempt28
+07B 00000583 SECT1  notype       Label        | Attempt29
+07C 00000593 SECT1  notype       Label        | Attempt30
+07D 000005A3 SECT1  notype       Label        | Attempt31
+07E 000005B3 SECT1  notype       Label        | Attempt32
+07F 000005C3 SECT1  notype       Label        | Attempt33
+080 000005D3 SECT1  notype       Label        | Attempt34
+081 000005E3 SECT1  notype       Label        | Attempt35
+082 000005F3 SECT1  notype       Label        | Attempt36
+083 00000603 SECT1  notype       Label        | Attempt37
+084 00000613 SECT1  notype       Label        | Attempt38
+085 00000623 SECT1  notype       Label        | Attempt39
+086 00000633 SECT1  notype       Label        | Attempt40
+087 00000643 SECT1  notype       Label        | Attempt41
+088 00000653 SECT1  notype       Label        | Attempt42
+089 00000663 SECT1  notype       Label        | Attempt43
+08A 00000673 SECT1  notype       Label        | Attempt44
+08B 00000683 SECT1  notype       Label        | Attempt45
+08C 00000693 SECT1  notype       Label        | Attempt46
+08D 000006A3 SECT1  notype       Label        | Attempt47
+08E 000006B3 SECT1  notype       Label        | Attempt48
+08F 000006C3 SECT1  notype       Label        | Attempt49
+090 000006D3 SECT1  notype       Label        | Attempt50
+091 000006E3 SECT1  notype       Label        | Attempt51
+092 000006F3 SECT1  notype       Label        | Attempt52
+093 00000703 SECT1  notype       Label        | Attempt53
+094 00000713 SECT1  notype       Label        | Attempt54
+095 00000723 SECT1  notype       Label        | Attempt55
+096 00000733 SECT1  notype       Label        | Attempt56
+097 00000743 SECT1  notype       Label        | Attempt57
+098 00000753 SECT1  notype       Label        | Attempt58
+099 00000763 SECT1  notype       Label        | Attempt59
+09A 00000773 SECT1  notype       Label        | Attempt60
+09B 00000783 SECT1  notype       Label        | Attempt61
+09C 00000793 SECT1  notype       Label        | Attempt62
+09D 000007A3 SECT1  notype       Label        | Attempt63
+09E 000007B3 SECT1  notype       Label        | Attempt64
+09F 00000101 SECT1  notype       Label        | Attempt1
+0A0 0000010B SECT1  notype       Label        | Attempt2
+0A1 00000115 SECT1  notype       Label        | Attempt3
+0A2 0000011F SECT1  notype       Label        | Attempt4
+0A3 00000129 SECT1  notype       Label        | Attempt5
+0A4 00000133 SECT1  notype       Label        | Attempt6
+0A5 00000143 SECT1  notype       Label        | Attempt7
+0A6 00000153 SECT1  notype       Label        | Attempt8
+0A7 00000163 SECT1  notype       Label        | Attempt9
+0A8 00000173 SECT1  notype       Label        | Attempt10
+0A9 00000183 SECT1  notype       Label        | Attempt11
+0AA 00000193 SECT1  notype       Label        | Attempt12
+0AB 000001A3 SECT1  notype       Label        | Attempt13
+0AC 000001B3 SECT1  notype       Label        | Attempt14
+0AD 000001C3 SECT1  notype       Label        | Attempt15
+0AE 000001D3 SECT1  notype       Label        | Attempt16
+
+String Table Size = 0x690 bytes
+
+  Summary
+
+           0 .data
+        121C .debug$S
+          FC .debug$T
+         7EF .text$mn

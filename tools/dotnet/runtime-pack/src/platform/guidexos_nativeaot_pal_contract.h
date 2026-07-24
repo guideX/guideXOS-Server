@@ -14,7 +14,15 @@
 #define GUIDEXOS_NATIVEAOT_PAL_CALL
 #endif
 
-#define GUIDEXOS_NATIVEAOT_PAL_ABI_VERSION 1u
+#define GUIDEXOS_NATIVEAOT_PAL_ABI_VERSION 2u
+
+// Values crossing this boundary are intentionally not Win32 BOOL/HANDLE
+// types.  A callback returns 0 for failure and a nonzero value for success;
+// opaque handles are represented as raw pointers or uintptr_t values and are
+// owned by the implementation that created them.
+typedef uintptr_t guidexos_nativeaot_pal_opaque_handle;
+
+typedef uintptr_t (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_thread_entry)(void* context);
 
 typedef void (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_fls_detach_callback)(void* value);
 
@@ -45,6 +53,64 @@ typedef struct guidexos_nativeaot_pal_hooks {
                                                                uint32_t milliseconds);
     int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *yield)(void* context);
 
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *get_last_error)(void* context);
+    void (GUIDEXOS_NATIVEAOT_PAL_CALL *set_last_error)(void* context,
+                                                        int32_t value);
+    void* (GUIDEXOS_NATIVEAOT_PAL_CALL *current_process)(void* context);
+    void* (GUIDEXOS_NATIVEAOT_PAL_CALL *current_thread)(void* context);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *duplicate_handle)(
+        void* context,
+        void* source_process,
+        void* source_handle,
+        void* target_process,
+        void** target_handle,
+        uint32_t access,
+        int32_t inherit,
+        uint32_t options);
+
+    void* (GUIDEXOS_NATIVEAOT_PAL_CALL *static_module_from_pointer)(
+        void* context,
+        const void* pointer);
+    void* (GUIDEXOS_NATIVEAOT_PAL_CALL *static_resolve)(
+        void* context,
+        void* module,
+        const char* name);
+
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *create_thread)(
+        void* context,
+        guidexos_nativeaot_thread_entry entry,
+        void* entry_context,
+        uint32_t stack_size,
+        int32_t high_priority,
+        guidexos_nativeaot_pal_opaque_handle* result);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *join_thread)(
+        void* context,
+        guidexos_nativeaot_pal_opaque_handle handle,
+        uint32_t timeout_milliseconds,
+        uintptr_t* result);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *close_thread)(
+        void* context,
+        guidexos_nativeaot_pal_opaque_handle handle);
+
+    void* (GUIDEXOS_NATIVEAOT_PAL_CALL *create_event)(
+        void* context,
+        int32_t manual_reset,
+        int32_t initial_state);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *wait_any)(
+        void* context,
+        uint32_t timeout_milliseconds,
+        uint32_t count,
+        void* const* handles,
+        int32_t alertable);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *close_event)(
+        void* context,
+        void* handle);
+
+    // This callback must not return.  Implementations are expected to enter
+    // the guideXOS fail-fast path and preserve the reason code.
+    void (GUIDEXOS_NATIVEAOT_PAL_CALL *fail_fast)(void* context,
+                                                  uint32_t reason);
+
     void* (GUIDEXOS_NATIVEAOT_PAL_CALL *virtual_alloc)(void* context,
                                                         void* preferred,
                                                         uintptr_t size,
@@ -60,6 +126,18 @@ typedef struct guidexos_nativeaot_pal_hooks {
                                                              uint32_t protection,
                                                              uint32_t* old_protection);
 } guidexos_nativeaot_pal_hooks;
+
+#ifdef __cplusplus
+#include <stddef.h>
+static_assert(sizeof(uint32_t) == 4, "NativeAOT PAL ABI requires 32-bit uint32_t");
+static_assert(sizeof(uint64_t) == 8, "NativeAOT PAL ABI requires 64-bit uint64_t");
+static_assert(sizeof(uintptr_t) == 8, "NativeAOT PAL ABI requires AMD64 pointers");
+static_assert(alignof(guidexos_nativeaot_pal_hooks) == alignof(void*),
+              "NativeAOT PAL hook alignment must be pointer alignment");
+static_assert(offsetof(guidexos_nativeaot_pal_hooks, current_thread_id) ==
+                  sizeof(uint32_t) * 2 + sizeof(void*),
+              "NativeAOT PAL hook prefix layout changed");
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,6 +169,92 @@ guidexos_nativeaot_pal_sleep(uint32_t milliseconds);
 
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_yield(void);
+
+void* GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_virtual_alloc(void* preferred,
+                                     uintptr_t size,
+                                     uint32_t allocation_type,
+                                     uint32_t protection);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_virtual_free(void* address,
+                                    uintptr_t size,
+                                    uint32_t free_type);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_virtual_protect(void* address,
+                                       uintptr_t size,
+                                       uint32_t protection,
+                                       uint32_t* old_protection);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_get_last_error(void);
+
+void GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_set_last_error(int32_t value);
+
+void* GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_current_process(void);
+
+void* GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_current_thread(void);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_duplicate_handle(void* source_process,
+                                        void* source_handle,
+                                        void* target_process,
+                                        void** target_handle,
+                                        uint32_t access,
+                                        int32_t inherit,
+                                        uint32_t options);
+
+void* GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_static_module_from_pointer(const void* pointer);
+
+void* GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_static_resolve(void* module, const char* name);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_create_thread(guidexos_nativeaot_thread_entry entry,
+                                      void* entry_context,
+                                      uint32_t stack_size,
+                                      int32_t high_priority,
+                                      guidexos_nativeaot_pal_opaque_handle* result);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_join_thread(guidexos_nativeaot_pal_opaque_handle handle,
+                                    uint32_t timeout_milliseconds,
+                                    uintptr_t* result);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_close_thread(guidexos_nativeaot_pal_opaque_handle handle);
+
+// Compatibility shims used only while compiling the locked NativeAOT
+// thread.cpp source.  They remain opaque C ABI calls and never expose a
+// guideXOS handle or C++ object to the replacement object.
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_close_handle(void* handle);
+
+uint8_t* GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_current_teb(void);
+
+void* GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_create_event(int32_t manual_reset, int32_t initial_state);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_wait_any(uint32_t timeout_milliseconds,
+                                uint32_t count,
+                                void* const* handles,
+                                int32_t alertable);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_close_event(void* handle);
+
+[[noreturn]] void GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_fail_fast(uint32_t reason);
+
+[[noreturn]] void GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_fail_fast_default(void);
 
 uint32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_fls_alloc(guidexos_nativeaot_fls_detach_callback callback);

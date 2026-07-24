@@ -2,14 +2,15 @@
 
 Current PAL/runtime status: [NativeAOT PAL/runtime replacement](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md). Current HostLog status: [Managed HostLog access-violation diagnosis](MANAGED_HOSTLOG_ACCESS_VIOLATION_DIAGNOSIS.md).
 
-Status: current 2026-07-23 validation. No RhInitialize, GC heap construction,
+Status: current 2026-07-24 validation. No RhInitialize, GC heap construction,
 finalizer/helper startup, managed allocation through the collector, or
-collection was executed. Decision: Outcome C. The Windows gcenv object was
-replaced and exact collector symbol binding succeeds, but a separate
-NativeAOT PAL/runtime object family still contributes mandatory Windows import
-candidates. The HostLog proof now passes reproducibly with the corrected
-guideXOS runtime pack; the historical stock-artifact fault is diagnosed in the
-linked HostLog report.
+collection was executed. The Windows gcenv object remains PASS at 53/53, and
+the separate four-object NativeAOT PAL/runtime replacement is now active with
+zero replacement-object Windows imports. The current overall decision is
+Outcome B because the Server Win64 bridge preflight passes while the deliberate
+system-QEMU Win64 hook-table bridge remains blocked. See
+[NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md)
+and [NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md](NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md).
 
 ## 1. Objective
 
@@ -179,8 +180,11 @@ The removed gcenv object no longer contributes GC-owned imports for VM,
 synchronization, timing, processor, or event methods. No fake Win32 VM exports
 were added.
 
-The adapted archive still has 19 raw Windows import candidates in other stock
-objects:
+The original pre-replacement archive had 19 raw Windows import candidates in
+the four selected PAL objects. The active replacement archive removes those
+contributions; see the [active PAL before/after report](../../out/dotnet/pal-runtime-active-replacement/imports/remaining-imports.json).
+The replacement objects contribute zero Windows imports. Historical candidate
+mapping:
 
 | Import candidate(s) | Contributing member |
 | --- | --- |
@@ -240,27 +244,11 @@ BA847F225439A8D693CD975CCAACDD01264BDA88BE4F2BBF18D5A0E4DB0F1F52.
 
 ## 16. HostLog regression status
 
-The clean nonallocating stock HostLog proof **reproduced but is unresolved**:
-exit 0xC0000005 before the host callback log line. Current diagnostics record
-faultAddress/rip 0x8dc44, FLS slot 7, stack bounds 0x551b400000 through
-0x551b600000, and the last callback as entering host call dispatch.
-
-Map disassembly identifies ManagedMain at 0x10001900 and an indirect call at
-0x100019cf through ctx->host->log; the callback did not complete. The fault
-target is outside the proof image and mapped server image, so the source-level
-faulting instruction is not established. ThreadStore attachment was not
-reached or is unknown. This proof used UseGuideXosRuntimePack=False, so the
-adapted GC archive was not linked and no exact GC platform method was entered.
-The current proof hashes are:
-
-~~~text
-HostLogProof.exe  24B8F7D827627A40BDE2F0910AB6D7409686BEDD402B2B0F27992410391DF285
-HostLogProof.elf  F19BD9D8E9DA9AE3B041F0F14911BB155D7178EDCCA542BE5D91F81B896B5DA7
-HostLogProof.map  E94F39120E23AC11144365A5A890B5F3C619BD1A5B9ABF24662B8459A0196832
-~~~
-
-This is not classified as the historical FlsGetValue path because current RIP
-and binding evidence do not demonstrate that path.
+The corrected guideXOS HostLog proof **passes reproducibly**: exact output
+`Hello from managed guideXOS code`, exactly one callback per launch, return
+code `0`, two launches in one Server session, and a fresh second process. The
+historical stock-artifact fault target was `0x8DC44`, caused by an unresolved
+`__imp_FlsGetValue` cell, and is no longer reached.
 
 ## 17. Repeated-allocation regression status
 
@@ -284,33 +272,25 @@ GC/platform import, and was not broadly relaxed.
 | Stock identity; Windows member identified/removed | PASS |
 | GuideXOS object; exact parity/binding | PASS, 53/53 |
 | Duplicate/missing definitions | PASS, 0/0 |
-| Windows VM/synchronization/FLS/thread elimination | PASS for removed gcenv; FAIL for separate PAL/runtime objects |
+| Windows VM/synchronization/FLS/thread elimination | PASS for removed gcenv and active PAL replacements |
 | Exact hosted probe | PASS |
-| Exact QEMU probe | BLOCKED by MSVC-to-MinGW ABI boundary |
-| HostLog baseline | Reproduced but unresolved |
+| Exact QEMU probe | Server trampoline PASS; system-QEMU blocked by Win64 hook-table bridge |
+| HostLog baseline | PASS after clean corrected stage |
 | Repeated-allocation baseline | PASS after clean rebuild/stage |
 
 The GC startup gate remains **not ready**. No RhInitialize call is authorized.
 
 ## 19. Remaining blocker
 
-Outcome B: the primary Windows GC environment object replacement works, but the
-mandatory NativeAOT PAL/runtime platform family remains bound in
-PalRedhawkCommon.cpp.obj, PalRedhawkMinWin.cpp.obj, thread.cpp.obj, and
-time.c.obj. This is the exact remaining symbol family, not a request for fake
-Win32 compatibility exports.
-
-The HostLog access violation is an independent unresolved managed-proof
-regression, and the exact Workstation archive cannot yet execute in the current
-QEMU ABI target. Both remain readiness blockers.
+Outcome B: active PAL replacement is complete, but the exact bare-metal QEMU
+bridge remains blocked by the missing versioned Win64 hook table and
+callback/worker/ThreadStore bridge. This is not a request for fake Win32
+compatibility exports.
 
 ## 20. Exact next experiment
 
-Rebuild the identified NativeAOT PAL/runtime object subset from the same locked
-source and matching MSVC ABI, replacing its Windows platform dependencies with
-guideXOS PAL adapters. Repeat the archive/member/symbol/import audit and add an
-exact-symbol probe in a target with the same ABI, or produce a separately
-proven ABI-compatible QEMU build. Keep RhInitialize, heap construction,
+Implement and prove the versioned Win64 PAL hook table plus
+callback/worker/stack/ThreadStore bridge in the guideXOS QEMU execution side,
+then rerun the exact PE-to-ELF PAL probe. Keep RhInitialize, heap construction,
 finalizer/helper startup, managed collector allocation, and collection
-disabled. Diagnose the HostLog indirect-call fault separately before
-reconsidering the startup gate.
+disabled.

@@ -1,0 +1,15 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-active-preflight\guidexos_nativeaot_pal_minwin_replacement.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          10 .bss
+         2D8 .chks64
+           4 .data
+          C8 .debug$S
+          C3 .drectve
+         120 .pdata
+         60F .text$mn
+         134 .xdata
