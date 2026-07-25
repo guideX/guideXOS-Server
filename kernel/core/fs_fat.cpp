@@ -30,6 +30,7 @@ static struct {
     bool     active;
     uint8_t  volIdx;
     uint32_t cluster;
+    uint32_t clusterSteps;
     uint32_t sectorInCluster;
     uint32_t entryInSector;
 } s_dirIter;
@@ -81,6 +82,14 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
     return block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
 }
 
+static block::Status write_volume_sectors(const FATVolume& vol, uint64_t lba,
+                                          uint32_t count, const void* buffer)
+{
+    if (count == 0 || !buffer) return block::BLOCK_ERR_INVALID;
+    return block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba,
+                                count, buffer);
+}
+
 // ================================================================
 // FAT cluster ? sector translation
 // ================================================================
@@ -111,8 +120,27 @@ static uint32_t fat_cluster_mask(const FATVolume& vol)
     return vol.type == FAT_TYPE_FAT16 ? FAT16_CLUSTER_MASK : FAT32_CLUSTER_MASK;
 }
 
+static bool is_valid_data_cluster(const FATVolume& vol, uint32_t cluster)
+{
+    uint32_t clusterCount = vol.type == FAT_TYPE_EXFAT
+        ? vol.exfatClusterCount
+        : vol.totalDataClusters;
+    return cluster >= 2 && clusterCount != 0 &&
+           (cluster - 2) < clusterCount;
+}
+
+static uint32_t max_chain_steps(const FATVolume& vol)
+{
+    uint32_t clusterCount = vol.type == FAT_TYPE_EXFAT
+        ? vol.exfatClusterCount
+        : vol.totalDataClusters;
+    return clusterCount != 0 ? clusterCount : 1;
+}
+
 static uint32_t fat_next_cluster(const FATVolume& vol, uint32_t cluster)
 {
+    if (!is_valid_data_cluster(vol, cluster)) return fat_end_value(vol);
+
     uint32_t entrySize = fat_entry_size(vol);
     uint32_t fatOffset   = cluster * entrySize;
     uint32_t fatSector   = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
@@ -136,6 +164,8 @@ static uint32_t fat_next_cluster(const FATVolume& vol, uint32_t cluster)
 
 static uint32_t exfat_next_cluster(const FATVolume& vol, uint32_t cluster)
 {
+    if (!is_valid_data_cluster(vol, cluster)) return 0xFFFFFFFF;
+
     uint32_t fatOffset   = cluster * 4;
     uint32_t sectorSize  = 1u << vol.exfatBytesPerSectorShift;
     uint32_t fatSector   = vol.exfatFatOffset + (fatOffset / sectorSize);
@@ -378,6 +408,7 @@ static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
     vol.bytesPerSector    = 1u << bs->bytesPerSectorShift;
     vol.sectorsPerCluster = 1u << bs->sectorsPerClusterShift;
     vol.firstDataSector   = bs->clusterHeapOffset;
+    vol.totalDataClusters = bs->clusterCount;
 
     vol.volumeLabel[0] = '\0';
     vol.mounted = true;
@@ -393,6 +424,11 @@ static block::Status read_cluster_sector(const FATVolume& vol,
                                          uint32_t sectorOffset,
                                          void* buffer)
 {
+    if (!is_valid_data_cluster(vol, cluster) ||
+        sectorOffset >= vol.sectorsPerCluster) {
+        return block::BLOCK_ERR_INVALID;
+    }
+
     uint32_t lba;
     if (vol.type == FAT_TYPE_FAT16 || vol.type == FAT_TYPE_FAT32) {
         lba = cluster_to_sector(vol, cluster) + sectorOffset;
@@ -409,6 +445,11 @@ static block::Status write_cluster_sector(const FATVolume& vol,
                                           uint32_t sectorOffset,
                                           const void* buffer)
 {
+    if (!is_valid_data_cluster(vol, cluster) ||
+        sectorOffset >= vol.sectorsPerCluster) {
+        return block::BLOCK_ERR_INVALID;
+    }
+
     uint32_t lba;
     if (vol.type == FAT_TYPE_FAT16 || vol.type == FAT_TYPE_FAT32) {
         lba = cluster_to_sector(vol, cluster) + sectorOffset;
@@ -636,6 +677,7 @@ bool open_root_dir(uint8_t volumeIndex)
     s_dirIter.active          = true;
     s_dirIter.volIdx          = volumeIndex;
     s_dirIter.cluster         = s_volumes[volumeIndex].rootCluster;
+    s_dirIter.clusterSteps    = 0;
     s_dirIter.sectorInCluster = 0;
     s_dirIter.entryInSector   = 0;
     return true;
@@ -661,10 +703,17 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
                 s_dirIter.active = false;
                 return false;
             }
-        } else if (is_end_of_chain(vol, s_dirIter.cluster)) {
+        } else if (is_end_of_chain(vol, s_dirIter.cluster) ||
+                   !is_valid_data_cluster(vol, s_dirIter.cluster) ||
+                   (s_dirIter.sectorInCluster == 0 &&
+                    s_dirIter.entryInSector == 0 &&
+                    s_dirIter.clusterSteps >= max_chain_steps(vol))) {
             s_dirIter.active = false;
             return false;
         } else {
+            if (s_dirIter.sectorInCluster == 0 && s_dirIter.entryInSector == 0) {
+                ++s_dirIter.clusterSteps;
+            }
             // Read current sector
             block::Status st = read_cluster_sector(vol,
                 s_dirIter.cluster, s_dirIter.sectorInCluster, s_secBuf);
@@ -755,12 +804,18 @@ uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
     uint32_t bytesRead = 0;
     uint8_t* dst = static_cast<uint8_t*>(buffer);
     uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
+    uint32_t clusterVisits = 0;
 
     while (bytesRead < len && f.currentOffset < f.fileSize) {
-        if (is_end_of_chain(vol, f.currentCluster)) break;
+        if (is_end_of_chain(vol, f.currentCluster) ||
+            !is_valid_data_cluster(vol, f.currentCluster)) break;
 
         // Offset within current cluster
         uint32_t offsetInCluster = f.currentOffset % clusterBytes;
+        if (offsetInCluster == 0) {
+            if (clusterVisits >= max_chain_steps(vol)) break;
+            ++clusterVisits;
+        }
         uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
         uint32_t offsetInSector  = offsetInCluster % vol.bytesPerSector;
 
@@ -802,11 +857,17 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
     uint32_t bytesWritten = 0;
     const uint8_t* src = static_cast<const uint8_t*>(buffer);
     uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
+    uint32_t clusterVisits = 0;
 
     while (bytesWritten < len && f.currentOffset < f.fileSize) {
-        if (is_end_of_chain(vol, f.currentCluster)) break;
+        if (is_end_of_chain(vol, f.currentCluster) ||
+            !is_valid_data_cluster(vol, f.currentCluster)) break;
 
         uint32_t offsetInCluster = f.currentOffset % clusterBytes;
+        if (offsetInCluster == 0) {
+            if (clusterVisits >= max_chain_steps(vol)) break;
+            ++clusterVisits;
+        }
         uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
         uint32_t offsetInSector  = offsetInCluster % vol.bytesPerSector;
 
@@ -993,8 +1054,12 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
     }
 
     uint32_t cluster = dirCluster;
+    uint32_t clusterSteps = 0;
 
-    while (!is_end_of_chain(vol, cluster)) {
+    while (!is_end_of_chain(vol, cluster) &&
+           is_valid_data_cluster(vol, cluster) &&
+           clusterSteps < max_chain_steps(vol)) {
+        ++clusterSteps;
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
             uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
             if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
@@ -1026,17 +1091,35 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
     const uint8_t* src = static_cast<const uint8_t*>(buffer);
     uint32_t cluster = firstCluster;
     uint32_t written = 0;
+    uint32_t clusterSteps = 0;
 
-    while (written < len && !is_end_of_chain(vol, cluster)) {
-        for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster && written < len; ++sectorInCluster) {
-            memzero(s_secBuf, vol.bytesPerSector);
-            uint32_t toCopy = len - written;
-            if (toCopy > vol.bytesPerSector) toCopy = vol.bytesPerSector;
-            memcopy(s_secBuf, src + written, toCopy);
-            if (write_cluster_sector(vol, cluster, sectorInCluster, s_secBuf) != block::BLOCK_OK) {
+    while (written < len && !is_end_of_chain(vol, cluster) &&
+           is_valid_data_cluster(vol, cluster) &&
+           clusterSteps < max_chain_steps(vol)) {
+        ++clusterSteps;
+
+        uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
+        uint32_t bytesThisCluster = len - written;
+        if (bytesThisCluster > clusterBytes) bytesThisCluster = clusterBytes;
+
+        uint32_t fullSectors = bytesThisCluster / vol.bytesPerSector;
+        if (fullSectors > 0) {
+            uint32_t clusterSector = cluster_to_sector(vol, cluster);
+            if (write_volume_sectors(vol, clusterSector, fullSectors,
+                                     src + written) != block::BLOCK_OK) {
                 return false;
             }
-            written += toCopy;
+            written += fullSectors * vol.bytesPerSector;
+        }
+
+        if (written < len && bytesThisCluster > fullSectors * vol.bytesPerSector) {
+            uint32_t partialBytes = bytesThisCluster - fullSectors * vol.bytesPerSector;
+            memzero(s_secBuf, vol.bytesPerSector);
+            memcopy(s_secBuf, src + written, partialBytes);
+            if (write_cluster_sector(vol, cluster, fullSectors, s_secBuf) != block::BLOCK_OK) {
+                return false;
+            }
+            written += partialBytes;
         }
 
         if (written < len) {
@@ -1048,6 +1131,7 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
                 if (write_fat_entry(vol, newCluster, fat_end_value(vol)) != block::BLOCK_OK) return false;
                 next = newCluster;
             }
+            if (!is_valid_data_cluster(vol, next)) return false;
             cluster = next;
         }
     }
@@ -1111,8 +1195,12 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
     }
 
     uint32_t cluster = dirCluster;
+    uint32_t clusterSteps = 0;
 
-    while (!is_end_of_chain(vol, cluster)) {
+    while (!is_end_of_chain(vol, cluster) &&
+           is_valid_data_cluster(vol, cluster) &&
+           clusterSteps < max_chain_steps(vol)) {
+        ++clusterSteps;
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
             uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
             if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
@@ -1206,7 +1294,9 @@ static uint32_t cluster_chain_capacity(const FATVolume& vol, uint32_t firstClust
 {
     uint32_t clusters = 0;
     uint32_t cluster = firstCluster;
-    while (!is_end_of_chain(vol, cluster) && clusters <= vol.totalDataClusters) {
+    while (!is_end_of_chain(vol, cluster) &&
+           is_valid_data_cluster(vol, cluster) &&
+           clusters < max_chain_steps(vol)) {
         ++clusters;
         cluster = next_cluster(vol, cluster);
     }
@@ -1221,6 +1311,7 @@ bool open_dir(uint8_t volumeIndex, uint32_t dirCluster)
     s_dirIter.active          = true;
     s_dirIter.volIdx          = volumeIndex;
     s_dirIter.cluster         = dirCluster;
+    s_dirIter.clusterSteps    = 0;
     s_dirIter.sectorInCluster = 0;
     s_dirIter.entryInSector   = 0;
     return true;

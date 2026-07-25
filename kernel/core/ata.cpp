@@ -310,12 +310,16 @@ static block::Status ata_pio_write(uint8_t devIdx,
             arch::outw(static_cast<uint16_t>(dev.ioBase + ATA_REG_DATA), wbuf[w]);
         }
 
-        // Flush cache
-        arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-                   dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
-        if (!ata_wait_bsy(dev.ioBase, 500000))
-            return block::BLOCK_ERR_TIMEOUT;
     }
+
+    // A block write is the persistence boundary. Flushing every sector made
+    // large FAT copies spend most of their time in synchronous cache flushes
+    // while the desktop event handler was blocked.
+    arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
+               dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
+    if (!ata_wait_bsy(dev.ioBase, 500000))
+        return block::BLOCK_ERR_TIMEOUT;
+
     return block::BLOCK_OK;
 }
 
