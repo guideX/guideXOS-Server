@@ -4840,6 +4840,12 @@ namespace gxos {
             oss << "  poll_event\n";
             oss << "  file_exists\n";
             oss << "  file_read_all\n";
+            oss << "  file_stat (hosted workspace, absolute path, max 240 bytes)\n";
+            oss << "  file_read_workspace (hosted workspace, max 256 KiB)\n";
+            oss << "  file_list (hosted workspace, max 129 returned entries)\n";
+            oss << "  file_write_all (hosted workspace, max 256 KiB)\n";
+            oss << "workspace path policy: absolute UTF-8 host paths only; traversal, device prefixes, control bytes, and symlink components rejected\n";
+            oss << "workspace root policy: guest-selected Developer Studio root containment; hosted filesystem permissions are development-only\n";
             return oss.str();
         }
 
@@ -4942,7 +4948,7 @@ namespace gxos {
             }
             oss << "\n";
             oss << "apiVersion: " << runtimeContext.hostCalls.version << "\n";
-            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.draw_rect && runtimeContext.hostCalls.wait_for_close && runtimeContext.hostCalls.poll_event && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
+            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.draw_rect && runtimeContext.hostCalls.wait_for_close && runtimeContext.hostCalls.poll_event && runtimeContext.hostCalls.exit && runtimeContext.hostCalls.file_stat && runtimeContext.hostCalls.file_read_workspace && runtimeContext.hostCalls.file_list && runtimeContext.hostCalls.file_write_all) ? "true" : "false") << "\n";
             oss << "runtimeSuccess: " << (runtimeContext.success ? "true" : "false") << "\n";
             if (!runtimeContext.diagnostics.empty()) {
                 oss << "runtimeDiagnostics: ";

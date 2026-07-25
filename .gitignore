@@ -22,8 +22,17 @@
 /kernel/build
 /guideXOSServer.exe
 /guideXOSServer.experimental.exe
+/tmp/developer-studio-phase-build.*
+/tmp/developer-studio-phase-build*.log
+/tmp/native-filesystem-contract-test*
+/tmp/native_abi_layout_test-phase-current.exe
 /logs
-/third_party
+# Vendor trees remain ignored except for the reproducible stb_image.h header
+# required by the hosted Native ELF/App Model build.
+/third_party/*
+!/third_party/stb/
+/third_party/stb/*
+!/third_party/stb/stb_image.h
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
 /scripts/fixtures/public-roots/*.local

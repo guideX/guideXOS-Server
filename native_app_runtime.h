@@ -3,6 +3,7 @@
 #include "app_launch_resolver.h"
 #include "native_elf_image_loader.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -124,6 +125,21 @@ struct NativeHostCallTable {
     gx_result (*file_list)(NativeGxAppContext* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated) = nullptr;
     gx_result (*file_write_all)(NativeGxAppContext* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten) = nullptr;
 };
+
+static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
+static_assert(offsetof(NativeHostCallTable, get_api_version) == 16, "native ABI version slot changed");
+static_assert(offsetof(NativeHostCallTable, request_window) == 24, "native ABI request_window slot changed");
+static_assert(offsetof(NativeHostCallTable, file_read_all) == 72, "native ABI file_read_all slot changed");
+static_assert(offsetof(NativeHostCallTable, file_exists) == 80, "native ABI file_exists slot changed");
+static_assert(offsetof(NativeHostCallTable, request_window_ex) == 88, "native ABI request_window_ex slot changed");
+static_assert(offsetof(NativeHostCallTable, file_read) == 96, "native ABI file_read slot changed");
+static_assert(offsetof(NativeHostCallTable, present_frame) == 104, "native ABI present_frame slot changed");
+static_assert(offsetof(NativeHostCallTable, get_ticks_ms) == 112, "native ABI get_ticks_ms slot changed");
+static_assert(offsetof(NativeHostCallTable, file_stat) == 120, "native ABI file_stat slot changed");
+static_assert(offsetof(NativeHostCallTable, file_read_workspace) == 128, "native ABI file_read_workspace slot changed");
+static_assert(offsetof(NativeHostCallTable, file_list) == 136, "native ABI file_list slot changed");
+static_assert(offsetof(NativeHostCallTable, file_write_all) == 144, "native ABI file_write_all slot changed");
+static_assert(sizeof(NativeHostCallTable) == 152, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,
@@ -248,6 +264,10 @@ public:
 private:
     static void LogContext(const NativeAppRuntimeContext& context, const std::string& abi);
 };
+
+#ifdef GX_NATIVE_FILESYSTEM_CONTRACT_TEST
+bool RunNativeFilesystemContractTest(std::string* failure);
+#endif
 
 } // namespace apps
 } // namespace gxos
