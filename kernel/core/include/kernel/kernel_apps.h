@@ -457,6 +457,9 @@ private:
     void beginMoveSelected();
     void pasteClipboard();
     bool copyFileContents(const char* sourcePath, const char* destPath);
+    bool contextMenuHasFileOperations() const;
+    int contextMenuItemCount() const;
+    const char* contextMenuItemLabel(int item) const;
     int hitTestContextMenu(int x, int y) const;
     bool handleContextMenuClick(int x, int y);
     int hitTestEntryRow(int x, int y) const;

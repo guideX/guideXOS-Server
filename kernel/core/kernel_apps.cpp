@@ -4151,7 +4151,7 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     appDrawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
 
     if (m_contextMenuOpen) {
-        static const int kContextMenuItems = 5;
+        const int kContextMenuItems = contextMenuItemCount();
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, rgb(245, 245, 248));
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY + CONTEXT_MENU_ITEM_H * kContextMenuItems + 1, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
@@ -4162,11 +4162,11 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 framebuffer::fill_rect(x + m_contextMenuX + 1, y + m_contextMenuY + 1 + i * CONTEXT_MENU_ITEM_H, CONTEXT_MENU_W - 2, CONTEXT_MENU_ITEM_H, rgb(60, 90, 140));
             }
         }
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6,  "Open", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H, "Pin to Desktop", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 2, "Rename", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 3, "Move to Trash", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 4, "Properties", rgb(20, 20, 20));
+        for (int i = 0; i < kContextMenuItems; ++i) {
+            appDrawText(x + m_contextMenuX + 8,
+                        y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * i,
+                        contextMenuItemLabel(i), rgb(20, 20, 20));
+        }
     }
 
     if (m_renamePrompt) {
@@ -4886,6 +4886,11 @@ void FileExplorerApp::closeProperties() {
 void FileExplorerApp::beginCopySelected() {
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
+    if (entry.isDir) {
+        setStatus("Folder copy/paste is not supported");
+        invalidate();
+        return;
+    }
     joinPath(m_currentPath, entry.name, m_clipboard.sourcePath, sizeof(m_clipboard.sourcePath));
     strcopy(m_clipboard.sourceName, entry.name, sizeof(m_clipboard.sourceName));
     strcopy(m_clipboard.sourceMount, m_currentPath, sizeof(m_clipboard.sourceMount));
@@ -4899,6 +4904,11 @@ void FileExplorerApp::beginCopySelected() {
 void FileExplorerApp::beginMoveSelected() {
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
+    if (entry.isDir) {
+        setStatus("Folder copy/paste is not supported");
+        invalidate();
+        return;
+    }
     joinPath(m_currentPath, entry.name, m_clipboard.sourcePath, sizeof(m_clipboard.sourcePath));
     strcopy(m_clipboard.sourceName, entry.name, sizeof(m_clipboard.sourceName));
     strcopy(m_clipboard.sourceMount, m_currentPath, sizeof(m_clipboard.sourceMount));
@@ -4957,10 +4967,42 @@ void FileExplorerApp::pasteClipboard() {
     invalidate();
 }
 
+bool FileExplorerApp::contextMenuHasFileOperations() const {
+    return m_selected >= 0 && m_selected < m_entryCount && !m_entries[m_selected].isDir;
+}
+
+int FileExplorerApp::contextMenuItemCount() const {
+    return contextMenuHasFileOperations() ? 7 : 5;
+}
+
+const char* FileExplorerApp::contextMenuItemLabel(int item) const {
+    if (contextMenuHasFileOperations()) {
+        switch (item) {
+            case 0: return "Open";
+            case 1: return "Copy File";
+            case 2: return "Cut File";
+            case 3: return "Pin to Desktop";
+            case 4: return "Rename";
+            case 5: return "Move to Trash";
+            case 6: return "Properties";
+            default: return "";
+        }
+    }
+
+    switch (item) {
+        case 0: return "Open";
+        case 1: return "Pin to Desktop";
+        case 2: return "Rename";
+        case 3: return "Move to Trash";
+        case 4: return "Properties";
+        default: return "";
+    }
+}
+
 int FileExplorerApp::hitTestContextMenu(int x, int y) const {
     if (!m_contextMenuOpen) return -1;
     if (x < m_contextMenuX || x >= m_contextMenuX + CONTEXT_MENU_W) return -1;
-    if (y < m_contextMenuY || y >= m_contextMenuY + CONTEXT_MENU_ITEM_H * 5) return -1;
+    if (y < m_contextMenuY || y >= m_contextMenuY + CONTEXT_MENU_ITEM_H * contextMenuItemCount()) return -1;
     return (y - m_contextMenuY) / CONTEXT_MENU_ITEM_H;
 }
 
@@ -4968,13 +5010,26 @@ bool FileExplorerApp::handleContextMenuClick(int x, int y) {
     int item = hitTestContextMenu(x, y);
     if (item < 0) return false;
     m_contextMenuOpen = false;
-    switch (item) {
-        case 0: openSelected(); break;
-        case 1: pinSelectedToDesktop(); break;
-        case 2: beginRenameSelected(); break;
-        case 3: showDeleteConfirmation(); break;
-        case 4: showPropertiesForSelected(); break;
-        default: break;
+    if (contextMenuHasFileOperations()) {
+        switch (item) {
+            case 0: openSelected(); break;
+            case 1: beginCopySelected(); break;
+            case 2: beginMoveSelected(); break;
+            case 3: pinSelectedToDesktop(); break;
+            case 4: beginRenameSelected(); break;
+            case 5: showDeleteConfirmation(); break;
+            case 6: showPropertiesForSelected(); break;
+            default: break;
+        }
+    } else {
+        switch (item) {
+            case 0: openSelected(); break;
+            case 1: pinSelectedToDesktop(); break;
+            case 2: beginRenameSelected(); break;
+            case 3: showDeleteConfirmation(); break;
+            case 4: showPropertiesForSelected(); break;
+            default: break;
+        }
     }
     return true;
 }
