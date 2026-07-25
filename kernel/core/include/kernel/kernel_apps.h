@@ -374,18 +374,9 @@ private:
         uint64_t size;
     };
 
-    enum class ClipboardOperation {
-        None,
-        Copy,
-        Move,
-    };
-
-    struct ClipboardState {
-        char sourcePath[MAX_PATH_LEN];
-        char sourceName[vfs::VFS_MAX_FILENAME];
-        char sourceMount[64];
-        bool sourceIsDir;
-        ClipboardOperation operation;
+    enum class ContextMenuTarget {
+        Entry,
+        CurrentDirectory,
     };
 
     char m_currentPath[MAX_PATH_LEN];
@@ -412,11 +403,12 @@ private:
     char m_renameValue[vfs::VFS_MAX_FILENAME];
     char m_deleteTarget[MAX_PATH_LEN];
     char m_deleteTargetName[vfs::VFS_MAX_FILENAME];
-    ClipboardState m_clipboard;
     bool m_contextMenuOpen;
     int m_contextMenuX;
     int m_contextMenuY;
     int m_contextMenuHover;
+    bool m_contextMenuPasteVisible;
+    ContextMenuTarget m_contextMenuTarget;
     bool m_propertiesOpen;
     bool m_propertiesIsDir;
     char m_propertiesName[vfs::VFS_MAX_FILENAME];
@@ -456,8 +448,10 @@ private:
     void beginCopySelected();
     void beginMoveSelected();
     void pasteClipboard();
-    bool copyFileContents(const char* sourcePath, const char* destPath);
+    void pasteClipboardTo(const char* destinationDirectory);
     bool contextMenuHasFileOperations() const;
+    bool contextMenuHasFolderPaste() const;
+    bool contextMenuHasCurrentDirectoryPaste() const;
     int contextMenuItemCount() const;
     const char* contextMenuItemLabel(int item) const;
     int hitTestContextMenu(int x, int y) const;

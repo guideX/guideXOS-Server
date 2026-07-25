@@ -15,6 +15,7 @@
 #include "include/kernel/time.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
+#include "include/kernel/file_clipboard.h"
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/nic.h"
 #include "include/kernel/ipv4.h"
@@ -3885,15 +3886,12 @@ FileExplorerApp::FileExplorerApp()
     m_renameValue[0] = '\0';
     m_deleteTarget[0] = '\0';
     m_deleteTargetName[0] = '\0';
-    m_clipboard.sourcePath[0] = '\0';
-    m_clipboard.sourceName[0] = '\0';
-    m_clipboard.sourceMount[0] = '\0';
-    m_clipboard.sourceIsDir = false;
-    m_clipboard.operation = ClipboardOperation::None;
     m_contextMenuOpen = false;
     m_contextMenuX = 0;
     m_contextMenuY = 0;
     m_contextMenuHover = -1;
+    m_contextMenuPasteVisible = false;
+    m_contextMenuTarget = ContextMenuTarget::Entry;
     m_propertiesOpen = false;
     m_propertiesIsDir = false;
     m_propertiesName[0] = '\0';
@@ -4358,12 +4356,23 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
         if (index >= 0 && index < m_entryCount) {
             m_selected = index;
             updateActionButtons();
+            m_contextMenuTarget = ContextMenuTarget::Entry;
+            m_contextMenuPasteVisible = false;
+            if (m_entries[m_selected].isDir) {
+                char destinationDirectory[MAX_PATH_LEN];
+                joinPath(m_currentPath, m_entries[m_selected].name, destinationDirectory, sizeof(destinationDirectory));
+                m_contextMenuPasteVisible = file_clipboard::can_paste_to(destinationDirectory);
+            }
+            m_contextMenuOpen = true;
+        } else {
+            m_contextMenuTarget = ContextMenuTarget::CurrentDirectory;
+            m_contextMenuPasteVisible = file_clipboard::can_paste_to(m_currentPath);
+            m_contextMenuOpen = contextMenuHasCurrentDirectoryPaste();
         }
-        m_contextMenuOpen = (index >= 0 && index < m_entryCount);
         m_contextMenuX = localX;
         m_contextMenuY = localY;
         m_contextMenuHover = -1;
-        serial::puts("[fileexplorer-bm] context menu open\n");
+        if (m_contextMenuOpen) serial::puts("[fileexplorer-bm] context menu open\n");
         invalidate();
         return;
     }
@@ -4891,13 +4900,14 @@ void FileExplorerApp::beginCopySelected() {
         invalidate();
         return;
     }
-    joinPath(m_currentPath, entry.name, m_clipboard.sourcePath, sizeof(m_clipboard.sourcePath));
-    strcopy(m_clipboard.sourceName, entry.name, sizeof(m_clipboard.sourceName));
-    strcopy(m_clipboard.sourceMount, m_currentPath, sizeof(m_clipboard.sourceMount));
-    m_clipboard.sourceIsDir = entry.isDir;
-    m_clipboard.operation = ClipboardOperation::Copy;
-    setStatus("Copied item path to File Explorer clipboard");
-    serial::puts("[fileexplorer-bm] clipboard copy prepared\n");
+    char fullPath[MAX_PATH_LEN];
+    joinPath(m_currentPath, entry.name, fullPath, sizeof(fullPath));
+    if (file_clipboard::set_file(fullPath, file_clipboard::Operation::Copy)) {
+        setStatus("Copied file to guideXOS clipboard");
+        serial::puts("[fileexplorer-bm] shared file clipboard copy prepared\n");
+    } else {
+        setStatus("Unable to copy file to clipboard");
+    }
     invalidate();
 }
 
@@ -4909,73 +4919,59 @@ void FileExplorerApp::beginMoveSelected() {
         invalidate();
         return;
     }
-    joinPath(m_currentPath, entry.name, m_clipboard.sourcePath, sizeof(m_clipboard.sourcePath));
-    strcopy(m_clipboard.sourceName, entry.name, sizeof(m_clipboard.sourceName));
-    strcopy(m_clipboard.sourceMount, m_currentPath, sizeof(m_clipboard.sourceMount));
-    m_clipboard.sourceIsDir = entry.isDir;
-    m_clipboard.operation = ClipboardOperation::Move;
-    setStatus("Prepared move in File Explorer clipboard");
-    serial::puts("[fileexplorer-bm] clipboard move prepared\n");
+    char fullPath[MAX_PATH_LEN];
+    joinPath(m_currentPath, entry.name, fullPath, sizeof(fullPath));
+    if (file_clipboard::set_file(fullPath, file_clipboard::Operation::Move)) {
+        setStatus("Cut file to guideXOS clipboard");
+        serial::puts("[fileexplorer-bm] shared file clipboard move prepared\n");
+    } else {
+        setStatus("Unable to cut file to clipboard");
+    }
     invalidate();
 }
 
-bool FileExplorerApp::copyFileContents(const char* sourcePath, const char* destPath) {
-    char buffer[8192];
-    int32_t bytesRead = vfs::read_file(sourcePath, buffer, sizeof(buffer));
-    if (bytesRead < 0) return false;
-    int32_t bytesWritten = vfs::write_file(destPath, buffer, (uint32_t)bytesRead);
-    return bytesWritten == bytesRead;
+void FileExplorerApp::pasteClipboard() {
+    pasteClipboardTo(m_currentPath);
 }
 
-void FileExplorerApp::pasteClipboard() {
-    if (m_clipboard.operation == ClipboardOperation::None || !m_clipboard.sourcePath[0]) {
-        setStatus("Clipboard is empty");
-        invalidate();
-        return;
-    }
-
-    char destPath[MAX_PATH_LEN];
-    joinPath(m_currentPath, m_clipboard.sourceName, destPath, sizeof(destPath));
-
-    if (m_clipboard.sourceIsDir) {
-        setStatus("copy/paste not yet supported for folders");
-        serial::puts("[fileexplorer-bm] copy/paste not yet supported for folders\n");
-        invalidate();
-        return;
-    }
-
-    if (m_clipboard.operation == ClipboardOperation::Copy) {
-        if (copyFileContents(m_clipboard.sourcePath, destPath)) {
-            setStatus("Copied item into current directory");
-            refresh();
-        } else {
-            setStatus("copy/paste not yet supported");
-            serial::puts("[fileexplorer-bm] file copy failed or unsupported\n");
-        }
-    } else if (m_clipboard.operation == ClipboardOperation::Move) {
-        vfs::Status status = vfs::rename(m_clipboard.sourcePath, destPath);
-        if (status == vfs::VFS_OK) {
-            setStatus("Moved item into current directory");
-            m_clipboard.operation = ClipboardOperation::None;
-            m_clipboard.sourcePath[0] = '\0';
-            refresh();
-        } else {
-            setStatus("Move not yet supported");
-            serial::puts("[fileexplorer-bm] move failed\n");
-        }
-    }
+void FileExplorerApp::pasteClipboardTo(const char* destinationDirectory) {
+    file_clipboard::PasteResult result = file_clipboard::paste_to_directory(destinationDirectory);
+    setStatus(file_clipboard::paste_result_message(result));
+    if (result == file_clipboard::PasteResult::Success) refresh();
     invalidate();
 }
 
 bool FileExplorerApp::contextMenuHasFileOperations() const {
-    return m_selected >= 0 && m_selected < m_entryCount && !m_entries[m_selected].isDir;
+    return m_contextMenuTarget == ContextMenuTarget::Entry &&
+           m_selected >= 0 && m_selected < m_entryCount && !m_entries[m_selected].isDir;
+}
+
+bool FileExplorerApp::contextMenuHasFolderPaste() const {
+    if (m_contextMenuTarget != ContextMenuTarget::Entry ||
+        m_selected < 0 || m_selected >= m_entryCount || !m_entries[m_selected].isDir) {
+        return false;
+    }
+    return m_contextMenuPasteVisible;
+}
+
+bool FileExplorerApp::contextMenuHasCurrentDirectoryPaste() const {
+    return m_contextMenuTarget == ContextMenuTarget::CurrentDirectory &&
+           m_contextMenuPasteVisible;
 }
 
 int FileExplorerApp::contextMenuItemCount() const {
-    return contextMenuHasFileOperations() ? 7 : 5;
+    if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
+        return contextMenuHasCurrentDirectoryPaste() ? 1 : 0;
+    }
+    if (contextMenuHasFileOperations()) return 7;
+    return contextMenuHasFolderPaste() ? 6 : 5;
 }
 
 const char* FileExplorerApp::contextMenuItemLabel(int item) const {
+    if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
+        return item == 0 ? "Paste File" : "";
+    }
+
     if (contextMenuHasFileOperations()) {
         switch (item) {
             case 0: return "Open";
@@ -4985,6 +4981,18 @@ const char* FileExplorerApp::contextMenuItemLabel(int item) const {
             case 4: return "Rename";
             case 5: return "Move to Trash";
             case 6: return "Properties";
+            default: return "";
+        }
+    }
+
+    if (contextMenuHasFolderPaste()) {
+        switch (item) {
+            case 0: return "Open";
+            case 1: return "Paste File";
+            case 2: return "Pin to Desktop";
+            case 3: return "Rename";
+            case 4: return "Move to Trash";
+            case 5: return "Properties";
             default: return "";
         }
     }
@@ -5010,7 +5018,9 @@ bool FileExplorerApp::handleContextMenuClick(int x, int y) {
     int item = hitTestContextMenu(x, y);
     if (item < 0) return false;
     m_contextMenuOpen = false;
-    if (contextMenuHasFileOperations()) {
+    if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
+        if (item == 0) pasteClipboard();
+    } else if (contextMenuHasFileOperations()) {
         switch (item) {
             case 0: openSelected(); break;
             case 1: beginCopySelected(); break;
@@ -5019,6 +5029,21 @@ bool FileExplorerApp::handleContextMenuClick(int x, int y) {
             case 4: beginRenameSelected(); break;
             case 5: showDeleteConfirmation(); break;
             case 6: showPropertiesForSelected(); break;
+            default: break;
+        }
+    } else if (contextMenuHasFolderPaste()) {
+        switch (item) {
+            case 0: openSelected(); break;
+            case 1: {
+                char destinationDirectory[MAX_PATH_LEN];
+                joinPath(m_currentPath, m_entries[m_selected].name, destinationDirectory, sizeof(destinationDirectory));
+                pasteClipboardTo(destinationDirectory);
+                break;
+            }
+            case 2: pinSelectedToDesktop(); break;
+            case 3: beginRenameSelected(); break;
+            case 4: showDeleteConfirmation(); break;
+            case 5: showPropertiesForSelected(); break;
             default: break;
         }
     } else {

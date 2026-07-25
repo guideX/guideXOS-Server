@@ -16,6 +16,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/startmenubutton_img.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
+#include "include/kernel/file_clipboard.h"
 #include "include/kernel/shell.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_apps.h"
@@ -6916,23 +6917,45 @@ static void draw_start_menu()
 // Right-click context menu (matching Legacy RightMenu.cs)
 // ============================================================
 
+static const DesktopIcon* context_menu_filesystem_entry()
+{
+    if (s_contextMenuMode != ContextMenuMode::DesktopFilesystemEntry ||
+        s_contextMenuIconDisplayIndex < 0 || s_contextMenuIconDisplayIndex >= s_visibleIconCount) {
+        return nullptr;
+    }
+    int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
+    if (iconIdx < 0 || iconIdx >= kDesktopIconCount) return nullptr;
+    const DesktopIcon& icon = s_desktopIcons[iconIdx];
+    return icon.kind == DesktopItemKind::FilesystemEntry && icon.path[0] ? &icon : nullptr;
+}
+
+static bool desktop_file_paste_available()
+{
+    return file_clipboard::can_paste_to(bare_metal_desktop_current_directory_path());
+}
+
+static void show_file_clipboard_notification(const char* message)
+{
+    s_notification.title = "File Clipboard";
+    s_notification.message = message ? message : "File clipboard operation failed";
+    s_notification.visible = true;
+    s_notification.showTime = s_tickCounter;
+}
+
 static int context_menu_item_count()
 {
     if (s_contextMenuMode == ContextMenuMode::StartMenuApp) return s_startMenuAllProgs ? 2 : 4;
     if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) return 2;
     if (s_contextMenuMode == ContextMenuMode::DesktopTrash) return 2;
     if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
-        if (s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
-            int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
-            if (iconIdx >= 0 && iconIdx < kDesktopIconCount &&
-                s_desktopIcons[iconIdx].kind == DesktopItemKind::FilesystemEntry &&
-                s_desktopIcons[iconIdx].isDirectory) {
-                return 2;
-            }
+        const DesktopIcon* entry = context_menu_filesystem_entry();
+        if (!entry) return 0;
+        if (entry->isDirectory) {
+            return file_clipboard::can_paste_to(entry->path) ? 3 : 2;
         }
-        return 1;
+        return 3; // Open, Copy File, Cut File
     }
-    return kContextMenuCount;
+    return desktop_file_paste_available() ? kContextMenuCount + 1 : kContextMenuCount;
 }
 
 static void draw_right_click_menu()
@@ -6968,7 +6991,7 @@ static void draw_right_click_menu()
             framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(48, 48, 58));
         }
 
-        const char* label = s_contextMenuItems[i];
+        const char* label = "";
         if (s_contextMenuMode == ContextMenuMode::StartMenuApp) {
             if (i == 0) {
                 label = "Open";
@@ -6982,14 +7005,27 @@ static void draw_right_click_menu()
         } else if (s_contextMenuMode == ContextMenuMode::DesktopTrash) {
             label = (i == 0) ? "Open" : "Empty Trash";
         } else if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
-            bool renameable = false;
-            if (s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
-                int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
-                if (iconIdx >= 0 && iconIdx < kDesktopIconCount) {
-                    renameable = s_desktopIcons[iconIdx].kind == DesktopItemKind::FilesystemEntry && s_desktopIcons[iconIdx].isDirectory;
-                }
+            const DesktopIcon* entry = context_menu_filesystem_entry();
+            if (entry && entry->isDirectory) {
+                bool pasteAvailable = file_clipboard::can_paste_to(entry->path);
+                if (i == 0) label = "Open";
+                else if (pasteAvailable && i == 1) label = "Paste File";
+                else if (i == (pasteAvailable ? 2 : 1)) label = "Rename";
+            } else if (entry) {
+                if (i == 0) label = "Open";
+                else if (i == 1) label = "Copy File";
+                else if (i == 2) label = "Cut File";
             }
-            label = (i == 0) ? "Open" : (renameable ? "Rename" : "");
+        } else if (s_contextMenuMode == ContextMenuMode::Desktop) {
+            bool pasteAvailable = desktop_file_paste_available();
+            if (pasteAvailable) {
+                if (i >= 0 && i < 5) label = s_contextMenuItems[i];
+                else if (i == 5) label = "Paste File";
+                else if (i == 6) label = "Open Terminal";
+                else if (i == 7) label = "TaskManager";
+            } else if (i >= 0 && i < kContextMenuCount) {
+                label = s_contextMenuItems[i];
+            }
         }
         if (!label || !label[0]) continue;
         draw_text(mx + 12, itemY + kContextMenuTextTopPadding,
@@ -7087,16 +7123,58 @@ static void handle_context_menu_command(int item)
     }
 
     if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
+        const DesktopIcon* entry = context_menu_filesystem_entry();
+        if (!entry) {
+            s_contextMenuMode = ContextMenuMode::Desktop;
+            return;
+        }
+
         if (item == 0) {
             show_icon_notification(s_contextMenuIconDisplayIndex);
-        } else if (item == 1) {
-            begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
+        } else if (entry->isDirectory) {
+            const bool pasteAvailable = file_clipboard::can_paste_to(entry->path);
+            if (pasteAvailable && item == 1) {
+                file_clipboard::PasteResult result = file_clipboard::paste_to_directory(entry->path);
+                show_file_clipboard_notification(file_clipboard::paste_result_message(result));
+                if (result == file_clipboard::PasteResult::Success) {
+                    refresh_desktop_icons();
+                    bare_metal_desktop_request_folder_refresh("desktop folder file paste");
+                    s_needsRedraw = true;
+                }
+            } else if (item == (pasteAvailable ? 2 : 1)) {
+                begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
+            }
+        } else if (item == 1 || item == 2) {
+            const file_clipboard::Operation operation = item == 1
+                ? file_clipboard::Operation::Copy
+                : file_clipboard::Operation::Move;
+            if (file_clipboard::set_file(entry->path, operation)) {
+                show_file_clipboard_notification(item == 1 ? "Copied file to guideXOS clipboard" :
+                                                  "Cut file to guideXOS clipboard");
+            } else {
+                show_file_clipboard_notification("Unable to prepare file clipboard");
+            }
         }
         s_contextMenuMode = ContextMenuMode::Desktop;
         return;
     }
 
-    switch (item) {
+    const bool pasteAvailable = desktop_file_paste_available();
+    if (pasteAvailable && item == 5) {
+        file_clipboard::PasteResult result = file_clipboard::paste_to_directory(
+            bare_metal_desktop_current_directory_path());
+        show_file_clipboard_notification(file_clipboard::paste_result_message(result));
+        if (result == file_clipboard::PasteResult::Success) {
+            refresh_desktop_icons();
+            bare_metal_desktop_request_folder_refresh("desktop file paste");
+            s_needsRedraw = true;
+        }
+        return;
+    }
+
+    int legacyItem = item;
+    if (pasteAvailable && item >= 5) legacyItem--;
+    switch (legacyItem) {
         case 0: // Refresh
             bare_metal_desktop_request_folder_refresh("right-click refresh");
             refresh_start_menu_list();
