@@ -83,6 +83,25 @@ struct gx_event {
     int param4 = 0;
 };
 
+enum : uint32_t {
+    GX_FILE_TYPE_UNKNOWN = 0,
+    GX_FILE_TYPE_REGULAR = 1,
+    GX_FILE_TYPE_DIRECTORY = 2
+};
+
+struct gx_file_info {
+    uint32_t type = GX_FILE_TYPE_UNKNOWN;
+    uint32_t reserved = 0;
+    uint64_t size = 0;
+};
+
+struct gx_file_entry {
+    uint32_t type = GX_FILE_TYPE_UNKNOWN;
+    uint32_t reserved = 0;
+    uint64_t size = 0;
+    char name[128] = {};
+};
+
 struct NativeHostCallTable {
     uint32_t size = 0;
     uint32_t version = kGuideXOSNativeApiVersion;
@@ -100,6 +119,10 @@ struct NativeHostCallTable {
     gx_result (*file_read)(NativeGxAppContext* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) = nullptr;
     gx_result (*present_frame)(NativeGxAppContext* ctx, gx_handle window, int x, int y, int width, int height, uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes) = nullptr;
     uint64_t (*get_ticks_ms)(NativeGxAppContext* ctx) = nullptr;
+    gx_result (*file_stat)(NativeGxAppContext* ctx, const char* path, gx_file_info* outInfo) = nullptr;
+    gx_result (*file_read_workspace)(NativeGxAppContext* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) = nullptr;
+    gx_result (*file_list)(NativeGxAppContext* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated) = nullptr;
+    gx_result (*file_write_all)(NativeGxAppContext* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten) = nullptr;
 };
 
 enum class NativeAppLifecycleState {
