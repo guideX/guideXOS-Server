@@ -300,10 +300,14 @@ if (!$SkipKernel) {
         if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }
-        if ($KernelExtraCFlags -notcontains "-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS") {
-            $KernelExtraCFlags += "-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS"
-        }
         # Keep the default bare-metal build free of boot-time smoke launches.
+        # The kernel makefile does not include CFLAGS in object dependencies. If
+        # an opt-in launch-smoke build ran immediately before a normal build,
+        # invalidate main.o so the old flagged startup path cannot be reused.
+        $cleanupSmokeEnabled = ($KernelExtraCFlags -join " ") -match "GXOS_DESKTOP_CLEANUP_RUNTIME_PASS"
+        if (-not $cleanupSmokeEnabled) {
+            Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\main.o")
+        }
         # Compiler diagnostics are written to stderr even for successful builds.
         # Keep them visible, but let the native make exit code remain the build
         # result instead of treating a warning as a terminating PowerShell error.

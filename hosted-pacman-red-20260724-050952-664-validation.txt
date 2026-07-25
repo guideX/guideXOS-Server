@@ -1,0 +1,16 @@
+run=20260724-050952-664
+server-wrapper-pid=5744
+server-pid=13040
+compositor=found
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050952-664-initial-seq1-gen7.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=1 compositorFrameSequence=7 frameGeneration=7 paintGeneration=7 captureGeneration=1 pacman=64,264 red=224,184 direction=left target=64,264 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050952-664-initial-seq1-gen7.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050952-664-corridor-seq22-gen23.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=22 compositorFrameSequence=23 frameGeneration=23 paintGeneration=23 captureGeneration=2 pacman=64,264 red=186,184 direction=left target=64,264 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050952-664-corridor-seq22-gen23.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050952-664-intersection-turn-seq38-gen38.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=38 compositorFrameSequence=38 frameGeneration=38 paintGeneration=38 captureGeneration=3 pacman=64,264 red=160,188 direction=down target=64,264 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050952-664-intersection-turn-seq38-gen38.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050952-664-tunnel-seq217-gen217.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=217 compositorFrameSequence=217 frameGeneration=217 paintGeneration=217 captureGeneration=4 pacman=64,264 red=30,232 direction=left target=64,264 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050952-664-tunnel-seq217-gen217.png
+distinct-red-positions=True
+error=Moving Red collision did not enter Dying.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

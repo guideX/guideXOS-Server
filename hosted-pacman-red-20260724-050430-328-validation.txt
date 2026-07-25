@@ -1,0 +1,11 @@
+run=20260724-050430-328
+server-wrapper-pid=10036
+server-pid=18220
+compositor=found
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050430-328-initial-seq1-gen10.png
+capture-target runtimeId=1 windowId=1000 frameSequence=1 compositorFrameSequence=10 frameGeneration=10 paintGeneration=10 captureGeneration=1 pacman=64,232 red=224,184 direction=left target=64,232 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050430-328-initial-seq1-gen10.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050430-328-corridor-seq30-gen32.png
+capture-target runtimeId=1 windowId=1000 frameSequence=30 compositorFrameSequence=32 frameGeneration=32 paintGeneration=32 captureGeneration=2 pacman=64,232 red=171,184 direction=left target=64,232 animationFrame=1 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050430-328-corridor-seq30-gen32.png
+error=Red intersection turn frame was not observed.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

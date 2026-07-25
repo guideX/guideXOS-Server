@@ -1,0 +1,7 @@
+run=20260724-050418-752
+server-wrapper-pid=9244
+server-pid=16684
+compositor=found
+error=Unable to find type [uint8].
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

@@ -1,0 +1,13 @@
+run=20260724-050849-066
+server-wrapper-pid=23808
+server-pid=25436
+compositor=found
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050849-066-initial-seq1-gen3.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=1 compositorFrameSequence=3 frameGeneration=3 paintGeneration=3 captureGeneration=1 pacman=64,232 red=224,184 direction=left target=64,232 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050849-066-initial-seq1-gen3.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050849-066-corridor-seq13-gen13.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=13 compositorFrameSequence=13 frameGeneration=13 paintGeneration=13 captureGeneration=2 pacman=64,232 red=201,184 direction=left target=64,232 animationFrame=1 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050849-066-corridor-seq13-gen13.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050849-066-intersection-turn-seq41-gen41.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=41 compositorFrameSequence=41 frameGeneration=41 paintGeneration=41 captureGeneration=3 pacman=64,232 red=160,195 direction=down target=64,232 animationFrame=1 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050849-066-intersection-turn-seq41-gen41.png
+error=Red tunnel traversal frame was not observed.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

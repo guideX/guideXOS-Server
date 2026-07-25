@@ -6,7 +6,7 @@
   "desktop.taskbar.position": "bottom",
   "desktop.clock.timeZoneId": "pacific",
   "desktop.clock.use24HourTime": false,
-  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan"],
+  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation"],
   "recent": ["Nexgen PacMan","Notepad","Resource Viewer","Image Viewer","DisplayOptions","ControlPanel","guideXOS Navigator"],
   "desktopShortcuts": [
   ],
@@ -17,7 +17,6 @@
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
   "windows": [
-    {"id": 1001, "title": "Nexgen PacMan", "x": 264, "y": 24, "w": 480, "h": 640, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
   ],
   "iconPositions": [
   ]

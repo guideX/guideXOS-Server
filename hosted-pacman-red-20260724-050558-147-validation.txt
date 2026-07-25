@@ -1,0 +1,17 @@
+run=20260724-050558-147
+server-wrapper-pid=25708
+server-pid=13392
+compositor=found
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050558-147-initial-seq1-gen3.png
+capture-target runtimeId=1 windowId=1000 frameSequence=1 compositorFrameSequence=3 frameGeneration=3 paintGeneration=3 captureGeneration=1 pacman=64,232 red=224,184 direction=left target=64,232 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050558-147-initial-seq1-gen3.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050558-147-corridor-seq15-gen16.png
+capture-target runtimeId=1 windowId=1000 frameSequence=15 compositorFrameSequence=16 frameGeneration=16 paintGeneration=16 captureGeneration=2 pacman=64,232 red=199,184 direction=left target=64,232 animationFrame=1 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050558-147-corridor-seq15-gen16.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050558-147-intersection-turn-seq38-gen38.png
+capture-target runtimeId=1 windowId=1000 frameSequence=38 compositorFrameSequence=38 frameGeneration=38 paintGeneration=38 captureGeneration=3 pacman=64,232 red=160,185 direction=down target=64,232 animationFrame=1 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050558-147-intersection-turn-seq38-gen38.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050558-147-tunnel-seq125-gen125.png
+capture-target runtimeId=1 windowId=1000 frameSequence=125 compositorFrameSequence=125 frameGeneration=125 paintGeneration=125 captureGeneration=4 pacman=64,232 red=32,232 direction=left target=64,232 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260724-050558-147-tunnel-seq125-gen125.png
+distinct-red-positions=True
+escape-cleanup=True
+zero-owned-windows=True
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

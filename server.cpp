@@ -173,6 +173,135 @@ static std::string nativeAppProcessesDiagnostic() {
     return oss.str();
 }
 
+static std::string desktopWindowOwnershipDiagnostic() {
+    std::ostringstream oss;
+    const uint64_t compositorPid = gxos::Lifecycle::ensureCompositor();
+    const std::vector<gxos::gui::WindowDebugInfo> windows = gxos::gui::Compositor::debugWindowsSnapshot();
+    oss << "DESKTOP_WINDOW_OWNERS_BEGIN\n";
+    oss << "compositorPid=" << compositorPid << "\n";
+    oss << "windowCount=" << windows.size() << "\n";
+    for (const auto& window : windows) {
+        std::string processName;
+        std::string appId;
+        const bool identityAvailable = gxos::ProcessTable::getIdentity(window.ownerPid, processName, appId);
+        oss << "window id=" << window.id
+            << " ownerPid=" << window.ownerPid
+            << " ownerName=" << (identityAvailable ? processName : "<unknown>")
+            << " appId=" << (identityAvailable && !appId.empty() ? appId : "<unknown>")
+            << " title=" << window.title
+            << " visible=" << (window.visible ? "true" : "false")
+            << "\n";
+    }
+    oss << "DESKTOP_WINDOW_OWNERS_END\n";
+    return oss.str();
+}
+
+static std::string desktopStartupAppModelRegressionDiagnostic() {
+    struct ExpectedApp {
+        const char* appId;
+        const char* displayName;
+    };
+
+    const std::vector<ExpectedApp> expectedApps = {
+        {"gxos.builtin.notepad", "Notepad"},
+        {"gxos.builtin.calculator", "Calculator"},
+        {"gxos.builtin.displayoptions", "DisplayOptions"}
+    };
+
+    std::ostringstream oss;
+    oss << "STARTUP_APP_MODEL_REGRESSION_BEGIN\n";
+    const uint64_t compositorPid = gxos::Lifecycle::ensureCompositor();
+    oss << "compositorPid=" << compositorPid << "\n";
+
+    // This is intentionally a metadata-only call.  The diagnostic proves that
+    // registry initialization does not dispatch any of the launch factories.
+    (void)gxos::gui::DesktopService::GetRegisteredAppsDiagnostic();
+    const auto& registeredApps = gxos::gui::DesktopService::GetRegisteredApps();
+    bool allRegistered = true;
+    for (const auto& expected : expectedApps) {
+        const auto it = std::find_if(registeredApps.begin(), registeredApps.end(),
+            [&](const gxos::gui::RegisteredDesktopApp& app) { return app.id == expected.appId; });
+        const bool registered = it != registeredApps.end();
+        allRegistered = allRegistered && registered;
+        oss << "registered appId=" << expected.appId
+            << " displayName=" << expected.displayName
+            << " result=" << (registered ? "PASS" : "FAIL") << "\n";
+    }
+
+    const std::vector<gxos::gui::WindowDebugInfo> initialWindows = gxos::gui::Compositor::debugWindowsSnapshot();
+    oss << "initialWindowCount=" << initialWindows.size() << "\n";
+    for (const auto& window : initialWindows) {
+        std::string processName;
+        std::string appId;
+        const bool identityAvailable = gxos::ProcessTable::getIdentity(window.ownerPid, processName, appId);
+        oss << "initialWindow id=" << window.id
+            << " ownerPid=" << window.ownerPid
+            << " ownerName=" << (identityAvailable ? processName : "<unknown>")
+            << " appId=" << (identityAvailable && !appId.empty() ? appId : "<unknown>")
+            << " title=" << window.title << "\n";
+    }
+    const bool registrationDidNotLaunch = initialWindows.empty();
+    oss << "registrationDidNotLaunch=" << (registrationDidNotLaunch ? "PASS" : "FAIL") << "\n";
+
+    bool explicitLaunchesPassed = true;
+    std::vector<uint64_t> baselineWindowIds;
+    for (const auto& window : initialWindows) baselineWindowIds.push_back(window.id);
+
+    for (const auto& expected : expectedApps) {
+        std::string launchError;
+        const bool launchReturnedSuccess = gxos::gui::DesktopService::LaunchApp(expected.appId, launchError, false);
+        gxos::gui::WindowDebugInfo launchedWindow;
+        bool windowFound = false;
+        if (launchReturnedSuccess) {
+            for (int attempt = 0; attempt < 50 && !windowFound; ++attempt) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                const auto windows = gxos::gui::Compositor::debugWindowsSnapshot();
+                for (const auto& window : windows) {
+                    if (std::find(baselineWindowIds.begin(), baselineWindowIds.end(), window.id) != baselineWindowIds.end()) continue;
+                    std::string processName;
+                    std::string appId;
+                    if (!gxos::ProcessTable::getIdentity(window.ownerPid, processName, appId)) continue;
+                    if (appId != expected.appId) continue;
+                    launchedWindow = window;
+                    windowFound = true;
+                    break;
+                }
+            }
+        }
+
+        const bool passed = launchReturnedSuccess && windowFound;
+        explicitLaunchesPassed = explicitLaunchesPassed && passed;
+        oss << "explicitLaunch appId=" << expected.appId
+            << " launchResult=" << (launchReturnedSuccess ? "PASS" : "FAIL")
+            << " windowOwnership=" << (windowFound ? "PASS" : "FAIL");
+        if (windowFound) {
+            oss << " windowId=" << launchedWindow.id
+                << " ownerPid=" << launchedWindow.ownerPid
+                << " title=" << launchedWindow.title;
+        }
+        if (!launchReturnedSuccess && !launchError.empty()) oss << " error=" << launchError;
+        oss << "\n";
+    }
+
+    // Keep this test-only command from writing the explicitly launched windows
+    // into the persistence fixture used by the caller.  This uses the normal
+    // compositor close path and is not part of ordinary startup.
+    const auto afterLaunchWindows = gxos::gui::Compositor::debugWindowsSnapshot();
+    for (const auto& window : afterLaunchWindows) {
+        if (std::find(baselineWindowIds.begin(), baselineWindowIds.end(), window.id) != baselineWindowIds.end()) continue;
+        gxos::ipc::Message closeMessage;
+        closeMessage.type = static_cast<uint32_t>(gxos::gui::MsgType::MT_Close);
+        const std::string id = std::to_string(window.id);
+        closeMessage.data.assign(id.begin(), id.end());
+        gxos::ipc::Bus::publish("gui.input", std::move(closeMessage), false);
+    }
+
+    const bool result = compositorPid != 0 && allRegistered && registrationDidNotLaunch && explicitLaunchesPassed;
+    oss << "STARTUP_APP_MODEL_REGRESSION_RESULT=" << (result ? "PASS" : "FAIL") << "\n";
+    oss << "STARTUP_APP_MODEL_REGRESSION_END\n";
+    return oss.str();
+}
+
 static std::string navigatorHostedSmokeDiagnostic() {
     struct Check {
         std::string name;
@@ -2177,7 +2306,7 @@ static void help(){
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
                  " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
-                 " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
+                 " desktop.apps | desktop.apps.verbose | desktop.windows.owners | desktop.startup.regression | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
@@ -2580,6 +2709,12 @@ using namespace gxos;
         }
         else if (cmd=="desktop.apps"){
             std::cout << gui::DesktopService::GetRegisteredAppsDiagnostic();
+        }
+        else if (cmd=="desktop.windows.owners"){
+            std::cout << desktopWindowOwnershipDiagnostic();
+        }
+        else if (cmd=="desktop.startup.regression"){
+            std::cout << desktopStartupAppModelRegressionDiagnostic();
         }
         else if (cmd=="desktop.apps.verbose"){
             std::cout << gui::DesktopService::GetRegisteredAppsVerboseDiagnostic();
