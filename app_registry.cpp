@@ -229,11 +229,17 @@ const AppEntry* AppRegistry::FindCompatibleEntry(const std::string& appId, const
 }
 
 std::vector<AppRegistrySource> AppRegistry::DefaultSources() {
+    // Prefer the checkout-local package layout when developing the hosted
+    // Server from a source checkout. Production-style hosted roots still use
+    // /Apps when no local Apps directory is present.
+    const std::filesystem::path packageRoot = std::filesystem::exists("Apps")
+        ? std::filesystem::path("Apps")
+        : std::filesystem::path("/Apps");
     return {
         { AppSourceKind::SystemApps, "/system/apps" },
         { AppSourceKind::SystemApps, "sdk/samples" },
         { AppSourceKind::SystemApps, "examples/apps" },
-        { AppSourceKind::Package, "/Apps" },
+        { AppSourceKind::Package, packageRoot },
         { AppSourceKind::UserApps, "/users/default/apps" }
     };
 }
