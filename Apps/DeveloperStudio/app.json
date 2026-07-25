@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.developerstudio",
+  "displayName": "guideXOS Developer Studio",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Initial native guideXOS Developer Studio shell and App Model foundation.",
+  "category": "Development",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.5.0",
+  "supportedArchitectures": [
+    "amd64"
+  ],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/developerstudio.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": [
+    "log",
+    "window",
+    "draw"
+  ],
+  "fileAssociations": [],
+  "defaultWindow": {
+    "width": 960,
+    "height": 640,
+    "resizable": true
+  },
+  "desktopRegistryHints": {
+    "registeredName": "guideXOS Developer Studio",
+    "canonicalLaunchName": "guideXOS Developer Studio",
+    "appearsInStartMenu": "true",
+    "canAppearOnDesktop": "false",
+    "recordRecentPrograms": "true",
+    "diagnosticMarker": "GUIDEXOS_DEVELOPER_STUDIO_REGISTRATION"
+  }
+}
