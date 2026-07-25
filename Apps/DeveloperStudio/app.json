@@ -4,7 +4,7 @@
   "displayName": "guideXOS Developer Studio",
   "version": "0.1.0",
   "publisher": "guideXOS",
-  "description": "Initial native guideXOS Developer Studio shell and App Model foundation.",
+  "description": "Bounded native guideXOS workspace and source editor.",
   "category": "Development",
   "kind": "NativeElf",
   "icon": "",
@@ -24,7 +24,9 @@
   "permissions": [
     "log",
     "window",
-    "draw"
+    "draw",
+    "filesystem.read",
+    "filesystem.write"
   ],
   "fileAssociations": [],
   "defaultWindow": {

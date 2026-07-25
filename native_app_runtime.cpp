@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -43,6 +44,8 @@ constexpr int kMinPollEventTimeoutMs = 0;
 constexpr int kMaxPollEventTimeoutMs = 30000;
 constexpr uint32_t kMaxFilePathLength = 240;
 constexpr uint32_t kMaxFileReadBytes = 64u * 1024u;
+constexpr uint32_t kMaxWorkspaceIoBytes = 256u * 1024u;
+constexpr uint32_t kMaxWorkspaceListEntries = 129u;
 constexpr uint64_t kMaxPresentFrameBytes = 16ull * 1024ull * 1024ull;
 constexpr uint64_t kMaxNativeAppStackBytes = 8ull * 1024ull * 1024ull;
 
@@ -158,6 +161,35 @@ bool copyNativePath(const NativeAppRuntimeContext& context, const char* path, st
 
     failureReason = "path-not-null-terminated-within-limit";
     return false;
+}
+
+bool copyWorkspacePath(const NativeAppRuntimeContext& context, const char* path, std::filesystem::path& output, std::string& failureReason) {
+    std::string requested;
+    if (!copyNativePath(context, path, requested, failureReason) || requested.empty()) return false;
+    if (requested.size() > kMaxFilePathLength) {
+        failureReason = "path-too-long";
+        return false;
+    }
+    std::replace(requested.begin(), requested.end(), static_cast<char>(92), '/');
+    if (requested.find("..") != std::string::npos) {
+        size_t start = 0;
+        while (start <= requested.size()) {
+            size_t end = requested.find('/', start);
+            if (end == std::string::npos) end = requested.size();
+            if (end - start == 2 && requested[start] == '.' && requested[start + 1] == '.') {
+                failureReason = "path-traversal";
+                return false;
+            }
+            if (end == requested.size()) break;
+            start = end + 1;
+        }
+    }
+    output = std::filesystem::path(requested).lexically_normal();
+    if (!output.is_absolute()) {
+        failureReason = "path-not-absolute";
+        return false;
+    }
+    return true;
 }
 
 void logInvalidFileReadContext(
@@ -482,6 +514,144 @@ uint64_t hostGetTicksMs(NativeGxAppContext* ctx) {
     static const std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - epoch).count();
     return elapsed < 0 ? 0u : static_cast<uint64_t>(elapsed);
+}
+
+bool hasWorkspaceReadPermission(const NativeAppRuntimeContext& context) {
+    return hasPermission(context, "filesystem.read");
+}
+
+bool hasWorkspaceWritePermission(const NativeAppRuntimeContext& context) {
+    return hasPermission(context, "filesystem.write");
+}
+
+gx_result hostFileStat(NativeGxAppContext* ctx, const char* path, gx_file_info* outInfo) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !outInfo || !nativeBufferRangeContains(*context, outInfo, sizeof(gx_file_info))) return GX_ERROR_INVALID_ARGUMENT;
+    *outInfo = gx_file_info{};
+    if (!hasWorkspaceReadPermission(*context)) return GX_ERROR_PERMISSION_DENIED;
+
+    std::filesystem::path resolved;
+    std::string failure;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return GX_ERROR_PERMISSION_DENIED;
+    std::error_code ec;
+    const std::filesystem::file_status status = std::filesystem::symlink_status(resolved, ec);
+    if (ec || !std::filesystem::exists(status)) return GX_ERROR_FAILED;
+    if (std::filesystem::is_directory(status)) {
+        outInfo->type = GX_FILE_TYPE_DIRECTORY;
+        return GX_OK;
+    }
+    if (!std::filesystem::is_regular_file(status)) return GX_ERROR_UNSUPPORTED;
+    outInfo->type = GX_FILE_TYPE_REGULAR;
+    outInfo->size = std::filesystem::file_size(resolved, ec);
+    return ec ? GX_ERROR_FAILED : GX_OK;
+}
+
+gx_result hostFileReadWorkspace(NativeGxAppContext* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !buffer || bufferSize == 0 || bufferSize > kMaxWorkspaceIoBytes || !outBytesRead ||
+        !nativeBufferRangeContains(*context, buffer, bufferSize) || !nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t))) return GX_ERROR_INVALID_ARGUMENT;
+    *outBytesRead = 0;
+    if (!hasWorkspaceReadPermission(*context)) return GX_ERROR_PERMISSION_DENIED;
+    std::filesystem::path resolved;
+    std::string failure;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return GX_ERROR_PERMISSION_DENIED;
+    std::error_code ec;
+    const std::filesystem::file_status status = std::filesystem::symlink_status(resolved, ec);
+    if (ec || !std::filesystem::is_regular_file(status)) return GX_ERROR_FAILED;
+    const uint64_t size = std::filesystem::file_size(resolved, ec);
+    if (ec || size > bufferSize || size > kMaxWorkspaceIoBytes) return GX_ERROR_UNSUPPORTED;
+    std::ifstream input(resolved, std::ios::binary);
+    if (!input) return GX_ERROR_FAILED;
+    if (size > 0) input.read(static_cast<char*>(buffer), static_cast<std::streamsize>(size));
+    if (!input && size > 0) return GX_ERROR_FAILED;
+    *outBytesRead = static_cast<uint32_t>(size);
+    return GX_OK;
+}
+
+gx_result hostFileList(NativeGxAppContext* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !outCount || !nativeBufferRangeContains(*context, outCount, sizeof(uint32_t)) || capacity > kMaxWorkspaceListEntries ||
+        (capacity > 0 && (!entries || !nativeBufferRangeContains(*context, entries, static_cast<uint64_t>(capacity) * sizeof(gx_file_entry))))) return GX_ERROR_INVALID_ARGUMENT;
+    *outCount = 0;
+    if (outTruncated && nativeBufferRangeContains(*context, outTruncated, sizeof(uint32_t))) *outTruncated = 0;
+    if (!hasWorkspaceReadPermission(*context)) return GX_ERROR_PERMISSION_DENIED;
+
+    std::filesystem::path resolved;
+    std::string failure;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return GX_ERROR_PERMISSION_DENIED;
+    std::error_code ec;
+    const std::filesystem::file_status rootStatus = std::filesystem::symlink_status(resolved, ec);
+    if (ec || !std::filesystem::is_directory(rootStatus)) return GX_ERROR_FAILED;
+
+    std::vector<gx_file_entry> collected;
+    collected.reserve(kMaxWorkspaceListEntries);
+    std::filesystem::directory_iterator iterator(resolved, std::filesystem::directory_options::skip_permission_denied, ec);
+    if (ec) return GX_ERROR_FAILED;
+    for (const std::filesystem::directory_entry& item : iterator) {
+        if (collected.size() >= kMaxWorkspaceListEntries) break;
+        gx_file_entry entry{};
+        const std::string name = item.path().filename().generic_string();
+        if (name.empty() || name.size() >= sizeof(entry.name)) continue;
+        for (size_t i = 0; i < name.size(); ++i) entry.name[i] = name[i];
+        entry.name[name.size()] = '\0';
+        std::error_code itemError;
+        const std::filesystem::file_status itemStatus = item.symlink_status(itemError);
+        if (itemError) continue;
+        if (std::filesystem::is_directory(itemStatus)) entry.type = GX_FILE_TYPE_DIRECTORY;
+        else if (std::filesystem::is_regular_file(itemStatus)) {
+            entry.type = GX_FILE_TYPE_REGULAR;
+            entry.size = std::filesystem::file_size(item.path(), itemError);
+            if (itemError) entry.size = 0;
+        } else {
+            entry.type = GX_FILE_TYPE_UNKNOWN;
+        }
+        collected.push_back(entry);
+    }
+    bool truncated = collected.size() > capacity;
+    if (collected.size() == kMaxWorkspaceListEntries) {
+        std::filesystem::directory_iterator probe = iterator;
+        if (probe != std::filesystem::directory_iterator()) truncated = true;
+    }
+    std::sort(collected.begin(), collected.end(), [](const gx_file_entry& left, const gx_file_entry& right) {
+        if (left.type == GX_FILE_TYPE_DIRECTORY && right.type != GX_FILE_TYPE_DIRECTORY) return true;
+        if (left.type != GX_FILE_TYPE_DIRECTORY && right.type == GX_FILE_TYPE_DIRECTORY) return false;
+        size_t index = 0;
+        while (left.name[index] != '\0' && right.name[index] != '\0') {
+            char a = left.name[index];
+            char b = right.name[index];
+            if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + ('a' - 'A'));
+            if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + ('a' - 'A'));
+            if (a != b) return a < b;
+            ++index;
+        }
+        return left.name[index] < right.name[index];
+    });
+    const uint32_t count = static_cast<uint32_t>(std::min<size_t>(capacity, collected.size()));
+    for (uint32_t i = 0; i < count; ++i) entries[i] = collected[i];
+    *outCount = count;
+    if (outTruncated && nativeBufferRangeContains(*context, outTruncated, sizeof(uint32_t))) *outTruncated = truncated ? 1u : 0u;
+    return GX_OK;
+}
+
+gx_result hostFileWriteAll(NativeGxAppContext* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !outBytesWritten || !nativeBufferRangeContains(*context, outBytesWritten, sizeof(uint32_t)) ||
+        !buffer || bufferSize > kMaxWorkspaceIoBytes || !nativeBufferRangeContains(*context, buffer, bufferSize == 0 ? 1 : bufferSize)) return GX_ERROR_INVALID_ARGUMENT;
+    *outBytesWritten = 0;
+    if (!hasWorkspaceWritePermission(*context)) return GX_ERROR_PERMISSION_DENIED;
+    std::filesystem::path resolved;
+    std::string failure;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return GX_ERROR_PERMISSION_DENIED;
+    std::error_code ec;
+    const std::filesystem::path parent = resolved.parent_path();
+    if (parent.empty() || !std::filesystem::is_directory(std::filesystem::symlink_status(parent, ec)) || ec) return GX_ERROR_FAILED;
+    std::ofstream output(resolved, std::ios::binary | std::ios::trunc);
+    if (!output) return GX_ERROR_FAILED;
+    if (bufferSize > 0) output.write(static_cast<const char*>(buffer), static_cast<std::streamsize>(bufferSize));
+    output.flush();
+    if (!output) return GX_ERROR_FAILED;
+    *outBytesWritten = bufferSize;
+    return GX_OK;
 }
 
 gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
@@ -1071,7 +1241,9 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         context->lastEventType = eventType;
         context->lastEventWindow = window;
         context->lastPollEventResult = GX_OK;
-        if (eventType == GX_EVENT_WINDOW_CLOSE) removeOwnedWindow(*context, window);
+        // Keep ownership until the app explicitly exits. Native applications
+        // need to be able to display Save/Discard/Cancel and keep the window
+        // alive when the user cancels a close request.
         NativeAppProcessTable::UpdateFromRuntime(*context);
         if (eventType == GX_EVENT_WINDOW_CLOSE) NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", "poll_event close windowId=" + std::to_string(window));
         Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " poll_event returned type=" + std::to_string(static_cast<uint32_t>(eventType)) + " windowId=" + std::to_string(window));
@@ -1214,6 +1386,10 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.file_read = hostFileRead;
     context.hostCalls.present_frame = hostPresentFrame;
     context.hostCalls.get_ticks_ms = hostGetTicksMs;
+    context.hostCalls.file_stat = hostFileStat;
+    context.hostCalls.file_read_workspace = hostFileReadWorkspace;
+    context.hostCalls.file_list = hostFileList;
+    context.hostCalls.file_write_all = hostFileWriteAll;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");

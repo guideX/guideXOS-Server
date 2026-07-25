@@ -70,6 +70,25 @@ typedef struct gx_event {
     int param4;
 } gx_event;
 
+enum {
+    GX_FILE_TYPE_UNKNOWN = 0,
+    GX_FILE_TYPE_REGULAR = 1,
+    GX_FILE_TYPE_DIRECTORY = 2
+};
+
+typedef struct gx_file_info {
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t size;
+} gx_file_info;
+
+typedef struct gx_file_entry {
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t size;
+    char name[128];
+} gx_file_entry;
+
 typedef struct gx_host_calls {
     uint32_t size;
     uint32_t version;
@@ -90,6 +109,12 @@ typedef struct gx_host_calls {
     /* Monotonic milliseconds since the hosted runtime's process-local epoch.
      * The uint64_t value wraps after 2^64 milliseconds. */
     uint64_t (GX_CALL *get_ticks_ms)(gx_app_context* ctx);
+    /* Hosted workspace extensions. Paths are explicit user-selected host paths;
+     * callers must still enforce their own workspace-root boundary. */
+    gx_result (GX_CALL *file_stat)(gx_app_context* ctx, const char* path, gx_file_info* outInfo);
+    gx_result (GX_CALL *file_read_workspace)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
+    gx_result (GX_CALL *file_list)(gx_app_context* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated);
+    gx_result (GX_CALL *file_write_all)(gx_app_context* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten);
 } gx_host_calls;
 
 #ifdef __cplusplus
