@@ -1,0 +1,13 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\replacements\time.c.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          60 .chks64
+          B4 .debug$S
+           3 .drectve
+          24 .pdata
+          A7 .text$mn
+          1C .xdata

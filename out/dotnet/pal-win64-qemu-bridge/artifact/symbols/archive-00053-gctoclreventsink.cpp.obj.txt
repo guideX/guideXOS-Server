@@ -1,0 +1,414 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\archives\adapted-members\00053-gctoclreventsink.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   F4, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 897C, #relocs    4, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .text$mn
+    Section length   A0, #relocs    5, #linenums    0, checksum 9F414455, selection    1 (pick no duplicates)
+00B 00000000 SECT4  notype ()    External     | ?FireDynamicEvent@GCToCLREventSink@@UEAAXPEBDPEAXI@Z (public: virtual void __cdecl GCToCLREventSink::FireDynamicEvent(char const *,void *,unsigned int))
+00C 00000000 SECT5  notype       Static       | .text$mn
+    Section length   54, #relocs    3, #linenums    0, checksum DD2FB2A5, selection    1 (pick no duplicates)
+00E 00000000 SECT5  notype ()    External     | ?FireGCStart_V2@GCToCLREventSink@@UEAAXIIII@Z (public: virtual void __cdecl GCToCLREventSink::FireGCStart_V2(unsigned int,unsigned int,unsigned int,unsigned int))
+00F 00000000 SECT6  notype       Static       | .text$mn
+    Section length   29, #relocs    2, #linenums    0, checksum 1584A5D1, selection    1 (pick no duplicates)
+011 00000000 SECT6  notype ()    External     | ?FireGCEnd_V1@GCToCLREventSink@@UEAAXII@Z (public: virtual void __cdecl GCToCLREventSink::FireGCEnd_V1(unsigned int,unsigned int))
+012 00000000 SECT7  notype       Static       | .text$mn
+    Section length   3D, #relocs    2, #linenums    0, checksum E4100F83, selection    1 (pick no duplicates)
+014 00000000 SECT7  notype ()    External     | ?FireGCGenerationRange@GCToCLREventSink@@UEAAXEPEAX_K1@Z (public: virtual void __cdecl GCToCLREventSink::FireGCGenerationRange(unsigned char,void *,unsigned __int64,unsigned __int64))
+015 00000000 SECT8  notype       Static       | .text$mn
+    Section length   D5, #relocs    2, #linenums    0, checksum C9CD1446, selection    1 (pick no duplicates)
+017 00000000 SECT8  notype ()    External     | ?FireGCHeapStats_V2@GCToCLREventSink@@UEAAX_K00000000000III@Z (public: virtual void __cdecl GCToCLREventSink::FireGCHeapStats_V2(unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned int,unsigned int,unsigned int))
+018 00000000 SECT9  notype       Static       | .text$mn
+    Section length   34, #relocs    2, #linenums    0, checksum A495FA48, selection    1 (pick no duplicates)
+01A 00000000 SECT9  notype ()    External     | ?FireGCCreateSegment_V1@GCToCLREventSink@@UEAAXPEAX_KI@Z (public: virtual void __cdecl GCToCLREventSink::FireGCCreateSegment_V1(void *,unsigned __int64,unsigned int))
+01B 00000000 SECTA  notype       Static       | .text$mn
+    Section length   15, #relocs    2, #linenums    0, checksum C5695B15, selection    1 (pick no duplicates)
+01D 00000000 SECTA  notype ()    External     | ?FireGCFreeSegment_V1@GCToCLREventSink@@UEAAXPEAX@Z (public: virtual void __cdecl GCToCLREventSink::FireGCFreeSegment_V1(void *))
+01E 00000000 SECTB  notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+020 00000000 SECTB  notype ()    External     | ?FireGCCreateConcurrentThread_V1@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireGCCreateConcurrentThread_V1(void))
+021 00000000 SECTC  notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+023 00000000 SECTC  notype ()    External     | ?FireGCTerminateConcurrentThread_V1@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireGCTerminateConcurrentThread_V1(void))
+024 00000000 SECTD  notype       Static       | .text$mn
+    Section length   14, #relocs    2, #linenums    0, checksum 147A1F92, selection    1 (pick no duplicates)
+026 00000000 SECTD  notype ()    External     | ?FireGCTriggered@GCToCLREventSink@@UEAAXI@Z (public: virtual void __cdecl GCToCLREventSink::FireGCTriggered(unsigned int))
+027 00000000 SECTE  notype       Static       | .text$mn
+    Section length   25, #relocs    2, #linenums    0, checksum F453D8F1, selection    1 (pick no duplicates)
+029 00000000 SECTE  notype ()    External     | ?FireGCMarkWithType@GCToCLREventSink@@UEAAXII_K@Z (public: virtual void __cdecl GCToCLREventSink::FireGCMarkWithType(unsigned int,unsigned int,unsigned __int64))
+02A 00000000 SECTF  notype       Static       | .text$mn
+    Section length   3B, #relocs    2, #linenums    0, checksum A37BC8DB, selection    1 (pick no duplicates)
+02C 00000000 SECTF  notype ()    External     | ?FireGCJoin_V2@GCToCLREventSink@@UEAAXIIII@Z (public: virtual void __cdecl GCToCLREventSink::FireGCJoin_V2(unsigned int,unsigned int,unsigned int,unsigned int))
+02D 00000000 SECT10 notype       Static       | .text$mn
+    Section length   AB, #relocs    2, #linenums    0, checksum 87E95CFF, selection    1 (pick no duplicates)
+02F 00000000 SECT10 notype ()    External     | ?FireGCGlobalHeapHistory_V4@GCToCLREventSink@@UEAAX_KHIIIIIIIIIIPEAX@Z (public: virtual void __cdecl GCToCLREventSink::FireGCGlobalHeapHistory_V4(unsigned __int64,int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,void *))
+030 00000000 SECT11 notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum 922B422E, selection    1 (pick no duplicates)
+032 00000000 SECT11 notype ()    External     | ?FireGCAllocationTick_V1@GCToCLREventSink@@UEAAXII@Z (public: virtual void __cdecl GCToCLREventSink::FireGCAllocationTick_V1(unsigned int,unsigned int))
+033 00000000 SECT12 notype       Static       | .text$mn
+    Section length   7A, #relocs    3, #linenums    0, checksum 91D252AD, selection    1 (pick no duplicates)
+035 00000000 SECT12 notype ()    External     | ?FireGCAllocationTick_V4@GCToCLREventSink@@UEAAX_KIIPEAX0@Z (public: virtual void __cdecl GCToCLREventSink::FireGCAllocationTick_V4(unsigned __int64,unsigned int,unsigned int,void *,unsigned __int64))
+036 00000000 SECT13 notype       Static       | .text$mn
+    Section length   56, #relocs    3, #linenums    0, checksum 9BB129C9, selection    1 (pick no duplicates)
+038 00000000 SECT13 notype ()    External     | ?FirePinObjectAtGCTime@GCToCLREventSink@@UEAAXPEAXPEAPEAE@Z (public: virtual void __cdecl GCToCLREventSink::FirePinObjectAtGCTime(void *,unsigned char * *))
+039 00000000 SECT14 notype       Static       | .text$mn
+    Section length   21, #relocs    2, #linenums    0, checksum 4D0CD6E2, selection    1 (pick no duplicates)
+03B 00000000 SECT14 notype ()    External     | ?FireGCLOHCompact@GCToCLREventSink@@UEAAXGIPEAX@Z (public: virtual void __cdecl GCToCLREventSink::FireGCLOHCompact(unsigned short,unsigned int,void *))
+03C 00000000 SECT15 notype       Static       | .text$mn
+    Section length   33, #relocs    2, #linenums    0, checksum 8734539C, selection    1 (pick no duplicates)
+03E 00000000 SECT15 notype ()    External     | ?FireGCFitBucketInfo@GCToCLREventSink@@UEAAXG_KGIPEAX@Z (public: virtual void __cdecl GCToCLREventSink::FireGCFitBucketInfo(unsigned short,unsigned __int64,unsigned short,unsigned int,void *))
+03F 00000000 SECT16 notype       Static       | .text$mn
+    Section length   34, #relocs    2, #linenums    0, checksum E59A37D7, selection    1 (pick no duplicates)
+041 00000000 SECT16 notype ()    External     | ?FirePinPlugAtGCTime@GCToCLREventSink@@UEAAXPEAE00@Z (public: virtual void __cdecl GCToCLREventSink::FirePinPlugAtGCTime(unsigned char *,unsigned char *,unsigned char *))
+042 00000000 SECT17 notype       Static       | .text$mn
+    Section length   BD, #relocs    2, #linenums    0, checksum E926EE83, selection    1 (pick no duplicates)
+044 00000000 SECT17 notype ()    External     | ?FireGCPerHeapHistory_V3@GCToCLREventSink@@UEAAXPEAX00000IIIIII0II0@Z (public: virtual void __cdecl GCToCLREventSink::FireGCPerHeapHistory_V3(void *,void *,void *,void *,void *,void *,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,void *,unsigned int,unsigned int,void *))
+045 00000000 SECT18 notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+047 00000000 SECT18 notype ()    External     | ?FireBGCBegin@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireBGCBegin(void))
+048 00000000 SECT19 notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+04A 00000000 SECT19 notype ()    External     | ?FireBGC1stNonConEnd@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireBGC1stNonConEnd(void))
+04B 00000000 SECT1A notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+04D 00000000 SECT1A notype ()    External     | ?FireBGC1stConEnd@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireBGC1stConEnd(void))
+04E 00000000 SECT1B notype       Static       | .text$mn
+    Section length   14, #relocs    2, #linenums    0, checksum 147A1F92, selection    1 (pick no duplicates)
+050 00000000 SECT1B notype ()    External     | ?FireBGC1stSweepEnd@GCToCLREventSink@@UEAAXI@Z (public: virtual void __cdecl GCToCLREventSink::FireBGC1stSweepEnd(unsigned int))
+051 00000000 SECT1C notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+053 00000000 SECT1C notype ()    External     | ?FireBGC2ndNonConBegin@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireBGC2ndNonConBegin(void))
+054 00000000 SECT1D notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+056 00000000 SECT1D notype ()    External     | ?FireBGC2ndNonConEnd@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireBGC2ndNonConEnd(void))
+057 00000000 SECT1E notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+059 00000000 SECT1E notype ()    External     | ?FireBGC2ndConBegin@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireBGC2ndConBegin(void))
+05A 00000000 SECT1F notype       Static       | .text$mn
+    Section length   11, #relocs    2, #linenums    0, checksum 9CA0C13A, selection    1 (pick no duplicates)
+05C 00000000 SECT1F notype ()    External     | ?FireBGC2ndConEnd@GCToCLREventSink@@UEAAXXZ (public: virtual void __cdecl GCToCLREventSink::FireBGC2ndConEnd(void))
+05D 00000000 SECT20 notype       Static       | .text$mn
+    Section length   15, #relocs    2, #linenums    0, checksum C5695B15, selection    1 (pick no duplicates)
+05F 00000000 SECT20 notype ()    External     | ?FireBGCDrainMark@GCToCLREventSink@@UEAAX_K@Z (public: virtual void __cdecl GCToCLREventSink::FireBGCDrainMark(unsigned __int64))
+060 00000000 SECT21 notype       Static       | .text$mn
+    Section length   34, #relocs    2, #linenums    0, checksum A495FA48, selection    1 (pick no duplicates)
+062 00000000 SECT21 notype ()    External     | ?FireBGCRevisit@GCToCLREventSink@@UEAAX_K0I@Z (public: virtual void __cdecl GCToCLREventSink::FireBGCRevisit(unsigned __int64,unsigned __int64,unsigned int))
+063 00000000 SECT22 notype       Static       | .text$mn
+    Section length   45, #relocs    2, #linenums    0, checksum C74D08D7, selection    1 (pick no duplicates)
+065 00000000 SECT22 notype ()    External     | ?FireBGCOverflow_V1@GCToCLREventSink@@UEAAX_K00II@Z (public: virtual void __cdecl GCToCLREventSink::FireBGCOverflow_V1(unsigned __int64,unsigned __int64,unsigned __int64,unsigned int,unsigned int))
+066 00000000 SECT23 notype       Static       | .text$mn
+    Section length   14, #relocs    2, #linenums    0, checksum 147A1F92, selection    1 (pick no duplicates)
+068 00000000 SECT23 notype ()    External     | ?FireBGCAllocWaitBegin@GCToCLREventSink@@UEAAXI@Z (public: virtual void __cdecl GCToCLREventSink::FireBGCAllocWaitBegin(unsigned int))
+069 00000000 SECT24 notype       Static       | .text$mn
+    Section length   14, #relocs    2, #linenums    0, checksum 147A1F92, selection    1 (pick no duplicates)
+06B 00000000 SECT24 notype ()    External     | ?FireBGCAllocWaitEnd@GCToCLREventSink@@UEAAXI@Z (public: virtual void __cdecl GCToCLREventSink::FireBGCAllocWaitEnd(unsigned int))
+06C 00000000 SECT25 notype       Static       | .text$mn
+    Section length   29, #relocs    2, #linenums    0, checksum 1584A5D1, selection    1 (pick no duplicates)
+06E 00000000 SECT25 notype ()    External     | ?FireGCFullNotify_V1@GCToCLREventSink@@UEAAXII@Z (public: virtual void __cdecl GCToCLREventSink::FireGCFullNotify_V1(unsigned int,unsigned int))
+06F 00000000 SECT26 notype       Static       | .text$mn
+    Section length   46, #relocs    2, #linenums    0, checksum 45FA7FDB, selection    1 (pick no duplicates)
+071 00000000 SECT26 notype ()    External     | ?FireSetGCHandle@GCToCLREventSink@@UEAAXPEAX0II@Z (public: virtual void __cdecl GCToCLREventSink::FireSetGCHandle(void *,void *,unsigned int,unsigned int))
+072 00000000 SECT27 notype       Static       | .text$mn
+    Section length   46, #relocs    2, #linenums    0, checksum 45FA7FDB, selection    1 (pick no duplicates)
+074 00000000 SECT27 notype ()    External     | ?FirePrvSetGCHandle@GCToCLREventSink@@UEAAXPEAX0II@Z (public: virtual void __cdecl GCToCLREventSink::FirePrvSetGCHandle(void *,void *,unsigned int,unsigned int))
+075 00000000 SECT28 notype       Static       | .text$mn
+    Section length   15, #relocs    2, #linenums    0, checksum C5695B15, selection    1 (pick no duplicates)
+077 00000000 SECT28 notype ()    External     | ?FireDestroyGCHandle@GCToCLREventSink@@UEAAXPEAX@Z (public: virtual void __cdecl GCToCLREventSink::FireDestroyGCHandle(void *))
+078 00000000 SECT29 notype       Static       | .text$mn
+    Section length   15, #relocs    2, #linenums    0, checksum C5695B15, selection    1 (pick no duplicates)
+07A 00000000 SECT29 notype ()    External     | ?FirePrvDestroyGCHandle@GCToCLREventSink@@UEAAXPEAX@Z (public: virtual void __cdecl GCToCLREventSink::FirePrvDestroyGCHandle(void *))
+07B 00000000 SECT2A notype       Static       | .rdata
+    Section length  130, #relocs   26, #linenums    0, checksum        0, selection    2 (pick any)
+07D 00000000 SECT2A notype       External     | ??_7GCToCLREventSink@@6B@ (const GCToCLREventSink::`vftable')
+07E 00000000 SECT2B notype       Static       | .data
+    Section length    8, #relocs    1, #linenums    0, checksum        0
+080 00000000 SECT2B notype       External     | ?g_gcToClrEventSink@@3VGCToCLREventSink@@A (class GCToCLREventSink g_gcToClrEventSink)
+081 00000000 SECT2C notype       Static       | .debug$S
+    Section length   FC, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1A)
+083 00000000 SECT2D notype       Static       | .debug$S
+    Section length  100, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x19)
+085 00000000 SECT2E notype       Static       | .debug$S
+    Section length  148, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1B)
+087 00000000 SECT2F notype       Static       | .debug$S
+    Section length   FC, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1E)
+089 00000000 SECT30 notype       Static       | .debug$S
+    Section length   FC, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1F)
+08B 00000000 SECT31 notype       Static       | .debug$S
+    Section length  100, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1C)
+08D 00000000 SECT32 notype       Static       | .debug$S
+    Section length  100, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1D)
+08F 00000000 SECT33 notype       Static       | .debug$S
+    Section length  148, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x23)
+091 00000000 SECT34 notype       Static       | .debug$S
+    Section length  144, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x24)
+093 00000000 SECT35 notype       Static       | .debug$S
+    Section length   F8, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x18)
+095 00000000 SECT36 notype       Static       | .debug$S
+    Section length  144, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x20)
+097 00000000 SECT37 notype       Static       | .debug$S
+    Section length  258, #relocs   16, #linenums    0, checksum        0, selection    5 (pick associative Section 0x22)
+099 00000000 SECT38 notype       Static       | .debug$S
+    Section length  1D4, #relocs   12, #linenums    0, checksum        0, selection    5 (pick associative Section 0x21)
+09B 00000000 SECT39 notype       Static       | .debug$S
+    Section length  148, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x28)
+09D 00000000 SECT3A notype       Static       | .debug$S
+    Section length  2A4, #relocs   16, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4)
+09F 00000000 SECT3B notype       Static       | .debug$S
+    Section length  18C, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x11)
+0A1 00000000 SECT3C notype       Static       | .debug$S
+    Section length  2E4, #relocs   1A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x12)
+0A3 00000000 SECT3D notype       Static       | .debug$S
+    Section length  10C, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0xB)
+0A5 00000000 SECT3E notype       Static       | .debug$S
+    Section length  1D4, #relocs   12, #linenums    0, checksum        0, selection    5 (pick associative Section 0x9)
+0A7 00000000 SECT3F notype       Static       | .debug$S
+    Section length  188, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x6)
+0A9 00000000 SECT40 notype       Static       | .debug$S
+    Section length  234, #relocs   10, #linenums    0, checksum        0, selection    5 (pick associative Section 0x15)
+0AB 00000000 SECT41 notype       Static       | .debug$S
+    Section length  148, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0xA)
+0AD 00000000 SECT42 notype       Static       | .debug$S
+    Section length  19C, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x25)
+0AF 00000000 SECT43 notype       Static       | .debug$S
+    Section length  258, #relocs   14, #linenums    0, checksum        0, selection    5 (pick associative Section 0x7)
+0B1 00000000 SECT44 notype       Static       | .debug$S
+    Section length  518, #relocs   26, #linenums    0, checksum        0, selection    5 (pick associative Section 0x10)
+0B3 00000000 SECT45 notype       Static       | .debug$S
+    Section length  640, #relocs   2A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x8)
+0B5 00000000 SECT46 notype       Static       | .debug$S
+    Section length  218, #relocs   14, #linenums    0, checksum        0, selection    5 (pick associative Section 0xF)
+0B7 00000000 SECT47 notype       Static       | .debug$S
+    Section length  1A8, #relocs    C, #linenums    0, checksum        0, selection    5 (pick associative Section 0x14)
+0B9 00000000 SECT48 notype       Static       | .debug$S
+    Section length  1B4, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0xE)
+0BB 00000000 SECT49 notype       Static       | .debug$S
+    Section length  620, #relocs   26, #linenums    0, checksum        0, selection    5 (pick associative Section 0x17)
+0BD 00000000 SECT4A notype       Static       | .debug$S
+    Section length  21C, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x5)
+0BF 00000000 SECT4B notype       Static       | .debug$S
+    Section length  10C, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0xC)
+0C1 00000000 SECT4C notype       Static       | .debug$S
+    Section length  140, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0xD)
+0C3 00000000 SECT4D notype       Static       | .debug$S
+    Section length  1B4, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x13)
+0C5 00000000 SECT4E notype       Static       | .debug$S
+    Section length  1F0, #relocs   12, #linenums    0, checksum        0, selection    5 (pick associative Section 0x16)
+0C7 00000000 SECT4F notype       Static       | .debug$S
+    Section length  14C, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x29)
+0C9 00000000 SECT50 notype       Static       | .debug$S
+    Section length  224, #relocs   14, #linenums    0, checksum        0, selection    5 (pick associative Section 0x27)
+0CB 00000000 SECT51 notype       Static       | .debug$S
+    Section length  224, #relocs   14, #linenums    0, checksum        0, selection    5 (pick associative Section 0x26)
+0CD 00000000 UNDEF  notype ()    External     | __report_rangecheckfailure
+0CE 00000000 UNDEF  notype ()    External     | ?GetSize@Object@@QEAA_KXZ (public: unsigned __int64 __cdecl Object::GetSize(void))
+0CF 00000000 UNDEF  notype ()    External     | ?FireEtwGCEnd_V1@@YAKIIGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwGCEnd_V1(unsigned int,unsigned int,unsigned short,struct _GUID const *,struct _GUID const *))
+0D0 00000000 UNDEF  notype ()    External     | ?FireEtwGCHeapStats_V2@@YAK_K000000000IIIG00PEBU_GUID@@1@Z (unsigned long __cdecl FireEtwGCHeapStats_V2(unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned __int64,unsigned int,unsigned int,unsigned int,unsigned short,unsigned __int64,unsigned __int64,struct _GUID const *,struct _GUID const *))
+0D1 00000000 UNDEF  notype ()    External     | ?FireEtwGCCreateSegment_V1@@YAK_K0IGPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwGCCreateSegment_V1(unsigned __int64,unsigned __int64,unsigned int,unsigned short,struct _GUID const *,struct _GUID const *))
+0D2 00000000 UNDEF  notype ()    External     | ?FireEtwGCFreeSegment_V1@@YAK_KGPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwGCFreeSegment_V1(unsigned __int64,unsigned short,struct _GUID const *,struct _GUID const *))
+0D3 00000000 UNDEF  notype ()    External     | ?FireEtwGCAllocationTick_V4@@YAKIIG_KPEBXPEB_WI10PEBU_GUID@@3@Z (unsigned long __cdecl FireEtwGCAllocationTick_V4(unsigned int,unsigned int,unsigned short,unsigned __int64,void const *,wchar_t const *,unsigned int,void const *,unsigned __int64,struct _GUID const *,struct _GUID const *))
+0D4 00000000 UNDEF  notype ()    External     | ?FireEtwGCCreateConcurrentThread_V1@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwGCCreateConcurrentThread_V1(unsigned short,struct _GUID const *,struct _GUID const *))
+0D5 00000000 UNDEF  notype ()    External     | ?FireEtwGCTerminateConcurrentThread_V1@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwGCTerminateConcurrentThread_V1(unsigned short,struct _GUID const *,struct _GUID const *))
+0D6 00000000 UNDEF  notype ()    External     | ?FireEtwGCGenerationRange@@YAKEPEBX_K1GPEBU_GUID@@2@Z (unsigned long __cdecl FireEtwGCGenerationRange(unsigned char,void const *,unsigned __int64,unsigned __int64,unsigned short,struct _GUID const *,struct _GUID const *))
+0D7 00000000 UNDEF  notype ()    External     | ?FireEtwSetGCHandle@@YAKPEBX0II_KGPEBU_GUID@@2@Z (unsigned long __cdecl FireEtwSetGCHandle(void const *,void const *,unsigned int,unsigned int,unsigned __int64,unsigned short,struct _GUID const *,struct _GUID const *))
+0D8 00000000 UNDEF  notype ()    External     | ?FireEtwDestroyGCHandle@@YAKPEBXGPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwDestroyGCHandle(void const *,unsigned short,struct _GUID const *,struct _GUID const *))
+0D9 00000000 UNDEF  notype ()    External     | ?FireEtwPinObjectAtGCTime@@YAKPEBX0_KPEB_WGPEBU_GUID@@3@Z (unsigned long __cdecl FireEtwPinObjectAtGCTime(void const *,void const *,unsigned __int64,wchar_t const *,unsigned short,struct _GUID const *,struct _GUID const *))
+0DA 00000000 UNDEF  notype ()    External     | ?FireEtwGCTriggered@@YAKIGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwGCTriggered(unsigned int,unsigned short,struct _GUID const *,struct _GUID const *))
+0DB 00000000 UNDEF  notype ()    External     | ?FireEtwGCDynamicEvent@@YAKPEB_WIPEBEGPEBU_GUID@@2@Z (unsigned long __cdecl FireEtwGCDynamicEvent(wchar_t const *,unsigned int,unsigned char const *,unsigned short,struct _GUID const *,struct _GUID const *))
+0DC 00000000 UNDEF  notype ()    External     | ?FireEtwGCMarkWithType@@YAKIGI_KPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwGCMarkWithType(unsigned int,unsigned short,unsigned int,unsigned __int64,struct _GUID const *,struct _GUID const *))
+0DD 00000000 UNDEF  notype ()    External     | ?FireEtwGCJoin_V2@@YAKIIIGIPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwGCJoin_V2(unsigned int,unsigned int,unsigned int,unsigned short,unsigned int,struct _GUID const *,struct _GUID const *))
+0DE 00000000 UNDEF  notype ()    External     | ?FireEtwGCPerHeapHistory_V3@@YAKGPEBX00000IIIIII0IH0PEBU_GUID@@1@Z (unsigned long __cdecl FireEtwGCPerHeapHistory_V3(unsigned short,void const *,void const *,void const *,void const *,void const *,void const *,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,void const *,unsigned int,int,void const *,struct _GUID const *,struct _GUID const *))
+0DF 00000000 UNDEF  notype ()    External     | ?FireEtwGCGlobalHeapHistory_V4@@YAK_KHIIIIGIIIIIHPEBXPEBU_GUID@@2@Z (unsigned long __cdecl FireEtwGCGlobalHeapHistory_V4(unsigned __int64,int,unsigned int,unsigned int,unsigned int,unsigned int,unsigned short,unsigned int,unsigned int,unsigned int,unsigned int,unsigned int,int,void const *,struct _GUID const *,struct _GUID const *))
+0E0 00000000 UNDEF  notype ()    External     | ?FireEtwGCLOHCompact@@YAKGGHPEBXPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwGCLOHCompact(unsigned short,unsigned short,int,void const *,struct _GUID const *,struct _GUID const *))
+0E1 00000000 UNDEF  notype ()    External     | ?FireEtwGCFitBucketInfo@@YAKGG_KGHPEBXPEBU_GUID@@2@Z (unsigned long __cdecl FireEtwGCFitBucketInfo(unsigned short,unsigned short,unsigned __int64,unsigned short,int,void const *,struct _GUID const *,struct _GUID const *))
+0E2 00000000 UNDEF  notype ()    External     | ?FireEtwBGCBegin@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGCBegin(unsigned short,struct _GUID const *,struct _GUID const *))
+0E3 00000000 UNDEF  notype ()    External     | ?FireEtwBGC1stNonConEnd@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGC1stNonConEnd(unsigned short,struct _GUID const *,struct _GUID const *))
+0E4 00000000 UNDEF  notype ()    External     | ?FireEtwBGC1stConEnd@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGC1stConEnd(unsigned short,struct _GUID const *,struct _GUID const *))
+0E5 00000000 UNDEF  notype ()    External     | ?FireEtwBGC2ndNonConBegin@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGC2ndNonConBegin(unsigned short,struct _GUID const *,struct _GUID const *))
+0E6 00000000 UNDEF  notype ()    External     | ?FireEtwBGC2ndNonConEnd@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGC2ndNonConEnd(unsigned short,struct _GUID const *,struct _GUID const *))
+0E7 00000000 UNDEF  notype ()    External     | ?FireEtwBGC2ndConBegin@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGC2ndConBegin(unsigned short,struct _GUID const *,struct _GUID const *))
+0E8 00000000 UNDEF  notype ()    External     | ?FireEtwBGC2ndConEnd@@YAKGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGC2ndConEnd(unsigned short,struct _GUID const *,struct _GUID const *))
+0E9 00000000 UNDEF  notype ()    External     | ?FireEtwBGCDrainMark@@YAK_KGPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwBGCDrainMark(unsigned __int64,unsigned short,struct _GUID const *,struct _GUID const *))
+0EA 00000000 UNDEF  notype ()    External     | ?FireEtwBGCRevisit@@YAK_K0IGPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwBGCRevisit(unsigned __int64,unsigned __int64,unsigned int,unsigned short,struct _GUID const *,struct _GUID const *))
+0EB 00000000 UNDEF  notype ()    External     | ?FireEtwBGCOverflow_V1@@YAK_K00IGIPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwBGCOverflow_V1(unsigned __int64,unsigned __int64,unsigned __int64,unsigned int,unsigned short,unsigned int,struct _GUID const *,struct _GUID const *))
+0EC 00000000 UNDEF  notype ()    External     | ?FireEtwBGCAllocWaitBegin@@YAKIGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGCAllocWaitBegin(unsigned int,unsigned short,struct _GUID const *,struct _GUID const *))
+0ED 00000000 UNDEF  notype ()    External     | ?FireEtwBGCAllocWaitEnd@@YAKIGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGCAllocWaitEnd(unsigned int,unsigned short,struct _GUID const *,struct _GUID const *))
+0EE 00000000 UNDEF  notype ()    External     | ?FireEtwGCFullNotify_V1@@YAKIIGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwGCFullNotify_V1(unsigned int,unsigned int,unsigned short,struct _GUID const *,struct _GUID const *))
+0EF 00000000 UNDEF  notype ()    External     | ?FireEtwBGC1stSweepEnd@@YAKIGPEBU_GUID@@0@Z (unsigned long __cdecl FireEtwBGC1stSweepEnd(unsigned int,unsigned short,struct _GUID const *,struct _GUID const *))
+0F0 00000000 UNDEF  notype ()    External     | ?FireEtwPrvSetGCHandle@@YAKPEBX0II_KGPEBU_GUID@@2@Z (unsigned long __cdecl FireEtwPrvSetGCHandle(void const *,void const *,unsigned int,unsigned int,unsigned __int64,unsigned short,struct _GUID const *,struct _GUID const *))
+0F1 00000000 UNDEF  notype ()    External     | ?FireEtwPrvDestroyGCHandle@@YAKPEBXGPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwPrvDestroyGCHandle(void const *,unsigned short,struct _GUID const *,struct _GUID const *))
+0F2 00000000 UNDEF  notype ()    External     | ?FireEtwPinPlugAtGCTime@@YAKPEBX00GPEBU_GUID@@1@Z (unsigned long __cdecl FireEtwPinPlugAtGCTime(void const *,void const *,void const *,unsigned short,struct _GUID const *,struct _GUID const *))
+0F3 00000000 UNDEF  notype ()    External     | ?FireGcStart@GCLog@ETW@@SAXPEATst_GCEventInfo@12@@Z (public: static void __cdecl ETW::GCLog::FireGcStart(union ETW::GCLog::st_GCEventInfo *))
+0F4 00000000 UNDEF  notype ()    External     | ?GetLastAllocEEType@@YAPEAVMethodTable@@XZ (class MethodTable * __cdecl GetLastAllocEEType(void))
+0F5 00000000 UNDEF  notype ()    External     | __GSHandlerCheck
+0F6 00000000 UNDEF  notype ()    External     | __security_check_cookie
+0F7 000000A0 SECT4  notype       Label        | $LN21
+0F8 00000000 SECT4  notype       Label        | $LN23
+0F9 00000000 SECT5  notype       Label        | $LN4
+0FA 00000000 SECT6  notype       Label        | $LN6
+0FB 00000000 SECT7  notype       Label        | $LN6
+0FC 00000000 SECT8  notype       Label        | $LN6
+0FD 00000000 SECT9  notype       Label        | $LN6
+0FE 00000000 SECTE  notype       Label        | $LN6
+0FF 00000000 SECTF  notype       Label        | $LN6
+100 00000000 SECT10 notype       Label        | $LN6
+101 00000000 SECT12 notype       Label        | $LN8
+102 00000000 SECT13 notype       Label        | $LN6
+103 00000000 SECT14 notype       Label        | $LN6
+104 00000000 SECT15 notype       Label        | $LN6
+105 00000000 SECT16 notype       Label        | $LN6
+106 00000000 SECT17 notype       Label        | $LN6
+107 00000000 SECT21 notype       Label        | $LN6
+108 00000000 SECT22 notype       Label        | $LN6
+109 00000000 SECT25 notype       Label        | $LN6
+10A 00000000 SECT26 notype       Label        | $LN6
+10B 00000000 SECT27 notype       Label        | $LN6
+10C 00000000 SECT52 notype       Static       | .xdata
+    Section length   14, #relocs    1, #linenums    0, checksum 6AD7FE28, selection    5 (pick associative Section 0x4)
+10E 00000000 SECT52 notype       Static       | $unwind$?FireDynamicEvent@GCToCLREventSink@@UEAAXPEBDPEAXI@Z
+10F 00000000 SECT53 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum AA4DE78C, selection    5 (pick associative Section 0x4)
+111 00000000 SECT53 notype       Static       | $pdata$?FireDynamicEvent@GCToCLREventSink@@UEAAXPEBDPEAXI@Z
+112 00000000 SECT54 notype       Static       | .xdata
+    Section length   10, #relocs    1, #linenums    0, checksum 7CF4C652, selection    5 (pick associative Section 0x5)
+114 00000000 SECT54 notype       Static       | $unwind$?FireGCStart_V2@GCToCLREventSink@@UEAAXIIII@Z
+115 00000000 SECT55 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D16CFD3C, selection    5 (pick associative Section 0x5)
+117 00000000 SECT55 notype       Static       | $pdata$?FireGCStart_V2@GCToCLREventSink@@UEAAXIIII@Z
+118 00000000 SECT56 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x6)
+11A 00000000 SECT56 notype       Static       | $unwind$?FireGCEnd_V1@GCToCLREventSink@@UEAAXII@Z
+11B 00000000 SECT57 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E639797D, selection    5 (pick associative Section 0x6)
+11D 00000000 SECT57 notype       Static       | $pdata$?FireGCEnd_V1@GCToCLREventSink@@UEAAXII@Z
+11E 00000000 SECT58 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 84432563, selection    5 (pick associative Section 0x7)
+120 00000000 SECT58 notype       Static       | $unwind$?FireGCGenerationRange@GCToCLREventSink@@UEAAXEPEAX_K1@Z
+121 00000000 SECT59 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1EC846AC, selection    5 (pick associative Section 0x7)
+123 00000000 SECT59 notype       Static       | $pdata$?FireGCGenerationRange@GCToCLREventSink@@UEAAXEPEAX_K1@Z
+124 00000000 SECT5A notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 729B57FD, selection    5 (pick associative Section 0x8)
+126 00000000 SECT5A notype       Static       | $unwind$?FireGCHeapStats_V2@GCToCLREventSink@@UEAAX_K00000000000III@Z
+127 00000000 SECT5B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4EFD7878, selection    5 (pick associative Section 0x8)
+129 00000000 SECT5B notype       Static       | $pdata$?FireGCHeapStats_V2@GCToCLREventSink@@UEAAX_K00000000000III@Z
+12A 00000000 SECT5C notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x9)
+12C 00000000 SECT5C notype       Static       | $unwind$?FireGCCreateSegment_V1@GCToCLREventSink@@UEAAXPEAX_KI@Z
+12D 00000000 SECT5D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  1875D87, selection    5 (pick associative Section 0x9)
+12F 00000000 SECT5D notype       Static       | $pdata$?FireGCCreateSegment_V1@GCToCLREventSink@@UEAAXPEAX_KI@Z
+130 00000000 SECT5E notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0xE)
+132 00000000 SECT5E notype       Static       | $unwind$?FireGCMarkWithType@GCToCLREventSink@@UEAAXII_K@Z
+133 00000000 SECT5F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B1966C32, selection    5 (pick associative Section 0xE)
+135 00000000 SECT5F notype       Static       | $pdata$?FireGCMarkWithType@GCToCLREventSink@@UEAAXII_K@Z
+136 00000000 SECT60 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 84432563, selection    5 (pick associative Section 0xF)
+138 00000000 SECT60 notype       Static       | $unwind$?FireGCJoin_V2@GCToCLREventSink@@UEAAXIIII@Z
+139 00000000 SECT61 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D8A74F2B, selection    5 (pick associative Section 0xF)
+13B 00000000 SECT61 notype       Static       | $pdata$?FireGCJoin_V2@GCToCLREventSink@@UEAAXIIII@Z
+13C 00000000 SECT62 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum CB5D5E5C, selection    5 (pick associative Section 0x10)
+13E 00000000 SECT62 notype       Static       | $unwind$?FireGCGlobalHeapHistory_V4@GCToCLREventSink@@UEAAX_KHIIIIIIIIIIPEAX@Z
+13F 00000000 SECT63 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F727FBDA, selection    5 (pick associative Section 0x10)
+141 00000000 SECT63 notype       Static       | $pdata$?FireGCGlobalHeapHistory_V4@GCToCLREventSink@@UEAAX_KHIIIIIIIIIIPEAX@Z
+142 00000000 SECT64 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum F3FE58BE, selection    5 (pick associative Section 0x12)
+144 00000000 SECT64 notype       Static       | $unwind$?FireGCAllocationTick_V4@GCToCLREventSink@@UEAAX_KIIPEAX0@Z
+145 00000000 SECT65 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 3D908D58, selection    5 (pick associative Section 0x12)
+147 00000000 SECT65 notype       Static       | $pdata$?FireGCAllocationTick_V4@GCToCLREventSink@@UEAAX_KIIPEAX0@Z
+148 00000000 SECT66 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum F02B2C92, selection    5 (pick associative Section 0x13)
+14A 00000000 SECT66 notype       Static       | $unwind$?FirePinObjectAtGCTime@GCToCLREventSink@@UEAAXPEAXPEAPEAE@Z
+14B 00000000 SECT67 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 9349FA41, selection    5 (pick associative Section 0x13)
+14D 00000000 SECT67 notype       Static       | $pdata$?FirePinObjectAtGCTime@GCToCLREventSink@@UEAAXPEAXPEAPEAE@Z
+14E 00000000 SECT68 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x14)
+150 00000000 SECT68 notype       Static       | $unwind$?FireGCLOHCompact@GCToCLREventSink@@UEAAXGIPEAX@Z
+151 00000000 SECT69 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 35DC62C8, selection    5 (pick associative Section 0x14)
+153 00000000 SECT69 notype       Static       | $pdata$?FireGCLOHCompact@GCToCLREventSink@@UEAAXGIPEAX@Z
+154 00000000 SECT6A notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 9E6AAF91, selection    5 (pick associative Section 0x15)
+156 00000000 SECT6A notype       Static       | $unwind$?FireGCFitBucketInfo@GCToCLREventSink@@UEAAXG_KGIPEAX@Z
+157 00000000 SECT6B notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  B42549E, selection    5 (pick associative Section 0x15)
+159 00000000 SECT6B notype       Static       | $pdata$?FireGCFitBucketInfo@GCToCLREventSink@@UEAAXG_KGIPEAX@Z
+15A 00000000 SECT6C notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x16)
+15C 00000000 SECT6C notype       Static       | $unwind$?FirePinPlugAtGCTime@GCToCLREventSink@@UEAAXPEAE00@Z
+15D 00000000 SECT6D notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  1875D87, selection    5 (pick associative Section 0x16)
+15F 00000000 SECT6D notype       Static       | $pdata$?FirePinPlugAtGCTime@GCToCLREventSink@@UEAAXPEAE00@Z
+160 00000000 SECT6E notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 7CD8929C, selection    5 (pick associative Section 0x17)
+162 00000000 SECT6E notype       Static       | $unwind$?FireGCPerHeapHistory_V3@GCToCLREventSink@@UEAAXPEAX00000IIIIII0II0@Z
+163 00000000 SECT6F notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4DF3C376, selection    5 (pick associative Section 0x17)
+165 00000000 SECT6F notype       Static       | $pdata$?FireGCPerHeapHistory_V3@GCToCLREventSink@@UEAAXPEAX00000IIIIII0II0@Z
+166 00000000 SECT70 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x21)
+168 00000000 SECT70 notype       Static       | $unwind$?FireBGCRevisit@GCToCLREventSink@@UEAAX_K0I@Z
+169 00000000 SECT71 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  1875D87, selection    5 (pick associative Section 0x21)
+16B 00000000 SECT71 notype       Static       | $pdata$?FireBGCRevisit@GCToCLREventSink@@UEAAX_K0I@Z
+16C 00000000 SECT72 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 84432563, selection    5 (pick associative Section 0x22)
+16E 00000000 SECT72 notype       Static       | $unwind$?FireBGCOverflow_V1@GCToCLREventSink@@UEAAX_K00II@Z
+16F 00000000 SECT73 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 617DCC89, selection    5 (pick associative Section 0x22)
+171 00000000 SECT73 notype       Static       | $pdata$?FireBGCOverflow_V1@GCToCLREventSink@@UEAAX_K00II@Z
+172 00000000 SECT74 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x25)
+174 00000000 SECT74 notype       Static       | $unwind$?FireGCFullNotify_V1@GCToCLREventSink@@UEAAXII@Z
+175 00000000 SECT75 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E639797D, selection    5 (pick associative Section 0x25)
+177 00000000 SECT75 notype       Static       | $pdata$?FireGCFullNotify_V1@GCToCLREventSink@@UEAAXII@Z
+178 00000000 SECT76 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 84432563, selection    5 (pick associative Section 0x26)
+17A 00000000 SECT76 notype       Static       | $unwind$?FireSetGCHandle@GCToCLREventSink@@UEAAXPEAX0II@Z
+17B 00000000 SECT77 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum EFF2CB6A, selection    5 (pick associative Section 0x26)
+17D 00000000 SECT77 notype       Static       | $pdata$?FireSetGCHandle@GCToCLREventSink@@UEAAXPEAX0II@Z
+17E 00000000 SECT78 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 84432563, selection    5 (pick associative Section 0x27)
+180 00000000 SECT78 notype       Static       | $unwind$?FirePrvSetGCHandle@GCToCLREventSink@@UEAAXPEAX0II@Z
+181 00000000 SECT79 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum EFF2CB6A, selection    5 (pick associative Section 0x27)
+183 00000000 SECT79 notype       Static       | $pdata$?FirePrvSetGCHandle@GCToCLREventSink@@UEAAXPEAX0II@Z
+184 00000000 UNDEF  notype       External     | _tls_index
+185 00000000 UNDEF  notype       External     | __security_cookie
+186 00000000 SECT7A notype       Static       | .debug$S
+    Section length   38, #relocs    2, #linenums    0, checksum        0, selection    5 (pick associative Section 0x2A)
+188 00000000 SECT7B notype       Static       | .chks64
+    Section length  3D8, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x1958 bytes
+
+  Summary
+
+         3D8 .chks64
+           8 .data
+        D2A4 .debug$S
+          88 .debug$T
+          F4 .drectve
+          F0 .pdata
+         130 .rdata
+         7F1 .text$mn
+          C8 .xdata

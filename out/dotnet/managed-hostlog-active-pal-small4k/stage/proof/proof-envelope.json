@@ -1,6 +1,6 @@
 {
     "proofLabel":  "NativeAOT managed-code execution proof",
-    "sourceOutputRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\managed-hostlog-active-pal-small4k",
+    "sourceOutputRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\managed-hostlog-active-pal-small4k\\",
     "stageRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\managed-hostlog-active-pal-small4k\\stage",
     "stageAppsRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\managed-hostlog-active-pal-small4k\\stage\\apps",
     "stageProofRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\managed-hostlog-active-pal-small4k\\stage\\proof",

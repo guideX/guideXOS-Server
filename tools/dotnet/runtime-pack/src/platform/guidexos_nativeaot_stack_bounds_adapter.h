@@ -4,7 +4,14 @@
 // runtime-neutral; this adapter is the isolated NativeAOT spelling that a
 // future PalRedhawk implementation can call.
 
+#if defined(GXOS_BARE_METAL)
+#include <stdint.h>
+namespace std {
+using ::uintptr_t;
+}
+#else
 #include <cstdint>
+#endif
 
 #include "../../../../../runtime/thread/guidexos_native_stack_bounds.h"
 

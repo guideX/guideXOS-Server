@@ -1,0 +1,4 @@
+[safe]
+	directory = D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/out/dotnet/gc-feasibility-baseline/nativeaot-runtime
+	directory = D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/out/dotnet/gc-feasibility-baseline/nativeaot-runtime
+	directory = D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/out/dotnet/gc-feasibility-baseline/nativeaot-runtime/src/coreclr

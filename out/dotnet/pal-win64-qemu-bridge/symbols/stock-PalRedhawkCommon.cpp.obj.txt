@@ -1,0 +1,74 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\extracted\PalRedhawkCommon.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length  122, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length ACFC, #relocs    2, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .bss
+    Section length    4, #relocs    0, #linenums    0, checksum        0
+00B 00000000 SECT4  notype       External     | ?g_RhNumberOfProcessors@@3IA (unsigned int g_RhNumberOfProcessors)
+00C 00000000 SECT5  notype       Static       | .text$mn
+    Section length   70, #relocs    1, #linenums    0, checksum E0B8452E, selection    1 (pick no duplicates)
+00E 00000000 SECT6  notype       Static       | .debug$S
+    Section length  208, #relocs   10, #linenums    0, checksum        0, selection    5 (pick associative Section 0x5)
+010 00000000 SECT7  notype       Static       | .text$mn
+    Section length   16, #relocs    0, #linenums    0, checksum 199DCDBC, selection    1 (pick no duplicates)
+012 00000000 SECT8  notype       Static       | .debug$S
+    Section length  170, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x7)
+014 00000000 SECT9  notype       Static       | .text$mn
+    Section length   4B, #relocs    0, #linenums    0, checksum 7CED3E8A, selection    1 (pick no duplicates)
+016 00000000 SECTA  notype       Static       | .debug$S
+    Section length  200, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x9)
+018 00000000 SECTB  notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum D8B1BCB1, selection    1 (pick no duplicates)
+01A 00000000 SECTC  notype       Static       | .debug$S
+    Section length   A4, #relocs    4, #linenums    0, checksum        0, selection    5 (pick associative Section 0xB)
+01C 00000000 SECTD  notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+01E 00000000 SECTE  notype       Static       | .debug$S
+    Section length   A8, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0xD)
+020 00000000 UNDEF  notype       External     | __imp_GetTickCount64
+021 00000000 UNDEF  notype       External     | __imp_VirtualQuery
+022 00000000 SECT7  notype ()    External     | PalGetModuleBounds
+023 00000000 SECTB  notype ()    External     | PalGetProcessCpuCount
+024 00000000 SECT5  notype ()    External     | PalGetMaximumStackBounds
+025 00000000 SECT9  notype ()    External     | PalGetModuleFileName
+026 00000000 SECTD  notype ()    External     | PalGetTickCount64
+027 00000000 SECT5  notype       Label        | $LN8
+028 00000000 SECTF  notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 5DBAB323, selection    5 (pick associative Section 0x5)
+02A 00000000 SECTF  notype       Static       | $unwind$PalGetMaximumStackBounds
+02B 00000000 SECT10 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum AC509190, selection    5 (pick associative Section 0x5)
+02D 00000000 SECT10 notype       Static       | $pdata$PalGetMaximumStackBounds
+02E 00000000 SECT11 notype       Static       | .voltbl
+    Section length    1, #relocs    0, #linenums    0, checksum E10E9818, selection    5 (pick associative Section 0x5)
+030 00000000 SECT11 notype       Static       | _volmd
+031 00000000 SECT12 notype       Static       | .voltbl
+    Section length    1, #relocs    0, #linenums    0, checksum        0, selection    5 (pick associative Section 0x9)
+033 00000000 SECT12 notype       Static       | _volmd
+034 00000000 SECT13 notype       Static       | .chks64
+    Section length   98, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0xF3 bytes
+
+  Summary
+
+           4 .bss
+          98 .chks64
+        B3C0 .debug$S
+          88 .debug$T
+         122 .drectve
+           C .pdata
+          DF .text$mn
+           2 .voltbl
+           C .xdata

@@ -1,0 +1,80 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\extracted\time.c.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01048413 ABS    notype       Static       | @comp.id
+001 80014190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   5D, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 7998, #relocs    0, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .text$mn
+    Section length   19, #relocs    1, #linenums    0, checksum AE3201CB, selection    1 (pick no duplicates)
+00B 00000000 SECT5  notype       Static       | .debug$S
+    Section length   F0, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4)
+00D 00000000 SECT6  notype       Static       | .text$mn
+    Section length   19, #relocs    1, #linenums    0, checksum AE3201CB, selection    1 (pick no duplicates)
+00F 00000000 SECT7  notype       Static       | .debug$S
+    Section length   E8, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x6)
+011 00000000 SECT8  notype       Static       | .text$mn
+    Section length   D9, #relocs    4, #linenums    0, checksum 498BD11D, selection    1 (pick no duplicates)
+013 00000000 SECT9  notype       Static       | .debug$S
+    Section length  2F8, #relocs   1E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x8)
+015 00000000 SECT6  notype ()    External     | minipal_hires_ticks
+016 00000000 SECT4  notype ()    External     | minipal_hires_tick_frequency
+017 00000000 SECT8  notype ()    External     | minipal_microdelay
+018 00000000 UNDEF  notype       External     | __imp_QueryPerformanceCounter
+019 00000000 UNDEF  notype       External     | __imp_QueryPerformanceFrequency
+01A 00000000 UNDEF  notype       External     | __imp_SleepEx
+01B 00000000 SECT6  notype       Label        | $LN4
+01C 00000000 SECT4  notype       Label        | $LN4
+01D 00000000 SECT8  notype       Label        | $LN33
+01E 00000000 SECTA  notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x6)
+020 00000000 SECTA  notype       Static       | $unwind$minipal_hires_ticks
+021 00000000 SECTB  notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 63F42A00, selection    5 (pick associative Section 0x6)
+023 00000000 SECTB  notype       Static       | $pdata$minipal_hires_ticks
+024 00000000 SECTC  notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x4)
+026 00000000 SECTC  notype       Static       | $unwind$minipal_hires_tick_frequency
+027 00000000 SECTD  notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 63F42A00, selection    5 (pick associative Section 0x4)
+029 00000000 SECTD  notype       Static       | $pdata$minipal_hires_tick_frequency
+02A 00000000 SECTE  notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum BFD00A3E, selection    5 (pick associative Section 0x8)
+02C 00000000 SECTE  notype       Static       | $unwind$minipal_microdelay
+02D 00000000 SECTF  notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  B42549E, selection    5 (pick associative Section 0x8)
+02F 00000000 SECTF  notype       Static       | $pdata$minipal_microdelay
+030 00000000 SECT10 notype       Static       | .xdata
+    Section length   1C, #relocs    3, #linenums    0, checksum 79CDAF17, selection    5 (pick associative Section 0x8)
+032 00000000 SECT10 notype       Static       | $chain$2$minipal_microdelay
+033 00000000 SECT11 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8214B612, selection    5 (pick associative Section 0x8)
+035 00000000 SECT11 notype       Static       | $pdata$2$minipal_microdelay
+036 00000000 SECT12 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum B215BE72, selection    5 (pick associative Section 0x8)
+038 00000000 SECT12 notype       Static       | $chain$3$minipal_microdelay
+039 00000000 SECT13 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D759B4C9, selection    5 (pick associative Section 0x8)
+03B 00000000 SECT13 notype       Static       | $pdata$3$minipal_microdelay
+03C 00000000 SECT14 notype       Static       | .chks64
+    Section length   A0, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x1B9 bytes
+
+  Summary
+
+          A0 .chks64
+        7E68 .debug$S
+          88 .debug$T
+          5D .drectve
+          3C .pdata
+         10B .text$mn
+          48 .xdata

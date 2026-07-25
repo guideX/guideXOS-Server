@@ -1,0 +1,4 @@
+[safe]
+	directory = D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/out/dotnet/pal-runtime-active-replacement-build/locked-source
+	directory = D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement-build\\locked-source
+	directory = D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-feasibility-baseline\\nativeaot-runtime

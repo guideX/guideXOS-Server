@@ -1,0 +1,51 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\archives\adapted-members\00028-gccommon.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   F4, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 8774, #relocs   1A, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .bss
+    Section length 1044, #relocs    0, #linenums    0, checksum        0
+00B 00000000 SECT4  notype       External     | g_gc_card_bundle_table
+00C 00000008 SECT4  notype       External     | g_gc_card_table
+00D 00000010 SECT4  notype       External     | g_gc_lowest_address
+00E 00000018 SECT4  notype       External     | g_gc_highest_address
+00F 00000020 SECT4  notype       External     | g_gc_heap_type
+010 00000000 SECT5  notype       Static       | .data
+    Section length   10, #relocs    0, #linenums    0, checksum C3C62516
+012 00000000 SECT5  notype       External     | g_max_generation
+013 00000028 SECT4  notype       External     | g_gc_pFreeObjectMethodTable
+014 00000024 SECT4  notype       External     | g_num_processors
+015 00000030 SECT4  notype       External     | ?g_theGCHeap@@3PEAVIGCHeapInternal@@EA (class IGCHeapInternal * g_theGCHeap)
+016 00000038 SECT4  notype       External     | ?g_theGCHandleManager@@3PEAVIGCHandleManager@@EA (class IGCHandleManager * g_theGCHandleManager)
+017 00000040 SECT4  notype       External     | ?saved_changed_segs@@3PAUchanged_seg@@A (struct changed_seg * saved_changed_segs)
+018 00000008 SECT5  notype       External     | ?saved_changed_segs_count@@3_KA (unsigned __int64 saved_changed_segs_count)
+019 00000000 SECT6  notype       Static       | .text$mn
+    Section length   3D, #relocs    3, #linenums    0, checksum D1961AE5, selection    1 (pick no duplicates)
+01B 00000000 SECT7  notype       Static       | .debug$S
+    Section length  1FC, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x6)
+01D 00000000 SECT6  notype ()    External     | ?record_changed_seg@@YAXPEAE0_KW4bgc_state@@W4changed_seg_state@@@Z (void __cdecl record_changed_seg(unsigned char *,unsigned char *,unsigned __int64,enum bgc_state,enum changed_seg_state))
+01E 00001040 SECT4  notype       External     | ?g_fSuspensionPending@@3V?$Volatile@H@@A (class Volatile<int> g_fSuspensionPending)
+01F 00000000 SECT8  notype       Static       | .chks64
+    Section length   40, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x1AE bytes
+
+  Summary
+
+        1044 .bss
+          40 .chks64
+          10 .data
+        8970 .debug$S
+          88 .debug$T
+          F4 .drectve
+          3D .text$mn

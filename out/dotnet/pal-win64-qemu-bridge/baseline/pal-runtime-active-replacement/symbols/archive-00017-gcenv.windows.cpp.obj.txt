@@ -1,0 +1,725 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-runtime-active-replacement\archives\adapted-members\00017-gcenv.windows.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length  122, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length F19C, #relocs   1C, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .bss
+    Section length   A8, #relocs    0, #linenums    0, checksum        0
+00B 00000000 SECT4  notype       External     | ?g_SystemInfo@@3UGCSystemInfo@@A (struct GCSystemInfo g_SystemInfo)
+00C 00000000 SECT5  notype       Static       | .text$mn
+    Section length    B, #relocs    0, #linenums    0, checksum 82DF0887, selection    1 (pick no duplicates)
+00E 00000000 SECT6  notype       Static       | .debug$S
+    Section length   D0, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x5)
+010 00000000 SECT7  notype       Static       | .text$mn
+    Section length   22, #relocs    2, #linenums    0, checksum 33D37B94, selection    1 (pick no duplicates)
+012 00000000 SECT8  notype       Static       | .debug$S
+    Section length   D4, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x7)
+014 00000000 SECT9  notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum C8256A8F, selection    1 (pick no duplicates)
+016 00000000 SECTA  notype       Static       | .debug$S
+    Section length   B4, #relocs    4, #linenums    0, checksum        0, selection    5 (pick associative Section 0x9)
+018 00000000 SECTB  notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum C8256A8F, selection    1 (pick no duplicates)
+01A 00000000 SECTC  notype       Static       | .debug$S
+    Section length   B4, #relocs    4, #linenums    0, checksum        0, selection    5 (pick associative Section 0xB)
+01C 00000000 SECTD  notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum DE285C5B, selection    1 (pick no duplicates)
+01E 00000000 SECTE  notype       Static       | .debug$S
+    Section length   BC, #relocs    4, #linenums    0, checksum        0, selection    5 (pick associative Section 0xD)
+020 00000000 SECTF  notype       Static       | .text$mn
+    Section length   1F, #relocs    1, #linenums    0, checksum CA96F08D, selection    1 (pick no duplicates)
+022 00000000 SECT10 notype       Static       | .debug$S
+    Section length  12C, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0xF)
+024 00000000 SECT11 notype       Static       | .text$mn
+    Section length   82, #relocs    4, #linenums    0, checksum 5ECCAAF5, selection    1 (pick no duplicates)
+026 00000000 SECT12 notype       Static       | .debug$S
+    Section length  284, #relocs   10, #linenums    0, checksum        0, selection    5 (pick associative Section 0x11)
+028 00000000 SECT13 notype       Static       | .text$mn
+    Section length   85, #relocs    4, #linenums    0, checksum 19C2D60C, selection    1 (pick no duplicates)
+02A 00000000 SECT14 notype       Static       | .debug$S
+    Section length  284, #relocs   10, #linenums    0, checksum        0, selection    5 (pick associative Section 0x13)
+02C 00000000 SECT15 notype       Static       | .text$mn
+    Section length   89, #relocs    4, #linenums    0, checksum 8B5CC4A4, selection    1 (pick no duplicates)
+02E 00000000 SECT16 notype       Static       | .debug$S
+    Section length  288, #relocs   10, #linenums    0, checksum        0, selection    5 (pick associative Section 0x15)
+030 00000000 SECT17 notype       Static       | .text$mn
+    Section length   8C, #relocs    4, #linenums    0, checksum 605985CA, selection    1 (pick no duplicates)
+032 00000000 SECT18 notype       Static       | .debug$S
+    Section length  288, #relocs   10, #linenums    0, checksum        0, selection    5 (pick associative Section 0x17)
+034 00000000 SECT19 notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+036 00000000 SECT1A notype       Static       | .debug$S
+    Section length   B4, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x19)
+038 00000000 SECT1B notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+03A 00000000 SECT1C notype       Static       | .debug$S
+    Section length   E4, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1B)
+03C 00000000 SECT1D notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+03E 00000000 SECT1E notype       Static       | .debug$S
+    Section length   E4, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1D)
+040 00000000 SECT1F notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+042 00000000 SECT20 notype       Static       | .debug$S
+    Section length   C0, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x1F)
+044 00000000 SECT21 notype       Static       | .text$mn
+    Section length   78, #relocs    3, #linenums    0, checksum 1DD65F84, selection    1 (pick no duplicates)
+046 00000000 SECT22 notype       Static       | .debug$S
+    Section length  2D0, #relocs   1A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x21)
+048 00000000 SECT23 notype       Static       | .text$mn
+    Section length   EC, #relocs    A, #linenums    0, checksum C2A4E270, selection    1 (pick no duplicates)
+04A 00000000 SECT24 notype       Static       | .debug$S
+    Section length  30C, #relocs   24, #linenums    0, checksum        0, selection    5 (pick associative Section 0x23)
+04C 00000000 SECT25 notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+04E 00000000 SECT26 notype       Static       | .debug$S
+    Section length   BC, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x25)
+050 00000000 SECT27 notype       Static       | .text$mn
+    Section length   27, #relocs    1, #linenums    0, checksum B0D06389, selection    1 (pick no duplicates)
+052 00000000 SECT28 notype       Static       | .debug$S
+    Section length  14C, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x27)
+054 00000000 SECT29 notype       Static       | .text$mn
+    Section length   11, #relocs    1, #linenums    0, checksum 1547B6A9, selection    1 (pick no duplicates)
+056 00000000 SECT2A notype       Static       | .debug$S
+    Section length   CC, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x29)
+058 00000000 SECT2B notype       Static       | .text$mn
+    Section length   49, #relocs    2, #linenums    0, checksum D396474E, selection    1 (pick no duplicates)
+05A 00000000 SECT2C notype       Static       | .debug$S
+    Section length  1DC, #relocs   12, #linenums    0, checksum        0, selection    5 (pick associative Section 0x2B)
+05C 00000000 SECT2D notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+05E 00000000 SECT2E notype       Static       | .debug$S
+    Section length   C0, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x2D)
+060 00000000 SECT2F notype       Static       | .text$mn
+    Section length  1DC, #relocs    7, #linenums    0, checksum 9BE7891C, selection    1 (pick no duplicates)
+062 00000000 SECT30 notype       Static       | .debug$S
+    Section length  430, #relocs   26, #linenums    0, checksum        0, selection    5 (pick associative Section 0x2F)
+064 00000000 SECT31 notype       Static       | .text$mn
+    Section length   A7, #relocs    6, #linenums    0, checksum 3BF9C524, selection    1 (pick no duplicates)
+066 00000000 SECT32 notype       Static       | .debug$S
+    Section length  344, #relocs   20, #linenums    0, checksum        0, selection    5 (pick associative Section 0x31)
+068 00000000 SECT33 notype       Static       | .text$mn
+    Section length  1AE, #relocs    8, #linenums    0, checksum 77CBA8A4, selection    1 (pick no duplicates)
+06A 00000000 SECT34 notype       Static       | .debug$S
+    Section length  508, #relocs   30, #linenums    0, checksum        0, selection    5 (pick associative Section 0x33)
+06C 00000000 SECT35 notype       Static       | .text$mn
+    Section length  145, #relocs    7, #linenums    0, checksum F408236C, selection    1 (pick no duplicates)
+06E 00000000 SECT36 notype       Static       | .debug$S
+    Section length  580, #relocs   36, #linenums    0, checksum        0, selection    5 (pick associative Section 0x35)
+070 00000000 SECT37 notype       Static       | .text$mn
+    Section length   15, #relocs    3, #linenums    0, checksum 320F4DF7, selection    1 (pick no duplicates)
+072 00000000 SECT38 notype       Static       | .debug$S
+    Section length   C4, #relocs    4, #linenums    0, checksum        0, selection    5 (pick associative Section 0x37)
+074 00000000 SECT39 notype       Static       | .text$mn
+    Section length   3D, #relocs    3, #linenums    0, checksum 56ECD2D0, selection    1 (pick no duplicates)
+076 00000000 SECT3A notype       Static       | .debug$S
+    Section length  134, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x39)
+078 00000000 SECT3B notype       Static       | .text$mn
+    Section length   3D, #relocs    3, #linenums    0, checksum 56ECD2D0, selection    1 (pick no duplicates)
+07A 00000000 SECT3C notype       Static       | .debug$S
+    Section length  134, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x3B)
+07C 00000000 SECT3D notype       Static       | .text$mn
+    Section length   2B, #relocs    1, #linenums    0, checksum 8B5908AA, selection    1 (pick no duplicates)
+07E 00000000 SECT3E notype       Static       | .debug$S
+    Section length  264, #relocs   14, #linenums    0, checksum        0, selection    5 (pick associative Section 0x3D)
+080 00000000 SECT3F notype       Static       | .text$mn
+    Section length  1F8, #relocs    F, #linenums    0, checksum A6F21814, selection    1 (pick no duplicates)
+082 00000000 SECT40 notype       Static       | .debug$S
+    Section length  4F0, #relocs   36, #linenums    0, checksum        0, selection    5 (pick associative Section 0x3F)
+084 00000000 SECT41 notype       Static       | .text$mn
+    Section length   11, #relocs    1, #linenums    0, checksum 65978A10, selection    1 (pick no duplicates)
+086 00000000 SECT42 notype       Static       | .debug$S
+    Section length   F8, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x41)
+088 00000000 SECT43 notype       Static       | .text$mn
+    Section length  1C0, #relocs   17, #linenums    0, checksum 89CBCDB0, selection    1 (pick no duplicates)
+08A 00000000 SECT44 notype       Static       | .debug$S
+    Section length  52C, #relocs   32, #linenums    0, checksum        0, selection    5 (pick associative Section 0x43)
+08C 00000000 SECT45 notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+08E 00000000 SECT46 notype       Static       | .debug$S
+    Section length   E4, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x45)
+090 00000000 SECT47 notype       Static       | .text$mn
+    Section length   BE, #relocs    4, #linenums    0, checksum 70592783, selection    1 (pick no duplicates)
+092 00000000 SECT48 notype       Static       | .debug$S
+    Section length  30C, #relocs   1C, #linenums    0, checksum        0, selection    5 (pick associative Section 0x47)
+094 00000000 SECT49 notype       Static       | .text$mn
+    Section length   19, #relocs    1, #linenums    0, checksum AE3201CB, selection    1 (pick no duplicates)
+096 00000000 SECT4A notype       Static       | .debug$S
+    Section length   FC, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x49)
+098 00000000 SECT4B notype       Static       | .text$mn
+    Section length   19, #relocs    1, #linenums    0, checksum AE3201CB, selection    1 (pick no duplicates)
+09A 00000000 SECT4C notype       Static       | .debug$S
+    Section length  100, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4B)
+09C 00000000 SECT4D notype       Static       | .text$mn
+    Section length    D, #relocs    1, #linenums    0, checksum 61B545E6, selection    1 (pick no duplicates)
+09E 00000000 SECT4E notype       Static       | .debug$S
+    Section length   FC, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4D)
+0A0 00000000 SECT4F notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+0A2 00000000 SECT50 notype       Static       | .debug$S
+    Section length  120, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4F)
+0A4 00000000 SECT51 notype       Static       | .text$mn
+    Section length    D, #relocs    1, #linenums    0, checksum 61B545E6, selection    1 (pick no duplicates)
+0A6 00000000 SECT52 notype       Static       | .debug$S
+    Section length   FC, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x51)
+0A8 00000000 SECT53 notype       Static       | .text$mn
+    Section length   92, #relocs    6, #linenums    0, checksum 5797F81D, selection    1 (pick no duplicates)
+0AA 00000000 SECT54 notype       Static       | .debug$S
+    Section length  2D4, #relocs   1E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x53)
+0AC 00000000 SECT55 notype       Static       | .text$mn
+    Section length  3B8, #relocs    4, #linenums    0, checksum 30615618, selection    1 (pick no duplicates)
+0AE 00000000 SECT56 notype       Static       | .debug$S
+    Section length  5F8, #relocs   18, #linenums    0, checksum        0, selection    5 (pick associative Section 0x55)
+0B0 00000000 SECT57 notype       Static       | .text$mn
+    Section length   8B, #relocs    7, #linenums    0, checksum 44FDCBB1, selection    1 (pick no duplicates)
+0B2 00000000 SECT58 notype       Static       | .debug$S
+    Section length  224, #relocs   14, #linenums    0, checksum        0, selection    5 (pick associative Section 0x57)
+0B4 00000000 SECT59 notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum 922B422E, selection    1 (pick no duplicates)
+0B6 00000000 SECT5A notype       Static       | .debug$S
+    Section length   A0, #relocs    4, #linenums    0, checksum        0, selection    5 (pick associative Section 0x59)
+0B8 00000000 SECT5B notype       Static       | .text$mn
+    Section length    E, #relocs    1, #linenums    0, checksum 45D47FB6, selection    1 (pick no duplicates)
+0BA 00000000 SECT5C notype       Static       | .debug$S
+    Section length   F8, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x5B)
+0BC 00000000 SECT5D notype       Static       | .text$mn
+    Section length   40, #relocs    3, #linenums    0, checksum 5A2B074B, selection    1 (pick no duplicates)
+0BE 00000000 SECT5E notype       Static       | .debug$S
+    Section length  16C, #relocs    C, #linenums    0, checksum        0, selection    5 (pick associative Section 0x5D)
+0C0 00000000 SECT5F notype       Static       | .text$mn
+    Section length   84, #relocs    3, #linenums    0, checksum 80D5BCC6, selection    1 (pick no duplicates)
+0C2 00000000 SECT60 notype       Static       | .debug$S
+    Section length  1BC, #relocs   14, #linenums    0, checksum        0, selection    5 (pick associative Section 0x5F)
+0C4 00000000 SECT61 notype       Static       | .text$mn
+    Section length   1A, #relocs    1, #linenums    0, checksum 976D5CB7, selection    1 (pick no duplicates)
+0C6 00000000 SECT62 notype       Static       | .debug$S
+    Section length  128, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x61)
+0C8 00000000 SECT63 notype       Static       | .text$mn
+    Section length   1C, #relocs    1, #linenums    0, checksum E99D444C, selection    1 (pick no duplicates)
+0CA 00000000 SECT64 notype       Static       | .debug$S
+    Section length  130, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x63)
+0CC 00000000 SECT65 notype       Static       | .text$mn
+    Section length   80, #relocs    3, #linenums    0, checksum D0750CDC, selection    1 (pick no duplicates)
+0CE 00000000 SECT66 notype       Static       | .debug$S
+    Section length  21C, #relocs   16, #linenums    0, checksum        0, selection    5 (pick associative Section 0x65)
+0D0 00000000 SECT67 notype       Static       | .text$mn
+    Section length  146, #relocs    F, #linenums    0, checksum 422B9F43, selection    1 (pick no duplicates)
+0D2 00000000 SECT68 notype       Static       | .debug$S
+    Section length  368, #relocs   2E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x67)
+0D4 00000000 SECT69 notype       Static       | .text$mn
+    Section length   64, #relocs    2, #linenums    0, checksum EB9DF1CF, selection    1 (pick no duplicates)
+0D6 00000000 SECT6A notype       Static       | .debug$S
+    Section length  1D0, #relocs   16, #linenums    0, checksum        0, selection    5 (pick associative Section 0x69)
+0D8 00000000 SECT6B notype       Static       | .text$mn
+    Section length    D, #relocs    1, #linenums    0, checksum 61B545E6, selection    1 (pick no duplicates)
+0DA 00000000 SECT6C notype       Static       | .debug$S
+    Section length  198, #relocs    E, #linenums    0, checksum        0, selection    5 (pick associative Section 0x6B)
+0DC 00000000 SECT6D notype       Static       | .text$mn
+    Section length    7, #relocs    1, #linenums    0, checksum 9A0130A6, selection    1 (pick no duplicates)
+0DE 00000000 SECT6E notype       Static       | .debug$S
+    Section length   FC, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x6D)
+0E0 00000000 UNDEF  notype ()    External     | ??3@YAXPEAX_K@Z (void __cdecl operator delete(void *,unsigned __int64))
+0E1 00000000 UNDEF  notype ()    External     | ??_V@YAXPEAX@Z (void __cdecl operator delete[](void *))
+0E2 00000000 UNDEF  notype ()    External     | ??2@YAPEAX_KAEBUnothrow_t@std@@@Z (void * __cdecl operator new(unsigned __int64,struct std::nothrow_t const &))
+0E3 00000000 UNDEF  notype ()    External     | ??_U@YAPEAX_KAEBUnothrow_t@std@@@Z (void * __cdecl operator new[](unsigned __int64,struct std::nothrow_t const &))
+0E4 00000000 UNDEF  notype ()    External     | strtoul
+0E5 00000000 UNDEF  notype       External     | __imp_DebugBreak
+0E6 00000000 UNDEF  notype       External     | __imp_CloseHandle
+0E7 00000000 UNDEF  notype       External     | __imp_GetLastError
+0E8 00000000 UNDEF  notype       External     | __imp_QueryPerformanceCounter
+0E9 00000000 UNDEF  notype       External     | __imp_QueryPerformanceFrequency
+0EA 00000000 UNDEF  notype       External     | __imp_InitializeCriticalSection
+0EB 00000000 UNDEF  notype       External     | __imp_EnterCriticalSection
+0EC 00000000 UNDEF  notype       External     | __imp_LeaveCriticalSection
+0ED 00000000 UNDEF  notype       External     | __imp_DeleteCriticalSection
+0EE 00000000 UNDEF  notype       External     | __imp_SetEvent
+0EF 00000000 UNDEF  notype       External     | __imp_ResetEvent
+0F0 00000000 UNDEF  notype       External     | __imp_WaitForSingleObject
+0F1 00000000 UNDEF  notype       External     | __imp_SleepEx
+0F2 00000000 UNDEF  notype       External     | __imp_CreateEventW
+0F3 00000000 UNDEF  notype       External     | __imp_GetCurrentProcess
+0F4 00000000 UNDEF  notype       External     | __imp_GetCurrentProcessId
+0F5 00000000 UNDEF  notype       External     | __imp_SwitchToThread
+0F6 00000000 UNDEF  notype       External     | __imp_GetCurrentThread
+0F7 00000000 UNDEF  notype       External     | __imp_GetCurrentThreadId
+0F8 00000000 UNDEF  notype       External     | __imp_SetThreadPriority
+0F9 00000000 UNDEF  notype       External     | __imp_OpenProcessToken
+0FA 00000000 UNDEF  notype       External     | __imp_FlushProcessWriteBuffers
+0FB 00000000 UNDEF  notype       External     | __imp_SetThreadIdealProcessorEx
+0FC 00000000 UNDEF  notype       External     | __imp_GetThreadIdealProcessorEx
+0FD 00000000 UNDEF  notype       External     | __imp_GetCurrentProcessorNumberEx
+0FE 00000000 UNDEF  notype       External     | __imp_GlobalMemoryStatusEx
+0FF 00000000 UNDEF  notype       External     | __imp_GetSystemInfo
+100 00000000 UNDEF  notype       External     | __imp_GetTickCount64
+101 00000000 UNDEF  notype       External     | __imp_GetLogicalProcessorInformation
+102 00000000 UNDEF  notype       External     | __imp_GetLogicalProcessorInformationEx
+103 00000000 UNDEF  notype       External     | __imp_VirtualAlloc
+104 00000000 UNDEF  notype       External     | __imp_VirtualFree
+105 00000000 UNDEF  notype       External     | __imp_GetLargePageMinimum
+106 00000000 UNDEF  notype       External     | __imp_VirtualUnlock
+107 00000000 UNDEF  notype       External     | __imp_GetWriteWatch
+108 00000000 UNDEF  notype       External     | __imp_ResetWriteWatch
+109 00000000 UNDEF  notype       External     | __imp_VirtualAllocExNuma
+10A 00000000 UNDEF  notype       External     | __imp_IsProcessInJob
+10B 00000000 UNDEF  notype       External     | __imp_QueryInformationJobObject
+10C 00000000 UNDEF  notype       External     | __imp_AdjustTokenPrivileges
+10D 00000000 UNDEF  notype       External     | __imp_GetNumaHighestNodeNumber
+10E 00000000 UNDEF  notype       External     | __imp_GetNumaNodeProcessorMaskEx
+10F 00000000 UNDEF  notype       External     | __imp_GetProcessGroupAffinity
+110 00000000 UNDEF  notype       External     | __imp_SetThreadGroupAffinity
+111 00000000 UNDEF  notype       External     | __imp_GetProcessAffinityMask
+112 00000000 UNDEF  notype       External     | __imp_SetThreadAffinityMask
+113 00000000 UNDEF  notype       External     | __imp_LookupPrivilegeValueW
+114 00000000 UNDEF  notype       External     | __imp_GetNumaProcessorNodeEx
+115 00000000 UNDEF  notype ()    External     | K32GetProcessMemoryInfo
+116 00000000 UNDEF  notype ()    External     | ?ParseIndexOrRange@@YA_NPEAPEBDPEA_K1@Z (bool __cdecl ParseIndexOrRange(char const * *,unsigned __int64 *,unsigned __int64 *))
+117 00000000 SECT41 notype ()    External     | ?Initialize@CLRCriticalSection@@QEAA_NXZ (public: bool __cdecl CLRCriticalSection::Initialize(void))
+118 00000000 SECT1B notype ()    External     | ?Destroy@CLRCriticalSection@@QEAAXXZ (public: void __cdecl CLRCriticalSection::Destroy(void))
+119 00000000 SECT1D notype ()    External     | ?Enter@CLRCriticalSection@@QEAAXXZ (public: void __cdecl CLRCriticalSection::Enter(void))
+11A 00000000 SECT45 notype ()    External     | ?Leave@CLRCriticalSection@@QEAAXXZ (public: void __cdecl CLRCriticalSection::Leave(void))
+11B 00000000 SECT5  notype ()    External     | ??0GCEvent@@QEAA@XZ (public: __cdecl GCEvent::GCEvent(void))
+11C 00000000 SECTF  notype ()    External     | ?CloseEvent@GCEvent@@QEAAXXZ (public: void __cdecl GCEvent::CloseEvent(void))
+11D 00000000 SECT51 notype ()    External     | ?Set@GCEvent@@QEAAXXZ (public: void __cdecl GCEvent::Set(void))
+11E 00000000 SECT4D notype ()    External     | ?Reset@GCEvent@@QEAAXXZ (public: void __cdecl GCEvent::Reset(void))
+11F 00000000 SECT6B notype ()    External     | ?Wait@GCEvent@@QEAAII_N@Z (public: unsigned int __cdecl GCEvent::Wait(unsigned int,bool))
+120 00000000 SECT13 notype ()    External     | ?CreateManualEventNoThrow@GCEvent@@QEAA_N_N@Z (public: bool __cdecl GCEvent::CreateManualEventNoThrow(bool))
+121 00000000 SECT11 notype ()    External     | ?CreateAutoEventNoThrow@GCEvent@@QEAA_N_N@Z (public: bool __cdecl GCEvent::CreateAutoEventNoThrow(bool))
+122 00000000 SECT17 notype ()    External     | ?CreateOSManualEventNoThrow@GCEvent@@QEAA_N_N@Z (public: bool __cdecl GCEvent::CreateOSManualEventNoThrow(bool))
+123 00000000 SECT15 notype ()    External     | ?CreateOSAutoEventNoThrow@GCEvent@@QEAA_N_N@Z (public: bool __cdecl GCEvent::CreateOSAutoEventNoThrow(bool))
+124 00000000 SECT43 notype ()    External     | ?Initialize@GCToOSInterface@@SA_NXZ (public: static bool __cdecl GCToOSInterface::Initialize(void))
+125 00000000 SECT59 notype ()    External     | ?Shutdown@GCToOSInterface@@SAXXZ (public: static void __cdecl GCToOSInterface::Shutdown(void))
+126 00000000 SECT65 notype ()    External     | ?VirtualReserve@GCToOSInterface@@SAPEAX_K0IG@Z (public: static void * __cdecl GCToOSInterface::VirtualReserve(unsigned __int64,unsigned __int64,unsigned int,unsigned short))
+127 00000000 SECT63 notype ()    External     | ?VirtualRelease@GCToOSInterface@@SA_NPEAX_K@Z (public: static bool __cdecl GCToOSInterface::VirtualRelease(void *,unsigned __int64))
+128 00000000 SECT5F notype ()    External     | ?VirtualCommit@GCToOSInterface@@SA_NPEAX_KG@Z (public: static bool __cdecl GCToOSInterface::VirtualCommit(void *,unsigned __int64,unsigned short))
+129 00000000 SECT67 notype ()    External     | ?VirtualReserveAndCommitLargePages@GCToOSInterface@@SAPEAX_KG@Z (public: static void * __cdecl GCToOSInterface::VirtualReserveAndCommitLargePages(unsigned __int64,unsigned short))
+12A 00000000 SECT61 notype ()    External     | ?VirtualDecommit@GCToOSInterface@@SA_NPEAX_K@Z (public: static bool __cdecl GCToOSInterface::VirtualDecommit(void *,unsigned __int64))
+12B 00000000 SECT69 notype ()    External     | ?VirtualReset@GCToOSInterface@@SA_NPEAX_K_N@Z (public: static bool __cdecl GCToOSInterface::VirtualReset(void *,unsigned __int64,bool))
+12C 00000000 SECT5D notype ()    External     | ?SupportsWriteWatch@GCToOSInterface@@SA_NXZ (public: static bool __cdecl GCToOSInterface::SupportsWriteWatch(void))
+12D 00000000 SECT4F notype ()    External     | ?ResetWriteWatch@GCToOSInterface@@SAXPEAX_K@Z (public: static void __cdecl GCToOSInterface::ResetWriteWatch(void *,unsigned __int64))
+12E 00000000 SECT3D notype ()    External     | ?GetWriteWatch@GCToOSInterface@@SA_N_NPEAX_KPEAPEAXPEA_K@Z (public: static bool __cdecl GCToOSInterface::GetWriteWatch(bool,void *,unsigned __int64,void * *,unsigned __int64 *))
+12F 00000000 SECT5B notype ()    External     | ?Sleep@GCToOSInterface@@SAXI@Z (public: static void __cdecl GCToOSInterface::Sleep(unsigned int))
+130 00000000 SECT6D notype ()    External     | ?YieldThread@GCToOSInterface@@SAXI@Z (public: static void __cdecl GCToOSInterface::YieldThread(unsigned int))
+131 00000000 SECT27 notype ()    External     | ?GetCurrentProcessorNumber@GCToOSInterface@@SAIXZ (public: static unsigned int __cdecl GCToOSInterface::GetCurrentProcessorNumber(void))
+132 00000000 SECTD  notype ()    External     | ?CanGetCurrentProcessorNumber@GCToOSInterface@@SA_NXZ (public: static bool __cdecl GCToOSInterface::CanGetCurrentProcessorNumber(void))
+133 00000000 SECT53 notype ()    External     | ?SetCurrentThreadIdealAffinity@GCToOSInterface@@SA_NGG@Z (public: static bool __cdecl GCToOSInterface::SetCurrentThreadIdealAffinity(unsigned short,unsigned short))
+134 00000000 SECT2B notype ()    External     | ?GetCurrentThreadIdealProc@GCToOSInterface@@SA_NPEAG@Z (public: static bool __cdecl GCToOSInterface::GetCurrentThreadIdealProc(unsigned short *))
+135 00000000 SECT29 notype ()    External     | ?GetCurrentThreadIdForLogging@GCToOSInterface@@SA_KXZ (public: static unsigned __int64 __cdecl GCToOSInterface::GetCurrentThreadIdForLogging(void))
+136 00000000 SECT25 notype ()    External     | ?GetCurrentProcessId@GCToOSInterface@@SAIXZ (public: static unsigned int __cdecl GCToOSInterface::GetCurrentProcessId(void))
+137 00000000 SECT23 notype ()    External     | ?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z (public: static unsigned __int64 __cdecl GCToOSInterface::GetCacheSizePerLogicalCpu(bool))
+138 00000000 SECT57 notype ()    External     | ?SetThreadAffinity@GCToOSInterface@@SA_NG@Z (public: static bool __cdecl GCToOSInterface::SetThreadAffinity(unsigned short))
+139 00000000 SECT7  notype ()    External     | ?BoostThreadPriority@GCToOSInterface@@SA_NXZ (public: static bool __cdecl GCToOSInterface::BoostThreadPriority(void))
+13A 00000000 SECT55 notype ()    External     | ?SetGCThreadsAffinitySet@GCToOSInterface@@SAPEBVAffinitySet@@_KPEBV2@@Z (public: static class AffinitySet const * __cdecl GCToOSInterface::SetGCThreadsAffinitySet(unsigned __int64,class AffinitySet const *))
+13B 00000000 SECT39 notype ()    External     | ?GetVirtualMemoryLimit@GCToOSInterface@@SA_KXZ (public: static unsigned __int64 __cdecl GCToOSInterface::GetVirtualMemoryLimit(void))
+13C 00000000 SECT3B notype ()    External     | ?GetVirtualMemoryMaxAddress@GCToOSInterface@@SA_KXZ (public: static unsigned __int64 __cdecl GCToOSInterface::GetVirtualMemoryMaxAddress(void))
+13D 00000000 SECT33 notype ()    External     | ?GetPhysicalMemoryLimit@GCToOSInterface@@SA_KPEA_N@Z (public: static unsigned __int64 __cdecl GCToOSInterface::GetPhysicalMemoryLimit(bool *))
+13E 00000000 SECT2F notype ()    External     | ?GetMemoryStatus@GCToOSInterface@@SAX_KPEAIPEA_K2@Z (public: static void __cdecl GCToOSInterface::GetMemoryStatus(unsigned __int64,unsigned int *,unsigned __int64 *,unsigned __int64 *))
+13F 00000000 SECT1F notype ()    External     | ?FlushProcessWriteBuffers@GCToOSInterface@@SAXXZ (public: static void __cdecl GCToOSInterface::FlushProcessWriteBuffers(void))
+140 00000000 SECT19 notype ()    External     | ?DebugBreak@GCToOSInterface@@SAXXZ (public: static void __cdecl GCToOSInterface::DebugBreak(void))
+141 00000000 SECT49 notype ()    External     | ?QueryPerformanceCounter@GCToOSInterface@@SA_JXZ (public: static __int64 __cdecl GCToOSInterface::QueryPerformanceCounter(void))
+142 00000000 SECT4B notype ()    External     | ?QueryPerformanceFrequency@GCToOSInterface@@SA_JXZ (public: static __int64 __cdecl GCToOSInterface::QueryPerformanceFrequency(void))
+143 00000000 SECT2D notype ()    External     | ?GetLowPrecisionTimeStamp@GCToOSInterface@@SA_KXZ (public: static unsigned __int64 __cdecl GCToOSInterface::GetLowPrecisionTimeStamp(void))
+144 00000000 SECT37 notype ()    External     | ?GetTotalProcessorCount@GCToOSInterface@@SAIXZ (public: static unsigned int __cdecl GCToOSInterface::GetTotalProcessorCount(void))
+145 00000000 SECTB  notype ()    External     | ?CanEnableGCNumaAware@GCToOSInterface@@SA_NXZ (public: static bool __cdecl GCToOSInterface::CanEnableGCNumaAware(void))
+146 00000000 SECT31 notype ()    External     | ?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z (public: static bool __cdecl GCToOSInterface::GetNumaInfo(unsigned short *,unsigned int *))
+147 00000000 SECT9  notype ()    External     | ?CanEnableGCCPUGroups@GCToOSInterface@@SA_NXZ (public: static bool __cdecl GCToOSInterface::CanEnableGCCPUGroups(void))
+148 00000000 SECT35 notype ()    External     | ?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z (public: static bool __cdecl GCToOSInterface::GetProcessorForHeap(unsigned short,unsigned short *,unsigned short *))
+149 00000000 SECT21 notype ()    External     | ?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z (public: static bool __cdecl GCToOSInterface::GetCPUGroupInfo(unsigned short *,unsigned int *))
+14A 00000000 SECT47 notype ()    External     | ?ParseGCHeapAffinitizeRangesEntry@GCToOSInterface@@SA_NPEAPEBDPEA_K1@Z (public: static bool __cdecl GCToOSInterface::ParseGCHeapAffinitizeRangesEntry(char const * *,unsigned __int64 *,unsigned __int64 *))
+14B 00000000 UNDEF  notype ()    External     | ?GetGCNumaAware@GCConfig@@SA_NXZ (public: static bool __cdecl GCConfig::GetGCNumaAware(void))
+14C 00000000 UNDEF  notype ()    External     | ?GetGCCpuGroup@GCConfig@@SA_N_N@Z (public: static bool __cdecl GCConfig::GetGCCpuGroup(bool))
+14D 00000000 SECT3F notype ()    Static       | ?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ (bool __cdecl `anonymous namespace'::InitCPUGroupInfoArray(void))
+14E 00000000 UNDEF  notype ()    External     | __GSHandlerCheck
+14F 00000000 UNDEF  notype ()    External     | __security_check_cookie
+150 00000000 SECT41 notype       Label        | $LN4
+151 00000000 SECTF  notype       Label        | $LN6
+152 00000000 SECT13 notype       Label        | $LN45
+153 00000000 SECT11 notype       Label        | $LN45
+154 00000000 SECT17 notype       Label        | $LN47
+155 00000000 SECT15 notype       Label        | $LN47
+156 00000000 SECT43 notype       Label        | $LN65
+157 00000000 SECT65 notype       Label        | $LN7
+158 00000000 SECT63 notype       Label        | $LN4
+159 00000000 SECT5F notype       Label        | $LN8
+15A 00000000 SECT67 notype       Label        | $LN21
+15B 00000000 SECT61 notype       Label        | $LN4
+15C 00000000 SECT69 notype       Label        | $LN9
+15D 00000000 SECT5D notype       Label        | $LN11
+15E 00000000 SECT3D notype       Label        | $LN5
+15F 00000000 SECT27 notype       Label        | $LN6
+160 00000000 SECT53 notype       Label        | $LN26
+161 00000000 SECT2B notype       Label        | $LN9
+162 00000000 SECT29 notype       Label        | $LN4
+163 00000000 SECT23 notype       Label        | $LN37
+164 00000000 SECT57 notype       Label        | $LN16
+165 00000000 SECT7  notype       Label        | $LN4
+166 00000000 SECT55 notype       Label        | $LN137
+167 00000000 SECT39 notype       Label        | $LN6
+168 00000000 SECT3B notype       Label        | $LN8
+169 0000010B SECT33 notype       Label        | $exit$47
+16A 00000000 SECT33 notype       Label        | $LN46
+16B 00000000 SECT2F notype       Label        | $LN47
+16C 00000000 SECT49 notype       Label        | $LN5
+16D 00000000 SECT4B notype       Label        | $LN5
+16E 00000000 SECT31 notype       Label        | $LN26
+16F 00000000 SECT35 notype       Label        | $LN56
+170 00000000 SECT21 notype       Label        | $LN16
+171 00000000 SECT47 notype       Label        | $LN18
+172 00000000 SECT6F notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x41)
+174 00000000 SECT6F notype       Static       | $unwind$?Initialize@CLRCriticalSection@@QEAA_NXZ
+175 00000000 SECT70 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B01131B5, selection    5 (pick associative Section 0x41)
+177 00000000 SECT70 notype       Static       | $pdata$?Initialize@CLRCriticalSection@@QEAA_NXZ
+178 00000000 SECT71 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0xF)
+17A 00000000 SECT71 notype       Static       | $unwind$?CloseEvent@GCEvent@@QEAAXXZ
+17B 00000000 SECT72 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum A59B2387, selection    5 (pick associative Section 0xF)
+17D 00000000 SECT72 notype       Static       | $pdata$?CloseEvent@GCEvent@@QEAAXXZ
+17E 00000000 SECT73 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum ED4F81A7, selection    5 (pick associative Section 0x13)
+180 00000000 SECT73 notype       Static       | $unwind$?CreateManualEventNoThrow@GCEvent@@QEAA_N_N@Z
+181 00000000 SECT74 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1BDB8BBE, selection    5 (pick associative Section 0x13)
+183 00000000 SECT74 notype       Static       | $pdata$?CreateManualEventNoThrow@GCEvent@@QEAA_N_N@Z
+184 00000000 SECT75 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum ED4F81A7, selection    5 (pick associative Section 0x11)
+186 00000000 SECT75 notype       Static       | $unwind$?CreateAutoEventNoThrow@GCEvent@@QEAA_N_N@Z
+187 00000000 SECT76 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 111E82A7, selection    5 (pick associative Section 0x11)
+189 00000000 SECT76 notype       Static       | $pdata$?CreateAutoEventNoThrow@GCEvent@@QEAA_N_N@Z
+18A 00000000 SECT77 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum ED4F81A7, selection    5 (pick associative Section 0x17)
+18C 00000000 SECT77 notype       Static       | $unwind$?CreateOSManualEventNoThrow@GCEvent@@QEAA_N_N@Z
+18D 00000000 SECT78 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  4949095, selection    5 (pick associative Section 0x17)
+18F 00000000 SECT78 notype       Static       | $pdata$?CreateOSManualEventNoThrow@GCEvent@@QEAA_N_N@Z
+190 00000000 SECT79 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum ED4F81A7, selection    5 (pick associative Section 0x15)
+192 00000000 SECT79 notype       Static       | $unwind$?CreateOSAutoEventNoThrow@GCEvent@@QEAA_N_N@Z
+193 00000000 SECT7A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4C749EF1, selection    5 (pick associative Section 0x15)
+195 00000000 SECT7A notype       Static       | $pdata$?CreateOSAutoEventNoThrow@GCEvent@@QEAA_N_N@Z
+196 00000000 SECT7B notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 10721228, selection    5 (pick associative Section 0x43)
+198 00000000 SECT7B notype       Static       | $unwind$?Initialize@GCToOSInterface@@SA_NXZ
+199 00000000 SECT7C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum DCD14C83, selection    5 (pick associative Section 0x43)
+19B 00000000 SECT7C notype       Static       | $pdata$?Initialize@GCToOSInterface@@SA_NXZ
+19C 00000000 SECT7D notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum  361AAC8, selection    5 (pick associative Section 0x65)
+19E 00000000 SECT7D notype       Static       | $unwind$?VirtualReserve@GCToOSInterface@@SAPEAX_K0IG@Z
+19F 00000000 SECT7E notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 533B85DA, selection    5 (pick associative Section 0x65)
+1A1 00000000 SECT7E notype       Static       | $pdata$?VirtualReserve@GCToOSInterface@@SAPEAX_K0IG@Z
+1A2 00000000 SECT7F notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x63)
+1A4 00000000 SECT7F notype       Static       | $unwind$?VirtualRelease@GCToOSInterface@@SA_NPEAX_K@Z
+1A5 00000000 SECT80 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 2B142464, selection    5 (pick associative Section 0x63)
+1A7 00000000 SECT80 notype       Static       | $pdata$?VirtualRelease@GCToOSInterface@@SA_NPEAX_K@Z
+1A8 00000000 SECT81 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum 8E593FBF, selection    5 (pick associative Section 0x5F)
+1AA 00000000 SECT81 notype       Static       | $unwind$?VirtualCommit@GCToOSInterface@@SA_NPEAX_KG@Z
+1AB 00000000 SECT82 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D7718B20, selection    5 (pick associative Section 0x5F)
+1AD 00000000 SECT82 notype       Static       | $pdata$?VirtualCommit@GCToOSInterface@@SA_NPEAX_KG@Z
+1AE 00000000 SECT83 notype       Static       | .xdata
+    Section length   18, #relocs    1, #linenums    0, checksum 9957DA5A, selection    5 (pick associative Section 0x67)
+1B0 00000000 SECT83 notype       Static       | $unwind$?VirtualReserveAndCommitLargePages@GCToOSInterface@@SAPEAX_KG@Z
+1B1 00000000 SECT84 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4985C0DE, selection    5 (pick associative Section 0x67)
+1B3 00000000 SECT84 notype       Static       | $pdata$?VirtualReserveAndCommitLargePages@GCToOSInterface@@SAPEAX_KG@Z
+1B4 00000000 SECT85 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x61)
+1B6 00000000 SECT85 notype       Static       | $unwind$?VirtualDecommit@GCToOSInterface@@SA_NPEAX_K@Z
+1B7 00000000 SECT86 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum ED7B2DE3, selection    5 (pick associative Section 0x61)
+1B9 00000000 SECT86 notype       Static       | $pdata$?VirtualDecommit@GCToOSInterface@@SA_NPEAX_K@Z
+1BA 00000000 SECT87 notype       Static       | .xdata
+    Section length   14, #relocs    0, #linenums    0, checksum F4634387, selection    5 (pick associative Section 0x69)
+1BC 00000000 SECT87 notype       Static       | $unwind$?VirtualReset@GCToOSInterface@@SA_NPEAX_K_N@Z
+1BD 00000000 SECT88 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 54A1AE41, selection    5 (pick associative Section 0x69)
+1BF 00000000 SECT88 notype       Static       | $pdata$?VirtualReset@GCToOSInterface@@SA_NPEAX_K_N@Z
+1C0 00000000 SECT89 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x5D)
+1C2 00000000 SECT89 notype       Static       | $unwind$?SupportsWriteWatch@GCToOSInterface@@SA_NXZ
+1C3 00000000 SECT8A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 299DC2ED, selection    5 (pick associative Section 0x5D)
+1C5 00000000 SECT8A notype       Static       | $pdata$?SupportsWriteWatch@GCToOSInterface@@SA_NXZ
+1C6 00000000 SECT8B notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x3D)
+1C8 00000000 SECT8B notype       Static       | $unwind$?GetWriteWatch@GCToOSInterface@@SA_N_NPEAX_KPEAPEAXPEA_K@Z
+1C9 00000000 SECT8C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum A41C7E00, selection    5 (pick associative Section 0x3D)
+1CB 00000000 SECT8C notype       Static       | $pdata$?GetWriteWatch@GCToOSInterface@@SA_N_NPEAX_KPEAPEAXPEA_K@Z
+1CC 00000000 SECT8D notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x27)
+1CE 00000000 SECT8D notype       Static       | $unwind$?GetCurrentProcessorNumber@GCToOSInterface@@SAIXZ
+1CF 00000000 SECT8E notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F3B36B4F, selection    5 (pick associative Section 0x27)
+1D1 00000000 SECT8E notype       Static       | $pdata$?GetCurrentProcessorNumber@GCToOSInterface@@SAIXZ
+1D2 00000000 SECT8F notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum EE051E80, selection    5 (pick associative Section 0x53)
+1D4 00000000 SECT8F notype       Static       | $unwind$?SetCurrentThreadIdealAffinity@GCToOSInterface@@SA_NGG@Z
+1D5 00000000 SECT90 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6DA5B38C, selection    5 (pick associative Section 0x53)
+1D7 00000000 SECT90 notype       Static       | $pdata$?SetCurrentThreadIdealAffinity@GCToOSInterface@@SA_NGG@Z
+1D8 00000000 SECT91 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x2B)
+1DA 00000000 SECT91 notype       Static       | $unwind$?GetCurrentThreadIdealProc@GCToOSInterface@@SA_NPEAG@Z
+1DB 00000000 SECT92 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 36D2D9C6, selection    5 (pick associative Section 0x2B)
+1DD 00000000 SECT92 notype       Static       | $pdata$?GetCurrentThreadIdealProc@GCToOSInterface@@SA_NPEAG@Z
+1DE 00000000 SECT93 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x29)
+1E0 00000000 SECT93 notype       Static       | $unwind$?GetCurrentThreadIdForLogging@GCToOSInterface@@SA_KXZ
+1E1 00000000 SECT94 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B01131B5, selection    5 (pick associative Section 0x29)
+1E3 00000000 SECT94 notype       Static       | $pdata$?GetCurrentThreadIdForLogging@GCToOSInterface@@SA_KXZ
+1E4 00000000 SECT95 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x23)
+1E6 00000000 SECT95 notype       Static       | $unwind$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1E7 00000000 SECT96 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 35DC62C8, selection    5 (pick associative Section 0x23)
+1E9 00000000 SECT96 notype       Static       | $pdata$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1EA 00000000 SECT97 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 28565CD8, selection    5 (pick associative Section 0x23)
+1EC 00000000 SECT97 notype       Static       | $chain$0$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1ED 00000000 SECT98 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FDA64035, selection    5 (pick associative Section 0x23)
+1EF 00000000 SECT98 notype       Static       | $pdata$0$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1F0 00000000 SECT99 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum FAF929EC, selection    5 (pick associative Section 0x23)
+1F2 00000000 SECT99 notype       Static       | $chain$2$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1F3 00000000 SECT9A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FFDE8CF3, selection    5 (pick associative Section 0x23)
+1F5 00000000 SECT9A notype       Static       | $pdata$2$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1F6 00000000 SECT9B notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 44F1AAD9, selection    5 (pick associative Section 0x23)
+1F8 00000000 SECT9B notype       Static       | $chain$3$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1F9 00000000 SECT9C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4E0C55FB, selection    5 (pick associative Section 0x23)
+1FB 00000000 SECT9C notype       Static       | $pdata$3$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1FC 00000000 SECT9D notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 8C8B8824, selection    5 (pick associative Section 0x23)
+1FE 00000000 SECT9D notype       Static       | $chain$4$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+1FF 00000000 SECT9E notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E872DA49, selection    5 (pick associative Section 0x23)
+201 00000000 SECT9E notype       Static       | $pdata$4$?GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z
+202 00000000 SECT9F notype       Static       | .voltbl
+    Section length    4, #relocs    0, #linenums    0, checksum 51721EAA, selection    5 (pick associative Section 0x23)
+204 00000000 SECT9F notype       Static       | _volmd
+205 00000000 SECTA0 notype       Static       | .xdata
+    Section length   10, #relocs    1, #linenums    0, checksum 3E4B73B5, selection    5 (pick associative Section 0x57)
+207 00000000 SECTA0 notype       Static       | $unwind$?SetThreadAffinity@GCToOSInterface@@SA_NG@Z
+208 00000000 SECTA1 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  E51998C, selection    5 (pick associative Section 0x57)
+20A 00000000 SECTA1 notype       Static       | $pdata$?SetThreadAffinity@GCToOSInterface@@SA_NG@Z
+20B 00000000 SECTA2 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x7)
+20D 00000000 SECTA2 notype       Static       | $unwind$?BoostThreadPriority@GCToOSInterface@@SA_NXZ
+20E 00000000 SECTA3 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum BB53652B, selection    5 (pick associative Section 0x7)
+210 00000000 SECTA3 notype       Static       | $pdata$?BoostThreadPriority@GCToOSInterface@@SA_NXZ
+211 00000000 SECTA4 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 75316C2B, selection    5 (pick associative Section 0x55)
+213 00000000 SECTA4 notype       Static       | $unwind$?SetGCThreadsAffinitySet@GCToOSInterface@@SAPEBVAffinitySet@@_KPEBV2@@Z
+214 00000000 SECTA5 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 34FBD78F, selection    5 (pick associative Section 0x55)
+216 00000000 SECTA5 notype       Static       | $pdata$?SetGCThreadsAffinitySet@GCToOSInterface@@SAPEBVAffinitySet@@_KPEBV2@@Z
+217 00000000 SECTA6 notype       Static       | .xdata
+    Section length   10, #relocs    1, #linenums    0, checksum B435F21A, selection    5 (pick associative Section 0x39)
+219 00000000 SECTA6 notype       Static       | $unwind$?GetVirtualMemoryLimit@GCToOSInterface@@SA_KXZ
+21A 00000000 SECTA7 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1EC846AC, selection    5 (pick associative Section 0x39)
+21C 00000000 SECTA7 notype       Static       | $pdata$?GetVirtualMemoryLimit@GCToOSInterface@@SA_KXZ
+21D 00000000 SECTA8 notype       Static       | .xdata
+    Section length   10, #relocs    1, #linenums    0, checksum B435F21A, selection    5 (pick associative Section 0x3B)
+21F 00000000 SECTA8 notype       Static       | $unwind$?GetVirtualMemoryMaxAddress@GCToOSInterface@@SA_KXZ
+220 00000000 SECTA9 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1EC846AC, selection    5 (pick associative Section 0x3B)
+222 00000000 SECTA9 notype       Static       | $pdata$?GetVirtualMemoryMaxAddress@GCToOSInterface@@SA_KXZ
+223 00000000 SECTAA notype       Static       | .xdata
+    Section length   20, #relocs    1, #linenums    0, checksum B7B93858, selection    5 (pick associative Section 0x33)
+225 00000000 SECTAA notype       Static       | $unwind$?GetPhysicalMemoryLimit@GCToOSInterface@@SA_KPEA_N@Z
+226 00000000 SECTAB notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 19B0FE0A, selection    5 (pick associative Section 0x33)
+228 00000000 SECTAB notype       Static       | $pdata$?GetPhysicalMemoryLimit@GCToOSInterface@@SA_KPEA_N@Z
+229 00000000 SECTAC notype       Static       | .xdata
+    Section length   1C, #relocs    1, #linenums    0, checksum 3C74BDF9, selection    5 (pick associative Section 0x2F)
+22B 00000000 SECTAC notype       Static       | $unwind$?GetMemoryStatus@GCToOSInterface@@SAX_KPEAIPEA_K2@Z
+22C 00000000 SECTAD notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F7C568E7, selection    5 (pick associative Section 0x2F)
+22E 00000000 SECTAD notype       Static       | $pdata$?GetMemoryStatus@GCToOSInterface@@SAX_KPEAIPEA_K2@Z
+22F 00000000 SECTAE notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x49)
+231 00000000 SECTAE notype       Static       | $unwind$?QueryPerformanceCounter@GCToOSInterface@@SA_JXZ
+232 00000000 SECTAF notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 63F42A00, selection    5 (pick associative Section 0x49)
+234 00000000 SECTAF notype       Static       | $pdata$?QueryPerformanceCounter@GCToOSInterface@@SA_JXZ
+235 00000000 SECTB0 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x4B)
+237 00000000 SECTB0 notype       Static       | $unwind$?QueryPerformanceFrequency@GCToOSInterface@@SA_JXZ
+238 00000000 SECTB1 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 63F42A00, selection    5 (pick associative Section 0x4B)
+23A 00000000 SECTB1 notype       Static       | $pdata$?QueryPerformanceFrequency@GCToOSInterface@@SA_JXZ
+23B 00000000 SECTB2 notype       Static       | .xdata
+    Section length   14, #relocs    1, #linenums    0, checksum C56375C3, selection    5 (pick associative Section 0x31)
+23D 00000000 SECTB2 notype       Static       | $unwind$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+23E 00000000 SECTB3 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 3F196BD1, selection    5 (pick associative Section 0x31)
+240 00000000 SECTB3 notype       Static       | $pdata$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+241 00000000 SECTB4 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum BE76F22E, selection    5 (pick associative Section 0x31)
+243 00000000 SECTB4 notype       Static       | $chain$1$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+244 00000000 SECTB5 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D88CCAE9, selection    5 (pick associative Section 0x31)
+246 00000000 SECTB5 notype       Static       | $pdata$1$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+247 00000000 SECTB6 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 864E813D, selection    5 (pick associative Section 0x31)
+249 00000000 SECTB6 notype       Static       | $chain$2$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+24A 00000000 SECTB7 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum CC576C89, selection    5 (pick associative Section 0x31)
+24C 00000000 SECTB7 notype       Static       | $pdata$2$?GetNumaInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+24D 00000000 SECTB8 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum 3866B28A, selection    5 (pick associative Section 0x35)
+24F 00000000 SECTB8 notype       Static       | $unwind$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+250 00000000 SECTB9 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 7FB58A25, selection    5 (pick associative Section 0x35)
+252 00000000 SECTB9 notype       Static       | $pdata$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+253 00000000 SECTBA notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 623FB435, selection    5 (pick associative Section 0x35)
+255 00000000 SECTBA notype       Static       | $chain$0$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+256 00000000 SECTBB notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1476BDF1, selection    5 (pick associative Section 0x35)
+258 00000000 SECTBB notype       Static       | $pdata$0$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+259 00000000 SECTBC notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 26ECE499, selection    5 (pick associative Section 0x35)
+25B 00000000 SECTBC notype       Static       | $chain$2$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+25C 00000000 SECTBD notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FB9CFDE7, selection    5 (pick associative Section 0x35)
+25E 00000000 SECTBD notype       Static       | $pdata$2$?GetProcessorForHeap@GCToOSInterface@@SA_NGPEAG0@Z
+25F 00000000 SECTBE notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 6E9162C9, selection    5 (pick associative Section 0x21)
+261 00000000 SECTBE notype       Static       | $unwind$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+262 00000000 SECTBF notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 7D3C6CAC, selection    5 (pick associative Section 0x21)
+264 00000000 SECTBF notype       Static       | $pdata$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+265 00000000 SECTC0 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum E4153CD1, selection    5 (pick associative Section 0x21)
+267 00000000 SECTC0 notype       Static       | $chain$0$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+268 00000000 SECTC1 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum DE56520E, selection    5 (pick associative Section 0x21)
+26A 00000000 SECTC1 notype       Static       | $pdata$0$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+26B 00000000 SECTC2 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum C46B8640, selection    5 (pick associative Section 0x21)
+26D 00000000 SECTC2 notype       Static       | $chain$1$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+26E 00000000 SECTC3 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum BED63533, selection    5 (pick associative Section 0x21)
+270 00000000 SECTC3 notype       Static       | $pdata$1$?GetCPUGroupInfo@GCToOSInterface@@SA_NPEAGPEAI@Z
+271 00000000 SECTC4 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum A60287C3, selection    5 (pick associative Section 0x47)
+273 00000000 SECTC4 notype       Static       | $unwind$?ParseGCHeapAffinitizeRangesEntry@GCToOSInterface@@SA_NPEAPEBDPEA_K1@Z
+274 00000000 SECTC5 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum C37CC495, selection    5 (pick associative Section 0x47)
+276 00000000 SECTC5 notype       Static       | $pdata$?ParseGCHeapAffinitizeRangesEntry@GCToOSInterface@@SA_NPEAPEBDPEA_K1@Z
+277 00000000 SECTC6 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum 2D3F84A3, selection    5 (pick associative Section 0x3F)
+279 00000000 SECTC6 notype       Static       | $unwind$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+27A 00000000 SECTC7 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8C06E16A, selection    5 (pick associative Section 0x3F)
+27C 00000000 SECTC7 notype       Static       | $pdata$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+27D 00000000 SECTC8 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum 2BC838E8, selection    5 (pick associative Section 0x3F)
+27F 00000000 SECTC8 notype       Static       | $chain$1$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+280 00000000 SECTC9 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1EDAFBA9, selection    5 (pick associative Section 0x3F)
+282 00000000 SECTC9 notype       Static       | $pdata$1$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+283 00000000 SECTCA notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 11790BAB, selection    5 (pick associative Section 0x3F)
+285 00000000 SECTCA notype       Static       | $chain$2$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+286 00000000 SECTCB notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E22B77BB, selection    5 (pick associative Section 0x3F)
+288 00000000 SECTCB notype       Static       | $pdata$2$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+289 00000000 SECTCC notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum  7BCE7B6, selection    5 (pick associative Section 0x3F)
+28B 00000000 SECTCC notype       Static       | $chain$3$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+28C 00000000 SECTCD notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 3CE1890A, selection    5 (pick associative Section 0x3F)
+28E 00000000 SECTCD notype       Static       | $pdata$3$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+28F 00000000 SECTCE notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 5B7C9D57, selection    5 (pick associative Section 0x3F)
+291 00000000 SECTCE notype       Static       | $chain$4$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+292 00000000 SECTCF notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 262F0410, selection    5 (pick associative Section 0x3F)
+294 00000000 SECTCF notype       Static       | $pdata$4$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+295 00000000 SECTD0 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum A78D1145, selection    5 (pick associative Section 0x3F)
+297 00000000 SECTD0 notype       Static       | $chain$5$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+298 00000000 SECTD1 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B1876484, selection    5 (pick associative Section 0x3F)
+29A 00000000 SECTD1 notype       Static       | $pdata$5$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+29B 00000000 SECTD2 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum 977D6DF2, selection    5 (pick associative Section 0x3F)
+29D 00000000 SECTD2 notype       Static       | $chain$7$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+29E 00000000 SECTD3 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum FB13E7B2, selection    5 (pick associative Section 0x3F)
+2A0 00000000 SECTD3 notype       Static       | $pdata$7$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+2A1 00000000 SECTD4 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 35510B86, selection    5 (pick associative Section 0x3F)
+2A3 00000000 SECTD4 notype       Static       | $chain$8$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+2A4 00000000 SECTD5 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum  6E895E2, selection    5 (pick associative Section 0x3F)
+2A6 00000000 SECTD5 notype       Static       | $pdata$8$?InitCPUGroupInfoArray@?A0x2a781ccb@@YA_NXZ
+2A7 00000000 UNDEF  notype       External     | ?nothrow@std@@3Unothrow_t@1@B (struct std::nothrow_t const std::nothrow)
+2A8 0000000C SECT4  notype       Static       | ?g_SeLockMemoryPrivilegeAcquired@@3_NA (bool g_SeLockMemoryPrivilegeAcquired)
+2A9 00000010 SECT4  notype       Static       | ?g_processAffinitySet@@3VAffinitySet@@A (class AffinitySet g_processAffinitySet)
+2AA 0000000D SECT4  notype       Static       | ?g_fEnableGCNumaAware@?A0x2a781ccb@@3_NA (bool `anonymous namespace'::g_fEnableGCNumaAware)
+2AB 00000090 SECT4  notype       Static       | ?g_nNodes@?A0x2a781ccb@@3IA (unsigned int `anonymous namespace'::g_nNodes)
+2AC 0000000E SECT4  notype       Static       | ?g_fEnableGCCPUGroups@?A0x2a781ccb@@3_NA (bool `anonymous namespace'::g_fEnableGCCPUGroups)
+2AD 00000094 SECT4  notype       Static       | ?g_nGroups@?A0x2a781ccb@@3KA (unsigned long `anonymous namespace'::g_nGroups)
+2AE 00000098 SECT4  notype       Static       | ?g_nProcessors@?A0x2a781ccb@@3KA (unsigned long `anonymous namespace'::g_nProcessors)
+2AF 000000A0 SECT4  notype       Static       | ?g_CPUGroupInfoArray@?A0x2a781ccb@@3PEAUCPU_Group_Info@1@EA (struct A0x2a781ccb::CPU_Group_Info * `anonymous namespace'::g_CPUGroupInfoArray)
+2B0 00000000 SECTD6 notype       Static       | .rdata
+    Section length   2C, #relocs    0, #linenums    0, checksum E37EB51F, selection    2 (pick any)
+2B2 00000000 SECTD6 notype       External     | ??_C@_1CM@JPKFCMPM@?$AAS?$AAe?$AAL?$AAo?$AAc?$AAk?$AAM?$AAe?$AAm?$AAo?$AAr?$AAy?$AAP?$AAr?$AAi@ (`string')
+2B3 00000000 SECTD7 notype       Static       | .bss
+    Section length    8, #relocs    0, #linenums    0, checksum        0, selection    2 (pick any)
+2B5 00000000 SECTD7 notype       Static       | ?s_maxSize@?1??GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z@4_KC (unsigned __int64 volatile `public: static unsigned __int64 __cdecl GCToOSInterface::GetCacheSizePerLogicalCpu(bool)'::`2'::s_maxSize)
+2B6 00000000 SECTD8 notype       Static       | .bss
+    Section length    8, #relocs    0, #linenums    0, checksum        0, selection    2 (pick any)
+2B8 00000000 SECTD8 notype       Static       | ?s_maxTrueSize@?1??GetCacheSizePerLogicalCpu@GCToOSInterface@@SA_K_N@Z@4_KC (unsigned __int64 volatile `public: static unsigned __int64 __cdecl GCToOSInterface::GetCacheSizePerLogicalCpu(bool)'::`2'::s_maxTrueSize)
+2B9 00000000 SECTD9 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 1DA5A78D, selection    2 (pick any)
+2BB 00000000 SECTD9 notype       External     | __real@4059000000000000
+2BC 00000000 UNDEF  notype       External     | __security_cookie
+2BD 00000000 UNDEF  notype       External     | _fltused
+2BE 00000000 SECTDA notype       Static       | .chks64
+    Section length  6D0, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x287E bytes
+
+  Summary
+
+          B8 .bss
+         6D0 .chks64
+       156C4 .debug$S
+          88 .debug$T
+         122 .drectve
+         264 .pdata
+          34 .rdata
+        17B9 .text$mn
+           4 .voltbl
+         318 .xdata

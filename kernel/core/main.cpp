@@ -32,6 +32,12 @@
 #if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
 #include "include/kernel/native_virtual_memory_qemu_test.h"
 #endif
+#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
+#include "include/kernel/nativeaot_pal_qemu_test.h"
+#include "guidexos_nativeaot_pal_qemu_exports.h"
+extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_start[];
+extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_end[];
+#endif
 #if defined(GXOS_NATIVE_MUTEX_QEMU_TEST)
 #include "include/kernel/native_mutex_qemu_test.h"
 #endif
@@ -249,6 +255,26 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::native_thread_qemu_test::run();
     while (1) {
         kernel::arch::enable_interrupts();
+        kernel::arch::halt();
+    }
+#endif
+
+#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
+    // The exact NativeAOT PAL bridge is opt-in and runs before the ordinary
+    // desktop/storage path.  The default application inventory is untouched.
+    kernel::interrupts::init();
+    kernel::pit::init(100);
+    kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+    kernel::serial::puts("[nativeaot-pal-qemu-test] timer services ready\n");
+    kernel::nativeaot_pal_qemu_test::run(
+        guidexos_nativeaot_pal_qemu_artifact_start,
+        static_cast<size_t>(guidexos_nativeaot_pal_qemu_artifact_end -
+                            guidexos_nativeaot_pal_qemu_artifact_start),
+        GUIDEXOS_NATIVEAOT_PAL_QEMU_INSTALL_ADDRESS,
+        GUIDEXOS_NATIVEAOT_PAL_QEMU_MAIN_ADDRESS,
+        GUIDEXOS_NATIVEAOT_PAL_QEMU_UNINSTALL_ADDRESS);
+    while (1) {
+        kernel::arch::disable_interrupts();
         kernel::arch::halt();
     }
 #endif

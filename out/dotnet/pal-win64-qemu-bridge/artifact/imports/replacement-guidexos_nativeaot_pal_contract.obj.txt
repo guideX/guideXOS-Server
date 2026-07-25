@@ -1,0 +1,14 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\replacements\guidexos_nativeaot_pal_contract.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+         2F0 .bss
+         298 .chks64
+          D0 .debug$S
+           3 .drectve
+          FC .pdata
+        17C4 .text$mn
+          E4 .xdata

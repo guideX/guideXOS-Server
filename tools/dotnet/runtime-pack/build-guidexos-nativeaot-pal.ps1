@@ -561,11 +561,12 @@ foreach ($launchNumber in 1,2) {
 # guideXOS SysV environment and does not provide this Win64 PAL hook table.
 $qemuSource = Join-Path $RuntimePackRoot "src\probes\guidexos_nativeaot_pal_qemu_probe.cpp"
 $qemuObject = Join-Path $qemuRoot "guidexos_nativeaot_pal_qemu_probe.obj"
+$qemuMinWinObject = Join-Path $qemuRoot "guidexos_nativeaot_pal_minwin_qemu_probe.obj"
 $qemuPe = Join-Path $qemuRoot "guidexos_nativeaot_pal_qemu_probe.exe"
 $qemuMap = Join-Path $qemuRoot "guidexos_nativeaot_pal_qemu_probe.map"
 $qemuElf = Join-Path $qemuRoot "guidexos_nativeaot_pal_qemu_probe.elf"
 $qemuBatch = Join-Path $qemuRoot "build-qemu-probe.bat"
-$qemuInputs = @($qemuSource,$qemuObject,$qemuPe,$qemuMap,$qemuElf,
+$qemuInputs = @($qemuSource,$qemuObject,$qemuMinWinObject,$qemuPe,$qemuMap,$qemuElf,
     $replacementPaths["PalRedhawkCommon.cpp.obj"],
     $replacementPaths["PalRedhawkMinWin.cpp.obj"],
     $replacementPaths["time.c.obj"],$contractObject)
@@ -573,7 +574,9 @@ $qemuBuildLines = @(
     "@echo off", "setlocal", "call `"$vcvars`" >nul", "if errorlevel 1 exit /b %errorlevel%",
     "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $commonDefines /I`"$platformInclude`" /Fo:`"$qemuObject`" `"$qemuSource`"",
     "if errorlevel 1 exit /b %errorlevel%",
-    "link.exe /nologo /MACHINE:X64 /SUBSYSTEM:NATIVE /ENTRY:GuideXosNativeAotPalProbeMain /NODEFAULTLIB /FIXED /BASE:0x10000000 /OPT:REF /INCREMENTAL:NO /alternatename:memset=guidexos_memset /MAP:`"$qemuMap`" /OUT:`"$qemuPe`" /EXPORT:GuideXosNativeAotPalProbeMain `"$qemuObject`" `"$($replacementPaths["PalRedhawkCommon.cpp.obj"])`" `"$($replacementPaths["PalRedhawkMinWin.cpp.obj"])`" `"$($replacementPaths["time.c.obj"])`" `"$contractObject`"",
+    "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $commonDefines /DGUIDEXOS_NATIVEAOT_PAL_QEMU_PROBE /I`"$platformInclude`" /Fo:`"$qemuMinWinObject`" `"$($RuntimePackRoot)\src\platform\guidexos_nativeaot_pal_minwin_replacement.cpp`"",
+    "if errorlevel 1 exit /b %errorlevel%",
+    "link.exe /nologo /MACHINE:X64 /SUBSYSTEM:NATIVE /ENTRY:GuideXosNativeAotPalProbeMain /NODEFAULTLIB /FIXED /BASE:0x10000000 /OPT:REF /INCREMENTAL:NO /alternatename:memset=guidexos_memset /MAP:`"$qemuMap`" /OUT:`"$qemuPe`" /EXPORT:GuideXosNativeAotPalInstallHooks /EXPORT:GuideXosNativeAotPalProbeMain /EXPORT:GuideXosNativeAotPalUninstallHooks `"$qemuObject`" `"$($replacementPaths["PalRedhawkCommon.cpp.obj"])`" `"$qemuMinWinObject`" `"$($replacementPaths["time.c.obj"])`" `"$contractObject`"",
     "exit /b %errorlevel%"
 )
 Invoke-VcBatch $qemuBatch $qemuBuildLines
@@ -583,6 +586,33 @@ foreach ($path in @($qemuObject,$qemuPe,$qemuMap)) {
 & $dumpbin /nologo /headers $qemuPe | Set-Content (Join-Path $qemuRoot "pe-headers.txt") -Encoding ASCII
 & $dumpbin /nologo /exports $qemuPe | Set-Content (Join-Path $qemuRoot "pe-exports.txt") -Encoding ASCII
 & $dumpbin /nologo /imports $qemuPe | Set-Content (Join-Path $qemuRoot "pe-imports.txt") -Encoding ASCII
+$qemuExportText = Get-Content -LiteralPath (Join-Path $qemuRoot "pe-exports.txt") -Raw
+$qemuExportRvas = @{}
+foreach ($line in ($qemuExportText -split "`r?`n")) {
+    if ($line -match '^\s+\d+\s+\d+\s+([0-9A-Fa-f]{8})\s+(GuideXosNativeAotPal\S+)\s*$') {
+        $qemuExportRvas[$Matches[2]] = [Convert]::ToUInt64($Matches[1], 16)
+    }
+}
+$qemuRequiredExports = @(
+    "GuideXosNativeAotPalInstallHooks",
+    "GuideXosNativeAotPalProbeMain",
+    "GuideXosNativeAotPalUninstallHooks")
+foreach ($exportName in $qemuRequiredExports) {
+    if (-not $qemuExportRvas.ContainsKey($exportName)) {
+        throw "QEMU PAL probe export was not found: $exportName"
+    }
+}
+$qemuExportBase = [uint64]0x10000000
+$qemuExportHeader = Join-Path $qemuRoot "guidexos_nativeaot_pal_qemu_exports.h"
+$qemuExportHeaderLines = @(
+    "#pragma once",
+    "#include <stdint.h>",
+    "",
+    ("#define GUIDEXOS_NATIVEAOT_PAL_QEMU_INSTALL_ADDRESS ((uintptr_t)0x{0:X}u)" -f ($qemuExportBase + $qemuExportRvas["GuideXosNativeAotPalInstallHooks"])),
+    ("#define GUIDEXOS_NATIVEAOT_PAL_QEMU_MAIN_ADDRESS ((uintptr_t)0x{0:X}u)" -f ($qemuExportBase + $qemuExportRvas["GuideXosNativeAotPalProbeMain"])),
+    ("#define GUIDEXOS_NATIVEAOT_PAL_QEMU_UNINSTALL_ADDRESS ((uintptr_t)0x{0:X}u)" -f ($qemuExportBase + $qemuExportRvas["GuideXosNativeAotPalUninstallHooks"]))
+)
+[IO.File]::WriteAllLines($qemuExportHeader, $qemuExportHeaderLines, [Text.ASCIIEncoding]::new())
 
 $pythonPath = $null
 $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"

@@ -4,7 +4,16 @@
 // inactive startup-readiness probe.  The runtime-thread record is deliberately
 // opaque outside this runtime-pack boundary.
 
+#if defined(GXOS_BARE_METAL)
+#include <stdint.h>
+namespace std {
+using ::int32_t;
+using ::uint32_t;
+using ::uintptr_t;
+}
+#else
 #include <cstdint>
+#endif
 
 #include "../../../../../runtime/thread/guidexos_native_stack_bounds.h"
 

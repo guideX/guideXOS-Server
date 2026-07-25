@@ -1,0 +1,174 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\archives\adapted-members\00057-event.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   F4, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 6954, #relocs    0, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .tls$
+    Section length   D8, #relocs    0, #linenums    0, checksum        0, selection    2 (pick any)
+00B 00000000 SECT4  notype       External     | tls_CurrentThread
+00C 00000000 SECT5  notype       Static       | .text$mn
+    Section length   2A, #relocs    1, #linenums    0, checksum  B2878D2, selection    1 (pick no duplicates)
+00E 00000000 SECT6  notype       Static       | .debug$S
+    Section length  12C, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x5)
+010 00000000 SECT7  notype       Static       | .text$mn
+    Section length   2D, #relocs    1, #linenums    0, checksum FAD88385, selection    1 (pick no duplicates)
+012 00000000 SECT8  notype       Static       | .debug$S
+    Section length  15C, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x7)
+014 00000000 SECT9  notype       Static       | .text$mn
+    Section length   30, #relocs    1, #linenums    0, checksum 7F88A3F7, selection    1 (pick no duplicates)
+016 00000000 SECTA  notype       Static       | .debug$S
+    Section length  15C, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0x9)
+018 00000000 SECTB  notype       Static       | .text$mn
+    Section length   2D, #relocs    1, #linenums    0, checksum FAD88385, selection    1 (pick no duplicates)
+01A 00000000 SECTC  notype       Static       | .debug$S
+    Section length  15C, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0xB)
+01C 00000000 SECTD  notype       Static       | .text$mn
+    Section length   30, #relocs    1, #linenums    0, checksum 7F88A3F7, selection    1 (pick no duplicates)
+01E 00000000 SECTE  notype       Static       | .debug$S
+    Section length  160, #relocs    A, #linenums    0, checksum        0, selection    5 (pick associative Section 0xD)
+020 00000000 SECTF  notype       Static       | .text$mn
+    Section length   11, #relocs    0, #linenums    0, checksum 76D361F7, selection    1 (pick no duplicates)
+022 00000000 SECT10 notype       Static       | .debug$S
+    Section length   EC, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0xF)
+024 00000000 SECT11 notype       Static       | .text$mn
+    Section length   12, #relocs    0, #linenums    0, checksum 1D31B99F, selection    1 (pick no duplicates)
+026 00000000 SECT12 notype       Static       | .debug$S
+    Section length   E8, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x11)
+028 00000000 SECT13 notype       Static       | .text$mn
+    Section length   23, #relocs    1, #linenums    0, checksum D84CFFB2, selection    1 (pick no duplicates)
+02A 00000000 SECT14 notype       Static       | .debug$S
+    Section length  120, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x13)
+02C 00000000 SECT15 notype       Static       | .text$mn
+    Section length   23, #relocs    1, #linenums    0, checksum D84CFFB2, selection    1 (pick no duplicates)
+02E 00000000 SECT16 notype       Static       | .debug$S
+    Section length  11C, #relocs    6, #linenums    0, checksum        0, selection    5 (pick associative Section 0x15)
+030 00000000 SECT17 notype       Static       | .text$mn
+    Section length   CF, #relocs    7, #linenums    0, checksum  EA40B0E, selection    1 (pick no duplicates)
+032 00000000 SECT18 notype       Static       | .debug$S
+    Section length  3C4, #relocs   28, #linenums    0, checksum        0, selection    5 (pick associative Section 0x17)
+034 00000000 SECT9  notype ()    External     | ?CreateManualEventNoThrow@CLREventStatic@@QEAA_N_N@Z (public: bool __cdecl CLREventStatic::CreateManualEventNoThrow(bool))
+035 00000000 SECT7  notype ()    External     | ?CreateAutoEventNoThrow@CLREventStatic@@QEAA_N_N@Z (public: bool __cdecl CLREventStatic::CreateAutoEventNoThrow(bool))
+036 00000000 SECTD  notype ()    External     | ?CreateOSManualEventNoThrow@CLREventStatic@@QEAA_N_N@Z (public: bool __cdecl CLREventStatic::CreateOSManualEventNoThrow(bool))
+037 00000000 SECTB  notype ()    External     | ?CreateOSAutoEventNoThrow@CLREventStatic@@QEAA_N_N@Z (public: bool __cdecl CLREventStatic::CreateOSAutoEventNoThrow(bool))
+038 00000000 SECT5  notype ()    External     | ?CloseEvent@CLREventStatic@@QEAAXXZ (public: void __cdecl CLREventStatic::CloseEvent(void))
+039 00000000 SECT11 notype ()    External     | ?IsValid@CLREventStatic@@QEBA_NXZ (public: bool __cdecl CLREventStatic::IsValid(void)const )
+03A 00000000 SECT15 notype ()    External     | ?Set@CLREventStatic@@QEAA_NXZ (public: bool __cdecl CLREventStatic::Set(void))
+03B 00000000 SECT13 notype ()    External     | ?Reset@CLREventStatic@@QEAA_NXZ (public: bool __cdecl CLREventStatic::Reset(void))
+03C 00000000 SECT17 notype ()    External     | ?Wait@CLREventStatic@@QEAAII_N0@Z (public: unsigned int __cdecl CLREventStatic::Wait(unsigned int,bool,bool))
+03D 00000000 SECTF  notype ()    External     | ?GetOSEvent@CLREventStatic@@QEAAPEAXXZ (public: void * __cdecl CLREventStatic::GetOSEvent(void))
+03E 00000000 UNDEF  notype ()    External     | CloseHandle
+03F 00000000 UNDEF  notype ()    External     | ResetEvent
+040 00000000 UNDEF  notype ()    External     | SetEvent
+041 00000000 UNDEF  notype ()    External     | PalCreateEventW
+042 00000000 UNDEF  notype ()    External     | PalCompatibleWaitAny
+043 00000000 UNDEF  notype ()    External     | ?IsInitialized@Thread@@QEAA_NXZ (public: bool __cdecl Thread::IsInitialized(void))
+044 00000000 UNDEF  notype ()    External     | ?EnablePreemptiveMode@Thread@@QEAAXXZ (public: void __cdecl Thread::EnablePreemptiveMode(void))
+045 00000000 UNDEF  notype ()    External     | ?DisablePreemptiveMode@Thread@@QEAAXXZ (public: void __cdecl Thread::DisablePreemptiveMode(void))
+046 00000000 SECT9  notype       Label        | $LN8
+047 00000000 SECT7  notype       Label        | $LN8
+048 00000000 SECTD  notype       Label        | $LN8
+049 00000000 SECTB  notype       Label        | $LN8
+04A 00000000 SECT5  notype       Label        | $LN9
+04B 00000000 SECT15 notype       Label        | $LN7
+04C 00000000 SECT13 notype       Label        | $LN7
+04D 00000000 SECT17 notype       Label        | $LN21
+04E 00000000 SECT19 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x9)
+050 00000000 SECT19 notype       Static       | $unwind$?CreateManualEventNoThrow@CLREventStatic@@QEAA_N_N@Z
+051 00000000 SECT1A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 85CD537D, selection    5 (pick associative Section 0x9)
+053 00000000 SECT1A notype       Static       | $pdata$?CreateManualEventNoThrow@CLREventStatic@@QEAA_N_N@Z
+054 00000000 SECT1B notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x7)
+056 00000000 SECT1B notype       Static       | $unwind$?CreateAutoEventNoThrow@CLREventStatic@@QEAA_N_N@Z
+057 00000000 SECT1C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 62737787, selection    5 (pick associative Section 0x7)
+059 00000000 SECT1C notype       Static       | $pdata$?CreateAutoEventNoThrow@CLREventStatic@@QEAA_N_N@Z
+05A 00000000 SECT1D notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0xD)
+05C 00000000 SECT1D notype       Static       | $unwind$?CreateOSManualEventNoThrow@CLREventStatic@@QEAA_N_N@Z
+05D 00000000 SECT1E notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 85CD537D, selection    5 (pick associative Section 0xD)
+05F 00000000 SECT1E notype       Static       | $pdata$?CreateOSManualEventNoThrow@CLREventStatic@@QEAA_N_N@Z
+060 00000000 SECT1F notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0xB)
+062 00000000 SECT1F notype       Static       | $unwind$?CreateOSAutoEventNoThrow@CLREventStatic@@QEAA_N_N@Z
+063 00000000 SECT20 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 62737787, selection    5 (pick associative Section 0xB)
+065 00000000 SECT20 notype       Static       | $pdata$?CreateOSAutoEventNoThrow@CLREventStatic@@QEAA_N_N@Z
+066 00000000 SECT21 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x5)
+068 00000000 SECT21 notype       Static       | $unwind$?CloseEvent@CLREventStatic@@QEAAXXZ
+069 00000000 SECT22 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 68B67E9E, selection    5 (pick associative Section 0x5)
+06B 00000000 SECT22 notype       Static       | $pdata$?CloseEvent@CLREventStatic@@QEAAXXZ
+06C 00000000 SECT23 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x15)
+06E 00000000 SECT23 notype       Static       | $unwind$?Set@CLREventStatic@@QEAA_NXZ
+06F 00000000 SECT24 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 77F965B5, selection    5 (pick associative Section 0x15)
+071 00000000 SECT24 notype       Static       | $pdata$?Set@CLREventStatic@@QEAA_NXZ
+072 00000000 SECT25 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x13)
+074 00000000 SECT25 notype       Static       | $unwind$?Reset@CLREventStatic@@QEAA_NXZ
+075 00000000 SECT26 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 77F965B5, selection    5 (pick associative Section 0x13)
+077 00000000 SECT26 notype       Static       | $pdata$?Reset@CLREventStatic@@QEAA_NXZ
+078 00000000 SECT27 notype       Static       | .xdata
+    Section length   14, #relocs    0, #linenums    0, checksum BB500C41, selection    5 (pick associative Section 0x17)
+07A 00000000 SECT27 notype       Static       | $unwind$?Wait@CLREventStatic@@QEAAII_N0@Z
+07B 00000000 SECT28 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1EC846AC, selection    5 (pick associative Section 0x17)
+07D 00000000 SECT28 notype       Static       | $pdata$?Wait@CLREventStatic@@QEAAII_N0@Z
+07E 00000000 SECT29 notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum 9F2DB737, selection    5 (pick associative Section 0x17)
+080 00000000 SECT29 notype       Static       | $chain$0$?Wait@CLREventStatic@@QEAAII_N0@Z
+081 00000000 SECT2A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum BA499830, selection    5 (pick associative Section 0x17)
+083 00000000 SECT2A notype       Static       | $pdata$0$?Wait@CLREventStatic@@QEAAII_N0@Z
+084 00000000 SECT2B notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum A79FAC40, selection    5 (pick associative Section 0x17)
+086 00000000 SECT2B notype       Static       | $chain$1$?Wait@CLREventStatic@@QEAAII_N0@Z
+087 00000000 SECT2C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 821B4DAD, selection    5 (pick associative Section 0x17)
+089 00000000 SECT2C notype       Static       | $pdata$1$?Wait@CLREventStatic@@QEAAII_N0@Z
+08A 00000000 SECT2D notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum DBFEE79B, selection    5 (pick associative Section 0x17)
+08C 00000000 SECT2D notype       Static       | $chain$2$?Wait@CLREventStatic@@QEAAII_N0@Z
+08D 00000000 SECT2E notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum A32177EB, selection    5 (pick associative Section 0x17)
+08F 00000000 SECT2E notype       Static       | $pdata$2$?Wait@CLREventStatic@@QEAAII_N0@Z
+090 00000000 SECT2F notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum A79FAC40, selection    5 (pick associative Section 0x17)
+092 00000000 SECT2F notype       Static       | $chain$3$?Wait@CLREventStatic@@QEAAII_N0@Z
+093 00000000 SECT30 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F52EFB75, selection    5 (pick associative Section 0x17)
+095 00000000 SECT30 notype       Static       | $pdata$3$?Wait@CLREventStatic@@QEAAII_N0@Z
+096 00000000 UNDEF  notype       External     | _tls_index
+097 00000000 SECT31 notype       Static       | .debug$S
+    Section length   2C, #relocs    2, #linenums    0, checksum        0, selection    5 (pick associative Section 0x4)
+099 00000000 SECT32 notype       Static       | .chks64
+    Section length  190, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x6EB bytes
+
+  Summary
+
+         190 .chks64
+        77F4 .debug$S
+          88 .debug$T
+          F4 .drectve
+          90 .pdata
+         21C .text$mn
+          D8 .tls$
+          94 .xdata

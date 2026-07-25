@@ -1,0 +1,34 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\archives\adapted-members\00008-InteropThunksHelpers.asm.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01038413 ABS    notype       Static       | @comp.id
+001 00004010 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .text$mn
+    Section length   5F, #relocs    5, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .data
+    Section length    0, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .tls$
+    Section length    8, #relocs    0, #linenums    0, checksum        0
+008 00000000 SECT4  notype       Static       | .debug$S
+    Section length  3F8, #relocs    A, #linenums    0, checksum        0
+00A 00000000 SECT5  notype       Static       | .debug$T
+    Section length   4C, #relocs    0, #linenums    0, checksum        0
+00C 00000000 UNDEF  notype       External     | _tls_index
+00D 00000000 SECT3  notype       Static       | ThunkParamSlot
+00E 00000000 SECT1  notype ()    External     | RhCommonStub
+00F 00000030 SECT1  notype ()    External     | RhGetCommonStubAddress
+010 00000040 SECT1  notype ()    External     | RhGetCurrentThunkContext
+011 00000000 SECT1  notype       Static       | $$000000
+
+String Table Size = 0x5B bytes
+
+  Summary
+
+           0 .data
+         3F8 .debug$S
+          4C .debug$T
+          5F .text$mn
+           8 .tls$

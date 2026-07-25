@@ -1160,3 +1160,11 @@ extern "C" void kernel_thread_exit()
     }
 }
 #endif
+
+// Runtime-pack ThreadStore bridge identity hook.  It returns the stable
+// scheduler-issued tid, never a TCB address; the runtime-pack source only
+// references it in the opt-in bare-metal build.
+extern "C" uintptr_t guidexos_nativeaot_threadstore_current_native_id()
+{
+    return static_cast<uintptr_t>(kernel::process::current_thread_id());
+}

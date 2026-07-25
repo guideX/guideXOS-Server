@@ -1,0 +1,344 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\archives\adapted-members\00060-DebugHeader.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058413 ABS    notype       Static       | @comp.id
+001 80034190 ABS    notype       Static       | @feat.00
+002 00000003 ABS    notype       Static       | @vol.md
+003 00000000 SECT1  notype       Static       | .drectve
+    Section length   F4, #relocs    0, #linenums    0, checksum        0
+005 00000000 SECT2  notype       Static       | .debug$S
+    Section length 89E8, #relocs    E, #linenums    0, checksum        0
+007 00000000 SECT3  notype       Static       | .debug$T
+    Section length   88, #relocs    0, #linenums    0, checksum        0
+009 00000000 SECT4  notype       Static       | .data
+    Section length   20, #relocs    0, #linenums    0, checksum EC45BD6D
+00B 00000000 SECT4  notype       External     | DotNetRuntimeDebugHeader
+00C 00000000 SECT5  notype       Static       | .text$mn
+    Section length  C49, #relocs  192, #linenums    0, checksum B15BBC4C, selection    1 (pick no duplicates)
+00E 00000000 SECT6  notype       Static       | .debug$S
+    Section length  2F0, #relocs    8, #linenums    0, checksum        0, selection    5 (pick associative Section 0x5)
+010 00000000 SECT5  notype ()    External     | PopulateDebugHeaders
+011 00000000 UNDEF  notype ()    External     | PalGetModuleHandleFromPointer
+012 00000000 UNDEF  notype ()    External     | ?GetRuntimeInstance@@YAPEAVRuntimeInstance@@XZ (class RuntimeInstance * __cdecl GetRuntimeInstance(void))
+013 00000000 UNDEF  notype ()    External     | memset
+014 00000000 SECT5  notype       Label        | $LN298
+015 00000000 SECT7  notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x5)
+017 00000000 SECT7  notype       Static       | $unwind$PopulateDebugHeaders
+018 00000000 SECT8  notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F172B3B2, selection    5 (pick associative Section 0x5)
+01A 00000000 SECT8  notype       Static       | $pdata$PopulateDebugHeaders
+01B 00000000 SECT9  notype       Static       | .voltbl
+    Section length    4, #relocs    0, #linenums    0, checksum 33B214BD, selection    5 (pick associative Section 0x5)
+01D 00000000 SECT9  notype       Static       | _volmd
+01E 00000000 UNDEF  notype       External     | ?theLog@StressLog@@2V1@A (public: static class StressLog StressLog::theLog)
+01F 00000000 UNDEF  notype       External     | ?g_gcDacGlobals@@3PEAUGcDacVars@@EA (struct GcDacVars * g_gcDacGlobals)
+020 00000000 UNDEF  notype       External     | ?g_CrashInfoBuffer@@3PAEA (unsigned char * g_CrashInfoBuffer)
+021 00000000 UNDEF  notype       External     | ?g_pFreeObjectEEType@@3PEAVMethodTable@@EA (class MethodTable * g_pFreeObjectEEType)
+022 00000000 SECTA  notype       Static       | .bss
+    Section length  9E0, #relocs    0, #linenums    0, checksum        0
+024 00000000 SECTA  notype       Static       | ?s_DebugEntries@@3PAUDebugTypeEntry@@A (struct DebugTypeEntry * s_DebugEntries)
+025 00000960 SECTA  notype       Static       | ?s_GlobalEntries@@3PAUGlobalValueEntry@@A (struct GlobalValueEntry * s_GlobalEntries)
+026 00000000 SECTB  notype       Static       | .rdata
+    Section length    A, #relocs    0, #linenums    0, checksum 70506B0C, selection    2 (pick any)
+028 00000000 SECTB  notype       External     | ??_C@_09GMCFPMIF@GcDacVars@ (`string')
+029 00000000 SECTC  notype       Static       | .rdata
+    Section length    7, #relocs    0, #linenums    0, checksum 39E6F595, selection    2 (pick any)
+02B 00000000 SECTC  notype       External     | ??_C@_06FLHFNFBE@SIZEOF@ (`string')
+02C 00000000 SECTD  notype       Static       | .rdata
+    Section length   15, #relocs    0, #linenums    0, checksum E5053D77, selection    2 (pick any)
+02E 00000000 SECTD  notype       External     | ??_C@_0BF@FLPOAHAD@major_version_number@ (`string')
+02F 00000000 SECTE  notype       Static       | .rdata
+    Section length   15, #relocs    0, #linenums    0, checksum 91B6E627, selection    2 (pick any)
+031 00000000 SECTE  notype       External     | ??_C@_0BF@CPENNMFD@minor_version_number@ (`string')
+032 00000000 SECTF  notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum 21F8168F, selection    2 (pick any)
+034 00000000 SECTF  notype       External     | ??_C@_0BA@DCLMKCCF@generation_size@ (`string')
+035 00000000 SECT10 notype       Static       | .rdata
+    Section length   17, #relocs    0, #linenums    0, checksum EFDCFE84, selection    2 (pick any)
+037 00000000 SECT10 notype       External     | ??_C@_0BH@GCIDCFDP@total_generation_count@ (`string')
+038 00000000 SECT11 notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum  FF410AC, selection    2 (pick any)
+03A 00000000 SECT11 notype       External     | ??_C@_0P@CHNIOMLE@built_with_svr@ (`string')
+03B 00000000 SECT12 notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum ED8EC1CD, selection    2 (pick any)
+03D 00000000 SECT12 notype       External     | ??_C@_0P@MFKCDNNF@finalize_queue@ (`string')
+03E 00000000 SECT13 notype       Static       | .rdata
+    Section length   11, #relocs    0, #linenums    0, checksum D2A5C6C3, selection    2 (pick any)
+040 00000000 SECT13 notype       External     | ??_C@_0BB@OELFMIIB@generation_table@ (`string')
+041 00000000 SECT14 notype       Static       | .rdata
+    Section length   17, #relocs    0, #linenums    0, checksum 9F09E2A7, selection    2 (pick any)
+043 00000000 SECT14 notype       External     | ??_C@_0BH@BCFGDJBM@ephemeral_heap_segment@ (`string')
+044 00000000 SECT15 notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum 54E951C8, selection    2 (pick any)
+046 00000000 SECT15 notype       External     | ??_C@_0BA@EHKNOFGC@alloc_allocated@ (`string')
+047 00000000 SECT16 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 76F08CDE, selection    2 (pick any)
+049 00000000 SECT16 notype       External     | ??_C@_07OMCNKMEI@n_heaps@ (`string')
+04A 00000000 SECT17 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 69BF97F5, selection    2 (pick any)
+04C 00000000 SECT17 notype       External     | ??_C@_07PDGCLHGD@g_heaps@ (`string')
+04D 00000000 SECT18 notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum 730D89FF, selection    2 (pick any)
+04F 00000000 SECT18 notype       External     | ??_C@_0M@PHCHLAGP@dac_gc_heap@ (`string')
+050 00000000 SECT19 notype       Static       | .rdata
+    Section length   11, #relocs    0, #linenums    0, checksum 65447B9C, selection    2 (pick any)
+052 00000000 SECT19 notype       External     | ??_C@_0BB@FDFEHFNO@gc_alloc_context@ (`string')
+053 00000000 SECT1A notype       Static       | .rdata
+    Section length    A, #relocs    0, #linenums    0, checksum 6F25CA8C, selection    2 (pick any)
+055 00000000 SECT1A notype       External     | ??_C@_09HDFAFNAF@alloc_ptr@ (`string')
+056 00000000 SECT1B notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum  4CC098B, selection    2 (pick any)
+058 00000000 SECT1B notype       External     | ??_C@_0M@IAOGDABL@alloc_limit@ (`string')
+059 00000000 SECT1C notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum 356C88CF, selection    2 (pick any)
+05B 00000000 SECT1C notype       External     | ??_C@_0M@LBEGLBFP@alloc_bytes@ (`string')
+05C 00000000 SECT1D notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum 56FE31E6, selection    2 (pick any)
+05E 00000000 SECT1D notype       External     | ??_C@_0BA@EFLKIFEM@alloc_bytes_uoh@ (`string')
+05F 00000000 SECT1E notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum EA38270B, selection    2 (pick any)
+061 00000000 SECT1E notype       External     | ??_C@_0M@GOBCBOJL@alloc_count@ (`string')
+062 00000000 SECT1F notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum 2C1BAC1B, selection    2 (pick any)
+064 00000000 SECT1F notype       External     | ??_C@_0P@EDHFAAD@dac_generation@ (`string')
+065 00000000 SECT20 notype       Static       | .rdata
+    Section length   13, #relocs    0, #linenums    0, checksum 3ABB9652, selection    2 (pick any)
+067 00000000 SECT20 notype       External     | ??_C@_0BD@BPEMKAMC@allocation_context@ (`string')
+068 00000000 SECT21 notype       Static       | .rdata
+    Section length    E, #relocs    0, #linenums    0, checksum 2153C45A, selection    2 (pick any)
+06A 00000000 SECT21 notype       External     | ??_C@_0O@PBHECGC@start_segment@ (`string')
+06B 00000000 SECT22 notype       Static       | .rdata
+    Section length   11, #relocs    0, #linenums    0, checksum 591B418E, selection    2 (pick any)
+06D 00000000 SECT22 notype       External     | ??_C@_0BB@GPALEPMM@allocation_start@ (`string')
+06E 00000000 SECT23 notype       Static       | .rdata
+    Section length   11, #relocs    0, #linenums    0, checksum 1101480C, selection    2 (pick any)
+070 00000000 SECT23 notype       External     | ??_C@_0BB@CHBBEGEO@dac_heap_segment@ (`string')
+071 00000000 SECT24 notype       Static       | .rdata
+    Section length    A, #relocs    0, #linenums    0, checksum FF2A27AC, selection    2 (pick any)
+073 00000000 SECT24 notype       External     | ??_C@_09ODFPLACF@allocated@ (`string')
+074 00000000 SECT25 notype       Static       | .rdata
+    Section length    A, #relocs    0, #linenums    0, checksum 90FCE177, selection    2 (pick any)
+076 00000000 SECT25 notype       External     | ??_C@_09IMIJHGPO@committed@ (`string')
+077 00000000 SECT26 notype       Static       | .rdata
+    Section length    9, #relocs    0, #linenums    0, checksum 412CFA54, selection    2 (pick any)
+079 00000000 SECT26 notype       External     | ??_C@_08FINKBBAF@reserved@ (`string')
+07A 00000000 SECT27 notype       Static       | .rdata
+    Section length    5, #relocs    0, #linenums    0, checksum  735C7A5, selection    2 (pick any)
+07C 00000000 SECT27 notype       External     | ??_C@_04DOOIMPEH@used@ (`string')
+07D 00000000 SECT28 notype       Static       | .rdata
+    Section length    4, #relocs    0, #linenums    0, checksum 570333FF, selection    2 (pick any)
+07F 00000000 SECT28 notype       External     | ??_C@_03IJLIBDBM@mem@ (`string')
+080 00000000 SECT29 notype       Static       | .rdata
+    Section length    6, #relocs    0, #linenums    0, checksum 487F11FD, selection    2 (pick any)
+082 00000000 SECT29 notype       External     | ??_C@_05GECEPKB@flags@ (`string')
+083 00000000 SECT2A notype       Static       | .rdata
+    Section length    5, #relocs    0, #linenums    0, checksum 3B4B4B07, selection    2 (pick any)
+085 00000000 SECT2A notype       External     | ??_C@_04CJGEDOF@next@ (`string')
+086 00000000 SECT2B notype       Static       | .rdata
+    Section length   15, #relocs    0, #linenums    0, checksum A7AE6C1A, selection    2 (pick any)
+088 00000000 SECT2B notype       External     | ??_C@_0BF@BJFFFGGO@background_allocated@ (`string')
+089 00000000 SECT2C notype       Static       | .rdata
+    Section length    5, #relocs    0, #linenums    0, checksum C390E35C, selection    2 (pick any)
+08B 00000000 SECT2C notype       External     | ??_C@_04PKENOLLO@heap@ (`string')
+08C 00000000 SECT2D notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum B35BFCD0, selection    2 (pick any)
+08E 00000000 SECT2D notype       External     | ??_C@_07CJIGNMEG@Globals@ (`string')
+08F 00000000 SECT2E notype       Static       | .rdata
+    Section length   16, #relocs    0, #linenums    0, checksum 987B91E1, selection    2 (pick any)
+091 00000000 SECT2E notype       External     | ??_C@_0BG@MPKNNPPO@FinalizeExtraSegCount@ (`string')
+092 00000000 SECT2F notype       Static       | .rdata
+    Section length    E, #relocs    0, #linenums    0, checksum 2D3E12D2, selection    2 (pick any)
+094 00000000 SECT2F notype       External     | ??_C@_0O@DHKJEOK@MinObjectSize@ (`string')
+095 00000000 SECT30 notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum F868B74C, selection    2 (pick any)
+097 00000000 SECT30 notype       External     | ??_C@_0M@HMECIONM@ThreadStore@ (`string')
+098 00000000 SECT31 notype       Static       | .rdata
+    Section length    D, #relocs    0, #linenums    0, checksum 3354BDD4, selection    2 (pick any)
+09A 00000000 SECT31 notype       External     | ??_C@_0N@MDNPAEKJ@m_ThreadList@ (`string')
+09B 00000000 SECT32 notype       Static       | .rdata
+    Section length   14, #relocs    0, #linenums    0, checksum E910481D, selection    2 (pick any)
+09D 00000000 SECT32 notype       External     | ??_C@_0BE@BJDKCMGP@RuntimeThreadLocals@ (`string')
+09E 00000000 SECT33 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 6FDB45F6, selection    2 (pick any)
+0A0 00000000 SECT33 notype       External     | ??_C@_07PFAGGFGA@m_pNext@ (`string')
+0A1 00000000 SECT34 notype       Static       | .rdata
+    Section length   18, #relocs    0, #linenums    0, checksum C51E4890, selection    2 (pick any)
+0A3 00000000 SECT34 notype       External     | ??_C@_0BI@JJCAHNEP@m_rgbAllocContextBuffer@ (`string')
+0A4 00000000 SECT35 notype       Static       | .rdata
+    Section length    B, #relocs    0, #linenums    0, checksum 301C5683, selection    2 (pick any)
+0A6 00000000 SECT35 notype       External     | ??_C@_0L@KEGEBIJA@m_threadId@ (`string')
+0A7 00000000 SECT36 notype       Static       | .rdata
+    Section length   13, #relocs    0, #linenums    0, checksum C31CB32A, selection    2 (pick any)
+0A9 00000000 SECT36 notype       External     | ??_C@_0BD@OGOLIFLK@m_pThreadStressLog@ (`string')
+0AA 00000000 SECT37 notype       Static       | .rdata
+    Section length   13, #relocs    0, #linenums    0, checksum CFB6B9B5, selection    2 (pick any)
+0AC 00000000 SECT37 notype       External     | ??_C@_0BD@OKEBIPCF@m_pExInfoStackHead@ (`string')
+0AD 00000000 SECT38 notype       Static       | .rdata
+    Section length    7, #relocs    0, #linenums    0, checksum D167AF80, selection    2 (pick any)
+0AF 00000000 SECT38 notype       External     | ??_C@_06LDPEIPAB@ExInfo@ (`string')
+0B0 00000000 SECT39 notype       Static       | .rdata
+    Section length    E, #relocs    0, #linenums    0, checksum 1639E73F, selection    2 (pick any)
+0B2 00000000 SECT39 notype       External     | ??_C@_0O@DIHNGBAH@m_pPrevExInfo@ (`string')
+0B3 00000000 SECT3A notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum 5F4F1794, selection    2 (pick any)
+0B5 00000000 SECT3A notype       External     | ??_C@_0M@NLGFCOAE@m_exception@ (`string')
+0B6 00000000 SECT3B notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum 1A41D6E9, selection    2 (pick any)
+0B8 00000000 SECT3B notype       External     | ??_C@_0M@JOGLOPHJ@MethodTable@ (`string')
+0B9 00000000 SECT3C notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum 5C36AAD5, selection    2 (pick any)
+0BB 00000000 SECT3C notype       External     | ??_C@_0M@NIBMJDEF@m_uBaseSize@ (`string')
+0BC 00000000 SECT3D notype       Static       | .rdata
+    Section length   12, #relocs    0, #linenums    0, checksum 696258E4, selection    2 (pick any)
+0BE 00000000 SECT3D notype       External     | ??_C@_0BC@PBIGGIFG@m_usComponentSize@ (`string')
+0BF 00000000 SECT3E notype       Static       | .rdata
+    Section length    9, #relocs    0, #linenums    0, checksum D0A96CDE, selection    2 (pick any)
+0C1 00000000 SECT3E notype       External     | ??_C@_08MJFPIHIP@m_uFlags@ (`string')
+0C2 00000000 SECT3F notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum 55B16FC8, selection    2 (pick any)
+0C4 00000000 SECT3F notype       External     | ??_C@_0M@NBJLFGFI@m_pBaseType@ (`string')
+0C5 00000000 SECT40 notype       Static       | .rdata
+    Section length   18, #relocs    0, #linenums    0, checksum 84C69B2E, selection    2 (pick any)
+0C7 00000000 SECT40 notype       External     | ??_C@_0BI@NIPIKOPB@m_pRelatedParameterType@ (`string')
+0C8 00000000 SECT41 notype       Static       | .rdata
+    Section length    9, #relocs    0, #linenums    0, checksum 9A0ADD26, selection    2 (pick any)
+0CA 00000000 SECT41 notype       External     | ??_C@_08IDPMDGHH@m_VTable@ (`string')
+0CB 00000000 SECT42 notype       Static       | .rdata
+    Section length    A, #relocs    0, #linenums    0, checksum 43A629B5, selection    2 (pick any)
+0CD 00000000 SECT42 notype       External     | ??_C@_09FPNDLODM@StressLog@ (`string')
+0CE 00000000 SECT43 notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum 906FC3E9, selection    2 (pick any)
+0D0 00000000 SECT43 notype       External     | ??_C@_0BA@IDCLHHED@facilitiesToLog@ (`string')
+0D1 00000000 SECT44 notype       Static       | .rdata
+    Section length    B, #relocs    0, #linenums    0, checksum  E2CC55F, selection    2 (pick any)
+0D3 00000000 SECT44 notype       External     | ??_C@_0L@JKFEILEM@levelToLog@ (`string')
+0D4 00000000 SECT45 notype       Static       | .rdata
+    Section length    B, #relocs    0, #linenums    0, checksum 2B202A47, selection    2 (pick any)
+0D6 00000000 SECT45 notype       External     | ??_C@_0L@LPFIGEFE@totalChunk@ (`string')
+0D7 00000000 SECT46 notype       Static       | .rdata
+    Section length    5, #relocs    0, #linenums    0, checksum 760D8A89, selection    2 (pick any)
+0D9 00000000 SECT46 notype       External     | ??_C@_04EPNAICGL@logs@ (`string')
+0DA 00000000 SECT47 notype       Static       | .rdata
+    Section length    E, #relocs    0, #linenums    0, checksum ACD1F921, selection    2 (pick any)
+0DC 00000000 SECT47 notype       External     | ??_C@_0O@ICJFHPBJ@tickFrequency@ (`string')
+0DD 00000000 SECT48 notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum  9B0FB1A, selection    2 (pick any)
+0DF 00000000 SECT48 notype       External     | ??_C@_0P@CBJMAHAC@startTimeStamp@ (`string')
+0E0 00000000 SECT49 notype       Static       | .rdata
+    Section length    A, #relocs    0, #linenums    0, checksum 940C94A1, selection    2 (pick any)
+0E2 00000000 SECT49 notype       External     | ??_C@_09IIHJADCI@startTime@ (`string')
+0E3 00000000 SECT4A notype       Static       | .rdata
+    Section length    D, #relocs    0, #linenums    0, checksum C771EF21, selection    2 (pick any)
+0E5 00000000 SECT4A notype       External     | ??_C@_0N@DHPKFGFM@moduleOffset@ (`string')
+0E6 00000000 SECT4B notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum 995EFF4A, selection    2 (pick any)
+0E8 00000000 SECT4B notype       External     | ??_C@_0BA@IKBKELOA@ThreadStressLog@ (`string')
+0E9 00000000 SECT4C notype       Static       | .rdata
+    Section length    9, #relocs    0, #linenums    0, checksum E3435079, selection    2 (pick any)
+0EB 00000000 SECT4C notype       External     | ??_C@_08PKLFLLCI@threadId@ (`string')
+0EC 00000000 SECT4D notype       Static       | .rdata
+    Section length    7, #relocs    0, #linenums    0, checksum 7A978055, selection    2 (pick any)
+0EE 00000000 SECT4D notype       External     | ??_C@_06BIAEKANE@isDead@ (`string')
+0EF 00000000 SECT4E notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum FFC9B638, selection    2 (pick any)
+0F1 00000000 SECT4E notype       External     | ??_C@_0P@NHOFEKCA@readHasWrapped@ (`string')
+0F2 00000000 SECT4F notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum C52E35DF, selection    2 (pick any)
+0F4 00000000 SECT4F notype       External     | ??_C@_0BA@NGGKIBHF@writeHasWrapped@ (`string')
+0F5 00000000 SECT50 notype       Static       | .rdata
+    Section length    7, #relocs    0, #linenums    0, checksum E75FADFF, selection    2 (pick any)
+0F7 00000000 SECT50 notype       External     | ??_C@_06IFMMINHO@curPtr@ (`string')
+0F8 00000000 SECT51 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 1D1D2C87, selection    2 (pick any)
+0FA 00000000 SECT51 notype       External     | ??_C@_07IHMAAMBB@readPtr@ (`string')
+0FB 00000000 SECT52 notype       Static       | .rdata
+    Section length    E, #relocs    0, #linenums    0, checksum A5CEC273, selection    2 (pick any)
+0FD 00000000 SECT52 notype       External     | ??_C@_0O@ILIKEEEL@chunkListHead@ (`string')
+0FE 00000000 SECT53 notype       Static       | .rdata
+    Section length    E, #relocs    0, #linenums    0, checksum 4976F417, selection    2 (pick any)
+100 00000000 SECT53 notype       External     | ??_C@_0O@GHDCHCCP@chunkListTail@ (`string')
+101 00000000 SECT54 notype       Static       | .rdata
+    Section length    D, #relocs    0, #linenums    0, checksum D91CB1AD, selection    2 (pick any)
+103 00000000 SECT54 notype       External     | ??_C@_0N@CJJHAINA@curReadChunk@ (`string')
+104 00000000 SECT55 notype       Static       | .rdata
+    Section length    E, #relocs    0, #linenums    0, checksum 85546C7D, selection    2 (pick any)
+106 00000000 SECT55 notype       External     | ??_C@_0O@KLBAOKEF@curWriteChunk@ (`string')
+107 00000000 SECT56 notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum EB0E1168, selection    2 (pick any)
+109 00000000 SECT56 notype       External     | ??_C@_0BA@PIEKKFMC@chunkListLength@ (`string')
+10A 00000000 SECT57 notype       Static       | .rdata
+    Section length    8, #relocs    0, #linenums    0, checksum 58036A29, selection    2 (pick any)
+10C 00000000 SECT57 notype       External     | ??_C@_07MCNOEKLP@pThread@ (`string')
+10D 00000000 SECT58 notype       Static       | .rdata
+    Section length    B, #relocs    0, #linenums    0, checksum 339C3D65, selection    2 (pick any)
+10F 00000000 SECT58 notype       External     | ??_C@_0L@KHOEHDHG@origCurPtr@ (`string')
+110 00000000 SECT59 notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum BB931A62, selection    2 (pick any)
+112 00000000 SECT59 notype       External     | ??_C@_0P@JDLPOGHK@StressLogChunk@ (`string')
+113 00000000 SECT5A notype       Static       | .rdata
+    Section length   19, #relocs    0, #linenums    0, checksum 338A2A34, selection    2 (pick any)
+115 00000000 SECT5A notype       External     | ??_C@_0BJ@CFLKNLEE@StressLogChunk_ChunkSize@ (`string')
+116 00000000 SECT5B notype       Static       | .rdata
+    Section length    5, #relocs    0, #linenums    0, checksum  F9D5F63, selection    2 (pick any)
+118 00000000 SECT5B notype       External     | ??_C@_04DGEAFHIB@prev@ (`string')
+119 00000000 SECT5C notype       Static       | .rdata
+    Section length    4, #relocs    0, #linenums    0, checksum F0B25912, selection    2 (pick any)
+11B 00000000 SECT5C notype       External     | ??_C@_03COAJHJPB@buf@ (`string')
+11C 00000000 SECT5D notype       Static       | .rdata
+    Section length    7, #relocs    0, #linenums    0, checksum DB86820A, selection    2 (pick any)
+11E 00000000 SECT5D notype       External     | ??_C@_06LJBFKCIL@dwSig1@ (`string')
+11F 00000000 SECT5E notype       Static       | .rdata
+    Section length    7, #relocs    0, #linenums    0, checksum F0ABD1C9, selection    2 (pick any)
+121 00000000 SECT5E notype       External     | ??_C@_06JCDIPBEI@dwSig2@ (`string')
+122 00000000 SECT5F notype       Static       | .rdata
+    Section length    A, #relocs    0, #linenums    0, checksum EE2614C4, selection    2 (pick any)
+124 00000000 SECT5F notype       External     | ??_C@_09PCFDIDEN@StressMsg@ (`string')
+125 00000000 SECT60 notype       Static       | .rdata
+    Section length    5, #relocs    0, #linenums    0, checksum 2CEEC17A, selection    2 (pick any)
+127 00000000 SECT60 notype       External     | ??_C@_04BFDDMJJI@args@ (`string')
+128 00000000 SECT61 notype       Static       | .rdata
+    Section length   10, #relocs    0, #linenums    0, checksum 898FB1EB, selection    2 (pick any)
+12A 00000000 SECT61 notype       External     | ??_C@_0BA@JKMLAFEB@RuntimeInstance@ (`string')
+12B 00000000 SECT62 notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum 8D33834C, selection    2 (pick any)
+12D 00000000 SECT62 notype       External     | ??_C@_0P@KFBPHPFE@m_pThreadStore@ (`string')
+12E 00000000 SECT63 notype       Static       | .rdata
+    Section length   12, #relocs    0, #linenums    0, checksum 8C66D981, selection    2 (pick any)
+130 00000000 SECT63 notype       External     | ??_C@_0BC@BEICOJDD@g_CrashInfoBuffer@ (`string')
+131 00000000 SECT64 notype       Static       | .rdata
+    Section length   16, #relocs    0, #linenums    0, checksum 52A6B2BA, selection    2 (pick any)
+133 00000000 SECT64 notype       External     | ??_C@_0BG@FHAPMKF@g_pTheRuntimeInstance@ (`string')
+134 00000000 SECT65 notype       Static       | .rdata
+    Section length    F, #relocs    0, #linenums    0, checksum  AED13FE, selection    2 (pick any)
+136 00000000 SECT65 notype       External     | ??_C@_0P@CCMBOPOG@g_gcDacGlobals@ (`string')
+137 00000000 SECT66 notype       Static       | .rdata
+    Section length   14, #relocs    0, #linenums    0, checksum 8922F8A4, selection    2 (pick any)
+139 00000000 SECT66 notype       External     | ??_C@_0BE@HJAIJMNG@g_pFreeObjectEEType@ (`string')
+13A 00000000 SECT67 notype       Static       | .rdata
+    Section length    C, #relocs    0, #linenums    0, checksum BB778600, selection    2 (pick any)
+13C 00000000 SECT67 notype       External     | ??_C@_0M@DPFNLPJA@g_stressLog@ (`string')
+13D 00000000 SECT68 notype       Static       | .rdata
+    Section length   12, #relocs    0, #linenums    0, checksum 5E348482, selection    2 (pick any)
+13F 00000000 SECT68 notype       External     | ??_C@_0BC@MGNALEDA@moduleBaseAddress@ (`string')
+140 00000000 SECT69 notype       Static       | .chks64
+    Section length  348, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0xD4F bytes
+
+  Summary
+
+         9E0 .bss
+         348 .chks64
+          20 .data
+        8CD8 .debug$S
+          88 .debug$T
+          F4 .drectve
+           C .pdata
+         4D2 .rdata
+         C49 .text$mn
+           4 .voltbl
+           8 .xdata

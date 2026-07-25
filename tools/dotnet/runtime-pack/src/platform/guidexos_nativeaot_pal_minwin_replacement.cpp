@@ -24,11 +24,24 @@ struct BackgroundWork {
     void* context;
 };
 
+#if defined(GUIDEXOS_NATIVEAOT_PAL_QEMU_PROBE)
+BackgroundWork g_qemuBackgroundWork = {};
+bool g_qemuBackgroundActive = false;
+#endif
+
 uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL backgroundEntry(void* raw) {
     BackgroundWork* work = static_cast<BackgroundWork*>(raw);
     if (work == nullptr || work->callback == nullptr) return 0;
     const uint32_t result = work->callback(work->context);
+#if defined(GUIDEXOS_NATIVEAOT_PAL_QEMU_PROBE)
+    // The exact QEMU artifact has no CRT/heap.  The probe permits one
+    // bounded background worker and the hook-side close operation joins it
+    // before this slot is reused.
+    extern bool g_qemuBackgroundActive;
+    g_qemuBackgroundActive = false;
+#else
     delete work;
+#endif
     return result;
 }
 
@@ -211,13 +224,25 @@ PalStartBackgroundWork(uint32_t (__stdcall* callback)(void*),
                        void* callback_context,
                        int32_t high_priority) {
     if (callback == nullptr) return false;
-    BackgroundWork* work = new (std::nothrow) BackgroundWork{ callback, callback_context };
+    BackgroundWork* work = nullptr;
+#if defined(GUIDEXOS_NATIVEAOT_PAL_QEMU_PROBE)
+    if (g_qemuBackgroundActive) return false;
+    g_qemuBackgroundActive = true;
+    g_qemuBackgroundWork = BackgroundWork{ callback, callback_context };
+    work = &g_qemuBackgroundWork;
+#else
+    work = new (std::nothrow) BackgroundWork{ callback, callback_context };
     if (work == nullptr) return false;
+#endif
     guidexos_nativeaot_pal_opaque_handle handle = 0;
     const int32_t created = guidexos_nativeaot_pal_create_thread(
         backgroundEntry, work, 8192u, high_priority != 0, &handle);
     if (created != 0) {
+#if defined(GUIDEXOS_NATIVEAOT_PAL_QEMU_PROBE)
+        g_qemuBackgroundActive = false;
+#else
         delete work;
+#endif
         return false;
     }
     // This API intentionally has no joinable result in its source contract;

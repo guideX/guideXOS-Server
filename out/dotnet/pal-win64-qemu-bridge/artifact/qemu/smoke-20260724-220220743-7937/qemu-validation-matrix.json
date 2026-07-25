@@ -1,0 +1,51 @@
+﻿{
+    "qemuLocated":  "PASS",
+    "baselineBoot":  "PASS",
+    "probePeBuilt":  "PASS",
+    "peImports":  "PASS",
+    "peToElfConversion":  "PASS",
+    "artifactStaged":  "FAIL",
+    "win64InstallExport":  "FAIL",
+    "hookMagicVersionSize":  "FAIL",
+    "initialCurrentThreadId":  "FAIL",
+    "initialStackBounds":  "FAIL",
+    "initialFlsLifecycle":  "FAIL",
+    "workerCreation":  "FAIL",
+    "sysvToWin64Callback":  "FAIL",
+    "workerResult":  "0x1234",
+    "workerThreadId":  "FAIL",
+    "workerStackBounds":  "FAIL",
+    "workerThreadStoreLifecycle":  "FAIL",
+    "flsDetachCallbackBridge":  "FAIL",
+    "callbackCount":  "expected=1 observed=1",
+    "join":  "FAIL",
+    "timing":  "FAIL",
+    "sleepYield":  "FAIL",
+    "cleanup":  "FAIL",
+    "hookUninstall":  "FAIL",
+    "secondInProcessLaunch":  "FAIL",
+    "freshProcessLaunch":  "FAIL",
+    "windowsPalThunkEntered":  "no",
+    "firstLaunch":  {
+                        "markerFound":  false,
+                        "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu\\smoke-20260724-220220743-7937\\first.serial.log",
+                        "logSha256":  "75309219F17D6DEE72873F6A6148665E0D13E5C78E2BCFCBC803593F129BDBD6"
+                    },
+    "freshProcess":  {
+                         "markerFound":  false,
+                         "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu\\smoke-20260724-220220743-7937\\fresh-process.serial.log",
+                         "logSha256":  "DD5566210A21B0C5A9A9D2C5D7778176CE77D94816074E932EC06AD0BD76E149"
+                     },
+    "baseline":  {
+                     "markerFound":  true,
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu\\smoke-20260724-220220743-7937\\baseline.serial.log",
+                     "logSha256":  "5CE946A7AE4F1AB690ECD9C630F060DD96E6C69649894709D2FAC652B67F9C90"
+                 },
+    "artifact":  {
+                     "elf":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\guidexos_nativeaot_pal_qemu_probe.elf",
+                     "elfSha256":  "07C91E64D6B299864C49D510E7B6F52BC89D7983DB791723DCCFD78EE204C5A1",
+                     "object":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\guidexos_nativeaot_pal_qemu_probe_artifact.o",
+                     "objectSha256":  "FEABA2A982CF209A5963B1DEE7ED1B39F42D20B96789730BA2103A899D5C4893",
+                     "exportsHeader":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\guidexos_nativeaot_pal_qemu_exports.h"
+                 }
+}

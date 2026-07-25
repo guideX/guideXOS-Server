@@ -1,0 +1,544 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\archives\adapted-members\00002-thread.cpp.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01058D98 ABS    notype       Static       | @comp.id
+001 80030090 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .drectve
+    Section length  102, #relocs    0, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .debug$S
+    Section length   B8, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .bss
+    Section length   18, #relocs    0, #linenums    0, checksum        0
+008 00000000 SECT3  notype       External     | ?s_DeadThreadsNonAllocBytes@Thread@@0_KA (private: static unsigned __int64 Thread::s_DeadThreadsNonAllocBytes)
+009 00000000 SECT4  notype       Static       | .tls$
+    Section length   D8, #relocs    0, #linenums    0, checksum        0, selection    2 (pick any)
+00B 00000000 SECT4  notype       External     | tls_CurrentThread
+00C 00000000 SECT5  notype       Static       | .bss
+    Section length    4, #relocs    0, #linenums    0, checksum        0, selection    2 (pick any)
+00E 00000000 SECT5  notype       External     | _Avx2WmemEnabledWeakValue
+00F 00000000 SECT6  notype       Static       | .text$mn
+    Section length   18, #relocs    0, #linenums    0, checksum D0D49E8F, selection    1 (pick no duplicates)
+011 00000000 SECT7  notype       Static       | .text$mn
+    Section length    6, #relocs    0, #linenums    0, checksum 91BD8B3C, selection    1 (pick no duplicates)
+013 00000000 SECT8  notype       Static       | .text$mn
+    Section length    7, #relocs    0, #linenums    0, checksum D6194A03, selection    1 (pick no duplicates)
+015 00000000 SECT9  notype       Static       | .text$mn
+    Section length    6, #relocs    0, #linenums    0, checksum 13A61365, selection    1 (pick no duplicates)
+017 00000000 SECTA  notype       Static       | .text$mn
+    Section length   A3, #relocs    7, #linenums    0, checksum 61D067DB, selection    1 (pick no duplicates)
+019 00000000 SECTB  notype       Static       | .text$mn
+    Section length   1F, #relocs    0, #linenums    0, checksum 52F537A9, selection    1 (pick no duplicates)
+01B 00000000 SECTC  notype       Static       | .text$mn
+    Section length   40, #relocs    3, #linenums    0, checksum 20B71748, selection    1 (pick no duplicates)
+01D 00000000 SECTD  notype       Static       | .text$mn
+    Section length   60, #relocs    6, #linenums    0, checksum A5A89A36, selection    1 (pick no duplicates)
+01F 00000000 SECTE  notype       Static       | .text$mn
+    Section length   3C, #relocs    3, #linenums    0, checksum B891EDBE, selection    1 (pick no duplicates)
+021 00000000 SECTF  notype       Static       | .text$mn
+    Section length    9, #relocs    0, #linenums    0, checksum 11F21F9E, selection    1 (pick no duplicates)
+023 00000000 SECT10 notype       Static       | .text$mn
+    Section length   2F, #relocs    1, #linenums    0, checksum 9F49F779, selection    1 (pick no duplicates)
+025 00000000 SECT11 notype       Static       | .text$mn
+    Section length   5F, #relocs    7, #linenums    0, checksum 9C3A4784, selection    1 (pick no duplicates)
+027 00000000 SECT12 notype       Static       | .text$mn
+    Section length   89, #relocs    3, #linenums    0, checksum 574DEFCE, selection    1 (pick no duplicates)
+029 00000000 SECT13 notype       Static       | .text$mn
+    Section length  2A4, #relocs   1C, #linenums    0, checksum 9FB2C511, selection    1 (pick no duplicates)
+02B 00000000 SECT14 notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum 160E83B5, selection    1 (pick no duplicates)
+02D 00000000 SECT15 notype       Static       | .text$mn
+    Section length   19, #relocs    2, #linenums    0, checksum A63AB85F, selection    2 (pick any)
+02F 00000000 SECT16 notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum 5D33F169, selection    1 (pick no duplicates)
+031 00000000 SECT17 notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum 22C965E9, selection    1 (pick no duplicates)
+033 00000000 SECT18 notype       Static       | .text$mn
+    Section length    5, #relocs    0, #linenums    0, checksum  ED12FB9, selection    1 (pick no duplicates)
+035 00000000 SECT19 notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum 469E5FF6, selection    1 (pick no duplicates)
+037 00000000 SECT1A notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum 7E8D903D, selection    1 (pick no duplicates)
+039 00000000 SECT1B notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum 875F70F2, selection    1 (pick no duplicates)
+03B 00000000 SECT1C notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum 267EC874, selection    1 (pick no duplicates)
+03D 00000000 SECT1D notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum 153E210D, selection    1 (pick no duplicates)
+03F 00000000 SECT1E notype       Static       | .text$mn
+    Section length   28, #relocs    1, #linenums    0, checksum BD01A6EE, selection    1 (pick no duplicates)
+041 00000000 SECT1F notype       Static       | .text$mn
+    Section length    5, #relocs    0, #linenums    0, checksum 194E9342, selection    1 (pick no duplicates)
+043 00000000 SECT20 notype       Static       | .text$mn
+    Section length   22, #relocs    1, #linenums    0, checksum 88033127, selection    1 (pick no duplicates)
+045 00000000 SECT21 notype       Static       | .text$mn
+    Section length  20F, #relocs   13, #linenums    0, checksum 8E231864, selection    1 (pick no duplicates)
+047 00000000 SECT22 notype       Static       | .text$mn
+    Section length   59, #relocs    3, #linenums    0, checksum 2BE2B16D, selection    1 (pick no duplicates)
+049 00000000 SECT23 notype       Static       | .text$mn
+    Section length   44, #relocs    2, #linenums    0, checksum  41726C7, selection    1 (pick no duplicates)
+04B 00000000 SECT24 notype       Static       | .text$mn
+    Section length   F7, #relocs    8, #linenums    0, checksum 2C1A3901, selection    1 (pick no duplicates)
+04D 00000000 SECT25 notype       Static       | .text$mn
+    Section length   55, #relocs    1, #linenums    0, checksum 63A0B940, selection    1 (pick no duplicates)
+04F 00000000 SECT26 notype       Static       | .text$mn
+    Section length    9, #relocs    0, #linenums    0, checksum B92D9243, selection    1 (pick no duplicates)
+051 00000000 SECT27 notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum 876811C8, selection    1 (pick no duplicates)
+053 00000000 SECT28 notype       Static       | .text$mn
+    Section length    9, #relocs    0, #linenums    0, checksum 4B474A9E, selection    1 (pick no duplicates)
+055 00000000 SECT29 notype       Static       | .text$mn
+    Section length   21, #relocs    2, #linenums    0, checksum 8D730EA8, selection    1 (pick no duplicates)
+057 00000000 SECT2A notype       Static       | .text$mn
+    Section length    9, #relocs    0, #linenums    0, checksum A0009516, selection    1 (pick no duplicates)
+059 00000000 SECT2B notype       Static       | .text$mn
+    Section length    9, #relocs    0, #linenums    0, checksum 57FFF46D, selection    1 (pick no duplicates)
+05B 00000000 SECT2C notype       Static       | .text$mn
+    Section length    9, #relocs    0, #linenums    0, checksum 6E2C1542, selection    1 (pick no duplicates)
+05D 00000000 SECT2D notype       Static       | .text$mn
+    Section length   12, #relocs    0, #linenums    0, checksum C4E2EFA0, selection    1 (pick no duplicates)
+05F 00000000 SECT2E notype       Static       | .text$mn
+    Section length   CE, #relocs    7, #linenums    0, checksum D60F9718, selection    1 (pick no duplicates)
+061 00000000 SECT2F notype       Static       | .text$mn
+    Section length   17, #relocs    0, #linenums    0, checksum BD6880A6, selection    1 (pick no duplicates)
+063 00000000 SECT30 notype       Static       | .text$mn
+    Section length    9, #relocs    0, #linenums    0, checksum F9B60A01, selection    1 (pick no duplicates)
+065 00000000 SECT31 notype       Static       | .text$mn
+    Section length   CE, #relocs    F, #linenums    0, checksum 2AD5A454, selection    1 (pick no duplicates)
+067 00000000 SECT32 notype       Static       | .text$mn
+    Section length   16, #relocs    0, #linenums    0, checksum 8ECDCF45, selection    1 (pick no duplicates)
+069 00000000 SECT33 notype       Static       | .text$mn
+    Section length   1D, #relocs    1, #linenums    0, checksum FAED2A51, selection    1 (pick no duplicates)
+06B 00000000 SECT34 notype       Static       | .text$mn
+    Section length    6, #relocs    0, #linenums    0, checksum 1FEB814C, selection    1 (pick no duplicates)
+06D 00000000 SECT35 notype       Static       | .text$mn
+    Section length    6, #relocs    0, #linenums    0, checksum 671FF19F, selection    1 (pick no duplicates)
+06F 00000000 SECT36 notype       Static       | .text$mn
+    Section length   B4, #relocs    7, #linenums    0, checksum 5F3F130B, selection    1 (pick no duplicates)
+071 00000000 SECT37 notype       Static       | .text$mn
+    Section length    5, #relocs    0, #linenums    0, checksum 4DB074A1, selection    1 (pick no duplicates)
+073 00000000 SECT38 notype       Static       | .text$mn
+    Section length    6, #relocs    0, #linenums    0, checksum E50469C6, selection    1 (pick no duplicates)
+075 00000000 SECT39 notype       Static       | .text$mn
+    Section length    8, #relocs    0, #linenums    0, checksum B237DBC6, selection    1 (pick no duplicates)
+077 00000000 SECT3A notype       Static       | .text$mn
+    Section length   1F, #relocs    0, #linenums    0, checksum 52F537A9, selection    1 (pick no duplicates)
+079 00000000 SECT3B notype       Static       | .text$mn
+    Section length   1F, #relocs    0, #linenums    0, checksum 52F537A9, selection    1 (pick no duplicates)
+07B 00000000 SECT3C notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum 922B422E, selection    1 (pick no duplicates)
+07D 00000000 SECT3D notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum 922B422E, selection    1 (pick no duplicates)
+07F 00000000 SECT3E notype       Static       | .text$mn
+    Section length   80, #relocs    8, #linenums    0, checksum 2583A6A6, selection    1 (pick no duplicates)
+081 00000000 SECT3F notype       Static       | .text$mn
+    Section length   16, #relocs    1, #linenums    0, checksum AC48A7DF, selection    1 (pick no duplicates)
+083 00000000 SECT40 notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+085 00000000 SECT41 notype       Static       | .text$mn
+    Section length    5, #relocs    1, #linenums    0, checksum 25C4A5AE, selection    1 (pick no duplicates)
+087 00000000 SECT42 notype       Static       | .text$mn
+    Section length   23, #relocs    2, #linenums    0, checksum 17AF4412, selection    1 (pick no duplicates)
+089 00000000 SECT43 notype       Static       | .text$mn
+    Section length   33, #relocs    2, #linenums    0, checksum 871D82A9, selection    1 (pick no duplicates)
+08B 00000000 SECT44 notype       Static       | .text$mn
+    Section length    8, #relocs    1, #linenums    0, checksum 5905F6AD, selection    1 (pick no duplicates)
+08D 00000000 SECT45 notype       Static       | .text$mn
+    Section length   22, #relocs    3, #linenums    0, checksum  6496BD3, selection    1 (pick no duplicates)
+08F 00000000 SECT46 notype       Static       | .text$mn
+    Section length   21, #relocs    2, #linenums    0, checksum 47DBB3D1, selection    1 (pick no duplicates)
+091 00000000 SECT47 notype       Static       | .text$mn
+    Section length   5B, #relocs    4, #linenums    0, checksum B424DE7A, selection    1 (pick no duplicates)
+093 00000000 SECT48 notype       Static       | .text$mn
+    Section length   CE, #relocs    F, #linenums    0, checksum 217F8180, selection    1 (pick no duplicates)
+095 00000000 SECT49 notype       Static       | .text$mn
+    Section length    C, #relocs    0, #linenums    0, checksum 4D4CE7D6, selection    1 (pick no duplicates)
+097 00000000 SECT4A notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum 922B422E, selection    1 (pick no duplicates)
+099 00000000 SECT4B notype       Static       | .text$mn
+    Section length   2E, #relocs    4, #linenums    0, checksum F38DA8F3, selection    1 (pick no duplicates)
+09B 00000000 SECT4C notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum 922B422E, selection    1 (pick no duplicates)
+09D 00000000 SECT4D notype       Static       | .text$mn
+    Section length    3, #relocs    0, #linenums    0, checksum 922B422E, selection    1 (pick no duplicates)
+09F 00000000 SECT4E notype       Static       | .text$mn
+    Section length   18, #relocs    1, #linenums    0, checksum E4F54E4D, selection    1 (pick no duplicates)
+0A1 00000000 UNDEF  notype ()    External     | ??_V@YAXPEAX@Z (void __cdecl operator delete[](void *))
+0A2 00000000 UNDEF  notype ()    External     | _wassert
+0A3 00000000 UNDEF  notype ()    External     | PalAllocateCompleteOSContext
+0A4 00000000 UNDEF  notype ()    External     | PalGetCompleteThreadContext
+0A5 00000000 UNDEF  notype ()    External     | PalSetThreadContext
+0A6 00000000 UNDEF  notype ()    External     | PalRestoreContext
+0A7 00000000 UNDEF  notype ()    External     | PalGetMaximumStackBounds
+0A8 00000000 UNDEF  notype ()    External     | PalSleep
+0A9 00000000 UNDEF  notype ()    External     | PalHijack
+0AA 00000000 UNDEF  notype ()    External     | PalGetHijackTarget
+0AB 00000000 UNDEF  notype ()    External     | PalCompatibleWaitAny
+0AC 00000000 UNDEF  notype ()    External     | PalGetCurrentOSThreadId
+0AD 00000000 UNDEF  notype ()    External     | PalPrintFatalError
+0AE 00000000 UNDEF  notype ()    External     | ?GetCodeManagerForAddress@RuntimeInstance@@QEAAPEAVICodeManager@@PEAX@Z (public: class ICodeManager * __cdecl RuntimeInstance::GetCodeManagerForAddress(void *))
+0AF 00000000 UNDEF  notype ()    External     | ?IsManaged@RuntimeInstance@@QEAA_NPEAX@Z (public: bool __cdecl RuntimeInstance::IsManaged(void *))
+0B0 00000000 UNDEF  notype ()    External     | ?GetRuntimeInstance@@YAPEAVRuntimeInstance@@XZ (class RuntimeInstance * __cdecl GetRuntimeInstance(void))
+0B1 00000000 UNDEF  notype ()    External     | ?ThreadDetach@StressLog@@SAXPEAVThreadStressLog@@@Z (public: static void __cdecl StressLog::ThreadDetach(class ThreadStressLog *))
+0B2 00000000 UNDEF  notype ()    External     | ?CreateThreadStressLog@StressLog@@SAPEAVThreadStressLog@@PEAVThread@@@Z (public: static class ThreadStressLog * __cdecl StressLog::CreateThreadStressLog(class Thread *))
+0B3 00000000 UNDEF  notype ()    External     | ?LogMsg@StressLog@@SAXIHPEBDZZ (public: static void __cdecl StressLog::LogMsg(unsigned int,int,char const *,...))
+0B4 00000000 UNDEF  notype ()    External     | ??0StackFrameIterator@@QEAA@PEAVThread@@PEAUPInvokeTransitionFrame@@@Z (public: __cdecl StackFrameIterator::StackFrameIterator(class Thread *,struct PInvokeTransitionFrame *))
+0B5 00000000 UNDEF  notype ()    External     | ??0StackFrameIterator@@QEAA@PEAVThread@@PEAU_CONTEXT@@@Z (public: __cdecl StackFrameIterator::StackFrameIterator(class Thread *,struct _CONTEXT *))
+0B6 00000000 UNDEF  notype ()    External     | ??0StackFrameIterator@@QEAA@PEAVThread@@PEAUPAL_LIMITED_CONTEXT@@@Z (public: __cdecl StackFrameIterator::StackFrameIterator(class Thread *,struct PAL_LIMITED_CONTEXT *))
+0B7 00000000 UNDEF  notype ()    External     | ?IsValid@StackFrameIterator@@QEAA_NXZ (public: bool __cdecl StackFrameIterator::IsValid(void))
+0B8 00000000 UNDEF  notype ()    External     | ?CalculateCurrentMethodState@StackFrameIterator@@QEAAXXZ (public: void __cdecl StackFrameIterator::CalculateCurrentMethodState(void))
+0B9 00000000 UNDEF  notype ()    External     | ?Next@StackFrameIterator@@QEAAXXZ (public: void __cdecl StackFrameIterator::Next(void))
+0BA 00000000 UNDEF  notype ()    External     | ?GetEffectiveSafePointAddress@StackFrameIterator@@QEAAPEAXXZ (public: void * __cdecl StackFrameIterator::GetEffectiveSafePointAddress(void))
+0BB 00000000 UNDEF  notype ()    External     | ?GetRegisterSet@StackFrameIterator@@QEAAPEAUREGDISPLAY@@XZ (public: struct REGDISPLAY * __cdecl StackFrameIterator::GetRegisterSet(void))
+0BC 00000000 UNDEF  notype ()    External     | ?GetCodeManager@StackFrameIterator@@QEAAPEAVICodeManager@@XZ (public: class ICodeManager * __cdecl StackFrameIterator::GetCodeManager(void))
+0BD 00000000 UNDEF  notype ()    External     | ?GetMethodInfo@StackFrameIterator@@QEAAPEAVMethodInfo@@XZ (public: class MethodInfo * __cdecl StackFrameIterator::GetMethodInfo(void))
+0BE 00000000 UNDEF  notype ()    External     | ?IsActiveStackFrame@StackFrameIterator@@QEAA_NXZ (public: bool __cdecl StackFrameIterator::IsActiveStackFrame(void))
+0BF 00000000 UNDEF  notype ()    External     | ?GetHijackedReturnValueLocation@StackFrameIterator@@QEAA_NPEAPEAPEAVObject@@PEAW4GCRefKind@@@Z (public: bool __cdecl StackFrameIterator::GetHijackedReturnValueLocation(class Object * * *,enum GCRefKind *))
+0C0 00000000 UNDEF  notype ()    External     | ?HasStackRangeToReportConservatively@StackFrameIterator@@QEAA_NXZ (public: bool __cdecl StackFrameIterator::HasStackRangeToReportConservatively(void))
+0C1 00000000 UNDEF  notype ()    External     | ?GetStackRangeToReportConservatively@StackFrameIterator@@QEAAXPEAPEAPEAVObject@@0@Z (public: void __cdecl StackFrameIterator::GetStackRangeToReportConservatively(class Object * * *,class Object * * *))
+0C2 00000000 SECTA  notype ()    External     | ?Construct@Thread@@AEAAXXZ (private: void __cdecl Thread::Construct(void))
+0C3 00000000 SECT37 notype ()    External     | ?SetState@Thread@@AEAAXW4ThreadStateFlags@1@@Z (private: void __cdecl Thread::SetState(enum Thread::ThreadStateFlags))
+0C4 00000000 SECT8  notype ()    External     | ?ClearState@Thread@@AEAAXW4ThreadStateFlags@1@@Z (private: void __cdecl Thread::ClearState(enum Thread::ThreadStateFlags))
+0C5 00000000 SECT21 notype ()    External     | ?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z (private: static void __cdecl Thread::HijackCallback(struct _CONTEXT *,void *))
+0C6 00000000 SECT22 notype ()    External     | ?HijackReturnAddress@Thread@@AEAAXPEAUPAL_LIMITED_CONTEXT@@P6AXXZ@Z (private: void __cdecl Thread::HijackReturnAddress(struct PAL_LIMITED_CONTEXT *,void (__cdecl*)(void)))
+0C7 00000000 SECT23 notype ()    External     | ?HijackReturnAddress@Thread@@AEAAXPEAU_CONTEXT@@P6AXXZ@Z (private: void __cdecl Thread::HijackReturnAddress(struct _CONTEXT *,void (__cdecl*)(void)))
+0C8 00000000 SECT24 notype ()    External     | ?HijackReturnAddressWorker@Thread@@AEAAXPEAVStackFrameIterator@@P6AXXZ@Z (private: void __cdecl Thread::HijackReturnAddressWorker(class StackFrameIterator *,void (__cdecl*)(void)))
+0C9 00000000 SECTB  notype ()    External     | ?CrossThreadUnhijack@Thread@@AEAAXXZ (private: void __cdecl Thread::CrossThreadUnhijack(void))
+0CA 00000000 SECT3B notype ()    External     | ?UnhijackWorker@Thread@@AEAAXXZ (private: void __cdecl Thread::UnhijackWorker(void))
+0CB 00000000 SECT2E notype ()    External     | ?Redirect@Thread@@AEAA_NXZ (private: bool __cdecl Thread::Redirect(void))
+0CC 00000000 SECT6  notype ()    External     | ?CacheTransitionFrameForSuspend@Thread@@AEAA_NXZ (private: bool __cdecl Thread::CacheTransitionFrameForSuspend(void))
+0CD 00000000 SECT30 notype ()    External     | ?ResetCachedTransitionFrame@Thread@@AEAAXXZ (private: void __cdecl Thread::ResetCachedTransitionFrame(void))
+0CE 00000000 SECT11 notype ()    External     | ?EnsureRuntimeInitialized@Thread@@AEAAXXZ (private: void __cdecl Thread::EnsureRuntimeInitialized(void))
+0CF 00000000 SECT1E notype ()    External     | ?GetTransitionFrame@Thread@@AEAAPEAUPInvokeTransitionFrame@@XZ (private: struct PInvokeTransitionFrame * __cdecl Thread::GetTransitionFrame(void))
+0D0 00000000 SECT13 notype ()    External     | ?GcScanRootsWorker@Thread@@AEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1AEAVStackFrameIterator@@@Z (private: void __cdecl Thread::GcScanRootsWorker(void (__cdecl*)(class Object * *,struct ScanContext *,unsigned int),struct ScanContext *,class StackFrameIterator &))
+0D1 00000000 SECT25 notype ()    External     | ?InlineSuspend@Thread@@QEAA_NPEAU_CONTEXT@@@Z (public: bool __cdecl Thread::InlineSuspend(struct _CONTEXT *))
+0D2 00000000 SECT17 notype ()    External     | ?GetDeadThreadsNonAllocBytes@Thread@@SA_KXZ (public: static unsigned __int64 __cdecl Thread::GetDeadThreadsNonAllocBytes(void))
+0D3 00000000 SECTD  notype ()    External     | ?Detach@Thread@@QEAAXXZ (public: void __cdecl Thread::Detach(void))
+0D4 00000000 SECTC  notype ()    External     | ?Destroy@Thread@@QEAAXXZ (public: void __cdecl Thread::Destroy(void))
+0D5 00000000 SECT2B notype ()    External     | ?IsInitialized@Thread@@QEAA_NXZ (public: bool __cdecl Thread::IsInitialized(void))
+0D6 00000000 SECT1B notype ()    External     | ?GetPalThreadIdForLogging@Thread@@QEAA_KXZ (public: unsigned __int64 __cdecl Thread::GetPalThreadIdForLogging(void))
+0D7 00000000 SECT12 notype ()    External     | ?GcScanRoots@Thread@@QEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1@Z (public: void __cdecl Thread::GcScanRoots(void (__cdecl*)(class Object * *,struct ScanContext *,unsigned int),struct ScanContext *))
+0D8 00000000 SECT20 notype ()    External     | ?Hijack@Thread@@QEAAXXZ (public: void __cdecl Thread::Hijack(void))
+0D9 00000000 SECT3A notype ()    External     | ?Unhijack@Thread@@QEAAXXZ (public: void __cdecl Thread::Unhijack(void))
+0DA 00000000 SECT2A notype ()    External     | ?IsHijacked@Thread@@QEAA_NXZ (public: bool __cdecl Thread::IsHijacked(void))
+0DB 00000000 SECT18 notype ()    External     | ?GetHijackedReturnAddress@Thread@@QEAAPEAXXZ (public: void * __cdecl Thread::GetHijackedReturnAddress(void))
+0DC 00000000 SECT29 notype ()    External     | ?IsHijackTarget@Thread@@SA_NPEAX@Z (public: static bool __cdecl Thread::IsHijackTarget(void *))
+0DD 00000000 SECT2C notype ()    External     | ?IsSuppressGcStressSet@Thread@@QEAA_NXZ (public: bool __cdecl Thread::IsSuppressGcStressSet(void))
+0DE 00000000 SECT38 notype ()    External     | ?SetSuppressGcStress@Thread@@QEAAXXZ (public: void __cdecl Thread::SetSuppressGcStress(void))
+0DF 00000000 SECT9  notype ()    External     | ?ClearSuppressGcStress@Thread@@QEAAXXZ (public: void __cdecl Thread::ClearSuppressGcStress(void))
+0E0 00000000 SECT2D notype ()    External     | ?PushExInfo@Thread@@QEAAXPEAUExInfo@@@Z (public: void __cdecl Thread::PushExInfo(struct ExInfo *))
+0E1 00000000 SECT3C notype ()    External     | ?ValidateExInfoPop@Thread@@QEAAXPEAUExInfo@@PEAX@Z (public: void __cdecl Thread::ValidateExInfoPop(struct ExInfo *,void *))
+0E2 00000000 SECT3D notype ()    External     | ?ValidateExInfoStack@Thread@@QEAAXXZ (public: void __cdecl Thread::ValidateExInfoStack(void))
+0E3 00000000 SECT35 notype ()    External     | ?SetDoNotTriggerGc@Thread@@QEAAXXZ (public: void __cdecl Thread::SetDoNotTriggerGc(void))
+0E4 00000000 SECT7  notype ()    External     | ?ClearDoNotTriggerGc@Thread@@QEAAXXZ (public: void __cdecl Thread::ClearDoNotTriggerGc(void))
+0E5 00000000 SECT27 notype ()    External     | ?IsDetached@Thread@@QEAA_NXZ (public: bool __cdecl Thread::IsDetached(void))
+0E6 00000000 SECT34 notype ()    External     | ?SetDetached@Thread@@QEAAXXZ (public: void __cdecl Thread::SetDetached(void))
+0E7 00000000 SECT14 notype ()    External     | ?GetCurExInfo@Thread@@QEAAPEAUExInfo@@XZ (public: struct ExInfo * __cdecl Thread::GetCurExInfo(void))
+0E8 00000000 SECT1F notype ()    External     | ?GetTransitionFrameForStackTrace@Thread@@QEAAPEAUPInvokeTransitionFrame@@XZ (public: struct PInvokeTransitionFrame * __cdecl Thread::GetTransitionFrameForStackTrace(void))
+0E9 00000000 SECT16 notype ()    External     | ?GetCurrentThreadPInvokeReturnAddress@Thread@@QEAAPEAXXZ (public: void * __cdecl Thread::GetCurrentThreadPInvokeReturnAddress(void))
+0EA 00000000 SECTF  notype ()    External     | ?EnablePreemptiveMode@Thread@@QEAAXXZ (public: void __cdecl Thread::EnablePreemptiveMode(void))
+0EB 00000000 SECTE  notype ()    External     | ?DisablePreemptiveMode@Thread@@QEAAXXZ (public: void __cdecl Thread::DisablePreemptiveMode(void))
+0EC 00000000 SECT33 notype ()    External     | ?SetDeferredTransitionFrameForNativeHelperThread@Thread@@QEAAXXZ (public: void __cdecl Thread::SetDeferredTransitionFrameForNativeHelperThread(void))
+0ED 00000000 SECT36 notype ()    External     | ?SetGCSpecial@Thread@@QEAAXXZ (public: void __cdecl Thread::SetGCSpecial(void))
+0EE 00000000 SECT28 notype ()    External     | ?IsGCSpecial@Thread@@QEAA_NXZ (public: bool __cdecl Thread::IsGCSpecial(void))
+0EF 00000000 SECT3E notype ()    External     | ?WaitForGC@Thread@@QEAAXPEAUPInvokeTransitionFrame@@@Z (public: void __cdecl Thread::WaitForGC(struct PInvokeTransitionFrame *))
+0F0 00000000 SECT31 notype ()    External     | ?ReversePInvokeAttachOrTrapThread@Thread@@QEAAXPEAUReversePInvokeFrame@@@Z (public: void __cdecl Thread::ReversePInvokeAttachOrTrapThread(struct ReversePInvokeFrame *))
+0F1 00000000 SECT1C notype ()    External     | ?GetThreadAbortException@Thread@@QEAAPEAVObject@@XZ (public: class Object * __cdecl Thread::GetThreadAbortException(void))
+0F2 00000000 SECT39 notype ()    External     | ?SetThreadAbortException@Thread@@QEAAXPEAVObject@@@Z (public: void __cdecl Thread::SetThreadAbortException(class Object *))
+0F3 00000000 SECT1D notype ()    External     | ?GetThreadStaticStorage@Thread@@QEAAPEAPEAVObject@@XZ (public: class Object * * __cdecl Thread::GetThreadStaticStorage(void))
+0F4 00000000 SECT19 notype ()    External     | ?GetInlinedThreadStaticList@Thread@@QEAAPEAUInlinedThreadStaticRoot@@XZ (public: struct InlinedThreadStaticRoot * __cdecl Thread::GetInlinedThreadStaticList(void))
+0F5 00000000 SECT2F notype ()    External     | ?RegisterInlinedThreadStaticRoot@Thread@@QEAAXPEAUInlinedThreadStaticRoot@@PEAVTypeManager@@@Z (public: void __cdecl Thread::RegisterInlinedThreadStaticRoot(struct InlinedThreadStaticRoot *,class TypeManager *))
+0F6 00000000 SECT1A notype ()    External     | ?GetInterruptedContext@Thread@@QEAAPEAU_CONTEXT@@XZ (public: struct _CONTEXT * __cdecl Thread::GetInterruptedContext(void))
+0F7 00000000 SECT10 notype ()    External     | ?EnsureRedirectionContext@Thread@@QEAAPEAU_CONTEXT@@XZ (public: struct _CONTEXT * __cdecl Thread::EnsureRedirectionContext(void))
+0F8 00000000 SECT26 notype ()    External     | ?IsActivationPending@Thread@@QEAA_NXZ (public: bool __cdecl Thread::IsActivationPending(void))
+0F9 00000000 SECT32 notype ()    External     | ?SetActivationPending@Thread@@QEAAX_N@Z (public: void __cdecl Thread::SetActivationPending(bool))
+0FA 00000000 SECT15 notype ()    External     | ?GetCurrentThread@ThreadStore@@SAPEAVThread@@XZ (public: static class Thread * __cdecl ThreadStore::GetCurrentThread(void))
+0FB 00000000 UNDEF  notype ()    External     | ?GetSuspendingThread@ThreadStore@@SAPEAVThread@@XZ (public: static class Thread * __cdecl ThreadStore::GetSuspendingThread(void))
+0FC 00000000 UNDEF  notype ()    External     | ?AttachCurrentThread@ThreadStore@@SAXXZ (public: static void __cdecl ThreadStore::AttachCurrentThread(void))
+0FD 00000000 SECT4E notype ()    External     | RhpWaitForGC2
+0FE 00000000 UNDEF  notype ()    External     | ?EnumGcRef@@YAXPEAPEAVObject@@W4GCRefKind@@P6AX0PEAUScanContext@@I@Z2@Z (void __cdecl EnumGcRef(class Object * *,enum GCRefKind,void (__cdecl*)(class Object * *,struct ScanContext *,unsigned int),struct ScanContext *))
+0FF 00000000 UNDEF  notype ()    External     | ?EnumGcRefConservatively@@YAXPEAPEAVObject@@P6AX0PEAUScanContext@@I@Z1@Z (void __cdecl EnumGcRefConservatively(class Object * *,void (__cdecl*)(class Object * *,struct ScanContext *,unsigned int),struct ScanContext *))
+100 00000000 UNDEF  notype ()    External     | ?EnumGcRefs@@YAXPEAVICodeManager@@PEAVMethodInfo@@PEAXPEAUREGDISPLAY@@P6AXPEAPEAVObject@@PEAUScanContext@@I@Z5_N@Z (void __cdecl EnumGcRefs(class ICodeManager *,class MethodInfo *,void *,struct REGDISPLAY *,void (__cdecl*)(class Object * *,struct ScanContext *,unsigned int),struct ScanContext *,bool))
+101 00000000 UNDEF  notype ()    External     | ?EnumGcRefsInRegionConservatively@@YAXPEAPEAVObject@@0P6AX0PEAUScanContext@@I@Z1@Z (void __cdecl EnumGcRefsInRegionConservatively(class Object * *,class Object * *,void (__cdecl*)(class Object * *,struct ScanContext *,unsigned int),struct ScanContext *))
+102 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_get_last_error
+103 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_set_last_error
+104 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_current_process
+105 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_current_thread
+106 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_duplicate_handle
+107 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_close_handle
+108 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_current_teb
+109 00000000 UNDEF  notype ()    External     | guidexos_nativeaot_pal_fail_fast_default
+10A 00000000 UNDEF  notype ()    External     | RhpGcProbeHijack
+10B 00000000 SECT4B notype ()    External     | RhpSuspendRedirected
+10C 00000000 SECT4A notype ()    External     | RhpSuppressGcStress
+10D 00000000 SECT4C notype ()    External     | RhpUnsuppressGcStress
+10E 00000000 SECT45 notype ()    External     | RhpGcPoll2
+10F 00000000 SECT4D notype ()    External     | RhpValidateExInfoPop
+110 00000000 SECT3F notype ()    External     | RhCompatibleReentrantWaitAny
+111 00000000 SECT44 notype ()    External     | RhSetRuntimeInitializationCallback
+112 00000000 SECT46 notype ()    External     | RhpGetThreadAbortException
+113 00000000 SECT42 notype ()    External     | RhGetThreadStaticStorage
+114 00000000 SECT43 notype ()    External     | RhRegisterInlinedThreadStaticRoot
+115 00000000 SECT40 notype ()    External     | RhCurrentNativeThreadId
+116 00000000 SECT41 notype ()    External     | RhCurrentOSThreadId
+117 00000000 SECT48 notype ()    External     | RhpReversePInvokeAttachOrTrapThread2
+118 00000000 SECT47 notype ()    External     | RhpReversePInvoke
+119 00000000 SECT49 notype ()    External     | RhpReversePInvokeReturn
+11A 000000A3 SECTA  notype       Label        | $LN8
+11B 00000000 SECTA  notype       Label        | $LN11
+11C 00000000 SECT21 notype       Label        | $LN79
+11D 00000000 SECT22 notype       Label        | $LN12
+11E 00000000 SECT23 notype       Label        | $LN4
+11F 00000000 SECT24 notype       Label        | $LN28
+120 00000000 SECT2E notype       Label        | $LN33
+121 0000005F SECT11 notype       Label        | $LN19
+122 00000000 SECT11 notype       Label        | $LN22
+123 00000000 SECT1E notype       Label        | $LN5
+124 00000000 SECT13 notype       Label        | $LN86
+125 00000000 SECT25 notype       Label        | $LN10
+126 00000000 SECTD  notype       Label        | $LN14
+127 00000000 SECTC  notype       Label        | $LN8
+128 00000000 SECT12 notype       Label        | $LN13
+129 00000000 SECT29 notype       Label        | $LN5
+12A 00000000 SECTE  notype       Label        | $LN11
+12B 0000001D SECT33 notype       Label        | $LN4
+12C 00000000 SECT33 notype       Label        | $LN7
+12D 000000B4 SECT36 notype       Label        | $LN19
+12E 00000000 SECT36 notype       Label        | $LN22
+12F 00000000 SECT3E notype       Label        | $LN26
+130 000000CE SECT31 notype       Label        | $LN39
+131 00000000 SECT31 notype       Label        | $LN43
+132 00000000 SECT10 notype       Label        | $LN10
+133 0000002E SECT4B notype       Label        | $LN3
+134 00000000 SECT4B notype       Label        | $LN4
+135 00000000 SECT3F notype       Label        | $LN4
+136 000000CE SECT48 notype       Label        | $LN42
+137 00000000 SECT48 notype       Label        | $LN46
+138 00000000 SECT4F notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum F02B2C92, selection    5 (pick associative Section 0xA)
+13A 00000000 SECT4F notype       Static       | $unwind$?Construct@Thread@@AEAAXXZ
+13B 00000000 SECT50 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 24C2E06F, selection    5 (pick associative Section 0xA)
+13D 00000000 SECT50 notype       Static       | $pdata$?Construct@Thread@@AEAAXXZ
+13E 00000000 SECT51 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum C39D52B1, selection    5 (pick associative Section 0x21)
+140 00000000 SECT51 notype       Static       | $unwind$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+141 00000000 SECT52 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F9766256, selection    5 (pick associative Section 0x21)
+143 00000000 SECT52 notype       Static       | $pdata$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+144 00000000 SECT53 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum  90AD80A, selection    5 (pick associative Section 0x21)
+146 00000000 SECT53 notype       Static       | $chain$1$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+147 00000000 SECT54 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E90B563E, selection    5 (pick associative Section 0x21)
+149 00000000 SECT54 notype       Static       | $pdata$1$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+14A 00000000 SECT55 notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum 3EB80F2D, selection    5 (pick associative Section 0x21)
+14C 00000000 SECT55 notype       Static       | $chain$3$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+14D 00000000 SECT56 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 44243460, selection    5 (pick associative Section 0x21)
+14F 00000000 SECT56 notype       Static       | $pdata$3$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+150 00000000 SECT57 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 505CBCD2, selection    5 (pick associative Section 0x21)
+152 00000000 SECT57 notype       Static       | $chain$4$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+153 00000000 SECT58 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum C2DF5989, selection    5 (pick associative Section 0x21)
+155 00000000 SECT58 notype       Static       | $pdata$4$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+156 00000000 SECT59 notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 402188BA, selection    5 (pick associative Section 0x21)
+158 00000000 SECT59 notype       Static       | $chain$5$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+159 00000000 SECT5A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8E70CD54, selection    5 (pick associative Section 0x21)
+15B 00000000 SECT5A notype       Static       | $pdata$5$?HijackCallback@Thread@@CAXPEAU_CONTEXT@@PEAX@Z
+15C 00000000 SECT5B notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum B674534D, selection    5 (pick associative Section 0x22)
+15E 00000000 SECT5B notype       Static       | $unwind$?HijackReturnAddress@Thread@@AEAAXPEAUPAL_LIMITED_CONTEXT@@P6AXXZ@Z
+15F 00000000 SECT5C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4A69E8ED, selection    5 (pick associative Section 0x22)
+161 00000000 SECT5C notype       Static       | $pdata$?HijackReturnAddress@Thread@@AEAAXPEAUPAL_LIMITED_CONTEXT@@P6AXXZ@Z
+162 00000000 SECT5D notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum B674534D, selection    5 (pick associative Section 0x23)
+164 00000000 SECT5D notype       Static       | $unwind$?HijackReturnAddress@Thread@@AEAAXPEAU_CONTEXT@@P6AXXZ@Z
+165 00000000 SECT5E notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum ADD7CC17, selection    5 (pick associative Section 0x23)
+167 00000000 SECT5E notype       Static       | $pdata$?HijackReturnAddress@Thread@@AEAAXPEAU_CONTEXT@@P6AXXZ@Z
+168 00000000 SECT5F notype       Static       | .xdata
+    Section length   14, #relocs    0, #linenums    0, checksum 92DF9465, selection    5 (pick associative Section 0x24)
+16A 00000000 SECT5F notype       Static       | $unwind$?HijackReturnAddressWorker@Thread@@AEAAXPEAVStackFrameIterator@@P6AXXZ@Z
+16B 00000000 SECT60 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F5AE1D53, selection    5 (pick associative Section 0x24)
+16D 00000000 SECT60 notype       Static       | $pdata$?HijackReturnAddressWorker@Thread@@AEAAXPEAVStackFrameIterator@@P6AXXZ@Z
+16E 00000000 SECT61 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum D57AC7F3, selection    5 (pick associative Section 0x2E)
+170 00000000 SECT61 notype       Static       | $unwind$?Redirect@Thread@@AEAA_NXZ
+171 00000000 SECT62 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6F2C5505, selection    5 (pick associative Section 0x2E)
+173 00000000 SECT62 notype       Static       | $pdata$?Redirect@Thread@@AEAA_NXZ
+174 00000000 SECT63 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x11)
+176 00000000 SECT63 notype       Static       | $unwind$?EnsureRuntimeInitialized@Thread@@AEAAXXZ
+177 00000000 SECT64 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 8C06E16A, selection    5 (pick associative Section 0x11)
+179 00000000 SECT64 notype       Static       | $pdata$?EnsureRuntimeInitialized@Thread@@AEAAXXZ
+17A 00000000 SECT65 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x1E)
+17C 00000000 SECT65 notype       Static       | $unwind$?GetTransitionFrame@Thread@@AEAAPEAUPInvokeTransitionFrame@@XZ
+17D 00000000 SECT66 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 2A9379E3, selection    5 (pick associative Section 0x1E)
+17F 00000000 SECT66 notype       Static       | $pdata$?GetTransitionFrame@Thread@@AEAAPEAUPInvokeTransitionFrame@@XZ
+180 00000000 SECT67 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum 7278A154, selection    5 (pick associative Section 0x13)
+182 00000000 SECT67 notype       Static       | $unwind$?GcScanRootsWorker@Thread@@AEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1AEAVStackFrameIterator@@@Z
+183 00000000 SECT68 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum B01131B5, selection    5 (pick associative Section 0x13)
+185 00000000 SECT68 notype       Static       | $pdata$?GcScanRootsWorker@Thread@@AEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1AEAVStackFrameIterator@@@Z
+186 00000000 SECT69 notype       Static       | .xdata
+    Section length   20, #relocs    3, #linenums    0, checksum 74CC47C0, selection    5 (pick associative Section 0x13)
+188 00000000 SECT69 notype       Static       | $chain$3$?GcScanRootsWorker@Thread@@AEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1AEAVStackFrameIterator@@@Z
+189 00000000 SECT6A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F954D2EC, selection    5 (pick associative Section 0x13)
+18B 00000000 SECT6A notype       Static       | $pdata$3$?GcScanRootsWorker@Thread@@AEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1AEAVStackFrameIterator@@@Z
+18C 00000000 SECT6B notype       Static       | .xdata
+    Section length   14, #relocs    3, #linenums    0, checksum A46FDCB5, selection    5 (pick associative Section 0x13)
+18E 00000000 SECT6B notype       Static       | $chain$4$?GcScanRootsWorker@Thread@@AEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1AEAVStackFrameIterator@@@Z
+18F 00000000 SECT6C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F9C59A66, selection    5 (pick associative Section 0x13)
+191 00000000 SECT6C notype       Static       | $pdata$4$?GcScanRootsWorker@Thread@@AEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1AEAVStackFrameIterator@@@Z
+192 00000000 SECT6D notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x25)
+194 00000000 SECT6D notype       Static       | $unwind$?InlineSuspend@Thread@@QEAA_NPEAU_CONTEXT@@@Z
+195 00000000 SECT6E notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 1DC6FDA2, selection    5 (pick associative Section 0x25)
+197 00000000 SECT6E notype       Static       | $pdata$?InlineSuspend@Thread@@QEAA_NPEAU_CONTEXT@@@Z
+198 00000000 SECT6F notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0xD)
+19A 00000000 SECT6F notype       Static       | $unwind$?Detach@Thread@@QEAAXXZ
+19B 00000000 SECT70 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D0EBA0BB, selection    5 (pick associative Section 0xD)
+19D 00000000 SECT70 notype       Static       | $pdata$?Detach@Thread@@QEAAXXZ
+19E 00000000 SECT71 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0xC)
+1A0 00000000 SECT71 notype       Static       | $unwind$?Destroy@Thread@@QEAAXXZ
+1A1 00000000 SECT72 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 299DC2ED, selection    5 (pick associative Section 0xC)
+1A3 00000000 SECT72 notype       Static       | $pdata$?Destroy@Thread@@QEAAXXZ
+1A4 00000000 SECT73 notype       Static       | .xdata
+    Section length   14, #relocs    0, #linenums    0, checksum F5F5E764, selection    5 (pick associative Section 0x12)
+1A6 00000000 SECT73 notype       Static       | $unwind$?GcScanRoots@Thread@@QEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1@Z
+1A7 00000000 SECT74 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 4C749EF1, selection    5 (pick associative Section 0x12)
+1A9 00000000 SECT74 notype       Static       | $pdata$?GcScanRoots@Thread@@QEAAXP6AXPEAPEAVObject@@PEAUScanContext@@I@Z1@Z
+1AA 00000000 SECT75 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x29)
+1AC 00000000 SECT75 notype       Static       | $unwind$?IsHijackTarget@Thread@@SA_NPEAX@Z
+1AD 00000000 SECT76 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 35DC62C8, selection    5 (pick associative Section 0x29)
+1AF 00000000 SECT76 notype       Static       | $pdata$?IsHijackTarget@Thread@@SA_NPEAX@Z
+1B0 00000000 SECT77 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0xE)
+1B2 00000000 SECT77 notype       Static       | $unwind$?DisablePreemptiveMode@Thread@@QEAAXXZ
+1B3 00000000 SECT78 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum D2624632, selection    5 (pick associative Section 0xE)
+1B5 00000000 SECT78 notype       Static       | $pdata$?DisablePreemptiveMode@Thread@@QEAAXXZ
+1B6 00000000 SECT79 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum  FC539D1, selection    5 (pick associative Section 0x33)
+1B8 00000000 SECT79 notype       Static       | $unwind$?SetDeferredTransitionFrameForNativeHelperThread@Thread@@QEAAXXZ
+1B9 00000000 SECT7A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum E7BE24FA, selection    5 (pick associative Section 0x33)
+1BB 00000000 SECT7A notype       Static       | $pdata$?SetDeferredTransitionFrameForNativeHelperThread@Thread@@QEAAXXZ
+1BC 00000000 SECT7B notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum EF287497, selection    5 (pick associative Section 0x36)
+1BE 00000000 SECT7B notype       Static       | $unwind$?SetGCSpecial@Thread@@QEAAXXZ
+1BF 00000000 SECT7C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum F8F13FD1, selection    5 (pick associative Section 0x36)
+1C1 00000000 SECT7C notype       Static       | $pdata$?SetGCSpecial@Thread@@QEAAXXZ
+1C2 00000000 SECT7D notype       Static       | .xdata
+    Section length   18, #relocs    3, #linenums    0, checksum E35D1BF8, selection    5 (pick associative Section 0x36)
+1C4 00000000 SECT7D notype       Static       | $chain$1$?SetGCSpecial@Thread@@QEAAXXZ
+1C5 00000000 SECT7E notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum A4D46C88, selection    5 (pick associative Section 0x36)
+1C7 00000000 SECT7E notype       Static       | $pdata$1$?SetGCSpecial@Thread@@QEAAXXZ
+1C8 00000000 SECT7F notype       Static       | .xdata
+    Section length   10, #relocs    3, #linenums    0, checksum 41A6D53D, selection    5 (pick associative Section 0x36)
+1CA 00000000 SECT7F notype       Static       | $chain$2$?SetGCSpecial@Thread@@QEAAXXZ
+1CB 00000000 SECT80 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 3D65613E, selection    5 (pick associative Section 0x36)
+1CD 00000000 SECT80 notype       Static       | $pdata$2$?SetGCSpecial@Thread@@QEAAXXZ
+1CE 00000000 SECT81 notype       Static       | .xdata
+    Section length   10, #relocs    0, #linenums    0, checksum 66A7A8DC, selection    5 (pick associative Section 0x3E)
+1D0 00000000 SECT81 notype       Static       | $unwind$?WaitForGC@Thread@@QEAAXPEAUPInvokeTransitionFrame@@@Z
+1D1 00000000 SECT82 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 533B85DA, selection    5 (pick associative Section 0x3E)
+1D3 00000000 SECT82 notype       Static       | $pdata$?WaitForGC@Thread@@QEAAXPEAUPInvokeTransitionFrame@@@Z
+1D4 00000000 SECT83 notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x31)
+1D6 00000000 SECT83 notype       Static       | $unwind$?ReversePInvokeAttachOrTrapThread@Thread@@QEAAXPEAUReversePInvokeFrame@@@Z
+1D7 00000000 SECT84 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6F2C5505, selection    5 (pick associative Section 0x31)
+1D9 00000000 SECT84 notype       Static       | $pdata$?ReversePInvokeAttachOrTrapThread@Thread@@QEAAXPEAUReversePInvokeFrame@@@Z
+1DA 00000000 SECT85 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x10)
+1DC 00000000 SECT85 notype       Static       | $unwind$?EnsureRedirectionContext@Thread@@QEAAPEAU_CONTEXT@@XZ
+1DD 00000000 SECT86 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 205670FA, selection    5 (pick associative Section 0x10)
+1DF 00000000 SECT86 notype       Static       | $pdata$?EnsureRedirectionContext@Thread@@QEAAPEAU_CONTEXT@@XZ
+1E0 00000000 SECT87 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum F4D9A8A3, selection    5 (pick associative Section 0x4B)
+1E2 00000000 SECT87 notype       Static       | $unwind$RhpSuspendRedirected
+1E3 00000000 SECT88 notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum ECFC7064, selection    5 (pick associative Section 0x4B)
+1E5 00000000 SECT88 notype       Static       | $pdata$RhpSuspendRedirected
+1E6 00000000 SECT89 notype       Static       | .xdata
+    Section length    8, #relocs    0, #linenums    0, checksum 37887F31, selection    5 (pick associative Section 0x3F)
+1E8 00000000 SECT89 notype       Static       | $unwind$RhCompatibleReentrantWaitAny
+1E9 00000000 SECT8A notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum BAD438AC, selection    5 (pick associative Section 0x3F)
+1EB 00000000 SECT8A notype       Static       | $pdata$RhCompatibleReentrantWaitAny
+1EC 00000000 SECT8B notype       Static       | .xdata
+    Section length    C, #relocs    0, #linenums    0, checksum 2559CD25, selection    5 (pick associative Section 0x48)
+1EE 00000000 SECT8B notype       Static       | $unwind$RhpReversePInvokeAttachOrTrapThread2
+1EF 00000000 SECT8C notype       Static       | .pdata
+    Section length    C, #relocs    3, #linenums    0, checksum 6F2C5505, selection    5 (pick associative Section 0x48)
+1F1 00000000 SECT8C notype       Static       | $pdata$RhpReversePInvokeAttachOrTrapThread2
+1F2 00000000 UNDEF  notype       External     | ?theLog@StressLog@@2V1@A (public: static class StressLog StressLog::theLog)
+1F3 00000000 UNDEF  notype       External     | ?g_pGCHeap@@3PEAVIGCHeap@@EA (class IGCHeap * g_pGCHeap)
+1F4 00000000 SECT8D notype       Static       | .rdata
+    Section length  12E, #relocs    0, #linenums    0, checksum  5F5C871, selection    2 (pick any)
+1F6 00000000 SECT8D notype       External     | ??_C@_1BCO@HFNKKJGJ@?$AAD?$AA?3?$AA?2?$AAd?$AAe?$AAv?$AA?2?$AAg?$AAu?$AAi?$AAd?$AAe?$AAX?$AAO?$AAS?$AAS@ (`string')
+1F7 00000000 SECT8E notype       Static       | .rdata
+    Section length   2A, #relocs    0, #linenums    0, checksum 856D13E7, selection    2 (pick any)
+1F9 00000000 SECT8E notype       External     | ??_C@_1CK@JOPNMEOD@?$AAg?$AA_?$AAp?$AAG?$AAC?$AAH?$AAe?$AAa?$AAp?$AA?5?$AA?$CB?$AA?$DN?$AA?5?$AAn?$AAu?$AAl@ (`string')
+1FA 00000000 UNDEF  notype       External     | RhpTrapThreads
+1FB 00000008 SECT3  notype       Static       | ?g_RuntimeInitializationCallback@@3P6AHXZEA (int (__cdecl* g_RuntimeInitializationCallback)(void))
+1FC 00000010 SECT3  notype       Static       | ?g_RuntimeInitializingThread@@3PEAVThread@@EA (class Thread * g_RuntimeInitializingThread)
+1FD 00000000 SECT8F notype       Static       | .rdata
+    Section length   15, #relocs    0, #linenums    0, checksum 3F21BB89, selection    2 (pick any)
+1FF 00000000 SECT8F notype       External     | ??_C@_0BF@IBNKIBPN@Scanning?5method?5?$CFpK?6@ (`string')
+200 00000000 SECT90 notype       Static       | .rdata
+    Section length   2B, #relocs    0, #linenums    0, checksum 9DEFDB04, selection    2 (pick any)
+202 00000000 SECT90 notype       External     | ??_C@_0CL@JKJJIPMK@InternalHijack?3?5TgtThread?5?$DN?5?$CFllx@ (`string')
+203 00000000 SECT91 notype       Static       | .rdata
+    Section length   2D, #relocs    0, #linenums    0, checksum 2DE43A9C, selection    2 (pick any)
+205 00000000 SECT91 notype       External     | ??_C@_0CN@BEJLFCMH@InternalRedirect?3?5TgtThread?5?$DN?5?$CFl@ (`string')
+206 00000000 SECT92 notype       Static       | .rdata
+    Section length   63, #relocs    0, #linenums    0, checksum  816848D, selection    2 (pick any)
+208 00000000 SECT92 notype       External     | ??_C@_0GD@HJBEHLFH@?6Fatal?5error?4?5Invalid?5Program?3?5a@ (`string')
+209 00000000 UNDEF  notype       External     | _tls_index
+20A 00000000 SECT93 notype       Static       | .chks64
+    Section length  498, #relocs    0, #linenums    0, checksum        0
+
+String Table Size = 0x2517 bytes
+
+  Summary
+
+          1C .bss
+         498 .chks64
+          B8 .debug$S
+         102 .drectve
+         174 .pdata
+         228 .rdata
+        1065 .text$mn
+          D8 .tls$
+         1BC .xdata

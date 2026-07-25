@@ -3,11 +3,11 @@
 #include "guidexos_nativeaot_fls_adapter.h"
 #include "guidexos_nativeaot_stack_bounds_adapter.h"
 
-#include <array>
-#include <atomic>
+#if !defined(GXOS_BARE_METAL)
 #include <functional>
 #include <mutex>
 #include <thread>
+#endif
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -42,8 +42,20 @@ struct RuntimeThreadRecord {
     std::int32_t next = -1;
 };
 
+#if !defined(GXOS_BARE_METAL)
 std::mutex g_mutex;
-std::array<RuntimeThreadRecord, kMaximumThreads> g_records{};
+struct ScopedLock {
+    ScopedLock() : lock(g_mutex) {}
+    std::lock_guard<std::mutex> lock;
+};
+#else
+struct ScopedLock {
+    ScopedLock() {}
+};
+extern "C" std::uintptr_t guidexos_nativeaot_threadstore_current_native_id();
+#endif
+
+RuntimeThreadRecord g_records[kMaximumThreads] = {};
 bool g_initialized = false;
 std::uint32_t g_attachedCount = 0;
 std::uint32_t g_callbackDetachCount = 0;
@@ -51,7 +63,9 @@ std::int32_t g_head = -1;
 fls::Index g_flsIndex = fls::kOutOfIndexes;
 
 std::uintptr_t currentNativeThreadId() {
-#if defined(_WIN32)
+#if defined(GXOS_BARE_METAL)
+    return guidexos_nativeaot_threadstore_current_native_id();
+#elif defined(_WIN32)
     // NativeAOT's PalGetCurrentOSThreadId is an OS-thread identity, not a
     // process-local C++ thread object identity.
     return static_cast<std::uintptr_t>(GetCurrentThreadId());
@@ -131,7 +145,7 @@ void runtimeThreadDetachCallback(void* value) {
     // Local-storage detach clears the FLS cell before invoking this callback.
     // The record is therefore still live, but calling fls::set here would be
     // both unnecessary and rejected during the generic detach window.
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     RuntimeThreadRecord* record = recordFromPointer(value);
     if (record == nullptr || !record->allocated || !record->attached ||
         record->nativeThreadId != currentNativeThreadId()) {
@@ -155,7 +169,7 @@ Result stackBoundsFailure(gxos::runtime::StackBoundsResult result) {
 } // namespace
 
 Result initialize() {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     if (g_initialized) {
         return Result::AlreadyInitialized;
     }
@@ -177,7 +191,7 @@ Result initialize() {
 }
 
 Result shutdown() {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     if (!g_initialized) {
         return Result::AlreadyShutdown;
     }
@@ -194,17 +208,17 @@ Result shutdown() {
 }
 
 bool isInitialized() {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     return g_initialized;
 }
 
 std::uint32_t attachedThreadCount() {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     return g_attachedCount;
 }
 
 std::uint32_t callbackDetachCount() {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     return g_callbackDetachCount;
 }
 
@@ -216,7 +230,7 @@ Result attachCurrentThread() {
         return stackBoundsFailure(result);
     }
 
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     if (!g_initialized) {
         return Result::NotInitialized;
     }
@@ -244,7 +258,7 @@ Result attachCurrentThread() {
     record->allocated = true;
     record->attached = true;
     record->preemptive = true;
-    const std::int32_t index = static_cast<std::int32_t>(record - g_records.data());
+    const std::int32_t index = static_cast<std::int32_t>(record - g_records);
     record->next = g_head;
     record->previous = -1;
     if (g_head >= 0) {
@@ -262,7 +276,7 @@ Result attachCurrentThread() {
 }
 
 Result detachCurrentThread() {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     if (!g_initialized) {
         return Result::NotInitialized;
     }
@@ -285,7 +299,7 @@ Result detachCurrentThread() {
 }
 
 void* getCurrentThread() {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     RuntimeThreadRecord* record = currentRecordLocked();
     if (record == nullptr || record->nativeThreadId != currentNativeThreadId()) {
         return nullptr;
@@ -297,7 +311,7 @@ bool snapshotCurrentThread(ThreadSnapshot* result) {
     if (result == nullptr) {
         return false;
     }
-    std::lock_guard<std::mutex> lock(g_mutex);
+    ScopedLock lock;
     RuntimeThreadRecord* record = currentRecordLocked();
     if (record == nullptr || record->nativeThreadId != currentNativeThreadId()) {
         *result = ThreadSnapshot{};

@@ -1,0 +1,26 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\qemu-probe\guidexos_nativeaot_pal_qemu_probe.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Section contains the following exports for guidexos_nativeaot_pal_qemu_probe.exe
+
+    00000000 characteristics
+    FFFFFFFF time date stamp
+        0.00 version
+           1 ordinal base
+           3 number of functions
+           3 number of names
+
+    ordinal hint RVA      name
+
+          1    0 000015C0 GuideXosNativeAotPalInstallHooks
+          2    1 000015D0 GuideXosNativeAotPalProbeMain
+          3    2 000018B0 GuideXosNativeAotPalUninstallHooks
+
+  Summary
+
+        1000 .data
+        1000 .pdata
+        1000 .rdata
+        2000 .text

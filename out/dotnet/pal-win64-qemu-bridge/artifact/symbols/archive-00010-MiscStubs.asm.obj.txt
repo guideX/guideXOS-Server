@@ -1,0 +1,45 @@
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-win64-qemu-bridge\artifact\archives\adapted-members\00010-MiscStubs.asm.obj
+
+File Type: COFF OBJECT
+
+COFF SYMBOL TABLE
+000 01038413 ABS    notype       Static       | @comp.id
+001 00004010 ABS    notype       Static       | @feat.00
+002 00000000 SECT1  notype       Static       | .text$mn
+    Section length   17, #relocs    0, #linenums    0, checksum        0
+004 00000000 SECT2  notype       Static       | .data
+    Section length    0, #relocs    0, #linenums    0, checksum        0
+006 00000000 SECT3  notype       Static       | .debug$S
+    Section length  3D8, #relocs    6, #linenums    0, checksum        0
+008 00000000 SECT4  notype       Static       | .debug$T
+    Section length   24, #relocs    0, #linenums    0, checksum        0
+00A 00000000 UNDEF  notype       External     | RhpGcAlloc
+00B 00000000 UNDEF  notype       External     | RhpValidateExInfoPop
+00C 00000000 UNDEF  notype       External     | RhDebugBreak
+00D 00000000 UNDEF  notype       External     | RhpWaitForGC2
+00E 00000000 UNDEF  notype       External     | RhExceptionHandling_FailedAllocation
+00F 00000000 UNDEF  notype       External     | RhThrowHwEx
+010 00000000 UNDEF  notype       External     | RhThrowEx
+011 00000000 UNDEF  notype       External     | RhRethrow
+012 00000000 UNDEF  notype       External     | RhpGcPoll2
+013 00000000 UNDEF  notype       External     | RhpTrapThreads
+014 00000000 UNDEF  notype       External     | g_lowest_address
+015 00000000 UNDEF  notype       External     | g_highest_address
+016 00000000 UNDEF  notype       External     | g_ephemeral_low
+017 00000000 UNDEF  notype       External     | g_ephemeral_high
+018 00000000 UNDEF  notype       External     | g_card_table
+019 00000000 UNDEF  notype       External     | g_card_bundle_table
+01A 00000000 UNDEF  notype       External     | g_write_watch_table
+01B 00000000 SECT1  notype ()    External     | RhpStackProbe
+01C 00000000 SECT1  notype       Static       | $$000000
+01D 00000009 SECT1  notype       Label        | ProbeLoop
+
+String Table Size = 0x12F bytes
+
+  Summary
+
+           0 .data
+         3D8 .debug$S
+          24 .debug$T
+          17 .text$mn

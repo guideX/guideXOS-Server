@@ -2,202 +2,58 @@
 
 ## Current gate — 2026-07-24
 
-Current authoritative PAL result: [NativeAOT PAL/runtime replacement](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md).
-Bridge details: [NativeAOT PAL Win64/QEMU bridge](NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md).
-Machine evidence: [PAL replacement manifest](../../out/dotnet/pal-runtime-active-replacement/pal-replacement-manifest.json).
+Authoritative implementation status: [NativeAOT PAL/runtime replacement](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md).
+ABI and system-QEMU evidence: [NativeAOT PAL Win64/QEMU bridge](NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md).
+Machine evidence: `out/dotnet/pal-win64-qemu-bridge/artifact/` and its
+`qemu/smoke-*/qemu-validation-matrix.json`.
 
-Decision: **Outcome B — active PAL replacement complete, QEMU bridge incomplete.**
-The four selected stock PAL members are absent from the adapted archive; exact
-replacement parity is 6/6, 38/38, 74/74, and 3/3 with zero missing,
-unexpected, or duplicate strong definitions. The hosted exact PAL probe passes.
-The converted Win64 PE/ELF probe passes through the Server trampoline with two
-launches in one process and one in a fresh process. The actual system-QEMU PAL
-probe remains blocked because the SysV QEMU side has no versioned C-compatible
-Win64 PAL hook table and callback/worker/ThreadStore bridge.
+The PAL bridge readiness gate passes. The collector itself was not started:
+`RhInitialize` was not called, the real Workstation GC heap was not
+constructed, the real finalizer/helper thread was not started, no collection
+was entered, and no allocation used the collector.
 
-| Gate | Current status |
+| Required readiness item | Current status |
 | --- | --- |
-| Workstation `gcenv` replacement | PASS, 53/53 |
-| Active PAL object replacement | PASS, all four together |
-| Stock PAL objects absent | PASS |
-| Exact symbol parity | PASS, missing 0 / duplicate 0 |
-| Remaining mandatory Windows imports | PASS for removed objects; complete archive remains bounded by other families |
-| Hosted exact PAL probe | PASS |
-| Win64 QEMU bridge | Server trampoline PASS; system-QEMU BLOCKED |
-| HostLog live proof | PASS, exact message, one callback, return 0 |
-| Single-allocation live proof | PASS |
-| Repeated-allocation live proof | PASS: 234 at 64 KiB; 14 at 4 KiB; controlled OOM |
-| ThreadStore/FLS | PASS as inactive/generic foundation; exact system-QEMU bridge pending |
-| VM/Event/mutex/thread | PASS hosted and generic QEMU foundations |
-| Runtime lock identity | PASS, locked ILCompiler commit and stock archive hash |
-| Collector startup | NOT AUTHORIZED; `RhInitialize` not called |
+| Active PAL archive replacement | PASS, four objects together |
+| Exact symbol parity | PASS, 6/6, 38/38, 74/74, 3/3; missing/unexpected/duplicate 0 |
+| Replacement Windows imports | PASS, 0 for all four replacements |
+| Win64 PAL hook-table versioning | PASS, ABI v1, 232 bytes, magic/version/size validation |
+| SysV hook implementation | PASS |
+| SysV-to-Win64 callback bridge | PASS, standalone ABI probe and QEMU worker callback |
+| Worker lifecycle bridge | PASS, opaque generation-checked handle, join, cleanup |
+| FLS detach-callback bridge | PASS, exact value and one callback |
+| Stack-bound bridge | PASS, initial and worker exact bounds/current pointer |
+| ThreadStore bridge | PASS, attach/lookup/detach and baseline restoration |
+| Exact hosted PAL probe | PASS, two launches |
+| Server PE-to-ELF PAL probe | PASS, repeat and fresh-process launches |
+| System-QEMU exact PAL probe | PASS, first/repeat/fresh-process launches |
+| HostLog | PASS, exact message, one callback, return 0 |
+| Managed allocation proofs | PASS, 234 at 64 KiB; 14 at 4 KiB; controlled OOM |
+| Collections | 0 |
+| GC-backed allocations | 0 |
+| Heap expansion | 0 |
+| Generic scheduler/events/native threads | PASS |
+| Generic VM/true-QEMU VM | PASS |
+| Generic mutex/local-storage/FLS/stack bounds/ThreadStore | PASS |
+| Windows PAL thunk entered by exact QEMU probe | NO |
 
-The no-collection condition remains: collections entered `0`, GC-backed
-allocations `0`, and heap expansion `0`. The prior `PrivateSdkAssemblies`
-staging error was **not reproduced after a clean locked build**; evidence is in
-[`private-sdk-assemblies-reproduction.json`](../../out/dotnet/pal-runtime-active-replacement/staging/private-sdk-assemblies-reproduction.json).
+The active archive hash is
+`5593D0FC4B99986797123C8494DF117570DB795DF8FCE63D732BB53594C794BF`.
+The pre-bridge baseline hash is preserved in
+`out/dotnet/pal-win64-qemu-bridge/baseline/`.
 
-The exact next experiment is to implement and prove the versioned Win64 PAL
-hook table plus callback/worker/stack/ThreadStore bridge in the guideXOS QEMU
-execution side, then rerun the exact PAL probe. Do not call `RhInitialize`.
+## Stop rule
 
-Current PAL/runtime status: [NativeAOT PAL/runtime replacement](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md). Current HostLog status: [Managed HostLog access-violation diagnosis](MANAGED_HOSTLOG_ACCESS_VIOLATION_DIAGNOSIS.md).
+This gate authorizes only the next separately gated experiment. It does not
+authorize ordinary boots to enable the QEMU test mode, and it does not claim
+live GC startup, collection-safe suspension, root enumeration, write-barrier
+publication, or finalizer behavior.
 
-The older gate paragraph and snapshots below are historical. The authoritative
-current gate is the 2026-07-24 table above.
+## Decision and exact next experiment
 
-Status: current gate updated 2026-07-22. The bounded runtime-neutral FLS/local-storage, exact stack-bound, minimal ThreadStore, generic VM, raw-address registry, and true bare-metal VM lifecycle prerequisites are PASS. The collector was not started. Current result: Outcome B, with one remaining prerequisite—exact stock Workstation GC `GCToOSInterface::Virtual*` binding/import elimination.
+Decision: **Outcome A — Win64 PAL hook-table and system-QEMU bridge complete.**
 
-Date: 2026-07-22; the historical 2026-07-19 audit remains preserved below.
-
-Machine-readable result: `out/dotnet/gc-startup-dry-run/readiness/gc-startup-readiness.json`
-Current foundation rerun summary: [foundation-rerun-summary.json](../../out/dotnet/pal-runtime-active-replacement/foundation-rerun-summary.json).
-
-## Scope and stop rule
-
-This audit targets the exact locked .NET 9.0 NativeAOT Workstation GC and the current guideXOS AMD64 experimental branch. It validates the runtime-pack lock, source identity, normal and experimental Server baselines, existing no-collection proofs, and the generic event, virtual-memory, thread, mutex, and QEMU regressions. The final local-storage guest artifact is `out/runtime/native-local-storage-qemu-validation/smoke-20260719-215002-880-4189/native-local-storage.serial.log`; the final mutex artifact is `out/runtime/native-mutex-qemu-validation/smoke-20260719-215440-132-9923/native-mutex.serial.log`.
-
-The live startup dry run is permitted only after every mandatory prerequisite is proven. Exact initial/worker stack bounds, startup-safe ThreadStore attachment, and the generic VM/adapter lifecycle now pass through inactive probes. Exact stock Workstation GC PAL binding is still unproven, so this audit stops before `RhInitialize`. No startup tracing mode was added, and `NATIVEAOT_GC_STARTUP_DRY_RUN.md` was intentionally not created.
-
-## Exact stock startup order
-
-The matching NativeAOT source establishes this order:
-
-```text
-RhInitialize
-  -> PalInit
-     -> Windows FLS allocation and GCToOSInterface initialization
-  -> InitDLL
-     -> InitializeGCEventLock
-     -> RestrictedCallouts::Initialize
-     -> RuntimeInstance::Initialize
-        -> ThreadStore::Create
-     -> InitializeGC
-        -> GCHeapUtilities::InitializeGC
-           -> GC_Initialize(nullptr, &heap, &manager, &g_gc_dac_vars)
-           -> WKS::CreateGCHeap
-        -> g_pGCHeap->Initialize
-        -> RhInitializeFinalization
-           -> PalStartFinalizerThread
-        -> GCHandleManager::Initialize
-```
-
-Relevant source evidence is in the matching extracted checkout under `out/dotnet/gc-feasibility-baseline/source-extract/src/coreclr/`, including `nativeaot/Runtime/startup.cpp`, `GCHelpers.cpp`, `gcheaputilities.cpp`, `FinalizerHelpers.cpp`, `threadstore.cpp`, `thread.cpp`, `gcenv.ee.cpp`, and `windows/PalRedhawkMinWin.cpp`.
-
-## Readiness matrix
-
-`Entered` is intentionally false for every startup operation: this was a readiness audit, not a startup attempt.
-
-| Mandatory item | Status | Implemented | Independently tested | Adapter linked for stock startup | Expected in stock order | Exact evidence/limitation |
-| --- | --- | --- | --- | --- | --- | --- |
-| Locked runtime-pack/source identity | PASS | Yes | Yes | Yes | Yes | Lock hashes and clean static smoke pass. |
-| Normal Server build | PASS | Yes | Yes | N/A | No | `baseline/normal-server-build.log`. |
-| Experimental Server build | PASS | Yes | Yes | N/A | No | `baseline/experimental-server-build.log`. |
-| Existing no-collection proofs | PASS | Yes | Yes | Proof adapter | No | Nonallocating, single-allocation, repeated 64 KiB, and repeated 4 KiB remain passing with no collection entry. |
-| FLS index allocation/release/detach callbacks | PASS | Yes | Yes | Yes (inactive probe) | Yes | `runtime/local_storage` manager, hosted tests, bare-metal kernel build, opt-in QEMU guest, and NativeAOT adapter probe all pass, including release callbacks, detached-thread cleanup, process/runtime teardown, and leak checks. The fixed-index proof path remains unchanged. |
-| Stack-bound PAL adapter | PASS | Yes | Yes | Inactive adapter | Yes | Hosted Windows and bare-metal providers return exact `[low, high)` bounds and validate current RSP; see [Native Stack Bounds](../runtime/NATIVE_STACK_BOUNDS.md). |
-| Initial-thread exact stack bounds | PASS | Yes | Yes | Inactive adapter | Yes | Boot linker symbols `boot_stack_bottom`/`boot_stack_top`; QEMU exact-source and RSP checks pass. |
-| Initial RSP validation | PASS | Yes | Yes | Inactive adapter | Yes | The sampled bootstrap RSP is inside the exact boot-stack interval. |
-| Worker-thread exact stack bounds | PASS | Yes | Yes | Inactive adapter | Yes | TCB-owned worker stack interval is published before entry and remains valid through detach. |
-| Worker RSP validation | PASS | Yes | Yes | Inactive adapter | Yes | Hosted and QEMU workers validate their sampled RSP inside the TCB-owned interval. |
-| Initial/worker ThreadStore attachment and stack bounds | PASS | Yes | Yes | Inactive adapter | Yes | Minimal opaque runtime records attach, lookup, isolate, detach, and clear bounds before reuse; see [NativeAOT ThreadStore Startup](NATIVEAOT_THREADSTORE_STARTUP.md). |
-| ThreadStore global initialization | PASS | Yes | Yes | Inactive adapter | Yes | Explicit application-scoped initialization, duplicate-init rejection, bounded registry, and attached-count checks pass. |
-| Initial-thread attachment | PASS | Yes | Yes | Inactive adapter | Yes | Requires generic local storage, exact bounds, current-RSP validation, transition sentinel, preemptive initial state, and FLS publication. |
-| Worker-thread attachment | PASS | Yes | Yes | Inactive adapter | Yes | Plain native worker attaches and detaches without managed work, allocation, or collection. |
-| Current-thread lookup | PASS | Yes | Yes | Inactive adapter | Yes | FLS-backed lookup is owner-checked and isolated between initial and worker threads. |
-| Transition-frame readiness | PASS | Yes | Yes | Inactive adapter | Yes | Empty/sentinel state is initialized; live transition frames are rejected on detach. |
-| ThreadStore detach | PASS | Yes | Yes | Inactive adapter | Yes | Exactly-once ownership validation, unlink, FLS clearing, generation retirement, and post-detach null lookup pass. |
-| FLS/ThreadStore detach ordering | PASS | Yes | Yes | Inactive adapter + QEMU | Yes | Runtime record remains live for callback delivery; stack/TCB reclamation follows both detach layers. |
-| Startup-safe thread enumeration | PASS | Yes | Yes | Inactive adapter | Yes | Bounded mutex-protected registry/count only; this is not collection-safe enumeration. |
-| Collection-safe suspension/enumeration | BLOCKED | No | No | No | No | Explicitly outside startup attachment scope; no suspension, hijacking, or collection-safe snapshot is claimed. |
-| GC event/critical-section startup lock | BLOCKED | Generic primitive only | Yes for generic event | No | Yes | Generic event/lock evidence passes; NativeAOT platform startup wiring remains downstream of the next GC PAL integration. |
-| GC-owned virtual memory/timing | FAIL for stock binding | Adapter/registry and generic VM complete | Yes for hosted/QEMU adapter and generic VM | No | Yes | Stock `gcenv.windows.cpp.obj` still owns the decorated `GCToOSInterface::Virtual*` symbols and Windows VM imports. |
-| Write barriers/card-table publication | BLOCKED | No | No | No | Yes | Blocked by the GC-owned PAL/startup boundary; current proof heap is not a real GC heap. |
-| Module/type-manager/runtime state | BLOCKED | No | No | No | Yes | Blocked by live GC startup; current proof pack does not register stock NativeAOT module/type-manager state. |
-| Mandatory finalizer/helper thread | BLOCKED | No | No | No | Yes | Blocked by live GC startup; the real helper remains intentionally unstarted. |
-| GC handle-manager initialization | BLOCKED | Source/library present | No | Library linked, startup not reached | Yes | Source path exists, but live initialization is blocked by the single GC-owned PAL blocker. |
-| Clean startup shutdown | BLOCKED | No | No | No | Yes | Not attempted because startup eligibility failed. |
-
-Generic primitive evidence is retained separately. The explicit QEMU thread and VM runs passed. The final local-storage QEMU guest emitted PASS for every listed lifecycle check, including `Detached-thread cleanup`, `Index release callback`, `Process/runtime teardown`, and `Leak check`. The final mutex guest emitted PASS for every listed behavioral check and the protected counter; the anchored parser reports both `Guest marker: PASS` and `Runner parsed result: PASS`. The hosted event, mutex, thread, VM, ELF, and local-storage suites and their inactive adapter compile/link probes pass.
-
-## Exact next blocker
-
-The ThreadStore/stack-bound prerequisite is now complete. The one next missing
-mandatory prerequisite is:
-
-```text
-NativeAOT GC-owned virtual-memory PAL integration
-```
-
-The generic FLS/local-storage manager, exact stack-bound API, bare-metal boot
-stack source, hosted stack provider, inactive PAL adapter, and minimal
-ThreadStore record now provide dynamic index allocation/release, per-thread
-get/set, detach-callback delivery, generation-safe reuse, exact initial and
-worker bounds, current-RSP validation, startup-safe registry/count checks, and
-bounded ThreadStore attach/detach. The exact locked FLS source mapping remains
-recorded in [NativeAOT GC Platform FLS](NATIVEAOT_GC_PLATFORM_FLS.md); the fixed
-index proof path remains unchanged. Starting stock `RhInitialize` before the
-GC-owned virtual-memory PAL is connected would not be a valid dry run.
-
-The remaining GC heap, write-barrier, module/type-manager, finalizer-helper,
-handle-manager, and shutdown rows are downstream of this one next blocker. They
-are not additional next blockers and are not being collapsed into a claim that
-the current runtime is startup-ready.
-
-## Preserved no-collection contract
-
-The current proof remains the control condition:
-
-- nonallocating managed entry: PASS;
-- single allocation through the proof heap: PASS;
-- repeated 64 KiB bounded allocation: 234 objects of size 280, 16 bytes remaining, controlled OOM, `collectionEntered=0`, no heap expansion: PASS;
-- repeated 4 KiB bounded allocation: 14 objects of size 280, 176 bytes remaining, controlled OOM, `collectionEntered=0`, no heap expansion: PASS;
-- no managed finalizers and no real GC collection were entered.
-
-These proofs were not changed by the readiness audit.
-
-## Historical fault classification
-
-Prior diagnostics remain classified as historical and unresolved where previously unresolved: `0xC0000409`, `0xC0000374`, and `0xC0000005`. None was reproduced by this gated audit. They are not evidence of a successful or failed live GC startup because no live startup was attempted.
-
-## Historical result (2026-07-19)
-
-Outcome B. Exact stack-bound reporting and minimal ThreadStore lifecycle are complete; the one next mandatory blocker is NativeAOT GC-owned virtual-memory PAL integration. No collector initialization, allocation through the real GC, collection, managed finalizer execution, or GC shutdown was attempted in this pass.
-
-## 26. Historical 2026-07-22 gate snapshot
-
-| Evidence | Result |
-| --- | --- |
-| Hosted generic VM and raw adapter probe | PASS; expected hosted fault guard remains BLOCKED without an unsafe fault harness |
-| True bare-metal VM and raw adapter QEMU probe | PASS; `Native VM ALL_PASS` |
-| Native stack bounds, local storage/FLS, and hosted thread runtime | PASS |
-| Local-storage, native-thread, and mutex QEMU regressions | PASS |
-| Runtime-pack static identity and state/hash checks | PASS; expected standalone FLS malformed harness remains BLOCKED/NOT EXECUTED |
-| Managed no-collection proof sweep | Partial: artifact/static and single-allocation execution PASS; host-log execution reproduces `0xC0000005`, repeated-allocation execution fails its PE-import assertion |
-| Stock Workstation GC VM binding audit | FAIL for readiness; stock `gcenv.windows.cpp.obj` still owns the decorated VM symbols and Windows VM imports |
-
-The current exact blocker is only:
-
-```text
-Bind the stock Workstation GC GCToOSInterface::Virtual* symbols to the
-guideXOS raw-address adapter and remove the stock Windows GC VM object/imports.
-```
-
-This is Outcome B. No GC startup, finalizer/helper startup, managed allocation
-through the real collector, or collection was attempted.
-
-## 27. Historical exact platform-object gate (2026-07-22)
-
-See [NativeAOT Workstation GC Platform Object Replacement](NATIVEAOT_WORKSTATION_GC_PLATFORM_OBJECT.md)
-for the archive, symbol, import, hosted-probe, QEMU ABI, and reproducibility
-evidence. The Windows `gcenv` object replacement is PASS: 53/53 exact symbols,
-zero missing, zero duplicate, and no Windows gcenv member. The exact hosted
-probe is PASS. The exact Workstation archive QEMU probe is blocked by the
-MSVC COFF/Win64 versus MinGW ELF/SysV ABI boundary, and 19 Windows import
-candidates remain in `PalRedhawkCommon.cpp.obj`, `PalRedhawkMinWin.cpp.obj`,
-`thread.cpp.obj`, and `time.c.obj`.
-
-The no-collection gate is not ready. HostLog still reproduces an unresolved
-`0xC0000005`; repeated allocation passes after a clean corrected stage. No
-`RhInitialize`, real GC heap, finalizer/helper startup, managed collector
-allocation, or collection was entered.
+The exact next experiment is the first Workstation GC
+initialization-and-shutdown dry run, with its own explicit opt-in artifact,
+serial markers, timeout, cleanup, and no-collection fallback checks. Do not
+run that experiment as part of the PAL bridge validation.

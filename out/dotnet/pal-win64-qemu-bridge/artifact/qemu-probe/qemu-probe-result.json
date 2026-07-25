@@ -1,0 +1,73 @@
+﻿{
+    "schemaVersion":  1,
+    "qemuLocated":  true,
+    "qemuPath":  "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "qemuVersion":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)\r\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+    "qemuSha256":  "A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02",
+    "peBuilt":  true,
+    "pe":  {
+               "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\guidexos_nativeaot_pal_qemu_probe.exe",
+               "sha256":  "D1FC7404BE0A3529E2E4F303F027CC8FE214DDED38C687DDD93C4B97B051EF05",
+               "map":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\guidexos_nativeaot_pal_qemu_probe.map",
+               "mapSha256":  "11FFFCF9A9F3AB6378E9DB036C1DB96751E2BECE314F183EE721042F7F30D24D",
+               "imports":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\pe-imports.txt",
+               "exports":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\pe-exports.txt",
+               "headers":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\pe-headers.txt"
+           },
+    "peImportsValidated":  true,
+    "peConverted":  true,
+    "elf":  {
+                "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\guidexos_nativeaot_pal_qemu_probe.elf",
+                "sha256":  "07C91E64D6B299864C49D510E7B6F52BC89D7983DB791723DCCFD78EE204C5A1",
+                "converter":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\tools\\dotnet\\pe_to_elf_v2_fixed_base.py",
+                "converterSha256":  "5F21B87D343106120EB5CAD1F98DF524404171E084C40F4FC3AFED6BE6F84B96",
+                "converterLog":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\pe-to-elf.log"
+            },
+    "serverStage":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\server-stage",
+    "win64EntryTrampoline":  {
+                                 "used":  true,
+                                 "serverExecutable":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\guideXOSServer.experimental.exe",
+                                 "launches":  [
+                                                  {
+                                                      "launch":  1,
+                                                      "processFresh":  true,
+                                                      "requestedProbeExecutions":  2,
+                                                      "returnCode":  0,
+                                                      "executionSuccessCount":  2,
+                                                      "trampolineCount":  2,
+                                                      "hostLogCountOneCount":  4,
+                                                      "exactMessageCount":  6,
+                                                      "log":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\server-probe-1.log"
+                                                  },
+                                                  {
+                                                      "launch":  2,
+                                                      "processFresh":  true,
+                                                      "requestedProbeExecutions":  1,
+                                                      "returnCode":  0,
+                                                      "executionSuccessCount":  1,
+                                                      "trampolineCount":  1,
+                                                      "hostLogCountOneCount":  2,
+                                                      "exactMessageCount":  3,
+                                                      "log":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-win64-qemu-bridge\\artifact\\qemu-probe\\server-probe-2.log"
+                                                  }
+                                              ]
+                             },
+    "exactPalArtifactLoaded":  true,
+    "tests":  {
+                  "currentThreadIdentity":  "PASS (self-contained PE hook)",
+                  "stackBounds":  "PASS (self-contained PE hook)",
+                  "flsLifecycle":  "PASS (self-contained PE hook)",
+                  "detachCallbacks":  "PASS (self-contained PE hook)",
+                  "workerCreation":  "BLOCKED (system-QEMU callback bridge not present)",
+                  "threadStoreLifecycle":  "BLOCKED (system-QEMU callback bridge not present)",
+                  "timing":  "PASS (self-contained PE hook)",
+                  "sleepYield":  "PASS (self-contained PE hook)",
+                  "resolverBehavior":  "PASS (static resolver; dynamic loading rejected)",
+                  "cleanup":  "PASS",
+                  "returnValue":  0
+              },
+    "systemQemuExecution":  "blocked",
+    "systemQemuBlocker":  "The converted ELF runs in the Server fixed-base loader, but the guideXOS SysV/QEMU environment exposes no versioned C-compatible Win64 PAL hook table or callback/worker/ThreadStore bridge. The existing trampoline adapts only the exported entry call and does not adapt PAL callback pointers or pass a native PAL context.",
+    "status":  "server-win64-trampoline-pass; bare-metal-qemu-blocked",
+    "rhInitializeCalled":  false
+}

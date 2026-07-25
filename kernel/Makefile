@@ -113,6 +113,10 @@ RUNTIME_SOURCES += ../runtime/thread/guidexos_native_stack_bounds.cpp
 # Inactive NativeAOT PAL ownership adapter used by the opt-in QEMU VM probe.
 # The normal kernel path does not call collector startup.
 RUNTIME_PACK_SOURCES := ../tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_virtual_memory_adapter.cpp
+RUNTIME_PACK_SOURCES += ../tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_abi_bridge.cpp
+RUNTIME_PACK_SOURCES += ../tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_fls_adapter.cpp
+RUNTIME_PACK_SOURCES += ../tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_stack_bounds_adapter.cpp
+RUNTIME_PACK_SOURCES += ../tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_adapter.cpp
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
@@ -129,6 +133,11 @@ RUNTIME_OBJS += $(patsubst ../runtime/local_storage/%.cpp,$(OBJ_DIR)/runtime/loc
 RUNTIME_PACK_OBJS := $(patsubst ../tools/dotnet/runtime-pack/src/platform/%.cpp,$(OBJ_DIR)/runtime-pack/%.o,$(RUNTIME_PACK_SOURCES))
 
 ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(RUNTIME_OBJS) $(RUNTIME_PACK_OBJS)
+ifneq ($(filter 1,$(GXOS_NATIVEAOT_PAL_QEMU_TEST)),)
+ALL_OBJS += $(BUILD_DIR)/pal-probe-artifact.o
+else ifneq ($(strip $(NATIVEAOT_PAL_QEMU_ARTIFACT_OBJ)),)
+ALL_OBJS += $(NATIVEAOT_PAL_QEMU_ARTIFACT_OBJ)
+endif
 DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d) $(RUNTIME_OBJS:.o=.d) $(RUNTIME_PACK_OBJS:.o=.d)
 
 # Targets
