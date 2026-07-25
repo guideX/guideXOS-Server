@@ -24,6 +24,7 @@
 #include "window_renderer.h"
 #include "special_effects.h"
 #include "window_animator.h"
+#include "window_bounds_store.h"
 #include "focus_indicator.h"
 #include "image_renderer.h"
 #include "kernel/core/include/kernel/image_adapter.h"
@@ -450,7 +451,7 @@ namespace gxos {
         uint32_t Compositor::g_gradientTopColor = 0xFF142850;
         uint32_t Compositor::g_gradientBottomColor = 0xFF0F121C;
         uint32_t Compositor::g_gradientAccentColor = 0xFF192337;
-        bool Compositor::g_showDesktopActive = false; std::vector<uint64_t> Compositor::g_showDesktopMinimized; uint64_t Compositor::g_lastClickTicks = 0; uint64_t Compositor::g_lastClickWin = 0;
+        bool Compositor::g_showDesktopActive = false; std::vector<uint64_t> Compositor::g_showDesktopMinimized; TitleBarDoubleClickTracker Compositor::g_titleBarDoubleClick;
         bool Compositor::g_altTabOverlayActive = false; uint64_t Compositor::g_altTabOverlayTicks = 0; int Compositor::g_altTabCycleIndex = 0;
         bool Compositor::g_taskbarCycleActive = false; int Compositor::g_taskbarCycleIndex = 0; bool Compositor::g_keyboardMoveActive = false; bool Compositor::g_keyboardSizeActive = false; int Compositor::g_kbOrigX = 0; int Compositor::g_kbOrigY = 0; int Compositor::g_kbOrigW = 0; int Compositor::g_kbOrigH = 0;
 
@@ -2891,6 +2892,16 @@ namespace gxos {
 #endif
         }
 
+        std::string Compositor::hostedDesktopCurrentPath() {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            return normalizeHostedVirtualPath(g_hostedDesktopDirectoryPath.empty()
+                ? DesktopFolderResolver::VirtualPath()
+                : g_hostedDesktopDirectoryPath);
+#else
+            return DesktopFolderResolver::VirtualPath();
+#endif
+        }
+
         bool Compositor::hostedDesktopSetCurrentPath(const std::string& path, bool pushHistory) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             const std::string normalized = normalizeHostedVirtualPath(path);
@@ -4579,6 +4590,95 @@ namespace gxos {
             }
         }
 
+        static int usableWidth(const WorkRect& work) { return std::max(1, work.right - work.left); }
+        static int usableHeight(const WorkRect& work) { return std::max(1, work.bottom - work.top); }
+
+        static void clampNormalBounds(WinInfo& window, const WorkRect& work) {
+            NormalWindowBounds bounds{window.x, window.y, window.w, window.h};
+            ClampNormalWindowBounds(bounds, WindowWorkArea{work.left, work.top, work.right, work.bottom});
+            window.x = bounds.x;
+            window.y = bounds.y;
+            window.w = bounds.w;
+            window.h = bounds.h;
+        }
+
+        static void rememberNormalBounds(WinInfo& window) {
+            window.normalX = window.x;
+            window.normalY = window.y;
+            window.normalW = window.w;
+            window.normalH = window.h;
+            window.hasNormalBounds = true;
+            window.prevX = window.x;
+            window.prevY = window.y;
+            window.prevW = window.w;
+            window.prevH = window.h;
+            window.animState.normX = window.x;
+            window.animState.normY = window.y;
+            window.animState.normW = window.w;
+            window.animState.normH = window.h;
+        }
+
+        static void maximizeWindow(WinInfo& window, const WorkRect& work) {
+            if (window.maximized || !window.resizable) return;
+            rememberNormalBounds(window);
+            window.x = work.left;
+            window.y = work.top;
+            window.w = usableWidth(work);
+            window.h = usableHeight(work);
+            window.maximized = true;
+            window.snapState = 0;
+            window.dirty = true;
+        }
+
+        static void restoreWindow(WinInfo& window, const WorkRect& work, int titleBarHeight) {
+            if (!window.maximized) return;
+            if (window.hasNormalBounds) {
+                window.x = window.normalX;
+                window.y = window.normalY;
+                window.w = window.normalW;
+                window.h = window.normalH;
+            } else {
+                window.x = window.prevX;
+                window.y = window.prevY;
+                window.w = window.prevW;
+                window.h = window.prevH;
+            }
+            clampNormalBounds(window, work);
+            rememberNormalBounds(window);
+            window.maximized = false;
+            window.snapState = 0;
+            window.dirty = true;
+        }
+
+        static void toggleMaximizeWindow(WinInfo& window, const WorkRect& work, int titleBarHeight) {
+            if (!window.resizable || window.minimized || window.tombstoned) return;
+            if (window.maximized) restoreWindow(window, work, titleBarHeight);
+            else maximizeWindow(window, work);
+        }
+
+        static bool titleBarControlAt(const WinInfo& window, int mx, int my, const DesktopTheme& theme) {
+            return IsTitleBarControlAt(window.x, window.y, window.w, window.resizable,
+                theme.titleBarHeight, theme.controlPadding, theme.titleButtonGap, mx, my);
+        }
+
+        static std::string windowPersistenceKey(uint64_t pid) {
+            std::string processName;
+            std::string appId;
+            if (!ProcessTable::getIdentity(pid, processName, appId)) return std::string();
+            if (!appId.empty()) return "app:" + appId;
+            if (!processName.empty()) return "process:" + processName;
+            return std::string();
+        }
+
+        static void persistNormalBounds(const WinInfo& window) {
+            if (window.persistenceKey.empty() || !window.resizable || window.modal || !window.hasNormalBounds) return;
+            const NormalWindowBounds bounds{window.normalX, window.normalY, window.normalW, window.normalH};
+            std::string error;
+            if (!WindowBoundsStore::Save(window.persistenceKey, bounds, error)) {
+                Logger::write(LogLevel::Warn, "Window bounds persistence failed: " + error);
+            }
+        }
+
         void Compositor::sendFocus(uint64_t winId) { sendFocusChange(0, winId); }
         void Compositor::loadWallpaper(const std::string& idOrPath) {
             const BackgroundEntry* entry = resolveConfiguredBackground(idOrPath);
@@ -4760,7 +4860,7 @@ namespace gxos {
                 for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.maximized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + titleBarH) { g_dragPending = true; g_dragPendingWin = w.id; g_dragOffX = mx - w.x; g_dragOffY = my - w.y; break; } }
             }
             // On mouse move with pending drag, check if we moved enough to initiate actual drag
-            if (!down && !up && g_dragPending && !g_dragActive) { if (std::abs(mx - g_dragStartX) >= 4 || std::abs(my - g_dragStartY) >= 4) { auto it = g_windows.find(g_dragPendingWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.minimized && !w.maximized && !w.tombstoned) { g_dragActive = true; g_dragWin = g_dragPendingWin; g_dragPending = false; } } } }
+            if (!down && !up && g_dragPending && !g_dragActive) { if (std::abs(mx - g_dragStartX) >= 4 || std::abs(my - g_dragStartY) >= 4) { auto it = g_windows.find(g_dragPendingWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.minimized && !w.maximized && !w.tombstoned) { g_dragActive = true; g_dragWin = g_dragPendingWin; g_titleBarDoubleClick.reset(); g_dragPending = false; } } } }
             // On mouse up, clear pending drag state
             if (up) { g_dragPending = false; g_dragPendingWin = 0; }
             // find topmost window under cursor
@@ -4842,6 +4942,7 @@ namespace gxos {
                             " control=close pressed=1 over=" + (activate ? "1" : "0") + " x=" + std::to_string(mx) + " y=" + std::to_string(my));
 #endif
                         if (activate) {
+                            persistNormalBounds(*topW);
                             g_windows.erase(id);
                             for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == id) { g_z.erase(it); break; } }
                             if (g_modalWindow == id) g_modalWindow = 0;
@@ -4880,19 +4981,7 @@ namespace gxos {
                         const bool activate = overMax && topW->resizable;
                         topW->titleBtnMaxPressed = false;
                         topW->titleBtnMaxHover = overMax;
-                        // toggle maximize state
-                        if (activate && !topW->maximized) { // maximize
-                            topW->prevX = topW->x; topW->prevY = topW->y; topW->prevW = topW->w; topW->prevH = topW->h;
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-                            RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL);
-#else
-                            RECT crL{ 0,0,1024,768 };
-#endif
-                            WorkRect maxWork = desktopWorkAreaForBounds(crL.right - crL.left, crL.bottom - crL.top);
-                            topW->x = maxWork.left; topW->y = maxWork.top; topW->w = maxWork.right - maxWork.left; topW->h = maxWork.bottom - maxWork.top; topW->maximized = true; topW->snapState = 0; topW->dirty = true;
-                        } else if (activate) { // restore
-                            topW->x = topW->prevX; topW->y = topW->prevY; topW->w = topW->prevW; topW->h = topW->prevH; topW->maximized = false; topW->dirty = true;
-                        }
+                        if (activate) toggleMaximizeWindow(*topW, work, titleBarH);
                         invalidate(id);
                         if (activate) return true;
                     }
@@ -4901,12 +4990,36 @@ namespace gxos {
 
             if (topW) { int wx = mx - topW->x - theme.windowPadding; int wy = my - topW->y - titleBarH - theme.windowPadding; for (auto& wd : topW->widgets) { bool over = (wx >= wd.x && wx < wd.x + wd.w && wy >= wd.y && wy < wd.y + wd.h); if (!down && !up) { if (wd.hover != over) { wd.hover = over; invalidate(topW->id); } } else if (down) { if (over) { wd.pressed = true; wd.hover = true; invalidate(topW->id); } } else if (up) { if (wd.pressed) { if (over) { emitWidgetEvt(topW->id, wd.id, "click", ""); Logger::write(LogLevel::Info, std::string("Widget clicked: ") + std::to_string(topW->id) + "/" + std::to_string(wd.id)); } wd.pressed = false; wd.hover = false; invalidate(topW->id); } } } }
             // move while dragging
-            if (g_dragActive && !up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.maximized && !w.minimized && !w.tombstoned) { int nx = mx - g_dragOffX; int ny = my - g_dragOffY; if (nx < work.left) nx = work.left; if (ny < work.top) ny = work.top; if (nx + w.w > work.right) nx = work.right - w.w; if (ny + w.h > work.bottom) ny = work.bottom - w.h; if (nx != w.x || ny != w.y) { w.x = nx; w.y = ny; w.dirty = true; invalidate(w.id); } } } }
-            if (down) { uint64_t t = nowMs( ); for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { uint64_t wid = g_z[idx]; WinInfo& w = g_windows[wid]; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + titleBarH) { if (g_lastClickWin == w.id && (t - g_lastClickTicks) < 450) { if (w.resizable && !w.minimized) { if (!w.maximized) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = work.left; w.y = work.top; w.w = work.right - work.left; w.h = work.bottom - work.top; w.maximized = true; } else { w.x = w.prevX; w.y = w.prevY; w.w = w.prevW; w.h = w.prevH; w.maximized = false; } } g_lastClickWin = 0; g_lastClickTicks = 0; invalidate(w.id); return captureRequested; } g_lastClickWin = w.id; g_lastClickTicks = t; break; } } }
+            if (g_dragActive && !up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.maximized && !w.minimized && !w.tombstoned) { int nx = mx - g_dragOffX; int ny = my - g_dragOffY; if (nx < work.left) nx = work.left; if (ny < work.top) ny = work.top; if (nx + w.w > work.right) nx = work.right - w.w; if (ny + w.h > work.bottom) ny = work.bottom - w.h; if (nx != w.x || ny != w.y) { w.x = nx; w.y = ny; w.normalX = nx; w.normalY = ny; w.hasNormalBounds = true; w.animState.normX = nx; w.animState.normY = ny; w.dirty = true; invalidate(w.id); } } } }
+            if (down) {
+                uint64_t t = nowMs();
+                bool titleBarClick = false;
+                for (int idx = static_cast<int>(g_z.size()) - 1; idx >= 0; --idx) {
+                    auto it = g_windows.find(g_z[idx]);
+                    if (it == g_windows.end()) continue;
+                    WinInfo& w = it->second;
+                    if (w.minimized || w.tombstoned) continue;
+                    const bool insideWindow = mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h;
+                    if (!insideWindow) continue;
+                    titleBarClick = mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + titleBarH;
+                    const bool titleBarControl = titleBarControlAt(w, mx, my, theme);
+                    if (g_titleBarDoubleClick.onDown(w.id, t, titleBarClick, titleBarControl, g_dragActive)) {
+                        toggleMaximizeWindow(w, work, titleBarH);
+                        g_dragPending = false;
+                        g_dragPendingWin = 0;
+                        invalidate(w.id);
+                        return captureRequested;
+                    }
+                    break;
+                }
+                if (!titleBarClick) {
+                    g_titleBarDoubleClick.reset();
+                }
+            }
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (!w.resizable || w.minimized || w.maximized || w.tombstoned) continue; if (mx >= w.x + w.w - gripSize && mx < w.x + w.w && my >= w.y + w.h - gripSize && my < w.y + w.h) { g_resizeActive = true; g_resizeWin = w.id; g_resizeStartW = w.w; g_resizeStartH = w.h; g_resizeStartMX = mx; g_resizeStartMY = my; break; } } }
-            if (g_dragActive && up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; const int snap = 16; bool nearLeft = mx <= snap, nearRight = mx >= cr.right - snap, nearTop = my <= snap; if (nearTop && !(nearLeft || nearRight)) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = work.left; w.y = work.top; w.w = work.right - work.left; w.h = work.bottom - work.top; w.maximized = true; w.snapState = 0; } else if (nearLeft) { w.maximized = false; w.x = work.left; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 1; } else if (nearRight) { w.maximized = false; w.x = work.left + (work.right - work.left) / 2; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 2; } w.dirty = true; } g_dragActive = false; g_dragWin = 0; g_snapPreviewActive = false; invalidate(0); }
+            if (g_dragActive && up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; const int snap = 16; bool nearLeft = mx <= snap, nearRight = mx >= cr.right - snap, nearTop = my <= snap; if (nearTop && !(nearLeft || nearRight)) { maximizeWindow(w, work); } else if (nearLeft) { w.maximized = false; w.x = work.left; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 1; w.dirty = true; } else if (nearRight) { w.maximized = false; w.x = work.left + (work.right - work.left) / 2; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 2; w.dirty = true; } } g_dragActive = false; g_dragWin = 0; g_snapPreviewActive = false; invalidate(0); }
             if (g_resizeActive && !up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; g_resizePreviewActive = true; g_resizePreviewW = newW; g_resizePreviewH = newH; } }
-            if (g_resizeActive && up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; it->second.w = newW; it->second.h = newH; it->second.dirty = true; } g_resizeActive = false; g_resizeWin = 0; g_resizePreviewActive = false; }
+            if (g_resizeActive && up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; it->second.w = newW; it->second.h = newH; clampNormalBounds(it->second, work); rememberNormalBounds(it->second); it->second.dirty = true; } g_resizeActive = false; g_resizeWin = 0; g_resizePreviewActive = false; }
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.tombstoned) continue; if (g_modalWindow != 0 && w.id != g_modalWindow) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) { g_focus = w.id; for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == w.id) { g_z.erase(itZ); break; } } g_z.push_back(w.id); publishOut(MsgType::MT_SetFocus, std::to_string(w.id), w.ownerPid); break; } } }
             return captureRequested;
         }
@@ -5025,7 +5138,7 @@ namespace gxos {
             std::string s(m.data.begin( ), m.data.end( )); switch ((MsgType)m.type) {
             case MsgType::MT_Create: { 
                 Logger::write(LogLevel::Info, std::string("Compositor received MT_Create: ") + s + " from pid=" + std::to_string(m.srcPid));
-                std::istringstream iss(s); std::string title; std::getline(iss, title, '|'); std::string wS, hS, flagsS; std::getline(iss, wS, '|'); std::getline(iss, hS, '|'); std::getline(iss, flagsS, '|'); int w = 320, h = 200; uint32_t createFlags = gui::kWindowCreateFlagResizable; try { w = std::stoi(wS); h = std::stoi(hS); if (!flagsS.empty()) createFlags = static_cast<uint32_t>(std::stoul(flagsS)); } catch (...) {} uint64_t id = s_nextWinId.fetch_add(1); uint64_t previousFocus = 0;
+                std::istringstream iss(s); std::string title; std::getline(iss, title, '|'); std::string wS, hS, flagsS; std::getline(iss, wS, '|'); std::getline(iss, hS, '|'); std::getline(iss, flagsS, '|'); int w = 320, h = 200; uint32_t createFlags = gui::kWindowCreateFlagResizable; try { w = std::stoi(wS); h = std::stoi(hS); if (!flagsS.empty()) createFlags = static_cast<uint32_t>(std::stoul(flagsS)); } catch (...) {} uint64_t id = s_nextWinId.fetch_add(1); uint64_t previousFocus = 0; const std::string persistenceKey = windowPersistenceKey(m.srcPid);
                 { 
                     std::lock_guard<std::mutex> lk(g_lock); 
                     previousFocus = g_focus;
@@ -5066,16 +5179,47 @@ namespace gxos {
                     wi.resizable = (createFlags & gui::kWindowCreateFlagResizable) != 0;
                     wi.modal = isDialogTitle(title);
                     wi.ownerPid = m.srcPid;
+                    wi.persistenceKey = persistenceKey;
+                    int desktopWidth = 1024;
+                    int desktopHeight = 768;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                    if (g_hwnd) {
+                        RECT clientRect{};
+                        if (GetClientRect(g_hwnd, &clientRect)) {
+                            desktopWidth = clientRect.right - clientRect.left;
+                            desktopHeight = clientRect.bottom - clientRect.top;
+                        }
+                    }
+#elif !defined(GXOS_BARE_METAL)
+                    if (g_videoBackend) {
+                        desktopWidth = g_videoBackend->getWidth();
+                        desktopHeight = g_videoBackend->getHeight();
+                    }
+#else
+                    if (g_videoBackend) {
+                        desktopWidth = g_videoBackend->getWidth();
+                        desktopHeight = g_videoBackend->getHeight();
+                    }
+#endif
+                    const WorkRect work = desktopWorkAreaForBounds(desktopWidth, desktopHeight);
+                    NormalWindowBounds savedBounds;
+                    if (wi.resizable && !wi.modal && !wi.persistenceKey.empty() &&
+                        WindowBoundsStore::Load(wi.persistenceKey, savedBounds)) {
+                        wi.x = savedBounds.x;
+                        wi.y = savedBounds.y;
+                        wi.w = savedBounds.w;
+                        wi.h = savedBounds.h;
+                        clampNormalBounds(wi, work);
+                        Logger::write(LogLevel::Info, "Restored normal window bounds for " + wi.persistenceKey);
+                    } else {
+                        clampNormalBounds(wi, work);
+                    }
+                    rememberNormalBounds(wi);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                     wi.taskbarIcon = Icons::TaskbarIcon(16);
 #endif
-                    // Initialize animation state - store normal bounds
-                    wi.animState.normX = winX;
-                    wi.animState.normY = winY;
-                    wi.animState.normW = w;
-                    wi.animState.normH = h;
                     // Start fade-in animation
-                    WindowAnimator::BeginFadeIn(wi.animState, winY);
+                    WindowAnimator::BeginFadeIn(wi.animState, wi.y);
                     g_windows[id] = wi;
                     g_z.push_back(id); 
                     g_focus = id; 
@@ -5095,7 +5239,30 @@ namespace gxos {
             case MsgType::MT_DrawText: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { if (text == "\f") { it->second.texts.clear(); it->second.positionedTexts.clear(); it->second.rects.clear(); it->second.images.clear(); it->second.hasFrame = false; it->second.frame.pixels.clear(); } else { it->second.texts.push_back(text); } it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawText, std::to_string(id) + "|" + text, ownerPid); invalidate(id); } break;
             case MsgType::MT_DrawTextAt: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawTextItem item{ std::stoi(xs), std::stoi(ys), text }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.positionedTexts.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawTextAt, std::to_string(id), ownerPid); invalidate(id); } break;
             case MsgType::MT_DrawTextAtColor: { std::istringstream iss(s); std::string idS, xs, ys, rs, gs, bs; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, rs, '|'); std::getline(iss, gs, '|'); std::getline(iss, bs, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawTextItem item{ std::stoi(xs), std::stoi(ys), text, true, (uint8_t)std::stoi(rs), (uint8_t)std::stoi(gs), (uint8_t)std::stoi(bs) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.positionedTexts.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawTextAtColor, std::to_string(id), ownerPid); invalidate(id); } break;
-            case MsgType::MT_Close: { uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto wit = g_windows.find(id); if (wit != g_windows.end( )) ownerPid = wit->second.ownerPid; g_windows.erase(id); g_pendingFrameSync.erase(id); auto it = std::find(g_z.begin( ), g_z.end( ), id); if (it != g_z.end( )) g_z.erase(it); if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid); invalidate(0); } break;
+            case MsgType::MT_Close: {
+                uint64_t id = 0;
+                uint64_t ownerPid = 0;
+                bool boundsChanged = false;
+                try { id = std::stoull(s); } catch (...) {}
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    auto wit = g_windows.find(id);
+                    if (wit != g_windows.end()) {
+                        ownerPid = wit->second.ownerPid;
+                        persistNormalBounds(wit->second);
+                        boundsChanged = wit->second.resizable && !wit->second.modal;
+                    }
+                    g_windows.erase(id);
+                    g_pendingFrameSync.erase(id);
+                    auto it = std::find(g_z.begin(), g_z.end(), id);
+                    if (it != g_z.end()) g_z.erase(it);
+                    if (g_modalWindow == id) g_modalWindow = 0;
+                    if (g_focus == id) g_focus = 0;
+                }
+                if (boundsChanged) saveDesktopConfig();
+                publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid);
+                invalidate(0);
+            } break;
             case MsgType::MT_DrawRect: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string xs, ys, ws, hs, rs, gs, bs; std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); std::getline(iss, rs, '|'); std::getline(iss, gs, '|'); std::getline(iss, bs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawRectItem item{ std::stoi(xs), std::stoi(ys), std::stoi(ws), std::stoi(hs), (uint8_t)std::stoi(rs),(uint8_t)std::stoi(gs),(uint8_t)std::stoi(bs) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.rects.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawRect, std::to_string(id), ownerPid); invalidate(id); } break;
             case MsgType::MT_FramePresent: {
                 gui::FramePresentSpec spec{};
@@ -5223,8 +5390,8 @@ namespace gxos {
             case MsgType::MT_DrawImage:
             case MsgType::MT_DrawImageAnimated: { DrawImageSpec spec{}; uint64_t ownerPid = 0; if (!unpackDrawImage(s, spec)) break; ImageBitmap image{}; std::vector<ImageBitmap> frames; if ((MsgType)m.type == MsgType::MT_DrawImageAnimated) { const size_t marker = spec.path.find("{frame}"); if (marker != std::string::npos) { for (int frame = 0; frame < 100; ++frame) { std::ostringstream frameName; frameName << std::setw(2) << std::setfill('0') << frame; std::string path = spec.path; path.replace(marker, 7, frameName.str()); ImageBitmap candidate = loadCachedUiImage(path); if (candidate.status != ImageLoadStatus::Ok) break; frames.push_back(candidate); } } if (!frames.empty()) image = frames.front(); } else { image = ImageAdapter::LoadFromFile(spec.path); } if (image.status != ImageLoadStatus::Ok) { Logger::write(LogLevel::Warn, std::string("Compositor: DrawImage skipped, image load failed: ") + spec.path + " status=" + ImageLoadStatusName(image.status)); break; } DrawImageItem item{ spec.x, spec.y, spec.w, spec.h, spec.path, image, std::move(frames) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(spec.winId); if (it != g_windows.end( )) { it->second.images.push_back(std::move(item)); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut((MsgType)m.type, std::to_string(spec.winId), ownerPid); invalidate(spec.winId); } break;
             case MsgType::MT_SetTitle: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string title; std::getline(iss, title); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.title = title; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_SetTitle, std::to_string(id) + "|" + title, ownerPid); invalidate(id); } break;
-            case MsgType::MT_Move: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nx = std::stoi(xs), ny = std::stoi(ys); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.x = nx; it->second.y = ny; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Move, std::to_string(id) + "|" + xs + "|" + ys, ownerPid); invalidate(id); } break;
-            case MsgType::MT_Resize: { std::istringstream iss(s); std::string idS, ws, hs; std::getline(iss, idS, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nw = std::stoi(ws), nh = std::stoi(hs); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.w = nw; it->second.h = nh; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Resize, std::to_string(id) + "|" + ws + "|" + hs, ownerPid); invalidate(id); } break;
+            case MsgType::MT_Move: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nx = std::stoi(xs), ny = std::stoi(ys); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.x = nx; it->second.y = ny; it->second.normalX = nx; it->second.normalY = ny; it->second.hasNormalBounds = true; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Move, std::to_string(id) + "|" + xs + "|" + ys, ownerPid); invalidate(id); } break;
+            case MsgType::MT_Resize: { std::istringstream iss(s); std::string idS, ws, hs; std::getline(iss, idS, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nw = std::stoi(ws), nh = std::stoi(hs); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.w = std::max(160, nw); it->second.h = std::max(120, nh); it->second.normalW = it->second.w; it->second.normalH = it->second.h; it->second.hasNormalBounds = true; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Resize, std::to_string(id) + "|" + ws + "|" + hs, ownerPid); invalidate(id); } break;
             case MsgType::MT_WidgetAdd: { // format: <winId>|<type>|<id>|<x>|<y>|<w>|<h>|<text>
                 std::istringstream iss(s); std::string winS, typeS, idS, xs, ys, ws2, hs2; std::getline(iss, winS, '|'); std::getline(iss, typeS, '|'); std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, ws2, '|'); std::getline(iss, hs2, '|'); std::string rest; std::getline(iss, rest); uint64_t winId = 0; try { winId = std::stoull(winS); } catch (...) {} int wtype = 0; try { wtype = std::stoi(typeS); } catch (...) {} int wid = 0; try { wid = std::stoi(idS); } catch (...) {} int wx = 0, wy = 0, ww = 0, wh = 0; try { wx = std::stoi(xs); wy = std::stoi(ys); ww = std::stoi(ws2); wh = std::stoi(hs2); } catch (...) {}
                 Widget wd; wd.type = (WidgetType)wtype; wd.id = wid; wd.x = wx; wd.y = wy; wd.w = ww; wd.h = wh; wd.text = rest;
@@ -5614,6 +5781,7 @@ namespace gxos {
 #endif
             
             bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiSyncChanIn, m, 0) || ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_FramePresent), m, 0) || ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
+            { std::lock_guard<std::mutex> lk(g_lock); for (const auto& kv : g_windows) persistNormalBounds(kv.second); }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; outCfg.windows.push_back(rec); } }
             std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); DisplayOptionsStoreData shutdownDisplayStore = displayOptionsFromDesktopConfig(outCfg); std::string shutdownDisplayErr; DisplayOptionsStore::Save("display-options.cfg", shutdownDisplayStore, shutdownDisplayErr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)

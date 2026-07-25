@@ -50,6 +50,7 @@ elf_validator.cpp ^
 executable_memory.cpp ^
 file_explorer.cpp ^
 file_icon_provider.cpp ^
+file_operations.cpp ^
 firewall.cpp ^
 focus_indicator.cpp ^
 fs.cpp ^
@@ -108,6 +109,7 @@ video_backend.cpp ^
 vfs.cpp ^
 vnc_server.cpp ^
 wallpaper_registry.cpp ^
+window_bounds_store.cpp ^
 welcome.cpp ^
 workspace_manager.cpp
 

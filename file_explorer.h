@@ -101,6 +101,9 @@ namespace gxos { namespace apps {
         static void cancelDelete();
         static void pinSelectedToDesktop();
         static void showFolderOnDesktop();
+        static void copySelectedFile();
+        static void cutSelectedFile();
+        static void pasteFileTo(const std::string& destinationPath);
         
         // Keyboard handling
         static void handleKeyPress(int keyCode, const std::string& action);
@@ -133,6 +136,7 @@ namespace gxos { namespace apps {
         static int hitTestFileListScrollbar(int x, int y);
         static int hitTestContextMenu(int x, int y);
         static void showContextMenuForRow(int rowIndex, int x, int y);
+        static void showContextMenuForEmptySpace(int x, int y);
         static bool handleContextMenuClick(int x, int y);
         static int fileListVisibleRowCount();
         static int fileListMaxScrollRows();
@@ -188,6 +192,8 @@ namespace gxos { namespace apps {
         static int s_contextMenuY;
         static int s_contextMenuHover;
         static std::vector<int> s_contextMenuActions;
+        static std::string s_contextMenuDestinationPath;
+        static uint64_t s_lastFileOperationGeneration;
     };
     
 }} // namespace gxos::apps

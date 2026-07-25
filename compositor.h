@@ -11,6 +11,7 @@
 #include "process.h"
 #include "logger.h"
 #include "desktop_config.h"
+#include "window_interaction_policy.h"
 #include "desktop_service.h"
 #include "vnc_server.h"
 #include "system_tray.h"
@@ -65,6 +66,11 @@ namespace gxos { namespace gui {
         bool minimized{false}; 
         bool maximized{false}; 
         int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; 
+        // Normal/restored bounds are retained separately from temporary
+        // maximized or snapped geometry.
+        int normalX{0}; int normalY{0}; int normalW{0}; int normalH{0};
+        bool hasNormalBounds{false};
+        std::string persistenceKey;
         bool dirty{true}; 
         int snapState{0}; 
         bool tombstoned{false}; 
@@ -134,6 +140,7 @@ namespace gxos { namespace gui {
         static std::string RunLaunchShadowSmokeDiagnostic();
         static void requestDesktopRefresh();
         static bool showFolderOnHostedDesktop(const std::string& path);
+        static std::string hostedDesktopCurrentPath();
         static bool beginDesktopFolderRename(int index);
         static void cancelDesktopFolderRename();
         static bool isDesktopFolderRenameActive();
@@ -262,7 +269,7 @@ namespace gxos { namespace gui {
 #else
         struct SnapRect { int l; int t; int r; int b; }; static SnapRect g_snapPreviewRect;
 #endif
-        static bool g_showDesktopActive; static std::vector<uint64_t> g_showDesktopMinimized; static uint64_t g_lastClickTicks; static uint64_t g_lastClickWin;
+        static bool g_showDesktopActive; static std::vector<uint64_t> g_showDesktopMinimized; static TitleBarDoubleClickTracker g_titleBarDoubleClick;
         static bool g_altTabOverlayActive; static uint64_t g_altTabOverlayTicks; static int g_altTabCycleIndex;
         static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;

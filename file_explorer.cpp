@@ -5,6 +5,8 @@
 #include "desktop_service.h"
 #include "logger.h"
 #include "compositor.h"
+#include "file_operations.h"
+#include "file_explorer_navigation_policy.h"
 #include "kernel/core/include/kernel/system_font.h"
 #include <sstream>
 #include <algorithm>
@@ -68,7 +70,10 @@ namespace gxos { namespace apps {
             ShowOnDesktop = 2,
             Rename = 3,
             MoveToTrash = 4,
-            SetAsDesktopBackground = 5
+            SetAsDesktopBackground = 5,
+            CopyFile = 6,
+            CutFile = 7,
+            PasteFile = 8
         };
 
         static const char* contextMenuLabel(ContextMenuAction action) {
@@ -79,6 +84,9 @@ namespace gxos { namespace apps {
                 case ContextMenuAction::Rename: return "Rename";
                 case ContextMenuAction::MoveToTrash: return "Move to Trash";
                 case ContextMenuAction::SetAsDesktopBackground: return "Set as Desktop Background";
+                case ContextMenuAction::CopyFile: return "Copy File";
+                case ContextMenuAction::CutFile: return "Cut File";
+                case ContextMenuAction::PasteFile: return "Paste File";
                 default: return "";
             }
         }
@@ -205,6 +213,12 @@ namespace gxos { namespace apps {
             if (!isSciFiThemeActive()) return packRgb(80, 100, 150);
             const DesktopTheme& theme = fileExplorerTheme();
             return blendColor(theme.windowBackground, theme.accent, 20);
+        }
+
+        uint32_t FileExplorerSelectedNavigationColor() {
+            if (!isSciFiThemeActive()) return packRgb(218, 228, 244);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBackground, theme.accent, 18);
         }
 
         uint32_t FileExplorerHoveredRowColor() {
@@ -539,6 +553,8 @@ namespace gxos { namespace apps {
     int FileExplorer::s_contextMenuY = 0;
     int FileExplorer::s_contextMenuHover = -1;
     std::vector<int> FileExplorer::s_contextMenuActions;
+    std::string FileExplorer::s_contextMenuDestinationPath;
+    uint64_t FileExplorer::s_lastFileOperationGeneration = 0;
 
     uint64_t FileExplorer::Launch(const std::string& startPath) {
         ProcessSpec spec{"file_explorer", FileExplorer::main};
@@ -575,6 +591,8 @@ namespace gxos { namespace apps {
         s_contextMenuOpen = false;
         s_contextMenuHover = -1;
         s_contextMenuActions.clear();
+        s_contextMenuDestinationPath.clear();
+        s_lastFileOperationGeneration = gxos::files::FileOperations::OperationGeneration();
         s_lastEntryClickTick = 0;
         s_lastEntryClickRow = -1;
 
@@ -593,6 +611,12 @@ namespace gxos { namespace apps {
 
         bool running = true;
         while (running) {
+            const uint64_t fileOperationGeneration = gxos::files::FileOperations::OperationGeneration();
+            if (fileOperationGeneration != s_lastFileOperationGeneration) {
+                s_lastFileOperationGeneration = fileOperationGeneration;
+                refresh();
+                updateDisplay();
+            }
             ipc::Message msg;
             if (!ipc::Bus::pop("gui.output", msg, 100)) continue;
 
@@ -1001,6 +1025,51 @@ namespace gxos { namespace apps {
         updateDisplay();
     }
 
+    void FileExplorer::copySelectedFile() {
+        if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(s_entries.size())) return;
+        const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
+        if (entry.isDirectory()) {
+            s_status = "Copy File is available for files only";
+            updateDisplay();
+            return;
+        }
+        std::string error;
+        if (!gxos::files::FileClipboard::Set(entry.fullPath, gxos::files::FileClipboardOperation::Copy, error)) {
+            s_status = error;
+        } else {
+            s_status = "File copied: " + entry.name;
+        }
+        updateDisplay();
+    }
+
+    void FileExplorer::cutSelectedFile() {
+        if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(s_entries.size())) return;
+        const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
+        if (entry.isDirectory()) {
+            s_status = "Cut File is available for files only";
+            updateDisplay();
+            return;
+        }
+        std::string error;
+        if (!gxos::files::FileClipboard::Set(entry.fullPath, gxos::files::FileClipboardOperation::Move, error)) {
+            s_status = error;
+        } else {
+            s_status = "File marked for move: " + entry.name;
+        }
+        updateDisplay();
+    }
+
+    void FileExplorer::pasteFileTo(const std::string& destinationPath) {
+        const gxos::files::FilePasteResult result = gxos::files::FileOperations::PasteFile(destinationPath);
+        if (!result.success) {
+            s_status = "Paste File failed: " + result.error;
+        } else {
+            s_status = "Pasted file: " + gxos::files::FileOperations::BaseName(result.destinationPath);
+        }
+        refresh();
+        updateDisplay();
+    }
+
     void FileExplorer::createFolder() {
         beginPrompt(PromptNewFolder, "New folder name", "NewFold1");
     }
@@ -1168,6 +1237,7 @@ namespace gxos { namespace apps {
             s_contextMenuOpen = false;
             s_contextMenuHover = -1;
             s_contextMenuActions.clear();
+            s_contextMenuDestinationPath.clear();
             updateDisplay();
             if (button != 2) return;
         }
@@ -1182,6 +1252,9 @@ namespace gxos { namespace apps {
             Logger::write(LogLevel::Info, "FileExplorer context menu creation requested row=" + std::to_string(rowIndex));
             if (rowIndex >= 0) {
                 showContextMenuForRow(rowIndex, x, y);
+                updateDisplay();
+            } else if (x >= kLeftPaneW && y >= kMainRowsStartY && y < kStatusBarY) {
+                showContextMenuForEmptySpace(x, y);
                 updateDisplay();
             }
             return;
@@ -1508,7 +1581,19 @@ namespace gxos { namespace apps {
         s_selectedIndex = rowIndex;
         s_contextMenuOpen = true;
         s_contextMenuActions.clear();
+        s_contextMenuDestinationPath.clear();
         s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::Open));
+        const ExplorerFileEntry& entry = s_entries[rowIndex];
+        if (!entry.isDirectory()) {
+            s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::CopyFile));
+            s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::CutFile));
+        } else {
+            std::string pasteError;
+            if (gxos::files::FileOperations::CanPasteFile(entry.fullPath, pasteError)) {
+                s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::PasteFile));
+                s_contextMenuDestinationPath = entry.fullPath;
+            }
+        }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         if (DesktopService::IsSetAsDesktopBackgroundEligible(s_entries[rowIndex].fullPath, s_entries[rowIndex].isDirectory())) {
             s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::SetAsDesktopBackground));
@@ -1533,6 +1618,22 @@ namespace gxos { namespace apps {
         Logger::write(LogLevel::Info, "FileExplorer context menu created for path=" + s_entries[rowIndex].fullPath);
     }
 
+    void FileExplorer::showContextMenuForEmptySpace(int x, int y) {
+        std::string pasteError;
+        if (!gxos::files::FileOperations::CanPasteFile(s_currentPath, pasteError)) return;
+        s_contextMenuOpen = true;
+        s_contextMenuActions.clear();
+        s_contextMenuDestinationPath = s_currentPath;
+        s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::PasteFile));
+        const int menuH = kContextMenuItemH * static_cast<int>(s_contextMenuActions.size());
+        s_contextMenuX = std::min(x, kWindowW - kContextMenuW - 2);
+        s_contextMenuY = std::min(y, kWindowH - menuH - 28);
+        if (s_contextMenuX < 0) s_contextMenuX = 0;
+        if (s_contextMenuY < 0) s_contextMenuY = 0;
+        s_contextMenuHover = -1;
+        Logger::write(LogLevel::Info, "FileExplorer empty-space context menu created for path=" + s_currentPath);
+    }
+
     bool FileExplorer::handleContextMenuClick(int x, int y) {
         int item = hitTestContextMenu(x, y);
         if (item < 0) return false;
@@ -1541,6 +1642,8 @@ namespace gxos { namespace apps {
         s_contextMenuOpen = false;
         s_contextMenuHover = -1;
         s_contextMenuActions.clear();
+        const std::string pasteDestination = s_contextMenuDestinationPath;
+        s_contextMenuDestinationPath.clear();
         switch (action) {
             case ContextMenuAction::Open: openSelected(); break;
             case ContextMenuAction::PinToDesktop: pinSelectedToDesktop(); break;
@@ -1558,6 +1661,9 @@ namespace gxos { namespace apps {
                 }
                 break;
             }
+            case ContextMenuAction::CopyFile: copySelectedFile(); break;
+            case ContextMenuAction::CutFile: cutSelectedFile(); break;
+            case ContextMenuAction::PasteFile: pasteFileTo(pasteDestination.empty() ? s_currentPath : pasteDestination); break;
             default: break;
         }
         return true;
@@ -1775,26 +1881,53 @@ namespace gxos { namespace apps {
         drawSurfaceTextAt(8, y, "Navigation", FileExplorerMutedTextColor());
         y += kRowH;
 
-        drawIcon("place.computer", kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
-        drawSurfaceTextAt(kNavTextX, rowTextY(y), "Root", FileExplorerTextColor());
+        const std::string currentPath = s_fileSystem ? s_fileSystem->normalizePath(s_currentPath) : s_currentPath;
+        auto drawNavigationRow = [&](int rowY, const std::string& iconName, const std::string& label, bool selected) {
+            if (selected) {
+                const uint32_t selectedColor = FileExplorerSelectedNavigationColor();
+                drawRect(2, rowY, kLeftPaneW - 5, kRowH,
+                    static_cast<int>((selectedColor >> 16) & 0xFF),
+                    static_cast<int>((selectedColor >> 8) & 0xFF),
+                    static_cast<int>(selectedColor & 0xFF));
+                const uint32_t accent = FileExplorerAccentColor();
+                drawRect(2, rowY, 2, kRowH,
+                    static_cast<int>((accent >> 16) & 0xFF),
+                    static_cast<int>((accent >> 8) & 0xFF),
+                    static_cast<int>(accent & 0xFF));
+            }
+            drawIcon(iconName, kNavIconX, rowIconY(rowY, kNavIconSize), kNavIconSize);
+            drawSurfaceTextAt(kNavTextX, rowTextY(rowY), label,
+                selected ? FileExplorerAccentColor() : FileExplorerTextColor());
+        };
+
+        drawNavigationRow(y, "place.computer", "Root", currentPath == "/");
         y += kRowH;
 
-        drawIcon("drive.fixed", kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
-        drawSurfaceTextAt(kNavTextX, rowTextY(y), "Mounted drives", FileExplorerTextColor());
+        // This is a navigation category, not a second location. The active
+        // state is derived from s_currentPath below so duplicate / entries do
+        // not create two selected rows.
+        drawNavigationRow(y, "drive.fixed", "Mounted drives", false);
         y += kRowH;
+
+        std::vector<NavigationRootLocation> navigationRoots;
+        navigationRoots.reserve(s_roots.size());
+        for (const ExplorerFileEntry& root : s_roots) {
+            navigationRoots.push_back({
+                s_fileSystem ? s_fileSystem->normalizePath(root.fullPath) : root.fullPath,
+                root.kind == ExplorerEntryKind::CommonFolder
+            });
+        }
+        const int selectedRootIndex = ActiveNavigationRootIndex(currentPath, navigationRoots);
 
         for (size_t i = 0; i < s_roots.size(); ++i) {
             const ExplorerFileEntry& root = s_roots[i];
-            std::string marker = static_cast<int>(i) == s_rootSelectedIndex ? "> " : "  ";
             const char* iconName = FileIconProvider::logicalIconNameForEntry(root);
-            drawIcon(iconName, kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
-            drawSurfaceTextAt(kNavTextX, rowTextY(y), marker + truncate(root.name, 22),
-                static_cast<int>(i) == s_rootSelectedIndex ? FileExplorerAccentColor() : FileExplorerTextColor());
+            const bool selected = static_cast<int>(i) == selectedRootIndex;
+            drawNavigationRow(y, iconName, truncate(root.name, 22), selected);
             y += kRowH;
         }
 
-        drawIcon("file.sysfolder", kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
-        drawSurfaceTextAt(kNavTextX, rowTextY(y), "Common folders", FileExplorerTextColor());
+        drawNavigationRow(y, "file.sysfolder", "Common folders", false);
         y += kRowH;
         drawSurfaceTextAt(8, rowTextY(y), "Keys: L/R roots, O open", FileExplorerMutedTextColor());
     }

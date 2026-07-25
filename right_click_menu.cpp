@@ -3,6 +3,7 @@
 #include "compositor.h"
 #include "desktop_service.h"
 #include "trash.h"
+#include "file_operations.h"
 #include "kernel/core/include/kernel/system_font.h"
 #include <cstring>
 
@@ -10,6 +11,12 @@ namespace gxos { namespace gui {
 
 namespace {
     constexpr int kFolderIconSizeOptionCount = 2;
+
+    bool desktopItemHasFilePath(const DesktopItem& item) {
+        return item.kind == DesktopItemKind::FilesystemEntry ||
+            (item.kind == DesktopItemKind::Shortcut &&
+                (item.shortcutType == "File" || item.shortcutType == "Folder"));
+    }
 
     const char* folderIconSizeLabel(int index) {
         switch (index) {
@@ -128,15 +135,26 @@ void RightClickMenu::buildItems() {
                     DesktopService::SetAsDesktopBackgroundActionIdentity() + " path=" + item->path);
             }
 #endif
-            if (item->kind == DesktopItemKind::FilesystemEntry && item->isDirectory) {
-                s_items.push_back({"Rename", false, false, false});
-            }
-            if (item->kind == DesktopItemKind::Shortcut) {
-                if (item->shortcutType == "File" || item->shortcutType == "Folder") {
-                    s_items.push_back({"Open Target Location", false, false, false});
+                if (item->kind == DesktopItemKind::FilesystemEntry && item->isDirectory) {
+                    s_items.push_back({"Rename", false, false, false});
                 }
-                s_items.push_back({"Remove from Desktop", false, false, false});
-            }
+                if (desktopItemHasFilePath(*item)) {
+                    if (item->isDirectory) {
+                        std::string pasteError;
+                        if (gxos::files::FileOperations::CanPasteFile(item->path, pasteError)) {
+                            s_items.push_back({"Paste File", false, false, false});
+                        }
+                    } else {
+                        s_items.push_back({"Copy File", false, false, false});
+                        s_items.push_back({"Cut File", false, false, false});
+                    }
+                }
+                if (item->kind == DesktopItemKind::Shortcut) {
+                    if (item->shortcutType == "File" || item->shortcutType == "Folder") {
+                        s_items.push_back({"Open Target Location", false, false, false});
+                    }
+                    s_items.push_back({"Remove from Desktop", false, false, false});
+                }
         }
         return;
     }
@@ -146,6 +164,10 @@ void RightClickMenu::buildItems() {
     s_items.push_back({"Auto Arrange", false, Compositor::hostedDesktopAutoArrangeIcons(), false});
     s_items.push_back({"Folder View Icon Size", true, false, false});
     s_iconSubmenuIndex = 4;
+    std::string pasteError;
+    if (gxos::files::FileOperations::CanPasteFile(Compositor::hostedDesktopCurrentPath(), pasteError)) {
+        s_items.push_back({"Paste File", false, false, false});
+    }
 }
 
 bool RightClickMenu::HandleClick(int mx, int my) {
@@ -207,6 +229,34 @@ bool RightClickMenu::HandleClick(int mx, int my) {
             } else if (s_items[idx].label == "Rename" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop folder Rename selected");
                 Compositor::beginDesktopFolderRename(s_desktopItemIndex);
+            } else if (s_items[idx].label == "Copy File" && s_desktopItemIndex >= 0) {
+                if (s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())) {
+                    const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
+                    std::string error;
+                    if (!gxos::files::FileClipboard::Set(item.path, gxos::files::FileClipboardOperation::Copy, error)) {
+                        Logger::write(LogLevel::Warn, "Desktop Copy File failed: " + error);
+                    }
+                }
+            } else if (s_items[idx].label == "Cut File" && s_desktopItemIndex >= 0) {
+                if (s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())) {
+                    const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
+                    std::string error;
+                    if (!gxos::files::FileClipboard::Set(item.path, gxos::files::FileClipboardOperation::Move, error)) {
+                        Logger::write(LogLevel::Warn, "Desktop Cut File failed: " + error);
+                    }
+                }
+            } else if (s_items[idx].label == "Paste File") {
+                const std::string destination = s_desktopItemIndex >= 0 &&
+                    s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())
+                    ? Compositor::g_items[s_desktopItemIndex].path
+                    : Compositor::hostedDesktopCurrentPath();
+                const gxos::files::FilePasteResult result = gxos::files::FileOperations::PasteFile(destination);
+                if (!result.success) {
+                    Logger::write(LogLevel::Warn, "Desktop Paste File failed: " + result.error);
+                } else {
+                    Logger::write(LogLevel::Info, "Desktop Paste File succeeded destination=" + result.destinationPath);
+                    Compositor::requestDesktopRefresh();
+                }
             } else if (s_items[idx].label == "Open Target Location" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop shortcut Open Target Location selected");
                 Compositor::openDesktopShortcutTargetLocation(s_desktopItemIndex);

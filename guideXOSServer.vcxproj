@@ -158,7 +158,10 @@
     <ClInclude Include="elf_validator.h" />
     <ClInclude Include="executable_memory.h" />
     <ClInclude Include="file_explorer.h" />
+    <ClInclude Include="file_explorer_navigation_policy.h" />
     <ClInclude Include="file_icon_provider.h" />
+    <ClInclude Include="file_operations.h" />
+    <ClInclude Include="window_interaction_policy.h" />
     <ClInclude Include="firewall.h" />
     <ClInclude Include="focus_indicator.h" />
     <ClInclude Include="fs.h" />
@@ -367,6 +370,7 @@
     <ClInclude Include="vfs.h" />
     <ClInclude Include="vnc_server.h" />
     <ClInclude Include="wallpaper_registry.h" />
+    <ClInclude Include="window_bounds_store.h" />
     <ClInclude Include="window_animator.h" />
     <ClInclude Include="window_effects.h" />
     <ClInclude Include="window_renderer.h" />
@@ -394,6 +398,7 @@
     <ClCompile Include="executable_memory.cpp" />
     <ClCompile Include="file_explorer.cpp" />
     <ClCompile Include="file_icon_provider.cpp" />
+    <ClCompile Include="file_operations.cpp" />
     <ClCompile Include="firewall.cpp" />
     <ClCompile Include="focus_indicator.cpp" />
     <ClCompile Include="fs.cpp" />
@@ -606,6 +611,7 @@
     <ClCompile Include="vfs.cpp" />
     <ClCompile Include="vnc_server.cpp" />
     <ClCompile Include="wallpaper_registry.cpp" />
+    <ClCompile Include="window_bounds_store.cpp" />
     <ClCompile Include="workspace_manager.cpp" />
   </ItemGroup>
   <ItemGroup>
