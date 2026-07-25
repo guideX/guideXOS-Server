@@ -1,0 +1,19 @@
+run=20260725-065311-373
+server-wrapper-pid=26408
+server-pid=19680
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260725-065311-373-playing-seq21-gen21.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xC91430 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=21 paintGeneration=21 captureGeneration=1 frameSequence=21 state=Playing score=30 lives=3 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260725-065311-373-playing-seq21-gen21.png timestampUtc=2026-07-25T13:53:13.1734139Z
+cycle=1 no-automatic-collision-before-schedule=False
+cycle=1 collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260725-065311-373-dying-seq63-gen63.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xC91430 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=63 paintGeneration=63 captureGeneration=2 frameSequence=63 state=Dying score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260725-065311-373-dying-seq63-gen63.png timestampUtc=2026-07-25T13:53:14.1817173Z
+cycle=1 dying=True lives-decremented-once=True duplicate-death-suppressed=True
+capture=D:\dev\pacman\guidexos\captures\pacman-danger-20260725-065311-373-ready-seq92-gen92.png
+capture-target appId=com.guidexos.pacman.danger-validation runtimeId=1 windowId=1000 hostedHwnd=0xC91430 title=guideXOSCpp Compositor dimensions=1024x768 frameGeneration=92 paintGeneration=92 captureGeneration=3 frameSequence=92 state=Ready score=60 lives=2 level=1 filename=D:\dev\pacman\guidexos\captures\pacman-danger-20260725-065311-373-ready-seq92-gen92.png timestampUtc=2026-07-25T13:53:15.2471609Z
+cycle=1 actor-reset=True ready-collision-free-window=True
+cycle=1 collisions=True game-over=False lives-zero=True
+error=Danger validation did not reach Game Over after three bounded collisions.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0
