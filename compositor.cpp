@@ -5669,9 +5669,22 @@ namespace gxos {
                 }
 
                 uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
-                publishOut(MsgType::MT_InputKey, std::to_string(key) + "|down", ownerPid);
+                int modifiers = 0;
+                if (IsCtrlDown( )) modifiers |= 2;
+                if (IsShiftDown( )) modifiers |= 1;
+                if ((GetKeyState(VK_MENU) & 0x8000) != 0) modifiers |= 4;
+                publishOut(MsgType::MT_InputKey, std::to_string(key) + "|down|" + std::to_string(modifiers), ownerPid);
             } break;
-            case WM_KEYUP: { int key = (int)w; uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); } publishOut(MsgType::MT_InputKey, std::to_string(key) + "|up", ownerPid); } break;
+            case WM_KEYUP: {
+                int key = (int)w;
+                uint64_t ownerPid = 0;
+                { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
+                int modifiers = 0;
+                if (IsCtrlDown( )) modifiers |= 2;
+                if (IsShiftDown( )) modifiers |= 1;
+                if ((GetKeyState(VK_MENU) & 0x8000) != 0) modifiers |= 4;
+                publishOut(MsgType::MT_InputKey, std::to_string(key) + "|up|" + std::to_string(modifiers), ownerPid);
+            } break;
             }
             return DefWindowProcA(h, msg, w, l);
         }

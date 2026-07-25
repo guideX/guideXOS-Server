@@ -12,6 +12,8 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <filesystem>
 #include <iomanip>
@@ -163,6 +165,91 @@ bool copyNativePath(const NativeAppRuntimeContext& context, const char* path, st
     return false;
 }
 
+bool isValidUtf8(const std::string& value) {
+    for (size_t i = 0; i < value.size();) {
+        const unsigned char first = static_cast<unsigned char>(value[i]);
+        size_t continuationCount = 0;
+        unsigned char minimumSecond = 0x80;
+        unsigned char maximumSecond = 0xBF;
+        if (first <= 0x7F) {
+            ++i;
+            continue;
+        }
+        if (first >= 0xC2 && first <= 0xDF) {
+            continuationCount = 1;
+        } else if (first == 0xE0) {
+            continuationCount = 2;
+            minimumSecond = 0xA0;
+        } else if (first >= 0xE1 && first <= 0xEC) {
+            continuationCount = 2;
+        } else if (first == 0xED) {
+            continuationCount = 2;
+            maximumSecond = 0x9F;
+        } else if (first >= 0xEE && first <= 0xEF) {
+            continuationCount = 2;
+        } else if (first == 0xF0) {
+            continuationCount = 3;
+            minimumSecond = 0x90;
+        } else if (first >= 0xF1 && first <= 0xF3) {
+            continuationCount = 3;
+        } else if (first == 0xF4) {
+            continuationCount = 3;
+            maximumSecond = 0x8F;
+        } else {
+            return false;
+        }
+
+        if (i + continuationCount >= value.size()) return false;
+        const unsigned char second = static_cast<unsigned char>(value[i + 1]);
+        if (second < minimumSecond || second > maximumSecond) return false;
+        for (size_t j = 2; j <= continuationCount; ++j) {
+            const unsigned char continuation = static_cast<unsigned char>(value[i + j]);
+            if (continuation < 0x80 || continuation > 0xBF) return false;
+        }
+        i += continuationCount + 1;
+    }
+    return true;
+}
+
+bool hasSymlinkComponent(const std::filesystem::path& path) {
+    std::error_code ec;
+    std::filesystem::path current = path.root_path();
+    for (const auto& component : path.relative_path()) {
+        current /= component;
+        const std::filesystem::file_status status = std::filesystem::symlink_status(current, ec);
+        if (std::filesystem::is_symlink(status)) return true;
+        if (ec == std::errc::no_such_file_or_directory) {
+            ec.clear();
+            continue;
+        }
+        if (ec) return true;
+    }
+    return false;
+}
+
+bool checkedByteCount(uint64_t count, uint64_t elementSize, uint64_t& bytes) {
+    if (elementSize == 0 || count > std::numeric_limits<uint64_t>::max() / elementSize) return false;
+    bytes = count * elementSize;
+    return true;
+}
+
+gx_result workspacePathFailureResult(const std::string& failure) {
+    if (failure == "path-traversal" || failure == "symlink-component" || failure == "device-path") {
+        return GX_ERROR_PERMISSION_DENIED;
+    }
+    return GX_ERROR_INVALID_ARGUMENT;
+}
+
+bool pathContainsTraversal(const std::string& path);
+
+/*
+ * Hosted workspace calls intentionally accept an explicit absolute host path.
+ * This is a development-only capability granted by the filesystem.* manifest
+ * permissions; the guest Developer Studio applies the selected workspace-root
+ * boundary. Bare-metal/VFS implementations must not inherit this host-path
+ * behavior. Device paths, traversal, control bytes, invalid UTF-8, and symlink
+ * components are rejected before any host filesystem operation.
+ */
 bool copyWorkspacePath(const NativeAppRuntimeContext& context, const char* path, std::filesystem::path& output, std::string& failureReason) {
     std::string requested;
     if (!copyNativePath(context, path, requested, failureReason) || requested.empty()) return false;
@@ -170,26 +257,74 @@ bool copyWorkspacePath(const NativeAppRuntimeContext& context, const char* path,
         failureReason = "path-too-long";
         return false;
     }
-    std::replace(requested.begin(), requested.end(), static_cast<char>(92), '/');
-    if (requested.find("..") != std::string::npos) {
-        size_t start = 0;
-        while (start <= requested.size()) {
-            size_t end = requested.find('/', start);
-            if (end == std::string::npos) end = requested.size();
-            if (end - start == 2 && requested[start] == '.' && requested[start + 1] == '.') {
-                failureReason = "path-traversal";
-                return false;
-            }
-            if (end == requested.size()) break;
-            start = end + 1;
+    if (!isValidUtf8(requested)) {
+        failureReason = "invalid-utf8";
+        return false;
+    }
+    for (unsigned char value : requested) {
+        if (value < 0x20 || value == 0x7F) {
+            failureReason = "unsupported-path-byte";
+            return false;
         }
     }
-    output = std::filesystem::path(requested).lexically_normal();
+    std::replace(requested.begin(), requested.end(), static_cast<char>(92), '/');
+    if (requested.size() >= 2 && requested[0] == '/' && requested[1] == '/') {
+        failureReason = "device-path";
+        return false;
+    }
+    const bool standardDrivePath = requested.size() >= 3 &&
+        ((requested[0] >= 'A' && requested[0] <= 'Z') || (requested[0] >= 'a' && requested[0] <= 'z')) &&
+        requested[1] == ':' && requested[2] == '/';
+    const size_t colon = requested.find(':');
+    if (colon != std::string::npos && !(standardDrivePath && colon == 1)) {
+        failureReason = "device-path";
+        return false;
+    }
+    if (requested.size() >= 2 && requested[1] == ':' && !standardDrivePath) {
+        failureReason = "device-path";
+        return false;
+    }
+    if (pathContainsTraversal(requested)) {
+        failureReason = "path-traversal";
+        return false;
+    }
+    try {
+        output = std::filesystem::path(requested).lexically_normal();
+    } catch (...) {
+        failureReason = "invalid-path";
+        return false;
+    }
     if (!output.is_absolute()) {
         failureReason = "path-not-absolute";
         return false;
     }
+    if (output.generic_string().size() > kMaxFilePathLength) {
+        failureReason = "normalized-path-too-long";
+        return false;
+    }
+    if (hasSymlinkComponent(output)) {
+        failureReason = "symlink-component";
+        return false;
+    }
     return true;
+}
+
+bool compareFileEntryNames(const gx_file_entry& left, const gx_file_entry& right) {
+    size_t index = 0;
+    while (left.name[index] != '\0' && right.name[index] != '\0') {
+        const unsigned char leftByte = static_cast<unsigned char>(left.name[index]);
+        const unsigned char rightByte = static_cast<unsigned char>(right.name[index]);
+        const unsigned char leftFolded = leftByte >= 'A' && leftByte <= 'Z' ? static_cast<unsigned char>(leftByte + ('a' - 'A')) : leftByte;
+        const unsigned char rightFolded = rightByte >= 'A' && rightByte <= 'Z' ? static_cast<unsigned char>(rightByte + ('a' - 'A')) : rightByte;
+        if (leftFolded != rightFolded) return leftFolded < rightFolded;
+        if (leftByte != rightByte) return leftByte < rightByte;
+        ++index;
+    }
+    return static_cast<unsigned char>(left.name[index]) < static_cast<unsigned char>(right.name[index]);
+}
+
+bool validOptionalOutputPointer(const NativeAppRuntimeContext& context, const void* pointer, size_t size) {
+    return pointer == nullptr || nativeBufferRangeContains(context, pointer, size);
 }
 
 void logInvalidFileReadContext(
@@ -532,7 +667,7 @@ gx_result hostFileStat(NativeGxAppContext* ctx, const char* path, gx_file_info* 
 
     std::filesystem::path resolved;
     std::string failure;
-    if (!copyWorkspacePath(*context, path, resolved, failure)) return GX_ERROR_PERMISSION_DENIED;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return workspacePathFailureResult(failure);
     std::error_code ec;
     const std::filesystem::file_status status = std::filesystem::symlink_status(resolved, ec);
     if (ec || !std::filesystem::exists(status)) return GX_ERROR_FAILED;
@@ -542,43 +677,52 @@ gx_result hostFileStat(NativeGxAppContext* ctx, const char* path, gx_file_info* 
     }
     if (!std::filesystem::is_regular_file(status)) return GX_ERROR_UNSUPPORTED;
     outInfo->type = GX_FILE_TYPE_REGULAR;
-    outInfo->size = std::filesystem::file_size(resolved, ec);
+    const uintmax_t fileSize = std::filesystem::file_size(resolved, ec);
+    if (fileSize > std::numeric_limits<uint64_t>::max()) return GX_ERROR_UNSUPPORTED;
+    outInfo->size = static_cast<uint64_t>(fileSize);
     return ec ? GX_ERROR_FAILED : GX_OK;
 }
 
 gx_result hostFileReadWorkspace(NativeGxAppContext* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
-    if (!context || !buffer || bufferSize == 0 || bufferSize > kMaxWorkspaceIoBytes || !outBytesRead ||
-        !nativeBufferRangeContains(*context, buffer, bufferSize) || !nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t))) return GX_ERROR_INVALID_ARGUMENT;
+    if (!context || !outBytesRead || !nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t)) || bufferSize > kMaxWorkspaceIoBytes) return GX_ERROR_INVALID_ARGUMENT;
+    if (bufferSize > 0 && (!buffer || !nativeBufferRangeContains(*context, buffer, bufferSize))) return GX_ERROR_INVALID_ARGUMENT;
     *outBytesRead = 0;
     if (!hasWorkspaceReadPermission(*context)) return GX_ERROR_PERMISSION_DENIED;
     std::filesystem::path resolved;
     std::string failure;
-    if (!copyWorkspacePath(*context, path, resolved, failure)) return GX_ERROR_PERMISSION_DENIED;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return workspacePathFailureResult(failure);
     std::error_code ec;
     const std::filesystem::file_status status = std::filesystem::symlink_status(resolved, ec);
     if (ec || !std::filesystem::is_regular_file(status)) return GX_ERROR_FAILED;
-    const uint64_t size = std::filesystem::file_size(resolved, ec);
+    const uintmax_t fileSize = std::filesystem::file_size(resolved, ec);
+    if (fileSize > std::numeric_limits<uint64_t>::max()) return GX_ERROR_UNSUPPORTED;
+    const uint64_t size = static_cast<uint64_t>(fileSize);
     if (ec || size > bufferSize || size > kMaxWorkspaceIoBytes) return GX_ERROR_UNSUPPORTED;
     std::ifstream input(resolved, std::ios::binary);
     if (!input) return GX_ERROR_FAILED;
-    if (size > 0) input.read(static_cast<char*>(buffer), static_cast<std::streamsize>(size));
-    if (!input && size > 0) return GX_ERROR_FAILED;
+    if (size > 0) {
+        input.read(static_cast<char*>(buffer), static_cast<std::streamsize>(size));
+        if (!input || static_cast<uint64_t>(input.gcount()) != size) return GX_ERROR_FAILED;
+    }
     *outBytesRead = static_cast<uint32_t>(size);
     return GX_OK;
 }
 
 gx_result hostFileList(NativeGxAppContext* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    uint64_t entryBytes = 0;
+    if (!checkedByteCount(capacity, sizeof(gx_file_entry), entryBytes)) return GX_ERROR_INVALID_ARGUMENT;
     if (!context || !outCount || !nativeBufferRangeContains(*context, outCount, sizeof(uint32_t)) || capacity > kMaxWorkspaceListEntries ||
-        (capacity > 0 && (!entries || !nativeBufferRangeContains(*context, entries, static_cast<uint64_t>(capacity) * sizeof(gx_file_entry))))) return GX_ERROR_INVALID_ARGUMENT;
+        !validOptionalOutputPointer(*context, outTruncated, sizeof(uint32_t)) ||
+        (capacity > 0 && (!entries || !nativeBufferRangeContains(*context, entries, entryBytes)))) return GX_ERROR_INVALID_ARGUMENT;
     *outCount = 0;
-    if (outTruncated && nativeBufferRangeContains(*context, outTruncated, sizeof(uint32_t))) *outTruncated = 0;
+    if (outTruncated) *outTruncated = 0;
     if (!hasWorkspaceReadPermission(*context)) return GX_ERROR_PERMISSION_DENIED;
 
     std::filesystem::path resolved;
     std::string failure;
-    if (!copyWorkspacePath(*context, path, resolved, failure)) return GX_ERROR_PERMISSION_DENIED;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return workspacePathFailureResult(failure);
     std::error_code ec;
     const std::filesystem::file_status rootStatus = std::filesystem::symlink_status(resolved, ec);
     if (ec || !std::filesystem::is_directory(rootStatus)) return GX_ERROR_FAILED;
@@ -615,33 +759,24 @@ gx_result hostFileList(NativeGxAppContext* ctx, const char* path, gx_file_entry*
     std::sort(collected.begin(), collected.end(), [](const gx_file_entry& left, const gx_file_entry& right) {
         if (left.type == GX_FILE_TYPE_DIRECTORY && right.type != GX_FILE_TYPE_DIRECTORY) return true;
         if (left.type != GX_FILE_TYPE_DIRECTORY && right.type == GX_FILE_TYPE_DIRECTORY) return false;
-        size_t index = 0;
-        while (left.name[index] != '\0' && right.name[index] != '\0') {
-            char a = left.name[index];
-            char b = right.name[index];
-            if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + ('a' - 'A'));
-            if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + ('a' - 'A'));
-            if (a != b) return a < b;
-            ++index;
-        }
-        return left.name[index] < right.name[index];
+        return compareFileEntryNames(left, right);
     });
     const uint32_t count = static_cast<uint32_t>(std::min<size_t>(capacity, collected.size()));
     for (uint32_t i = 0; i < count; ++i) entries[i] = collected[i];
     *outCount = count;
-    if (outTruncated && nativeBufferRangeContains(*context, outTruncated, sizeof(uint32_t))) *outTruncated = truncated ? 1u : 0u;
+    if (outTruncated) *outTruncated = truncated ? 1u : 0u;
     return GX_OK;
 }
 
 gx_result hostFileWriteAll(NativeGxAppContext* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
-    if (!context || !outBytesWritten || !nativeBufferRangeContains(*context, outBytesWritten, sizeof(uint32_t)) ||
-        !buffer || bufferSize > kMaxWorkspaceIoBytes || !nativeBufferRangeContains(*context, buffer, bufferSize == 0 ? 1 : bufferSize)) return GX_ERROR_INVALID_ARGUMENT;
+    if (!context || !outBytesWritten || !nativeBufferRangeContains(*context, outBytesWritten, sizeof(uint32_t)) || bufferSize > kMaxWorkspaceIoBytes) return GX_ERROR_INVALID_ARGUMENT;
+    if (bufferSize > 0 && (!buffer || !nativeBufferRangeContains(*context, buffer, bufferSize))) return GX_ERROR_INVALID_ARGUMENT;
     *outBytesWritten = 0;
     if (!hasWorkspaceWritePermission(*context)) return GX_ERROR_PERMISSION_DENIED;
     std::filesystem::path resolved;
     std::string failure;
-    if (!copyWorkspacePath(*context, path, resolved, failure)) return GX_ERROR_PERMISSION_DENIED;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return workspacePathFailureResult(failure);
     std::error_code ec;
     const std::filesystem::path parent = resolved.parent_path();
     if (parent.empty() || !std::filesystem::is_directory(std::filesystem::symlink_status(parent, ec)) || ec) return GX_ERROR_FAILED;
@@ -1533,6 +1668,200 @@ void NativeAppRuntime::LogContext(const NativeAppRuntimeContext& context, const 
         << " Diagnostics: " << joinStrings(context.diagnostics);
     Logger::write(context.success ? LogLevel::Info : LogLevel::Warn, oss.str());
 }
+
+#ifdef GX_NATIVE_FILESYSTEM_CONTRACT_TEST
+bool RunNativeFilesystemContractTest(std::string* failure) {
+    std::filesystem::path root;
+    bool dispatchStarted = false;
+    auto fail = [&](const std::string& message) {
+        if (failure && failure->empty()) *failure = message;
+    };
+
+    try {
+        root = std::filesystem::temp_directory_path() / ("guidexos-native-filesystem-contract-" + std::to_string(Allocator::currentPid()));
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        ec.clear();
+        std::filesystem::create_directories(root / "nested" / "empty-dir", ec);
+        if (ec) {
+            fail("fixture-create");
+            return false;
+        }
+        std::filesystem::create_directories(root / "order" / "child-dir", ec);
+        if (ec) {
+            fail("fixture-order-create");
+            return false;
+        }
+
+        auto writeFile = [&](const std::filesystem::path& path, const std::string& bytes) {
+            std::ofstream output(path, std::ios::binary | std::ios::trunc);
+            if (!output) return false;
+            output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+            output.flush();
+            return static_cast<bool>(output);
+        };
+        if (!writeFile(root / "sample.txt", std::string("alpha\0omega", 11))) { fail("fixture-sample"); return false; }
+        if (!writeFile(root / "empty.txt", std::string())) { fail("fixture-empty"); return false; }
+        if (!writeFile(root / "binary.dat", std::string("A\0B\xFF", 4))) { fail("fixture-binary"); return false; }
+        if (!writeFile(root / "nested" / "config.json", "{\"ok\":true}")) { fail("fixture-nested"); return false; }
+        if (!writeFile(root / "order" / "A.txt", "A")) { fail("fixture-order-A"); return false; }
+        if (!writeFile(root / "order" / "b.txt", "b")) { fail("fixture-order-b"); return false; }
+        for (uint32_t index = 0; index < 130; ++index) {
+            char name[32] = {};
+            std::snprintf(name, sizeof(name), "entry-%03u.txt", index);
+            if (!writeFile(root / name, "x")) { fail("fixture-list-entry"); return false; }
+        }
+
+        NativeAppRuntimeContext context;
+        context.appId = "native-filesystem-contract-test";
+        context.runtimeId = 1;
+        context.permissions.push_back("filesystem.read");
+        context.permissions.push_back("filesystem.write");
+        NativeGxAppContext appContext;
+        NativeAppRuntime::BeginHostCallDispatch(context);
+        dispatchStarted = true;
+        context.activeGxContext = &appContext;
+        context.hostCalls.file_stat = hostFileStat;
+        context.hostCalls.file_read_workspace = hostFileReadWorkspace;
+        context.hostCalls.file_list = hostFileList;
+        context.hostCalls.file_write_all = hostFileWriteAll;
+        appContext.size = static_cast<uint32_t>(sizeof(appContext));
+        appContext.host = &context.hostCalls;
+
+        bool allPassed = true;
+        auto check = [&](bool condition, const char* name) {
+            if (!condition) {
+                allPassed = false;
+                fail(name);
+            }
+        };
+        auto setPath = [&](char* destination, size_t capacity, const std::string& value) {
+            if (value.size() + 1 > capacity) return false;
+            std::memset(destination, 0, capacity);
+            std::memcpy(destination, value.data(), value.size());
+            return true;
+        };
+        auto pathString = [&](const std::filesystem::path& path) {
+            return path.generic_string();
+        };
+
+        char path[256] = {};
+        gx_file_info info = {};
+        check(setPath(path, sizeof(path), pathString(root / "sample.txt")) &&
+            hostFileStat(&appContext, path, &info) == GX_OK &&
+            info.type == GX_FILE_TYPE_REGULAR && info.size == 11, "stat-regular-file");
+        check(setPath(path, sizeof(path), pathString(root / "nested")) &&
+            hostFileStat(&appContext, path, &info) == GX_OK && info.type == GX_FILE_TYPE_DIRECTORY, "stat-directory");
+        check(setPath(path, sizeof(path), pathString(root / "does-not-exist")) &&
+            hostFileStat(&appContext, path, &info) == GX_ERROR_FAILED, "stat-missing-file");
+        path[0] = '\0';
+        check(hostFileStat(&appContext, path, &info) == GX_ERROR_INVALID_ARGUMENT, "stat-empty-path");
+        check(hostFileStat(&appContext, nullptr, &info) == GX_ERROR_INVALID_ARGUMENT, "stat-null-path");
+        check(hostFileStat(&appContext, path, nullptr) == GX_ERROR_INVALID_ARGUMENT, "stat-null-output");
+
+        check(setPath(path, sizeof(path), pathString(root / "nested" / "." / "config.json")) &&
+            hostFileStat(&appContext, path, &info) == GX_OK, "stat-dot-normalization");
+        check(setPath(path, sizeof(path), pathString(root) + "//nested//config.json") &&
+            hostFileStat(&appContext, path, &info) == GX_OK, "stat-repeated-separators");
+        check(setPath(path, sizeof(path), pathString(root) + "/../config.json") &&
+            hostFileStat(&appContext, path, &info) == GX_ERROR_PERMISSION_DENIED, "stat-parent-traversal");
+        check(setPath(path, sizeof(path), "relative.txt") &&
+            hostFileStat(&appContext, path, &info) == GX_ERROR_INVALID_ARGUMENT, "stat-relative-path");
+        check(setPath(path, sizeof(path), "\\\\?\\C:\\device.txt") &&
+            hostFileStat(&appContext, path, &info) == GX_ERROR_PERMISSION_DENIED, "stat-device-path");
+
+        std::memset(path, 0, sizeof(path));
+        const std::string embedded = pathString(root / "empty.txt") + std::string("\0/../outside", 12);
+        std::memcpy(path, embedded.data(), embedded.size());
+        check(hostFileStat(&appContext, path, &info) == GX_OK && info.size == 0, "stat-nul-terminates-input");
+        std::memset(path, 0, sizeof(path));
+        const std::string invalidUtf8 = pathString(root) + "/bad-" + std::string("\xC3\x28", 2);
+        std::memcpy(path, invalidUtf8.data(), invalidUtf8.size());
+        check(hostFileStat(&appContext, path, &info) == GX_ERROR_INVALID_ARGUMENT, "stat-invalid-utf8");
+
+        auto setSizedPath = [&](char* destination, size_t length) {
+            std::string value = pathString(root) + "/";
+            if (value.size() >= length) return false;
+            value.append(length - value.size(), 'x');
+            return setPath(destination, 256, value);
+        };
+        check(setSizedPath(path, 239) && hostFileStat(&appContext, path, &info) == GX_ERROR_FAILED, "path-239-bytes");
+        check(setSizedPath(path, 240) && hostFileStat(&appContext, path, &info) == GX_ERROR_FAILED, "path-240-bytes");
+        check(setSizedPath(path, 241) && hostFileStat(&appContext, path, &info) == GX_ERROR_INVALID_ARGUMENT, "path-241-bytes");
+        std::string utf8Path = pathString(root) + "/";
+        while (utf8Path.size() + 2 <= 240) utf8Path += "\xC3\xA9";
+        while (utf8Path.size() < 240) utf8Path += 'x';
+        check(setPath(path, sizeof(path), utf8Path) && hostFileStat(&appContext, path, &info) == GX_ERROR_FAILED, "utf8-byte-boundary");
+
+        char readBuffer[64] = {};
+        uint32_t bytesRead = 0;
+        check(setPath(path, sizeof(path), pathString(root / "sample.txt")) &&
+            hostFileReadWorkspace(&appContext, path, readBuffer, 11, &bytesRead) == GX_OK &&
+            bytesRead == 11 && std::memcmp(readBuffer, "alpha\0omega", 11) == 0, "read-exact-binary-data");
+        std::memset(readBuffer, 0, sizeof(readBuffer));
+        bytesRead = 99;
+        check(hostFileReadWorkspace(&appContext, path, readBuffer, 4, &bytesRead) == GX_ERROR_UNSUPPORTED && bytesRead == 0, "read-undersized-buffer");
+        bytesRead = 0;
+        check(hostFileReadWorkspace(&appContext, path, readBuffer, sizeof(readBuffer), &bytesRead) == GX_OK && bytesRead == 11, "read-oversized-buffer");
+        check(hostFileReadWorkspace(&appContext, path, readBuffer, kMaxWorkspaceIoBytes + 1, &bytesRead) == GX_ERROR_INVALID_ARGUMENT, "read-over-limit-request");
+        check(setPath(path, sizeof(path), pathString(root / "empty.txt")) &&
+            hostFileReadWorkspace(&appContext, path, nullptr, 0, &bytesRead) == GX_OK && bytesRead == 0, "read-zero-length-file");
+        check(hostFileReadWorkspace(&appContext, path, nullptr, 1, &bytesRead) == GX_ERROR_INVALID_ARGUMENT, "read-null-buffer");
+        check(hostFileReadWorkspace(&appContext, path, reinterpret_cast<void*>(static_cast<uintptr_t>(1)), 1, &bytesRead) == GX_ERROR_INVALID_ARGUMENT, "read-invalid-buffer-range");
+        check(hostFileReadWorkspace(&appContext, path, readBuffer, 1, nullptr) == GX_ERROR_INVALID_ARGUMENT, "read-null-output");
+
+        gx_file_entry entries[8] = {};
+        uint32_t entryCount = 0;
+        uint32_t truncated = 0;
+        check(setPath(path, sizeof(path), pathString(root / "nested" / "empty-dir")) &&
+            hostFileList(&appContext, path, entries, 8, &entryCount, &truncated) == GX_OK &&
+            entryCount == 0 && truncated == 0, "list-empty-directory");
+        check(setPath(path, sizeof(path), pathString(root)) &&
+            hostFileList(&appContext, path, entries, 3, &entryCount, &truncated) == GX_OK &&
+            entryCount == 3 && truncated == 1, "list-truncation");
+        gx_file_entry orderEntries[4] = {};
+        gx_file_entry orderEntriesAgain[4] = {};
+        uint32_t orderCountAgain = 0;
+        uint32_t orderTruncatedAgain = 0;
+        check(setPath(path, sizeof(path), pathString(root / "order")) &&
+            hostFileList(&appContext, path, orderEntries, 4, &entryCount, &truncated) == GX_OK &&
+            hostFileList(&appContext, path, orderEntriesAgain, 4, &orderCountAgain, &orderTruncatedAgain) == GX_OK &&
+            entryCount == 3 && orderCountAgain == entryCount && truncated == 0 && orderTruncatedAgain == 0 &&
+            std::string(orderEntries[0].name) == std::string(orderEntriesAgain[0].name) &&
+            std::string(orderEntries[1].name) == std::string(orderEntriesAgain[1].name) &&
+            std::string(orderEntries[2].name) == std::string(orderEntriesAgain[2].name) &&
+            orderEntries[0].type == GX_FILE_TYPE_DIRECTORY, "list-deterministic-case-order");
+        check(hostFileList(&appContext, path, entries, 1, &entryCount, reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(1))) == GX_ERROR_INVALID_ARGUMENT, "list-invalid-optional-output");
+        check(hostFileList(&appContext, path, reinterpret_cast<gx_file_entry*>(static_cast<uintptr_t>(1)), 1, &entryCount, &truncated) == GX_ERROR_INVALID_ARGUMENT, "list-invalid-entry-range");
+        check(hostFileList(&appContext, path, entries, 130, &entryCount, &truncated) == GX_ERROR_INVALID_ARGUMENT, "list-over-capacity");
+
+        char writeBuffer[32] = "updated";
+        const char overwriteBuffer[] = "overwrite";
+        uint32_t bytesWritten = 0;
+        check(setPath(path, sizeof(path), pathString(root / "sample.txt")) &&
+            hostFileWriteAll(&appContext, path, writeBuffer, 7, &bytesWritten) == GX_OK && bytesWritten == 7, "write-success");
+        check(hostFileWriteAll(&appContext, path, overwriteBuffer, 9, &bytesWritten) == GX_OK && bytesWritten == 9, "write-overwrite");
+        check(hostFileWriteAll(&appContext, path, writeBuffer, kMaxWorkspaceIoBytes + 1, &bytesWritten) == GX_ERROR_INVALID_ARGUMENT, "write-over-limit-request");
+        check(hostFileWriteAll(&appContext, path, nullptr, 0, &bytesWritten) == GX_OK && bytesWritten == 0, "write-zero-byte");
+        check(hostFileWriteAll(&appContext, path, nullptr, 1, &bytesWritten) == GX_ERROR_INVALID_ARGUMENT, "write-null-buffer");
+        check(hostFileWriteAll(&appContext, path, reinterpret_cast<const void*>(static_cast<uintptr_t>(1)), 1, &bytesWritten) == GX_ERROR_INVALID_ARGUMENT, "write-invalid-buffer-range");
+        check(hostFileWriteAll(&appContext, path, writeBuffer, 7, nullptr) == GX_ERROR_INVALID_ARGUMENT, "write-null-output");
+        check(setPath(path, sizeof(path), pathString(root / "nested")) &&
+            hostFileWriteAll(&appContext, path, writeBuffer, 7, &bytesWritten) == GX_ERROR_FAILED, "write-directory-failure");
+
+        if (dispatchStarted) NativeAppRuntime::EndHostCallDispatch(context);
+        dispatchStarted = false;
+        std::filesystem::remove_all(root, ec);
+        return allPassed;
+    } catch (...) {
+        fail("filesystem-contract-exception");
+        if (dispatchStarted && g_activeRuntimeContext) NativeAppRuntime::EndHostCallDispatch(*g_activeRuntimeContext);
+        std::error_code ec;
+        if (!root.empty()) std::filesystem::remove_all(root, ec);
+        return false;
+    }
+}
+#endif
 
 } // namespace apps
 } // namespace gxos

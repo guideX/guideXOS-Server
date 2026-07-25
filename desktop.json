@@ -10,8 +10,8 @@
   "desktop.display.resolution": "1024x768",
   "desktop.clock.timeZoneId": "pacific",
   "desktop.clock.use24HourTime": false,
-  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation","Nexgen PacMan Bare-Metal Fruit Validation","Nexgen PacMan Fruit Validation","Nexgen PacMan Level Validation","ComputerFiles","Trash"],
-  "recent": ["guideXOS Navigator","Notepad","File Explorer","DisplayOptions","ControlPanel","Nexgen PacMan Danger Validation","Nexgen PacMan","Resource Viewer","Image Viewer","ComputerFiles"],
+  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation","Nexgen PacMan Bare-Metal Fruit Validation","Nexgen PacMan Fruit Validation","Nexgen PacMan Level Validation","ComputerFiles","Trash","guideXOS Developer Studio"],
+  "recent": ["guideXOS Developer Studio","guideXOS Navigator","Notepad","File Explorer","DisplayOptions","ControlPanel","Nexgen PacMan Danger Validation","Nexgen PacMan","Resource Viewer","Image Viewer","ComputerFiles"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,

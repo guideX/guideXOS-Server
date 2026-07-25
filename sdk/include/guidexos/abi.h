@@ -109,8 +109,11 @@ typedef struct gx_host_calls {
     /* Monotonic milliseconds since the hosted runtime's process-local epoch.
      * The uint64_t value wraps after 2^64 milliseconds. */
     uint64_t (GX_CALL *get_ticks_ms)(gx_app_context* ctx);
-    /* Hosted workspace extensions. Paths are explicit user-selected host paths;
-     * callers must still enforce their own workspace-root boundary. */
+    /* Hosted-development workspace extensions. Paths are explicit absolute
+     * UTF-8 host paths; the Server rejects traversal/device/symlink paths but
+     * does not know an application's selected workspace root. Callers must
+     * enforce that root boundary. These slots are appended for ABI stability
+     * and are not a bare-metal/VFS path contract. */
     gx_result (GX_CALL *file_stat)(gx_app_context* ctx, const char* path, gx_file_info* outInfo);
     gx_result (GX_CALL *file_read_workspace)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
     gx_result (GX_CALL *file_list)(gx_app_context* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated);

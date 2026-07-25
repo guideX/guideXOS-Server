@@ -22,13 +22,20 @@
 /kernel/build
 /guideXOSServer.exe
 /guideXOSServer.experimental.exe
+/tmp/developer-studio-phase-build.*
+/tmp/developer-studio-phase-build*.log
+/tmp/native-filesystem-contract-test*
+/tmp/native_abi_layout_test-phase-current.exe
 /logs
 # Keep the established Mbed TLS vendor tree ignored, but make the exact
 # stb_image dependency visible and reproducible for the PNG/JPEG image path.
+# The visible stb_image header is also required by the hosted Native
+# ELF/App Model build.
 /third_party/*
 !/third_party/stb/
 /third_party/stb/*
 !/third_party/stb/stb_image.h
+<<<<<<< HEAD
 /dist/
 /out/release-tools/
 /out/release-iso/
