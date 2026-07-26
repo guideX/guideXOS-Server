@@ -21,6 +21,7 @@ namespace fs_fat {
 static FATVolume s_volumes[MAX_FAT_VOLUMES];
 static FATFile   s_files[MAX_OPEN_FILES];
 static uint8_t   s_volumeCount = 0;
+static block::Status s_lastIoStatus = block::BLOCK_OK;
 
 // Sector buffer for reading metadata (one sector at a time)
 static uint8_t   s_secBuf[4096]; // supports up to 4096-byte sectors
@@ -74,20 +75,26 @@ static bool is_fat_partition_type(uint8_t partType)
 
 static block::Status read_volume_sector(const FATVolume& vol, uint64_t lba, void* buffer)
 {
-    return block::read_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    s_lastIoStatus = block::read_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    return s_lastIoStatus;
 }
 
 static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, const void* buffer)
 {
-    return block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    s_lastIoStatus = block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    return s_lastIoStatus;
 }
 
 static block::Status write_volume_sectors(const FATVolume& vol, uint64_t lba,
                                           uint32_t count, const void* buffer)
 {
-    if (count == 0 || !buffer) return block::BLOCK_ERR_INVALID;
-    return block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba,
-                                count, buffer);
+    if (count == 0 || !buffer) {
+        s_lastIoStatus = block::BLOCK_ERR_INVALID;
+        return s_lastIoStatus;
+    }
+    s_lastIoStatus = block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba,
+                                          count, buffer);
+    return s_lastIoStatus;
 }
 
 // ================================================================
@@ -520,6 +527,14 @@ static uint32_t allocate_cluster(FATVolume& vol)
     return 0;
 }
 
+static void release_allocated_cluster(FATVolume& vol, uint32_t cluster)
+{
+    if (!is_valid_data_cluster(vol, cluster)) return;
+    // Best-effort rollback. The original create path leaked the newly
+    // allocated cluster when directory-sector publication failed.
+    write_fat_entry(vol, cluster, fat_free_value(vol));
+}
+
 // ================================================================
 // 8.3 short name to readable string
 // ================================================================
@@ -625,6 +640,7 @@ void init()
     memzero(s_files, sizeof(s_files));
     memzero(&s_dirIter, sizeof(s_dirIter));
     s_volumeCount = 0;
+    s_lastIoStatus = block::BLOCK_OK;
 }
 
 uint8_t mount(uint8_t blockDevIndex)
@@ -1512,54 +1528,130 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
 
 bool create_directory_path(uint8_t volumeIndex, const char* path)
 {
-    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
-    if (!s_volumes[volumeIndex].mounted) return false;
-    if (!path) return false;
+    return create_directory_path_status(volumeIndex, path, nullptr) == DIRECTORY_CREATE_OK;
+}
+
+const char* directory_create_status_name(DirectoryCreateStatus status)
+{
+    switch (status) {
+        case DIRECTORY_CREATE_OK: return "FAT_CREATE_OK";
+        case DIRECTORY_CREATE_INVALID_ARGUMENT: return "FAT_CREATE_INVALID_ARGUMENT";
+        case DIRECTORY_CREATE_NOT_MOUNTED: return "FAT_CREATE_NOT_MOUNTED";
+        case DIRECTORY_CREATE_UNSUPPORTED_TYPE: return "FAT_CREATE_UNSUPPORTED_TYPE";
+        case DIRECTORY_CREATE_ALREADY_EXISTS: return "FAT_CREATE_ALREADY_EXISTS";
+        case DIRECTORY_CREATE_PARENT_NOT_FOUND: return "FAT_CREATE_PARENT_NOT_FOUND";
+        case DIRECTORY_CREATE_INVALID_NAME: return "FAT_CREATE_INVALID_NAME";
+        case DIRECTORY_CREATE_NO_FREE_CLUSTER: return "FAT_CREATE_NO_FREE_CLUSTER";
+        case DIRECTORY_CREATE_NO_FREE_ENTRY: return "FAT_CREATE_NO_FREE_ENTRY";
+        case DIRECTORY_CREATE_IO_ERROR: return "FAT_CREATE_IO_ERROR";
+        default: return "FAT_CREATE_UNKNOWN";
+    }
+}
+
+static void initialize_directory_entry(FAT32_DirEntry* entry,
+                                        const char* shortName,
+                                        uint32_t firstCluster)
+{
+    memzero(entry, sizeof(FAT32_DirEntry));
+    memcopy(entry->name, shortName, 11);
+    entry->attr = ATTR_DIRECTORY;
+    entry->firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFF);
+    entry->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
+    entry->fileSize = 0;
+}
+
+DirectoryCreateStatus create_directory_path_status(uint8_t volumeIndex,
+                                                    const char* path,
+                                                    block::Status* outBlockStatus)
+{
+    s_lastIoStatus = block::BLOCK_OK;
+    if (outBlockStatus) *outBlockStatus = block::BLOCK_OK;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !path) {
+        return DIRECTORY_CREATE_INVALID_ARGUMENT;
+    }
+    if (!s_volumes[volumeIndex].mounted) {
+        return DIRECTORY_CREATE_NOT_MOUNTED;
+    }
 
     FATVolume& vol = s_volumes[volumeIndex];
-    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) {
+        return DIRECTORY_CREATE_UNSUPPORTED_TYPE;
+    }
 
     DirEntry existing;
-    if (lookup_path(volumeIndex, path, &existing)) return false;
+    if (lookup_path(volumeIndex, path, &existing)) {
+        return DIRECTORY_CREATE_ALREADY_EXISTS;
+    }
 
     uint32_t parentCluster = 0;
     char dirName[128];
     if (!split_parent_and_name(volumeIndex, path, &parentCluster, dirName, sizeof(dirName))) {
-        return false;
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return s_lastIoStatus == block::BLOCK_OK
+            ? DIRECTORY_CREATE_PARENT_NOT_FOUND : DIRECTORY_CREATE_IO_ERROR;
     }
 
     char shortName[11];
-    if (!make_short_name(dirName, shortName)) return false;
+    if (!make_short_name(dirName, shortName)) {
+        return DIRECTORY_CREATE_INVALID_NAME;
+    }
 
     uint32_t firstCluster = allocate_cluster(vol);
-    if (firstCluster == 0) return false;
+    if (firstCluster == 0) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return s_lastIoStatus == block::BLOCK_OK
+            ? DIRECTORY_CREATE_NO_FREE_CLUSTER : DIRECTORY_CREATE_IO_ERROR;
+    }
 
+    // Allocate and clear the directory cluster before publishing its parent
+    // entry. FAT directory entries for . and .. make the result interoperable
+    // with external FAT readers and preserve the current driver's cluster
+    // traversal semantics.
     for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
         memzero(s_secBuf, vol.bytesPerSector);
+        if (sectorInCluster == 0) {
+            static const char dotName[11] = {'.', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
+            static const char dotDotName[11] = {'.', '.', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
+            FAT32_DirEntry* dot = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[0]);
+            FAT32_DirEntry* dotDot = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[32]);
+            initialize_directory_entry(dot, dotName, firstCluster);
+            initialize_directory_entry(dotDot, dotDotName, parentCluster);
+        }
         if (write_cluster_sector(vol, firstCluster, sectorInCluster, s_secBuf) != block::BLOCK_OK) {
-            return false;
+            const block::Status failedStatus = s_lastIoStatus;
+            release_allocated_cluster(vol, firstCluster);
+            if (outBlockStatus) *outBlockStatus = failedStatus;
+            return DIRECTORY_CREATE_IO_ERROR;
         }
     }
 
     uint32_t sector = 0;
     uint32_t offset = 0;
     if (!find_free_dir_entry(volumeIndex, parentCluster, &sector, &offset)) {
-        return false;
+        const block::Status failedStatus = s_lastIoStatus;
+        release_allocated_cluster(vol, firstCluster);
+        if (outBlockStatus) *outBlockStatus = failedStatus;
+        return failedStatus == block::BLOCK_OK
+            ? DIRECTORY_CREATE_NO_FREE_ENTRY : DIRECTORY_CREATE_IO_ERROR;
     }
 
     if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
-        return false;
+        const block::Status failedStatus = s_lastIoStatus;
+        release_allocated_cluster(vol, firstCluster);
+        if (outBlockStatus) *outBlockStatus = failedStatus;
+        return DIRECTORY_CREATE_IO_ERROR;
     }
 
     FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
-    memzero(de, sizeof(FAT32_DirEntry));
-    memcopy(de->name, shortName, 11);
-    de->attr = ATTR_DIRECTORY;
-    de->firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFF);
-    de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
-    de->fileSize = 0;
+    initialize_directory_entry(de, shortName, firstCluster);
+    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        const block::Status failedStatus = s_lastIoStatus;
+        release_allocated_cluster(vol, firstCluster);
+        if (outBlockStatus) *outBlockStatus = failedStatus;
+        return DIRECTORY_CREATE_IO_ERROR;
+    }
 
-    return write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
+    return DIRECTORY_CREATE_OK;
 }
 
 bool delete_path(uint8_t volumeIndex, const char* path, bool directory)

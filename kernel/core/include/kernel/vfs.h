@@ -209,6 +209,9 @@ Status unmount(const char* path);
 // Get mount point info by path.
 const MountPoint* get_mount(const char* path);
 
+// Return the stable mount-table slot selected for a path, or 0xFF.
+uint8_t mount_index_for_path(const char* path);
+
 // Get mount point info by index.
 const MountPoint* get_mount_by_index(uint8_t index);
 
@@ -329,6 +332,9 @@ uint64_t free_space(const char* mountPath);
 
 // Get filesystem type name as string.
 const char* fs_type_name(FSType type);
+
+// Translate a VFS status into a stable diagnostic name.
+const char* status_name(Status status);
 
 } // namespace vfs
 } // namespace kernel

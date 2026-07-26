@@ -25,6 +25,8 @@ $ErrorActionPreference = "Stop"
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  guideXOS Complete Build System" -ForegroundColor Cyan
 Write-Host "====================================" -ForegroundColor Cyan
+Write-Host "  Build identity: GXOS-DESKTOP-MKDIR-TRACE-V1" -ForegroundColor Cyan
+Write-Host "  Build probe ID: GXOS-DMKDIR-20260726-01" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
@@ -308,6 +310,14 @@ if (!$SkipKernel) {
         if (-not $cleanupSmokeEnabled) {
             Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\main.o")
         }
+        # The file-operation runtime smoke adds run_runtime_smoke() to the
+        # clipboard translation unit. CFLAGS are not part of the Makefile's
+        # object dependency key, so invalidate that object when switching
+        # between normal and smoke kernels instead of allowing a stale object
+        # to produce an undefined symbol at link time.
+        # Always rebuild this translation unit on scripted builds so the
+        # normal build after a smoke run cannot retain the smoke-only symbol.
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\file_clipboard.o")
         # Compiler diagnostics are written to stderr even for successful builds.
         # Keep them visible, but let the native make exit code remain the build
         # result instead of treating a warning as a terminating PowerShell error.
@@ -385,6 +395,20 @@ elseif (Test-Path $KernelBin) {
     }
     Copy-Item $KernelBin $TargetKernel -Force
     Write-Host "      Copied: kernel.elf ($(((Get-Item $TargetKernel).Length / 1KB).ToString('0.0')) KB)" -ForegroundColor Cyan
+    $identityPath = Join-Path $ESPDir "build-identity.txt"
+    @(
+        "identity=GXOS-DESKTOP-MKDIR-TRACE-V1"
+        "probe=GXOS-DMKDIR-20260726-01"
+        "imageKind=ESP-directory-used-as-QEMU-FAT-media"
+        "imageRoot=$ESPDir"
+        "bootloaderSource=$BootloaderBin"
+        "bootloaderSha256=$((Get-FileHash -LiteralPath $TargetBootloader -Algorithm SHA256).Hash)"
+        "kernelSource=$KernelBin"
+        "kernelSha256=$((Get-FileHash -LiteralPath $KernelBin -Algorithm SHA256).Hash)"
+        "espKernelSha256=$((Get-FileHash -LiteralPath $TargetKernel -Algorithm SHA256).Hash)"
+        "builtAtUtc=$([DateTime]::UtcNow.ToString('o'))"
+    ) | Set-Content -LiteralPath $identityPath -Encoding ascii
+    Write-Host "      Wrote: build-identity.txt" -ForegroundColor Cyan
 } else {
     Write-Host "      WARNING: Kernel binary not found at: $KernelBin" -ForegroundColor Yellow
     Write-Host "      ESP will boot but needs a kernel to run" -ForegroundColor Gray

@@ -51,6 +51,7 @@ control_panel.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
 file_explorer.cpp ^
+file_operations.cpp ^
 file_icon_provider.cpp ^
 firewall.cpp ^
 focus_indicator.cpp ^
@@ -112,7 +113,8 @@ vfs.cpp ^
 vnc_server.cpp ^
 wallpaper_registry.cpp ^
 welcome.cpp ^
-workspace_manager.cpp
+workspace_manager.cpp ^
+window_bounds_store.cpp
 
 REM Output
 set OUTPUT=guideXOSServer.experimental.exe

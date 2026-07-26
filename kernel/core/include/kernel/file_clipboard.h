@@ -9,6 +9,7 @@
 #define KERNEL_FILE_CLIPBOARD_H
 
 #include "kernel/types.h"
+#include "kernel/vfs.h"
 
 namespace kernel {
 namespace file_clipboard {
@@ -60,6 +61,13 @@ PasteResult paste_to_directory(const char* destinationDirectory);
 // Create a collision-free desktop-style folder name through the VFS. The
 // returned path is the actual path created by the current filesystem backend.
 bool create_unique_folder(const char* destinationDirectory, char* outPath, size_t outPathSize);
+
+// Diagnostic form used by the Desktop command. It returns the exact VFS
+// status from the shared create operation while preserving the legacy wrapper.
+bool create_unique_folder_ex(const char* destinationDirectory,
+                             char* outPath,
+                             size_t outPathSize,
+                             vfs::Status* outStatus);
 
 const char* paste_result_message(PasteResult result);
 

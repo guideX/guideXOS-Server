@@ -80,7 +80,8 @@ try {
     while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
         if (Test-Path -LiteralPath $serialLog) {
-            $output = [string](Get-Content -LiteralPath $serialLog -Raw)
+            $output = Get-Content -LiteralPath $serialLog -Raw
+            if ($null -eq $output) { $output = "" }
             if ($output.Contains("[FILE-OPS-RUNTIME-SMOKE] result=PASS") -or
                 $output.Contains("[FILE-OPS-RUNTIME-SMOKE] result=FAIL")) { break }
         }
@@ -90,7 +91,8 @@ try {
         Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
     }
 
-    $output = if (Test-Path -LiteralPath $serialLog) { [string](Get-Content -LiteralPath $serialLog -Raw) } else { "" }
+    $output = if (Test-Path -LiteralPath $serialLog) { Get-Content -LiteralPath $serialLog -Raw } else { "" }
+    if ($null -eq $output) { $output = "" }
     Write-Host $output
     if ($output.Contains("[FILE-OPS-RUNTIME-SMOKE] result=PASS")) {
         Write-Host "File-operation runtime smoke PASS. Serial log: $serialLog" -ForegroundColor Green

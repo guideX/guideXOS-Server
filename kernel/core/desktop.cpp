@@ -1367,28 +1367,11 @@ static bool bare_metal_desktop_directory_exists(const char* path)
 static bool bare_metal_desktop_directory_is_writable(const char* path)
 {
     if (!bare_metal_desktop_directory_exists(path)) return false;
-
-    // FAT directory creation is currently limited to short 8.3 names. The
-    // old long probe name was rejected even when the desktop directory was
-    // writable, and its collision handling could remove user content. Use a
-    // short reserved candidate and only remove a directory created by us.
-    static const char* kProbeNames[] = {
-        "GXPROBE", "GXPROB2", "GXPROB3", "GXPROB4", "GXPROB5"
-    };
-    for (const char* probeName : kProbeNames) {
-        char probePath[vfs::VFS_MAX_PATH];
-        vfs::join_path(path, probeName, probePath, sizeof(probePath));
-        if (!probePath[0]) continue;
-
-        vfs::FileInfo existing{};
-        if (vfs::stat(probePath, &existing) == vfs::VFS_OK) continue;
-
-        const vfs::Status probeStatus = vfs::mkdir(probePath);
-        if (probeStatus == vfs::VFS_OK) {
-            return vfs::rmdir(probePath) == vfs::VFS_OK;
-        }
-    }
-    return false;
+    // Do not perform a separate destructive write probe. The actual requested
+    // operation is the authoritative writability test and its detailed VFS /
+    // FAT status is reported through the desktop Create Folder trace.
+    const vfs::MountPoint* mount = vfs::get_mount(path);
+    return mount && !mount->readOnly && mount->fsType == vfs::FS_TYPE_FAT32;
 }
 
 static bool bare_metal_prepare_desktop_directory(const char* path)
@@ -1904,6 +1887,7 @@ static NotificationToast s_notification = {
     true,
     0
 };
+static char s_desktopMkdirFailureMessage[80] = {0};
 
 // ============================================================
 // Wallpaper Configuration
@@ -4007,6 +3991,24 @@ bool sync_live_directory_from_shell_cwd(const char* cwd)
 #if defined(GXOS_BARE_METAL)
 void refresh_bare_metal_desktop_folders_after_vfs_ready()
 {
+    // Desktop::init runs before VFS mount on bare metal, so the first backing
+    // directory resolution can only retain the default path. Re-resolve it
+    // now that the real writable mount exists, and create the directory if
+    // the freshly mounted volume does not contain it yet.
+    char resolvedDesktopPath[vfs::VFS_MAX_PATH] = {0};
+    if (bare_metal_ensure_desktop_backing_directory(resolvedDesktopPath,
+                                                     (int)sizeof(resolvedDesktopPath))) {
+        desktop_str_copy(s_bareMetalDesktopHomePath, resolvedDesktopPath,
+                         (int)sizeof(s_bareMetalDesktopHomePath));
+        desktop_str_copy(s_bareMetalDesktopCurrentPath, resolvedDesktopPath,
+                         (int)sizeof(s_bareMetalDesktopCurrentPath));
+        s_bareMetalDesktopHistoryCount = 0;
+        serial::puts("[desktop] desktop backing directory resolved after VFS ready: ");
+        serial::puts(resolvedDesktopPath);
+        serial::puts("\n");
+    } else {
+        serial::puts("[desktop] desktop backing directory unresolved after VFS ready\n");
+    }
     if (!bare_metal_ensure_standard_user_folders()) {
         serial::puts("[desktop] warning: one or more standard user folders could not be created\n");
     }
@@ -7192,15 +7194,26 @@ static void handle_context_menu_command(int item)
             break;
         }
         case 4: { // New Folder
+            serial::puts("DESKTOP_MENU_DISPATCH mode=Desktop item=4 command=CreateFolder\n");
             char newFolderPath[vfs::VFS_MAX_PATH]{};
-            const bool created = file_clipboard::create_unique_folder(
-                bare_metal_desktop_current_directory_path(), newFolderPath, sizeof(newFolderPath));
+            vfs::Status createStatus = vfs::VFS_ERR_INVALID;
+            const bool created = file_clipboard::create_unique_folder_ex(
+                bare_metal_desktop_current_directory_path(), newFolderPath, sizeof(newFolderPath), &createStatus);
             s_notification.title = "New Folder";
             if (created) {
                 s_notification.message = "Created on desktop";
+                serial::puts("DESKTOP_MKDIR_REFRESH=requested\n");
                 bare_metal_desktop_request_folder_refresh("desktop new folder");
+                serial::puts("DESKTOP_MKDIR_REFRESH=complete\n");
             } else {
-                s_notification.message = "Unable to create folder";
+                int failureMessagePos = 0;
+                s_desktopMkdirFailureMessage[0] = '\0';
+                desktop_append_text(s_desktopMkdirFailureMessage, &failureMessagePos,
+                                    (int)sizeof(s_desktopMkdirFailureMessage), "Unable: ");
+                desktop_append_text(s_desktopMkdirFailureMessage, &failureMessagePos,
+                                    (int)sizeof(s_desktopMkdirFailureMessage), vfs::status_name(createStatus));
+                s_notification.message = s_desktopMkdirFailureMessage;
+                serial::puts("DESKTOP_MKDIR_REFRESH=not-run\n");
             }
             s_notification.visible = true;
             s_notification.showTime = s_tickCounter;
@@ -8717,6 +8730,8 @@ void show_context_menu(uint32_t x, uint32_t y)
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = -1;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
+    serial::puts("DESKTOP_CONTEXT_MENU mode=Desktop pasteVisible=");
+    serial::puts(s_contextMenuPasteVisibleAtOpen ? "1\n" : "0\n");
     // Close start menu when context menu is shown
     s_startMenuOpen = false;
 }
@@ -11822,6 +11837,11 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             s_rightClickMenuOpen = false;
             s_rightClickHover = -1;
             if (menuItem >= 0) {
+                serial::puts("DESKTOP_MENU_DISPATCH_INPUT mode=");
+                serial::puts(s_contextMenuMode == ContextMenuMode::Desktop ? "Desktop" : "Other");
+                serial::puts(" item=0x");
+                serial::put_hex8(static_cast<uint8_t>(menuItem));
+                serial::puts("\n");
                 handle_context_menu_command(menuItem);
             } else {
                 s_contextMenuMode = ContextMenuMode::Desktop;

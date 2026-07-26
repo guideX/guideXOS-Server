@@ -35,6 +35,24 @@ enum FATType : uint8_t {
     FAT_TYPE_EXFAT = 3,
 };
 
+// Detailed result for the shared directory-create path. The old bool API
+// erased the failing layer and caused VFS to report every failure as
+// VFS_ERR_NOT_SUPPORTED.
+enum DirectoryCreateStatus : uint8_t {
+    DIRECTORY_CREATE_OK = 0,
+    DIRECTORY_CREATE_INVALID_ARGUMENT,
+    DIRECTORY_CREATE_NOT_MOUNTED,
+    DIRECTORY_CREATE_UNSUPPORTED_TYPE,
+    DIRECTORY_CREATE_ALREADY_EXISTS,
+    DIRECTORY_CREATE_PARENT_NOT_FOUND,
+    DIRECTORY_CREATE_INVALID_NAME,
+    DIRECTORY_CREATE_NO_FREE_CLUSTER,
+    DIRECTORY_CREATE_NO_FREE_ENTRY,
+    DIRECTORY_CREATE_IO_ERROR,
+};
+
+const char* directory_create_status_name(DirectoryCreateStatus status);
+
 // ================================================================
 // FAT12/16 BIOS Parameter Block (BPB) — first 62 bytes of sector 0
 // FAT32 reuses the common prefix and adds its own extension below.
@@ -302,6 +320,9 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
 
 // Create a new empty 8.3 directory in an existing directory.
 bool create_directory_path(uint8_t volumeIndex, const char* path);
+DirectoryCreateStatus create_directory_path_status(uint8_t volumeIndex,
+                                                    const char* path,
+                                                    block::Status* outBlockStatus);
 
 // Delete an existing 8.3 file or empty directory entry by path.
 bool delete_path(uint8_t volumeIndex, const char* path, bool directory);

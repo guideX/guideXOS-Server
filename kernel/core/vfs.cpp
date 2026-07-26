@@ -150,6 +150,20 @@ static const char* get_relative_path(const char* fullPath, const MountPoint* mou
     return relative;
 }
 
+static const char* block_status_name(block::Status status)
+{
+    switch (status) {
+        case block::BLOCK_OK: return "BLOCK_OK";
+        case block::BLOCK_ERR_IO: return "BLOCK_ERR_IO";
+        case block::BLOCK_ERR_TIMEOUT: return "BLOCK_ERR_TIMEOUT";
+        case block::BLOCK_ERR_NO_MEDIA: return "BLOCK_ERR_NO_MEDIA";
+        case block::BLOCK_ERR_NOT_READY: return "BLOCK_ERR_NOT_READY";
+        case block::BLOCK_ERR_INVALID: return "BLOCK_ERR_INVALID";
+        case block::BLOCK_ERR_UNSUPPORTED: return "BLOCK_ERR_UNSUPPORTED";
+        default: return "BLOCK_STATUS_UNKNOWN";
+    }
+}
+
 static bool has_source_prefix(const MountPoint* mount)
 {
     return mount && mount->sourcePrefix[0] != '\0' &&
@@ -569,6 +583,12 @@ Status unmount(const char* path)
 const MountPoint* get_mount(const char* path)
 {
     return find_mount_for_path(path);
+}
+
+uint8_t mount_index_for_path(const char* path)
+{
+    MountPoint* mount = find_mount_for_path(path);
+    return mount ? static_cast<uint8_t>(mount - s_mounts) : 0xFF;
 }
 
 const MountPoint* get_mount_by_index(uint8_t index)
@@ -1185,8 +1205,41 @@ Status mkdir(const char* path)
     char resolvedPath[VFS_MAX_PATH];
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
-        case FS_TYPE_FAT32:
-            return fs_fat::create_directory_path(mount->fsVolumeIndex, relPath) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+        case FS_TYPE_FAT32: {
+            block::Status blockStatus = block::BLOCK_OK;
+            const fs_fat::DirectoryCreateStatus fatStatus =
+                fs_fat::create_directory_path_status(mount->fsVolumeIndex, relPath, &blockStatus);
+            Status result = VFS_ERR_NOT_SUPPORTED;
+            switch (fatStatus) {
+                case fs_fat::DIRECTORY_CREATE_OK: result = VFS_OK; break;
+                case fs_fat::DIRECTORY_CREATE_ALREADY_EXISTS: result = VFS_ERR_EXISTS; break;
+                case fs_fat::DIRECTORY_CREATE_PARENT_NOT_FOUND: result = VFS_ERR_NOT_FOUND; break;
+                case fs_fat::DIRECTORY_CREATE_INVALID_NAME:
+                case fs_fat::DIRECTORY_CREATE_INVALID_ARGUMENT: result = VFS_ERR_INVALID; break;
+                case fs_fat::DIRECTORY_CREATE_NO_FREE_CLUSTER:
+                case fs_fat::DIRECTORY_CREATE_NO_FREE_ENTRY: result = VFS_ERR_NO_SPACE; break;
+                case fs_fat::DIRECTORY_CREATE_NOT_MOUNTED: result = VFS_ERR_NOT_MOUNT; break;
+                case fs_fat::DIRECTORY_CREATE_IO_ERROR: result = VFS_ERR_IO; break;
+                default: result = VFS_ERR_NOT_SUPPORTED; break;
+            }
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS_MKDIR] path=");
+            serial::puts(path);
+            serial::puts(" fs=");
+            serial::puts(fs_type_name(mount->fsType));
+            serial::puts(" fatStatus=");
+            serial::puts(fs_fat::directory_create_status_name(fatStatus));
+            serial::puts(" blockStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(blockStatus));
+            serial::puts("(");
+            serial::puts(block_status_name(blockStatus));
+            serial::puts(")");
+            serial::puts(" vfsStatus=");
+            serial::puts(status_name(result));
+            serial::puts("\n");
+#endif
+            return result;
+        }
 
         default:
             break;
@@ -1406,6 +1459,27 @@ const char* fs_type_name(FSType type)
         case FS_TYPE_ISO9660: return "ISO9660";
         case FS_TYPE_RAMDISK: return "RamDisk";
         default:              return "Unknown";
+    }
+}
+
+const char* status_name(Status status)
+{
+    switch (status) {
+        case VFS_OK: return "VFS_OK";
+        case VFS_ERR_NOT_FOUND: return "VFS_ERR_NOT_FOUND";
+        case VFS_ERR_EXISTS: return "VFS_ERR_EXISTS";
+        case VFS_ERR_NOT_DIR: return "VFS_ERR_NOT_DIR";
+        case VFS_ERR_IS_DIR: return "VFS_ERR_IS_DIR";
+        case VFS_ERR_NOT_EMPTY: return "VFS_ERR_NOT_EMPTY";
+        case VFS_ERR_NO_SPACE: return "VFS_ERR_NO_SPACE";
+        case VFS_ERR_READ_ONLY: return "VFS_ERR_READ_ONLY";
+        case VFS_ERR_INVALID: return "VFS_ERR_INVALID";
+        case VFS_ERR_IO: return "VFS_ERR_IO";
+        case VFS_ERR_NOT_MOUNT: return "VFS_ERR_NOT_MOUNT";
+        case VFS_ERR_BUSY: return "VFS_ERR_BUSY";
+        case VFS_ERR_TOO_MANY: return "VFS_ERR_TOO_MANY";
+        case VFS_ERR_NOT_SUPPORTED: return "VFS_ERR_NOT_SUPPORTED";
+        default: return "VFS_STATUS_UNKNOWN";
     }
 }
 

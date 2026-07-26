@@ -7,6 +7,7 @@
 //
 
 #include "include/kernel/version.h"
+#include "include/kernel/build_identity.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/vga.h"
 #include "include/kernel/framebuffer.h"
@@ -224,6 +225,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
     // Initialize serial debug output early
     kernel::serial::init();
+    kernel::serial::puts("[GXOS-BUILD] identity=");
+    kernel::serial::puts(GXOS_BUILD_IDENTITY);
+    kernel::serial::puts(" probe=");
+    kernel::serial::puts(GXOS_BUILD_PROBE_ID);
+    kernel::serial::puts("\n");
     kernel::serial::puts("[KERNEL] guideXOS kernel_main entered\n");
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
     kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2\n");
@@ -379,6 +385,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
+
+#ifdef GXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE
+        // Run the storage/clipboard regression immediately after VFS mount.
+        // Network initialization can wait for DHCP on QEMU or physical
+        // hardware, so it must not gate this filesystem-specific smoke result.
+        kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] issuing command=file-operations.runtime\n");
+        kernel::file_clipboard::run_runtime_smoke();
+        kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] done\n");
+#endif
         
         // ============================================================
         
@@ -535,12 +550,6 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::run_imageviewer_runtime_smoke();
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
 #endif
-#ifdef GXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE
-        kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] issuing command=file-operations.runtime\n");
-        kernel::file_clipboard::run_runtime_smoke();
-        kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] done\n");
-#endif
-        
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         

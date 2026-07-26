@@ -492,38 +492,186 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
     return copied;
 }
 
-bool create_unique_folder(const char* destinationDirectory, char* outPath, size_t outPathSize) {
-    if (!destinationDirectory || !destinationDirectory[0] || !outPath || outPathSize == 0) return false;
-    outPath[0] = '\0';
+static void log_folder_status(const char* key, vfs::Status status)
+{
+    serial::puts(key);
+    serial::puts("=");
+    serial::puts(vfs::status_name(status));
+    serial::puts("(");
+    serial::put_hex8(static_cast<uint8_t>(status));
+    serial::puts(")\n");
+}
+
+static void log_folder_text(const char* key, const char* value)
+{
+    serial::puts(key);
+    serial::puts("=");
+    serial::puts(value && value[0] ? value : "(empty)");
+    serial::puts("\n");
+}
+
+bool create_unique_folder(const char* destinationDirectory, char* outPath, size_t outPathSize)
+{
+    return create_unique_folder_ex(destinationDirectory, outPath, outPathSize, nullptr);
+}
+
+bool create_unique_folder_ex(const char* destinationDirectory,
+                             char* outPath,
+                             size_t outPathSize,
+                             vfs::Status* outStatus)
+{
+    vfs::Status finalStatus = vfs::VFS_ERR_INVALID;
+    if (outStatus) *outStatus = finalStatus;
+    if (outPath && outPathSize > 0) outPath[0] = '\0';
+
+    serial::puts("DESKTOP_MKDIR_BEGIN\n");
+    log_folder_text("DESKTOP_MKDIR_PARENT", destinationDirectory);
+    if (!destinationDirectory || !destinationDirectory[0] || !outPath || outPathSize == 0) {
+        serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=argument-validation\n");
+        return false;
+    }
 
     char normalizedDestination[vfs::VFS_MAX_PATH];
-    if (!destination_is_valid(destinationDirectory, normalizedDestination, sizeof(normalizedDestination))) return false;
+    vfs::normalize_path(destinationDirectory, normalizedDestination, sizeof(normalizedDestination));
+    log_folder_text("DESKTOP_MKDIR_PARENT_NORMALIZED", normalizedDestination);
+
+    vfs::FileInfo parentInfo{};
+    const vfs::Status parentStatus = vfs::stat(normalizedDestination, &parentInfo);
+    serial::puts("DESKTOP_MKDIR_PARENT_EXISTS=");
+    serial::puts(parentStatus == vfs::VFS_OK && parentInfo.type == vfs::FILE_TYPE_DIRECTORY ? "1" : "0");
+    serial::puts("\n");
+    log_folder_status("DESKTOP_MKDIR_PARENT_STATUS", parentStatus);
+    if (parentStatus != vfs::VFS_OK) {
+        finalStatus = parentStatus;
+        serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=parent-resolution\n");
+        if (outStatus) *outStatus = finalStatus;
+        return false;
+    }
+    if (parentInfo.type != vfs::FILE_TYPE_DIRECTORY) {
+        finalStatus = vfs::VFS_ERR_NOT_DIR;
+        log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+        serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=parent-type\n");
+        if (outStatus) *outStatus = finalStatus;
+        return false;
+    }
+
+    const vfs::MountPoint* mount = vfs::get_mount(normalizedDestination);
+    const uint8_t mountIndex = vfs::mount_index_for_path(normalizedDestination);
+    if (!mount) {
+        finalStatus = vfs::VFS_ERR_NOT_MOUNT;
+        log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+        serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=mount-resolution\n");
+        if (outStatus) *outStatus = finalStatus;
+        return false;
+    }
+    serial::puts("DESKTOP_MKDIR_FS=");
+    serial::puts(vfs::fs_type_name(mount->fsType));
+    serial::puts(" mountId=0x");
+    serial::put_hex8(mountIndex);
+    serial::puts(" mount=");
+    serial::puts(mount->path);
+    serial::puts(" device=0x");
+    serial::put_hex8(mount->blockDevIndex);
+    serial::puts(" writable=");
+    serial::puts(mount->readOnly ? "0" : "1");
+    serial::puts(" alias=");
+    serial::puts(mount->alias ? "1" : "0");
+    serial::puts(" source=");
+    serial::puts(mount->sourcePrefix[0] ? mount->sourcePrefix : "/");
+    serial::puts("\n");
+    if (mount->readOnly) {
+        finalStatus = vfs::VFS_ERR_READ_ONLY;
+        log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+        serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=writable-check\n");
+        if (outStatus) *outStatus = finalStatus;
+        return false;
+    }
+    if (mount->fsType != vfs::FS_TYPE_FAT32) {
+        finalStatus = vfs::VFS_ERR_NOT_SUPPORTED;
+        log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+        serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=filesystem-type\n");
+        if (outStatus) *outStatus = finalStatus;
+        return false;
+    }
 
     char folderName[vfs::VFS_MAX_FILENAME];
     for (int suffixIndex = 1; suffixIndex < kMaxNameCandidates; ++suffixIndex) {
-        if (!make_new_folder_name(suffixIndex, folderName, sizeof(folderName))) return false;
+        if (!make_new_folder_name(suffixIndex, folderName, sizeof(folderName))) {
+            finalStatus = vfs::VFS_ERR_INVALID;
+            log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+            serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=name-generation\n");
+            if (outStatus) *outStatus = finalStatus;
+            return false;
+        }
+        log_folder_text("DESKTOP_MKDIR_NAME", folderName);
         char candidatePath[vfs::VFS_MAX_PATH];
         vfs::join_path(normalizedDestination, folderName, candidatePath, sizeof(candidatePath));
-        if (!candidatePath[0]) return false;
-        if (vfs::exists(candidatePath)) continue;
-        if (vfs::mkdir(candidatePath) == vfs::VFS_OK) {
+        log_folder_text("DESKTOP_MKDIR_PATH", candidatePath);
+        if (!candidatePath[0]) {
+            finalStatus = vfs::VFS_ERR_INVALID;
+            log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+            serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=path-join\n");
+            if (outStatus) *outStatus = finalStatus;
+            return false;
+        }
+
+        vfs::FileInfo existing{};
+        const vfs::Status candidateStatus = vfs::stat(candidatePath, &existing);
+        log_folder_status("DESKTOP_MKDIR_CANDIDATE_STAT", candidateStatus);
+        if (candidateStatus == vfs::VFS_OK) {
+            serial::puts("DESKTOP_MKDIR_COLLISION=1\n");
+            continue;
+        }
+        if (candidateStatus != vfs::VFS_ERR_NOT_FOUND) {
+            finalStatus = candidateStatus;
+            log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+            serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=candidate-resolution\n");
+            if (outStatus) *outStatus = finalStatus;
+            return false;
+        }
+
+        serial::puts("DESKTOP_MKDIR_VFS=kernel::vfs::mkdir\n");
+        finalStatus = vfs::mkdir(candidatePath);
+        log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+        if (finalStatus == vfs::VFS_OK) {
             vfs::FileInfo createdInfo{};
-            if (vfs::stat(candidatePath, &createdInfo) != vfs::VFS_OK ||
-                createdInfo.type != vfs::FILE_TYPE_DIRECTORY) {
-                vfs::rmdir(candidatePath);
+            const vfs::Status verifyStatus = vfs::stat(candidatePath, &createdInfo);
+            serial::puts("DESKTOP_MKDIR_VERIFY=");
+            serial::puts(verifyStatus == vfs::VFS_OK &&
+                         createdInfo.type == vfs::FILE_TYPE_DIRECTORY ? "1" : "0");
+            serial::puts("\n");
+            log_folder_status("DESKTOP_MKDIR_VERIFY_STATUS", verifyStatus);
+            if (verifyStatus != vfs::VFS_OK || createdInfo.type != vfs::FILE_TYPE_DIRECTORY) {
+                finalStatus = verifyStatus == vfs::VFS_OK ? vfs::VFS_ERR_NOT_DIR : verifyStatus;
+                serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=verification\n");
+                if (outStatus) *outStatus = finalStatus;
                 return false;
             }
             if (!copy_text(outPath, outPathSize, candidatePath)) {
-                vfs::rmdir(candidatePath);
+                finalStatus = vfs::VFS_ERR_INVALID;
+                log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+                serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=result-copy\n");
+                if (outStatus) *outStatus = finalStatus;
                 return false;
             }
             ++s_operationGeneration;
+            serial::puts("DESKTOP_MKDIR_SUCCESS=1\n");
+            if (outStatus) *outStatus = vfs::VFS_OK;
             return true;
         }
-        vfs::FileInfo existing{};
-        if (vfs::stat(candidatePath, &existing) == vfs::VFS_OK) continue;
+        if (finalStatus == vfs::VFS_ERR_EXISTS) {
+            serial::puts("DESKTOP_MKDIR_COLLISION=1\n");
+            continue;
+        }
+        serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=creation\n");
+        if (outStatus) *outStatus = finalStatus;
         return false;
     }
+
+    finalStatus = vfs::VFS_ERR_EXISTS;
+    log_folder_status("DESKTOP_MKDIR_RESULT", finalStatus);
+    serial::puts("DESKTOP_MKDIR_FAILURE_STAGE=name-exhaustion\n");
+    if (outStatus) *outStatus = finalStatus;
     return false;
 }
 
@@ -567,6 +715,12 @@ static bool smoke_is_directory(const char* path) {
     return path && vfs::stat(path, &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_DIRECTORY;
 }
 
+static void smoke_phase(const char* phase) {
+    serial::puts("[FILE-OPS-RUNTIME-SMOKE] phase=");
+    serial::puts(phase ? phase : "unknown");
+    serial::puts("\n");
+}
+
 void run_runtime_smoke() {
     static const uint8_t sourceBytes[] = {0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF};
     static const uint8_t existingBytes[] = {0xCA, 0xFE};
@@ -595,6 +749,31 @@ void run_runtime_smoke() {
     vfs::join_path(folder, "EMPTYDIR", emptyDirectory, sizeof(emptyDirectory));
     ok &= vfs::mkdir(emptyDirectory) == vfs::VFS_OK;
 
+    // Exercise the exact FAT short-name boundary independently of the
+    // desktop naming policy. This catches a filesystem-layer rejection of
+    // otherwise valid names before a collision-safe name is blamed.
+    static const char* shortNames[] = {"TEST", "FOLDER", "NEWFOLD", "NEWFOL01"};
+    for (size_t shortIndex = 0; shortIndex < sizeof(shortNames) / sizeof(shortNames[0]); ++shortIndex) {
+        char shortPath[vfs::VFS_MAX_PATH];
+        vfs::join_path(root, shortNames[shortIndex], shortPath, sizeof(shortPath));
+        const vfs::Status shortStatus = vfs::mkdir(shortPath);
+        serial::puts("[FILE-OPS-RUNTIME-SMOKE] shortName=");
+        serial::puts(shortNames[shortIndex]);
+        serial::puts(" status=");
+        serial::puts(vfs::status_name(shortStatus));
+        serial::puts("\n");
+        ok &= shortStatus == vfs::VFS_OK;
+        ok &= smoke_is_directory(shortPath);
+        ok &= vfs::mkdir(shortPath) == vfs::VFS_ERR_EXISTS;
+    }
+    ok &= vfs::mkdir("/Desktop/GXOPSMK/MISSING/TEST") == vfs::VFS_ERR_NOT_FOUND;
+
+    const vfs::Status readOnlyStatus = vfs::mkdir("/system/TEST");
+    serial::puts("[FILE-OPS-RUNTIME-SMOKE] readOnlyMount status=");
+    serial::puts(vfs::status_name(readOnlyStatus));
+    serial::puts("\n");
+    ok &= readOnlyStatus == vfs::VFS_ERR_READ_ONLY;
+
     char sourceFile[vfs::VFS_MAX_PATH];
     vfs::join_path(root, "SRC.TXT", sourceFile, sizeof(sourceFile));
     ok &= smoke_write_file(sourceFile, sourceBytes, sizeof(sourceBytes));
@@ -602,14 +781,19 @@ void run_runtime_smoke() {
     char nestedFile[vfs::VFS_MAX_PATH];
     vfs::join_path(nested, "NEST.TXT", nestedFile, sizeof(nestedFile));
     ok &= smoke_write_file(nestedFile, sourceBytes, sizeof(sourceBytes));
+    smoke_phase("files-written");
 
     const uint64_t generationBefore = operation_generation();
     ok &= set_file(sourceFile, Operation::Copy);
+    smoke_phase("copy-file-begin");
     ok &= paste_to_directory(destination) == PasteResult::Success;
+    smoke_phase("copy-file-complete");
     char copiedFile[vfs::VFS_MAX_PATH];
     vfs::join_path(destination, "SRC.TXT", copiedFile, sizeof(copiedFile));
     ok &= smoke_file_equals(sourceFile, sourceBytes, sizeof(sourceBytes));
+    smoke_phase("source-verified");
     ok &= smoke_file_equals(copiedFile, sourceBytes, sizeof(sourceBytes));
+    smoke_phase("copy-verified");
 
     ok &= set_file(sourceFile, Operation::Move);
     ok &= paste_to_directory(destination) == PasteResult::Success;
@@ -617,6 +801,7 @@ void run_runtime_smoke() {
     vfs::join_path(destination, "SRC~1.TXT", movedFile, sizeof(movedFile));
     ok &= !vfs::exists(sourceFile);
     ok &= smoke_file_equals(movedFile, sourceBytes, sizeof(sourceBytes));
+    smoke_phase(ok ? "after-move-pass" : "after-move-fail");
 
     char collisionSource[vfs::VFS_MAX_PATH];
     vfs::join_path(root, "COLLIDE.TXT", collisionSource, sizeof(collisionSource));
@@ -627,9 +812,13 @@ void run_runtime_smoke() {
     ok &= set_file(collisionSource, Operation::Copy);
     ok &= paste_to_directory(destination) == PasteResult::Success;
     char collisionCopy[vfs::VFS_MAX_PATH];
-    vfs::join_path(destination, "COLLIDE~1.TXT", collisionCopy, sizeof(collisionCopy));
+    // The shared candidate generator reserves two characters for ~N, so the
+    // FAT-valid 8.3 result is COLLID~1.TXT (not the invalid nine-character
+    // COLLIDE~1.TXT spelling).
+    vfs::join_path(destination, "COLLID~1.TXT", collisionCopy, sizeof(collisionCopy));
     ok &= smoke_file_equals(collisionExisting, existingBytes, sizeof(existingBytes));
     ok &= smoke_file_equals(collisionCopy, sourceBytes, sizeof(sourceBytes));
+    smoke_phase(ok ? "after-collision-pass" : "after-collision-fail");
 
     ok &= set_file(folder, Operation::Copy);
     ok &= paste_to_directory(destination) == PasteResult::Success;
@@ -648,6 +837,7 @@ void run_runtime_smoke() {
     ok &= paste_to_directory(nested) == PasteResult::Unsupported;
     ok &= smoke_is_directory(folder) && has_pending_file();
     clear();
+    smoke_phase(ok ? "after-folder-pass" : "after-folder-fail");
 
     char newFolderOne[vfs::VFS_MAX_PATH];
     char newFolderTwo[vfs::VFS_MAX_PATH];
@@ -656,6 +846,7 @@ void run_runtime_smoke() {
     ok &= newFolderOne[0] && newFolderTwo[0] && !same_path(newFolderOne, newFolderTwo);
     ok &= smoke_is_directory(newFolderOne) && smoke_is_directory(newFolderTwo);
     ok &= operation_generation() > generationBefore;
+    smoke_phase(ok ? "after-new-folders-pass" : "after-new-folders-fail");
 
     char staleFile[vfs::VFS_MAX_PATH];
     vfs::join_path(root, "STALE.TXT", staleFile, sizeof(staleFile));
@@ -664,9 +855,13 @@ void run_runtime_smoke() {
     ok &= vfs::unlink(staleFile) == vfs::VFS_OK;
     ok &= paste_to_directory(destination) == PasteResult::SourceMissing;
     ok &= !has_pending_file();
+    smoke_phase(ok ? "before-cleanup-pass" : "before-cleanup-fail");
 
     clear();
     const PasteResult cleanupResult = remove_entry_tree(root);
+    serial::puts("[FILE-OPS-RUNTIME-SMOKE] cleanup=");
+    serial::puts(paste_result_message(cleanupResult));
+    serial::puts("\n");
     ok &= cleanupResult == PasteResult::Success;
     serial::puts("[FILE-OPS-RUNTIME-SMOKE] result=");
     serial::puts(ok ? "PASS\n" : "FAIL\n");
