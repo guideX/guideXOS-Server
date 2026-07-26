@@ -86,6 +86,7 @@ navigator_html_parser.cpp ^
 native_app_debug_log.cpp ^
 native_app_process_table.cpp ^
 native_app_runtime.cpp ^
+native_build_service.cpp ^
 native_elf_executor.cpp ^
 native_elf_image_loader.cpp ^
 native_elf_launch_pipeline.cpp ^

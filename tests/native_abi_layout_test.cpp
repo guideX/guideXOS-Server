@@ -52,7 +52,17 @@ static_assert(offsetof(gx_host_calls, file_list) == 136, "file_list slot changed
 static_assert(offsetof(gx_host_calls, file_write_all) == 144, "file_write_all slot changed");
 static_assert(offsetof(gx_host_calls, file_create_directory) == 152, "file_create_directory slot changed");
 static_assert(offsetof(gx_host_calls, file_remove) == 160, "file_remove slot changed");
-static_assert(sizeof(gx_host_calls) == 168, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, build_project_start) == 168, "build start slot changed");
+static_assert(offsetof(gx_host_calls, build_project_poll) == 176, "build poll slot changed");
+static_assert(offsetof(gx_host_calls, build_project_release) == 184, "build release slot changed");
+static_assert(sizeof(gx_host_calls) == 192, "gx_host_calls size changed");
+static_assert(sizeof(gx_build_request) == 72, "build request size changed");
+static_assert(offsetof(gx_build_request, projectRoot) == 8, "build request project root offset changed");
+static_assert(offsetof(gx_build_request, configuration) == 64, "build request configuration offset changed");
+static_assert(sizeof(gx_build_output_line) == 260, "build output line size changed");
+static_assert(offsetof(gx_build_snapshot, handle) == 8, "build snapshot handle offset changed");
+static_assert(offsetof(gx_build_snapshot, artifactPath) == 72, "build snapshot artifact offset changed");
+static_assert(sizeof(gx_build_snapshot) == 8784, "build snapshot size changed");
 
 constexpr uint64_t kPacManFrameWidth = 448;
 constexpr uint64_t kPacManFrameHeight = 553;
@@ -67,7 +77,9 @@ int main() {
                           offsetof(gx_host_calls, present_frame);
     const bool workspaceAppended = offsetof(gx_host_calls, file_write_all) >
                                    offsetof(gx_host_calls, file_list);
-    if (!appended || !workspaceAppended) return 1;
+    const bool buildAppended = offsetof(gx_host_calls, build_project_start) >
+                               offsetof(gx_host_calls, file_remove);
+    if (!appended || !workspaceAppended || !buildAppended) return 1;
     std::cout << "Native ABI layout test PASS\n";
     return 0;
 }

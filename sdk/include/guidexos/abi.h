@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.h"
+#include "build.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -120,6 +121,11 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *file_write_all)(gx_app_context* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten);
     gx_result (GX_CALL *file_create_directory)(gx_app_context* ctx, const char* path);
     gx_result (GX_CALL *file_remove)(gx_app_context* ctx, const char* path);
+    /* Hosted-development build service. These slots are append-only and are
+     * not a production or bare-metal build API. */
+    gx_result (GX_CALL *build_project_start)(gx_app_context* ctx, const gx_build_request* request, gx_build_handle* outHandle);
+    gx_result (GX_CALL *build_project_poll)(gx_app_context* ctx, gx_build_handle handle, gx_build_snapshot* outSnapshot);
+    gx_result (GX_CALL *build_project_release)(gx_app_context* ctx, gx_build_handle handle);
 } gx_host_calls;
 
 #ifdef __cplusplus
