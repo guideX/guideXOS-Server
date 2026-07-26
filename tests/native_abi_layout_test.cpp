@@ -50,7 +50,9 @@ static_assert(offsetof(gx_host_calls, file_stat) == 120, "file_stat slot changed
 static_assert(offsetof(gx_host_calls, file_read_workspace) == 128, "file_read_workspace slot changed");
 static_assert(offsetof(gx_host_calls, file_list) == 136, "file_list slot changed");
 static_assert(offsetof(gx_host_calls, file_write_all) == 144, "file_write_all slot changed");
-static_assert(sizeof(gx_host_calls) == 152, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, file_create_directory) == 152, "file_create_directory slot changed");
+static_assert(offsetof(gx_host_calls, file_remove) == 160, "file_remove slot changed");
+static_assert(sizeof(gx_host_calls) == 168, "gx_host_calls size changed");
 
 constexpr uint64_t kPacManFrameWidth = 448;
 constexpr uint64_t kPacManFrameHeight = 553;

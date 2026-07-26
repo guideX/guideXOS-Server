@@ -118,6 +118,8 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *file_read_workspace)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
     gx_result (GX_CALL *file_list)(gx_app_context* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated);
     gx_result (GX_CALL *file_write_all)(gx_app_context* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten);
+    gx_result (GX_CALL *file_create_directory)(gx_app_context* ctx, const char* path);
+    gx_result (GX_CALL *file_remove)(gx_app_context* ctx, const char* path);
 } gx_host_calls;
 
 #ifdef __cplusplus

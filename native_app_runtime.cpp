@@ -789,6 +789,31 @@ gx_result hostFileWriteAll(NativeGxAppContext* ctx, const char* path, const void
     return GX_OK;
 }
 
+gx_result hostFileCreateDirectory(NativeGxAppContext* ctx, const char* path) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !hasWorkspaceWritePermission(*context)) return context ? GX_ERROR_PERMISSION_DENIED : GX_ERROR_INVALID_ARGUMENT;
+    std::filesystem::path resolved;
+    std::string failure;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return workspacePathFailureResult(failure);
+    std::error_code ec;
+    if (std::filesystem::exists(std::filesystem::symlink_status(resolved, ec))) return GX_ERROR_FAILED;
+    if (ec || !std::filesystem::create_directory(resolved, ec) || ec) return GX_ERROR_FAILED;
+    return GX_OK;
+}
+
+gx_result hostFileRemove(NativeGxAppContext* ctx, const char* path) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !hasWorkspaceWritePermission(*context)) return context ? GX_ERROR_PERMISSION_DENIED : GX_ERROR_INVALID_ARGUMENT;
+    std::filesystem::path resolved;
+    std::string failure;
+    if (!copyWorkspacePath(*context, path, resolved, failure)) return workspacePathFailureResult(failure);
+    std::error_code ec;
+    const std::filesystem::file_status status = std::filesystem::symlink_status(resolved, ec);
+    if (ec || !std::filesystem::exists(status) || std::filesystem::is_symlink(status)) return GX_ERROR_FAILED;
+    if (!std::filesystem::remove(resolved, ec) || ec) return GX_ERROR_FAILED;
+    return GX_OK;
+}
+
 gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -1525,6 +1550,8 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.file_read_workspace = hostFileReadWorkspace;
     context.hostCalls.file_list = hostFileList;
     context.hostCalls.file_write_all = hostFileWriteAll;
+    context.hostCalls.file_create_directory = hostFileCreateDirectory;
+    context.hostCalls.file_remove = hostFileRemove;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");
@@ -1725,6 +1752,8 @@ bool RunNativeFilesystemContractTest(std::string* failure) {
         context.hostCalls.file_read_workspace = hostFileReadWorkspace;
         context.hostCalls.file_list = hostFileList;
         context.hostCalls.file_write_all = hostFileWriteAll;
+        context.hostCalls.file_create_directory = hostFileCreateDirectory;
+        context.hostCalls.file_remove = hostFileRemove;
         appContext.size = static_cast<uint32_t>(sizeof(appContext));
         appContext.host = &context.hostCalls;
 
