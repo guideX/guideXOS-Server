@@ -1,0 +1,2 @@
+error=Another compositor owns the compositor window.
+remaining-owned-server-processes=0
