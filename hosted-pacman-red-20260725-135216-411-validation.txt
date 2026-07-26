@@ -1,0 +1,22 @@
+run=20260725-135216-411
+server-wrapper-pid=9672
+server-pid=2972
+compositor=found
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-initial-seq1-gen4.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=1 compositorFrameSequence=4 frameGeneration=4 paintGeneration=4 captureGeneration=1 pacman=64,264 red=224,184 direction=left target=64,264 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-initial-seq1-gen4.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-corridor-seq16-gen16.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=16 compositorFrameSequence=16 frameGeneration=16 paintGeneration=16 captureGeneration=2 pacman=64,264 red=201,184 direction=left target=64,264 animationFrame=1 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-corridor-seq16-gen16.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-intersection-turn-seq39-gen39.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=39 compositorFrameSequence=39 frameGeneration=39 paintGeneration=39 captureGeneration=3 pacman=64,264 red=160,185 direction=down target=64,264 animationFrame=1 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-intersection-turn-seq39-gen39.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-tunnel-seq246-gen246.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=246 compositorFrameSequence=246 frameGeneration=246 paintGeneration=246 captureGeneration=4 pacman=416,232 red=18,232 direction=left target=416,232 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-tunnel-seq246-gen246.png
+distinct-red-positions=True
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-moving-collision-dying-seq258-gen260.png
+capture-target runtimeId=1 windowId=1000 state=Dying frameSequence=258 compositorFrameSequence=260 frameGeneration=260 paintGeneration=260 captureGeneration=5 pacman=416,232 red=431,232 direction=left target=416,232 animationFrame=1 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-moving-collision-dying-seq258-gen260.png
+capture=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-moving-collision-ready-seq305-gen305.png
+capture-target runtimeId=1 windowId=1000 state=Ready frameSequence=305 compositorFrameSequence=305 frameGeneration=305 paintGeneration=305 captureGeneration=6 pacman=224,376 red=224,184 direction=left target=224,376 animationFrame=0 filename=D:\dev\pacman\guidexos\captures\pacman-red-20260725-135216-411-moving-collision-ready-seq305-gen305.png
+moving-red-collision-sequence=True
+escape-cleanup=True
+zero-owned-windows=True
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

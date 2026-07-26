@@ -425,7 +425,8 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     mp.fsType = fsType;
     mp.blockDevIndex = blockDevIndex;
     mp.fsVolumeIndex = fsVolume;
-    mp.readOnly = false;
+    const block::BlockDevice* blockDevice = block::get_device(blockDevIndex);
+    mp.readOnly = !blockDevice || !blockDevice->writeFn;
     mp.alias = false;
     mp.sourcePrefix[0] = '\0';
     
@@ -1166,6 +1167,16 @@ void closedir(uint8_t iterator)
 Status mkdir(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
+
+    FileInfo existing{};
+    if (stat(path, &existing) == VFS_OK) return VFS_ERR_EXISTS;
+
+    char parentPath[VFS_MAX_PATH];
+    parent_path(path, parentPath, sizeof(parentPath));
+    FileInfo parentInfo{};
+    Status parentStatus = stat(parentPath, &parentInfo);
+    if (parentStatus != VFS_OK) return parentStatus;
+    if (parentInfo.type != FILE_TYPE_DIRECTORY) return VFS_ERR_NOT_DIR;
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;

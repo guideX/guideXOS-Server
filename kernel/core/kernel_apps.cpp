@@ -3877,6 +3877,7 @@ FileExplorerApp::FileExplorerApp()
     : m_entryCount(0), m_selected(0), m_scroll(0),
       m_lastClickIndex(-1), m_lastClickTick(0),
       m_backBtnId(-1), m_upBtnId(-1), m_refreshBtnId(-1), m_rootBtnId(-1),
+      m_createFolderBtnId(-1),
       m_renameFileBtnId(-1), m_deleteFileBtnId(-1), m_renameFolderBtnId(-1), m_deleteFolderBtnId(-1),
       m_confirmDeleteBtnId(-1), m_cancelDeleteBtnId(-1), m_renamePrompt(false), m_deleteConfirm(false),
       m_deleteTargetIsDir(false) {
@@ -3884,6 +3885,7 @@ FileExplorerApp::FileExplorerApp()
     strcopy(m_currentPath, "/", MAX_PATH_LEN);
     strcopy(m_status, "Ready", sizeof(m_status));
     m_renameValue[0] = '\0';
+    m_createFolderPrompt = false;
     m_deleteTarget[0] = '\0';
     m_deleteTargetName[0] = '\0';
     m_contextMenuOpen = false;
@@ -3891,6 +3893,7 @@ FileExplorerApp::FileExplorerApp()
     m_contextMenuY = 0;
     m_contextMenuHover = -1;
     m_contextMenuPasteVisible = false;
+    m_contextMenuCreateFolderVisible = false;
     m_contextMenuTarget = ContextMenuTarget::Entry;
     m_propertiesOpen = false;
     m_propertiesIsDir = false;
@@ -4036,6 +4039,7 @@ bool FileExplorerApp::initWithParam(const char* startPath) {
     m_upBtnId = addButton(66, 5, 38, 20, "Up");
     m_refreshBtnId = addButton(108, 5, 58, 20, "Refresh");
     m_rootBtnId = addButton(170, 5, 70, 20, "Mounts");
+    m_createFolderBtnId = addButton(436, 5, 94, 20, "New Folder");
     m_renameFileBtnId = addButton(248, 5, 82, 20, "Rename File");
     m_deleteFileBtnId = addButton(334, 5, 78, 20, "Delete File");
     m_renameFolderBtnId = addButton(248, 5, 92, 20, "Rename Dir");
@@ -4169,9 +4173,13 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
     if (m_renamePrompt) {
         framebuffer::fill_rect(x + 220, y + 165, 360, 92, rgb(245, 245, 250));
-        appDrawText(x + 232, y + 182, "Rename selected item", rgb(30, 30, 30));
+        appDrawText(x + 232, y + 182, m_createFolderPrompt ? "Create folder" : "Rename selected item", rgb(30, 30, 30));
         appDrawText(x + 232, y + 205, m_renameValue, rgb(20, 20, 20));
-        appDrawText(x + 232, y + 230, "Enter=OK  Esc=Cancel  Backspace=Delete", rgb(80, 80, 80));
+        appDrawText(x + 232, y + 230,
+                    m_createFolderPrompt
+                        ? "Enter=Create  Esc=Cancel  Backspace=Delete"
+                        : "Enter=OK  Esc=Cancel  Backspace=Delete",
+                    rgb(80, 80, 80));
     } else if (m_deleteConfirm) {
         framebuffer::fill_rect(x + 220, y + 165, 390, 92, rgb(250, 245, 245));
         appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Move this folder to Trash?" : "Move this file to Trash?", rgb(80, 30, 30));
@@ -4210,9 +4218,11 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
 
     if (m_renamePrompt) {
         if (key == '\n' || key == '\r') {
-            commitRename();
+            if (m_createFolderPrompt) commitCreateFolder();
+            else commitRename();
         } else if (key == 27) {
-            cancelRename();
+            if (m_createFolderPrompt) cancelCreateFolder();
+            else cancelRename();
         } else if (key == '\b') {
             int len = strlen_local(m_renameValue);
             if (len > 0) m_renameValue[len - 1] = '\0';
@@ -4304,7 +4314,8 @@ void FileExplorerApp::onKeyChar(char c) {
     if (!m_renamePrompt) return;
     if (c >= 32 && c < 127) {
         int len = strlen_local(m_renameValue);
-        if (len < (int)sizeof(m_renameValue) - 1 && c != '/') {
+        int maxNameLength = m_createFolderPrompt ? 8 : (int)sizeof(m_renameValue) - 1;
+        if (len < maxNameLength && c != '/' && c != '\\' && (!m_createFolderPrompt || c != ' ')) {
             m_renameValue[len] = c;
             m_renameValue[len + 1] = '\0';
         }
@@ -4358,6 +4369,7 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
             updateActionButtons();
             m_contextMenuTarget = ContextMenuTarget::Entry;
             m_contextMenuPasteVisible = false;
+            m_contextMenuCreateFolderVisible = false;
             if (m_entries[m_selected].isDir) {
                 char destinationDirectory[MAX_PATH_LEN];
                 joinPath(m_currentPath, m_entries[m_selected].name, destinationDirectory, sizeof(destinationDirectory));
@@ -4367,7 +4379,9 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
         } else {
             m_contextMenuTarget = ContextMenuTarget::CurrentDirectory;
             m_contextMenuPasteVisible = file_clipboard::can_paste_to(m_currentPath);
-            m_contextMenuOpen = contextMenuHasCurrentDirectoryPaste();
+            m_contextMenuCreateFolderVisible = canCreateFolderHere();
+            m_contextMenuOpen = contextMenuHasCurrentDirectoryPaste() ||
+                                contextMenuHasCurrentDirectoryCreateFolder();
         }
         m_contextMenuX = localX;
         m_contextMenuY = localY;
@@ -4455,6 +4469,8 @@ void FileExplorerApp::onWidgetClick(int widgetId) {
         refresh();
         updateActionButtons();
         invalidate();
+    } else if (widgetId == m_createFolderBtnId) {
+        beginCreateFolder();
     } else if (widgetId == m_renameFileBtnId || widgetId == m_renameFolderBtnId) {
         beginRenameSelected();
     } else if (widgetId == m_deleteFileBtnId || widgetId == m_deleteFolderBtnId) {
@@ -4599,10 +4615,23 @@ void FileExplorerApp::goUp() {
     }
 }
 
+bool FileExplorerApp::canCreateFolderHere() const {
+    vfs::FileInfo info{};
+    if (vfs::stat(m_currentPath, &info) != vfs::VFS_OK ||
+        info.type != vfs::FILE_TYPE_DIRECTORY) {
+        return false;
+    }
+
+    const vfs::MountPoint* mount = vfs::get_mount(m_currentPath);
+    return mount && mount->active && !mount->readOnly &&
+           mount->fsType == vfs::FS_TYPE_FAT32;
+}
+
 void FileExplorerApp::updateActionButtons() {
     bool hasSelection = m_selected >= 0 && m_selected < m_entryCount;
     bool isDir = hasSelection && m_entries[m_selected].isDir;
 
+    app::Widget* createFolder = getWidget(m_createFolderBtnId);
     app::Widget* renameFile = getWidget(m_renameFileBtnId);
     app::Widget* deleteFile = getWidget(m_deleteFileBtnId);
     app::Widget* renameFolder = getWidget(m_renameFolderBtnId);
@@ -4610,6 +4639,10 @@ void FileExplorerApp::updateActionButtons() {
     app::Widget* confirmDelete = getWidget(m_confirmDeleteBtnId);
     app::Widget* cancelDelete = getWidget(m_cancelDeleteBtnId);
 
+    if (createFolder) {
+        createFolder->visible = canCreateFolderHere() && !m_renamePrompt && !m_deleteConfirm;
+        createFolder->enabled = createFolder->visible;
+    }
     if (renameFile) renameFile->visible = hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
     if (deleteFile) deleteFile->visible = hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
     if (renameFolder) renameFolder->visible = hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
@@ -4762,9 +4795,66 @@ bool FileExplorerApp::isWheelTarget(int localX, int localY) const {
     return localY >= listTop && localY < listBottom;
 }
 
+void FileExplorerApp::beginCreateFolder() {
+    if (!canCreateFolderHere()) {
+        setStatus("Folder creation is unavailable here");
+        invalidate();
+        return;
+    }
+
+    m_deleteConfirm = false;
+    m_createFolderPrompt = true;
+    m_renamePrompt = true;
+    strcopy(m_renameValue, "NEWDIR", sizeof(m_renameValue));
+    setStatus("Type a folder name (up to 8 characters), then press Enter.");
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::commitCreateFolder() {
+    if (!m_createFolderPrompt || !m_renameValue[0]) {
+        cancelCreateFolder();
+        return;
+    }
+
+    char path[MAX_PATH_LEN];
+    joinPath(m_currentPath, m_renameValue, path, sizeof(path));
+
+    vfs::FileInfo existing{};
+    if (vfs::stat(path, &existing) == vfs::VFS_OK) {
+        setStatus("A file or folder with that name already exists");
+        updateActionButtons();
+        invalidate();
+        return;
+    }
+
+    vfs::Status status = vfs::mkdir(path);
+    if (status == vfs::VFS_OK) {
+        m_createFolderPrompt = false;
+        m_renamePrompt = false;
+        refresh();
+        setStatus("Created folder");
+    } else if (status == vfs::VFS_ERR_READ_ONLY) {
+        setStatus("Folder cannot be created in a read-only location");
+    } else {
+        setStatus("Could not create folder");
+    }
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::cancelCreateFolder() {
+    m_createFolderPrompt = false;
+    m_renamePrompt = false;
+    setStatus("Create folder cancelled");
+    updateActionButtons();
+    invalidate();
+}
+
 void FileExplorerApp::beginRenameSelected() {
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     m_deleteConfirm = false;
+    m_createFolderPrompt = false;
     m_renamePrompt = true;
     strcopy(m_renameValue, m_entries[m_selected].name, sizeof(m_renameValue));
     setStatus("Type a new name, then press Enter.");
@@ -4785,6 +4875,7 @@ void FileExplorerApp::commitRename() {
 
     vfs::Status status = vfs::rename(oldPath, newPath);
     m_renamePrompt = false;
+    m_createFolderPrompt = false;
     if (status == vfs::VFS_OK) {
         setStatus("Renamed item");
     } else {
@@ -4796,6 +4887,7 @@ void FileExplorerApp::commitRename() {
 }
 
 void FileExplorerApp::cancelRename() {
+    m_createFolderPrompt = false;
     m_renamePrompt = false;
     setStatus("Rename cancelled");
     updateActionButtons();
@@ -4808,6 +4900,7 @@ void FileExplorerApp::showDeleteConfirmation() {
     joinPath(m_currentPath, entry.name, m_deleteTarget, sizeof(m_deleteTarget));
     strcopy(m_deleteTargetName, entry.name, sizeof(m_deleteTargetName));
     m_deleteTargetIsDir = entry.isDir;
+    m_createFolderPrompt = false;
     m_renamePrompt = false;
     m_deleteConfirm = true;
     setStatus("Confirm delete");
@@ -4959,9 +5052,17 @@ bool FileExplorerApp::contextMenuHasCurrentDirectoryPaste() const {
            m_contextMenuPasteVisible;
 }
 
+bool FileExplorerApp::contextMenuHasCurrentDirectoryCreateFolder() const {
+    return m_contextMenuTarget == ContextMenuTarget::CurrentDirectory &&
+           m_contextMenuCreateFolderVisible;
+}
+
 int FileExplorerApp::contextMenuItemCount() const {
     if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
-        return contextMenuHasCurrentDirectoryPaste() ? 1 : 0;
+        int count = 0;
+        if (contextMenuHasCurrentDirectoryPaste()) ++count;
+        if (contextMenuHasCurrentDirectoryCreateFolder()) ++count;
+        return count;
     }
     if (contextMenuHasFileOperations()) return 7;
     return contextMenuHasFolderPaste() ? 6 : 5;
@@ -4969,7 +5070,13 @@ int FileExplorerApp::contextMenuItemCount() const {
 
 const char* FileExplorerApp::contextMenuItemLabel(int item) const {
     if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
-        return item == 0 ? "Paste File" : "";
+        if (contextMenuHasCurrentDirectoryPaste()) {
+            if (item == 0) return "Paste File";
+            if (item == 1 && contextMenuHasCurrentDirectoryCreateFolder()) return "Create Folder";
+        } else if (contextMenuHasCurrentDirectoryCreateFolder() && item == 0) {
+            return "Create Folder";
+        }
+        return "";
     }
 
     if (contextMenuHasFileOperations()) {
@@ -5019,7 +5126,14 @@ bool FileExplorerApp::handleContextMenuClick(int x, int y) {
     if (item < 0) return false;
     m_contextMenuOpen = false;
     if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
-        if (item == 0) pasteClipboard();
+        if (contextMenuHasCurrentDirectoryPaste() && item == 0) {
+            pasteClipboard();
+        } else {
+            const int createFolderItem = contextMenuHasCurrentDirectoryPaste() ? 1 : 0;
+            if (contextMenuHasCurrentDirectoryCreateFolder() && item == createFolderItem) {
+                beginCreateFolder();
+            }
+        }
     } else if (contextMenuHasFileOperations()) {
         switch (item) {
             case 0: openSelected(); break;
@@ -5071,6 +5185,8 @@ int FileExplorerApp::hitTestEntryRow(int x, int y) const {
 void FileExplorerApp::closeTransientUi() {
     m_contextMenuOpen = false;
     m_contextMenuHover = -1;
+    m_contextMenuPasteVisible = false;
+    m_contextMenuCreateFolderVisible = false;
     m_propertiesOpen = false;
 }
 

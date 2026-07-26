@@ -1,0 +1,24 @@
+run=20260725-135245-665
+server-wrapper-pid=13300
+server-pid=5252
+compositor=found
+capture=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-initial-house-seq1-gen3.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=1 compositorFrameSequence=3 frameGeneration=3 paintGeneration=3 captureGeneration=1 pacman=64,232 pink=192,224 pinkDirection=up pinkTarget=128,296 pinkRelease=house-bounce pinkAnimation=0 red=224,184 redDirection=left cyan=224,240 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-initial-house-seq1-gen3.png
+capture=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-house-exit-seq22-gen22.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=22 compositorFrameSequence=22 frameGeneration=22 paintGeneration=22 captureGeneration=2 pacman=64,232 pink=198,224 pinkDirection=right pinkTarget=128,296 pinkRelease=to-center pinkAnimation=0 red=186,184 redDirection=left cyan=224,234 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-house-exit-seq22-gen22.png
+capture=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-corridor-seq64-gen64.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=64 compositorFrameSequence=64 frameGeneration=64 paintGeneration=64 captureGeneration=3 pacman=64,232 pink=232,184 pinkDirection=right pinkTarget=128,296 pinkRelease=normal pinkAnimation=1 red=64,232 redDirection=down cyan=200,184 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-corridor-seq64-gen64.png
+capture=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-projected-intersection-turn-seq72-gen73.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=72 compositorFrameSequence=73 frameGeneration=73 paintGeneration=73 captureGeneration=4 pacman=64,232 pink=248,183 pinkDirection=up pinkTarget=128,296 pinkRelease=normal pinkAnimation=0 red=64,232 redDirection=down cyan=183,184 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-projected-intersection-turn-seq72-gen73.png
+capture=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-distant-route-seq105-gen105.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=105 compositorFrameSequence=105 frameGeneration=105 paintGeneration=105 captureGeneration=5 pacman=64,232 pink=261,136 pinkDirection=right pinkTarget=128,296 pinkRelease=normal pinkAnimation=0 red=64,232 redDirection=down cyan=152,213 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-distant-route-seq105-gen105.png
+pink-distinct-positions=True
+capture=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-moving-collision-dying-seq134-gen134.png
+capture-target runtimeId=1 windowId=1000 state=Dying frameSequence=134 compositorFrameSequence=134 frameGeneration=134 paintGeneration=134 captureGeneration=6 pacman=296,121 pink=296,120 pinkDirection=up pinkTarget=296,121 pinkRelease=normal pinkAnimation=1 red=64,232 redDirection=down cyan=152,264 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-moving-collision-dying-seq134-gen134.png
+capture=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-ready-house-reset-seq189-gen189.png
+capture-target runtimeId=1 windowId=1000 state=Ready frameSequence=189 compositorFrameSequence=189 frameGeneration=189 paintGeneration=189 captureGeneration=7 pacman=224,376 pink=192,224 pinkDirection=up pinkTarget=288,440 pinkRelease=house-bounce pinkAnimation=0 red=224,184 redDirection=left cyan=224,240 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-pink-20260725-135245-665-ready-house-reset-seq189-gen189.png
+moving-pink-collision-sequence=True
+red-moved-and-cyan-orange-stationary=True
+escape-cleanup=True
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

@@ -1,0 +1,25 @@
+run=20260725-134734-390
+server-wrapper-pid=13992
+server-pid=15244
+compositor=found
+capture=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-initial-house-seq1-gen5.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=1 compositorFrameSequence=5 frameGeneration=5 paintGeneration=5 captureGeneration=1 pacman=64,232 red=224,184 redDirection=left pink=192,224 pinkDirection=up cyan=224,240 cyanDirection=down cyanTarget=352,504 cyanRelease=cyan-house-bounce cyanAnimation=0 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-initial-house-seq1-gen5.png
+capture=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-house-exit-seq32-gen32.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=32 compositorFrameSequence=32 frameGeneration=32 paintGeneration=32 captureGeneration=2 pacman=64,232 red=164,184 redDirection=left pink=220,224 pinkDirection=right cyan=224,212 cyanDirection=up cyanTarget=192,360 cyanRelease=cyan-exiting cyanAnimation=0 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-house-exit-seq32-gen32.png
+capture=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-corridor-seq54-gen54.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=54 compositorFrameSequence=54 frameGeneration=54 paintGeneration=54 captureGeneration=3 pacman=64,232 red=160,220 redDirection=down pink=224,188 pinkDirection=up cyan=213,184 cyanDirection=left cyanTarget=192,360 cyanRelease=normal cyanAnimation=0 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-corridor-seq54-gen54.png
+capture=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-targeted-intersection-turn-seq94-gen94.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=94 compositorFrameSequence=94 frameGeneration=94 paintGeneration=94 captureGeneration=4 pacman=64,232 red=64,232 redDirection=down pink=248,145 pinkDirection=up cyan=152,191 cyanDirection=down cyanTarget=192,360 cyanRelease=normal cyanAnimation=0 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-targeted-intersection-turn-seq94-gen94.png
+capture=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-distant-route-seq127-gen127.png
+capture-target runtimeId=1 windowId=1000 state=Playing frameSequence=127 compositorFrameSequence=127 frameGeneration=127 paintGeneration=127 captureGeneration=5 pacman=64,232 red=64,232 redDirection=down pink=296,134 pinkDirection=up cyan=152,250 cyanDirection=down cyanTarget=192,360 cyanRelease=normal cyanAnimation=1 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-distant-route-seq127-gen127.png
+cyan-distinct-positions=True
+red-moved=True
+cyan-target-red-independence=True
+capture=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-moving-collision-dying-seq170-gen171.png
+capture-target runtimeId=1 windowId=1000 state=Dying frameSequence=170 compositorFrameSequence=171 frameGeneration=171 paintGeneration=171 captureGeneration=6 pacman=195,280 red=64,232 redDirection=down pink=268,88 pinkDirection=left cyan=196,280 cyanDirection=right cyanTarget=195,280 cyanRelease=normal cyanAnimation=1 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-moving-collision-dying-seq170-gen171.png
+capture=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-ready-house-reset-seq223-gen223.png
+capture-target runtimeId=1 windowId=1000 state=Ready frameSequence=223 compositorFrameSequence=223 frameGeneration=223 paintGeneration=223 captureGeneration=7 pacman=224,376 red=224,184 redDirection=left pink=192,224 pinkDirection=up cyan=224,240 cyanDirection=down cyanTarget=352,504 cyanRelease=cyan-house-bounce cyanAnimation=0 orange=256,224 filename=D:\dev\pacman\guidexos\captures\pacman-cyan-20260725-134734-390-ready-house-reset-seq223-gen223.png
+moving-cyan-collision-sequence=True
+escape-cleanup=True
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

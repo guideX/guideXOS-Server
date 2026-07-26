@@ -391,6 +391,7 @@ private:
     int m_upBtnId;
     int m_refreshBtnId;
     int m_rootBtnId;
+    int m_createFolderBtnId;
     int m_renameFileBtnId;
     int m_deleteFileBtnId;
     int m_renameFolderBtnId;
@@ -398,6 +399,7 @@ private:
     int m_confirmDeleteBtnId;
     int m_cancelDeleteBtnId;
     bool m_renamePrompt;
+    bool m_createFolderPrompt;
     bool m_deleteConfirm;
     bool m_deleteTargetIsDir;
     char m_renameValue[vfs::VFS_MAX_FILENAME];
@@ -408,6 +410,7 @@ private:
     int m_contextMenuY;
     int m_contextMenuHover;
     bool m_contextMenuPasteVisible;
+    bool m_contextMenuCreateFolderVisible;
     ContextMenuTarget m_contextMenuTarget;
     bool m_propertiesOpen;
     bool m_propertiesIsDir;
@@ -439,6 +442,9 @@ private:
     void beginRenameSelected();
     void commitRename();
     void cancelRename();
+    void beginCreateFolder();
+    void commitCreateFolder();
+    void cancelCreateFolder();
     void showDeleteConfirmation();
     void confirmDelete();
     void cancelDelete();
@@ -452,6 +458,7 @@ private:
     bool contextMenuHasFileOperations() const;
     bool contextMenuHasFolderPaste() const;
     bool contextMenuHasCurrentDirectoryPaste() const;
+    bool contextMenuHasCurrentDirectoryCreateFolder() const;
     int contextMenuItemCount() const;
     const char* contextMenuItemLabel(int item) const;
     int hitTestContextMenu(int x, int y) const;
@@ -462,6 +469,7 @@ private:
     bool launchApplicationLikeFile(const char* fullPath, const Entry& entry);
     bool openDiskImage(const char* fullPath, const Entry& entry);
     void setStatus(const char* status);
+    bool canCreateFolderHere() const;
     bool isTextFile(const char* name) const;
     void joinPath(const char* base, const char* name, char* out, int outSize) const;
     void parentPath(const char* path, char* out, int outSize) const;
