@@ -60,6 +60,7 @@ typedef struct gx_build_request {
 } gx_build_request;
 
 typedef struct gx_build_output_line {
+    /* 0 = unknown/legacy, 1 = stdout, 2 = stderr. */
     uint32_t stream;
     char text[GX_BUILD_MAX_OUTPUT_LINE_BYTES];
 } gx_build_output_line;
