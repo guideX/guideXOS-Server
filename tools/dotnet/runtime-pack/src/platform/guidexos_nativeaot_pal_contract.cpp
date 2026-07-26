@@ -6,6 +6,7 @@ namespace {
 
 guidexos_nativeaot_pal_hooks g_pal_hooks = {};
 guidexos_nativeaot_fls_hooks g_fls_hooks = {};
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
 guidexos_nativeaot_pal_hook_table_v1 g_hook_table = {};
 bool g_hook_table_installed = false;
 uint64_t g_hook_table_generation = 0;
@@ -18,6 +19,7 @@ struct WorkerToken {
 
 constexpr uint32_t kWorkerTokenCapacity = 8u;
 WorkerToken g_worker_tokens[kWorkerTokenCapacity] = {};
+#endif
 
 bool validPalHooks(const guidexos_nativeaot_pal_hooks* hooks) {
     return hooks != nullptr &&
@@ -44,6 +46,7 @@ bool validFlsHooks(const guidexos_nativeaot_fls_hooks* hooks) {
            hooks->set != nullptr;
 }
 
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
 bool hasCapability(uint64_t capabilities, uint64_t capability) {
     return (capabilities & capability) == capability;
 }
@@ -109,10 +112,16 @@ WorkerToken* lookupWorkerToken(guidexos_nativeaot_pal_opaque_handle value) {
            token.installation_generation == g_hook_table.installation_generation
         ? &token : nullptr;
 }
+#endif
 
 bool palInstalled() {
+#if defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
+    return g_pal_hooks.size >= sizeof(g_pal_hooks) &&
+           g_pal_hooks.abi_version == GUIDEXOS_NATIVEAOT_PAL_ABI_VERSION;
+#else
     return tableInstalled() || (g_pal_hooks.size >= sizeof(g_pal_hooks) &&
            g_pal_hooks.abi_version == GUIDEXOS_NATIVEAOT_PAL_ABI_VERSION);
+#endif
 }
 
 bool flsInstalled() {
@@ -144,6 +153,7 @@ guidexos_nativeaot_pal_install_fls_hooks(const guidexos_nativeaot_fls_hooks* hoo
     return 0;
 }
 
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_install_hook_table(
     const guidexos_nativeaot_pal_hook_table_v1* table) {
@@ -177,14 +187,17 @@ extern "C" uint64_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_hook_table_generation(void) {
     return g_hook_table_generation;
 }
+#endif
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_current_thread_id(uint64_t* result) {
     if (result == nullptr || !palInstalled()) return -1;
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     if (tableInstalled()) {
         *result = g_hook_table.current_thread_id();
         return *result == 0 ? -1 : 0;
     }
+#endif
     *result = g_pal_hooks.current_thread_id(g_pal_hooks.context);
     return *result == 0 ? -1 : 0;
 }
@@ -192,6 +205,7 @@ guidexos_nativeaot_pal_current_thread_id(uint64_t* result) {
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_stack_bounds(uintptr_t* low, uintptr_t* high, uintptr_t* current) {
     if (low == nullptr || high == nullptr || current == nullptr || !palInstalled()) return -1;
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     if (tableInstalled()) {
         guidexos_nativeaot_pal_stack_bounds_value bounds = {};
         const int32_t result = g_hook_table.query_current_stack_bounds(&bounds);
@@ -200,16 +214,19 @@ guidexos_nativeaot_pal_stack_bounds(uintptr_t* low, uintptr_t* high, uintptr_t* 
         *current = static_cast<uintptr_t>(bounds.current);
         return result;
     }
+#endif
     return g_pal_hooks.stack_bounds(g_pal_hooks.context, low, high, current);
 }
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_counter(uint64_t* result) {
     if (result == nullptr || !palInstalled()) return -1;
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     if (tableInstalled()) {
         *result = g_hook_table.query_counter();
         return 0;
     }
+#endif
     *result = g_pal_hooks.counter(g_pal_hooks.context);
     return 0;
 }
@@ -217,10 +234,12 @@ guidexos_nativeaot_pal_counter(uint64_t* result) {
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_frequency(uint64_t* result) {
     if (result == nullptr || !palInstalled()) return -1;
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     if (tableInstalled()) {
         *result = g_hook_table.query_counter_frequency();
         return *result == 0 ? -1 : 0;
     }
+#endif
     *result = g_pal_hooks.frequency(g_pal_hooks.context);
     return *result == 0 ? -1 : 0;
 }
@@ -228,10 +247,12 @@ guidexos_nativeaot_pal_frequency(uint64_t* result) {
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_sleep(uint32_t milliseconds) {
     if (!palInstalled()) return -1;
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     if (tableInstalled()) {
         g_hook_table.sleep_milliseconds(milliseconds);
         return 0;
     }
+#endif
     return
         g_pal_hooks.sleep_milliseconds(g_pal_hooks.context, milliseconds);
 }
@@ -239,10 +260,12 @@ guidexos_nativeaot_pal_sleep(uint32_t milliseconds) {
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_yield(void) {
     if (!palInstalled()) return -1;
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     if (tableInstalled()) {
         g_hook_table.yield_thread();
         return 0;
     }
+#endif
     return g_pal_hooks.yield(g_pal_hooks.context);
 }
 
@@ -334,8 +357,14 @@ extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_create_thread(guidexos_nativeaot_thread_entry entry,
                                      void* entry_context,
                                      uint32_t stack_size,
-                                      int32_t high_priority,
+                                     int32_t high_priority,
                                       guidexos_nativeaot_pal_opaque_handle* result) {
+#if defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
+    return !palInstalled() || g_pal_hooks.create_thread == nullptr
+        ? -1 : g_pal_hooks.create_thread(g_pal_hooks.context, entry,
+                                          entry_context, stack_size,
+                                          high_priority, result);
+#else
     if (!palInstalled() || result == nullptr || entry == nullptr) return -1;
     if (tableInstalled()) {
         guidexos_nativeaot_pal_worker_handle worker = {};
@@ -346,12 +375,18 @@ guidexos_nativeaot_pal_create_thread(guidexos_nativeaot_thread_entry entry,
     }
     return g_pal_hooks.create_thread(g_pal_hooks.context, entry, entry_context,
                                      stack_size, high_priority, result);
+#endif
 }
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_join_thread(guidexos_nativeaot_pal_opaque_handle handle,
                                     uint32_t timeout_milliseconds,
                                     uintptr_t* result) {
+#if defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
+    return !palInstalled() || g_pal_hooks.join_thread == nullptr
+        ? -1 : g_pal_hooks.join_thread(g_pal_hooks.context, handle,
+                                        timeout_milliseconds, result);
+#else
     if (!palInstalled()) return -1;
     if (tableInstalled()) {
         WorkerToken* token = lookupWorkerToken(handle);
@@ -360,10 +395,15 @@ guidexos_nativeaot_pal_join_thread(guidexos_nativeaot_pal_opaque_handle handle,
     }
     return g_pal_hooks.join_thread(g_pal_hooks.context, handle,
                                    timeout_milliseconds, result);
+#endif
 }
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_close_thread(guidexos_nativeaot_pal_opaque_handle handle) {
+#if defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
+    return !palInstalled() || g_pal_hooks.close_thread == nullptr
+        ? -1 : g_pal_hooks.close_thread(g_pal_hooks.context, handle);
+#else
     if (!palInstalled()) return -1;
     if (tableInstalled()) {
         WorkerToken* token = lookupWorkerToken(handle);
@@ -373,6 +413,7 @@ guidexos_nativeaot_pal_close_thread(guidexos_nativeaot_pal_opaque_handle handle)
         return result;
     }
     return g_pal_hooks.close_thread(g_pal_hooks.context, handle);
+#endif
 }
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
@@ -411,9 +452,11 @@ guidexos_nativeaot_pal_close_event(void* handle) {
 
 extern "C" [[noreturn]] void GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_fail_fast(uint32_t reason) {
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     if (tableInstalled()) {
         g_hook_table.fail_fast(reason, 0);
     }
+#endif
     if (palInstalled() && g_pal_hooks.fail_fast != nullptr) {
         g_pal_hooks.fail_fast(g_pal_hooks.context, reason);
     }
@@ -428,27 +471,41 @@ guidexos_nativeaot_pal_fail_fast_default(void) {
 
 extern "C" uint32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_fls_alloc(guidexos_nativeaot_fls_detach_callback callback) {
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     if (tableInstalled()) {
         return g_hook_table.fls_allocate(
             static_cast<guidexos_nativeaot_pal_win64_detach_callback>(callback));
     }
+#endif
     return !flsInstalled() ? UINT32_MAX : g_fls_hooks.alloc(g_fls_hooks.context, callback);
 }
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_fls_free(uint32_t index) {
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     return tableInstalled() ? g_hook_table.fls_release(index) :
+#else
+    return
+#endif
         (!flsInstalled() ? -1 : g_fls_hooks.free_index(g_fls_hooks.context, index));
 }
 
 extern "C" void* GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_fls_get(uint32_t index) {
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     return tableInstalled() ? g_hook_table.fls_get(index) :
+#else
+    return
+#endif
         (!flsInstalled() ? nullptr : g_fls_hooks.get(g_fls_hooks.context, index));
 }
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_fls_set(uint32_t index, void* value) {
+#if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
     return tableInstalled() ? g_hook_table.fls_set(index, value) :
+#else
+    return
+#endif
         (!flsInstalled() ? -1 : g_fls_hooks.set(g_fls_hooks.context, index, value));
 }

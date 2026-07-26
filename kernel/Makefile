@@ -135,6 +135,8 @@ RUNTIME_PACK_OBJS := $(patsubst ../tools/dotnet/runtime-pack/src/platform/%.cpp,
 ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS) $(RUNTIME_OBJS) $(RUNTIME_PACK_OBJS)
 ifneq ($(filter 1,$(GXOS_NATIVEAOT_PAL_QEMU_TEST)),)
 ALL_OBJS += $(BUILD_DIR)/pal-probe-artifact.o
+else ifneq ($(filter 1,$(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)),)
+ALL_OBJS += $(BUILD_DIR)/gc-startup-artifact.o
 else ifneq ($(strip $(NATIVEAOT_PAL_QEMU_ARTIFACT_OBJ)),)
 ALL_OBJS += $(NATIVEAOT_PAL_QEMU_ARTIFACT_OBJ)
 endif
@@ -249,6 +251,11 @@ $(OBJ_DIR)/runtime-pack/%.o: ../tools/dotnet/runtime-pack/src/platform/%.cpp
 	@$(call MKDIR,$(dir $@))
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gc-startup-artifact.o: $(NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ)
+	@$(call MKDIR,$(dir $@))
+	@echo "Embedding $(NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ)..."
+	copy /Y "$(subst /,\\,$<)" "$(subst /,\\,$@)" >NUL
 
 $(OBJ_DIR)/third_party/%.o: ../third_party/%.c
 	@$(call MKDIR,$(dir $@))

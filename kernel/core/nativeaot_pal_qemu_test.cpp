@@ -1,6 +1,6 @@
 #include "include/kernel/nativeaot_pal_qemu_test.h"
 
-#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
 
 #include "include/kernel/address_space.h"
 #include "include/kernel/arch.h"
@@ -9,13 +9,24 @@
 #include "include/kernel/pit.h"
 
 #include "runtime/local_storage/guidexos_local_storage.h"
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#include "runtime/memory/guidexos_virtual_memory_region.h"
+#include "runtime/synchronization/guidexos_event.h"
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_gc_startup_platform_contract.h"
+#endif
 #include "runtime/thread/guidexos_native_thread.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_abi_bridge.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_contract.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_adapter.h"
 
+#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_end[];
+#endif
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
+extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
+#endif
 
 namespace kernel {
 namespace nativeaot_pal_qemu_test {
@@ -24,7 +35,13 @@ namespace {
 constexpr uintptr_t kPageSize = 0x1000u;
 constexpr uint32_t kPtLoad = 1u;
 constexpr uint16_t kElfExec = 2u;
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+// The startup artifact contains a bounded 4 MiB native metadata arena in its
+// writable image.  Keep staging bounded while allowing that known image size.
+constexpr uint32_t kMaxMappedPages = 8192u;
+#else
 constexpr uint32_t kMaxMappedPages = 1024u;
+#endif
 constexpr uint32_t kMaxFlsSlots = gxos::runtime::kLocalStorageCapacity;
 constexpr uint32_t kMaxWorkerSlots = 8u;
 
@@ -610,6 +627,443 @@ void runOne(const uint8_t* artifact, size_t artifactSize,
            g_activeCallbacks == 0 && g_mappedPageCount == 0, allPassed);
 }
 
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+
+constexpr uint32_t kMaxGcEventSlots = 16u;
+constexpr uint32_t kMaxGcVmSlots = 16u;
+
+struct GcEventSlot {
+    bool active;
+    gxos::runtime::Event event;
+};
+
+struct GcVmSlot {
+    bool active;
+    gxos::runtime::virtual_memory::VirtualMemoryRegion region;
+};
+
+GcEventSlot g_gcEvents[kMaxGcEventSlots] = {};
+GcVmSlot g_gcVmSlots[kMaxGcVmSlots] = {};
+uint32_t g_startupLegacyAllocCalls = 0;
+uintptr_t g_startupLegacyLastSize = 0;
+bool g_startupLegacyLastSuccess = false;
+
+void startupStatus(const char* name, bool passed, bool& allPassed) {
+    serial::puts("[nativeaot-gc-startup-qemu-test] ");
+    serial::puts(name);
+    serial::puts(passed ? ": PASS\n" : ": FAIL\n");
+    if (!passed) allPassed = false;
+}
+
+GcEventSlot* findGcEvent(void* handle) {
+    if (handle == nullptr) return nullptr;
+    for (GcEventSlot& slot : g_gcEvents) {
+        if (slot.active && static_cast<void*>(&slot.event) == handle) return &slot;
+    }
+    return nullptr;
+}
+
+void* GUIDEXOS_NATIVEAOT_PAL_CALL startupCreateEvent(
+    uint32_t manualReset, uint32_t initialState) {
+    for (GcEventSlot& slot : g_gcEvents) {
+        if (slot.active) continue;
+        if (!slot.event.initialize(
+                manualReset != 0 ? gxos::runtime::EventMode::ManualReset
+                                 : gxos::runtime::EventMode::AutoReset,
+                initialState != 0)) return nullptr;
+        slot.active = true;
+        return &slot.event;
+    }
+    return nullptr;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupSetEvent(void* handle) {
+    GcEventSlot* slot = findGcEvent(handle);
+    return slot != nullptr && slot->event.signal() == gxos::runtime::EventStatus::Ok
+        ? 0 : -1;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupResetEvent(void* handle) {
+    GcEventSlot* slot = findGcEvent(handle);
+    return slot != nullptr && slot->event.reset() == gxos::runtime::EventStatus::Ok
+        ? 0 : -1;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupWaitEvent(
+    void* handle, uint32_t timeoutMilliseconds) {
+    GcEventSlot* slot = findGcEvent(handle);
+    if (slot == nullptr) return -1;
+    const gxos::runtime::WaitResult result = timeoutMilliseconds == 0xFFFFFFFFu
+        ? slot->event.wait(gxos::runtime::WaitTimeout::infinite())
+        : slot->event.wait(gxos::runtime::WaitTimeout::finiteMilliseconds(
+              timeoutMilliseconds));
+    if (result == gxos::runtime::WaitResult::Signaled) return 0;
+    if (result == gxos::runtime::WaitResult::TimedOut) return 258;
+    return -1;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCloseEvent(void* handle) {
+    GcEventSlot* slot = findGcEvent(handle);
+    if (slot == nullptr || slot->event.close() != gxos::runtime::EventStatus::Ok) {
+        return -1;
+    }
+    slot->active = false;
+    return 0;
+}
+
+GcVmSlot* findGcVm(const void* address) {
+    const uintptr_t value = reinterpret_cast<uintptr_t>(address);
+    for (GcVmSlot& slot : g_gcVmSlots) {
+        if (!slot.active || slot.region.base == nullptr) continue;
+        const uintptr_t base = reinterpret_cast<uintptr_t>(slot.region.base);
+        if (value >= base && value - base < slot.region.reservedSize) return &slot;
+    }
+    return nullptr;
+}
+
+void* GUIDEXOS_NATIVEAOT_PAL_CALL startupReserve(
+    uintptr_t size, uintptr_t alignment, uint32_t, uint16_t) {
+    if (size == 0) return nullptr;
+    for (GcVmSlot& slot : g_gcVmSlots) {
+        if (slot.active) continue;
+        const gxos::runtime::virtual_memory::VmResult result =
+            gxos::runtime::virtual_memory::reserve(
+                size, alignment, nullptr, &slot.region);
+        if (result != gxos::runtime::virtual_memory::VmResult::Ok) {
+            serial::puts("[nativeaot-gc-startup-qemu-test] reserve failed size=");
+            serial::put_hex64(size);
+            serial::puts(" alignment=");
+            serial::put_hex64(alignment);
+            serial::puts(" result=");
+            serial::puts(gxos::runtime::virtual_memory::vmResultName(result));
+            serial::puts(" detail=");
+            serial::puts(gxos::runtime::virtual_memory::lastDiagnostic());
+            serial::putc('\n');
+            return nullptr;
+        }
+        slot.active = true;
+        return slot.region.base;
+    }
+    return nullptr;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCommit(
+    void* address, uintptr_t size, uint16_t) {
+    GcVmSlot* slot = findGcVm(address);
+    if (slot == nullptr || size == 0) return -1;
+    const uintptr_t offset = reinterpret_cast<uintptr_t>(address) -
+        reinterpret_cast<uintptr_t>(slot->region.base);
+    return gxos::runtime::virtual_memory::commit(
+               slot->region, offset, size,
+               gxos::runtime::virtual_memory::MemoryProtection::ReadWrite) ==
+            gxos::runtime::virtual_memory::VmResult::Ok ? 0 : -1;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupDecommit(
+    void* address, uintptr_t size, uint16_t) {
+    GcVmSlot* slot = findGcVm(address);
+    if (slot == nullptr || size == 0) return -1;
+    const uintptr_t offset = reinterpret_cast<uintptr_t>(address) -
+        reinterpret_cast<uintptr_t>(slot->region.base);
+    return gxos::runtime::virtual_memory::decommit(
+               slot->region, offset, size) ==
+            gxos::runtime::virtual_memory::VmResult::Ok ? 0 : -1;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupRelease(
+    void* address, uintptr_t, uint16_t) {
+    GcVmSlot* slot = findGcVm(address);
+    if (slot == nullptr || address != slot->region.base) return -1;
+    const gxos::runtime::virtual_memory::VmResult result =
+        gxos::runtime::virtual_memory::release(slot->region);
+    if (result != gxos::runtime::virtual_memory::VmResult::Ok) return -1;
+    slot->active = false;
+    return 0;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupReset(
+    void* address, uintptr_t size, uint32_t) {
+    return findGcVm(address) != nullptr && size != 0 ? 0 : -1;
+}
+
+uint32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupPageSize() { return 4096u; }
+uint32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupGranularity() { return 4096u; }
+uint64_t GUIDEXOS_NATIVEAOT_PAL_CALL startupVirtualLimit() {
+    // Workstation GC's default regions range is bounded by half of this
+    // negotiated limit. Keep the startup-only dry run inside the generic
+    // true-VM reservation range rather than advertising a host-sized range
+    // that the bare-metal page-table adapter cannot materialize.
+    return UINT64_C(128) * 1024u * 1024u;
+}
+uint64_t GUIDEXOS_NATIVEAOT_PAL_CALL startupPhysicalLimit(uint32_t* restricted) {
+    if (restricted != nullptr) *restricted = 0;
+    return UINT64_C(64) * 1024u * 1024u;
+}
+void GUIDEXOS_NATIVEAOT_PAL_CALL startupMemoryStatus(
+    uint64_t, uint32_t* memoryLoad, uint64_t* availablePhysical,
+    uint64_t* availablePageFile) {
+    if (memoryLoad != nullptr) *memoryLoad = 0;
+    if (availablePhysical != nullptr) *availablePhysical = UINT64_C(64) * 1024u * 1024u;
+    if (availablePageFile != nullptr) *availablePageFile = UINT64_C(64) * 1024u * 1024u;
+}
+
+uint64_t GUIDEXOS_NATIVEAOT_PAL_CALL legacyCurrentThread(void*) {
+    return bridgeCurrentThreadId64();
+}
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL legacyStackBounds(
+    void*, uintptr_t* low, uintptr_t* high, uintptr_t* current) {
+    guidexos_nativeaot_pal_stack_bounds_value value{};
+    const int32_t result = bridgeStackBounds(&value);
+    if (result == 0) {
+        if (low != nullptr) *low = value.low;
+        if (high != nullptr) *high = value.high;
+        if (current != nullptr) *current = value.current;
+    }
+    return result;
+}
+uint64_t GUIDEXOS_NATIVEAOT_PAL_CALL legacyCounter(void*) { return bridgeCounter(); }
+uint64_t GUIDEXOS_NATIVEAOT_PAL_CALL legacyFrequency(void*) { return bridgeFrequency(); }
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL legacySleep(void*, uint32_t value) {
+    bridgeSleep(value);
+    return 0;
+}
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL legacyYield(void*) {
+    bridgeYield();
+    return 0;
+}
+void* GUIDEXOS_NATIVEAOT_PAL_CALL legacyModule(void*, const void*) {
+    return reinterpret_cast<void*>(g_artifactBase);
+}
+void* GUIDEXOS_NATIVEAOT_PAL_CALL legacyResolve(void*, void*, const char*) {
+    return nullptr;
+}
+void GUIDEXOS_NATIVEAOT_PAL_CALL legacyFailFast(void*, uint32_t reason) {
+    bridgeFailFast(reason, 0);
+}
+void* GUIDEXOS_NATIVEAOT_PAL_CALL legacyVirtualAlloc(
+    void*, void*, uintptr_t size, uint32_t type, uint32_t) {
+    ++g_startupLegacyAllocCalls;
+    g_startupLegacyLastSize = size;
+    void* result = startupReserve(size, 4096u, 0, 0xFFFFu);
+    if (result != nullptr && (type & 0x1000u) != 0) {
+        const uintptr_t committedSize = (size + 4095u) & ~uintptr_t(4095u);
+        if (startupCommit(result, committedSize, 0xFFFFu) != 0) {
+            (void)startupRelease(result, committedSize, 0xFFFFu);
+            return nullptr;
+        }
+    }
+    g_startupLegacyLastSuccess = result != nullptr;
+    return result;
+}
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL legacyVirtualFree(
+    void*, void* address, uintptr_t size, uint32_t type) {
+    return type == 0x4000u ? startupRelease(address, size, 0xFFFFu)
+                           : startupDecommit(address, size, 0xFFFFu);
+}
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL legacyVirtualProtect(
+    void*, void* address, uintptr_t size, uint32_t, uint32_t* oldProtection) {
+    if (oldProtection != nullptr) *oldProtection = 0x04u;
+    return findGcVm(address) != nullptr && size != 0 ? 1 : 0;
+}
+
+void fillStartupPalHooks(guidexos_nativeaot_pal_hooks* hooks) {
+    *hooks = {};
+    hooks->size = sizeof(*hooks);
+    hooks->abi_version = GUIDEXOS_NATIVEAOT_PAL_ABI_VERSION;
+    hooks->current_thread_id = legacyCurrentThread;
+    hooks->stack_bounds = legacyStackBounds;
+    hooks->counter = legacyCounter;
+    hooks->frequency = legacyFrequency;
+    hooks->sleep_milliseconds = legacySleep;
+    hooks->yield = legacyYield;
+    hooks->static_module_from_pointer = legacyModule;
+    hooks->static_resolve = legacyResolve;
+    hooks->fail_fast = legacyFailFast;
+    hooks->virtual_alloc = legacyVirtualAlloc;
+    hooks->virtual_free = legacyVirtualFree;
+    hooks->virtual_protect = legacyVirtualProtect;
+}
+
+void fillStartupPalTable(guidexos_nativeaot_pal_hook_table_v1* table,
+                         uintptr_t base, uintptr_t size, uint64_t generation) {
+    *table = {};
+    table->magic = GUIDEXOS_NATIVEAOT_PAL_HOOK_MAGIC;
+    table->abi_version = GUIDEXOS_NATIVEAOT_PAL_HOOK_ABI_VERSION;
+    table->structure_size = sizeof(*table);
+    table->capability_bits = GUIDEXOS_NATIVEAOT_PAL_CAP_REQUIRED;
+    table->installation_generation = generation;
+    table->artifact_base = base;
+    table->artifact_size = size;
+    table->current_thread_id = bridgeCurrentThreadId64;
+    table->query_current_stack_bounds = bridgeStackBounds;
+    table->fls_allocate = bridgeFlsAllocate;
+    table->fls_release = bridgeFlsRelease;
+    table->fls_get = bridgeFlsGet;
+    table->fls_set = bridgeFlsSet;
+    table->create_worker = bridgeCreateWorker;
+    table->join_worker = bridgeJoinWorker;
+    table->destroy_worker_handle = bridgeDestroyWorker;
+    table->query_counter = bridgeCounter;
+    table->query_counter_frequency = bridgeFrequency;
+    table->monotonic_milliseconds = bridgeMilliseconds;
+    table->sleep_milliseconds = bridgeSleep;
+    table->yield_thread = bridgeYield;
+    table->fail_fast = bridgeFailFast;
+}
+
+void fillStartupPlatformTable(
+    guidexos_nativeaot_gc_startup_platform_table_v1* table,
+    uint64_t generation) {
+    *table = {};
+    table->magic = GUIDEXOS_NATIVEAOT_GC_PLATFORM_MAGIC;
+    table->abi_version = GUIDEXOS_NATIVEAOT_GC_PLATFORM_ABI_VERSION;
+    table->structure_size = sizeof(*table);
+    table->capability_bits = GUIDEXOS_NATIVEAOT_GC_CAP_REQUIRED;
+    table->installation_generation = generation;
+    table->create_event = startupCreateEvent;
+    table->set_event = startupSetEvent;
+    table->reset_event = startupResetEvent;
+    table->wait_event = startupWaitEvent;
+    table->close_event = startupCloseEvent;
+    table->reserve = startupReserve;
+    table->commit = startupCommit;
+    table->decommit = startupDecommit;
+    table->release = startupRelease;
+    table->reset = startupReset;
+    table->page_size = startupPageSize;
+    table->allocation_granularity = startupGranularity;
+    table->virtual_memory_limit = startupVirtualLimit;
+    table->physical_memory_limit = startupPhysicalLimit;
+    table->memory_status = startupMemoryStatus;
+}
+
+void runStartupImpl(const uint8_t* artifact, size_t artifactSize,
+                    uintptr_t installPalAddress, uintptr_t installTableAddress,
+                    uintptr_t installPlatformAddress, uintptr_t mainAddress,
+                    uintptr_t stateAddress, uintptr_t preGcStateAddress,
+                    uintptr_t allocationCountAddress, uintptr_t lastAllocationSizeAddress,
+                    uintptr_t diagnosticStageAddress,
+                    uint64_t generation) {
+    bool allPassed = true;
+    serial::puts("[nativeaot-gc-startup-qemu-test] BEGIN\n");
+    const bool foundations =
+        gxos::runtime::initializeLocalStorage() == gxos::runtime::LocalStorageResult::Success &&
+        gxos::runtime::attachLocalStorage() == gxos::runtime::LocalStorageResult::Success &&
+        guidexos::nativeaot::threadstore::initialize() ==
+            guidexos::nativeaot::threadstore::Result::Success &&
+        guidexos::nativeaot::threadstore::attachCurrentThread() ==
+            guidexos::nativeaot::threadstore::Result::Success;
+    startupStatus("Runtime foundation initialization", foundations, allPassed);
+    if (!foundations) {
+        serial::puts("[nativeaot-gc-startup-qemu-test] ALL_FAIL\n");
+        return;
+    }
+
+    uintptr_t base = 0;
+    uintptr_t size = 0;
+    const bool loaded = loadArtifact(artifact, artifactSize, &base, &size);
+    startupStatus("Artifact staged", loaded, allPassed);
+    if (!loaded) {
+        serial::puts("[nativeaot-gc-startup-qemu-test] ALL_FAIL\n");
+        return;
+    }
+    resetBridgeState(base, size, generation);
+
+    guidexos_nativeaot_pal_hooks legacy = {};
+    fillStartupPalHooks(&legacy);
+    guidexos_nativeaot_pal_hook_table_v1 pal = {};
+    fillStartupPalTable(&pal, base, size, generation);
+    guidexos_nativeaot_gc_startup_platform_table_v1 platform = {};
+    fillStartupPlatformTable(&platform, generation);
+
+    serial::puts("[nativeaot-gc-startup-qemu-test] PAL ABI=1 size=");
+    serial::put_hex32(pal.structure_size);
+    serial::puts(" capabilities=");
+    serial::put_hex64(pal.capability_bits);
+    serial::puts(" GC ABI=1 size=");
+    serial::put_hex32(platform.structure_size);
+    serial::puts(" capabilities=");
+    serial::put_hex64(platform.capability_bits);
+    serial::puts(" generation=");
+    serial::put_hex64(generation);
+    serial::puts("\n");
+
+    using InstallPal = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        const guidexos_nativeaot_pal_hooks*);
+    using InstallTable = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        const guidexos_nativeaot_pal_hook_table_v1*);
+    using InstallPlatform = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        const guidexos_nativeaot_gc_startup_platform_table_v1*);
+    using Main = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+    const int32_t palResult = reinterpret_cast<InstallPal>(installPalAddress)(&legacy);
+    const int32_t tableResult = reinterpret_cast<InstallTable>(installTableAddress)(&pal);
+    const int32_t platformResult = reinterpret_cast<InstallPlatform>(installPlatformAddress)(&platform);
+    startupStatus("Win64 PAL legacy installation", palResult == 0, allPassed);
+    startupStatus("Win64 PAL v1 installation", tableResult == 0, allPassed);
+    startupStatus("GC platform installation", platformResult == 0, allPassed);
+    startupStatus("Hook magic/version/size", palResult == 0 && tableResult == 0 && platformResult == 0, allPassed);
+    if (palResult != 0 || tableResult != 0 || platformResult != 0) {
+        serial::puts("[nativeaot-gc-startup-qemu-test] ALL_FAIL\n");
+        return;
+    }
+
+    const int32_t startupResult = reinterpret_cast<Main>(mainAddress)();
+    using State = uint32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+    const uint32_t palState = reinterpret_cast<State>(stateAddress)();
+    const uint32_t preGcState = reinterpret_cast<State>(preGcStateAddress)();
+    const uint32_t allocationCount = reinterpret_cast<State>(allocationCountAddress)();
+    const uint32_t lastAllocationSize = reinterpret_cast<State>(lastAllocationSizeAddress)();
+    const uint32_t diagnosticStage = reinterpret_cast<State>(diagnosticStageAddress)();
+    serial::puts("[nativeaot-gc-startup-qemu-test] PAL startup stage=");
+    serial::put_hex32(palState);
+    serial::puts("\n");
+    serial::puts("[nativeaot-gc-startup-qemu-test] diagnostic stage=");
+    serial::put_hex32(diagnosticStage);
+    serial::puts("\n");
+    serial::puts("[nativeaot-gc-startup-qemu-test] pre-GC state=");
+    serial::put_hex32(preGcState);
+    serial::puts(" allocationCalls=");
+    serial::put_hex32(allocationCount);
+    serial::puts(" lastAllocationSize=");
+    serial::put_hex32(lastAllocationSize);
+    serial::puts("\n");
+    serial::puts("[nativeaot-gc-startup-qemu-test] RhInitialize return=");
+    serial::put_hex32(static_cast<uint32_t>(startupResult));
+    serial::puts("\n");
+    startupStatus("RhInitialize", startupResult == 0, allPassed);
+    bridgeSleep(100u);
+    const uint32_t attached = guidexos::nativeaot::threadstore::attachedThreadCount();
+    serial::puts("[nativeaot-gc-startup-qemu-test] ThreadStore attached=");
+    serial::put_hex32(attached);
+    serial::puts(" activeWorkers=");
+    uint32_t activeWorkers = 0;
+    for (const WorkerSlot& worker : g_workers) {
+        if (worker.active) ++activeWorkers;
+    }
+    serial::put_hex32(activeWorkers);
+    serial::puts(" callbacks=");
+    serial::put_hex32(g_activeCallbacks);
+    serial::puts("\n");
+    serial::puts("[nativeaot-gc-startup-qemu-test] legacyAllocCalls=");
+    serial::put_hex32(g_startupLegacyAllocCalls);
+    serial::puts(" lastSize=");
+    serial::put_hex64(g_startupLegacyLastSize);
+    serial::puts(" success=");
+    serial::put_hex32(g_startupLegacyLastSuccess ? 1u : 0u);
+    serial::puts("\n");
+    startupStatus("Finalizer helper parked", startupResult == 0 &&
+                  ((palState >> 24) & 0xFFu) == 0x02u && attached == 1u &&
+                  g_activeCallbacks == 0, allPassed);
+    startupStatus("No managed finalizer entry", startupResult == 0, allPassed);
+    startupStatus("Process-lifetime cleanup boundary", startupResult == 0, allPassed);
+    serial::puts("[nativeaot-gc-startup-qemu-test] same-process shutdown: UNSUPPORTED\n");
+    serial::puts(allPassed
+        ? "[nativeaot-gc-startup-qemu-test] ALL_PASS\n"
+        : "[nativeaot-gc-startup-qemu-test] ALL_FAIL\n");
+}
+
+#endif
+
 } // namespace
 
 void run(const uint8_t* artifact, size_t artifactSize,
@@ -624,6 +1078,21 @@ void run(const uint8_t* artifact, size_t artifactSize,
         ? "[nativeaot-pal-qemu-test] ALL_PASS\n"
         : "[nativeaot-pal-qemu-test] ALL_FAIL\n");
 }
+
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+void runStartup(const uint8_t* artifact, size_t artifactSize,
+                uintptr_t installPalAddress, uintptr_t installTableAddress,
+                uintptr_t installPlatformAddress, uintptr_t mainAddress,
+                uintptr_t stateAddress, uintptr_t preGcStateAddress,
+                uintptr_t allocationCountAddress, uintptr_t lastAllocationSizeAddress,
+                uintptr_t diagnosticStageAddress,
+                uint64_t generation) {
+    runStartupImpl(artifact, artifactSize, installPalAddress, installTableAddress,
+                   installPlatformAddress, mainAddress, stateAddress, preGcStateAddress,
+                   allocationCountAddress, lastAllocationSizeAddress, diagnosticStageAddress,
+                   generation);
+}
+#endif
 
 } // namespace nativeaot_pal_qemu_test
 } // namespace kernel

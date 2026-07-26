@@ -677,7 +677,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // The pool is deliberately explicit and bounded.  It is the only source
     // used by the kernel address-space layer for VM data and page-table pages;
     // reservation itself never consumes these pages.
-    constexpr UINTN runtimeFramePoolPages = 512; // 2 MiB, test-visible bound
+    constexpr UINTN runtimeFramePoolPages = 4096; // 16 MiB for startup-QEMU GC reservations
     EFI_PHYSICAL_ADDRESS runtimeFramePoolPhys = 0;
     {
         EFI_STATUS st = SystemTable->BootServices->AllocatePages(

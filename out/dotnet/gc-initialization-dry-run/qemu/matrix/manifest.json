@@ -1,0 +1,30 @@
+{
+    "qemuLocated":  true,
+    "artifact":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-initialization-dry-run\\artifact\\NativeAotGcStartupMinimal.exe",
+    "kernel":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\kernel\\build\\amd64\\bin\\kernel.elf",
+    "bootloader":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\guideXOSBootLoader\\x64\\Release\\guideXOSBootLoader.exe",
+    "sameProcessShutdown":  "unsupported-by-locked-NativeAOT-contract",
+    "runs":  [
+                 {
+                     "label":  "first",
+                     "process":  "disposable",
+                     "marker":  true,
+                     "pass":  true,
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-initialization-dry-run\\qemu\\matrix\\first\\serial.log"
+                 },
+                 {
+                     "label":  "repeat",
+                     "process":  "disposable",
+                     "marker":  true,
+                     "pass":  true,
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-initialization-dry-run\\qemu\\matrix\\repeat\\serial.log"
+                 },
+                 {
+                     "label":  "fresh",
+                     "process":  "disposable",
+                     "marker":  true,
+                     "pass":  true,
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-initialization-dry-run\\qemu\\matrix\\fresh\\serial.log"
+                 }
+             ]
+}

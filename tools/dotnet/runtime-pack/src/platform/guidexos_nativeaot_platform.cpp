@@ -543,6 +543,7 @@ extern "C" __declspec(noinline) int __cdecl FlsSetValue(gx_uint32 index, void* v
 extern "C" __declspec(selectany) void* __imp_FlsGetValue = reinterpret_cast<void*>(&FlsGetValue);
 extern "C" __declspec(selectany) void* __imp_FlsSetValue = reinterpret_cast<void*>(&FlsSetValue);
 
+#if !defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
 extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     unsigned char* block = currentTlsBlock();
     if (frame == nullptr || block == nullptr || _tls_index == kFlsOutOfIndexes) {
@@ -599,3 +600,4 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvokeReturn2(void* fram
 extern "C" __declspec(noinline) void __cdecl RhpFallbackFailFast() {
     guideXosFailFast(5u);
 }
+#endif

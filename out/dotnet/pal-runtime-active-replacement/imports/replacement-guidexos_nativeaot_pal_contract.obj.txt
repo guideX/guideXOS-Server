@@ -5,10 +5,10 @@ File Type: COFF OBJECT
 
   Summary
 
-          F8 .bss
-         1D0 .chks64
-          D0 .debug$S
+         2F0 .bss
+         298 .chks64
+          D4 .debug$S
            3 .drectve
-          84 .pdata
-         90E .text$mn
-          58 .xdata
+          FC .pdata
+        17C4 .text$mn
+          E4 .xdata

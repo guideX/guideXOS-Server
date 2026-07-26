@@ -137,14 +137,14 @@ Commands:
  pbytes | help | quit/exit
 [LaunchResolver] App: com.guidexos.experimental.nativeaot.palprobe Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/NativeAotPalProbe.elf Result: success Reason: Launch resolved
 [NativeElfLaunch] App: com.guidexos.experimental.nativeaot.palprobe Architecture: amd64 Path: D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\pal-runtime-active-replacement\qemu-probe\server-stage\apps\NativeAotPalProbe\bin/amd64/NativeAotPalProbe.elf Validation: valid Result: success Message: Native ELF validated.
-[NativeElfImageLoader] App: com.guidexos.experimental.nativeaot.palprobe Architecture: amd64 EntryVA: 0x100012b0 Segments: 5 ImageSize: 16896 PIE: false Interpreter: false Result: success Diagnostics: Native ELF image loaded
+[NativeElfImageLoader] App: com.guidexos.experimental.nativeaot.palprobe Architecture: amd64 EntryVA: 0x100015d0 Segments: 5 ImageSize: 20992 PIE: false Interpreter: false Result: success Diagnostics: Native ELF image loaded
 [NativeAppRuntime] App: com.guidexos.experimental.nativeaot.palprobe RuntimeId: 1 ProcessId: 0 Architecture: amd64 ABI: guidexos-c-abi-v1 Permissions: 1 State: Prepared Result: success Diagnostics: Native app runtime prepared
 [NativeElfExecutor] App: com.guidexos.experimental.nativeaot.palprobe Architecture: amd64 CanExecute: true Reason: Native ELF executor gate passed Result: available
 [NativeAppRuntime] App: com.guidexos.experimental.nativeaot.palprobe (NativeAOT PAL Probe) runtimeId=1 entering host call dispatch
 [NativeAppHost] App: com.guidexos.experimental.nativeaot.palprobe (NativeAOT PAL Probe) log: NativeAOT PAL PE bridge probe completed
 [NativeAppRuntime] Cleanup begin app=com.guidexos.experimental.nativeaot.palprobe (NativeAOT PAL Probe) runtimeId=1 processId=0 ownedWindows=0
 [NativeAppRuntime] Cleanup complete app=com.guidexos.experimental.nativeaot.palprobe (NativeAOT PAL Probe) runtimeId=1 state=Exited exitCode=0 cleanedWindows=0 remainingWindows=0
-[NativeElfExecutor] App: com.guidexos.experimental.nativeaot.palprobe Architecture: amd64 CanExecute: true Reason: Native ELF mapped for experimental execution; Preferred base: 0x10000000; Actual mapped base: 0x10000000; Preferred-base mapping: success; Entry host address resolved: 0x100012b0; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 1; Last host log message: NativeAOT PAL PE bridge probe completed; API version returned: 0; request_window call count: 0; last window id: 0; request_window result: 0; drawText call count: 0; last drawText window: 0; last drawText result: 0; drawRect call count: 0; last drawRect window: 0; last drawRect width: 0; last drawRect height: 0; last drawRect color: 0; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 0; last event type: 0; last event window: 0; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 0; fileExists call count: 0; last file read bytes: 0; last file IO result: 0 Result: executed
+[NativeElfExecutor] App: com.guidexos.experimental.nativeaot.palprobe Architecture: amd64 CanExecute: true Reason: Native ELF mapped for experimental execution; Preferred base: 0x10000000; Actual mapped base: 0x10000000; Preferred-base mapping: success; Entry host address resolved: 0x100015d0; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 1; Last host log message: NativeAOT PAL PE bridge probe completed; API version returned: 0; request_window call count: 0; last window id: 0; request_window result: 0; drawText call count: 0; last drawText window: 0; last drawText result: 0; drawRect call count: 0; last drawRect window: 0; last drawRect width: 0; last drawRect height: 0; last drawRect color: 0; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 0; last event type: 0; last event window: 0; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 0; fileExists call count: 0; last file read bytes: 0; last file IO result: 0 Result: executed
 NativeAppPipelineSmokeTest(com.guidexos.experimental.nativeaot.palprobe)
 nativeapp.inspect com.guidexos.experimental.nativeaot.palprobe
 
@@ -174,9 +174,9 @@ elfType: ET_EXEC
 validationSuccess: true
 
 [ElfImage]
-entryVirtualAddress: 0x100012b0
+entryVirtualAddress: 0x100015d0
 preferredBase: 0x10000000
-imageSize: 16896
+imageSize: 20992
 segmentCount: 5
 ptInterpPresent: false
 pieOrDynamic: false
@@ -215,7 +215,7 @@ actualMappedBase: 0x10000000
 preferredBaseMappingAttempted: true
 preferredBaseMappingSuccess: true
 trampolineUsed: true
-entryHostAddress: 0x100012b0
+entryHostAddress: 0x100015d0
 gxMainReturnCode: 0
 requestWindowCallCount: 0
 lastWindowId: 0
@@ -254,7 +254,7 @@ lastMouseX: 0
 lastMouseY: 0
 lastMousePackedButtonAction: 0
 lastMouseModifiers: 0
-executionDiagnostics: Native ELF mapped for experimental execution; Preferred base: 0x10000000; Actual mapped base: 0x10000000; Preferred-base mapping: success; Entry host address resolved: 0x100012b0; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 1; Last host log message: NativeAOT PAL PE bridge probe completed; API version returned: 0; request_window call count: 0; last window id: 0; request_window result: 0; drawText call count: 0; last drawText window: 0; last drawText result: 0; drawRect call count: 0; last drawRect window: 0; last drawRect width: 0; last drawRect height: 0; last drawRect color: 0; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 0; last event type: 0; last event window: 0; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 0; fileExists call count: 0; last file read bytes: 0; last file IO result: 0
+executionDiagnostics: Native ELF mapped for experimental execution; Preferred base: 0x10000000; Actual mapped base: 0x10000000; Preferred-base mapping: success; Entry host address resolved: 0x100015d0; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 1; Last host log message: NativeAOT PAL PE bridge probe completed; API version returned: 0; request_window call count: 0; last window id: 0; request_window result: 0; drawText call count: 0; last drawText window: 0; last drawText result: 0; drawRect call count: 0; last drawRect window: 0; last drawRect width: 0; last drawRect height: 0; last drawRect color: 0; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 0; last event type: 0; last event window: 0; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 0; fileExists call count: 0; last file read bytes: 0; last file IO result: 0
 
 Result: inspection complete; experimental execution path attempted
 

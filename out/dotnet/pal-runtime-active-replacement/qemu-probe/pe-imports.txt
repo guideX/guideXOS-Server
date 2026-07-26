@@ -8,4 +8,4 @@ File Type: EXECUTABLE IMAGE
         1000 .data
         1000 .pdata
         1000 .rdata
-        1000 .text
+        2000 .text

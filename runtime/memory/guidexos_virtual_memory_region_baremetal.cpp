@@ -35,9 +35,16 @@ using kernel::memory::address_space::MappingInfo;
 
 constexpr std::size_t kPageSize = 4096;
 constexpr std::uintptr_t kRuntimeRangeBase = 0x100000000ULL;
-constexpr std::size_t kRuntimeRangeSize = 64 * 1024 * 1024;
+constexpr std::size_t kRuntimeRangeSize = 128 * 1024 * 1024;
 constexpr std::size_t kMaxRegions = 32;
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+// The Workstation GC startup dry run reserves larger initial segments than
+// the ordinary VM smoke tests.  Keep this enlargement opt-in to that QEMU
+// build; the generic backend's normal bound remains 4 MiB.
+constexpr std::size_t kMaxRegionPages = 32768;
+#else
 constexpr std::size_t kMaxRegionPages = 1024;
+#endif
 constexpr std::size_t kMaxRegionSize = kMaxRegionPages * kPageSize;
 
 constexpr std::uint64_t kPtePresent = 1ULL << 0;

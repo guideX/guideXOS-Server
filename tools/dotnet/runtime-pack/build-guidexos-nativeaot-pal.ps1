@@ -287,6 +287,7 @@ $replacementPaths = [ordered]@{
     "time.c.obj" = Join-Path $replacementRoot "time.c.obj"
 }
 $contractObject = Join-Path $replacementRoot "guidexos_nativeaot_pal_contract.obj"
+$stableBridgeContractObject = Join-Path $stableBuildRoot "guidexos_nativeaot_pal_contract.bridge.obj"
 $stableReplacementPaths = [ordered]@{
     "PalRedhawkCommon.cpp.obj" = Join-Path $stableBuildRoot "PalRedhawkCommon.cpp.obj"
     "PalRedhawkMinWin.cpp.obj" = Join-Path $stableBuildRoot "PalRedhawkMinWin.cpp.obj"
@@ -297,8 +298,17 @@ $stableContractObject = Join-Path $stableBuildRoot "guidexos_nativeaot_pal_contr
 $compileBatch = Join-Path $replacementRoot "compile-replacements.bat"
 $commonFlags = "/nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro"
 $commonDefines = "/DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT"
+$activeContractDefines = "$commonDefines /DGUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE"
 $threadDefines = "$commonDefines /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB"
 $includeCommon = "/I`"$platformInclude`""
+$includePal = @(
+    "/I`"$platformInclude`"",
+    "/I`"$(Join-Path $threadIncludeRoot 'coreclr\gc')`"",
+    "/I`"$(Join-Path $threadIncludeRoot 'coreclr\gc\env')`"",
+    "/I`"$(Join-Path $threadIncludeRoot 'coreclr\nativeaot\Runtime')`"",
+    "/I`"$(Join-Path $threadIncludeRoot 'coreclr\nativeaot\Runtime\inc')`"",
+    "/I`"$(Join-Path $threadIncludeRoot 'coreclr\inc')`""
+) -join ' '
 $includeThread = @(
     "/I`"$(Join-Path $threadIncludeRoot 'coreclr\nativeaot\Runtime')`"",
     "/I`"$(Join-Path $threadIncludeRoot 'coreclr\nativeaot\Runtime\windows')`"",
@@ -313,11 +323,13 @@ $includeThread = @(
 $compileLines = @(
     "@echo off", "setlocal", "call `"$vcvars`" >nul", "if errorlevel 1 exit /b %errorlevel%",
     "pushd `"$stableBuildRoot`"",
-    "cl.exe $commonFlags $commonDefines $includeCommon /Fo:guidexos_nativeaot_pal_contract.obj `"$contractSource`"",
+    "cl.exe $commonFlags $activeContractDefines $includeCommon /Fo:guidexos_nativeaot_pal_contract.obj `"$contractSource`"",
+    "if errorlevel 1 exit /b %errorlevel%",
+    "cl.exe $commonFlags $commonDefines $includeCommon /Fo:guidexos_nativeaot_pal_contract.bridge.obj `"$contractSource`"",
     "if errorlevel 1 exit /b %errorlevel%",
     "cl.exe $commonFlags $commonDefines $includeCommon /Fo:PalRedhawkCommon.cpp.obj `"$commonSource`"",
     "if errorlevel 1 exit /b %errorlevel%",
-    "cl.exe $commonFlags $commonDefines $includeCommon /Fo:PalRedhawkMinWin.cpp.obj `"$minwinSource`"",
+    "cl.exe $commonFlags $commonDefines $includePal /Fo:PalRedhawkMinWin.cpp.obj `"$minwinSource`"",
     "if errorlevel 1 exit /b %errorlevel%",
     "cl.exe $commonFlags $commonDefines $includeCommon /Fo:time.c.obj `"$timeSource`"",
     "if errorlevel 1 exit /b %errorlevel%",
@@ -327,10 +339,10 @@ $compileLines = @(
     "exit /b %errorlevel%"
 )
 Invoke-VcBatch $compileBatch $compileLines
-foreach ($path in @($stableContractObject) + @($stableReplacementPaths.Values)) {
+foreach ($path in @($stableContractObject,$stableBridgeContractObject) + @($stableReplacementPaths.Values)) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Replacement object was not produced: $path" }
 }
-Copy-Item -LiteralPath $stableContractObject -Destination $contractObject -Force
+Copy-Item -LiteralPath $stableBridgeContractObject -Destination $contractObject -Force
 foreach ($object in $replacementPaths.Keys) {
     Copy-Item -LiteralPath $stableReplacementPaths[$object] -Destination $replacementPaths[$object] -Force
 }

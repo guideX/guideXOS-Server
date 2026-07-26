@@ -1,0 +1,66 @@
+﻿{
+    "date":  "2026-07-25",
+    "qemuLocated":  true,
+    "qemu":  "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "baselineBoot":  "PASS, runtime foundation and bootloader",
+    "probePEBuilt":  true,
+    "probePEImports":  "PASS, import directory absent",
+    "peToElfConversion":  true,
+    "artifactStaged":  "PASS, all three runs",
+    "palAbi":  {
+                   "version":  1,
+                   "size":  232,
+                   "capabilities":  "0x1FF"
+               },
+    "gcPlatformAbi":  {
+                          "version":  1,
+                          "size":  216,
+                          "capabilities":  "0x7"
+                      },
+    "hookDelivery":  "probe-specific exports",
+    "rhInitialize":  "PASS, return 0 in first/repeat/fresh disposable processes",
+    "currentThread":  "PASS",
+    "stackBounds":  "PASS",
+    "fls":  "PASS, preserved PAL bridge evidence",
+    "detachCallback":  "PASS, preserved PAL bridge evidence",
+    "worker":  "PASS, preserved PAL bridge evidence",
+    "workerResult":  "0x1234",
+    "threadStore":  "PASS, preserved PAL bridge evidence",
+    "timing":  "PASS, preserved PAL bridge evidence",
+    "sleepYield":  "PASS, preserved PAL bridge evidence",
+    "cleanup":  "PASS, process-lifetime boundary",
+    "hookUninstall":  "N/A for startup-only locked lifecycle; process exit is required",
+    "firstLaunch":  "PASS",
+    "repeatLaunch":  "PASS, disposable process",
+    "freshProcessLaunch":  "PASS",
+    "windowsPalThunkEntered":  "no",
+    "collections":  0,
+    "gcBackedAllocations":  0,
+    "managedEntryEntered":  "no",
+    "managedFinalizerEntryEntered":  "no",
+    "orderlySameProcessShutdown":  "UNSUPPORTED",
+    "activePalArchiveSha256":  "C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F",
+    "qemuRuns":  [
+                     {
+                         "label":  "first",
+                         "process":  "disposable",
+                         "marker":  true,
+                         "pass":  true,
+                         "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-initialization-dry-run\\qemu\\matrix\\first\\serial.log"
+                     },
+                     {
+                         "label":  "repeat",
+                         "process":  "disposable",
+                         "marker":  true,
+                         "pass":  true,
+                         "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-initialization-dry-run\\qemu\\matrix\\repeat\\serial.log"
+                     },
+                     {
+                         "label":  "fresh",
+                         "process":  "disposable",
+                         "marker":  true,
+                         "pass":  true,
+                         "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-initialization-dry-run\\qemu\\matrix\\fresh\\serial.log"
+                     }
+                 ]
+}

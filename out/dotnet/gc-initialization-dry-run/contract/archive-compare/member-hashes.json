@@ -1,0 +1,457 @@
+﻿[
+    {
+        "index":  0,
+        "member":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement-build\\PalRedhawkCommon.cpp.obj",
+        "old":  "9E548A374DB357D7C208CC82988A8858A340F08055452044D61F73A83B31E165",
+        "current":  "9E548A374DB357D7C208CC82988A8858A340F08055452044D61F73A83B31E165",
+        "equal":  true
+    },
+    {
+        "index":  1,
+        "member":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement-build\\PalRedhawkMinWin.cpp.obj",
+        "old":  "18777106F156AF3DE022349C8616196928DBE6FE1C80229B1C74C850F98BE70C",
+        "current":  "18777106F156AF3DE022349C8616196928DBE6FE1C80229B1C74C850F98BE70C",
+        "equal":  true
+    },
+    {
+        "index":  2,
+        "member":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement-build\\thread.cpp.obj",
+        "old":  "89CD068A74370727F38C907CE54D1695CFECA1A5ACE44B6C18B1654022494F5E",
+        "current":  "89CD068A74370727F38C907CE54D1695CFECA1A5ACE44B6C18B1654022494F5E",
+        "equal":  true
+    },
+    {
+        "index":  3,
+        "member":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement-build\\time.c.obj",
+        "old":  "95287984D9D656B96EC6E907ADECA3DBCA29153400EC16C557D877C7E2D75B8B",
+        "current":  "95287984D9D656B96EC6E907ADECA3DBCA29153400EC16C557D877C7E2D75B8B",
+        "equal":  true
+    },
+    {
+        "index":  4,
+        "member":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement-build\\guidexos_nativeaot_pal_contract.obj",
+        "old":  "F2143156DDA3B986CC4C8C4F6A86EEE58BEEA011878ADF14CD38D834E49EBF06",
+        "current":  "78DA2F89EC7FF2C257936F61A1308EBB73C5FD564DC50FE3D498D1E79C0D996B",
+        "equal":  false
+    },
+    {
+        "index":  5,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\WriteBarriers.asm.obj",
+        "old":  "6B49D90087B9CC5928410BE4840441966D95EBE63CC4F26E1474B3137AE32F0C",
+        "current":  "6B49D90087B9CC5928410BE4840441966D95EBE63CC4F26E1474B3137AE32F0C",
+        "equal":  true
+    },
+    {
+        "index":  6,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\UniversalTransition.asm.obj",
+        "old":  "C678F9DB956792E6130482247979FF3D401CE5A326472B115F2AF4E915B6136E",
+        "current":  "C678F9DB956792E6130482247979FF3D401CE5A326472B115F2AF4E915B6136E",
+        "equal":  true
+    },
+    {
+        "index":  7,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\StubDispatch.asm.obj",
+        "old":  "2DB5F6AAB12A5CAFA073636E66D20359CC5649EB4D9E8765DDAA48E0B6F408C9",
+        "current":  "2DB5F6AAB12A5CAFA073636E66D20359CC5649EB4D9E8765DDAA48E0B6F408C9",
+        "equal":  true
+    },
+    {
+        "index":  8,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\InteropThunksHelpers.asm.obj",
+        "old":  "EB2721AA505542D49D5FB470236CD6F0961575BFBC071D71CFB1B3EAD31BD42B",
+        "current":  "EB2721AA505542D49D5FB470236CD6F0961575BFBC071D71CFB1B3EAD31BD42B",
+        "equal":  true
+    },
+    {
+        "index":  9,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\PInvoke.asm.obj",
+        "old":  "6D0DED48C64DEB19274B81601F2016BF348EA4FAB5FD6DC7B5EBE1082BDDFA19",
+        "current":  "6D0DED48C64DEB19274B81601F2016BF348EA4FAB5FD6DC7B5EBE1082BDDFA19",
+        "equal":  true
+    },
+    {
+        "index":  10,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\MiscStubs.asm.obj",
+        "old":  "D0677F1DEBFC29E5617C7059C1FE1143932862F1B26D9A5E73725F2F86268366",
+        "current":  "D0677F1DEBFC29E5617C7059C1FE1143932862F1B26D9A5E73725F2F86268366",
+        "equal":  true
+    },
+    {
+        "index":  11,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\GcProbe.asm.obj",
+        "old":  "E3AD197794296FCF02BF1070E24FD12A2298E8C405E8A9639393548DD46D6EE3",
+        "current":  "E3AD197794296FCF02BF1070E24FD12A2298E8C405E8A9639393548DD46D6EE3",
+        "equal":  true
+    },
+    {
+        "index":  12,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\ExceptionHandling.asm.obj",
+        "old":  "34AB57224AEB96B7EED9C2A8E033D3F571892B4BA1FC02E0B67FEA7C56BAF530",
+        "current":  "34AB57224AEB96B7EED9C2A8E033D3F571892B4BA1FC02E0B67FEA7C56BAF530",
+        "equal":  true
+    },
+    {
+        "index":  13,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\amd64\\AllocFast.asm.obj",
+        "old":  "C957F9234A2827C77E57669D470054B715B2042384C54B8674CF84357405D824",
+        "current":  "C957F9234A2827C77E57669D470054B715B2042384C54B8674CF84357405D824",
+        "equal":  true
+    },
+    {
+        "index":  14,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\windows\\CoffNativeCodeManager.cpp.obj",
+        "old":  "358C89C18D2C394F214143198B625705055ED087F11B97D5648919F33B9EBDF1",
+        "current":  "358C89C18D2C394F214143198B625705055ED087F11B97D5648919F33B9EBDF1",
+        "equal":  true
+    },
+    {
+        "index":  15,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\ThunksMapping.cpp.obj",
+        "old":  "42F52B4B155914711D904F500EA371082098D35391CB9FF21EF9375D8B86E37A",
+        "current":  "42F52B4B155914711D904F500EA371082098D35391CB9FF21EF9375D8B86E37A",
+        "equal":  true
+    },
+    {
+        "index":  16,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\AsmOffsetsVerify.cpp.obj",
+        "old":  "E6CC30925539C8B84139F306D8D397884F013265127364085F67DA513C9DCBCA",
+        "current":  "E6CC30925539C8B84139F306D8D397884F013265127364085F67DA513C9DCBCA",
+        "equal":  true
+    },
+    {
+        "index":  17,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\windows\\gcenv.windows.cpp.obj",
+        "old":  "E9FBBC398B453693F0C019AC42B47FE4A42F8EBEC74E57C10EA7C5F05CC09A74",
+        "current":  "E9FBBC398B453693F0C019AC42B47FE4A42F8EBEC74E57C10EA7C5F05CC09A74",
+        "equal":  true
+    },
+    {
+        "index":  18,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\D_\\a\\_work\\1\\s\\src\\native\\minipal\\cpufeatures.c.obj",
+        "old":  "57E13BC1B645C409CAFECE965F33121307067085E0EBB45654E155BEA71143DD",
+        "current":  "57E13BC1B645C409CAFECE965F33121307067085E0EBB45654E155BEA71143DD",
+        "equal":  true
+    },
+    {
+        "index":  19,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\softwarewritewatch.cpp.obj",
+        "old":  "3781DDA6722BC0A9806C969C6D466E8016BB18FAB5F4824F294C91103FA14820",
+        "current":  "3781DDA6722BC0A9806C969C6D466E8016BB18FAB5F4824F294C91103FA14820",
+        "equal":  true
+    },
+    {
+        "index":  20,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\objecthandle.cpp.obj",
+        "old":  "65CA9868904676C32CE68EBC34E506BC73039F2E28C825515D2C9B86F2179B97",
+        "current":  "65CA9868904676C32CE68EBC34E506BC73039F2E28C825515D2C9B86F2179B97",
+        "equal":  true
+    },
+    {
+        "index":  21,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\handletablescan.cpp.obj",
+        "old":  "CE20C1978A13DD303427F9E3BE103C1C15D06660B83C222B8B0058636B968666",
+        "current":  "CE20C1978A13DD303427F9E3BE103C1C15D06660B83C222B8B0058636B968666",
+        "equal":  true
+    },
+    {
+        "index":  22,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\handletablecore.cpp.obj",
+        "old":  "CFF8229B99AB7CA4E53214321794C18F9B517004C4B6E10B0E33C0D4E1B16C91",
+        "current":  "CFF8229B99AB7CA4E53214321794C18F9B517004C4B6E10B0E33C0D4E1B16C91",
+        "equal":  true
+    },
+    {
+        "index":  23,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\handletablecache.cpp.obj",
+        "old":  "086D21A010F490C1F709A786B8C875DB6B685CC6592335A9A1B92C68D8D8DBED",
+        "current":  "086D21A010F490C1F709A786B8C875DB6B685CC6592335A9A1B92C68D8D8DBED",
+        "equal":  true
+    },
+    {
+        "index":  24,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\handletable.cpp.obj",
+        "old":  "D95DE3A95A0EF23555133FA07B8D175AD76034921F26089226C4C0B6178F7018",
+        "current":  "D95DE3A95A0EF23555133FA07B8D175AD76034921F26089226C4C0B6178F7018",
+        "equal":  true
+    },
+    {
+        "index":  25,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\gcscan.cpp.obj",
+        "old":  "5F21DC45026F742365D147679B77B4A15EAB41263A7BB4ED97BF64C5B0C5F981",
+        "current":  "5F21DC45026F742365D147679B77B4A15EAB41263A7BB4ED97BF64C5B0C5F981",
+        "equal":  true
+    },
+    {
+        "index":  26,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\gcwks.cpp.obj",
+        "old":  "03162809C8C01522C8B92AED277C1C6B582CF71181991CDEA50201633E21467D",
+        "current":  "03162809C8C01522C8B92AED277C1C6B582CF71181991CDEA50201633E21467D",
+        "equal":  true
+    },
+    {
+        "index":  27,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\gceewks.cpp.obj",
+        "old":  "25C12B6FFA15776F98D1E5F7A669BF68B0C7B3508DC6BA1BC7869CB8EEBCAF91",
+        "current":  "25C12B6FFA15776F98D1E5F7A669BF68B0C7B3508DC6BA1BC7869CB8EEBCAF91",
+        "equal":  true
+    },
+    {
+        "index":  28,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\gccommon.cpp.obj",
+        "old":  "12AA11CDA1C446D7D45EE45CC6AE48F05A0040D2EE5AFEA844E3210B033792A9",
+        "current":  "12AA11CDA1C446D7D45EE45CC6AE48F05A0040D2EE5AFEA844E3210B033792A9",
+        "equal":  true
+    },
+    {
+        "index":  29,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\gchandletable.cpp.obj",
+        "old":  "C60CF86C76CCBC313A7AD00F8CAD4027FFF04494411A752BDC6BA01B31E283BA",
+        "current":  "C60CF86C76CCBC313A7AD00F8CAD4027FFF04494411A752BDC6BA01B31E283BA",
+        "equal":  true
+    },
+    {
+        "index":  30,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\gcconfig.cpp.obj",
+        "old":  "79967339B5860CD24B90E4788D6AD7A1CF5E67A6E4F5B2216881FB4A435EB1C8",
+        "current":  "79967339B5860CD24B90E4788D6AD7A1CF5E67A6E4F5B2216881FB4A435EB1C8",
+        "equal":  true
+    },
+    {
+        "index":  31,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\gcload.cpp.obj",
+        "old":  "1F8C1CE177AD8B00D4EF082F3AA40BFF6BB073F8D2D35FC02A9E34280F2E380E",
+        "current":  "1F8C1CE177AD8B00D4EF082F3AA40BFF6BB073F8D2D35FC02A9E34280F2E380E",
+        "equal":  true
+    },
+    {
+        "index":  32,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\__\\__\\gc\\gceventstatus.cpp.obj",
+        "old":  "9439164BB318A54341F71F924929C580BDB64AE6A7AE3CC477117B2225C92BCD",
+        "current":  "9439164BB318A54341F71F924929C580BDB64AE6A7AE3CC477117B2225C92BCD",
+        "equal":  true
+    },
+    {
+        "index":  33,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\yieldprocessornormalized.cpp.obj",
+        "old":  "214977CC5F9453DE2174274270A872F2FD541119B1968B49678249F655B5E129",
+        "current":  "214977CC5F9453DE2174274270A872F2FD541119B1968B49678249F655B5E129",
+        "equal":  true
+    },
+    {
+        "index":  34,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\UniversalTransitionHelpers.cpp.obj",
+        "old":  "D7D7BB7BA4291526FD3E2A8198CF34ADDC1844274902470B5E18733A00114ED8",
+        "current":  "D7D7BB7BA4291526FD3E2A8198CF34ADDC1844274902470B5E18733A00114ED8",
+        "equal":  true
+    },
+    {
+        "index":  35,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\threadstore.cpp.obj",
+        "old":  "673BAFD6D0A889EC1CA6CD355334DB70D8FC32701A7D7FE7F7F8434ED6B9C603",
+        "current":  "673BAFD6D0A889EC1CA6CD355334DB70D8FC32701A7D7FE7F7F8434ED6B9C603",
+        "equal":  true
+    },
+    {
+        "index":  36,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\SyncClean.cpp.obj",
+        "old":  "E21F5FCCB38DA5C6E76A00727C740D02C3A30125713F4AA8EAC3939C46D5C6EE",
+        "current":  "E21F5FCCB38DA5C6E76A00727C740D02C3A30125713F4AA8EAC3939C46D5C6EE",
+        "equal":  true
+    },
+    {
+        "index":  37,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\stressLog.cpp.obj",
+        "old":  "53418228C6E8024AEA41518216DFE338CAFC636F34DDF1844174CFBE47EA55C6",
+        "current":  "53418228C6E8024AEA41518216DFE338CAFC636F34DDF1844174CFBE47EA55C6",
+        "equal":  true
+    },
+    {
+        "index":  38,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\startup.cpp.obj",
+        "old":  "015F5F42614854EEC052E9122DFD0C786C3EA9C1741C07ED3002F4BC98439002",
+        "current":  "015F5F42614854EEC052E9122DFD0C786C3EA9C1741C07ED3002F4BC98439002",
+        "equal":  true
+    },
+    {
+        "index":  39,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\StackFrameIterator.cpp.obj",
+        "old":  "8B612DFBDABD9D22D6D2211D98BF291D7BC9C554E1C82AC8B7EB7FA5A165F8BF",
+        "current":  "8B612DFBDABD9D22D6D2211D98BF291D7BC9C554E1C82AC8B7EB7FA5A165F8BF",
+        "equal":  true
+    },
+    {
+        "index":  40,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\RuntimeInstance.cpp.obj",
+        "old":  "8D9441A12B25543A2BACC0E7E348D8C052E9C7E4983D19FBB205CAA10F03024F",
+        "current":  "8D9441A12B25543A2BACC0E7E348D8C052E9C7E4983D19FBB205CAA10F03024F",
+        "equal":  true
+    },
+    {
+        "index":  41,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\RhConfig.cpp.obj",
+        "old":  "C3D6B99B9F9B681E8C1153BBC03BE3395716CE95B5AF9DEF89EA1C916880C55C",
+        "current":  "C3D6B99B9F9B681E8C1153BBC03BE3395716CE95B5AF9DEF89EA1C916880C55C",
+        "equal":  true
+    },
+    {
+        "index":  42,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\RestrictedCallouts.cpp.obj",
+        "old":  "9652E135B16564AAF86413C3CD1CC947C51996EA632E6E93ABF2EAEA472E644D",
+        "current":  "9652E135B16564AAF86413C3CD1CC947C51996EA632E6E93ABF2EAEA472E644D",
+        "equal":  true
+    },
+    {
+        "index":  43,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\portable.cpp.obj",
+        "old":  "52BC80DEF3EEAFA1FF0E8F765F566750373317BD2F35999A1B93137B350B9170",
+        "current":  "52BC80DEF3EEAFA1FF0E8F765F566750373317BD2F35999A1B93137B350B9170",
+        "equal":  true
+    },
+    {
+        "index":  44,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\ObjectLayout.cpp.obj",
+        "old":  "4B917B5397A7BE8757EC901CDD766174990FC221A16962925A8094C30ED5A229",
+        "current":  "4B917B5397A7BE8757EC901CDD766174990FC221A16962925A8094C30ED5A229",
+        "equal":  true
+    },
+    {
+        "index":  45,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\TypeManager.cpp.obj",
+        "old":  "E1E4C0F746513F81D0042867770355698558BDD65FFBD6D42A332CCE7177920E",
+        "current":  "E1E4C0F746513F81D0042867770355698558BDD65FFBD6D42A332CCE7177920E",
+        "equal":  true
+    },
+    {
+        "index":  46,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\MiscHelpers.cpp.obj",
+        "old":  "162FCF150395433B30582A78AFA5C647BE57761AC899B0961D7BB4E66F03256A",
+        "current":  "162FCF150395433B30582A78AFA5C647BE57761AC899B0961D7BB4E66F03256A",
+        "equal":  true
+    },
+    {
+        "index":  47,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\MathHelpers.cpp.obj",
+        "old":  "EF3498DE131540E1FB29C8E4DB3DEEA7D952B3A8B0762289AAE5CC1B8F5E9EB7",
+        "current":  "EF3498DE131540E1FB29C8E4DB3DEEA7D952B3A8B0762289AAE5CC1B8F5E9EB7",
+        "equal":  true
+    },
+    {
+        "index":  48,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\HandleTableHelpers.cpp.obj",
+        "old":  "22B72E3D7F72768AF3EE5B1E289C84999E9EDE60889808003FF91E9FC0EDD76A",
+        "current":  "22B72E3D7F72768AF3EE5B1E289C84999E9EDE60889808003FF91E9FC0EDD76A",
+        "equal":  true
+    },
+    {
+        "index":  49,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\GcStressControl.cpp.obj",
+        "old":  "449E69C9635282402FB38D38904A713F72E7E5C2CDA45B805C83871D43BC8E3F",
+        "current":  "449E69C9635282402FB38D38904A713F72E7E5C2CDA45B805C83871D43BC8E3F",
+        "equal":  true
+    },
+    {
+        "index":  50,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\gcenv.ee.cpp.obj",
+        "old":  "22FB12B7F63CB2A16D659695CE30BCC951683190030664C65CC189F76F94EFD0",
+        "current":  "22FB12B7F63CB2A16D659695CE30BCC951683190030664C65CC189F76F94EFD0",
+        "equal":  true
+    },
+    {
+        "index":  51,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\GCMemoryHelpers.cpp.obj",
+        "old":  "D215F0AEB5C54C8CE7AEAFE961ED94E128C65EC065DCF9F532F682FED17F5E6D",
+        "current":  "D215F0AEB5C54C8CE7AEAFE961ED94E128C65EC065DCF9F532F682FED17F5E6D",
+        "equal":  true
+    },
+    {
+        "index":  52,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\gcheaputilities.cpp.obj",
+        "old":  "1DEE5547BEE044CCA4634B3247AD4CEF75E37D8735692EFE5C658A05D9DECFC6",
+        "current":  "1DEE5547BEE044CCA4634B3247AD4CEF75E37D8735692EFE5C658A05D9DECFC6",
+        "equal":  true
+    },
+    {
+        "index":  53,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\gctoclreventsink.cpp.obj",
+        "old":  "0254491E270B781D98F99284C1E6A231A6D7FFAF655F3A6BB26969E3E3094750",
+        "current":  "0254491E270B781D98F99284C1E6A231A6D7FFAF655F3A6BB26969E3E3094750",
+        "equal":  true
+    },
+    {
+        "index":  54,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\GCHelpers.cpp.obj",
+        "old":  "8293475F598E69C5D7753D1E13AAAF89E8B28B4E7F86CEC6412595EA22CDC7E2",
+        "current":  "8293475F598E69C5D7753D1E13AAAF89E8B28B4E7F86CEC6412595EA22CDC7E2",
+        "equal":  true
+    },
+    {
+        "index":  55,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\GcEnum.cpp.obj",
+        "old":  "BB142242AC33D870DFA2940EB6D7C1EE4C6CAD483788CDCF2D8E87291F76DFEE",
+        "current":  "BB142242AC33D870DFA2940EB6D7C1EE4C6CAD483788CDCF2D8E87291F76DFEE",
+        "equal":  true
+    },
+    {
+        "index":  56,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\FinalizerHelpers.cpp.obj",
+        "old":  "5FC359A22C8923F3C663A6364007377F43A3E7B766FF8C589BABA6ACD98DAD42",
+        "current":  "5FC359A22C8923F3C663A6364007377F43A3E7B766FF8C589BABA6ACD98DAD42",
+        "equal":  true
+    },
+    {
+        "index":  57,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\event.cpp.obj",
+        "old":  "483785111B19629BE02E3783F80BA37CAB798B1209264C4AE916A31D3222FFF2",
+        "current":  "483785111B19629BE02E3783F80BA37CAB798B1209264C4AE916A31D3222FFF2",
+        "equal":  true
+    },
+    {
+        "index":  58,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\EHHelpers.cpp.obj",
+        "old":  "3C25AEA7A15DF1E9A1145F1495F38E5C6771055182D1EDFFC5076B99204A3A3F",
+        "current":  "3C25AEA7A15DF1E9A1145F1495F38E5C6771055182D1EDFFC5076B99204A3A3F",
+        "equal":  true
+    },
+    {
+        "index":  59,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\MethodTable.cpp.obj",
+        "old":  "D6551BF67B296F005EC1AB0D8874A4F82B994AD8492616FD6BC161B35E0FCAA2",
+        "current":  "D6551BF67B296F005EC1AB0D8874A4F82B994AD8492616FD6BC161B35E0FCAA2",
+        "equal":  true
+    },
+    {
+        "index":  60,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\DebugHeader.cpp.obj",
+        "old":  "54CC27304CB9A1C2DEED6F7EAFF250F6C6D693A063B3D979DDF38C62AB517FF8",
+        "current":  "54CC27304CB9A1C2DEED6F7EAFF250F6C6D693A063B3D979DDF38C62AB517FF8",
+        "equal":  true
+    },
+    {
+        "index":  61,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\Crst.cpp.obj",
+        "old":  "3548F2A220F021E0A43CB12C3A69EB1D47B41E51B923E763C1D4C8CB001578D7",
+        "current":  "3548F2A220F021E0A43CB12C3A69EB1D47B41E51B923E763C1D4C8CB001578D7",
+        "equal":  true
+    },
+    {
+        "index":  62,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\CachedInterfaceDispatch.cpp.obj",
+        "old":  "B0B867BE461D3646430F18CB67720DB94ECD27E859E5E50B3490B8B639818B13",
+        "current":  "B0B867BE461D3646430F18CB67720DB94ECD27E859E5E50B3490B8B639818B13",
+        "equal":  true
+    },
+    {
+        "index":  63,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\rhassert.cpp.obj",
+        "old":  "C9C8D086DE8120BE32CBAE4214D580483DB4B820793B4509E17274C90C91BBE5",
+        "current":  "C9C8D086DE8120BE32CBAE4214D580483DB4B820793B4509E17274C90C91BBE5",
+        "equal":  true
+    },
+    {
+        "index":  64,
+        "member":  "nativeaot\\Runtime\\Full\\CMakeFiles\\Runtime.WorkstationGC.dir\\__\\allocheap.cpp.obj",
+        "old":  "E81748BDB4375C516D8D0D788BD271B582803774C9B34741CAFF2C971EE49E08",
+        "current":  "E81748BDB4375C516D8D0D788BD271B582803774C9B34741CAFF2C971EE49E08",
+        "equal":  true
+    }
+]

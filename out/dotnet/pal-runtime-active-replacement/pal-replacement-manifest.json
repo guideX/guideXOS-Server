@@ -878,7 +878,7 @@
                      ],
     "contractObject":  {
                            "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement\\replacements\\guidexos_nativeaot_pal_contract.obj",
-                           "sha256":  "F2143156DDA3B986CC4C8C4F6A86EEE58BEEA011878ADF14CD38D834E49EBF06",
+                           "sha256":  "A753164880EFDD94C8C8C0A7A0F93BD9F5F2F6A6C236950DA3BEA81F252AFB60",
                            "symbols":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement\\symbols\\replacement-guidexos_nativeaot_pal_contract.obj.txt",
                            "imports":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement\\imports\\replacement-guidexos_nativeaot_pal_contract.obj.txt"
                        },

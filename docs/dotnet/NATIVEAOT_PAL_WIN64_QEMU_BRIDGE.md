@@ -1,10 +1,10 @@
 # NativeAOT PAL Win64/QEMU bridge
 
-Status: 2026-07-24. The versioned PAL hook table, SysV/Win64 callback
+Status: 2026-07-25. The versioned PAL hook table, SysV/Win64 callback
 bridges, worker lifecycle, FLS detach path, stack-bound path, and
-application-scoped ThreadStore probe all pass under system QEMU. The exact
-probe does not call `RhInitialize`, start the real finalizer/helper thread,
-construct a GC heap, allocate through the collector, or enter collection.
+application-scoped ThreadStore probe all pass under system QEMU. The
+separately gated startup artifact also initializes Workstation GC successfully
+without managed execution, collection, or collector-backed allocation.
 
 ## 1. Objective
 
@@ -144,17 +144,21 @@ headers, PT_LOAD ranges, zeroes BSS, maps writable image pages, stages the
 artifact, and validates callback pointers against the loaded range.
 
 The final active archive hash is
-`5593D0FC4B99986797123C8494DF117570DB795DF8FCE63D732BB53594C794BF`.
+`C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F`.
 The pre-bridge baseline hash remains preserved under
 `out/dotnet/pal-win64-qemu-bridge/baseline/`.
 
 ## 17. QEMU test mode
 
-The mode is opt-in through `GXOS_NATIVEAOT_PAL_QEMU_TEST`; ordinary boots and
-the default application inventory are unchanged. The runner is
+The PAL mode is opt-in through `GXOS_NATIVEAOT_PAL_QEMU_TEST`; ordinary boots
+and the default application inventory are unchanged. The runner is
 [`scripts/smoke-nativeaot-pal-qemu.ps1`](../../scripts/smoke-nativeaot-pal-qemu.ps1).
-It builds the opt-in kernel, stages the converted image, runs a baseline boot,
-then runs the exact PAL probe.
+The startup-only GC mode is independently opt-in through
+`GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST`; its runner is
+[`scripts/smoke-nativeaot-gc-startup-qemu.ps1`](../../scripts/smoke-nativeaot-gc-startup-qemu.ps1).
+It stages the fixed-base converted artifact, installs the PAL and GC platform
+tables through probe-specific exports, calls `RhInitialize`, records bounded
+state, and terminates the disposable QEMU process.
 
 ## 18. First launch
 
@@ -168,41 +172,51 @@ callback count is `expected=1 observed=1`.
 
 ## 19. Repeat launch
 
-The first QEMU process runs `run()` twice. The second in-process generation
+The first PAL QEMU process runs `run()` twice. The second in-process generation
 passes with no stale worker, FLS, callback, ThreadStore, or hook-table state.
+For the GC startup-only artifact, repeat means a second disposable process:
+the locked source has no orderly same-process `RhShutdown` contract.
 
 ## 20. Fresh-process launch
 
-The runner starts a separate QEMU process with the same opt-in image. The
-fresh process boots normally and its two-generation exact probe also reports
-`ALL_PASS`.
+The PAL runner starts a separate QEMU process with the same opt-in image. The
+fresh process boots normally and its two-generation exact probe reports
+`ALL_PASS`. The GC startup runner also starts a fresh disposable process and
+reports `ALL_PASS`.
 
 ## 21. Cleanup
 
-The exact run reports PASS for worker join/cleanup, ThreadStore detach, hook
-uninstall, and final cleanup. The matrix records no active callback at
-uninstall and no Windows PAL thunk entry. The serial diagnostics report
-`Active callbacks: 00000000` after each generation.
+The exact PAL run reports PASS for worker join/cleanup, ThreadStore detach,
+hook uninstall, and final cleanup. The startup-only GC run reports PASS for
+runtime initialization and the process-lifetime cleanup boundary. It retains
+the parked helper until QEMU exits; same-process shutdown is explicitly
+`UNSUPPORTED`.
 
 ## 22. Remaining limitations
 
 This is a probe-scoped PAL boundary, not general Win32 emulation. It does not
 provide dynamic loading, arbitrary Windows handles, suspension/hijacking,
-collection-safe enumeration, or the real NativeAOT GC startup path. The
-artifact is not retained after uninstall and unload. Failure paths are
-fail-closed; a callback fault is not converted into a success result.
+collection-safe enumeration, or managed finalizer execution. The GC startup
+artifact uses a bounded startup platform table and a process-lifetime cleanup
+boundary because the locked NativeAOT source exposes no public shutdown API.
+The artifact is not retained after its disposable process exits. Failure paths
+are fail-closed; a callback fault is not converted into a success result.
 
 ## 23. Updated readiness result
 
 The PAL replacement, versioned hook table, SysV implementation, both callback
 bridges, worker lifecycle, stack bounds, ThreadStore lifecycle, hosted exact
-probe, Server PE-to-ELF probe, and system-QEMU exact probe are PASS. The
-managed no-collection proofs and generic foundation suites remain required
-regression evidence and are recorded by
+probe, Server PE-to-ELF probe, system-QEMU exact probe, and startup-only
+Workstation `RhInitialize` probe are PASS. The managed no-collection proofs
+and generic foundation suites remain required regression evidence and are
+recorded by
 [`NATIVEAOT_GC_STARTUP_READINESS.md`](NATIVEAOT_GC_STARTUP_READINESS.md).
 
 ## 24. Exact next experiment
 
-After the readiness gate is rechecked, the next separately gated experiment is
-the first Workstation GC initialization-and-shutdown dry run. That experiment
-must remain isolated; this bridge validation itself never calls `RhInitialize`.
+The next separately gated experiment is a Workstation GC lifecycle experiment
+with an explicit supported shutdown boundary. The current startup proof calls
+`RhInitialize` only from its probe export, returns 0 in first/repeat/fresh
+disposable QEMU processes, enters no collection, performs no collector-backed
+allocation, and does not enter managed finalizer code. Do not infer orderly
+same-process shutdown from this result.

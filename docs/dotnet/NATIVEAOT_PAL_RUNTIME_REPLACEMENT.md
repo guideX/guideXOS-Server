@@ -1,63 +1,56 @@
 # NativeAOT PAL/runtime replacement
 
-Status: 2026-07-24. The active four-object NativeAOT PAL replacement and the
-versioned Win64/QEMU bridge are complete. The detailed ABI and QEMU evidence
-are in [NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md](NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md).
-`RhInitialize` was not called.
+Status: 2026-07-25. The active four-object PAL replacement and the versioned
+Win64/SysV bridge pass. Detailed bridge evidence is in
+[NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md](NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md).
+The separately gated Workstation GC startup-only dry run also passes; its
+evidence is in `out/dotnet/gc-initialization-dry-run/`.
 
-## Current archive gate
+## Active archive
 
-The locked stock `Runtime.WorkstationGC.lib` hash remains
+The active adapted archive hash is
+`C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F`.
+The locked stock archive hash remains
 `0E6A134AD4150CD604317A47860DAE82EB30AAE4D9CDB14144E06454E7BB1948`.
-The post-bridge adapted archive is
-`5593D0FC4B99986797123C8494DF117570DB795DF8FCE63D732BB53594C794BF`.
-The pre-bridge baseline archive hash
-`C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F`
-is preserved under `out/dotnet/pal-win64-qemu-bridge/baseline/`.
 
-The four replaced members retain exact definition parity:
-
-| Member | Definitions | Missing | Unexpected | Replacement imports |
+| Replaced member | Definitions | Missing | Unexpected | Windows imports |
 | --- | ---: | ---: | ---: | ---: |
 | `PalRedhawkCommon.cpp.obj` | 6/6 | 0 | 0 | 0 |
 | `PalRedhawkMinWin.cpp.obj` | 38/38 | 0 | 0 | 0 |
 | `thread.cpp.obj` | 74/74 | 0 | 0 | 0 |
 | `time.c.obj` | 3/3 | 0 | 0 | 0 |
 
-The active objects were rebuilt with MSVC 19.51.36248 for x64. The contract
-uses fixed-width C values, explicit calling conventions, opaque generation-
-checked worker handles, and no C++ runtime object at the boundary.
+The adapted Workstation `gcenv` object remains 53/53 with no missing or
+duplicate definitions. The active PAL archive itself was not changed by the
+startup-only artifact.
 
-## Probe status
+## Validation status
 
 | Gate | Result |
 | --- | --- |
-| Hosted exact PAL probe | PASS, two launches returned 0 |
-| Server PE-to-ELF PAL probe | PASS, repeat and fresh-process launches |
-| System-QEMU exact PAL probe | PASS, first/repeat/fresh-process matrix |
-| Windows PAL thunk in exact QEMU run | NO |
-| HostLog | PASS, exact message, one callback, return 0 |
-| 64 KiB proof | PASS, 234 allocations, controlled OOM |
-| 4 KiB proof | PASS, 14 allocations, controlled OOM |
+| Hosted exact PAL probe | PASS |
+| Server PE-to-ELF PAL probe | PASS |
+| System-QEMU exact PAL probe | PASS, first/repeat/fresh |
+| Workstation GC `RhInitialize` startup-only dry run | PASS, first/repeat/fresh disposable processes |
+| Windows PAL import directory | PASS, absent |
+| Mandatory Windows PAL thunk | NO |
+| HostLog | PASS |
+| 64 KiB proof | PASS, 234 allocations |
+| 4 KiB proof | PASS, 14 allocations |
+| Controlled OOM | PASS |
 | Collections | 0 |
 | GC-backed allocations | 0 |
 | Heap expansion | 0 |
+| Generic scheduler/events/threads/VM/mutex/FLS/stack/ThreadStore | PASS |
 
-The exact QEMU matrix and complete serial logs are under
-`out/dotnet/pal-win64-qemu-bridge/artifact/qemu/smoke-20260724-222115183-5445/`;
-the matrix is `qemu-validation-matrix.json`. Generic scheduler, event,
-native-thread, VM, mutex, local-storage/FLS, stack-bound, ThreadStore, and
-inactive-adapter foundations remain passing.
+The startup artifact calls `RhInitialize` only from its explicit probe entry.
+It does not enter a managed entry point, request collection, allocate managed
+objects, or invoke managed finalizer work. The PAL helper created by the
+locked startup path is retained in a parked process-lifetime state because
+the locked NativeAOT source exposes no orderly `RhShutdown` API.
 
-## Readiness result
+Decision: **Outcome A - Win64 PAL hook-table and system-QEMU bridge complete.**
 
-Active PAL replacement, exact parity, replacement imports, hook-table
-versioning, SysV implementation, both callback bridges, worker lifecycle,
-FLS detach, stack bounds, ThreadStore lifecycle, hosted PAL, Server PE-to-ELF,
-system QEMU, HostLog, and managed no-collection proofs are PASS.
-
-Decision: **Outcome A — Win64 PAL hook-table and system-QEMU bridge complete.**
-
-The exact next experiment is the first separately gated Workstation GC
-initialization-and-shutdown dry run. That experiment is not part of this pass;
-do not call `RhInitialize` during bridge validation.
+The exact next experiment is a separately gated Workstation GC lifecycle test
+with an explicit supported shutdown boundary; same-process shutdown remains
+unsupported by the current locked NativeAOT contract.
