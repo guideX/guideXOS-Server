@@ -37,6 +37,7 @@
 /out/dotnet/gc-startup-dry-run/
 /out/dotnet/native-event/
 /out/dotnet/native-thread-smoke/
+/out/dotnet/gc-shutdown-boundary/
 /out/runtime/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx

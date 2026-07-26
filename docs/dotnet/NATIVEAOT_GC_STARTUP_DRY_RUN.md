@@ -1,6 +1,6 @@
 # NativeAOT Workstation GC startup dry run
 
-Status: 2026-07-25. This document records the separately gated startup-only
+Status: 2026-07-26. This document records the separately gated startup-only
 experiment that follows the PAL bridge pass. It is intentionally narrower than
 managed execution or collection validation.
 
@@ -169,9 +169,27 @@ bridges, worker lifecycle, FLS detach, stack bounds, ThreadStore, hosted PAL,
 Server PE-to-ELF PAL, system-QEMU PAL, startup `RhInitialize`, HostLog, and
 managed no-collection proofs pass. Same-process GC shutdown is unsupported.
 
-## 24. Exact next experiment
+## 24. Shutdown-boundary result
 
-The next experiment is a separately gated Workstation GC lifecycle test with a
-supported shutdown boundary. Until that boundary is defined and validated,
-do not enter managed code, trigger collection, or treat process termination as
-an orderly `RhShutdown`.
+The matching NativeAOT source audit is complete. It contains no supported
+runtime-wide `RhShutdown`, finalizer stop/join, FLS-index release, module or
+type-manager unregister, or write-barrier reset sequence. Internal names such
+as `GCHeap::StaticShutdown` and `GCHandleManager::Shutdown` are not callable
+public shutdown contracts and have no matching runtime call path.
+
+The selected model is **Model C: process-lifetime GC state**. The parked helper,
+ThreadStore state, FLS index, collector state, registered modules, and PAL hook
+generation remain valid until the disposable QEMU process ends. QEMU process
+exit is cleanup for the experiment, not an orderly same-process `RhShutdown`.
+No shutdown, collection, managed entry, real-GC allocation, or second
+`RhInitialize` was run during this audit. See
+[NATIVEAOT_RUNTIME_GC_SHUTDOWN_BOUNDARY.md](NATIVEAOT_RUNTIME_GC_SHUTDOWN_BOUNDARY.md)
+for the source-backed candidate matrix and resource accounting.
+
+## 25. Exact next experiment
+
+Because the process-lifetime boundary is now explicit, the next experiment is
+one disposable QEMU initialization with exactly one primitive `byte[]` through
+the real collector, with collection and finalizer work disabled. It must first
+pass the locked-artifact identity gate and must not attempt same-process
+shutdown or a second `RhInitialize`.
