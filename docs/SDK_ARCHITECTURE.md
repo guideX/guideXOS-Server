@@ -49,7 +49,7 @@ Experimental hosted Native ELF execution status:
 - `build-native-experimental.bat` enables execution for trusted local hosted-runtime validation.
 - Supported: amd64 host, amd64 app, static ET_EXEC, no PT_INTERP, no dynamic linking, no relocations, preferred base maps successfully, guideXOS C ABI v1 (`guidexos-c-abi-v1`) only.
 - Unsupported: ET_DYN/PIE, shared libraries, libc-heavy apps, cross-architecture execution, dynamic linker, and arbitrary host filesystem access.
-- Available host calls: log, get_api_version, request_window, draw_text, draw_rect, wait_for_close, poll_event, file_exists, file_read_all, request_window_ex, file_read, present_frame, and get_ticks_ms (monotonic milliseconds; uint64_t wrap after 2^64 milliseconds).
+- Available host calls: log, get_api_version, request_window, draw_text, draw_rect, wait_for_close, poll_event, file_exists, file_read_all, request_window_ex, file_read, present_frame, get_ticks_ms, and the hosted-development workspace calls file_stat, file_read_workspace, file_list, file_write_all, file_create_directory, and file_remove. The last two are exact-path, non-recursive directory/file operations for Developer Studio project generation and rollback; they are not a bare-metal filesystem contract.
 
 ================================================================================
 2. DIRECTORY STRUCTURE

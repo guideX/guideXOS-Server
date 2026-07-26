@@ -124,6 +124,8 @@ struct NativeHostCallTable {
     gx_result (*file_read_workspace)(NativeGxAppContext* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) = nullptr;
     gx_result (*file_list)(NativeGxAppContext* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated) = nullptr;
     gx_result (*file_write_all)(NativeGxAppContext* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten) = nullptr;
+    gx_result (*file_create_directory)(NativeGxAppContext* ctx, const char* path) = nullptr;
+    gx_result (*file_remove)(NativeGxAppContext* ctx, const char* path) = nullptr;
 };
 
 static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
@@ -139,7 +141,9 @@ static_assert(offsetof(NativeHostCallTable, file_stat) == 120, "native ABI file_
 static_assert(offsetof(NativeHostCallTable, file_read_workspace) == 128, "native ABI file_read_workspace slot changed");
 static_assert(offsetof(NativeHostCallTable, file_list) == 136, "native ABI file_list slot changed");
 static_assert(offsetof(NativeHostCallTable, file_write_all) == 144, "native ABI file_write_all slot changed");
-static_assert(sizeof(NativeHostCallTable) == 152, "native ABI host call table size changed");
+static_assert(offsetof(NativeHostCallTable, file_create_directory) == 152, "native ABI file_create_directory slot changed");
+static_assert(offsetof(NativeHostCallTable, file_remove) == 160, "native ABI file_remove slot changed");
+static_assert(sizeof(NativeHostCallTable) == 168, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,
