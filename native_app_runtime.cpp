@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "native_app_debug_log.h"
 #include "native_app_process_table.h"
+#include "native_build_service.h"
 
 #include <algorithm>
 #include <atomic>
@@ -162,6 +163,22 @@ bool copyNativePath(const NativeAppRuntimeContext& context, const char* path, st
     }
 
     failureReason = "path-not-null-terminated-within-limit";
+    return false;
+}
+
+bool copyNativeString(const NativeAppRuntimeContext& context, const char* value, uint32_t maxBytes, std::string& output) {
+    output.clear();
+    if (!value || maxBytes == 0) return false;
+    const uint64_t start = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(value));
+    for (uint32_t i = 0; i <= maxBytes; ++i) {
+        if (start > std::numeric_limits<uint64_t>::max() - i) return false;
+        const char* current = reinterpret_cast<const char*>(static_cast<uintptr_t>(start + i));
+        if (!nativeBufferRangeContains(context, current, 1)) return false;
+        const unsigned char byte = static_cast<unsigned char>(*current);
+        if (byte == 0) return true;
+        if (byte < 0x20 || byte == 0x7F) return false;
+        output.push_back(static_cast<char>(byte));
+    }
     return false;
 }
 
@@ -812,6 +829,37 @@ gx_result hostFileRemove(NativeGxAppContext* ctx, const char* path) {
     if (ec || !std::filesystem::exists(status) || std::filesystem::is_symlink(status)) return GX_ERROR_FAILED;
     if (!std::filesystem::remove(resolved, ec) || ec) return GX_ERROR_FAILED;
     return GX_OK;
+}
+
+gx_result hostBuildProjectStart(NativeGxAppContext* ctx, const gx_build_request* request, gx_build_handle* outHandle) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !request || !outHandle || !nativeBufferRangeContains(*context, request, sizeof(gx_build_request)) ||
+        !nativeBufferRangeContains(*context, outHandle, sizeof(gx_build_handle)) || request->size < sizeof(gx_build_request) ||
+        request->version != GX_BUILD_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
+    *outHandle = 0;
+    NativeBuildService::NativeBuildRequest copied;
+    if (!copyNativeString(*context, request->projectRoot, 240, copied.projectRoot) ||
+        !copyNativeString(*context, request->projectId, 96, copied.projectId) ||
+        !copyNativeString(*context, request->projectKind, 64, copied.projectKind) ||
+        !copyNativeString(*context, request->targetProfile, 128, copied.targetProfile) ||
+        !copyNativeString(*context, request->buildSystem, 64, copied.buildSystem) ||
+        !copyNativeString(*context, request->buildScript, 160, copied.buildScript) ||
+        !copyNativeString(*context, request->expectedArtifact, 160, copied.expectedArtifact) ||
+        !copyNativeString(*context, request->configuration, 32, copied.configuration)) return GX_ERROR_INVALID_ARGUMENT;
+    return NativeBuildService::Start(*context, copied, outHandle);
+}
+
+gx_result hostBuildProjectPoll(NativeGxAppContext* ctx, gx_build_handle handle, gx_build_snapshot* outSnapshot) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || handle == 0 || !outSnapshot || !nativeBufferRangeContains(*context, outSnapshot, sizeof(gx_build_snapshot))) return GX_ERROR_INVALID_ARGUMENT;
+    *outSnapshot = gx_build_snapshot{};
+    return NativeBuildService::Poll(*context, handle, outSnapshot);
+}
+
+gx_result hostBuildProjectRelease(NativeGxAppContext* ctx, gx_build_handle handle) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || handle == 0) return GX_ERROR_INVALID_ARGUMENT;
+    return NativeBuildService::Release(*context, handle);
 }
 
 gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
@@ -1552,6 +1600,9 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.file_write_all = hostFileWriteAll;
     context.hostCalls.file_create_directory = hostFileCreateDirectory;
     context.hostCalls.file_remove = hostFileRemove;
+    context.hostCalls.build_project_start = hostBuildProjectStart;
+    context.hostCalls.build_project_poll = hostBuildProjectPoll;
+    context.hostCalls.build_project_release = hostBuildProjectRelease;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");
@@ -1624,6 +1675,11 @@ void NativeAppRuntime::Cleanup(NativeAppRuntimeContext& context, NativeAppLifecy
         g_hostLifecycleState = NativeAppLifecycleState::Closing;
         context.exitCode = exitCode;
         context.failureReason = failureReason;
+
+        /* A hosted build is owned by the Native App runtime. If the app exits
+         * unexpectedly, terminate only jobs belonging to this runtime before
+         * releasing the runtime's windows. */
+        NativeBuildService::CancelForRuntime(context.runtimeId);
 
         Logger::write(LogLevel::Info, "[NativeAppRuntime] Cleanup begin app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " processId=" + std::to_string(context.processId) + " ownedWindows=" + std::to_string(context.createdWindowHandles.size()));
         NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", "cleanup started ownedWindows=" + std::to_string(context.createdWindowHandles.size()));
@@ -1754,6 +1810,9 @@ bool RunNativeFilesystemContractTest(std::string* failure) {
         context.hostCalls.file_write_all = hostFileWriteAll;
         context.hostCalls.file_create_directory = hostFileCreateDirectory;
         context.hostCalls.file_remove = hostFileRemove;
+        context.hostCalls.build_project_start = hostBuildProjectStart;
+        context.hostCalls.build_project_poll = hostBuildProjectPoll;
+        context.hostCalls.build_project_release = hostBuildProjectRelease;
         appContext.size = static_cast<uint32_t>(sizeof(appContext));
         appContext.host = &context.hostCalls;
 
