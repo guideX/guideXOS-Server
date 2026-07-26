@@ -482,7 +482,15 @@ namespace gxos { namespace files {
             error = "Nothing to paste";
             return false;
         }
-        return validatePaste(entry, destinationDirectory, error);
+        const bool valid = validatePaste(entry, destinationDirectory, error);
+        if (!valid) {
+            const EntryKind sourceKind = entryKind(entry.sourcePath);
+            if (sourceKind == EntryKind::Missing || sourceKind == EntryKind::Unsupported) {
+                // Do not leave a dead source advertising a Paste command.
+                FileClipboard::Clear();
+            }
+        }
+        return valid;
     }
 
     FilePasteResult FileOperations::PasteFile(const std::string& destinationDirectory) {
@@ -495,9 +503,19 @@ namespace gxos { namespace files {
 
         const std::string source = normalizeVirtualPath(entry.sourcePath);
         const std::string destinationDirectoryNormalized = normalizeVirtualPath(destinationDirectory);
+        const EntryKind sourceKind = entryKind(source);
+        if (sourceKind == EntryKind::Missing) {
+            FileClipboard::Clear();
+            result.error = "Clipboard source is no longer available";
+            return result;
+        }
+        if (sourceKind == EntryKind::Unsupported) {
+            FileClipboard::Clear();
+            result.error = "Clipboard source is not a supported file or folder";
+            return result;
+        }
         if (!validatePaste(entry, destinationDirectoryNormalized, result.error)) return result;
 
-        const EntryKind sourceKind = entryKind(source);
         const std::string sameNameDestination = combinePath(destinationDirectoryNormalized, baseName(source));
         if (entry.operation == FileClipboardOperation::Move && samePath(source, sameNameDestination)) {
             // A cut/paste into the source's current parent is a completed no-op.
@@ -541,6 +559,9 @@ namespace gxos { namespace files {
                     result.error = "Move cleanup failed; source was preserved";
                     return result;
                 }
+            } else if (entryKind(destination) != sourceKind) {
+                result.error = "Move could not be verified at its destination";
+                return result;
             }
             FileClipboard::Clear();
         }
@@ -573,7 +594,9 @@ namespace gxos { namespace files {
             // the same collision policy while using the largest representable
             // equivalent name on that backend.
             const std::string suffix = suffixIndex == 1 ? std::string() : std::to_string(suffixIndex);
-            const std::string base = "NewFolder";
+            // The bare-metal FAT writer has no LFN creation path, so use the
+            // 8-character representation of the existing NewFolder policy.
+            const std::string base = "NewFolde";
             const size_t baseLength = suffix.empty() ? base.size() : 8u - std::min<size_t>(suffix.size(), 7u);
             const std::string name = base.substr(0, baseLength) + suffix;
 #endif
@@ -583,8 +606,13 @@ namespace gxos { namespace files {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             std::error_code ec;
             if (std::filesystem::create_directory(hostedPathForVirtual(candidate), ec) && !ec) {
+                if (!isDirectory(candidate)) {
+                    result.error = "Folder creation could not be verified";
+                    return result;
+                }
                 result.success = true;
                 result.path = candidate;
+                s_operationGeneration.fetch_add(1, std::memory_order_release);
                 return result;
             }
             if (!ec && exists(candidate)) continue;
@@ -593,8 +621,13 @@ namespace gxos { namespace files {
 #else
             const kernel::vfs::Status status = kernel::vfs::mkdir(candidate.c_str());
             if (status == kernel::vfs::VFS_OK) {
+                if (!isDirectory(candidate)) {
+                    result.error = "Folder creation could not be verified";
+                    return result;
+                }
                 result.success = true;
                 result.path = candidate;
+                s_operationGeneration.fetch_add(1, std::memory_order_release);
                 return result;
             }
             if (status == kernel::vfs::VFS_ERR_EXISTS) continue;

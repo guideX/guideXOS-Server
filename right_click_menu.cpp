@@ -1,6 +1,7 @@
 #include "right_click_menu.h"
 #include "logger.h"
 #include "compositor.h"
+#include "desktop_folder.h"
 #include "desktop_service.h"
 #include "trash.h"
 #include "file_operations.h"
@@ -139,14 +140,13 @@ void RightClickMenu::buildItems() {
                     s_items.push_back({"Rename", false, false, false});
                 }
                 if (desktopItemHasFilePath(*item)) {
+                    s_items.push_back({"Copy File", false, false, false});
+                    s_items.push_back({"Cut File", false, false, false});
                     if (item->isDirectory) {
                         std::string pasteError;
                         if (gxos::files::FileOperations::CanPasteFile(item->path, pasteError)) {
                             s_items.push_back({"Paste", false, false, false});
                         }
-                    } else {
-                        s_items.push_back({"Copy File", false, false, false});
-                        s_items.push_back({"Cut File", false, false, false});
                     }
                 }
                 if (item->kind == DesktopItemKind::Shortcut) {
@@ -259,8 +259,14 @@ bool RightClickMenu::HandleClick(int mx, int my) {
                     Compositor::requestDesktopRefresh();
                 }
             } else if (s_items[idx].label == "New Folder") {
-                const gxos::files::FileCreateResult result =
-                    gxos::files::FileOperations::CreateUniqueFolder(Compositor::hostedDesktopCurrentPath());
+                const std::string desktopPath = Compositor::hostedDesktopCurrentPath();
+                std::string ensureError;
+                gxos::files::FileCreateResult result;
+                if (!DesktopFolderResolver::EnsureExists(desktopPath, ensureError, true)) {
+                    result.error = ensureError.empty() ? "Desktop folder is unavailable" : ensureError;
+                } else {
+                    result = gxos::files::FileOperations::CreateUniqueFolder(desktopPath);
+                }
                 if (!result.success) {
                     Logger::write(LogLevel::Warn, "Desktop New Folder failed: " + result.error);
                 } else {

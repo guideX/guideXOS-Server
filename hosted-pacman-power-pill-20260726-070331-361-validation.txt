@@ -1,0 +1,30 @@
+run=20260726-070331-361
+server-wrapper-pid=8208
+server-pid=18816
+compositor-window=11995200
+capture=D:\dev\pacman\guidexos\captures\pacman-power-pill-20260726-070331-361-before-power-pill-seq1-gen3.png
+capture-target runtimeId=1 windowId=1000 frameSequence=1 frameGeneration=3 paintGeneration=3 captureGeneration=1 state=Playing step=0 pacman=24,360 score=0 chain=0 red=160,232,normal,0 pink=192,232,normal,0 cyan=224,232,normal,0 orange=256,232,normal,0
+capture=D:\dev\pacman\guidexos\captures\pacman-power-pill-20260726-070331-361-first-frightened-seq12-gen12.png
+capture-target runtimeId=1 windowId=1000 frameSequence=12 frameGeneration=12 paintGeneration=12 captureGeneration=2 state=Playing step=26 pacman=24,360 score=10 chain=0 red=159,220,frightened,874 pink=203,232,frightened,874 cyan=235,232,frightened,874 orange=267,232,frightened,874
+capture=D:\dev\pacman\guidexos\captures\pacman-power-pill-20260726-070331-361-frightened-movement-seq19-gen19.png
+capture-target runtimeId=1 windowId=1000 frameSequence=19 frameGeneration=19 paintGeneration=19 captureGeneration=3 state=Playing step=41 pacman=24,360 score=10 chain=0 red=159,212,frightened,859 pink=211,232,frightened,859 cyan=243,232,frightened,859 orange=271,228,frightened,859
+capture=D:\dev\pacman\guidexos\captures\pacman-power-pill-20260726-070331-361-flashing-near-expiration-seq340-gen343.png
+capture-target runtimeId=1 windowId=1000 frameSequence=340 frameGeneration=343 paintGeneration=343 captureGeneration=4 state=Playing step=713 pacman=24,360 score=10 chain=0 red=77,424,frightened,187 pink=271,220,frightened,187 cyan=271,244,frightened,187 orange=271,220,frightened,187
+capture=D:\dev\pacman\guidexos\captures\pacman-power-pill-20260726-070331-361-first-ghost-eaten-seq366-gen367.png
+capture-target runtimeId=1 windowId=1000 frameSequence=366 frameGeneration=367 paintGeneration=367 captureGeneration=5 state=Playing step=763 pacman=271,239 score=3010 chain=4 red=94,432,frightened,20 pink=252,240,returning,0 cyan=252,224,returning,0 orange=252,240,returning,0
+capture=D:\dev\pacman\guidexos\captures\pacman-power-pill-20260726-070331-361-second-ghost-eaten-seq382-gen384.png
+capture-target runtimeId=1 windowId=1000 frameSequence=382 frameGeneration=384 paintGeneration=384 captureGeneration=6 state=Playing step=792 pacman=271,239 score=3010 chain=4 red=94,432,normal,0 pink=238,224,returning,0 cyan=208,238,returning,0 orange=238,224,returning,0
+capture=D:\dev\pacman\guidexos\captures\pacman-power-pill-20260726-070331-361-fourth-ghost-eaten-seq400-gen402.png
+capture-target runtimeId=1 windowId=1000 frameSequence=400 frameGeneration=402 paintGeneration=402 captureGeneration=7 state=Playing step=822 pacman=271,239 score=3010 chain=4 red=94,432,normal,0 pink=234,224,returning,0 cyan=240,234,returning,0 orange=234,224,returning,0
+capture=D:\dev\pacman\guidexos\captures\pacman-power-pill-20260726-070331-361-frightened-expired-normal-seq419-gen421.png
+capture-target runtimeId=1 windowId=1000 frameSequence=419 frameGeneration=421 paintGeneration=421 captureGeneration=8 state=Playing step=852 pacman=271,239 score=3010 chain=4 red=94,432,normal,0 pink=230,224,returning,0 cyan=240,230,returning,0 orange=230,224,returning,0
+power-pill-log=True
+timer-init-log=True
+reversal-log=True
+flashing-log=True
+eaten-log=True
+score-sequence=True
+expiration-log=True
+escape-and-zero-window-cleanup=pass
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

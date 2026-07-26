@@ -1368,17 +1368,24 @@ static bool bare_metal_desktop_directory_is_writable(const char* path)
 {
     if (!bare_metal_desktop_directory_exists(path)) return false;
 
-    char probePath[vfs::VFS_MAX_PATH];
-    vfs::join_path(path, ".gxos_desktop_probe", probePath, sizeof(probePath));
-    vfs::Status probeStatus = vfs::mkdir(probePath);
-    if (probeStatus == vfs::VFS_OK) {
-        vfs::rmdir(probePath);
-        return true;
-    }
-    if (probeStatus == vfs::VFS_ERR_EXISTS) {
-        if (vfs::rmdir(probePath) == vfs::VFS_OK && vfs::mkdir(probePath) == vfs::VFS_OK) {
-            vfs::rmdir(probePath);
-            return true;
+    // FAT directory creation is currently limited to short 8.3 names. The
+    // old long probe name was rejected even when the desktop directory was
+    // writable, and its collision handling could remove user content. Use a
+    // short reserved candidate and only remove a directory created by us.
+    static const char* kProbeNames[] = {
+        "GXPROBE", "GXPROB2", "GXPROB3", "GXPROB4", "GXPROB5"
+    };
+    for (const char* probeName : kProbeNames) {
+        char probePath[vfs::VFS_MAX_PATH];
+        vfs::join_path(path, probeName, probePath, sizeof(probePath));
+        if (!probePath[0]) continue;
+
+        vfs::FileInfo existing{};
+        if (vfs::stat(probePath, &existing) == vfs::VFS_OK) continue;
+
+        const vfs::Status probeStatus = vfs::mkdir(probePath);
+        if (probeStatus == vfs::VFS_OK) {
+            return vfs::rmdir(probePath) == vfs::VFS_OK;
         }
     }
     return false;
@@ -6925,7 +6932,8 @@ static int context_menu_item_count()
         const DesktopIcon* entry = context_menu_filesystem_entry();
         if (!entry) return 0;
         if (entry->isDirectory) {
-            return s_contextMenuPasteVisibleAtOpen ? 3 : 2;
+            // Open, Copy, Cut, optional Paste, Rename.
+            return 4 + (s_contextMenuPasteVisibleAtOpen ? 1 : 0);
         }
         return 3; // Open, Copy File, Cut File
     }
@@ -6982,8 +6990,10 @@ static void draw_right_click_menu()
             const DesktopIcon* entry = context_menu_filesystem_entry();
             if (entry && entry->isDirectory) {
                 if (i == 0) label = "Open";
-                else if (s_contextMenuPasteVisibleAtOpen && i == 1) label = "Paste";
-                else if (i == (s_contextMenuPasteVisibleAtOpen ? 2 : 1)) label = "Rename";
+                else if (i == 1) label = "Copy File";
+                else if (i == 2) label = "Cut File";
+                else if (s_contextMenuPasteVisibleAtOpen && i == 3) label = "Paste";
+                else if (i == (s_contextMenuPasteVisibleAtOpen ? 4 : 3)) label = "Rename";
             } else if (entry) {
                 if (i == 0) label = "Open";
                 else if (i == 1) label = "Copy File";
@@ -7103,8 +7113,18 @@ static void handle_context_menu_command(int item)
 
         if (item == 0) {
             show_icon_notification(s_contextMenuIconDisplayIndex);
+        } else if (item == 1 || item == 2) {
+            const file_clipboard::Operation operation = item == 1
+                ? file_clipboard::Operation::Copy
+                : file_clipboard::Operation::Move;
+            if (file_clipboard::set_file(entry->path, operation)) {
+                show_file_clipboard_notification(item == 1 ? "Copied file to guideXOS clipboard" :
+                                                  "Cut file to guideXOS clipboard");
+            } else {
+                show_file_clipboard_notification("Unable to prepare file clipboard");
+            }
         } else if (entry->isDirectory) {
-            if (s_contextMenuPasteVisibleAtOpen && item == 1) {
+            if (s_contextMenuPasteVisibleAtOpen && item == 3) {
                 if (file_clipboard::can_paste_to(entry->path)) {
                     file_clipboard::PasteResult result = file_clipboard::paste_to_directory(entry->path);
                     show_file_clipboard_notification(file_clipboard::paste_result_message(result));
@@ -7116,18 +7136,8 @@ static void handle_context_menu_command(int item)
                 }
                 // Consume a stale Paste slot instead of accidentally invoking
                 // Rename when the clipboard changed after menu construction.
-            } else if (item == (s_contextMenuPasteVisibleAtOpen ? 2 : 1)) {
+            } else if (item == (s_contextMenuPasteVisibleAtOpen ? 4 : 3)) {
                 begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
-            }
-        } else if (item == 1 || item == 2) {
-            const file_clipboard::Operation operation = item == 1
-                ? file_clipboard::Operation::Copy
-                : file_clipboard::Operation::Move;
-            if (file_clipboard::set_file(entry->path, operation)) {
-                show_file_clipboard_notification(item == 1 ? "Copied file to guideXOS clipboard" :
-                                                  "Cut file to guideXOS clipboard");
-            } else {
-                show_file_clipboard_notification("Unable to prepare file clipboard");
             }
         }
         s_contextMenuMode = ContextMenuMode::Desktop;

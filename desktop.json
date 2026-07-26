@@ -7,7 +7,7 @@
   "desktop.clock.timeZoneId": "pacific",
   "desktop.clock.use24HourTime": false,
   "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation"],
-  "recent": ["Nexgen PacMan","Notepad","Resource Viewer","Image Viewer","DisplayOptions","ControlPanel","guideXOS Navigator"],
+  "recent": ["Nexgen PacMan Danger Validation","Nexgen PacMan","Notepad","Resource Viewer","Image Viewer","DisplayOptions","ControlPanel","guideXOS Navigator"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,

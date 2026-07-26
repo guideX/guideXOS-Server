@@ -106,6 +106,15 @@ int main() {
     ok &= expect(std::filesystem::exists(kFixtureRoot / "A" / "Nested Folder" / "deep file.txt"),
         "failed descendant paste preserves source");
 
+    ok &= expect(gxos::files::FileClipboard::Set(kRoot + "/A/Nested Folder",
+        gxos::files::FileClipboardOperation::Move, error), "folder cut clipboard set");
+    result = gxos::files::FileOperations::PasteFile(kRoot + "/A/Nested Folder/Empty Directory");
+    ok &= expect(!result.success, "folder cut into descendant fails safely");
+    ok &= expect(std::filesystem::exists(kFixtureRoot / "A" / "Nested Folder" / "deep file.txt"),
+        "failed folder cut preserves source");
+    ok &= expect(gxos::files::FileClipboard::Get(cutEntry),
+        "failed folder cut preserves clipboard");
+
     result = gxos::files::FileOperations::PasteFile(kRoot + "/missing-destination");
     ok &= expect(!result.success, "unavailable destination paste fails");
     ok &= expect(gxos::files::FileClipboard::Get(cutEntry),
@@ -117,6 +126,7 @@ int main() {
     result = gxos::files::FileOperations::PasteFile(kRoot + "/Desktop");
     ok &= expect(!result.success, "empty clipboard paste is rejected");
 
+    const uint64_t folderGenerationBefore = gxos::files::FileOperations::OperationGeneration();
     auto newFolder = gxos::files::FileOperations::CreateUniqueFolder(kRoot + "/Desktop");
     ok &= expect(newFolder.success && newFolder.path == kRoot + "/Desktop/New Folder",
         "hosted new folder uses default name");
@@ -126,6 +136,8 @@ int main() {
     ok &= expect(std::filesystem::is_directory(kFixtureRoot / "Desktop" / "New Folder") &&
         std::filesystem::is_directory(kFixtureRoot / "Desktop" / "New Folder (2)"),
         "hosted new folders persist on disk");
+    ok &= expect(gxos::files::FileOperations::OperationGeneration() > folderGenerationBefore,
+        "hosted new folder advances refresh generation");
 
     ok &= expect(gxos::files::FileClipboard::Set(kRoot + "/A/sample file.bin",
         gxos::files::FileClipboardOperation::Move, error), "stale clipboard set");
@@ -133,7 +145,7 @@ int main() {
     result = gxos::files::FileOperations::PasteFile(kRoot + "/B");
     ok &= expect(!result.success, "stale clipboard rejected");
     gxos::files::FileClipboardEntry staleEntry;
-    ok &= expect(gxos::files::FileClipboard::Get(staleEntry), "failed move preserves clipboard");
+    ok &= expect(!gxos::files::FileClipboard::Get(staleEntry), "stale clipboard is invalidated");
 
     gxos::files::FileClipboard::Clear();
     gxos::gui::NormalWindowBounds bounds{40, 50, 640, 480};

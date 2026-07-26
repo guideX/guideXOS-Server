@@ -326,7 +326,10 @@ static PasteResult copy_entry_tree(const char* sourcePath, const char* destinati
 
 static bool make_new_folder_name(int suffixIndex, char* out, size_t outSize) {
     if (!out || outSize == 0 || suffixIndex <= 0) return false;
-    const char* base = "NewFolder";
+    // FAT directory creation currently supports short 8.3 names only. Keep
+    // the existing NewFolder naming policy in the largest representable form
+    // and reserve the final characters for collision suffixes.
+    const char* base = "NewFolde";
     if (suffixIndex == 1) return copy_text(out, outSize, base);
 
     char suffix[12] = {0};
@@ -385,16 +388,26 @@ uint64_t operation_generation() {
 }
 
 bool can_paste_to(const char* destinationDirectory) {
-    if (!source_is_valid(nullptr)) return false;
+    vfs::FileInfo sourceInfo{};
+    if (!source_is_valid(&sourceInfo)) {
+        clear();
+        return false;
+    }
     char normalizedDestination[vfs::VFS_MAX_PATH];
-    return destination_is_valid(destinationDirectory, normalizedDestination, sizeof(normalizedDestination));
+    if (!destination_is_valid(destinationDirectory, normalizedDestination, sizeof(normalizedDestination))) return false;
+    if (sourceInfo.type == vfs::FILE_TYPE_DIRECTORY &&
+        same_or_descendant_path(normalizedDestination, s_sourcePath)) return false;
+    return true;
 }
 
 PasteResult paste_to_directory(const char* destinationDirectory) {
     if (!has_pending_file()) return PasteResult::Empty;
 
     vfs::FileInfo sourceInfo{};
-    if (!source_is_valid(&sourceInfo)) return PasteResult::SourceMissing;
+    if (!source_is_valid(&sourceInfo)) {
+        clear();
+        return PasteResult::SourceMissing;
+    }
 
     char normalizedDestination[vfs::VFS_MAX_PATH];
     if (!destination_is_valid(destinationDirectory, normalizedDestination, sizeof(normalizedDestination))) {
@@ -440,6 +453,12 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
         if (sourceMount == destinationMount) {
             vfs::Status renameStatus = vfs::rename(s_sourcePath, destinationPath);
             if (renameStatus == vfs::VFS_OK) {
+                vfs::FileInfo destinationInfo{};
+                if (vfs::stat(destinationPath, &destinationInfo) != vfs::VFS_OK ||
+                    destinationInfo.type != sourceInfo.type ||
+                    (sourceInfo.type == vfs::FILE_TYPE_REGULAR && destinationInfo.size != sourceInfo.size)) {
+                    return PasteResult::Failed;
+                }
                 clear();
                 ++s_operationGeneration;
                 return PasteResult::Success;
@@ -488,7 +507,18 @@ bool create_unique_folder(const char* destinationDirectory, char* outPath, size_
         if (!candidatePath[0]) return false;
         if (vfs::exists(candidatePath)) continue;
         if (vfs::mkdir(candidatePath) == vfs::VFS_OK) {
-            return copy_text(outPath, outPathSize, candidatePath);
+            vfs::FileInfo createdInfo{};
+            if (vfs::stat(candidatePath, &createdInfo) != vfs::VFS_OK ||
+                createdInfo.type != vfs::FILE_TYPE_DIRECTORY) {
+                vfs::rmdir(candidatePath);
+                return false;
+            }
+            if (!copy_text(outPath, outPathSize, candidatePath)) {
+                vfs::rmdir(candidatePath);
+                return false;
+            }
+            ++s_operationGeneration;
+            return true;
         }
         vfs::FileInfo existing{};
         if (vfs::stat(candidatePath, &existing) == vfs::VFS_OK) continue;
@@ -614,6 +644,10 @@ void run_runtime_smoke() {
     ok &= set_file(folder, Operation::Copy);
     ok &= paste_to_directory(nested) == PasteResult::Unsupported;
     ok &= smoke_is_directory(folder) && smoke_file_equals(nestedFile, sourceBytes, sizeof(sourceBytes));
+    ok &= set_file(folder, Operation::Move);
+    ok &= paste_to_directory(nested) == PasteResult::Unsupported;
+    ok &= smoke_is_directory(folder) && has_pending_file();
+    clear();
 
     char newFolderOne[vfs::VFS_MAX_PATH];
     char newFolderTwo[vfs::VFS_MAX_PATH];
@@ -622,6 +656,14 @@ void run_runtime_smoke() {
     ok &= newFolderOne[0] && newFolderTwo[0] && !same_path(newFolderOne, newFolderTwo);
     ok &= smoke_is_directory(newFolderOne) && smoke_is_directory(newFolderTwo);
     ok &= operation_generation() > generationBefore;
+
+    char staleFile[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "STALE.TXT", staleFile, sizeof(staleFile));
+    ok &= smoke_write_file(staleFile, sourceBytes, sizeof(sourceBytes));
+    ok &= set_file(staleFile, Operation::Move);
+    ok &= vfs::unlink(staleFile) == vfs::VFS_OK;
+    ok &= paste_to_directory(destination) == PasteResult::SourceMissing;
+    ok &= !has_pending_file();
 
     clear();
     const PasteResult cleanupResult = remove_entry_tree(root);
