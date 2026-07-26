@@ -3,6 +3,7 @@
 #include "app_launch_resolver.h"
 #include "native_elf_image_loader.h"
 #include "sdk/include/guidexos/build.h"
+#include "sdk/include/guidexos/development_run.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -29,7 +30,8 @@ enum : gx_result {
     GX_ERROR_FAILED = -4,
     GX_ERROR_PERMISSION_DENIED = -5,
     GX_ERROR_INTERNAL = -6,
-    GX_ERROR_TIMEOUT = -7
+    GX_ERROR_TIMEOUT = -7,
+    GX_ERROR_BUSY = -8
 };
 
 typedef uint64_t gx_handle;
@@ -130,6 +132,11 @@ struct NativeHostCallTable {
     gx_result (*build_project_start)(NativeGxAppContext* ctx, const gx_build_request* request, gx_build_handle* outHandle) = nullptr;
     gx_result (*build_project_poll)(NativeGxAppContext* ctx, gx_build_handle handle, gx_build_snapshot* outSnapshot) = nullptr;
     gx_result (*build_project_release)(NativeGxAppContext* ctx, gx_build_handle handle) = nullptr;
+    gx_result (*development_run_prepare)(NativeGxAppContext* ctx, const gx_development_run_request* request, gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot) = nullptr;
+    gx_result (*development_run_start)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
+    gx_result (*development_run_poll)(NativeGxAppContext* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) = nullptr;
+    gx_result (*development_run_request_close)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
+    gx_result (*development_run_release)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
 };
 
 static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
@@ -150,7 +157,12 @@ static_assert(offsetof(NativeHostCallTable, file_remove) == 160, "native ABI fil
 static_assert(offsetof(NativeHostCallTable, build_project_start) == 168, "native ABI build start slot changed");
 static_assert(offsetof(NativeHostCallTable, build_project_poll) == 176, "native ABI build poll slot changed");
 static_assert(offsetof(NativeHostCallTable, build_project_release) == 184, "native ABI build release slot changed");
-static_assert(sizeof(NativeHostCallTable) == 192, "native ABI host call table size changed");
+static_assert(offsetof(NativeHostCallTable, development_run_prepare) == 192, "native ABI development run prepare slot changed");
+static_assert(offsetof(NativeHostCallTable, development_run_start) == 200, "native ABI development run start slot changed");
+static_assert(offsetof(NativeHostCallTable, development_run_poll) == 208, "native ABI development run poll slot changed");
+static_assert(offsetof(NativeHostCallTable, development_run_request_close) == 216, "native ABI development run close slot changed");
+static_assert(offsetof(NativeHostCallTable, development_run_release) == 224, "native ABI development run release slot changed");
+static_assert(sizeof(NativeHostCallTable) == 232, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,

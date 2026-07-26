@@ -113,11 +113,11 @@ GUIDEXOS_DEVELOPER_STUDIO_MARKER clean_close=PASS
 
 Automated validation covers ABI layout, the Native filesystem contract,
 host-side workspace/document behavior, package identity, ELF validation,
-launch discovery, lifecycle markers, and process/window cleanup. Manual
-validation is still required for visual inspection and end-to-end compositor
-keyboard/mouse editing; the current shell has no generic key/mouse injection
-command. Do not report the complete interactive editor slice as automated
-until that manual portion has been performed.
+launch discovery, lifecycle markers, and process/window cleanup. The
+experimental shell exposes focused-window `gui.key` input for bounded hosted
+checks, but visual inspection and complete compositor keyboard/mouse editing
+remain manual validation. Do not report the complete interactive editor slice
+as automated until that manual portion has been performed.
 
 Observed validation on 2026-07-25 includes a normal experimental-server start
 with no Developer Studio construction marker, `windowCount=0`, and zero native

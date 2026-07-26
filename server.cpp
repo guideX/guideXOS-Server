@@ -80,6 +80,7 @@
 #include "package_manager.h"
 #include "native_elf_executor.h"
 #include "native_app_process_table.h"
+#include "development_run_service.h"
 #include <iostream>
 #include <algorithm>
 #include <array>
@@ -4485,7 +4486,7 @@ static void help(){
                  " bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]\n"
                  " bus.cap <chan> <cap> | bus.stats <chan>\n"
                  " console.start | console.send <text> | console.pop [timeoutMs]\n"
-                 " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>\n"
+                 " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id> | gui.key <keyCode> <down|up> [modifiers]\n"
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
@@ -4542,7 +4543,7 @@ using namespace gxos;
     Lifecycle::bootstrap();
     gxos::net::armNetworkTelemetry("hostedSocketCounters");
     Lifecycle::markInteractive();
-    struct ShutdownGuard { ~ShutdownGuard(){ Lifecycle::shutdown(); } } guard;
+    struct ShutdownGuard { ~ShutdownGuard(){ apps::DevelopmentRunService::Shutdown(); Lifecycle::shutdown(); } } guard;
 
     // Registerable specs
     std::unordered_map<std::string, ProcessSpec> specs{
@@ -4581,7 +4582,7 @@ using namespace gxos;
             std::string winS; int id,x,y,w,h; iss>>winS>>id>>x>>y>>w>>h; std::string rest; std::getline(iss,rest); if(!rest.empty() && rest[0]==' ') rest.erase(0,1); if(winS.empty()){ std::cout<<"Usage: gui.btn <win> <id> <x> <y> <w> <h> <text>"<<std::endl; continue; }
             std::ostringstream oss; oss<<winS<<"|"<<1 /*Button*/<<"|"<<id<<"|"<<x<<"|"<<y<<"|"<<w<<"|"<<h<<"|"<<rest; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetAdd; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Button queued"<<std::endl; continue; }
         if (cmd=="gui.wlist"){ if(!requireCompositor()) continue; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WindowList; ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Requested window list (use gui.pop)"<<std::endl; continue; }
-        if (cmd=="gui.activate"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"gui.activate <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Activate; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Activate sent"<<std::endl; continue; }
+        if (cmd=="gui.activate"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"gui.activate <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Activate; m.dstPid=Lifecycle::state().compositorPid; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Activate sent"<<std::endl; continue; }
         if (cmd=="gui.min"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"gui.min <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Minimize; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Minimize sent"<<std::endl; continue; }
         if (cmd=="gxm.load"){
             if(!requireCompositor()) continue;
@@ -4661,7 +4662,8 @@ using namespace gxos;
         } else if (cmd=="gui.text"){
             if(!requireCompositor()) continue;
             std::string idS; iss>>idS; std::string rest; std::getline(iss, rest); if(rest.size()>0 && rest[0]==' ') rest.erase(0,1); ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DrawText; std::string payload = idS+"|"+rest; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Text queued"<<std::endl;
-        } else if (cmd=="gui.close"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Close; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Close requested"<<std::endl;
+        } else if (cmd=="gui.close"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Close; m.dstPid=Lifecycle::state().compositorPid; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Close requested"<<std::endl;
+        } else if (cmd=="gui.key"){ if(!requireCompositor()) continue; int keyCode=0, modifiers=0; std::string action; iss>>keyCode>>action>>modifiers; if(action!="down" && action!="up"){ std::cout<<"Usage: gui.key <keyCode> <down|up> [modifiers]"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_InputKey; m.dstPid=Lifecycle::state().compositorPid; const std::string payload=std::to_string(keyCode)+"|"+action+"|"+std::to_string(modifiers); m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Key queued"<<std::endl;
         } else if (cmd=="gui.rect"){ if(!requireCompositor()) continue; std::string idS; int x,y,w,h,r,g,b; iss>>idS>>x>>y>>w>>h>>r>>g>>b; std::ostringstream oss; oss<<idS<<"|"<<x<<"|"<<y<<"|"<<w<<"|"<<h<<"|"<<r<<"|"<<g<<"|"<<b; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DrawRect; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Rect queued"<<std::endl;
         } else if (cmd=="gui.move"){ if(!requireCompositor()) continue; std::string idS; int x,y; iss>>idS>>x>>y; std::ostringstream oss; oss<<idS<<"|"<<x<<"|"<<y; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Move; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Move queued"<<std::endl;
         } else if (cmd=="gui.resize"){ if(!requireCompositor()) continue; std::string idS; int w,h; iss>>idS>>w>>h; std::ostringstream oss; oss<<idS<<"|"<<w<<"|"<<h; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Resize; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Resize queued"<<std::endl;
@@ -5279,6 +5281,7 @@ using namespace gxos;
             std::cout << "Unknown command (help for list)" << std::endl;
         }
     }
+    apps::DevelopmentRunService::Shutdown();
     Lifecycle::shutdown();
     Logger::write(LogLevel::Info, "guideXOSServer server exiting.");
     return 0;

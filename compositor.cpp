@@ -7049,7 +7049,12 @@ namespace gxos {
             renderToFramebuffer();
 #endif
             
-            bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiSyncChanIn, m, 0) || ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_FramePresent), m, 0) || ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
+            bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiSyncChanIn, m, 0) ||
+                ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_InputKey), m, 0) ||
+                ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_Activate), m, 0) ||
+                ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_Close), m, 0) ||
+                ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_FramePresent), m, 0) ||
+                ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
             { std::lock_guard<std::mutex> lk(g_lock); for (const auto& kv : g_windows) persistNormalBounds(kv.second); }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; rec.restoreX = w.prevX; rec.restoreY = w.prevY; rec.restoreW = w.prevW; rec.restoreH = w.prevH; outCfg.windows.push_back(rec); } }
             ensureDisplayConfigDefaults(outCfg);

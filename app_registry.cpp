@@ -244,12 +244,55 @@ std::vector<AppRegistrySource> AppRegistry::DefaultSources() {
     };
 }
 
+bool AppRegistry::RegisterTemporaryDevelopmentApp(const RegisteredApp& app, std::string& error) {
+    error.clear();
+    if (app.manifest.id.empty() || app.manifest.displayName.empty() ||
+        app.sourceKind != AppSourceKind::DevelopmentTemporary || !app.temporaryDevelopment ||
+        app.temporaryOwnerRuntimeId == 0 || app.temporaryGeneration == 0) {
+        error = "invalid temporary development registration";
+        return false;
+    }
+
+    auto existing = m_appsById.find(app.manifest.id);
+    if (existing != m_appsById.end()) {
+        const RegisteredApp& current = m_apps[existing->second];
+        if (!current.temporaryDevelopment) {
+            error = "APPLICATION_ID_INSTALLED";
+            return false;
+        }
+        if (current.temporaryOwnerRuntimeId != app.temporaryOwnerRuntimeId) {
+            error = "APPLICATION_ID_IN_USE";
+            return false;
+        }
+        error = "DEPLOYMENT_ALREADY_ACTIVE";
+        return false;
+    }
+
+    m_appsById[app.manifest.id] = m_apps.size();
+    m_apps.push_back(app);
+    return true;
+}
+
+bool AppRegistry::UnregisterTemporaryDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation) {
+    auto existing = m_appsById.find(appId);
+    if (existing == m_appsById.end()) return false;
+    const size_t index = existing->second;
+    const RegisteredApp& current = m_apps[index];
+    if (!current.temporaryDevelopment || current.temporaryOwnerRuntimeId != ownerRuntimeId || current.temporaryGeneration != generation) return false;
+
+    m_apps.erase(m_apps.begin() + static_cast<std::ptrdiff_t>(index));
+    m_appsById.clear();
+    for (size_t i = 0; i < m_apps.size(); ++i) m_appsById[m_apps[i].manifest.id] = i;
+    return true;
+}
+
 const char* AppRegistry::ToString(AppSourceKind kind) {
     switch (kind) {
     case AppSourceKind::BuiltIn: return "BuiltIn";
     case AppSourceKind::SystemApps: return "SystemApps";
     case AppSourceKind::UserApps: return "UserApps";
     case AppSourceKind::Package: return "Package";
+    case AppSourceKind::DevelopmentTemporary: return "DevelopmentTemporary";
     default: return "Unknown";
     }
 }

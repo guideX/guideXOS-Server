@@ -27,6 +27,7 @@ uint32_t createdWindowCount(const NativeAppRuntimeContext& context) {
 
 void applyRuntimeState(NativeAppProcessInfo& process, const NativeAppRuntimeContext& context) {
     process.lifecycleState = context.lifecycleState;
+    process.processId = context.processId;
     process.startTime = context.startTime;
     process.endTime = context.endTime;
     process.exitCode = context.exitCode;
@@ -88,6 +89,7 @@ void NativeAppProcessTable::RegisterPrepared(const NativeAppRuntimeContext& cont
     if (!existing) {
         NativeAppProcessInfo process;
         process.nativePid = context.runtimeId;
+        process.processId = context.processId;
         process.runtimeId = context.runtimeId;
         process.appId = context.appId;
         process.displayName = context.displayName;

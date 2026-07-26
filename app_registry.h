@@ -3,6 +3,7 @@
 #include "app_manifest.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -15,7 +16,8 @@ enum class AppSourceKind {
     BuiltIn = 0,
     SystemApps,
     UserApps,
-    Package
+    Package,
+    DevelopmentTemporary
 };
 
 struct RegisteredApp {
@@ -23,6 +25,9 @@ struct RegisteredApp {
     AppSourceKind sourceKind = AppSourceKind::UserApps;
     std::filesystem::path manifestPath;
     std::filesystem::path appDirectory;
+    bool temporaryDevelopment = false;
+    uint64_t temporaryOwnerRuntimeId = 0;
+    uint64_t temporaryGeneration = 0;
 
     const AppEntry* FindCompatibleEntry(const std::string& currentArchitecture) const;
 };
@@ -63,6 +68,11 @@ public:
     AppScanResult Scan(const std::vector<AppRegistrySource>& sources);
     AppScanResult RegisterBuiltInAppsAsManifests();
     AppScanResult RegisterBuiltInAppsAsManifests(const std::vector<std::string>& appNames);
+
+    // Development Run uses an in-memory registration that is never included
+    // in source scanning or persistent package discovery.
+    bool RegisterTemporaryDevelopmentApp(const RegisteredApp& app, std::string& error);
+    bool UnregisterTemporaryDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation);
 
     const std::vector<RegisteredApp>& GetAllApps() const;
     const RegisteredApp* FindById(const std::string& appId) const;
