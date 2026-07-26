@@ -31,6 +31,21 @@ static bool s_lastKeyAltF4Candidate = false;
 static bool s_lastKeyAltLeftDown = false;
 static bool s_lastKeyAltRightDown = false;
 static bool s_capsLock = false;
+static const uint8_t kEventQueueCapacity = 64;
+static KeyEvent s_eventQueue[kEventQueueCapacity];
+static volatile uint8_t s_eventHead = 0;
+static volatile uint8_t s_eventTail = 0;
+static uint32_t s_traceCount = 0;
+
+static void enqueue_event(uint32_t key, bool keyUp)
+{
+    if (key == 0) return;
+    const uint8_t next = static_cast<uint8_t>((s_eventHead + 1u) % kEventQueueCapacity);
+    if (next == s_eventTail) return;
+    s_eventQueue[s_eventHead].key = key;
+    s_eventQueue[s_eventHead].action = keyUp ? KeyAction::Up : KeyAction::Down;
+    s_eventHead = next;
+}
 
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
 static void log_key_transition(const char* label, uint8_t scancode, bool keyUp, bool extended)
@@ -151,6 +166,9 @@ void init()
     s_capsLock = false;
     s_extendedKey = false;
     s_breakCode = false;
+    s_eventHead = 0;
+    s_eventTail = 0;
+    s_traceCount = 0;
     
     serial::puts("[PS2KB] Keyboard initialized (scancode set 2)\n");
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -167,6 +185,13 @@ void irq_handler()
     if (status & 0x20) return;  // Bit 5 = mouse data, skip it
     
     uint8_t scancode = arch::inb(kDataPort);
+
+    if (s_traceCount < 48u) {
+        ++s_traceCount;
+        serial::puts("[PS2KB] raw=0x");
+        serial::put_hex8(scancode);
+        serial::putc('\n');
+    }
     
     // Scancode set 2: Handle special prefixes
     // 0xE0 = extended key prefix
@@ -247,12 +272,6 @@ void irq_handler()
         }
     }
     
-    // Only process key presses, not releases
-    if (keyUp) {
-        s_extendedKey = false;
-        return;
-    }
-    
     uint32_t key = 0;
     
     // Handle extended keys (arrow keys, etc.) - scancode set 2 values
@@ -303,6 +322,8 @@ void irq_handler()
     }
     
     if (key != 0) {
+        enqueue_event(key, keyUp);
+        if (keyUp) return;
         s_lastKey = key;
         s_hasKey = true;
         s_lastKeyAltF4Candidate = altF4Candidate;
@@ -320,7 +341,28 @@ uint32_t get_key()
 {
     if (!s_hasKey) return 0;
     s_hasKey = false;
+    // Keep the legacy one-key API and the lossless transition queue in sync.
+    // The desktop consumes key-downs only; discard queued release transitions
+    // until the corresponding legacy key-down is reached.
+    while (s_eventTail != s_eventHead) {
+        const KeyEvent event = s_eventQueue[s_eventTail];
+        s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
+        if (event.action == KeyAction::Down) break;
+    }
     return s_lastKey;
+}
+
+bool has_event()
+{
+    return s_eventTail != s_eventHead;
+}
+
+bool get_event(KeyEvent* outEvent)
+{
+    if (!outEvent || s_eventTail == s_eventHead) return false;
+    *outEvent = s_eventQueue[s_eventTail];
+    s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
+    return true;
 }
 
 void clear()
@@ -330,6 +372,8 @@ void clear()
     s_lastKeyAltF4Candidate = false;
     s_lastKeyAltLeftDown = false;
     s_lastKeyAltRightDown = false;
+    s_eventHead = 0;
+    s_eventTail = 0;
 }
 
 bool is_ctrl_down()
@@ -383,6 +427,8 @@ void init() {}
 void irq_handler() {}
 bool has_key() { return false; }
 uint32_t get_key() { return 0; }
+bool has_event() { return false; }
+bool get_event(KeyEvent*) { return false; }
 void clear() {}
 bool is_ctrl_down() { return false; }
 bool is_shift_down() { return false; }

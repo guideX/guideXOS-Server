@@ -25,8 +25,8 @@ $ErrorActionPreference = "Stop"
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  guideXOS Complete Build System" -ForegroundColor Cyan
 Write-Host "====================================" -ForegroundColor Cyan
-Write-Host "  Build identity: GXOS-DESKTOP-MKDIR-TRACE-V1" -ForegroundColor Cyan
-Write-Host "  Build probe ID: GXOS-DMKDIR-20260726-01" -ForegroundColor Cyan
+Write-Host "  Build identity: GXOS-DESKTOP-PASTE-TRACE-V1" -ForegroundColor Cyan
+Write-Host "  Build probe ID: GXOS-DPASTE-20260726-01" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
@@ -397,8 +397,8 @@ elseif (Test-Path $KernelBin) {
     Write-Host "      Copied: kernel.elf ($(((Get-Item $TargetKernel).Length / 1KB).ToString('0.0')) KB)" -ForegroundColor Cyan
     $identityPath = Join-Path $ESPDir "build-identity.txt"
     @(
-        "identity=GXOS-DESKTOP-MKDIR-TRACE-V1"
-        "probe=GXOS-DMKDIR-20260726-01"
+        "identity=GXOS-DESKTOP-PASTE-TRACE-V1"
+        "probe=GXOS-DPASTE-20260726-01"
         "imageKind=ESP-directory-used-as-QEMU-FAT-media"
         "imageRoot=$ESPDir"
         "bootloaderSource=$BootloaderBin"

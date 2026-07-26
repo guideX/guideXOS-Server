@@ -13,6 +13,14 @@
 namespace kernel {
 namespace ps2keyboard {
 
+// Stable values used by both the legacy desktop dispatcher and the Native
+// ELF input bridge.  The decoder's private names retain their historical
+// spelling in the implementation.
+static const uint32_t KEY_EVENT_UP = 0x100;
+static const uint32_t KEY_EVENT_DOWN = 0x101;
+static const uint32_t KEY_EVENT_LEFT = 0x102;
+static const uint32_t KEY_EVENT_RIGHT = 0x103;
+
 // Initialize the PS/2 keyboard driver
 void init();
 
@@ -25,6 +33,20 @@ bool has_key();
 // Get the last key pressed (ASCII or special code)
 // Returns 0 if no key available
 uint32_t get_key();
+
+enum class KeyAction : uint8_t {
+    Up = 0,
+    Down = 1
+};
+
+struct KeyEvent {
+    uint32_t key;
+    KeyAction action;
+};
+
+// Consume the lossless key transition queue used by Native ELF apps.
+bool has_event();
+bool get_event(KeyEvent* outEvent);
 
 // Modifier state accessors
 bool is_ctrl_down();

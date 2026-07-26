@@ -19,6 +19,8 @@ static char s_sourcePath[vfs::VFS_MAX_PATH] = {0};
 static char s_sourceName[vfs::VFS_MAX_FILENAME] = {0};
 static Operation s_operation = Operation::None;
 static uint64_t s_operationGeneration = 0;
+static PasteDiagnostic s_lastDiagnostic{};
+static char s_diagnosticMessage[192] = {0};
 
 static size_t local_strlen(const char* value) {
     if (!value) return 0;
@@ -36,6 +38,109 @@ static bool copy_text(char* destination, size_t destinationSize, const char* sou
     }
     for (size_t i = 0; i <= length; ++i) destination[i] = source[i];
     return true;
+}
+
+static void append_text(char* destination, size_t destinationSize, const char* source) {
+    if (!destination || destinationSize == 0 || !source) return;
+    size_t length = local_strlen(destination);
+    while (*source && length + 1 < destinationSize) destination[length++] = *source++;
+    destination[length] = '\0';
+}
+
+static const char* paste_stage_name_local(PasteStage stage) {
+    switch (stage) {
+        case PasteStage::None: return "none";
+        case PasteStage::ClipboardSet: return "clipboard-population";
+        case PasteStage::SourceValidation: return "source-validation";
+        case PasteStage::DestinationValidation: return "destination-validation";
+        case PasteStage::DestinationNaming: return "destination-naming";
+        case PasteStage::SourceOpenRead: return "source-open-read";
+        case PasteStage::DestinationCreate: return "destination-create";
+        case PasteStage::DataTransfer: return "data-transfer";
+        case PasteStage::Flush: return "flush";
+        case PasteStage::Verification: return "verification";
+        case PasteStage::Refresh: return "refresh";
+        case PasteStage::Complete: return "complete";
+        default: return "unknown";
+    }
+}
+
+static const char* paste_result_name_local(PasteResult result) {
+    switch (result) {
+        case PasteResult::Success: return "SUCCESS";
+        case PasteResult::Empty: return "EMPTY";
+        case PasteResult::SourceMissing: return "SOURCE_MISSING";
+        case PasteResult::DestinationMissing: return "DESTINATION_MISSING";
+        case PasteResult::ReadOnly: return "READ_ONLY";
+        case PasteResult::Conflict: return "CONFLICT";
+        case PasteResult::Unsupported: return "UNSUPPORTED";
+        case PasteResult::Failed: return "FAILED";
+        default: return "FAILED";
+    }
+}
+
+static void trace_u64(const char* key, uint64_t value) {
+    serial::puts(key);
+    serial::puts("=");
+    serial::put_hex64(value);
+    serial::puts("\n");
+}
+
+static void trace_status(const char* key, vfs::Status status) {
+    serial::puts(key);
+    serial::puts("=");
+    serial::puts(vfs::status_name(status));
+    serial::puts("(");
+    serial::put_hex8(static_cast<uint8_t>(status));
+    serial::puts(")\n");
+}
+
+static void trace_text(const char* key, const char* value) {
+    serial::puts(key);
+    serial::puts("=");
+    serial::puts(value && value[0] ? value : "(empty)");
+    serial::puts("\n");
+}
+
+static void reset_diagnostic(PasteResult result) {
+    s_lastDiagnostic = PasteDiagnostic{};
+    s_lastDiagnostic.result = result;
+}
+
+static void set_diagnostic_stage(PasteStage stage) {
+    s_lastDiagnostic.stage = stage;
+    trace_text("DESKTOP_PASTE_STAGE", paste_stage_name_local(stage));
+}
+
+static void set_diagnostic_failure(PasteStage stage, PasteResult result,
+                                   vfs::Status vfsStatus, const char* fatStatus) {
+    s_lastDiagnostic.stage = stage;
+    s_lastDiagnostic.result = result;
+    s_lastDiagnostic.vfsStatus = vfsStatus;
+    copy_text(s_lastDiagnostic.fatStatus, sizeof(s_lastDiagnostic.fatStatus),
+              fatStatus ? fatStatus : "");
+    trace_text("DESKTOP_PASTE_FAILURE_STAGE", paste_stage_name_local(stage));
+    trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(result));
+    trace_status("DESKTOP_PASTE_RESULT", vfsStatus);
+    if (fatStatus && fatStatus[0]) trace_text("DESKTOP_PASTE_FAT_RESULT", fatStatus);
+}
+
+static void copy_diagnostic_path(char* destination, size_t destinationSize, const char* source) {
+    copy_text(destination, destinationSize, source ? source : "");
+}
+
+static const char* fat_status_for_vfs_status(vfs::Status status) {
+    switch (status) {
+        case vfs::VFS_ERR_NOT_FOUND: return "FAT_FILE_WRITE_NOT_FOUND";
+        case vfs::VFS_ERR_EXISTS: return "FAT_FILE_WRITE_ALREADY_EXISTS";
+        case vfs::VFS_ERR_INVALID: return "FAT_FILE_WRITE_INVALID_NAME";
+        case vfs::VFS_ERR_NO_SPACE: return "FAT_FILE_WRITE_NO_SPACE";
+        case vfs::VFS_ERR_READ_ONLY: return "FAT_FILE_WRITE_READ_ONLY";
+        case vfs::VFS_ERR_NOT_MOUNT: return "FAT_FILE_WRITE_NOT_MOUNTED";
+        case vfs::VFS_ERR_NOT_SUPPORTED: return "FAT_FILE_WRITE_UNSUPPORTED_TYPE";
+        case vfs::VFS_ERR_IO: return "FAT_FILE_WRITE_IO_ERROR";
+        default: return "";
+    }
 }
 
 static bool append_decimal(char* destination, size_t destinationSize, size_t& length, int value) {
@@ -242,27 +347,95 @@ static bool choose_destination_path(const char* destinationDirectory, char* dest
 }
 
 static PasteResult copy_file_contents(const char* sourcePath, const char* destinationPath, uint64_t sourceSize) {
-    if (!sourcePath || !destinationPath || sourceSize > kMaxCopyBytes) return PasteResult::Unsupported;
+    copy_diagnostic_path(s_lastDiagnostic.sourcePath, sizeof(s_lastDiagnostic.sourcePath), sourcePath);
+    copy_diagnostic_path(s_lastDiagnostic.destinationPath, sizeof(s_lastDiagnostic.destinationPath), destinationPath);
+    s_lastDiagnostic.bytesExpected = sourceSize;
+    trace_u64("DESKTOP_PASTE_BYTES_EXPECTED", sourceSize);
+    if (!sourcePath || !destinationPath) {
+        set_diagnostic_failure(PasteStage::SourceValidation, PasteResult::Failed,
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_ARGUMENT");
+        return PasteResult::Failed;
+    }
+    if (sourceSize > kMaxCopyBytes) {
+        set_diagnostic_failure(PasteStage::DataTransfer, PasteResult::Unsupported,
+                               vfs::VFS_ERR_NO_SPACE, "FAT_FILE_WRITE_NO_SPACE");
+        return PasteResult::Unsupported;
+    }
 
     const uint32_t byteCount = static_cast<uint32_t>(sourceSize);
-    int32_t bytesRead = 0;
-    if (byteCount > 0) {
-        bytesRead = vfs::read_file(sourcePath, s_copyBuffer, byteCount);
-        if (bytesRead != static_cast<int32_t>(byteCount)) return PasteResult::Failed;
+    set_diagnostic_stage(PasteStage::SourceOpenRead);
+    trace_text("DESKTOP_PASTE_SOURCE_OPEN", sourcePath);
+    const uint8_t sourceHandle = vfs::open(sourcePath, vfs::OPEN_READ);
+    if (sourceHandle == 0xFF) {
+        set_diagnostic_failure(PasteStage::SourceOpenRead, PasteResult::SourceMissing,
+                               vfs::VFS_ERR_NOT_FOUND, "FAT_FILE_WRITE_NOT_FOUND");
+        return PasteResult::SourceMissing;
+    }
+    trace_text("DESKTOP_PASTE_SOURCE_OPEN_STATUS", "VFS_OK");
+    const int32_t bytesRead = byteCount == 0
+        ? 0 : vfs::read(sourceHandle, s_copyBuffer, byteCount);
+    s_lastDiagnostic.bytesRead = bytesRead > 0 ? static_cast<uint64_t>(bytesRead) : 0;
+    trace_u64("DESKTOP_PASTE_BYTES_READ", s_lastDiagnostic.bytesRead);
+    const vfs::Status sourceCloseStatus = vfs::close(sourceHandle);
+    trace_status("DESKTOP_PASTE_SOURCE_CLOSE", sourceCloseStatus);
+    if (sourceCloseStatus != vfs::VFS_OK) {
+        set_diagnostic_failure(PasteStage::SourceOpenRead, PasteResult::Failed,
+                               sourceCloseStatus, "FAT_FILE_WRITE_IO_ERROR");
+        return PasteResult::Failed;
+    }
+    if (bytesRead < 0) {
+        set_diagnostic_failure(PasteStage::SourceOpenRead, PasteResult::Failed,
+                               static_cast<vfs::Status>(bytesRead), "FAT_FILE_WRITE_IO_ERROR");
+        return PasteResult::Failed;
+    }
+    if (bytesRead != static_cast<int32_t>(byteCount)) {
+        set_diagnostic_failure(PasteStage::DataTransfer, PasteResult::Failed,
+                               vfs::VFS_ERR_IO, "FAT_FILE_WRITE_IO_ERROR");
+        return PasteResult::Failed;
     }
 
-    int32_t bytesWritten = vfs::write_file(destinationPath, s_copyBuffer, byteCount);
+    set_diagnostic_stage(PasteStage::DataTransfer);
+    trace_text("DESKTOP_PASTE_DATA_COPY", "VFS_READ_TO_EXCLUSIVE_CREATE");
+    set_diagnostic_stage(PasteStage::DestinationCreate);
+    trace_text("DESKTOP_PASTE_DEST_CREATE", destinationPath);
+    const int32_t bytesWritten = vfs::create_file(
+        destinationPath, byteCount == 0 ? nullptr : s_copyBuffer, byteCount);
+    s_lastDiagnostic.bytesWritten = bytesWritten > 0 ? static_cast<uint64_t>(bytesWritten) : 0;
+    trace_u64("DESKTOP_PASTE_BYTES_WRITTEN", s_lastDiagnostic.bytesWritten);
     if (bytesWritten != static_cast<int32_t>(byteCount)) {
-        vfs::unlink(destinationPath);
+        const vfs::Status writeStatus = bytesWritten < 0
+            ? static_cast<vfs::Status>(bytesWritten) : vfs::VFS_ERR_IO;
+        trace_status("DESKTOP_PASTE_DEST_CREATE_STATUS", writeStatus);
+        const vfs::Status cleanupStatus = vfs::unlink(destinationPath);
+        trace_status("DESKTOP_PASTE_ROLLBACK", cleanupStatus);
+        set_diagnostic_failure(PasteStage::DestinationCreate, PasteResult::Failed,
+                               writeStatus, fat_status_for_vfs_status(writeStatus));
         return PasteResult::Failed;
     }
+    trace_status("DESKTOP_PASTE_DEST_CREATE_STATUS", vfs::VFS_OK);
 
+    // FAT writes publish their data, FAT chain, and directory metadata
+    // synchronously. Keep an explicit trace point so the operation contract
+    // remains visible even though there is no buffered file handle to flush.
+    set_diagnostic_stage(PasteStage::Flush);
+    trace_status("DESKTOP_PASTE_FLUSH", vfs::VFS_OK);
+
+    set_diagnostic_stage(PasteStage::Verification);
     vfs::FileInfo destinationInfo{};
-    if (vfs::stat(destinationPath, &destinationInfo) != vfs::VFS_OK ||
-        destinationInfo.type != vfs::FILE_TYPE_REGULAR || destinationInfo.size != sourceSize) {
-        vfs::unlink(destinationPath);
+    const vfs::Status verifyStatus = vfs::stat(destinationPath, &destinationInfo);
+    trace_status("DESKTOP_PASTE_VERIFY_STATUS", verifyStatus);
+    trace_u64("DESKTOP_PASTE_VERIFY_SIZE", destinationInfo.size);
+    if (verifyStatus != vfs::VFS_OK || destinationInfo.type != vfs::FILE_TYPE_REGULAR ||
+        destinationInfo.size != sourceSize) {
+        const vfs::Status failureStatus = verifyStatus == vfs::VFS_OK
+            ? vfs::VFS_ERR_IO : verifyStatus;
+        const vfs::Status cleanupStatus = vfs::unlink(destinationPath);
+        trace_status("DESKTOP_PASTE_ROLLBACK", cleanupStatus);
+        set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
+                               failureStatus, fat_status_for_vfs_status(failureStatus));
         return PasteResult::Failed;
     }
+    trace_text("DESKTOP_PASTE_VERIFY", "VFS_OK size-match");
     return PasteResult::Success;
 }
 
@@ -344,28 +517,50 @@ static bool make_new_folder_name(int suffixIndex, char* out, size_t outSize) {
 }
 
 bool set_file(const char* sourcePath, Operation operation) {
-    if (!sourcePath || !sourcePath[0] || operation == Operation::None) return false;
+    reset_diagnostic(PasteResult::Failed);
+    set_diagnostic_stage(PasteStage::ClipboardSet);
+    trace_text("FILE_CLIPBOARD_SOURCE_REQUEST", sourcePath);
+    if (!sourcePath || !sourcePath[0] || operation == Operation::None) {
+        set_diagnostic_failure(PasteStage::ClipboardSet, PasteResult::Failed,
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_ARGUMENT");
+        return false;
+    }
 
     char normalizedPath[vfs::VFS_MAX_PATH];
     vfs::normalize_path(sourcePath, normalizedPath, sizeof(normalizedPath));
+    trace_text("FILE_CLIPBOARD_SOURCE", normalizedPath);
     vfs::FileInfo info{};
-    if (!normalizedPath[0] || vfs::stat(normalizedPath, &info) != vfs::VFS_OK ||
+    const vfs::Status sourceStatus = normalizedPath[0]
+        ? vfs::stat(normalizedPath, &info) : vfs::VFS_ERR_INVALID;
+    trace_status("FILE_CLIPBOARD_SOURCE_STAT", sourceStatus);
+    if (!normalizedPath[0] || sourceStatus != vfs::VFS_OK ||
         (info.type != vfs::FILE_TYPE_REGULAR && info.type != vfs::FILE_TYPE_DIRECTORY)) {
+        set_diagnostic_failure(PasteStage::ClipboardSet, PasteResult::SourceMissing,
+                               sourceStatus, "FAT_FILE_WRITE_NOT_FOUND");
         return false;
     }
 
     const char* name = vfs::basename(normalizedPath);
-    if (!name || !name[0]) return false;
+    if (!name || !name[0]) {
+        set_diagnostic_failure(PasteStage::ClipboardSet, PasteResult::Failed,
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_NAME");
+        return false;
+    }
     char nextSourcePath[vfs::VFS_MAX_PATH];
     char nextSourceName[vfs::VFS_MAX_FILENAME];
     if (!copy_text(nextSourcePath, sizeof(nextSourcePath), normalizedPath) ||
         !copy_text(nextSourceName, sizeof(nextSourceName), name)) {
+        set_diagnostic_failure(PasteStage::ClipboardSet, PasteResult::Failed,
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_ARGUMENT");
         return false;
     }
 
     copy_text(s_sourcePath, sizeof(s_sourcePath), nextSourcePath);
     copy_text(s_sourceName, sizeof(s_sourceName), nextSourceName);
     s_operation = operation;
+    trace_text("FILE_CLIPBOARD_COPY_SET", operation == Operation::Copy ? "COPY" : "MOVE");
+    trace_text("FILE_CLIPBOARD_SOURCE_TYPE", info.type == vfs::FILE_TYPE_REGULAR ? "REGULAR_FILE" : "DIRECTORY");
+    trace_text("FILE_CLIPBOARD_SOURCE_NAME", s_sourceName);
     return true;
 }
 
@@ -401,67 +596,159 @@ bool can_paste_to(const char* destinationDirectory) {
 }
 
 PasteResult paste_to_directory(const char* destinationDirectory) {
-    if (!has_pending_file()) return PasteResult::Empty;
+    reset_diagnostic(PasteResult::Failed);
+    serial::puts("DESKTOP_PASTE_BEGIN\n");
+    if (!has_pending_file()) {
+        set_diagnostic_stage(PasteStage::SourceValidation);
+        s_lastDiagnostic.result = PasteResult::Empty;
+        trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Empty));
+        return PasteResult::Empty;
+    }
 
+    copy_diagnostic_path(s_lastDiagnostic.sourcePath, sizeof(s_lastDiagnostic.sourcePath), s_sourcePath);
+    trace_text("DESKTOP_PASTE_SOURCE", s_sourcePath);
+    trace_text("DESKTOP_PASTE_SOURCE_NAME", s_sourceName);
+    trace_text("DESKTOP_PASTE_OPERATION", s_operation == Operation::Copy ? "COPY" : "MOVE");
+
+    set_diagnostic_stage(PasteStage::SourceValidation);
     vfs::FileInfo sourceInfo{};
-    if (!source_is_valid(&sourceInfo)) {
+    const vfs::Status sourceStatus = vfs::stat(s_sourcePath, &sourceInfo);
+    trace_status("DESKTOP_PASTE_SOURCE_STAT", sourceStatus);
+    trace_text("DESKTOP_PASTE_SOURCE_TYPE",
+               sourceInfo.type == vfs::FILE_TYPE_REGULAR ? "REGULAR_FILE" :
+               sourceInfo.type == vfs::FILE_TYPE_DIRECTORY ? "DIRECTORY" : "OTHER");
+    trace_u64("DESKTOP_PASTE_SOURCE_SIZE", sourceInfo.size);
+    if (sourceStatus != vfs::VFS_OK ||
+        (sourceInfo.type != vfs::FILE_TYPE_REGULAR && sourceInfo.type != vfs::FILE_TYPE_DIRECTORY)) {
         clear();
+        set_diagnostic_failure(PasteStage::SourceValidation, PasteResult::SourceMissing,
+                               sourceStatus == vfs::VFS_OK ? vfs::VFS_ERR_INVALID : sourceStatus,
+                               "FAT_FILE_WRITE_NOT_FOUND");
         return PasteResult::SourceMissing;
     }
 
-    char normalizedDestination[vfs::VFS_MAX_PATH];
-    if (!destination_is_valid(destinationDirectory, normalizedDestination, sizeof(normalizedDestination))) {
-        vfs::FileInfo destinationInfo{};
-        if (!destinationDirectory || vfs::stat(destinationDirectory, &destinationInfo) != vfs::VFS_OK ||
-            destinationInfo.type != vfs::FILE_TYPE_DIRECTORY) {
-            return PasteResult::DestinationMissing;
-        }
-        const vfs::MountPoint* destinationMount = vfs::get_mount(normalizedDestination);
-        if (!destinationMount) return PasteResult::DestinationMissing;
-        if (destinationMount->readOnly) return PasteResult::ReadOnly;
+    char normalizedDestination[vfs::VFS_MAX_PATH] = {0};
+    if (destinationDirectory && destinationDirectory[0]) {
+        vfs::normalize_path(destinationDirectory, normalizedDestination, sizeof(normalizedDestination));
+    }
+    copy_diagnostic_path(s_lastDiagnostic.destinationDirectory,
+                         sizeof(s_lastDiagnostic.destinationDirectory), normalizedDestination);
+    trace_text("DESKTOP_PASTE_DEST_DIR", normalizedDestination);
+
+    set_diagnostic_stage(PasteStage::DestinationValidation);
+    vfs::FileInfo destinationInfo{};
+    const vfs::Status destinationStatus = normalizedDestination[0]
+        ? vfs::stat(normalizedDestination, &destinationInfo) : vfs::VFS_ERR_INVALID;
+    trace_status("DESKTOP_PASTE_DEST_DIR_STAT", destinationStatus);
+    if (destinationStatus != vfs::VFS_OK || destinationInfo.type != vfs::FILE_TYPE_DIRECTORY) {
+        const vfs::Status failureStatus = destinationStatus != vfs::VFS_OK
+            ? destinationStatus : vfs::VFS_ERR_NOT_DIR;
+        const PasteResult result = failureStatus == vfs::VFS_ERR_READ_ONLY
+            ? PasteResult::ReadOnly : PasteResult::DestinationMissing;
+        set_diagnostic_failure(PasteStage::DestinationValidation, result, failureStatus,
+                               fat_status_for_vfs_status(failureStatus));
+        return result;
+    }
+
+    const vfs::MountPoint* destinationMount = vfs::get_mount(normalizedDestination);
+    if (!destinationMount) {
+        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::DestinationMissing,
+                               vfs::VFS_ERR_NOT_MOUNT, "FAT_FILE_WRITE_NOT_MOUNTED");
+        return PasteResult::DestinationMissing;
+    }
+    serial::puts("DESKTOP_PASTE_DEST_FS=");
+    serial::puts(vfs::fs_type_name(destinationMount->fsType));
+    serial::puts(" mount=");
+    serial::puts(destinationMount->path);
+    serial::puts(" source=");
+    serial::puts(destinationMount->sourcePrefix[0] ? destinationMount->sourcePrefix : "/");
+    serial::puts(" alias=");
+    serial::puts(destinationMount->alias ? "1" : "0");
+    serial::puts(" writable=");
+    serial::puts(destinationMount->readOnly ? "0\n" : "1\n");
+    if (destinationMount->readOnly) {
+        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::ReadOnly,
+                               vfs::VFS_ERR_READ_ONLY, "FAT_FILE_WRITE_READ_ONLY");
+        return PasteResult::ReadOnly;
+    }
+    if (destinationMount->fsType != vfs::FS_TYPE_FAT32) {
+        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::Unsupported,
+                               vfs::VFS_ERR_NOT_SUPPORTED, "FAT_FILE_WRITE_UNSUPPORTED_TYPE");
         return PasteResult::Unsupported;
     }
 
     if (sourceInfo.type == vfs::FILE_TYPE_DIRECTORY &&
         same_or_descendant_path(normalizedDestination, s_sourcePath)) {
+        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::Unsupported,
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_ARGUMENT");
         return PasteResult::Unsupported;
     }
 
-    char sourceDestinationPath[vfs::VFS_MAX_PATH];
-    vfs::join_path(normalizedDestination, s_sourceName, sourceDestinationPath, sizeof(sourceDestinationPath));
-    if (!sourceDestinationPath[0]) return PasteResult::Unsupported;
+    set_diagnostic_stage(PasteStage::DestinationNaming);
+    char destinationPath[vfs::VFS_MAX_PATH];
+    if (!choose_destination_path(normalizedDestination, destinationPath, sizeof(destinationPath))) {
+        set_diagnostic_failure(PasteStage::DestinationNaming, PasteResult::Conflict,
+                               vfs::VFS_ERR_EXISTS, "FAT_FILE_WRITE_ALREADY_EXISTS");
+        return PasteResult::Conflict;
+    }
+    copy_diagnostic_path(s_lastDiagnostic.destinationPath,
+                         sizeof(s_lastDiagnostic.destinationPath), destinationPath);
+    trace_text("DESKTOP_PASTE_DEST_NAME", vfs::basename(destinationPath));
+    trace_text("DESKTOP_PASTE_DEST_PATH", destinationPath);
 
     // Cutting an item into its current directory is a safe no-op. Copying to
     // the same directory deliberately takes the deterministic Copy name path.
+    char sourceDestinationPath[vfs::VFS_MAX_PATH];
+    vfs::join_path(normalizedDestination, s_sourceName,
+                   sourceDestinationPath, sizeof(sourceDestinationPath));
     if (s_operation == Operation::Move && same_path(s_sourcePath, sourceDestinationPath)) {
         clear();
         ++s_operationGeneration;
+        set_diagnostic_stage(PasteStage::Complete);
+        s_lastDiagnostic.result = PasteResult::Success;
+        trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
         return PasteResult::Success;
-    }
-
-    char destinationPath[vfs::VFS_MAX_PATH];
-    if (!choose_destination_path(normalizedDestination, destinationPath, sizeof(destinationPath))) {
-        return PasteResult::Conflict;
     }
 
     if (s_operation == Operation::Move) {
         const vfs::MountPoint* sourceMount = vfs::get_mount(s_sourcePath);
-        const vfs::MountPoint* destinationMount = vfs::get_mount(destinationPath);
-        if (!sourceMount || !destinationMount) return PasteResult::DestinationMissing;
-        if (sourceMount->readOnly) return PasteResult::ReadOnly;
+        destinationMount = vfs::get_mount(destinationPath);
+        if (!sourceMount || !destinationMount) {
+            set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::DestinationMissing,
+                                   vfs::VFS_ERR_NOT_MOUNT, "FAT_FILE_WRITE_NOT_MOUNTED");
+            return PasteResult::DestinationMissing;
+        }
+        if (sourceMount->readOnly) {
+            set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::ReadOnly,
+                                   vfs::VFS_ERR_READ_ONLY, "FAT_FILE_WRITE_READ_ONLY");
+            return PasteResult::ReadOnly;
+        }
 
         if (sourceMount == destinationMount) {
-            vfs::Status renameStatus = vfs::rename(s_sourcePath, destinationPath);
+            set_diagnostic_stage(PasteStage::DataTransfer);
+            trace_text("DESKTOP_PASTE_MOVE_RENAME", "VFS_RENAME");
+            const vfs::Status renameStatus = vfs::rename(s_sourcePath, destinationPath);
+            trace_status("DESKTOP_PASTE_MOVE_RENAME_STATUS", renameStatus);
             if (renameStatus == vfs::VFS_OK) {
-                vfs::FileInfo destinationInfo{};
-                if (vfs::stat(destinationPath, &destinationInfo) != vfs::VFS_OK ||
-                    destinationInfo.type != sourceInfo.type ||
-                    (sourceInfo.type == vfs::FILE_TYPE_REGULAR && destinationInfo.size != sourceInfo.size)) {
-                    return PasteResult::Failed;
+                set_diagnostic_stage(PasteStage::Flush);
+                trace_status("DESKTOP_PASTE_FLUSH", vfs::VFS_OK);
+                vfs::FileInfo movedInfo{};
+                const vfs::Status verifyStatus = vfs::stat(destinationPath, &movedInfo);
+                trace_status("DESKTOP_PASTE_VERIFY_STATUS", verifyStatus);
+                if (verifyStatus == vfs::VFS_OK && movedInfo.type == sourceInfo.type &&
+                    (sourceInfo.type != vfs::FILE_TYPE_REGULAR || movedInfo.size == sourceInfo.size)) {
+                    clear();
+                    ++s_operationGeneration;
+                    set_diagnostic_stage(PasteStage::Complete);
+                    s_lastDiagnostic.result = PasteResult::Success;
+                    trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
+                    return PasteResult::Success;
                 }
-                clear();
-                ++s_operationGeneration;
-                return PasteResult::Success;
+                vfs::rename(destinationPath, s_sourcePath);
+                set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
+                                       verifyStatus == vfs::VFS_OK ? vfs::VFS_ERR_IO : verifyStatus,
+                                       fat_status_for_vfs_status(verifyStatus));
+                return PasteResult::Failed;
             }
         }
 
@@ -470,25 +757,31 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
         // tree has been created successfully.
         PasteResult copied = copy_entry_tree(s_sourcePath, destinationPath, sourceInfo);
         if (copied != PasteResult::Success) return copied;
-        vfs::FileInfo destinationInfo{};
-        if (vfs::stat(destinationPath, &destinationInfo) != vfs::VFS_OK ||
-            destinationInfo.type != sourceInfo.type ||
-            (sourceInfo.type == vfs::FILE_TYPE_REGULAR && destinationInfo.size != sourceInfo.size)) {
-            remove_entry_tree(destinationPath);
-            return PasteResult::Failed;
-        }
         PasteResult removed = remove_entry_tree(s_sourcePath);
         if (removed != PasteResult::Success) {
             remove_entry_tree(destinationPath);
+            set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
+                                   vfs::VFS_ERR_IO, "FAT_FILE_WRITE_IO_ERROR");
             return PasteResult::Failed;
         }
         clear();
         ++s_operationGeneration;
+        set_diagnostic_stage(PasteStage::Complete);
+        s_lastDiagnostic.result = PasteResult::Success;
+        trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
         return PasteResult::Success;
     }
 
     PasteResult copied = copy_entry_tree(s_sourcePath, destinationPath, sourceInfo);
-    if (copied == PasteResult::Success) ++s_operationGeneration;
+    if (copied == PasteResult::Success) {
+        ++s_operationGeneration;
+        set_diagnostic_stage(PasteStage::Complete);
+        s_lastDiagnostic.result = PasteResult::Success;
+        trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
+    } else if (s_lastDiagnostic.stage == PasteStage::None) {
+        set_diagnostic_failure(PasteStage::DataTransfer, copied,
+                               vfs::VFS_ERR_IO, "FAT_FILE_WRITE_IO_ERROR");
+    }
     return copied;
 }
 
@@ -676,30 +969,141 @@ bool create_unique_folder_ex(const char* destinationDirectory,
 }
 
 const char* paste_result_message(PasteResult result) {
-    switch (result) {
-        case PasteResult::Success: return "Pasted item";
-        case PasteResult::Empty: return "Clipboard is empty";
-        case PasteResult::SourceMissing: return "Clipboard source is unavailable";
-        case PasteResult::DestinationMissing: return "Paste destination is unavailable";
-        case PasteResult::ReadOnly: return "Paste destination is read-only";
-        case PasteResult::Conflict: return "Could not choose a safe file name";
-        case PasteResult::Unsupported: return "Paste is unsupported for this item";
-        case PasteResult::Failed: return "Paste failed";
-        default: return "Paste failed";
+    if (result == PasteResult::Success) return "Pasted item";
+    return paste_diagnostic_message();
+}
+
+const char* paste_stage_name(PasteStage stage) {
+    return paste_stage_name_local(stage);
+}
+
+const PasteDiagnostic& last_paste_diagnostic() {
+    return s_lastDiagnostic;
+}
+
+const char* paste_diagnostic_message() {
+    s_diagnosticMessage[0] = '\0';
+    if (s_lastDiagnostic.result == PasteResult::Success) return "Pasted item";
+    if (s_lastDiagnostic.result == PasteResult::Empty) return "Clipboard is empty";
+
+    append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), "Paste Failed: ");
+    if (s_lastDiagnostic.vfsStatus != vfs::VFS_OK) {
+        append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage),
+                    vfs::status_name(s_lastDiagnostic.vfsStatus));
+    } else if (s_lastDiagnostic.fatStatus[0]) {
+        append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), s_lastDiagnostic.fatStatus);
+    } else {
+        append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage),
+                    paste_result_name_local(s_lastDiagnostic.result));
     }
+    append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), " at ");
+    append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage),
+                paste_stage_name_local(s_lastDiagnostic.stage));
+    if (s_lastDiagnostic.fatStatus[0] && s_lastDiagnostic.vfsStatus != vfs::VFS_OK) {
+        append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), " (");
+        append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), s_lastDiagnostic.fatStatus);
+        append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), ")");
+    }
+    return s_diagnosticMessage;
+}
+
+void note_paste_refresh(bool success) {
+    if (s_lastDiagnostic.result != PasteResult::Success) return;
+    set_diagnostic_stage(PasteStage::Refresh);
+    trace_text("DESKTOP_PASTE_REFRESH", success ? "SUCCESS" : "FAILED");
+    if (!success) {
+        s_lastDiagnostic.result = PasteResult::Failed;
+        s_lastDiagnostic.vfsStatus = vfs::VFS_ERR_IO;
+        copy_text(s_lastDiagnostic.fatStatus, sizeof(s_lastDiagnostic.fatStatus),
+                  "FAT_FILE_WRITE_IO_ERROR");
+        trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Failed));
+        return;
+    }
+    set_diagnostic_stage(PasteStage::Complete);
+    trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
 }
 
 #if defined(GXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
 static bool smoke_write_file(const char* path, const uint8_t* bytes, size_t byteCount) {
-    return path && bytes && vfs::write_file(path, bytes, static_cast<uint32_t>(byteCount)) ==
+    return path && (bytes || byteCount == 0) && vfs::write_file(path, bytes, static_cast<uint32_t>(byteCount)) ==
         static_cast<int32_t>(byteCount);
 }
 
-static bool smoke_file_equals(const char* path, const uint8_t* expected, size_t expectedSize) {
-    if (!path || !expected) return false;
+static bool smoke_text_equals(const char* left, const char* right) {
+    if (!left || !right) return false;
+    size_t index = 0;
+    while (left[index] || right[index]) {
+        if (left[index] != right[index]) return false;
+        ++index;
+    }
+    return true;
+}
+
+static bool smoke_write_pattern_file(const char* path, size_t byteCount) {
+    if (!path || byteCount > kMaxCopyBytes) return false;
+    for (size_t index = 0; index < byteCount; ++index) {
+        s_copyBuffer[index] = static_cast<uint8_t>((index * 37u + 0x5Au) & 0xFFu);
+    }
+    return smoke_write_file(path, s_copyBuffer, byteCount);
+}
+
+static bool smoke_file_matches_pattern(const char* path, size_t expectedSize) {
+    if (!path) return false;
     vfs::FileInfo info{};
     if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
         info.size != expectedSize) return false;
+
+    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    if (handle == 0xFF) return false;
+    uint8_t bytes[4096];
+    size_t offset = 0;
+    bool ok = true;
+    while (offset < expectedSize) {
+        const uint32_t request = static_cast<uint32_t>(
+            expectedSize - offset > sizeof(bytes) ? sizeof(bytes) : expectedSize - offset);
+        const int32_t count = vfs::read(handle, bytes, request);
+        if (count != static_cast<int32_t>(request)) {
+            serial::puts("[FILE-OPS-RUNTIME-SMOKE] pattern-read-mismatch path=");
+            serial::puts(path);
+            serial::puts(" offset=");
+            serial::put_hex64(offset);
+            serial::puts(" requested=");
+            serial::put_hex32(request);
+            serial::puts(" actual=");
+            serial::put_hex32(count < 0 ? 0 : static_cast<uint32_t>(count));
+            serial::puts("\n");
+            ok = false;
+            break;
+        }
+        for (uint32_t index = 0; index < request; ++index) {
+            const uint8_t expected = static_cast<uint8_t>(((offset + index) * 37u + 0x5Au) & 0xFFu);
+            if (bytes[index] != expected) {
+                serial::puts("[FILE-OPS-RUNTIME-SMOKE] pattern-mismatch path=");
+                serial::puts(path);
+                serial::puts(" offset=");
+                serial::put_hex64(offset + index);
+                serial::puts(" expected=0x");
+                serial::put_hex8(expected);
+                serial::puts(" actual=0x");
+                serial::put_hex8(bytes[index]);
+                serial::puts("\n");
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) break;
+        offset += request;
+    }
+    if (vfs::close(handle) != vfs::VFS_OK) ok = false;
+    return ok && offset == expectedSize;
+}
+
+static bool smoke_file_equals(const char* path, const uint8_t* expected, size_t expectedSize) {
+    if (!path || (!expected && expectedSize != 0)) return false;
+    vfs::FileInfo info{};
+    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size != expectedSize) return false;
+    if (expectedSize == 0) return true;
     uint8_t bytes[32] = {0};
     if (expectedSize > sizeof(bytes)) return false;
     const int32_t read = vfs::read_file(path, bytes, static_cast<uint32_t>(expectedSize));
@@ -721,13 +1125,21 @@ static void smoke_phase(const char* phase) {
     serial::puts("\n");
 }
 
+static bool smoke_check(const char* label, bool value) {
+    serial::puts("[FILE-OPS-RUNTIME-SMOKE] check=");
+    serial::puts(label ? label : "unknown");
+    serial::puts(" result=");
+    serial::puts(value ? "PASS\n" : "FAIL\n");
+    return value;
+}
+
 void run_runtime_smoke() {
     static const uint8_t sourceBytes[] = {0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF};
     static const uint8_t existingBytes[] = {0xCA, 0xFE};
-    static const char* root = "/Desktop/GXOPSMK";
-    static const char* destination = "/Desktop/GXOPSMK/OPDST";
-    static const char* folder = "/Desktop/GXOPSMK/OPFOLD";
-    static const char* nested = "/Desktop/GXOPSMK/OPFOLD/SUBDIR";
+    static const char* root = "/Desktop/GXSMK5";
+    static const char* destination = "/Desktop/GXSMK5/OPDST";
+    static const char* folder = "/Desktop/GXSMK5/OPFOLD";
+    static const char* nested = "/Desktop/GXSMK5/OPFOLD/SUBDIR";
     bool ok = true;
 
     serial::puts("[FILE-OPS-RUNTIME-SMOKE] start\n");
@@ -766,7 +1178,7 @@ void run_runtime_smoke() {
         ok &= smoke_is_directory(shortPath);
         ok &= vfs::mkdir(shortPath) == vfs::VFS_ERR_EXISTS;
     }
-    ok &= vfs::mkdir("/Desktop/GXOPSMK/MISSING/TEST") == vfs::VFS_ERR_NOT_FOUND;
+    ok &= vfs::mkdir("/Desktop/GXSMK5/MISSING/TEST") == vfs::VFS_ERR_NOT_FOUND;
 
     const vfs::Status readOnlyStatus = vfs::mkdir("/system/TEST");
     serial::puts("[FILE-OPS-RUNTIME-SMOKE] readOnlyMount status=");
@@ -777,6 +1189,47 @@ void run_runtime_smoke() {
     char sourceFile[vfs::VFS_MAX_PATH];
     vfs::join_path(root, "SRC.TXT", sourceFile, sizeof(sourceFile));
     ok &= smoke_write_file(sourceFile, sourceBytes, sizeof(sourceBytes));
+
+    char testPng[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "TEST.PNG", testPng, sizeof(testPng));
+    ok &= smoke_write_file(testPng, sourceBytes, sizeof(sourceBytes));
+
+    char desktopRootPng[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "BMROOT.PNG", desktopRootPng, sizeof(desktopRootPng));
+    ok &= smoke_write_file(desktopRootPng, sourceBytes, sizeof(sourceBytes));
+
+    char imagePng[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "IMAGE.PNG", imagePng, sizeof(imagePng));
+    static const size_t multiClusterImageSize = 131123;
+    ok &= smoke_write_pattern_file(imagePng, multiClusterImageSize);
+
+    char zeroPng[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "ZERO.PNG", zeroPng, sizeof(zeroPng));
+    ok &= smoke_write_file(zeroPng, nullptr, 0);
+
+    char imageCollisionSource[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "IMAGE001.PNG", imageCollisionSource, sizeof(imageCollisionSource));
+    ok &= smoke_write_file(imageCollisionSource, sourceBytes, sizeof(sourceBytes));
+    char imageCollisionExisting[vfs::VFS_MAX_PATH];
+    vfs::join_path(destination, "IMAGE001.PNG", imageCollisionExisting, sizeof(imageCollisionExisting));
+    ok &= smoke_write_file(imageCollisionExisting, existingBytes, sizeof(existingBytes));
+
+    char generatedName[vfs::VFS_MAX_FILENAME];
+    ok &= smoke_check("candidate-space", make_candidate_name("my picture.png", 0,
+                                                               generatedName, sizeof(generatedName)) &&
+                      smoke_text_equals(generatedName, "MYPICTUR.PNG"));
+    ok &= smoke_check("candidate-long", make_candidate_name("long-desktop-image-name.png", 0,
+                                                               generatedName, sizeof(generatedName)) &&
+                      smoke_text_equals(generatedName, "LONG-DES.PNG"));
+    ok &= smoke_check("candidate-collision", make_candidate_name("IMAGE001.PNG", 1,
+                                                                    generatedName, sizeof(generatedName)) &&
+                      smoke_text_equals(generatedName, "IMAGE0~1.PNG"));
+
+    ok &= set_file(testPng, Operation::Copy);
+    const PasteResult readOnlyPaste = paste_to_directory("/system/wall");
+    ok &= smoke_check("read-only-destination", readOnlyPaste == PasteResult::ReadOnly);
+    ok &= smoke_file_equals(testPng, sourceBytes, sizeof(sourceBytes));
+    clear();
 
     char nestedFile[vfs::VFS_MAX_PATH];
     vfs::join_path(nested, "NEST.TXT", nestedFile, sizeof(nestedFile));
@@ -794,6 +1247,51 @@ void run_runtime_smoke() {
     smoke_phase("source-verified");
     ok &= smoke_file_equals(copiedFile, sourceBytes, sizeof(sourceBytes));
     smoke_phase("copy-verified");
+
+    ok &= set_file(testPng, Operation::Copy);
+    ok &= paste_to_directory(destination) == PasteResult::Success;
+    char copiedTestPng[vfs::VFS_MAX_PATH];
+    vfs::join_path(destination, "TEST.PNG", copiedTestPng, sizeof(copiedTestPng));
+    ok &= smoke_file_equals(testPng, sourceBytes, sizeof(sourceBytes));
+    ok &= smoke_file_equals(copiedTestPng, sourceBytes, sizeof(sourceBytes));
+
+    // Exercise the same root Desktop destination used by the background
+    // Paste command. The physical desktop may resolve this path through its
+    // post-mount alias; the VFS call remains the shared operation boundary.
+    ok &= set_file(desktopRootPng, Operation::Copy);
+    ok &= paste_to_directory("/Desktop") == PasteResult::Success;
+    char copiedDesktopRootPng[vfs::VFS_MAX_PATH];
+    vfs::join_path("/Desktop", "BMROOT.PNG", copiedDesktopRootPng, sizeof(copiedDesktopRootPng));
+    ok &= smoke_file_equals(desktopRootPng, sourceBytes, sizeof(sourceBytes));
+    ok &= smoke_file_equals(copiedDesktopRootPng, sourceBytes, sizeof(sourceBytes));
+    ok &= vfs::unlink(copiedDesktopRootPng) == vfs::VFS_OK;
+    smoke_phase(ok ? "after-desktop-root-pass" : "after-desktop-root-fail");
+
+    ok &= set_file(imagePng, Operation::Copy);
+    ok &= paste_to_directory(destination) == PasteResult::Success;
+    char copiedImagePng[vfs::VFS_MAX_PATH];
+    vfs::join_path(destination, "IMAGE.PNG", copiedImagePng, sizeof(copiedImagePng));
+    ok &= smoke_check("multi-source-pattern",
+                      smoke_file_matches_pattern(imagePng, multiClusterImageSize));
+    ok &= smoke_check("multi-destination-pattern",
+                      smoke_file_matches_pattern(copiedImagePng, multiClusterImageSize));
+    smoke_phase(ok ? "after-multicluster-png-pass" : "after-multicluster-png-fail");
+
+    ok &= set_file(zeroPng, Operation::Copy);
+    ok &= paste_to_directory(destination) == PasteResult::Success;
+    char copiedZeroPng[vfs::VFS_MAX_PATH];
+    vfs::join_path(destination, "ZERO.PNG", copiedZeroPng, sizeof(copiedZeroPng));
+    ok &= smoke_check("zero-source", smoke_file_equals(zeroPng, nullptr, 0));
+    ok &= smoke_check("zero-destination", smoke_file_equals(copiedZeroPng, nullptr, 0));
+
+    ok &= set_file(imageCollisionSource, Operation::Copy);
+    ok &= paste_to_directory(destination) == PasteResult::Success;
+    char imageCollisionCopy[vfs::VFS_MAX_PATH];
+    vfs::join_path(destination, "IMAGE0~1.PNG", imageCollisionCopy, sizeof(imageCollisionCopy));
+    ok &= smoke_file_equals(imageCollisionExisting, existingBytes, sizeof(existingBytes));
+    ok &= smoke_file_equals(imageCollisionCopy, sourceBytes, sizeof(sourceBytes));
+    ok &= smoke_file_equals(imageCollisionSource, sourceBytes, sizeof(sourceBytes));
+    smoke_phase(ok ? "after-png-cases-pass" : "after-png-cases-fail");
 
     ok &= set_file(sourceFile, Operation::Move);
     ok &= paste_to_directory(destination) == PasteResult::Success;

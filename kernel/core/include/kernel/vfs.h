@@ -317,6 +317,10 @@ int32_t read_file(const char* path, void* buffer, uint32_t maxSize);
 // Returns bytes written, or negative on error.
 int32_t write_file(const char* path, const void* buffer, uint32_t size);
 
+// Create a new regular file without replacing an existing entry.
+// Returns bytes written, or negative on error.
+int32_t create_file(const char* path, const void* buffer, uint32_t size);
+
 // Append data to a file.
 int32_t append_file(const char* path, const void* buffer, uint32_t size);
 

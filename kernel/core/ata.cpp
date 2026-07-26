@@ -115,6 +115,16 @@ static bool ata_wait_bsy(uint16_t ioBase, uint32_t timeout)
     return false;
 }
 
+static bool ata_wait_command_idle(uint16_t ioBase, uint32_t timeout)
+{
+    for (uint32_t i = 0; i < timeout; ++i) {
+        uint8_t st = arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
+        if (st & (ATA_SR_ERR | ATA_SR_DF)) return false;
+        if (!(st & (ATA_SR_BSY | ATA_SR_DRQ))) return true;
+    }
+    return false;
+}
+
 static bool ata_wait_drq(uint16_t ioBase, uint32_t timeout)
 {
     for (uint32_t i = 0; i < timeout; ++i) {
@@ -309,6 +319,9 @@ static block::Status ata_pio_write(uint8_t devIdx,
         for (uint32_t w = 0; w < dev.sectorSize / 2; ++w) {
             arch::outw(static_cast<uint16_t>(dev.ioBase + ATA_REG_DATA), wbuf[w]);
         }
+        // Complete one PIO write command before programming the next sector.
+        if (!ata_wait_command_idle(dev.ioBase, 500000))
+            return block::BLOCK_ERR_TIMEOUT;
 
     }
 

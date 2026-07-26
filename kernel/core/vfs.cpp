@@ -164,6 +164,25 @@ static const char* block_status_name(block::Status status)
     }
 }
 
+static Status map_fat_file_write_status(fs_fat::FileWriteStatus status)
+{
+    switch (status) {
+        case fs_fat::FILE_WRITE_OK: return VFS_OK;
+        case fs_fat::FILE_WRITE_NOT_FOUND: return VFS_ERR_NOT_FOUND;
+        case fs_fat::FILE_WRITE_ALREADY_EXISTS: return VFS_ERR_EXISTS;
+        case fs_fat::FILE_WRITE_INVALID_NAME:
+        case fs_fat::FILE_WRITE_INVALID_ARGUMENT: return VFS_ERR_INVALID;
+        case fs_fat::FILE_WRITE_NO_FREE_CLUSTER:
+        case fs_fat::FILE_WRITE_NO_FREE_ENTRY:
+        case fs_fat::FILE_WRITE_NO_SPACE: return VFS_ERR_NO_SPACE;
+        case fs_fat::FILE_WRITE_READ_ONLY: return VFS_ERR_READ_ONLY;
+        case fs_fat::FILE_WRITE_NOT_MOUNTED: return VFS_ERR_NOT_MOUNT;
+        case fs_fat::FILE_WRITE_UNSUPPORTED_TYPE: return VFS_ERR_NOT_SUPPORTED;
+        case fs_fat::FILE_WRITE_IO_ERROR: return VFS_ERR_IO;
+        default: return VFS_ERR_NOT_SUPPORTED;
+    }
+}
+
 static bool has_source_prefix(const MountPoint* mount)
 {
     return mount && mount->sourcePrefix[0] != '\0' &&
@@ -1012,7 +1031,21 @@ Status seek(uint8_t handle, int64_t offset, SeekOrigin origin)
     if (newPos < 0) {
         newPos = 0;
     }
-    
+
+    MountPoint* mount = &s_mounts[fh.mountIndex];
+    if (newPos > 0xFFFFFFFFll) return VFS_ERR_INVALID;
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32:
+        case FS_TYPE_EXFAT:
+            if (fh.fsFileHandle == 0xFF ||
+                !fs_fat::seek_file(fh.fsFileHandle, static_cast<uint32_t>(newPos))) {
+                return VFS_ERR_IO;
+            }
+            break;
+        default:
+            return VFS_ERR_NOT_SUPPORTED;
+    }
+
     fh.position = static_cast<uint64_t>(newPos);
     return VFS_OK;
 }
@@ -1400,12 +1433,71 @@ int32_t write_file(const char* path, const void* buffer, uint32_t size)
     char resolvedPath[VFS_MAX_PATH];
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
-        case FS_TYPE_FAT32:
-            if (fs_fat::overwrite_path(mount->fsVolumeIndex, relPath, buffer, size) ||
-                fs_fat::create_file_path(mount->fsVolumeIndex, relPath, buffer, size)) {
-                return static_cast<int32_t>(size);
+        case FS_TYPE_FAT32: {
+            block::Status blockStatus = block::BLOCK_OK;
+            fs_fat::FileWriteStatus fatStatus = fs_fat::overwrite_path_status(
+                mount->fsVolumeIndex, relPath, buffer, size, &blockStatus);
+            const char* operation = "overwrite";
+            if (fatStatus == fs_fat::FILE_WRITE_NOT_FOUND) {
+                operation = "create";
+                fatStatus = fs_fat::create_file_path_status(
+                    mount->fsVolumeIndex, relPath, buffer, size, &blockStatus);
             }
+            const Status result = map_fat_file_write_status(fatStatus);
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS_WRITE_FILE] path=");
+            serial::puts(path);
+            serial::puts(" operation=");
+            serial::puts(operation);
+            serial::puts(" bytes=");
+            serial::put_hex64(size);
+            serial::puts(" fatStatus=");
+            serial::puts(fs_fat::file_write_status_name(fatStatus));
+            serial::puts(" blockStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(blockStatus));
+            serial::puts(" vfsStatus=");
+            serial::puts(status_name(result));
+            serial::puts("\n");
+#endif
+            return result == VFS_OK ? static_cast<int32_t>(size) : result;
+        }
+
+        default:
             return VFS_ERR_NOT_SUPPORTED;
+    }
+}
+
+int32_t create_file(const char* path, const void* buffer, uint32_t size)
+{
+    if (!path || (!buffer && size != 0)) return VFS_ERR_INVALID;
+
+    MountPoint* mount = find_mount_for_path(path);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
+    if (mount->readOnly) return VFS_ERR_READ_ONLY;
+
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32: {
+            block::Status blockStatus = block::BLOCK_OK;
+            const fs_fat::FileWriteStatus fatStatus = fs_fat::create_file_path_status(
+                mount->fsVolumeIndex, relPath, buffer, size, &blockStatus);
+            const Status result = map_fat_file_write_status(fatStatus);
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS_CREATE_FILE] path=");
+            serial::puts(path);
+            serial::puts(" bytes=");
+            serial::put_hex64(size);
+            serial::puts(" fatStatus=");
+            serial::puts(fs_fat::file_write_status_name(fatStatus));
+            serial::puts(" blockStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(blockStatus));
+            serial::puts(" vfsStatus=");
+            serial::puts(status_name(result));
+            serial::puts("\n");
+#endif
+            return result == VFS_OK ? static_cast<int32_t>(size) : result;
+        }
 
         default:
             return VFS_ERR_NOT_SUPPORTED;

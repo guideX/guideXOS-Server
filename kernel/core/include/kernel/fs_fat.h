@@ -53,6 +53,26 @@ enum DirectoryCreateStatus : uint8_t {
 
 const char* directory_create_status_name(DirectoryCreateStatus status);
 
+// Detailed result for regular-file writes.  The legacy bool APIs remain
+// available for callers that only need success/failure, while VFS and the
+// file clipboard use this status to preserve the failing FAT stage.
+enum FileWriteStatus : uint8_t {
+    FILE_WRITE_OK = 0,
+    FILE_WRITE_INVALID_ARGUMENT,
+    FILE_WRITE_NOT_MOUNTED,
+    FILE_WRITE_UNSUPPORTED_TYPE,
+    FILE_WRITE_NOT_FOUND,
+    FILE_WRITE_ALREADY_EXISTS,
+    FILE_WRITE_INVALID_NAME,
+    FILE_WRITE_NO_FREE_CLUSTER,
+    FILE_WRITE_NO_FREE_ENTRY,
+    FILE_WRITE_IO_ERROR,
+    FILE_WRITE_READ_ONLY,
+    FILE_WRITE_NO_SPACE,
+};
+
+const char* file_write_status_name(FileWriteStatus status);
+
 // ================================================================
 // FAT12/16 BIOS Parameter Block (BPB) — first 62 bytes of sector 0
 // FAT32 reuses the common prefix and adds its own extension below.
@@ -307,6 +327,10 @@ uint8_t open_file(uint8_t volumeIndex, uint32_t firstCluster,
 // Returns the number of bytes actually read.
 uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len);
 
+// Move an open file handle to an absolute byte offset.  The VFS layer uses
+// this for Native ELF package reads and other offset-based consumers.
+bool seek_file(uint8_t fileHandle, uint32_t offset);
+
 // Overwrite bytes in an existing FAT32 file without extending its cluster chain.
 // Returns the number of bytes written.
 uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len);
@@ -315,8 +339,16 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len);
 // Does not allocate additional clusters.
 bool overwrite_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
 
+FileWriteStatus overwrite_path_status(uint8_t volumeIndex, const char* path,
+                                      const void* buffer, uint32_t len,
+                                      block::Status* outBlockStatus);
+
 // Create a new 8.3 file in an existing directory and write its contents.
 bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
+
+FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
+                                        const void* buffer, uint32_t len,
+                                        block::Status* outBlockStatus);
 
 // Create a new empty 8.3 directory in an existing directory.
 bool create_directory_path(uint8_t volumeIndex, const char* path);

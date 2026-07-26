@@ -4998,11 +4998,12 @@ void FileExplorerApp::beginCopySelected() {
     Entry& entry = m_entries[m_selected];
     char fullPath[MAX_PATH_LEN];
     joinPath(m_currentPath, entry.name, fullPath, sizeof(fullPath));
+    serial::puts("[fileexplorer-bm] FILE_CLIPBOARD_CONTEXT_COMMAND=COPY\n");
     if (file_clipboard::set_file(fullPath, file_clipboard::Operation::Copy)) {
         setStatus("Copied file to guideXOS clipboard");
         serial::puts("[fileexplorer-bm] shared file clipboard copy prepared\n");
     } else {
-        setStatus("Unable to copy file to clipboard");
+        setStatus(file_clipboard::paste_diagnostic_message());
     }
     invalidate();
 }
@@ -5012,11 +5013,12 @@ void FileExplorerApp::beginMoveSelected() {
     Entry& entry = m_entries[m_selected];
     char fullPath[MAX_PATH_LEN];
     joinPath(m_currentPath, entry.name, fullPath, sizeof(fullPath));
+    serial::puts("[fileexplorer-bm] FILE_CLIPBOARD_CONTEXT_COMMAND=CUT\n");
     if (file_clipboard::set_file(fullPath, file_clipboard::Operation::Move)) {
         setStatus("Cut file to guideXOS clipboard");
         serial::puts("[fileexplorer-bm] shared file clipboard move prepared\n");
     } else {
-        setStatus("Unable to cut file to clipboard");
+        setStatus(file_clipboard::paste_diagnostic_message());
     }
     invalidate();
 }
@@ -5026,9 +5028,15 @@ void FileExplorerApp::pasteClipboard() {
 }
 
 void FileExplorerApp::pasteClipboardTo(const char* destinationDirectory) {
+    serial::puts("[fileexplorer-bm] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
+    serial::puts(destinationDirectory ? destinationDirectory : "(null)");
+    serial::puts("\n");
     file_clipboard::PasteResult result = file_clipboard::paste_to_directory(destinationDirectory);
     setStatus(file_clipboard::paste_result_message(result));
-    if (result == file_clipboard::PasteResult::Success) refresh();
+    if (result == file_clipboard::PasteResult::Success) {
+        refresh();
+        file_clipboard::note_paste_refresh(true);
+    }
     invalidate();
 }
 

@@ -23,6 +23,7 @@
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/file_clipboard.h"
+#include "include/kernel/native_elf_baremetal.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -382,6 +383,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #if defined(GXOS_BARE_METAL)
         kernel::desktop::refresh_bare_metal_desktop_folders_after_vfs_ready();
 #endif
+        // Discover external NativeElf packages only after the persistent FAT
+        // filesystem is mounted. The loader consumes /Apps through VFS and
+        // never reaches back to a host filesystem path at runtime.
+        kernel::native_elf::discover();
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();

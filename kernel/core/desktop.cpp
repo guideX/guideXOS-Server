@@ -37,6 +37,7 @@
 #include "include/kernel/time.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/block_device.h"
+#include "include/kernel/native_elf_baremetal.h"
 #if defined(GXOS_BARE_METAL)
 #include "include/kernel/app_launch_target_resolver.h"
 #endif
@@ -1764,6 +1765,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
     {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
     {"Paint",       false, true,  0xFFC87830},  // recent
+    {"Nexgen PacMan", true, false, 0xFFE0B020}, // discovered Native ELF package
     {"Clock",       false, true,  0xFF4690C8},  // recent
     {"File Explorer", false, true, 0xFFC8B43C}, // recent
     {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
@@ -1783,6 +1785,7 @@ static const char* s_allProgramsList[] = {
     "HDInstaller",
     "ImgViewer",
     "AppModel",
+    "Nexgen PacMan",
     "Notepad",
     "Paint",
     "TaskManager",
@@ -7123,16 +7126,20 @@ static void handle_context_menu_command(int item)
                 show_file_clipboard_notification(item == 1 ? "Copied file to guideXOS clipboard" :
                                                   "Cut file to guideXOS clipboard");
             } else {
-                show_file_clipboard_notification("Unable to prepare file clipboard");
+                show_file_clipboard_notification(file_clipboard::paste_diagnostic_message());
             }
         } else if (entry->isDirectory) {
             if (s_contextMenuPasteVisibleAtOpen && item == 3) {
                 if (file_clipboard::can_paste_to(entry->path)) {
+                    serial::puts("[desktop] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
+                    serial::puts(entry->path);
+                    serial::puts("\n");
                     file_clipboard::PasteResult result = file_clipboard::paste_to_directory(entry->path);
                     show_file_clipboard_notification(file_clipboard::paste_result_message(result));
                     if (result == file_clipboard::PasteResult::Success) {
                         refresh_desktop_icons();
                         bare_metal_desktop_request_folder_refresh("desktop folder file paste");
+                        file_clipboard::note_paste_refresh(true);
                         s_needsRedraw = true;
                     }
                 }
@@ -7148,12 +7155,16 @@ static void handle_context_menu_command(int item)
 
     if (s_contextMenuPasteVisibleAtOpen && item == 5) {
         if (desktop_file_paste_available()) {
+            serial::puts("[desktop] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
+            serial::puts(bare_metal_desktop_current_directory_path());
+            serial::puts("\n");
             file_clipboard::PasteResult result = file_clipboard::paste_to_directory(
                 bare_metal_desktop_current_directory_path());
             show_file_clipboard_notification(file_clipboard::paste_result_message(result));
             if (result == file_clipboard::PasteResult::Success) {
                 refresh_desktop_icons();
                 bare_metal_desktop_request_folder_refresh("desktop file paste");
+                file_clipboard::note_paste_refresh(true);
                 s_needsRedraw = true;
             }
         }
@@ -8245,6 +8256,14 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
 static bool try_launch_kernel_app(const char* appName)
 {
     if (!appName) return false;
+
+    // External NativeElf packages use the same desktop launch surface as
+    // built-in kernel apps, but are discovered from the mounted /Apps VFS.
+    if (native_elf::is_available(appName)) {
+        s_shellActive = false;
+        return native_elf::launch(appName);
+    }
+
     const char* selectedDispatch = select_bare_metal_launch_dispatch(appName, "BareMetalKernelApp");
     
     // Check if app is available in kernel mode
@@ -10501,6 +10520,21 @@ void handle_key(uint32_t key)
     if (key == shell::KEY_SUPER) {
         serial::puts("[desktop] Super key pressed, toggling Start Menu\n");
         toggle_start_menu();
+        draw();
+        return;
+    }
+
+    // Bare-metal Native ELF validation and the installed PacMan package share
+    // the normal desktop/App Model dispatcher.  F12 is an intentionally
+    // narrow desktop shortcut for this external package so QEMU/physical
+    // keyboard validation does not depend on shell text-entry timing.
+    if (key == 0x11B && native_elf::is_available("Nexgen PacMan")) {
+        s_startMenuOpen = false;
+        s_shellActive = false;
+        serial::puts("[NATIVE-ELF] desktop shortcut launch=Nexgen PacMan\n");
+        const bool launched = launch_app("Nexgen PacMan");
+        serial::puts("[NATIVE-ELF] desktop shortcut result=");
+        serial::puts(launched ? "PASS\n" : "FAIL\n");
         draw();
         return;
     }

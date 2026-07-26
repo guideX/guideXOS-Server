@@ -31,6 +31,34 @@ enum class PasteResult : uint8_t {
     Failed,
 };
 
+enum class PasteStage : uint8_t {
+    None,
+    ClipboardSet,
+    SourceValidation,
+    DestinationValidation,
+    DestinationNaming,
+    SourceOpenRead,
+    DestinationCreate,
+    DataTransfer,
+    Flush,
+    Verification,
+    Refresh,
+    Complete,
+};
+
+struct PasteDiagnostic {
+    PasteStage stage{PasteStage::None};
+    PasteResult result{PasteResult::Failed};
+    vfs::Status vfsStatus{vfs::VFS_OK};
+    char fatStatus[48]{};
+    char sourcePath[vfs::VFS_MAX_PATH]{};
+    char destinationDirectory[vfs::VFS_MAX_PATH]{};
+    char destinationPath[vfs::VFS_MAX_PATH]{};
+    uint64_t bytesExpected{0};
+    uint64_t bytesRead{0};
+    uint64_t bytesWritten{0};
+};
+
 // Record one VFS file or directory in the kernel file-operation clipboard.
 bool set_file(const char* sourcePath, Operation operation);
 
@@ -70,6 +98,10 @@ bool create_unique_folder_ex(const char* destinationDirectory,
                              vfs::Status* outStatus);
 
 const char* paste_result_message(PasteResult result);
+const char* paste_stage_name(PasteStage stage);
+const PasteDiagnostic& last_paste_diagnostic();
+const char* paste_diagnostic_message();
+void note_paste_refresh(bool success);
 
 } // namespace file_clipboard
 } // namespace kernel
