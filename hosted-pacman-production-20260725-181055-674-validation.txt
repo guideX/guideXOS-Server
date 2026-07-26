@@ -1,0 +1,31 @@
+run=20260725-181055-674
+server-wrapper-pid=18428
+server-pid=17380
+compositor=found
+cycle=1 launch=True windowId=1000
+capture=D:\dev\pacman\guidexos\captures\pacman-production-20260725-181055-674-four-ghosts.png
+discovery-and-elf-validation=True
+four-ghost-initialization=True
+production-ghost-release-red=True
+production-ghost-release-pink=True
+production-ghost-release-cyan=True
+production-ghost-release-orange=True
+production-all-four-release=True
+no-automatic-launch-collision=True
+capture=D:\dev\pacman\guidexos\captures\pacman-production-20260725-181055-674-movement-and-score.png
+movement-pills-score=True
+cycle=1 escape-cleanup=True
+cycle=2 launch=True windowId=1001
+repeat-launch-no-collision=True
+cycle-one-collision-baseline=0
+cycle-two-collision-baseline=1
+cycle-baseline-self-check=True
+cycle=2 escape-cleanup=True
+focus-diagnostics=True
+escape-diagnostic=True
+zero-owned-windows=True
+retained-frame-present-diagnostics=True
+remaining-owned-server-processes=0
+remaining-owned-compositor-window=0
+server-wrapper-exit-code=0
+desktop-json-restored=True
