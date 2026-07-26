@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "native_app_debug_log.h"
 #include "native_app_process_table.h"
+#include "development_run_service.h"
 #include "native_build_service.h"
 
 #include <algorithm>
@@ -862,6 +863,64 @@ gx_result hostBuildProjectRelease(NativeGxAppContext* ctx, gx_build_handle handl
     return NativeBuildService::Release(*context, handle);
 }
 
+gx_result hostDevelopmentRunPrepare(NativeGxAppContext* ctx, const gx_development_run_request* request, gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !request || !outHandle || !outSnapshot ||
+        !nativeBufferRangeContains(*context, request, sizeof(gx_development_run_request)) ||
+        !nativeBufferRangeContains(*context, outHandle, sizeof(gx_development_run_handle)) ||
+        !nativeBufferRangeContains(*context, outSnapshot, sizeof(gx_development_run_snapshot)) ||
+        request->size < sizeof(gx_development_run_request) || request->version != GX_DEVELOPMENT_RUN_API_VERSION ||
+        outSnapshot->size < sizeof(gx_development_run_snapshot) || outSnapshot->version != GX_DEVELOPMENT_RUN_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
+    *outHandle = 0;
+    std::string projectRoot, projectId, projectKind, targetProfile, manifestPath, artifactPath, artifactSha256;
+    if (!copyNativeString(*context, request->projectRoot, GX_DEVELOPMENT_RUN_MAX_PROJECT_ROOT_BYTES, projectRoot) ||
+        !copyNativeString(*context, request->projectId, GX_DEVELOPMENT_RUN_MAX_PROJECT_ID_BYTES, projectId) ||
+        !copyNativeString(*context, request->projectKind, 64, projectKind) ||
+        !copyNativeString(*context, request->targetProfile, 128, targetProfile) ||
+        !copyNativeString(*context, request->manifestPath, GX_DEVELOPMENT_RUN_MAX_PATH_BYTES, manifestPath) ||
+        !copyNativeString(*context, request->artifactPath, GX_DEVELOPMENT_RUN_MAX_PATH_BYTES, artifactPath) ||
+        !copyNativeString(*context, request->artifactSha256, GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES, artifactSha256)) return GX_ERROR_INVALID_ARGUMENT;
+    gx_development_run_request copied = {};
+    copied.size = sizeof(copied);
+    copied.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    copied.projectRoot = projectRoot.c_str();
+    copied.projectId = projectId.c_str();
+    copied.projectKind = projectKind.c_str();
+    copied.targetProfile = targetProfile.c_str();
+    copied.manifestPath = manifestPath.c_str();
+    copied.artifactPath = artifactPath.c_str();
+    copied.artifactSha256 = artifactSha256.c_str();
+    const gx_result result = DevelopmentRunService::Prepare(*context, copied, outHandle, outSnapshot);
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    return result;
+}
+
+gx_result hostDevelopmentRunStart(NativeGxAppContext* ctx, gx_development_run_handle handle) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || handle == 0) return GX_ERROR_INVALID_ARGUMENT;
+    return DevelopmentRunService::Start(*context, handle);
+}
+
+gx_result hostDevelopmentRunPoll(NativeGxAppContext* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || handle == 0 || !outSnapshot || !nativeBufferRangeContains(*context, outSnapshot, sizeof(gx_development_run_snapshot)) || outSnapshot->size < sizeof(gx_development_run_snapshot) || outSnapshot->version != GX_DEVELOPMENT_RUN_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
+    const gx_result result = DevelopmentRunService::Poll(*context, handle, outSnapshot);
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    return result;
+}
+
+gx_result hostDevelopmentRunRequestClose(NativeGxAppContext* ctx, gx_development_run_handle handle) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || handle == 0) return GX_ERROR_INVALID_ARGUMENT;
+    return DevelopmentRunService::RequestClose(*context, handle);
+}
+
+gx_result hostDevelopmentRunRelease(NativeGxAppContext* ctx, gx_development_run_handle handle) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || handle == 0) return GX_ERROR_INVALID_ARGUMENT;
+    return DevelopmentRunService::Release(*context, handle);
+}
+
 gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -1603,6 +1662,11 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.build_project_start = hostBuildProjectStart;
     context.hostCalls.build_project_poll = hostBuildProjectPoll;
     context.hostCalls.build_project_release = hostBuildProjectRelease;
+    context.hostCalls.development_run_prepare = hostDevelopmentRunPrepare;
+    context.hostCalls.development_run_start = hostDevelopmentRunStart;
+    context.hostCalls.development_run_poll = hostDevelopmentRunPoll;
+    context.hostCalls.development_run_request_close = hostDevelopmentRunRequestClose;
+    context.hostCalls.development_run_release = hostDevelopmentRunRelease;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");
@@ -1645,6 +1709,7 @@ void NativeAppRuntime::BeginHostCallDispatch(NativeAppRuntimeContext& context) {
     context.startTime = std::chrono::steady_clock::now();
     g_hostLifecycleState = NativeAppLifecycleState::Running;
     g_activeRuntimeContext = &context;
+    NativeAppProcessTable::UpdateFromRuntime(context);
     Logger::write(LogLevel::Info, "[NativeAppRuntime] App: " + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " entering host call dispatch");
 }
 
@@ -1680,6 +1745,7 @@ void NativeAppRuntime::Cleanup(NativeAppRuntimeContext& context, NativeAppLifecy
          * unexpectedly, terminate only jobs belonging to this runtime before
          * releasing the runtime's windows. */
         NativeBuildService::CancelForRuntime(context.runtimeId);
+        DevelopmentRunService::ReleaseOwner(context.runtimeId);
 
         Logger::write(LogLevel::Info, "[NativeAppRuntime] Cleanup begin app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " processId=" + std::to_string(context.processId) + " ownedWindows=" + std::to_string(context.createdWindowHandles.size()));
         NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", "cleanup started ownedWindows=" + std::to_string(context.createdWindowHandles.size()));

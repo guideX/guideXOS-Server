@@ -44,6 +44,7 @@ console_service.cpp ^
 console_window.cpp ^
 desktop_theme.cpp ^
 desktop_service.cpp ^
+development_run_service.cpp ^
 desktop_state.cpp ^
 disk_manager.cpp ^
 display_options.cpp ^

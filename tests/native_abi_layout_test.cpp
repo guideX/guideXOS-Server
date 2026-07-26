@@ -47,7 +47,18 @@ static_assert(offsetof(gx_host_calls, file_remove) == 160, "file_remove slot cha
 static_assert(offsetof(gx_host_calls, build_project_start) == 168, "build start slot changed");
 static_assert(offsetof(gx_host_calls, build_project_poll) == 176, "build poll slot changed");
 static_assert(offsetof(gx_host_calls, build_project_release) == 184, "build release slot changed");
-static_assert(sizeof(gx_host_calls) == 192, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, development_run_prepare) == 192, "development run prepare slot changed");
+static_assert(offsetof(gx_host_calls, development_run_start) == 200, "development run start slot changed");
+static_assert(offsetof(gx_host_calls, development_run_poll) == 208, "development run poll slot changed");
+static_assert(offsetof(gx_host_calls, development_run_request_close) == 216, "development run close slot changed");
+static_assert(offsetof(gx_host_calls, development_run_release) == 224, "development run release slot changed");
+static_assert(sizeof(gx_host_calls) == 232, "gx_host_calls size changed");
+static_assert(sizeof(gx_development_run_request) == 64, "development run request size changed");
+static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
+static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
+static_assert(sizeof(gx_development_run_snapshot) == 448, "development run snapshot size changed");
+static_assert(offsetof(gx_development_run_snapshot, processId) == 24, "development run process id offset changed");
+static_assert(offsetof(gx_development_run_snapshot, applicationId) == 56, "development run application id offset changed");
 static_assert(sizeof(gx_build_request) == 72, "build request size changed");
 static_assert(offsetof(gx_build_request, projectRoot) == 8, "build request project root offset changed");
 static_assert(offsetof(gx_build_request, configuration) == 64, "build request configuration offset changed");
@@ -63,7 +74,9 @@ int main() {
                                    offsetof(gx_host_calls, file_list);
     const bool buildAppended = offsetof(gx_host_calls, build_project_start) >
                                offsetof(gx_host_calls, file_remove);
-    if (!appended || !workspaceAppended || !buildAppended) return 1;
+    const bool runAppended = offsetof(gx_host_calls, development_run_prepare) >
+                             offsetof(gx_host_calls, build_project_release);
+    if (!appended || !workspaceAppended || !buildAppended || !runAppended) return 1;
     std::cout << "Native ABI layout test PASS\n";
     return 0;
 }

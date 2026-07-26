@@ -12,6 +12,7 @@ namespace apps {
 
 struct NativeAppProcessInfo {
     uint64_t nativePid = 0;
+    uint64_t processId = 0;
     uint64_t runtimeId = 0;
     std::string appId;
     std::string displayName;

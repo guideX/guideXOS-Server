@@ -6,7 +6,7 @@
 #include <vector>
 #include <cstdint>
 
-namespace gxos { namespace gui {
+namespace gxos { namespace apps { struct RegisteredApp; } namespace gui {
     // Pinned item types matching C# implementation
     enum class PinnedKind : uint8_t {
         App = 0,        // Application name (e.g., "Calculator")
@@ -129,6 +129,13 @@ namespace gxos { namespace gui {
         static void RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName);
         static void RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName, const std::string& source);
         static bool LaunchApp(const std::string& name, std::string& error, bool recordRecent = true);
+        static bool RegisterDevelopmentApp(const apps::RegisteredApp& app, std::string& error);
+        static bool UnregisterDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation);
+        static bool IsInstalledAppId(const std::string& appId);
+        // Semantic hosted-development launch. The caller must have already
+        // registered a DevelopmentTemporary AppRegistry entry; this method
+        // still uses the normal resolver, Native ELF pipeline, and runtime.
+        static bool LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, std::string& error, uint64_t& outProcessId);
         static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent = true);
         static bool IsSetAsDesktopBackgroundEligible(const std::string& path, bool isDirectory, bool isTrashItem = false);
         static bool DispatchSetAsDesktopBackground(const std::string& path, const std::string& sourceSurface, std::string& error);

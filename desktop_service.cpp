@@ -4844,8 +4844,11 @@ namespace gxos {
             oss << "  file_read_workspace (hosted workspace, max 256 KiB)\n";
             oss << "  file_list (hosted workspace, max 129 returned entries)\n";
             oss << "  file_write_all (hosted workspace, max 256 KiB)\n";
+            oss << "  build_project_start/poll/release (owner-bound hosted project builds)\n";
+            oss << "  development_run_prepare/start/poll/request_close/release (owner-bound temporary App Model deployment)\n";
             oss << "workspace path policy: absolute UTF-8 host paths only; traversal, device prefixes, control bytes, and symlink components rejected\n";
             oss << "workspace root policy: guest-selected Developer Studio root containment; hosted filesystem permissions are development-only\n";
+            oss << "development run policy: rebuild before run; manifest/artifact/hash/ELF revalidated; installed IDs and privileged claims rejected; temporary registration is in-memory only\n";
             return oss.str();
         }
 
@@ -5837,6 +5840,70 @@ namespace gxos {
 
             Logger::write(LogLevel::Info, std::string("Launched app: ") + name);
             return true;
+        }
+
+        bool DesktopService::LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, std::string& error, uint64_t& outProcessId) {
+            error.clear();
+            outProcessId = 0;
+            ensureDefaultAppsRegistered();
+
+            const apps::RegisteredApp* registryApp = s_appRegistry.FindById(appId);
+            if (!registryApp || !registryApp->temporaryDevelopment ||
+                registryApp->sourceKind != apps::AppSourceKind::DevelopmentTemporary) {
+                error = "STALE_DEPLOYMENT";
+                return false;
+            }
+            if (registryApp->temporaryOwnerRuntimeId != ownerRuntimeId || registryApp->temporaryGeneration != generation) {
+                error = "OWNER_MISMATCH";
+                return false;
+            }
+
+            apps::AppLaunchResolver launchResolver(s_appRegistry, apps::AppLaunchResolver::CurrentArchitecture());
+            apps::LaunchDecision launchDecision = launchResolver.ResolveLaunch(*registryApp);
+            if (!launchDecision.success || launchDecision.strategy != apps::AppLaunchStrategy::NativeElf) {
+                error = launchDecision.reason.empty() ? "LAUNCH_UNAVAILABLE" : launchDecision.reason;
+                return false;
+            }
+            if (!apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {
+                error = "LAUNCH_UNAVAILABLE";
+                return false;
+            }
+
+            const apps::AppEntry* entry = registryApp->FindCompatibleEntry(launchDecision.architecture);
+            if (!entry || entry->path.empty()) {
+                error = "LAUNCH_UNAVAILABLE";
+                return false;
+            }
+            const std::filesystem::path resolvedPath = registryApp->appDirectory / std::filesystem::path(entry->path);
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(std::filesystem::symlink_status(resolvedPath, ec)) || ec) {
+                error = "LAUNCH_FAILED";
+                return false;
+            }
+
+            outProcessId = launchNativeElfProcess(*registryApp, launchDecision);
+            if (outProcessId == 0) {
+                error = "LAUNCH_FAILED";
+                return false;
+            }
+            Logger::write(LogLevel::Info, "Development App Model launch: appId=" + appId + " processId=" + std::to_string(outProcessId));
+            return true;
+        }
+
+        bool DesktopService::RegisterDevelopmentApp(const apps::RegisteredApp& app, std::string& error) {
+            ensureDefaultAppsRegistered();
+            return s_appRegistry.RegisterTemporaryDevelopmentApp(app, error);
+        }
+
+        bool DesktopService::UnregisterDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation) {
+            ensureDefaultAppsRegistered();
+            return s_appRegistry.UnregisterTemporaryDevelopmentApp(appId, ownerRuntimeId, generation);
+        }
+
+        bool DesktopService::IsInstalledAppId(const std::string& appId) {
+            ensureDefaultAppsRegistered();
+            const apps::RegisteredApp* app = s_appRegistry.FindById(appId);
+            return app && !app->temporaryDevelopment;
         }
 
         void DesktopService::LoadState() {

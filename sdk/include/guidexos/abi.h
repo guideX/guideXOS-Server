@@ -2,6 +2,7 @@
 
 #include "types.h"
 #include "build.h"
+#include "development_run.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -126,6 +127,13 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *build_project_start)(gx_app_context* ctx, const gx_build_request* request, gx_build_handle* outHandle);
     gx_result (GX_CALL *build_project_poll)(gx_app_context* ctx, gx_build_handle handle, gx_build_snapshot* outSnapshot);
     gx_result (GX_CALL *build_project_release)(gx_app_context* ctx, gx_build_handle handle);
+    /* Hosted-development Run Project calls. These slots are append-only and
+     * are not a generic package registration or arbitrary ELF launch API. */
+    gx_result (GX_CALL *development_run_prepare)(gx_app_context* ctx, const gx_development_run_request* request, gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot);
+    gx_result (GX_CALL *development_run_start)(gx_app_context* ctx, gx_development_run_handle handle);
+    gx_result (GX_CALL *development_run_poll)(gx_app_context* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot);
+    gx_result (GX_CALL *development_run_request_close)(gx_app_context* ctx, gx_development_run_handle handle);
+    gx_result (GX_CALL *development_run_release)(gx_app_context* ctx, gx_development_run_handle handle);
 } gx_host_calls;
 
 #ifdef __cplusplus
