@@ -142,7 +142,7 @@ void RightClickMenu::buildItems() {
                     if (item->isDirectory) {
                         std::string pasteError;
                         if (gxos::files::FileOperations::CanPasteFile(item->path, pasteError)) {
-                            s_items.push_back({"Paste File", false, false, false});
+                            s_items.push_back({"Paste", false, false, false});
                         }
                     } else {
                         s_items.push_back({"Copy File", false, false, false});
@@ -164,9 +164,10 @@ void RightClickMenu::buildItems() {
     s_items.push_back({"Auto Arrange", false, Compositor::hostedDesktopAutoArrangeIcons(), false});
     s_items.push_back({"Folder View Icon Size", true, false, false});
     s_iconSubmenuIndex = 4;
+    s_items.push_back({"New Folder", false, false, false});
     std::string pasteError;
     if (gxos::files::FileOperations::CanPasteFile(Compositor::hostedDesktopCurrentPath(), pasteError)) {
-        s_items.push_back({"Paste File", false, false, false});
+        s_items.push_back({"Paste", false, false, false});
     }
 }
 
@@ -245,16 +246,25 @@ bool RightClickMenu::HandleClick(int mx, int my) {
                         Logger::write(LogLevel::Warn, "Desktop Cut File failed: " + error);
                     }
                 }
-            } else if (s_items[idx].label == "Paste File") {
+            } else if (s_items[idx].label == "Paste") {
                 const std::string destination = s_desktopItemIndex >= 0 &&
                     s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())
                     ? Compositor::g_items[s_desktopItemIndex].path
                     : Compositor::hostedDesktopCurrentPath();
                 const gxos::files::FilePasteResult result = gxos::files::FileOperations::PasteFile(destination);
                 if (!result.success) {
-                    Logger::write(LogLevel::Warn, "Desktop Paste File failed: " + result.error);
+                    Logger::write(LogLevel::Warn, "Desktop Paste failed: " + result.error);
                 } else {
-                    Logger::write(LogLevel::Info, "Desktop Paste File succeeded destination=" + result.destinationPath);
+                    Logger::write(LogLevel::Info, "Desktop Paste succeeded destination=" + result.destinationPath);
+                    Compositor::requestDesktopRefresh();
+                }
+            } else if (s_items[idx].label == "New Folder") {
+                const gxos::files::FileCreateResult result =
+                    gxos::files::FileOperations::CreateUniqueFolder(Compositor::hostedDesktopCurrentPath());
+                if (!result.success) {
+                    Logger::write(LogLevel::Warn, "Desktop New Folder failed: " + result.error);
+                } else {
+                    Logger::write(LogLevel::Info, "Desktop New Folder created: " + result.path);
                     Compositor::requestDesktopRefresh();
                 }
             } else if (s_items[idx].label == "Open Target Location" && s_desktopItemIndex >= 0) {

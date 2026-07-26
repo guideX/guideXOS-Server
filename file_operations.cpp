@@ -20,8 +20,15 @@
 namespace gxos { namespace files {
 
     namespace {
-        constexpr int kMaxUniqueNameAttempts = 100;
+        constexpr int kMaxUniqueNameAttempts = 1000;
         constexpr uint32_t kCopyBufferBytes = 64u * 1024u;
+
+        enum class EntryKind {
+            Missing,
+            RegularFile,
+            Directory,
+            Unsupported
+        };
 
         std::mutex s_clipboardMutex;
         FileClipboardEntry s_clipboard;
@@ -122,14 +129,46 @@ namespace gxos { namespace files {
 #endif
         }
 
-        std::string uniqueDestination(const std::string& destinationDirectory, const std::string& sourceName) {
+        EntryKind entryKind(const std::string& path) {
+            if (isDirectory(path)) return EntryKind::Directory;
+            if (isRegularFile(path)) return EntryKind::RegularFile;
+            return exists(path) ? EntryKind::Unsupported : EntryKind::Missing;
+        }
+
+        bool isDirectoryWritable(const std::string& path) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            if (!isDirectory(path)) return false;
+            std::error_code ec;
+            const std::filesystem::perms permissions = std::filesystem::status(hostedPathForVirtual(path), ec).permissions();
+            if (ec) return false;
+            return (permissions & (std::filesystem::perms::owner_write |
+                                   std::filesystem::perms::group_write |
+                                   std::filesystem::perms::others_write)) != std::filesystem::perms::none;
+#else
+            if (!isDirectory(path)) return false;
+            const kernel::vfs::MountPoint* mount = kernel::vfs::get_mount(normalizeVirtualPath(path).c_str());
+            return mount && mount->active && !mount->readOnly && mount->fsType == kernel::vfs::FS_TYPE_FAT32;
+#endif
+        }
+
+        bool sameOrDescendant(const std::string& path, const std::string& ancestor) {
+            const std::string childKey = pathKey(path);
+            const std::string ancestorKey = pathKey(ancestor);
+            if (childKey == ancestorKey) return true;
+            return childKey.size() > ancestorKey.size() &&
+                childKey.compare(0, ancestorKey.size(), ancestorKey) == 0 &&
+                ancestorKey != "/" && childKey[ancestorKey.size()] == '/';
+        }
+
+        std::string uniqueDestination(const std::string& destinationDirectory, const std::string& sourceName,
+                                      bool sourceIsDirectory) {
             const std::string first = combinePath(destinationDirectory, sourceName);
             if (!exists(first)) return first;
 
             std::string stem = sourceName;
             std::string extension;
             const size_t dot = sourceName.find_last_of('.');
-            if (dot != std::string::npos && dot > 0) {
+            if (!sourceIsDirectory && dot != std::string::npos && dot > 0 && dot + 1 < sourceName.size()) {
                 stem = sourceName.substr(0, dot);
                 extension = sourceName.substr(dot);
             }
@@ -210,6 +249,86 @@ namespace gxos { namespace files {
 #endif
         }
 
+#if !defined(_WIN32) || defined(GXOS_BARE_METAL)
+        bool readDirectoryEntryAt(const std::string& path, size_t wantedIndex,
+                                  kernel::vfs::DirEntry& out, std::string& error) {
+            const uint8_t iterator = kernel::vfs::opendir(normalizeVirtualPath(path).c_str());
+            if (iterator == 0xFF) {
+                error = "Unable to enumerate source folder";
+                return false;
+            }
+
+            size_t index = 0;
+            kernel::vfs::DirEntry entry{};
+            while (kernel::vfs::readdir(iterator, &entry)) {
+                if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
+                    (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+                if (index == wantedIndex) {
+                    out = entry;
+                    kernel::vfs::closedir(iterator);
+                    return true;
+                }
+                ++index;
+            }
+            kernel::vfs::closedir(iterator);
+            return false;
+        }
+#endif
+
+        bool removeEntry(const std::string& path, std::string& error);
+
+        bool copyEntry(const std::string& source, const std::string& destination, EntryKind kind, std::string& error) {
+            if (kind == EntryKind::RegularFile) return copyFile(source, destination, error);
+            if (kind != EntryKind::Directory) {
+                error = "Clipboard source is not a supported file or folder";
+                return false;
+            }
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            std::error_code ec;
+            std::filesystem::copy(hostedPathForVirtual(source), hostedPathForVirtual(destination),
+                std::filesystem::copy_options::recursive | std::filesystem::copy_options::none, ec);
+            if (ec) {
+                error = ec.message();
+                std::string cleanupError;
+                removeEntry(destination, cleanupError);
+                return false;
+            }
+            return true;
+#else
+            if (kernel::vfs::mkdir(normalizeVirtualPath(destination).c_str()) != kernel::vfs::VFS_OK) {
+                error = "Unable to create destination folder";
+                return false;
+            }
+
+            for (size_t childIndex = 0;; ++childIndex) {
+                kernel::vfs::DirEntry child{};
+                std::string enumerationError;
+                if (!readDirectoryEntryAt(source, childIndex, child, enumerationError)) {
+                    if (!enumerationError.empty()) {
+                        error = enumerationError;
+                        std::string cleanupError;
+                        removeEntry(destination, cleanupError);
+                        return false;
+                    }
+                    break;
+                }
+
+                const std::string childSource = combinePath(source, child.name);
+                const std::string childDestination = combinePath(destination, child.name);
+                const EntryKind childKind = child.type == kernel::vfs::FILE_TYPE_DIRECTORY
+                    ? EntryKind::Directory : child.type == kernel::vfs::FILE_TYPE_REGULAR
+                    ? EntryKind::RegularFile : EntryKind::Unsupported;
+                if (!copyEntry(childSource, childDestination, childKind, error)) {
+                    std::string cleanupError;
+                    removeEntry(destination, cleanupError);
+                    return false;
+                }
+            }
+            return true;
+#endif
+        }
+
         bool moveFile(const std::string& source, const std::string& destination, std::string& error) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             std::error_code ec;
@@ -248,19 +367,67 @@ namespace gxos { namespace files {
 #endif
         }
 
+        bool removeEntry(const std::string& path, std::string& error) {
+            const EntryKind kind = entryKind(path);
+            if (kind == EntryKind::Missing) return true;
+            if (kind == EntryKind::RegularFile) return removeFile(path, error);
+            if (kind != EntryKind::Directory) {
+                error = "Unable to remove unsupported filesystem entry";
+                return false;
+            }
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            std::error_code ec;
+            std::filesystem::remove_all(hostedPathForVirtual(path), ec);
+            if (ec) {
+                error = ec.message();
+                return false;
+            }
+            return true;
+#else
+            // The VFS directory iterator is index-based and entries shift
+            // after a child is removed. Always remove the first remaining
+            // child so recursive cleanup cannot skip entries.
+            for (;;) {
+                kernel::vfs::DirEntry child{};
+                std::string enumerationError;
+                if (!readDirectoryEntryAt(path, 0, child, enumerationError)) {
+                    if (!enumerationError.empty()) {
+                        error = enumerationError;
+                        return false;
+                    }
+                    break;
+                }
+                const std::string childPath = combinePath(path, child.name);
+                if (!removeEntry(childPath, error)) return false;
+            }
+            const kernel::vfs::Status status = kernel::vfs::rmdir(normalizeVirtualPath(path).c_str());
+            if (status != kernel::vfs::VFS_OK) {
+                error = statusText(status);
+                return false;
+            }
+            return true;
+#endif
+        }
+
         bool validatePaste(const FileClipboardEntry& entry, const std::string& destinationDirectory, std::string& error) {
             const std::string source = normalizeVirtualPath(entry.sourcePath);
             const std::string destination = normalizeVirtualPath(destinationDirectory);
-            if (!isRegularFile(source)) {
-                error = "Clipboard source file is no longer available";
+            const EntryKind sourceKind = entryKind(source);
+            if (sourceKind == EntryKind::Missing) {
+                error = "Clipboard source is no longer available";
                 return false;
             }
-            if (!isDirectory(destination)) {
+            if (sourceKind == EntryKind::Unsupported) {
+                error = "Clipboard source is not a supported file or folder";
+                return false;
+            }
+            if (!isDirectory(destination) || !isDirectoryWritable(destination)) {
                 error = "Paste destination is not an available folder";
                 return false;
             }
-            if (entry.operation == FileClipboardOperation::Move && samePath(parentPath(source), destination)) {
-                error = "Source file is already in this folder";
+            if (sourceKind == EntryKind::Directory && sameOrDescendant(destination, source)) {
+                error = "Cannot paste a folder into itself or one of its descendants";
                 return false;
             }
             return true;
@@ -270,8 +437,9 @@ namespace gxos { namespace files {
     bool FileClipboard::Set(const std::string& sourcePath, FileClipboardOperation operation, std::string& error) {
         error.clear();
         const std::string normalized = normalizeVirtualPath(sourcePath);
-        if (!isRegularFile(normalized)) {
-            error = "Clipboard source is not an available regular file";
+        const EntryKind kind = entryKind(normalized);
+        if (kind != EntryKind::RegularFile && kind != EntryKind::Directory) {
+            error = "Clipboard source is not an available file or folder";
             return false;
         }
         std::lock_guard<std::mutex> lock(s_clipboardMutex);
@@ -329,7 +497,19 @@ namespace gxos { namespace files {
         const std::string destinationDirectoryNormalized = normalizeVirtualPath(destinationDirectory);
         if (!validatePaste(entry, destinationDirectoryNormalized, result.error)) return result;
 
-        const std::string destination = uniqueDestination(destinationDirectoryNormalized, baseName(source));
+        const EntryKind sourceKind = entryKind(source);
+        const std::string sameNameDestination = combinePath(destinationDirectoryNormalized, baseName(source));
+        if (entry.operation == FileClipboardOperation::Move && samePath(source, sameNameDestination)) {
+            // A cut/paste into the source's current parent is a completed no-op.
+            FileClipboard::Clear();
+            result.success = true;
+            result.destinationPath = source;
+            s_operationGeneration.fetch_add(1, std::memory_order_release);
+            return result;
+        }
+
+        const std::string destination = uniqueDestination(destinationDirectoryNormalized, baseName(source),
+                                                           sourceKind == EntryKind::Directory);
         if (destination.empty()) {
             result.error = "Unable to choose a safe destination name";
             return result;
@@ -337,7 +517,7 @@ namespace gxos { namespace files {
 
         std::string operationError;
         if (entry.operation == FileClipboardOperation::Copy) {
-            if (!copyFile(source, destination, operationError)) {
+            if (!copyEntry(source, destination, sourceKind, operationError)) {
                 result.error = operationError;
                 return result;
             }
@@ -345,19 +525,19 @@ namespace gxos { namespace files {
             if (!moveFile(source, destination, operationError)) {
                 // A rename can be unsupported across mounted filesystems. In
                 // that case, copy first and delete only after the copy exists.
-                if (!copyFile(source, destination, operationError)) {
+                if (!copyEntry(source, destination, sourceKind, operationError)) {
                     result.error = operationError;
                     return result;
                 }
-                if (!exists(destination)) {
+                if (entryKind(destination) != sourceKind) {
                     std::string cleanupError;
-                    removeFile(destination, cleanupError);
+                    removeEntry(destination, cleanupError);
                     result.error = "Move verification failed; source was preserved";
                     return result;
                 }
-                if (!removeFile(source, operationError)) {
+                if (!removeEntry(source, operationError)) {
                     std::string cleanupError;
-                    removeFile(destination, cleanupError);
+                    removeEntry(destination, cleanupError);
                     result.error = "Move cleanup failed; source was preserved";
                     return result;
                 }
@@ -368,6 +548,62 @@ namespace gxos { namespace files {
         result.success = true;
         result.destinationPath = destination;
         s_operationGeneration.fetch_add(1, std::memory_order_release);
+        return result;
+    }
+
+    FileCreateResult FileOperations::CreateUniqueFolder(const std::string& destinationDirectory) {
+        FileCreateResult result;
+        const std::string destination = normalizeVirtualPath(destinationDirectory);
+        if (!isDirectory(destination)) {
+            result.error = "Folder destination is not available";
+            return result;
+        }
+        if (!isDirectoryWritable(destination)) {
+            result.error = "Folder destination is read-only or unavailable";
+            return result;
+        }
+
+        for (int suffixIndex = 1; suffixIndex <= kMaxUniqueNameAttempts; ++suffixIndex) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const std::string name = suffixIndex == 1
+                ? "New Folder"
+                : "New Folder (" + std::to_string(suffixIndex) + ")";
+#else
+            // The current bare-metal FAT writer accepts only 8.3 names. Keep
+            // the same collision policy while using the largest representable
+            // equivalent name on that backend.
+            const std::string suffix = suffixIndex == 1 ? std::string() : std::to_string(suffixIndex);
+            const std::string base = "NewFolder";
+            const size_t baseLength = suffix.empty() ? base.size() : 8u - std::min<size_t>(suffix.size(), 7u);
+            const std::string name = base.substr(0, baseLength) + suffix;
+#endif
+            const std::string candidate = combinePath(destination, name);
+            if (exists(candidate)) continue;
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            std::error_code ec;
+            if (std::filesystem::create_directory(hostedPathForVirtual(candidate), ec) && !ec) {
+                result.success = true;
+                result.path = candidate;
+                return result;
+            }
+            if (!ec && exists(candidate)) continue;
+            result.error = ec ? ec.message() : "Unable to create folder";
+            return result;
+#else
+            const kernel::vfs::Status status = kernel::vfs::mkdir(candidate.c_str());
+            if (status == kernel::vfs::VFS_OK) {
+                result.success = true;
+                result.path = candidate;
+                return result;
+            }
+            if (status == kernel::vfs::VFS_ERR_EXISTS) continue;
+            result.error = statusText(status);
+            return result;
+#endif
+        }
+
+        result.error = "Unable to choose a safe folder name";
         return result;
     }
 

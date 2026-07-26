@@ -1032,6 +1032,12 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
 {
     FATVolume& vol = s_volumes[volumeIndex];
     uint32_t entriesPerSector = vol.bytesPerSector / 32;
+    // Prefer the directory end marker. A deleted short entry can still have
+    // stale long-name slots immediately before it, which would make a newly
+    // created file appear under the deleted file's name during lookup.
+    uint32_t deletedSector = 0;
+    uint32_t deletedOffset = 0;
+    bool haveDeletedEntry = false;
 
     if (is_fat16_root_dir(vol, dirCluster)) {
         for (uint32_t sectorIndex = 0; sectorIndex < vol.rootDirSectors; ++sectorIndex) {
@@ -1043,12 +1049,22 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
             for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
                 uint32_t offset = entryIndex * 32;
                 const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
-                if (de->name[0] == 0x00 || static_cast<uint8_t>(de->name[0]) == 0xE5) {
+                if (de->name[0] == 0x00) {
                     *outSector = sector;
                     *outOffset = offset;
                     return true;
                 }
+                if (static_cast<uint8_t>(de->name[0]) == 0xE5 && !haveDeletedEntry) {
+                    deletedSector = sector;
+                    deletedOffset = offset;
+                    haveDeletedEntry = true;
+                }
             }
+        }
+        if (haveDeletedEntry) {
+            *outSector = deletedSector;
+            *outOffset = deletedOffset;
+            return true;
         }
         return false;
     }
@@ -1069,10 +1085,15 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
             for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
                 uint32_t offset = entryIndex * 32;
                 const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
-                if (de->name[0] == 0x00 || static_cast<uint8_t>(de->name[0]) == 0xE5) {
+                if (de->name[0] == 0x00) {
                     *outSector = sector;
                     *outOffset = offset;
                     return true;
+                }
+                if (static_cast<uint8_t>(de->name[0]) == 0xE5 && !haveDeletedEntry) {
+                    deletedSector = sector;
+                    deletedOffset = offset;
+                    haveDeletedEntry = true;
                 }
             }
         }
@@ -1080,6 +1101,11 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
         cluster = next_cluster(vol, cluster);
     }
 
+    if (haveDeletedEntry) {
+        *outSector = deletedSector;
+        *outOffset = deletedOffset;
+        return true;
+    }
     return false;
 }
 

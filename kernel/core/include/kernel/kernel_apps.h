@@ -411,6 +411,7 @@ private:
     int m_contextMenuHover;
     bool m_contextMenuPasteVisible;
     bool m_contextMenuCreateFolderVisible;
+    uint64_t m_lastFileOperationGeneration;
     ContextMenuTarget m_contextMenuTarget;
     bool m_propertiesOpen;
     bool m_propertiesIsDir;

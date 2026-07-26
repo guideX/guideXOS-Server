@@ -3880,7 +3880,7 @@ FileExplorerApp::FileExplorerApp()
       m_createFolderBtnId(-1),
       m_renameFileBtnId(-1), m_deleteFileBtnId(-1), m_renameFolderBtnId(-1), m_deleteFolderBtnId(-1),
       m_confirmDeleteBtnId(-1), m_cancelDeleteBtnId(-1), m_renamePrompt(false), m_deleteConfirm(false),
-      m_deleteTargetIsDir(false) {
+      m_deleteTargetIsDir(false), m_lastFileOperationGeneration(0) {
     strcopy(m_name, "Files", app::MAX_APP_NAME);
     strcopy(m_currentPath, "/", MAX_PATH_LEN);
     strcopy(m_status, "Ready", sizeof(m_status));
@@ -4050,6 +4050,7 @@ bool FileExplorerApp::initWithParam(const char* startPath) {
     strcopy(m_currentPath, resolvedStartPath, MAX_PATH_LEN);
     refresh();
     updateActionButtons();
+    m_lastFileOperationGeneration = file_clipboard::operation_generation();
     m_state = app::AppState::Running;
     return true;
 }
@@ -4059,6 +4060,13 @@ void FileExplorerApp::shutdown() {
 }
 
 void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    const uint64_t fileOperationGeneration = file_clipboard::operation_generation();
+    if (fileOperationGeneration != m_lastFileOperationGeneration) {
+        m_lastFileOperationGeneration = fileOperationGeneration;
+        refresh();
+        updateActionButtons();
+    }
+
     static const uint32_t kIconSize = 16;
     framebuffer::fill_rect(x, y, w, h, rgb(246, 246, 246));
 
@@ -4988,11 +4996,6 @@ void FileExplorerApp::closeProperties() {
 void FileExplorerApp::beginCopySelected() {
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
-    if (entry.isDir) {
-        setStatus("Folder copy/paste is not supported");
-        invalidate();
-        return;
-    }
     char fullPath[MAX_PATH_LEN];
     joinPath(m_currentPath, entry.name, fullPath, sizeof(fullPath));
     if (file_clipboard::set_file(fullPath, file_clipboard::Operation::Copy)) {
@@ -5007,11 +5010,6 @@ void FileExplorerApp::beginCopySelected() {
 void FileExplorerApp::beginMoveSelected() {
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
-    if (entry.isDir) {
-        setStatus("Folder copy/paste is not supported");
-        invalidate();
-        return;
-    }
     char fullPath[MAX_PATH_LEN];
     joinPath(m_currentPath, entry.name, fullPath, sizeof(fullPath));
     if (file_clipboard::set_file(fullPath, file_clipboard::Operation::Move)) {
@@ -5036,7 +5034,7 @@ void FileExplorerApp::pasteClipboardTo(const char* destinationDirectory) {
 
 bool FileExplorerApp::contextMenuHasFileOperations() const {
     return m_contextMenuTarget == ContextMenuTarget::Entry &&
-           m_selected >= 0 && m_selected < m_entryCount && !m_entries[m_selected].isDir;
+           m_selected >= 0 && m_selected < m_entryCount;
 }
 
 bool FileExplorerApp::contextMenuHasFolderPaste() const {
@@ -5064,14 +5062,14 @@ int FileExplorerApp::contextMenuItemCount() const {
         if (contextMenuHasCurrentDirectoryCreateFolder()) ++count;
         return count;
     }
-    if (contextMenuHasFileOperations()) return 7;
+    if (contextMenuHasFileOperations()) return m_entries[m_selected].isDir && contextMenuHasFolderPaste() ? 8 : 7;
     return contextMenuHasFolderPaste() ? 6 : 5;
 }
 
 const char* FileExplorerApp::contextMenuItemLabel(int item) const {
     if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
         if (contextMenuHasCurrentDirectoryPaste()) {
-            if (item == 0) return "Paste File";
+            if (item == 0) return "Paste";
             if (item == 1 && contextMenuHasCurrentDirectoryCreateFolder()) return "Create Folder";
         } else if (contextMenuHasCurrentDirectoryCreateFolder() && item == 0) {
             return "Create Folder";
@@ -5080,6 +5078,19 @@ const char* FileExplorerApp::contextMenuItemLabel(int item) const {
     }
 
     if (contextMenuHasFileOperations()) {
+        if (m_entries[m_selected].isDir && contextMenuHasFolderPaste()) {
+            switch (item) {
+                case 0: return "Open";
+                case 1: return "Copy File";
+                case 2: return "Cut File";
+                case 3: return "Paste";
+                case 4: return "Pin to Desktop";
+                case 5: return "Rename";
+                case 6: return "Move to Trash";
+                case 7: return "Properties";
+                default: return "";
+            }
+        }
         switch (item) {
             case 0: return "Open";
             case 1: return "Copy File";
@@ -5095,7 +5106,7 @@ const char* FileExplorerApp::contextMenuItemLabel(int item) const {
     if (contextMenuHasFolderPaste()) {
         switch (item) {
             case 0: return "Open";
-            case 1: return "Paste File";
+            case 1: return "Paste";
             case 2: return "Pin to Desktop";
             case 3: return "Rename";
             case 4: return "Move to Trash";
@@ -5135,14 +5146,22 @@ bool FileExplorerApp::handleContextMenuClick(int x, int y) {
             }
         }
     } else if (contextMenuHasFileOperations()) {
+        const bool folderPaste = m_entries[m_selected].isDir && contextMenuHasFolderPaste();
+        if (folderPaste && item == 3) {
+            char destinationDirectory[MAX_PATH_LEN];
+            joinPath(m_currentPath, m_entries[m_selected].name, destinationDirectory, sizeof(destinationDirectory));
+            pasteClipboardTo(destinationDirectory);
+            return true;
+        }
         switch (item) {
             case 0: openSelected(); break;
             case 1: beginCopySelected(); break;
             case 2: beginMoveSelected(); break;
-            case 3: pinSelectedToDesktop(); break;
-            case 4: beginRenameSelected(); break;
-            case 5: showDeleteConfirmation(); break;
-            case 6: showPropertiesForSelected(); break;
+            case 3: if (!folderPaste) pinSelectedToDesktop(); break;
+            case 4: if (folderPaste) pinSelectedToDesktop(); else beginRenameSelected(); break;
+            case 5: if (folderPaste) beginRenameSelected(); else showDeleteConfirmation(); break;
+            case 6: if (folderPaste) showDeleteConfirmation(); else showPropertiesForSelected(); break;
+            case 7: if (folderPaste) showPropertiesForSelected(); break;
             default: break;
         }
     } else if (contextMenuHasFolderPaste()) {

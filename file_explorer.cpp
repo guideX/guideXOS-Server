@@ -86,7 +86,7 @@ namespace gxos { namespace apps {
                 case ContextMenuAction::SetAsDesktopBackground: return "Set as Desktop Background";
                 case ContextMenuAction::CopyFile: return "Copy File";
                 case ContextMenuAction::CutFile: return "Cut File";
-                case ContextMenuAction::PasteFile: return "Paste File";
+                case ContextMenuAction::PasteFile: return "Paste";
                 default: return "";
             }
         }
@@ -1028,11 +1028,6 @@ namespace gxos { namespace apps {
     void FileExplorer::copySelectedFile() {
         if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(s_entries.size())) return;
         const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
-        if (entry.isDirectory()) {
-            s_status = "Copy File is available for files only";
-            updateDisplay();
-            return;
-        }
         std::string error;
         if (!gxos::files::FileClipboard::Set(entry.fullPath, gxos::files::FileClipboardOperation::Copy, error)) {
             s_status = error;
@@ -1045,11 +1040,6 @@ namespace gxos { namespace apps {
     void FileExplorer::cutSelectedFile() {
         if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(s_entries.size())) return;
         const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
-        if (entry.isDirectory()) {
-            s_status = "Cut File is available for files only";
-            updateDisplay();
-            return;
-        }
         std::string error;
         if (!gxos::files::FileClipboard::Set(entry.fullPath, gxos::files::FileClipboardOperation::Move, error)) {
             s_status = error;
@@ -1062,7 +1052,7 @@ namespace gxos { namespace apps {
     void FileExplorer::pasteFileTo(const std::string& destinationPath) {
         const gxos::files::FilePasteResult result = gxos::files::FileOperations::PasteFile(destinationPath);
         if (!result.success) {
-            s_status = "Paste File failed: " + result.error;
+            s_status = "Paste failed: " + result.error;
         } else {
             s_status = "Pasted file: " + gxos::files::FileOperations::BaseName(result.destinationPath);
         }
@@ -1584,10 +1574,9 @@ namespace gxos { namespace apps {
         s_contextMenuDestinationPath.clear();
         s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::Open));
         const ExplorerFileEntry& entry = s_entries[rowIndex];
-        if (!entry.isDirectory()) {
-            s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::CopyFile));
-            s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::CutFile));
-        } else {
+        s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::CopyFile));
+        s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::CutFile));
+        if (entry.isDirectory()) {
             std::string pasteError;
             if (gxos::files::FileOperations::CanPasteFile(entry.fullPath, pasteError)) {
                 s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::PasteFile));

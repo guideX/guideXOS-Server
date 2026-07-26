@@ -30,7 +30,7 @@ enum class PasteResult : uint8_t {
     Failed,
 };
 
-// Record one regular file in the kernel file-operation clipboard.
+// Record one VFS file or directory in the kernel file-operation clipboard.
 bool set_file(const char* sourcePath, Operation operation);
 
 // Clear a completed or invalid operation.
@@ -39,12 +39,27 @@ void clear();
 bool has_pending_file();
 Operation pending_operation();
 
+// Monotonic generation for completed copy/move operations. File Explorer
+// uses this to refresh when the desktop consumes the shared clipboard.
+uint64_t operation_generation();
+
+#if defined(GXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+// Diagnostic-only VFS production-path smoke coverage. This is compiled and
+// invoked only by the opt-in QEMU runtime smoke build.
+void run_runtime_smoke();
+#endif
+
 // Returns true only when the source and destination are currently suitable
-// for a file paste. The operation itself still performs all validation again.
+// for a file or folder paste. The operation itself still performs all
+// validation again.
 bool can_paste_to(const char* destinationDirectory);
 
-// Copy or move the pending regular file into a destination directory.
+// Copy or move the pending file or folder into a destination directory.
 PasteResult paste_to_directory(const char* destinationDirectory);
+
+// Create a collision-free desktop-style folder name through the VFS. The
+// returned path is the actual path created by the current filesystem backend.
+bool create_unique_folder(const char* destinationDirectory, char* outPath, size_t outPathSize);
 
 const char* paste_result_message(PasteResult result);
 

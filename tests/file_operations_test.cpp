@@ -32,9 +32,14 @@ int main() {
     std::filesystem::create_directories(kFixtureRoot / "A");
     std::filesystem::create_directories(kFixtureRoot / "B");
     std::filesystem::create_directories(kFixtureRoot / "Desktop");
+    std::filesystem::create_directories(kFixtureRoot / "A" / "Nested Folder" / "Empty Directory");
     const std::vector<uint8_t> fixtureBytes{0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF};
     {
         std::ofstream output(kFixtureRoot / "A" / "sample file.bin", std::ios::binary);
+        output.write(reinterpret_cast<const char*>(fixtureBytes.data()), static_cast<std::streamsize>(fixtureBytes.size()));
+    }
+    {
+        std::ofstream output(kFixtureRoot / "A" / "Nested Folder" / "deep file.txt", std::ios::binary);
         output.write(reinterpret_cast<const char*>(fixtureBytes.data()), static_cast<std::streamsize>(fixtureBytes.size()));
     }
 
@@ -66,6 +71,61 @@ int main() {
         "same-name conflict uses safe name");
     ok &= expect(readBytes(kFixtureRoot / "B" / "sample file - Copy.bin") == fixtureBytes,
         "safe-name copy preserves bytes");
+
+    ok &= expect(gxos::files::FileClipboard::Set(kRoot + "/A/Nested Folder",
+        gxos::files::FileClipboardOperation::Copy, error), "folder copy clipboard set");
+    result = gxos::files::FileOperations::PasteFile(kRoot + "/Desktop");
+    ok &= expect(result.success, "folder copy paste succeeds");
+    ok &= expect(std::filesystem::exists(kFixtureRoot / "A" / "Nested Folder" / "deep file.txt"),
+        "folder copy leaves nested source");
+    ok &= expect(readBytes(kFixtureRoot / "Desktop" / "Nested Folder" / "deep file.txt") == fixtureBytes,
+        "folder copy preserves nested bytes");
+    ok &= expect(std::filesystem::is_empty(kFixtureRoot / "Desktop" / "Nested Folder" / "Empty Directory"),
+        "folder copy preserves empty directory");
+
+    std::filesystem::create_directories(kFixtureRoot / "Desktop" / "Nested Folder - Copy");
+    const std::vector<uint8_t> collisionBytes{0xCA, 0xFE};
+    {
+        std::ofstream output(kFixtureRoot / "Desktop" / "Nested Folder - Copy" / "existing.bin", std::ios::binary);
+        output.write(reinterpret_cast<const char*>(collisionBytes.data()), static_cast<std::streamsize>(collisionBytes.size()));
+    }
+    ok &= expect(gxos::files::FileClipboard::Set(kRoot + "/A/Nested Folder",
+        gxos::files::FileClipboardOperation::Copy, error), "folder collision clipboard set");
+    result = gxos::files::FileOperations::PasteFile(kRoot + "/Desktop");
+    ok &= expect(result.success && result.destinationPath.find("Nested Folder - Copy (2)") != std::string::npos,
+        "folder collision uses deterministic safe name");
+    ok &= expect(readBytes(kFixtureRoot / "Desktop" / "Nested Folder - Copy" / "existing.bin") == collisionBytes,
+        "folder collision does not overwrite existing destination");
+
+    ok &= expect(gxos::files::FileClipboard::Set(kRoot + "/A/Nested Folder",
+        gxos::files::FileClipboardOperation::Copy, error), "descendant paste clipboard set");
+    ok &= expect(!gxos::files::FileOperations::CanPasteFile(kRoot + "/A/Nested Folder", error),
+        "folder paste into itself is disabled");
+    result = gxos::files::FileOperations::PasteFile(kRoot + "/A/Nested Folder");
+    ok &= expect(!result.success, "folder paste into itself fails safely");
+    ok &= expect(std::filesystem::exists(kFixtureRoot / "A" / "Nested Folder" / "deep file.txt"),
+        "failed descendant paste preserves source");
+
+    result = gxos::files::FileOperations::PasteFile(kRoot + "/missing-destination");
+    ok &= expect(!result.success, "unavailable destination paste fails");
+    ok &= expect(gxos::files::FileClipboard::Get(cutEntry),
+        "failed folder paste preserves clipboard");
+
+    gxos::files::FileClipboard::Clear();
+    ok &= expect(!gxos::files::FileOperations::CanPasteFile(kRoot + "/Desktop", error),
+        "empty clipboard disables paste");
+    result = gxos::files::FileOperations::PasteFile(kRoot + "/Desktop");
+    ok &= expect(!result.success, "empty clipboard paste is rejected");
+
+    auto newFolder = gxos::files::FileOperations::CreateUniqueFolder(kRoot + "/Desktop");
+    ok &= expect(newFolder.success && newFolder.path == kRoot + "/Desktop/New Folder",
+        "hosted new folder uses default name");
+    auto secondNewFolder = gxos::files::FileOperations::CreateUniqueFolder(kRoot + "/Desktop");
+    ok &= expect(secondNewFolder.success && secondNewFolder.path == kRoot + "/Desktop/New Folder (2)",
+        "hosted new folder collision uses suffix");
+    ok &= expect(std::filesystem::is_directory(kFixtureRoot / "Desktop" / "New Folder") &&
+        std::filesystem::is_directory(kFixtureRoot / "Desktop" / "New Folder (2)"),
+        "hosted new folders persist on disk");
 
     ok &= expect(gxos::files::FileClipboard::Set(kRoot + "/A/sample file.bin",
         gxos::files::FileClipboardOperation::Move, error), "stale clipboard set");

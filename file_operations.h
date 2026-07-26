@@ -21,6 +21,12 @@ namespace gxos { namespace files {
         std::string error;
     };
 
+    struct FileCreateResult {
+        bool success{false};
+        std::string path;
+        std::string error;
+    };
+
     /// Process-local guideXOS file clipboard. It intentionally contains only
     /// a canonical virtual path and operation metadata; file bytes stay in the
     /// guideXOS VFS and never enter the host clipboard.
@@ -32,7 +38,7 @@ namespace gxos { namespace files {
         static bool IsCutSource(const std::string& sourcePath);
     };
 
-    /// File-only operations shared by File Explorer and desktop shell menus.
+    /// Filesystem operations shared by File Explorer and desktop shell menus.
     /// Paths are guideXOS virtual paths (for example /Desktop/photo.png).
     class FileOperations {
     public:
@@ -45,6 +51,7 @@ namespace gxos { namespace files {
         static bool IsRegularFile(const std::string& path);
         static bool CanPasteFile(const std::string& destinationDirectory, std::string& error);
         static FilePasteResult PasteFile(const std::string& destinationDirectory);
+        static FileCreateResult CreateUniqueFolder(const std::string& destinationDirectory);
         static uint64_t OperationGeneration();
     };
 

@@ -1878,6 +1878,10 @@ enum class ContextMenuMode : uint8_t {
 static ContextMenuMode s_contextMenuMode = ContextMenuMode::Desktop;
 static char s_contextMenuAppName[64] = {0};
 static int s_contextMenuIconDisplayIndex = -1;
+// Keep the menu shape stable for its lifetime. Clipboard state can become
+// stale between opening the menu and clicking it; that must not remap a stale
+// Paste slot onto another command.
+static bool s_contextMenuPasteVisibleAtOpen = false;
 
 // Notification toast
 struct NotificationToast {
@@ -3855,36 +3859,6 @@ static void arrange_desktop_icons_into_grid(bool persistPositions)
     if (persistPositions) save_icon_positions();
     sync_selected_icon_after_layout();
     s_needsRedraw = true;
-}
-
-static void build_unique_new_folder_name(int suffixIndex, char* out, int outSize)
-{
-    if (!out || outSize <= 0) return;
-
-    const char* prefix = "NewFolder";
-    int prefixLen = 8;
-    int digits = 1;
-    for (int value = suffixIndex; value >= 10; value /= 10) ++digits;
-    prefixLen = 8 - digits;
-    if (prefixLen < 1) prefixLen = 1;
-
-    int pos = 0;
-    for (int i = 0; prefix[i] && i < prefixLen && pos + 1 < outSize; ++i) {
-        out[pos++] = prefix[i];
-    }
-
-    char suffix[16];
-    int suffixPos = 0;
-    int value = suffixIndex;
-    do {
-        suffix[suffixPos++] = (char)('0' + (value % 10));
-        value /= 10;
-    } while (value > 0 && suffixPos < (int)sizeof(suffix));
-
-    while (suffixPos > 0 && pos + 1 < outSize) {
-        out[pos++] = suffix[--suffixPos];
-    }
-    out[pos] = '\0';
 }
 
 static bool bare_metal_desktop_resolve_directory_target(const char* targetPath, char* resolvedPath, size_t resolvedPathSize)
@@ -6951,11 +6925,11 @@ static int context_menu_item_count()
         const DesktopIcon* entry = context_menu_filesystem_entry();
         if (!entry) return 0;
         if (entry->isDirectory) {
-            return file_clipboard::can_paste_to(entry->path) ? 3 : 2;
+            return s_contextMenuPasteVisibleAtOpen ? 3 : 2;
         }
         return 3; // Open, Copy File, Cut File
     }
-    return desktop_file_paste_available() ? kContextMenuCount + 1 : kContextMenuCount;
+    return s_contextMenuPasteVisibleAtOpen ? kContextMenuCount + 1 : kContextMenuCount;
 }
 
 static void draw_right_click_menu()
@@ -7007,20 +6981,18 @@ static void draw_right_click_menu()
         } else if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
             const DesktopIcon* entry = context_menu_filesystem_entry();
             if (entry && entry->isDirectory) {
-                bool pasteAvailable = file_clipboard::can_paste_to(entry->path);
                 if (i == 0) label = "Open";
-                else if (pasteAvailable && i == 1) label = "Paste File";
-                else if (i == (pasteAvailable ? 2 : 1)) label = "Rename";
+                else if (s_contextMenuPasteVisibleAtOpen && i == 1) label = "Paste";
+                else if (i == (s_contextMenuPasteVisibleAtOpen ? 2 : 1)) label = "Rename";
             } else if (entry) {
                 if (i == 0) label = "Open";
                 else if (i == 1) label = "Copy File";
                 else if (i == 2) label = "Cut File";
             }
         } else if (s_contextMenuMode == ContextMenuMode::Desktop) {
-            bool pasteAvailable = desktop_file_paste_available();
-            if (pasteAvailable) {
+            if (s_contextMenuPasteVisibleAtOpen) {
                 if (i >= 0 && i < 5) label = s_contextMenuItems[i];
-                else if (i == 5) label = "Paste File";
+                else if (i == 5) label = "Paste";
                 else if (i == 6) label = "Open Terminal";
                 else if (i == 7) label = "TaskManager";
             } else if (i >= 0 && i < kContextMenuCount) {
@@ -7132,16 +7104,19 @@ static void handle_context_menu_command(int item)
         if (item == 0) {
             show_icon_notification(s_contextMenuIconDisplayIndex);
         } else if (entry->isDirectory) {
-            const bool pasteAvailable = file_clipboard::can_paste_to(entry->path);
-            if (pasteAvailable && item == 1) {
-                file_clipboard::PasteResult result = file_clipboard::paste_to_directory(entry->path);
-                show_file_clipboard_notification(file_clipboard::paste_result_message(result));
-                if (result == file_clipboard::PasteResult::Success) {
-                    refresh_desktop_icons();
-                    bare_metal_desktop_request_folder_refresh("desktop folder file paste");
-                    s_needsRedraw = true;
+            if (s_contextMenuPasteVisibleAtOpen && item == 1) {
+                if (file_clipboard::can_paste_to(entry->path)) {
+                    file_clipboard::PasteResult result = file_clipboard::paste_to_directory(entry->path);
+                    show_file_clipboard_notification(file_clipboard::paste_result_message(result));
+                    if (result == file_clipboard::PasteResult::Success) {
+                        refresh_desktop_icons();
+                        bare_metal_desktop_request_folder_refresh("desktop folder file paste");
+                        s_needsRedraw = true;
+                    }
                 }
-            } else if (item == (pasteAvailable ? 2 : 1)) {
+                // Consume a stale Paste slot instead of accidentally invoking
+                // Rename when the clipboard changed after menu construction.
+            } else if (item == (s_contextMenuPasteVisibleAtOpen ? 2 : 1)) {
                 begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
             }
         } else if (item == 1 || item == 2) {
@@ -7159,21 +7134,24 @@ static void handle_context_menu_command(int item)
         return;
     }
 
-    const bool pasteAvailable = desktop_file_paste_available();
-    if (pasteAvailable && item == 5) {
-        file_clipboard::PasteResult result = file_clipboard::paste_to_directory(
-            bare_metal_desktop_current_directory_path());
-        show_file_clipboard_notification(file_clipboard::paste_result_message(result));
-        if (result == file_clipboard::PasteResult::Success) {
-            refresh_desktop_icons();
-            bare_metal_desktop_request_folder_refresh("desktop file paste");
-            s_needsRedraw = true;
+    if (s_contextMenuPasteVisibleAtOpen && item == 5) {
+        if (desktop_file_paste_available()) {
+            file_clipboard::PasteResult result = file_clipboard::paste_to_directory(
+                bare_metal_desktop_current_directory_path());
+            show_file_clipboard_notification(file_clipboard::paste_result_message(result));
+            if (result == file_clipboard::PasteResult::Success) {
+                refresh_desktop_icons();
+                bare_metal_desktop_request_folder_refresh("desktop file paste");
+                s_needsRedraw = true;
+            }
         }
+        // If the clipboard became stale after the menu opened, consume the
+        // old Paste slot without dispatching the command below it.
         return;
     }
 
     int legacyItem = item;
-    if (pasteAvailable && item >= 5) legacyItem--;
+    if (s_contextMenuPasteVisibleAtOpen && item >= 5) legacyItem--;
     switch (legacyItem) {
         case 0: // Refresh
             bare_metal_desktop_request_folder_refresh("right-click refresh");
@@ -7205,25 +7183,14 @@ static void handle_context_menu_command(int item)
         }
         case 4: { // New Folder
             char newFolderPath[vfs::VFS_MAX_PATH]{};
-            vfs::Status status = vfs::VFS_ERR_NOT_FOUND;
-            for (int suffixIndex = 1; suffixIndex < 1000; ++suffixIndex) {
-                char folderName[vfs::VFS_MAX_FILENAME];
-                build_unique_new_folder_name(suffixIndex, folderName, (int)sizeof(folderName));
-                if (!folderName[0]) continue;
-                vfs::join_path(bare_metal_desktop_current_directory_path(), folderName, newFolderPath, sizeof(newFolderPath));
-                status = vfs::mkdir(newFolderPath);
-                if (status == vfs::VFS_OK) break;
-                if (status != vfs::VFS_ERR_EXISTS) break;
-            }
+            const bool created = file_clipboard::create_unique_folder(
+                bare_metal_desktop_current_directory_path(), newFolderPath, sizeof(newFolderPath));
             s_notification.title = "New Folder";
-            if (status == vfs::VFS_OK) {
+            if (created) {
                 s_notification.message = "Created on desktop";
-                refresh_desktop_icons();
-                s_needsRedraw = true;
-            } else if (status == vfs::VFS_ERR_EXISTS) {
-                s_notification.message = "Already exists";
+                bare_metal_desktop_request_folder_refresh("desktop new folder");
             } else {
-                s_notification.message = "Not supported by filesystem";
+                s_notification.message = "Unable to create folder";
             }
             s_notification.visible = true;
             s_notification.showTime = s_tickCounter;
@@ -8736,6 +8703,7 @@ void show_context_menu(uint32_t x, uint32_t y)
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::Desktop;
+    s_contextMenuPasteVisibleAtOpen = desktop_file_paste_available();
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = -1;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
@@ -8749,6 +8717,7 @@ static void show_start_menu_app_context_menu(uint32_t x, uint32_t y, const char*
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::StartMenuApp;
+    s_contextMenuPasteVisibleAtOpen = false;
     desktop_str_copy(s_contextMenuAppName, appName, (int)sizeof(s_contextMenuAppName));
     s_contextMenuIconDisplayIndex = -1;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
@@ -8763,6 +8732,7 @@ static void show_desktop_shortcut_context_menu(uint32_t x, uint32_t y, int displ
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::DesktopShortcut;
+    s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
@@ -8775,6 +8745,7 @@ static void show_desktop_trash_context_menu(uint32_t x, uint32_t y, int displayI
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::DesktopTrash;
+    s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
@@ -8787,8 +8758,13 @@ static void show_desktop_filesystem_context_menu(uint32_t x, uint32_t y, int dis
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::DesktopFilesystemEntry;
+    s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
+    const DesktopIcon* entry = context_menu_filesystem_entry();
+    if (entry && entry->isDirectory) {
+        s_contextMenuPasteVisibleAtOpen = file_clipboard::can_paste_to(entry->path);
+    }
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Desktop filesystem context menu creation\n");
 }
@@ -8800,6 +8776,7 @@ void close_context_menu()
     s_contextMenuMode = ContextMenuMode::Desktop;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = -1;
+    s_contextMenuPasteVisibleAtOpen = false;
 }
 
 void toggle_start_menu()

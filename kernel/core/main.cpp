@@ -21,6 +21,7 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
+#include "include/kernel/file_clipboard.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -533,6 +534,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] issuing command=desktop.smoke.imageviewer-runtime\n");
         kernel::desktop::run_imageviewer_runtime_smoke();
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
+#endif
+#ifdef GXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE
+        kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] issuing command=file-operations.runtime\n");
+        kernel::file_clipboard::run_runtime_smoke();
+        kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] done\n");
 #endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
