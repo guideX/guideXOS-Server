@@ -1891,6 +1891,103 @@ static NotificationToast s_notification = {
     0
 };
 static char s_desktopMkdirFailureMessage[80] = {0};
+static char s_fileOperationMessage[160] = {0};
+static bool s_fileOperationFeedbackShown = false;
+static const uint64_t kFileOperationProgressVisibilityThreshold = 128u * 1024u;
+
+static void desktop_file_operation_progress(const file_clipboard::FileOperationProgress& progress)
+{
+    if (progress.state == file_clipboard::OperationState::Preparing &&
+        progress.phase == file_clipboard::PasteStage::SourceValidation &&
+        progress.bytesCompleted == 0) {
+        s_fileOperationFeedbackShown = false;
+    }
+
+    const bool terminal = progress.state == file_clipboard::OperationState::Completed ||
+                          progress.state == file_clipboard::OperationState::Failed;
+    if (!terminal && progress.totalKnown &&
+        progress.totalBytes < kFileOperationProgressVisibilityThreshold) {
+        // Small files normally complete before a second frame would be useful.
+        // Keep the operation state active, but avoid a distracting dialog flash.
+        return;
+    }
+
+    s_fileOperationMessage[0] = '\0';
+    const char* verb = progress.operation == file_clipboard::Operation::Move ? "Moving" : "Copying";
+    if (progress.state == file_clipboard::OperationState::Preparing) {
+        desktop_str_copy(s_fileOperationMessage,
+                         progress.totalKnown ? "Preparing file..." : "Preparing files...",
+                         (int)sizeof(s_fileOperationMessage));
+        if (progress.sourceDisplayName[0]) {
+            s_fileOperationMessage[0] = '\0';
+            int pos = 0;
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                                "Preparing ");
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                                progress.sourceDisplayName);
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "...");
+        }
+    } else if (progress.state == file_clipboard::OperationState::Copying ||
+               progress.state == file_clipboard::OperationState::Moving) {
+        int pos = 0;
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), verb);
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), " ");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                            progress.totalKnown && progress.sourceDisplayName[0]
+                                ? progress.sourceDisplayName : "files");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), " - ");
+        if (progress.totalKnown && progress.totalBytes > 0) {
+            uint64_t completed = progress.bytesCompleted > progress.totalBytes
+                ? progress.totalBytes : progress.bytesCompleted;
+            int percent = static_cast<int>((completed * 100u) / progress.totalBytes);
+            desktop_append_int(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), percent);
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "%");
+        } else {
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "in progress...");
+        }
+    } else if (progress.state == file_clipboard::OperationState::Verifying) {
+        int pos = 0;
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "Verifying ");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                            progress.sourceDisplayName[0] ? progress.sourceDisplayName : "files");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "...");
+    } else if (progress.state == file_clipboard::OperationState::Refreshing) {
+        desktop_str_copy(s_fileOperationMessage, "Refreshing destination...",
+                         (int)sizeof(s_fileOperationMessage));
+    } else if (progress.state == file_clipboard::OperationState::Completed) {
+        if (!s_fileOperationFeedbackShown) return;
+        int pos = 0;
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                            progress.operation == file_clipboard::Operation::Move ? "Moved " : "Copied ");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                            progress.sourceDisplayName[0] ? progress.sourceDisplayName : "item");
+    } else if (progress.state == file_clipboard::OperationState::Failed) {
+        desktop_str_copy(s_fileOperationMessage, file_clipboard::paste_diagnostic_message(),
+                         (int)sizeof(s_fileOperationMessage));
+    }
+
+    if (progress.state == file_clipboard::OperationState::Failed) {
+        s_notification.title = "File operation failed";
+    } else if (progress.state == file_clipboard::OperationState::Completed) {
+        s_notification.title = progress.operation == file_clipboard::Operation::Move
+            ? "Move complete" : "Copy complete";
+    } else {
+        s_notification.title = verb;
+        s_fileOperationFeedbackShown = true;
+    }
+    s_notification.message = s_fileOperationMessage;
+    s_notification.visible = true;
+    // The normal desktop tick will start the terminal toast's lifetime once
+    // the operation has released its active-state guard.  Keeping this at
+    // zero also avoids coupling the shell-facing callback to tick ordering.
+    s_notification.showTime = 0;
+    s_needsRedraw = true;
+
+    // This callback runs at the start of the operation and after bounded
+    // chunks. Repaint and service only the guarded desktop pump so the user
+    // sees progress without allowing nested filesystem dispatch.
+    cooperative_yield();
+}
 
 // ============================================================
 // Wallpaper Configuration
@@ -7057,6 +7154,7 @@ static int hit_test_context_menu(int32_t mx, int32_t my)
 
 static void handle_context_menu_command(int item)
 {
+    if (file_clipboard::operation_active()) return;
     if (s_contextMenuMode == ContextMenuMode::StartMenuApp) {
         if (item == 0) {
             serial::puts("[desktop] Start Menu context Open selected\n");
@@ -7153,6 +7251,7 @@ static void handle_context_menu_command(int item)
                         ownedDestinationDirectory);
                     show_file_clipboard_notification(file_clipboard::paste_result_message(result));
                     if (result == file_clipboard::PasteResult::Success) {
+                        file_clipboard::begin_paste_refresh();
                         serial::puts("FPASTE_REFRESH_BEGIN\n");
                         bare_metal_desktop_request_folder_refresh("desktop folder file paste");
                         serial::puts("FPASTE_REFRESH_END\n");
@@ -7184,6 +7283,7 @@ static void handle_context_menu_command(int item)
                 ownedDestinationDirectory);
             show_file_clipboard_notification(file_clipboard::paste_result_message(result));
             if (result == file_clipboard::PasteResult::Success) {
+                file_clipboard::begin_paste_refresh();
                 serial::puts("FPASTE_REFRESH_BEGIN\n");
                 bare_metal_desktop_request_folder_refresh("desktop file paste");
                 serial::puts("FPASTE_REFRESH_END\n");
@@ -8478,10 +8578,38 @@ void init()
     init_taskbar_widgets();
     
     s_initialized = true;
+    file_clipboard::set_progress_callback(desktop_file_operation_progress);
     desktop_capabilities::log_current(false, false);
 }
 
 // Update tick counter (call this from main loop, e.g., every 10ms)
+static uint32_t s_lastFileOperationClockTick = 0;
+
+static void update_clock_during_file_operation()
+{
+    const uint32_t now = (uint32_t)pit::ticks();
+    if (now - s_lastFileOperationClockTick < 100) return;
+    s_lastFileOperationClockTick = now;
+
+    time::DateTime current{};
+    if (time::get_current_datetime(current)) {
+        const bool wasAvailable = s_timeAvailable;
+        s_timeAvailable = true;
+        copy_datetime_from_time_service(current);
+        TaskbarWidget& clock = s_taskbarWidgets[(int)TaskbarWidgetType::Clock];
+        if (!clock.visible) clock.visible = true;
+        if (!wasAvailable) log_taskbar_widget(TaskbarWidgetType::Clock, true,
+                                               "RTC/CMOS time became available");
+    } else {
+        update_time();
+    }
+
+    if (s_timeAvailable && s_currentTime.minute != s_lastRenderedClockMinute) {
+        s_lastRenderedClockMinute = s_currentTime.minute;
+        s_needsRedraw = true;
+    }
+}
+
 void tick()
 {
     s_tickCounter++;
@@ -8510,10 +8638,10 @@ void tick()
     }
     
     // Auto-hide notifications after 5 seconds (500 ticks at 10ms each)
-    if (s_notification.visible && s_notification.showTime == 0) {
+    if (!file_clipboard::operation_active() && s_notification.visible && s_notification.showTime == 0) {
         s_notification.showTime = s_tickCounter;
     }
-    if (s_notification.visible && s_notification.showTime > 0) {
+    if (!file_clipboard::operation_active() && s_notification.visible && s_notification.showTime > 0) {
         if (s_tickCounter - s_notification.showTime >= 500) {
             s_notification.visible = false;
             s_needsRedraw = true;
@@ -8598,6 +8726,7 @@ void cooperative_yield()
         logged = true;
     }
 
+    if (file_clipboard::operation_active()) update_clock_during_file_operation();
     input::poll();
     if (input::mouse_dirty()) {
         input::mouse_clear_dirty();
@@ -8610,7 +8739,9 @@ void cooperative_yield()
     }
 
     const uint32_t now = (uint32_t)pit::ticks();
-    if (now - lastPresentTick >= 10) {
+    const bool initialFileOperationPaint = file_clipboard::operation_active() &&
+        file_clipboard::operation_state() == file_clipboard::OperationState::Preparing;
+    if (initialFileOperationPaint || now - lastPresentTick >= 10) {
         lastPresentTick = now;
         draw();
         draw_cursor(input::mouse_x(), input::mouse_y());
@@ -10521,6 +10652,7 @@ int get_running_app_count()
 
 void handle_key(uint32_t key)
 {
+    if (file_clipboard::operation_active()) return;
     reset_alt_f4_shortcut_state();
 
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -11568,6 +11700,14 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     s_mouseX = mx;
     s_mouseY = my;
 
+    if (file_clipboard::operation_active()) {
+        // A synchronous paste may yield for paint/timer work, but button
+        // edges must not enter desktop, compositor, or app dispatch.
+        s_prevButtons = buttons;
+        draw_cursor(mx, my);
+        return;
+    }
+
     // Detect button press/release edges
     uint8_t pressed  = buttons & ~s_prevButtons;   // newly pressed
     uint8_t released = s_prevButtons & ~buttons;    // newly released
@@ -12585,6 +12725,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 void handle_mouse_wheel(int32_t mx, int32_t my, int8_t wheelDelta)
 {
     if (!s_initialized || wheelDelta == 0) return;
+    if (file_clipboard::operation_active()) return;
     if (s_desktopRename.active) return;
 
     apply_taskbar_layout();

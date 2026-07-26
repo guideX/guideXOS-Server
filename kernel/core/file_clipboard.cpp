@@ -28,6 +28,11 @@ static uint64_t s_operationGeneration = 0;
 static PasteDiagnostic s_lastDiagnostic{};
 static char s_diagnosticMessage[192] = {0};
 static uint64_t s_progressCounter = 0;
+static uint64_t s_sourceSize = 0;
+static bool s_sourceIsRegularFile = false;
+static bool s_operationActive = false;
+static ProgressCallback s_progressCallback = nullptr;
+static FileOperationProgress s_progress{};
 
 static size_t local_strlen(const char* value) {
     if (!value) return 0;
@@ -45,6 +50,45 @@ static bool copy_text(char* destination, size_t destinationSize, const char* sou
     }
     for (size_t i = 0; i <= length; ++i) destination[i] = source[i];
     return true;
+}
+
+static void notify_progress() {
+    if (s_progressCallback) s_progressCallback(s_progress);
+}
+
+static void set_operation_state(OperationState state) {
+    s_progress.state = state;
+    notify_progress();
+}
+
+static void begin_operation_progress(const char* destinationDirectory) {
+    s_progress = FileOperationProgress{};
+    s_progress.operation = s_operation;
+    s_progress.state = OperationState::Preparing;
+    s_progress.phase = PasteStage::SourceValidation;
+    copy_text(s_progress.sourceDisplayName, sizeof(s_progress.sourceDisplayName), s_sourceName);
+    s_progress.totalKnown = s_sourceIsRegularFile;
+    s_progress.totalBytes = s_sourceIsRegularFile ? s_sourceSize : 0;
+    if (destinationDirectory) {
+        vfs::normalize_path(destinationDirectory, s_progress.destinationPath,
+                            sizeof(s_progress.destinationPath));
+    }
+    s_operationActive = true;
+    notify_progress();
+}
+
+static PasteResult finish_operation(PasteResult result) {
+    s_progress.result = result;
+    s_progress.state = result == PasteResult::Success
+        ? OperationState::Completed : OperationState::Failed;
+    s_progress.phase = result == PasteResult::Success
+        ? PasteStage::Complete : s_lastDiagnostic.stage;
+    notify_progress();
+    // Keep the callback inside the protected window. It may repaint and pump
+    // safe cursor/timer work, but must never be able to start another paste.
+    s_operationActive = false;
+    if (result == PasteResult::Success) ++s_operationGeneration;
+    return result;
 }
 
 static void append_text(char* destination, size_t destinationSize, const char* source) {
@@ -76,6 +120,7 @@ static const char* paste_result_name_local(PasteResult result) {
     switch (result) {
         case PasteResult::Success: return "SUCCESS";
         case PasteResult::Empty: return "EMPTY";
+        case PasteResult::Busy: return "BUSY";
         case PasteResult::SourceMissing: return "SOURCE_MISSING";
         case PasteResult::DestinationMissing: return "DESTINATION_MISSING";
         case PasteResult::ReadOnly: return "READ_ONLY";
@@ -146,10 +191,12 @@ static void reset_diagnostic(PasteResult result) {
 
 static void set_diagnostic_stage(PasteStage stage) {
     s_lastDiagnostic.stage = stage;
+    if (s_operationActive) s_progress.phase = stage;
     trace_text("DESKTOP_PASTE_STAGE", paste_stage_name_local(stage));
     serial::puts("FPASTE_STAGE=");
     serial::puts(paste_stage_name_local(stage));
     serial::puts("\n");
+    if (s_operationActive) notify_progress();
 }
 
 static void set_diagnostic_failure(PasteStage stage, PasteResult result,
@@ -163,6 +210,10 @@ static void set_diagnostic_failure(PasteStage stage, PasteResult result,
     trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(result));
     trace_status("DESKTOP_PASTE_RESULT", vfsStatus);
     if (fatStatus && fatStatus[0]) trace_text("DESKTOP_PASTE_FAT_RESULT", fatStatus);
+    if (s_operationActive) {
+        s_progress.phase = stage;
+        s_progress.result = result;
+    }
 }
 
 static void copy_diagnostic_path(char* destination, size_t destinationSize, const char* source) {
@@ -435,6 +486,8 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
         return PasteResult::Unsupported;
     }
 
+    set_operation_state(s_operation == Operation::Move
+        ? OperationState::Moving : OperationState::Copying);
     set_diagnostic_stage(PasteStage::SourceOpenRead);
     trace_marker("FPASTE_SOURCE_OPEN");
     trace_text("DESKTOP_PASTE_SOURCE_OPEN", sourcePath);
@@ -472,9 +525,11 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
 
     uint64_t sourceOffset = 0;
     uint64_t destinationOffset = 0;
+    uint64_t lastProgressNotification = s_progress.bytesCompleted;
     bool transferOk = true;
     vfs::Status transferStatus = vfs::VFS_OK;
     PasteStage failureStage = PasteStage::DataTransfer;
+    set_diagnostic_stage(PasteStage::DataTransfer);
     while (sourceOffset < sourceSize) {
         const uint64_t remaining = sourceSize - sourceOffset;
         const uint32_t requested = remaining > kCopyBufferBytes
@@ -526,11 +581,17 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
             bufferOffset += static_cast<uint32_t>(actualWrite);
             destinationOffset += static_cast<uint64_t>(actualWrite);
             s_lastDiagnostic.bytesWritten = destinationOffset;
+            s_progress.bytesCompleted += static_cast<uint64_t>(actualWrite);
         }
         if (!transferOk) break;
         if (sourceOffset >= s_lastDiagnostic.bytesRead &&
             (destinationOffset == sourceOffset || destinationOffset % (64u * 1024u) == 0)) {
             trace_progress("stream", destinationOffset, sourceSize);
+        }
+        if (s_progress.bytesCompleted - lastProgressNotification >= kCopyBufferBytes ||
+            sourceOffset >= sourceSize) {
+            lastProgressNotification = s_progress.bytesCompleted;
+            notify_progress();
         }
     }
 
@@ -569,6 +630,7 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
         return PasteResult::Failed;
     }
 
+    set_operation_state(OperationState::Verifying);
     set_diagnostic_stage(PasteStage::Verification);
     trace_marker("FPASTE_VERIFY_BEGIN");
     vfs::FileInfo destinationInfo{};
@@ -723,6 +785,10 @@ static bool make_new_folder_name(int suffixIndex, char* out, size_t outSize) {
 }
 
 bool set_file(const char* sourcePath, Operation operation) {
+    if (s_operationActive) {
+        trace_marker("FILE_CLIPBOARD_REJECTED_BUSY");
+        return false;
+    }
     reset_diagnostic(PasteResult::Failed);
     set_diagnostic_stage(PasteStage::ClipboardSet);
     trace_text("FILE_CLIPBOARD_SOURCE_REQUEST", sourcePath);
@@ -764,6 +830,8 @@ bool set_file(const char* sourcePath, Operation operation) {
     copy_text(s_sourcePath, sizeof(s_sourcePath), nextSourcePath);
     copy_text(s_sourceName, sizeof(s_sourceName), nextSourceName);
     s_operation = operation;
+    s_sourceSize = info.type == vfs::FILE_TYPE_REGULAR ? info.size : 0;
+    s_sourceIsRegularFile = info.type == vfs::FILE_TYPE_REGULAR;
     trace_text("FILE_CLIPBOARD_COPY_SET", operation == Operation::Copy ? "COPY" : "MOVE");
     trace_text("FILE_CLIPBOARD_SOURCE_TYPE", info.type == vfs::FILE_TYPE_REGULAR ? "REGULAR_FILE" : "DIRECTORY");
     trace_text("FILE_CLIPBOARD_SOURCE_NAME", s_sourceName);
@@ -774,6 +842,8 @@ void clear() {
     s_sourcePath[0] = '\0';
     s_sourceName[0] = '\0';
     s_operation = Operation::None;
+    s_sourceSize = 0;
+    s_sourceIsRegularFile = false;
 }
 
 bool has_pending_file() {
@@ -784,11 +854,28 @@ Operation pending_operation() {
     return s_operation;
 }
 
+void set_progress_callback(ProgressCallback callback) {
+    s_progressCallback = callback;
+}
+
+bool operation_active() {
+    return s_operationActive;
+}
+
+OperationState operation_state() {
+    return s_progress.state;
+}
+
+const FileOperationProgress& progress() {
+    return s_progress;
+}
+
 uint64_t operation_generation() {
     return s_operationGeneration;
 }
 
 bool can_paste_to(const char* destinationDirectory) {
+    if (s_operationActive) return false;
     vfs::FileInfo sourceInfo{};
     if (!source_is_valid(&sourceInfo)) {
         clear();
@@ -802,6 +889,7 @@ bool can_paste_to(const char* destinationDirectory) {
 }
 
 PasteResult paste_to_directory(const char* destinationDirectory) {
+    if (s_operationActive) return PasteResult::Busy;
     reset_diagnostic(PasteResult::Failed);
     s_progressCounter = 0;
     serial::puts("FPASTE_BEGIN identity=");
@@ -817,6 +905,7 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
         trace_marker("FPASTE_RETURN_EMPTY");
         return PasteResult::Empty;
     }
+    begin_operation_progress(destinationDirectory);
     trace_marker("FPASTE_CLIPBOARD_VALID");
 
     copy_diagnostic_path(s_lastDiagnostic.sourcePath, sizeof(s_lastDiagnostic.sourcePath), s_sourcePath);
@@ -832,13 +921,16 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
                sourceInfo.type == vfs::FILE_TYPE_REGULAR ? "REGULAR_FILE" :
                sourceInfo.type == vfs::FILE_TYPE_DIRECTORY ? "DIRECTORY" : "OTHER");
     trace_u64("DESKTOP_PASTE_SOURCE_SIZE", sourceInfo.size);
+    s_progress.totalKnown = sourceInfo.type == vfs::FILE_TYPE_REGULAR;
+    s_progress.totalBytes = s_progress.totalKnown ? sourceInfo.size : 0;
+    notify_progress();
     if (sourceStatus != vfs::VFS_OK ||
         (sourceInfo.type != vfs::FILE_TYPE_REGULAR && sourceInfo.type != vfs::FILE_TYPE_DIRECTORY)) {
         clear();
         set_diagnostic_failure(PasteStage::SourceValidation, PasteResult::SourceMissing,
                                sourceStatus == vfs::VFS_OK ? vfs::VFS_ERR_INVALID : sourceStatus,
                                "FAT_FILE_WRITE_NOT_FOUND");
-        return PasteResult::SourceMissing;
+        return finish_operation(PasteResult::SourceMissing);
     }
     trace_marker("FPASTE_SOURCE_RESOLVED");
 
@@ -848,6 +940,7 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
     }
     copy_diagnostic_path(s_lastDiagnostic.destinationDirectory,
                          sizeof(s_lastDiagnostic.destinationDirectory), normalizedDestination);
+    copy_diagnostic_path(s_progress.destinationPath, sizeof(s_progress.destinationPath), normalizedDestination);
     trace_text("DESKTOP_PASTE_DEST_DIR", normalizedDestination);
 
     set_diagnostic_stage(PasteStage::DestinationValidation);
@@ -862,7 +955,7 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
             ? PasteResult::ReadOnly : PasteResult::DestinationMissing;
         set_diagnostic_failure(PasteStage::DestinationValidation, result, failureStatus,
                                fat_status_for_vfs_status(failureStatus));
-        return result;
+        return finish_operation(result);
     }
     trace_marker("FPASTE_FOLDER_RESOLVED");
 
@@ -870,7 +963,7 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
     if (!destinationMount) {
         set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::DestinationMissing,
                                vfs::VFS_ERR_NOT_MOUNT, "FAT_FILE_WRITE_NOT_MOUNTED");
-        return PasteResult::DestinationMissing;
+        return finish_operation(PasteResult::DestinationMissing);
     }
     serial::puts("DESKTOP_PASTE_DEST_FS=");
     serial::puts(vfs::fs_type_name(destinationMount->fsType));
@@ -885,12 +978,12 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
     if (destinationMount->readOnly) {
         set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::ReadOnly,
                                vfs::VFS_ERR_READ_ONLY, "FAT_FILE_WRITE_READ_ONLY");
-        return PasteResult::ReadOnly;
+        return finish_operation(PasteResult::ReadOnly);
     }
     if (destinationMount->fsType != vfs::FS_TYPE_FAT32) {
         set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::Unsupported,
                                vfs::VFS_ERR_NOT_SUPPORTED, "FAT_FILE_WRITE_UNSUPPORTED_TYPE");
-        return PasteResult::Unsupported;
+        return finish_operation(PasteResult::Unsupported);
     }
 
     if (sourceInfo.type == vfs::FILE_TYPE_DIRECTORY) {
@@ -901,7 +994,7 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
         set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::Unsupported,
                                vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_ARGUMENT");
         trace_marker("FPASTE_RECURSION_CHECK_END rejected");
-        return PasteResult::Unsupported;
+        return finish_operation(PasteResult::Unsupported);
     }
     if (sourceInfo.type == vfs::FILE_TYPE_DIRECTORY) {
         trace_marker("FPASTE_RECURSION_CHECK_END accepted");
@@ -912,10 +1005,11 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
     if (!choose_destination_path(normalizedDestination, destinationPath, sizeof(destinationPath))) {
         set_diagnostic_failure(PasteStage::DestinationNaming, PasteResult::Conflict,
                                vfs::VFS_ERR_EXISTS, "FAT_FILE_WRITE_ALREADY_EXISTS");
-        return PasteResult::Conflict;
+        return finish_operation(PasteResult::Conflict);
     }
     copy_diagnostic_path(s_lastDiagnostic.destinationPath,
                          sizeof(s_lastDiagnostic.destinationPath), destinationPath);
+    copy_diagnostic_path(s_progress.destinationPath, sizeof(s_progress.destinationPath), destinationPath);
     trace_text("DESKTOP_PASTE_DEST_NAME", vfs::basename(destinationPath));
     trace_text("DESKTOP_PASTE_DEST_PATH", destinationPath);
     trace_marker("FPASTE_DEST_NAME_READY");
@@ -927,11 +1021,10 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
                    sourceDestinationPath, sizeof(sourceDestinationPath));
     if (s_operation == Operation::Move && same_path(s_sourcePath, sourceDestinationPath)) {
         clear();
-        ++s_operationGeneration;
         set_diagnostic_stage(PasteStage::Complete);
         s_lastDiagnostic.result = PasteResult::Success;
         trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
-        return PasteResult::Success;
+        return finish_operation(PasteResult::Success);
     }
 
     if (s_operation == Operation::Move) {
@@ -940,20 +1033,22 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
         if (!sourceMount || !destinationMount) {
             set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::DestinationMissing,
                                    vfs::VFS_ERR_NOT_MOUNT, "FAT_FILE_WRITE_NOT_MOUNTED");
-            return PasteResult::DestinationMissing;
+            return finish_operation(PasteResult::DestinationMissing);
         }
         if (sourceMount->readOnly) {
             set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::ReadOnly,
                                    vfs::VFS_ERR_READ_ONLY, "FAT_FILE_WRITE_READ_ONLY");
-            return PasteResult::ReadOnly;
+            return finish_operation(PasteResult::ReadOnly);
         }
 
         // Use copy-then-verify-delete for every clipboard Move. This keeps
         // Cut semantics identical across filesystems and avoids depending on
         // an atomic same-volume rename to publish two directory entries. The
         // source is never deleted until the destination tree is verified.
+        set_operation_state(OperationState::Moving);
         PasteResult copied = copy_entry_tree(s_sourcePath, destinationPath, sourceInfo, 0);
-        if (copied != PasteResult::Success) return copied;
+        if (copied != PasteResult::Success) return finish_operation(copied);
+        set_operation_state(OperationState::Verifying);
         set_diagnostic_stage(PasteStage::Verification);
         trace_marker("FPASTE_VERIFY_BEGIN");
         if (!verify_entry_tree(s_sourcePath, destinationPath, sourceInfo, 0)) {
@@ -961,7 +1056,7 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
             remove_entry_tree(destinationPath, 0);
             set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
                                    vfs::VFS_ERR_IO, "FAT_FILE_WRITE_IO_ERROR");
-            return PasteResult::Failed;
+            return finish_operation(PasteResult::Failed);
         }
         trace_marker("FPASTE_VERIFY_END status=OK");
         PasteResult removed = remove_entry_tree(s_sourcePath, 0);
@@ -969,22 +1064,21 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
             remove_entry_tree(destinationPath, 0);
             set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
                                    vfs::VFS_ERR_IO, "FAT_FILE_WRITE_IO_ERROR");
-            return PasteResult::Failed;
+            return finish_operation(PasteResult::Failed);
         }
         clear();
         trace_marker("FPASTE_CLIPBOARD_FINALIZE");
-        ++s_operationGeneration;
         set_diagnostic_stage(PasteStage::Complete);
         s_lastDiagnostic.result = PasteResult::Success;
         trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
         trace_marker("FPASTE_OPERATION_COMPLETE");
-        return PasteResult::Success;
+        return finish_operation(PasteResult::Success);
     }
 
     trace_marker("FPASTE_COPY_BEGIN");
+    set_operation_state(OperationState::Copying);
     PasteResult copied = copy_entry_tree(s_sourcePath, destinationPath, sourceInfo, 0);
     if (copied == PasteResult::Success) {
-        ++s_operationGeneration;
         set_diagnostic_stage(PasteStage::Complete);
         s_lastDiagnostic.result = PasteResult::Success;
         trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
@@ -994,7 +1088,7 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
         set_diagnostic_failure(PasteStage::DataTransfer, copied,
                                vfs::VFS_ERR_IO, "FAT_FILE_WRITE_IO_ERROR");
     }
-    return copied;
+    return finish_operation(copied);
 }
 
 static void log_folder_status(const char* key, vfs::Status status)
@@ -1182,6 +1276,7 @@ bool create_unique_folder_ex(const char* destinationDirectory,
 
 const char* paste_result_message(PasteResult result) {
     if (result == PasteResult::Success) return "Pasted item";
+    if (result == PasteResult::Busy) return "A file operation is already in progress";
     return paste_diagnostic_message();
 }
 
@@ -1197,6 +1292,7 @@ const char* paste_diagnostic_message() {
     s_diagnosticMessage[0] = '\0';
     if (s_lastDiagnostic.result == PasteResult::Success) return "Pasted item";
     if (s_lastDiagnostic.result == PasteResult::Empty) return "Clipboard is empty";
+    if (s_lastDiagnostic.result == PasteResult::Busy) return "A file operation is already in progress";
 
     append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), "Paste Failed: ");
     if (s_lastDiagnostic.vfsStatus != vfs::VFS_OK) {
@@ -1219,6 +1315,15 @@ const char* paste_diagnostic_message() {
     return s_diagnosticMessage;
 }
 
+bool begin_paste_refresh() {
+    if (s_operationActive || s_lastDiagnostic.result != PasteResult::Success) return false;
+    s_operationActive = true;
+    s_progress.state = OperationState::Refreshing;
+    s_progress.phase = PasteStage::Refresh;
+    notify_progress();
+    return true;
+}
+
 void note_paste_refresh(bool success) {
     if (s_lastDiagnostic.result != PasteResult::Success) return;
     set_diagnostic_stage(PasteStage::Refresh);
@@ -1230,12 +1335,22 @@ void note_paste_refresh(bool success) {
                   "FAT_FILE_WRITE_IO_ERROR");
         trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Failed));
         trace_marker("FPASTE_COMPLETE_FAILED");
+        s_progress.result = PasteResult::Failed;
+        s_progress.state = OperationState::Failed;
+        s_progress.phase = PasteStage::Refresh;
+        notify_progress();
+        s_operationActive = false;
         return;
     }
     set_diagnostic_stage(PasteStage::Complete);
     trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
     trace_marker("FPASTE_CLIPBOARD_FINALIZE");
     trace_marker("FPASTE_COMPLETE");
+    s_progress.result = PasteResult::Success;
+    s_progress.state = OperationState::Completed;
+    s_progress.phase = PasteStage::Complete;
+    notify_progress();
+    s_operationActive = false;
 }
 
 #if defined(GXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)

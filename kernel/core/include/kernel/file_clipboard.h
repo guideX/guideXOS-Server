@@ -23,6 +23,7 @@ enum class Operation : uint8_t {
 enum class PasteResult : uint8_t {
     Success,
     Empty,
+    Busy,
     SourceMissing,
     DestinationMissing,
     ReadOnly,
@@ -44,6 +45,32 @@ enum class PasteStage : uint8_t {
     Verification,
     Refresh,
     Complete,
+};
+
+// The filesystem operation remains synchronous, but its state is explicit so
+// shell/UI code can disable conflicting commands and render progress without
+// re-entering VFS or FAT mutation code.
+enum class OperationState : uint8_t {
+    Idle,
+    Preparing,
+    Copying,
+    Moving,
+    Verifying,
+    Refreshing,
+    Completed,
+    Failed,
+};
+
+struct FileOperationProgress {
+    Operation operation{Operation::None};
+    OperationState state{OperationState::Idle};
+    PasteStage phase{PasteStage::None};
+    PasteResult result{PasteResult::Failed};
+    char sourceDisplayName[vfs::VFS_MAX_FILENAME]{};
+    char destinationPath[vfs::VFS_MAX_PATH]{};
+    uint64_t totalBytes{0};
+    uint64_t bytesCompleted{0};
+    bool totalKnown{false};
 };
 
 struct PasteDiagnostic {
@@ -68,6 +95,17 @@ void clear();
 bool has_pending_file();
 Operation pending_operation();
 
+using ProgressCallback = void (*)(const FileOperationProgress& progress);
+
+// Register the shell-facing progress sink. The callback is invoked before
+// filesystem work starts and at bounded transfer checkpoints; it must not
+// mutate the filesystem or call paste_to_directory().
+void set_progress_callback(ProgressCallback callback);
+
+bool operation_active();
+OperationState operation_state();
+const FileOperationProgress& progress();
+
 // Monotonic generation for completed copy/move operations. File Explorer
 // uses this to refresh when the desktop consumes the shared clipboard.
 uint64_t operation_generation();
@@ -85,6 +123,11 @@ bool can_paste_to(const char* destinationDirectory);
 
 // Copy or move the pending file or folder into a destination directory.
 PasteResult paste_to_directory(const char* destinationDirectory);
+
+// Keep the busy state through the caller-owned destination refresh. This is
+// intentionally separate from paste_to_directory() so the filesystem layer
+// does not depend on desktop refresh implementation details.
+bool begin_paste_refresh();
 
 // Create a collision-free desktop-style folder name through the VFS. The
 // returned path is the actual path created by the current filesystem backend.

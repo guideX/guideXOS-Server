@@ -4061,7 +4061,8 @@ void FileExplorerApp::shutdown() {
 
 void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     const uint64_t fileOperationGeneration = file_clipboard::operation_generation();
-    if (fileOperationGeneration != m_lastFileOperationGeneration) {
+    if (!file_clipboard::operation_active() &&
+        fileOperationGeneration != m_lastFileOperationGeneration) {
         m_lastFileOperationGeneration = fileOperationGeneration;
         refresh();
         updateActionButtons();
@@ -4217,6 +4218,7 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 }
 
 void FileExplorerApp::onKeyDown(uint32_t key) {
+    if (file_clipboard::operation_active()) return;
     if (m_propertiesOpen) {
         if (key == 27 || key == '\n' || key == '\r') {
             closeProperties();
@@ -4468,6 +4470,7 @@ bool FileExplorerApp::handleNavigationPaneClick(int localX, int localY) {
 }
 
 void FileExplorerApp::onWidgetClick(int widgetId) {
+    if (file_clipboard::operation_active()) return;
     closeTransientUi();
     if (widgetId == m_backBtnId || widgetId == m_rootBtnId) {
         navigate("/");
@@ -4638,6 +4641,7 @@ bool FileExplorerApp::canCreateFolderHere() const {
 void FileExplorerApp::updateActionButtons() {
     bool hasSelection = m_selected >= 0 && m_selected < m_entryCount;
     bool isDir = hasSelection && m_entries[m_selected].isDir;
+    const bool fileOperationActive = file_clipboard::operation_active();
 
     app::Widget* createFolder = getWidget(m_createFolderBtnId);
     app::Widget* renameFile = getWidget(m_renameFileBtnId);
@@ -4648,15 +4652,33 @@ void FileExplorerApp::updateActionButtons() {
     app::Widget* cancelDelete = getWidget(m_cancelDeleteBtnId);
 
     if (createFolder) {
-        createFolder->visible = canCreateFolderHere() && !m_renamePrompt && !m_deleteConfirm;
+        createFolder->visible = !fileOperationActive && canCreateFolderHere() && !m_renamePrompt && !m_deleteConfirm;
         createFolder->enabled = createFolder->visible;
     }
-    if (renameFile) renameFile->visible = hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
-    if (deleteFile) deleteFile->visible = hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
-    if (renameFolder) renameFolder->visible = hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
-    if (deleteFolder) deleteFolder->visible = hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
-    if (confirmDelete) confirmDelete->visible = m_deleteConfirm;
-    if (cancelDelete) cancelDelete->visible = m_deleteConfirm;
+    if (renameFile) {
+        renameFile->visible = !fileOperationActive && hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
+        renameFile->enabled = renameFile->visible;
+    }
+    if (deleteFile) {
+        deleteFile->visible = !fileOperationActive && hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
+        deleteFile->enabled = deleteFile->visible;
+    }
+    if (renameFolder) {
+        renameFolder->visible = !fileOperationActive && hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
+        renameFolder->enabled = renameFolder->visible;
+    }
+    if (deleteFolder) {
+        deleteFolder->visible = !fileOperationActive && hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
+        deleteFolder->enabled = deleteFolder->visible;
+    }
+    if (confirmDelete) {
+        confirmDelete->visible = !fileOperationActive && m_deleteConfirm;
+        confirmDelete->enabled = confirmDelete->visible;
+    }
+    if (cancelDelete) {
+        cancelDelete->visible = m_deleteConfirm;
+        cancelDelete->enabled = cancelDelete->visible;
+    }
 }
 
 int FileExplorerApp::visibleRowCount() const {
@@ -4804,6 +4826,7 @@ bool FileExplorerApp::isWheelTarget(int localX, int localY) const {
 }
 
 void FileExplorerApp::beginCreateFolder() {
+    if (file_clipboard::operation_active()) return;
     if (!canCreateFolderHere()) {
         setStatus("Folder creation is unavailable here");
         invalidate();
@@ -4820,6 +4843,7 @@ void FileExplorerApp::beginCreateFolder() {
 }
 
 void FileExplorerApp::commitCreateFolder() {
+    if (file_clipboard::operation_active()) return;
     if (!m_createFolderPrompt || !m_renameValue[0]) {
         cancelCreateFolder();
         return;
@@ -4860,6 +4884,7 @@ void FileExplorerApp::cancelCreateFolder() {
 }
 
 void FileExplorerApp::beginRenameSelected() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     m_deleteConfirm = false;
     m_createFolderPrompt = false;
@@ -4871,6 +4896,7 @@ void FileExplorerApp::beginRenameSelected() {
 }
 
 void FileExplorerApp::commitRename() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount || !m_renameValue[0]) {
         cancelRename();
         return;
@@ -4903,6 +4929,7 @@ void FileExplorerApp::cancelRename() {
 }
 
 void FileExplorerApp::showDeleteConfirmation() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
     joinPath(m_currentPath, entry.name, m_deleteTarget, sizeof(m_deleteTarget));
@@ -4925,6 +4952,7 @@ void FileExplorerApp::showDeleteConfirmation() {
 }
 
 void FileExplorerApp::confirmDelete() {
+    if (file_clipboard::operation_active()) return;
     if (!m_deleteConfirm || !m_deleteTarget[0]) return;
     char movedPath[MAX_PATH_LEN];
     char error[96];
@@ -4994,6 +5022,7 @@ void FileExplorerApp::closeProperties() {
 }
 
 void FileExplorerApp::beginCopySelected() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
     char fullPath[MAX_PATH_LEN];
@@ -5009,6 +5038,7 @@ void FileExplorerApp::beginCopySelected() {
 }
 
 void FileExplorerApp::beginMoveSelected() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
     char fullPath[MAX_PATH_LEN];
@@ -5028,12 +5058,14 @@ void FileExplorerApp::pasteClipboard() {
 }
 
 void FileExplorerApp::pasteClipboardTo(const char* destinationDirectory) {
+    if (file_clipboard::operation_active()) return;
     serial::puts("[fileexplorer-bm] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
     serial::puts(destinationDirectory ? destinationDirectory : "(null)");
     serial::puts("\n");
     file_clipboard::PasteResult result = file_clipboard::paste_to_directory(destinationDirectory);
     setStatus(file_clipboard::paste_result_message(result));
     if (result == file_clipboard::PasteResult::Success) {
+        file_clipboard::begin_paste_refresh();
         refresh();
         file_clipboard::note_paste_refresh(true);
     }
@@ -5141,6 +5173,7 @@ int FileExplorerApp::hitTestContextMenu(int x, int y) const {
 }
 
 bool FileExplorerApp::handleContextMenuClick(int x, int y) {
+    if (file_clipboard::operation_active()) return false;
     int item = hitTestContextMenu(x, y);
     if (item < 0) return false;
     m_contextMenuOpen = false;
