@@ -404,17 +404,28 @@ bool runProcess(const std::shared_ptr<BuildJob>& job) {
     SECURITY_ATTRIBUTES attributes = {};
     attributes.nLength = sizeof(attributes);
     attributes.bInheritHandle = TRUE;
-    HANDLE readHandle = nullptr;
-    HANDLE writeHandle = nullptr;
-    if (!CreatePipe(&readHandle, &writeHandle, &attributes, 0)) { setFailure(job, GX_BUILD_ERROR_PROCESS_START_FAILED); return false; }
-    SetHandleInformation(readHandle, HANDLE_FLAG_INHERIT, 0);
+    HANDLE stdoutReadHandle = nullptr;
+    HANDLE stdoutWriteHandle = nullptr;
+    HANDLE stderrReadHandle = nullptr;
+    HANDLE stderrWriteHandle = nullptr;
+    if (!CreatePipe(&stdoutReadHandle, &stdoutWriteHandle, &attributes, 0) ||
+        !CreatePipe(&stderrReadHandle, &stderrWriteHandle, &attributes, 0)) {
+        if (stdoutReadHandle) CloseHandle(stdoutReadHandle);
+        if (stdoutWriteHandle) CloseHandle(stdoutWriteHandle);
+        if (stderrReadHandle) CloseHandle(stderrReadHandle);
+        if (stderrWriteHandle) CloseHandle(stderrWriteHandle);
+        setFailure(job, GX_BUILD_ERROR_PROCESS_START_FAILED);
+        return false;
+    }
+    SetHandleInformation(stdoutReadHandle, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(stderrReadHandle, HANDLE_FLAG_INHERIT, 0);
     STARTUPINFOW startup = {};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     startup.wShowWindow = SW_HIDE;
     startup.hStdInput = nullptr;
-    startup.hStdOutput = writeHandle;
-    startup.hStdError = writeHandle;
+    startup.hStdOutput = stdoutWriteHandle;
+    startup.hStdError = stderrWriteHandle;
     std::wstring command = quoteWindowsArgument(executable) + L" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " +
         quoteWindowsArgument(script) + L" -SdkInclude " + quoteWindowsArgument(sdk) + L" -ToolchainRoot " + quoteWindowsArgument(tools) +
         L" -Configuration " + quoteWindowsArgument(utf8ToWide(job->request.configuration));
@@ -424,8 +435,9 @@ bool runProcess(const std::shared_ptr<BuildJob>& job) {
     PROCESS_INFORMATION process = {};
     const BOOL created = CreateProcessW(executable.c_str(), &mutableCommand[0], nullptr, nullptr, TRUE,
         CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT, &environment[0], root.c_str(), &startup, &process);
-    CloseHandle(writeHandle);
-    if (!created) { CloseHandle(readHandle); setFailure(job, GX_BUILD_ERROR_PROCESS_START_FAILED); return false; }
+    CloseHandle(stdoutWriteHandle);
+    CloseHandle(stderrWriteHandle);
+    if (!created) { CloseHandle(stdoutReadHandle); CloseHandle(stderrReadHandle); setFailure(job, GX_BUILD_ERROR_PROCESS_START_FAILED); return false; }
     HANDLE processJob = CreateJobObjectW(nullptr, nullptr);
     if (processJob) {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
@@ -440,13 +452,21 @@ bool runProcess(const std::shared_ptr<BuildJob>& job) {
         job->snapshot.state = GX_BUILD_RUNNING;
     }
     CloseHandle(process.hThread);
-    std::thread reader([job, readHandle]() {
+    std::thread stdoutReader([job, stdoutReadHandle]() {
         char buffer[4096] = {};
         std::string pending;
         DWORD bytesRead = 0;
-        while (ReadFile(readHandle, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) appendBytes(job, 0, pending, buffer, bytesRead);
-        finishOutput(job, 0, pending);
-        CloseHandle(readHandle);
+        while (ReadFile(stdoutReadHandle, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) appendBytes(job, 1, pending, buffer, bytesRead);
+        finishOutput(job, 1, pending);
+        CloseHandle(stdoutReadHandle);
+    });
+    std::thread stderrReader([job, stderrReadHandle]() {
+        char buffer[4096] = {};
+        std::string pending;
+        DWORD bytesRead = 0;
+        while (ReadFile(stderrReadHandle, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) appendBytes(job, 2, pending, buffer, bytesRead);
+        finishOutput(job, 2, pending);
+        CloseHandle(stderrReadHandle);
     });
     bool timeout = false;
     bool waitFailed = false;
@@ -464,7 +484,8 @@ bool runProcess(const std::shared_ptr<BuildJob>& job) {
             break;
         }
     }
-    if (reader.joinable()) reader.join();
+    if (stdoutReader.joinable()) stdoutReader.join();
+    if (stderrReader.joinable()) stderrReader.join();
     DWORD exitCode = 1;
     GetExitCodeProcess(process.hProcess, &exitCode);
     CloseHandle(process.hProcess);
