@@ -1,6 +1,6 @@
 #include "include/kernel/nativeaot_pal_qemu_test.h"
 
-#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
 
 #include "include/kernel/address_space.h"
 #include "include/kernel/arch.h"
@@ -9,10 +9,13 @@
 #include "include/kernel/pit.h"
 
 #include "runtime/local_storage/guidexos_local_storage.h"
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
 #include "runtime/memory/guidexos_virtual_memory_region.h"
 #include "runtime/synchronization/guidexos_event.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_gc_startup_platform_contract.h"
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h"
+#endif
 #endif
 #include "runtime/thread/guidexos_native_thread.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_abi_bridge.h"
@@ -23,7 +26,7 @@
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_end[];
 #endif
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
 #endif
@@ -35,7 +38,7 @@ namespace {
 constexpr uintptr_t kPageSize = 0x1000u;
 constexpr uint32_t kPtLoad = 1u;
 constexpr uint16_t kElfExec = 2u;
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
 // The startup artifact contains a bounded 4 MiB native metadata arena in its
 // writable image.  Keep staging bounded while allowing that known image size.
 constexpr uint32_t kMaxMappedPages = 8192u;
@@ -627,7 +630,7 @@ void runOne(const uint8_t* artifact, size_t artifactSize,
            g_activeCallbacks == 0 && g_mappedPageCount == 0, allPassed);
 }
 
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
 
 constexpr uint32_t kMaxGcEventSlots = 16u;
 constexpr uint32_t kMaxGcVmSlots = 16u;
@@ -1062,6 +1065,253 @@ void runStartupImpl(const uint8_t* artifact, size_t artifactSize,
         : "[nativeaot-gc-startup-qemu-test] ALL_FAIL\n");
 }
 
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
+
+struct FirstRealAllocationContext {
+    uint32_t size;
+    uint32_t apiVersion;
+    void* host;
+    void* userData;
+};
+
+void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
+    serial::puts("[nativeaot-gc-first-allocation] ");
+    serial::puts(name);
+    serial::puts(passed ? ": PASS\n" : ": FAIL\n");
+    if (!passed) allPassed = false;
+}
+
+void printFirstAllocationPointer(const char* name, uintptr_t value) {
+    serial::puts("[nativeaot-gc-first-allocation] ");
+    serial::puts(name);
+    serial::puts("=");
+    serial::put_hex64(value);
+    serial::puts("\n");
+}
+
+void runFirstRealAllocationImpl(
+    const uint8_t* artifact, size_t artifactSize,
+    uintptr_t installPalAddress, uintptr_t installTableAddress,
+    uintptr_t installPlatformAddress, uintptr_t startupMainAddress,
+    uintptr_t getStateAddress, uintptr_t getPreGcStateAddress,
+    uintptr_t getAllocationCountAddress, uintptr_t getLastAllocationSizeAddress,
+    uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
+    uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
+    uint64_t generation) {
+    bool allPassed = true;
+    serial::puts("[nativeaot-gc-first-allocation] BEGIN\n");
+    const bool foundations =
+        gxos::runtime::initializeLocalStorage() == gxos::runtime::LocalStorageResult::Success &&
+        gxos::runtime::attachLocalStorage() == gxos::runtime::LocalStorageResult::Success &&
+        guidexos::nativeaot::threadstore::initialize() ==
+            guidexos::nativeaot::threadstore::Result::Success &&
+        guidexos::nativeaot::threadstore::attachCurrentThread() ==
+            guidexos::nativeaot::threadstore::Result::Success;
+    firstAllocationStatus("Runtime foundation initialization", foundations, allPassed);
+    if (!foundations) {
+        serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
+        return;
+    }
+
+    uintptr_t base = 0;
+    uintptr_t size = 0;
+    const bool loaded = loadArtifact(artifact, artifactSize, &base, &size);
+    firstAllocationStatus("Artifact staged", loaded, allPassed);
+    if (!loaded) {
+        serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
+        return;
+    }
+    resetBridgeState(base, size, generation);
+
+    guidexos_nativeaot_pal_hooks legacy = {};
+    fillStartupPalHooks(&legacy);
+    guidexos_nativeaot_pal_hook_table_v1 pal = {};
+    fillStartupPalTable(&pal, base, size, generation);
+    guidexos_nativeaot_gc_startup_platform_table_v1 platform = {};
+    fillStartupPlatformTable(&platform, generation);
+
+    using InstallPal = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        const guidexos_nativeaot_pal_hooks*);
+    using InstallTable = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        const guidexos_nativeaot_pal_hook_table_v1*);
+    using InstallPlatform = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        const guidexos_nativeaot_gc_startup_platform_table_v1*);
+    using StartupMain = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+    using ManagedMain = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        FirstRealAllocationContext*);
+    using Finalize = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(uint32_t);
+    using GetDiagnostics = const guidexos_nativeaot_allocation_diagnostics*
+        (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+    using State = uint32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+
+    const int32_t palResult = reinterpret_cast<InstallPal>(installPalAddress)(&legacy);
+    const int32_t tableResult = reinterpret_cast<InstallTable>(installTableAddress)(&pal);
+    const int32_t platformResult = reinterpret_cast<InstallPlatform>(installPlatformAddress)(&platform);
+    firstAllocationStatus("Win64 PAL legacy installation", palResult == 0, allPassed);
+    firstAllocationStatus("Win64 PAL v1 installation", tableResult == 0, allPassed);
+    firstAllocationStatus("GC platform installation", platformResult == 0, allPassed);
+    if (palResult != 0 || tableResult != 0 || platformResult != 0) {
+        serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
+        return;
+    }
+
+    const int32_t startupResult = reinterpret_cast<StartupMain>(startupMainAddress)();
+    const uint32_t palState = reinterpret_cast<State>(getStateAddress)();
+    const uint32_t preGcState = reinterpret_cast<State>(getPreGcStateAddress)();
+    const uint32_t startupAllocationCount = reinterpret_cast<State>(getAllocationCountAddress)();
+    const uint32_t startupLastAllocationSize = reinterpret_cast<State>(getLastAllocationSizeAddress)();
+    const uint32_t diagnosticStage = reinterpret_cast<State>(getDiagnosticStageAddress)();
+    serial::puts("[nativeaot-gc-first-allocation] RhInitialize return=");
+    serial::put_hex32(static_cast<uint32_t>(startupResult));
+    serial::puts(" state=");
+    serial::put_hex32(palState);
+    serial::puts(" preGcState=");
+    serial::put_hex32(preGcState);
+    serial::puts(" diagnosticStage=");
+    serial::put_hex32(diagnosticStage);
+    serial::puts(" startupNativeAllocations=");
+    serial::put_hex32(startupAllocationCount);
+    serial::puts(" lastSize=");
+    serial::put_hex32(startupLastAllocationSize);
+    serial::puts("\n");
+    firstAllocationStatus("RhInitialize", startupResult == 0, allPassed);
+    if (startupResult != 0) {
+        serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
+        return;
+    }
+
+    // RhInitialize has already published the parked finalizer-worker state.
+    // Enter managed code immediately so the first-allocation boundary cannot
+    // be confused with a timer wait under the disposable TCG scheduler.
+    FirstRealAllocationContext context{};
+    context.size = sizeof(context);
+    context.apiVersion = 0u;
+    serial::puts("[nativeaot-gc-first-allocation] entering ManagedMain once\n");
+    const int32_t managedResult = reinterpret_cast<ManagedMain>(managedMainAddress)(&context);
+    const int32_t finalizeResult = reinterpret_cast<Finalize>(finalizeAddress)(
+        static_cast<uint32_t>(managedResult));
+    const guidexos_nativeaot_allocation_diagnostics* diagnostics =
+        reinterpret_cast<GetDiagnostics>(getDiagnosticsAddress)();
+    firstAllocationStatus("Managed entry once", diagnostics != nullptr, allPassed);
+    firstAllocationStatus("Managed byte[24] return", managedResult == 0x1801, allPassed);
+    firstAllocationStatus("Allocation finalization", finalizeResult == 0, allPassed);
+    if (diagnostics == nullptr) {
+        serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
+        return;
+    }
+
+    serial::puts("[nativeaot-gc-first-allocation] managedStatus=");
+    serial::put_hex32(static_cast<uint32_t>(managedResult));
+    serial::puts(" finalizeStatus=");
+    serial::put_hex32(static_cast<uint32_t>(finalizeResult));
+    serial::puts(" schema=");
+    serial::put_hex32(diagnostics->schemaVersion);
+    serial::puts(" allocationCount=");
+    serial::put_hex32(diagnostics->allocationCount);
+    serial::puts(" rhpNewArrayEntries=");
+    serial::put_hex32(diagnostics->rhpNewArrayEntries);
+    serial::puts(" realGcAllocationEntries=");
+    serial::put_hex32(diagnostics->realGcAllocationEntries);
+    serial::puts(" slowAllocationEntries=");
+    serial::put_hex32(diagnostics->slowAllocationEntries);
+    serial::puts(" allocationContextRefills=");
+    serial::put_hex32(diagnostics->allocationContextRefills);
+    serial::puts("\n");
+
+    printFirstAllocationPointer("contextBefore", diagnostics->allocationContextBefore);
+    printFirstAllocationPointer("limitBefore", diagnostics->allocationLimitBefore);
+    printFirstAllocationPointer("contextAfter", diagnostics->allocationContextAfter);
+    printFirstAllocationPointer("limitAfter", diagnostics->allocationLimitAfter);
+    printFirstAllocationPointer("heapBase", diagnostics->heapBase);
+    printFirstAllocationPointer("heapAllocated", diagnostics->heapAllocated);
+    printFirstAllocationPointer("heapReserved", diagnostics->heapReserved);
+    printFirstAllocationPointer("object", diagnostics->objectAddress);
+    printFirstAllocationPointer("returnedObject", diagnostics->returnedObject);
+    printFirstAllocationPointer("data", diagnostics->arrayData);
+    printFirstAllocationPointer("eeType", diagnostics->eeType);
+
+    serial::puts("[nativeaot-gc-first-allocation] length=");
+    serial::put_hex32(diagnostics->arrayLengthObserved);
+    serial::puts(" requestedLength=");
+    serial::put_hex32(diagnostics->requestedArrayLength);
+    serial::puts(" size=");
+    serial::put_hex32(diagnostics->requestedObjectSize);
+    serial::puts(" zeroBytes=");
+    serial::put_hex32(diagnostics->zeroByteCount);
+    serial::puts(" pattern=");
+    serial::put_hex32(diagnostics->patternVerified);
+    serial::puts(" alignment=");
+    serial::put_hex32(diagnostics->objectAlignmentVerified);
+    serial::puts(" layout=");
+    serial::put_hex32(diagnostics->objectLayoutVerified);
+    serial::puts(" range=");
+    serial::put_hex32(diagnostics->objectRangeVerified);
+    serial::puts(" ownership=");
+    serial::put_hex32(diagnostics->heapOwnershipVerified);
+    serial::puts(" pointerContractFailures=");
+    serial::put_hex32(diagnostics->pointerContractFailures);
+    serial::puts("\n");
+
+    serial::puts("[nativeaot-gc-first-allocation] gcCountBefore=");
+    serial::put_hex32(diagnostics->gcCountBefore);
+    serial::puts(" gcCountAfter=");
+    serial::put_hex32(diagnostics->gcCountAfter);
+    serial::puts(" collectionsEntered=");
+    serial::put_hex32(diagnostics->collectionsEntered);
+    serial::puts(" collectionTriggeringEntries=");
+    serial::put_hex32(diagnostics->collectionTriggeringEntries);
+    serial::puts(" gcInProgressBefore=");
+    serial::put_hex32(diagnostics->gcInProgressBefore);
+    serial::puts(" gcInProgressAfter=");
+    serial::put_hex32(diagnostics->gcInProgressAfter);
+    serial::puts(" finalizableBefore=");
+    serial::put_hex32(diagnostics->finalizableObjectCountBefore);
+    serial::puts(" finalizableAfter=");
+    serial::put_hex32(diagnostics->finalizableObjectCountAfter);
+    serial::puts(" finalizationScans=");
+    serial::put_hex32(diagnostics->finalizationScans);
+    serial::puts(" finalizersExecuted=");
+    serial::put_hex32(diagnostics->finalizersExecuted);
+    serial::puts("\n");
+
+    const bool oneAllocation =
+        diagnostics->schemaVersion == 1u &&
+        diagnostics->allocationSucceeded == 1u &&
+        diagnostics->allocationCount == 1u &&
+        diagnostics->rhpNewArrayEntries == 1u &&
+        diagnostics->realGcAllocationEntries == 1u &&
+        diagnostics->requestedArrayLength == 24u &&
+        diagnostics->requestedObjectSize == 40u &&
+        diagnostics->arrayLengthObserved == 24u &&
+        diagnostics->zeroByteCount == 24u &&
+        diagnostics->patternVerified == 1u &&
+        diagnostics->objectAddress == diagnostics->returnedObject &&
+        diagnostics->arrayData == diagnostics->objectAddress + 0x10u &&
+        diagnostics->objectAlignmentVerified == 1u &&
+        diagnostics->objectLayoutVerified == 1u &&
+        diagnostics->objectRangeVerified == 1u &&
+        diagnostics->heapOwnershipVerified == 1u &&
+        diagnostics->pointerContractFailures == 0u &&
+        diagnostics->gcCountBefore == diagnostics->gcCountAfter &&
+        diagnostics->collectionsEntered == 0u &&
+        diagnostics->collectionTriggeringEntries == 0u &&
+        diagnostics->gcInProgressBefore == 0u &&
+        diagnostics->gcInProgressAfter == 0u &&
+        diagnostics->finalizableObjectCountBefore == diagnostics->finalizableObjectCountAfter &&
+        diagnostics->finalizationScans == 0u &&
+        diagnostics->finalizersExecuted == 0u;
+    firstAllocationStatus("One real Workstation GC allocation", oneAllocation, allPassed);
+    firstAllocationStatus("Finalizer worker parked", ((palState >> 24) & 0xFFu) == 0x02u &&
+                           g_activeCallbacks == 0u, allPassed);
+    serial::puts("[nativeaot-gc-first-allocation] wrapperCallCount=1 managedEntryCallCount=1 shutdownCalls=0\n");
+    serial::puts("[nativeaot-gc-first-allocation] same-process shutdown: UNSUPPORTED\n");
+    serial::puts(allPassed
+        ? "[nativeaot-gc-startup-qemu-test] ALL_PASS\n"
+        : "[nativeaot-gc-first-allocation] ALL_FAIL\n");
+}
+
+#endif
+
 #endif
 
 } // namespace
@@ -1079,7 +1329,7 @@ void run(const uint8_t* artifact, size_t artifactSize,
         : "[nativeaot-pal-qemu-test] ALL_FAIL\n");
 }
 
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
 void runStartup(const uint8_t* artifact, size_t artifactSize,
                 uintptr_t installPalAddress, uintptr_t installTableAddress,
                 uintptr_t installPlatformAddress, uintptr_t mainAddress,
@@ -1092,6 +1342,25 @@ void runStartup(const uint8_t* artifact, size_t artifactSize,
                    allocationCountAddress, lastAllocationSizeAddress, diagnosticStageAddress,
                    generation);
 }
+
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
+void runFirstRealAllocation(
+    const uint8_t* artifact, size_t artifactSize,
+    uintptr_t installPalAddress, uintptr_t installTableAddress,
+    uintptr_t installPlatformAddress, uintptr_t startupMainAddress,
+    uintptr_t getStateAddress, uintptr_t getPreGcStateAddress,
+    uintptr_t getAllocationCountAddress, uintptr_t getLastAllocationSizeAddress,
+    uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
+    uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
+    uint64_t generation) {
+    runFirstRealAllocationImpl(
+        artifact, artifactSize, installPalAddress, installTableAddress,
+        installPlatformAddress, startupMainAddress, getStateAddress,
+        getPreGcStateAddress, getAllocationCountAddress,
+        getLastAllocationSizeAddress, getDiagnosticStageAddress,
+        managedMainAddress, finalizeAddress, getDiagnosticsAddress, generation);
+}
+#endif
 #endif
 
 } // namespace nativeaot_pal_qemu_test

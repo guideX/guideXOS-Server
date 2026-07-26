@@ -258,6 +258,11 @@ extern "C" void* __imp_SetUnhandledExceptionFilter =
 extern "C" void* __imp_GetStartupInfoW = reinterpret_cast<void*>(&GetStartupInfoW);
 extern "C" void* __imp_RtlVirtualUnwind = nullptr;
 
+// The NativeAOT managed image already supplies these image-owned globals and
+// fail-fast entrypoints. The startup-only dry-run has no managed image, so it
+// keeps the local copies; the first-allocation image reuses its generated
+// copies to avoid two competing startup surfaces in one link.
+#if !defined(GUIDEXOS_NATIVEAOT_MANAGED_IMAGE)
 extern "C" int g_requiredCpuFeatures = 0;
 extern "C" uint32_t _tls_index = 0;
 struct StartupEmbeddedConfig {
@@ -276,6 +281,7 @@ extern "C" [[noreturn]] void RhExceptionHandling_FailedAllocation() { startupFai
 extern "C" [[noreturn]] void RhThrowHwEx() { startupFailFast(); }
 extern "C" [[noreturn]] void RhThrowEx() { startupFailFast(); }
 extern "C" [[noreturn]] void RhRethrow() { startupFailFast(); }
+#endif
 
 extern "C" bool RhInitialize(bool isDll);
 

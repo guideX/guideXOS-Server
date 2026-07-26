@@ -38,7 +38,12 @@
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_end[];
 #endif
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
+#include "include/kernel/nativeaot_pal_qemu_test.h"
+#include "guidexos_nativeaot_gc_first_allocation_exports.h"
+extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
+extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
+#elif defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
 #include "include/kernel/nativeaot_pal_qemu_test.h"
 #include "guidexos_nativeaot_gc_startup_exports.h"
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
@@ -285,7 +290,36 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     }
 #endif
 
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
+    // This branch is a disposable process-lifetime experiment: startup is
+    // followed by exactly one managed byte[24] allocation and then the CPU
+    // halts. It is never part of the ordinary boot/application path.
+    kernel::interrupts::init();
+    kernel::pit::init(100);
+    kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+    kernel::serial::puts("[nativeaot-gc-first-allocation] timer services ready\n");
+    kernel::nativeaot_pal_qemu_test::runFirstRealAllocation(
+        guidexos_nativeaot_gc_startup_artifact_start,
+        static_cast<size_t>(guidexos_nativeaot_gc_startup_artifact_end -
+                            guidexos_nativeaot_gc_startup_artifact_start),
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_INSTALL_PAL_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_INSTALL_TABLE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_INSTALL_PLATFORM_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_STARTUP_MAIN_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_STATE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_PRE_GC_STATE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_ALLOCATION_COUNT_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_LAST_ALLOCATION_SIZE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_DIAGNOSTIC_STAGE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_MANAGED_MAIN_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_FINALIZE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_DIAGNOSTICS_ADDRESS,
+        1u);
+    while (1) {
+        kernel::arch::disable_interrupts();
+        kernel::arch::halt();
+    }
+#elif defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
     // Workstation GC startup is a disposable, process-lifetime experiment.
     // It intentionally runs before the ordinary desktop/storage path and
     // never becomes part of a normal boot or application inventory.

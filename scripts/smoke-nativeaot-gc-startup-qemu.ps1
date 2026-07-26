@@ -1,6 +1,8 @@
 param(
     [string]$Workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [string]$EvidenceRoot = '',
+    [string]$KernelPath = '',
+    [string]$ArtifactPath = '',
     [int]$Runs = 3,
     [int]$TimeoutSeconds = 30
 )
@@ -13,8 +15,16 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $ovmf = 'C:\Program Files\qemu\share\edk2-x86_64-code.fd'
 $bootloader = Join-Path $Workspace 'guideXOSBootLoader/x64/Release/guideXOSBootLoader.exe'
-$kernel = Join-Path $Workspace 'kernel/build/amd64/bin/kernel.elf'
-$artifact = Join-Path $Workspace 'out/dotnet/gc-initialization-dry-run/artifact/NativeAotGcStartupMinimal.exe'
+$kernel = if ([string]::IsNullOrWhiteSpace($KernelPath)) {
+    Join-Path $Workspace 'kernel/build/amd64/bin/kernel.elf'
+} else {
+    [IO.Path]::GetFullPath($KernelPath)
+}
+$artifact = if ([string]::IsNullOrWhiteSpace($ArtifactPath)) {
+    Join-Path $Workspace 'out/dotnet/gc-initialization-dry-run/artifact/NativeAotGcStartupMinimal.exe'
+} else {
+    [IO.Path]::GetFullPath($ArtifactPath)
+}
 
 foreach ($path in @($qemu, $ovmf, $bootloader, $kernel, $artifact)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

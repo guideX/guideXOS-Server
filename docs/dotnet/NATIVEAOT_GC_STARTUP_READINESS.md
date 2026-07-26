@@ -1,7 +1,9 @@
 # NativeAOT Workstation GC startup readiness
 
 Status: 2026-07-26. PAL bridge readiness and the first Workstation GC
-initialization-only dry run pass. The runtime shutdown audit selects a
+initialization-only dry run pass. The identity gate is resolved as Identity B:
+normalized fresh archives match, while the historical difference is the
+reviewed QEMU virtual-memory range expansion. The runtime shutdown audit selects a
 process-lifetime GC model: full orderly same-process GC shutdown is not
 available in the locked NativeAOT source, so QEMU runs use disposable
 processes and never signal the finalizer event.
@@ -32,23 +34,26 @@ The shutdown decision and candidate audit are in
 | Managed allocation proofs | PASS, 234 / 14 and controlled OOM |
 | Workstation GC initialization-only probe | PASS, `RhInitialize` returned 0 |
 | Workstation GC orderly shutdown | UNSUPPORTED by locked source contract; Model C process-lifetime |
-| Collections | 0 |
-| GC-backed allocations | 0 |
-| Heap expansion | 0 |
+| Real managed first `byte[24]` allocation | FAIL/HANG in `RhpNewArray`; Outcome C |
+| Historical bounded-mode collections | 0 |
+| Historical bounded-mode GC-backed allocations | 0 |
+| Historical bounded-mode heap expansion | 0 |
 
 The startup QEMU matrix reports PASS for first, repeat, and fresh disposable
 processes. The startup platform extension is ABI v1, 216 bytes, capability
 mask `0x7`; the PAL table is ABI v1, 232 bytes, capability mask `0x1FF`.
 
-`RhInitialize` was called only in the startup-only probe, once per disposable
-QEMU process. No managed entry point, collector allocation, collection, or
-managed finalizer callback was entered. The NativeAOT helper creation request
-is kept parked and cleanup is process-lifetime only.
+The authorized first-allocation image called `RhInitialize` once and entered
+`ManagedMain` once in each of three fresh disposable QEMU processes. The stock
+real-GC allocation path did not return before the bounded timeout, so no
+post-allocation diagnostics exist and no PASS is claimed for object layout,
+zero initialization, pattern, ownership, or collection counts. The helper was
+parked before managed entry; cleanup remains process-lifetime only.
 
-Decision: **Outcome B - Workstation GC is usable for startup-only disposable
-processes; runtime state is process-lifetime and not same-process reusable.**
+Decision: **Outcome C for real managed allocation**. Startup-only readiness
+remains Outcome B, but the branch is not ready to claim a real managed heap
+allocation.
 
-The next experiment is one disposable primitive managed allocation through the
-real collector, with collection and finalizer work still disabled. No shutdown
-or second `RhInitialize` is authorized until the locked source exposes a
-supported contract.
+See [NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION.md](NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION.md)
+for the bounded logs and artifact hashes. No shutdown or second `RhInitialize`
+is authorized until the locked source exposes a supported contract.

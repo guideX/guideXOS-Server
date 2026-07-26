@@ -15,13 +15,15 @@ Workstation GC initialization succeeds in disposable system-QEMU processes,
 but the matching NativeAOT source does not provide a supported runtime-wide GC
 shutdown, finalizer stop/join, FLS-index release, module/type-manager
 unregister, write-barrier reset, or same-process reinitialization contract.
-QEMU process exit is therefore the cleanup boundary for this branch. No
-shutdown call, `GC.Collect`, managed entry, managed allocation through the
-real collector, or second `RhInitialize` was executed in this audit.
+QEMU process exit is therefore the cleanup boundary for this branch. The
+first-allocation audit made one managed entry and attempted one real
+allocation per disposable process, but made no shutdown call, `GC.Collect`,
+finalizer request, or second `RhInitialize`.
 
 This is not a claim that process exit is an orderly GC shutdown. It is a
-deliberate containment rule for an initialization-only experiment whose
-runtime state is not reusable in the same process.
+deliberate containment rule for the startup and first-allocation experiments;
+the latter entered managed code but hung inside the real allocation path and
+was terminated only by the disposable QEMU timeout.
 
 ## Source-backed shutdown audit
 
@@ -99,12 +101,13 @@ Supported full shutdown entry: **none found**.
 | PAL hook table and callbacks | Quiesce every callback/worker before uninstall | Kept installed until process exit |
 | Virtual-memory reservations/commits | Release only after no collector or barrier access remains | Process exit for the live GC experiment |
 
-The existing startup serial evidence shows one attached ThreadStore record and
-one active parked helper before disposable QEMU termination, with zero callback
-entries, zero collections, zero GC-backed allocations, and no managed finalizer
-entry. The process teardown proof establishes that the disposable process ends
-without a post-exit callback; it does not pretend that every internal GC byte
-was independently enumerated after address-space destruction.
+The startup serial evidence shows one attached ThreadStore record and one
+active parked helper before disposable QEMU termination. The first-allocation
+serial evidence shows `RhInitialize` returning zero and `ManagedMain` being
+entered once in each of three fresh processes, followed by a bounded timeout in
+the real allocation path. It does not provide post-allocation collection or
+object diagnostics, and it does not pretend that every internal GC byte was
+independently enumerated after address-space destruction.
 
 ## Failure-path result
 
@@ -137,23 +140,20 @@ same-process cleanup from process exit.
 
 The existing authoritative startup matrix remains the basis for the current
 startup result: first, repeat, and fresh disposable QEMU processes pass;
-`RhInitialize` returns zero; managed entry, collector allocation, collection,
-and managed finalizer entry remain zero. This audit did not rerun a new live
-QEMU image after the clean adapted-GC rebuild because that rebuild produced
-archive hash `C2B4E7BA982D27D9C17B98CAA0ACD160584251C2569CB41F4FBA3EA658243068`
-and replacement-object hash
-`D3BBA664316C6DB860659EF7C501B0263621F6D6C227DCDA5D96EDD495E99DC4`, instead
-of the locked baseline archive `BA847F225439A8D693CD975CCAACDD01264BDA88BE4F2BBF18D5A0E4DB0F1F52`
-and object `1F255DFCF8CBEB0A93289EF0E160C04DA5410EB41F9B06113186BF9D3438F0CCB`.
-The rebuild retained exact symbol binding and zero missing/duplicate symbols,
-but the identity mismatch is recorded as a reproducibility gate; it is not
-silently treated as the locked artifact.
+`RhInitialize` returns zero in the startup image. The normalized identity
+comparison is now reproducible across two clean fresh builds; the only
+historical normalized semantic difference is the reviewed
+`guidexos_virtual_memory_region.obj` QEMU range expansion. The hosted
+exact-symbol probe passes for the final real-GC archive. In the authorized
+first-allocation image, `ManagedMain` is entered once in `first`, `repeat`, and
+`fresh` disposable QEMU processes, but the real `RhpNewArray` path does not
+return before timeout. Therefore no real allocation, collection-free proof,
+or object-layout proof is recorded by this experiment.
 
 ## Exact next experiment
 
-Because Model C is selected, the next authorized experiment is one disposable
-QEMU init run with exactly one primitive `byte[]` allocated through the real
-collector, no collection, no finalizer request, no second initialization, and
-no live-process teardown attempt. The run must retain the current process-
-lifetime cleanup boundary and must first pass the locked-artifact identity
-gate.
+Because Model C is selected and the first real allocation did not complete,
+the next step is diagnosis of that collector/PAL boundary. Any retry must use a
+new disposable process and preserve the same restrictions: no collection
+request, no finalizer request, no second initialization, and no live-process
+teardown attempt.

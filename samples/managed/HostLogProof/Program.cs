@@ -24,8 +24,10 @@ public static unsafe class Program
     private static extern int GuideXosManagedAllocationReport(NativeGxAppContext* context, uint status);
 #endif
 
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedArrayHostLog")]
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
+#endif
 
     public static void Main()
     {
@@ -49,12 +51,37 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION
         if (ctx->host == null || ctx->host->log == null)
         {
             return GxAbi.ErrorInvalidArgument;
         }
+#endif
 
-#if HOSTLOGPROOF_ALLOCATING
+#if HOSTLOGPROOF_FIRST_REAL_ALLOCATION
+        // This is the complete managed body for the first real-GC experiment.
+        // It intentionally contains one object allocation and no managed
+        // diagnostics, strings, delegates, exceptions, or additional objects.
+        byte[] value = new byte[24];
+        int zeroByteCount = 0;
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (value[i] == 0) zeroByteCount++;
+        }
+
+        bool patternVerified = true;
+        for (int i = 0; i < value.Length; i++)
+        {
+            value[i] = (byte)(0x40 + i);
+        }
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (value[i] != (byte)(0x40 + i)) patternVerified = false;
+        }
+
+        GC.KeepAlive(value);
+        return (zeroByteCount << 8) | (patternVerified ? 1 : 0);
+#elif HOSTLOGPROOF_ALLOCATING
 #if HOSTLOGPROOF_REPEATED_ALLOCATION
         const int arrayLength = 256;
         const int maximumBoundedAllocations = 512;

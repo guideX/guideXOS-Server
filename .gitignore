@@ -38,6 +38,8 @@
 /out/dotnet/native-event/
 /out/dotnet/native-thread-smoke/
 /out/dotnet/gc-shutdown-boundary/
+/out/dotnet/gc-first-real-allocation/
 /out/runtime/
+/samples/managed/HostLogProof/obj/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx
