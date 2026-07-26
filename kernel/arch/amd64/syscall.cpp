@@ -18,6 +18,7 @@
 #include "include/arch/syscall.h"
 #include "include/arch/amd64.h"
 #include "include/arch/context_switch.h"
+#include "kernel/pit.h"
 
 #if defined(_MSC_VER)
 #define GXOS_MSVC_STUB 1
@@ -393,6 +394,7 @@ void handle_interrupt(uint32_t vector)
     
     if (irq == 0) {
         // Timer interrupt (IRQ 0)
+        kernel::pit::irq_handler();
         context::arch_timer_tick();
     } else if (irq < MAX_IRQS && s_irq_handlers[irq]) {
         s_irq_handlers[irq](irq);

@@ -11,14 +11,16 @@
 namespace kernel {
 namespace file_clipboard {
 
-static const uint32_t kMaxCopyBytes = 8u * 1024u * 1024u;
+static const uint32_t kCopyBufferBytes = 64u * 1024u;
+static const uint64_t kMaxFatFileBytes = 0xFFFFFFFFull;
 static const int kMaxNameCandidates = 1000;
 static const uint32_t kMaxTreeDepth = 64;
 static const size_t kMaxDirectoryEntriesPerOperation = 4096;
 
-// File operations are deliberately bounded. The buffer is in BSS and is
-// shared by the synchronous paste path, so there is no unbounded allocation.
-static uint8_t s_copyBuffer[kMaxCopyBytes];
+// File operations are deliberately bounded. The fixed buffer is in BSS and
+// is shared by the synchronous paste path, so paste never allocates a
+// file-sized stack or heap buffer.
+static uint8_t s_copyBuffer[kCopyBufferBytes];
 static char s_sourcePath[vfs::VFS_MAX_PATH] = {0};
 static char s_sourceName[vfs::VFS_MAX_FILENAME] = {0};
 static Operation s_operation = Operation::None;
@@ -427,13 +429,12 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
                                vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_ARGUMENT");
         return PasteResult::Failed;
     }
-    if (sourceSize > kMaxCopyBytes) {
+    if (sourceSize > kMaxFatFileBytes) {
         set_diagnostic_failure(PasteStage::DataTransfer, PasteResult::Unsupported,
-                               vfs::VFS_ERR_NO_SPACE, "FAT_FILE_WRITE_NO_SPACE");
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_SIZE_OVERFLOW");
         return PasteResult::Unsupported;
     }
 
-    const uint32_t byteCount = static_cast<uint32_t>(sourceSize);
     set_diagnostic_stage(PasteStage::SourceOpenRead);
     trace_marker("FPASTE_SOURCE_OPEN");
     trace_text("DESKTOP_PASTE_SOURCE_OPEN", sourcePath);
@@ -445,71 +446,128 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
     }
     trace_marker("FPASTE_SOURCE_OPEN_OK");
     trace_text("DESKTOP_PASTE_SOURCE_OPEN_STATUS", "VFS_OK");
-    trace_transfer("FPASTE_READ_BEGIN", 0, byteCount, "VFS_REQUESTED");
-    const int32_t bytesRead = byteCount == 0
-        ? 0 : vfs::read(sourceHandle, s_copyBuffer, byteCount);
-    s_lastDiagnostic.bytesRead = bytesRead > 0 ? static_cast<uint64_t>(bytesRead) : 0;
-    trace_transfer("FPASTE_READ_END", 0, s_lastDiagnostic.bytesRead,
-                   fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
-    trace_progress("read", s_lastDiagnostic.bytesRead, sourceSize);
-    trace_u64("DESKTOP_PASTE_BYTES_READ", s_lastDiagnostic.bytesRead);
-    const vfs::Status sourceCloseStatus = vfs::close(sourceHandle);
-    trace_marker("FPASTE_CLOSE_SOURCE");
-    trace_status("DESKTOP_PASTE_SOURCE_CLOSE", sourceCloseStatus);
-    if (sourceCloseStatus != vfs::VFS_OK) {
-        set_diagnostic_failure(PasteStage::SourceOpenRead, PasteResult::Failed,
-                               sourceCloseStatus, "FAT_FILE_WRITE_IO_ERROR");
-        return PasteResult::Failed;
-    }
-    if (bytesRead < 0) {
-        set_diagnostic_failure(PasteStage::SourceOpenRead, PasteResult::Failed,
-                               static_cast<vfs::Status>(bytesRead),
-                               fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
-        return PasteResult::Failed;
-    }
-    if (bytesRead != static_cast<int32_t>(byteCount)) {
-        set_diagnostic_failure(PasteStage::DataTransfer, PasteResult::Failed,
-                               vfs::VFS_ERR_IO,
-                               fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
-        return PasteResult::Failed;
-    }
-
-    set_diagnostic_stage(PasteStage::DataTransfer);
-    trace_marker("FPASTE_COPY_BEGIN");
-    trace_text("DESKTOP_PASTE_DATA_COPY", "VFS_READ_TO_EXCLUSIVE_CREATE");
     set_diagnostic_stage(PasteStage::DestinationCreate);
     trace_marker("FPASTE_DEST_CREATE");
     trace_text("DESKTOP_PASTE_DEST_CREATE", destinationPath);
-    trace_transfer("FPASTE_WRITE_BEGIN", 0, byteCount, "VFS_REQUESTED");
-    const int32_t bytesWritten = vfs::create_file(
-        destinationPath, byteCount == 0 ? nullptr : s_copyBuffer, byteCount);
-    s_lastDiagnostic.bytesWritten = bytesWritten > 0 ? static_cast<uint64_t>(bytesWritten) : 0;
-    trace_transfer("FPASTE_WRITE_END", 0, s_lastDiagnostic.bytesWritten,
-                   fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
-    trace_progress("write", s_lastDiagnostic.bytesWritten, sourceSize);
-    trace_u64("DESKTOP_PASTE_BYTES_WRITTEN", s_lastDiagnostic.bytesWritten);
-    if (bytesWritten != static_cast<int32_t>(byteCount)) {
-        const vfs::Status writeStatus = bytesWritten < 0
-            ? static_cast<vfs::Status>(bytesWritten) : vfs::VFS_ERR_IO;
-        trace_status("DESKTOP_PASTE_DEST_CREATE_STATUS", writeStatus);
-        const vfs::Status cleanupStatus = vfs::unlink(destinationPath);
-        trace_status("DESKTOP_PASTE_ROLLBACK", cleanupStatus);
+    trace_u64("LFPASTE_COPY_BUFFER_BYTES", kCopyBufferBytes);
+    trace_u64("LFPASTE_BEGIN_SIZE", sourceSize);
+    const int32_t emptyCreate = vfs::create_file(destinationPath, nullptr, 0);
+    if (emptyCreate != 0) {
+        vfs::close(sourceHandle);
         set_diagnostic_failure(PasteStage::DestinationCreate, PasteResult::Failed,
-                               writeStatus,
+                               emptyCreate < 0 ? static_cast<vfs::Status>(emptyCreate)
+                                               : vfs::VFS_ERR_IO,
                                fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
         return PasteResult::Failed;
     }
+    const uint8_t destinationHandle = vfs::open(destinationPath, vfs::OPEN_WRITE);
+    if (destinationHandle == 0xFF) {
+        vfs::close(sourceHandle);
+        vfs::unlink(destinationPath);
+        set_diagnostic_failure(PasteStage::DestinationCreate, PasteResult::Failed,
+                               vfs::VFS_ERR_IO, "FAT_FILE_WRITE_OPEN_DESTINATION");
+        return PasteResult::Failed;
+    }
     trace_marker("FPASTE_DEST_CREATE_OK");
-    trace_marker("FPASTE_CLOSE_DEST");
-    trace_status("DESKTOP_PASTE_DEST_CREATE_STATUS", vfs::VFS_OK);
 
-    // FAT writes publish their data, FAT chain, and directory metadata
-    // synchronously. Keep an explicit trace point so the operation contract
-    // remains visible even though there is no buffered file handle to flush.
-    set_diagnostic_stage(PasteStage::Flush);
-    trace_marker("FPASTE_FLUSH_BEGIN");
-    trace_status("DESKTOP_PASTE_FLUSH", vfs::VFS_OK);
-    trace_marker("FPASTE_FLUSH_END");
+    uint64_t sourceOffset = 0;
+    uint64_t destinationOffset = 0;
+    bool transferOk = true;
+    vfs::Status transferStatus = vfs::VFS_OK;
+    PasteStage failureStage = PasteStage::DataTransfer;
+    while (sourceOffset < sourceSize) {
+        const uint64_t remaining = sourceSize - sourceOffset;
+        const uint32_t requested = remaining > kCopyBufferBytes
+            ? kCopyBufferBytes : static_cast<uint32_t>(remaining);
+        serial::puts("LFPASTE_READ offset=0x");
+        serial::put_hex64(sourceOffset);
+        serial::puts(" requested=0x");
+        serial::put_hex32(requested);
+        serial::puts(" buffer=0x");
+        serial::put_hex64(reinterpret_cast<uintptr_t>(s_copyBuffer));
+        serial::puts("\n");
+        const int32_t actualRead = vfs::read(sourceHandle, s_copyBuffer, requested);
+        trace_transfer("LFPASTE_READ_END", sourceOffset,
+                       actualRead > 0 ? static_cast<uint64_t>(actualRead) : 0,
+                       fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
+        if (actualRead != static_cast<int32_t>(requested)) {
+            transferOk = false;
+            transferStatus = actualRead < 0 ? static_cast<vfs::Status>(actualRead)
+                                             : vfs::VFS_ERR_IO;
+            failureStage = PasteStage::SourceOpenRead;
+            break;
+        }
+        s_lastDiagnostic.bytesRead += static_cast<uint64_t>(actualRead);
+        sourceOffset += static_cast<uint64_t>(actualRead);
+
+        uint32_t bufferOffset = 0;
+        while (bufferOffset < static_cast<uint32_t>(actualRead)) {
+            const uint32_t writeRequest = static_cast<uint32_t>(actualRead) - bufferOffset;
+            serial::puts("LFPASTE_WRITE offset=0x");
+            serial::put_hex64(destinationOffset);
+            serial::puts(" requested=0x");
+            serial::put_hex32(writeRequest);
+            serial::puts(" read=0x");
+            serial::put_hex32(actualRead);
+            serial::puts("\n");
+            const int32_t actualWrite = vfs::write(destinationHandle,
+                                                   s_copyBuffer + bufferOffset,
+                                                   writeRequest);
+            trace_transfer("LFPASTE_WRITE_END", destinationOffset,
+                           actualWrite > 0 ? static_cast<uint64_t>(actualWrite) : 0,
+                           fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
+            if (actualWrite <= 0 || static_cast<uint32_t>(actualWrite) > writeRequest) {
+                transferOk = false;
+                transferStatus = actualWrite < 0 ? static_cast<vfs::Status>(actualWrite)
+                                                  : vfs::VFS_ERR_NO_PROGRESS;
+                failureStage = PasteStage::DataTransfer;
+                break;
+            }
+            bufferOffset += static_cast<uint32_t>(actualWrite);
+            destinationOffset += static_cast<uint64_t>(actualWrite);
+            s_lastDiagnostic.bytesWritten = destinationOffset;
+        }
+        if (!transferOk) break;
+        if (sourceOffset >= s_lastDiagnostic.bytesRead &&
+            (destinationOffset == sourceOffset || destinationOffset % (64u * 1024u) == 0)) {
+            trace_progress("stream", destinationOffset, sourceSize);
+        }
+    }
+
+    const vfs::Status sourceCloseStatus = vfs::close(sourceHandle);
+    trace_marker("FPASTE_CLOSE_SOURCE");
+    trace_status("DESKTOP_PASTE_SOURCE_CLOSE", sourceCloseStatus);
+    if (sourceCloseStatus != vfs::VFS_OK && transferOk) {
+        transferOk = false;
+        transferStatus = sourceCloseStatus;
+        failureStage = PasteStage::SourceOpenRead;
+    }
+    if (transferOk) {
+        set_diagnostic_stage(PasteStage::Flush);
+        trace_marker("LFPASTE_FLUSH_BEGIN");
+        const vfs::Status flushStatus = vfs::flush(destinationHandle);
+        trace_status("LFPASTE_FLUSH_END", flushStatus);
+        if (flushStatus != vfs::VFS_OK) {
+            transferOk = false;
+            transferStatus = flushStatus;
+            failureStage = PasteStage::Flush;
+        }
+    }
+    const vfs::Status destinationCloseStatus = vfs::close(destinationHandle);
+    trace_marker("FPASTE_CLOSE_DEST");
+    trace_status("DESKTOP_PASTE_DEST_CLOSE", destinationCloseStatus);
+    if (destinationCloseStatus != vfs::VFS_OK && transferOk) {
+        transferOk = false;
+        transferStatus = destinationCloseStatus;
+        failureStage = PasteStage::Flush;
+    }
+    if (!transferOk) {
+        const vfs::Status cleanupStatus = vfs::unlink(destinationPath);
+        trace_status("DESKTOP_PASTE_ROLLBACK", cleanupStatus);
+        set_diagnostic_failure(failureStage, PasteResult::Failed,
+                               transferStatus, fat_status_for_vfs_status(transferStatus));
+        return PasteResult::Failed;
+    }
 
     set_diagnostic_stage(PasteStage::Verification);
     trace_marker("FPASTE_VERIFY_BEGIN");
@@ -529,6 +587,9 @@ static PasteResult copy_file_contents(const char* sourcePath, const char* destin
     }
     trace_marker("FPASTE_VERIFY_END");
     trace_text("DESKTOP_PASTE_VERIFY", "VFS_OK size-match");
+    serial::puts("LFPASTE_COMPLETE bytes=0x");
+    serial::put_hex64(destinationOffset);
+    serial::puts("\n");
     return PasteResult::Success;
 }
 
@@ -887,39 +948,10 @@ PasteResult paste_to_directory(const char* destinationDirectory) {
             return PasteResult::ReadOnly;
         }
 
-        if (sourceMount == destinationMount) {
-            set_diagnostic_stage(PasteStage::DataTransfer);
-            trace_text("DESKTOP_PASTE_MOVE_RENAME", "VFS_RENAME");
-            const vfs::Status renameStatus = vfs::rename(s_sourcePath, destinationPath);
-            trace_status("DESKTOP_PASTE_MOVE_RENAME_STATUS", renameStatus);
-            if (renameStatus == vfs::VFS_OK) {
-                set_diagnostic_stage(PasteStage::Flush);
-                trace_status("DESKTOP_PASTE_FLUSH", vfs::VFS_OK);
-                vfs::FileInfo movedInfo{};
-                const vfs::Status verifyStatus = vfs::stat(destinationPath, &movedInfo);
-                trace_status("DESKTOP_PASTE_VERIFY_STATUS", verifyStatus);
-                if (verifyStatus == vfs::VFS_OK && movedInfo.type == sourceInfo.type &&
-                    (sourceInfo.type != vfs::FILE_TYPE_REGULAR || movedInfo.size == sourceInfo.size)) {
-                    clear();
-                    trace_marker("FPASTE_CLIPBOARD_FINALIZE");
-                    ++s_operationGeneration;
-                    set_diagnostic_stage(PasteStage::Complete);
-                    s_lastDiagnostic.result = PasteResult::Success;
-                    trace_text("DESKTOP_PASTE_FINAL_RESULT", paste_result_name_local(PasteResult::Success));
-                    trace_marker("FPASTE_OPERATION_COMPLETE");
-                    return PasteResult::Success;
-                }
-                vfs::rename(destinationPath, s_sourcePath);
-                set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
-                                       verifyStatus == vfs::VFS_OK ? vfs::VFS_ERR_IO : verifyStatus,
-                                       fat_status_for_vfs_status(verifyStatus));
-                return PasteResult::Failed;
-            }
-        }
-
-        // Cross-filesystem moves, and filesystems without atomic rename, use
-        // copy-then-delete. The source is never deleted until the destination
-        // tree has been created successfully.
+        // Use copy-then-verify-delete for every clipboard Move. This keeps
+        // Cut semantics identical across filesystems and avoids depending on
+        // an atomic same-volume rename to publish two directory entries. The
+        // source is never deleted until the destination tree is verified.
         PasteResult copied = copy_entry_tree(s_sourcePath, destinationPath, sourceInfo, 0);
         if (copied != PasteResult::Success) return copied;
         set_diagnostic_stage(PasteStage::Verification);
@@ -1223,11 +1255,29 @@ static bool smoke_text_equals(const char* left, const char* right) {
 }
 
 static bool smoke_write_pattern_file(const char* path, size_t byteCount) {
-    if (!path || byteCount > kMaxCopyBytes) return false;
-    for (size_t index = 0; index < byteCount; ++index) {
-        s_copyBuffer[index] = static_cast<uint8_t>((index * 37u + 0x5Au) & 0xFFu);
+    if (!path || byteCount > 0xFFFFFFFFull) return false;
+    const uint8_t handle = vfs::open(path,
+        vfs::OPEN_WRITE | vfs::OPEN_CREATE | vfs::OPEN_EXCL);
+    if (handle == 0xFF) return false;
+    size_t offset = 0;
+    bool ok = true;
+    while (offset < byteCount) {
+        const uint32_t request = static_cast<uint32_t>(
+            byteCount - offset > kCopyBufferBytes ? kCopyBufferBytes : byteCount - offset);
+        for (uint32_t index = 0; index < request; ++index) {
+            s_copyBuffer[index] = static_cast<uint8_t>(((offset + index) * 37u + 0x5Au) & 0xFFu);
+        }
+        const int32_t written = vfs::write(handle, s_copyBuffer, request);
+        if (written != static_cast<int32_t>(request)) {
+            ok = false;
+            break;
+        }
+        offset += request;
     }
-    return smoke_write_file(path, s_copyBuffer, byteCount);
+    if (ok) ok = vfs::flush(handle) == vfs::VFS_OK;
+    if (vfs::close(handle) != vfs::VFS_OK) ok = false;
+    if (!ok) vfs::unlink(path);
+    return ok && offset == byteCount;
 }
 
 static bool smoke_file_matches_pattern(const char* path, size_t expectedSize) {
@@ -1460,6 +1510,18 @@ void run_runtime_smoke() {
                       smoke_file_matches_pattern(copiedImagePng, multiClusterImageSize));
     smoke_phase(ok ? "after-multicluster-png-pass" : "after-multicluster-png-fail");
 
+    // Cut the same multi-cluster source after the copy case. The destination
+    // already contains IMAGE.PNG, so this also proves collision naming and
+    // source deletion ordering for a multi-cluster move.
+    ok &= set_file(imagePng, Operation::Move);
+    ok &= paste_to_directory(destination) == PasteResult::Success;
+    char movedImagePng[vfs::VFS_MAX_PATH];
+    vfs::join_path(destination, "IMAGE~1.PNG", movedImagePng, sizeof(movedImagePng));
+    ok &= !vfs::exists(imagePng);
+    ok &= smoke_check("multicluster-cut-destination",
+                      smoke_file_matches_pattern(movedImagePng, multiClusterImageSize));
+    smoke_phase(ok ? "after-multicluster-cut-pass" : "after-multicluster-cut-fail");
+
     ok &= set_file(zeroPng, Operation::Copy);
     ok &= paste_to_directory(destination) == PasteResult::Success;
     char copiedZeroPng[vfs::VFS_MAX_PATH];
@@ -1529,6 +1591,86 @@ void run_runtime_smoke() {
     ok &= operation_generation() > generationBefore;
     smoke_phase(ok ? "after-new-folders-pass" : "after-new-folders-fail");
 
+    // Deterministic large-file threshold suite. Each source is generated with
+    // the same byte pattern, copied through the production clipboard path,
+    // and checked at both source and destination. The names remain FAT 8.3
+    // compatible so a failure cannot be attributed to long-name handling.
+    static const char* thresholdRoot = "/Desktop/GXSMK6";
+    static const char* thresholdDestination = "/Desktop/GXSMK6/DST";
+    static const char* thresholdNames[] = {
+        "F0000000.BIN", "F0000001.BIN", "F0004096.BIN", "F0065536.BIN",
+        "F0262144.BIN", "F0524288.BIN", "F1048576.BIN", "F1572864.BIN",
+        "F2097152.BIN", "F3145728.BIN"
+    };
+    static const size_t thresholdSizes[] = {
+        0u, 1u, 4096u, 65536u, 262144u, 524288u,
+        1048576u, 1572864u, 2097152u, 3145728u
+    };
+    remove_entry_tree(thresholdRoot, 0);
+    ok &= vfs::mkdir(thresholdRoot) == vfs::VFS_OK;
+    ok &= vfs::mkdir(thresholdDestination) == vfs::VFS_OK;
+    const fs_fat::FATVolume* desktopVolume =
+        fs_fat::get_volume(desktopMount->fsVolumeIndex);
+    if (desktopVolume) {
+        serial::puts("[FILE-OPS-RUNTIME-SMOKE] threshold clusterBytes=");
+        serial::put_hex32(desktopVolume->bytesPerSector * desktopVolume->sectorsPerCluster);
+        serial::puts("\n");
+    }
+    for (size_t thresholdIndex = 0;
+         thresholdIndex < sizeof(thresholdSizes) / sizeof(thresholdSizes[0]) && ok;
+         ++thresholdIndex) {
+        char thresholdSource[vfs::VFS_MAX_PATH];
+        char thresholdCopy[vfs::VFS_MAX_PATH];
+        vfs::join_path(thresholdRoot, thresholdNames[thresholdIndex],
+                       thresholdSource, sizeof(thresholdSource));
+        vfs::join_path(thresholdDestination, thresholdNames[thresholdIndex],
+                       thresholdCopy, sizeof(thresholdCopy));
+        const bool generated = smoke_write_pattern_file(
+            thresholdSource, thresholdSizes[thresholdIndex]);
+        const bool copied = generated && set_file(thresholdSource, Operation::Copy) &&
+                            paste_to_directory(thresholdDestination) == PasteResult::Success;
+        const bool sourceOk = copied && smoke_file_matches_pattern(
+            thresholdSource, thresholdSizes[thresholdIndex]);
+        const bool destinationOk = copied && smoke_file_matches_pattern(
+            thresholdCopy, thresholdSizes[thresholdIndex]);
+        serial::puts("[FILE-OPS-RUNTIME-SMOKE] threshold name=");
+        serial::puts(thresholdNames[thresholdIndex]);
+        serial::puts(" size=");
+        serial::put_hex64(thresholdSizes[thresholdIndex]);
+        serial::puts(" result=");
+        serial::puts(generated && copied && sourceOk && destinationOk ? "PASS\n" : "FAIL\n");
+        ok &= generated && copied && sourceOk && destinationOk;
+    }
+
+    // The failing-size collision and Desktop-root cases use the same 2 MiB
+    // deterministic source, while the normal threshold loop targets a folder.
+    if (ok) {
+        char largeSource[vfs::VFS_MAX_PATH];
+        char largeCollision[vfs::VFS_MAX_PATH];
+        vfs::join_path(thresholdRoot, "F2097152.BIN", largeSource, sizeof(largeSource));
+        ok &= set_file(largeSource, Operation::Copy);
+        ok &= paste_to_directory(thresholdDestination) == PasteResult::Success;
+        char collisionName[vfs::VFS_MAX_FILENAME];
+        ok &= make_candidate_name("F2097152.BIN", 1,
+                                  collisionName, sizeof(collisionName));
+        vfs::join_path(thresholdDestination, collisionName,
+                       largeCollision, sizeof(largeCollision));
+        ok &= smoke_file_matches_pattern(largeSource, 2097152u);
+        ok &= smoke_file_matches_pattern(largeCollision, 2097152u);
+        serial::puts("[FILE-OPS-RUNTIME-SMOKE] threshold-2MiB-collision result=");
+        serial::puts(ok ? "PASS\n" : "FAIL\n");
+
+        char rootCopy[vfs::VFS_MAX_PATH];
+        vfs::join_path("/Desktop", "F2097152.BIN", rootCopy, sizeof(rootCopy));
+        vfs::unlink(rootCopy);
+        ok &= set_file(largeSource, Operation::Copy);
+        ok &= paste_to_directory("/Desktop") == PasteResult::Success;
+        ok &= smoke_file_matches_pattern(rootCopy, 2097152u);
+        ok &= vfs::unlink(rootCopy) == vfs::VFS_OK;
+        serial::puts("[FILE-OPS-RUNTIME-SMOKE] threshold-2MiB-desktop-root result=");
+        serial::puts(ok ? "PASS\n" : "FAIL\n");
+    }
+
     char staleFile[vfs::VFS_MAX_PATH];
     vfs::join_path(root, "STALE.TXT", staleFile, sizeof(staleFile));
     ok &= smoke_write_file(staleFile, sourceBytes, sizeof(sourceBytes));
@@ -1539,6 +1681,7 @@ void run_runtime_smoke() {
     smoke_phase(ok ? "before-cleanup-pass" : "before-cleanup-fail");
 
     clear();
+    remove_entry_tree(thresholdRoot, 0);
     const PasteResult cleanupResult = remove_entry_tree(root, 0);
     serial::puts("[FILE-OPS-RUNTIME-SMOKE] cleanup=");
     serial::puts(paste_result_message(cleanupResult));

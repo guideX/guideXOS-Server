@@ -105,6 +105,10 @@ enum Status : int8_t {
     VFS_ERR_BUSY      = -11,
     VFS_ERR_TOO_MANY  = -12,
     VFS_ERR_NOT_SUPPORTED = -13,
+    VFS_ERR_IO_TIMEOUT = -14,
+    VFS_ERR_CORRUPT_CHAIN = -15,
+    VFS_ERR_NO_PROGRESS = -16,
+    VFS_ERR_ALLOCATION_FAILED = -17,
 };
 
 // ================================================================

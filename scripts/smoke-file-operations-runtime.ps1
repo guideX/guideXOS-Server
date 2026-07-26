@@ -53,7 +53,7 @@ function Build-KernelWithFlags([string]$flags) {
 function Get-LastPasteMarker([string]$output) {
     if (-not $output) { return "none" }
     $marker = $output -split "`r?`n" |
-        Where-Object { $_ -match "FPASTE_|\[FILE-OPS-RUNTIME-SMOKE\] phase=" } |
+        Where-Object { $_ -match "FPASTE_|LFPASTE_|KERNEL-HEARTBEAT|\[FILE-OPS-RUNTIME-SMOKE\] phase=" } |
         Select-Object -Last 1
     if (-not $marker) { return "none" }
     return $marker.Trim()
@@ -108,9 +108,12 @@ try {
         Write-Host "File-operation runtime smoke PASS. Serial log: $serialLog" -ForegroundColor Green
         exit 0
     }
+    $lastMarker = Get-LastPasteMarker $output
     if ($timedOut) {
-        $lastMarker = Get-LastPasteMarker $output
         Write-Host "[FILE-OPS-RUNTIME-SMOKE] result=FAIL timeout=1 lastStage=$lastMarker" -ForegroundColor Red
+    } else {
+        $exitCode = if ($process.HasExited) { $process.ExitCode } else { "unknown" }
+        Write-Host "[FILE-OPS-RUNTIME-SMOKE] result=FAIL exitCode=$exitCode lastStage=$lastMarker" -ForegroundColor Red
     }
     throw "File-operation runtime smoke did not report PASS. Serial log: $serialLog"
 } finally {

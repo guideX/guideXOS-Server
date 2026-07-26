@@ -325,9 +325,18 @@ static block::Status ata_pio_write(uint8_t devIdx,
 
     }
 
-    // A block write is the persistence boundary. Flushing every sector made
-    // large FAT copies spend most of their time in synchronous cache flushes
-    // while the desktop event handler was blocked.
+    return block::BLOCK_OK;
+}
+
+// Cache flush is deliberately separate from a block write. FAT commits call
+// this after data and metadata are complete, instead of paying for a device
+// cache flush after every cluster and FAT-entry update.
+static block::Status ata_pio_flush(uint8_t devIdx)
+{
+    if (devIdx >= MAX_ATA_DEVICES || !s_devices[devIdx].active)
+        return block::BLOCK_ERR_INVALID;
+
+    ATADevice& dev = s_devices[devIdx];
     arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
                dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
     if (!ata_wait_bsy(dev.ioBase, 500000))
@@ -416,6 +425,7 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         bdev.sectorSize   = dev.sectorSize;
         bdev.readFn       = ata_pio_read;
         bdev.writeFn      = ata_pio_write;
+        bdev.flushFn      = ata_pio_flush;
         memcopy(bdev.name, dev.name, 6);
 
         block::register_device(bdev);

@@ -69,6 +69,10 @@ enum FileWriteStatus : uint8_t {
     FILE_WRITE_IO_ERROR,
     FILE_WRITE_READ_ONLY,
     FILE_WRITE_NO_SPACE,
+    FILE_WRITE_IO_TIMEOUT,
+    FILE_WRITE_CORRUPT_CHAIN,
+    FILE_WRITE_NO_PROGRESS,
+    FILE_WRITE_ALLOCATION_FAILED,
 };
 
 const char* file_write_status_name(FileWriteStatus status);
@@ -270,6 +274,7 @@ struct FATVolume {
     uint32_t totalSectors;
     uint32_t firstDataSector;
     uint32_t totalDataClusters;
+    uint32_t nextFreeCluster;      // bounded allocation search hint
 
     // exFAT geometry
     uint64_t exfatVolumeLength;
@@ -297,6 +302,7 @@ struct FATFile {
     uint32_t currentCluster;
     uint32_t currentOffset;       // byte offset within the file
     uint8_t  attr;
+    bool     pendingClusterAdvance;
 };
 
 static const uint8_t MAX_OPEN_FILES = 8;
@@ -369,6 +375,16 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
 FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
                                         const void* buffer, uint32_t len,
                                         block::Status* outBlockStatus);
+
+// Update only the FAT directory-entry file size after a bounded streaming
+// write. Data and cluster-chain writes are performed by write_file().
+FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
+                                             const char* path,
+                                             uint32_t fileSize,
+                                             block::Status* outBlockStatus);
+
+// Persist all completed writes for a mounted FAT volume.
+bool flush(uint8_t volumeIndex, block::Status* outBlockStatus = nullptr);
 
 // Create a new empty 8.3 directory in an existing directory.
 bool create_directory_path(uint8_t volumeIndex, const char* path);

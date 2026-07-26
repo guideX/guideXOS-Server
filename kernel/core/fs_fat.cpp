@@ -23,11 +23,13 @@ static FATFile   s_files[MAX_OPEN_FILES];
 static uint8_t   s_volumeCount = 0;
 static block::Status s_lastIoStatus = block::BLOCK_OK;
 static TraversalStatus s_lastTraversalStatus = TRAVERSAL_OK;
+static uint64_t s_fatScanIterations = 0;
+static uint64_t s_allocatedClusters = 0;
 
 // A v0.1 file operation must fail boundedly even when the FAT contains a
-// cycle.  The normal clipboard path is limited to 8 MiB, so this is well
-// above the largest supported copy while preventing a corrupt volume from
-// turning one synchronous UI event into a whole-volume walk.
+// cycle.  Large copies stream through a modest buffer, while this bound
+// prevents a corrupt volume from turning one synchronous UI event into a
+// whole-volume walk.
 static const uint32_t kMaxSafeChainSteps = 65536u;
 static const uint32_t kMaxSafeDirectoryChainSteps = 4096u;
 
@@ -93,15 +95,12 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
     return s_lastIoStatus;
 }
 
-static block::Status write_volume_sectors(const FATVolume& vol, uint64_t lba,
-                                          uint32_t count, const void* buffer)
+static block::Status flush_volume_io(const FATVolume& vol)
 {
-    if (count == 0 || !buffer) {
-        s_lastIoStatus = block::BLOCK_ERR_INVALID;
-        return s_lastIoStatus;
-    }
-    s_lastIoStatus = block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba,
-                                          count, buffer);
+    s_lastIoStatus = block::flush(vol.blockDevIndex);
+    serial::puts("LFPASTE_FLUSH_END status=0x");
+    serial::put_hex8(static_cast<uint8_t>(s_lastIoStatus));
+    serial::puts("\n");
     return s_lastIoStatus;
 }
 
@@ -111,8 +110,10 @@ static block::Status write_volume_sectors(const FATVolume& vol, uint64_t lba,
 
 static uint32_t cluster_to_sector(const FATVolume& vol, uint32_t cluster)
 {
-    return vol.firstDataSector +
-           (cluster - 2) * vol.sectorsPerCluster;
+    const uint64_t sector = static_cast<uint64_t>(vol.firstDataSector) +
+                            static_cast<uint64_t>(cluster - 2) *
+                            vol.sectorsPerCluster;
+    return sector > 0xFFFFFFFFull ? 0 : static_cast<uint32_t>(sector);
 }
 
 static uint32_t fat_entry_size(const FATVolume& vol)
@@ -170,6 +171,36 @@ static bool is_bad_cluster(const FATVolume& vol, uint32_t cluster)
 static void set_traversal_status(TraversalStatus status)
 {
     s_lastTraversalStatus = status;
+}
+
+static FileWriteStatus write_failure_status()
+{
+    if (s_lastIoStatus == block::BLOCK_ERR_TIMEOUT) return FILE_WRITE_IO_TIMEOUT;
+    switch (s_lastTraversalStatus) {
+        case TRAVERSAL_CHAIN_CYCLE:
+        case TRAVERSAL_CHAIN_STEP_LIMIT:
+        case TRAVERSAL_TRUNCATED_CHAIN:
+        case TRAVERSAL_INVALID_CLUSTER:
+        case TRAVERSAL_BAD_CLUSTER:
+            return FILE_WRITE_CORRUPT_CHAIN;
+        case TRAVERSAL_NO_PROGRESS:
+            return FILE_WRITE_NO_PROGRESS;
+        default:
+            return s_lastIoStatus == block::BLOCK_OK
+                ? FILE_WRITE_ALLOCATION_FAILED : FILE_WRITE_IO_ERROR;
+    }
+}
+
+static bool cluster_byte_count(const FATVolume& vol, uint32_t* outBytes)
+{
+    if (!outBytes || vol.bytesPerSector == 0 || vol.sectorsPerCluster == 0) {
+        return false;
+    }
+    const uint64_t bytes = static_cast<uint64_t>(vol.bytesPerSector) *
+                           vol.sectorsPerCluster;
+    if (bytes == 0 || bytes > 0xFFFFFFFFull) return false;
+    *outBytes = static_cast<uint32_t>(bytes);
+    return true;
 }
 
 // Floyd's tortoise/hare check keeps cycle detection bounded without a
@@ -348,8 +379,11 @@ static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
     vol.firstDataSector = vol.reservedSectors +
                           (vol.numFATs * vol.fatSizeSectors);
 
+    if (vol.totalSectors <= vol.firstDataSector) return false;
     uint32_t dataSectors = vol.totalSectors - vol.firstDataSector;
     vol.totalDataClusters = dataSectors / vol.sectorsPerCluster;
+    if (vol.totalDataClusters == 0 || !cluster_byte_count(vol, &dataSectors)) return false;
+    vol.nextFreeCluster = 2;
 
     // Copy volume label
     memcopy(vol.volumeLabel, bpb->volumeLabel, 11);
@@ -414,6 +448,8 @@ static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionO
 
     uint32_t dataSectors = vol.totalSectors - vol.firstDataSector;
     vol.totalDataClusters = dataSectors / vol.sectorsPerCluster;
+    if (vol.totalDataClusters == 0 || !cluster_byte_count(vol, &dataSectors)) return false;
+    vol.nextFreeCluster = 2;
 
     memcopy(vol.volumeLabel, bpb->volumeLabel, 11);
     vol.volumeLabel[11] = '\0';
@@ -493,6 +529,7 @@ static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
     vol.sectorsPerCluster = 1u << bs->sectorsPerClusterShift;
     vol.firstDataSector   = bs->clusterHeapOffset;
     vol.totalDataClusters = bs->clusterCount;
+    vol.nextFreeCluster   = 2;
 
     vol.volumeLabel[0] = '\0';
     vol.mounted = true;
@@ -573,34 +610,59 @@ static block::Status write_fat_entry(const FATVolume& vol, uint32_t cluster, uin
 
 static uint32_t allocate_cluster(FATVolume& vol)
 {
+    if (vol.totalDataClusters == 0) return 0;
     uint32_t entrySize = fat_entry_size(vol);
-    uint32_t entriesPerSector = vol.bytesPerSector / entrySize;
-    for (uint32_t fatSectorOffset = 0; fatSectorOffset < vol.fatSizeSectors; ++fatSectorOffset) {
-        uint32_t fatSector = vol.reservedSectors + fatSectorOffset;
-        if (read_volume_sector(vol, fatSector, s_secBuf) != block::BLOCK_OK) {
+    const uint32_t firstCluster =
+        is_valid_data_cluster(vol, vol.nextFreeCluster) ? vol.nextFreeCluster : 2;
+    serial::puts("LFPASTE_ALLOC_BEGIN previous=0x00000000 start=0x");
+    serial::put_hex32(firstCluster);
+    serial::puts("\n");
+
+    // Search each valid data-cluster slot at most once, beginning at the last
+    // successful allocation. This makes allocation O(number of candidates)
+    // for an operation, rather than restarting at cluster 2 each time.
+    for (uint32_t scan = 0; scan < vol.totalDataClusters; ++scan) {
+        const uint32_t relative =
+            (static_cast<uint64_t>(firstCluster - 2) + scan) % vol.totalDataClusters;
+        const uint32_t cluster = relative + 2;
+        const uint32_t fatOffset = cluster * entrySize;
+        const uint32_t fatSectorOffset = fatOffset / vol.bytesPerSector;
+        const uint32_t entryOffset = fatOffset % vol.bytesPerSector;
+        if (fatSectorOffset >= vol.fatSizeSectors ||
+            read_volume_sector(vol, vol.reservedSectors + fatSectorOffset, s_secBuf) != block::BLOCK_OK) {
+            return 0;
+        }
+        ++s_fatScanIterations;
+
+        uint32_t value;
+        if (entrySize == 2) {
+            value = *reinterpret_cast<uint16_t*>(&s_secBuf[entryOffset]) & FAT16_CLUSTER_MASK;
+        } else {
+            value = *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]) & FAT32_CLUSTER_MASK;
+        }
+        if (value != fat_free_value(vol)) continue;
+
+        if (write_fat_entry(vol, cluster, fat_end_value(vol)) != block::BLOCK_OK) {
             return 0;
         }
 
-        for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
-            uint32_t cluster = fatSectorOffset * entriesPerSector + entryIndex;
-            if (cluster < 2 || cluster >= vol.totalDataClusters + 2) continue;
-
-            uint32_t value;
-            if (entrySize == 2) {
-                value = *reinterpret_cast<uint16_t*>(&s_secBuf[entryIndex * 2]) & FAT16_CLUSTER_MASK;
-            } else {
-                value = *reinterpret_cast<uint32_t*>(&s_secBuf[entryIndex * 4]) & FAT32_CLUSTER_MASK;
-            }
-            if (value != fat_free_value(vol)) continue;
-
-            if (write_fat_entry(vol, cluster, fat_end_value(vol)) != block::BLOCK_OK) {
-                return 0;
-            }
-
-            return cluster;
-        }
+        vol.nextFreeCluster = cluster == vol.totalDataClusters + 1 ? 2 : cluster + 1;
+        ++s_allocatedClusters;
+        serial::puts("LFPASTE_ALLOC_END new=0x");
+        serial::put_hex32(cluster);
+        serial::puts(" scans=0x");
+        serial::put_hex64(scan + 1);
+        serial::puts(" totalScans=0x");
+        serial::put_hex64(s_fatScanIterations);
+        serial::puts(" status=OK\n");
+        return cluster;
     }
 
+    serial::puts("LFPASTE_ALLOC_END new=0x00000000 scans=0x");
+    serial::put_hex64(vol.totalDataClusters);
+    serial::puts(" totalScans=0x");
+    serial::put_hex64(s_fatScanIterations);
+    serial::puts(" status=NO_SPACE\n");
     return 0;
 }
 
@@ -610,23 +672,35 @@ static void release_allocated_cluster(FATVolume& vol, uint32_t cluster)
     // Best-effort rollback. The original create path leaked the newly
     // allocated cluster when directory-sector publication failed.
     write_fat_entry(vol, cluster, fat_free_value(vol));
+    if (!is_valid_data_cluster(vol, vol.nextFreeCluster) || cluster < vol.nextFreeCluster) {
+        vol.nextFreeCluster = cluster;
+    }
 }
 
-static void release_cluster_chain(FATVolume& vol, uint32_t firstCluster)
+static bool release_cluster_chain(FATVolume& vol, uint32_t firstCluster)
 {
     if (chain_cycle_detected(vol, firstCluster, max_chain_steps(vol))) {
         set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
-        return;
+        return false;
     }
     uint32_t cluster = firstCluster;
     uint32_t steps = 0;
     while (is_valid_data_cluster(vol, cluster) && steps < max_chain_steps(vol)) {
         ++steps;
         const uint32_t next = next_cluster(vol, cluster);
-        if (write_fat_entry(vol, cluster, fat_free_value(vol)) != block::BLOCK_OK) return;
-        if (is_end_of_chain(vol, next) || !is_valid_data_cluster(vol, next)) return;
+        if (write_fat_entry(vol, cluster, fat_free_value(vol)) != block::BLOCK_OK) return false;
+        if (!is_valid_data_cluster(vol, vol.nextFreeCluster) || cluster < vol.nextFreeCluster) {
+            vol.nextFreeCluster = cluster;
+        }
+        if (is_end_of_chain(vol, next)) return true;
+        if (!is_valid_data_cluster(vol, next)) {
+            set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+            return false;
+        }
         cluster = next;
     }
+    set_traversal_status(TRAVERSAL_CHAIN_STEP_LIMIT);
+    return false;
 }
 
 // ================================================================
@@ -736,6 +810,8 @@ void init()
     s_volumeCount = 0;
     s_lastIoStatus = block::BLOCK_OK;
     s_lastTraversalStatus = TRAVERSAL_OK;
+    s_fatScanIterations = 0;
+    s_allocatedClusters = 0;
 }
 
 uint8_t mount(uint8_t blockDevIndex)
@@ -909,6 +985,7 @@ uint8_t open_file(uint8_t volumeIndex, uint32_t firstCluster,
             s_files[i].currentCluster = firstCluster;
             s_files[i].currentOffset  = 0;
             s_files[i].attr           = attr;
+            s_files[i].pendingClusterAdvance = false;
             return i;
         }
     }
@@ -1028,6 +1105,7 @@ bool seek_file(uint8_t fileHandle, uint32_t offset)
     set_traversal_status(TRAVERSAL_OK);
     f.currentOffset = offset;
     f.currentCluster = f.firstCluster;
+    f.pendingClusterAdvance = false;
     if (offset == 0 || f.fileSize == 0 || offset >= f.fileSize) return true;
 
     FATVolume& vol = s_volumes[f.volumeIndex];
@@ -1058,18 +1136,57 @@ bool seek_file(uint8_t fileHandle, uint32_t offset)
     return true;
 }
 
-uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
+static bool extend_file_chain(FATVolume& vol, uint32_t previous,
+                              uint32_t offset, uint32_t* outNext)
 {
-    if (fileHandle >= MAX_OPEN_FILES || (!buffer && len != 0)) {
+    if (!outNext || !is_valid_data_cluster(vol, previous)) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return false;
+    }
+    uint32_t next = next_cluster(vol, previous);
+    if (is_end_of_chain(vol, next)) {
+        serial::puts("LFPASTE_ALLOC_BEGIN previous=0x");
+        serial::put_hex32(previous);
+        serial::puts(" start=0x");
+        serial::put_hex32(vol.nextFreeCluster);
+        serial::puts(" offset=0x");
+        serial::put_hex32(offset);
+        serial::puts("\n");
+        const uint32_t newCluster = allocate_cluster(vol);
+        if (newCluster == 0) {
+            set_traversal_status(TRAVERSAL_NO_PROGRESS);
+            return false;
+        }
+        // allocate_cluster() already published the new cluster as
+        // end-of-chain; link only the old tail here.
+        if (write_fat_entry(vol, previous, newCluster) != block::BLOCK_OK) {
+            set_traversal_status(TRAVERSAL_IO_ERROR);
+            return false;
+        }
+        serial::puts("LFPASTE_CHAIN_LINK from=0x");
+        serial::put_hex32(previous);
+        serial::puts(" to=0x");
+        serial::put_hex32(newCluster);
+        serial::puts("\n");
+        next = newCluster;
+    }
+    if (next == previous || is_bad_cluster(vol, next) ||
+        !is_valid_data_cluster(vol, next)) {
+        set_traversal_status(next == previous
+            ? TRAVERSAL_CHAIN_CYCLE : TRAVERSAL_INVALID_CLUSTER);
+        return false;
+    }
+    *outNext = next;
+    return true;
+}
+
+static uint32_t write_file_cursor(FATFile& f, const void* buffer, uint32_t len)
+{
+    if (!f.open || (!buffer && len != 0) || len == 0) {
         set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
         return 0;
     }
-    FATFile& f = s_files[fileHandle];
-    if (!f.open || len == 0) {
-        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
-        return 0;
-    }
-    if (f.attr & ATTR_READ_ONLY) {
+    if (f.attr & ATTR_READ_ONLY || f.volumeIndex >= MAX_FAT_VOLUMES) {
         set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
         return 0;
     }
@@ -1080,31 +1197,57 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
         return 0;
     }
 
-    uint32_t bytesWritten = 0;
-    const uint8_t* src = static_cast<const uint8_t*>(buffer);
-    uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
-    uint32_t clusterVisits = 0;
-    set_traversal_status(TRAVERSAL_OK);
-    if (clusterBytes == 0) {
+    uint32_t clusterBytes = 0;
+    if (!cluster_byte_count(vol, &clusterBytes)) {
         set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
         return 0;
     }
-    const uint32_t bytesAvailable = f.currentOffset < f.fileSize
-        ? f.fileSize - f.currentOffset : 0;
-    const uint32_t bytesRequested = len < bytesAvailable ? len : bytesAvailable;
+    const uint64_t endOffset = static_cast<uint64_t>(f.currentOffset) + len;
+    if (endOffset > 0xFFFFFFFFull || f.currentOffset > f.fileSize) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
+
     const uint32_t offsetInFirstCluster = f.currentOffset % clusterBytes;
-    const uint64_t span = static_cast<uint64_t>(offsetInFirstCluster) + bytesRequested;
-    uint32_t expectedClusters = static_cast<uint32_t>(
+    const uint64_t span = static_cast<uint64_t>(offsetInFirstCluster) + len;
+    const uint32_t expectedClusters = static_cast<uint32_t>(
         (span + clusterBytes - 1) / clusterBytes);
-    if (expectedClusters == 0 && bytesRequested != 0) expectedClusters = 1;
     const uint32_t stepLimit = expectedClusters < max_chain_steps(vol)
         ? expectedClusters : max_chain_steps(vol);
-    if (bytesRequested != 0 && chain_cycle_detected(vol, f.currentCluster, stepLimit)) {
+    if (chain_cycle_detected(vol, f.currentCluster, stepLimit)) {
         set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
         return 0;
     }
 
-    while (bytesWritten < len && f.currentOffset < f.fileSize) {
+    serial::puts("LFPASTE_BEGIN size=0x");
+    serial::put_hex32(len);
+    serial::puts(" buffer=0x");
+    serial::put_hex32(0x10000u);
+    serial::puts(" offset=0x");
+    serial::put_hex32(f.currentOffset);
+    serial::puts(" clusterBytes=0x");
+    serial::put_hex32(clusterBytes);
+    serial::puts(" stepLimit=0x");
+    serial::put_hex32(stepLimit);
+    serial::puts("\n");
+
+    const uint8_t* src = static_cast<const uint8_t*>(buffer);
+    uint32_t bytesWritten = 0;
+    uint32_t clusterVisits = 0;
+    uint32_t nextProgress = 64u * 1024u;
+    set_traversal_status(TRAVERSAL_OK);
+
+    // A previous bounded write may have ended exactly on a cluster boundary.
+    // Keep the tail cluster until the next write is known to need another
+    // cluster, then extend once and advance the cursor.
+    if (f.pendingClusterAdvance) {
+        uint32_t next = 0;
+        if (!extend_file_chain(vol, f.currentCluster, f.currentOffset, &next)) return 0;
+        f.currentCluster = next;
+        f.pendingClusterAdvance = false;
+    }
+
+    while (bytesWritten < len) {
         if (is_end_of_chain(vol, f.currentCluster)) {
             set_traversal_status(TRAVERSAL_TRUNCATED_CHAIN);
             break;
@@ -1118,57 +1261,88 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
             break;
         }
 
-        uint32_t offsetInCluster = f.currentOffset % clusterBytes;
+        const uint32_t offsetInCluster = f.currentOffset % clusterBytes;
         if (offsetInCluster == 0) {
             if (clusterVisits >= stepLimit) {
-                set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+                set_traversal_status(TRAVERSAL_CHAIN_STEP_LIMIT);
                 break;
             }
             ++clusterVisits;
         }
-        uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
-        uint32_t offsetInSector  = offsetInCluster % vol.bytesPerSector;
-
-        block::Status st = read_cluster_sector(vol,
-            f.currentCluster, sectorInCluster, s_secBuf);
+        const uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
+        const uint32_t offsetInSector = offsetInCluster % vol.bytesPerSector;
+        block::Status st = read_cluster_sector(vol, f.currentCluster,
+                                               sectorInCluster, s_secBuf);
         if (st != block::BLOCK_OK) {
             set_traversal_status(TRAVERSAL_IO_ERROR);
             break;
         }
 
-        uint32_t available = vol.bytesPerSector - offsetInSector;
-        uint32_t remaining = f.fileSize - f.currentOffset;
-        uint32_t wanted    = len - bytesWritten;
-        uint32_t toCopy    = available;
-        if (toCopy > remaining) toCopy = remaining;
-        if (toCopy > wanted)    toCopy = wanted;
+        uint32_t toCopy = vol.bytesPerSector - offsetInSector;
+        if (toCopy > len - bytesWritten) toCopy = len - bytesWritten;
         if (toCopy == 0) {
             set_traversal_status(TRAVERSAL_NO_PROGRESS);
             break;
         }
 
         memcopy(&s_secBuf[offsetInSector], src + bytesWritten, toCopy);
-
         st = write_cluster_sector(vol, f.currentCluster, sectorInCluster, s_secBuf);
         if (st != block::BLOCK_OK) {
             set_traversal_status(TRAVERSAL_IO_ERROR);
             break;
         }
 
-        bytesWritten    += toCopy;
+        bytesWritten += toCopy;
         f.currentOffset += toCopy;
+        if (f.currentOffset > f.fileSize) f.fileSize = f.currentOffset;
 
-        if ((f.currentOffset % clusterBytes) == 0 && f.currentOffset > 0) {
-            f.currentCluster = next_cluster(vol, f.currentCluster);
+        if (bytesWritten >= nextProgress || bytesWritten == len) {
+            serial::puts("LFPASTE_PROGRESS offset=0x");
+            serial::put_hex32(f.currentOffset);
+            serial::puts(" requested=0x");
+            serial::put_hex32(len);
+            serial::puts(" written=0x");
+            serial::put_hex32(bytesWritten);
+            serial::puts(" cluster=0x");
+            serial::put_hex32(f.currentCluster);
+            serial::puts("\n");
+            while (nextProgress <= bytesWritten && nextProgress <= 0xFFFFFFFFu - 64u * 1024u) {
+                nextProgress += 64u * 1024u;
+            }
+        }
+
+        if (bytesWritten < len && (f.currentOffset % clusterBytes) == 0) {
+            const uint32_t previous = f.currentCluster;
+            uint32_t next = 0;
+            if (!extend_file_chain(vol, previous, f.currentOffset, &next)) break;
+            f.currentCluster = next;
+            f.pendingClusterAdvance = false;
         }
     }
 
-    if (bytesWritten == bytesRequested && bytesWritten != 0 &&
-        s_lastTraversalStatus == TRAVERSAL_OK) {
+    if (bytesWritten == len && s_lastTraversalStatus == TRAVERSAL_OK) {
         set_traversal_status(TRAVERSAL_END_OF_CHAIN);
+        f.pendingClusterAdvance = (f.currentOffset % clusterBytes) == 0;
     }
-
+    serial::puts("LFPASTE_WRITE_END offset=0x");
+    serial::put_hex32(f.currentOffset);
+    serial::puts(" requested=0x");
+    serial::put_hex32(len);
+    serial::puts(" actual=0x");
+    serial::put_hex32(bytesWritten);
+    serial::puts(" status=");
+    serial::puts(traversal_status_name(last_traversal_status()));
+    serial::puts("\n");
     return bytesWritten;
+}
+
+uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
+{
+    if (fileHandle >= MAX_OPEN_FILES) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
+    return write_file_cursor(s_files[fileHandle], buffer, len);
 }
 
 void close_file(uint8_t fileHandle)
@@ -1182,6 +1356,21 @@ const FATVolume* get_volume(uint8_t volumeIndex)
     if (volumeIndex >= MAX_FAT_VOLUMES) return nullptr;
     if (!s_volumes[volumeIndex].mounted) return nullptr;
     return &s_volumes[volumeIndex];
+}
+
+bool flush(uint8_t volumeIndex, block::Status* outBlockStatus)
+{
+    if (outBlockStatus) *outBlockStatus = block::BLOCK_OK;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !s_volumes[volumeIndex].mounted) {
+        if (outBlockStatus) *outBlockStatus = block::BLOCK_ERR_INVALID;
+        return false;
+    }
+    serial::puts("LFPASTE_FLUSH_BEGIN volume=0x");
+    serial::put_hex8(volumeIndex);
+    serial::puts("\n");
+    const block::Status status = flush_volume_io(s_volumes[volumeIndex]);
+    if (outBlockStatus) *outBlockStatus = status;
+    return status == block::BLOCK_OK;
 }
 
 // ================================================================
@@ -1388,95 +1577,21 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
         set_traversal_status(TRAVERSAL_OK);
         return true;
     }
-    if (!buffer) {
+    if (!buffer || !is_valid_data_cluster(vol, firstCluster)) {
         set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
         return false;
     }
 
-    const uint8_t* src = static_cast<const uint8_t*>(buffer);
-    uint32_t cluster = firstCluster;
-    uint32_t written = 0;
-    uint32_t clusterSteps = 0;
-    const uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
-    if (clusterBytes == 0) {
-        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
-        return false;
-    }
-    const uint32_t requiredClusters = static_cast<uint32_t>(
-        (static_cast<uint64_t>(len) + clusterBytes - 1) / clusterBytes);
-    const uint32_t stepLimit = requiredClusters < max_chain_steps(vol)
-        ? requiredClusters : max_chain_steps(vol);
-    set_traversal_status(TRAVERSAL_OK);
-    if (chain_cycle_detected(vol, firstCluster, stepLimit)) {
-        set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
-        return false;
-    }
-
-    while (written < len && !is_end_of_chain(vol, cluster) &&
-           is_valid_data_cluster(vol, cluster) &&
-           clusterSteps < stepLimit) {
-        ++clusterSteps;
-
-        uint32_t bytesThisCluster = len - written;
-        if (bytesThisCluster > clusterBytes) bytesThisCluster = clusterBytes;
-
-        uint32_t fullSectors = bytesThisCluster / vol.bytesPerSector;
-        if (fullSectors > 0) {
-            uint32_t clusterSector = cluster_to_sector(vol, cluster);
-            if (write_volume_sectors(vol, clusterSector, fullSectors,
-                                     src + written) != block::BLOCK_OK) {
-                set_traversal_status(TRAVERSAL_IO_ERROR);
-                return false;
-            }
-            written += fullSectors * vol.bytesPerSector;
-        }
-
-        if (written < len && bytesThisCluster > fullSectors * vol.bytesPerSector) {
-            uint32_t partialBytes = bytesThisCluster - fullSectors * vol.bytesPerSector;
-            memzero(s_secBuf, vol.bytesPerSector);
-            memcopy(s_secBuf, src + written, partialBytes);
-            if (write_cluster_sector(vol, cluster, fullSectors, s_secBuf) != block::BLOCK_OK) {
-                set_traversal_status(TRAVERSAL_IO_ERROR);
-                return false;
-            }
-            written += partialBytes;
-        }
-
-        if (written < len) {
-            uint32_t next = next_cluster(vol, cluster);
-            if (is_end_of_chain(vol, next)) {
-                uint32_t newCluster = allocate_cluster(vol);
-                if (newCluster == 0) {
-                    set_traversal_status(TRAVERSAL_NO_PROGRESS);
-                    return false;
-                }
-                if (write_fat_entry(vol, cluster, newCluster) != block::BLOCK_OK) {
-                    set_traversal_status(TRAVERSAL_IO_ERROR);
-                    return false;
-                }
-                if (write_fat_entry(vol, newCluster, fat_end_value(vol)) != block::BLOCK_OK) {
-                    set_traversal_status(TRAVERSAL_IO_ERROR);
-                    return false;
-                }
-                next = newCluster;
-            }
-            if (is_bad_cluster(vol, next)) {
-                set_traversal_status(TRAVERSAL_BAD_CLUSTER);
-                return false;
-            }
-            if (!is_valid_data_cluster(vol, next)) {
-                set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
-                return false;
-            }
-            cluster = next;
-        }
-    }
-
-    if (written != len && s_lastTraversalStatus == TRAVERSAL_OK) {
-        set_traversal_status(clusterSteps >= stepLimit
-            ? TRAVERSAL_CHAIN_CYCLE : TRAVERSAL_NO_PROGRESS);
-    }
-    return written == len;
+    FATFile temp{};
+    temp.open = true;
+    temp.volumeIndex = static_cast<uint8_t>(&vol - s_volumes);
+    temp.firstCluster = firstCluster;
+    temp.fileSize = 0;
+    temp.currentCluster = firstCluster;
+    temp.currentOffset = 0;
+    temp.attr = ATTR_ARCHIVE;
+    temp.pendingClusterAdvance = false;
+    return write_file_cursor(temp, buffer, len) == len;
 }
 
 static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const char* name,
@@ -1803,6 +1918,11 @@ FileWriteStatus overwrite_path_status(uint8_t volumeIndex, const char* path,
         if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
         return FILE_WRITE_IO_ERROR;
     }
+    if (flush_volume_io(vol) != block::BLOCK_OK) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+            ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+    }
     return FILE_WRITE_OK;
 }
 
@@ -1868,7 +1988,7 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
         release_cluster_chain(vol, firstCluster);
         s_lastIoStatus = failedStatus;
         if (outBlockStatus) *outBlockStatus = failedStatus;
-        return failedStatus == block::BLOCK_OK ? FILE_WRITE_NO_FREE_CLUSTER : FILE_WRITE_IO_ERROR;
+        return write_failure_status();
     }
     serial::puts("FPASTE_FAT_CHAIN_WRITE_END status=");
     serial::puts(traversal_status_name(last_traversal_status()));
@@ -1929,12 +2049,60 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::put_hex32(firstCluster);
     serial::puts(" status=FILE_WRITE_OK\n");
     serial::puts("FPASTE_DIRECTORY_METADATA_END status=FAT_FILE_WRITE_OK\n");
+    serial::puts("LFPASTE_SIZE_UPDATE size=0x");
+    serial::put_hex32(len);
+    serial::puts("\n");
+    serial::puts("LFPASTE_FLUSH_BEGIN stage=create\n");
+    if (flush_volume_io(vol) != block::BLOCK_OK) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return FILE_WRITE_IO_TIMEOUT;
+    }
     return FILE_WRITE_OK;
 }
 
 bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len)
 {
     return create_file_path_status(volumeIndex, path, buffer, len, nullptr) == FILE_WRITE_OK;
+}
+
+FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
+                                             const char* path,
+                                             uint32_t fileSize,
+                                             block::Status* outBlockStatus)
+{
+    s_lastIoStatus = block::BLOCK_OK;
+    if (outBlockStatus) *outBlockStatus = block::BLOCK_OK;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !path) return FILE_WRITE_INVALID_ARGUMENT;
+    if (!s_volumes[volumeIndex].mounted) return FILE_WRITE_NOT_MOUNTED;
+
+    FATVolume& vol = s_volumes[volumeIndex];
+    DirEntry entry;
+    uint32_t sector = 0;
+    uint32_t offset = 0;
+    if (!find_path_entry_at(volumeIndex, path, &entry, &sector, &offset)) {
+        return FILE_WRITE_NOT_FOUND;
+    }
+    if (entry.isDir) return FILE_WRITE_INVALID_ARGUMENT;
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+            ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+    }
+    FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
+    de->fileSize = fileSize;
+    serial::puts("LFPASTE_SIZE_UPDATE size=0x");
+    serial::put_hex32(fileSize);
+    serial::puts(" sector=0x");
+    serial::put_hex32(sector);
+    serial::puts(" offset=0x");
+    serial::put_hex32(offset);
+    serial::puts("\n");
+    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return s_lastIoStatus == block::BLOCK_ERR_TIMEOUT
+            ? FILE_WRITE_IO_TIMEOUT : FILE_WRITE_IO_ERROR;
+    }
+    return FILE_WRITE_OK;
 }
 
 bool create_directory_path(uint8_t volumeIndex, const char* path)
@@ -1974,6 +2142,10 @@ const char* file_write_status_name(FileWriteStatus status)
         case FILE_WRITE_IO_ERROR: return "FAT_FILE_WRITE_IO_ERROR";
         case FILE_WRITE_READ_ONLY: return "FAT_FILE_WRITE_READ_ONLY";
         case FILE_WRITE_NO_SPACE: return "FAT_FILE_WRITE_NO_SPACE";
+        case FILE_WRITE_IO_TIMEOUT: return "FAT_FILE_WRITE_IO_TIMEOUT";
+        case FILE_WRITE_CORRUPT_CHAIN: return "FAT_FILE_WRITE_CORRUPT_CHAIN";
+        case FILE_WRITE_NO_PROGRESS: return "FAT_FILE_WRITE_NO_PROGRESS";
+        case FILE_WRITE_ALLOCATION_FAILED: return "FAT_FILE_WRITE_ALLOCATION_FAILED";
         default: return "FAT_FILE_WRITE_UNKNOWN";
     }
 }
@@ -2056,6 +2228,13 @@ DirectoryCreateStatus create_directory_path_status(uint8_t volumeIndex,
             ? DIRECTORY_CREATE_NO_FREE_CLUSTER : DIRECTORY_CREATE_IO_ERROR;
     }
 
+    serial::puts("LFPASTE_DIR_CLUSTER_INIT_BEGIN cluster=0x");
+    serial::put_hex32(firstCluster);
+    serial::puts(" sectors=0x");
+    serial::put_hex32(vol.sectorsPerCluster);
+    serial::puts(" bytes=0x");
+    serial::put_hex32(vol.bytesPerSector);
+    serial::puts("\n");
     // Allocate and clear the directory cluster before publishing its parent
     // entry. FAT directory entries for . and .. make the result interoperable
     // with external FAT readers and preserve the current driver's cluster
@@ -2077,9 +2256,15 @@ DirectoryCreateStatus create_directory_path_status(uint8_t volumeIndex,
             return DIRECTORY_CREATE_IO_ERROR;
         }
     }
+    serial::puts("LFPASTE_DIR_CLUSTER_INIT_END cluster=0x");
+    serial::put_hex32(firstCluster);
+    serial::puts("\n");
 
     uint32_t sector = 0;
     uint32_t offset = 0;
+    serial::puts("LFPASTE_DIR_ENTRY_FIND_BEGIN parent=0x");
+    serial::put_hex32(parentCluster);
+    serial::puts("\n");
     if (!find_free_dir_entry(volumeIndex, parentCluster, &sector, &offset)) {
         const block::Status failedStatus = s_lastIoStatus;
         release_allocated_cluster(vol, firstCluster);
@@ -2087,23 +2272,47 @@ DirectoryCreateStatus create_directory_path_status(uint8_t volumeIndex,
         return failedStatus == block::BLOCK_OK
             ? DIRECTORY_CREATE_NO_FREE_ENTRY : DIRECTORY_CREATE_IO_ERROR;
     }
+    serial::puts("LFPASTE_DIR_ENTRY_FIND_END sector=0x");
+    serial::put_hex32(sector);
+    serial::puts(" offset=0x");
+    serial::put_hex32(offset);
+    serial::puts("\n");
 
+    serial::puts("LFPASTE_DIR_METADATA_READ_BEGIN sector=0x");
+    serial::put_hex32(sector);
+    serial::puts("\n");
     if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         const block::Status failedStatus = s_lastIoStatus;
         release_allocated_cluster(vol, firstCluster);
         if (outBlockStatus) *outBlockStatus = failedStatus;
         return DIRECTORY_CREATE_IO_ERROR;
     }
+    serial::puts("LFPASTE_DIR_METADATA_READ_END sector=0x");
+    serial::put_hex32(sector);
+    serial::puts("\n");
 
     FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
     initialize_directory_entry(de, shortName, firstCluster);
+    serial::puts("LFPASTE_DIR_METADATA_WRITE_BEGIN sector=0x");
+    serial::put_hex32(sector);
+    serial::puts(" offset=0x");
+    serial::put_hex32(offset);
+    serial::puts("\n");
     if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         const block::Status failedStatus = s_lastIoStatus;
         release_allocated_cluster(vol, firstCluster);
         if (outBlockStatus) *outBlockStatus = failedStatus;
         return DIRECTORY_CREATE_IO_ERROR;
     }
+    serial::puts("LFPASTE_DIR_METADATA_WRITE_END sector=0x");
+    serial::put_hex32(sector);
+    serial::puts("\n");
 
+    serial::puts("LFPASTE_FLUSH_BEGIN stage=directory-create\n");
+    if (flush_volume_io(vol) != block::BLOCK_OK) {
+        if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
+        return DIRECTORY_CREATE_IO_ERROR;
+    }
     return DIRECTORY_CREATE_OK;
 }
 
@@ -2135,8 +2344,8 @@ bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
 
     // A failed Paste rollback must remove the directory entry and return its
     // entire data chain to the free-cluster pool, not merely hide the entry.
-    release_cluster_chain(vol, entry.firstCluster);
-    return true;
+    if (!release_cluster_chain(vol, entry.firstCluster)) return false;
+    return flush_volume_io(vol) == block::BLOCK_OK;
 }
 
 bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
@@ -2147,6 +2356,11 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
 
     FATVolume& vol = s_volumes[volumeIndex];
     if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
+    serial::puts("LFPASTE_RENAME_BEGIN old=");
+    serial::puts(oldPath);
+    serial::puts(" new=");
+    serial::puts(newPath);
+    serial::puts("\n");
 
     DirEntry existing;
     if (lookup_path(volumeIndex, newPath, &existing)) return false;
@@ -2177,7 +2391,8 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
         FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[oldOffset]);
         memcopy(de->name, shortName, 11);
 
-        return write_volume_sector(vol, oldSector, s_secBuf) == block::BLOCK_OK;
+        if (write_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
+        return flush_volume_io(vol) == block::BLOCK_OK;
     }
 
     if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
@@ -2188,16 +2403,34 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
     uint32_t newSector = 0;
     uint32_t newOffset = 0;
     if (!find_free_dir_entry(volumeIndex, newParent, &newSector, &newOffset)) return false;
+    serial::puts("LFPASTE_RENAME_DEST_SLOT sector=0x");
+    serial::put_hex32(newSector);
+    serial::puts(" offset=0x");
+    serial::put_hex32(newOffset);
+    serial::puts("\n");
 
     if (read_volume_sector(vol, newSector, s_secBuf) != block::BLOCK_OK) return false;
     memcopy(&s_secBuf[newOffset], &movedEntry, sizeof(FAT32_DirEntry));
+    serial::puts("LFPASTE_RENAME_DEST_WRITE_BEGIN sector=0x");
+    serial::put_hex32(newSector);
+    serial::puts("\n");
     if (write_volume_sector(vol, newSector, s_secBuf) != block::BLOCK_OK) return false;
+    serial::puts("LFPASTE_RENAME_DEST_WRITE_END sector=0x");
+    serial::put_hex32(newSector);
+    serial::puts("\n");
 
     if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
     FAT32_DirEntry* oldDe = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[oldOffset]);
     oldDe->name[0] = static_cast<char>(0xE5);
 
-    return write_volume_sector(vol, oldSector, s_secBuf) == block::BLOCK_OK;
+    serial::puts("LFPASTE_RENAME_SOURCE_WRITE_BEGIN sector=0x");
+    serial::put_hex32(oldSector);
+    serial::puts("\n");
+    if (write_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
+    serial::puts("LFPASTE_RENAME_SOURCE_WRITE_END sector=0x");
+    serial::put_hex32(oldSector);
+    serial::puts("\n");
+    return flush_volume_io(vol) == block::BLOCK_OK;
 }
 
 } // namespace fs_fat
