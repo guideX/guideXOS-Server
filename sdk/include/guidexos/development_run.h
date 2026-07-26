@@ -1,0 +1,96 @@
+#pragma once
+
+#include "types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define GX_DEVELOPMENT_RUN_API_VERSION 1u
+#define GX_DEVELOPMENT_RUN_MAX_PROJECT_ROOT_BYTES 240u
+#define GX_DEVELOPMENT_RUN_MAX_PROJECT_ID_BYTES 96u
+#define GX_DEVELOPMENT_RUN_MAX_PATH_BYTES 160u
+#define GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES 65u
+#define GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES 96u
+#define GX_DEVELOPMENT_RUN_MAX_DISPLAY_NAME_BYTES 96u
+#define GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES 128u
+
+typedef uint64_t gx_development_run_handle;
+
+typedef enum gx_development_run_state {
+    GX_DEVELOPMENT_RUN_EMPTY = 0,
+    GX_DEVELOPMENT_RUN_VALIDATING = 1,
+    GX_DEVELOPMENT_RUN_PREPARED = 2,
+    GX_DEVELOPMENT_RUN_REGISTERED = 3,
+    GX_DEVELOPMENT_RUN_LAUNCHING = 4,
+    GX_DEVELOPMENT_RUN_RUNNING = 5,
+    GX_DEVELOPMENT_RUN_EXITED = 6,
+    GX_DEVELOPMENT_RUN_CLEANING_UP = 7,
+    GX_DEVELOPMENT_RUN_COMPLETED = 8,
+    GX_DEVELOPMENT_RUN_FAILED = 9
+} gx_development_run_state;
+
+typedef enum gx_development_run_error_code {
+    GX_DEVELOPMENT_RUN_ERROR_NONE = 0,
+    GX_DEVELOPMENT_RUN_ERROR_INVALID_REQUEST = 1,
+    GX_DEVELOPMENT_RUN_ERROR_OWNER_NOT_ALLOWED = 2,
+    GX_DEVELOPMENT_RUN_ERROR_NO_PROJECT = 3,
+    GX_DEVELOPMENT_RUN_ERROR_WORKSPACE_ONLY = 4,
+    GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_PROJECT = 5,
+    GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET = 6,
+    GX_DEVELOPMENT_RUN_ERROR_PROJECT_INVALID = 7,
+    GX_DEVELOPMENT_RUN_ERROR_MANIFEST_MISSING = 8,
+    GX_DEVELOPMENT_RUN_ERROR_MANIFEST_MALFORMED = 9,
+    GX_DEVELOPMENT_RUN_ERROR_MANIFEST_MISMATCH = 10,
+    GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_MISSING = 11,
+    GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_CHANGED = 12,
+    GX_DEVELOPMENT_RUN_ERROR_BUILD_REQUIRED = 13,
+    GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_INVALID = 14,
+    GX_DEVELOPMENT_RUN_ERROR_ENTRY_POINT_MISSING = 15,
+    GX_DEVELOPMENT_RUN_ERROR_ABI_MISMATCH = 16,
+    GX_DEVELOPMENT_RUN_ERROR_ARCHITECTURE_MISMATCH = 17,
+    GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_INSTALLED = 18,
+    GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_IN_USE = 19,
+    GX_DEVELOPMENT_RUN_ERROR_DEPLOYMENT_ALREADY_ACTIVE = 20,
+    GX_DEVELOPMENT_RUN_ERROR_STALE_DEPLOYMENT = 21,
+    GX_DEVELOPMENT_RUN_ERROR_OWNER_MISMATCH = 22,
+    GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE = 23,
+    GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED = 24,
+    GX_DEVELOPMENT_RUN_ERROR_RELEASED = 25,
+    GX_DEVELOPMENT_RUN_ERROR_SERVICE_UNAVAILABLE = 26,
+    GX_DEVELOPMENT_RUN_ERROR_INTERNAL = 27
+} gx_development_run_error_code;
+
+typedef struct gx_development_run_request {
+    uint32_t size;
+    uint32_t version;
+    const char* projectRoot;
+    const char* projectId;
+    const char* projectKind;
+    const char* targetProfile;
+    const char* manifestPath;
+    const char* artifactPath;
+    const char* artifactSha256;
+} gx_development_run_request;
+
+typedef struct gx_development_run_snapshot {
+    uint32_t size;
+    uint32_t version;
+    gx_development_run_handle handle;
+    uint32_t state;
+    uint32_t errorCode;
+    uint64_t processId;
+    uint64_t nativeRuntimeId;
+    uint32_t windowCount;
+    uint32_t createdWindowCount;
+    int32_t exitCode;
+    uint32_t cleanupComplete;
+    char applicationId[GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES];
+    char displayName[GX_DEVELOPMENT_RUN_MAX_DISPLAY_NAME_BYTES];
+    char artifactSha256[GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES];
+    char errorMessage[GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES];
+} gx_development_run_snapshot;
+
+#ifdef __cplusplus
+}
+#endif
