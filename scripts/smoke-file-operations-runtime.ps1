@@ -50,6 +50,15 @@ function Build-KernelWithFlags([string]$flags) {
     }
 }
 
+function Get-LastPasteMarker([string]$output) {
+    if (-not $output) { return "none" }
+    $marker = $output -split "`r?`n" |
+        Where-Object { $_ -match "FPASTE_|\[FILE-OPS-RUNTIME-SMOKE\] phase=" } |
+        Select-Object -Last 1
+    if (-not $marker) { return "none" }
+    return $marker.Trim()
+}
+
 $qemu = Find-Qemu
 if (-not $qemu) { throw "qemu-system-x86_64 not found." }
 $ovmf = Find-Ovmf
@@ -86,6 +95,7 @@ try {
                 $output.Contains("[FILE-OPS-RUNTIME-SMOKE] result=FAIL")) { break }
         }
     }
+    $timedOut = -not $process.HasExited -and (Get-Date) -ge $deadline
     if (-not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
@@ -97,6 +107,10 @@ try {
     if ($output.Contains("[FILE-OPS-RUNTIME-SMOKE] result=PASS")) {
         Write-Host "File-operation runtime smoke PASS. Serial log: $serialLog" -ForegroundColor Green
         exit 0
+    }
+    if ($timedOut) {
+        $lastMarker = Get-LastPasteMarker $output
+        Write-Host "[FILE-OPS-RUNTIME-SMOKE] result=FAIL timeout=1 lastStage=$lastMarker" -ForegroundColor Red
     }
     throw "File-operation runtime smoke did not report PASS. Serial log: $serialLog"
 } finally {

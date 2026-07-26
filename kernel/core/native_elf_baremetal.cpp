@@ -185,14 +185,6 @@ static bool text_equal(const char* a, const char* b) {
     return *a == '\0' && *b == '\0';
 }
 
-static bool starts_with(const char* value, const char* prefix) {
-    if (!value || !prefix) return false;
-    while (*prefix) {
-        if (*value++ != *prefix++) return false;
-    }
-    return true;
-}
-
 static uint32_t text_length(const char* value) {
     uint32_t length = 0;
     if (value) while (value[length]) ++length;
@@ -265,11 +257,6 @@ static void log_runtime(Runtime* runtime, const char* message) {
     serial::puts(" ");
     serial::puts(message ? message : "");
     serial::putc('\n');
-}
-
-static void log_hex(const char* label, uint64_t value) {
-    serial::puts(label);
-    serial::put_hex64(value);
 }
 
 static bool package_path(const Package* package, const char* relative, char* output, uint32_t capacity) {
@@ -680,7 +667,11 @@ static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outE
             return GX_OK;
         }
 
-        pump_desktop(runtime);
+        // Keep the native event path independent from the compositor's full
+        // desktop repaint. Frames are repainted from host_present_frame;
+        // polling must remain responsive to queued PS/2 transitions.
+        input::poll();
+
         const bool focused = compositor::KernelCompositor::getFocusedWindow() == runtime->owner->window();
         if (!runtime->focusKnown || focused != runtime->lastFocus) {
             runtime->focusKnown = true;
@@ -691,6 +682,9 @@ static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outE
 
         ps2keyboard::KeyEvent keyEvent;
         if (ps2keyboard::get_event(&keyEvent)) {
+            serial::puts("[NATIVE-ELF] input event key=0x"); serial::put_hex32(keyEvent.key);
+            serial::puts(" action=");
+            serial::puts(keyEvent.action == ps2keyboard::KeyAction::Down ? "down\n" : "up\n");
             outEvent->type = GX_EVENT_KEY;
             outEvent->param1 = static_cast<int>(keyEvent.key == ps2keyboard::KEY_EVENT_LEFT ? GX_KEY_LEFT :
                 keyEvent.key == ps2keyboard::KEY_EVENT_UP ? GX_KEY_UP :
@@ -798,7 +792,10 @@ static gx_result GX_CALL host_present_frame(gx_app_context* context, gx_handle w
         width != 448 || height != 553 || strideBytes != 1792u ||
         pixelFormat != GX_PIXEL_FORMAT_XRGB8888 || pixelBytes < strideBytes * static_cast<uint32_t>(height) ||
         pixelBytes > kMaxFrameBytes) return GX_ERROR_INVALID_ARGUMENT;
+    serial::puts("[NATIVE-ELF] frame copy begin bytes=0x"); serial::put_hex32(pixelBytes); serial::putc('\n');
     runtime->owner->present(pixels, static_cast<uint32_t>(width), static_cast<uint32_t>(height), strideBytes);
+    pump_desktop(runtime);
+    serial::puts("[NATIVE-ELF] frame copy complete\n");
     if (runtime->owner->closed()) return GX_ERROR_FAILED;
     serial::puts("[NATIVE-ELF] frame PASS app="); serial::puts(runtime->package->displayName);
     serial::puts(" window=0x"); serial::put_hex64(window);
@@ -849,7 +846,11 @@ static bool run_package(Package* package) {
     runtime.context.host = &runtime.host;
     runtime.context.userData = &runtime;
     log_runtime(&runtime, "launch begin path=package-relative runtime=native-elf abi=guidexos-c-abi-v1");
-    if (!load_image(&runtime)) return false;
+    if (!load_image(&runtime)) {
+        delete[] runtime.image;
+        runtime.image = nullptr;
+        return false;
+    }
     runtime.stack = new uint8_t[kRuntimeStackBytes];
     if (!runtime.stack) {
         delete[] runtime.image;

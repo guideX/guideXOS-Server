@@ -22,6 +22,14 @@ static FATVolume s_volumes[MAX_FAT_VOLUMES];
 static FATFile   s_files[MAX_OPEN_FILES];
 static uint8_t   s_volumeCount = 0;
 static block::Status s_lastIoStatus = block::BLOCK_OK;
+static TraversalStatus s_lastTraversalStatus = TRAVERSAL_OK;
+
+// A v0.1 file operation must fail boundedly even when the FAT contains a
+// cycle.  The normal clipboard path is limited to 8 MiB, so this is well
+// above the largest supported copy while preventing a corrupt volume from
+// turning one synchronous UI event into a whole-volume walk.
+static const uint32_t kMaxSafeChainSteps = 65536u;
+static const uint32_t kMaxSafeDirectoryChainSteps = 4096u;
 
 // Sector buffer for reading metadata (one sector at a time)
 static uint8_t   s_secBuf[4096]; // supports up to 4096-byte sectors
@@ -141,12 +149,43 @@ static uint32_t max_chain_steps(const FATVolume& vol)
     uint32_t clusterCount = vol.type == FAT_TYPE_EXFAT
         ? vol.exfatClusterCount
         : vol.totalDataClusters;
-    return clusterCount != 0 ? clusterCount : 1;
+    if (clusterCount == 0) return 1;
+    return clusterCount < kMaxSafeChainSteps ? clusterCount : kMaxSafeChainSteps;
 }
 
+static uint32_t directory_chain_step_limit(const FATVolume& vol)
+{
+    const uint32_t volumeLimit = max_chain_steps(vol);
+    return volumeLimit < kMaxSafeDirectoryChainSteps
+        ? volumeLimit : kMaxSafeDirectoryChainSteps;
+}
+
+static bool is_bad_cluster(const FATVolume& vol, uint32_t cluster)
+{
+    if (vol.type == FAT_TYPE_FAT16) return cluster == FAT16_CLUSTER_BAD;
+    if (vol.type == FAT_TYPE_FAT32) return cluster == FAT32_CLUSTER_BAD;
+    return vol.type == FAT_TYPE_EXFAT && cluster == 0xFFFFFFF7u;
+}
+
+static void set_traversal_status(TraversalStatus status)
+{
+    s_lastTraversalStatus = status;
+}
+
+// Floyd's tortoise/hare check keeps cycle detection bounded without a
+// heap-sized visited-cluster table.  Reaching EOC before the limit is the
+// normal terminating case; reaching the limit without EOC is handled by the
+// caller's step invariant.
 static uint32_t fat_next_cluster(const FATVolume& vol, uint32_t cluster)
 {
-    if (!is_valid_data_cluster(vol, cluster)) return fat_end_value(vol);
+    if (is_bad_cluster(vol, cluster)) {
+        set_traversal_status(TRAVERSAL_BAD_CLUSTER);
+        return fat_end_value(vol);
+    }
+    if (!is_valid_data_cluster(vol, cluster)) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return fat_end_value(vol);
+    }
 
     uint32_t entrySize = fat_entry_size(vol);
     uint32_t fatOffset   = cluster * entrySize;
@@ -154,7 +193,10 @@ static uint32_t fat_next_cluster(const FATVolume& vol, uint32_t cluster)
     uint32_t entryOffset = fatOffset % vol.bytesPerSector;
 
     block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
-    if (st != block::BLOCK_OK) return fat_end_value(vol);
+    if (st != block::BLOCK_OK) {
+        set_traversal_status(TRAVERSAL_IO_ERROR);
+        return fat_end_value(vol);
+    }
 
     if (entrySize == 2) {
         uint32_t val = *reinterpret_cast<uint16_t*>(&s_secBuf[entryOffset]);
@@ -171,7 +213,14 @@ static uint32_t fat_next_cluster(const FATVolume& vol, uint32_t cluster)
 
 static uint32_t exfat_next_cluster(const FATVolume& vol, uint32_t cluster)
 {
-    if (!is_valid_data_cluster(vol, cluster)) return 0xFFFFFFFF;
+    if (is_bad_cluster(vol, cluster)) {
+        set_traversal_status(TRAVERSAL_BAD_CLUSTER);
+        return 0xFFFFFFFF;
+    }
+    if (!is_valid_data_cluster(vol, cluster)) {
+        set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+        return 0xFFFFFFFF;
+    }
 
     uint32_t fatOffset   = cluster * 4;
     uint32_t sectorSize  = 1u << vol.exfatBytesPerSectorShift;
@@ -179,7 +228,10 @@ static uint32_t exfat_next_cluster(const FATVolume& vol, uint32_t cluster)
     uint32_t entryOffset = fatOffset % sectorSize;
 
     block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
-    if (st != block::BLOCK_OK) return 0xFFFFFFFF;
+    if (st != block::BLOCK_OK) {
+        set_traversal_status(TRAVERSAL_IO_ERROR);
+        return 0xFFFFFFFF;
+    }
 
     return *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]);
 }
@@ -201,6 +253,31 @@ static bool is_end_of_chain(const FATVolume& vol, uint32_t cluster)
     if (vol.type == FAT_TYPE_FAT32) return cluster >= FAT32_CLUSTER_END;
     if (vol.type == FAT_TYPE_EXFAT) return cluster >= 0xFFFFFFF8;
     return true;
+}
+
+// Floyd's tortoise/hare check keeps cycle detection bounded without a
+// heap-sized visited-cluster table. Reaching EOC before the limit is the
+// normal terminating case; reaching the limit without EOC is handled by the
+// caller's step invariant.
+static bool chain_cycle_detected(const FATVolume& vol, uint32_t firstCluster,
+                                 uint32_t stepLimit)
+{
+    if (stepLimit == 0 || is_end_of_chain(vol, firstCluster) ||
+        !is_valid_data_cluster(vol, firstCluster)) return false;
+
+    uint32_t slow = firstCluster;
+    uint32_t fast = firstCluster;
+    for (uint32_t step = 0; step < stepLimit; ++step) {
+        if (is_end_of_chain(vol, slow) || !is_valid_data_cluster(vol, slow)) return false;
+        slow = next_cluster(vol, slow);
+
+        if (is_end_of_chain(vol, fast) || !is_valid_data_cluster(vol, fast)) return false;
+        fast = next_cluster(vol, fast);
+        if (is_end_of_chain(vol, fast) || !is_valid_data_cluster(vol, fast)) return false;
+        fast = next_cluster(vol, fast);
+        if (slow == fast && !is_end_of_chain(vol, slow)) return true;
+    }
+    return false;
 }
 
 // ================================================================
@@ -537,6 +614,10 @@ static void release_allocated_cluster(FATVolume& vol, uint32_t cluster)
 
 static void release_cluster_chain(FATVolume& vol, uint32_t firstCluster)
 {
+    if (chain_cycle_detected(vol, firstCluster, max_chain_steps(vol))) {
+        set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+        return;
+    }
     uint32_t cluster = firstCluster;
     uint32_t steps = 0;
     while (is_valid_data_cluster(vol, cluster) && steps < max_chain_steps(vol)) {
@@ -654,6 +735,7 @@ void init()
     memzero(&s_dirIter, sizeof(s_dirIter));
     s_volumeCount = 0;
     s_lastIoStatus = block::BLOCK_OK;
+    s_lastTraversalStatus = TRAVERSAL_OK;
 }
 
 uint8_t mount(uint8_t blockDevIndex)
@@ -709,6 +791,7 @@ bool open_root_dir(uint8_t volumeIndex)
     s_dirIter.clusterSteps    = 0;
     s_dirIter.sectorInCluster = 0;
     s_dirIter.entryInSector   = 0;
+    set_traversal_status(TRAVERSAL_OK);
     return true;
 }
 
@@ -736,8 +819,17 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
                    !is_valid_data_cluster(vol, s_dirIter.cluster) ||
                    (s_dirIter.sectorInCluster == 0 &&
                     s_dirIter.entryInSector == 0 &&
-                    s_dirIter.clusterSteps >= max_chain_steps(vol))) {
+                    s_dirIter.clusterSteps >= directory_chain_step_limit(vol))) {
             s_dirIter.active = false;
+            if (is_end_of_chain(vol, s_dirIter.cluster)) {
+                set_traversal_status(TRAVERSAL_DIRECTORY_END);
+            } else if (is_bad_cluster(vol, s_dirIter.cluster)) {
+                set_traversal_status(TRAVERSAL_BAD_CLUSTER);
+            } else if (!is_valid_data_cluster(vol, s_dirIter.cluster)) {
+                set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+            } else {
+                set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+            }
             return false;
         } else {
             if (s_dirIter.sectorInCluster == 0 && s_dirIter.entryInSector == 0) {
@@ -825,24 +917,63 @@ uint8_t open_file(uint8_t volumeIndex, uint32_t firstCluster,
 
 uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
 {
-    if (fileHandle >= MAX_OPEN_FILES) return 0;
+    if (fileHandle >= MAX_OPEN_FILES || (!buffer && len != 0)) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
     FATFile& f = s_files[fileHandle];
-    if (!f.open) return 0;
+    if (!f.open) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
 
     FATVolume& vol = s_volumes[f.volumeIndex];
     uint32_t bytesRead = 0;
     uint8_t* dst = static_cast<uint8_t*>(buffer);
     uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
     uint32_t clusterVisits = 0;
+    set_traversal_status(TRAVERSAL_OK);
+    if (clusterBytes == 0) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
+
+    const uint32_t bytesAvailable = f.currentOffset < f.fileSize
+        ? f.fileSize - f.currentOffset : 0;
+    const uint32_t bytesRequested = len < bytesAvailable ? len : bytesAvailable;
+    const uint32_t offsetInFirstCluster = f.currentOffset % clusterBytes;
+    const uint64_t span = static_cast<uint64_t>(offsetInFirstCluster) + bytesRequested;
+    uint32_t expectedClusters = static_cast<uint32_t>(
+        (span + clusterBytes - 1) / clusterBytes);
+    if (expectedClusters == 0 && bytesRequested != 0) expectedClusters = 1;
+    const uint32_t stepLimit = expectedClusters < max_chain_steps(vol)
+        ? expectedClusters : max_chain_steps(vol);
+    if (bytesRequested != 0 && chain_cycle_detected(vol, f.currentCluster, stepLimit)) {
+        set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+        return 0;
+    }
 
     while (bytesRead < len && f.currentOffset < f.fileSize) {
-        if (is_end_of_chain(vol, f.currentCluster) ||
-            !is_valid_data_cluster(vol, f.currentCluster)) break;
+        if (is_end_of_chain(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_TRUNCATED_CHAIN);
+            break;
+        }
+        if (is_bad_cluster(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_BAD_CLUSTER);
+            break;
+        }
+        if (!is_valid_data_cluster(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+            break;
+        }
 
         // Offset within current cluster
         uint32_t offsetInCluster = f.currentOffset % clusterBytes;
         if (offsetInCluster == 0) {
-            if (clusterVisits >= max_chain_steps(vol)) break;
+            if (clusterVisits >= stepLimit) {
+                set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+                break;
+            }
             ++clusterVisits;
         }
         uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
@@ -850,7 +981,10 @@ uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
 
         block::Status st = read_cluster_sector(vol,
             f.currentCluster, sectorInCluster, s_secBuf);
-        if (st != block::BLOCK_OK) break;
+        if (st != block::BLOCK_OK) {
+            set_traversal_status(TRAVERSAL_IO_ERROR);
+            break;
+        }
 
         uint32_t available = vol.bytesPerSector - offsetInSector;
         uint32_t remaining = f.fileSize - f.currentOffset;
@@ -858,6 +992,10 @@ uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
         uint32_t toCopy    = available;
         if (toCopy > remaining) toCopy = remaining;
         if (toCopy > wanted)    toCopy = wanted;
+        if (toCopy == 0) {
+            set_traversal_status(TRAVERSAL_NO_PROGRESS);
+            break;
+        }
 
         memcopy(dst + bytesRead, &s_secBuf[offsetInSector], toCopy);
         bytesRead        += toCopy;
@@ -867,6 +1005,11 @@ uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
         if ((f.currentOffset % clusterBytes) == 0 && f.currentOffset > 0) {
             f.currentCluster = next_cluster(vol, f.currentCluster);
         }
+    }
+
+    if (bytesRead == bytesRequested && bytesRead != 0 &&
+        s_lastTraversalStatus == TRAVERSAL_OK) {
+        set_traversal_status(TRAVERSAL_END_OF_CHAIN);
     }
 
     return bytesRead;
@@ -882,48 +1025,105 @@ bool seek_file(uint8_t fileHandle, uint32_t offset)
     // returns zero; for offsets inside the file, rebuild the cluster cursor
     // so the next FAT read starts at the requested byte rather than at the
     // position where the file was opened.
+    set_traversal_status(TRAVERSAL_OK);
     f.currentOffset = offset;
     f.currentCluster = f.firstCluster;
-    if (offset == 0 || f.fileSize == 0) return true;
+    if (offset == 0 || f.fileSize == 0 || offset >= f.fileSize) return true;
 
     FATVolume& vol = s_volumes[f.volumeIndex];
     const uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
     if (clusterBytes == 0) return false;
 
     const uint32_t clusterIndex = offset / clusterBytes;
-    for (uint32_t i = 0; i < clusterIndex; ++i) {
-        if (is_end_of_chain(vol, f.currentCluster) ||
-            !is_valid_data_cluster(vol, f.currentCluster)) {
+    const uint32_t stepLimit = max_chain_steps(vol);
+    for (uint32_t i = 0; i < clusterIndex && i < stepLimit; ++i) {
+        if (is_end_of_chain(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_TRUNCATED_CHAIN);
+            return false;
+        }
+        if (is_bad_cluster(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_BAD_CLUSTER);
+            return false;
+        }
+        if (!is_valid_data_cluster(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
             return false;
         }
         f.currentCluster = next_cluster(vol, f.currentCluster);
+    }
+    if (clusterIndex > stepLimit) {
+        set_traversal_status(TRAVERSAL_CHAIN_STEP_LIMIT);
+        return false;
     }
     return true;
 }
 
 uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
 {
-    if (fileHandle >= MAX_OPEN_FILES) return 0;
+    if (fileHandle >= MAX_OPEN_FILES || (!buffer && len != 0)) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
     FATFile& f = s_files[fileHandle];
-    if (!f.open) return 0;
-    if (!buffer || len == 0) return 0;
-    if (f.attr & ATTR_READ_ONLY) return 0;
+    if (!f.open || len == 0) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
+    if (f.attr & ATTR_READ_ONLY) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
 
     FATVolume& vol = s_volumes[f.volumeIndex];
-    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return 0;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
 
     uint32_t bytesWritten = 0;
     const uint8_t* src = static_cast<const uint8_t*>(buffer);
     uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
     uint32_t clusterVisits = 0;
+    set_traversal_status(TRAVERSAL_OK);
+    if (clusterBytes == 0) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return 0;
+    }
+    const uint32_t bytesAvailable = f.currentOffset < f.fileSize
+        ? f.fileSize - f.currentOffset : 0;
+    const uint32_t bytesRequested = len < bytesAvailable ? len : bytesAvailable;
+    const uint32_t offsetInFirstCluster = f.currentOffset % clusterBytes;
+    const uint64_t span = static_cast<uint64_t>(offsetInFirstCluster) + bytesRequested;
+    uint32_t expectedClusters = static_cast<uint32_t>(
+        (span + clusterBytes - 1) / clusterBytes);
+    if (expectedClusters == 0 && bytesRequested != 0) expectedClusters = 1;
+    const uint32_t stepLimit = expectedClusters < max_chain_steps(vol)
+        ? expectedClusters : max_chain_steps(vol);
+    if (bytesRequested != 0 && chain_cycle_detected(vol, f.currentCluster, stepLimit)) {
+        set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+        return 0;
+    }
 
     while (bytesWritten < len && f.currentOffset < f.fileSize) {
-        if (is_end_of_chain(vol, f.currentCluster) ||
-            !is_valid_data_cluster(vol, f.currentCluster)) break;
+        if (is_end_of_chain(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_TRUNCATED_CHAIN);
+            break;
+        }
+        if (is_bad_cluster(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_BAD_CLUSTER);
+            break;
+        }
+        if (!is_valid_data_cluster(vol, f.currentCluster)) {
+            set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+            break;
+        }
 
         uint32_t offsetInCluster = f.currentOffset % clusterBytes;
         if (offsetInCluster == 0) {
-            if (clusterVisits >= max_chain_steps(vol)) break;
+            if (clusterVisits >= stepLimit) {
+                set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+                break;
+            }
             ++clusterVisits;
         }
         uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
@@ -931,7 +1131,10 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
 
         block::Status st = read_cluster_sector(vol,
             f.currentCluster, sectorInCluster, s_secBuf);
-        if (st != block::BLOCK_OK) break;
+        if (st != block::BLOCK_OK) {
+            set_traversal_status(TRAVERSAL_IO_ERROR);
+            break;
+        }
 
         uint32_t available = vol.bytesPerSector - offsetInSector;
         uint32_t remaining = f.fileSize - f.currentOffset;
@@ -939,11 +1142,18 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
         uint32_t toCopy    = available;
         if (toCopy > remaining) toCopy = remaining;
         if (toCopy > wanted)    toCopy = wanted;
+        if (toCopy == 0) {
+            set_traversal_status(TRAVERSAL_NO_PROGRESS);
+            break;
+        }
 
         memcopy(&s_secBuf[offsetInSector], src + bytesWritten, toCopy);
 
         st = write_cluster_sector(vol, f.currentCluster, sectorInCluster, s_secBuf);
-        if (st != block::BLOCK_OK) break;
+        if (st != block::BLOCK_OK) {
+            set_traversal_status(TRAVERSAL_IO_ERROR);
+            break;
+        }
 
         bytesWritten    += toCopy;
         f.currentOffset += toCopy;
@@ -951,6 +1161,11 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
         if ((f.currentOffset % clusterBytes) == 0 && f.currentOffset > 0) {
             f.currentCluster = next_cluster(vol, f.currentCluster);
         }
+    }
+
+    if (bytesWritten == bytesRequested && bytesWritten != 0 &&
+        s_lastTraversalStatus == TRAVERSAL_OK) {
+        set_traversal_status(TRAVERSAL_END_OF_CHAIN);
     }
 
     return bytesWritten;
@@ -1132,7 +1347,7 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
 
     while (!is_end_of_chain(vol, cluster) &&
            is_valid_data_cluster(vol, cluster) &&
-           clusterSteps < max_chain_steps(vol)) {
+           clusterSteps < directory_chain_step_limit(vol)) {
         ++clusterSteps;
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
             uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
@@ -1169,20 +1384,39 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
 
 static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const void* buffer, uint32_t len)
 {
-    if (len == 0) return true;
-    if (!buffer) return false;
+    if (len == 0) {
+        set_traversal_status(TRAVERSAL_OK);
+        return true;
+    }
+    if (!buffer) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return false;
+    }
 
     const uint8_t* src = static_cast<const uint8_t*>(buffer);
     uint32_t cluster = firstCluster;
     uint32_t written = 0;
     uint32_t clusterSteps = 0;
+    const uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
+    if (clusterBytes == 0) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return false;
+    }
+    const uint32_t requiredClusters = static_cast<uint32_t>(
+        (static_cast<uint64_t>(len) + clusterBytes - 1) / clusterBytes);
+    const uint32_t stepLimit = requiredClusters < max_chain_steps(vol)
+        ? requiredClusters : max_chain_steps(vol);
+    set_traversal_status(TRAVERSAL_OK);
+    if (chain_cycle_detected(vol, firstCluster, stepLimit)) {
+        set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+        return false;
+    }
 
     while (written < len && !is_end_of_chain(vol, cluster) &&
            is_valid_data_cluster(vol, cluster) &&
-           clusterSteps < max_chain_steps(vol)) {
+           clusterSteps < stepLimit) {
         ++clusterSteps;
 
-        uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
         uint32_t bytesThisCluster = len - written;
         if (bytesThisCluster > clusterBytes) bytesThisCluster = clusterBytes;
 
@@ -1191,6 +1425,7 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
             uint32_t clusterSector = cluster_to_sector(vol, cluster);
             if (write_volume_sectors(vol, clusterSector, fullSectors,
                                      src + written) != block::BLOCK_OK) {
+                set_traversal_status(TRAVERSAL_IO_ERROR);
                 return false;
             }
             written += fullSectors * vol.bytesPerSector;
@@ -1201,6 +1436,7 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
             memzero(s_secBuf, vol.bytesPerSector);
             memcopy(s_secBuf, src + written, partialBytes);
             if (write_cluster_sector(vol, cluster, fullSectors, s_secBuf) != block::BLOCK_OK) {
+                set_traversal_status(TRAVERSAL_IO_ERROR);
                 return false;
             }
             written += partialBytes;
@@ -1210,16 +1446,36 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
             uint32_t next = next_cluster(vol, cluster);
             if (is_end_of_chain(vol, next)) {
                 uint32_t newCluster = allocate_cluster(vol);
-                if (newCluster == 0) return false;
-                if (write_fat_entry(vol, cluster, newCluster) != block::BLOCK_OK) return false;
-                if (write_fat_entry(vol, newCluster, fat_end_value(vol)) != block::BLOCK_OK) return false;
+                if (newCluster == 0) {
+                    set_traversal_status(TRAVERSAL_NO_PROGRESS);
+                    return false;
+                }
+                if (write_fat_entry(vol, cluster, newCluster) != block::BLOCK_OK) {
+                    set_traversal_status(TRAVERSAL_IO_ERROR);
+                    return false;
+                }
+                if (write_fat_entry(vol, newCluster, fat_end_value(vol)) != block::BLOCK_OK) {
+                    set_traversal_status(TRAVERSAL_IO_ERROR);
+                    return false;
+                }
                 next = newCluster;
             }
-            if (!is_valid_data_cluster(vol, next)) return false;
+            if (is_bad_cluster(vol, next)) {
+                set_traversal_status(TRAVERSAL_BAD_CLUSTER);
+                return false;
+            }
+            if (!is_valid_data_cluster(vol, next)) {
+                set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
+                return false;
+            }
             cluster = next;
         }
     }
 
+    if (written != len && s_lastTraversalStatus == TRAVERSAL_OK) {
+        set_traversal_status(clusterSteps >= stepLimit
+            ? TRAVERSAL_CHAIN_CYCLE : TRAVERSAL_NO_PROGRESS);
+    }
     return written == len;
 }
 
@@ -1283,7 +1539,7 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
 
     while (!is_end_of_chain(vol, cluster) &&
            is_valid_data_cluster(vol, cluster) &&
-           clusterSteps < max_chain_steps(vol)) {
+           clusterSteps < directory_chain_step_limit(vol)) {
         ++clusterSteps;
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
             uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
@@ -1374,17 +1630,29 @@ static bool find_path_entry_at(uint8_t volumeIndex, const char* path,
     return false;
 }
 
-static uint32_t cluster_chain_capacity(const FATVolume& vol, uint32_t firstCluster)
+static uint32_t cluster_chain_capacity(const FATVolume& vol, uint32_t firstCluster,
+                                       uint32_t requestedBytes)
 {
+    if (requestedBytes == 0) return 0;
+    const uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
+    if (clusterBytes == 0) return 0;
+    const uint32_t requiredClusters = static_cast<uint32_t>(
+        (static_cast<uint64_t>(requestedBytes) + clusterBytes - 1) / clusterBytes);
+    if (chain_cycle_detected(vol, firstCluster, requiredClusters)) {
+        set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+        return 0;
+    }
     uint32_t clusters = 0;
     uint32_t cluster = firstCluster;
     while (!is_end_of_chain(vol, cluster) &&
            is_valid_data_cluster(vol, cluster) &&
+           clusters < requiredClusters &&
            clusters < max_chain_steps(vol)) {
         ++clusters;
         cluster = next_cluster(vol, cluster);
     }
-    return clusters * vol.sectorsPerCluster * vol.bytesPerSector;
+    const uint64_t capacity = static_cast<uint64_t>(clusters) * clusterBytes;
+    return capacity > 0xFFFFFFFFull ? 0xFFFFFFFFu : static_cast<uint32_t>(capacity);
 }
 
 bool open_dir(uint8_t volumeIndex, uint32_t dirCluster)
@@ -1398,6 +1666,7 @@ bool open_dir(uint8_t volumeIndex, uint32_t dirCluster)
     s_dirIter.clusterSteps    = 0;
     s_dirIter.sectorInCluster = 0;
     s_dirIter.entryInSector   = 0;
+    set_traversal_status(TRAVERSAL_OK);
     return true;
 }
 
@@ -1515,7 +1784,7 @@ FileWriteStatus overwrite_path_status(uint8_t volumeIndex, const char* path,
     if (entry.isDir) return FILE_WRITE_INVALID_ARGUMENT;
     if (entry.attr & ATTR_READ_ONLY) return FILE_WRITE_READ_ONLY;
 
-    uint32_t capacity = cluster_chain_capacity(vol, entry.firstCluster);
+    uint32_t capacity = cluster_chain_capacity(vol, entry.firstCluster, len);
     if (len > capacity) return FILE_WRITE_NO_SPACE;
     if (!write_file_clusters(vol, entry.firstCluster, buffer, len)) {
         if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
@@ -1571,6 +1840,9 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     char shortName[11];
     if (!make_short_name(fileName, shortName)) return FILE_WRITE_INVALID_NAME;
 
+    serial::puts("FPASTE_FAT_ALLOCATE_BEGIN bytes=0x");
+    serial::put_hex32(len);
+    serial::puts("\n");
     uint32_t firstCluster = allocate_cluster(vol);
     if (firstCluster == 0) {
         if (outBlockStatus) *outBlockStatus = s_lastIoStatus;
@@ -1584,7 +1856,13 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::puts(" bytes=0x");
     serial::put_hex32(len);
     serial::puts("\n");
+    serial::puts("FPASTE_FAT_ALLOCATE_OK cluster=0x");
+    serial::put_hex32(firstCluster);
+    serial::puts("\n");
 
+    serial::puts("FPASTE_FAT_CHAIN_WRITE_BEGIN bytes=0x");
+    serial::put_hex32(len);
+    serial::puts("\n");
     if (!write_file_clusters(vol, firstCluster, buffer, len)) {
         const block::Status failedStatus = s_lastIoStatus;
         release_cluster_chain(vol, firstCluster);
@@ -1592,6 +1870,9 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
         if (outBlockStatus) *outBlockStatus = failedStatus;
         return failedStatus == block::BLOCK_OK ? FILE_WRITE_NO_FREE_CLUSTER : FILE_WRITE_IO_ERROR;
     }
+    serial::puts("FPASTE_FAT_CHAIN_WRITE_END status=");
+    serial::puts(traversal_status_name(last_traversal_status()));
+    serial::puts("\n");
 
     serial::puts("[FAT_FILE_CREATE_WRITE] path=");
     serial::puts(path);
@@ -1603,6 +1884,7 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
 
     uint32_t sector = 0;
     uint32_t offset = 0;
+    serial::puts("FPASTE_DIRECTORY_METADATA_BEGIN\n");
     if (!find_free_dir_entry(volumeIndex, parentCluster, &sector, &offset)) {
         const block::Status failedStatus = s_lastIoStatus;
         release_cluster_chain(vol, firstCluster);
@@ -1610,6 +1892,11 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
         if (outBlockStatus) *outBlockStatus = failedStatus;
         return failedStatus == block::BLOCK_OK ? FILE_WRITE_NO_FREE_ENTRY : FILE_WRITE_IO_ERROR;
     }
+    serial::puts("FPASTE_DIRECTORY_METADATA_SLOT_OK sector=0x");
+    serial::put_hex32(sector);
+    serial::puts(" offset=0x");
+    serial::put_hex32(offset);
+    serial::puts("\n");
 
     if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         const block::Status failedStatus = s_lastIoStatus;
@@ -1641,6 +1928,7 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     serial::puts(" firstCluster=0x");
     serial::put_hex32(firstCluster);
     serial::puts(" status=FILE_WRITE_OK\n");
+    serial::puts("FPASTE_DIRECTORY_METADATA_END status=FAT_FILE_WRITE_OK\n");
     return FILE_WRITE_OK;
 }
 
@@ -1688,6 +1976,29 @@ const char* file_write_status_name(FileWriteStatus status)
         case FILE_WRITE_NO_SPACE: return "FAT_FILE_WRITE_NO_SPACE";
         default: return "FAT_FILE_WRITE_UNKNOWN";
     }
+}
+
+const char* traversal_status_name(TraversalStatus status)
+{
+    switch (status) {
+        case TRAVERSAL_OK: return "FAT_TRAVERSAL_OK";
+        case TRAVERSAL_END_OF_CHAIN: return "FAT_TRAVERSAL_END_OF_CHAIN";
+        case TRAVERSAL_DIRECTORY_END: return "FAT_TRAVERSAL_DIRECTORY_END";
+        case TRAVERSAL_INVALID_ARGUMENT: return "FAT_TRAVERSAL_INVALID_ARGUMENT";
+        case TRAVERSAL_INVALID_CLUSTER: return "FAT_TRAVERSAL_INVALID_CLUSTER";
+        case TRAVERSAL_BAD_CLUSTER: return "FAT_TRAVERSAL_BAD_CLUSTER";
+        case TRAVERSAL_CHAIN_CYCLE: return "FAT_TRAVERSAL_CHAIN_CYCLE";
+        case TRAVERSAL_CHAIN_STEP_LIMIT: return "FAT_TRAVERSAL_CHAIN_STEP_LIMIT";
+        case TRAVERSAL_TRUNCATED_CHAIN: return "FAT_TRAVERSAL_TRUNCATED_CHAIN";
+        case TRAVERSAL_NO_PROGRESS: return "FAT_TRAVERSAL_NO_PROGRESS";
+        case TRAVERSAL_IO_ERROR: return "FAT_TRAVERSAL_IO_ERROR";
+        default: return "FAT_TRAVERSAL_UNKNOWN";
+    }
+}
+
+TraversalStatus last_traversal_status()
+{
+    return s_lastTraversalStatus;
 }
 
 static void initialize_directory_entry(FAT32_DirEntry* entry,

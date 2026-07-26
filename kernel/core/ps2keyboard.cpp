@@ -35,16 +35,31 @@ static const uint8_t kEventQueueCapacity = 64;
 static KeyEvent s_eventQueue[kEventQueueCapacity];
 static volatile uint8_t s_eventHead = 0;
 static volatile uint8_t s_eventTail = 0;
-static uint32_t s_traceCount = 0;
+static KeyEvent s_nativeEventQueue[kEventQueueCapacity];
+static volatile uint8_t s_nativeEventHead = 0;
+static volatile uint8_t s_nativeEventTail = 0;
 
 static void enqueue_event(uint32_t key, bool keyUp)
 {
     if (key == 0) return;
-    const uint8_t next = static_cast<uint8_t>((s_eventHead + 1u) % kEventQueueCapacity);
-    if (next == s_eventTail) return;
-    s_eventQueue[s_eventHead].key = key;
-    s_eventQueue[s_eventHead].action = keyUp ? KeyAction::Up : KeyAction::Down;
-    s_eventHead = next;
+    const KeyAction action = keyUp ? KeyAction::Up : KeyAction::Down;
+
+    const uint8_t legacyNext = static_cast<uint8_t>((s_eventHead + 1u) % kEventQueueCapacity);
+    if (legacyNext != s_eventTail) {
+        s_eventQueue[s_eventHead].key = key;
+        s_eventQueue[s_eventHead].action = action;
+        s_eventHead = legacyNext;
+    }
+
+    // Keep Native ELF transitions independent from the legacy desktop
+    // get_key() compatibility path, which may consume key-downs while the
+    // desktop dispatcher is servicing other UI work.
+    const uint8_t nativeNext = static_cast<uint8_t>((s_nativeEventHead + 1u) % kEventQueueCapacity);
+    if (nativeNext != s_nativeEventTail) {
+        s_nativeEventQueue[s_nativeEventHead].key = key;
+        s_nativeEventQueue[s_nativeEventHead].action = action;
+        s_nativeEventHead = nativeNext;
+    }
 }
 
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -168,7 +183,8 @@ void init()
     s_breakCode = false;
     s_eventHead = 0;
     s_eventTail = 0;
-    s_traceCount = 0;
+    s_nativeEventHead = 0;
+    s_nativeEventTail = 0;
     
     serial::puts("[PS2KB] Keyboard initialized (scancode set 2)\n");
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -186,13 +202,6 @@ void irq_handler()
     
     uint8_t scancode = arch::inb(kDataPort);
 
-    if (s_traceCount < 48u) {
-        ++s_traceCount;
-        serial::puts("[PS2KB] raw=0x");
-        serial::put_hex8(scancode);
-        serial::putc('\n');
-    }
-    
     // Scancode set 2: Handle special prefixes
     // 0xE0 = extended key prefix
     // 0xF0 = break (key release) prefix
@@ -354,14 +363,14 @@ uint32_t get_key()
 
 bool has_event()
 {
-    return s_eventTail != s_eventHead;
+    return s_nativeEventTail != s_nativeEventHead;
 }
 
 bool get_event(KeyEvent* outEvent)
 {
-    if (!outEvent || s_eventTail == s_eventHead) return false;
-    *outEvent = s_eventQueue[s_eventTail];
-    s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
+    if (!outEvent || s_nativeEventTail == s_nativeEventHead) return false;
+    *outEvent = s_nativeEventQueue[s_nativeEventTail];
+    s_nativeEventTail = static_cast<uint8_t>((s_nativeEventTail + 1u) % kEventQueueCapacity);
     return true;
 }
 
@@ -374,6 +383,8 @@ void clear()
     s_lastKeyAltRightDown = false;
     s_eventHead = 0;
     s_eventTail = 0;
+    s_nativeEventHead = 0;
+    s_nativeEventTail = 0;
 }
 
 bool is_ctrl_down()

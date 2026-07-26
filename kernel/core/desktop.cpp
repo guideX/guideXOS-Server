@@ -7116,6 +7116,20 @@ static void handle_context_menu_command(int item)
             return;
         }
 
+        // The icon model is refreshed after a successful paste. Copy the
+        // clicked folder path before dispatch so the synchronous VFS/FAT
+        // operation never relies on a pointer into the model being refreshed.
+        char ownedDestinationDirectory[vfs::VFS_MAX_PATH] = {0};
+        if (entry->isDirectory) {
+            vfs::normalize_path(entry->path, ownedDestinationDirectory,
+                                sizeof(ownedDestinationDirectory));
+            serial::puts("FPASTE_CLICKED_FOLDER display=");
+            serial::puts(entry->label ? entry->label : "(unnamed)");
+            serial::puts(" path=");
+            serial::puts(ownedDestinationDirectory);
+            serial::puts("\n");
+        }
+
         if (item == 0) {
             show_icon_notification(s_contextMenuIconDisplayIndex);
         } else if (item == 1 || item == 2) {
@@ -7130,16 +7144,20 @@ static void handle_context_menu_command(int item)
             }
         } else if (entry->isDirectory) {
             if (s_contextMenuPasteVisibleAtOpen && item == 3) {
-                if (file_clipboard::can_paste_to(entry->path)) {
+                serial::puts("FPASTE_CONTEXT_DISPATCH\n");
+                if (file_clipboard::can_paste_to(ownedDestinationDirectory)) {
                     serial::puts("[desktop] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
-                    serial::puts(entry->path);
+                    serial::puts(ownedDestinationDirectory);
                     serial::puts("\n");
-                    file_clipboard::PasteResult result = file_clipboard::paste_to_directory(entry->path);
+                    file_clipboard::PasteResult result = file_clipboard::paste_to_directory(
+                        ownedDestinationDirectory);
                     show_file_clipboard_notification(file_clipboard::paste_result_message(result));
                     if (result == file_clipboard::PasteResult::Success) {
-                        refresh_desktop_icons();
+                        serial::puts("FPASTE_REFRESH_BEGIN\n");
                         bare_metal_desktop_request_folder_refresh("desktop folder file paste");
+                        serial::puts("FPASTE_REFRESH_END\n");
                         file_clipboard::note_paste_refresh(true);
+                        serial::puts("FPASTE_RETURN_UI\n");
                         s_needsRedraw = true;
                     }
                 }
@@ -7155,16 +7173,22 @@ static void handle_context_menu_command(int item)
 
     if (s_contextMenuPasteVisibleAtOpen && item == 5) {
         if (desktop_file_paste_available()) {
+            char ownedDestinationDirectory[vfs::VFS_MAX_PATH] = {0};
+            vfs::normalize_path(bare_metal_desktop_current_directory_path(),
+                                ownedDestinationDirectory, sizeof(ownedDestinationDirectory));
+            serial::puts("FPASTE_CONTEXT_DISPATCH\n");
             serial::puts("[desktop] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
-            serial::puts(bare_metal_desktop_current_directory_path());
+            serial::puts(ownedDestinationDirectory);
             serial::puts("\n");
             file_clipboard::PasteResult result = file_clipboard::paste_to_directory(
-                bare_metal_desktop_current_directory_path());
+                ownedDestinationDirectory);
             show_file_clipboard_notification(file_clipboard::paste_result_message(result));
             if (result == file_clipboard::PasteResult::Success) {
-                refresh_desktop_icons();
+                serial::puts("FPASTE_REFRESH_BEGIN\n");
                 bare_metal_desktop_request_folder_refresh("desktop file paste");
+                serial::puts("FPASTE_REFRESH_END\n");
                 file_clipboard::note_paste_refresh(true);
+                serial::puts("FPASTE_RETURN_UI\n");
                 s_needsRedraw = true;
             }
         }

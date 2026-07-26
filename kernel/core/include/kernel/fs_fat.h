@@ -73,6 +73,26 @@ enum FileWriteStatus : uint8_t {
 
 const char* file_write_status_name(FileWriteStatus status);
 
+// Every cluster-chain consumer exposes its last bounded traversal result.
+// This is diagnostic state only; callers still use their existing bool/count
+// return values for compatibility with the VFS API.
+enum TraversalStatus : uint8_t {
+    TRAVERSAL_OK = 0,
+    TRAVERSAL_END_OF_CHAIN,
+    TRAVERSAL_DIRECTORY_END,
+    TRAVERSAL_INVALID_ARGUMENT,
+    TRAVERSAL_INVALID_CLUSTER,
+    TRAVERSAL_BAD_CLUSTER,
+    TRAVERSAL_CHAIN_CYCLE,
+    TRAVERSAL_CHAIN_STEP_LIMIT,
+    TRAVERSAL_TRUNCATED_CHAIN,
+    TRAVERSAL_NO_PROGRESS,
+    TRAVERSAL_IO_ERROR,
+};
+
+const char* traversal_status_name(TraversalStatus status);
+TraversalStatus last_traversal_status();
+
 // ================================================================
 // FAT12/16 BIOS Parameter Block (BPB) — first 62 bytes of sector 0
 // FAT32 reuses the common prefix and adds its own extension below.

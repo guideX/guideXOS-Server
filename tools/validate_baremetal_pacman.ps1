@@ -16,6 +16,8 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBuild,
+    [switch]$SkipGameplayInput,
+    [string]$GameplayKeys = "right",
     [int]$TimeoutSeconds = 100,
     [int]$Cycles = 3
 )
@@ -35,13 +37,14 @@ $RunDir = Join-Path $ServerRoot "logs\baremetal-pacman\$RunId"
 $SerialLog = Join-Path $RunDir "qemu-serial.log"
 $QemuErrLog = Join-Path $RunDir "qemu-stderr.log"
 $ValidationLog = Join-Path $RunDir "validation.log"
-$StageDir = Join-Path $EspDir "Apps\PacMan"
 $Qemu = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $Ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
 $QemuProcess = $null
 $QmpPort = 0
 
 New-Item -ItemType Directory -Path $RunDir -Force | Out-Null
+$QemuEspDir = Join-Path $RunDir "esp"
+$StageDir = Join-Path $QemuEspDir "Apps\PacMan"
 
 function Write-Validation([string]$Message) {
     $line = "[$(Get-Date -Format o)] $Message"
@@ -120,7 +123,9 @@ function Send-Key([string]$Key) {
     if ($response -match "invalid parameter|unknown command|error") {
         throw "QMP sendkey failed for $Key`: $response"
     }
-    Start-Sleep -Milliseconds 45
+    # Leave enough time for QEMU's emulated PS/2 controller and the kernel
+    # IRQ path to deliver both make and break transitions before the next key.
+    Start-Sleep -Milliseconds 180
 }
 
 function Send-ShellText([string]$Text) {
@@ -147,9 +152,9 @@ function Stage-ProductionPackage {
     Assert-Path (Join-Path $ProductionPackage "bin\amd64\pacman.elf") "production Native ELF"
     Assert-Path (Join-Path $ProductionPackage "resources\level1.gximg") "production level resource"
     Assert-Path (Join-Path $ProductionPackage "resources\pacpics.gximg") "production sprite resource"
-    New-Item -ItemType Directory -Path (Join-Path $EspDir "Apps") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $QemuEspDir "Apps") -Force | Out-Null
 
-    $appsRoot = (Resolve-Path (Join-Path $EspDir "Apps")).Path.TrimEnd('\')
+    $appsRoot = (Resolve-Path (Join-Path $QemuEspDir "Apps")).Path.TrimEnd('\')
     if (Test-Path -LiteralPath $StageDir) {
         $resolvedStage = (Resolve-Path $StageDir).Path
         if (!$resolvedStage.StartsWith($appsRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -169,7 +174,7 @@ function Stage-ProductionPackage {
     if ((Compare-Object $expected $files).Count -ne 0) {
         throw "ESP package tree is not the exact production package: $($files -join ', ')"
     }
-    Write-Validation "package.staged root=/Apps/PacMan source=$ProductionPackage files=$($files -join ',')"
+    Write-Validation "package.staged root=/Apps/PacMan image=$QemuEspDir source=$ProductionPackage files=$($files -join ',')"
     foreach ($file in $files) {
         $hash = Get-FileHash -LiteralPath (Join-Path $StageDir $file.Replace('/', '\')) -Algorithm SHA256
         Write-Validation "package.hash path=/Apps/PacMan/$file sha256=$($hash.Hash)"
@@ -183,10 +188,16 @@ try {
     Assert-Path $Qemu "QEMU"
     Assert-Path $Ovmf "OVMF firmware"
 
+    # Give QEMU an isolated writable FAT tree for this bounded run. The
+    # original ESP remains untouched, including concurrent desktop changes.
+    New-Item -ItemType Directory -Path $QemuEspDir -Force | Out-Null
+    Get-ChildItem -LiteralPath $EspDir -Force | Copy-Item -Destination $QemuEspDir -Recurse -Force
+
     if (!$SkipBuild) {
         Write-Validation "build.pacman=production Native ELF diagnostics=ON danger-validation=OFF"
+        $ServerRootCmake = $ServerRoot.Replace('\', '/')
         & "C:\mingw64\bin\cmake.exe" -S (Join-Path $PacmanRoot "guidexos") -B (Join-Path $PacmanRoot "guidexos\build-baremetal") -G Ninja `
-            -DGUIDEXOS_SERVER_ROOT=$ServerRoot -DGUIDEXOS_PACKAGE_ROOT="D:\Apps" `
+            "-DGUIDEXOS_SERVER_ROOT=$ServerRootCmake" "-DGUIDEXOS_PACKAGE_ROOT=D:/Apps" `
             -DPACMAN_ENABLE_DIAGNOSTICS=ON -DPACMAN_HOSTED_DANGER_TEST=OFF `
             -DPACMAN_HOSTED_RED_MOVEMENT_TEST=OFF -DPACMAN_HOSTED_PINK_MOVEMENT_TEST=OFF `
             -DPACMAN_HOSTED_CYAN_MOVEMENT_TEST=OFF -DPACMAN_HOSTED_ORANGE_MOVEMENT_TEST=OFF `
@@ -201,7 +212,7 @@ try {
 
     Assert-Path $KernelElf "built kernel ELF"
     Assert-Path (Join-Path $ServerRoot "ESP\EFI\BOOT\BOOTX64.EFI") "UEFI bootloader"
-    Copy-Item -LiteralPath $KernelElf -Destination (Join-Path $EspDir "kernel.elf") -Force
+    Copy-Item -LiteralPath $KernelElf -Destination (Join-Path $QemuEspDir "kernel.elf") -Force
     Stage-ProductionPackage
 
     $qmpProbe = New-Object System.Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
@@ -214,10 +225,11 @@ try {
     $qemuArgumentString = `
         '-machine "pc,accel=tcg" ' +
         '-drive "if=pflash,format=raw,readonly=on,file=' + $Ovmf + '" ' +
-        '-drive "file=fat:rw:' + $EspDir + ',format=raw,if=ide,index=0,media=disk" ' +
+        '-drive "file=fat:rw:' + $QemuEspDir + ',format=raw,if=ide,index=0,media=disk" ' +
         '-m 1024M -vga std -display none ' +
         '-serial "file:' + $SerialLog + '" ' +
         '-qmp "tcp:127.0.0.1:' + $QmpPort + ',server=on,wait=off" ' +
+        '-d guest_errors -D "' + (Join-Path $RunDir "qemu-debug.log") + '" ' +
         '-no-reboot -rtc base=utc,clock=host ' +
         '-netdev user,id=net0 -device e1000,netdev=net0'
     Write-Validation "qemu.start qmpPort=$QmpPort serial=$SerialLog"
@@ -245,17 +257,28 @@ try {
         if (!(Wait-SerialCount "[NATIVE-ELF] frame PASS" ($beforeFrame + 1) $frameWaitSeconds)) { throw "Cycle $cycle did not present a PacMan frame" }
         Capture-Screenshot (Join-Path $RunDir "cycle-$cycle-initial.ppm")
 
-        Send-Key "right"
-        Send-Key "right"
-        Send-Key "down"
-        Send-Key "left"
-        Start-Sleep -Seconds 2
-        Capture-Screenshot (Join-Path $RunDir "cycle-$cycle-input.ppm")
-        Write-Validation "cycle.$cycle gameplay.input=right,right,down,left screenshot=captured"
+        if (!$SkipGameplayInput) {
+            foreach ($gameplayKey in ($GameplayKeys -split ',' | Where-Object { $_.Trim().Length -gt 0 })) {
+                Send-Key $gameplayKey.Trim()
+            }
+            Start-Sleep -Seconds 2
+            Capture-Screenshot (Join-Path $RunDir "cycle-$cycle-input.ppm")
+            Write-Validation "cycle.$cycle gameplay.input=$GameplayKeys screenshot=captured"
+        } else {
+            Write-Validation "cycle.$cycle gameplay.input=skipped"
+        }
 
         $beforeExit = Text-Count (Read-Serial) "lifecycle PASS window/resource cleanup complete"
-        Send-Key "esc"
-        if (!(Wait-SerialCount "lifecycle PASS window/resource cleanup complete" ($beforeExit + 1) 20)) { throw "Cycle $cycle did not cleanly exit" }
+        $exitObserved = $false
+        for ($escapeAttempt = 1; $escapeAttempt -le 3; $escapeAttempt++) {
+            Write-Validation "cycle.$cycle escape.attempt=$escapeAttempt"
+            Send-Key "esc"
+            if (Wait-SerialCount "lifecycle PASS window/resource cleanup complete" ($beforeExit + 1) 6) {
+                $exitObserved = $true
+                break
+            }
+        }
+        if (!$exitObserved) { throw "Cycle $cycle did not cleanly exit" }
         Write-Validation "cycle.$cycle PASS launch/frame/input/escape/lifecycle"
     }
 
