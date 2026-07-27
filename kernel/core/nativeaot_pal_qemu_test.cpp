@@ -124,6 +124,34 @@ uint64_t g_lastWorkerThreadId = 0;
 uintptr_t g_lastWorkerStackLow = 0;
 uintptr_t g_lastWorkerStackHigh = 0;
 uintptr_t g_lastWorkerStackCurrent = 0;
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
+uintptr_t g_firstAllocationDiagnosticsAddress = 0;
+
+// The NativeAOT image uses the Win64 TLS vector contract directly:
+// GS:[0x58] points to a vector and the image's _tls_index selects a block.
+// The bare-metal loader had not installed that current-thread boundary.  A
+// single disposable managed-entry thread is sufficient for this experiment;
+// the block remains fixed native storage and is never used as a GC context.
+struct NativeAotTlsGsArea {
+    uint8_t reserved[0x58];
+    void** vector;
+};
+
+alignas(16) NativeAotTlsGsArea g_nativeAotTlsGsArea = {};
+alignas(16) unsigned char g_nativeAotTlsBlock[0x110] = {};
+void* g_nativeAotTlsVector[1] = {};
+static_assert(offsetof(NativeAotTlsGsArea, vector) == 0x58,
+              "NativeAOT TLS vector offset must match the Win64 ABI");
+
+bool installNativeAotCurrentThreadTls() {
+    g_nativeAotTlsVector[0] = g_nativeAotTlsBlock;
+    g_nativeAotTlsGsArea.vector = g_nativeAotTlsVector;
+    constexpr uint32_t kGsBaseMsr = 0xC0000101u;
+    const uint64_t gsBase = reinterpret_cast<uint64_t>(&g_nativeAotTlsGsArea);
+    arch::amd64::write_msr(kGsBaseMsr, gsBase);
+    return arch::amd64::read_msr(kGsBaseMsr) == gsBase;
+}
+#endif
 
 void status(const char* name, bool passed, bool& allPassed) {
     serial::puts("[nativeaot-pal-qemu-test] ");
@@ -402,6 +430,32 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeYield() {
     serial::puts(" detail=");
     serial::put_hex64(detail);
     serial::putc('\n');
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
+    if (g_firstAllocationDiagnosticsAddress != 0) {
+        const guidexos_nativeaot_allocation_diagnostics* diagnostics =
+            reinterpret_cast<const guidexos_nativeaot_allocation_diagnostics*>(
+                g_firstAllocationDiagnosticsAddress);
+        serial::puts("[nativeaot-gc-first-allocation] failfastStage=");
+        serial::put_hex32(diagnostics->stage);
+        serial::puts(" sequence=");
+        serial::put_hex32(diagnostics->sequence);
+        serial::puts(" failfastReason=");
+        serial::put_hex32(diagnostics->failFastReason);
+        serial::puts(" currentRip=");
+        serial::put_hex64(diagnostics->currentRip);
+        serial::puts(" currentRsp=");
+        serial::put_hex64(diagnostics->currentRsp);
+        serial::puts(" transitionFrame=");
+        serial::put_hex64(diagnostics->transitionFrame);
+        serial::puts(" runtimeThreadRecord=");
+        serial::put_hex64(diagnostics->runtimeThreadRecord);
+        serial::puts(" allocPtr=");
+        serial::put_hex64(diagnostics->allocationContextBefore);
+        serial::puts(" allocLimit=");
+        serial::put_hex64(diagnostics->allocationLimitBefore);
+        serial::puts("\n");
+    }
+#endif
     for (;;) {
         arch::disable_interrupts();
         arch::halt();
@@ -1122,6 +1176,9 @@ void runFirstRealAllocationImpl(
         return;
     }
     resetBridgeState(base, size, generation);
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
+    g_firstAllocationDiagnosticsAddress = getDiagnosticsAddress;
+#endif
 
     guidexos_nativeaot_pal_hooks legacy = {};
     fillStartupPalHooks(&legacy);
@@ -1176,6 +1233,20 @@ void runFirstRealAllocationImpl(
     serial::puts("\n");
     firstAllocationStatus("RhInitialize", startupResult == 0, allPassed);
     if (startupResult != 0) {
+        serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
+        return;
+    }
+
+    const bool tlsInstalled = installNativeAotCurrentThreadTls();
+    firstAllocationStatus("NativeAOT current-thread TLS vector", tlsInstalled, allPassed);
+    serial::puts("[nativeaot-gc-first-allocation] tlsGsBase=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(&g_nativeAotTlsGsArea));
+    serial::puts(" tlsVector=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_nativeAotTlsVector));
+    serial::puts(" tlsBlock=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_nativeAotTlsBlock));
+    serial::puts(" tlsIndexAssumed=0\n");
+    if (!tlsInstalled) {
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
     }
@@ -1251,6 +1322,35 @@ void runFirstRealAllocationImpl(
     serial::puts(" pointerContractFailures=");
     serial::put_hex32(diagnostics->pointerContractFailures);
     serial::puts("\n");
+    serial::puts("[nativeaot-gc-first-allocation] stage=");
+    serial::put_hex32(diagnostics->stage);
+    serial::puts(" sequence=");
+    serial::put_hex32(diagnostics->sequence);
+    serial::puts(" currentRip=");
+    serial::put_hex64(diagnostics->currentRip);
+    serial::puts(" currentRsp=");
+    serial::put_hex64(diagnostics->currentRsp);
+    serial::puts(" runtimeThreadRecord=");
+    serial::put_hex64(diagnostics->runtimeThreadRecord);
+    serial::puts(" gcMode=");
+    serial::put_hex32(diagnostics->gcMode);
+    serial::puts(" transitionFrame=");
+    serial::put_hex64(diagnostics->transitionFrame);
+    serial::puts(" lastDirectTarget=");
+    serial::put_hex64(diagnostics->lastDirectTarget);
+    serial::puts(" lastIndirectCell=");
+    serial::put_hex64(diagnostics->lastIndirectCell);
+    serial::puts(" lastIndirectTarget=");
+    serial::put_hex64(diagnostics->lastIndirectTarget);
+    serial::puts(" lastLockId=");
+    serial::put_hex64(diagnostics->lastLockId);
+    serial::puts(" lastEventId=");
+    serial::put_hex64(diagnostics->lastEventId);
+    serial::puts(" waitReason=");
+    serial::put_hex32(diagnostics->waitReason);
+    serial::puts(" failFastReason=");
+    serial::put_hex32(diagnostics->failFastReason);
+    serial::puts("\n");
 
     serial::puts("[nativeaot-gc-first-allocation] gcCountBefore=");
     serial::put_hex32(diagnostics->gcCountBefore);
@@ -1281,7 +1381,7 @@ void runFirstRealAllocationImpl(
         diagnostics->rhpNewArrayEntries == 1u &&
         diagnostics->realGcAllocationEntries == 1u &&
         diagnostics->requestedArrayLength == 24u &&
-        diagnostics->requestedObjectSize == 40u &&
+        diagnostics->requestedObjectSize == 48u &&
         diagnostics->arrayLengthObserved == 24u &&
         diagnostics->zeroByteCount == 24u &&
         diagnostics->patternVerified == 1u &&

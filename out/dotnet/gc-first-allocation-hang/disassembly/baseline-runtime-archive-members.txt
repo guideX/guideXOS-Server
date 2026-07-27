@@ -1,0 +1,26 @@
+﻿LINK : warning LNK4044: unrecognized option '/list'; ignored
+
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-allocation-hang\baseline\Runtime.WorkstationGC.guidexos-nativeaot-gc-real.lib
+
+File Type: LIBRARY
+
+  Summary
+
+          38 .CRT$XCU
+        881D .bss
+        E320 .chks64
+         6A0 .chks64
+         A84 .data
+      2DDCB0 .debug$S
+        1E9C .debug$T
+        3246 .drectve
+         1F6 .drectve
+           4 .gehcont$y
+        4350 .pdata
+        2723 .rdata
+          54 .text$di
+       5581E .text$mn
+         DA0 .tls$
+           3 .voltbl
+         66A .voltbl
+        6040 .xdata

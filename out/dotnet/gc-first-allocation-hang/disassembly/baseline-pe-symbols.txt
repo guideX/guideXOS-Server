@@ -1,0 +1,15 @@
+﻿
+Dump of file D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-allocation-hang\baseline\NativeAotGcFirstAllocation.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Summary
+
+        1000 .CRT
+      10B000 .data
+       49000 .managed
+        9000 .pdata
+       42000 .rdata
+        1000 .rsrc
+       5F000 .text
+       19000 hydrated

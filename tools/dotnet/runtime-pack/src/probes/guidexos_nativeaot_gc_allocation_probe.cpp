@@ -19,7 +19,8 @@ extern "C" int32_t guidexos_nativeaot_gc_read_state(
     uint32_t* gcCount,
     uintptr_t* allocatedBytes,
     uint32_t* finalizableObjects,
-    uint32_t* gcInProgress) {
+    uint32_t* gcInProgress,
+    uint32_t* gcMode) {
     Thread* thread = ThreadStore::GetCurrentThreadIfAvailable();
     if (thread == nullptr || thread->GetAllocContext() == nullptr ||
         !GCHeapUtilities::IsGCHeapInitialized()) {
@@ -51,6 +52,9 @@ extern "C" int32_t guidexos_nativeaot_gc_read_state(
     }
     if (gcInProgress != nullptr) {
         *gcInProgress = heap->IsGCInProgressHelper(false) ? 1u : 0u;
+    }
+    if (gcMode != nullptr) {
+        *gcMode = thread->IsCurrentThreadInCooperativeMode() ? 1u : 0u;
     }
     return 0;
 }

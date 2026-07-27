@@ -42,3 +42,23 @@ separate bounded image-backed mode; they do not validate the real collector.
 Evidence and the exact real-allocation boundary are recorded in
 [NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION.md](NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION.md).
 No second initialization or live-process shutdown was attempted.
+
+## First-allocation hang follow-up
+
+The original Outcome C result remains preserved. The immutable artifact was
+captured and stopped in the reverse-P/Invoke guard at RIP `0x10001CA7` with
+`gs_base=0`; this was a terminal fail-fast self-loop with interrupts enabled,
+not a GC lock, Event, helper, or collection wait. The exact corrections were
+the current-thread TLS vector/runtime-cell bootstrap, PE-to-ELF mapping of the
+zero-raw-size `hydrated` section, and the source-matching NativeAOT
+`RehydrateData` call before `ManagedMain`. The real `byte[24]` size/range proof
+was updated from the bounded-mode 40-byte geometry to the actual 48-byte
+object.
+
+The corrected artifact passed one real collector-backed allocation in the
+first process and two additional fresh QEMU processes. The object was
+non-null, length 24, zero-initialized, pattern-valid, aligned, in the
+Workstation heap, and no collection or finalizer executed. The follow-up
+decision is **Outcome A**. The exact hashes, stage record, disassembly,
+watchdog snapshot, and remaining regression limitation are in
+[NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION_HANG.md](NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION_HANG.md).

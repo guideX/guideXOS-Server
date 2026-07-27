@@ -117,3 +117,30 @@ This result does not authorize a normal managed runtime, a second allocation,
 `GC.Collect`, finalizer signaling, same-process reinitialization, or live
 shutdown. Further work is diagnosis of the collector/PAL boundary in a new
 disposable process, retaining the same identity and shutdown gates.
+
+## Follow-up: exact hash-specific diagnosis and correction
+
+The original Outcome C evidence above is intentionally retained. The immutable
+PE/ELF baseline was preserved under
+`out/dotnet/gc-first-allocation-hang/baseline/` and confirmed in a fresh QEMU
+process. The live GDB capture for that exact hash resolves the terminal
+boundary as the `RhpReversePInvoke` current-thread TLS guard: `gs_base=0`, RIP
+`0x10001CA7`, and a terminal `guideXosFailFast+0x7` self-loop with interrupts
+enabled. It was therefore a terminal fail-fast spin, not a Workstation heap
+lock or Event wait. The earlier coarse serial description remains part of the
+original record; the exact RIP capture is the stronger boundary evidence.
+
+The correction installed the current-thread NativeAOT TLS vector/runtime cell,
+mapped the zero-raw-size `hydrated` PE section in the PE-to-ELF converter, and
+enabled the matching source-backed `RehydrateData` call before managed entry.
+The diagnostic validator was also corrected to use the real `byte[24]` object
+size of `0x30` (48) and valid segment bounds. No collector lock, collection,
+helper signal, or old no-collection heap was bypassed.
+
+The final corrected artifact is recorded in
+[NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION_HANG.md](NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION_HANG.md).
+It passed exactly one real collector-backed `byte[24]` allocation in the first
+corrected process and in two additional fresh processes, with non-null object,
+length 24, 24 zero bytes, pattern and heap ownership all passing. Collection
+and finalization counters remained zero. The follow-up decision is **Outcome A**;
+the original Outcome C result is not deleted or rewritten.

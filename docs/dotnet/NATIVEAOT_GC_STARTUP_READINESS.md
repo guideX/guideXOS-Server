@@ -57,3 +57,22 @@ allocation.
 See [NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION.md](NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION.md)
 for the bounded logs and artifact hashes. No shutdown or second `RhInitialize`
 is authorized until the locked source exposes a supported contract.
+
+## First-allocation follow-up
+
+The original startup and Outcome C evidence above remains preserved. The
+hash-specific follow-up captured the immutable baseline RIP at
+`0x10001CA7` in `guideXosFailFast+0x7`; the missing current-thread GS TLS
+vector caused a terminal fail-fast self-loop before the wrapper could publish
+its allocation stages. The corrected image additionally required mapping the
+zero-raw-size `hydrated` section and invoking the matching NativeAOT metadata
+rehydration boundary before managed entry. These were image/runtime readiness
+invariants, not collector-lock or collection changes.
+
+The three-run startup-only QEMU probe was rerun and passed. The corrected
+first-allocation report then passed exactly one real Workstation-GC `byte[24]`
+allocation in three fresh disposable processes, with non-null object, length,
+zeroing, pattern, and heap ownership proven; collection and finalization
+counters stayed zero. The follow-up decision is **Outcome A**, while this
+document's original Outcome C wording remains the historical record for the
+pre-correction artifact.

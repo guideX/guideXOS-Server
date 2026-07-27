@@ -1,0 +1,15 @@
+﻿gdb.exe : warning: No executable has been specified and target does not support
+At line:2 char:1208
++ ... n\gdb.exe'; & $gdb -q -batch -ex "set pagination off" -ex "target rem ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: No exe...oes not support:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+determining executable automatically.  Try using the "file" command.
+0x000000000000fff0 in ?? ()
+Selected thread is running.
+Selected thread is running.
+Selected thread is running.
+Cannot execute this command while the target is running.
+Use the "interrupt" command to stop the target
+and then try again.

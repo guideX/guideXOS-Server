@@ -180,7 +180,13 @@ def to_elf(pe: bytes, custom_entry: int | None = None) -> bytes:
     else:
         print(f"Using PE entry point: 0x{entry:X}")
 
-    load_secs = [s for s in sections if s.raw_size > 0]
+    # PE sections with no raw bytes are still loadable image memory.  NativeAOT
+    # uses one such section ("hydrated") for runtime-rehydrated metadata.  The
+    # QEMU image loader maps PT_LOAD memory and zero-fills it; omitting this
+    # section leaves the metadata address absent and faults before RhpNewArray.
+    # Keep the PE section order and emit a fileless PT_LOAD for zero-raw
+    # sections rather than fabricating metadata contents here.
+    load_secs = [s for s in sections if s.raw_size > 0 or s.vsize > 0]
     if not load_secs:
         raise SystemExit("No loadable sections with raw data")
 
