@@ -19,7 +19,10 @@ param(
     [switch]$SkipGameplayInput,
     [string]$GameplayKeys = "right",
     [int]$TimeoutSeconds = 100,
-    [int]$Cycles = 3
+    [int]$Cycles = 3,
+    [int]$HoldAfterFrameSeconds = 0,
+    [switch]$ReadOnlyDisk,
+    [string]$KernelElfPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,15 +30,27 @@ $ErrorActionPreference = "Stop"
 $ServerRoot = Split-Path -Parent $PSScriptRoot
 $PacmanRoot = Join-Path (Split-Path -Parent $ServerRoot) "pacman"
 $EspDir = Join-Path $ServerRoot "ESP"
-$KernelElf = Join-Path $ServerRoot "kernel\build\amd64\bin\kernel.elf"
+$KernelElf = if ([string]::IsNullOrWhiteSpace($KernelElfPath)) {
+    Join-Path $ServerRoot "kernel\build\amd64\bin\kernel.elf"
+} else {
+    $KernelElfPath
+}
 $ProductionPackage = Join-Path $env:ProgramData "guideXOS\PacMan"
 if (!(Test-Path $ProductionPackage)) {
     $ProductionPackage = "D:\Apps\PacMan"
 }
-$RunId = Get-Date -Format "yyyyMMdd-HHmmss"
+$RunId = "{0}-{1}" -f (Get-Date -Format "yyyyMMdd-HHmmss-fff"), ([guid]::NewGuid().ToString("N").Substring(0, 8))
 $RunDir = Join-Path $ServerRoot "logs\baremetal-pacman\$RunId"
 $SerialLog = Join-Path $RunDir "qemu-serial.log"
+$SerialTailLog = Join-Path $RunDir "qemu-serial-tail-200.log"
 $QemuErrLog = Join-Path $RunDir "qemu-stderr.log"
+$QemuStdoutLog = Join-Path $RunDir "qemu-stdout.log"
+$QemuDebugLog = Join-Path $RunDir "qemu-debug.log"
+$QemuCommandLog = Join-Path $RunDir "qemu-command-line.txt"
+$QemuPidLog = Join-Path $RunDir "qemu-pid.txt"
+$QemuExitLog = Join-Path $RunDir "qemu-exit-code.txt"
+$QemuTailLog = Join-Path $RunDir "qemu-debug-tail-200.log"
+$OutcomeLog = Join-Path $RunDir "outcome.txt"
 $ValidationLog = Join-Path $RunDir "validation.log"
 $Qemu = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $Ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
@@ -74,11 +89,59 @@ function Read-Serial {
     try { return Get-Content -LiteralPath $SerialLog -Raw -ErrorAction Stop } catch { return "" }
 }
 
+function Save-Tails {
+    if (Test-Path -LiteralPath $SerialLog) {
+        Get-Content -LiteralPath $SerialLog -Tail 200 | Set-Content -LiteralPath $SerialTailLog
+    }
+    if (Test-Path -LiteralPath $QemuDebugLog) {
+        Get-Content -LiteralPath $QemuDebugLog -Tail 200 | Set-Content -LiteralPath $QemuTailLog
+    }
+}
+
+function Classify-QemuOutcome {
+    $serial = Read-Serial
+    $debug = if (Test-Path -LiteralPath $QemuDebugLog) { Get-Content -LiteralPath $QemuDebugLog -Raw } else { "" }
+    $stderr = if (Test-Path -LiteralPath $QemuErrLog) { Get-Content -LiteralPath $QemuErrLog -Raw } else { "" }
+    $exitCode = if (Test-Path -LiteralPath $QemuExitLog) { ((Get-Content -LiteralPath $QemuExitLog -Raw) -as [string]).Trim() } else { "unknown" }
+    if ([string]::IsNullOrWhiteSpace($exitCode)) { $exitCode = "unknown" }
+    $resetCount = [regex]::Matches($debug, '(?m)^CPU Reset \(CPU \d+\)').Count
+    $classification = "unknown"
+    if ($serial -match "(?i)(triple fault|triple-fault)") {
+        $classification = "guest triple fault/reset"
+    } elseif ($serial -match "(?i)(debug.?exit|emulator.?exit|qemu.?exit)") {
+        $classification = "guest debug exit"
+    } elseif ($serial -match "(?i)(acpi.*shutdown|poweroff|system shutdown|shutdown requested)") {
+        $classification = "guest shutdown"
+    } elseif ($serial -match "(?i)(guest reboot|reboot requested|reset requested)") {
+        $classification = "guest reboot/reset"
+    } elseif ($stderr -match "(?i)(assertion failed|Bail out|qemu: fatal|abort") {
+        $classification = "host-side QEMU crash"
+    } elseif ($debug -match "(?i)(triple fault|shutdown)") {
+        $classification = "QEMU diagnostic indicates reset/shutdown"
+    } elseif ($resetCount -gt 2 -and $serial -notmatch "(?i)lifecycle PASS") {
+        $classification = "guest reboot/reset"
+    } elseif ($exitCode -ne "0" -and $exitCode -ne "unknown") {
+        $classification = "host-side QEMU exit/crash"
+    } elseif (!$QemuProcess -or !$QemuProcess.HasExited) {
+        $classification = "harness timeout/owned QEMU still running"
+    } elseif ($serial -match "(?i)Entering main loop") {
+        $classification = "harness stopped healthy guest"
+    } else {
+        $classification = "QEMU exited without guest shutdown marker"
+    }
+    Set-Content -LiteralPath $OutcomeLog -Value ("classification={0}`nqemuExitCode={1}`nqemuCpuResetRecords={2}" -f $classification, $exitCode, $resetCount)
+    Write-Validation "qemu.outcome classification=$classification exitCode=$exitCode cpuResetRecords=$resetCount"
+}
+
 function Wait-SerialCount([string]$Needle, [int]$Minimum, [int]$Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     do {
         $content = Read-Serial
         if ((Text-Count $content $Needle) -ge $Minimum) { return $true }
+        if ($QemuProcess -and $QemuProcess.HasExited) {
+            Write-Validation "qemu.exited.while.waiting needle=$Needle exitCode=$($QemuProcess.ExitCode)"
+            return $false
+        }
         Start-Sleep -Milliseconds 200
     } while ((Get-Date) -lt $deadline)
     return $false
@@ -222,19 +285,27 @@ try {
     # Start-Process passes an ArgumentList array through Windows command-line
     # tokenization. Keep the two drive specifications quoted as whole tokens;
     # the OVMF path contains a space.
+    $diskMode = if ($ReadOnlyDisk) { "ro" } else { "rw" }
+    $diskSpec = "fat:{0}:{1}" -f $diskMode, $QemuEspDir
+    $diskReadOnlyOption = if ($ReadOnlyDisk) { ",readonly=on" } else { "" }
     $qemuArgumentString = `
         '-machine "pc,accel=tcg" ' +
         '-drive "if=pflash,format=raw,readonly=on,file=' + $Ovmf + '" ' +
-        '-drive "file=fat:rw:' + $QemuEspDir + ',format=raw,if=ide,index=0,media=disk" ' +
+        '-drive "file=' + $diskSpec + ',format=raw,if=ide,index=0,media=disk' + $diskReadOnlyOption + '" ' +
         '-m 1024M -vga std -display none ' +
         '-serial "file:' + $SerialLog + '" ' +
         '-qmp "tcp:127.0.0.1:' + $QmpPort + ',server=on,wait=off" ' +
-        '-d guest_errors -D "' + (Join-Path $RunDir "qemu-debug.log") + '" ' +
-        '-no-reboot -rtc base=utc,clock=host ' +
+        '-d guest_errors,int,cpu_reset -D "' + $QemuDebugLog + '" ' +
+        '-no-reboot -no-shutdown -rtc base=utc,clock=host ' +
         '-netdev user,id=net0 -device e1000,netdev=net0'
-    Write-Validation "qemu.start qmpPort=$QmpPort serial=$SerialLog"
+    Set-Content -LiteralPath $QemuCommandLog -Value ("`"{0}`" {1}" -f $Qemu, $qemuArgumentString)
+    Write-Validation "qemu.disk.mode=$diskMode"
+    Write-Validation "qemu.command=$Qemu $qemuArgumentString"
+    Write-Validation "qemu.start qmpPort=$QmpPort serial=$SerialLog debug=$QemuDebugLog"
     $QemuProcess = Start-Process -FilePath $Qemu -ArgumentList $qemuArgumentString -WorkingDirectory (Split-Path -Parent $Qemu) `
-        -RedirectStandardOutput (Join-Path $RunDir "qemu-stdout.log") -RedirectStandardError $QemuErrLog -PassThru
+        -RedirectStandardOutput $QemuStdoutLog -RedirectStandardError $QemuErrLog -PassThru
+    Set-Content -LiteralPath $QemuPidLog -Value $QemuProcess.Id
+    Write-Validation "qemu.pid=$($QemuProcess.Id)"
     Start-Sleep -Milliseconds 250
     if ($QemuProcess.HasExited) {
         $qemuError = if (Test-Path -LiteralPath $QemuErrLog) { Get-Content -LiteralPath $QemuErrLog -Raw } else { "(no stderr)" }
@@ -266,6 +337,21 @@ try {
             Write-Validation "cycle.$cycle gameplay.input=$GameplayKeys screenshot=captured"
         } else {
             Write-Validation "cycle.$cycle gameplay.input=skipped"
+        }
+
+        if ($HoldAfterFrameSeconds -gt 0) {
+            Write-Validation "cycle.$cycle hold.begin seconds=$HoldAfterFrameSeconds"
+            for ($holdSecond = 0; $holdSecond -lt $HoldAfterFrameSeconds; $holdSecond++) {
+                if ($QemuProcess.HasExited) {
+                    throw "Cycle $cycle QEMU exited during hold at second $holdSecond"
+                }
+                Start-Sleep -Seconds 1
+            }
+            if ($QemuProcess.HasExited) {
+                throw "Cycle $cycle QEMU exited at end of hold"
+            }
+            Capture-Screenshot (Join-Path $RunDir "cycle-$cycle-hold.ppm")
+            Write-Validation "cycle.$cycle hold.PASS seconds=$HoldAfterFrameSeconds screenshot=captured"
         }
 
         $beforeExit = Text-Count (Read-Serial) "lifecycle PASS window/resource cleanup complete"
@@ -305,9 +391,22 @@ try {
     Write-Validation "VALIDATION_RESULT=FAIL reason=$($_.Exception.Message)"
     exit 1
 } finally {
+    if ($QemuProcess -and $QemuProcess.HasExited) {
+        $QemuProcess.Refresh()
+        try { $finalExitCode = [int]$QemuProcess.ExitCode } catch { $finalExitCode = "unknown" }
+        Set-Content -LiteralPath $QemuExitLog -Value $finalExitCode
+        Write-Validation "qemu.exit code=$finalExitCode"
+    }
     if ($QemuProcess -and !$QemuProcess.HasExited) {
         Write-Validation "cleanup stopping owned qemu pid=$($QemuProcess.Id)"
         Stop-Process -Id $QemuProcess.Id -Force -ErrorAction SilentlyContinue
         $QemuProcess.WaitForExit(3000)
+        if ($QemuProcess.HasExited) {
+            $QemuProcess.Refresh()
+            try { $finalExitCode = [int]$QemuProcess.ExitCode } catch { $finalExitCode = "unknown" }
+            Set-Content -LiteralPath $QemuExitLog -Value $finalExitCode
+        }
     }
+    Save-Tails
+    Classify-QemuOutcome
 }

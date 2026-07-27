@@ -1380,9 +1380,11 @@ PasteResult move_to_trash(const char* sourcePath, char* outTrashedPath, size_t o
     if (trashStatus != vfs::VFS_OK || trashInfo.type != vfs::FILE_TYPE_DIRECTORY) {
         if (trashStatus == vfs::VFS_OK) trashStatus = vfs::VFS_ERR_NOT_DIR;
         trace_status("TRASH_ROOT_RESOLVE", trashStatus);
-        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::DestinationMissing,
+        const PasteResult rootResult = trashStatus == vfs::VFS_ERR_READ_ONLY
+            ? PasteResult::ReadOnly : PasteResult::DestinationMissing;
+        set_diagnostic_failure(PasteStage::DestinationValidation, rootResult,
                                trashStatus, fat_status_for_vfs_status(trashStatus));
-        return finish_operation(PasteResult::DestinationMissing);
+        return finish_operation(rootResult);
     }
     trace_status("TRASH_ROOT_RESOLVE", vfs::VFS_OK);
     const vfs::MountPoint* sourceMount = mount_for_path(normalizedSource);
@@ -1406,8 +1408,6 @@ PasteResult move_to_trash(const char* sourcePath, char* outTrashedPath, size_t o
         return finish_operation(PasteResult::ReadOnly);
     }
 
-    trace_text("TRASH_STRATEGY", "rename");
-
     set_diagnostic_stage(PasteStage::DestinationNaming);
     char movedPath[vfs::VFS_MAX_PATH] = {0};
     if (!choose_trash_path(trashRoot, sourceName,
@@ -1427,8 +1427,9 @@ PasteResult move_to_trash(const char* sourcePath, char* outTrashedPath, size_t o
         trace_text("TRASH_METADATA_PATH", metadataPath);
     }
 
-    // Re-stat directly before the first mutation. Metadata is created before
-    // rename so a metadata or rename failure leaves the source in place.
+    // Re-stat directly before the first mutation. The copy/delete transaction
+    // leaves the source untouched until destination verification and metadata
+    // creation have both succeeded.
     vfs::FileInfo revalidated{};
     sourceStatus = vfs::stat(normalizedSource, &revalidated);
     if (sourceStatus != vfs::VFS_OK || revalidated.type != sourceInfo.type) {
@@ -1440,50 +1441,74 @@ PasteResult move_to_trash(const char* sourcePath, char* outTrashedPath, size_t o
         return finish_operation(result);
     }
 
+    // FAT rename_path currently cannot complete a cross-directory directory
+    // entry write reliably on the supported bare-metal ATA path. Use the
+    // verified copy/delete transaction until that lower-layer primitive is
+    // complete; it preserves the source until the destination and metadata
+    // have both been flushed and verified.
+    trace_text("TRASH_STRATEGY", "copy-delete");
+    trace_text("TRASH_RENAME_UNAVAILABLE", "FAT_CROSS_DIRECTORY_ENTRY_WRITE");
+    trace_marker("TRASH_DEST_CREATE_BEGIN");
+    trace_text("TRASH_DEST_CREATE_KIND", "copy");
+    set_operation_state(OperationState::Moving);
+    set_diagnostic_stage(PasteStage::DestinationCreate);
+    const PasteResult copyResult = copy_entry_tree(normalizedSource, movedPath,
+                                                   sourceInfo, 0);
+    if (copyResult != PasteResult::Success) {
+        vfs::Status copyStatus = s_lastDiagnostic.vfsStatus;
+        if (copyStatus == vfs::VFS_OK) copyStatus = vfs::VFS_ERR_IO;
+        const char* copyFatStatus = s_lastDiagnostic.fatStatus[0]
+            ? s_lastDiagnostic.fatStatus : fat_status_for_vfs_status(copyStatus);
+        const PasteResult cleanupResult = remove_entry_tree(movedPath, 0);
+        trace_status("TRASH_DEST_CREATE_RESULT", copyStatus);
+        trace_status("TRASH_VERIFY", cleanupResult == PasteResult::Success
+            ? vfs::VFS_OK : vfs::VFS_ERR_IO);
+        set_diagnostic_failure(PasteStage::DestinationCreate, PasteResult::Failed,
+                               copyStatus, copyFatStatus);
+        return finish_operation(PasteResult::Failed);
+    }
+    trace_status("TRASH_DEST_CREATE_RESULT", vfs::VFS_OK);
+
+    set_operation_state(OperationState::Verifying);
+    set_diagnostic_stage(PasteStage::Verification);
+    if (!verify_entry_tree(normalizedSource, movedPath, sourceInfo, 0)) {
+        const PasteResult cleanupResult = remove_entry_tree(movedPath, 0);
+        trace_text("TRASH_VERIFY", "FAILED");
+        trace_status("TRASH_VERIFY_ROLLBACK", cleanupResult == PasteResult::Success
+            ? vfs::VFS_OK : vfs::VFS_ERR_IO);
+        set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
+                               vfs::VFS_ERR_IO, "FAT_FILE_WRITE_VERIFY_FAILED");
+        return finish_operation(PasteResult::Failed);
+    }
+    trace_text("TRASH_VERIFY", "OK");
+
     vfs::Status metadataStatus = vfs::VFS_OK;
     if (!write_trash_metadata(movedPath, normalizedSource,
                               sourceInfo.type == vfs::FILE_TYPE_DIRECTORY,
                               &metadataStatus)) {
         remove_trash_metadata(movedPath);
-        trace_status("TRASH_VERIFY", metadataStatus);
+        const PasteResult cleanupResult = remove_entry_tree(movedPath, 0);
+        trace_status("TRASH_VERIFY_ROLLBACK", cleanupResult == PasteResult::Success
+            ? vfs::VFS_OK : vfs::VFS_ERR_IO);
         set_diagnostic_failure(PasteStage::DestinationCreate, PasteResult::Failed,
                                metadataStatus, fat_status_for_vfs_status(metadataStatus));
         return finish_operation(PasteResult::Failed);
     }
 
-    trace_marker("TRASH_DEST_CREATE_BEGIN");
-    trace_text("TRASH_DEST_CREATE_KIND", "directory-entry-rename");
-    set_operation_state(OperationState::Moving);
     set_diagnostic_stage(PasteStage::Flush);
-    const vfs::Status renameStatus = vfs::rename(normalizedSource, movedPath);
-    if (renameStatus != vfs::VFS_OK) {
+    trace_text("TRASH_SOURCE_DELETE", "BEGIN");
+    const PasteResult sourceDeleteResult = remove_entry_tree(normalizedSource, 0);
+    if (sourceDeleteResult != PasteResult::Success) {
         remove_trash_metadata(movedPath);
-        trace_status("TRASH_DEST_CREATE_RESULT", renameStatus);
-        trace_status("TRASH_SOURCE_DELETE", renameStatus);
-        set_diagnostic_failure(PasteStage::Flush, renameStatus == vfs::VFS_ERR_READ_ONLY
-            ? PasteResult::ReadOnly : PasteResult::Failed,
-            renameStatus, fat_status_for_vfs_status(renameStatus));
-        return finish_operation(renameStatus == vfs::VFS_ERR_READ_ONLY
-            ? PasteResult::ReadOnly : PasteResult::Failed);
-    }
-
-    set_operation_state(OperationState::Verifying);
-    set_diagnostic_stage(PasteStage::Verification);
-    vfs::FileInfo movedInfo{};
-    if (vfs::stat(movedPath, &movedInfo) != vfs::VFS_OK || movedInfo.type != sourceInfo.type) {
-        vfs::Status rollbackStatus = vfs::rename(movedPath, normalizedSource);
-        remove_trash_metadata(movedPath);
-        trace_text("TRASH_VERIFY", "FAILED");
-        trace_status("TRASH_SOURCE_DELETE", rollbackStatus);
-        const vfs::Status failureStatus = rollbackStatus == vfs::VFS_OK ? vfs::VFS_ERR_IO : rollbackStatus;
-        set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
-                               failureStatus, fat_status_for_vfs_status(failureStatus));
+        const PasteResult cleanupResult = remove_entry_tree(movedPath, 0);
+        trace_status("TRASH_SOURCE_DELETE", vfs::VFS_ERR_IO);
+        trace_status("TRASH_VERIFY_ROLLBACK", cleanupResult == PasteResult::Success
+            ? vfs::VFS_OK : vfs::VFS_ERR_IO);
+        set_diagnostic_failure(PasteStage::Flush, PasteResult::Failed,
+                               vfs::VFS_ERR_IO, "FAT_FILE_WRITE_SOURCE_DELETE_FAILED");
         return finish_operation(PasteResult::Failed);
     }
-
-    trace_status("TRASH_DEST_CREATE_RESULT", vfs::VFS_OK);
-    trace_text("TRASH_VERIFY", "OK");
-    trace_text("TRASH_SOURCE_DELETE", "rename-completed");
+    trace_status("TRASH_SOURCE_DELETE", vfs::VFS_OK);
     copy_diagnostic_path(outTrashedPath, outTrashedPathSize, movedPath);
     set_diagnostic_stage(PasteStage::Complete);
     s_lastDiagnostic.result = PasteResult::Success;
