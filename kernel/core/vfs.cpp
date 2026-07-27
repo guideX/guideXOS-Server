@@ -1264,6 +1264,13 @@ bool readdir(uint8_t iterator, DirEntry* entry)
 void closedir(uint8_t iterator)
 {
     if (iterator >= VFS_MAX_OPEN_FILES) return;
+    if (s_dirs[iterator].active) {
+        MountPoint& mount = s_mounts[s_dirs[iterator].mountIndex];
+        if (mount.active && (mount.fsType == FS_TYPE_FAT32 ||
+                             mount.fsType == FS_TYPE_EXFAT)) {
+            fs_fat::close_dir(mount.fsVolumeIndex);
+        }
+    }
     s_dirs[iterator].active = false;
 }
 

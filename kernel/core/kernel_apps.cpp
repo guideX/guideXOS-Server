@@ -4844,6 +4844,7 @@ void FileExplorerApp::confirmDelete() {
         refresh();
         desktop_request_folder_refresh();
         kernel_desktop_refresh_trash_state();
+        file_clipboard::note_trash_refresh(true);
         setStatus("Moved item to Trash");
     } else {
         setStatus(error[0] ? error : "Move to Trash failed");

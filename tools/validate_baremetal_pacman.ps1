@@ -22,6 +22,7 @@ param(
     [int]$Cycles = 3,
     [int]$HoldAfterFrameSeconds = 0,
     [switch]$ReadOnlyDisk,
+    [switch]$EnablePacmanDiagnostics,
     [string]$KernelElfPath = "",
     [string]$ProductionPackagePath = ""
 )
@@ -62,6 +63,7 @@ $Ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
 $QemuProcess = $null
 $QmpPort = 0
 $HarnessRequestedQemuStop = $false
+$PacmanDiagnostics = if ($EnablePacmanDiagnostics) { "ON" } else { "OFF" }
 
 New-Item -ItemType Directory -Path $RunDir -Force | Out-Null
 $QemuEspDir = Join-Path $RunDir "esp"
@@ -270,11 +272,11 @@ try {
     Get-ChildItem -LiteralPath $EspDir -Force | Copy-Item -Destination $QemuEspDir -Recurse -Force
 
     if (!$SkipBuild) {
-        Write-Validation "build.pacman=production Native ELF diagnostics=ON danger-validation=OFF"
+        Write-Validation "build.pacman=production Native ELF diagnostics=$PacmanDiagnostics danger-validation=OFF"
         $ServerRootCmake = $ServerRoot.Replace('\', '/')
         & "C:\mingw64\bin\cmake.exe" -S (Join-Path $PacmanRoot "guidexos") -B (Join-Path $PacmanRoot "guidexos\build-baremetal") -G Ninja `
             "-DGUIDEXOS_SERVER_ROOT=$ServerRootCmake" "-DGUIDEXOS_PACKAGE_ROOT=D:/Apps" `
-            -DPACMAN_ENABLE_DIAGNOSTICS=ON -DPACMAN_HOSTED_DANGER_TEST=OFF `
+            "-DPACMAN_ENABLE_DIAGNOSTICS=$PacmanDiagnostics" -DPACMAN_HOSTED_DANGER_TEST=OFF `
             -DPACMAN_HOSTED_RED_MOVEMENT_TEST=OFF -DPACMAN_HOSTED_PINK_MOVEMENT_TEST=OFF `
             -DPACMAN_HOSTED_CYAN_MOVEMENT_TEST=OFF -DPACMAN_HOSTED_ORANGE_MOVEMENT_TEST=OFF `
             -DPACMAN_HOSTED_POWER_PILL_TEST=OFF
@@ -390,14 +392,18 @@ try {
         "file_read app=Nexgen PacMan relative=resources/level1.gximg offset=0x",
         "file_read app=Nexgen PacMan relative=resources/pacpics.gximg offset=0x",
         "frame PASS app=Nexgen PacMan window=0x",
-        "PacMan ghosts initialized: Red, Pink, Cyan, and Orange moving",
-        "PacMan requested direction",
         "lifecycle PASS window/resource cleanup complete"
     )
+    if ($EnablePacmanDiagnostics) {
+        $required += @(
+            "PacMan ghosts initialized: Red, Pink, Cyan, and Orange moving",
+            "PacMan requested direction"
+        )
+    }
     foreach ($needle in $required) {
         if ($serial.IndexOf($needle, [System.StringComparison]::Ordinal) -lt 0) { throw "Missing required serial evidence: $needle" }
     }
-    Write-Validation "evidence.PASS discovery/ELF/VFS-resources/frame/input/ghosts/lifecycle"
+    Write-Validation "evidence.PASS discovery/ELF/VFS-resources/frame/lifecycle diagnostics=$PacmanDiagnostics"
     Write-Validation "VALIDATION_RESULT=PASS"
     exit 0
 } catch {

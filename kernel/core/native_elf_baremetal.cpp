@@ -7,6 +7,7 @@
 #include "include/kernel/input_manager.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_compositor.h"
+#include "include/kernel/file_clipboard.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
@@ -1049,6 +1050,7 @@ extern "C" uint64_t gxos_native_exception_dispatch(const NativeExceptionFrame* f
     serial::puts(" operation="); serial::puts(runtime
         ? abi_operation_name(runtime->currentAbiOperation) : "none");
     serial::putc('\n');
+    file_clipboard::trace_exception_context();
     serial::puts("[NATIVE-ELF-FAULT] RAX=0x"); serial::put_hex64(frame->rax);
     serial::puts(" RBX=0x"); serial::put_hex64(frame->rbx);
     serial::puts(" RCX=0x"); serial::put_hex64(frame->rcx);

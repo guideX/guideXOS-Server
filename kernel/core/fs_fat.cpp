@@ -25,6 +25,7 @@ static block::Status s_lastIoStatus = block::BLOCK_OK;
 static TraversalStatus s_lastTraversalStatus = TRAVERSAL_OK;
 static DeleteStatus s_lastDeleteStatus = DELETE_OK;
 static bool s_trashTraceActive = false;
+static uint64_t s_trashTraceGeneration = 0;
 static uint64_t s_fatScanIterations = 0;
 static uint64_t s_allocatedClusters = 0;
 
@@ -94,7 +95,9 @@ static block::Status read_volume_sector(const FATVolume& vol, uint64_t lba, void
 static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, const void* buffer)
 {
     if (s_trashTraceActive) {
-        serial::puts("TRASH_BLOCK_WRITE_BEGIN lba=0x");
+        serial::puts("TRASH_BLOCK_WRITE_BEGIN gen=");
+        serial::put_hex64(s_trashTraceGeneration);
+        serial::puts(" lba=0x");
         serial::put_hex64(vol.partitionOffset + lba);
         serial::puts(" relative=0x");
         serial::put_hex64(lba);
@@ -104,7 +107,9 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
     }
     s_lastIoStatus = block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
     if (s_trashTraceActive) {
-        serial::puts("TRASH_BLOCK_WRITE_LBA=0x");
+        serial::puts("TRASH_BLOCK_WRITE_LBA gen=");
+        serial::put_hex64(s_trashTraceGeneration);
+        serial::puts(" lba=0x");
         serial::put_hex64(vol.partitionOffset + lba);
         serial::puts(" relative=0x");
         serial::put_hex64(lba);
@@ -113,7 +118,9 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
         serial::puts("\n");
     }
     if (s_trashTraceActive) {
-        serial::puts("FAT_BLOCK_WRITE_LBA=0x");
+        serial::puts("FAT_BLOCK_WRITE_LBA gen=");
+        serial::put_hex64(s_trashTraceGeneration);
+        serial::puts(" lba=0x");
         serial::put_hex64(vol.partitionOffset + lba);
         serial::puts(" relative=0x");
         serial::put_hex64(lba);
@@ -643,9 +650,12 @@ static uint32_t allocate_cluster(FATVolume& vol)
 {
     if (vol.totalDataClusters == 0) return 0;
     uint32_t entrySize = fat_entry_size(vol);
+    const uint32_t previousHint = vol.nextFreeCluster;
     const uint32_t firstCluster =
         is_valid_data_cluster(vol, vol.nextFreeCluster) ? vol.nextFreeCluster : 2;
-    serial::puts("LFPASTE_ALLOC_BEGIN previous=0x00000000 start=0x");
+    serial::puts("LFPASTE_ALLOC_BEGIN previous=0x");
+    serial::put_hex32(previousHint);
+    serial::puts(" start=0x");
     serial::put_hex32(firstCluster);
     serial::puts("\n");
 
@@ -703,9 +713,11 @@ static void release_allocated_cluster(FATVolume& vol, uint32_t cluster)
     // Best-effort rollback. The original create path leaked the newly
     // allocated cluster when directory-sector publication failed.
     write_fat_entry(vol, cluster, fat_free_value(vol));
-    if (!is_valid_data_cluster(vol, vol.nextFreeCluster) || cluster < vol.nextFreeCluster) {
-        vol.nextFreeCluster = cluster;
-    }
+    serial::puts("LFPASTE_CLUSTER_RELEASE cluster=0x");
+    serial::put_hex32(cluster);
+    serial::puts(" hint=0x");
+    serial::put_hex32(vol.nextFreeCluster);
+    serial::puts(" mode=forward-hint\n");
 }
 
 static bool release_cluster_chain(FATVolume& vol, uint32_t firstCluster)
@@ -720,9 +732,11 @@ static bool release_cluster_chain(FATVolume& vol, uint32_t firstCluster)
         ++steps;
         const uint32_t next = next_cluster(vol, cluster);
         if (write_fat_entry(vol, cluster, fat_free_value(vol)) != block::BLOCK_OK) return false;
-        if (!is_valid_data_cluster(vol, vol.nextFreeCluster) || cluster < vol.nextFreeCluster) {
-            vol.nextFreeCluster = cluster;
-        }
+        serial::puts("LFPASTE_CLUSTER_RELEASE cluster=0x");
+        serial::put_hex32(cluster);
+        serial::puts(" hint=0x");
+        serial::put_hex32(vol.nextFreeCluster);
+        serial::puts(" mode=forward-hint\n");
         if (is_end_of_chain(vol, next)) return true;
         if (!is_valid_data_cluster(vol, next)) {
             set_traversal_status(TRAVERSAL_INVALID_CLUSTER);
@@ -846,9 +860,10 @@ void init()
     s_allocatedClusters = 0;
 }
 
-void set_trash_trace(bool enabled)
+void set_trash_trace(bool enabled, uint64_t generation)
 {
     s_trashTraceActive = enabled;
+    s_trashTraceGeneration = enabled ? generation : 0;
 }
 
 uint8_t mount(uint8_t blockDevIndex)
@@ -906,6 +921,17 @@ bool open_root_dir(uint8_t volumeIndex)
     s_dirIter.entryInSector   = 0;
     set_traversal_status(TRAVERSAL_OK);
     return true;
+}
+
+void close_dir(uint8_t volumeIndex)
+{
+    if (!s_dirIter.active || s_dirIter.volIdx != volumeIndex) return;
+    s_dirIter.active = false;
+    s_dirIter.cluster = 0;
+    s_dirIter.clusterSteps = 0;
+    s_dirIter.sectorInCluster = 0;
+    s_dirIter.entryInSector = 0;
+    set_traversal_status(TRAVERSAL_OK);
 }
 
 bool read_dir(uint8_t volumeIndex, DirEntry* out)
@@ -2402,6 +2428,7 @@ static bool directory_is_empty_for_delete(uint8_t volumeIndex, uint32_t firstClu
     while (read_dir(volumeIndex, &child)) {
         if (++entryCount > kMaxSafeChainSteps) {
             s_lastDeleteStatus = DELETE_CORRUPT_DIRECTORY;
+            s_dirIter.active = false;
             return false;
         }
         if ((child.name[0] == '.' && child.name[1] == '\0') ||
@@ -2411,6 +2438,7 @@ static bool directory_is_empty_for_delete(uint8_t volumeIndex, uint32_t firstClu
         // Most importantly, return before touching the parent directory
         // entry or releasing the directory's cluster chain.
         s_lastDeleteStatus = DELETE_DIRECTORY_NOT_EMPTY;
+        s_dirIter.active = false;
         return false;
     }
 
@@ -2423,8 +2451,10 @@ static bool directory_is_empty_for_delete(uint8_t volumeIndex, uint32_t firstClu
                               traversal == TRAVERSAL_CHAIN_STEP_LIMIT ||
                               traversal == TRAVERSAL_TRUNCATED_CHAIN)
             ? DELETE_CORRUPT_CHAIN : DELETE_CORRUPT_DIRECTORY;
+        s_dirIter.active = false;
         return false;
     }
+    s_dirIter.active = false;
     return true;
 }
 

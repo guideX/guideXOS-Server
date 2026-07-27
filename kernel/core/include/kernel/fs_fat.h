@@ -351,7 +351,7 @@ void init();
 
 // Enable the concise Trash-operation sector trace around FAT writes. This is
 // diagnostic state only and does not alter filesystem behavior.
-void set_trash_trace(bool enabled);
+void set_trash_trace(bool enabled, uint64_t generation = 0);
 
 // Attempt to mount a FAT32 or exFAT volume on a block device.
 // Returns the volume index, or 0xFF on failure.
@@ -363,6 +363,11 @@ void unmount(uint8_t volumeIndex);
 // Open root directory for iteration.  Caller repeatedly calls
 // read_dir() until it returns false.
 bool open_root_dir(uint8_t volumeIndex);
+
+// Close the single FAT traversal cursor backing the VFS iterator. VFS owns
+// the public iterator slot; this hook prevents a bounded/early close from
+// leaving a stale FAT cursor active for the next filesystem operation.
+void close_dir(uint8_t volumeIndex);
 
 // Read the next directory entry.  Returns false when exhausted.
 bool read_dir(uint8_t volumeIndex, DirEntry* out);

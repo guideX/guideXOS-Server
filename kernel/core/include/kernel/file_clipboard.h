@@ -111,6 +111,12 @@ const FileOperationProgress& progress();
 // uses this to refresh when the desktop consumes the shared clipboard.
 uint64_t operation_generation();
 
+// Diagnostic snapshot for exception handlers. While a Trash transaction is
+// active this returns its generation; otherwise it returns the last completed
+// Trash generation and the last recorded stage.
+uint64_t trash_operation_generation();
+void trace_exception_context();
+
 #if defined(GXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
 // Diagnostic-only VFS production-path smoke coverage. This is compiled and
 // invoked only by the opt-in QEMU runtime smoke build.
@@ -162,6 +168,11 @@ const char* paste_stage_name(PasteStage stage);
 const PasteDiagnostic& last_paste_diagnostic();
 const char* paste_diagnostic_message();
 void note_paste_refresh(bool success);
+
+// Complete the caller-owned Desktop/File Explorer refresh after a successful
+// Move-to-Trash transaction. The filesystem operation is already idle before
+// this hook runs; it only closes the generation trace for the UI refresh.
+void note_trash_refresh(bool success);
 
 } // namespace file_clipboard
 } // namespace kernel
