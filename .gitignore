@@ -24,6 +24,10 @@
 /guideXOSServer.experimental.exe
 /logs
 /third_party
+/dist/
+/out/release-tools/
+/out/release-iso/
+/tools/__pycache__/
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
 /scripts/fixtures/public-roots/*.local
