@@ -671,6 +671,12 @@ static const char* kernel_vfs_status_text(vfs::Status status)
         case vfs::VFS_ERR_BUSY: return "Filesystem busy";
         case vfs::VFS_ERR_TOO_MANY: return "Too many open filesystem objects";
         case vfs::VFS_ERR_NOT_SUPPORTED: return "Filesystem operation not supported";
+        case vfs::VFS_ERR_DIRECTORY_NOT_EMPTY: return "Directory is not empty";
+        case vfs::VFS_ERR_RECURSION_LIMIT: return "Directory traversal is too deep";
+        case vfs::VFS_ERR_ENTRY_LIMIT: return "Too many directory entries";
+        case vfs::VFS_ERR_CORRUPT_DIRECTORY: return "Directory is corrupt";
+        case vfs::VFS_ERR_INVALID_DESTINATION: return "Invalid destination";
+        case vfs::VFS_ERR_ROLLBACK_FAILED: return "Rollback failed";
         default: return "Filesystem operation failed";
     }
 }
@@ -4831,8 +4837,11 @@ void FileExplorerApp::confirmDelete() {
     } else {
         setStatus(error[0] ? error : "Move to Trash failed");
     }
-    refresh();
     if (moved) {
+        // Refresh only after a completed filesystem transaction.  A refused
+        // non-empty folder has not mutated the source or Trash and must not
+        // re-enter enumeration from inside the Delete failure path.
+        refresh();
         desktop_request_folder_refresh();
         kernel_desktop_refresh_trash_state();
         setStatus("Moved item to Trash");

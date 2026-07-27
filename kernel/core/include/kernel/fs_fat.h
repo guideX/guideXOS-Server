@@ -97,6 +97,25 @@ enum TraversalStatus : uint8_t {
 const char* traversal_status_name(TraversalStatus status);
 TraversalStatus last_traversal_status();
 
+// Detailed result for delete_path().  The legacy bool API remains available,
+// but callers must be able to distinguish an intentionally refused rmdir from
+// an I/O or FAT-chain failure.
+enum DeleteStatus : uint8_t {
+    DELETE_OK = 0,
+    DELETE_INVALID_ARGUMENT,
+    DELETE_NOT_MOUNTED,
+    DELETE_NOT_FOUND,
+    DELETE_WRONG_TYPE,
+    DELETE_READ_ONLY,
+    DELETE_DIRECTORY_NOT_EMPTY,
+    DELETE_CORRUPT_DIRECTORY,
+    DELETE_CORRUPT_CHAIN,
+    DELETE_IO_ERROR,
+};
+
+const char* delete_status_name(DeleteStatus status);
+DeleteStatus last_delete_status();
+
 // ================================================================
 // FAT12/16 BIOS Parameter Block (BPB) — first 62 bytes of sector 0
 // FAT32 reuses the common prefix and adds its own extension below.

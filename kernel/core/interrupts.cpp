@@ -13,19 +13,20 @@
 
 #include "include/kernel/interrupts.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/native_elf_fault.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace interrupts {
 
 // ================================================================
-// x86 / amd64  —  IDT + 8259 PIC implementation
+// x86 / amd64  â€”  IDT + 8259 PIC implementation
 // ================================================================
 
 #if ARCH_HAS_PIC_8259
 
 // ----------------------------------------------------------------
-// IDT structures — architecture-dependent
+// IDT structures â€” architecture-dependent
 // ----------------------------------------------------------------
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -129,6 +130,12 @@ static GDTPtr   s_gdtPtr;
 static IDTEntry s_idt[kIDTSize];
 static IDTPtr   s_idtPtr;
 static irq_handler_t s_handlers[16] = { 0 };
+
+#if defined(__x86_64__) || defined(_M_X64)
+// Exception diagnostics must not use the interrupted Native ELF stack.  The
+// app stack is intentionally isolated from this bounded kernel-owned stack.
+extern "C" uint8_t gxos_exception_stack[16u * 1024u] = {};
+#endif
 
 // ----------------------------------------------------------------
 // GDT helpers
@@ -442,6 +449,169 @@ static stub_fn s_stubs[16] = {
     irq_stub_12, irq_stub_13, irq_stub_14, irq_stub_15
 };
 
+#if defined(__x86_64__)
+
+// Every amd64 CPU exception gets a real IDT target.  The stubs normalize the
+// error-code and no-error forms, save all general-purpose registers, and
+// switch to the kernel-owned exception stack before entering C++.
+#define MAKE_EXCEPTION_STUB_NO_ERROR(n)                    \
+    extern "C" void exception_stub_##n();                 \
+    asm(                                                    \
+        ".intel_syntax noprefix\n"                       \
+        ".global exception_stub_" #n "\n"                 \
+        "exception_stub_" #n ":\n"                      \
+        "    push 0\n"                                    \
+        "    push " #n "\n"                                \
+        "    push r15\n"                                   \
+        "    push r14\n"                                   \
+        "    push r13\n"                                   \
+        "    push r12\n"                                   \
+        "    push r11\n"                                   \
+        "    push r10\n"                                   \
+        "    push r9\n"                                    \
+        "    push r8\n"                                    \
+        "    push rdi\n"                                   \
+        "    push rsi\n"                                   \
+        "    push rbp\n"                                   \
+        "    push rbx\n"                                   \
+        "    push rdx\n"                                   \
+        "    push rcx\n"                                   \
+        "    push rax\n"                                   \
+        "    mov r12, rsp\n"                               \
+        "    lea rsp, [rip + gxos_exception_stack + 16384]\n" \
+        "    and rsp, -16\n"                               \
+        "    sub rsp, 40\n"                                \
+        "    mov rcx, r12\n"                               \
+        "    call gxos_native_exception_dispatch\n"         \
+        "    add rsp, 40\n"                                \
+        "    test rax, rax\n"                              \
+        "    jnz .native_exception_recover_" #n "\n"       \
+        "    mov rsp, r12\n"                               \
+        "    pop rax\n"                                   \
+        "    pop rcx\n"                                   \
+        "    pop rdx\n"                                   \
+        "    pop rbx\n"                                   \
+        "    pop rbp\n"                                   \
+        "    pop rsi\n"                                   \
+        "    pop rdi\n"                                   \
+        "    pop r8\n"                                    \
+        "    pop r9\n"                                    \
+        "    pop r10\n"                                   \
+        "    pop r11\n"                                   \
+        "    pop r12\n"                                   \
+        "    pop r13\n"                                   \
+        "    pop r14\n"                                   \
+        "    pop r15\n"                                   \
+        "    add rsp, 16\n"                                \
+        "    iretq\n"                                      \
+        ".native_exception_recover_" #n ":\n"             \
+        "    mov rsp, [rip + gxos_native_fault_recovery_rsp]\n" \
+        "    jmp [rip + gxos_native_fault_recovery_rip]\n"   \
+        ".att_syntax prefix\n"                            \
+    );
+
+#define MAKE_EXCEPTION_STUB_WITH_ERROR(n)                  \
+    extern "C" void exception_stub_##n();                 \
+    asm(                                                    \
+        ".intel_syntax noprefix\n"                       \
+        ".global exception_stub_" #n "\n"                 \
+        "exception_stub_" #n ":\n"                      \
+        "    push " #n "\n"                                \
+        "    push r15\n"                                   \
+        "    push r14\n"                                   \
+        "    push r13\n"                                   \
+        "    push r12\n"                                   \
+        "    push r11\n"                                   \
+        "    push r10\n"                                   \
+        "    push r9\n"                                    \
+        "    push r8\n"                                    \
+        "    push rdi\n"                                   \
+        "    push rsi\n"                                   \
+        "    push rbp\n"                                   \
+        "    push rbx\n"                                   \
+        "    push rdx\n"                                   \
+        "    push rcx\n"                                   \
+        "    push rax\n"                                   \
+        "    mov r12, rsp\n"                               \
+        "    lea rsp, [rip + gxos_exception_stack + 16384]\n" \
+        "    and rsp, -16\n"                               \
+        "    sub rsp, 40\n"                                \
+        "    mov rcx, r12\n"                               \
+        "    call gxos_native_exception_dispatch\n"         \
+        "    add rsp, 40\n"                                \
+        "    test rax, rax\n"                              \
+        "    jnz .native_exception_recover_" #n "\n"       \
+        "    mov rsp, r12\n"                               \
+        "    pop rax\n"                                   \
+        "    pop rcx\n"                                   \
+        "    pop rdx\n"                                   \
+        "    pop rbx\n"                                   \
+        "    pop rbp\n"                                   \
+        "    pop rsi\n"                                   \
+        "    pop rdi\n"                                   \
+        "    pop r8\n"                                    \
+        "    pop r9\n"                                    \
+        "    pop r10\n"                                   \
+        "    pop r11\n"                                   \
+        "    pop r12\n"                                   \
+        "    pop r13\n"                                   \
+        "    pop r14\n"                                   \
+        "    pop r15\n"                                   \
+        "    add rsp, 8\n"                                 \
+        "    iretq\n"                                      \
+        ".native_exception_recover_" #n ":\n"             \
+        "    mov rsp, [rip + gxos_native_fault_recovery_rsp]\n" \
+        "    jmp [rip + gxos_native_fault_recovery_rip]\n"   \
+        ".att_syntax prefix\n"                            \
+    );
+
+MAKE_EXCEPTION_STUB_NO_ERROR(0)
+MAKE_EXCEPTION_STUB_NO_ERROR(1)
+MAKE_EXCEPTION_STUB_NO_ERROR(2)
+MAKE_EXCEPTION_STUB_NO_ERROR(3)
+MAKE_EXCEPTION_STUB_NO_ERROR(4)
+MAKE_EXCEPTION_STUB_NO_ERROR(5)
+MAKE_EXCEPTION_STUB_NO_ERROR(6)
+MAKE_EXCEPTION_STUB_NO_ERROR(7)
+MAKE_EXCEPTION_STUB_WITH_ERROR(8)
+MAKE_EXCEPTION_STUB_NO_ERROR(9)
+MAKE_EXCEPTION_STUB_WITH_ERROR(10)
+MAKE_EXCEPTION_STUB_WITH_ERROR(11)
+MAKE_EXCEPTION_STUB_WITH_ERROR(12)
+MAKE_EXCEPTION_STUB_WITH_ERROR(13)
+MAKE_EXCEPTION_STUB_WITH_ERROR(14)
+MAKE_EXCEPTION_STUB_NO_ERROR(15)
+MAKE_EXCEPTION_STUB_WITH_ERROR(16)
+MAKE_EXCEPTION_STUB_NO_ERROR(17)
+MAKE_EXCEPTION_STUB_NO_ERROR(18)
+MAKE_EXCEPTION_STUB_NO_ERROR(19)
+MAKE_EXCEPTION_STUB_NO_ERROR(20)
+MAKE_EXCEPTION_STUB_NO_ERROR(21)
+MAKE_EXCEPTION_STUB_NO_ERROR(22)
+MAKE_EXCEPTION_STUB_NO_ERROR(23)
+MAKE_EXCEPTION_STUB_NO_ERROR(24)
+MAKE_EXCEPTION_STUB_NO_ERROR(25)
+MAKE_EXCEPTION_STUB_NO_ERROR(26)
+MAKE_EXCEPTION_STUB_NO_ERROR(27)
+MAKE_EXCEPTION_STUB_NO_ERROR(28)
+MAKE_EXCEPTION_STUB_WITH_ERROR(29)
+MAKE_EXCEPTION_STUB_WITH_ERROR(30)
+MAKE_EXCEPTION_STUB_NO_ERROR(31)
+
+typedef void (*exception_stub_fn)();
+static exception_stub_fn s_exception_stubs[32] = {
+    exception_stub_0,  exception_stub_1,  exception_stub_2,  exception_stub_3,
+    exception_stub_4,  exception_stub_5,  exception_stub_6,  exception_stub_7,
+    exception_stub_8,  exception_stub_9,  exception_stub_10, exception_stub_11,
+    exception_stub_12, exception_stub_13, exception_stub_14, exception_stub_15,
+    exception_stub_16, exception_stub_17, exception_stub_18, exception_stub_19,
+    exception_stub_20, exception_stub_21, exception_stub_22, exception_stub_23,
+    exception_stub_24, exception_stub_25, exception_stub_26, exception_stub_27,
+    exception_stub_28, exception_stub_29, exception_stub_30, exception_stub_31
+};
+
+#endif // defined(__x86_64__)
+
 static void load_idt()
 {
     s_idtPtr.limit = sizeof(s_idt) - 1;
@@ -496,6 +666,12 @@ void init()
         set_idt_entry(i, 0, 0);
     }
 
+#if defined(__x86_64__)
+    for (int i = 0; i < 32; ++i) {
+        set_idt_entry(i, reinterpret_cast<uint64_t>(s_exception_stubs[i]), 0x8E);
+    }
+#endif
+
     pic_remap();
 
     for (int i = 0; i < 16; ++i) {
@@ -544,7 +720,7 @@ void register_irq(uint8_t irq, irq_handler_t handler)
 #else // !ARCH_HAS_PIC_8259
 
 // ================================================================
-// Non-x86 implementation  —  SPARC / SPARC64 / generic stub
+// Non-x86 implementation  â€”  SPARC / SPARC64 / generic stub
 // ================================================================
 
 static irq_handler_t s_handlers[16] = { 0 };
@@ -604,4 +780,3 @@ extern "C" void sparc64_irq_dispatch(uint64_t tt_value)
 
 } // namespace interrupts
 } // namespace kernel
-

@@ -1331,6 +1331,23 @@ Status mkdir(const char* path)
     return VFS_ERR_NOT_SUPPORTED;
 }
 
+static Status status_for_fat_delete(bool succeeded)
+{
+    if (succeeded) return VFS_OK;
+    switch (fs_fat::last_delete_status()) {
+        case fs_fat::DELETE_NOT_FOUND: return VFS_ERR_NOT_FOUND;
+        case fs_fat::DELETE_WRONG_TYPE: return VFS_ERR_NOT_DIR;
+        case fs_fat::DELETE_READ_ONLY: return VFS_ERR_READ_ONLY;
+        case fs_fat::DELETE_DIRECTORY_NOT_EMPTY: return VFS_ERR_DIRECTORY_NOT_EMPTY;
+        case fs_fat::DELETE_CORRUPT_DIRECTORY: return VFS_ERR_CORRUPT_DIRECTORY;
+        case fs_fat::DELETE_CORRUPT_CHAIN: return VFS_ERR_CORRUPT_CHAIN;
+        case fs_fat::DELETE_NOT_MOUNTED: return VFS_ERR_NOT_MOUNT;
+        case fs_fat::DELETE_INVALID_ARGUMENT: return VFS_ERR_INVALID;
+        case fs_fat::DELETE_IO_ERROR: return VFS_ERR_IO;
+        default: return VFS_ERR_IO;
+    }
+}
+
 Status rmdir(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
@@ -1343,7 +1360,8 @@ Status rmdir(const char* path)
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
-            return fs_fat::delete_path(mount->fsVolumeIndex, relPath, true) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+            return status_for_fat_delete(
+                fs_fat::delete_path(mount->fsVolumeIndex, relPath, true));
 
         default:
             break;
@@ -1423,7 +1441,8 @@ Status unlink(const char* path)
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
-            return fs_fat::delete_path(mount->fsVolumeIndex, relPath, false) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+            return status_for_fat_delete(
+                fs_fat::delete_path(mount->fsVolumeIndex, relPath, false));
 
         default:
             break;
@@ -1625,6 +1644,12 @@ const char* status_name(Status status)
         case VFS_ERR_CORRUPT_CHAIN: return "VFS_ERR_CORRUPT_CHAIN";
         case VFS_ERR_NO_PROGRESS: return "VFS_ERR_NO_PROGRESS";
         case VFS_ERR_ALLOCATION_FAILED: return "VFS_ERR_ALLOCATION_FAILED";
+        case VFS_ERR_DIRECTORY_NOT_EMPTY: return "VFS_ERR_DIRECTORY_NOT_EMPTY";
+        case VFS_ERR_RECURSION_LIMIT: return "VFS_ERR_RECURSION_LIMIT";
+        case VFS_ERR_ENTRY_LIMIT: return "VFS_ERR_ENTRY_LIMIT";
+        case VFS_ERR_CORRUPT_DIRECTORY: return "VFS_ERR_CORRUPT_DIRECTORY";
+        case VFS_ERR_INVALID_DESTINATION: return "VFS_ERR_INVALID_DESTINATION";
+        case VFS_ERR_ROLLBACK_FAILED: return "VFS_ERR_ROLLBACK_FAILED";
         default: return "VFS_STATUS_UNKNOWN";
     }
 }

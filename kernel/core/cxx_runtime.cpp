@@ -7,6 +7,7 @@
 //
 
 #include <kernel/types.h>
+#include <kernel/serial_debug.h>
 
 // Avoid GCC generating libstdc++ calls
 #if !defined(_MSC_VER)
@@ -38,9 +39,9 @@ int atexit(void (*)())
 
 void __cxa_pure_virtual()
 {
-    // Kernel panic or halt - should never happen
+    kernel::serial::puts("[KERNEL-PANIC] assertion=pure-virtual-call halted=1\n");
     while (1) {
-        // Infinite loop - this is a fatal error
+        // Infinite loop - this is a fatal error.
     }
 }
 

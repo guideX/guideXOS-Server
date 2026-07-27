@@ -175,6 +175,7 @@ static inline void disable_interrupts()
 void perform_shutdown()
 {
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
+    kernel::serial::puts("[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none\n");
     // Method 1: QEMU debug exit (cleanest for QEMU with isa-debug-exit device)
     // Exit code will be (0 << 1) | 1 = 1, indicating success
     outb_power(QEMU_DEBUG_EXIT_PORT, 0x00);
@@ -216,6 +217,7 @@ void perform_shutdown()
 void perform_restart()
 {
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
+    kernel::serial::puts("[SHUTDOWN] final reason=system-restart exitCode=1 caller=desktop expected=1 runtime=none app=none\n");
     disable_interrupts();
     
     // Method 1: Keyboard controller reset (most reliable)

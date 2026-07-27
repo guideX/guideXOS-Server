@@ -29,6 +29,7 @@ enum class PasteResult : uint8_t {
     ReadOnly,
     Conflict,
     Unsupported,
+    DirectoryNotEmpty,
     Failed,
 };
 

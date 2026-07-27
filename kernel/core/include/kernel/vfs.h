@@ -109,6 +109,14 @@ enum Status : int8_t {
     VFS_ERR_CORRUPT_CHAIN = -15,
     VFS_ERR_NO_PROGRESS = -16,
     VFS_ERR_ALLOCATION_FAILED = -17,
+    // Directory and transactional traversal errors are kept distinct so a
+    // caller can refuse a risky operation without treating it as generic I/O.
+    VFS_ERR_DIRECTORY_NOT_EMPTY = -18,
+    VFS_ERR_RECURSION_LIMIT = -19,
+    VFS_ERR_ENTRY_LIMIT = -20,
+    VFS_ERR_CORRUPT_DIRECTORY = -21,
+    VFS_ERR_INVALID_DESTINATION = -22,
+    VFS_ERR_ROLLBACK_FAILED = -23,
 };
 
 // ================================================================

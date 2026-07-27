@@ -22,7 +22,8 @@ param(
     [int]$Cycles = 3,
     [int]$HoldAfterFrameSeconds = 0,
     [switch]$ReadOnlyDisk,
-    [string]$KernelElfPath = ""
+    [string]$KernelElfPath = "",
+    [string]$ProductionPackagePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,8 +36,12 @@ $KernelElf = if ([string]::IsNullOrWhiteSpace($KernelElfPath)) {
 } else {
     $KernelElfPath
 }
-$ProductionPackage = Join-Path $env:ProgramData "guideXOS\PacMan"
-if (!(Test-Path $ProductionPackage)) {
+$ProductionPackage = if ([string]::IsNullOrWhiteSpace($ProductionPackagePath)) {
+    Join-Path $env:ProgramData "guideXOS\PacMan"
+} else {
+    $ProductionPackagePath
+}
+if ([string]::IsNullOrWhiteSpace($ProductionPackagePath) -and !(Test-Path $ProductionPackage)) {
     $ProductionPackage = "D:\Apps\PacMan"
 }
 $RunId = "{0}-{1}" -f (Get-Date -Format "yyyyMMdd-HHmmss-fff"), ([guid]::NewGuid().ToString("N").Substring(0, 8))
@@ -56,6 +61,7 @@ $Qemu = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $Ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
 $QemuProcess = $null
 $QmpPort = 0
+$HarnessRequestedQemuStop = $false
 
 New-Item -ItemType Directory -Path $RunDir -Force | Out-Null
 $QemuEspDir = Join-Path $RunDir "esp"
@@ -102,19 +108,22 @@ function Classify-QemuOutcome {
     $serial = Read-Serial
     $debug = if (Test-Path -LiteralPath $QemuDebugLog) { Get-Content -LiteralPath $QemuDebugLog -Raw } else { "" }
     $stderr = if (Test-Path -LiteralPath $QemuErrLog) { Get-Content -LiteralPath $QemuErrLog -Raw } else { "" }
+    $validation = if (Test-Path -LiteralPath $ValidationLog) { Get-Content -LiteralPath $ValidationLog -Raw } else { "" }
     $exitCode = if (Test-Path -LiteralPath $QemuExitLog) { ((Get-Content -LiteralPath $QemuExitLog -Raw) -as [string]).Trim() } else { "unknown" }
     if ([string]::IsNullOrWhiteSpace($exitCode)) { $exitCode = "unknown" }
     $resetCount = [regex]::Matches($debug, '(?m)^CPU Reset \(CPU \d+\)').Count
     $classification = "unknown"
     if ($serial -match "(?i)(triple fault|triple-fault)") {
         $classification = "guest triple fault/reset"
+    } elseif ($serial -match "(?i)NATIVE-ELF-FAULT") {
+        $classification = "guest application fault contained"
     } elseif ($serial -match "(?i)(debug.?exit|emulator.?exit|qemu.?exit)") {
         $classification = "guest debug exit"
     } elseif ($serial -match "(?i)(acpi.*shutdown|poweroff|system shutdown|shutdown requested)") {
         $classification = "guest shutdown"
     } elseif ($serial -match "(?i)(guest reboot|reboot requested|reset requested)") {
         $classification = "guest reboot/reset"
-    } elseif ($stderr -match "(?i)(assertion failed|Bail out|qemu: fatal|abort") {
+    } elseif ($stderr -match "(?i)(assertion failed|Bail out|qemu: fatal|abort)") {
         $classification = "host-side QEMU crash"
     } elseif ($debug -match "(?i)(triple fault|shutdown)") {
         $classification = "QEMU diagnostic indicates reset/shutdown"
@@ -122,9 +131,13 @@ function Classify-QemuOutcome {
         $classification = "guest reboot/reset"
     } elseif ($exitCode -ne "0" -and $exitCode -ne "unknown") {
         $classification = "host-side QEMU exit/crash"
+    } elseif ($QemuProcess -and $QemuProcess.HasExited -and !$HarnessRequestedQemuStop) {
+        $classification = "unmarked QEMU exit"
     } elseif (!$QemuProcess -or !$QemuProcess.HasExited) {
         $classification = "harness timeout/owned QEMU still running"
-    } elseif ($serial -match "(?i)Entering main loop") {
+    } elseif ($HarnessRequestedQemuStop -and $validation -match "(?i)VALIDATION_RESULT=FAIL") {
+        $classification = "harness stopped guest after validation failure"
+    } elseif ($HarnessRequestedQemuStop -and $serial -match "(?i)Entering main loop") {
         $classification = "harness stopped healthy guest"
     } else {
         $classification = "QEMU exited without guest shutdown marker"
@@ -297,7 +310,8 @@ try {
         '-qmp "tcp:127.0.0.1:' + $QmpPort + ',server=on,wait=off" ' +
         '-d guest_errors,int,cpu_reset -D "' + $QemuDebugLog + '" ' +
         '-no-reboot -no-shutdown -rtc base=utc,clock=host ' +
-        '-netdev user,id=net0 -device e1000,netdev=net0'
+        '-netdev user,id=net0 -device e1000,netdev=net0 ' +
+        '-device isa-debug-exit,iobase=0x501,iosize=0x04'
     Set-Content -LiteralPath $QemuCommandLog -Value ("`"{0}`" {1}" -f $Qemu, $qemuArgumentString)
     Write-Validation "qemu.disk.mode=$diskMode"
     Write-Validation "qemu.command=$Qemu $qemuArgumentString"
@@ -398,6 +412,7 @@ try {
         Write-Validation "qemu.exit code=$finalExitCode"
     }
     if ($QemuProcess -and !$QemuProcess.HasExited) {
+        $HarnessRequestedQemuStop = $true
         Write-Validation "cleanup stopping owned qemu pid=$($QemuProcess.Id)"
         Stop-Process -Id $QemuProcess.Id -Force -ErrorAction SilentlyContinue
         $QemuProcess.WaitForExit(3000)

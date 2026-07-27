@@ -23,6 +23,7 @@ static FATFile   s_files[MAX_OPEN_FILES];
 static uint8_t   s_volumeCount = 0;
 static block::Status s_lastIoStatus = block::BLOCK_OK;
 static TraversalStatus s_lastTraversalStatus = TRAVERSAL_OK;
+static DeleteStatus s_lastDeleteStatus = DELETE_OK;
 static bool s_trashTraceActive = false;
 static uint64_t s_fatScanIterations = 0;
 static uint64_t s_allocatedClusters = 0;
@@ -840,6 +841,7 @@ void init()
     s_volumeCount = 0;
     s_lastIoStatus = block::BLOCK_OK;
     s_lastTraversalStatus = TRAVERSAL_OK;
+    s_lastDeleteStatus = DELETE_OK;
     s_fatScanIterations = 0;
     s_allocatedClusters = 0;
 }
@@ -2223,6 +2225,28 @@ TraversalStatus last_traversal_status()
     return s_lastTraversalStatus;
 }
 
+const char* delete_status_name(DeleteStatus status)
+{
+    switch (status) {
+        case DELETE_OK: return "FAT_DELETE_OK";
+        case DELETE_INVALID_ARGUMENT: return "FAT_DELETE_INVALID_ARGUMENT";
+        case DELETE_NOT_MOUNTED: return "FAT_DELETE_NOT_MOUNTED";
+        case DELETE_NOT_FOUND: return "FAT_DELETE_NOT_FOUND";
+        case DELETE_WRONG_TYPE: return "FAT_DELETE_WRONG_TYPE";
+        case DELETE_READ_ONLY: return "FAT_DELETE_READ_ONLY";
+        case DELETE_DIRECTORY_NOT_EMPTY: return "FAT_DELETE_DIRECTORY_NOT_EMPTY";
+        case DELETE_CORRUPT_DIRECTORY: return "FAT_DELETE_CORRUPT_DIRECTORY";
+        case DELETE_CORRUPT_CHAIN: return "FAT_DELETE_CORRUPT_CHAIN";
+        case DELETE_IO_ERROR: return "FAT_DELETE_IO_ERROR";
+        default: return "FAT_DELETE_UNKNOWN";
+    }
+}
+
+DeleteStatus last_delete_status()
+{
+    return s_lastDeleteStatus;
+}
+
 static void initialize_directory_entry(FAT32_DirEntry* entry,
                                         const char* shortName,
                                         uint32_t firstCluster)
@@ -2366,36 +2390,109 @@ DirectoryCreateStatus create_directory_path_status(uint8_t volumeIndex,
     return DIRECTORY_CREATE_OK;
 }
 
+static bool directory_is_empty_for_delete(uint8_t volumeIndex, uint32_t firstCluster)
+{
+    if (!open_dir(volumeIndex, firstCluster)) {
+        s_lastDeleteStatus = DELETE_CORRUPT_DIRECTORY;
+        return false;
+    }
+
+    uint32_t entryCount = 0;
+    DirEntry child{};
+    while (read_dir(volumeIndex, &child)) {
+        if (++entryCount > kMaxSafeChainSteps) {
+            s_lastDeleteStatus = DELETE_CORRUPT_DIRECTORY;
+            return false;
+        }
+        if ((child.name[0] == '.' && child.name[1] == '\0') ||
+            (child.name[0] == '.' && child.name[1] == '.' && child.name[2] == '\0')) {
+            continue;
+        }
+        // Most importantly, return before touching the parent directory
+        // entry or releasing the directory's cluster chain.
+        s_lastDeleteStatus = DELETE_DIRECTORY_NOT_EMPTY;
+        return false;
+    }
+
+    const TraversalStatus traversal = last_traversal_status();
+    if (traversal != TRAVERSAL_DIRECTORY_END &&
+        traversal != TRAVERSAL_END_OF_CHAIN && traversal != TRAVERSAL_OK) {
+        s_lastDeleteStatus = (traversal == TRAVERSAL_CHAIN_CYCLE ||
+                              traversal == TRAVERSAL_INVALID_CLUSTER ||
+                              traversal == TRAVERSAL_BAD_CLUSTER ||
+                              traversal == TRAVERSAL_CHAIN_STEP_LIMIT ||
+                              traversal == TRAVERSAL_TRUNCATED_CHAIN)
+            ? DELETE_CORRUPT_CHAIN : DELETE_CORRUPT_DIRECTORY;
+        return false;
+    }
+    return true;
+}
+
 bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
 {
+    s_lastDeleteStatus = DELETE_INVALID_ARGUMENT;
     if (volumeIndex >= MAX_FAT_VOLUMES) return false;
-    if (!s_volumes[volumeIndex].mounted) return false;
+    if (!s_volumes[volumeIndex].mounted) {
+        s_lastDeleteStatus = DELETE_NOT_MOUNTED;
+        return false;
+    }
     if (!path) return false;
 
     FATVolume& vol = s_volumes[volumeIndex];
-    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) {
+        s_lastDeleteStatus = DELETE_INVALID_ARGUMENT;
+        return false;
+    }
 
     DirEntry entry;
     uint32_t sector = 0;
     uint32_t offset = 0;
     if (!find_path_entry_at(volumeIndex, path, &entry, &sector, &offset)) {
+        s_lastDeleteStatus = DELETE_NOT_FOUND;
         return false;
     }
-    if (entry.isDir != directory) return false;
-    if (entry.attr & ATTR_READ_ONLY) return false;
+    if (entry.isDir != directory) {
+        s_lastDeleteStatus = DELETE_WRONG_TYPE;
+        return false;
+    }
+    if (entry.attr & ATTR_READ_ONLY) {
+        s_lastDeleteStatus = DELETE_READ_ONLY;
+        return false;
+    }
+
+    if (directory && !directory_is_empty_for_delete(volumeIndex, entry.firstCluster)) {
+        return false;
+    }
 
     if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        s_lastDeleteStatus = DELETE_IO_ERROR;
         return false;
     }
 
     FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
     de->name[0] = static_cast<char>(0xE5);
-    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) return false;
+    if (write_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+        s_lastDeleteStatus = DELETE_IO_ERROR;
+        return false;
+    }
 
     // A failed Paste rollback must remove the directory entry and return its
     // entire data chain to the free-cluster pool, not merely hide the entry.
-    if (!release_cluster_chain(vol, entry.firstCluster)) return false;
-    return flush_volume_io(vol) == block::BLOCK_OK;
+    if (!release_cluster_chain(vol, entry.firstCluster)) {
+        s_lastDeleteStatus = (last_traversal_status() == TRAVERSAL_CHAIN_CYCLE ||
+                              last_traversal_status() == TRAVERSAL_INVALID_CLUSTER ||
+                              last_traversal_status() == TRAVERSAL_BAD_CLUSTER ||
+                              last_traversal_status() == TRAVERSAL_CHAIN_STEP_LIMIT ||
+                              last_traversal_status() == TRAVERSAL_TRUNCATED_CHAIN)
+            ? DELETE_CORRUPT_CHAIN : DELETE_IO_ERROR;
+        return false;
+    }
+    if (flush_volume_io(vol) != block::BLOCK_OK) {
+        s_lastDeleteStatus = DELETE_IO_ERROR;
+        return false;
+    }
+    s_lastDeleteStatus = DELETE_OK;
+    return true;
 }
 
 static bool restore_directory_entry(const FATVolume& vol, uint32_t sector,
