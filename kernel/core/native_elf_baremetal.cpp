@@ -29,17 +29,7 @@ static const uint32_t kRuntimeStackBytes = 128u * 1024u;
 static const uint32_t kMaxLoadedImageBytes = 32u * 1024u * 1024u;
 static const uint32_t kMaxFrameBytes = 16u * 1024u * 1024u;
 
-struct Package {
-    bool valid;
-    char directory[64];
-    char root[128];
-    char id[80];
-    char displayName[80];
-    char executable[160];
-    char entryPoint[48];
-    char abi[64];
-    uint64_t executableBytes;
-};
+using Package = PackageInfo;
 
 struct Runtime;
 
@@ -495,6 +485,9 @@ void discover() {
     serial::puts("[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS\n");
     const uint8_t iterator = vfs::opendir("/Apps");
     if (iterator == 0xFF) {
+        // VFS can be mounted after early desktop probes.  Do not permanently
+        // cache a negative result from a not-yet-mounted package root.
+        s_discovered = false;
         serial::puts("[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY\n");
         return;
     }
@@ -523,6 +516,11 @@ static Package* find_package(const char* appName) {
 bool is_available(const char* appName) {
     if (!s_discovered) discover();
     return find_package(appName) != nullptr;
+}
+
+const PackageInfo* lookup_package(const char* appName) {
+    if (!s_discovered) discover();
+    return find_package(appName);
 }
 
 struct Elf64Header {
@@ -1232,6 +1230,7 @@ bool launch(const char* appName) {
 void discover() {}
 bool launch(const char*) { return false; }
 bool is_available(const char*) { return false; }
+const PackageInfo* lookup_package(const char*) { return nullptr; }
 
 #endif
 

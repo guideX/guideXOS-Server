@@ -10,6 +10,8 @@ param(
     [switch]$RequireCleanWorktree,
     [switch]$Force,
     [switch]$BootstrapTools,
+    [ValidateSet('PyCdlib', 'Oscdimg')]
+    [string]$IsoBackend = 'PyCdlib',
     [string]$OscdimgPath,
     [string]$PythonPath
 )
@@ -29,6 +31,7 @@ $IsoHelper = Join-Path $RepositoryRoot 'tools\release_iso.py'
 $RequirementsFile = Join-Path $RepositoryRoot 'requirements-release.txt'
 $PackageStartUtc = [DateTime]::UtcNow
 $WorkDirectory = $null
+$CommandLogRoot = Join-Path $ReleaseWorkRoot 'command-logs'
 
 function Fail([string]$Message) {
     throw "[release-iso] $Message"
@@ -74,6 +77,25 @@ function Format-CommandLine([string]$FilePath, [string[]]$Arguments) {
     return ($parts -join ' ')
 }
 
+function Format-ProcessArguments([string[]]$Arguments) {
+    $parts = @()
+    foreach ($argument in $Arguments) {
+        if ($null -eq $argument) {
+            $parts += '""'
+        } elseif ($argument -match '[\s"]') {
+            $parts += '"' + $argument.Replace('"', '\"') + '"'
+        } else {
+            $parts += $argument
+        }
+    }
+    return ($parts -join ' ')
+}
+
+function Read-ProcessOutput([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    return [IO.File]::ReadAllText($Path)
+}
+
 function Invoke-ExternalChecked {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -85,29 +107,65 @@ function Invoke-ExternalChecked {
     if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
         Fail "external tool was not found: $FilePath"
     }
-    Write-Host ("[release-iso] " + (Format-CommandLine $FilePath $Arguments)) -ForegroundColor DarkGray
-    $captured = @()
-    $exitCode = 1
-    Push-Location -LiteralPath $WorkingDirectory
+    $commandId = [Guid]::NewGuid().ToString('N')
+    $safeName = ([IO.Path]::GetFileNameWithoutExtension($FilePath) -replace '[^A-Za-z0-9._-]', '_')
+    New-Item -ItemType Directory -Path $CommandLogRoot -Force | Out-Null
+    $stdoutLog = Join-Path $CommandLogRoot ("$commandId-$safeName-stdout.log")
+    $stderrLog = Join-Path $CommandLogRoot ("$commandId-$safeName-stderr.log")
+    $commandLine = Format-CommandLine $FilePath $Arguments
+    Write-Host ("[release-iso] " + $commandLine) -ForegroundColor DarkGray
+    $process = $null
+    $exitCode = $null
     try {
-        $captured = @(& $FilePath @Arguments 2>&1)
-        $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE }
+        $process = Start-Process -FilePath $FilePath `
+            -ArgumentList (Format-ProcessArguments $Arguments) `
+            -WorkingDirectory $WorkingDirectory `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog `
+            -PassThru `
+            -WindowStyle Hidden `
+            -ErrorAction Stop
+        $process.WaitForExit()
+        $exitCode = [int]$process.ExitCode
     } catch {
-        Fail ("failed to start external command: " + $_.Exception.Message + "`n" + (Format-CommandLine $FilePath $Arguments))
+        Fail ("failed to start external command.`n" +
+            "  executable: $FilePath`n" +
+            "  arguments: $(Format-ProcessArguments $Arguments)`n" +
+            "  working directory: $WorkingDirectory`n" +
+            "  details: $($_.Exception.Message)")
     } finally {
-        Pop-Location
+        if ($null -ne $process) { $process.Dispose() }
     }
-    foreach ($line in $captured) {
-        Write-Host ([string]$line)
+
+    $stdout = Read-ProcessOutput $stdoutLog
+    $stderr = Read-ProcessOutput $stderrLog
+    if ($stdout.Length -gt 0) { [Console]::Out.Write($stdout) }
+    if ($stderr.Length -gt 0) { [Console]::Error.Write($stderr) }
+    $combinedOutput = $stdout
+    if ($stderr.Length -gt 0) {
+        if ($combinedOutput.Length -gt 0) { $combinedOutput += [Environment]::NewLine }
+        $combinedOutput += $stderr
     }
-    $text = ($captured | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
     if (-not $AllowNonZero -and $exitCode -ne 0) {
-        Fail ("command failed with exit code ${exitCode}: " + (Format-CommandLine $FilePath $Arguments))
+        Fail ("command failed with exit code ${exitCode}.`n" +
+            "  executable: $FilePath`n" +
+            "  arguments: $(Format-ProcessArguments $Arguments)`n" +
+            "  working directory: $WorkingDirectory`n" +
+            "  stdout log: $stdoutLog`n" +
+            "  stderr log: $stderrLog")
     }
-    if (-not $AllowNonZero -and $text -match '(?im)(fatal|truncat(?:ion|ed)? error|\bERROR\b)') {
-        Fail ("command output reported a fatal/truncation error: " + (Format-CommandLine $FilePath $Arguments))
+    return [PSCustomObject]@{
+        ExitCode = $exitCode
+        Output = $combinedOutput
+        Stdout = $stdout
+        Stderr = $stderr
+        Command = $commandLine
+        FilePath = $FilePath
+        Arguments = @($Arguments)
+        WorkingDirectory = $WorkingDirectory
+        StdoutLog = $stdoutLog
+        StderrLog = $stderrLog
     }
-    return [PSCustomObject]@{ ExitCode = $exitCode; Output = $text; Command = (Format-CommandLine $FilePath $Arguments) }
 }
 
 function Invoke-GitChecked([string[]]$Arguments) {
@@ -139,18 +197,25 @@ function Resolve-Oscdimg {
 
     $candidates = @()
     $command = Get-Command oscdimg.exe -ErrorAction SilentlyContinue
-    if ($null -ne $command) { $candidates += $command.Source }
     $adkRoots = @(
         (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg'),
         (Join-Path $env:ProgramFiles 'Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg'),
         (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\x86\Oscdimg')
     )
+    if ($null -ne $command) { $candidates += $command.Source }
     foreach ($root in $adkRoots) {
         $candidates += (Join-Path $root 'oscdimg.exe')
     }
     $resolved = @(Get-ExistingFileCandidates $candidates)
     if ($resolved.Count -eq 0) {
         Fail "oscdimg.exe was not found. Install the Windows ADK Deployment Tools component (Deployment Tools only), or pass -OscdimgPath with the full path to oscdimg.exe. The script never downloads or installs the ADK."
+    }
+    if ([Environment]::Is64BitOperatingSystem) {
+        $amd64 = @($resolved | Where-Object { $_ -match '(?i)[\\/]amd64[\\/]Oscdimg[\\/]oscdimg\.exe$' })
+        if ($amd64.Count -gt 0) { $resolved = $amd64 }
+    } else {
+        $x86 = @($resolved | Where-Object { $_ -match '(?i)[\\/]x86[\\/]Oscdimg[\\/]oscdimg\.exe$' })
+        if ($x86.Count -gt 0) { $resolved = $x86 }
     }
     if ($resolved.Count -gt 1) {
         Fail ("multiple oscdimg.exe candidates were found; pass -OscdimgPath explicitly:`n" + ($resolved -join "`n"))
@@ -173,8 +238,11 @@ function Get-WorkingPythonCandidate {
     }
     $candidatePath = $candidate.Source
     $probe = Invoke-ExternalChecked -FilePath $candidatePath -Arguments @('--version') -AllowNonZero
-    if ($probe.ExitCode -ne 0 -or $probe.Output -match '(?i)(not found|store)') {
+    if ($probe.ExitCode -ne 0) {
         Fail "the discovered Python command is not usable: $candidatePath. Pass -PythonPath to a real Python 3 executable."
+    }
+    if ($probe.Output -match '(?im)^Python was not found.*Microsoft Store') {
+        Fail "the discovered Python command is the Microsoft Store execution-alias shim: $candidatePath. Pass -PythonPath to a real Python 3 executable."
     }
     return $candidatePath
 }
@@ -197,7 +265,7 @@ function Resolve-ReleasePython {
         New-Item -ItemType Directory -Path $ReleaseToolsRoot -Force | Out-Null
         Invoke-ExternalChecked -FilePath $python -Arguments @('-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '--requirement', $RequirementsFile) | Out-Null
     }
-    $probeCode = "import importlib.metadata as m; assert m.version('pyfatfs') == '1.1.0'; assert m.version('fs') == '2.4.16'; print('pyfatfs=' + m.version('pyfatfs')); print('fs=' + m.version('fs'))"
+    $probeCode = "import importlib.metadata as m; assert m.version('pyfatfs') == '1.1.0'; assert m.version('fs') == '2.4.16'; assert m.version('pycdlib') == '1.16.0'; print('pyfatfs=' + m.version('pyfatfs')); print('fs=' + m.version('fs')); print('pycdlib=' + m.version('pycdlib'))"
     $probe = Invoke-ExternalChecked -FilePath $python -Arguments @('-c', $probeCode) -AllowNonZero
     if ($probe.ExitCode -ne 0) {
         Fail "the required local Python dependencies are missing or unpinned. Run again with -BootstrapTools, which installs only into out\release-tools\venv."
@@ -256,7 +324,24 @@ function Get-EspContents {
         if ($item.Length -le 0) { Fail "required ESP input is empty: $(Get-RepositoryRelativePath $path)" }
         $required += (Get-FileRecord $item)
     }
-    return [PSCustomObject]@{ Files = $records; Required = $required; TotalBytes = [int64](($records | Measure-Object -Property size -Sum).Sum) }
+    $totalBytes = [int64](($records | ForEach-Object { [int64]$_.size } | Measure-Object -Sum).Sum)
+    return [PSCustomObject]@{ Files = $records; Required = $required; TotalBytes = $totalBytes }
+}
+
+function Get-EspPackageRecords($EspRecords) {
+    $repositoryPrefix = 'ESP/'
+    $records = @()
+    foreach ($record in $EspRecords) {
+        if (-not $record.path.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            Fail "ESP record is not rooted under ESP: $($record.path)"
+        }
+        $records += [ordered]@{
+            path = $record.path.Substring($repositoryPrefix.Length)
+            size = [int64]$record.size
+            sha256 = $record.sha256
+        }
+    }
+    return @($records)
 }
 
 function Get-ToolRecord([string]$Path, [string]$VersionText) {
@@ -273,17 +358,25 @@ function Get-PythonVersion([string]$Python) {
     return (Invoke-ExternalChecked -FilePath $Python -Arguments @('--version')).Output.Trim()
 }
 
-function Get-IsoExpectedRecords($EspRecords, [System.IO.FileInfo]$FatImage) {
-    $records = @()
-    foreach ($record in $EspRecords) {
-        $records += [ordered]@{ path = $record.path; size = $record.size; sha256 = $record.sha256 }
-    }
+function Get-LocalFileRecord([System.IO.FileInfo]$File, [string]$IsoPath) {
+    if ($File.Length -le 0) { Fail "empty ISO input file is not allowed: $($File.FullName)" }
     return [ordered]@{
-        files = $records
+        path = $IsoPath
+        size = [int64]$File.Length
+        sha256 = (Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+
+function Get-IsoExpectedRecords([System.IO.FileInfo]$FatImage, [System.IO.FileInfo]$Readme, [string]$BootImageIsoPath) {
+    $naturalSectorCount = [int64][Math]::Ceiling([double]$FatImage.Length / 512.0)
+    $sectorCount = if ($naturalSectorCount -gt 65535) { 0 } else { [int]$naturalSectorCount }
+    return [ordered]@{
+        files = @((Get-LocalFileRecord $Readme 'README.TXT'))
         bootImage = [ordered]@{
-            path = 'EFI-BOOT.IMG'
+            path = $BootImageIsoPath
             size = [int64]$FatImage.Length
             sha256 = (Get-FileHash -LiteralPath $FatImage.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            sectorCount = $sectorCount
         }
     }
 }
@@ -306,7 +399,12 @@ function Copy-EspToStaging($Records, [string]$StagingRoot) {
     New-Item -ItemType Directory -Path $StagingRoot -Force | Out-Null
     foreach ($record in $Records) {
         $source = Join-Path $RepositoryRoot ($record.path -replace '/', '\')
-        $destination = Join-Path $StagingRoot ($record.path -replace '/', '\')
+        $repositoryPrefix = 'ESP/'
+        if (-not $record.path.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            Fail "ESP record is not rooted under ESP: $($record.path)"
+        }
+        $packagePath = $record.path.Substring($repositoryPrefix.Length)
+        $destination = Join-Path $StagingRoot ($packagePath -replace '/', '\')
         $parent = Split-Path -Parent $destination
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
         Copy-Item -LiteralPath $source -Destination $destination -Force
@@ -327,6 +425,9 @@ if ($Version -notmatch '^(0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0
     Fail "invalid version '$Version'. Use a conservative semantic version such as 0.1.0 or 0.1.0-rc1."
 }
 if ($SkipBuild -and $Clean) { Fail '-Clean cannot be combined with -SkipBuild because it removes the existing ESP.' }
+if ($IsoBackend -eq 'PyCdlib' -and -not [string]::IsNullOrWhiteSpace($OscdimgPath)) {
+    Fail '-OscdimgPath is only valid with -IsoBackend Oscdimg. PyCdlib is the default backend and does not require the ADK.'
+}
 
 $sourceStatusLines = @(Invoke-GitChecked @('status', '--porcelain=v1', '--untracked-files=all') -split "`r?`n" | Where-Object { $_ -ne '' })
 $sourceCommit = Invoke-GitChecked @('rev-parse', 'HEAD')
@@ -350,7 +451,13 @@ foreach ($existing in @($finalIso, $finalSha, $finalManifest)) {
     }
 }
 
-$oscdimg = Resolve-Oscdimg
+$oscdimg = $null
+$oscdimgVersion = $null
+if ($IsoBackend -eq 'Oscdimg') {
+    $oscdimg = Resolve-Oscdimg
+    $oscdimgVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($oscdimg).ProductVersion
+    if ([string]::IsNullOrWhiteSpace($oscdimgVersion)) { $oscdimgVersion = 'unknown' }
+}
 $python = $null
 $fatImage = $null
 $isoTemp = $null
@@ -381,7 +488,7 @@ try {
 
     $expectedPath = Join-Path $WorkDirectory 'esp-expected.json'
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [IO.File]::WriteAllText($expectedPath, (@{ files = @($esp.Files) } | ConvertTo-Json -Depth 5) + "`n", $utf8NoBom)
+    [IO.File]::WriteAllText($expectedPath, (@{ files = @(Get-EspPackageRecords $esp.Files) } | ConvertTo-Json -Depth 5) + "`n", $utf8NoBom)
     $fatPayloadReserve = [Math]::Max(8388608, [Math]::Ceiling([double]$esp.TotalBytes * 0.25))
     $directoryReserve = [Math]::Max(4096, $esp.Files.Count * 128)
     $calculatedSize = [int64]($esp.TotalBytes + $fatPayloadReserve + $directoryReserve)
@@ -396,32 +503,79 @@ try {
     $fatReport = Get-Content -LiteralPath (Join-Path $WorkDirectory 'fat-report.json') -Raw | ConvertFrom-Json
     if ([int64]$fatReport.imageBytes -ne [int64]$fatImage.Length) { Fail 'FAT helper report does not match the generated image size.' }
 
-    $stagingRoot = Join-Path $WorkDirectory 'iso-root'
-    Copy-EspToStaging $esp.Files $stagingRoot
+    $readmePath = Join-Path $WorkDirectory 'release-readme.txt'
+    $bootImageIsoPath = if ($IsoBackend -eq 'PyCdlib') { 'UEFI_BOOT.IMG' } else { 'EFI-BOOT.IMG' }
+    $readmeText = @(
+        'guideXOS Server release media',
+        ("Version: $Version"),
+        ("Architecture: $Arch"),
+        ("Source commit: $sourceCommit"),
+        '',
+        ("The bootable UEFI FAT image is $bootImageIsoPath."),
+        'It contains the complete guideXOS Server EFI payload.',
+        'This ISO is read-only release media.'
+    ) -join "`n"
+    [IO.File]::WriteAllText($readmePath, $readmeText + "`n", $utf8NoBom)
+    $readme = Get-Item -LiteralPath $readmePath
     $isoExpectedPath = Join-Path $WorkDirectory 'iso-expected.json'
-    [IO.File]::WriteAllText($isoExpectedPath, (Get-IsoExpectedRecords $esp.Files $fatImage | ConvertTo-Json -Depth 5) + "`n", $utf8NoBom)
+    [IO.File]::WriteAllText($isoExpectedPath, (Get-IsoExpectedRecords $fatImage $readme $bootImageIsoPath | ConvertTo-Json -Depth 5) + "`n", $utf8NoBom)
     $isoTemp = Join-Path $WorkDirectory 'artifact.iso'
-    $isoArgs = @('-m', '-n', '-j1', '-u2', '-udfver102', '-pEF', '-e', '-lGUIDEXOS', ("-b" + $fatImage.FullName), $stagingRoot, $isoTemp)
-    Invoke-ExternalChecked -FilePath $oscdimg -Arguments $isoArgs | Out-Null
-    if (-not (Test-Path -LiteralPath $isoTemp -PathType Leaf)) { Fail 'oscdimg reported success but did not create the temporary ISO.' }
+    $isoReportPath = Join-Path $WorkDirectory 'iso-report.json'
+    if ($IsoBackend -eq 'PyCdlib') {
+        $isoArgs = @(
+            $IsoHelper, 'create',
+            '--boot-image', $fatImage.FullName,
+            '--readme', $readme.FullName,
+            '--output', $isoTemp,
+            '--expected', $isoExpectedPath,
+            '--report', $isoReportPath,
+            '--volume-id', 'GUIDEXOS',
+            '--oversized-sentinel', '0'
+        )
+        Invoke-ExternalChecked -FilePath $python -Arguments $isoArgs | Out-Null
+    } else {
+        $stagingRoot = Join-Path $WorkDirectory 'iso-root'
+        Copy-EspToStaging $esp.Files $stagingRoot
+        Copy-Item -LiteralPath $readme.FullName -Destination (Join-Path $stagingRoot 'README.TXT')
+        Copy-Item -LiteralPath $fatImage.FullName -Destination (Join-Path $stagingRoot 'EFI-BOOT.IMG')
+        $isoArgs = @('-m', '-n', '-j1', '-u2', '-udfver102', '-pEF', '-e', '-lGUIDEXOS', ("-b" + $fatImage.FullName), $stagingRoot, $isoTemp)
+        $oscdimgResult = Invoke-ExternalChecked -FilePath $oscdimg -Arguments $isoArgs
+        if ($oscdimgResult.ExitCode -eq 0 -and $oscdimgResult.Output -match '(?im)^\s*ERROR:\s*Boot sector file ".*" size is too large\s*$') {
+            Fail ("oscdimg reported that the EFI boot image is too large despite exit code 0. The current EFI image requires the PyCdlib backend.`n" +
+                "  stdout log: $($oscdimgResult.StdoutLog)`n" +
+                "  stderr log: $($oscdimgResult.StderrLog)")
+        }
+        if (-not (Test-Path -LiteralPath $isoTemp -PathType Leaf)) { Fail 'oscdimg reported success but did not create the temporary ISO.' }
+    }
     $isoInfo = Get-Item -LiteralPath $isoTemp
     if ($isoInfo.Length -le 0 -or $isoInfo.Length -lt $fatImage.Length) { Fail "generated ISO is empty or smaller than its EFI boot image: $($isoInfo.Length) bytes" }
-    $isoReportPath = Join-Path $WorkDirectory 'iso-report.json'
     Invoke-ExternalChecked -FilePath $python -Arguments @($IsoHelper, 'verify', '--iso', $isoTemp, '--expected', $isoExpectedPath, '--report', $isoReportPath) | Out-Null
     $isoReport = Get-Content -LiteralPath $isoReportPath -Raw | ConvertFrom-Json
 
     $isoHash = (Get-FileHash -LiteralPath $isoTemp -Algorithm SHA256).Hash.ToLowerInvariant()
     $shaTemp = Join-Path $WorkDirectory $shaName
     [IO.File]::WriteAllText($shaTemp, "$isoHash  $isoName`n", $utf8NoBom)
-    $oscdimgVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($oscdimg).ProductVersion
-    if ([string]::IsNullOrWhiteSpace($oscdimgVersion)) { $oscdimgVersion = 'unknown' }
     $gitVersion = Invoke-GitChecked @('--version')
+    $toolRecords = [ordered]@{
+        git = $gitVersion
+        powershell = $PSVersionTable.PSVersion.ToString()
+        python = Get-PythonVersion $python
+        pyfatfs = '1.1.0'
+        fs = '2.4.16'
+        pycdlib = '1.16.0'
+        isoBackend = $IsoBackend
+        canonicalBuild = 'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' })
+    }
+    if ($IsoBackend -eq 'Oscdimg') {
+        $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
+    }
     $manifest = [ordered]@{
         schemaVersion = 1
         product = 'guideXOS Server'
         version = $Version
         architecture = $Arch
         artifactType = 'bootable-uefi-iso'
+        isoBackend = $IsoBackend
         isoFilename = $isoName
         isoByteSize = [int64]$isoInfo.Length
         sha256 = $isoHash
@@ -434,6 +588,7 @@ try {
         inputFiles = @($esp.Files)
         efiImage = [ordered]@{
             filename = 'EFI-BOOT.IMG'
+            isoPath = $bootImageIsoPath
             byteSize = [int64]$fatImage.Length
             sha256 = (Get-FileHash -LiteralPath $fatImage.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             calculatedCapacityBytes = [int64]$calculatedSize
@@ -442,15 +597,7 @@ try {
             fatType = 'FAT32'
         }
         isoVerification = $isoReport
-        tools = [ordered]@{
-            git = $gitVersion
-            powershell = $PSVersionTable.PSVersion.ToString()
-            python = Get-PythonVersion $python
-            pyfatfs = '1.1.0'
-            fs = '2.4.16'
-            oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
-            canonicalBuild = 'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' })
-        }
+        tools = $toolRecords
         notes = @(
             'AMD64 UEFI only; no legacy BIOS El Torito entry is generated.',
             'The ISO and EFI image are read-only release media.',

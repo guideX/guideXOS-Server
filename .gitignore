@@ -27,6 +27,8 @@
 /dist/
 /out/release-tools/
 /out/release-iso/
+/out/release-build-output.log
+/out/release-build-error.log
 /tools/__pycache__/
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest

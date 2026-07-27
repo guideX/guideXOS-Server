@@ -1,50 +1,34 @@
 # guideXOS Server release ISO
 
 This process packages the repository's generated AMD64 UEFI `ESP` directory as
-a read-only, single-boot UEFI ISO. The ISO is intended for release-candidate
-testing. It does not write USB devices or create persistent storage media.
+a read-only, single-boot UEFI ISO. It does not write USB devices or create
+persistent storage media.
 
-The boot payload is the existing guideXOS Server payload:
+The boot payload is unchanged and remains inside the complete FAT EFI image:
 
 - `EFI/BOOT/BOOTX64.EFI`
 - `kernel.elf`
 - `ramdisk.img`
+- `build-identity.txt`
 
-The bootloader loads `kernel.elf` and `ramdisk.img` from the root of the FAT
-EFI image. Persistent user data must live on separate writable storage; the
-release ISO is read-only.
+The ISO9660 tree contains that image as `UEFI_BOOT.IMG` and a small
+`README.TXT`. The El Torito catalog references the exact `UEFI_BOOT.IMG` extent.
 
 ## Requirements
 
 - Windows 10 or Windows 11.
-- Windows PowerShell 5.1 or later. The public entry points are PowerShell
-  scripts and resolve the repository from their own locations, so the caller
-  does not have to start in the repository directory.
-- A working Python 3.8+ installation for the FAT-image helper. Python is used
-  only through the repository-local release tooling environment.
-- Microsoft `oscdimg.exe` from the Windows ADK Deployment Tools component.
-- QEMU and AMD64 UEFI firmware are required only for the optional QEMU test.
+- Windows PowerShell 5.1 or later.
+- Python 3.10 or later. The release dependencies are installed only in the
+  ignored `out\release-tools\venv` environment.
+- QEMU and AMD64 OVMF are required only for the optional bounded smoke test.
 
-Install the Windows ADK from Microsoft's [ADK installation
-documentation](https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install).
-In the feature selection dialog, select the Deployment Tools component only;
-the release script does not download or install the ADK. `oscdimg.exe` is
-normally installed below:
-
-```text
-C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe
-```
-
-The script checks `PATH` and common ADK locations. It does not permanently
-modify `PATH`. If more than one candidate is found, pass `-OscdimgPath` with
-the exact intended file.
-
-The pinned Python dependencies are in
+The pinned release dependencies are in
 [`requirements-release.txt`](../requirements-release.txt): `pyfatfs==1.1.0`,
-`fs==2.4.16`, `appdirs==1.4.4`, `six==1.17.0`, and `setuptools==75.8.0`.
-They are MIT-licensed and are installed only under the ignored
-`out\release-tools\venv` directory. The package metadata is available from
-[pyfatfs on PyPI](https://pypi.org/project/pyfatfs/).
+`fs==2.4.16`, `pycdlib==1.16.0`, `appdirs==1.4.4`, `six==1.17.0`, and
+`setuptools==75.8.0`. `pycdlib` 1.16.0 is a pure-Python ISO9660/El Torito
+library, requires Python 3.10 or later, and is licensed LGPL-2.1-only. The
+other pinned packages retain their existing licenses. No package is installed
+globally.
 
 ## Bootstrap the local release tools
 
@@ -59,14 +43,14 @@ executable and opt in to the isolated bootstrap:
     -BootstrapTools
 ```
 
-`-BootstrapTools` creates or updates only
-`out\release-tools\venv`. Without that switch, missing or mismatched packages
-are reported with instructions and nothing is installed. An explicit Python
-can be selected with `-PythonPath C:\path\to\python.exe`.
+`-BootstrapTools` creates or updates only `out\release-tools\venv`.
+Without that switch, missing or mismatched packages fail with instructions.
+Use `-PythonPath C:\path\to\python.exe` to select a real Python executable.
 
-## Build a release candidate from the canonical build
+## Build a release candidate
 
-From any PowerShell location, run:
+The default backend is `PyCdlib`; the normal flow does not discover or require
+the Windows ADK:
 
 ```powershell
 .\scripts\create-release-iso.ps1 `
@@ -75,33 +59,7 @@ From any PowerShell location, run:
     -Clean
 ```
 
-The script resolves the repository root from `scripts\create-release-iso.ps1`,
-validates Git state, invokes the supported `build.ps1 -Arch amd64` flow, checks
-for stale or incomplete ESP inputs, calculates FAT capacity from the actual
-ESP contents plus a safety reserve, creates `EFI-BOOT.IMG`, creates the ISO
-with `oscdimg.exe`, reopens and verifies both images, and publishes only after
-all validation succeeds.
-
-A dirty worktree is allowed for development release candidates but is warned
-about and recorded in the manifest. For final packaging, require a clean
-worktree:
-
-```powershell
-.\scripts\create-release-iso.ps1 `
-    -Version 0.1.0-rc1 `
-    -Arch amd64 `
-    -Clean `
-    -RequireCleanWorktree
-```
-
-Use `-Force` only when intentionally replacing all three existing artifacts.
-The script otherwise fails before touching an existing final artifact.
-
-## Package an existing ESP
-
-`-SkipBuild` is explicit; it never becomes an implicit fallback. The same
-required-file, empty-file, path, stale-input, FAT, ISO, and hash checks still
-run:
+To package the existing ESP without rebuilding it:
 
 ```powershell
 .\scripts\create-release-iso.ps1 `
@@ -110,8 +68,67 @@ run:
     -SkipBuild
 ```
 
-Use this only when `ESP\EFI\BOOT\BOOTX64.EFI`, `ESP\kernel.elf`, and
-`ESP\ramdisk.img` are the intended, freshly generated files.
+`-SkipBuild` is explicit and still performs stale-input, required-file, FAT,
+ISO, structural, and hash checks. Do not use `-RequireCleanWorktree` while the
+release tooling is under review. Use `-Force` only when intentionally replacing
+all three existing files in `dist`.
+
+## Oversized UEFI El Torito behavior
+
+The El Torito sector-count field is a count of 512-byte virtual sectors and
+can represent at most `65535` sectors (`32 MiB - 512 bytes`). The current FAT
+EFI image is larger than that limit, so `oscdimg` rejects it.
+
+The release helper uses `pycdlib.PyCdlib.add_eltorito` directly with:
+
+```python
+iso.add_eltorito(
+    "/UEFI_BOOT.IMG;1",
+    boot_load_size=0,
+    platform_id=0xEF,
+    efi=True,
+    media_name="noemul",
+    bootable=True,
+)
+```
+
+The chosen oversized sentinel is `0`. UEFI 2.10 section 13.3.2.1 specifies
+that sector count `0` or `1` makes an EFI no-emulation system partition consume
+the image from its start through the end of the CD-ROM; see the
+[UEFI media-access specification](https://uefi.org/specs/UEFI/2.10/13_Protocols_Media_Access.html).
+Established `xorriso` tooling documents the same `0`/`1` behavior and records
+`0` for an oversized EFI image; see the
+[xorriso El Torito documentation](https://manpages.debian.org/unstable/xorriso/xorriso.1.en.html).
+The helper verifies the complete FAT file extent independently and permits no
+unexpected data after it; `pycdlib` may place the expected human-readable
+`README.TXT` after the boot-linked extent, followed only by zero alignment
+padding. A false value such as `65535` is never used.
+
+The catalog is independently checked for:
+
+- a valid Primary Volume Descriptor and El Torito boot record;
+- a valid catalog pointer and validation-entry checksum;
+- platform ID `0xEF`;
+- bootable `0x88`, no-emulation media type, and nonzero in-range boot-image LBA;
+- the selected oversized sentinel;
+- the complete FAT image extent and source/embedded SHA-256 equality; and
+- plausible FAT32 boot-sector data and an untruncated ISO.
+
+The helper also reopens the temporary ISO with `pycdlib` before it is promoted.
+
+`oscdimg` is retained only as an explicitly selected compatibility backend:
+
+```powershell
+.\scripts\create-release-iso.ps1 `
+    -Version 0.1.0-rc1 `
+    -Arch amd64 `
+    -SkipBuild `
+    -IsoBackend Oscdimg `
+    -OscdimgPath 'C:\path\to\oscdimg.exe'
+```
+
+It is not the default and cannot package the current oversized EFI image. The
+normal release path must use `PyCdlib`.
 
 ## Expected output
 
@@ -122,35 +139,19 @@ dist\
   guideXOS-Server-v0.1.0-rc1-amd64.manifest.json
 ```
 
-The manifest includes the product, version, architecture, artifact type, ISO
-filename and byte size, SHA-256, source commit and branch, worktree status,
-UTC packaging timestamp, all ESP input hashes, EFI-image capacity and hash,
-ISO boot metadata, and tool versions/hashes. It contains no host-specific
-secrets or unnecessary absolute paths.
-
-The temporary FAT image, ISO staging tree, and helper reports are under the
-ignored `out\release-iso` work root and are removed after a successful or
-failed build. The published ISO is first validated under a temporary filename
-and then moved into `dist`.
-
-## Verify the checksum
-
-```powershell
-$iso = '.\dist\guideXOS-Server-v0.1.0-rc1-amd64.iso'
-$sha = '.\dist\guideXOS-Server-v0.1.0-rc1-amd64.iso.sha256'
-$expected = (Get-Content -LiteralPath $sha).Split()[0].ToLowerInvariant()
-$actual = (Get-FileHash -LiteralPath $iso -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($expected -ne $actual) { throw "SHA-256 mismatch: $iso" }
-'SHA-256 OK'
-```
+The manifest records the backend, source commit/branch, worktree state, ESP
+input hashes, complete FAT-image size/hash, raw El Torito verification report,
+and pinned tool versions. Temporary ISO files, reports, and QEMU logs are
+under ignored `out\release-iso`; the final ISO is moved into `dist` only after
+validation succeeds.
 
 ## Test the exact ISO in QEMU
 
-The explicit test wrapper keeps the normal AMD64 UEFI settings used by the
-repository: `pc` machine, 1024 MiB RAM, standard VGA, GTK display, VNC `:0`,
-UTC RTC, user-mode networking with an E1000 device, serial capture, and
-`-no-reboot`. It replaces the development-only `fat:rw:ESP` mapping with a
-read-only CD-ROM ISO and does not attach a writable persistence disk.
+The bounded test attaches only the generated ISO as read-only CD-ROM media. It
+does not map `fat:rw:ESP`, expose the source ESP directory, or attach a writable
+persistence disk. It preserves the repository's normal `pc`, 1024 MiB, standard
+VGA, GTK/VNC, UTC RTC, user-mode networking, E1000, serial, and `-no-reboot`
+settings. Split OVMF variables are copied to a unique ignored test directory.
 
 ```powershell
 .\scripts\test-release-iso.ps1 `
@@ -158,71 +159,26 @@ read-only CD-ROM ISO and does not attach a writable persistence disk.
     -TimeoutSeconds 60
 ```
 
-QEMU and OVMF are discovered in `PATH`, the repository's `OVMF.fd`/`ovmf.fd`,
-and the existing common QEMU installation locations. Split firmware variables
-are copied into a unique ignored test directory; the source firmware is never
-modified. Use `-QemuPath`, `-OvmfPath`, and `-OvmfVarsPath` when discovery is
-not sufficient. The complete command and serial-log path are printed. A
-QEMU result is virtual-machine evidence only and does not prove bare-metal
-hardware compatibility.
-
-## Promote a tested RC without rebuilding
-
-Promotion is a byte-preserving copy. It does not rebuild the ESP or ISO. Run
-this only after testing the RC and only when the final-named files do not
-already exist:
-
-```powershell
-$dist = (Resolve-Path '.\dist').Path
-$rcBase = Join-Path $dist 'guideXOS-Server-v0.1.0-rc1-amd64'
-$finalBase = Join-Path $dist 'guideXOS-Server-v0.1.0-amd64'
-$finalIso = "$finalBase.iso"
-$finalSha = "$finalIso.sha256"
-$finalManifest = "$finalBase.manifest.json"
-foreach ($path in @($finalIso, $finalSha, $finalManifest)) {
-    if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite $path" }
-}
-Copy-Item -LiteralPath "$rcBase.iso" -Destination $finalIso
-$hash = (Get-FileHash -LiteralPath $finalIso -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath $finalSha -Value "$hash  $([IO.Path]::GetFileName($finalIso))" -Encoding utf8
-$manifest = Get-Content -LiteralPath "$rcBase.manifest.json" -Raw | ConvertFrom-Json
-$manifest.isoFilename = [IO.Path]::GetFileName($finalIso)
-$manifest.isoByteSize = (Get-Item -LiteralPath $finalIso).Length
-$manifest.sha256 = $hash
-$manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $finalManifest -Encoding utf8
-```
-
-The final manifest retains the RC's source commit, input hashes, tool records,
-and verification metadata while updating the filename and checksum.
+Review the retained `out\release-iso\qemu-test-*\serial.log` and QEMU log.
+The wrapper reports virtual-machine evidence only; it does not claim
+bare-metal compatibility.
 
 ## Limitations and troubleshooting
 
-- This release path supports AMD64 UEFI only. It intentionally creates no
-  legacy BIOS El Torito entry and does not claim hybrid USB behavior.
-- ISO media and the embedded EFI image are read-only. Persistent user data
-  needs separate writable storage.
-- Media Creator and physical USB writing are separate future work. This script
-  never selects or writes a physical disk.
-- `Python 3 was not found`: install Python for the current user, or pass
-  `-PythonPath` to an existing Python 3 executable. No global package is
-  installed by the script.
-- `pyfatfs is unavailable` or an unpinned-version error: use
-  `-BootstrapTools`, or install the exact pinned requirements into
-  `out\release-tools\venv` yourself.
-- `oscdimg.exe was not found`: install only the ADK Deployment Tools component,
-  or pass `-OscdimgPath` with the full path to an existing `oscdimg.exe`. The
-  script does not download the ADK.
-- `required ESP input is missing/empty`: run the canonical AMD64 build and
-  inspect `ESP\EFI\BOOT\BOOTX64.EFI`, `ESP\kernel.elf`, and
-  `ESP\ramdisk.img`. Do not use `-SkipBuild` for an absent or stale ESP.
-- An existing output collision requires `-Force`; a failed build never
-  publishes a partially named final ISO.
-- QEMU discovery or boot failure: pass explicit `-QemuPath` and firmware
-  paths, inspect the printed command and the retained serial log under
-  `out\release-iso\qemu-test-*`, and confirm that the ISO is attached as
-  `media=cdrom,readonly=on`. QEMU success still requires manual bare-metal
-  validation.
+- AMD64 UEFI only; no legacy BIOS El Torito entry or hybrid USB image is
+  generated.
+- The ISO and embedded EFI image are read-only. Persistent user data requires
+  separate writable storage.
+- `Python 3 was not found` or a dependency-version error: pass `-PythonPath`
+  to a real Python 3.10+ executable and use `-BootstrapTools`.
+- Missing or stale ESP inputs: run the canonical AMD64 build and inspect
+  `ESP\EFI\BOOT\BOOTX64.EFI`, `ESP\kernel.elf`, `ESP\ramdisk.img`, and
+  `ESP\build-identity.txt`.
+- Existing output collisions require `-Force`; a failed build does not publish
+  a partially named final artifact.
+- QEMU discovery or boot failure: pass explicit `-QemuPath`, `-OvmfPath`, and
+  `-OvmfVarsPath`, then inspect the printed command and retained serial log.
+  QEMU success still requires manual bare-metal validation.
 
-USB image creation is intentionally deferred. The ISO path is the current
-release deliverable and no raw disk image or physical-media operation is
-performed.
+Physical USB and bare-metal testing remain intentionally outside this tooling
+change.

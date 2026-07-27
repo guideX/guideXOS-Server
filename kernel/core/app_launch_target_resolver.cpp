@@ -3,6 +3,9 @@
 #include "built_in_app_metadata.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/vfs.h"
+#if defined(GXOS_BARE_METAL)
+#include "include/kernel/native_elf_baremetal.h"
+#endif
 
 namespace gxos {
 namespace apps {
@@ -173,6 +176,29 @@ static void fill_shell_label(gxos::apps::LaunchTarget& target, const char* label
     }
 }
 
+#if defined(GXOS_BARE_METAL)
+static bool fill_native_elf_target(gxos::apps::LaunchTarget& target, const char* label)
+{
+    const kernel::native_elf::PackageInfo* package = kernel::native_elf::lookup_package(label);
+    if (!package || !package->valid) return false;
+
+    target.type = gxos::apps::LaunchTargetType::NativeElfApp;
+    target.appId = package->id;
+    target.displayName = package->displayName;
+    // The canonical App Model ID is the dispatch identity.  native_elf::launch
+    // accepts it through the same package table as the display name/path.
+    target.dispatchLaunchName = package->id;
+    target.hostedAvailable = false;
+    target.bareMetalAvailable = true;
+    target.diagnosticStatus = "resolved-native-elf";
+    target.diagnosticReason =
+        "Validated NativeElf App Model target: runtime=native-elf architecture=amd64 "
+        "abi=guidexos-c-abi-v1 executable=/Apps/PacMan/bin/amd64/pacman.elf "
+        "package-relative VFS resources";
+    return true;
+}
+#endif
+
 gxos::apps::LaunchTarget resolveLaunchTarget(const char* label)
 {
     gxos::apps::LaunchTarget target;
@@ -218,6 +244,10 @@ gxos::apps::LaunchTarget resolveLaunchTarget(const char* label)
         fill_shell_label(target, label);
         return target;
     }
+
+#if defined(GXOS_BARE_METAL)
+    if (fill_native_elf_target(target, label)) return target;
+#endif
 
     if (is_path_like(label)) {
         target.type = gxos::apps::LaunchTargetType::FileOpen;
@@ -273,7 +303,7 @@ gxos::apps::LaunchTarget resolveLaunchTarget(const char* label)
 
     target.type = gxos::apps::LaunchTargetType::Unknown;
     target.diagnosticStatus = "unresolved";
-    target.diagnosticReason = "No bare-metal kernel app, metadata identity, legacy alias, shell action, or file-open target matched";
+    target.diagnosticReason = "No bare-metal kernel app, validated NativeElf package, metadata identity, legacy alias, shell action, or file-open target matched";
     return target;
 }
 

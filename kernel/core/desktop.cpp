@@ -4788,19 +4788,56 @@ static bool remove_from_start_menu_recent(const char* appName)
 }
 
 // Get current start menu item count based on mode
+static bool start_menu_item_is_available(const char* appName)
+{
+#if defined(GXOS_BARE_METAL)
+    if (desktop_str_eq(appName, "Nexgen PacMan")) {
+        return native_elf::is_available(appName);
+    }
+#endif
+    return true;
+}
+
+static const char* start_menu_visible_item_for_index(int visibleIndex)
+{
+    if (visibleIndex < 0) return "";
+
+    int current = 0;
+    if (s_startMenuAllProgs) {
+        for (int i = 0; i < kAllProgramsCount; ++i) {
+            if (!start_menu_item_is_available(s_allProgramsList[i])) continue;
+            if (current++ == visibleIndex) return s_allProgramsList[i];
+        }
+        return "";
+    }
+
+    for (int i = 0; i < s_startMenuRecentProgramCount; ++i) {
+        if (!start_menu_item_is_available(s_startMenuRecentPrograms[i])) continue;
+        if (current++ == visibleIndex) return s_startMenuRecentPrograms[i];
+    }
+    return "";
+}
+
 static int get_start_menu_item_count()
 {
-    return s_startMenuAllProgs ? kAllProgramsCount : s_startMenuRecentProgramCount;
+    int count = 0;
+    if (s_startMenuAllProgs) {
+        for (int i = 0; i < kAllProgramsCount; ++i) {
+            if (start_menu_item_is_available(s_allProgramsList[i])) ++count;
+        }
+    } else {
+        for (int i = 0; i < s_startMenuRecentProgramCount; ++i) {
+            if (start_menu_item_is_available(s_startMenuRecentPrograms[i])) ++count;
+        }
+    }
+    return count;
 }
 
 static const char* start_menu_left_item_label_for_row(int row)
 {
     if (row < 0) return "";
     int itemIndex = row + s_startMenuScroll;
-    if (s_startMenuAllProgs) {
-        return (itemIndex >= 0 && itemIndex < kAllProgramsCount) ? s_allProgramsList[itemIndex] : "";
-    }
-    return (itemIndex >= 0 && itemIndex < s_startMenuRecentProgramCount) ? s_startMenuRecentPrograms[itemIndex] : "";
+    return start_menu_visible_item_for_index(itemIndex);
 }
 
 // ============================================================
@@ -5162,7 +5199,23 @@ void set_wallpaper_image_pack(const void* packBase, uint64_t packSize)
         return;
     }
 
-    if (kernel::vfs::mount_type("/system", blockIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
+    // A normal bare-metal boot has a writable ESP mounted at /, so keep the
+    // wallpaper image at /system there.  A release ISO has no writable block
+    // device exposed to the kernel; in that case the boot ramdisk is the
+    // read-only root filesystem and must also provide the canonical /Apps
+    // package path.  Alias /system back to the same image so existing
+    // wallpaper paths remain stable in both boot modes.
+    if (!kernel::vfs::get_mount("/")) {
+        if (kernel::vfs::mount_type("/", blockIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
+            serial::puts("[desktop] failed to mount boot runtime image at /\n");
+            return;
+        }
+        if (kernel::vfs::mount_alias("/system", "/") == 0xFF) {
+            serial::puts("[desktop] failed to alias boot runtime image at /system\n");
+            return;
+        }
+        serial::puts("[desktop] mounted boot runtime image at /; /system aliases the same image\n");
+    } else if (kernel::vfs::mount_type("/system", blockIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
         serial::puts("[desktop] failed to mount wallpaper image pack at /system\n");
         return;
     }
@@ -6784,10 +6837,9 @@ static void draw_start_menu()
     // Left column: app list, Right column: system shortcuts
     uint32_t headerH = 30;
     uint32_t footerH = 36;
-    // Use kStartMenuAppCount (not visibleRows) so menuH/menuY stays consistent
-    // with get_start_menu_geometry() used by hit-testing - otherwise the menu
-    // renders at a different Y than the hover/click hit-test expects.
-    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuRowH;
+    // Use the filtered item count so a missing or invalid Native ELF package
+    // cannot leave a clickable PacMan row in the menu geometry.
+    uint32_t bodyH = (uint32_t)itemCount * kStartMenuRowH;
     uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     uint32_t maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     uint32_t menuH = headerH + maxBodyH + footerH;
@@ -6833,32 +6885,16 @@ static void draw_start_menu()
         
         uint32_t itemY = contentY + (uint32_t)i * kStartMenuRowH;
 
-        // Get app name and color based on mode
-        const char* appName = "";
+        // Get the filtered app name and its presentation metadata.
+        const char* appName = start_menu_left_item_label_for_row(i);
         uint32_t appColor;
         bool isPinned = false;
-        
-        if (s_startMenuAllProgs) {
-            // All Programs mode - use sorted list
-            appName = s_allProgramsList[itemIndex];
-            // Find color from app list
-            appColor = rgb(90, 130, 180); // default
-            for (int j = 0; j < kStartMenuAppCount; j++) {
-                if (s_startMenuApps[j].name[0] == appName[0] &&
-                    s_startMenuApps[j].name[1] == appName[1]) {
-                    appColor = s_startMenuApps[j].color;
-                    isPinned = s_startMenuApps[j].pinned;
-                    break;
-                }
-            }
-        } else {
-            // Recent Programs mode - build from persisted recent list
-            if (itemIndex < 0 || itemIndex >= s_startMenuRecentProgramCount) continue;
-            appName = s_startMenuRecentPrograms[itemIndex];
-            const StartMenuApp* app = find_start_menu_app(appName);
-            if (!app) continue;
+        if (!appName[0]) continue;
+        appColor = rgb(90, 130, 180); // default
+        const StartMenuApp* app = find_start_menu_app(appName);
+        if (app) {
             appColor = app->color;
-            isPinned = false;
+            isPinned = s_startMenuAllProgs ? app->pinned : false;
         }
 
         // Keyboard selection highlight (yellow/gold)
@@ -8391,12 +8427,15 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
         reason = "Target is blocked, unsupported, unknown, or unclassified";
     } else if (gxos::apps::TypedDispatchRuntimeEnabled() &&
                (target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
-                target.type == gxos::apps::LaunchTargetType::LegacyAlias) &&
+                target.type == gxos::apps::LaunchTargetType::LegacyAlias ||
+                (target.type == gxos::apps::LaunchTargetType::NativeElfApp && target.bareMetalAvailable)) &&
                target.dispatchLaunchName && target.dispatchLaunchName[0]) {
         usage = gxos::apps::LaunchDispatchUsage::TypedDispatch;
         if (target.type != gxos::apps::LaunchTargetType::LegacyAlias) {
             selectedDispatch = target.dispatchLaunchName;
-            reason = "Resolver classified target as typed-dispatch ready";
+            reason = target.type == gxos::apps::LaunchTargetType::NativeElfApp
+                ? "Resolver classified validated NativeElf target as bare-metal typed-dispatch ready"
+                : "Resolver classified target as typed-dispatch ready";
         } else {
             reason = "Resolver classified alias as typed-ready; compatibility alias remains the selected dispatch";
         }
@@ -8428,14 +8467,16 @@ static bool try_launch_kernel_app(const char* appName)
 {
     if (!appName) return false;
 
-    // External NativeElf packages use the same desktop launch surface as
-    // built-in kernel apps, but are discovered from the mounted /Apps VFS.
-    if (native_elf::is_available(appName)) {
-        s_shellActive = false;
-        return native_elf::launch(appName);
-    }
-
+    const gxos::apps::LaunchTarget target = appmodel::resolveLaunchTarget(appName);
     const char* selectedDispatch = select_bare_metal_launch_dispatch(appName, "BareMetalKernelApp");
+
+    // External NativeElf packages use the same desktop launch surface as
+    // built-in kernel apps, but are discovered from the mounted /Apps VFS and
+    // only reach this branch after the shared resolver validated the package.
+    if (target.type == gxos::apps::LaunchTargetType::NativeElfApp && target.bareMetalAvailable) {
+        s_shellActive = false;
+        return native_elf::launch(selectedDispatch);
+    }
     
     // Check if app is available in kernel mode
     if (app::AppManager::isAppAvailable(selectedDispatch)) {
@@ -11389,7 +11430,7 @@ static StartMenuGeometry get_start_menu_geometry()
     DesktopRect start = get_start_button_rect();
     g.headerH = 30;
     g.footerH = 36;
-    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuRowH;
+    uint32_t bodyH = (uint32_t)get_start_menu_item_count() * kStartMenuRowH;
     uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     g.maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     g.menuH = g.headerH + g.maxBodyH + g.footerH;

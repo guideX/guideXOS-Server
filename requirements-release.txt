@@ -1,8 +1,9 @@
 # Release-media tooling dependencies. Install only in out\release-tools\venv.
-# pyfatfs, fs, appdirs, six, and setuptools are MIT-licensed. Versions are
-# pinned for repeatable tooling.
+# pyfatfs, fs, appdirs, six, and setuptools are MIT-licensed. pycdlib is
+# LGPL-2.1-only. Versions are pinned for repeatable tooling.
 pyfatfs==1.1.0
 fs==2.4.16
+pycdlib==1.16.0
 appdirs==1.4.4
 six==1.17.0
 setuptools==75.8.0
