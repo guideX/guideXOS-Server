@@ -2,7 +2,8 @@
 # clipboard, desktop-path, and folder-creation command path.
 
 param(
-    [int]$TimeoutSeconds = 120
+    [int]$TimeoutSeconds = 120,
+    [switch]$TrashOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,7 +72,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $esp "EFI\BOOT\BOOTX64.EFI"))) {
 
 $activeSmokeBuild = $false
 try {
-    Build-KernelWithFlags "-DGXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE"
+    $smokeFlags = "-DGXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE"
+    if ($TrashOnly) {
+        $smokeFlags += " -DGXOS_FILE_OPERATIONS_TRASH_RUNTIME_SMOKE_ACTIVE"
+    }
+    Build-KernelWithFlags $smokeFlags
     $activeSmokeBuild = $true
 
     $args = @(

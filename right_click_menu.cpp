@@ -5,6 +5,8 @@
 #include "desktop_service.h"
 #include "trash.h"
 #include "file_operations.h"
+#include "file_explorer.h"
+#include "notification_manager.h"
 #include "kernel/core/include/kernel/system_font.h"
 #include <cstring>
 
@@ -17,6 +19,13 @@ namespace {
         return item.kind == DesktopItemKind::FilesystemEntry ||
             (item.kind == DesktopItemKind::Shortcut &&
                 (item.shortcutType == "File" || item.shortcutType == "Folder"));
+    }
+
+    bool desktopItemIsDeletable(const DesktopItem& item) {
+        if (item.kind != DesktopItemKind::FilesystemEntry || !item.removable || item.path.empty()) return false;
+        return item.isDirectory
+            ? gxos::files::FileOperations::IsDirectory(item.path)
+            : gxos::files::FileOperations::IsRegularFile(item.path);
     }
 
     const char* folderIconSizeLabel(int index) {
@@ -33,6 +42,9 @@ int RightClickMenu::s_x = 0;
 int RightClickMenu::s_y = 0;
 std::vector<RightClickMenu::MenuItem> RightClickMenu::s_items;
 int RightClickMenu::s_desktopItemIndex = -1;
+std::string RightClickMenu::s_desktopItemTargetPath;
+std::string RightClickMenu::s_desktopItemTargetLabel;
+bool RightClickMenu::s_desktopItemTargetIsDirectory = false;
 std::string RightClickMenu::s_startMenuAppName;
 bool RightClickMenu::s_iconSubmenuVisible = false;
 int RightClickMenu::s_iconSubmenuIndex = -1;
@@ -42,6 +54,9 @@ void RightClickMenu::Show(int x, int y) {
     s_y = y;
     s_visible = true;
     s_desktopItemIndex = -1;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     buildItems();
@@ -53,6 +68,17 @@ void RightClickMenu::ShowForDesktopItem(int x, int y, int desktopItemIndex) {
     s_y = y;
     s_visible = true;
     s_desktopItemIndex = desktopItemIndex;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
+    if (desktopItemIndex >= 0 && desktopItemIndex < static_cast<int>(Compositor::g_items.size())) {
+        const DesktopItem& target = Compositor::g_items[desktopItemIndex];
+        if (target.kind == DesktopItemKind::FilesystemEntry && target.removable) {
+            s_desktopItemTargetPath = gxos::files::FileOperations::NormalizePath(target.path);
+            s_desktopItemTargetLabel = target.label;
+            s_desktopItemTargetIsDirectory = target.isDirectory;
+        }
+    }
     s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     buildItems();
@@ -64,6 +90,9 @@ void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appNam
     s_y = y;
     s_visible = true;
     s_desktopItemIndex = -1;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName = appName;
     s_iconSubmenuVisible = false;
     buildItems();
@@ -73,6 +102,9 @@ void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appNam
 void RightClickMenu::Hide() {
     s_visible = false;
     s_desktopItemIndex = -1;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     s_items.clear();
@@ -148,6 +180,9 @@ void RightClickMenu::buildItems() {
                             s_items.push_back({"Paste", false, false, false});
                         }
                     }
+                }
+                if (desktopItemIsDeletable(*item) && !gxos::files::FileOperations::IsOperationActive()) {
+                    s_items.push_back({"Delete", false, false, false});
                 }
                 if (item->kind == DesktopItemKind::Shortcut) {
                     if (item->shortcutType == "File" || item->shortcutType == "Folder") {
@@ -244,6 +279,32 @@ bool RightClickMenu::HandleClick(int mx, int my) {
                     std::string error;
                     if (!gxos::files::FileClipboard::Set(item.path, gxos::files::FileClipboardOperation::Move, error)) {
                         Logger::write(LogLevel::Warn, "Desktop Cut File failed: " + error);
+                    }
+                }
+            } else if (s_items[idx].label == "Delete" && !s_desktopItemTargetPath.empty()) {
+                const std::string targetPath = s_desktopItemTargetPath;
+                const std::string targetLabel = s_desktopItemTargetLabel.empty()
+                    ? gxos::files::FileOperations::BaseName(targetPath) : s_desktopItemTargetLabel;
+                if (gxos::files::FileOperations::IsOperationActive()) {
+                    Logger::write(LogLevel::Warn, "Desktop Delete rejected: a file operation is already in progress");
+                    NotificationManager::Add("A file operation is already in progress", NotificationLevel::Error);
+                } else {
+                    const bool targetStillExists = s_desktopItemTargetIsDirectory
+                        ? gxos::files::FileOperations::IsDirectory(targetPath)
+                        : gxos::files::FileOperations::IsRegularFile(targetPath);
+                    if (!targetStillExists) {
+                        Logger::write(LogLevel::Warn, "Desktop Delete target is stale: " + targetPath);
+                        NotificationManager::Add("Delete failed: target not found", NotificationLevel::Error);
+                    } else {
+                        Logger::write(LogLevel::Info, "Desktop Delete confirmation requested path=" + targetPath);
+                        if (gxos::apps::FileExplorer::LaunchDeleteConfirmation(
+                                targetPath, s_desktopItemTargetIsDirectory) == 0) {
+                            Logger::write(LogLevel::Error, "Desktop Delete confirmation launch failed path=" + targetPath);
+                            NotificationManager::Add("Unable to open Delete confirmation", NotificationLevel::Error);
+                        } else {
+                            NotificationManager::Add("Confirm Delete in File Explorer: " + targetLabel,
+                                                     NotificationLevel::Info);
+                        }
                     }
                 }
             } else if (s_items[idx].label == "Paste") {

@@ -330,6 +330,10 @@ struct DirEntry {
 // Initialise the FAT filesystem driver.
 void init();
 
+// Enable the concise Trash-operation sector trace around FAT writes. This is
+// diagnostic state only and does not alter filesystem behavior.
+void set_trash_trace(bool enabled);
+
 // Attempt to mount a FAT32 or exFAT volume on a block device.
 // Returns the volume index, or 0xFF on failure.
 uint8_t mount(uint8_t blockDevIndex);

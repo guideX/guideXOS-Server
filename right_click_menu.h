@@ -59,6 +59,9 @@ namespace gxos { namespace gui {
         static int s_y;
         static std::vector<MenuItem> s_items;
         static int s_desktopItemIndex;
+        static std::string s_desktopItemTargetPath;
+        static std::string s_desktopItemTargetLabel;
+        static bool s_desktopItemTargetIsDirectory;
         static std::string s_startMenuAppName;
         static bool s_iconSubmenuVisible;
         static int s_iconSubmenuIndex;

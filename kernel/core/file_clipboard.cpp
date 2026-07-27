@@ -16,6 +16,9 @@ static const uint64_t kMaxFatFileBytes = 0xFFFFFFFFull;
 static const int kMaxNameCandidates = 1000;
 static const uint32_t kMaxTreeDepth = 64;
 static const size_t kMaxDirectoryEntriesPerOperation = 4096;
+static const char* kTrashRootPath = "/Trash";
+static const char* kTrashMetadataExtension = ".INF";
+static const char* kTrashMetadataPrefix = "TR";
 
 // File operations are deliberately bounded. The fixed buffer is in BSS and
 // is shared by the synchronous paste path, so paste never allocates a
@@ -87,6 +90,7 @@ static PasteResult finish_operation(PasteResult result) {
     // Keep the callback inside the protected window. It may repaint and pump
     // safe cursor/timer work, but must never be able to start another paste.
     s_operationActive = false;
+    fs_fat::set_trash_trace(false);
     if (result == PasteResult::Success) ++s_operationGeneration;
     return result;
 }
@@ -230,6 +234,10 @@ static const char* fat_status_for_vfs_status(vfs::Status status) {
         case vfs::VFS_ERR_NOT_MOUNT: return "FAT_FILE_WRITE_NOT_MOUNTED";
         case vfs::VFS_ERR_NOT_SUPPORTED: return "FAT_FILE_WRITE_UNSUPPORTED_TYPE";
         case vfs::VFS_ERR_IO: return "FAT_FILE_WRITE_IO_ERROR";
+        case vfs::VFS_ERR_IO_TIMEOUT: return "FAT_FILE_WRITE_IO_TIMEOUT";
+        case vfs::VFS_ERR_CORRUPT_CHAIN: return "FAT_FILE_WRITE_CORRUPT_CHAIN";
+        case vfs::VFS_ERR_NO_PROGRESS: return "FAT_FILE_WRITE_NO_PROGRESS";
+        case vfs::VFS_ERR_ALLOCATION_FAILED: return "FAT_FILE_WRITE_ALLOCATION_FAILED";
         default: return "";
     }
 }
@@ -252,7 +260,15 @@ static bool append_decimal(char* destination, size_t destinationSize, size_t& le
 }
 
 static bool is_fat_short_name_char(char c) {
-    return c > 32 && c < 127 && c != '/' && c != '\\';
+    if (c <= 32 || c >= 127) return false;
+    switch (c) {
+        case '"': case '*': case '+': case ',': case '/': case ':':
+        case ';': case '<': case '=': case '>': case '?': case '[':
+        case '\\': case ']': case '|':
+            return false;
+        default:
+            return true;
+    }
 }
 
 static char uppercase_ascii(char c) {
@@ -784,6 +800,175 @@ static bool make_new_folder_name(int suffixIndex, char* out, size_t outSize) {
     return true;
 }
 
+static bool path_matches_mount(const char* path, const char* mountPath) {
+    if (!path || !mountPath || !mountPath[0]) return false;
+    const size_t mountLength = local_strlen(mountPath);
+    for (size_t i = 0; i < mountLength; ++i) {
+        if (path[i] != mountPath[i]) return false;
+    }
+    return path[mountLength] == '\0' || path[mountLength] == '/' ||
+        (mountLength == 1 && mountPath[0] == '/');
+}
+
+static const vfs::MountPoint* mount_for_path(const char* path) {
+    const vfs::MountPoint* best = nullptr;
+    size_t bestLength = 0;
+    for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS; ++i) {
+        const vfs::MountPoint* mount = vfs::get_mount_by_index(i);
+        if (!mount || !mount->active || !path_matches_mount(path, mount->path)) continue;
+        const size_t length = local_strlen(mount->path);
+        if (!best || length > bestLength) {
+            best = mount;
+            bestLength = length;
+        }
+    }
+    return best;
+}
+
+static bool trash_root_for_path(const char* sourcePath, char* outPath, size_t outPathSize) {
+    if (!outPath || outPathSize == 0) return false;
+    outPath[0] = '\0';
+    const vfs::MountPoint* mount = mount_for_path(sourcePath);
+    if (!mount) return false;
+    if (local_strlen(mount->path) == 1 && mount->path[0] == '/') {
+        return copy_text(outPath, outPathSize, kTrashRootPath);
+    }
+    if (!copy_text(outPath, outPathSize, mount->path)) return false;
+    append_text(outPath, outPathSize, "/Trash");
+    return outPath[0] != '\0';
+}
+
+static bool make_trash_candidate_name(const char* sourceName, int suffixIndex, bool isDirectory,
+                                      char* outName, size_t outNameSize) {
+    (void)isDirectory;
+    if (!make_candidate_name(sourceName, suffixIndex, outName, outNameSize)) return false;
+    // Keep the reserved metadata namespace out of the data namespace. This
+    // prevents a deleted user file from being mistaken for restore metadata.
+    return !is_trash_metadata_name(outName);
+}
+
+static bool trash_candidate_is_free(const char* candidatePath) {
+    if (!candidatePath || !candidatePath[0]) return false;
+    vfs::FileInfo info{};
+    if (vfs::stat(candidatePath, &info) == vfs::VFS_OK) return false;
+    char infoPath[vfs::VFS_MAX_PATH] = {0};
+    if (!trash_metadata_path_for(candidatePath, infoPath, sizeof(infoPath))) return false;
+    return vfs::stat(infoPath, &info) != vfs::VFS_OK;
+}
+
+static bool choose_trash_path(const char* trashRoot, const char* sourceName,
+                              bool isDirectory, char* outPath, size_t outPathSize) {
+    if (!trashRoot || !sourceName || !outPath || outPathSize == 0) return false;
+    for (int suffixIndex = 0; suffixIndex < kMaxNameCandidates; ++suffixIndex) {
+        char candidateName[vfs::VFS_MAX_FILENAME] = {0};
+        if (!make_trash_candidate_name(sourceName, suffixIndex, isDirectory,
+                                       candidateName, sizeof(candidateName))) continue;
+        char candidatePath[vfs::VFS_MAX_PATH] = {0};
+        vfs::join_path(trashRoot, candidateName, candidatePath, sizeof(candidatePath));
+        if (trash_candidate_is_free(candidatePath) && copy_text(outPath, outPathSize, candidatePath)) return true;
+    }
+    return false;
+}
+
+static bool write_trash_metadata(const char* trashedPath, const char* sourcePath,
+                                 bool isDirectory, vfs::Status* outStatus) {
+    if (outStatus) *outStatus = vfs::VFS_ERR_INVALID;
+    char infoPath[vfs::VFS_MAX_PATH] = {0};
+    if (!trash_metadata_path_for(trashedPath, infoPath, sizeof(infoPath))) return false;
+    trace_text("TRASH_METADATA_PATH", infoPath);
+    trace_marker("TRASH_METADATA_CREATE_BEGIN");
+    trace_marker("TRASH_FAT_DIR_ENTRY_BEGIN");
+
+    char metadata[512] = {0};
+    // FAT desktop names cannot contain quotes, so the bounded metadata format
+    // is safe here while retaining the original path for restore.
+    append_text(metadata, sizeof(metadata), "{\n  \"originalPath\": \"");
+    append_text(metadata, sizeof(metadata), sourcePath);
+    append_text(metadata, sizeof(metadata), "\",\n  \"originalName\": \"");
+    append_text(metadata, sizeof(metadata), vfs::basename(sourcePath));
+    append_text(metadata, sizeof(metadata), "\",\n  \"isDirectory\": ");
+    append_text(metadata, sizeof(metadata), isDirectory ? "true" : "false");
+    append_text(metadata, sizeof(metadata), "\n}");
+    const int32_t written = vfs::create_file(infoPath, metadata,
+                                             static_cast<uint32_t>(local_strlen(metadata)));
+    if (written < 0 || written != static_cast<int32_t>(local_strlen(metadata))) {
+        if (outStatus) {
+            *outStatus = written < 0 ? static_cast<vfs::Status>(written) : vfs::VFS_ERR_IO;
+        }
+        const vfs::Status status = outStatus ? *outStatus : vfs::VFS_ERR_IO;
+        trace_status("TRASH_FAT_DIR_ENTRY_RESULT", status);
+        trace_status("TRASH_METADATA_CREATE_RESULT", status);
+        return false;
+    }
+    if (outStatus) *outStatus = vfs::VFS_OK;
+    trace_status("TRASH_FAT_DIR_ENTRY_RESULT", vfs::VFS_OK);
+    trace_status("TRASH_METADATA_CREATE_RESULT", vfs::VFS_OK);
+    return true;
+}
+
+static void remove_trash_metadata(const char* trashedPath) {
+    char infoPath[vfs::VFS_MAX_PATH] = {0};
+    if (trash_metadata_path_for(trashedPath, infoPath, sizeof(infoPath))) vfs::unlink(infoPath);
+}
+
+static uint32_t trash_name_hash(const char* name) {
+    uint32_t hash = 2166136261u;
+    if (!name) return hash;
+    for (size_t i = 0; name[i]; ++i) {
+        hash ^= static_cast<uint8_t>(uppercase_ascii(name[i]));
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static char hex_digit(uint32_t value) {
+    value &= 0xFu;
+    return value < 10u ? static_cast<char>('0' + value)
+                       : static_cast<char>('A' + value - 10u);
+}
+
+bool is_trash_metadata_name(const char* name) {
+    if (!name) return false;
+    // TRxxxxxx.INF is an intentionally reserved FAT 8.3 namespace. It is
+    // paired with the data entry by hash and never uses a dot-prefixed LFN.
+    const size_t length = local_strlen(name);
+    if (length != 12 || uppercase_ascii(name[0]) != 'T' || uppercase_ascii(name[1]) != 'R' || name[8] != '.') return false;
+    if (uppercase_ascii(name[9]) != 'I' || uppercase_ascii(name[10]) != 'N' || uppercase_ascii(name[11]) != 'F') return false;
+    for (size_t i = 2; i < 8; ++i) {
+        const char c = uppercase_ascii(name[i]);
+        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'))) return false;
+    }
+    return true;
+}
+
+bool trash_metadata_path_for(const char* trashedPath,
+                             char* outMetadataPath,
+                             size_t outMetadataPathSize) {
+    if (!trashedPath || !trashedPath[0] || !outMetadataPath || outMetadataPathSize == 0) return false;
+    outMetadataPath[0] = '\0';
+    const char* itemName = vfs::basename(trashedPath);
+    if (!itemName || !itemName[0]) return false;
+
+    char metadataName[13] = {0};
+    const uint32_t hash = trash_name_hash(itemName);
+    metadataName[0] = kTrashMetadataPrefix[0];
+    metadataName[1] = kTrashMetadataPrefix[1];
+    for (uint32_t digit = 0; digit < 6; ++digit) {
+        const uint32_t shift = (5u - digit) * 4u;
+        metadataName[2 + digit] = hex_digit(hash >> shift);
+    }
+    metadataName[8] = kTrashMetadataExtension[0];
+    metadataName[9] = kTrashMetadataExtension[1];
+    metadataName[10] = kTrashMetadataExtension[2];
+    metadataName[11] = kTrashMetadataExtension[3];
+    metadataName[12] = '\0';
+
+    char parentPath[vfs::VFS_MAX_PATH] = {0};
+    vfs::parent_path(trashedPath, parentPath, sizeof(parentPath));
+    vfs::join_path(parentPath, metadataName, outMetadataPath, outMetadataPathSize);
+    return outMetadataPath[0] != '\0';
+}
+
 bool set_file(const char* sourcePath, Operation operation) {
     if (s_operationActive) {
         trace_marker("FILE_CLIPBOARD_REJECTED_BUSY");
@@ -1109,6 +1294,206 @@ static void log_folder_text(const char* key, const char* value)
     serial::puts("\n");
 }
 
+PasteResult move_to_trash(const char* sourcePath, char* outTrashedPath, size_t outTrashedPathSize)
+{
+    trace_marker("TRASH_MOVE_BEGIN");
+    trace_text("TRASH_SOURCE_PATH", sourcePath);
+    reset_diagnostic(PasteResult::Failed);
+    if (s_operationActive) {
+        s_lastDiagnostic.result = PasteResult::Busy;
+        return PasteResult::Busy;
+    }
+    if (!sourcePath || !sourcePath[0] || !outTrashedPath || outTrashedPathSize == 0) {
+        set_diagnostic_failure(PasteStage::SourceValidation, PasteResult::Failed,
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_ARGUMENT");
+        return PasteResult::Failed;
+    }
+
+    outTrashedPath[0] = '\0';
+    char normalizedSource[vfs::VFS_MAX_PATH] = {0};
+    vfs::normalize_path(sourcePath, normalizedSource, sizeof(normalizedSource));
+    copy_diagnostic_path(s_lastDiagnostic.sourcePath, sizeof(s_lastDiagnostic.sourcePath), normalizedSource);
+    set_diagnostic_stage(PasteStage::SourceValidation);
+
+    vfs::FileInfo sourceInfo{};
+    vfs::Status sourceStatus = vfs::stat(normalizedSource, &sourceInfo);
+    trace_text("TRASH_SOURCE_PATH", normalizedSource);
+    trace_status("TRASH_SOURCE_STAT", sourceStatus);
+    if (sourceStatus != vfs::VFS_OK) {
+        set_diagnostic_failure(PasteStage::SourceValidation, PasteResult::SourceMissing,
+                               sourceStatus, fat_status_for_vfs_status(sourceStatus));
+        return PasteResult::SourceMissing;
+    }
+    if (sourceInfo.type != vfs::FILE_TYPE_REGULAR && sourceInfo.type != vfs::FILE_TYPE_DIRECTORY) {
+        set_diagnostic_failure(PasteStage::SourceValidation, PasteResult::Unsupported,
+                               vfs::VFS_ERR_NOT_SUPPORTED, "FAT_FILE_WRITE_UNSUPPORTED_TYPE");
+        return PasteResult::Unsupported;
+    }
+    trace_text("TRASH_SOURCE_TYPE",
+               sourceInfo.type == vfs::FILE_TYPE_REGULAR ? "REGULAR_FILE" : "DIRECTORY");
+    if (same_path(normalizedSource, "/") || same_path(normalizedSource, kTrashRootPath)) {
+        set_diagnostic_failure(PasteStage::SourceValidation, PasteResult::Unsupported,
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_PROTECTED_PATH");
+        return PasteResult::Unsupported;
+    }
+
+    const char* sourceName = vfs::basename(normalizedSource);
+    if (!sourceName || !sourceName[0]) {
+        set_diagnostic_failure(PasteStage::SourceValidation, PasteResult::Failed,
+                               vfs::VFS_ERR_INVALID, "FAT_FILE_WRITE_INVALID_NAME");
+        return PasteResult::Failed;
+    }
+
+    // Keep the operation state active through all VFS mutation and prevent
+    // mouse/key dispatch from re-entering paste or Delete on bare metal.
+    s_operationActive = true;
+    fs_fat::set_trash_trace(true);
+    s_progress = FileOperationProgress{};
+    s_progress.operation = Operation::Move;
+    s_progress.state = OperationState::Preparing;
+    s_progress.phase = PasteStage::SourceValidation;
+    copy_text(s_progress.sourceDisplayName, sizeof(s_progress.sourceDisplayName), sourceName);
+    s_progress.totalKnown = sourceInfo.type == vfs::FILE_TYPE_REGULAR;
+    s_progress.totalBytes = s_progress.totalKnown ? sourceInfo.size : 0;
+    notify_progress();
+
+    char trashRoot[vfs::VFS_MAX_PATH] = {0};
+    if (!trash_root_for_path(normalizedSource, trashRoot, sizeof(trashRoot))) {
+        trace_text("TRASH_ROOT_RESOLVE", "VFS_ERR_NOT_MOUNT");
+        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::DestinationMissing,
+                               vfs::VFS_ERR_NOT_MOUNT, "FAT_FILE_WRITE_NOT_MOUNTED");
+        return finish_operation(PasteResult::DestinationMissing);
+    }
+    copy_diagnostic_path(s_lastDiagnostic.destinationDirectory,
+                         sizeof(s_lastDiagnostic.destinationDirectory), trashRoot);
+    copy_diagnostic_path(s_progress.destinationPath, sizeof(s_progress.destinationPath), trashRoot);
+    trace_text("TRASH_ROOT_PATH", trashRoot);
+    trace_text("TRASH_ROOT_RESOLVE", "BEGIN");
+    set_diagnostic_stage(PasteStage::DestinationValidation);
+
+    vfs::FileInfo trashInfo{};
+    vfs::Status trashStatus = vfs::stat(trashRoot, &trashInfo);
+    if (trashStatus == vfs::VFS_ERR_NOT_FOUND) {
+        trashStatus = vfs::mkdir(trashRoot);
+        if (trashStatus == vfs::VFS_OK) trashStatus = vfs::stat(trashRoot, &trashInfo);
+    }
+    if (trashStatus != vfs::VFS_OK || trashInfo.type != vfs::FILE_TYPE_DIRECTORY) {
+        if (trashStatus == vfs::VFS_OK) trashStatus = vfs::VFS_ERR_NOT_DIR;
+        trace_status("TRASH_ROOT_RESOLVE", trashStatus);
+        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::DestinationMissing,
+                               trashStatus, fat_status_for_vfs_status(trashStatus));
+        return finish_operation(PasteResult::DestinationMissing);
+    }
+    trace_status("TRASH_ROOT_RESOLVE", vfs::VFS_OK);
+    const vfs::MountPoint* sourceMount = mount_for_path(normalizedSource);
+    const vfs::MountPoint* trashMount = mount_for_path(trashRoot);
+    const uint8_t sourceMountId = vfs::mount_index_for_path(normalizedSource);
+    const uint8_t trashMountId = vfs::mount_index_for_path(trashRoot);
+    serial::puts("TRASH_SOURCE_MOUNT_ID=0x");
+    serial::put_hex8(sourceMountId);
+    serial::puts(" TRASH_ROOT_MOUNT_ID=0x");
+    serial::put_hex8(trashMountId);
+    serial::puts("\n");
+    trace_text("TRASH_SAME_MOUNT", sourceMount && trashMount && sourceMount == trashMount ? "1" : "0");
+    if (!sourceMount || !trashMount || sourceMount != trashMount) {
+        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::Unsupported,
+                               vfs::VFS_ERR_NOT_SUPPORTED, "FAT_FILE_WRITE_UNSUPPORTED_TYPE");
+        return finish_operation(PasteResult::Unsupported);
+    }
+    if (sourceMount->readOnly || trashMount->readOnly) {
+        set_diagnostic_failure(PasteStage::DestinationValidation, PasteResult::ReadOnly,
+                               vfs::VFS_ERR_READ_ONLY, "FAT_FILE_WRITE_READ_ONLY");
+        return finish_operation(PasteResult::ReadOnly);
+    }
+
+    trace_text("TRASH_STRATEGY", "rename");
+
+    set_diagnostic_stage(PasteStage::DestinationNaming);
+    char movedPath[vfs::VFS_MAX_PATH] = {0};
+    if (!choose_trash_path(trashRoot, sourceName,
+                           sourceInfo.type == vfs::FILE_TYPE_DIRECTORY,
+                           movedPath, sizeof(movedPath))) {
+        set_diagnostic_failure(PasteStage::DestinationNaming, PasteResult::Conflict,
+                               vfs::VFS_ERR_EXISTS, "FAT_FILE_WRITE_ALREADY_EXISTS");
+        return finish_operation(PasteResult::Conflict);
+    }
+    copy_diagnostic_path(s_lastDiagnostic.destinationPath,
+                         sizeof(s_lastDiagnostic.destinationPath), movedPath);
+    copy_diagnostic_path(s_progress.destinationPath, sizeof(s_progress.destinationPath), movedPath);
+    trace_text("TRASH_DEST_NAME", vfs::basename(movedPath));
+    trace_text("TRASH_DEST_PATH", movedPath);
+    char metadataPath[vfs::VFS_MAX_PATH] = {0};
+    if (trash_metadata_path_for(movedPath, metadataPath, sizeof(metadataPath))) {
+        trace_text("TRASH_METADATA_PATH", metadataPath);
+    }
+
+    // Re-stat directly before the first mutation. Metadata is created before
+    // rename so a metadata or rename failure leaves the source in place.
+    vfs::FileInfo revalidated{};
+    sourceStatus = vfs::stat(normalizedSource, &revalidated);
+    if (sourceStatus != vfs::VFS_OK || revalidated.type != sourceInfo.type) {
+        const PasteResult result = sourceStatus == vfs::VFS_ERR_READ_ONLY
+            ? PasteResult::ReadOnly : PasteResult::SourceMissing;
+        set_diagnostic_failure(PasteStage::SourceValidation, result,
+                               sourceStatus == vfs::VFS_OK ? vfs::VFS_ERR_INVALID : sourceStatus,
+                               fat_status_for_vfs_status(sourceStatus));
+        return finish_operation(result);
+    }
+
+    vfs::Status metadataStatus = vfs::VFS_OK;
+    if (!write_trash_metadata(movedPath, normalizedSource,
+                              sourceInfo.type == vfs::FILE_TYPE_DIRECTORY,
+                              &metadataStatus)) {
+        remove_trash_metadata(movedPath);
+        trace_status("TRASH_VERIFY", metadataStatus);
+        set_diagnostic_failure(PasteStage::DestinationCreate, PasteResult::Failed,
+                               metadataStatus, fat_status_for_vfs_status(metadataStatus));
+        return finish_operation(PasteResult::Failed);
+    }
+
+    trace_marker("TRASH_DEST_CREATE_BEGIN");
+    trace_text("TRASH_DEST_CREATE_KIND", "directory-entry-rename");
+    set_operation_state(OperationState::Moving);
+    set_diagnostic_stage(PasteStage::Flush);
+    const vfs::Status renameStatus = vfs::rename(normalizedSource, movedPath);
+    if (renameStatus != vfs::VFS_OK) {
+        remove_trash_metadata(movedPath);
+        trace_status("TRASH_DEST_CREATE_RESULT", renameStatus);
+        trace_status("TRASH_SOURCE_DELETE", renameStatus);
+        set_diagnostic_failure(PasteStage::Flush, renameStatus == vfs::VFS_ERR_READ_ONLY
+            ? PasteResult::ReadOnly : PasteResult::Failed,
+            renameStatus, fat_status_for_vfs_status(renameStatus));
+        return finish_operation(renameStatus == vfs::VFS_ERR_READ_ONLY
+            ? PasteResult::ReadOnly : PasteResult::Failed);
+    }
+
+    set_operation_state(OperationState::Verifying);
+    set_diagnostic_stage(PasteStage::Verification);
+    vfs::FileInfo movedInfo{};
+    if (vfs::stat(movedPath, &movedInfo) != vfs::VFS_OK || movedInfo.type != sourceInfo.type) {
+        vfs::Status rollbackStatus = vfs::rename(movedPath, normalizedSource);
+        remove_trash_metadata(movedPath);
+        trace_text("TRASH_VERIFY", "FAILED");
+        trace_status("TRASH_SOURCE_DELETE", rollbackStatus);
+        const vfs::Status failureStatus = rollbackStatus == vfs::VFS_OK ? vfs::VFS_ERR_IO : rollbackStatus;
+        set_diagnostic_failure(PasteStage::Verification, PasteResult::Failed,
+                               failureStatus, fat_status_for_vfs_status(failureStatus));
+        return finish_operation(PasteResult::Failed);
+    }
+
+    trace_status("TRASH_DEST_CREATE_RESULT", vfs::VFS_OK);
+    trace_text("TRASH_VERIFY", "OK");
+    trace_text("TRASH_SOURCE_DELETE", "rename-completed");
+    copy_diagnostic_path(outTrashedPath, outTrashedPathSize, movedPath);
+    set_diagnostic_stage(PasteStage::Complete);
+    s_lastDiagnostic.result = PasteResult::Success;
+    const bool clearClipboard = has_pending_file() && same_path(s_sourcePath, normalizedSource);
+    PasteResult result = finish_operation(PasteResult::Success);
+    if (clearClipboard) clear();
+    trace_marker("TRASH_MOVE_COMPLETE");
+    return result;
+}
+
 bool create_unique_folder(const char* destinationDirectory, char* outPath, size_t outPathSize)
 {
     return create_unique_folder_ex(destinationDirectory, outPath, outPathSize, nullptr);
@@ -1294,7 +1679,7 @@ const char* paste_diagnostic_message() {
     if (s_lastDiagnostic.result == PasteResult::Empty) return "Clipboard is empty";
     if (s_lastDiagnostic.result == PasteResult::Busy) return "A file operation is already in progress";
 
-    append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), "Paste Failed: ");
+    append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage), "File operation failed: ");
     if (s_lastDiagnostic.vfsStatus != vfs::VFS_OK) {
         append_text(s_diagnosticMessage, sizeof(s_diagnosticMessage),
                     vfs::status_name(s_lastDiagnostic.vfsStatus));
@@ -1481,6 +1866,32 @@ static bool smoke_check(const char* label, bool value) {
     return value;
 }
 
+static bool smoke_direct_trash_create_probe(const char* trashRoot) {
+    if (!trashRoot || !trashRoot[0]) return false;
+    char probePath[vfs::VFS_MAX_PATH];
+    vfs::join_path(trashRoot, "TEST.TXT", probePath, sizeof(probePath));
+    if (!probePath[0]) return false;
+    vfs::unlink(probePath);
+
+    static const uint8_t probeBytes[] = {'O', 'K', '\n'};
+    const int32_t created = vfs::create_file(probePath, probeBytes, sizeof(probeBytes));
+    if (created != static_cast<int32_t>(sizeof(probeBytes))) return false;
+    const uint8_t handle = vfs::open(probePath, vfs::OPEN_READ);
+    if (handle == 0xFF) {
+        vfs::unlink(probePath);
+        return false;
+    }
+    uint8_t readBytes[sizeof(probeBytes)] = {0};
+    const int32_t read = vfs::read(handle, readBytes, sizeof(readBytes));
+    const bool closed = vfs::close(handle) == vfs::VFS_OK;
+    bool bytesMatch = read == static_cast<int32_t>(sizeof(probeBytes));
+    for (size_t i = 0; bytesMatch && i < sizeof(probeBytes); ++i) {
+        bytesMatch = readBytes[i] == probeBytes[i];
+    }
+    const vfs::Status removed = vfs::unlink(probePath);
+    return closed && bytesMatch && removed == vfs::VFS_OK && !vfs::exists(probePath);
+}
+
 void run_runtime_smoke() {
     static const uint8_t sourceBytes[] = {0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF};
     static const uint8_t existingBytes[] = {0xCA, 0xFE};
@@ -1537,6 +1948,73 @@ void run_runtime_smoke() {
     char sourceFile[vfs::VFS_MAX_PATH];
     vfs::join_path(root, "SRC.TXT", sourceFile, sizeof(sourceFile));
     ok &= smoke_write_file(sourceFile, sourceBytes, sizeof(sourceBytes));
+
+    // Trash uses the same mounted FAT tree as the source. Probe the exact
+    // destination API before Move-to-Trash so metadata/path failures cannot be
+    // confused with data transfer failures.
+    char trashRoot[vfs::VFS_MAX_PATH];
+    ok &= trash_root_for_path(sourceFile, trashRoot, sizeof(trashRoot));
+    if (ok && !smoke_is_directory(trashRoot)) {
+        ok &= vfs::mkdir(trashRoot) == vfs::VFS_OK;
+    }
+    ok &= smoke_check("trash-root-resolves-after-mount", smoke_is_directory(trashRoot));
+    ok &= smoke_check("trash-direct-create", smoke_direct_trash_create_probe(trashRoot));
+
+    char trashSource[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "src.txt", trashSource, sizeof(trashSource));
+    ok &= smoke_write_file(trashSource, sourceBytes, sizeof(sourceBytes));
+    char firstTrashedPath[vfs::VFS_MAX_PATH] = {0};
+    const PasteResult firstTrashResult = move_to_trash(
+        trashSource, firstTrashedPath, sizeof(firstTrashedPath));
+    char firstMetadataPath[vfs::VFS_MAX_PATH] = {0};
+    ok &= smoke_check("trash-small-file-move", firstTrashResult == PasteResult::Success);
+    ok &= smoke_check("trash-source-preserved-until-success", !vfs::exists(trashSource));
+    ok &= smoke_check("trash-small-file-bytes",
+                      firstTrashResult == PasteResult::Success &&
+                      smoke_file_equals(firstTrashedPath, sourceBytes, sizeof(sourceBytes)));
+    ok &= smoke_check("trash-metadata-fat-name",
+                      trash_metadata_path_for(firstTrashedPath, firstMetadataPath,
+                                              sizeof(firstMetadataPath)) &&
+                      is_trash_metadata_name(vfs::basename(firstMetadataPath)) &&
+                      vfs::exists(firstMetadataPath));
+
+    ok &= smoke_write_file(trashSource, sourceBytes, sizeof(sourceBytes));
+    char secondTrashedPath[vfs::VFS_MAX_PATH] = {0};
+    const PasteResult secondTrashResult = move_to_trash(
+        trashSource, secondTrashedPath, sizeof(secondTrashedPath));
+    ok &= smoke_check("trash-collision-unique",
+                      secondTrashResult == PasteResult::Success &&
+                      !same_path(firstTrashedPath, secondTrashedPath));
+    char secondMetadataPath[vfs::VFS_MAX_PATH] = {0};
+    trash_metadata_path_for(secondTrashedPath, secondMetadataPath, sizeof(secondMetadataPath));
+
+    char trashEmptyFolder[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "EMPTYTRS", trashEmptyFolder, sizeof(trashEmptyFolder));
+    ok &= vfs::mkdir(trashEmptyFolder) == vfs::VFS_OK;
+    char movedEmptyFolder[vfs::VFS_MAX_PATH] = {0};
+    ok &= move_to_trash(trashEmptyFolder, movedEmptyFolder, sizeof(movedEmptyFolder)) == PasteResult::Success;
+    ok &= smoke_check("trash-empty-folder", !vfs::exists(trashEmptyFolder) && smoke_is_directory(movedEmptyFolder));
+    char emptyMetadataPath[vfs::VFS_MAX_PATH] = {0};
+    trash_metadata_path_for(movedEmptyFolder, emptyMetadataPath, sizeof(emptyMetadataPath));
+
+    char trashTree[vfs::VFS_MAX_PATH];
+    char trashTreeNested[vfs::VFS_MAX_PATH];
+    char trashTreeFile[vfs::VFS_MAX_PATH];
+    vfs::join_path(root, "TREETRS", trashTree, sizeof(trashTree));
+    vfs::join_path(trashTree, "NEST", trashTreeNested, sizeof(trashTreeNested));
+    vfs::join_path(trashTreeNested, "CHILD.TXT", trashTreeFile, sizeof(trashTreeFile));
+    ok &= vfs::mkdir(trashTree) == vfs::VFS_OK;
+    ok &= vfs::mkdir(trashTreeNested) == vfs::VFS_OK;
+    ok &= smoke_write_file(trashTreeFile, sourceBytes, sizeof(sourceBytes));
+    char movedTree[vfs::VFS_MAX_PATH] = {0};
+    ok &= move_to_trash(trashTree, movedTree, sizeof(movedTree)) == PasteResult::Success;
+    char movedTreeFile[vfs::VFS_MAX_PATH];
+    vfs::join_path(movedTree, "NEST/CHILD.TXT", movedTreeFile, sizeof(movedTreeFile));
+    ok &= smoke_check("trash-nonempty-folder",
+                      !vfs::exists(trashTree) && smoke_file_equals(movedTreeFile,
+                                                                     sourceBytes, sizeof(sourceBytes)));
+    char treeMetadataPath[vfs::VFS_MAX_PATH] = {0};
+    trash_metadata_path_for(movedTree, treeMetadataPath, sizeof(treeMetadataPath));
 
     char testPng[vfs::VFS_MAX_PATH];
     vfs::join_path(root, "TEST.PNG", testPng, sizeof(testPng));
@@ -1796,6 +2274,14 @@ void run_runtime_smoke() {
     smoke_phase(ok ? "before-cleanup-pass" : "before-cleanup-fail");
 
     clear();
+    if (firstMetadataPath[0]) vfs::unlink(firstMetadataPath);
+    if (secondMetadataPath[0]) vfs::unlink(secondMetadataPath);
+    if (emptyMetadataPath[0]) vfs::unlink(emptyMetadataPath);
+    if (treeMetadataPath[0]) vfs::unlink(treeMetadataPath);
+    remove_entry_tree(firstTrashedPath, 0);
+    remove_entry_tree(secondTrashedPath, 0);
+    remove_entry_tree(movedEmptyFolder, 0);
+    remove_entry_tree(movedTree, 0);
     remove_entry_tree(thresholdRoot, 0);
     const PasteResult cleanupResult = remove_entry_tree(root, 0);
     serial::puts("[FILE-OPS-RUNTIME-SMOKE] cleanup=");
@@ -1803,6 +2289,77 @@ void run_runtime_smoke() {
     serial::puts("\n");
     ok &= cleanupResult == PasteResult::Success;
     serial::puts("[FILE-OPS-RUNTIME-SMOKE] result=");
+    serial::puts(ok ? "PASS\n" : "FAIL\n");
+}
+
+void run_trash_runtime_smoke() {
+    static const uint8_t sourceBytes[] = {'t', 'r', 'a', 's', 'h', '\n'};
+    static const char* sourcePath = "/desktop/GXOPSMK/src.txt";
+    static const char* readOnlySource = "/system/wall/ivsmoke.png";
+    bool ok = true;
+
+    serial::puts("[FILE-OPS-TRASH-SMOKE] start\n");
+    clear();
+
+    const vfs::MountPoint* sourceMount = vfs::get_mount(sourcePath);
+    ok &= smoke_check("source-mount", sourceMount != nullptr);
+    if (!sourceMount || sourceMount->readOnly || sourceMount->fsType != vfs::FS_TYPE_FAT32) {
+        serial::puts("[FILE-OPS-TRASH-SMOKE] result=FAIL\n");
+        return;
+    }
+
+    char trashRoot[vfs::VFS_MAX_PATH] = {0};
+    ok &= trash_root_for_path(sourcePath, trashRoot, sizeof(trashRoot));
+    if (ok && !smoke_is_directory(trashRoot)) {
+        ok &= vfs::mkdir(trashRoot) == vfs::VFS_OK;
+    }
+    ok &= smoke_check("trash-root-resolves-after-mount", smoke_is_directory(trashRoot));
+    ok &= smoke_check("trash-direct-create", smoke_direct_trash_create_probe(trashRoot));
+
+    ok &= smoke_write_file(sourcePath, sourceBytes, sizeof(sourceBytes));
+    char firstTrashedPath[vfs::VFS_MAX_PATH] = {0};
+    const PasteResult firstResult = move_to_trash(
+        sourcePath, firstTrashedPath, sizeof(firstTrashedPath));
+    char firstMetadataPath[vfs::VFS_MAX_PATH] = {0};
+    const bool firstMetadataName =
+        trash_metadata_path_for(firstTrashedPath, firstMetadataPath, sizeof(firstMetadataPath)) &&
+        is_trash_metadata_name(vfs::basename(firstMetadataPath));
+    ok &= smoke_check("small-file-move", firstResult == PasteResult::Success);
+    ok &= smoke_check("source-removed-after-success", !vfs::exists(sourcePath));
+    ok &= smoke_check("destination-bytes", firstResult == PasteResult::Success &&
+                      smoke_file_equals(firstTrashedPath, sourceBytes, sizeof(sourceBytes)));
+    ok &= smoke_check("metadata-fat-name", firstMetadataName && vfs::exists(firstMetadataPath));
+
+    ok &= smoke_write_file(sourcePath, sourceBytes, sizeof(sourceBytes));
+    char secondTrashedPath[vfs::VFS_MAX_PATH] = {0};
+    const PasteResult secondResult = move_to_trash(
+        sourcePath, secondTrashedPath, sizeof(secondTrashedPath));
+    char secondMetadataPath[vfs::VFS_MAX_PATH] = {0};
+    const bool secondMetadata =
+        trash_metadata_path_for(secondTrashedPath, secondMetadataPath, sizeof(secondMetadataPath));
+    ok &= smoke_check("collision-unique", secondResult == PasteResult::Success &&
+                      !same_path(firstTrashedPath, secondTrashedPath));
+    ok &= smoke_check("collision-bytes", secondResult == PasteResult::Success &&
+                      smoke_file_equals(secondTrashedPath, sourceBytes, sizeof(sourceBytes)));
+    ok &= smoke_check("collision-metadata", secondMetadata && vfs::exists(secondMetadataPath));
+
+    ok &= set_file(readOnlySource, Operation::Copy);
+    char ignoredTrashedPath[vfs::VFS_MAX_PATH] = {0};
+    const PasteResult readOnlyResult = move_to_trash(
+        readOnlySource, ignoredTrashedPath, sizeof(ignoredTrashedPath));
+    ok &= smoke_check("failure-result-preserves-source", readOnlyResult == PasteResult::ReadOnly &&
+                      vfs::exists(readOnlySource));
+    ok &= smoke_check("failure-preserves-clipboard", has_pending_file());
+    clear();
+
+    if (firstMetadataPath[0]) vfs::unlink(firstMetadataPath);
+    if (secondMetadataPath[0]) vfs::unlink(secondMetadataPath);
+    if (firstTrashedPath[0]) vfs::unlink(firstTrashedPath);
+    if (secondTrashedPath[0]) vfs::unlink(secondTrashedPath);
+    ok &= smoke_check("trash-cleanup", !vfs::exists(firstTrashedPath) &&
+                      !vfs::exists(secondTrashedPath));
+
+    serial::puts("[FILE-OPS-TRASH-SMOKE] result=");
     serial::puts(ok ? "PASS\n" : "FAIL\n");
 }
 #endif

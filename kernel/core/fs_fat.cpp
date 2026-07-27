@@ -23,6 +23,7 @@ static FATFile   s_files[MAX_OPEN_FILES];
 static uint8_t   s_volumeCount = 0;
 static block::Status s_lastIoStatus = block::BLOCK_OK;
 static TraversalStatus s_lastTraversalStatus = TRAVERSAL_OK;
+static bool s_trashTraceActive = false;
 static uint64_t s_fatScanIterations = 0;
 static uint64_t s_allocatedClusters = 0;
 
@@ -91,7 +92,36 @@ static block::Status read_volume_sector(const FATVolume& vol, uint64_t lba, void
 
 static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, const void* buffer)
 {
+    if (s_trashTraceActive) {
+        serial::puts("TRASH_BLOCK_WRITE_BEGIN lba=0x");
+        serial::put_hex64(vol.partitionOffset + lba);
+        serial::puts(" relative=0x");
+        serial::put_hex64(lba);
+        serial::puts(" device=0x");
+        serial::put_hex8(vol.blockDevIndex);
+        serial::puts("\n");
+    }
     s_lastIoStatus = block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    if (s_trashTraceActive) {
+        serial::puts("TRASH_BLOCK_WRITE_LBA=0x");
+        serial::put_hex64(vol.partitionOffset + lba);
+        serial::puts(" relative=0x");
+        serial::put_hex64(lba);
+        serial::puts(" result=0x");
+        serial::put_hex8(static_cast<uint8_t>(s_lastIoStatus));
+        serial::puts("\n");
+    }
+    if (s_trashTraceActive) {
+        serial::puts("FAT_BLOCK_WRITE_LBA=0x");
+        serial::put_hex64(vol.partitionOffset + lba);
+        serial::puts(" relative=0x");
+        serial::put_hex64(lba);
+        serial::puts(" device=0x");
+        serial::put_hex8(vol.blockDevIndex);
+        serial::puts(" result=0x");
+        serial::put_hex8(static_cast<uint8_t>(s_lastIoStatus));
+        serial::puts("\n");
+    }
     return s_lastIoStatus;
 }
 
@@ -812,6 +842,11 @@ void init()
     s_lastTraversalStatus = TRAVERSAL_OK;
     s_fatScanIterations = 0;
     s_allocatedClusters = 0;
+}
+
+void set_trash_trace(bool enabled)
+{
+    s_trashTraceActive = enabled;
 }
 
 uint8_t mount(uint8_t blockDevIndex)
@@ -1958,7 +1993,17 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
     }
 
     char shortName[11];
-    if (!make_short_name(fileName, shortName)) return FILE_WRITE_INVALID_NAME;
+    serial::puts("FAT_FILE_DIR_ENTRY_BEGIN path=");
+    serial::puts(path);
+    serial::puts(" parentCluster=0x");
+    serial::put_hex32(parentCluster);
+    serial::puts(" name=");
+    serial::puts(fileName);
+    serial::puts("\n");
+    if (!make_short_name(fileName, shortName)) {
+        serial::puts("FAT_FILE_DIR_ENTRY_RESULT=FAT_FILE_WRITE_INVALID_NAME\n");
+        return FILE_WRITE_INVALID_NAME;
+    }
 
     serial::puts("FPASTE_FAT_ALLOCATE_BEGIN bytes=0x");
     serial::put_hex32(len);
@@ -2041,6 +2086,11 @@ FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
         if (outBlockStatus) *outBlockStatus = failedStatus;
         return FILE_WRITE_IO_ERROR;
     }
+    serial::puts("FAT_FILE_DIR_ENTRY_RESULT=FAT_FILE_WRITE_OK sector=0x");
+    serial::put_hex32(sector);
+    serial::puts(" offset=0x");
+    serial::put_hex32(offset);
+    serial::puts("\n");
     serial::puts("[FAT_FILE_CREATE_PUBLISH] path=");
     serial::puts(path);
     serial::puts(" size=0x");
@@ -2348,6 +2398,22 @@ bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
     return flush_volume_io(vol) == block::BLOCK_OK;
 }
 
+static bool restore_directory_entry(const FATVolume& vol, uint32_t sector,
+                                    uint32_t offset, const FAT32_DirEntry& entry)
+{
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) return false;
+    memcopy(&s_secBuf[offset], &entry, sizeof(FAT32_DirEntry));
+    return write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
+}
+
+static bool hide_directory_entry(const FATVolume& vol, uint32_t sector, uint32_t offset)
+{
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) return false;
+    FAT32_DirEntry* entry = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
+    entry->name[0] = static_cast<char>(0xE5);
+    return write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
+}
+
 bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
 {
     if (volumeIndex >= MAX_FAT_VOLUMES) return false;
@@ -2389,13 +2455,22 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
         }
 
         FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[oldOffset]);
+        FAT32_DirEntry originalEntry;
+        memcopy(&originalEntry, de, sizeof(FAT32_DirEntry));
         memcopy(de->name, shortName, 11);
 
         if (write_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
-        return flush_volume_io(vol) == block::BLOCK_OK;
+        if (flush_volume_io(vol) == block::BLOCK_OK) return true;
+        serial::puts("LFPASTE_RENAME_ROLLBACK_BEGIN same-parent\n");
+        restore_directory_entry(vol, oldSector, oldOffset, originalEntry);
+        flush_volume_io(vol);
+        serial::puts("LFPASTE_RENAME_ROLLBACK_END same-parent\n");
+        return false;
     }
 
     if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
+    FAT32_DirEntry originalEntry;
+    memcopy(&originalEntry, &s_secBuf[oldOffset], sizeof(FAT32_DirEntry));
     FAT32_DirEntry movedEntry;
     memcopy(&movedEntry, &s_secBuf[oldOffset], sizeof(FAT32_DirEntry));
     memcopy(movedEntry.name, shortName, 11);
@@ -2414,23 +2489,44 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
     serial::puts("LFPASTE_RENAME_DEST_WRITE_BEGIN sector=0x");
     serial::put_hex32(newSector);
     serial::puts("\n");
-    if (write_volume_sector(vol, newSector, s_secBuf) != block::BLOCK_OK) return false;
+    if (write_volume_sector(vol, newSector, s_secBuf) != block::BLOCK_OK) {
+        hide_directory_entry(vol, newSector, newOffset);
+        flush_volume_io(vol);
+        return false;
+    }
     serial::puts("LFPASTE_RENAME_DEST_WRITE_END sector=0x");
     serial::put_hex32(newSector);
     serial::puts("\n");
 
-    if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
+    if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) {
+        hide_directory_entry(vol, newSector, newOffset);
+        flush_volume_io(vol);
+        return false;
+    }
     FAT32_DirEntry* oldDe = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[oldOffset]);
     oldDe->name[0] = static_cast<char>(0xE5);
 
     serial::puts("LFPASTE_RENAME_SOURCE_WRITE_BEGIN sector=0x");
     serial::put_hex32(oldSector);
     serial::puts("\n");
-    if (write_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
+    if (write_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) {
+        serial::puts("LFPASTE_RENAME_ROLLBACK_BEGIN source-write\n");
+        restore_directory_entry(vol, oldSector, oldOffset, originalEntry);
+        hide_directory_entry(vol, newSector, newOffset);
+        flush_volume_io(vol);
+        serial::puts("LFPASTE_RENAME_ROLLBACK_END source-write\n");
+        return false;
+    }
     serial::puts("LFPASTE_RENAME_SOURCE_WRITE_END sector=0x");
     serial::put_hex32(oldSector);
     serial::puts("\n");
-    return flush_volume_io(vol) == block::BLOCK_OK;
+    if (flush_volume_io(vol) == block::BLOCK_OK) return true;
+    serial::puts("LFPASTE_RENAME_ROLLBACK_BEGIN flush\n");
+    restore_directory_entry(vol, oldSector, oldOffset, originalEntry);
+    hide_directory_entry(vol, newSector, newOffset);
+    flush_volume_io(vol);
+    serial::puts("LFPASTE_RENAME_ROLLBACK_END flush\n");
+    return false;
 }
 
 } // namespace fs_fat

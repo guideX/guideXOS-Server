@@ -27,6 +27,12 @@ namespace gxos { namespace files {
         std::string error;
     };
 
+    struct FileTrashResult {
+        bool success{false};
+        std::string trashedPath;
+        std::string error;
+    };
+
     /// Process-local guideXOS file clipboard. It intentionally contains only
     /// a canonical virtual path and operation metadata; file bytes stay in the
     /// guideXOS VFS and never enter the host clipboard.
@@ -49,8 +55,10 @@ namespace gxos { namespace files {
         static bool Exists(const std::string& path);
         static bool IsDirectory(const std::string& path);
         static bool IsRegularFile(const std::string& path);
+        static bool IsOperationActive();
         static bool CanPasteFile(const std::string& destinationDirectory, std::string& error);
         static FilePasteResult PasteFile(const std::string& destinationDirectory);
+        static FileTrashResult MoveToTrash(const std::string& sourcePath);
         static FileCreateResult CreateUniqueFolder(const std::string& destinationDirectory);
         static uint64_t OperationGeneration();
     };

@@ -5,8 +5,11 @@
 #include <cctype>
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #include <filesystem>
+#include <fstream>
 #endif
+#include <ctime>
 #include <mutex>
+#include <sstream>
 
 #if !defined(_WIN32) || defined(GXOS_BARE_METAL)
 #if defined(SEEK_SET)
@@ -22,6 +25,8 @@ namespace gxos { namespace files {
     namespace {
         constexpr int kMaxUniqueNameAttempts = 1000;
         constexpr uint32_t kCopyBufferBytes = 64u * 1024u;
+        constexpr const char* kTrashRootPath = "/Trash";
+        constexpr const char* kTrashInfoSuffix = ".trashinfo";
 
         enum class EntryKind {
             Missing,
@@ -33,7 +38,25 @@ namespace gxos { namespace files {
         std::mutex s_clipboardMutex;
         FileClipboardEntry s_clipboard;
         bool s_clipboardValid = false;
+        std::atomic_bool s_operationActive{false};
         std::atomic<uint64_t> s_operationGeneration{0};
+
+        class OperationGuard {
+        public:
+            OperationGuard() : acquired_(!s_operationActive.exchange(true, std::memory_order_acq_rel)) {}
+            ~OperationGuard() {
+                if (acquired_) s_operationActive.store(false, std::memory_order_release);
+            }
+            bool acquired() const { return acquired_; }
+            void release() {
+                if (acquired_) {
+                    s_operationActive.store(false, std::memory_order_release);
+                    acquired_ = false;
+                }
+            }
+        private:
+            bool acquired_{false};
+        };
 
         std::string normalizeVirtualPath(const std::string& path) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -181,6 +204,85 @@ namespace gxos { namespace files {
                 if (!exists(candidate)) return candidate;
             }
             return std::string();
+        }
+
+        std::string uniqueTrashPath(const std::string& sourceName, bool sourceIsDirectory) {
+            const std::string first = combinePath(kTrashRootPath, sourceName);
+            if (!exists(first) && !exists(first + kTrashInfoSuffix)) return first;
+
+            std::string stem = sourceName;
+            std::string extension;
+            const size_t dot = sourceName.find_last_of('.');
+            if (!sourceIsDirectory && dot != std::string::npos && dot > 0 && dot + 1 < sourceName.size()) {
+                stem = sourceName.substr(0, dot);
+                extension = sourceName.substr(dot);
+            }
+
+            for (int attempt = 1; attempt < kMaxUniqueNameAttempts; ++attempt) {
+                const std::string candidateName = stem + " (" + std::to_string(attempt) + ")" + extension;
+                const std::string candidate = combinePath(kTrashRootPath, candidateName);
+                if (!exists(candidate) && !exists(candidate + kTrashInfoSuffix)) return candidate;
+            }
+            return std::string();
+        }
+
+        std::string jsonEscape(const std::string& value) {
+            std::string out;
+            out.reserve(value.size() + 8);
+            for (char ch : value) {
+                switch (ch) {
+                    case '\\': out += "\\\\"; break;
+                    case '"': out += "\\\""; break;
+                    case '\n': out += "\\n"; break;
+                    case '\r': out += "\\r"; break;
+                    case '\t': out += "\\t"; break;
+                    default: out.push_back(ch); break;
+                }
+            }
+            return out;
+        }
+
+        bool writeTrashMetadata(const std::string& trashedPath, const std::string& sourcePath,
+                                bool isDirectory, std::string& error) {
+            std::ostringstream info;
+            info << "{\n"
+                 << "  \"originalPath\": \"" << jsonEscape(sourcePath) << "\",\n"
+                 << "  \"originalName\": \"" << jsonEscape(baseName(sourcePath)) << "\",\n"
+                 << "  \"isDirectory\": " << (isDirectory ? "true" : "false") << ",\n"
+                 << "  \"trashedAt\": " << static_cast<long long>(std::time(nullptr)) << "\n"
+                 << "}";
+            const std::string infoPath = trashedPath + kTrashInfoSuffix;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            std::ofstream output(hostedPathForVirtual(infoPath), std::ios::binary | std::ios::trunc);
+            if (!output) {
+                error = "Unable to create Trash metadata";
+                return false;
+            }
+            output << info.str();
+            if (!output.good()) {
+                error = "Unable to write Trash metadata";
+                return false;
+            }
+            return true;
+#else
+            const std::string text = info.str();
+            const int32_t written = kernel::vfs::write_file(normalizeVirtualPath(infoPath).c_str(),
+                text.data(), static_cast<uint32_t>(text.size()));
+            if (written < 0 || written != static_cast<int32_t>(text.size())) {
+                error = "Unable to write Trash metadata";
+                return false;
+            }
+            return true;
+#endif
+        }
+
+        void removeTrashMetadata(const std::string& trashedPath) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            std::error_code ec;
+            std::filesystem::remove(hostedPathForVirtual(trashedPath + kTrashInfoSuffix), ec);
+#else
+            kernel::vfs::unlink(normalizeVirtualPath(trashedPath + kTrashInfoSuffix).c_str());
+#endif
         }
 
         std::string statusText(int status) {
@@ -436,6 +538,10 @@ namespace gxos { namespace files {
 
     bool FileClipboard::Set(const std::string& sourcePath, FileClipboardOperation operation, std::string& error) {
         error.clear();
+        if (s_operationActive.load(std::memory_order_acquire)) {
+            error = "A file operation is already in progress";
+            return false;
+        }
         const std::string normalized = normalizeVirtualPath(sourcePath);
         const EntryKind kind = entryKind(normalized);
         if (kind != EntryKind::RegularFile && kind != EntryKind::Directory) {
@@ -475,8 +581,13 @@ namespace gxos { namespace files {
     bool FileOperations::Exists(const std::string& path) { return exists(path); }
     bool FileOperations::IsDirectory(const std::string& path) { return isDirectory(path); }
     bool FileOperations::IsRegularFile(const std::string& path) { return isRegularFile(path); }
+    bool FileOperations::IsOperationActive() { return s_operationActive.load(std::memory_order_acquire); }
 
     bool FileOperations::CanPasteFile(const std::string& destinationDirectory, std::string& error) {
+        if (s_operationActive.load(std::memory_order_acquire)) {
+            error = "A file operation is already in progress";
+            return false;
+        }
         FileClipboardEntry entry;
         if (!FileClipboard::Get(entry)) {
             error = "Nothing to paste";
@@ -495,6 +606,11 @@ namespace gxos { namespace files {
 
     FilePasteResult FileOperations::PasteFile(const std::string& destinationDirectory) {
         FilePasteResult result;
+        OperationGuard operationGuard;
+        if (!operationGuard.acquired()) {
+            result.error = "A file operation is already in progress";
+            return result;
+        }
         FileClipboardEntry entry;
         if (!FileClipboard::Get(entry)) {
             result.error = "Nothing to paste";
@@ -572,8 +688,117 @@ namespace gxos { namespace files {
         return result;
     }
 
+    FileTrashResult FileOperations::MoveToTrash(const std::string& sourcePath) {
+        FileTrashResult result;
+        OperationGuard operationGuard;
+        if (!operationGuard.acquired()) {
+            result.error = "A file operation is already in progress";
+            return result;
+        }
+
+        const std::string source = normalizeVirtualPath(sourcePath);
+        const EntryKind kind = entryKind(source);
+        if (kind == EntryKind::Missing) {
+            result.error = "Target not found: " + source;
+            return result;
+        }
+        if (kind != EntryKind::RegularFile && kind != EntryKind::Directory) {
+            result.error = "Target is not a deletable file or folder: " + source;
+            return result;
+        }
+        if (source == "/" || source == normalizeVirtualPath(kTrashRootPath)) {
+            result.error = "Protected filesystem path cannot be moved to Trash";
+            return result;
+        }
+
+        const std::string parent = parentPath(source);
+        if (!isDirectoryWritable(parent)) {
+            result.error = "Source folder is read-only or unavailable";
+            return result;
+        }
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        std::error_code ec;
+        const std::filesystem::path trashHostPath = hostedPathForVirtual(kTrashRootPath);
+        if (!std::filesystem::exists(trashHostPath, ec)) {
+            if (!std::filesystem::create_directory(trashHostPath, ec) || ec) {
+                result.error = ec ? "Trash unavailable: " + ec.message() : "Trash unavailable";
+                return result;
+            }
+        }
+        if (ec || !std::filesystem::is_directory(trashHostPath, ec) || ec) {
+            result.error = ec ? "Trash unavailable: " + ec.message() : "Trash path is not a directory";
+            return result;
+        }
+        if (!isDirectoryWritable(kTrashRootPath)) {
+            result.error = "Trash destination is read-only or unavailable";
+            return result;
+        }
+#else
+        if (!isDirectory(kTrashRootPath)) {
+            const kernel::vfs::Status mkdirStatus = kernel::vfs::mkdir(kTrashRootPath);
+            if (mkdirStatus != kernel::vfs::VFS_OK && mkdirStatus != kernel::vfs::VFS_ERR_EXISTS) {
+                result.error = "Trash unavailable: " + statusText(mkdirStatus);
+                return result;
+            }
+        }
+        if (!isDirectory(kTrashRootPath) || !isDirectoryWritable(kTrashRootPath)) {
+            result.error = "Trash destination is read-only or unavailable";
+            return result;
+        }
+#endif
+
+        const std::string trashedPath = uniqueTrashPath(baseName(source), kind == EntryKind::Directory);
+        if (trashedPath.empty()) {
+            result.error = "Trash name-collision exhaustion";
+            return result;
+        }
+
+        // The caller owns the stable source path, and this second lookup is the
+        // mutation boundary revalidation. Metadata is written first so a failed
+        // rename never leaves the source half-deleted or without restore data.
+        if (entryKind(source) != kind) {
+            result.error = "Target changed or disappeared before deletion";
+            return result;
+        }
+        std::string metadataError;
+        if (!writeTrashMetadata(trashedPath, source, kind == EntryKind::Directory, metadataError)) {
+            removeTrashMetadata(trashedPath);
+            result.error = metadataError;
+            return result;
+        }
+
+        if (!moveFile(source, trashedPath, result.error)) {
+            removeTrashMetadata(trashedPath);
+            return result;
+        }
+        const EntryKind destinationKind = entryKind(trashedPath);
+        if (destinationKind != kind) {
+            std::string rollbackError;
+            const bool rolledBack = moveFile(trashedPath, source, rollbackError);
+            removeTrashMetadata(trashedPath);
+            result.error = rolledBack
+                ? "Trash move verification failed; source was preserved"
+                : "Trash move verification failed and rollback failed: " + rollbackError;
+            return result;
+        }
+
+        FileClipboardEntry clipboard;
+        const bool clearClipboard = FileClipboard::Get(clipboard) && samePath(clipboard.sourcePath, source);
+        result.success = true;
+        result.trashedPath = trashedPath;
+        s_operationGeneration.fetch_add(1, std::memory_order_release);
+        if (clearClipboard) FileClipboard::Clear();
+        return result;
+    }
+
     FileCreateResult FileOperations::CreateUniqueFolder(const std::string& destinationDirectory) {
         FileCreateResult result;
+        OperationGuard operationGuard;
+        if (!operationGuard.acquired()) {
+            result.error = "A file operation is already in progress";
+            return result;
+        }
         const std::string destination = normalizeVirtualPath(destinationDirectory);
         if (!isDirectory(destination)) {
             result.error = "Folder destination is not available";

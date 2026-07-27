@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -148,6 +149,100 @@ int main() {
     ok &= expect(!gxos::files::FileClipboard::Get(staleEntry), "stale clipboard is invalidated");
 
     gxos::files::FileClipboard::Clear();
+
+    // Desktop Delete uses the same collision-safe Trash operation as File
+    // Explorer. Cover files, both clipboard modes, empty folders, and a
+    // non-empty folder without relying on the desktop icon model.
+    const std::vector<uint8_t> deleteBytes{0x11, 0x22, 0x33, 0x44};
+    const std::string deleteStem = "gxos-delete-" + std::to_string(
+        std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    const std::string deleteFileName = deleteStem + ".txt";
+    const std::string emptyFolderName = deleteStem + "-empty";
+    const std::string treeFolderName = deleteStem + "-tree";
+    const std::filesystem::path trashHostRoot = std::filesystem::current_path() / "Trash";
+    const auto trashHostPath = [](const std::string& virtualPath) {
+        if (virtualPath.empty() || virtualPath.front() != '/') {
+            return std::filesystem::current_path() / "__invalid-trash-test-path__";
+        }
+        return std::filesystem::current_path() / virtualPath.substr(1);
+    };
+    const auto writeFixtureFile = [](const std::filesystem::path& path,
+                                     const std::vector<uint8_t>& bytes) {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output.write(reinterpret_cast<const char*>(bytes.data()),
+                     static_cast<std::streamsize>(bytes.size()));
+    };
+    writeFixtureFile(kFixtureRoot / "Desktop" / deleteFileName, deleteBytes);
+    ok &= expect(gxos::files::FileClipboard::Set(kRoot + "/Desktop/" + deleteFileName,
+        gxos::files::FileClipboardOperation::Copy, error),
+        "delete file copy clipboard set");
+    auto deleteResult = gxos::files::FileOperations::MoveToTrash(kRoot + "/Desktop/" + deleteFileName);
+    ok &= expect(deleteResult.success, "delete file moves to Trash");
+    const std::filesystem::path firstTrashFile = trashHostPath(deleteResult.trashedPath);
+    ok &= expect(!std::filesystem::exists(kFixtureRoot / "Desktop" / deleteFileName),
+        "deleted file leaves Desktop");
+    ok &= expect(std::filesystem::exists(firstTrashFile),
+        "deleted file exists in Trash");
+    ok &= expect(readBytes(firstTrashFile) == deleteBytes,
+        "Trash preserves deleted file bytes");
+    ok &= expect(std::filesystem::exists(firstTrashFile.string() + ".trashinfo"),
+        "Trash writes restore metadata");
+    gxos::files::FileClipboardEntry deletedCopy;
+    ok &= expect(!gxos::files::FileClipboard::Get(deletedCopy),
+        "successful delete clears copy clipboard source");
+
+    writeFixtureFile(kFixtureRoot / "Desktop" / deleteFileName, deleteBytes);
+    deleteResult = gxos::files::FileOperations::MoveToTrash(kRoot + "/Desktop/" + deleteFileName);
+    const std::filesystem::path secondTrashFile = trashHostPath(deleteResult.trashedPath);
+    ok &= expect(deleteResult.success && deleteResult.trashedPath.find(deleteStem + " (1).txt") != std::string::npos,
+        "Trash collision uses a non-overwriting name");
+    ok &= expect(readBytes(firstTrashFile) == deleteBytes && readBytes(secondTrashFile) == deleteBytes,
+        "Trash collision preserves the original item");
+
+    std::filesystem::create_directories(kFixtureRoot / "Desktop" / emptyFolderName);
+    deleteResult = gxos::files::FileOperations::MoveToTrash(kRoot + "/Desktop/" + emptyFolderName);
+    const std::filesystem::path emptyTrashFolder = trashHostPath(deleteResult.trashedPath);
+    ok &= expect(deleteResult.success &&
+        !std::filesystem::exists(kFixtureRoot / "Desktop" / emptyFolderName) &&
+        std::filesystem::is_directory(emptyTrashFolder),
+        "empty folder moves to Trash");
+
+    std::filesystem::create_directories(kFixtureRoot / "Desktop" / treeFolderName / "nested");
+    writeFixtureFile(kFixtureRoot / "Desktop" / treeFolderName / "root.bin", deleteBytes);
+    writeFixtureFile(kFixtureRoot / "Desktop" / treeFolderName / "nested" / "child.bin", deleteBytes);
+    ok &= expect(gxos::files::FileClipboard::Set(kRoot + "/Desktop/" + treeFolderName,
+        gxos::files::FileClipboardOperation::Move, error),
+        "delete folder cut clipboard set");
+    deleteResult = gxos::files::FileOperations::MoveToTrash(kRoot + "/Desktop/" + treeFolderName);
+    const std::filesystem::path treeTrashFolder = trashHostPath(deleteResult.trashedPath);
+    ok &= expect(deleteResult.success &&
+        !std::filesystem::exists(kFixtureRoot / "Desktop" / treeFolderName),
+        "non-empty folder moves to Trash");
+    ok &= expect(readBytes(treeTrashFolder / "root.bin") == deleteBytes &&
+        readBytes(treeTrashFolder / "nested" / "child.bin") == deleteBytes,
+        "Trash preserves non-empty folder contents");
+    gxos::files::FileClipboardEntry deletedCut;
+    ok &= expect(!gxos::files::FileClipboard::Get(deletedCut),
+        "successful delete clears cut clipboard source");
+
+    writeFixtureFile(kFixtureRoot / "Desktop" / "failed-delete.txt", deleteBytes);
+    deleteResult = gxos::files::FileOperations::MoveToTrash(kRoot + "/Desktop/missing-delete.txt");
+    ok &= expect(!deleteResult.success && std::filesystem::exists(kFixtureRoot / "Desktop" / "failed-delete.txt"),
+        "failed delete leaves existing Desktop data intact");
+
+    std::filesystem::remove_all(firstTrashFile);
+    std::filesystem::remove(firstTrashFile.string() + ".trashinfo");
+    std::filesystem::remove_all(secondTrashFile);
+    std::filesystem::remove(secondTrashFile.string() + ".trashinfo");
+    std::filesystem::remove_all(emptyTrashFolder);
+    std::filesystem::remove(emptyTrashFolder.string() + ".trashinfo");
+    std::filesystem::remove_all(treeTrashFolder);
+    std::filesystem::remove(treeTrashFolder.string() + ".trashinfo");
+    std::error_code trashCleanupError;
+    if (std::filesystem::exists(trashHostRoot) && std::filesystem::is_empty(trashHostRoot, trashCleanupError)) {
+        std::filesystem::remove(trashHostRoot, trashCleanupError);
+    }
+
     gxos::gui::NormalWindowBounds bounds{40, 50, 640, 480};
     ok &= expect(gxos::gui::WindowBoundsStore::Save("app:test.one", bounds, error), "window bounds save");
     gxos::gui::NormalWindowBounds loaded;

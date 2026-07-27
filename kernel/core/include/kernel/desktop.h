@@ -198,5 +198,7 @@ void run_imageviewer_runtime_smoke();
 
 // External function for keyboard IRQ to request redraw
 extern "C" void desktop_request_redraw();
+// Re-scan filesystem-backed Desktop icons after a completed mutation.
+extern "C" void desktop_request_folder_refresh();
 
 #endif // KERNEL_DESKTOP_H

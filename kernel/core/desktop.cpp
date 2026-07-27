@@ -1875,6 +1875,11 @@ static int s_contextMenuIconDisplayIndex = -1;
 // stale between opening the menu and clicking it; that must not remap a stale
 // Paste slot onto another command.
 static bool s_contextMenuPasteVisibleAtOpen = false;
+// The clicked filesystem target is owned by the menu, rather than borrowed
+// from the refreshable desktop icon model. Delete uses this stable path after
+// revalidating it at the mutation boundary.
+static char s_contextMenuTargetPath[vfs::VFS_MAX_PATH] = {0};
+static bool s_contextMenuTargetIsDirectory = false;
 
 // Notification toast
 struct NotificationToast {
@@ -2717,7 +2722,6 @@ static int hit_test_app_model_dialog(int32_t mx, int32_t my)
     return -1;
 }
 
-static bool text_ends_with(const char* value, const char* suffix);
 static bool text_ends_with_ignore_case(const char* value, const char* suffix);
 
 static bool desktop_entry_is_known_image(const char* name)
@@ -5729,20 +5733,6 @@ static bool text_equals(const char* a, const char* b)
     return *a == '\0' && *b == '\0';
 }
 
-static bool text_ends_with(const char* value, const char* suffix)
-{
-    if (!value || !suffix) return false;
-    int valueLen = 0;
-    int suffixLen = 0;
-    while (value[valueLen]) ++valueLen;
-    while (suffix[suffixLen]) ++suffixLen;
-    if (suffixLen > valueLen) return false;
-    for (int i = 0; i < suffixLen; ++i) {
-        if (value[valueLen - suffixLen + i] != suffix[i]) return false;
-    }
-    return true;
-}
-
 static bool text_ends_with_ignore_case(const char* value, const char* suffix)
 {
     if (!value || !suffix) return false;
@@ -5794,7 +5784,7 @@ static bool desktop_trash_root_has_items(const char* trashRoot)
     vfs::DirEntry entry{};
     while (vfs::readdir(dir, &entry)) {
         if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
-        if (text_ends_with(entry.name, ".trashinfo")) continue;
+        if (file_clipboard::is_trash_metadata_name(entry.name)) continue;
         hasItems = true;
         break;
     }
@@ -7012,6 +7002,16 @@ static const DesktopIcon* context_menu_filesystem_entry()
     return icon.kind == DesktopItemKind::FilesystemEntry && icon.path[0] ? &icon : nullptr;
 }
 
+static bool desktop_context_delete_visible()
+{
+    if (file_clipboard::operation_active() || !s_contextMenuTargetPath[0]) return false;
+    vfs::FileInfo info{};
+    const vfs::Status status = vfs::stat(s_contextMenuTargetPath, &info);
+    return status == vfs::VFS_OK &&
+        ((s_contextMenuTargetIsDirectory && info.type == vfs::FILE_TYPE_DIRECTORY) ||
+         (!s_contextMenuTargetIsDirectory && info.type == vfs::FILE_TYPE_REGULAR));
+}
+
 static bool desktop_file_paste_available()
 {
     return file_clipboard::can_paste_to(bare_metal_desktop_current_directory_path());
@@ -7034,10 +7034,11 @@ static int context_menu_item_count()
         const DesktopIcon* entry = context_menu_filesystem_entry();
         if (!entry) return 0;
         if (entry->isDirectory) {
-            // Open, Copy, Cut, optional Paste, Rename.
-            return 4 + (s_contextMenuPasteVisibleAtOpen ? 1 : 0);
+            // Open, Copy, Cut, optional Paste, Rename, Delete.
+            return 4 + (s_contextMenuPasteVisibleAtOpen ? 1 : 0) +
+                   (desktop_context_delete_visible() ? 1 : 0);
         }
-        return 3; // Open, Copy File, Cut File
+        return 3 + (desktop_context_delete_visible() ? 1 : 0); // Open, Copy File, Cut File, Delete
     }
     return s_contextMenuPasteVisibleAtOpen ? kContextMenuCount + 1 : kContextMenuCount;
 }
@@ -7096,10 +7097,13 @@ static void draw_right_click_menu()
                 else if (i == 2) label = "Cut File";
                 else if (s_contextMenuPasteVisibleAtOpen && i == 3) label = "Paste";
                 else if (i == (s_contextMenuPasteVisibleAtOpen ? 4 : 3)) label = "Rename";
+                else if (desktop_context_delete_visible() &&
+                         i == (s_contextMenuPasteVisibleAtOpen ? 5 : 4)) label = "Delete";
             } else if (entry) {
                 if (i == 0) label = "Open";
                 else if (i == 1) label = "Copy File";
                 else if (i == 2) label = "Cut File";
+                else if (desktop_context_delete_visible() && i == 3) label = "Delete";
             }
         } else if (s_contextMenuMode == ContextMenuMode::Desktop) {
             if (s_contextMenuPasteVisibleAtOpen) {
@@ -7209,7 +7213,13 @@ static void handle_context_menu_command(int item)
 
     if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
         const DesktopIcon* entry = context_menu_filesystem_entry();
-        if (!entry) {
+        char ownedTargetPath[vfs::VFS_MAX_PATH] = {0};
+        const bool ownedTargetIsDirectory = s_contextMenuTargetIsDirectory;
+        desktop_str_copy(ownedTargetPath, s_contextMenuTargetPath, (int)sizeof(ownedTargetPath));
+        const int deleteItem = ownedTargetIsDirectory
+            ? (s_contextMenuPasteVisibleAtOpen ? 5 : 4) : 3;
+        const bool isDeleteCommand = item == deleteItem;
+        if (!ownedTargetPath[0] || (!entry && !isDeleteCommand)) {
             s_contextMenuMode = ContextMenuMode::Desktop;
             return;
         }
@@ -7218,11 +7228,11 @@ static void handle_context_menu_command(int item)
         // clicked folder path before dispatch so the synchronous VFS/FAT
         // operation never relies on a pointer into the model being refreshed.
         char ownedDestinationDirectory[vfs::VFS_MAX_PATH] = {0};
-        if (entry->isDirectory) {
-            vfs::normalize_path(entry->path, ownedDestinationDirectory,
+        if (ownedTargetIsDirectory) {
+            vfs::normalize_path(ownedTargetPath, ownedDestinationDirectory,
                                 sizeof(ownedDestinationDirectory));
             serial::puts("FPASTE_CLICKED_FOLDER display=");
-            serial::puts(entry->label ? entry->label : "(unnamed)");
+            serial::puts(entry && entry->label ? entry->label : "(unnamed)");
             serial::puts(" path=");
             serial::puts(ownedDestinationDirectory);
             serial::puts("\n");
@@ -7234,13 +7244,48 @@ static void handle_context_menu_command(int item)
             const file_clipboard::Operation operation = item == 1
                 ? file_clipboard::Operation::Copy
                 : file_clipboard::Operation::Move;
-            if (file_clipboard::set_file(entry->path, operation)) {
+            if (file_clipboard::set_file(ownedTargetPath, operation)) {
                 show_file_clipboard_notification(item == 1 ? "Copied file to guideXOS clipboard" :
                                                   "Cut file to guideXOS clipboard");
             } else {
                 show_file_clipboard_notification(file_clipboard::paste_diagnostic_message());
             }
-        } else if (entry->isDirectory) {
+        } else if (item == (ownedTargetIsDirectory
+                                ? (s_contextMenuPasteVisibleAtOpen ? 5 : 4)
+                                : 3)) {
+            // Revalidate the owned target immediately before mutation. The
+        // operation itself performs a second validation and keeps the
+        // shared file-operation guard active through VFS/FAT mutation.
+            vfs::FileInfo targetInfo{};
+            const vfs::Status targetStatus = vfs::stat(ownedTargetPath, &targetInfo);
+            const bool targetTypeMatches = targetStatus == vfs::VFS_OK &&
+                ((ownedTargetIsDirectory && targetInfo.type == vfs::FILE_TYPE_DIRECTORY) ||
+                 (!ownedTargetIsDirectory && targetInfo.type == vfs::FILE_TYPE_REGULAR));
+            if (!targetTypeMatches) {
+                serial::puts("[desktop] Delete rejected: target is missing or changed\n");
+                show_file_clipboard_notification("Delete failed: target not found or changed");
+            } else {
+                char deleteRequest[vfs::VFS_MAX_PATH + 32] = {0};
+                int requestPos = 0;
+                desktop_append_text(deleteRequest, &requestPos, (int)sizeof(deleteRequest),
+                                    "--confirm-delete|");
+                desktop_append_text(deleteRequest, &requestPos, (int)sizeof(deleteRequest),
+                                    ownedTargetPath);
+                desktop_append_text(deleteRequest, &requestPos, (int)sizeof(deleteRequest), "|");
+                desktop_append_text(deleteRequest, &requestPos, (int)sizeof(deleteRequest),
+                                    ownedTargetIsDirectory ? "1" : "0");
+                serial::puts("[desktop] Delete confirmation requested path=");
+                serial::puts(ownedTargetPath);
+                serial::puts("\n");
+                if (app::AppManager::launchAppWithParam("Files", deleteRequest)) {
+                    show_file_clipboard_notification("Confirm Delete in File Explorer");
+                } else {
+                    serial::puts("[desktop] Delete confirmation launch failed\n");
+                    show_file_clipboard_notification("Unable to open Delete confirmation");
+                }
+                s_needsRedraw = true;
+            }
+        } else if (ownedTargetIsDirectory) {
             if (s_contextMenuPasteVisibleAtOpen && item == 3) {
                 serial::puts("FPASTE_CONTEXT_DISPATCH\n");
                 if (file_clipboard::can_paste_to(ownedDestinationDirectory)) {
@@ -7263,7 +7308,7 @@ static void handle_context_menu_command(int item)
                 // Consume a stale Paste slot instead of accidentally invoking
                 // Rename when the clipboard changed after menu construction.
             } else if (item == (s_contextMenuPasteVisibleAtOpen ? 4 : 3)) {
-                begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
+                if (entry) begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
             }
         }
         s_contextMenuMode = ContextMenuMode::Desktop;
@@ -8903,6 +8948,8 @@ void show_context_menu(uint32_t x, uint32_t y)
     s_contextMenuPasteVisibleAtOpen = desktop_file_paste_available();
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = -1;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("DESKTOP_CONTEXT_MENU mode=Desktop pasteVisible=");
     serial::puts(s_contextMenuPasteVisibleAtOpen ? "1\n" : "0\n");
@@ -8919,6 +8966,8 @@ static void show_start_menu_app_context_menu(uint32_t x, uint32_t y, const char*
     s_contextMenuPasteVisibleAtOpen = false;
     desktop_str_copy(s_contextMenuAppName, appName, (int)sizeof(s_contextMenuAppName));
     s_contextMenuIconDisplayIndex = -1;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Start Menu context menu creation: ");
     serial::puts(s_contextMenuAppName);
@@ -8934,6 +8983,8 @@ static void show_desktop_shortcut_context_menu(uint32_t x, uint32_t y, int displ
     s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Desktop shortcut context menu creation\n");
 }
@@ -8947,6 +8998,8 @@ static void show_desktop_trash_context_menu(uint32_t x, uint32_t y, int displayI
     s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Desktop trash context menu creation\n");
 }
@@ -8960,6 +9013,18 @@ static void show_desktop_filesystem_context_menu(uint32_t x, uint32_t y, int dis
     s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
+    const DesktopIcon* target = context_menu_filesystem_entry();
+    vfs::FileInfo targetInfo{};
+    const bool targetIsValid = target && target->removable && target->path[0] &&
+        vfs::stat(target->path, &targetInfo) == vfs::VFS_OK &&
+        ((target->isDirectory && targetInfo.type == vfs::FILE_TYPE_DIRECTORY) ||
+         (!target->isDirectory && targetInfo.type == vfs::FILE_TYPE_REGULAR));
+    if (!file_clipboard::operation_active() && targetIsValid) {
+        vfs::normalize_path(target->path, s_contextMenuTargetPath, sizeof(s_contextMenuTargetPath));
+        s_contextMenuTargetIsDirectory = target->isDirectory;
+    }
     const DesktopIcon* entry = context_menu_filesystem_entry();
     if (entry && entry->isDirectory) {
         s_contextMenuPasteVisibleAtOpen = file_clipboard::can_paste_to(entry->path);
@@ -8976,6 +9041,8 @@ void close_context_menu()
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = -1;
     s_contextMenuPasteVisibleAtOpen = false;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
 }
 
 void toggle_start_menu()
@@ -10849,6 +10916,11 @@ void handle_key(uint32_t key)
 void desktop_request_redraw()
 {
     kernel::desktop::s_needsRedraw = true;
+}
+
+void desktop_request_folder_refresh()
+{
+    kernel::desktop::bare_metal_desktop_request_folder_refresh("file operation");
 }
 
 namespace kernel {

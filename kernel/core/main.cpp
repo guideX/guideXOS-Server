@@ -396,7 +396,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Network initialization can wait for DHCP on QEMU or physical
         // hardware, so it must not gate this filesystem-specific smoke result.
         kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] issuing command=file-operations.runtime\n");
+#ifdef GXOS_FILE_OPERATIONS_TRASH_RUNTIME_SMOKE_ACTIVE
+        kernel::file_clipboard::run_trash_runtime_smoke();
+#else
         kernel::file_clipboard::run_runtime_smoke();
+#endif
         kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] done\n");
 #endif
         

@@ -33,9 +33,6 @@ namespace gxos { namespace apps {
         constexpr int kHeaderH = 24;
         constexpr int kRowH = 22;
         constexpr size_t kLazyPageSize = 256;
-        constexpr const char* kTrashRootPath = "/Trash";
-        constexpr const char* kTrashInfoSuffix = ".trashinfo";
-
         constexpr int kIconSize = 16;
         constexpr int kNavIconSize = 16;
         constexpr int kToolbarIconSize = 16;
@@ -564,6 +561,11 @@ namespace gxos { namespace apps {
             : ProcessTable::spawn(spec, {"file_explorer", startPath});
     }
 
+    uint64_t FileExplorer::LaunchDeleteConfirmation(const std::string& targetPath, bool isDirectory) {
+        const std::string normalized = gxos::files::FileOperations::NormalizePath(targetPath);
+        return Launch("--confirm-delete|" + normalized + "|" + (isDirectory ? "1" : "0"));
+    }
+
     std::unique_ptr<IExplorerFileSystem> FileExplorer::createFileSystemProvider() {
         return std::make_unique<KernelVfsExplorerFileSystem>();
     }
@@ -572,9 +574,26 @@ namespace gxos { namespace apps {
         Logger::write(LogLevel::Info, "FileExplorer starting...");
 
         s_windowId = 0;
+        bool launchDeleteConfirmation = false;
+        bool launchDeleteIsDirectory = false;
+        std::string launchDeletePath;
+        std::string requestedStartPath = (argc > 1) ? argv[1] : "";
+        const std::string deletePrefix = "--confirm-delete|";
+        if (requestedStartPath.rfind(deletePrefix, 0) == 0) {
+            const std::string payload = requestedStartPath.substr(deletePrefix.size());
+            const size_t separator = payload.rfind('|');
+            if (separator != std::string::npos && separator > 0) {
+                launchDeletePath = gxos::files::FileOperations::NormalizePath(payload.substr(0, separator));
+                launchDeleteIsDirectory = payload.substr(separator + 1) == "1";
+                launchDeleteConfirmation = !launchDeletePath.empty();
+                requestedStartPath = gxos::files::FileOperations::ParentPath(launchDeletePath);
+            }
+        }
         s_fileSystem = createFileSystemProvider();
         s_roots = s_fileSystem->getRoots();
-        s_currentPath = (argc > 1) ? s_fileSystem->normalizePath(argv[1]) : (s_roots.empty() ? "/" : s_fileSystem->normalizePath(s_roots[0].fullPath));
+        s_currentPath = !requestedStartPath.empty()
+            ? s_fileSystem->normalizePath(requestedStartPath)
+            : (s_roots.empty() ? "/" : s_fileSystem->normalizePath(s_roots[0].fullPath));
         s_entries.clear();
         s_backHistory.clear();
         s_forwardHistory.clear();
@@ -597,6 +616,12 @@ namespace gxos { namespace apps {
         s_lastEntryClickRow = -1;
 
         refresh();
+        if (launchDeleteConfirmation) {
+            s_deleteTargetPath = launchDeletePath;
+            s_deleteTargetIsDirectory = launchDeleteIsDirectory;
+            s_showDeleteConfirmation = true;
+            s_status = "Confirm delete";
+        }
 
         ipc::Bus::ensure("gui.input");
         ipc::Bus::ensure("gui.output");
@@ -1432,52 +1457,6 @@ namespace gxos { namespace apps {
         return path;
     }
 
-    std::string FileExplorer::trashRootPath() {
-        return kTrashRootPath;
-    }
-
-    std::string FileExplorer::makeUniquePathInDirectory(const std::string& directoryPath, const std::string& baseName, bool directory) {
-        std::string path = s_fileSystem->combinePath(directoryPath, baseName);
-        if (!s_fileSystem->exists(path)) return path;
-        for (int i = 1; i < 100; ++i) {
-            std::string candidate = baseName + " (" + std::to_string(i) + ")";
-            if (!directory && baseName.find('.') != std::string::npos) {
-                size_t dot = baseName.find_last_of('.');
-                candidate = baseName.substr(0, dot) + " (" + std::to_string(i) + ")" + baseName.substr(dot);
-            }
-            path = s_fileSystem->combinePath(directoryPath, candidate);
-            if (!s_fileSystem->exists(path)) return path;
-        }
-        return path;
-    }
-
-    std::string FileExplorer::trashInfoPathFor(const std::string& trashedPath) {
-        return trashedPath + kTrashInfoSuffix;
-    }
-
-    std::string FileExplorer::jsonEscape(const std::string& value) {
-        std::string out;
-        out.reserve(value.size() + 8);
-        for (char ch : value) {
-            switch (ch) {
-                case '\\': out += "\\\\"; break;
-                case '"': out += "\\\""; break;
-                case '\n': out += "\\n"; break;
-                case '\r': out += "\\r"; break;
-                case '\t': out += "\\t"; break;
-                default: out.push_back(ch); break;
-            }
-        }
-        return out;
-    }
-
-    void FileExplorer::refreshTrashDesktopState() {
-        Logger::write(LogLevel::Info, "FileExplorer desktop Trash icon refresh requested");
-#ifdef _WIN32
-        gxos::gui::Compositor::requestDesktopRefresh();
-#endif
-    }
-
     bool FileExplorer::handleNavigationPaneClick(int x, int y) {
         if (x < 0 || x >= kLeftPaneW) return false;
 
@@ -1659,50 +1638,17 @@ namespace gxos { namespace apps {
     }
 
     bool FileExplorer::moveEntryToTrash(const ExplorerFileEntry& entry, std::string& error, std::string& trashedPath) {
-        Logger::write(LogLevel::Info, std::string("FileExplorer move-to-trash resolved path=") + entry.fullPath);
-        const std::string trashPath = trashRootPath();
-        Logger::write(LogLevel::Info, std::string("FileExplorer trash directory selected=") + trashPath);
-        if (!s_fileSystem->exists(trashPath)) {
-            if (!s_fileSystem->createDirectory(trashPath, error)) {
-                Logger::write(LogLevel::Error, std::string("FileExplorer trash mkdir failed: ") + error);
-                return false;
-            }
-            Logger::write(LogLevel::Info, std::string("FileExplorer trash directory created=") + trashPath);
-        }
-
-        trashedPath = makeUniquePathInDirectory(trashPath, entry.name, entry.isDirectory());
-        if (trashedPath != s_fileSystem->combinePath(trashPath, entry.name)) {
-            Logger::write(LogLevel::Info, std::string("FileExplorer trash collision resolved to=") + trashedPath);
-        }
-
-        if (!s_fileSystem->rename(entry.fullPath, trashedPath, error)) {
-            Logger::write(LogLevel::Error, std::string("FileExplorer move-to-trash failed: ") + error);
+        const gxos::files::FileTrashResult result = gxos::files::FileOperations::MoveToTrash(entry.fullPath);
+        error = result.error;
+        trashedPath = result.trashedPath;
+        if (!result.success) {
+            Logger::write(LogLevel::Error, std::string("FileExplorer move-to-trash failed path=") + entry.fullPath +
+                " error=" + error);
             return false;
         }
-
-        std::time_t now = std::time(nullptr);
-        std::ostringstream info;
-        info << "{\n"
-             << "  \"originalPath\": \"" << jsonEscape(entry.fullPath) << "\",\n"
-             << "  \"originalName\": \"" << jsonEscape(entry.name) << "\",\n"
-             << "  \"isDirectory\": " << (entry.isDirectory() ? "true" : "false") << ",\n"
-             << "  \"trashedAt\": " << static_cast<long long>(now) << "\n"
-             << "}";
-        std::string infoText = info.str();
-#ifndef _WIN32
-        int32_t infoWritten = kernel::vfs::write_file(trashInfoPathFor(trashedPath).c_str(), infoText.data(), static_cast<uint32_t>(infoText.size()));
-        if (infoWritten < 0) {
-            Logger::write(LogLevel::Warn, std::string("FileExplorer trash metadata write failed for ") + trashedPath);
-        }
-#else
-        std::filesystem::path infoPath = std::filesystem::current_path() / std::filesystem::path(trashInfoPathFor(trashedPath).substr(1));
-        std::ofstream infoFile(infoPath, std::ios::binary | std::ios::trunc);
-        if (infoFile) infoFile << infoText;
-        else Logger::write(LogLevel::Warn, std::string("FileExplorer trash metadata write failed for ") + trashedPath);
-#endif
-
         Logger::write(LogLevel::Info, std::string("FileExplorer move-to-trash success path=") + trashedPath);
-        refreshTrashDesktopState();
+        s_lastFileOperationGeneration = gxos::files::FileOperations::OperationGeneration();
+        gxos::gui::Compositor::requestDesktopRefresh();
         return true;
     }
 

@@ -114,6 +114,7 @@ uint64_t operation_generation();
 // Diagnostic-only VFS production-path smoke coverage. This is compiled and
 // invoked only by the opt-in QEMU runtime smoke build.
 void run_runtime_smoke();
+void run_trash_runtime_smoke();
 #endif
 
 // Returns true only when the source and destination are currently suitable
@@ -123,6 +124,21 @@ bool can_paste_to(const char* destinationDirectory);
 
 // Copy or move the pending file or folder into a destination directory.
 PasteResult paste_to_directory(const char* destinationDirectory);
+
+// Move a validated VFS file or folder to the per-filesystem Trash directory.
+// The mutation is guarded by the same operation state as paste, preserves
+// Trash restore metadata, and returns the actual collision-safe destination.
+PasteResult move_to_trash(const char* sourcePath,
+                          char* outTrashedPath,
+                          size_t outTrashedPathSize);
+
+// FAT-safe paired restore metadata helpers used by the shared Move-to-Trash
+// implementation and the bare-metal Trash UI. Metadata names are reserved
+// short names, never dot-prefixed or long-name companions.
+bool trash_metadata_path_for(const char* trashedPath,
+                             char* outMetadataPath,
+                             size_t outMetadataPathSize);
+bool is_trash_metadata_name(const char* name);
 
 // Keep the busy state through the caller-owned destination refresh. This is
 // intentionally separate from paste_to_directory() so the filesystem layer
