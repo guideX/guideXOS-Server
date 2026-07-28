@@ -220,6 +220,24 @@ void hydrateGeneratedMetadata() {
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+bool sourceDerivedArrayObjectSize(void* eeType, gx_size length, gx_size* objectSize) {
+    if (eeType == nullptr || objectSize == nullptr) {
+        return false;
+    }
+
+    const auto* typeBytes = reinterpret_cast<const unsigned char*>(eeType);
+    const gx_size componentSize = *reinterpret_cast<const gx_uint16*>(typeBytes);
+    const gx_size baseSize = *reinterpret_cast<const gx_uint32*>(typeBytes + sizeof(gx_uint32));
+    if (componentSize != 0u && length >
+        ((~static_cast<gx_size>(0)) - baseSize - 7u) / componentSize) {
+        return false;
+    }
+
+    const gx_size unalignedObjectSize = baseSize + (componentSize * length);
+    *objectSize = (unalignedObjectSize + 7u) & ~static_cast<gx_size>(7u);
+    return true;
+}
+
 gx_size alignedArrayObjectSize(gx_size length) {
     if (length > ((~static_cast<gx_size>(0)) - kManagedArrayBaseSize - 7u) / kManagedArrayComponentSize) {
         return 0u;
@@ -365,10 +383,8 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
         guideXosFailFast(6u);
     }
 
-    const auto* typeBytes = reinterpret_cast<const unsigned char*>(eeType);
-    const gx_size componentSize = *reinterpret_cast<const gx_uint16*>(typeBytes);
-    const gx_size baseSize = *reinterpret_cast<const gx_uint32*>(typeBytes + sizeof(gx_uint32));
-    if (componentSize != 0u && length > ((~static_cast<gx_size>(0)) - baseSize - 7u) / componentSize) {
+    gx_size objectSize = 0u;
+    if (!sourceDerivedArrayObjectSize(eeType, length, &objectSize)) {
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
         ++g_guideXosAllocationDiagnostics.pointerContractFailures;
         recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_ALLOCATION,
@@ -379,8 +395,6 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
         guideXosFailFast(6u);
     }
 
-    const gx_size unalignedObjectSize = baseSize + (componentSize * length);
-    const gx_size objectSize = (unalignedObjectSize + 7u) & ~static_cast<gx_size>(7u);
     g_guideXosAllocationDiagnostics.requestedArrayLength = static_cast<gx_uint32>(length);
     g_guideXosAllocationDiagnostics.requestedObjectSize = static_cast<gx_uint32>(objectSize);
 
@@ -573,8 +587,13 @@ guideXosManagedAllocationFinalize(gx_uint32 managedReturnCode) {
         objectAddress != 0u &&
         *reinterpret_cast<const gx_uintptr*>(objectAddress) ==
             g_guideXosAllocationDiagnostics.eeType ? 1u : 0u;
+    gx_size sourceObjectSize = 0u;
+    const bool sourceObjectSizeValid = sourceDerivedArrayObjectSize(
+        reinterpret_cast<void*>(g_guideXosAllocationDiagnostics.eeType),
+        g_guideXosAllocationDiagnostics.arrayLengthObserved,
+        &sourceObjectSize);
     g_guideXosAllocationDiagnostics.objectRangeVerified =
-        objectAddress != 0u && objectSize == 48u &&
+        objectAddress != 0u && sourceObjectSizeValid && objectSize == sourceObjectSize &&
         objectAddress >= heapBase &&
         heapReserved >= objectAddress &&
         objectSize <= heapReserved - objectAddress &&

@@ -290,8 +290,13 @@ and zero collections:
 | repeat 1 | `37367DB9E4BE896F33E4A6762A54ECE542243197DC61053C664686C1EEAF68CF` | `6CAD6CDEB78D2A7D10CC7079A51C80403268DD47048F5F0E6CDD5AE49924095F` |
 | repeat 2 | `FF97C374A9B451D597DC9AF26E84E2D7C2D04540A37585EFC63451DD29B3C2A5` | `6CAD6CDEB78D2A7D10CC7079A51C80403268DD47048F5F0E6CDD5AE49924095F` |
 
-The allocation PE/ELF/kernel hashes are the same as the first corrected run;
-the adapted normalized identity is the same authorized identity above.
+The allocation PE/ELF hashes are the same as the first corrected run. The
+historical corrected kernel remains
+`41A14A553696846F27A63CCD34E308E90A0DDF835D57CDAA2AEDCCC5DF3BE68`; after the source-derived
+object-size validator correction, a clean current-source relink produced
+kernel hash `18784067D03861716EC0DDE3716B2FD9252F7F55EDA04874B9DC27A2323A73`.
+That relink also passed one fresh disposable allocation process. The adapted
+normalized identity is the same authorized identity above.
 
 ## 19. Collection and finalization counters
 
@@ -302,36 +307,48 @@ For the corrected run and both repetitions: `gcCountBefore=0`,
 one `RhpNewArray` entry, one slow allocation entry, and one real GC allocation
 entry. No second managed allocation was attempted.
 
-## 20. Existing-proof regressions
+## 20. Verification-pass regression matrix
 
-The three-run startup-only Workstation GC QEMU probe passed again. The generic
-ELF regression smoke and runtime-pack state/hash checks passed. The preserved
-historical proof envelope remains HostLog PASS, 234 allocations at 64 KiB, 14
-allocations at 4 KiB, controlled OOM PASS, collections 0, and heap expansion 0.
+The current verification reran the HostLog path, the historical bounded
+single-allocation proof, runtime-pack static/state checks, the focused
+fileless-section converter test, generic ELF, events, hosted native threads,
+hosted true-VM, mutex, local-storage/FLS, and the bounded repeated-allocation
+proofs. The 64 KiB execution produced exactly 234 allocations and controlled
+OOM; the 4 KiB execution produced exactly 14 allocations and controlled OOM.
+Both reported collection entered 0 and heap expansion 0. Inventory isolation
+also passed.
 
-The archived static repeated-allocation output could not be rerun in place
-because its manifest has an older runtime-pack lock hash. It was not rebuilt
-or converted into a new repeated-allocation workload in this focused pass.
-Existing scheduler/Event/thread/VM/mutex/FLS/ThreadStore evidence remains
-preserved; no new regression was observed. Inventory isolation was unchanged.
+The normal-kernel startup-only QEMU probe passed in one fresh disposable
+process. The generic mutex QEMU lifecycle probe passed its guest marker and
+all listed checks. The generic native-thread, true-VM, and local-storage QEMU
+lifecycle runners were not rerun after the current-source correction. The
+stack-bounds runner remains incomplete because PowerShell treated compiler
+warning stderr as a terminating harness error after its hosted checks; its
+hosted and adapter checks were present, but the script did not complete.
+FLS-before-initialization and process-teardown-policy checks remain blocked by
+the documented absence of standalone harnesses. These items are not called
+PASS here.
 
-## 21. Decision outcome
+## 21. Verification decision outcome
 
-**Outcome A — First real collector-backed `byte[24]` succeeds.** The exact
-first blocker was diagnosed, the reached initialization boundaries were
-corrected, one allocation returned in the first corrected process, and the
-same immutable corrected artifact passed in two additional fresh processes.
-Object layout, zeroing, pattern, alignment, range, and Workstation heap
-ownership passed without collection or finalization.
+**Verification Outcome B — Core allocation is valid, closure validation
+remains incomplete.** The prior Outcome A core result is authoritative for the
+collector-backed allocation itself: the current sources reproduce one real
+`byte[24]` allocation with source-derived layout, zeroing, pattern, range, and
+Workstation ownership, with no collection or finalization. The verification
+pass does not authorize the next experiment because the complete generic-QEMU
+regression matrix and the stack/teardown harness closure are incomplete, and
+the generated evidence directory is tracked rather than ignored. In
+addition, the existing startup-QEMU script does not itself build and enforce
+both allocation-specific Makefile variables and matching `EXTRA_CFLAGS`
+definitions; the final manual build log does contain both.
 
 ## 22. Exact next experiment
 
-Perform bounded primitive-array allocations through Workstation GC until the
-first allocation-context refill, without allowing collection. This run already
-observed the initial first-call refill (`allocationContextRefills=1`), so the
-next experiment must distinguish that initial refill from the first subsequent
-bounded refill and must retain the same no-collection and one-process-per-run
-boundaries.
+Not authorized by this verification pass. The proposed next experiment is
+bounded primitive-array allocation through Workstation GC until the first
+subsequent allocation-context refill, without allowing collection; it must
+wait for the Outcome B closure items above.
 
 ## Validation report
 
@@ -369,7 +386,10 @@ boundaries.
 | Pattern validation | PASS |
 | GC heap ownership | PASS |
 | Fresh-process repetitions | 2 additional |
-| Existing proof regressions | PASS for rerun checks; archived repeated static rerun limited by stale lock metadata |
+| Existing proof regressions | Historical bounded 234/14 and controlled-OOM checks PASS; generic-QEMU and harness closure incomplete |
 
 Generated evidence is under
-`out/dotnet/gc-first-allocation-hang/**`. No commit was created.
+`out/dotnet/gc-first-allocation-hang/**`; its 197 generated files are tracked
+in the repository rather than ignored. The preceding implementation pass is
+already present in commit `95580DF6872E85527D27526B78AE3CDCEE25DD53`; no new
+commit was created by this verification pass.

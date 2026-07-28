@@ -144,3 +144,9 @@ corrected process and in two additional fresh processes, with non-null object,
 length 24, 24 zero bytes, pattern and heap ownership all passing. Collection
 and finalization counters remained zero. The follow-up decision is **Outcome A**;
 the original Outcome C result is not deleted or rewritten.
+
+The later verification report supersedes that follow-up's completion status:
+the core allocation remains valid, but the authoritative verification decision
+is **Outcome B** until the explicitly listed regression, harness, and evidence
+tracking closure items are complete. No repeated Workstation-GC allocation is
+authorized by that verification.

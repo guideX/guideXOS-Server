@@ -270,7 +270,7 @@ try {
     $expectedEntryFields = if ($UseGuideXosRuntimePack) {
         @{
             entryCategory = "guidexos-runtime-pack-reverse-pinvoke"
-            converterSha256 = "5F21B87D343106120EB5CAD1F98DF524404171E084C40F4FC3AFED6BE6F84B96"
+            converterSha256 = "55994B674326D21A8FADE6FDDBA10D6A602E5605F67709C87F9AA57C9212F678"
             ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
             ilCompilerVersion = "9.0.0"
             runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"
@@ -286,7 +286,7 @@ try {
             reversePInvokeAttachAddress = "0x1004B1A0"
             reversePInvokeReturnAddress = "0x1004B290"
             flsGetValueImportThunkAddress = "0x10052108"
-            converterSha256 = "5F21B87D343106120EB5CAD1F98DF524404171E084C40F4FC3AFED6BE6F84B96"
+            converterSha256 = "55994B674326D21A8FADE6FDDBA10D6A602E5605F67709C87F9AA57C9212F678"
             ilCompilerPackage = "Microsoft.DotNet.ILCompiler"
             ilCompilerVersion = "9.0.0"
             runtimePackPackage = "runtime.win-x64.microsoft.dotnet.ilcompiler"

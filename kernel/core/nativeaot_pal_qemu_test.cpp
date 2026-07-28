@@ -1381,7 +1381,6 @@ void runFirstRealAllocationImpl(
         diagnostics->rhpNewArrayEntries == 1u &&
         diagnostics->realGcAllocationEntries == 1u &&
         diagnostics->requestedArrayLength == 24u &&
-        diagnostics->requestedObjectSize == 48u &&
         diagnostics->arrayLengthObserved == 24u &&
         diagnostics->zeroByteCount == 24u &&
         diagnostics->patternVerified == 1u &&
