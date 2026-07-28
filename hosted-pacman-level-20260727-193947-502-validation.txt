@@ -1,0 +1,9 @@
+run=20260727-193947-502
+server-wrapper-pid=7468
+server-pid=13636
+compositor-window=4327412
+capture=D:\dev\pacman\guidexos\captures\pacman-level-20260727-193947-502-level1-initial-playing-seq1-gen2.png
+capture-target runtimeId=1 windowId=1000 applicationSequence=1 frameSequence=2 frameGeneration=2 paintGeneration=2 captureGeneration=1 level=1 score=0 lives=3 remaining=244 state=Playing
+error=Final active level-1 frame was not observed.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0

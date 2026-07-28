@@ -1,0 +1,17 @@
+run=20260727-194035-268
+server-wrapper-pid=15700
+server-pid=18812
+compositor-window=15668014
+capture=D:\dev\pacman\guidexos\captures\pacman-level-20260727-194035-268-level1-initial-playing-seq1-gen6.png
+capture-target runtimeId=1 windowId=1000 applicationSequence=1 frameSequence=6 frameGeneration=6 paintGeneration=6 captureGeneration=1 level=1 score=0 lives=3 remaining=244 state=Playing
+capture=D:\dev\pacman\guidexos\captures\pacman-level-20260727-194035-268-level1-final-active-seq5-gen6.png
+capture-target runtimeId=1 windowId=1000 applicationSequence=5 frameSequence=6 frameGeneration=6 paintGeneration=6 captureGeneration=2 level=1 score=0 lives=3 remaining=1 state=Playing
+capture=D:\dev\pacman\guidexos\captures\pacman-level-20260727-194035-268-level1-complete-seq6-gen6.png
+capture-target runtimeId=1 windowId=1000 applicationSequence=6 frameSequence=6 frameGeneration=6 paintGeneration=6 captureGeneration=3 level=1 score=1010 lives=3 remaining=0 state=LevelComplete
+capture=D:\dev\pacman\guidexos\captures\pacman-level-20260727-194035-268-level2-ready-seq7-gen7.png
+capture-target runtimeId=1 windowId=1000 applicationSequence=7 frameSequence=7 frameGeneration=7 paintGeneration=7 captureGeneration=4 level=2 score=1010 lives=3 remaining=244 state=Ready
+capture=D:\dev\pacman\guidexos\captures\pacman-level-20260727-194035-268-level2-playing-seq8-gen11.png
+capture-target runtimeId=1 windowId=1000 applicationSequence=8 frameSequence=11 frameGeneration=11 paintGeneration=11 captureGeneration=5 level=2 score=1010 lives=3 remaining=244 state=Playing
+error=Level 3 Playing frame was not observed.
+remaining-owned-server-processes=0
+server-wrapper-exit-code=0
