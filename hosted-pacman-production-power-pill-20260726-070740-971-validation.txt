@@ -1,6 +1,0 @@
-run=20260726-070740-971
-server-wrapper-pid=12592
-server-pid=22176
-error=Production route did not consume a power pill.
-remaining-owned-server-processes=0
-server-wrapper-exit-code=-1

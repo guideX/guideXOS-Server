@@ -1,5 +1,0 @@
-compositor=found
-cycle=1 ghost-collision=False
-cycle=1 moved-capture=D:\dev\pacman\guidexos\captures\pacman-moved.png
-cycle=1 launch-move-escape=pass
-server-exit-code=0

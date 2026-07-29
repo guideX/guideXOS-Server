@@ -1,7 +1,0 @@
-run=20260722-202633-690
-server-wrapper-pid=17708
-server-pid=3140
-compositor=found
-error=Production validation launch 1 did not present an interactive frame or compositor window.
-remaining-owned-server-processes=0
-server-wrapper-exit-code=0

@@ -1,8 +1,0 @@
-run=20260723-140052-167
-server-wrapper-pid=6796
-server-pid=8356
-compositor=found
-cycle=1 launch=True windowId=1000
-error=Painted generation 9 belongs to state=Playing score=10 lives=3, not requested state=Playing score=0 lives=3 for playing.
-remaining-owned-server-processes=0
-server-wrapper-exit-code=0

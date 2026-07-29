@@ -1,7 +1,0 @@
-run=20260725-134753-445
-server-wrapper-pid=15984
-server-pid=7460
-compositor=found
-error=Initial Red frame was not observed.
-remaining-owned-server-processes=0
-server-wrapper-exit-code=0

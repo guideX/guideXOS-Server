@@ -1,8 +1,0 @@
-compositor=found
-power-capture=D:\dev\pacman\guidexos\captures\pacman-power-pill.png
-normal-pill-log=True
-power-pill-log=True
-score-log=True
-remaining-count-log=True
-escape-and-zero-window-cleanup=pass
-server-exit-code=0

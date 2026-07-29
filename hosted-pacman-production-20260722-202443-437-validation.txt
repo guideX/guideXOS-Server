@@ -1,7 +1,0 @@
-run=20260722-202443-437
-server-wrapper-pid=9760
-server-pid=16904
-compositor=found
-error=Production validation launch 1 failed: no new compositor window.
-remaining-owned-server-processes=0
-server-wrapper-exit-code=0
