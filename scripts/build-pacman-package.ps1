@@ -63,6 +63,7 @@ $sourceFiles = @(
     @{ Name = "main"; Path = Join-Path $SourceRoot "src\main.cpp" },
     @{ Name = "game"; Path = Join-Path $SourceRoot "src\game.cpp" },
     @{ Name = "level"; Path = Join-Path $SourceRoot "src\level.cpp" },
+    @{ Name = "level_rules"; Path = Join-Path $SourceRoot "src\level_rules.cpp" },
     @{ Name = "renderer"; Path = Join-Path $SourceRoot "src\renderer.cpp" },
     @{ Name = "bitmap_loader"; Path = Join-Path $SourceRoot "src\bitmap_loader.cpp" }
 )

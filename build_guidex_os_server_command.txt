@@ -1,2 +1,0 @@
-$hash = (Get-FileHash .\guideXOS-Server-v0.1.0-amd64.iso -Algorithm SHA256).Hash.ToLower()
-"$hash  guideXOS-Server-v0.1.0-amd64.iso" | Set-Content .\guideXOS-Server-v0.1.0-amd64.iso.sha256
