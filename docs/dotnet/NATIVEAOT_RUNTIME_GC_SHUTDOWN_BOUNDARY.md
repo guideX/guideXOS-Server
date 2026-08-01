@@ -157,3 +157,35 @@ the next step is diagnosis of that collector/PAL boundary. Any retry must use a
 new disposable process and preserve the same restrictions: no collection
 request, no finalizer request, no second initialization, and no live-process
 teardown attempt.
+
+## Final closure validation — 2026-08-01
+
+The earlier real-allocation hang and Outcome C text describe the historical
+pre-correction image. The corrected implementation remains authoritative in
+commit `95580df6872e85527d27526b78ae3cdcee25dd53`; the original hang was a
+fail-fast loop, with GS/TLS first and PE-to-ELF zero-fill plus metadata
+hydration subsequent blockers.
+
+The final closure pass completed the dedicated native-thread, true-VM,
+local-storage/FLS, PAL system-QEMU, stack-bounds, FLS-before-init,
+process-teardown, managed-baseline, hosted-generic, and focused converter
+checks. The final allocation runner performed exactly one collector-backed
+`byte[24]` in a fresh disposable process, then ended through OS process
+teardown. No `RhShutdown`, collection, or managed finalizer was attempted.
+
+The policy result is explicit:
+
+```text
+Runtime-level shutdown: NOT SUPPORTED
+OS process teardown: PASS
+Process-owned counter publication: unavailable where the current environment cannot expose it
+```
+
+The unavailable counter values are not inferred or fabricated. They do not
+change the process-teardown result. Generated evidence is ignored and locally
+preserved, and the ordinary kernel output was restored after the run.
+
+The final decision is **Closure Outcome A — First collector-backed allocation
+milestone fully closed**. Bounded primitive-array allocations through Workstation
+GC are authorized until the first subsequent allocation-context refill, without
+allowing collection. No repeated allocation was performed during closure.

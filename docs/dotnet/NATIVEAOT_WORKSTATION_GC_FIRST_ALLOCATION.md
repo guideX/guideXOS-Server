@@ -150,3 +150,34 @@ the core allocation remains valid, but the authoritative verification decision
 is **Outcome B** until the explicitly listed regression, harness, and evidence
 tracking closure items are complete. No repeated Workstation-GC allocation is
 authorized by that verification.
+
+## Final closure validation — 2026-08-01
+
+The historical hang and follow-up sections above are retained as the record of
+the staged investigation. The authoritative core implementation is commit
+`95580df6872e85527d27526b78ae3cdcee25dd53`. The original hang was a terminal
+fail-fast loop; GS/TLS was the first blocker, followed by PE-to-ELF zero-fill
+mapping and NativeAOT metadata hydration. The corrected path then completed one
+real Workstation-GC-backed `byte[24]` allocation.
+
+The dedicated native-thread, true-VM, local-storage/FLS, PAL system-QEMU,
+stack-bounds, FLS-before-initialization, process-teardown-policy, managed
+baseline, hosted generic, and focused PE-to-ELF closure checks completed. The
+allocation-specific runner now enforces the matching Makefile selectors,
+`EXTRA_CFLAGS` definitions, fresh evidence, allocation markers, and ordinary
+kernel restoration. Generated evidence is ignored and untracked while remaining
+available locally; human-authored documentation remains under `docs/`.
+
+The final immutable run used one fresh disposable QEMU process and exactly one
+collector-backed `byte[24]`. The returned object was `0x100A00028`; its size was
+source-derived as `ALIGN_UP(baseSize + componentSize * length,
+pointerAlignment) = 0x30` (48 bytes), with 24 initial zero bytes, pattern PASS,
+and GC ownership PASS. Managed entry, `RhpNewArray`, and real GC allocation
+counters were each 1. Collection and finalization counters were each 0.
+Process teardown passed; runtime-level GC shutdown remains NOT SUPPORTED.
+
+The final decision is **Closure Outcome A — First collector-backed allocation
+milestone fully closed**. This authorizes bounded primitive-array allocations
+through Workstation GC until the first subsequent allocation-context refill,
+without allowing collection. Repeated allocations were not started during this
+closure pass.

@@ -1,9 +1,0 @@
-
-label  process    marker pass serial                                                                       
------  -------    ------ ---- ------                                                                       
-first  disposable   True True out\dotnet\gc-first-allocation-hang\qemu\startup-regression\first\serial.log 
-repeat disposable   True True out\dotnet\gc-first-allocation-hang\qemu\startup-regression\repeat\serial.log
-fresh  disposable   True True out\dotnet\gc-first-allocation-hang\qemu\startup-regression\fresh\serial.log 
-
-
-

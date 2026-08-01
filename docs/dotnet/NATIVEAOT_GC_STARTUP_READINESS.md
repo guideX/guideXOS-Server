@@ -76,3 +76,29 @@ zeroing, pattern, and heap ownership proven; collection and finalization
 counters stayed zero. The follow-up decision is **Outcome A**, while this
 document's original Outcome C wording remains the historical record for the
 pre-correction artifact.
+
+## Final closure validation — 2026-08-01
+
+The original Outcome C and the follow-up phase above remain historical. The
+authoritative implementation is commit
+`95580df6872e85527d27526b78ae3cdcee25dd53`. The original hang was a fail-fast
+loop; GS/TLS was the first blocker, followed by PE-to-ELF zero-fill mapping and
+NativeAOT metadata hydration.
+
+The dedicated QEMU lifecycle suites, PAL system-QEMU probe, stack-bounds
+runner, FLS-before-initialization harness, process-teardown policy harness,
+allocation smoke-runner enforcement, managed baseline proofs, hosted generic
+suites, and focused PE-to-ELF zero-fill test all completed. Generated evidence
+is locally preserved under ignored `out/` paths and is no longer tracked.
+
+The final immutable run performed exactly one real Workstation-GC-backed
+`byte[24]` allocation. The object was `0x100A00028`, with source-derived size
+`ALIGN_UP(baseSize + componentSize * length, pointerAlignment) = 48` bytes,
+24 initial zero bytes, valid pattern and GC ownership. Managed entry,
+`RhpNewArray`, and real-GC counters were 1; collections entered and managed
+finalizers were 0. Process teardown passed, while runtime-level GC shutdown
+remains NOT SUPPORTED. The final decision is **Closure Outcome A — First
+collector-backed allocation milestone fully closed**. Bounded primitive-array
+allocations are authorized only until the first subsequent allocation-context
+refill and without allowing collection; repeated allocations were not begun in
+this pass.

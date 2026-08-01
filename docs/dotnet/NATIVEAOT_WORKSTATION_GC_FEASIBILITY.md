@@ -62,3 +62,31 @@ Workstation heap, and no collection or finalizer executed. The follow-up
 decision is **Outcome A**. The exact hashes, stage record, disassembly,
 watchdog snapshot, and remaining regression limitation are in
 [NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION_HANG.md](NATIVEAOT_WORKSTATION_GC_FIRST_ALLOCATION_HANG.md).
+
+## Final closure validation — 2026-08-01
+
+The Outcome C wording above describes the pre-correction artifact and remains
+historical. The core implementation is authoritative in commit
+`95580df6872e85527d27526b78ae3cdcee25dd53`. The original hang was a fail-fast
+loop. GS/TLS was the first blocker; PE-to-ELF zero-fill mapping and NativeAOT
+metadata hydration were subsequent blockers.
+
+After those corrections, every named dedicated QEMU, PAL, stack, FLS,
+process-teardown, managed-baseline, hosted-generic, and focused converter
+closure suite passed. The allocation-specific runner enforces experiment
+selectors, matching preprocessor definitions, fresh logs, allocation-specific
+markers, and restoration of the ordinary kernel. Generated evidence is ignored
+and untracked, with local copies preserved.
+
+One final fresh disposable process performed exactly one collector-backed
+`byte[24]` allocation. It returned `0x100A00028`; the source-derived aligned
+object size was `0x30` / 48 bytes, with 24 initial zero bytes, pattern PASS, and
+GC ownership PASS. Managed entry, `RhpNewArray`, and real-GC allocation entries
+were 1; collections entered and managed finalizers were 0. OS process teardown
+passed; runtime-level GC shutdown is NOT SUPPORTED.
+
+The final decision is **Closure Outcome A — First collector-backed allocation
+milestone fully closed**. Bounded primitive-array allocations through
+Workstation GC are authorized until the first subsequent allocation-context
+refill, without allowing collection. Repeated allocations were not run during
+closure validation.

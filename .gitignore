@@ -39,6 +39,13 @@
 /out/dotnet/native-thread-smoke/
 /out/dotnet/gc-shutdown-boundary/
 /out/dotnet/gc-first-real-allocation/
+/out/dotnet/gc-first-allocation-hang/
+/out/dotnet/closure-*/
+/out/dotnet/gc-first-allocation-closure/
+/out/dotnet/gc-process-teardown-policy/
+/out/dotnet/pal-win64-qemu-bridge/artifact/qemu/smoke-*/
+/out/dotnet/pal-win64-qemu-bridge/artifact/tmp/vl.*
+/tools/dotnet/__pycache__/
 /out/runtime/
 /samples/managed/HostLogProof/obj/
 /scripts/fixtures/public-roots/*.local

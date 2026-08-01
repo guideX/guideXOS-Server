@@ -496,21 +496,28 @@ void run() {
         gxos::runtime::virtual_memory::release(metadataReuseRegion) == VmResult::Ok;
     status("Metadata reuse", metadataReuse);
 
-    // Fill the bounded runtime virtual range with max-sized reservations.
-    VirtualMemoryRegion rangeRegions[16];
+    // Fill the current source-defined 128 MiB runtime range with its
+    // source-defined 4 MiB maximum regions.  The bounded metadata table has
+    // 32 entries, so the first reservation after the full range may report
+    // OutOfMemory because the range and metadata are exhausted together.
+    VirtualMemoryRegion rangeRegions[32];
     bool rangeReserved = true;
-    for (vm_size index = 0; index < 16; ++index) {
+    for (vm_size index = 0; index < 32; ++index) {
         rangeReserved = rangeReserved &&
             gxos::runtime::virtual_memory::reserve(
                 gxos::runtime::virtual_memory::maximumRegionSize(), page, nullptr,
                 &rangeRegions[index]) == VmResult::Ok;
     }
     VirtualMemoryRegion rangeOverflow;
+    const VmResult rangeOverflowResult = rangeReserved
+        ? gxos::runtime::virtual_memory::reserve(
+              page, page, nullptr, &rangeOverflow)
+        : VmResult::InvalidArgument;
     const bool rangeExhausted = rangeReserved &&
-        gxos::runtime::virtual_memory::reserve(page, page, nullptr,
-                                               &rangeOverflow) == VmResult::AddressUnavailable;
+        (rangeOverflowResult == VmResult::AddressUnavailable ||
+         rangeOverflowResult == VmResult::OutOfMemory);
     status("Virtual-range exhaustion", rangeExhausted);
-    for (vm_size index = 0; index < 16; ++index) {
+    for (vm_size index = 0; index < 32; ++index) {
         (void)gxos::runtime::virtual_memory::release(rangeRegions[index]);
     }
 

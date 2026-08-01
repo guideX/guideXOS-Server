@@ -393,3 +393,46 @@ Generated evidence is under
 in the repository rather than ignored. The preceding implementation pass is
 already present in commit `95580DF6872E85527D27526B78AE3CDCEE25DD53`; no new
 commit was created by this verification pass.
+
+## 23. Final closure validation — 2026-08-01
+
+Section 21 is the historical verification decision and is superseded by this
+completed closure record; the earlier evidence and phase boundaries are not
+rewritten. The core implementation remains authoritative in commit
+`95580df6872e85527d27526b78ae3cdcee25dd53`. The original hang was a fail-fast
+loop. GS/TLS was the first blocker, followed by PE-to-ELF zero-fill mapping and
+NativeAOT metadata hydration.
+
+All named closure suites completed: dedicated native-thread, true-VM,
+local-storage/FLS, PAL system-QEMU, stack bounds, FLS-before-initialization,
+process-teardown policy, managed baseline, hosted generic, and focused
+PE-to-ELF. The allocation smoke runner enforces experiment selectors and
+matching compile definitions, rejects startup-only and ordinary desktop
+markers, rejects stale logs, requires the single-allocation counters and
+geometry, and restores the ordinary kernel. The generated evidence directory
+was corrected from 197 tracked files to 0 tracked files by a narrow ignore rule;
+the local evidence remains on disk.
+
+The final fresh process performed exactly one collector-backed `byte[24]`:
+
+| Field | Result |
+| --- | --- |
+| Final allocation PE SHA-256 | `9B9975F3B220BE6694435EE87616DA1F199CDBC727DA45983BFBDB2531CB6406` |
+| Final allocation ELF SHA-256 | `BD39D05561CF16350E7544AD31DC26F097AF36F4552D06BCDBC6CF77480696E8` |
+| Experimental kernel SHA-256 | `EACBE5677082C2D028FFC572E894AC87CB911CD53B29C449B6098C408CBD58FD` |
+| Returned object | `0x100A00028` |
+| Length | `24` |
+| Source-derived size | `ALIGN_UP(baseSize + componentSize * length, pointerAlignment) = 0x30 / 48` |
+| Initial zero bytes | `24` |
+| Pattern / GC ownership | `PASS / PASS` |
+| Managed / `RhpNewArray` / real GC entries | `1 / 1 / 1` |
+| Collections entered / managed finalizers | `0 / 0` |
+| Process teardown | `PASS` |
+| Runtime-level shutdown | `NOT SUPPORTED` |
+| Restored ordinary kernel | `D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C` / `PASS` |
+
+The final decision is **Closure Outcome A — First collector-backed allocation
+milestone fully closed**. Bounded primitive-array allocations through Workstation
+GC are authorized until the first subsequent allocation-context refill, without
+allowing collection. No repeated Workstation-GC allocation was performed in
+this closure pass.

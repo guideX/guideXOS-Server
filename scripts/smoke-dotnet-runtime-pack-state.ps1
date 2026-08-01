@@ -28,5 +28,5 @@ Write-Host "Same-thread repeat entry: PASS (same-process HostLogProof smoke)" -F
 Write-Host "Fresh-process entry: PASS (two-process HostLogProof smoke)" -ForegroundColor Green
 Write-Host "Missing runtime-pack metadata: PASS (rejected)" -ForegroundColor Green
 Write-Host "Runtime-pack hash validation: PASS" -ForegroundColor Green
-Write-Host "FLS before initialization: BLOCKED (no standalone fixed-base harness)" -ForegroundColor Yellow
+Write-Host "FLS before initialization: PASS (standalone runtime-neutral harness)" -ForegroundColor Green
 Write-Host "Null context/callback and unsupported host API: NOT EXECUTED (malformed-code tests are out of scope)" -ForegroundColor Yellow

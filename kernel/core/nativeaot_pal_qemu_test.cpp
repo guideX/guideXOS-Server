@@ -1405,7 +1405,7 @@ void runFirstRealAllocationImpl(
     serial::puts("[nativeaot-gc-first-allocation] wrapperCallCount=1 managedEntryCallCount=1 shutdownCalls=0\n");
     serial::puts("[nativeaot-gc-first-allocation] same-process shutdown: UNSUPPORTED\n");
     serial::puts(allPassed
-        ? "[nativeaot-gc-startup-qemu-test] ALL_PASS\n"
+        ? "[nativeaot-gc-first-allocation] ALL_PASS\n"
         : "[nativeaot-gc-first-allocation] ALL_FAIL\n");
 }
 
