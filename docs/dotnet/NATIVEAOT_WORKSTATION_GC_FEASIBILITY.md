@@ -103,3 +103,20 @@ non-LOH `byte[256]` with aligned size `0x118` / 280 bytes and GC ownership;
 collection and finalization counters were zero. This advances the bounded
 authorization through that exact refill boundary, while preserving the
 process-lifetime shutdown restriction.
+
+## 4 KiB exit regression classification
+
+The initially observed live bounded 4 KiB result `0xC0000419` remains
+preserved as an opaque observation. Immutable-artifact raw Server capture and
+three fresh runner executions all returned zero and passed the historical
+14-allocation controlled-OOM contract. The current source path contains no
+producer for the reported value, and the preserved failing execution lacks the
+process/WER/serial record needed to identify its first layer. No speculative
+runtime or runner correction was made.
+
+The first-refill result therefore remains technically valid but its milestone
+closure is pending a separate, source-backed classification of that 4 KiB
+exit. Multiple subsequent refills, segment transitions, new page commitment,
+collection, and allocation beyond the established boundary remain blocked.
+The detailed evidence is in
+[NATIVEAOT_4K_PROOF_EXIT_REGRESSION.md](NATIVEAOT_4K_PROOF_EXIT_REGRESSION.md).

@@ -263,3 +263,28 @@ the normalized adapted-GC identity, PAL replacement hashes, repeated PE,
 converted ELF, experimental kernel/ESP hashes, three fresh-process serial
 hashes, and the restored ordinary-kernel hash. Evidence under `out/` is
 ignored/local; the source runner and this report are the reproducible inputs.
+
+## 4 KiB exit regression closure audit
+
+The initially reported live bounded 4 KiB rerun exited through the opaque
+value `0xC0000419` before managed diagnostics. That observation remains part
+of the historical record; it was not reinterpreted as a Windows exception and
+was not erased.
+
+The immutable 4 KiB PE/ELF, preserved runtime pack, preserved kernel/ESP, and
+the source-rebuilt Server were then exercised through raw Server capture and
+three fresh runner processes. Every captured layer returned `0x00000000`;
+every positive Server session reported 14 successful arrays, controlled OOM,
+zero collections, zero GC-backed allocations, zero expansion, and `Exited`
+cleanup. The 64 KiB proof remained at 234 allocations.
+
+No current source, managed marker, Server marker, serial log, raw process
+capture, or PowerShell capture generated `0xC0000419`. The first producing
+layer therefore remains unobserved, and no correction was justified. The full
+classification is documented in
+[NATIVEAOT_4K_PROOF_EXIT_REGRESSION.md](NATIVEAOT_4K_PROOF_EXIT_REGRESSION.md).
+
+The first-refill Outcome A result remains technically valid. First-refill
+milestone closure is pending this separate 4 KiB exit classification; multiple
+subsequent refills, segment transitions, new page commitments, collection, and
+allocation beyond the established first-refill boundary remain unauthorized.

@@ -42,6 +42,7 @@
 /out/dotnet/gc-first-allocation-hang/
 /out/dotnet/gc-first-refill/
 /out/dotnet/closure-*/
+/out/dotnet/gc-first-refill-closure/
 /out/dotnet/gc-first-allocation-closure/
 /out/dotnet/gc-process-teardown-policy/
 /out/dotnet/pal-win64-qemu-bridge/artifact/qemu/smoke-*/

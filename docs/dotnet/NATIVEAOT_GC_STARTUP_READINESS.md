@@ -115,3 +115,18 @@ byte geometry, context publication, and GC ownership all passed. Collections,
 finalization scans, and managed finalizers remained zero. The decision is
 **Outcome A** for this bounded boundary only; no post-refill allocation or
 same-process shutdown is authorized.
+
+## 4 KiB exit regression classification
+
+The separate bounded 4 KiB closure audit preserved the reported opaque
+`0xC0000419` observation and then ran the immutable proof through raw Server,
+runner, and three fresh execution layers. All captured executions returned
+`0x00000000` and reproduced 14 allocations, controlled OOM, zero collections,
+zero GC-backed allocations, zero expansion, and normal teardown. No captured
+layer generated the reported value, so no runtime, GC, ABI, teardown, or runner
+correction was applied. See
+[NATIVEAOT_4K_PROOF_EXIT_REGRESSION.md](NATIVEAOT_4K_PROOF_EXIT_REGRESSION.md).
+
+The first-refill experiment remains technically Outcome A, but milestone
+closure is pending the unbound 4 KiB exit classification. No multiple-refill
+or segment-transition experiment is authorized.
