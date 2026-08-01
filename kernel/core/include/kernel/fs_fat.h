@@ -1,4 +1,4 @@
-// FAT32 / exFAT Filesystem Driver
+ï»¿// FAT32 / exFAT Filesystem Driver
 //
 // Supports:
 //   - FAT32: mount, read directory, open/read/write files
@@ -7,7 +7,7 @@
 //   - Cluster chain traversal
 //
 // Operates on top of the block device abstraction layer.
-// Architecture-independent — works on all platforms.
+// Architecture-independent â€” works on all platforms.
 //
 // Reference: Microsoft FAT32 File System Specification (Dec 2000),
 //            Microsoft exFAT Revision 1.00
@@ -30,12 +30,95 @@ namespace fs_fat {
 
 enum FATType : uint8_t {
     FAT_TYPE_NONE  = 0,
-    FAT_TYPE_FAT32 = 1,
-    FAT_TYPE_EXFAT = 2,
+    FAT_TYPE_FAT16 = 1,
+    FAT_TYPE_FAT32 = 2,
+    FAT_TYPE_EXFAT = 3,
 };
 
+// Detailed result for the shared directory-create path. The old bool API
+// erased the failing layer and caused VFS to report every failure as
+// VFS_ERR_NOT_SUPPORTED.
+enum DirectoryCreateStatus : uint8_t {
+    DIRECTORY_CREATE_OK = 0,
+    DIRECTORY_CREATE_INVALID_ARGUMENT,
+    DIRECTORY_CREATE_NOT_MOUNTED,
+    DIRECTORY_CREATE_UNSUPPORTED_TYPE,
+    DIRECTORY_CREATE_ALREADY_EXISTS,
+    DIRECTORY_CREATE_PARENT_NOT_FOUND,
+    DIRECTORY_CREATE_INVALID_NAME,
+    DIRECTORY_CREATE_NO_FREE_CLUSTER,
+    DIRECTORY_CREATE_NO_FREE_ENTRY,
+    DIRECTORY_CREATE_IO_ERROR,
+};
+
+const char* directory_create_status_name(DirectoryCreateStatus status);
+
+// Detailed result for regular-file writes.  The legacy bool APIs remain
+// available for callers that only need success/failure, while VFS and the
+// file clipboard use this status to preserve the failing FAT stage.
+enum FileWriteStatus : uint8_t {
+    FILE_WRITE_OK = 0,
+    FILE_WRITE_INVALID_ARGUMENT,
+    FILE_WRITE_NOT_MOUNTED,
+    FILE_WRITE_UNSUPPORTED_TYPE,
+    FILE_WRITE_NOT_FOUND,
+    FILE_WRITE_ALREADY_EXISTS,
+    FILE_WRITE_INVALID_NAME,
+    FILE_WRITE_NO_FREE_CLUSTER,
+    FILE_WRITE_NO_FREE_ENTRY,
+    FILE_WRITE_IO_ERROR,
+    FILE_WRITE_READ_ONLY,
+    FILE_WRITE_NO_SPACE,
+    FILE_WRITE_IO_TIMEOUT,
+    FILE_WRITE_CORRUPT_CHAIN,
+    FILE_WRITE_NO_PROGRESS,
+    FILE_WRITE_ALLOCATION_FAILED,
+};
+
+const char* file_write_status_name(FileWriteStatus status);
+
+// Every cluster-chain consumer exposes its last bounded traversal result.
+// This is diagnostic state only; callers still use their existing bool/count
+// return values for compatibility with the VFS API.
+enum TraversalStatus : uint8_t {
+    TRAVERSAL_OK = 0,
+    TRAVERSAL_END_OF_CHAIN,
+    TRAVERSAL_DIRECTORY_END,
+    TRAVERSAL_INVALID_ARGUMENT,
+    TRAVERSAL_INVALID_CLUSTER,
+    TRAVERSAL_BAD_CLUSTER,
+    TRAVERSAL_CHAIN_CYCLE,
+    TRAVERSAL_CHAIN_STEP_LIMIT,
+    TRAVERSAL_TRUNCATED_CHAIN,
+    TRAVERSAL_NO_PROGRESS,
+    TRAVERSAL_IO_ERROR,
+};
+
+const char* traversal_status_name(TraversalStatus status);
+TraversalStatus last_traversal_status();
+
+// Detailed result for delete_path().  The legacy bool API remains available,
+// but callers must be able to distinguish an intentionally refused rmdir from
+// an I/O or FAT-chain failure.
+enum DeleteStatus : uint8_t {
+    DELETE_OK = 0,
+    DELETE_INVALID_ARGUMENT,
+    DELETE_NOT_MOUNTED,
+    DELETE_NOT_FOUND,
+    DELETE_WRONG_TYPE,
+    DELETE_READ_ONLY,
+    DELETE_DIRECTORY_NOT_EMPTY,
+    DELETE_CORRUPT_DIRECTORY,
+    DELETE_CORRUPT_CHAIN,
+    DELETE_IO_ERROR,
+};
+
+const char* delete_status_name(DeleteStatus status);
+DeleteStatus last_delete_status();
+
 // ================================================================
-// FAT32 BIOS Parameter Block (BPB) — first 90 bytes of sector 0
+// FAT12/16 BIOS Parameter Block (BPB) â€” first 62 bytes of sector 0
+// FAT32 reuses the common prefix and adds its own extension below.
 // ================================================================
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -76,8 +159,31 @@ struct FAT32_BPB {
     char     fsType[8];
 } FAT_PACKED;
 
+struct FAT12_16_BPB {
+    uint8_t  jmpBoot[3];
+    char     oemName[8];
+    uint16_t bytesPerSector;
+    uint8_t  sectorsPerCluster;
+    uint16_t reservedSectors;
+    uint8_t  numFATs;
+    uint16_t rootEntryCount;
+    uint16_t totalSectors16;
+    uint8_t  mediaType;
+    uint16_t fatSize16;
+    uint16_t sectorsPerTrack;
+    uint16_t numHeads;
+    uint32_t hiddenSectors;
+    uint32_t totalSectors32;
+    uint8_t  driveNumber;
+    uint8_t  reserved1;
+    uint8_t  bootSig;
+    uint32_t volumeID;
+    char     volumeLabel[11];
+    char     fsType[8];
+} FAT_PACKED;
+
 // ================================================================
-// exFAT Boot Sector — first 120 bytes of sector 0
+// exFAT Boot Sector â€” first 120 bytes of sector 0
 // ================================================================
 
 struct ExFAT_BootSector {
@@ -159,6 +265,12 @@ static const uint32_t FAT32_CLUSTER_BAD  = 0x0FFFFFF7;
 static const uint32_t FAT32_CLUSTER_END  = 0x0FFFFFF8;
 static const uint32_t FAT32_CLUSTER_MASK = 0x0FFFFFFF;
 
+// Special cluster values (FAT12/16)
+static const uint16_t FAT16_CLUSTER_FREE = 0x0000;
+static const uint16_t FAT16_CLUSTER_BAD   = 0xFFF7;
+static const uint16_t FAT16_CLUSTER_END   = 0xFFF8;
+static const uint16_t FAT16_CLUSTER_MASK  = 0xFFFF;
+
 // ================================================================
 // Mounted volume descriptor
 // ================================================================
@@ -167,17 +279,21 @@ struct FATVolume {
     bool     mounted;
     FATType  type;
     uint8_t  blockDevIndex;       // index in block::get_device()
+    uint64_t partitionOffset;     // start LBA of the mounted volume within the block device
 
-    // FAT32 geometry
+    // FAT12/16 + FAT32 shared geometry
     uint32_t bytesPerSector;
     uint32_t sectorsPerCluster;
     uint32_t reservedSectors;
     uint32_t numFATs;
     uint32_t fatSizeSectors;
     uint32_t rootCluster;
+    uint32_t rootDirFirstSector;
+    uint32_t rootDirSectors;
     uint32_t totalSectors;
     uint32_t firstDataSector;
     uint32_t totalDataClusters;
+    uint32_t nextFreeCluster;      // bounded allocation search hint
 
     // exFAT geometry
     uint64_t exfatVolumeLength;
@@ -205,6 +321,7 @@ struct FATFile {
     uint32_t currentCluster;
     uint32_t currentOffset;       // byte offset within the file
     uint8_t  attr;
+    bool     pendingClusterAdvance;
 };
 
 static const uint8_t MAX_OPEN_FILES = 8;
@@ -232,6 +349,10 @@ struct DirEntry {
 // Initialise the FAT filesystem driver.
 void init();
 
+// Enable the concise Trash-operation sector trace around FAT writes. This is
+// diagnostic state only and does not alter filesystem behavior.
+void set_trash_trace(bool enabled, uint64_t generation = 0);
+
 // Attempt to mount a FAT32 or exFAT volume on a block device.
 // Returns the volume index, or 0xFF on failure.
 uint8_t mount(uint8_t blockDevIndex);
@@ -242,6 +363,11 @@ void unmount(uint8_t volumeIndex);
 // Open root directory for iteration.  Caller repeatedly calls
 // read_dir() until it returns false.
 bool open_root_dir(uint8_t volumeIndex);
+
+// Close the single FAT traversal cursor backing the VFS iterator. VFS owns
+// the public iterator slot; this hook prevents a bounded/early close from
+// leaving a stale FAT cursor active for the next filesystem operation.
+void close_dir(uint8_t volumeIndex);
 
 // Read the next directory entry.  Returns false when exhausted.
 bool read_dir(uint8_t volumeIndex, DirEntry* out);
@@ -255,6 +381,10 @@ uint8_t open_file(uint8_t volumeIndex, uint32_t firstCluster,
 // Returns the number of bytes actually read.
 uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len);
 
+// Move an open file handle to an absolute byte offset.  The VFS layer uses
+// this for Native ELF package reads and other offset-based consumers.
+bool seek_file(uint8_t fileHandle, uint32_t offset);
+
 // Overwrite bytes in an existing FAT32 file without extending its cluster chain.
 // Returns the number of bytes written.
 uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len);
@@ -263,11 +393,32 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len);
 // Does not allocate additional clusters.
 bool overwrite_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
 
+FileWriteStatus overwrite_path_status(uint8_t volumeIndex, const char* path,
+                                      const void* buffer, uint32_t len,
+                                      block::Status* outBlockStatus);
+
 // Create a new 8.3 file in an existing directory and write its contents.
 bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
 
+FileWriteStatus create_file_path_status(uint8_t volumeIndex, const char* path,
+                                        const void* buffer, uint32_t len,
+                                        block::Status* outBlockStatus);
+
+// Update only the FAT directory-entry file size after a bounded streaming
+// write. Data and cluster-chain writes are performed by write_file().
+FileWriteStatus update_file_size_path_status(uint8_t volumeIndex,
+                                             const char* path,
+                                             uint32_t fileSize,
+                                             block::Status* outBlockStatus);
+
+// Persist all completed writes for a mounted FAT volume.
+bool flush(uint8_t volumeIndex, block::Status* outBlockStatus = nullptr);
+
 // Create a new empty 8.3 directory in an existing directory.
 bool create_directory_path(uint8_t volumeIndex, const char* path);
+DirectoryCreateStatus create_directory_path_status(uint8_t volumeIndex,
+                                                    const char* path,
+                                                    block::Status* outBlockStatus);
 
 // Delete an existing 8.3 file or empty directory entry by path.
 bool delete_path(uint8_t volumeIndex, const char* path, bool directory);
@@ -303,3 +454,4 @@ bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out);
 } // namespace kernel
 
 #endif // KERNEL_FS_FAT_H
+

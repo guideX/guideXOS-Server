@@ -150,6 +150,43 @@ static const char* get_relative_path(const char* fullPath, const MountPoint* mou
     return relative;
 }
 
+static const char* block_status_name(block::Status status)
+{
+    switch (status) {
+        case block::BLOCK_OK: return "BLOCK_OK";
+        case block::BLOCK_ERR_IO: return "BLOCK_ERR_IO";
+        case block::BLOCK_ERR_TIMEOUT: return "BLOCK_ERR_TIMEOUT";
+        case block::BLOCK_ERR_NO_MEDIA: return "BLOCK_ERR_NO_MEDIA";
+        case block::BLOCK_ERR_NOT_READY: return "BLOCK_ERR_NOT_READY";
+        case block::BLOCK_ERR_INVALID: return "BLOCK_ERR_INVALID";
+        case block::BLOCK_ERR_UNSUPPORTED: return "BLOCK_ERR_UNSUPPORTED";
+        default: return "BLOCK_STATUS_UNKNOWN";
+    }
+}
+
+static Status map_fat_file_write_status(fs_fat::FileWriteStatus status)
+{
+    switch (status) {
+        case fs_fat::FILE_WRITE_OK: return VFS_OK;
+        case fs_fat::FILE_WRITE_NOT_FOUND: return VFS_ERR_NOT_FOUND;
+        case fs_fat::FILE_WRITE_ALREADY_EXISTS: return VFS_ERR_EXISTS;
+        case fs_fat::FILE_WRITE_INVALID_NAME:
+        case fs_fat::FILE_WRITE_INVALID_ARGUMENT: return VFS_ERR_INVALID;
+        case fs_fat::FILE_WRITE_NO_FREE_CLUSTER:
+        case fs_fat::FILE_WRITE_NO_FREE_ENTRY:
+        case fs_fat::FILE_WRITE_NO_SPACE: return VFS_ERR_NO_SPACE;
+        case fs_fat::FILE_WRITE_READ_ONLY: return VFS_ERR_READ_ONLY;
+        case fs_fat::FILE_WRITE_NOT_MOUNTED: return VFS_ERR_NOT_MOUNT;
+        case fs_fat::FILE_WRITE_UNSUPPORTED_TYPE: return VFS_ERR_NOT_SUPPORTED;
+        case fs_fat::FILE_WRITE_IO_ERROR: return VFS_ERR_IO;
+        case fs_fat::FILE_WRITE_IO_TIMEOUT: return VFS_ERR_IO_TIMEOUT;
+        case fs_fat::FILE_WRITE_CORRUPT_CHAIN: return VFS_ERR_CORRUPT_CHAIN;
+        case fs_fat::FILE_WRITE_NO_PROGRESS: return VFS_ERR_NO_PROGRESS;
+        case fs_fat::FILE_WRITE_ALLOCATION_FAILED: return VFS_ERR_ALLOCATION_FAILED;
+        default: return VFS_ERR_NOT_SUPPORTED;
+    }
+}
+
 static bool has_source_prefix(const MountPoint* mount)
 {
     return mount && mount->sourcePrefix[0] != '\0' &&
@@ -266,15 +303,16 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
         serial::puts("\n");
 #endif
         
-        if (partType == 0x0B || partType == 0x0C) {
-            // FAT32 partition - get start LBA
+        if (partType == 0x01 || partType == 0x04 || partType == 0x06 ||
+            partType == 0x0B || partType == 0x0C || partType == 0x0E) {
+            // FAT-family partition - let the FAT driver probe the partition start.
             uint32_t startLBA = *reinterpret_cast<uint32_t*>(&buffer[446 + 8]);
 #if defined(__GNUC__) || defined(__clang__)
-            serial::puts("[VFS]   FAT32 partition at LBA 0x");
+            serial::puts("[VFS]   FAT partition at LBA 0x");
             serial::put_hex32(startLBA);
-            serial::puts(" - partitions not supported\n");
+            serial::puts(" - deferring to partition-aware FAT mount\n");
 #endif
-            return FS_TYPE_NONE;
+            return FS_TYPE_FAT32;
         }
     }
     
@@ -424,7 +462,8 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     mp.fsType = fsType;
     mp.blockDevIndex = blockDevIndex;
     mp.fsVolumeIndex = fsVolume;
-    mp.readOnly = false;
+    const block::BlockDevice* blockDevice = block::get_device(blockDevIndex);
+    mp.readOnly = !blockDevice || !blockDevice->writeFn;
     mp.alias = false;
     mp.sourcePrefix[0] = '\0';
     
@@ -567,6 +606,12 @@ Status unmount(const char* path)
 const MountPoint* get_mount(const char* path)
 {
     return find_mount_for_path(path);
+}
+
+uint8_t mount_index_for_path(const char* path)
+{
+    MountPoint* mount = find_mount_for_path(path);
+    return mount ? static_cast<uint8_t>(mount - s_mounts) : 0xFF;
 }
 
 const MountPoint* get_mount_by_index(uint8_t index)
@@ -789,6 +834,9 @@ uint8_t open(const char* path, uint16_t flags)
             // Use lookup_path to find the file
             fs_fat::DirEntry entry;
             if (fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
+                if ((flags & OPEN_CREATE) && (flags & OPEN_EXCL)) {
+                    return 0xFF;
+                }
                 // Check if it's a directory when we want a file
                 if (entry.isDir && (flags & OPEN_WRITE)) {
                     // Cannot open directory for writing
@@ -798,35 +846,51 @@ uint8_t open(const char* path, uint16_t flags)
                     return 0xFF;
                 }
                 
-                // Open the file
-                fsHandle = fs_fat::open_file(mount->fsVolumeIndex,
-                                             entry.firstCluster,
-                                             entry.fileSize,
-                                             entry.attr);
-                if (fsHandle != 0xFF) {
-                    fileSize = entry.fileSize;
-                    found = true;
-#if defined(__GNUC__) || defined(__clang__)
-                    serial::puts("[VFS] Opened: ");
-                    serial::puts(path);
-                    serial::puts("\n");
-#endif
-                }
             } else {
                 // File not found - check if we should create it
                 if (flags & OPEN_CREATE) {
-                    // TODO: File creation not yet implemented
+                    block::Status blockStatus = block::BLOCK_OK;
+                    const fs_fat::FileWriteStatus createStatus =
+                        fs_fat::create_file_path_status(mount->fsVolumeIndex,
+                                                        relPath, nullptr, 0,
+                                                        &blockStatus);
+                    if (createStatus != fs_fat::FILE_WRITE_OK) {
 #if defined(__GNUC__) || defined(__clang__)
-                    serial::puts("[VFS] ERROR: File creation not implemented\n");
+                        serial::puts("[VFS] ERROR: File creation failed status=");
+                        serial::puts(fs_fat::file_write_status_name(createStatus));
+                        serial::puts(" block=0x");
+                        serial::put_hex8(static_cast<uint8_t>(blockStatus));
+                        serial::puts("\n");
+#endif
+                        return 0xFF;
+                    }
+                    if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
+                        return 0xFF;
+                    }
+                } else {
+#if defined(__GNUC__) || defined(__clang__)
+                    serial::puts("[VFS] ERROR: File not found: ");
+                    serial::puts(path);
+                    serial::puts("\n");
 #endif
                     return 0xFF;
                 }
+            }
+
+            // Open the existing or newly-created file.
+            if (entry.isDir && (flags & OPEN_WRITE)) return 0xFF;
+            fsHandle = fs_fat::open_file(mount->fsVolumeIndex,
+                                         entry.firstCluster,
+                                         entry.fileSize,
+                                         entry.attr);
+            if (fsHandle != 0xFF) {
+                fileSize = entry.fileSize;
+                found = true;
 #if defined(__GNUC__) || defined(__clang__)
-                serial::puts("[VFS] ERROR: File not found: ");
+                serial::puts("[VFS] Opened: ");
                 serial::puts(path);
                 serial::puts("\n");
 #endif
-                return 0xFF;
             }
             break;
         }
@@ -871,9 +935,17 @@ Status close(uint8_t handle)
     if (!s_files[handle].open) return VFS_ERR_INVALID;
     
     FileHandle& fh = s_files[handle];
-    
+    Status flushStatus = VFS_OK;
     // Close via filesystem driver
     MountPoint* mount = &s_mounts[fh.mountIndex];
+
+    if ((fh.flags & OPEN_WRITE) && mount->fsType == FS_TYPE_FAT32) {
+        block::Status blockStatus = block::BLOCK_OK;
+        if (!fs_fat::flush(mount->fsVolumeIndex, &blockStatus)) {
+            flushStatus = blockStatus == block::BLOCK_ERR_TIMEOUT
+                ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO;
+        }
+    }
     
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
@@ -888,7 +960,7 @@ Status close(uint8_t handle)
     }
     
     fh.open = false;
-    return VFS_OK;
+    return flushStatus;
 }
 
 int32_t read(uint8_t handle, void* buffer, uint32_t size)
@@ -960,6 +1032,21 @@ int32_t write(uint8_t handle, const void* buffer, uint32_t size)
 
     if (bytesWritten > 0) {
         fh.position += static_cast<uint64_t>(bytesWritten);
+        if (fh.position > fh.size) {
+            if (fh.position > 0xFFFFFFFFull) return VFS_ERR_INVALID;
+            char resolvedPath[VFS_MAX_PATH];
+            const char* relPath = resolve_relative_path(fh.path, mount,
+                                                         resolvedPath, sizeof(resolvedPath));
+            block::Status blockStatus = block::BLOCK_OK;
+            const fs_fat::FileWriteStatus sizeStatus =
+                fs_fat::update_file_size_path_status(mount->fsVolumeIndex,
+                                                     relPath,
+                                                     static_cast<uint32_t>(fh.position),
+                                                     &blockStatus);
+            const Status mapped = map_fat_file_write_status(sizeStatus);
+            if (mapped != VFS_OK) return mapped;
+            fh.size = fh.position;
+        }
     }
 
     return bytesWritten;
@@ -990,7 +1077,21 @@ Status seek(uint8_t handle, int64_t offset, SeekOrigin origin)
     if (newPos < 0) {
         newPos = 0;
     }
-    
+
+    MountPoint* mount = &s_mounts[fh.mountIndex];
+    if (newPos > 0xFFFFFFFFll) return VFS_ERR_INVALID;
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32:
+        case FS_TYPE_EXFAT:
+            if (fh.fsFileHandle == 0xFF ||
+                !fs_fat::seek_file(fh.fsFileHandle, static_cast<uint32_t>(newPos))) {
+                return VFS_ERR_IO;
+            }
+            break;
+        default:
+            return VFS_ERR_NOT_SUPPORTED;
+    }
+
     fh.position = static_cast<uint64_t>(newPos);
     return VFS_OK;
 }
@@ -1013,8 +1114,12 @@ Status flush(uint8_t handle)
 {
     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
     if (!s_files[handle].open) return VFS_ERR_INVALID;
-    // No buffering currently implemented
-    return VFS_OK;
+    MountPoint* mount = &s_mounts[s_files[handle].mountIndex];
+    if (mount->fsType != FS_TYPE_FAT32) return VFS_OK;
+    block::Status blockStatus = block::BLOCK_OK;
+    return fs_fat::flush(mount->fsVolumeIndex, &blockStatus)
+        ? VFS_OK
+        : (blockStatus == block::BLOCK_ERR_TIMEOUT ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO);
 }
 
 const FileHandle* get_handle(uint8_t handle)
@@ -1159,12 +1264,29 @@ bool readdir(uint8_t iterator, DirEntry* entry)
 void closedir(uint8_t iterator)
 {
     if (iterator >= VFS_MAX_OPEN_FILES) return;
+    if (s_dirs[iterator].active) {
+        MountPoint& mount = s_mounts[s_dirs[iterator].mountIndex];
+        if (mount.active && (mount.fsType == FS_TYPE_FAT32 ||
+                             mount.fsType == FS_TYPE_EXFAT)) {
+            fs_fat::close_dir(mount.fsVolumeIndex);
+        }
+    }
     s_dirs[iterator].active = false;
 }
 
 Status mkdir(const char* path)
 {
     if (!path) return VFS_ERR_INVALID;
+
+    FileInfo existing{};
+    if (stat(path, &existing) == VFS_OK) return VFS_ERR_EXISTS;
+
+    char parentPath[VFS_MAX_PATH];
+    parent_path(path, parentPath, sizeof(parentPath));
+    FileInfo parentInfo{};
+    Status parentStatus = stat(parentPath, &parentInfo);
+    if (parentStatus != VFS_OK) return parentStatus;
+    if (parentInfo.type != FILE_TYPE_DIRECTORY) return VFS_ERR_NOT_DIR;
 
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
@@ -1173,14 +1295,64 @@ Status mkdir(const char* path)
     char resolvedPath[VFS_MAX_PATH];
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
-        case FS_TYPE_FAT32:
-            return fs_fat::create_directory_path(mount->fsVolumeIndex, relPath) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+        case FS_TYPE_FAT32: {
+            block::Status blockStatus = block::BLOCK_OK;
+            const fs_fat::DirectoryCreateStatus fatStatus =
+                fs_fat::create_directory_path_status(mount->fsVolumeIndex, relPath, &blockStatus);
+            Status result = VFS_ERR_NOT_SUPPORTED;
+            switch (fatStatus) {
+                case fs_fat::DIRECTORY_CREATE_OK: result = VFS_OK; break;
+                case fs_fat::DIRECTORY_CREATE_ALREADY_EXISTS: result = VFS_ERR_EXISTS; break;
+                case fs_fat::DIRECTORY_CREATE_PARENT_NOT_FOUND: result = VFS_ERR_NOT_FOUND; break;
+                case fs_fat::DIRECTORY_CREATE_INVALID_NAME:
+                case fs_fat::DIRECTORY_CREATE_INVALID_ARGUMENT: result = VFS_ERR_INVALID; break;
+                case fs_fat::DIRECTORY_CREATE_NO_FREE_CLUSTER:
+                case fs_fat::DIRECTORY_CREATE_NO_FREE_ENTRY: result = VFS_ERR_NO_SPACE; break;
+                case fs_fat::DIRECTORY_CREATE_NOT_MOUNTED: result = VFS_ERR_NOT_MOUNT; break;
+                case fs_fat::DIRECTORY_CREATE_IO_ERROR: result = VFS_ERR_IO; break;
+                default: result = VFS_ERR_NOT_SUPPORTED; break;
+            }
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS_MKDIR] path=");
+            serial::puts(path);
+            serial::puts(" fs=");
+            serial::puts(fs_type_name(mount->fsType));
+            serial::puts(" fatStatus=");
+            serial::puts(fs_fat::directory_create_status_name(fatStatus));
+            serial::puts(" blockStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(blockStatus));
+            serial::puts("(");
+            serial::puts(block_status_name(blockStatus));
+            serial::puts(")");
+            serial::puts(" vfsStatus=");
+            serial::puts(status_name(result));
+            serial::puts("\n");
+#endif
+            return result;
+        }
 
         default:
             break;
     }
 
     return VFS_ERR_NOT_SUPPORTED;
+}
+
+static Status status_for_fat_delete(bool succeeded)
+{
+    if (succeeded) return VFS_OK;
+    switch (fs_fat::last_delete_status()) {
+        case fs_fat::DELETE_NOT_FOUND: return VFS_ERR_NOT_FOUND;
+        case fs_fat::DELETE_WRONG_TYPE: return VFS_ERR_NOT_DIR;
+        case fs_fat::DELETE_READ_ONLY: return VFS_ERR_READ_ONLY;
+        case fs_fat::DELETE_DIRECTORY_NOT_EMPTY: return VFS_ERR_DIRECTORY_NOT_EMPTY;
+        case fs_fat::DELETE_CORRUPT_DIRECTORY: return VFS_ERR_CORRUPT_DIRECTORY;
+        case fs_fat::DELETE_CORRUPT_CHAIN: return VFS_ERR_CORRUPT_CHAIN;
+        case fs_fat::DELETE_NOT_MOUNTED: return VFS_ERR_NOT_MOUNT;
+        case fs_fat::DELETE_INVALID_ARGUMENT: return VFS_ERR_INVALID;
+        case fs_fat::DELETE_IO_ERROR: return VFS_ERR_IO;
+        default: return VFS_ERR_IO;
+    }
 }
 
 Status rmdir(const char* path)
@@ -1195,7 +1367,8 @@ Status rmdir(const char* path)
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
-            return fs_fat::delete_path(mount->fsVolumeIndex, relPath, true) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+            return status_for_fat_delete(
+                fs_fat::delete_path(mount->fsVolumeIndex, relPath, true));
 
         default:
             break;
@@ -1275,7 +1448,8 @@ Status unlink(const char* path)
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
-            return fs_fat::delete_path(mount->fsVolumeIndex, relPath, false) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+            return status_for_fat_delete(
+                fs_fat::delete_path(mount->fsVolumeIndex, relPath, false));
 
         default:
             break;
@@ -1335,12 +1509,71 @@ int32_t write_file(const char* path, const void* buffer, uint32_t size)
     char resolvedPath[VFS_MAX_PATH];
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
-        case FS_TYPE_FAT32:
-            if (fs_fat::overwrite_path(mount->fsVolumeIndex, relPath, buffer, size) ||
-                fs_fat::create_file_path(mount->fsVolumeIndex, relPath, buffer, size)) {
-                return static_cast<int32_t>(size);
+        case FS_TYPE_FAT32: {
+            block::Status blockStatus = block::BLOCK_OK;
+            fs_fat::FileWriteStatus fatStatus = fs_fat::overwrite_path_status(
+                mount->fsVolumeIndex, relPath, buffer, size, &blockStatus);
+            const char* operation = "overwrite";
+            if (fatStatus == fs_fat::FILE_WRITE_NOT_FOUND) {
+                operation = "create";
+                fatStatus = fs_fat::create_file_path_status(
+                    mount->fsVolumeIndex, relPath, buffer, size, &blockStatus);
             }
+            const Status result = map_fat_file_write_status(fatStatus);
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS_WRITE_FILE] path=");
+            serial::puts(path);
+            serial::puts(" operation=");
+            serial::puts(operation);
+            serial::puts(" bytes=");
+            serial::put_hex64(size);
+            serial::puts(" fatStatus=");
+            serial::puts(fs_fat::file_write_status_name(fatStatus));
+            serial::puts(" blockStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(blockStatus));
+            serial::puts(" vfsStatus=");
+            serial::puts(status_name(result));
+            serial::puts("\n");
+#endif
+            return result == VFS_OK ? static_cast<int32_t>(size) : result;
+        }
+
+        default:
             return VFS_ERR_NOT_SUPPORTED;
+    }
+}
+
+int32_t create_file(const char* path, const void* buffer, uint32_t size)
+{
+    if (!path || (!buffer && size != 0)) return VFS_ERR_INVALID;
+
+    MountPoint* mount = find_mount_for_path(path);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
+    if (mount->readOnly) return VFS_ERR_READ_ONLY;
+
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32: {
+            block::Status blockStatus = block::BLOCK_OK;
+            const fs_fat::FileWriteStatus fatStatus = fs_fat::create_file_path_status(
+                mount->fsVolumeIndex, relPath, buffer, size, &blockStatus);
+            const Status result = map_fat_file_write_status(fatStatus);
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS_CREATE_FILE] path=");
+            serial::puts(path);
+            serial::puts(" bytes=");
+            serial::put_hex64(size);
+            serial::puts(" fatStatus=");
+            serial::puts(fs_fat::file_write_status_name(fatStatus));
+            serial::puts(" blockStatus=0x");
+            serial::put_hex8(static_cast<uint8_t>(blockStatus));
+            serial::puts(" vfsStatus=");
+            serial::puts(status_name(result));
+            serial::puts("\n");
+#endif
+            return result == VFS_OK ? static_cast<int32_t>(size) : result;
+        }
 
         default:
             return VFS_ERR_NOT_SUPPORTED;
@@ -1394,6 +1627,37 @@ const char* fs_type_name(FSType type)
         case FS_TYPE_ISO9660: return "ISO9660";
         case FS_TYPE_RAMDISK: return "RamDisk";
         default:              return "Unknown";
+    }
+}
+
+const char* status_name(Status status)
+{
+    switch (status) {
+        case VFS_OK: return "VFS_OK";
+        case VFS_ERR_NOT_FOUND: return "VFS_ERR_NOT_FOUND";
+        case VFS_ERR_EXISTS: return "VFS_ERR_EXISTS";
+        case VFS_ERR_NOT_DIR: return "VFS_ERR_NOT_DIR";
+        case VFS_ERR_IS_DIR: return "VFS_ERR_IS_DIR";
+        case VFS_ERR_NOT_EMPTY: return "VFS_ERR_NOT_EMPTY";
+        case VFS_ERR_NO_SPACE: return "VFS_ERR_NO_SPACE";
+        case VFS_ERR_READ_ONLY: return "VFS_ERR_READ_ONLY";
+        case VFS_ERR_INVALID: return "VFS_ERR_INVALID";
+        case VFS_ERR_IO: return "VFS_ERR_IO";
+        case VFS_ERR_NOT_MOUNT: return "VFS_ERR_NOT_MOUNT";
+        case VFS_ERR_BUSY: return "VFS_ERR_BUSY";
+        case VFS_ERR_TOO_MANY: return "VFS_ERR_TOO_MANY";
+        case VFS_ERR_NOT_SUPPORTED: return "VFS_ERR_NOT_SUPPORTED";
+        case VFS_ERR_IO_TIMEOUT: return "VFS_ERR_IO_TIMEOUT";
+        case VFS_ERR_CORRUPT_CHAIN: return "VFS_ERR_CORRUPT_CHAIN";
+        case VFS_ERR_NO_PROGRESS: return "VFS_ERR_NO_PROGRESS";
+        case VFS_ERR_ALLOCATION_FAILED: return "VFS_ERR_ALLOCATION_FAILED";
+        case VFS_ERR_DIRECTORY_NOT_EMPTY: return "VFS_ERR_DIRECTORY_NOT_EMPTY";
+        case VFS_ERR_RECURSION_LIMIT: return "VFS_ERR_RECURSION_LIMIT";
+        case VFS_ERR_ENTRY_LIMIT: return "VFS_ERR_ENTRY_LIMIT";
+        case VFS_ERR_CORRUPT_DIRECTORY: return "VFS_ERR_CORRUPT_DIRECTORY";
+        case VFS_ERR_INVALID_DESTINATION: return "VFS_ERR_INVALID_DESTINATION";
+        case VFS_ERR_ROLLBACK_FAILED: return "VFS_ERR_ROLLBACK_FAILED";
+        default: return "VFS_STATUS_UNKNOWN";
     }
 }
 

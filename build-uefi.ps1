@@ -19,6 +19,8 @@ $ErrorActionPreference = "Stop"
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  guideXOS Complete Build System" -ForegroundColor Cyan
 Write-Host "====================================" -ForegroundColor Cyan
+Write-Host "  Build identity: GXOS-LARGE-FILE-PASTE-TRACE-V1" -ForegroundColor Cyan
+Write-Host "  Build probe ID: GXOS-LFPASTE-20260726-02" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
@@ -51,7 +53,7 @@ if ($Clean) {
         Write-Host "      Removed kernel build/" -ForegroundColor Gray
     }
     
-    $RootKernelBuildDir = Join-Path $RootDir "build\$Arch"
+    $RootKernelBuildDir = Join-Path $KernelDir "build\$Arch"
     if (Test-Path $RootKernelBuildDir) {
         Remove-Item -Recurse -Force $RootKernelBuildDir
         Write-Host "      Removed build/$Arch/" -ForegroundColor Gray
@@ -186,7 +188,7 @@ if (!$SkipKernel) {
 
         # Remove stale final kernel outputs before invoking make so a skipped
         # or failed build cannot be mistaken for a fresh kernel.
-        $KernelBinDir = Join-Path $RootDir "build\$Arch\bin"
+        $KernelBinDir = Join-Path $KernelDir "build\$Arch\bin"
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelBinDir "kernel.elf")
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelBinDir "kernel.pe")
 
@@ -245,7 +247,7 @@ if (Test-Path $BootloaderBin) {
 
 # Copy kernel if it exists
 # Kernel is built to build/<arch>/bin/ relative to project root (not kernel/ subdirectory)
-$KernelBin = Join-Path $RootDir "build\$Arch\bin\kernel.elf"
+$KernelBin = Join-Path $KernelDir "build\$Arch\bin\kernel.elf"
 if ($KernelBuildSkipped) {
     Write-Host "      WARNING: Kernel build was skipped; not copying existing kernel.elf." -ForegroundColor Yellow
     Write-Host "               Run with a working AMD64 MinGW/GNU make toolchain to update ESP." -ForegroundColor Yellow
@@ -261,6 +263,20 @@ elseif (Test-Path $KernelBin) {
     }
     Copy-Item $KernelBin $TargetKernel -Force
     Write-Host "      Copied: kernel.elf ($(((Get-Item $TargetKernel).Length / 1KB).ToString('0.0')) KB)" -ForegroundColor Cyan
+    $identityPath = Join-Path $ESPDir "build-identity.txt"
+    @(
+        "identity=GXOS-LARGE-FILE-PASTE-TRACE-V1"
+        "probe=GXOS-LFPASTE-20260726-02"
+        "imageKind=ESP-directory-used-as-QEMU-FAT-media"
+        "imageRoot=$ESPDir"
+        "bootloaderSource=$BootloaderBin"
+        "bootloaderSha256=$((Get-FileHash -LiteralPath $TargetBootloader -Algorithm SHA256).Hash)"
+        "kernelSource=$KernelBin"
+        "kernelSha256=$((Get-FileHash -LiteralPath $KernelBin -Algorithm SHA256).Hash)"
+        "espKernelSha256=$((Get-FileHash -LiteralPath $TargetKernel -Algorithm SHA256).Hash)"
+        "builtAtUtc=$([DateTime]::UtcNow.ToString('o'))"
+    ) | Set-Content -LiteralPath $identityPath -Encoding ascii
+    Write-Host "      Wrote: build-identity.txt" -ForegroundColor Cyan
 } else {
     Write-Host "      WARNING: Kernel binary not found at: $KernelBin" -ForegroundColor Yellow
     Write-Host "      ESP will boot but needs a kernel to run" -ForegroundColor Gray
@@ -356,7 +372,7 @@ if (!(Test-Path (Join-Path $ESPDir "kernel.elf"))) {
     $AllReady = $false
 } else {
     $EspKernel = Get-Item (Join-Path $ESPDir "kernel.elf")
-    $BuiltKernel = Join-Path $RootDir "build\$Arch\bin\kernel.elf"
+    $BuiltKernel = Join-Path $KernelDir "build\$Arch\bin\kernel.elf"
     $NewestKernelSource = Get-ChildItem (Join-Path $RootDir "kernel") -Recurse -Include *.cpp,*.h,*.asm,*.s,Makefile,*.arch |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1

@@ -128,15 +128,20 @@ namespace gxos { namespace gui {
         static void RegisterApp(const std::string& name, const std::string& iconName = "");
         static void RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName);
         static void RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName, const std::string& source);
-        static bool LaunchApp(const std::string& name, std::string& error);
-        static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error);
+        static bool LaunchApp(const std::string& name, std::string& error, bool recordRecent = true);
+        static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent = true);
+        static bool IsSetAsDesktopBackgroundEligible(const std::string& path, bool isDirectory, bool isTrashItem = false);
+        static bool DispatchSetAsDesktopBackground(const std::string& path, const std::string& sourceSurface, std::string& error);
+        static const char* SetAsDesktopBackgroundActionIdentity();
         static std::string ResolveFilesystemEntryDiagnostic(const std::string& path, bool isDirectory);
         static bool ShowFolderOnHostedDesktop(const std::string& path, std::string& error);
         static const std::vector<RegisteredDesktopApp>& GetRegisteredApps() { return s_apps; }
         static std::string GetRegisteredAppsVerboseDiagnostic();
         static std::string GetRegisteredAppsDiagnostic();
         static std::string AppModelSummaryDiagnostic();
+        static std::string AppModelInventoryDiagnostic();
         static std::string BuiltInAppMetadataCoverageDiagnostic();
+        static std::string ShellObjectRegistryDiagnostic();
         static apps::LaunchTarget ResolveLaunchTarget(const std::string& label);
         static std::string ResolveLaunchTargetDiagnostic(const std::string& label);
         static std::string LegacyDispatchStringForLaunchTarget(const apps::LaunchTarget& target, std::string& status, std::string& reason);
@@ -154,6 +159,7 @@ namespace gxos { namespace gui {
         static std::string LaunchStorageDiagnostic();
         static std::string LaunchStoragePreviewDiagnostic();
         static std::string LaunchStoragePreviewComparisonDiagnostic();
+        static std::string FileAssociationV1Diagnostic();
         static std::string LaunchTargetTypeCoverageDiagnostic();
         static std::string TypedDispatchGateDiagnostic(const std::string& mode = "");
         static std::string NativeAppCapabilitiesDiagnostic();

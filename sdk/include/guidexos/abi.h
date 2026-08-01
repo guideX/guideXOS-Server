@@ -35,6 +35,15 @@ enum {
     GX_KEY_MOD_ALT = 4
 };
 
+/* Keyboard values use the guideXOS virtual-key contract shared by hosted and
+ * Native ELF input translation. */
+enum {
+    GX_KEY_LEFT = 37,
+    GX_KEY_UP = 38,
+    GX_KEY_RIGHT = 39,
+    GX_KEY_DOWN = 40
+};
+
 enum {
     GX_MOUSE_ACTION_MOVE = 0,
     GX_MOUSE_ACTION_DOWN = 1,
@@ -74,6 +83,13 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *exit)(gx_app_context* ctx, gx_result exitCode);
     gx_result (GX_CALL *file_read_all)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
     gx_result (GX_CALL *file_exists)(gx_app_context* ctx, const char* path, uint32_t* outExists);
+    /* v1 extensions are appended so existing v1 tables keep their layout. */
+    gx_result (GX_CALL *request_window_ex)(gx_app_context* ctx, const char* title, int width, int height, uint32_t flags, gx_handle* outWindow);
+    gx_result (GX_CALL *file_read)(gx_app_context* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
+    gx_result (GX_CALL *present_frame)(gx_app_context* ctx, gx_handle window, int x, int y, int width, int height, uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes);
+    /* Monotonic milliseconds since the hosted runtime's process-local epoch.
+     * The uint64_t value wraps after 2^64 milliseconds. */
+    uint64_t (GX_CALL *get_ticks_ms)(gx_app_context* ctx);
 } gx_host_calls;
 
 #ifdef __cplusplus

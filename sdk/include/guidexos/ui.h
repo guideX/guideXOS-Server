@@ -43,9 +43,30 @@ static inline gx_result file_read_all(gx_app_context* ctx, const char* path, voi
     return ctx->host->file_read_all(ctx, path, buffer, bufferSize, outBytesRead);
 }
 
+static inline gx_result file_read(gx_app_context* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
+    if (!ctx || !ctx->host || !ctx->host->file_read) return GX_ERROR_UNSUPPORTED;
+    return ctx->host->file_read(ctx, path, offset, buffer, bufferSize, outBytesRead);
+}
+
 static inline gx_result file_exists(gx_app_context* ctx, const char* path, uint32_t* outExists) {
     if (!ctx || !ctx->host || !ctx->host->file_exists) return GX_ERROR_UNSUPPORTED;
     return ctx->host->file_exists(ctx, path, outExists);
+}
+
+static inline gx_result gx_request_fixed_window(gx_app_context* ctx, const char* title, int width, int height, gx_handle* outWindow) {
+    if (!ctx || !ctx->host || !ctx->host->request_window_ex) return GX_ERROR_UNSUPPORTED;
+    return ctx->host->request_window_ex(ctx, title, width, height, GX_WINDOW_FLAG_FIXED_SIZE, outWindow);
+}
+
+static inline gx_result gx_present_frame(gx_app_context* ctx, gx_handle window, int x, int y, int width, int height,
+                                         uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes) {
+    if (!ctx || !ctx->host || !ctx->host->present_frame) return GX_ERROR_UNSUPPORTED;
+    return ctx->host->present_frame(ctx, window, x, y, width, height, strideBytes, pixelFormat, pixels, pixelBytes);
+}
+
+static inline uint64_t gx_get_ticks_ms(gx_app_context* ctx) {
+    if (!ctx || !ctx->host || !ctx->host->get_ticks_ms) return 0;
+    return ctx->host->get_ticks_ms(ctx);
 }
 
 static inline gx_result gx_draw_button(gx_app_context* ctx, gx_handle window, gx_rect rect, const char* label, int pressed) {

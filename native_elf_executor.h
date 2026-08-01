@@ -63,6 +63,14 @@ struct NativeElfExecutionResult {
     std::string lastFilePath;
     uint32_t lastFileReadBytes = 0;
     int32_t lastFileIoResult = GX_OK;
+    uint32_t fileReadChunkCallCount = 0;
+    uint64_t lastFileReadOffset = 0;
+    uint32_t presentFrameCallCount = 0;
+    uint64_t lastPresentFrameWindow = 0;
+    int lastPresentFrameWidth = 0;
+    int lastPresentFrameHeight = 0;
+    uint32_t lastPresentFrameBytes = 0;
+    int32_t lastPresentFrameResult = GX_OK;
     uint64_t runtimeId = 0;
     std::string lifecycleStateBeforeExecution;
     std::string lifecycleStateAfterExecution;

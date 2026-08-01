@@ -56,6 +56,8 @@ public:
     static uint64_t s_windowGeneration;
     static uint64_t s_displayRequestId;
     static bool s_displayRequestPending;
+    static bool s_removeConfirmationVisible;
+    static std::string s_removeTargetId;
 
     static void loadSelection();
     static void render();

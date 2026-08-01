@@ -27,6 +27,10 @@ void irq_handler();
 // Number of ticks since boot
 uint64_t ticks();
 
+// Diagnostic-only indication that the independent timer interrupt path is
+// alive. This is intentionally not driven by the desktop event loop.
+bool heartbeat_seen();
+
 } // namespace pit
 } // namespace kernel
 

@@ -53,6 +53,7 @@
 #include "gxos_tls_prerequisites.h"
 #include "desktop_config.h"
 #include "desktop_service.h"
+#include "background_service.h"
 #include "notepad.h"
 #include "calculator.h"
 #include "console_window.h"
@@ -172,6 +173,135 @@ static std::string nativeAppProcessesDiagnostic() {
     return oss.str();
 }
 
+static std::string desktopWindowOwnershipDiagnostic() {
+    std::ostringstream oss;
+    const uint64_t compositorPid = gxos::Lifecycle::ensureCompositor();
+    const std::vector<gxos::gui::WindowDebugInfo> windows = gxos::gui::Compositor::debugWindowsSnapshot();
+    oss << "DESKTOP_WINDOW_OWNERS_BEGIN\n";
+    oss << "compositorPid=" << compositorPid << "\n";
+    oss << "windowCount=" << windows.size() << "\n";
+    for (const auto& window : windows) {
+        std::string processName;
+        std::string appId;
+        const bool identityAvailable = gxos::ProcessTable::getIdentity(window.ownerPid, processName, appId);
+        oss << "window id=" << window.id
+            << " ownerPid=" << window.ownerPid
+            << " ownerName=" << (identityAvailable ? processName : "<unknown>")
+            << " appId=" << (identityAvailable && !appId.empty() ? appId : "<unknown>")
+            << " title=" << window.title
+            << " visible=" << (window.visible ? "true" : "false")
+            << "\n";
+    }
+    oss << "DESKTOP_WINDOW_OWNERS_END\n";
+    return oss.str();
+}
+
+static std::string desktopStartupAppModelRegressionDiagnostic() {
+    struct ExpectedApp {
+        const char* appId;
+        const char* displayName;
+    };
+
+    const std::vector<ExpectedApp> expectedApps = {
+        {"gxos.builtin.notepad", "Notepad"},
+        {"gxos.builtin.calculator", "Calculator"},
+        {"gxos.builtin.displayoptions", "DisplayOptions"}
+    };
+
+    std::ostringstream oss;
+    oss << "STARTUP_APP_MODEL_REGRESSION_BEGIN\n";
+    const uint64_t compositorPid = gxos::Lifecycle::ensureCompositor();
+    oss << "compositorPid=" << compositorPid << "\n";
+
+    // This is intentionally a metadata-only call.  The diagnostic proves that
+    // registry initialization does not dispatch any of the launch factories.
+    (void)gxos::gui::DesktopService::GetRegisteredAppsDiagnostic();
+    const auto& registeredApps = gxos::gui::DesktopService::GetRegisteredApps();
+    bool allRegistered = true;
+    for (const auto& expected : expectedApps) {
+        const auto it = std::find_if(registeredApps.begin(), registeredApps.end(),
+            [&](const gxos::gui::RegisteredDesktopApp& app) { return app.id == expected.appId; });
+        const bool registered = it != registeredApps.end();
+        allRegistered = allRegistered && registered;
+        oss << "registered appId=" << expected.appId
+            << " displayName=" << expected.displayName
+            << " result=" << (registered ? "PASS" : "FAIL") << "\n";
+    }
+
+    const std::vector<gxos::gui::WindowDebugInfo> initialWindows = gxos::gui::Compositor::debugWindowsSnapshot();
+    oss << "initialWindowCount=" << initialWindows.size() << "\n";
+    for (const auto& window : initialWindows) {
+        std::string processName;
+        std::string appId;
+        const bool identityAvailable = gxos::ProcessTable::getIdentity(window.ownerPid, processName, appId);
+        oss << "initialWindow id=" << window.id
+            << " ownerPid=" << window.ownerPid
+            << " ownerName=" << (identityAvailable ? processName : "<unknown>")
+            << " appId=" << (identityAvailable && !appId.empty() ? appId : "<unknown>")
+            << " title=" << window.title << "\n";
+    }
+    const bool registrationDidNotLaunch = initialWindows.empty();
+    oss << "registrationDidNotLaunch=" << (registrationDidNotLaunch ? "PASS" : "FAIL") << "\n";
+
+    bool explicitLaunchesPassed = true;
+    std::vector<uint64_t> baselineWindowIds;
+    for (const auto& window : initialWindows) baselineWindowIds.push_back(window.id);
+
+    for (const auto& expected : expectedApps) {
+        std::string launchError;
+        const bool launchReturnedSuccess = gxos::gui::DesktopService::LaunchApp(expected.appId, launchError, false);
+        gxos::gui::WindowDebugInfo launchedWindow;
+        bool windowFound = false;
+        if (launchReturnedSuccess) {
+            for (int attempt = 0; attempt < 50 && !windowFound; ++attempt) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                const auto windows = gxos::gui::Compositor::debugWindowsSnapshot();
+                for (const auto& window : windows) {
+                    if (std::find(baselineWindowIds.begin(), baselineWindowIds.end(), window.id) != baselineWindowIds.end()) continue;
+                    std::string processName;
+                    std::string appId;
+                    if (!gxos::ProcessTable::getIdentity(window.ownerPid, processName, appId)) continue;
+                    if (appId != expected.appId) continue;
+                    launchedWindow = window;
+                    windowFound = true;
+                    break;
+                }
+            }
+        }
+
+        const bool passed = launchReturnedSuccess && windowFound;
+        explicitLaunchesPassed = explicitLaunchesPassed && passed;
+        oss << "explicitLaunch appId=" << expected.appId
+            << " launchResult=" << (launchReturnedSuccess ? "PASS" : "FAIL")
+            << " windowOwnership=" << (windowFound ? "PASS" : "FAIL");
+        if (windowFound) {
+            oss << " windowId=" << launchedWindow.id
+                << " ownerPid=" << launchedWindow.ownerPid
+                << " title=" << launchedWindow.title;
+        }
+        if (!launchReturnedSuccess && !launchError.empty()) oss << " error=" << launchError;
+        oss << "\n";
+    }
+
+    // Keep this test-only command from writing the explicitly launched windows
+    // into the persistence fixture used by the caller.  This uses the normal
+    // compositor close path and is not part of ordinary startup.
+    const auto afterLaunchWindows = gxos::gui::Compositor::debugWindowsSnapshot();
+    for (const auto& window : afterLaunchWindows) {
+        if (std::find(baselineWindowIds.begin(), baselineWindowIds.end(), window.id) != baselineWindowIds.end()) continue;
+        gxos::ipc::Message closeMessage;
+        closeMessage.type = static_cast<uint32_t>(gxos::gui::MsgType::MT_Close);
+        const std::string id = std::to_string(window.id);
+        closeMessage.data.assign(id.begin(), id.end());
+        gxos::ipc::Bus::publish("gui.input", std::move(closeMessage), false);
+    }
+
+    const bool result = compositorPid != 0 && allRegistered && registrationDidNotLaunch && explicitLaunchesPassed;
+    oss << "STARTUP_APP_MODEL_REGRESSION_RESULT=" << (result ? "PASS" : "FAIL") << "\n";
+    oss << "STARTUP_APP_MODEL_REGRESSION_END\n";
+    return oss.str();
+}
+
 static std::string navigatorHostedSmokeDiagnostic() {
     struct Check {
         std::string name;
@@ -208,6 +338,11 @@ static std::string navigatorHostedSmokeDiagnostic() {
         while (!compact.empty() && compact.back() == ' ') compact.pop_back();
         if (text.size() > compact.size()) compact += "...";
         return compact;
+    };
+    auto evidenceSnippet = [&](const std::string& report, const std::string& needle) {
+        const std::size_t pos = report.find(needle);
+        if (pos == std::string::npos) return std::string("(missing)");
+        return summarizeText(report.substr(pos, 700), 700);
     };
     auto envIsOne = [](const char* name) {
         const char* value = std::getenv(name);
@@ -330,6 +465,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("HTTP enabled", contains(runtimeReport, "Capabilities.HTTP=enabled"), "expected enabled");
     add("HTTP byte-stream backend enabled", contains(runtimeReport, "Backends.HTTP backend=guide_web_http hosted TCP byte-stream with Schannel TLS wrapper for https"), "expected hosted TCP byte-stream backend");
     add("TLS backend is Schannel", contains(runtimeReport, "Capabilities.TLS backend=Schannel hosted"), "expected hosted Schannel backend");
+    add("hosted evidence lane is explicit", contains(runtimeReport, "Evidence Lane.evidence_lane=hosted") &&
+        contains(runtimeReport, "Evidence Lane.tls_backend=schannel"), "expected hosted evidence lane marker");
     add("certificate validation enabled", contains(runtimeReport, "Capabilities.Certificate validation=enabled via Schannel, Windows trust, and hostname validation"), "expected Windows trust and hostname validation");
     add("TLS insertion seam active", contains(runtimeReport, "Capabilities.TLS insertion seam=active HttpByteStream wrapper"), "expected active TLS wrapper");
     add("HTTPS downgrade redirect blocked by default", contains(runtimeReport, "Capabilities.HTTPS-to-HTTP redirect policy=blocked by default"), "expected hosted downgrade policy");
@@ -358,7 +495,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("Forms-lite bare-metal POST marker remains unsupported", contains(runtimeReport, "Capabilities.Forms-lite POST forms bare-metal=unsupported"), "expected honest unsupported bare-metal marker");
     add("Forms-lite focus navigation enabled", contains(runtimeReport, "Capabilities.Forms-lite focus navigation=Tab/Shift+Tab, Enter, Space"), "expected focus navigation capability");
     add("Find in Page enabled", contains(runtimeReport, "Capabilities.Find in Page=enabled"), "expected enabled");
-    add("external stylesheets unsupported", contains(runtimeReport, "Capabilities.External stylesheets=unsupported"), "expected unsupported");
+    add("bounded hosted external stylesheets", contains(runtimeReport, "Capabilities.External stylesheets=bounded hosted"), "expected bounded hosted support");
     add("bookmark persistence enabled", contains(runtimeReport, "Capabilities.Bookmark persistence=enabled"), "expected enabled");
 
     auto hasPositiveCount = [&](const std::string& report, const std::string& prefix) {
@@ -368,6 +505,26 @@ static std::string navigatorHostedSmokeDiagnostic() {
         return valuePos < report.size() &&
             std::isdigit(static_cast<unsigned char>(report[valuePos])) &&
             report[valuePos] != '0';
+    };
+    auto countValue = [&](const std::string& report, const std::string& prefix) {
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return -1;
+        std::size_t valuePos = pos + prefix.size();
+        std::size_t endPos = valuePos;
+        while (endPos < report.size() && std::isdigit(static_cast<unsigned char>(report[endPos]))) {
+            ++endPos;
+        }
+        try {
+            return std::stoi(report.substr(valuePos, endPos - valuePos));
+        } catch (...) {
+            return -1;
+        }
+    };
+    auto reportLine = [](const std::string& report, const std::string& prefix) {
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = report.find('\n', pos);
+        return report.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
     };
 
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
@@ -527,7 +684,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(cssTableWideReport, "Current Document.CSS enabled=yes") &&
         hasPositiveCount(cssTableWideReport, "Current Document.CSS table layout fallbacks=") &&
         hasPositiveCount(cssTableWideReport, "Current Document.CSS tables rendered="),
-        "report=\"" + summarizeText(cssTableWideReport, 260) + "\"");
+        "fallbacks=" + reportLine(cssTableWideReport, "Current Document.CSS table layout fallbacks=") +
+        "; tables=" + reportLine(cssTableWideReport, "Current Document.CSS tables rendered=") +
+        "; report=\"" + summarizeText(cssTableWideReport, 260) + "\"");
 
     bool cssInlinePolishLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline-polish.html");
     std::string cssInlinePolishText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -648,10 +807,1012 @@ static std::string navigatorHostedSmokeDiagnostic() {
         !contains(cssDisplayNoneText, "This hidden text must stay hidden."),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
 
+    bool cssPhase1eLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase1e.html");
+    std::string cssPhase1eText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase1eReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 1E fixture loads",
+        cssPhase1eLoaded &&
+        contains(cssPhase1eText, "Phase 1E Media and Text") &&
+        contains(cssPhase1eText, "Long URL marker") &&
+        contains(cssPhase1eText, "Break-all marker") &&
+        contains(cssPhase1eText, "Pre-wrap marker line one") &&
+        contains(cssPhase1eText, "Nested wrapper backgrounds and padding marker.") &&
+        contains(cssPhase1eText, "Unsupported properties remain nonfatal."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 1E media markers",
+        cssPhase1eLoaded &&
+        contains(cssPhase1eText, "Max-width 100 percent figure marker") &&
+        contains(cssPhase1eText, "Width-only aspect ratio marker") &&
+        contains(cssPhase1eText, "Height-only aspect ratio marker") &&
+        contains(cssPhase1eText, "Max-height aspect marker") &&
+        contains(cssPhase1eText, "Oversized image clamped to content width marker") &&
+        contains(cssPhase1eText, "Malformed or huge dimensions are clamped marker") &&
+        contains(cssPhase1eText, "Missing image alt fallback marker"),
+        "text=\"" + summarizeText(cssPhase1eText, 260) + "\"");
+    add("CSS phase 1E structural markers",
+        cssPhase1eLoaded &&
+        contains(cssPhase1eText, "Blockquote marker line.") &&
+        contains(cssPhase1eText, "Nested blockquote marker line.") &&
+        contains(cssPhase1eText, "Citation marker.") &&
+        contains(cssPhase1eText, "Definition term alpha") &&
+        contains(cssPhase1eText, "Definition detail two."),
+        "text=\"" + summarizeText(cssPhase1eText, 260) + "\"");
+    add("CSS phase 1E diagnostics",
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS figures rendered=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS figcaptions rendered=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS blockquotes rendered=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS definition lists rendered=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS images constrained=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS images aspect preserved=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS image alt fallbacks=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS image size clamps=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS nested layout clamps="),
+        "report=\"" + summarizeText(cssPhase1eReport, 260) + "\"");
+
+    bool cssPhase1fLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase1f.html");
+    std::string cssPhase1fText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase1fReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 1F fixture loads",
+        cssPhase1fLoaded &&
+        contains(cssPhase1fText, "Wrapper with border shorthand 1px solid #888 marker.") &&
+        contains(cssPhase1fText, "Oversized border width clamp marker.") &&
+        contains(cssPhase1fText, "Caption spacing marker") &&
+        contains(cssPhase1fText, "List style none item stays readable without markers.") &&
+        contains(cssPhase1fText, "Default underlined link marker") &&
+        contains(cssPhase1fText, "Sans-serif font family marker.") &&
+        contains(cssPhase1fText, "Serif fallback marker."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    std::string cssPhase1fDetail =
+        "report=\"" + summarizeText(cssPhase1fReport, 260) + "\"" +
+        " bordered=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS bordered blocks rendered=")) +
+        " dashed=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS dashed borders rendered=")) +
+        " dotted=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS dotted borders rendered=")) +
+        " border_width_clamps=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS border width clamps=")) +
+        " collapsed_tables=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS collapsed tables rendered=")) +
+        " separate_tables=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS separate tables rendered=")) +
+        " border_spacing_clamps=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS table border spacing clamps=")) +
+        " list_markers=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS list style markers rendered=")) +
+        " list_none=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS list style none applied=")) +
+        " text_decorations=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS text decorations rendered=")) +
+        " generic_fonts=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS generic font family applied=")) +
+        " generic_font_fallbacks=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS generic font family fallbacks=")) +
+        " table_layout_fallbacks=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS table layout fallbacks=")) +
+        " table_captions=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS table captions rendered="));
+    add("CSS phase 1F diagnostics",
+        contains(cssPhase1fReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS bordered blocks rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS dashed borders rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS dotted borders rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS border width clamps=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS collapsed tables rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS separate tables rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS table border spacing clamps=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS list style markers rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS list style none applied=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS text decorations rendered=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family applied=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family fallbacks=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS table layout fallbacks=") &&
+        hasPositiveCount(cssPhase1fReport, "Current Document.CSS table captions rendered="),
+        cssPhase1fDetail);
+
+    bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
+    std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2aReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2aReport.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = cssPhase2aReport.find('\n', pos);
+        return cssPhase2aReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 2A fixture loads",
+        cssPhase2aLoaded &&
+        contains(cssPhase2aText, "Phase 2A Selector Cascade") &&
+        contains(cssPhase2aText, "Universal and exact class token marker.") &&
+        contains(cssPhase2aText, "Multiple class matching marker.") &&
+        contains(cssPhase2aText, "Descendant selector marker.") &&
+        contains(cssPhase2aText, "Direct child selector marker.") &&
+        contains(cssPhase2aText, "Wrapper inheritance marker.") &&
+        contains(cssPhase2aText, "Table cell text inheritance marker."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2A selector and cascade diagnostics",
+        contains(cssPhase2aReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS selector groups parsed=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS compound selectors parsed=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS child combinators=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS descendant combinators=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS selector matches=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS specificity overrides=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS source-order overrides=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS cascade property resolutions=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS style blocks=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS external stylesheets loaded=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS inherited properties applied=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS unsupported selectors=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS selector group clamps=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS selector depth clamps=") &&
+        hasPositiveCount(cssPhase2aReport, "Current Document.CSS !important declarations applied=") &&
+        contains(cssPhase2aReport, "id=phase2a-partial") &&
+        contains(cssPhase2aReport, "id=phase2a-inherited") &&
+        contains(cssPhase2aReport, "id=phase2a-cell"),
+        "counts=" + cssPhase2aReportLine("Current Document.CSS selector groups parsed=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS compound selectors parsed=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS child combinators=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS descendant combinators=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS selector matches=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS specificity overrides=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS source-order overrides=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS inherited properties applied=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS unsupported selectors=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS selector group clamps=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS selector depth clamps=") +
+        "; " + cssPhase2aReportLine("Current Document.CSS !important declarations applied=") +
+        "; evidence=" + summarizeText(cssPhase2aReportLine("Current Document.CSS computed style evidence="), 1200));
+    add("CSS phase 2A property-level evidence",
+        contains(cssPhase2aReport, "id=phase2a-partial") &&
+        contains(cssPhase2aReport, "background=#fef3c7") &&
+        contains(cssPhase2aReport, "border-top-width=2") &&
+        contains(cssPhase2aReport, "id=phase2a-inline") &&
+        contains(cssPhase2aReport, "background=#dbeafe") &&
+        contains(cssPhase2aReport, "id=phase2a-inherited") &&
+        contains(cssPhase2aReport, "font-size=20") &&
+        contains(cssPhase2aReport, "line-height=36") &&
+        contains(cssPhase2aReport, "id=phase2a-inherit-override") &&
+        contains(cssPhase2aReport, "color=#15803d"),
+        std::string("partial=") + yesNo(contains(cssPhase2aReport, "id=phase2a-partial")) +
+        ",partial-background=" + yesNo(contains(cssPhase2aReport, "background=#fef3c7")) +
+        ",partial-border=" + yesNo(contains(cssPhase2aReport, "border-top-width=2")) +
+        ",inline=" + yesNo(contains(cssPhase2aReport, "id=phase2a-inline")) +
+        ",inline-background=" + yesNo(contains(cssPhase2aReport, "background=#dbeafe")) +
+        ",inherited=" + yesNo(contains(cssPhase2aReport, "id=phase2a-inherited")) +
+        ",font-size-20=" + yesNo(contains(cssPhase2aReport, "font-size=20")) +
+        ",line-height-36=" + yesNo(contains(cssPhase2aReport, "line-height=36")) +
+        ",override=" + yesNo(contains(cssPhase2aReport, "id=phase2a-inherit-override")) +
+        ",override-color=" + yesNo(contains(cssPhase2aReport, "color=#15803d")) +
+        "; evidence=" + summarizeText(cssPhase2aReportLine("Current Document.CSS computed style evidence="), 1800));
+
     bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
     std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+
+    bool cssPhase2bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2b.html");
+    std::string cssPhase2bText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2bReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2bReport.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = cssPhase2bReport.find('\n', pos);
+        return cssPhase2bReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 2B structural fixture loads",
+        cssPhase2bLoaded &&
+        contains(cssPhase2bText, "Phase 2B Structural Selectors") &&
+        contains(cssPhase2bText, "First child marker") &&
+        contains(cssPhase2bText, "Second child marker") &&
+        contains(cssPhase2bText, "Only child marker") &&
+        contains(cssPhase2bText, "First of type marker") &&
+        contains(cssPhase2bText, "Only of type marker") &&
+        contains(cssPhase2bText, "Visited link marker") &&
+        contains(cssPhase2bText, "Unvisited link marker"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2B pseudo diagnostics",
+        contains(cssPhase2bReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS pseudo-classes parsed=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS structural pseudo matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS first-child matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS last-child matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS nth-child matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS of-type matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS :not matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS :link pseudo matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS :visited pseudo matches=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS pseudo-class clamps=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS nth-expression parse errors=") &&
+        hasPositiveCount(cssPhase2bReport, "Current Document.CSS unsupported selectors=") &&
+        contains(cssPhase2bReport, "id=phase2b-first") &&
+        contains(cssPhase2bReport, "id=phase2b-type-second") &&
+        contains(cssPhase2bReport, "id=phase2b-visited") &&
+        contains(cssPhase2bReport, "id=phase2b-link"),
+        "pseudo=" + cssPhase2bReportLine("Current Document.CSS pseudo-classes parsed=") +
+        "; structural=" + cssPhase2bReportLine("Current Document.CSS structural pseudo matches=") +
+        "; nth=" + cssPhase2bReportLine("Current Document.CSS nth-child matches=") +
+        "; of-type=" + cssPhase2bReportLine("Current Document.CSS of-type matches=") +
+        "; not=" + cssPhase2bReportLine("Current Document.CSS :not matches=") +
+        "; link=" + cssPhase2bReportLine("Current Document.CSS :link pseudo matches=") +
+        "; visited=" + cssPhase2bReportLine("Current Document.CSS :visited pseudo matches=") +
+        "; clamps=" + cssPhase2bReportLine("Current Document.CSS pseudo-class clamps=") +
+        "; nth-errors=" + cssPhase2bReportLine("Current Document.CSS nth-expression parse errors=") +
+        "; evidence=" + summarizeText(cssPhase2bReportLine("Current Document.CSS computed style evidence="), 1800));
+    add("CSS phase 2B structural evidence",
+        contains(cssPhase2bReport, "id=phase2b-first") &&
+        contains(cssPhase2bReport, "element-index=1") &&
+        contains(cssPhase2bReport, "color-winning-pseudo=first-child") &&
+        contains(cssPhase2bReport, "id=phase2b-type-second") &&
+        contains(cssPhase2bReport, "type-index=2") &&
+        contains(cssPhase2bReport, "type-count=2") &&
+        contains(cssPhase2bReport, "id=phase2b-visited") &&
+        contains(cssPhase2bReport, "color-winning-pseudo=visited") &&
+        contains(cssPhase2bReport, "id=phase2b-link") &&
+        contains(cssPhase2bReport, "color-winning-pseudo=link"),
+        std::string("first=") + yesNo(contains(cssPhase2bReport, "id=phase2b-first")) +
+        ",first-index=" + yesNo(contains(cssPhase2bReport, "element-index=1")) +
+        ",first-pseudo=" + yesNo(contains(cssPhase2bReport, "color-winning-pseudo=first-child")) +
+        ",type-second=" + yesNo(contains(cssPhase2bReport, "id=phase2b-type-second")) +
+        ",type-index=" + yesNo(contains(cssPhase2bReport, "type-index=2")) +
+        ",type-count=" + yesNo(contains(cssPhase2bReport, "type-count=2")) +
+        ",visited=" + yesNo(contains(cssPhase2bReport, "id=phase2b-visited")) +
+        ",visited-pseudo=" + yesNo(contains(cssPhase2bReport, "color-winning-pseudo=visited")) +
+        ",link=" + yesNo(contains(cssPhase2bReport, "id=phase2b-link")) +
+        ",link-pseudo=" + yesNo(contains(cssPhase2bReport, "color-winning-pseudo=link")));
+
+    bool cssPhase2cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2c.html");
+    std::string cssPhase2cText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2cReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2cReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2cReport.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = cssPhase2cReport.find('\n', pos);
+        return cssPhase2cReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    const bool cssPhase2cVisitedPurple = contains(cssPhase2cReport,
+        "id=phase2c-visited,tag=a,classes=,color=#7c3aed");
+    const bool cssPhase2cVisitedPseudoEvidence =
+        contains(cssPhase2cReport, "color-winning-pseudo=visited") ||
+        contains(cssPhase2cReport, "color-winning-pseudo=link+visited");
+    const bool cssPhase2cCrossParentUnmatched = contains(cssPhase2cReport,
+        "id=phase2c-cross-parent,tag=p,classes=,color=#334155");
+    add("CSS phase 2C sibling fixture loads",
+        cssPhase2cLoaded &&
+        contains(cssPhase2cText, "Phase 2C Sibling Combinators") &&
+        contains(cssPhase2cText, "Immediate paragraph") &&
+        contains(cssPhase2cText, "Later paragraph") &&
+        contains(cssPhase2cText, "Second item") &&
+        contains(cssPhase2cText, "Later note") &&
+        contains(cssPhase2cText, "Cross parent paragraph") &&
+        contains(cssPhase2cText, "Visited sibling") &&
+        contains(cssPhase2cText, "Cascade target"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2C sibling diagnostics",
+        contains(cssPhase2cReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS adjacent-sibling combinators=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS general-sibling combinators=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS adjacent-sibling matches=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS general-sibling matches=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS sibling scan steps=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS sibling scan clamps=") &&
+        contains(cssPhase2cReport, "Current Document.CSS sibling metadata errors=0") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS :visited pseudo matches=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS unsupported selectors=") &&
+        hasPositiveCount(cssPhase2cReport, "Current Document.CSS selector depth clamps="),
+        "adjacent=" + cssPhase2cReportLine("Current Document.CSS adjacent-sibling matches=") +
+        "; general=" + cssPhase2cReportLine("Current Document.CSS general-sibling matches=") +
+        "; scan=" + cssPhase2cReportLine("Current Document.CSS sibling scan steps=") +
+        "; scan-clamps=" + cssPhase2cReportLine("Current Document.CSS sibling scan clamps=") +
+        "; metadata-errors=" + cssPhase2cReportLine("Current Document.CSS sibling metadata errors=") +
+        "; visited=" + cssPhase2cReportLine("Current Document.CSS :visited pseudo matches=") +
+        "; unsupported=" + cssPhase2cReportLine("Current Document.CSS unsupported selectors=") +
+        "; depth=" + cssPhase2cReportLine("Current Document.CSS selector depth clamps="));
+    add("CSS phase 2C sibling and structural evidence",
+        contains(cssPhase2cReport, "id=phase2c-adj-immediate") &&
+        contains(cssPhase2cReport, "previous-sibling-tag=h2") &&
+        contains(cssPhase2cReport, "winning-combinator=adjacent-sibling") &&
+        contains(cssPhase2cReport, "id=phase2c-general-note") &&
+        contains(cssPhase2cReport, "winning-combinator=general-sibling") &&
+        contains(cssPhase2cReport, "id=phase2c-list-second") &&
+        contains(cssPhase2cReport, "element-index=2") &&
+        contains(cssPhase2cReport, "id=phase2c-visited") &&
+        cssPhase2cVisitedPurple &&
+        cssPhase2cVisitedPseudoEvidence &&
+        cssPhase2cCrossParentUnmatched &&
+        contains(cssPhase2cReport, "id=phase2c-group-valid"),
+        std::string("adjacent-evidence=") + yesNo(contains(cssPhase2cReport, "winning-combinator=adjacent-sibling")) +
+        ",general-evidence=" + yesNo(contains(cssPhase2cReport, "winning-combinator=general-sibling")) +
+        ",previous-tag=" + yesNo(contains(cssPhase2cReport, "previous-sibling-tag=h2")) +
+        ",visited-id=" + yesNo(contains(cssPhase2cReport, "id=phase2c-visited")) +
+        ",visited-required-color=" + yesNo(cssPhase2cVisitedPurple) +
+        ",visited-pseudo=" + yesNo(cssPhase2cVisitedPseudoEvidence) +
+        ",visited=" + yesNo(cssPhase2cVisitedPseudoEvidence) +
+        ",cross-parent-unmatched=" + yesNo(cssPhase2cCrossParentUnmatched) +
+        "; visited-evidence=" + evidenceSnippet(cssPhase2cReport, "id=phase2c-visited") +
+        "; cross-parent-evidence=" + evidenceSnippet(cssPhase2cReport, "id=phase2c-cross-parent") +
+        "; evidence=" + summarizeText(cssPhase2cReportLine("Current Document.CSS computed style evidence="), 2200));
+    add("CSS phase 2C pseudo and cascade evidence",
+        contains(cssPhase2cReport, "id=phase2c-not-target") &&
+        contains(cssPhase2cReport, "font-size=18") &&
+        contains(cssPhase2cReport, "id=phase2c-cascade-target") &&
+        contains(cssPhase2cReport, "padding-top=7") &&
+        contains(cssPhase2cReport, "border-top-width=1") &&
+        contains(cssPhase2cReport, "id=phase2c-inline") &&
+        contains(cssPhase2cReport, "color=#1d4ed8") &&
+        contains(cssPhase2cReport, "id=phase2c-important") &&
+        contains(cssPhase2cReport, "color=#166534"),
+        std::string("not=") + yesNo(contains(cssPhase2cReport, "id=phase2c-not-target")) +
+        ",partial-padding=" + yesNo(contains(cssPhase2cReport, "padding-top=7")) +
+        ",partial-border=" + yesNo(contains(cssPhase2cReport, "border-top-width=1")) +
+        ",inline=" + yesNo(contains(cssPhase2cReport, "color=#1d4ed8")) +
+        ",important=" + yesNo(contains(cssPhase2cReport, "color=#166534")) +
+        "; evidence=" + summarizeText(cssPhase2cReportLine("Current Document.CSS computed style evidence="), 2200));
+
+    bool cssPhase2dLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2d.html");
+    std::string cssPhase2dText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2dReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2dReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2dReport.find(prefix);
+        if (pos == std::string::npos) return std::string();
+        const std::size_t end = cssPhase2dReport.find('\n', pos);
+        return cssPhase2dReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 2D empty and parser fixture loads",
+        cssPhase2dLoaded &&
+        contains(cssPhase2dText, "Phase 2D Empty and Parser Recovery") &&
+        contains(cssPhase2dText, "Empty adjacent marker") &&
+        contains(cssPhase2dText, "duplicate first") &&
+        contains(cssPhase2dText, "multiline target") &&
+        contains(cssPhase2dText, "broken image fallback") &&
+        contains(cssPhase2dText, "figure caption") &&
+        contains(cssPhase2dText, "cell text") &&
+        contains(cssPhase2dText, "incomplete metadata marker") &&
+        contains(cssPhase2dText, "important target"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2D empty matching diagnostics",
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS :empty pseudo parsed=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS :empty pseudo matches=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS :empty metadata incomplete=") &&
+        contains(cssPhase2dReport, "Current Document.CSS content metadata clamps=0"),
+        "empty-parsed=" + cssPhase2dReportLine("Current Document.CSS :empty pseudo parsed=") +
+        "; empty-matches=" + cssPhase2dReportLine("Current Document.CSS :empty pseudo matches=") +
+        "; incomplete=" + cssPhase2dReportLine("Current Document.CSS :empty metadata incomplete=") +
+        "; content-clamps=" + cssPhase2dReportLine("Current Document.CSS content metadata clamps="));
+    add("CSS phase 2D parser recovery diagnostics",
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS selector group member recoveries=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS selector recovery successes=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS unterminated comment errors=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS unbalanced parenthesis errors=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS unbalanced bracket errors=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS unterminated string errors=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS invalid combinator sequences=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS identifier escape rejections=") &&
+        hasPositiveCount(cssPhase2dReport, "Current Document.CSS selector depth clamps="),
+        "recoveries=" + cssPhase2dReportLine("Current Document.CSS selector group member recoveries=") +
+        "; recovery-success=" + cssPhase2dReportLine("Current Document.CSS selector recovery successes=") +
+        "; comments=" + cssPhase2dReportLine("Current Document.CSS unterminated comment errors=") +
+        "; parentheses=" + cssPhase2dReportLine("Current Document.CSS unbalanced parenthesis errors=") +
+        "; brackets=" + cssPhase2dReportLine("Current Document.CSS unbalanced bracket errors=") +
+        "; strings=" + cssPhase2dReportLine("Current Document.CSS unterminated string errors=") +
+        "; combinators=" + cssPhase2dReportLine("Current Document.CSS invalid combinator sequences=") +
+        "; escapes=" + cssPhase2dReportLine("Current Document.CSS identifier escape rejections="));
+    add("CSS phase 2D bounded empty and cascade evidence",
+        contains(cssPhase2dReport, "id=phase2d-empty-next") &&
+        contains(cssPhase2dReport, "border-top-width=1") &&
+        contains(cssPhase2dReport, "id=phase2d-duplicate") &&
+        contains(cssPhase2dReport, "computed-empty=no") &&
+        contains(cssPhase2dReport, "id=phase2d-multiline-target") &&
+        contains(cssPhase2dReport, "color=#0ea5e9") &&
+        contains(cssPhase2dReport, "id=phase2d-cell") &&
+        contains(cssPhase2dReport, "content-metadata=complete") &&
+        contains(cssPhase2dReport, "id=phase2d-declaration") &&
+        contains(cssPhase2dReport, "padding-top=5") &&
+        contains(cssPhase2dReport, "id=phase2d-combinator-target") &&
+        contains(cssPhase2dReport, "color=#9333ea") &&
+        contains(cssPhase2dReport, "id=phase2d-inline") &&
+        contains(cssPhase2dReport, "color=#1d4ed8") &&
+        contains(cssPhase2dReport, "id=phase2d-important") &&
+        contains(cssPhase2dReport, "color=#166534"),
+        std::string("empty-adjacent=") + yesNo(contains(cssPhase2dReport, "id=phase2d-empty-next") && contains(cssPhase2dReport, "border-top-width=1")) +
+        "; cell=" + yesNo(contains(cssPhase2dReport, "id=phase2d-cell")) +
+        "; comments=" + yesNo(contains(cssPhase2dReport, "id=phase2d-declaration") && contains(cssPhase2dReport, "padding-top=5")) +
+        "; combinator=" + yesNo(contains(cssPhase2dReport, "id=phase2d-combinator-target") && contains(cssPhase2dReport, "color=#9333ea")) +
+        "; inline=" + yesNo(contains(cssPhase2dReport, "id=phase2d-inline") && contains(cssPhase2dReport, "color=#1d4ed8")) +
+        "; important=" + yesNo(contains(cssPhase2dReport, "id=phase2d-important") && contains(cssPhase2dReport, "color=#166534")) +
+        "; evidence=" + summarizeText(cssPhase2dReportLine("Current Document.CSS computed style evidence="), 2600));
+
+    bool cssPhase2eLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2e.html");
+    std::string cssPhase2eText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase2eReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase2eReportLine = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase2eReport.find(prefix);
+        if (pos == std::string::npos) return std::string("(missing)");
+        const std::size_t end = cssPhase2eReport.find('\n', pos);
+        return cssPhase2eReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 2E bounded forms fixture loads",
+        cssPhase2eLoaded &&
+        contains(cssPhase2eText, "Phase 2E Bounded Static Forms") &&
+        contains(cssPhase2eText, "Wrapping choice") &&
+        contains(cssPhase2eText, "Associated checked choice") &&
+        contains(cssPhase2eText, "Static textarea marker") &&
+        contains(cssPhase2eText, "Selected option marker") &&
+        contains(cssPhase2eText, "Default first enabled option") &&
+        contains(cssPhase2eText, "Element button") &&
+        contains(cssPhase2eText, "[password field]") &&
+        !contains(cssPhase2eText, "secret-phase2e-value") &&
+        !contains(cssPhase2eText, "hidden-secret-must-not-render"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 2E form and state diagnostics",
+        contains(cssPhase2eReport, "Current Document.Forms=1") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML forms parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML fieldsets parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML labels parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML inputs parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML buttons parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML textareas parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML selects parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML options parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML hidden controls=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML control metadata clamps=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.HTML control text truncations=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :checked pseudo parsed=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :checked pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :disabled pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :enabled pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :required pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :read-only pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.CSS :read-write pseudo matches=") &&
+        hasPositiveCount(cssPhase2eReport, "Current Document.Form controls rendered=") &&
+        contains(cssPhase2eReport, "Current Document.Form interactions deferred=") &&
+        !contains(cssPhase2eReport, "secret-phase2e-value") &&
+        !contains(cssPhase2eReport, "hidden-secret-must-not-render"),
+        "forms=" + cssPhase2eReportLine("Current Document.HTML forms parsed=") +
+        "; fieldsets=" + cssPhase2eReportLine("Current Document.HTML fieldsets parsed=") +
+        "; inputs=" + cssPhase2eReportLine("Current Document.HTML inputs parsed=") +
+        "; options=" + cssPhase2eReportLine("Current Document.HTML options parsed=") +
+        "; clamps=" + cssPhase2eReportLine("Current Document.HTML control metadata clamps=") +
+        "; truncations=" + cssPhase2eReportLine("Current Document.HTML control text truncations=") +
+        "; checked=" + cssPhase2eReportLine("Current Document.CSS :checked pseudo matches=") +
+        "; disabled=" + cssPhase2eReportLine("Current Document.CSS :disabled pseudo matches=") +
+        "; enabled=" + cssPhase2eReportLine("Current Document.CSS :enabled pseudo matches=") +
+        "; required=" + cssPhase2eReportLine("Current Document.CSS :required pseudo matches=") +
+        "; readonly=" + cssPhase2eReportLine("Current Document.CSS :read-only pseudo matches=") +
+        "; readwrite=" + cssPhase2eReportLine("Current Document.CSS :read-write pseudo matches="));
+    const bool cssPhase2eAssociatedEvidence = contains(cssPhase2eReport, "id=phase2e-associated");
+    const bool cssPhase2eCheckedEvidence = contains(cssPhase2eReport, "checked=yes");
+    const bool cssPhase2eDisabledEvidence = contains(cssPhase2eReport, "control-disabled=yes");
+    const bool cssPhase2eRequiredEvidence = contains(cssPhase2eReport, "id=phase2e-required") &&
+        contains(cssPhase2eReport, "required=yes");
+    const bool cssPhase2eInlineEvidence = contains(cssPhase2eReport, "id=phase2e-inline") &&
+        contains(cssPhase2eReport, "color=#1d4ed8");
+    const bool cssPhase2eImportantEvidence = contains(cssPhase2eReport, "id=phase2e-important") &&
+        contains(cssPhase2eReport, "color=#166534");
+    const bool cssPhase2eOrderEvidence = contains(cssPhase2eReport, "id=phase2e-source-order");
+    const bool cssPhase2eOptionEvidence = contains(cssPhase2eReport, "id=phase2e-option-clamp");
+    add("CSS phase 2E state and cascade evidence",
+        cssPhase2eAssociatedEvidence && cssPhase2eCheckedEvidence && cssPhase2eDisabledEvidence &&
+        cssPhase2eRequiredEvidence && cssPhase2eInlineEvidence && cssPhase2eImportantEvidence &&
+        cssPhase2eOrderEvidence && cssPhase2eOptionEvidence &&
+        contains(cssPhase2eReport, "phase2e-"),
+        std::string("associated=") + yesNo(cssPhase2eAssociatedEvidence) +
+        ",checked=" + yesNo(cssPhase2eCheckedEvidence) +
+        ",disabled=" + yesNo(cssPhase2eDisabledEvidence) +
+        ",required=" + yesNo(cssPhase2eRequiredEvidence) +
+        ",inline=" + yesNo(cssPhase2eInlineEvidence) +
+        ",important=" + yesNo(cssPhase2eImportantEvidence) +
+        ",order=" + yesNo(cssPhase2eOrderEvidence) +
+        ",option=" + yesNo(cssPhase2eOptionEvidence) +
+        "; evidence=" + summarizeText(cssPhase2eReportLine("Current Document.CSS computed style evidence="), 3200));
+
+    bool cssPhase2fLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2f.html");
+    const std::string cssPhase2fUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    const std::string cssPhase2fText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool phase2fInitialState =
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-a") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-radio") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-other-form-radio");
+    const bool phase2fCheckboxClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-checkbox") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox");
+    const bool phase2fDisabledCheckbox =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-disabled-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-checkbox");
+    const bool phase2fRadioBClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-radio-b");
+    const bool phase2fRadioClick =
+        phase2fRadioBClick &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-a") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-radio") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-other-form-radio");
+    const int radioBActivationsBeforeStable = gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-radio-b");
+    const bool phase2fCheckedRadioStable =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-radio-b") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-radio-b") == radioBActivationsBeforeStable + 1;
+    const bool phase2fNamelessFallback =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-nameless-a") &&
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-nameless-b") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-nameless-a") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-nameless-b");
+    const bool phase2fLabelActivation =
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-checkbox-label") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-wrapping-label") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-wrapped-checkbox");
+    const int wrappedBeforeNestedClick = gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-wrapped-checkbox");
+    const bool phase2fNestedControlDedup =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-wrapped-checkbox") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-wrapped-checkbox") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-wrapped-checkbox") == wrappedBeforeNestedClick + 1;
+    const bool phase2fDisabledLabel =
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-disabled-checkbox-label") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-checkbox");
+    const bool phase2fMalformedLabels =
+        !gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-missing-label") &&
+        !gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-duplicate-label") &&
+        !gxos::apps::Navigator::SmokeClickFormLabelById("phase2f-unrelated-label");
+    const int buttonActivationBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-button");
+    const bool phase2fButtonClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-button");
+    const bool phase2fInputButtonClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-input-button");
+    const bool phase2fSubmitClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-submit");
+    const bool phase2fResetClick = gxos::apps::Navigator::SmokeClickFormControlById("phase2f-reset");
+    const bool phase2fInertButtons =
+        phase2fButtonClick && phase2fInputButtonClick && phase2fSubmitClick && phase2fResetClick &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-button") == buttonActivationBefore + 1 &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2fUrl;
+    const bool phase2fDisabledButton =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2f-disabled-button") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-disabled-button") == 0;
+    const std::string cssPhase2fReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 2F bounded fixture loads",
+        cssPhase2fLoaded && cssPhase2fUrl == "http://127.0.0.1:8080/navigator-smoke/css-phase2f.html" &&
+        contains(cssPhase2fText, "Phase 2F Session Local Forms") &&
+        contains(cssPhase2fText, "Wrapping label checkbox") &&
+        contains(cssPhase2fText, "Inert button") &&
+        !contains(cssPhase2fText, "phase2f-secret"),
+        "currentUrl=" + cssPhase2fUrl);
+    add("CSS phase 2F checkbox and disabled behavior",
+        phase2fInitialState && phase2fCheckboxClick && phase2fDisabledCheckbox,
+        std::string("initial=") + yesNo(phase2fInitialState) + ",toggle=" + yesNo(phase2fCheckboxClick) +
+        ",disabled=" + yesNo(phase2fDisabledCheckbox));
+    add("CSS phase 2F radio groups and nameless fallback",
+        phase2fRadioClick && phase2fCheckedRadioStable && phase2fNamelessFallback,
+        std::string("radio=") + yesNo(phase2fRadioClick) + ",click=" + yesNo(phase2fRadioBClick) +
+        ",b=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b")) +
+        ",a=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-a")) +
+        ",disabled=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-disabled-radio")) +
+        ",other-form=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-other-form-radio")) +
+        ",stable=" + yesNo(phase2fCheckedRadioStable) + ",nameless=" + yesNo(phase2fNamelessFallback));
+    add("CSS phase 2F label association and deduplication",
+        phase2fLabelActivation && phase2fNestedControlDedup && phase2fDisabledLabel && phase2fMalformedLabels,
+        std::string("labels=") + yesNo(phase2fLabelActivation) + ",nested-dedup=" + yesNo(phase2fNestedControlDedup) +
+        ",disabled=" + yesNo(phase2fDisabledLabel) + ",malformed=" + yesNo(phase2fMalformedLabels));
+    add("CSS phase 2F inert buttons preserve URL and reset semantics",
+        phase2fInertButtons && phase2fDisabledButton,
+        std::string("inert=") + yesNo(phase2fInertButtons) + ",button=" + yesNo(phase2fButtonClick) +
+        ",input-button=" + yesNo(phase2fInputButtonClick) + ",submit=" + yesNo(phase2fSubmitClick) +
+        ",reset=" + yesNo(phase2fResetClick) + ",count-before=" + std::to_string(buttonActivationBefore) +
+        ",count-after=" + std::to_string(gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-button")) +
+        ",url-same=" + yesNo(gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2fUrl) +
+        ",disabled=" + yesNo(phase2fDisabledButton));
+    add("CSS phase 2F hit targets and mouse release safety",
+        gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-checkbox") &&
+        !gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-hidden") &&
+        gxos::apps::Navigator::SmokeFormMouseSafetyById("phase2f-checkbox"),
+        std::string("checkbox-target=") + yesNo(gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-checkbox")) +
+        ",hidden-target=" + yesNo(gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-hidden")));
+    add("CSS phase 2F live state diagnostics and cascade evidence",
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_runtime_controls_initialized=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_checkbox_toggles=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_radio_group_unchecks=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_label_activations=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.form_button_activations=") &&
+        hasPositiveCount(cssPhase2fReport, "Current Document.css_checked_runtime_recomputations=") &&
+        contains(cssPhase2fReport, "id=phase2f-important") &&
+        contains(cssPhase2fReport, "radio-group-hash=") &&
+        contains(cssPhase2fReport, "runtime-activation-count="),
+        "report=" + summarizeText(cssPhase2fReport, 3600));
+    const bool phase2fReloaded = gxos::apps::Navigator::SmokeReloadCurrentDocument();
+    add("CSS phase 2F reload resets session-local state",
+        phase2fReloaded && !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-a") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2f-radio-b") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-checkbox") == 0,
+        std::string("reloaded=") + yesNo(phase2fReloaded));
+
+    const bool cssPhase2gLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2g.html");
+    const std::string cssPhase2gUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    const std::string cssPhase2gText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool phase2gInitialFocus =
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "none";
+    const int phase2gFocusableCount = gxos::apps::Navigator::SmokeFormFocusableCount();
+    auto phase2gTab = [&](bool reverse = false) {
+        if (reverse) gxos::apps::Navigator::SmokeKeyPress(16, "down");
+        gxos::apps::Navigator::SmokeKeyPress(9, "down");
+        gxos::apps::Navigator::SmokeKeyPress(9, "up");
+        if (reverse) gxos::apps::Navigator::SmokeKeyPress(16, "up");
+    };
+    auto phase2gKeyTap = [&](int keyCode) {
+        gxos::apps::Navigator::SmokeKeyPress(keyCode, "down");
+        gxos::apps::Navigator::SmokeKeyPress(keyCode, "up");
+    };
+    const bool phase2gFirstTab =
+        gxos::apps::Navigator::SmokeKeyPress(9, "down") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-checkbox" &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "up");
+    const bool phase2gSecondTab =
+        (phase2gTab(), gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-radio-a");
+    const bool phase2gShiftTab =
+        (phase2gTab(true), gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-checkbox");
+    std::vector<std::string> phase2gFocusOrder;
+    phase2gFocusOrder.push_back(gxos::apps::Navigator::SmokeFocusedFormControlId());
+    for (int i = 0; i < phase2gFocusableCount; ++i) {
+        phase2gTab();
+        phase2gFocusOrder.push_back(gxos::apps::Navigator::SmokeFocusedFormControlId());
+    }
+    const std::vector<std::string> phase2gExpectedFocusOrder = {
+        "phase2g-checkbox", "phase2g-radio-a", "phase2g-radio-b", "phase2g-text",
+        "phase2g-textarea", "phase2g-select", "phase2g-button", "phase2g-submit",
+        "phase2g-reset", "phase2g-source-order", "phase2g-inline", "phase2g-important",
+        "phase2g-checkbox"
+    };
+    const bool phase2gOrderedTraversal = phase2gFocusOrder == phase2gExpectedFocusOrder;
+    const bool phase2gBackwardBoundary =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        (phase2gTab(true), gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-important");
+    const bool phase2gRepeatBounded =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "up") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "phase2g-radio-a";
+    add("CSS phase 2G fixture and bounded focus order",
+        cssPhase2gLoaded && cssPhase2gUrl == "http://127.0.0.1:8080/navigator-smoke/css-phase2g.html" &&
+        contains(cssPhase2gText, "Phase 2G Bounded Keyboard Focus") &&
+        phase2gInitialFocus && phase2gFocusableCount == 12 && phase2gFirstTab &&
+        phase2gSecondTab && phase2gShiftTab && phase2gOrderedTraversal &&
+        phase2gBackwardBoundary && phase2gRepeatBounded,
+        "loaded=" + std::string(yesNo(cssPhase2gLoaded)) +
+        ",initial=" + yesNo(phase2gInitialFocus) +
+        ",focusable=" + std::to_string(phase2gFocusableCount) +
+        ",order=" + yesNo(phase2gOrderedTraversal) +
+        ",backward-boundary=" + yesNo(phase2gBackwardBoundary) +
+        ",repeat=" + yesNo(phase2gRepeatBounded));
+
+    const bool phase2gMouseCheckbox =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2g-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-checkbox") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse" &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-checkbox");
+    const bool phase2gMouseLabel =
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2g-radio-a-label") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-radio-a") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse" &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-radio-a");
+    const bool phase2gDisabledMouse =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2g-disabled") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-checkbox") &&
+        !gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-disabled");
+    const bool phase2gHiddenHit = !gxos::apps::Navigator::SmokeFormHitTargetById("phase2g-hidden") &&
+        !gxos::apps::Navigator::SmokeFormHitTargetById("phase2g-css-hidden");
+    add("CSS phase 2G mouse focus, labels, and bounded hit targets",
+        phase2gMouseCheckbox && phase2gMouseLabel && phase2gDisabledMouse && phase2gHiddenHit,
+        "checkbox=" + std::string(yesNo(phase2gMouseCheckbox)) +
+        ",label=" + yesNo(phase2gMouseLabel) +
+        ",disabled=" + yesNo(phase2gDisabledMouse) +
+        ",hidden-targets=" + yesNo(phase2gHiddenHit));
+
+    const bool phase2gReloadBeforeKeyboard = gxos::apps::Navigator::SmokeReloadCurrentDocument();
+    const int phase2gCheckboxActivationsBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-checkbox");
+    const bool phase2gSpaceCheckbox =
+        phase2gReloadBeforeKeyboard &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-checkbox")) &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-checkbox") == phase2gCheckboxActivationsBefore + 1 &&
+        (phase2gKeyTap(32), !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-checkbox"));
+    const bool phase2gSpaceRadio =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-radio-b", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-radio-b"));
+    const int phase2gButtonBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button");
+    const bool phase2gSpaceButton =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-button", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button") == phase2gButtonBefore + 1) &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2gUrl;
+    const int phase2gSubmitBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-submit");
+    const int phase2gResetBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-reset");
+    const bool phase2gSpaceVisualButtons =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-submit", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-submit") == phase2gSubmitBefore + 1) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-reset", true) &&
+        (phase2gKeyTap(32), gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-reset") == phase2gResetBefore + 1) &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2gUrl;
+    const int phase2gTextLength = gxos::apps::Navigator::SmokeFormControlInputLengthById("phase2g-text");
+    const int phase2gTextareaLength = gxos::apps::Navigator::SmokeFormControlInputLengthById("phase2g-textarea");
+    const bool phase2gNonActivatingTextControls =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-text", true) &&
+        (phase2gKeyTap(32), phase2gKeyTap(13),
+         gxos::apps::Navigator::SmokeFormControlInputLengthById("phase2g-text") == phase2gTextLength) &&
+        phase2gTextareaLength >= 0 &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-textarea", true) &&
+        (phase2gKeyTap(32), phase2gKeyTap(13),
+         gxos::apps::Navigator::SmokeFormControlInputLengthById("phase2g-textarea") == phase2gTextareaLength) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-select", true) &&
+        (phase2gKeyTap(32), phase2gKeyTap(13), gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2gUrl);
+    const bool phase2gEnterButton =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-button", true) &&
+        (phase2gKeyTap(13), gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button") == phase2gButtonBefore + 2) &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2gUrl;
+    add("CSS phase 2G Space and Enter activation stays inert",
+        phase2gSpaceCheckbox && phase2gSpaceRadio && phase2gSpaceButton &&
+        phase2gSpaceVisualButtons && phase2gNonActivatingTextControls && phase2gEnterButton,
+        "checkbox=" + std::string(yesNo(phase2gSpaceCheckbox)) +
+        ",radio=" + yesNo(phase2gSpaceRadio) +
+        ",button-space=" + yesNo(phase2gSpaceButton) +
+        ",visual-buttons=" + yesNo(phase2gSpaceVisualButtons) +
+        ",text-controls=" + yesNo(phase2gNonActivatingTextControls) +
+        ",button-enter=" + yesNo(phase2gEnterButton));
+
+    const bool phase2gRepeatActivation =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-checkbox") == phase2gCheckboxActivationsBefore + 3;
+    const bool phase2gDisabledStaleActivation =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeSetFormControlDisabledById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlFocusedById("phase2g-checkbox") &&
+        gxos::apps::Navigator::SmokeSetFormControlDisabledById("phase2g-checkbox", false);
+    add("CSS phase 2G key-repeat and disabled stale-event safety",
+        phase2gRepeatActivation && phase2gDisabledStaleActivation,
+        "repeat=" + std::string(yesNo(phase2gRepeatActivation)) +
+        ",disabled-stale=" + yesNo(phase2gDisabledStaleActivation));
+
+    const bool phase2gKeyboardFocusForEvidence = gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true);
+    const std::string cssPhase2gKeyboardReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2gKeyboardEvidence =
+        phase2gKeyboardFocusForEvidence &&
+        contains(cssPhase2gKeyboardReport, "id=phase2g-checkbox") &&
+        contains(cssPhase2gKeyboardReport, "focusable=yes") &&
+        contains(cssPhase2gKeyboardReport, "focused=yes") &&
+        contains(cssPhase2gKeyboardReport, "focus-origin=keyboard") &&
+        contains(cssPhase2gKeyboardReport, "focus-pseudo-match=yes") &&
+        contains(cssPhase2gKeyboardReport, "focus-visible-pseudo-match=yes") &&
+        contains(cssPhase2gKeyboardReport, "css_focus_pseudo_parsed=") &&
+        contains(cssPhase2gKeyboardReport, "css_focus_pseudo_matches=") &&
+        contains(cssPhase2gKeyboardReport, "css_focus_visible_pseudo_matches=") &&
+        contains(cssPhase2gKeyboardReport, "form_focusable_controls=") &&
+        contains(cssPhase2gKeyboardReport, "form_focus_changes=") &&
+        contains(cssPhase2gKeyboardReport, "form_tab_forward=") &&
+        contains(cssPhase2gKeyboardReport, "form_tab_backward=") &&
+        contains(cssPhase2gKeyboardReport, "form_keyboard_activations=") &&
+        contains(cssPhase2gKeyboardReport, "form_space_activations=") &&
+        contains(cssPhase2gKeyboardReport, "form_enter_activations=") &&
+        contains(cssPhase2gKeyboardReport, "form_key_repeat_suppressed=") &&
+        contains(cssPhase2gKeyboardReport, "form_focus_mode=session_local_non_editing");
+    const bool phase2gSourceOrderFocused = gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-source-order", true);
+    const std::string phase2gSourceOrderReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2gInlineFocused = gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-inline", true);
+    const std::string phase2gInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2gImportantFocused = gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-important", true);
+    const std::string phase2gImportantReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2gCascadeEvidence =
+        phase2gSourceOrderFocused && phase2gInlineFocused && phase2gImportantFocused &&
+        contains(phase2gSourceOrderReport, "id=phase2g-source-order") &&
+        contains(phase2gSourceOrderReport, "focused=yes") &&
+        contains(phase2gSourceOrderReport, "color=#0f766e") &&
+        contains(phase2gInlineReport, "id=phase2g-inline") &&
+        contains(phase2gInlineReport, "focused=yes") &&
+        contains(phase2gInlineReport, "color=#1d4ed8") &&
+        contains(phase2gImportantReport, "id=phase2g-important") &&
+        contains(phase2gImportantReport, "focused=yes") &&
+        contains(phase2gImportantReport, "color=#b91c1c") &&
+        contains(phase2gImportantReport, "color-important=yes") &&
+        contains(cssPhase2gKeyboardReport, "padding-top=5");
+    const bool phase2gMouseFocusVisibleDeferral =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2g-checkbox") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse" &&
+        contains(gxos::apps::Navigator::SmokeRuntimeReport(), "id=phase2g-checkbox") &&
+        !contains(gxos::apps::Navigator::SmokeRuntimeReport(), "focus-visible-pseudo-match=yes");
+    add("CSS phase 2G focus pseudos, origin, and cascade evidence",
+        phase2gKeyboardEvidence && phase2gCascadeEvidence && phase2gMouseFocusVisibleDeferral,
+        "keyboard-evidence=" + std::string(yesNo(phase2gKeyboardEvidence)) +
+        ",cascade=" + yesNo(phase2gCascadeEvidence) +
+        ",mouse-focus-visible=" + yesNo(phase2gMouseFocusVisibleDeferral) +
+        "; source=" + evidenceSnippet(phase2gSourceOrderReport, "id=phase2g-source-order") +
+        "; inline=" + evidenceSnippet(phase2gInlineReport, "id=phase2g-inline") +
+        "; important=" + evidenceSnippet(phase2gImportantReport, "id=phase2g-important") +
+        "; report=" + summarizeText(cssPhase2gKeyboardReport, 1200));
+
+    const int phase2gLifecycleButtonBefore = gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button");
+    const bool phase2gNavigationClearsFocus =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2gUrl) &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2g-button") == 0;
+    const bool phase2gReloadClearsFocus =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        gxos::apps::Navigator::SmokeReloadCurrentDocument() &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2g-checkbox");
+    const bool phase2gAddressBarClearsFocus =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2g-checkbox", true) &&
+        (gxos::apps::Navigator::SmokeFocusAddressBar(),
+         gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+         gxos::apps::Navigator::SmokeFormFocusOrigin() == "none");
+    add("CSS phase 2G focus lifecycle and stale key-up guards",
+        phase2gNavigationClearsFocus && phase2gReloadClearsFocus && phase2gAddressBarClearsFocus,
+        "navigation=" + std::string(yesNo(phase2gNavigationClearsFocus)) +
+        ",reload=" + yesNo(phase2gReloadClearsFocus) +
+        ",address-bar=" + yesNo(phase2gAddressBarClearsFocus) +
+        ",old-button-count=" + std::to_string(phase2gLifecycleButtonBefore));
+    const std::string cssPhase2gFinalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 2G focus diagnostics are bounded and private",
+        contains(cssPhase2gFinalReport, "form_focus_mode=session_local_non_editing") &&
+        contains(cssPhase2gFinalReport, "form_focus_state_resets=") &&
+        contains(cssPhase2gFinalReport, "form_stale_key_activation_blocks=") &&
+        !contains(cssPhase2gFinalReport, "stable text marker") &&
+        !contains(cssPhase2gFinalReport, "phase2g-hidden-marker"),
+        "report=" + summarizeText(cssPhase2gFinalReport, 3600));
+
+    const std::string cssPhase2hUrl = "http://127.0.0.1:8080/navigator-smoke/css-phase2h.html";
+    const bool cssPhase2hLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2hUrl);
+    const bool phase2hEscapeCheckbox =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(27, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-checkbox") == 0;
+    const int phase2hButtonBeforeEscape = gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button");
+    const bool phase2hEscapeButton =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(27, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button") == phase2hButtonBeforeEscape;
+    const bool phase2hFocusChangeCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-radio", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox");
+    const bool phase2hKeyMismatchCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox");
+    const bool phase2hStateChangeCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeSetFormControlDisabledById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeSetFormControlDisabledById("phase2h-checkbox", false);
+    const bool phase2hHiddenCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeSetFormControlHiddenById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeSetFormControlHiddenById("phase2h-checkbox", false);
+    const bool phase2hGenerationCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeForceFormFocusGenerationMismatch() &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox");
+    const bool phase2hDeactivationCancel =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        (gxos::apps::Navigator::SmokeDeactivateWindow(), true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox");
+    const int phase2hCheckboxBeforeRepeat = gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-checkbox");
+    const bool phase2hSpaceRepeat =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-checkbox") == phase2hCheckboxBeforeRepeat + 1 &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-checkbox") == phase2hCheckboxBeforeRepeat + 1;
+    const int phase2hButtonBeforeRepeat = gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button");
+    const bool phase2hEnterRepeat =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button") == phase2hButtonBeforeRepeat + 1;
+    const bool phase2hAlternatingKeysSafe =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button") == phase2hButtonBeforeRepeat + 1;
+    const bool phase2hKeyboardOrigin =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "keyboard";
+    const bool phase2hMouseOrigin =
+        gxos::apps::Navigator::SmokeClickFormControlById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse";
+    const bool phase2hLabelMouseOrigin =
+        gxos::apps::Navigator::SmokeClickFormLabelById("phase2h-radio-label") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "mouse";
+    const bool phase2hLaterTabRestoresKeyboard =
+        gxos::apps::Navigator::SmokeKeyPress(9, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(9, "up") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "keyboard";
+    const std::string cssPhase2hReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase2hAccessibilityEvidence =
+        contains(cssPhase2hReport, "form_accessibility_records=") &&
+        contains(cssPhase2hReport, "role=checkbox") &&
+        contains(cssPhase2hReport, "role=radio") &&
+        contains(cssPhase2hReport, "role=button") &&
+        contains(cssPhase2hReport, "role=textbox") &&
+        contains(cssPhase2hReport, "role=password textbox") &&
+        contains(cssPhase2hReport, "role=textarea") &&
+        contains(cssPhase2hReport, "role=select") &&
+        contains(cssPhase2hReport, "label-source=wrapping") &&
+        contains(cssPhase2hReport, "label-source=for/id") &&
+        contains(cssPhase2hReport, "form_label_associations_invalid=") &&
+        contains(cssPhase2hReport, "form_accessibility_aria=deferred_native_bounded_only") &&
+        contains(cssPhase2hReport, "specificity=") &&
+        contains(cssPhase2hReport, "source-order=") &&
+        !contains(cssPhase2hReport, "do-not-log") &&
+        !contains(cssPhase2hReport, "Text placeholder") &&
+        !contains(cssPhase2hReport, "Phase 2H checkbox");
+    add("CSS phase 2H cancellation, repeat, and focus-origin fixture",
+        cssPhase2hLoaded && phase2hEscapeCheckbox && phase2hEscapeButton && phase2hFocusChangeCancel &&
+        phase2hKeyMismatchCancel && phase2hStateChangeCancel && phase2hHiddenCancel &&
+        phase2hGenerationCancel && phase2hDeactivationCancel && phase2hSpaceRepeat &&
+        phase2hEnterRepeat && phase2hAlternatingKeysSafe && phase2hKeyboardOrigin &&
+        phase2hMouseOrigin && phase2hLabelMouseOrigin && phase2hLaterTabRestoresKeyboard,
+        std::string("loaded=") + yesNo(cssPhase2hLoaded) +
+        ",escape-checkbox=" + yesNo(phase2hEscapeCheckbox) +
+        ",escape-button=" + yesNo(phase2hEscapeButton) +
+        ",focus-change=" + yesNo(phase2hFocusChangeCancel) +
+        ",key-mismatch=" + yesNo(phase2hKeyMismatchCancel) +
+        ",state-change=" + yesNo(phase2hStateChangeCancel) +
+        ",hidden=" + yesNo(phase2hHiddenCancel) +
+        ",generation=" + yesNo(phase2hGenerationCancel) +
+        ",deactivation=" + yesNo(phase2hDeactivationCancel) +
+        ",space-repeat=" + yesNo(phase2hSpaceRepeat) +
+        ",enter-repeat=" + yesNo(phase2hEnterRepeat) +
+        ",alternating=" + yesNo(phase2hAlternatingKeysSafe) +
+        ",keyboard-origin=" + yesNo(phase2hKeyboardOrigin) +
+        ",mouse-origin=" + yesNo(phase2hMouseOrigin) +
+        ",label-mouse-origin=" + yesNo(phase2hLabelMouseOrigin) +
+        ",tab-origin=" + yesNo(phase2hLaterTabRestoresKeyboard));
+    add("CSS phase 2H bounded accessibility and style evidence",
+        phase2hAccessibilityEvidence && contains(cssPhase2hReport, "form_focus_ring_draws=") &&
+        contains(cssPhase2hReport, "form_focus_reveal_noops=") &&
+        contains(cssPhase2hReport, "form_focus_visible_matches=") &&
+        contains(cssPhase2hReport, "form_accessible_name_missing="),
+        std::string("evidence=") + yesNo(phase2hAccessibilityEvidence) +
+        ",report=" + summarizeText(cssPhase2hReport, 5200));
+    const bool phase2hNavigationStaleKeyUp =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2hUrl) &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2h-button") == 0;
+    const bool phase2hReloadStaleKeyUp =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2h-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeReloadCurrentDocument() &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2h-checkbox") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    add("CSS phase 2H navigation/reload stale-key guards",
+        phase2hNavigationStaleKeyUp && phase2hReloadStaleKeyUp,
+        std::string("navigation=") + yesNo(phase2hNavigationStaleKeyUp) +
+        ",reload=" + yesNo(phase2hReloadStaleKeyUp));
 
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
@@ -1142,10 +2303,10 @@ static void help(){
                  " console.start | console.send <text> | console.pop [timeoutMs]\n"
                  " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>\n"
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
-                 " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
+                 " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
-                 " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.coverage | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
+                 " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
+                 " desktop.apps | desktop.apps.verbose | desktop.windows.owners | desktop.startup.regression | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
@@ -1249,7 +2410,29 @@ using namespace gxos;
                 "RECT 1000|20|60|120|40|180|60|60\n"
                 "BTN 1000|1|20|120|110|32|Click Me\n";
             std::string err; if(gui::GxmLoader::ExecuteText(script, err)) std::cout<<"Sample executed"<<std::endl; else std::cout<<"Sample error: "<<err<<std::endl; continue; }
-        if (cmd=="gui.start"){
+        if (cmd=="gui.sync"){
+            if(!requireCompositor()) continue;
+            std::string idS, generationS, sequenceS, freezeS;
+            iss >> idS >> generationS >> sequenceS >> freezeS;
+            if(idS.empty() || generationS.empty()){ std::cout<<"gui.sync <id> <frameGeneration> [frameSequence]"<<std::endl; continue; }
+            ipc::Message m;
+            m.type=(uint32_t)gui::MsgType::MT_SyncFrame;
+            std::string payload = idS + "|" + generationS + (sequenceS.empty() ? "" : "|" + sequenceS) + (freezeS.empty() ? "" : "|" + freezeS);
+            m.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.sync", std::move(m), false);
+            std::cout<<"Frame sync requested: windowId="<<idS<<" expectedFrameGeneration="<<generationS
+                     <<(sequenceS.empty() ? "" : " expectedFrameSequence=" + sequenceS)
+                     <<(freezeS.empty() ? "" : " freezeForCapture=" + freezeS)<<std::endl;
+        } else if (cmd=="gui.unfreeze") {
+            if(!requireCompositor()) continue;
+            std::string idS; iss >> idS;
+            if(idS.empty()){ std::cout<<"gui.unfreeze <id>"<<std::endl; continue; }
+            ipc::Message m;
+            m.type=(uint32_t)gui::MsgType::MT_UnfreezeFrame;
+            m.data.assign(idS.begin(), idS.end());
+            ipc::Bus::publish("gui.sync", std::move(m), false);
+            std::cout<<"Frame capture freeze release requested: windowId="<<idS<<std::endl;
+        } else if (cmd=="gui.start"){
             uint64_t before = Lifecycle::state().compositorPid;
             if(requireCompositor() && before!=0){ std::cout<<"Compositor already running pid="<<Lifecycle::state().compositorPid<<std::endl; }
         } else if (cmd=="gui.open.appmodeldemo"){
@@ -1348,8 +2531,23 @@ using namespace gxos;
         }
         // Desktop and Taskbar convenience commands
         else if (cmd=="desktop.wallpaper"){
-            if(!requireCompositor()) continue;
-            std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopWallpaperSet; m.data.assign(path.begin(), path.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop wallpaper set request sent: "<<path<<std::endl; }
+            std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; }
+            std::string error;
+            if (gui::DesktopBackgroundService::ImportAndSetDesktopBackground(path, error)) {
+                std::cout<<"Desktop background imported and selected: "<<path<<std::endl;
+            } else {
+                std::cout<<"Desktop background import failed: "<<error<<std::endl;
+            }
+        }
+        else if (cmd=="desktop.background.remove"){
+            std::string id; iss>>id; if(id.empty()){ std::cout<<"desktop.background.remove <id>"<<std::endl; continue; }
+            std::string error;
+            if (gui::DesktopBackgroundService::RemoveBackground(id, error)) {
+                std::cout<<"Desktop background removed: "<<id<<std::endl;
+            } else {
+                std::cout<<"Desktop background removal failed: "<<error<<std::endl;
+            }
+        }
         else if (cmd=="desktop.launch.resolve"){
             std::string label; std::getline(iss, label); if(label.size()>0 && label[0]==' ') label.erase(0,1); if(label.empty()){ std::cout<<"desktop.launch.resolve <label>"<<std::endl; continue; }
             std::cout << gui::DesktopService::ResolveLaunchTargetDiagnostic(label);
@@ -1393,12 +2591,108 @@ using namespace gxos;
                  std::cout<<"Desktop launch failed: "<<err<<std::endl;
              }
          }
+         else if (cmd=="desktop.open"){
+            if(!requireCompositor()) continue;
+             std::string pathAndMode; std::getline(iss, pathAndMode); if(pathAndMode.size()>0 && pathAndMode[0]==' ') pathAndMode.erase(0,1);
+             if(pathAndMode.empty()){ std::cout<<"desktop.open <path> [dir]"<<std::endl; continue; }
+             std::string mode;
+             if (pathAndMode.size() >= 4 && pathAndMode.rfind(" dir") == pathAndMode.size() - 4) {
+                 mode = "dir";
+                 pathAndMode.erase(pathAndMode.size() - 4);
+             } else if (pathAndMode.size() >= 10 && pathAndMode.rfind(" directory") == pathAndMode.size() - 10) {
+                 mode = "directory";
+                 pathAndMode.erase(pathAndMode.size() - 10);
+             }
+             if (pathAndMode.size() >= 2 && pathAndMode.front() == '"' && pathAndMode.back() == '"') {
+                 pathAndMode = pathAndMode.substr(1, pathAndMode.size() - 2);
+             }
+             std::string err;
+             const bool isDirectory = mode == "dir" || mode == "directory";
+             if (gui::DesktopService::OpenFilesystemEntry(pathAndMode, isDirectory, err)) {
+                 std::cout<<"Desktop open successful: "<<pathAndMode<<std::endl;
+             } else {
+                 std::cout<<"Desktop open failed: "<<err<<std::endl;
+             }
+         }
          else if (cmd=="desktop.pin" || cmd=="desktop.unpin"){
             if(!requireCompositor()) continue;
              std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<< (cmd=="desktop.pin"?"desktop.pin <action>":"desktop.unpin <action>") << std::endl; continue; }
              std::vector<std::pair<bool,std::string>> ops; ops.emplace_back(cmd=="desktop.pin", action);
              std::string payload = gui::packPins(ops);
              ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopPins; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop pin/unpin request sent: "<<payload<<std::endl; }
+        else if (cmd=="desktop.appmodel.active-typed-dispatch-gate"){
+            std::string mode; std::getline(iss, mode); if(mode.size()>0 && mode[0]==' ') mode.erase(0,1);
+            const bool restoreEnabled = gxos::apps::AppModelActiveTypedDispatchEnabled();
+            const bool forceOffRequested = mode == "force-off" || mode == "off" || mode == "disabled";
+            const bool forceOnRequested = mode == "force-on" || mode == "on" || mode == "enabled";
+            const bool resetRequested = mode == "reset" || mode == "restore" || mode == "default";
+            if (forceOffRequested) {
+                gxos::apps::SetAppModelActiveTypedDispatchEnabledForDiagnostics(false);
+            } else if (forceOnRequested) {
+                gxos::apps::SetAppModelActiveTypedDispatchEnabledForDiagnostics(true);
+            } else if (resetRequested) {
+                gxos::apps::ResetAppModelActiveTypedDispatchEnabledForDiagnostics();
+            }
+
+            const bool runtimeEnabled = gxos::apps::AppModelActiveTypedDispatchEnabled();
+            std::cout << "[AppModelActiveTypedDispatchGate]\n";
+            std::cout << "command: desktop.appmodel.active-typed-dispatch-gate\n";
+            std::cout << "mode: " << (forceOffRequested ? "force-off" : (forceOnRequested ? "force-on" : (resetRequested ? "reset" : "status"))) << "\n";
+            std::cout << "appModelActiveDispatchFeatureGate=" << gxos::apps::AppModelActiveTypedDispatchFeatureGateName() << "\n";
+            std::cout << "appModelActiveDispatchDefaultOnCandidateGate=" << gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateGateName() << "\n";
+            std::cout << "appModelActiveDispatchCandidateEnabled=" << (gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled() ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchEnabled=" << (runtimeEnabled ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchRuntimePath=" << (runtimeEnabled ? "active" : "inactive") << "\n";
+            std::cout << "appModelActiveDispatchEffectiveStateSource=" << gxos::apps::AppModelActiveTypedDispatchEffectiveStateSourceName() << "\n";
+            std::cout << "runtimeLaunchBehaviorChanged=true\n";
+            std::cout << "visibleLaunchBehaviorChanged=false\n";
+            std::cout << "appModelActiveDispatchRuntimeLaunchBehaviorChanged=true\n";
+            std::cout << "appModelActiveDispatchVisibleLaunchBehaviorChanged=false\n";
+            std::cout << "persistentDesktopStorageWrites=false\n";
+            std::cout << "appModelActiveDispatchPreviousState=" << (restoreEnabled ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchCurrentState=" << (runtimeEnabled ? "true" : "false") << "\n";
+            if (forceOffRequested || forceOnRequested || resetRequested) {
+                std::cout << "appModelActiveDispatchToggleApplied=true\n";
+            } else {
+                std::cout << "appModelActiveDispatchToggleApplied=false\n";
+            }
+            std::cout << "nonFatal=true\n";
+        }
+        else if (cmd=="desktop.appmodel.active-typed-dispatch-default-on-candidate"){
+            std::string mode; std::getline(iss, mode); if(mode.size()>0 && mode[0]==' ') mode.erase(0,1);
+            const bool candidateBefore = gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled();
+            const bool enableRequested = mode == "on" || mode == "enable" || mode == "enabled" || mode == "candidate-on";
+            const bool disableRequested = mode == "off" || mode == "disable" || mode == "disabled" || mode == "candidate-off";
+            const bool resetRequested = mode == "reset" || mode == "restore" || mode == "default";
+            if (enableRequested) {
+                gxos::apps::SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(true);
+            } else if (disableRequested) {
+                gxos::apps::SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(false);
+            } else if (resetRequested) {
+                gxos::apps::ResetAppModelActiveTypedDispatchEnabledForDiagnostics();
+            }
+
+            const bool candidateAfter = gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled();
+            const bool runtimeEnabled = gxos::apps::AppModelActiveTypedDispatchEnabled();
+            std::cout << "[AppModelActiveTypedDispatchCandidateGate]\n";
+            std::cout << "command: desktop.appmodel.active-typed-dispatch-default-on-candidate\n";
+            std::cout << "mode: " << (enableRequested ? "candidate-on" : (disableRequested ? "candidate-off" : (resetRequested ? "reset" : "status"))) << "\n";
+            std::cout << "appModelActiveDispatchFeatureGate=" << gxos::apps::AppModelActiveTypedDispatchFeatureGateName() << "\n";
+            std::cout << "appModelActiveDispatchDefaultOnCandidateGate=" << gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateGateName() << "\n";
+            std::cout << "appModelActiveDispatchCandidateEnabled=" << (candidateAfter ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchEnabled=" << (runtimeEnabled ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchRuntimePath=" << (runtimeEnabled ? "active" : "inactive") << "\n";
+            std::cout << "appModelActiveDispatchEffectiveStateSource=" << gxos::apps::AppModelActiveTypedDispatchEffectiveStateSourceName() << "\n";
+            std::cout << "runtimeLaunchBehaviorChanged=true\n";
+            std::cout << "visibleLaunchBehaviorChanged=false\n";
+            std::cout << "appModelActiveDispatchRuntimeLaunchBehaviorChanged=true\n";
+            std::cout << "appModelActiveDispatchVisibleLaunchBehaviorChanged=false\n";
+            std::cout << "persistentDesktopStorageWrites=false\n";
+            std::cout << "appModelActiveDispatchCandidatePreviousState=" << (candidateBefore ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchCandidateCurrentState=" << (candidateAfter ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchToggleApplied=" << ((enableRequested || disableRequested || resetRequested) ? "true" : "false") << "\n";
+            std::cout << "nonFatal=true\n";
+        }
         else if (cmd=="desktop.showconfig"){
             gxos::gui::DesktopConfigData cfg; std::string err;
             if(!gxos::gui::DesktopConfig::Load("desktop.json", cfg, err)){
@@ -1415,6 +2709,12 @@ using namespace gxos;
         }
         else if (cmd=="desktop.apps"){
             std::cout << gui::DesktopService::GetRegisteredAppsDiagnostic();
+        }
+        else if (cmd=="desktop.windows.owners"){
+            std::cout << desktopWindowOwnershipDiagnostic();
+        }
+        else if (cmd=="desktop.startup.regression"){
+            std::cout << desktopStartupAppModelRegressionDiagnostic();
         }
         else if (cmd=="desktop.apps.verbose"){
             std::cout << gui::DesktopService::GetRegisteredAppsVerboseDiagnostic();
@@ -1446,8 +2746,17 @@ using namespace gxos;
                 }
             }
         }
+        else if (cmd=="desktop.appmodel.inventory"){
+            std::cout << gui::DesktopService::AppModelInventoryDiagnostic();
+        }
+        else if (cmd=="desktop.appmodel.file-associations"){
+            std::cout << gui::DesktopService::FileAssociationV1Diagnostic();
+        }
         else if (cmd=="desktop.appmodel.coverage"){
             std::cout << gui::DesktopService::BuiltInAppMetadataCoverageDiagnostic();
+        }
+        else if (cmd=="desktop.appmodel.shell-objects"){
+            std::cout << gui::DesktopService::ShellObjectRegistryDiagnostic();
         }
         else if (cmd=="desktop.appmodel.typed-dispatch-gate"){
             std::string mode; std::getline(iss, mode); if(mode.size()>0 && mode[0]==' ') mode.erase(0,1);
@@ -1471,6 +2780,12 @@ using namespace gxos;
             auto& docs = gui::DesktopService::GetRecentDocuments();
             std::cout<<"Recent Documents ("<<docs.size()<<"):"<<std::endl;
             for(const auto& doc : docs) std::cout<<"  "<<doc.path<<std::endl;
+        }
+        else if (cmd=="desktop.recent.remove"){
+            std::string name; std::getline(iss, name); if(name.size()>0 && name[0]==' ') name.erase(0,1);
+            if(name.empty()){ std::cout<<"desktop.recent.remove <name>"<<std::endl; continue; }
+            const bool removed = gui::DesktopService::RemoveRecentProgram(name);
+            std::cout << "Recent program remove " << (removed ? "successful" : "skipped") << ": " << name << std::endl;
         }
         else if (cmd=="nativeapp.capabilities"){
             std::cout << gui::DesktopService::NativeAppCapabilitiesDiagnostic();

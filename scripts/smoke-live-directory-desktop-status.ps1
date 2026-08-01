@@ -96,6 +96,14 @@ $bareMetalDesktopIconInitMarkers = Find-FirstMatch -LiteralPath (Join-Path $Root
 $bareMetalDesktopBackingPathMarker = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare-metal desktop backing path chosen"
 $bareMetalDesktopNavigation = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_set_current_directory|bare_metal_desktop_go_back|bare_metal_desktop_go_home|sync_live_directory_from_shell_cwd"
 $bareMetalDesktopBackHome = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_go_back|bare_metal_desktop_go_home"
+$bareMetalWallpaperPersistenceWrite = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "wallpaper persist target id=|wallpaper persist path=|wallpaper persist readback source="
+$bareMetalWallpaperPersistenceLoad = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "wallpaper load id=|wallpaper resolve result=ok id="
+$bareMetalWallpaperPersistenceFallback = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "wallpaper fallback reason=|wallpaper load deferred reason="
+$bareMetalAltF4Shortcut = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "shortcut alt-f4 recognized|shortcut alt-f4 close-request|shortcut alt-f4 close-result|handle_alt_f4_shortcut|reset_alt_f4_shortcut_state|s_altF4ShortcutConsumed"
+$bareMetalRequestCloseWindow = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\kernel_compositor.cpp") -Pattern "requestCloseWindow\("
+$bareMetalRequestCloseLifecycle = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\kernel_app.cpp") -Pattern "onWindowClose\(\);|shutdown\(\);"
+$bareMetalKeyboardF4State = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\ps2keyboard.cpp") -Pattern "s_f4Down|is_f4_down|0x0C"
+$bareMetalKeyboardAltState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\ps2keyboard.cpp") -Pattern "is_left_alt_down|is_right_alt_down|s_altDown|s_rightAltDown"
 $bareMetalShellDesktopSyncApi = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\include\kernel\desktop.h") -Pattern "sync_live_directory_from_shell_cwd"
 $bareMetalShellDesktopSyncCall = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "sync_live_directory_from_shell_cwd"
 $bareMetalShellDesktopSync = if ($null -ne $bareMetalShellDesktopSyncApi -and $null -ne $bareMetalShellDesktopSyncCall) { $bareMetalShellDesktopSyncCall } else { $null }
@@ -181,6 +189,14 @@ Emit-Check "bare-metal desktop startup sync API" "present" $bareMetalDesktopStar
 Emit-Check "bare-metal desktop startup sync call" "present" $bareMetalDesktopStartupSyncCall
 Emit-Check "bare-metal desktop navigation helpers" "present" $bareMetalDesktopNavigation
 Emit-Check "bare-metal desktop back/home helpers" "present" $bareMetalDesktopBackHome
+Emit-Check "bare-metal wallpaper persistence write markers" "present" $bareMetalWallpaperPersistenceWrite
+Emit-Check "bare-metal wallpaper persistence load marker" "present" $bareMetalWallpaperPersistenceLoad
+Emit-Check "bare-metal wallpaper persistence fallback marker" "present" $bareMetalWallpaperPersistenceFallback
+Emit-Check "bare-metal Alt+F4 shortcut routing" "present" $bareMetalAltF4Shortcut
+Emit-Check "bare-metal compositor request-close helper" "present" $bareMetalRequestCloseWindow
+Emit-Check "bare-metal request-close lifecycle" "present" $bareMetalRequestCloseLifecycle
+Emit-Check "bare-metal F4 state tracking" "present" $bareMetalKeyboardF4State
+Emit-Check "bare-metal Alt state tracking" "present" $bareMetalKeyboardAltState
 Emit-Check "bare-metal shell desktop sync API" "present" $bareMetalShellDesktopSyncApi
 Emit-Check "bare-metal shell desktop sync call" "present" $bareMetalShellDesktopSyncCall
 Emit-Check "bare-metal shell desktop sync hook" "present" $bareMetalShellDesktopSync
@@ -217,7 +233,7 @@ if ($null -eq $displayOptionsIconSize) {
 }
 
 $hostedParityPresent = $null -ne $hostedDesktopLive -and $null -ne $hostedDesktopPathState -and $null -ne $hostedDesktopNav -and $null -ne $hostedShellCdCommand -and $null -ne $hostedShellDesktopBridge -and $null -ne $showOnDesktop -and $null -ne $hostedNonRootCompactIcons -and $null -ne $displayOptionsIconSize -and $null -ne $rightClickIconSize
-$bareMetalSourceParityPresent = $null -ne $bareMetalDesktopState -and $null -ne $bareMetalDesktopHomePath -and $null -ne $bareMetalDesktopHomeCheck -and $null -ne $bareMetalDesktopBackingPathMarker -and $null -ne $bareMetalDesktopIconInitMarkers -and $null -ne $bareMetalDesktopManualRefresh -and $null -ne $bareMetalDesktopStartupSync -and $null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopBackHome -and $null -ne $bareMetalShellDesktopSync -and $null -ne $kernelBareMetalCompactIcons -and $null -eq $kernelBareMetalDesktopConfigLoad
+$bareMetalSourceParityPresent = $null -ne $bareMetalDesktopState -and $null -ne $bareMetalDesktopHomePath -and $null -ne $bareMetalDesktopHomeCheck -and $null -ne $bareMetalDesktopBackingPathMarker -and $null -ne $bareMetalDesktopIconInitMarkers -and $null -ne $bareMetalDesktopManualRefresh -and $null -ne $bareMetalDesktopStartupSync -and $null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopBackHome -and $null -ne $bareMetalWallpaperPersistenceWrite -and $null -ne $bareMetalWallpaperPersistenceLoad -and $null -ne $bareMetalWallpaperPersistenceFallback -and $null -ne $bareMetalAltF4Shortcut -and $null -ne $bareMetalRequestCloseWindow -and $null -ne $bareMetalRequestCloseLifecycle -and $null -ne $bareMetalKeyboardF4State -and $null -ne $bareMetalKeyboardAltState -and $null -ne $bareMetalShellDesktopSync -and $null -ne $kernelBareMetalCompactIcons -and $null -eq $kernelBareMetalDesktopConfigLoad
 $bareMetalParityPresent = if ($runtimeEvidenceFresh) { $true } else { $bareMetalSourceParityPresent }
 
 $desktopSmokeScripts = @(
@@ -225,8 +241,15 @@ $desktopSmokeScripts = @(
     "scripts\smoke-appmodel-launchshadow.ps1",
     "scripts\smoke-appmodel-phase2-status.ps1",
     "scripts\smoke-appmodel-typed-dispatch-flags.ps1",
+    "scripts\smoke-appmodel-phase3a-active-typed-dispatch.ps1",
+    "scripts\smoke-appmodel-phase3b-active-typed-dispatch.ps1",
+    "scripts\smoke-appmodel-phase3c-active-typed-dispatch.ps1",
+    "scripts\smoke-appmodel-phase3d-active-typed-dispatch.ps1",
+    "scripts\smoke-appmodel-phase3e-active-typed-dispatch.ps1",
     "scripts\smoke-navigator-hosted.ps1",
     "scripts\smoke-navigator-kernel.ps1",
+    "scripts\smoke-appmodel-phase5a-status.ps1",
+    "scripts\smoke-appmodel-phase5b-regression-closeout.ps1",
     "scripts\smoke-taskmanager-snapshot.ps1"
 )
 
@@ -271,11 +294,13 @@ Write-Host "  bare-metal-home-path=$(if ($null -ne $bareMetalDesktopHomePath) { 
 Write-Host "  bare-metal-folder-navigation=$(if ($null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopHomeCheck) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-back-go-desktop=$(if ($null -ne $bareMetalDesktopBackHome) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-go-desktop-target=$(if ($null -ne $bareMetalDesktopHomePath) { '/Desktop' } else { 'missing' })"
+Write-Host "  bare-metal-wallpaper-persistence=$(if ($null -ne $bareMetalWallpaperPersistenceWrite -and $null -ne $bareMetalWallpaperPersistenceLoad -and $null -ne $bareMetalWallpaperPersistenceFallback) { 'source-integrated' } else { 'missing' })"
+Write-Host "  bare-metal-alt-f4-shortcut=$(if ($null -ne $bareMetalAltF4Shortcut -and $null -ne $bareMetalRequestCloseWindow -and $null -ne $bareMetalRequestCloseLifecycle) { 'source-integrated' } else { 'missing' })"
 Write-Host "  bare-metal-shell-cd-sync=$(if ($null -ne $bareMetalShellDesktopSync) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-nonroot-smaller-icons=$(if ($null -ne $kernelBareMetalCompactIcons) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-nonroot-icon-config=$(if ($null -eq $kernelBareMetalDesktopConfigLoad) { 'default-on-no-host-config' } else { 'host-config-loaded' })"
-Write-Host "  bare-metal-parity=$(if ($bareMetalParityPresent) { if ($runtimeEvidenceFresh) { 'feature-present-runtime-evidence-partial' } else { 'feature-present-evidence-partial' } } else { 'missing' })"
-Write-Host "  live-directory-desktop-parity=$(if ($hostedParityPresent -and $bareMetalParityPresent) { if ($runtimeEvidenceFresh) { 'hosted-present-baremetal-present-runtime-evidence' } else { 'hosted-present-baremetal-present-source-only' } } else { 'missing' })"
+Write-Host "  bare-metal-parity=$(if ($bareMetalParityPresent) { if ($runtimeEvidenceFresh) { 'runtime-verified-partial' } else { 'source-only-evidence-partial' } } else { 'missing' })"
+Write-Host "  live-directory-desktop-parity=$(if ($hostedParityPresent -and $bareMetalParityPresent) { if ($runtimeEvidenceFresh) { 'hosted-present-baremetal-present-runtime-verified' } else { 'hosted-present-baremetal-present-source-only' } } else { 'missing' })"
 if ($runtimeEvidenceFresh) {
     Write-Host "  live-directory-desktop-runtime-path=$(if ($runtimeEvidencePathMode -eq 'native-desktop-live-smoke') { 'native-desktop-live-smoke' } elseif ($runtimeEvidencePathMode -eq 'alias-fallback') { 'alias-fallback' } else { $runtimeEvidencePathMode })"
     Write-Host "  live-directory-desktop-native-path=$(if ($runtimeEvidenceNativePathAvailable -eq 'PASS') { 'present' } elseif ($runtimeEvidencePathMode -eq 'alias-fallback') { 'blocked' } else { 'missing' })"

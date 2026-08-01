@@ -50,6 +50,38 @@ function Test-SerialLogContains {
     return $content.Contains($Pattern)
 }
 
+function Test-FileContainsAscii {
+    param(
+        [string]$Path,
+        [string]$Pattern
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $false
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $needle = [System.Text.Encoding]::ASCII.GetBytes($Pattern)
+    if ($needle.Length -eq 0 -or $bytes.Length -lt $needle.Length) {
+        return $false
+    }
+
+    for ($i = 0; $i -le $bytes.Length - $needle.Length; $i++) {
+        $matched = $true
+        for ($j = 0; $j -lt $needle.Length; $j++) {
+            if ($bytes[$i + $j] -ne $needle[$j]) {
+                $matched = $false
+                break
+            }
+        }
+        if ($matched) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 $qemu = Find-Qemu
 if (-not $qemu) { throw "qemu-system-x86_64 not found." }
 
@@ -61,6 +93,12 @@ $bootloader = Join-Path $esp "EFI\BOOT\BOOTX64.EFI"
 if (-not (Test-Path $bootloader)) {
     throw "ESP/EFI/BOOT/BOOTX64.EFI not found. Run build.bat first."
 }
+
+$cleanupMarker = "desktopCleanupRuntimePass=2"
+$builtKernel = Join-Path $Root "kernel\build\amd64\bin\kernel.elf"
+$espKernel = Join-Path $esp "kernel.elf"
+$cleanupMarkerInBuiltKernel = Test-FileContainsAscii -Path $builtKernel -Pattern $cleanupMarker
+$cleanupMarkerInEspKernel = Test-FileContainsAscii -Path $espKernel -Pattern $cleanupMarker
 
 $args = @(
     "-machine", "pc",
@@ -95,6 +133,7 @@ try {
 $output = if (Test-Path $serialLog) { Get-Content $serialLog -Raw } else { "" }
 Write-Host $output
 
+$cleanupMarkerPresent = $cleanupMarkerInBuiltKernel -or $cleanupMarkerInEspKernel -or $output.Contains($cleanupMarker)
 $iconInitStarted = $output.Contains("[desktop] bare-metal desktop icon init starting")
 $iconInitCompleted = $output.Contains("[desktop] bare-metal desktop icon init completed")
 $backingPathChosen = $output.Contains("[desktop] bare-metal desktop backing path chosen:")
@@ -102,12 +141,23 @@ $startupRequestedCount = [regex]::Matches($output, '\[desktop\] bare-metal start
 $startupCompletedCount = [regex]::Matches($output, '\[desktop\] bare-metal startup desktop folder scan completed').Count
 $startupRequested = $startupRequestedCount -eq 1
 $startupCompleted = $startupCompletedCount -eq 1
+$launchSmokeBegin = $output.Contains("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke begin")
+$launchSmokeEnd = $output.Contains("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke end")
+$displayOptionsLaunch = $output.Contains("[KERNEL] desktopCleanupRuntimePass=2 launch app=DisplayOptions result=PASS")
+$notepadLaunch = $output.Contains("[KERNEL] desktopCleanupRuntimePass=2 launch app=Notepad result=PASS")
+$calculatorLaunch = $output.Contains("[KERNEL] desktopCleanupRuntimePass=2 launch app=Calculator result=PASS")
 $summaryPresent = [regex]::IsMatch($output, '\[desktop\] Desktop folder enumeration completed discovered=')
 
-$overallPass = $iconInitStarted -and $iconInitCompleted -and $backingPathChosen -and $startupRequested -and $startupCompleted -and $summaryPresent
+$overallPass = (-not $cleanupMarkerPresent) -and $iconInitStarted -and $iconInitCompleted -and $backingPathChosen -and $startupRequested -and $startupCompleted -and $summaryPresent -and (-not $launchSmokeBegin) -and (-not $launchSmokeEnd) -and (-not $displayOptionsLaunch) -and (-not $notepadLaunch) -and (-not $calculatorLaunch)
 
+Write-Host "cleanup marker present: $cleanupMarkerPresent"
 Write-Host "startup scan requested count: $startupRequestedCount"
 Write-Host "startup scan completed count: $startupCompletedCount"
+Write-Host "launch smoke begin: $launchSmokeBegin"
+Write-Host "launch smoke end: $launchSmokeEnd"
+Write-Host "DisplayOptions launch: $displayOptionsLaunch"
+Write-Host "Notepad launch: $notepadLaunch"
+Write-Host "Calculator launch: $calculatorLaunch"
 
 if ($overallPass) {
     Write-Host "Desktop startup sync smoke PASS. Serial log: $serialLog"

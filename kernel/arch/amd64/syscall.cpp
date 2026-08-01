@@ -18,6 +18,8 @@
 #include "include/arch/syscall.h"
 #include "include/arch/amd64.h"
 #include "include/arch/context_switch.h"
+#include "kernel/file_clipboard.h"
+#include "kernel/pit.h"
 
 #if defined(_MSC_VER)
 #define GXOS_MSVC_STUB 1
@@ -276,7 +278,16 @@ int64_t dispatch(SyscallArgs* args)
 extern "C" void exception_dispatch(uint64_t vector, uint64_t error_code,
                                    uint64_t rip, uint64_t rflags)
 {
-    (void)rflags;
+    serial_puts("[KERNEL-EXCEPTION] vector=");
+    serial_put_hex(vector);
+    serial_puts(" error=");
+    serial_put_hex(error_code);
+    serial_puts(" RIP=");
+    serial_put_hex(rip);
+    serial_puts(" RFLAGS=");
+    serial_put_hex(rflags);
+    serial_puts(" RSP=unavailable RBP=unavailable\n");
+    file_clipboard::trace_exception_context();
     
     switch (vector) {
         case 0:   // Divide Error
@@ -350,6 +361,8 @@ void handle_page_fault(uint64_t error_code, uint64_t fault_addr)
     serial_puts((error_code & 0x4) ? " (user)" : " (kernel)");
     serial_puts(" at ");
     serial_put_hex(fault_addr);
+    serial_puts(" CR2=");
+    serial_put_hex(fault_addr);
     serial_puts("\n");
     
     // TODO: Implement page fault handling
@@ -393,6 +406,7 @@ void handle_interrupt(uint32_t vector)
     
     if (irq == 0) {
         // Timer interrupt (IRQ 0)
+        kernel::pit::irq_handler();
         context::arch_timer_tick();
     } else if (irq < MAX_IRQS && s_irq_handlers[irq]) {
         s_irq_handlers[irq](irq);

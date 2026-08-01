@@ -60,6 +60,11 @@ typedef Status (*WriteSectorsFn)(uint8_t devIndex,
                                  uint32_t count,
                                  const void* buffer);
 
+// Persist completed writes in the device cache. Transports whose writes are
+// already durable may leave this callback null; the block layer then treats
+// synchronous write completion as the persistence boundary.
+typedef Status (*FlushFn)(uint8_t devIndex);
+
 // ================================================================
 // Block device descriptor
 // ================================================================
@@ -73,6 +78,7 @@ struct BlockDevice {
     char          name[32];       // human-readable, e.g. "ata0", "nvme0n1"
     ReadSectorsFn  readFn;
     WriteSectorsFn writeFn;
+    FlushFn       flushFn;
 };
 
 static const uint8_t MAX_BLOCK_DEVICES = 16;
@@ -110,6 +116,10 @@ Status write_sectors(uint8_t devIndex,
                      uint64_t lba,
                      uint32_t count,
                      const void* buffer);
+
+// Flush transport/device write caches. A transport without a flush callback
+// is considered synchronously durable.
+Status flush(uint8_t devIndex);
 
 } // namespace block
 } // namespace kernel

@@ -16,6 +16,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/startmenubutton_img.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
+#include "include/kernel/file_clipboard.h"
 #include "include/kernel/shell.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_apps.h"
@@ -39,6 +40,7 @@
 #if ARCH_HAS_PIC_8259
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
 #endif
+#include "include/kernel/native_elf_baremetal.h"
 #if defined(GXOS_BARE_METAL)
 #include "include/kernel/app_launch_target_resolver.h"
 #endif
@@ -262,6 +264,7 @@ static inline void disable_interrupts()
 void perform_shutdown()
 {
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
+    kernel::serial::puts("[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none\n");
     // Method 1: QEMU debug exit (cleanest for QEMU with isa-debug-exit device)
     // Exit code will be (0 << 1) | 1 = 1, indicating success
     outb_power(QEMU_DEBUG_EXIT_PORT, 0x00);
@@ -303,6 +306,7 @@ void perform_shutdown()
 void perform_restart()
 {
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
+    kernel::serial::puts("[SHUTDOWN] final reason=system-restart exitCode=1 caller=desktop expected=1 runtime=none app=none\n");
     disable_interrupts();
     
     // Method 1: Keyboard controller reset (most reliable)
@@ -928,7 +932,10 @@ static TaskbarDockPosition parse_taskbar_position(const char* value)
     return TaskbarDockPosition::Bottom;
 }
 
-static const char* kBareMetalDisplayOptionsStorePath = "/display-options.cfg";
+static const char* kBareMetalDisplayOptionsStorePath = "/desktop.cfg";
+static const char* kBareMetalDisplayOptionsLegacyStorePath = "/display-options.cfg";
+static const char* kBareMetalWallpaperIdStorePath = "/wallpaper.id";
+static const char* kBareMetalWallpaperIdLegacyStorePath = "/desktop.wallpaper.id";
 static const int kBareMetalWallpaperIdMax = 96;
 static const int kBareMetalScaleModeMax = 16;
 static const int kBareMetalThemeIdMax = 32;
@@ -961,6 +968,136 @@ static void bare_metal_display_options_defaults(BareMetalDisplayOptionsData& sto
     store.showDesktopSystemSettings = false;
     store.smallLiveDesktopFolderIcons = true;
     store.autoArrangeDesktopIcons = false;
+}
+
+enum class BareMetalDisplayOptionsLoadSource : uint8_t;
+static bool bare_metal_parse_bool_value(const char* value, bool fallback);
+static void bare_metal_trim_in_place(char* value);
+static const char* bare_metal_normalize_scale_mode(const char* value);
+static const char* bare_metal_normalize_taskbar_position(const char* value);
+
+static bool bare_metal_load_display_options_from_ini_path(const char* path, BareMetalDisplayOptionsData& out, BareMetalDisplayOptionsLoadSource source, BareMetalDisplayOptionsLoadSource* outSource = nullptr)
+{
+    if (!path || !path[0]) return false;
+
+    vfs::FileInfo info{};
+    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR || info.size == 0) {
+        return false;
+    }
+
+    char text[512];
+    int32_t count = vfs::read_file(path, text, sizeof(text) - 1);
+    if (count <= 0) {
+        return false;
+    }
+
+    text[count] = '\0';
+    bool parsedAny = false;
+    char* cursor = text;
+    while (*cursor) {
+        char* line = cursor;
+        while (*cursor && *cursor != '\n' && *cursor != '\r') {
+            ++cursor;
+        }
+        if (*cursor) {
+            *cursor++ = '\0';
+            while (*cursor == '\n' || *cursor == '\r') {
+                ++cursor;
+            }
+        }
+        bare_metal_trim_in_place(line);
+        if (!line[0] || line[0] == '#' || line[0] == ';') continue;
+        char* sep = line;
+        while (*sep && *sep != '=') ++sep;
+        if (*sep != '=') continue;
+        *sep++ = '\0';
+        bare_metal_trim_in_place(line);
+        bare_metal_trim_in_place(sep);
+        if (desktop_str_eq(line, "version") || desktop_str_eq(line, "displayOptionsVersion")) {
+            parsedAny = true;
+            continue;
+        }
+        if (desktop_str_eq(line, "wallpaperId")) {
+            desktop_str_copy(out.wallpaperId, sep, (int)sizeof(out.wallpaperId));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "backgroundScaleMode")) {
+            desktop_str_copy(out.backgroundScaleMode, bare_metal_normalize_scale_mode(sep), (int)sizeof(out.backgroundScaleMode));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "desktopThemeId")) {
+            desktop_str_copy(out.desktopThemeId, sep, (int)sizeof(out.desktopThemeId));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "taskbarPosition")) {
+            desktop_str_copy(out.taskbarPosition, bare_metal_normalize_taskbar_position(sep), (int)sizeof(out.taskbarPosition));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "showDesktopTrash")) {
+            out.showDesktopTrash = bare_metal_parse_bool_value(sep, out.showDesktopTrash);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "showDesktopThisSystem")) {
+            out.showDesktopThisSystem = bare_metal_parse_bool_value(sep, out.showDesktopThisSystem);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "showDesktopFileManager")) {
+            out.showDesktopFileManager = bare_metal_parse_bool_value(sep, out.showDesktopFileManager);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "showDesktopSystemSettings")) {
+            out.showDesktopSystemSettings = bare_metal_parse_bool_value(sep, out.showDesktopSystemSettings);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "smallLiveDesktopFolderIcons")) {
+            out.smallLiveDesktopFolderIcons = bare_metal_parse_bool_value(sep, out.smallLiveDesktopFolderIcons);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "autoArrangeDesktopIcons")) {
+            out.autoArrangeDesktopIcons = bare_metal_parse_bool_value(sep, out.autoArrangeDesktopIcons);
+            parsedAny = true;
+        }
+    }
+
+    if (parsedAny) {
+        if (outSource) {
+            *outSource = source;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+enum class BareMetalDisplayOptionsLoadSource : uint8_t {
+    None = 0,
+    Primary = 1,
+    Legacy = 2,
+};
+
+static const char* bare_metal_display_options_load_source_name(BareMetalDisplayOptionsLoadSource source)
+{
+    switch (source) {
+        case BareMetalDisplayOptionsLoadSource::Primary: return "primary";
+        case BareMetalDisplayOptionsLoadSource::Legacy: return "legacy";
+        case BareMetalDisplayOptionsLoadSource::None:
+        default:
+            return "none";
+    }
+}
+
+static void bare_metal_log_display_options_backend(const char* prefix)
+{
+    serial::puts(prefix);
+    serial::puts(" path=");
+    serial::puts(kBareMetalDisplayOptionsStorePath);
+    serial::puts(" backend=");
+    const vfs::MountPoint* mount = vfs::get_mount(kBareMetalDisplayOptionsStorePath);
+    if (mount) {
+        serial::puts(vfs::fs_type_name(mount->fsType));
+        serial::puts(" mount=");
+        serial::puts(mount->path);
+        serial::puts(" device=");
+        serial::put_hex8(mount->blockDevIndex);
+        serial::puts(" readonly=");
+        serial::puts(mount->readOnly ? "1" : "0");
+        serial::puts(" alias=");
+        serial::puts(mount->alias ? "1" : "0");
+    } else {
+        serial::puts("unmounted");
+    }
+    serial::putc('\n');
 }
 
 static bool bare_metal_parse_bool_value(const char* value, bool fallback)
@@ -1009,9 +1146,10 @@ static const char* bare_metal_normalize_taskbar_position(const char* value)
     return "bottom";
 }
 
-static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& store)
+static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& store, BareMetalDisplayOptionsLoadSource* outSource = nullptr)
 {
     bare_metal_display_options_defaults(store);
+    bool foundAny = false;
 
     char value[16];
     int32_t count = vfs::read_file("/desktop.taskbar.position", value, sizeof(value) - 1);
@@ -1019,6 +1157,7 @@ static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& 
         value[count] = '\0';
         bare_metal_trim_in_place(value);
         desktop_str_copy(store.taskbarPosition, taskbar_position_name(parse_taskbar_position(value)), (int)sizeof(store.taskbarPosition));
+        foundAny = true;
     }
 
     char modeBuf[32];
@@ -1027,6 +1166,7 @@ static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& 
         modeBuf[count] = '\0';
         bare_metal_trim_in_place(modeBuf);
         desktop_str_copy(store.backgroundScaleMode, bare_metal_normalize_scale_mode(modeBuf), (int)sizeof(store.backgroundScaleMode));
+        foundAny = true;
     }
 
     char idBuf[96];
@@ -1035,6 +1175,7 @@ static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& 
         idBuf[count] = '\0';
         bare_metal_trim_in_place(idBuf);
         desktop_str_copy(store.wallpaperId, idBuf, (int)sizeof(store.wallpaperId));
+        foundAny = true;
     }
 
     char buffer[192];
@@ -1045,90 +1186,81 @@ static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& 
         store.showDesktopThisSystem = parse_system_icon_setting(buffer, count, "ThisSystem", true);
         store.showDesktopFileManager = parse_system_icon_setting(buffer, count, "FileManager", true);
         store.showDesktopSystemSettings = parse_system_icon_setting(buffer, count, "SystemSettings", false);
+        foundAny = true;
     }
 
-    return true;
+    if (outSource && foundAny) {
+        *outSource = BareMetalDisplayOptionsLoadSource::Legacy;
+    }
+
+    return foundAny;
 }
 
-static bool bare_metal_load_display_options(BareMetalDisplayOptionsData& out)
+static bool bare_metal_load_display_options(BareMetalDisplayOptionsData& out, BareMetalDisplayOptionsLoadSource* outSource = nullptr)
 {
     bare_metal_display_options_defaults(out);
-
-    vfs::FileInfo info{};
-    if (vfs::stat(kBareMetalDisplayOptionsStorePath, &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR && info.size > 0) {
-        char text[512];
-        int32_t count = vfs::read_file(kBareMetalDisplayOptionsStorePath, text, sizeof(text) - 1);
-        if (count > 0) {
-            text[count] = '\0';
-            bool parsedAny = false;
-            char* cursor = text;
-            while (*cursor) {
-                char* line = cursor;
-                while (*cursor && *cursor != '\n' && *cursor != '\r') {
-                    ++cursor;
-                }
-                if (*cursor) {
-                    *cursor++ = '\0';
-                    while (*cursor == '\n' || *cursor == '\r') {
-                        ++cursor;
-                    }
-                }
-                bare_metal_trim_in_place(line);
-                if (!line[0] || line[0] == '#' || line[0] == ';') continue;
-                char* sep = line;
-                while (*sep && *sep != '=') ++sep;
-                if (*sep != '=') continue;
-                *sep++ = '\0';
-                bare_metal_trim_in_place(line);
-                bare_metal_trim_in_place(sep);
-                if (desktop_str_eq(line, "version") || desktop_str_eq(line, "displayOptionsVersion")) {
-                    parsedAny = true;
-                    continue;
-                }
-                if (desktop_str_eq(line, "wallpaperId")) {
-                    desktop_str_copy(out.wallpaperId, sep, (int)sizeof(out.wallpaperId));
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "backgroundScaleMode")) {
-                    desktop_str_copy(out.backgroundScaleMode, bare_metal_normalize_scale_mode(sep), (int)sizeof(out.backgroundScaleMode));
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "desktopThemeId")) {
-                    desktop_str_copy(out.desktopThemeId, sep, (int)sizeof(out.desktopThemeId));
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "taskbarPosition")) {
-                    desktop_str_copy(out.taskbarPosition, bare_metal_normalize_taskbar_position(sep), (int)sizeof(out.taskbarPosition));
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "showDesktopTrash")) {
-                    out.showDesktopTrash = bare_metal_parse_bool_value(sep, out.showDesktopTrash);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "showDesktopThisSystem")) {
-                    out.showDesktopThisSystem = bare_metal_parse_bool_value(sep, out.showDesktopThisSystem);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "showDesktopFileManager")) {
-                    out.showDesktopFileManager = bare_metal_parse_bool_value(sep, out.showDesktopFileManager);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "showDesktopSystemSettings")) {
-                    out.showDesktopSystemSettings = bare_metal_parse_bool_value(sep, out.showDesktopSystemSettings);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "smallLiveDesktopFolderIcons")) {
-                    out.smallLiveDesktopFolderIcons = bare_metal_parse_bool_value(sep, out.smallLiveDesktopFolderIcons);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "autoArrangeDesktopIcons")) {
-                    out.autoArrangeDesktopIcons = bare_metal_parse_bool_value(sep, out.autoArrangeDesktopIcons);
-                    parsedAny = true;
-                }
-            }
-
-            if (parsedAny) {
-                return true;
-            }
-        }
+    if (outSource) {
+        *outSource = BareMetalDisplayOptionsLoadSource::None;
     }
 
-    bare_metal_load_display_options_legacy(out);
+    const vfs::MountPoint* mount = vfs::get_mount(kBareMetalDisplayOptionsStorePath);
+    if (!mount) {
+        return false;
+    }
+
+    if (bare_metal_load_display_options_from_ini_path(kBareMetalDisplayOptionsStorePath, out, BareMetalDisplayOptionsLoadSource::Primary, outSource)) {
+        return true;
+    }
+
+    if (bare_metal_load_display_options_from_ini_path(kBareMetalDisplayOptionsLegacyStorePath, out, BareMetalDisplayOptionsLoadSource::Legacy, outSource)) {
+        return true;
+    }
+
+    BareMetalDisplayOptionsLoadSource legacySource = BareMetalDisplayOptionsLoadSource::None;
+    if (bare_metal_load_display_options_legacy(out, &legacySource)) {
+        if (outSource) {
+            *outSource = legacySource;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool bare_metal_load_wallpaper_id_file_at_path(const char* path, char* outWallpaperId, int outWallpaperIdSize)
+{
+    if (!path || !path[0] || !outWallpaperId || outWallpaperIdSize <= 0) return false;
+    outWallpaperId[0] = '\0';
+
+    if (!vfs::get_mount(path)) {
+        return false;
+    }
+
+    char idBuf[kBareMetalWallpaperIdMax];
+    const int32_t count = vfs::read_file(path, idBuf, sizeof(idBuf) - 1);
+    if (count <= 0) {
+        return false;
+    }
+
+    idBuf[count] = '\0';
+    bare_metal_trim_in_place(idBuf);
+    if (!idBuf[0]) {
+        return false;
+    }
+
+    desktop_str_copy(outWallpaperId, idBuf, outWallpaperIdSize);
     return true;
 }
 
-static void bare_metal_save_display_options(const BareMetalDisplayOptionsData& store)
+static bool bare_metal_load_wallpaper_id_file(char* outWallpaperId, int outWallpaperIdSize)
+{
+    if (bare_metal_load_wallpaper_id_file_at_path(kBareMetalWallpaperIdStorePath, outWallpaperId, outWallpaperIdSize)) {
+        return true;
+    }
+    return bare_metal_load_wallpaper_id_file_at_path(kBareMetalWallpaperIdLegacyStorePath, outWallpaperId, outWallpaperIdSize);
+}
+
+static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& store, int32_t* outPrimaryWrite = nullptr)
 {
     char text[512];
     int pos = 0;
@@ -1154,7 +1286,13 @@ static void bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     desktop_append_text(text, &pos, sizeof(text), "\nautoArrangeDesktopIcons=");
     desktop_append_text(text, &pos, sizeof(text), store.autoArrangeDesktopIcons ? "1" : "0");
     desktop_append_text(text, &pos, sizeof(text), "\n");
-    vfs::write_file(kBareMetalDisplayOptionsStorePath, text, (uint32_t)pos);
+    const int32_t primaryWrite = vfs::write_file(kBareMetalDisplayOptionsStorePath, text, (uint32_t)pos);
+    const bool primaryWriteOk = primaryWrite == pos;
+    if (outPrimaryWrite) {
+        *outPrimaryWrite = primaryWrite;
+    }
+
+    vfs::write_file(kBareMetalDisplayOptionsLegacyStorePath, text, (uint32_t)pos);
 
     const char* taskbar = store.taskbarPosition[0] ? store.taskbarPosition : "bottom";
     vfs::write_file("/desktop.taskbar.position", taskbar, (uint32_t)desktop_strlen(taskbar));
@@ -1172,10 +1310,34 @@ static void bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     vfs::write_file("/desktop.system.icons", buffer, (uint32_t)pos);
 
     if (store.wallpaperId[0]) {
-        vfs::write_file("/desktop.wallpaper.id", store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
+        vfs::write_file(kBareMetalWallpaperIdStorePath, store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
+        vfs::write_file(kBareMetalWallpaperIdLegacyStorePath, store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
     }
     const char* mode = store.backgroundScaleMode[0] ? store.backgroundScaleMode : "fill";
     vfs::write_file("/desktop.background.scale", mode, (uint32_t)desktop_strlen(mode));
+
+    return primaryWriteOk;
+}
+
+static void bare_metal_serial_put_uint32_dec(uint32_t value)
+{
+    char buf[11];
+    int pos = 0;
+    if (value == 0) {
+        buf[pos++] = '0';
+    } else {
+        char tmp[10];
+        int tmpPos = 0;
+        while (value > 0 && tmpPos < 10) {
+            tmp[tmpPos++] = static_cast<char>('0' + (value % 10));
+            value /= 10;
+        }
+        while (tmpPos > 0) {
+            buf[pos++] = tmp[--tmpPos];
+        }
+    }
+    buf[pos] = '\0';
+    serial::puts(buf);
 }
 
 static void persist_taskbar_position()
@@ -1189,10 +1351,13 @@ static void persist_taskbar_position()
 static void load_persisted_taskbar_position()
 {
     BareMetalDisplayOptionsData store;
-    if (!bare_metal_load_display_options(store)) return;
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    if (!bare_metal_load_display_options(store, &source)) return;
     s_taskbarDockPosition = parse_taskbar_position(store.taskbarPosition);
     serial::puts("[desktop] loaded taskbar position=");
     serial::puts(taskbar_position_name(s_taskbarDockPosition));
+    serial::puts(" source=");
+    serial::puts(bare_metal_display_options_load_source_name(source));
     serial::puts("\n");
 }
 
@@ -1301,21 +1466,11 @@ static bool bare_metal_desktop_directory_exists(const char* path)
 static bool bare_metal_desktop_directory_is_writable(const char* path)
 {
     if (!bare_metal_desktop_directory_exists(path)) return false;
-
-    char probePath[vfs::VFS_MAX_PATH];
-    vfs::join_path(path, ".gxos_desktop_probe", probePath, sizeof(probePath));
-    vfs::Status probeStatus = vfs::mkdir(probePath);
-    if (probeStatus == vfs::VFS_OK) {
-        vfs::rmdir(probePath);
-        return true;
-    }
-    if (probeStatus == vfs::VFS_ERR_EXISTS) {
-        if (vfs::rmdir(probePath) == vfs::VFS_OK && vfs::mkdir(probePath) == vfs::VFS_OK) {
-            vfs::rmdir(probePath);
-            return true;
-        }
-    }
-    return false;
+    // Do not perform a separate destructive write probe. The actual requested
+    // operation is the authoritative writability test and its detailed VFS /
+    // FAT status is reported through the desktop Create Folder trace.
+    const vfs::MountPoint* mount = vfs::get_mount(path);
+    return mount && !mount->readOnly && mount->fsType == vfs::FS_TYPE_FAT32;
 }
 
 static bool bare_metal_prepare_desktop_directory(const char* path)
@@ -1708,6 +1863,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
     {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
     {"Paint",       false, true,  0xFFC87830},  // recent
+    {"Nexgen PacMan", true, false, 0xFFE0B020}, // discovered Native ELF package
     {"Clock",       false, true,  0xFF4690C8},  // recent
     {"File Explorer", false, true, 0xFFC8B43C}, // recent
     {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
@@ -1727,6 +1883,7 @@ static const char* s_allProgramsList[] = {
     "HDInstaller",
     "ImgViewer",
     "AppModel",
+    "Nexgen PacMan",
     "Notepad",
     "Paint",
     "TaskManager",
@@ -1812,6 +1969,15 @@ enum class ContextMenuMode : uint8_t {
 static ContextMenuMode s_contextMenuMode = ContextMenuMode::Desktop;
 static char s_contextMenuAppName[64] = {0};
 static int s_contextMenuIconDisplayIndex = -1;
+// Keep the menu shape stable for its lifetime. Clipboard state can become
+// stale between opening the menu and clicking it; that must not remap a stale
+// Paste slot onto another command.
+static bool s_contextMenuPasteVisibleAtOpen = false;
+// The clicked filesystem target is owned by the menu, rather than borrowed
+// from the refreshable desktop icon model. Delete uses this stable path after
+// revalidating it at the mutation boundary.
+static char s_contextMenuTargetPath[vfs::VFS_MAX_PATH] = {0};
+static bool s_contextMenuTargetIsDirectory = false;
 
 // Notification toast
 struct NotificationToast {
@@ -1827,6 +1993,104 @@ static NotificationToast s_notification = {
     true,
     0
 };
+static char s_desktopMkdirFailureMessage[80] = {0};
+static char s_fileOperationMessage[160] = {0};
+static bool s_fileOperationFeedbackShown = false;
+static const uint64_t kFileOperationProgressVisibilityThreshold = 128u * 1024u;
+
+static void desktop_file_operation_progress(const file_clipboard::FileOperationProgress& progress)
+{
+    if (progress.state == file_clipboard::OperationState::Preparing &&
+        progress.phase == file_clipboard::PasteStage::SourceValidation &&
+        progress.bytesCompleted == 0) {
+        s_fileOperationFeedbackShown = false;
+    }
+
+    const bool terminal = progress.state == file_clipboard::OperationState::Completed ||
+                          progress.state == file_clipboard::OperationState::Failed;
+    if (!terminal && progress.totalKnown &&
+        progress.totalBytes < kFileOperationProgressVisibilityThreshold) {
+        // Small files normally complete before a second frame would be useful.
+        // Keep the operation state active, but avoid a distracting dialog flash.
+        return;
+    }
+
+    s_fileOperationMessage[0] = '\0';
+    const char* verb = progress.operation == file_clipboard::Operation::Move ? "Moving" : "Copying";
+    if (progress.state == file_clipboard::OperationState::Preparing) {
+        desktop_str_copy(s_fileOperationMessage,
+                         progress.totalKnown ? "Preparing file..." : "Preparing files...",
+                         (int)sizeof(s_fileOperationMessage));
+        if (progress.sourceDisplayName[0]) {
+            s_fileOperationMessage[0] = '\0';
+            int pos = 0;
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                                "Preparing ");
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                                progress.sourceDisplayName);
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "...");
+        }
+    } else if (progress.state == file_clipboard::OperationState::Copying ||
+               progress.state == file_clipboard::OperationState::Moving) {
+        int pos = 0;
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), verb);
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), " ");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                            progress.totalKnown && progress.sourceDisplayName[0]
+                                ? progress.sourceDisplayName : "files");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), " - ");
+        if (progress.totalKnown && progress.totalBytes > 0) {
+            uint64_t completed = progress.bytesCompleted > progress.totalBytes
+                ? progress.totalBytes : progress.bytesCompleted;
+            int percent = static_cast<int>((completed * 100u) / progress.totalBytes);
+            desktop_append_int(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), percent);
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "%");
+        } else {
+            desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "in progress...");
+        }
+    } else if (progress.state == file_clipboard::OperationState::Verifying) {
+        int pos = 0;
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "Verifying ");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                            progress.sourceDisplayName[0] ? progress.sourceDisplayName : "files");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage), "...");
+    } else if (progress.state == file_clipboard::OperationState::Refreshing) {
+        desktop_str_copy(s_fileOperationMessage, "Refreshing destination...",
+                         (int)sizeof(s_fileOperationMessage));
+    } else if (progress.state == file_clipboard::OperationState::Completed) {
+        if (!s_fileOperationFeedbackShown) return;
+        int pos = 0;
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                            progress.operation == file_clipboard::Operation::Move ? "Moved " : "Copied ");
+        desktop_append_text(s_fileOperationMessage, &pos, (int)sizeof(s_fileOperationMessage),
+                            progress.sourceDisplayName[0] ? progress.sourceDisplayName : "item");
+    } else if (progress.state == file_clipboard::OperationState::Failed) {
+        desktop_str_copy(s_fileOperationMessage, file_clipboard::paste_diagnostic_message(),
+                         (int)sizeof(s_fileOperationMessage));
+    }
+
+    if (progress.state == file_clipboard::OperationState::Failed) {
+        s_notification.title = "File operation failed";
+    } else if (progress.state == file_clipboard::OperationState::Completed) {
+        s_notification.title = progress.operation == file_clipboard::Operation::Move
+            ? "Move complete" : "Copy complete";
+    } else {
+        s_notification.title = verb;
+        s_fileOperationFeedbackShown = true;
+    }
+    s_notification.message = s_fileOperationMessage;
+    s_notification.visible = true;
+    // The normal desktop tick will start the terminal toast's lifetime once
+    // the operation has released its active-state guard.  Keeping this at
+    // zero also avoids coupling the shell-facing callback to tick ordering.
+    s_notification.showTime = 0;
+    s_needsRedraw = true;
+
+    // This callback runs at the start of the operation and after bounded
+    // chunks. Repaint and service only the guarded desktop pump so the user
+    // sees progress without allowing nested filesystem dispatch.
+    cooperative_yield();
+}
 
 // ============================================================
 // Wallpaper Configuration
@@ -1951,7 +2215,11 @@ struct WallpaperImageCache {
 
 static WallpaperPackEntry s_wallpaperPackEntries[kBuiltInWallpaperCount * 2];
 static int s_wallpaperPackEntryCount = 0;
+#if defined(GXOS_BARE_METAL)
 static bool s_wallpaperPackMounted = false;
+#else
+static bool s_wallpaperPackMounted = true;
+#endif
 static WallpaperImageCache s_wallpaperThumbCache[kBuiltInWallpaperCount];
 static WallpaperImageCache s_wallpaperFullCache{};
 static const char* s_wallpaperFullCacheId = nullptr;
@@ -2374,6 +2642,9 @@ static int32_t s_shellResizeStartY = 0;
 static int32_t s_shellResizeStartW = 0;
 static int32_t s_shellResizeStartH = 0;
 
+static const uint32_t kAltF4KeyCode = 0x113;
+static bool s_altF4ShortcutConsumed = false;
+
 // Forward declarations
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 static void draw_shell_window();
@@ -2383,6 +2654,7 @@ static int find_nearest_icon_in_direction(int currentIcon, int direction);
 static void show_icon_notification(int iconIndex);
 static void show_start_menu_notification(const char* label);
 static void toggle_show_desktop();
+static void reset_alt_f4_shortcut_state();
 static bool try_launch_kernel_app(const char* appName);
 
 // ============================================================
@@ -2548,7 +2820,6 @@ static int hit_test_app_model_dialog(int32_t mx, int32_t my)
     return -1;
 }
 
-static bool text_ends_with(const char* value, const char* suffix);
 static bool text_ends_with_ignore_case(const char* value, const char* suffix);
 
 static bool desktop_entry_is_known_image(const char* name)
@@ -3783,36 +4054,6 @@ static void arrange_desktop_icons_into_grid(bool persistPositions)
     s_needsRedraw = true;
 }
 
-static void build_unique_new_folder_name(int suffixIndex, char* out, int outSize)
-{
-    if (!out || outSize <= 0) return;
-
-    const char* prefix = "NewFolder";
-    int prefixLen = 8;
-    int digits = 1;
-    for (int value = suffixIndex; value >= 10; value /= 10) ++digits;
-    prefixLen = 8 - digits;
-    if (prefixLen < 1) prefixLen = 1;
-
-    int pos = 0;
-    for (int i = 0; prefix[i] && i < prefixLen && pos + 1 < outSize; ++i) {
-        out[pos++] = prefix[i];
-    }
-
-    char suffix[16];
-    int suffixPos = 0;
-    int value = suffixIndex;
-    do {
-        suffix[suffixPos++] = (char)('0' + (value % 10));
-        value /= 10;
-    } while (value > 0 && suffixPos < (int)sizeof(suffix));
-
-    while (suffixPos > 0 && pos + 1 < outSize) {
-        out[pos++] = suffix[--suffixPos];
-    }
-    out[pos] = '\0';
-}
-
 static bool bare_metal_desktop_resolve_directory_target(const char* targetPath, char* resolvedPath, size_t resolvedPathSize)
 {
     if (!resolvedPath || resolvedPathSize == 0) return false;
@@ -3952,6 +4193,24 @@ bool sync_live_directory_from_shell_cwd(const char* cwd)
 #if defined(GXOS_BARE_METAL)
 void refresh_bare_metal_desktop_folders_after_vfs_ready()
 {
+    // Desktop::init runs before VFS mount on bare metal, so the first backing
+    // directory resolution can only retain the default path. Re-resolve it
+    // now that the real writable mount exists, and create the directory if
+    // the freshly mounted volume does not contain it yet.
+    char resolvedDesktopPath[vfs::VFS_MAX_PATH] = {0};
+    if (bare_metal_ensure_desktop_backing_directory(resolvedDesktopPath,
+                                                     (int)sizeof(resolvedDesktopPath))) {
+        desktop_str_copy(s_bareMetalDesktopHomePath, resolvedDesktopPath,
+                         (int)sizeof(s_bareMetalDesktopHomePath));
+        desktop_str_copy(s_bareMetalDesktopCurrentPath, resolvedDesktopPath,
+                         (int)sizeof(s_bareMetalDesktopCurrentPath));
+        s_bareMetalDesktopHistoryCount = 0;
+        serial::puts("[desktop] desktop backing directory resolved after VFS ready: ");
+        serial::puts(resolvedDesktopPath);
+        serial::puts("\n");
+    } else {
+        serial::puts("[desktop] desktop backing directory unresolved after VFS ready\n");
+    }
     if (!bare_metal_ensure_standard_user_folders()) {
         serial::puts("[desktop] warning: one or more standard user folders could not be created\n");
     }
@@ -4625,19 +4884,56 @@ static bool remove_from_start_menu_recent(const char* appName)
 }
 
 // Get current start menu item count based on mode
+static bool start_menu_item_is_available(const char* appName)
+{
+#if defined(GXOS_BARE_METAL)
+    if (desktop_str_eq(appName, "Nexgen PacMan")) {
+        return native_elf::is_available(appName);
+    }
+#endif
+    return true;
+}
+
+static const char* start_menu_visible_item_for_index(int visibleIndex)
+{
+    if (visibleIndex < 0) return "";
+
+    int current = 0;
+    if (s_startMenuAllProgs) {
+        for (int i = 0; i < kAllProgramsCount; ++i) {
+            if (!start_menu_item_is_available(s_allProgramsList[i])) continue;
+            if (current++ == visibleIndex) return s_allProgramsList[i];
+        }
+        return "";
+    }
+
+    for (int i = 0; i < s_startMenuRecentProgramCount; ++i) {
+        if (!start_menu_item_is_available(s_startMenuRecentPrograms[i])) continue;
+        if (current++ == visibleIndex) return s_startMenuRecentPrograms[i];
+    }
+    return "";
+}
+
 static int get_start_menu_item_count()
 {
-    return s_startMenuAllProgs ? kAllProgramsCount : s_startMenuRecentProgramCount;
+    int count = 0;
+    if (s_startMenuAllProgs) {
+        for (int i = 0; i < kAllProgramsCount; ++i) {
+            if (start_menu_item_is_available(s_allProgramsList[i])) ++count;
+        }
+    } else {
+        for (int i = 0; i < s_startMenuRecentProgramCount; ++i) {
+            if (start_menu_item_is_available(s_startMenuRecentPrograms[i])) ++count;
+        }
+    }
+    return count;
 }
 
 static const char* start_menu_left_item_label_for_row(int row)
 {
     if (row < 0) return "";
     int itemIndex = row + s_startMenuScroll;
-    if (s_startMenuAllProgs) {
-        return (itemIndex >= 0 && itemIndex < kAllProgramsCount) ? s_allProgramsList[itemIndex] : "";
-    }
-    return (itemIndex >= 0 && itemIndex < s_startMenuRecentProgramCount) ? s_startMenuRecentPrograms[itemIndex] : "";
+    return start_menu_visible_item_for_index(itemIndex);
 }
 
 // ============================================================
@@ -4999,7 +5295,23 @@ void set_wallpaper_image_pack(const void* packBase, uint64_t packSize)
         return;
     }
 
-    if (kernel::vfs::mount_type("/system", blockIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
+    // A normal bare-metal boot has a writable ESP mounted at /, so keep the
+    // wallpaper image at /system there.  A release ISO has no writable block
+    // device exposed to the kernel; in that case the boot ramdisk is the
+    // read-only root filesystem and must also provide the canonical /Apps
+    // package path.  Alias /system back to the same image so existing
+    // wallpaper paths remain stable in both boot modes.
+    if (!kernel::vfs::get_mount("/")) {
+        if (kernel::vfs::mount_type("/", blockIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
+            serial::puts("[desktop] failed to mount boot runtime image at /\n");
+            return;
+        }
+        if (kernel::vfs::mount_alias("/system", "/") == 0xFF) {
+            serial::puts("[desktop] failed to alias boot runtime image at /system\n");
+            return;
+        }
+        serial::puts("[desktop] mounted boot runtime image at /; /system aliases the same image\n");
+    } else if (kernel::vfs::mount_type("/system", blockIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
         serial::puts("[desktop] failed to mount wallpaper image pack at /system\n");
         return;
     }
@@ -5024,75 +5336,198 @@ bool draw_wallpaper_thumbnail_by_id(const char* wallpaperId, uint32_t x, uint32_
 static void load_persisted_wallpaper_scale_mode()
 {
     BareMetalDisplayOptionsData store;
-    bare_metal_load_display_options(store);
+    bare_metal_log_display_options_backend("[desktop] wallpaper load");
+    if (!vfs::get_mount(kBareMetalDisplayOptionsStorePath)) {
+        serial::puts("[desktop] wallpaper load deferred reason=settings-volume-not-mounted\n");
+        return;
+    }
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    if (!bare_metal_load_display_options(store, &source)) {
+        serial::puts("[desktop] wallpaper fallback reason=read-or-parse-failed\n");
+        return;
+    }
     bool supported = true;
     s_wallpaperConfig.scaleMode = parse_wallpaper_scale_mode(store.backgroundScaleMode, &supported);
     serial::puts("[desktop] loaded background scale mode=");
     serial::puts(wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode));
+    serial::puts(" source=");
+    serial::puts(bare_metal_display_options_load_source_name(source));
     serial::puts("\n");
     if (!supported) serial::puts("[desktop] unsupported background scale mode, falling back to fill\n");
 }
 
-static void load_persisted_wallpaper_id()
+static void apply_wallpaper_gradient_selection(const BuiltInGradientPalette* gradient)
+{
+    if (!gradient) return;
+    s_wallpaperConfig.type = WallpaperType::Gradient;
+    s_wallpaperConfig.topColor = gradient->topColor;
+    s_wallpaperConfig.bottomColor = gradient->bottomColor;
+    s_wallpaperConfig.gridColor = gradient->accentColor;
+    s_wallpaperConfig.wallpaperId = gradient->id;
+    s_wallpaperConfig.showBranding = true;
+    s_wallpaperConfig.showGrid = true;
+}
+
+static void apply_wallpaper_builtin_selection(const BuiltInWallpaperPalette* entry)
+{
+    if (!entry) return;
+    s_wallpaperConfig.type = WallpaperType::BuiltIn;
+    s_wallpaperConfig.topColor = entry->topColor;
+    s_wallpaperConfig.bottomColor = entry->bottomColor;
+    s_wallpaperConfig.gridColor = entry->accentColor;
+    s_wallpaperConfig.wallpaperId = entry->id;
+    s_wallpaperConfig.showBranding = false;
+    s_wallpaperConfig.showGrid = false;
+}
+
+static bool persist_wallpaper_selection(const char* wallpaperId)
 {
     BareMetalDisplayOptionsData store;
-    bare_metal_load_display_options(store);
-    const char* wallpaperId = store.wallpaperId;
-    if (!wallpaperId[0]) return;
-    serial::puts("[desktop] loaded saved background id=");
-    serial::puts(wallpaperId);
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    bare_metal_load_display_options(store, &source);
+    desktop_str_copy(store.wallpaperId, wallpaperId ? wallpaperId : "", (int)sizeof(store.wallpaperId));
+    desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
+    serial::puts("[desktop] wallpaper persist target id=");
+    serial::puts(wallpaperId ? wallpaperId : "(null)");
     serial::puts("\n");
+    bare_metal_log_display_options_backend("[desktop] wallpaper persist");
+    int32_t primaryWrite = 0;
+    const bool saved = bare_metal_save_display_options(store, &primaryWrite);
+    serial::puts("[desktop] wallpaper persist path=");
+    serial::puts(kBareMetalDisplayOptionsStorePath);
+    serial::puts(" result=");
+    serial::puts(saved ? "ok" : "fail");
+    if (primaryWrite >= 0) {
+        serial::puts(" bytes=");
+        bare_metal_serial_put_uint32_dec(static_cast<uint32_t>(primaryWrite));
+    } else {
+        serial::puts(" error=0x");
+        serial::put_hex32(static_cast<uint32_t>(primaryWrite));
+    }
+    serial::puts(" source=");
+    serial::puts(bare_metal_display_options_load_source_name(source));
+    serial::putc('\n');
+
+    BareMetalDisplayOptionsData readback;
+    BareMetalDisplayOptionsLoadSource readbackSource = BareMetalDisplayOptionsLoadSource::None;
+    const bool readbackOk = bare_metal_load_display_options(readback, &readbackSource);
+    serial::puts("[desktop] wallpaper persist readback source=");
+    serial::puts(bare_metal_display_options_load_source_name(readbackSource));
+    serial::puts(" id=");
+    serial::puts(readbackOk ? (readback.wallpaperId[0] ? readback.wallpaperId : "(empty)") : "(unavailable)");
+    serial::puts(" match=");
+    serial::puts(readbackOk && desktop_str_eq(readback.wallpaperId, wallpaperId ? wallpaperId : "") ? "1" : "0");
+    serial::putc('\n');
+    return saved;
+}
+
+static void load_persisted_wallpaper_id()
+{
+    const char* defaultWallpaperId = s_builtInWallpapers[0].id;
+    char wallpaperFileId[kBareMetalWallpaperIdMax];
+    const bool haveWallpaperFileId = bare_metal_load_wallpaper_id_file(wallpaperFileId, sizeof(wallpaperFileId));
+
+    BareMetalDisplayOptionsData store;
+    bare_metal_log_display_options_backend("[desktop] wallpaper load");
+    if (!vfs::get_mount(kBareMetalDisplayOptionsStorePath)) {
+        serial::puts("[desktop] wallpaper load deferred reason=settings-volume-not-mounted\n");
+        return;
+    }
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    const bool haveConfig = bare_metal_load_display_options(store, &source);
+    const char* configWallpaperId = haveConfig ? store.wallpaperId : "";
+    const char* wallpaperId = nullptr;
+    const char* wallpaperSource = nullptr;
+
+    if (haveWallpaperFileId) {
+        if (configWallpaperId[0] && desktop_str_eq(wallpaperFileId, defaultWallpaperId) && !desktop_str_eq(configWallpaperId, defaultWallpaperId)) {
+            wallpaperId = configWallpaperId;
+            wallpaperSource = "config-overrode-default-wallpaper-file";
+        } else {
+            wallpaperId = wallpaperFileId;
+            wallpaperSource = "wallpaper-file";
+        }
+    } else if (haveConfig) {
+        wallpaperId = configWallpaperId;
+        wallpaperSource = bare_metal_display_options_load_source_name(source);
+    }
+
+    if (!wallpaperId || !wallpaperId[0]) {
+        serial::puts("[desktop] wallpaper fallback reason=missing-or-empty\n");
+        apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
+        serial::puts("[desktop] wallpaper apply source=default id=");
+        serial::puts(s_builtInWallpapers[0].id);
+        serial::puts("\n");
+        return;
+    }
+
+    serial::puts("[desktop] wallpaper load id=");
+    serial::puts(wallpaperId);
+    serial::puts(" source=");
+    serial::puts(wallpaperSource ? wallpaperSource : "unknown");
+    serial::putc('\n');
+
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
-        s_wallpaperConfig.type = WallpaperType::Gradient;
-        s_wallpaperConfig.topColor = gradient->topColor;
-        s_wallpaperConfig.bottomColor = gradient->bottomColor;
-        s_wallpaperConfig.gridColor = gradient->accentColor;
-        s_wallpaperConfig.wallpaperId = gradient->id;
-        s_wallpaperConfig.showBranding = true;
-        s_wallpaperConfig.showGrid = true;
-        serial::puts("[desktop] loaded background kind=gradient\n");
+        apply_wallpaper_gradient_selection(gradient);
+        serial::puts("[desktop] wallpaper resolve result=ok id=");
+        serial::puts(gradient->id);
+        serial::puts("\n");
+        serial::puts("[desktop] wallpaper apply source=persisted id=");
+        serial::puts(gradient->id);
+        serial::puts("\n");
         return;
     }
 
     const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(wallpaperId);
     if (entry) {
-        s_wallpaperConfig.type = WallpaperType::BuiltIn;
-        s_wallpaperConfig.topColor = entry->topColor;
-        s_wallpaperConfig.bottomColor = entry->bottomColor;
-        s_wallpaperConfig.gridColor = entry->accentColor;
-        s_wallpaperConfig.wallpaperId = entry->id;
-        s_wallpaperConfig.showBranding = false;
-        s_wallpaperConfig.showGrid = false;
-        serial::puts("[desktop] loaded background kind=image\n");
+        apply_wallpaper_builtin_selection(entry);
+        if (s_wallpaperPackMounted) {
+            WallpaperImageCache* image = load_wallpaper_full_cache(entry->id);
+            if (!image) {
+                serial::puts("[desktop] wallpaper image unavailable, keeping persisted selection id=");
+                serial::puts(wallpaperId);
+                serial::puts("\n");
+            } else {
+                serial::puts("[desktop] wallpaper resolve result=ok id=");
+                serial::puts(entry->id);
+                serial::puts("\n");
+            }
+        } else {
+            serial::puts("[desktop] wallpaper load deferred reason=wallpaper-pack-not-mounted id=");
+            serial::puts(wallpaperId);
+            serial::puts("\n");
+        }
+        serial::puts("[desktop] wallpaper apply source=persisted id=");
+        serial::puts(entry->id);
+        serial::puts("\n");
     } else {
-        serial::puts("[desktop] Invalid persisted wallpaper id, using default\n");
+        serial::puts("[desktop] wallpaper fallback reason=invalid-id id=");
+        serial::puts(wallpaperId);
+        serial::puts("\n");
+        apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
+        serial::puts("[desktop] wallpaper apply source=default id=");
+        serial::puts(s_builtInWallpapers[0].id);
+        serial::puts("\n");
     }
 }
 
 void set_wallpaper_by_id(const char* wallpaperId)
 {
-    serial::puts("[desktop] set wallpaper request id=");
+    serial::puts("[desktop] wallpaper select id=");
     serial::puts(wallpaperId ? wallpaperId : "(null)");
     serial::puts("\n");
-    bool shouldPersist = true;
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
+        if (s_wallpaperConfig.type == WallpaperType::Gradient && desktop_str_eq(s_wallpaperConfig.wallpaperId, gradient->id)) {
+            persist_wallpaper_selection(gradient->id);
+            return;
+        }
         serial::puts("[desktop] selected gradient id=");
         serial::puts(gradient->id);
         serial::puts("\n");
-        s_wallpaperConfig.type = WallpaperType::Gradient;
-        s_wallpaperConfig.topColor = gradient->topColor;
-        s_wallpaperConfig.bottomColor = gradient->bottomColor;
-        s_wallpaperConfig.gridColor = gradient->accentColor;
-        s_wallpaperConfig.wallpaperId = gradient->id;
-        s_wallpaperConfig.showBranding = true;
-        s_wallpaperConfig.showGrid = true;
-        BareMetalDisplayOptionsData store;
-        bare_metal_load_display_options(store);
-        desktop_str_copy(store.wallpaperId, gradient->id, (int)sizeof(store.wallpaperId));
-        desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
-        bare_metal_save_display_options(store);
+        apply_wallpaper_gradient_selection(gradient);
+        persist_wallpaper_selection(gradient->id);
         s_needsRedraw = true;
         return;
     }
@@ -5101,27 +5536,18 @@ void set_wallpaper_by_id(const char* wallpaperId)
     if (!entry) {
         serial::puts("[desktop] Wallpaper id not found, falling back to default\n");
         entry = &s_builtInWallpapers[0];
-        shouldPersist = false;
+    }
+    if (s_wallpaperConfig.type == WallpaperType::BuiltIn && desktop_str_eq(s_wallpaperConfig.wallpaperId, entry->id)) {
+        persist_wallpaper_selection(entry->id);
+        return;
     }
     serial::puts("[desktop] selected wallpaper full=");
     serial::puts(entry->fullImagePath);
     serial::puts(" thumb=");
     serial::puts(entry->thumbnailPath);
     serial::puts("\n");
-    s_wallpaperConfig.type = WallpaperType::BuiltIn;
-    s_wallpaperConfig.topColor = entry->topColor;
-    s_wallpaperConfig.bottomColor = entry->bottomColor;
-    s_wallpaperConfig.gridColor = entry->accentColor;
-    s_wallpaperConfig.wallpaperId = entry->id;
-    s_wallpaperConfig.showBranding = false;
-    s_wallpaperConfig.showGrid = false;
-    if (shouldPersist) {
-        BareMetalDisplayOptionsData store;
-        bare_metal_load_display_options(store);
-        desktop_str_copy(store.wallpaperId, entry->id, (int)sizeof(store.wallpaperId));
-        desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
-        bare_metal_save_display_options(store);
-    }
+    apply_wallpaper_builtin_selection(entry);
+    persist_wallpaper_selection(entry->id);
     s_needsRedraw = true;
 }
 
@@ -5458,20 +5884,6 @@ static bool text_equals(const char* a, const char* b)
     return *a == '\0' && *b == '\0';
 }
 
-static bool text_ends_with(const char* value, const char* suffix)
-{
-    if (!value || !suffix) return false;
-    int valueLen = 0;
-    int suffixLen = 0;
-    while (value[valueLen]) ++valueLen;
-    while (suffix[suffixLen]) ++suffixLen;
-    if (suffixLen > valueLen) return false;
-    for (int i = 0; i < suffixLen; ++i) {
-        if (value[valueLen - suffixLen + i] != suffix[i]) return false;
-    }
-    return true;
-}
-
 static bool text_ends_with_ignore_case(const char* value, const char* suffix)
 {
     if (!value || !suffix) return false;
@@ -5523,7 +5935,7 @@ static bool desktop_trash_root_has_items(const char* trashRoot)
     vfs::DirEntry entry{};
     while (vfs::readdir(dir, &entry)) {
         if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
-        if (text_ends_with(entry.name, ".trashinfo")) continue;
+        if (file_clipboard::is_trash_metadata_name(entry.name)) continue;
         hasItems = true;
         break;
     }
@@ -6521,10 +6933,9 @@ static void draw_start_menu()
     // Left column: app list, Right column: system shortcuts
     uint32_t headerH = 30;
     uint32_t footerH = 36;
-    // Use kStartMenuAppCount (not visibleRows) so menuH/menuY stays consistent
-    // with get_start_menu_geometry() used by hit-testing - otherwise the menu
-    // renders at a different Y than the hover/click hit-test expects.
-    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuRowH;
+    // Use the filtered item count so a missing or invalid Native ELF package
+    // cannot leave a clickable PacMan row in the menu geometry.
+    uint32_t bodyH = (uint32_t)itemCount * kStartMenuRowH;
     uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     uint32_t maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     uint32_t menuH = headerH + maxBodyH + footerH;
@@ -6570,32 +6981,16 @@ static void draw_start_menu()
         
         uint32_t itemY = contentY + (uint32_t)i * kStartMenuRowH;
 
-        // Get app name and color based on mode
-        const char* appName = "";
+        // Get the filtered app name and its presentation metadata.
+        const char* appName = start_menu_left_item_label_for_row(i);
         uint32_t appColor;
         bool isPinned = false;
-        
-        if (s_startMenuAllProgs) {
-            // All Programs mode - use sorted list
-            appName = s_allProgramsList[itemIndex];
-            // Find color from app list
-            appColor = rgb(90, 130, 180); // default
-            for (int j = 0; j < kStartMenuAppCount; j++) {
-                if (s_startMenuApps[j].name[0] == appName[0] &&
-                    s_startMenuApps[j].name[1] == appName[1]) {
-                    appColor = s_startMenuApps[j].color;
-                    isPinned = s_startMenuApps[j].pinned;
-                    break;
-                }
-            }
-        } else {
-            // Recent Programs mode - build from persisted recent list
-            if (itemIndex < 0 || itemIndex >= s_startMenuRecentProgramCount) continue;
-            appName = s_startMenuRecentPrograms[itemIndex];
-            const StartMenuApp* app = find_start_menu_app(appName);
-            if (!app) continue;
+        if (!appName[0]) continue;
+        appColor = rgb(90, 130, 180); // default
+        const StartMenuApp* app = find_start_menu_app(appName);
+        if (app) {
             appColor = app->color;
-            isPinned = false;
+            isPinned = s_startMenuAllProgs ? app->pinned : false;
         }
 
         // Keyboard selection highlight (yellow/gold)
@@ -6729,23 +7124,57 @@ static void draw_start_menu()
 // Right-click context menu (matching Legacy RightMenu.cs)
 // ============================================================
 
+static const DesktopIcon* context_menu_filesystem_entry()
+{
+    if (s_contextMenuMode != ContextMenuMode::DesktopFilesystemEntry ||
+        s_contextMenuIconDisplayIndex < 0 || s_contextMenuIconDisplayIndex >= s_visibleIconCount) {
+        return nullptr;
+    }
+    int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
+    if (iconIdx < 0 || iconIdx >= kDesktopIconCount) return nullptr;
+    const DesktopIcon& icon = s_desktopIcons[iconIdx];
+    return icon.kind == DesktopItemKind::FilesystemEntry && icon.path[0] ? &icon : nullptr;
+}
+
+static bool desktop_context_delete_visible()
+{
+    if (file_clipboard::operation_active() || !s_contextMenuTargetPath[0]) return false;
+    vfs::FileInfo info{};
+    const vfs::Status status = vfs::stat(s_contextMenuTargetPath, &info);
+    return status == vfs::VFS_OK &&
+        ((s_contextMenuTargetIsDirectory && info.type == vfs::FILE_TYPE_DIRECTORY) ||
+         (!s_contextMenuTargetIsDirectory && info.type == vfs::FILE_TYPE_REGULAR));
+}
+
+static bool desktop_file_paste_available()
+{
+    return file_clipboard::can_paste_to(bare_metal_desktop_current_directory_path());
+}
+
+static void show_file_clipboard_notification(const char* message)
+{
+    s_notification.title = "File Clipboard";
+    s_notification.message = message ? message : "File clipboard operation failed";
+    s_notification.visible = true;
+    s_notification.showTime = s_tickCounter;
+}
+
 static int context_menu_item_count()
 {
     if (s_contextMenuMode == ContextMenuMode::StartMenuApp) return s_startMenuAllProgs ? 2 : 4;
     if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) return 2;
     if (s_contextMenuMode == ContextMenuMode::DesktopTrash) return 2;
     if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
-        if (s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
-            int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
-            if (iconIdx >= 0 && iconIdx < kDesktopIconCount &&
-                s_desktopIcons[iconIdx].kind == DesktopItemKind::FilesystemEntry &&
-                s_desktopIcons[iconIdx].isDirectory) {
-                return 2;
-            }
+        const DesktopIcon* entry = context_menu_filesystem_entry();
+        if (!entry) return 0;
+        if (entry->isDirectory) {
+            // Open, Copy, Cut, optional Paste, Rename, Delete.
+            return 4 + (s_contextMenuPasteVisibleAtOpen ? 1 : 0) +
+                   (desktop_context_delete_visible() ? 1 : 0);
         }
-        return 1;
+        return 3 + (desktop_context_delete_visible() ? 1 : 0); // Open, Copy File, Cut File, Delete
     }
-    return kContextMenuCount;
+    return s_contextMenuPasteVisibleAtOpen ? kContextMenuCount + 1 : kContextMenuCount;
 }
 
 static void draw_right_click_menu()
@@ -6781,22 +7210,44 @@ static void draw_right_click_menu()
             framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(48, 48, 58));
         }
 
-        const char* label = s_contextMenuItems[i];
+        const char* label = "";
         if (s_contextMenuMode == ContextMenuMode::StartMenuApp) {
-            label = (i == 0) ? "Open" : (is_app_shortcut_pinned_to_desktop(s_contextMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop");
+            if (i == 0) {
+                label = "Open";
+            } else if (!s_startMenuAllProgs && i == 3) {
+                label = "Remove from This List";
+            } else {
+                label = is_app_shortcut_pinned_to_desktop(s_contextMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop";
+            }
         } else if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) {
             label = (i == 0) ? "Open" : "Remove from Desktop";
         } else if (s_contextMenuMode == ContextMenuMode::DesktopTrash) {
             label = (i == 0) ? "Open" : "Empty Trash";
         } else if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
-            bool renameable = false;
-            if (s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
-                int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
-                if (iconIdx >= 0 && iconIdx < kDesktopIconCount) {
-                    renameable = s_desktopIcons[iconIdx].kind == DesktopItemKind::FilesystemEntry && s_desktopIcons[iconIdx].isDirectory;
-                }
+            const DesktopIcon* entry = context_menu_filesystem_entry();
+            if (entry && entry->isDirectory) {
+                if (i == 0) label = "Open";
+                else if (i == 1) label = "Copy File";
+                else if (i == 2) label = "Cut File";
+                else if (s_contextMenuPasteVisibleAtOpen && i == 3) label = "Paste";
+                else if (i == (s_contextMenuPasteVisibleAtOpen ? 4 : 3)) label = "Rename";
+                else if (desktop_context_delete_visible() &&
+                         i == (s_contextMenuPasteVisibleAtOpen ? 5 : 4)) label = "Delete";
+            } else if (entry) {
+                if (i == 0) label = "Open";
+                else if (i == 1) label = "Copy File";
+                else if (i == 2) label = "Cut File";
+                else if (desktop_context_delete_visible() && i == 3) label = "Delete";
             }
-            label = (i == 0) ? "Open" : (renameable ? "Rename" : "");
+        } else if (s_contextMenuMode == ContextMenuMode::Desktop) {
+            if (s_contextMenuPasteVisibleAtOpen) {
+                if (i >= 0 && i < 5) label = s_contextMenuItems[i];
+                else if (i == 5) label = "Paste";
+                else if (i == 6) label = "Open Terminal";
+                else if (i == 7) label = "TaskManager";
+            } else if (i >= 0 && i < kContextMenuCount) {
+                label = s_contextMenuItems[i];
+            }
         }
         if (!label || !label[0]) continue;
         draw_text(mx + 12, itemY + kContextMenuTextTopPadding,
@@ -6841,6 +7292,7 @@ static int hit_test_context_menu(int32_t mx, int32_t my)
 
 static void handle_context_menu_command(int item)
 {
+    if (file_clipboard::operation_active()) return;
     if (s_contextMenuMode == ContextMenuMode::StartMenuApp) {
         if (item == 0) {
             serial::puts("[desktop] Start Menu context Open selected\n");
@@ -6894,16 +7346,139 @@ static void handle_context_menu_command(int item)
     }
 
     if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
+        const DesktopIcon* entry = context_menu_filesystem_entry();
+        char ownedTargetPath[vfs::VFS_MAX_PATH] = {0};
+        const bool ownedTargetIsDirectory = s_contextMenuTargetIsDirectory;
+        desktop_str_copy(ownedTargetPath, s_contextMenuTargetPath, (int)sizeof(ownedTargetPath));
+        const int deleteItem = ownedTargetIsDirectory
+            ? (s_contextMenuPasteVisibleAtOpen ? 5 : 4) : 3;
+        const bool isDeleteCommand = item == deleteItem;
+        if (!ownedTargetPath[0] || (!entry && !isDeleteCommand)) {
+            s_contextMenuMode = ContextMenuMode::Desktop;
+            return;
+        }
+
+        // The icon model is refreshed after a successful paste. Copy the
+        // clicked folder path before dispatch so the synchronous VFS/FAT
+        // operation never relies on a pointer into the model being refreshed.
+        char ownedDestinationDirectory[vfs::VFS_MAX_PATH] = {0};
+        if (ownedTargetIsDirectory) {
+            vfs::normalize_path(ownedTargetPath, ownedDestinationDirectory,
+                                sizeof(ownedDestinationDirectory));
+            serial::puts("FPASTE_CLICKED_FOLDER display=");
+            serial::puts(entry && entry->label ? entry->label : "(unnamed)");
+            serial::puts(" path=");
+            serial::puts(ownedDestinationDirectory);
+            serial::puts("\n");
+        }
+
         if (item == 0) {
             show_icon_notification(s_contextMenuIconDisplayIndex);
-        } else if (item == 1) {
-            begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
+        } else if (item == 1 || item == 2) {
+            const file_clipboard::Operation operation = item == 1
+                ? file_clipboard::Operation::Copy
+                : file_clipboard::Operation::Move;
+            if (file_clipboard::set_file(ownedTargetPath, operation)) {
+                show_file_clipboard_notification(item == 1 ? "Copied file to guideXOS clipboard" :
+                                                  "Cut file to guideXOS clipboard");
+            } else {
+                show_file_clipboard_notification(file_clipboard::paste_diagnostic_message());
+            }
+        } else if (item == (ownedTargetIsDirectory
+                                ? (s_contextMenuPasteVisibleAtOpen ? 5 : 4)
+                                : 3)) {
+            // Revalidate the owned target immediately before mutation. The
+        // operation itself performs a second validation and keeps the
+        // shared file-operation guard active through VFS/FAT mutation.
+            vfs::FileInfo targetInfo{};
+            const vfs::Status targetStatus = vfs::stat(ownedTargetPath, &targetInfo);
+            const bool targetTypeMatches = targetStatus == vfs::VFS_OK &&
+                ((ownedTargetIsDirectory && targetInfo.type == vfs::FILE_TYPE_DIRECTORY) ||
+                 (!ownedTargetIsDirectory && targetInfo.type == vfs::FILE_TYPE_REGULAR));
+            if (!targetTypeMatches) {
+                serial::puts("[desktop] Delete rejected: target is missing or changed\n");
+                show_file_clipboard_notification("Delete failed: target not found or changed");
+            } else {
+                char deleteRequest[vfs::VFS_MAX_PATH + 32] = {0};
+                int requestPos = 0;
+                desktop_append_text(deleteRequest, &requestPos, (int)sizeof(deleteRequest),
+                                    "--confirm-delete|");
+                desktop_append_text(deleteRequest, &requestPos, (int)sizeof(deleteRequest),
+                                    ownedTargetPath);
+                desktop_append_text(deleteRequest, &requestPos, (int)sizeof(deleteRequest), "|");
+                desktop_append_text(deleteRequest, &requestPos, (int)sizeof(deleteRequest),
+                                    ownedTargetIsDirectory ? "1" : "0");
+                serial::puts("[desktop] Delete confirmation requested path=");
+                serial::puts(ownedTargetPath);
+                serial::puts("\n");
+                if (app::AppManager::launchAppWithParam("Files", deleteRequest)) {
+                    show_file_clipboard_notification("Confirm Delete in File Explorer");
+                } else {
+                    serial::puts("[desktop] Delete confirmation launch failed\n");
+                    show_file_clipboard_notification("Unable to open Delete confirmation");
+                }
+                s_needsRedraw = true;
+            }
+        } else if (ownedTargetIsDirectory) {
+            if (s_contextMenuPasteVisibleAtOpen && item == 3) {
+                serial::puts("FPASTE_CONTEXT_DISPATCH\n");
+                if (file_clipboard::can_paste_to(ownedDestinationDirectory)) {
+                    serial::puts("[desktop] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
+                    serial::puts(ownedDestinationDirectory);
+                    serial::puts("\n");
+                    file_clipboard::PasteResult result = file_clipboard::paste_to_directory(
+                        ownedDestinationDirectory);
+                    show_file_clipboard_notification(file_clipboard::paste_result_message(result));
+                    if (result == file_clipboard::PasteResult::Success) {
+                        file_clipboard::begin_paste_refresh();
+                        serial::puts("FPASTE_REFRESH_BEGIN\n");
+                        bare_metal_desktop_request_folder_refresh("desktop folder file paste");
+                        serial::puts("FPASTE_REFRESH_END\n");
+                        file_clipboard::note_paste_refresh(true);
+                        serial::puts("FPASTE_RETURN_UI\n");
+                        s_needsRedraw = true;
+                    }
+                }
+                // Consume a stale Paste slot instead of accidentally invoking
+                // Rename when the clipboard changed after menu construction.
+            } else if (item == (s_contextMenuPasteVisibleAtOpen ? 4 : 3)) {
+                if (entry) begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
+            }
         }
         s_contextMenuMode = ContextMenuMode::Desktop;
         return;
     }
 
-    switch (item) {
+    if (s_contextMenuPasteVisibleAtOpen && item == 5) {
+        if (desktop_file_paste_available()) {
+            char ownedDestinationDirectory[vfs::VFS_MAX_PATH] = {0};
+            vfs::normalize_path(bare_metal_desktop_current_directory_path(),
+                                ownedDestinationDirectory, sizeof(ownedDestinationDirectory));
+            serial::puts("FPASTE_CONTEXT_DISPATCH\n");
+            serial::puts("[desktop] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
+            serial::puts(ownedDestinationDirectory);
+            serial::puts("\n");
+            file_clipboard::PasteResult result = file_clipboard::paste_to_directory(
+                ownedDestinationDirectory);
+            show_file_clipboard_notification(file_clipboard::paste_result_message(result));
+            if (result == file_clipboard::PasteResult::Success) {
+                file_clipboard::begin_paste_refresh();
+                serial::puts("FPASTE_REFRESH_BEGIN\n");
+                bare_metal_desktop_request_folder_refresh("desktop file paste");
+                serial::puts("FPASTE_REFRESH_END\n");
+                file_clipboard::note_paste_refresh(true);
+                serial::puts("FPASTE_RETURN_UI\n");
+                s_needsRedraw = true;
+            }
+        }
+        // If the clipboard became stale after the menu opened, consume the
+        // old Paste slot without dispatching the command below it.
+        return;
+    }
+
+    int legacyItem = item;
+    if (s_contextMenuPasteVisibleAtOpen && item >= 5) legacyItem--;
+    switch (legacyItem) {
         case 0: // Refresh
             bare_metal_desktop_request_folder_refresh("right-click refresh");
             refresh_start_menu_list();
@@ -6933,26 +7508,26 @@ static void handle_context_menu_command(int item)
             break;
         }
         case 4: { // New Folder
+            serial::puts("DESKTOP_MENU_DISPATCH mode=Desktop item=4 command=CreateFolder\n");
             char newFolderPath[vfs::VFS_MAX_PATH]{};
-            vfs::Status status = vfs::VFS_ERR_NOT_FOUND;
-            for (int suffixIndex = 1; suffixIndex < 1000; ++suffixIndex) {
-                char folderName[vfs::VFS_MAX_FILENAME];
-                build_unique_new_folder_name(suffixIndex, folderName, (int)sizeof(folderName));
-                if (!folderName[0]) continue;
-                vfs::join_path(bare_metal_desktop_current_directory_path(), folderName, newFolderPath, sizeof(newFolderPath));
-                status = vfs::mkdir(newFolderPath);
-                if (status == vfs::VFS_OK) break;
-                if (status != vfs::VFS_ERR_EXISTS) break;
-            }
+            vfs::Status createStatus = vfs::VFS_ERR_INVALID;
+            const bool created = file_clipboard::create_unique_folder_ex(
+                bare_metal_desktop_current_directory_path(), newFolderPath, sizeof(newFolderPath), &createStatus);
             s_notification.title = "New Folder";
-            if (status == vfs::VFS_OK) {
+            if (created) {
                 s_notification.message = "Created on desktop";
-                refresh_desktop_icons();
-                s_needsRedraw = true;
-            } else if (status == vfs::VFS_ERR_EXISTS) {
-                s_notification.message = "Already exists";
+                serial::puts("DESKTOP_MKDIR_REFRESH=requested\n");
+                bare_metal_desktop_request_folder_refresh("desktop new folder");
+                serial::puts("DESKTOP_MKDIR_REFRESH=complete\n");
             } else {
-                s_notification.message = "Not supported by filesystem";
+                int failureMessagePos = 0;
+                s_desktopMkdirFailureMessage[0] = '\0';
+                desktop_append_text(s_desktopMkdirFailureMessage, &failureMessagePos,
+                                    (int)sizeof(s_desktopMkdirFailureMessage), "Unable: ");
+                desktop_append_text(s_desktopMkdirFailureMessage, &failureMessagePos,
+                                    (int)sizeof(s_desktopMkdirFailureMessage), vfs::status_name(createStatus));
+                s_notification.message = s_desktopMkdirFailureMessage;
+                serial::puts("DESKTOP_MKDIR_REFRESH=not-run\n");
             }
             s_notification.visible = true;
             s_notification.showTime = s_tickCounter;
@@ -7948,12 +8523,15 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
         reason = "Target is blocked, unsupported, unknown, or unclassified";
     } else if (gxos::apps::TypedDispatchRuntimeEnabled() &&
                (target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
-                target.type == gxos::apps::LaunchTargetType::LegacyAlias) &&
+                target.type == gxos::apps::LaunchTargetType::LegacyAlias ||
+                (target.type == gxos::apps::LaunchTargetType::NativeElfApp && target.bareMetalAvailable)) &&
                target.dispatchLaunchName && target.dispatchLaunchName[0]) {
         usage = gxos::apps::LaunchDispatchUsage::TypedDispatch;
         if (target.type != gxos::apps::LaunchTargetType::LegacyAlias) {
             selectedDispatch = target.dispatchLaunchName;
-            reason = "Resolver classified target as typed-dispatch ready";
+            reason = target.type == gxos::apps::LaunchTargetType::NativeElfApp
+                ? "Resolver classified validated NativeElf target as bare-metal typed-dispatch ready"
+                : "Resolver classified target as typed-dispatch ready";
         } else {
             reason = "Resolver classified alias as typed-ready; compatibility alias remains the selected dispatch";
         }
@@ -7984,7 +8562,17 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
 static bool try_launch_kernel_app(const char* appName)
 {
     if (!appName) return false;
+
+    const gxos::apps::LaunchTarget target = appmodel::resolveLaunchTarget(appName);
     const char* selectedDispatch = select_bare_metal_launch_dispatch(appName, "BareMetalKernelApp");
+
+    // External NativeElf packages use the same desktop launch surface as
+    // built-in kernel apps, but are discovered from the mounted /Apps VFS and
+    // only reach this branch after the shared resolver validated the package.
+    if (target.type == gxos::apps::LaunchTargetType::NativeElfApp && target.bareMetalAvailable) {
+        s_shellActive = false;
+        return native_elf::launch(selectedDispatch);
+    }
     
     // Check if app is available in kernel mode
     if (app::AppManager::isAppAvailable(selectedDispatch)) {
@@ -8201,13 +8789,42 @@ void init()
     init_taskbar_widgets();
     
     s_initialized = true;
+    file_clipboard::set_progress_callback(desktop_file_operation_progress);
     desktop_capabilities::log_current(false, false);
 }
 
 // Update tick counter (call this from main loop, e.g., every 10ms)
+static uint32_t s_lastFileOperationClockTick = 0;
+
+static void update_clock_during_file_operation()
+{
+    const uint32_t now = (uint32_t)pit::ticks();
+    if (now - s_lastFileOperationClockTick < 100) return;
+    s_lastFileOperationClockTick = now;
+
+    time::DateTime current{};
+    if (time::get_current_datetime(current)) {
+        const bool wasAvailable = s_timeAvailable;
+        s_timeAvailable = true;
+        copy_datetime_from_time_service(current);
+        TaskbarWidget& clock = s_taskbarWidgets[(int)TaskbarWidgetType::Clock];
+        if (!clock.visible) clock.visible = true;
+        if (!wasAvailable) log_taskbar_widget(TaskbarWidgetType::Clock, true,
+                                               "RTC/CMOS time became available");
+    } else {
+        update_time();
+    }
+
+    if (s_timeAvailable && s_currentTime.minute != s_lastRenderedClockMinute) {
+        s_lastRenderedClockMinute = s_currentTime.minute;
+        s_needsRedraw = true;
+    }
+}
+
 void tick()
 {
     s_tickCounter++;
+    reset_alt_f4_shortcut_state();
     
     // Update time every ~100 ticks (roughly 1 second if tick is called every 10ms)
     if (s_tickCounter % 100 == 0) {
@@ -8232,10 +8849,10 @@ void tick()
     }
     
     // Auto-hide notifications after 5 seconds (500 ticks at 10ms each)
-    if (s_notification.visible && s_notification.showTime == 0) {
+    if (!file_clipboard::operation_active() && s_notification.visible && s_notification.showTime == 0) {
         s_notification.showTime = s_tickCounter;
     }
-    if (s_notification.visible && s_notification.showTime > 0) {
+    if (!file_clipboard::operation_active() && s_notification.visible && s_notification.showTime > 0) {
         if (s_tickCounter - s_notification.showTime >= 500) {
             s_notification.visible = false;
             s_needsRedraw = true;
@@ -8311,6 +8928,7 @@ void cooperative_yield()
     static bool pumping = false;
     static bool logged = false;
     static uint32_t lastPresentTick = 0;
+    reset_alt_f4_shortcut_state();
     if (pumping || !s_initialized) return;
     pumping = true;
 
@@ -8319,6 +8937,7 @@ void cooperative_yield()
         logged = true;
     }
 
+    if (file_clipboard::operation_active()) update_clock_during_file_operation();
     input::poll();
     if (input::mouse_dirty()) {
         input::mouse_clear_dirty();
@@ -8331,7 +8950,9 @@ void cooperative_yield()
     }
 
     const uint32_t now = (uint32_t)pit::ticks();
-    if (now - lastPresentTick >= 10) {
+    const bool initialFileOperationPaint = file_clipboard::operation_active() &&
+        file_clipboard::operation_state() == file_clipboard::OperationState::Preparing;
+    if (initialFileOperationPaint || now - lastPresentTick >= 10) {
         lastPresentTick = now;
         draw();
         draw_cursor(input::mouse_x(), input::mouse_y());
@@ -8490,9 +9111,14 @@ void show_context_menu(uint32_t x, uint32_t y)
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::Desktop;
+    s_contextMenuPasteVisibleAtOpen = desktop_file_paste_available();
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = -1;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
+    serial::puts("DESKTOP_CONTEXT_MENU mode=Desktop pasteVisible=");
+    serial::puts(s_contextMenuPasteVisibleAtOpen ? "1\n" : "0\n");
     // Close start menu when context menu is shown
     s_startMenuOpen = false;
 }
@@ -8503,8 +9129,11 @@ static void show_start_menu_app_context_menu(uint32_t x, uint32_t y, const char*
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::StartMenuApp;
+    s_contextMenuPasteVisibleAtOpen = false;
     desktop_str_copy(s_contextMenuAppName, appName, (int)sizeof(s_contextMenuAppName));
     s_contextMenuIconDisplayIndex = -1;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Start Menu context menu creation: ");
     serial::puts(s_contextMenuAppName);
@@ -8517,8 +9146,11 @@ static void show_desktop_shortcut_context_menu(uint32_t x, uint32_t y, int displ
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::DesktopShortcut;
+    s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Desktop shortcut context menu creation\n");
 }
@@ -8529,8 +9161,11 @@ static void show_desktop_trash_context_menu(uint32_t x, uint32_t y, int displayI
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::DesktopTrash;
+    s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Desktop trash context menu creation\n");
 }
@@ -8541,8 +9176,25 @@ static void show_desktop_filesystem_context_menu(uint32_t x, uint32_t y, int dis
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
     s_contextMenuMode = ContextMenuMode::DesktopFilesystemEntry;
+    s_contextMenuPasteVisibleAtOpen = false;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = displayIndex;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
+    const DesktopIcon* target = context_menu_filesystem_entry();
+    vfs::FileInfo targetInfo{};
+    const bool targetIsValid = target && target->removable && target->path[0] &&
+        vfs::stat(target->path, &targetInfo) == vfs::VFS_OK &&
+        ((target->isDirectory && targetInfo.type == vfs::FILE_TYPE_DIRECTORY) ||
+         (!target->isDirectory && targetInfo.type == vfs::FILE_TYPE_REGULAR));
+    if (!file_clipboard::operation_active() && targetIsValid) {
+        vfs::normalize_path(target->path, s_contextMenuTargetPath, sizeof(s_contextMenuTargetPath));
+        s_contextMenuTargetIsDirectory = target->isDirectory;
+    }
+    const DesktopIcon* entry = context_menu_filesystem_entry();
+    if (entry && entry->isDirectory) {
+        s_contextMenuPasteVisibleAtOpen = file_clipboard::can_paste_to(entry->path);
+    }
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Desktop filesystem context menu creation\n");
 }
@@ -8554,6 +9206,9 @@ void close_context_menu()
     s_contextMenuMode = ContextMenuMode::Desktop;
     s_contextMenuAppName[0] = '\0';
     s_contextMenuIconDisplayIndex = -1;
+    s_contextMenuPasteVisibleAtOpen = false;
+    s_contextMenuTargetPath[0] = '\0';
+    s_contextMenuTargetIsDirectory = false;
 }
 
 void toggle_start_menu()
@@ -10097,6 +10752,132 @@ static void toggle_show_desktop()
     s_rightClickMenuOpen = false;
 }
 
+static void reset_alt_f4_shortcut_state()
+{
+    if (!ps2keyboard::is_alt_down() || !ps2keyboard::is_f4_down()) {
+        s_altF4ShortcutConsumed = false;
+    }
+}
+
+static void close_shell_surface()
+{
+    shell::close();
+    s_shellPosX = -1;
+    s_shellPosY = -1;
+    s_shellW = -1;
+    s_shellH = -1;
+    s_shellMinimized = false;
+    s_shellMaximized = false;
+    s_shellDragging = false;
+    s_shellResizing = false;
+    s_shellActive = true;
+}
+
+static bool close_shell_surface_if_open()
+{
+    if (!shell::is_open()) return false;
+    close_shell_surface();
+    return true;
+}
+
+static bool close_topmost_modal_dialog()
+{
+    if (s_networkConfigOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=network-config\n");
+        s_networkConfigOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:network-config\n");
+        return true;
+    }
+    if (s_networkAdaptersOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=network-adapters\n");
+        s_networkAdaptersOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:network-adapters\n");
+        return true;
+    }
+    if (s_deviceManagerOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=device-manager\n");
+        s_deviceManagerOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:device-manager\n");
+        return true;
+    }
+    if (s_controlPanelOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=control-panel\n");
+        s_controlPanelOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:control-panel\n");
+        return true;
+    }
+    if (s_appModelDialogOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=app-model\n");
+        s_appModelDialogOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:app-model\n");
+        return true;
+    }
+    if (s_shutdownDialogOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=shutdown-dialog\n");
+        s_shutdownDialogOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:shutdown-dialog\n");
+        return true;
+    }
+    return false;
+}
+
+static bool handle_alt_f4_shortcut(bool leftAltPressed, bool rightAltPressed)
+{
+    if (s_altF4ShortcutConsumed) return false;
+    s_altF4ShortcutConsumed = true;
+
+    serial::puts("[desktop] shortcut alt-f4 recognized consumed=1 leftAlt=");
+    serial::puts(leftAltPressed ? "1" : "0");
+    serial::puts(" rightAlt=");
+    serial::puts(rightAltPressed ? "1" : "0");
+    serial::puts(" f4=");
+    serial::puts("1");
+    serial::putc('\n');
+
+    if (close_topmost_modal_dialog()) {
+        return true;
+    }
+
+    if (s_startMenuOpen || s_rightClickMenuOpen) {
+        serial::puts("[desktop] shortcut alt-f4 ignored reason=menu-open leftAlt=");
+        serial::puts(leftAltPressed ? "1" : "0");
+        serial::puts(" rightAlt=");
+        serial::puts(rightAltPressed ? "1" : "0");
+        serial::puts(" f4=");
+        serial::puts("1");
+        serial::putc('\n');
+        return true;
+    }
+
+    app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
+    if (!focused) {
+        serial::puts("[desktop] shortcut alt-f4 ignored reason=no-active-window leftAlt=");
+        serial::puts(leftAltPressed ? "1" : "0");
+        serial::puts(" rightAlt=");
+        serial::puts(rightAltPressed ? "1" : "0");
+        serial::puts(" f4=");
+        serial::puts("1");
+        serial::putc('\n');
+        return true;
+    }
+
+    serial::puts("[desktop] shortcut alt-f4 close-request window=");
+    serial::put_hex32(focused->id);
+    serial::puts(" title=");
+    serial::puts(focused->title);
+    serial::puts(" app=");
+    serial::puts(focused->owner ? focused->owner->getName() : "(no-owner)");
+    serial::putc('\n');
+
+    const bool closed = compositor::KernelCompositor::requestCloseWindow(focused->id);
+    serial::puts("[desktop] shortcut alt-f4 close-result=");
+    serial::puts(closed ? "accepted" : "rejected");
+    serial::puts(" window=");
+    serial::put_hex32(focused->id);
+    serial::putc('\n');
+    return true;
+}
+
 int get_running_app_count()
 {
     return app::AppManager::getRunningAppCount();
@@ -10104,11 +10885,85 @@ int get_running_app_count()
 
 void handle_key(uint32_t key)
 {
+    if (file_clipboard::operation_active()) return;
+    reset_alt_f4_shortcut_state();
+
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    if (key == kAltF4KeyCode) {
+        serial::puts("[desktop] key f4 candidate=");
+        serial::puts(ps2keyboard::was_alt_f4_shortcut_candidate() ? "1" : "0");
+        serial::puts(" leftAlt=");
+        serial::puts(ps2keyboard::last_key_alt_left_down() ? "1" : "0");
+        serial::puts(" rightAlt=");
+        serial::puts(ps2keyboard::last_key_alt_right_down() ? "1" : "0");
+        serial::puts(" currentLeftAlt=");
+        serial::puts(ps2keyboard::is_left_alt_down() ? "1" : "0");
+        serial::puts(" currentRightAlt=");
+        serial::puts(ps2keyboard::is_right_alt_down() ? "1" : "0");
+        serial::puts(" f4=");
+        serial::puts(ps2keyboard::is_f4_down() ? "1" : "0");
+        serial::putc('\n');
+    }
+#endif
+
     if (key == shell::KEY_SUPER) {
         serial::puts("[desktop] Super key pressed, toggling Start Menu\n");
         toggle_start_menu();
         draw();
         return;
+    }
+
+    // Bare-metal Native ELF validation and the installed PacMan package share
+    // the normal desktop/App Model dispatcher.  F12 is an intentionally
+    // narrow desktop shortcut for this external package so QEMU/physical
+    // keyboard validation does not depend on shell text-entry timing.
+    if (key == 0x11B && native_elf::is_available("Nexgen PacMan")) {
+        s_startMenuOpen = false;
+        s_shellActive = false;
+        serial::puts("[NATIVE-ELF] desktop shortcut launch=Nexgen PacMan\n");
+        const bool launched = launch_app("Nexgen PacMan");
+        serial::puts("[NATIVE-ELF] desktop shortcut result=");
+        serial::puts(launched ? "PASS\n" : "FAIL\n");
+        draw();
+        return;
+    }
+
+    if (key == kAltF4KeyCode) {
+        if (ps2keyboard::was_alt_f4_shortcut_candidate()) {
+            if (handle_alt_f4_shortcut(ps2keyboard::last_key_alt_left_down(), ps2keyboard::last_key_alt_right_down())) {
+                draw();
+            }
+            return;
+        }
+        if (s_altF4ShortcutConsumed) {
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+            serial::puts("[desktop] shortcut alt-f4 ignored reason=repeat-while-consumed leftAlt=");
+            serial::puts(ps2keyboard::last_key_alt_left_down() ? "1" : "0");
+            serial::puts(" rightAlt=");
+            serial::puts(ps2keyboard::last_key_alt_right_down() ? "1" : "0");
+            serial::puts(" currentLeftAlt=");
+            serial::puts(ps2keyboard::is_left_alt_down() ? "1" : "0");
+            serial::puts(" currentRightAlt=");
+            serial::puts(ps2keyboard::is_right_alt_down() ? "1" : "0");
+            serial::puts(" f4=");
+            serial::puts(ps2keyboard::is_f4_down() ? "1" : "0");
+            serial::putc('\n');
+#endif
+            return;
+        }
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[desktop] shortcut alt-f4 ignored reason=no-alt-on-make leftAlt=");
+        serial::puts(ps2keyboard::last_key_alt_left_down() ? "1" : "0");
+        serial::puts(" rightAlt=");
+        serial::puts(ps2keyboard::last_key_alt_right_down() ? "1" : "0");
+        serial::puts(" currentLeftAlt=");
+        serial::puts(ps2keyboard::is_left_alt_down() ? "1" : "0");
+        serial::puts(" currentRightAlt=");
+        serial::puts(ps2keyboard::is_right_alt_down() ? "1" : "0");
+        serial::puts(" f4=");
+        serial::puts(ps2keyboard::is_f4_down() ? "1" : "0");
+        serial::putc('\n');
+#endif
     }
 
     if (s_desktopRename.active) {
@@ -10148,14 +11003,7 @@ void handle_key(uint32_t key)
     if (shell::is_open()) {
         // Escape closes shell
         if (key == 27) {  // ESC
-            shell::close();
-            s_shellPosX = -1;  // Reset position for next open
-            s_shellPosY = -1;
-            s_shellW = -1;
-            s_shellH = -1;
-            s_shellMinimized = false;
-            s_shellMaximized = false;
-            s_shellActive = true;
+            close_shell_surface_if_open();
             draw();
             return;
         }
@@ -10234,6 +11082,11 @@ void handle_key(uint32_t key)
 void desktop_request_redraw()
 {
     kernel::desktop::request_redraw();
+}
+
+void desktop_request_folder_refresh()
+{
+    kernel::desktop::bare_metal_desktop_request_folder_refresh("file operation");
 }
 
 namespace kernel {
@@ -10711,7 +11564,7 @@ static StartMenuGeometry get_start_menu_geometry()
     DesktopRect start = get_start_button_rect();
     g.headerH = 30;
     g.footerH = 36;
-    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuRowH;
+    uint32_t bodyH = (uint32_t)get_start_menu_item_count() * kStartMenuRowH;
     uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     g.maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     g.menuH = g.headerH + g.maxBodyH + g.footerH;
@@ -11096,6 +11949,14 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     s_mouseX = mx;
     s_mouseY = my;
 
+    if (file_clipboard::operation_active()) {
+        // A synchronous paste may yield for paint/timer work, but button
+        // edges must not enter desktop, compositor, or app dispatch.
+        s_prevButtons = buttons;
+        draw_cursor(mx, my);
+        return;
+    }
+
     // Detect button press/release edges
     uint8_t pressed  = buttons & ~s_prevButtons;   // newly pressed
     uint8_t released = s_prevButtons & ~buttons;    // newly released
@@ -11423,6 +12284,11 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             s_rightClickMenuOpen = false;
             s_rightClickHover = -1;
             if (menuItem >= 0) {
+                serial::puts("DESKTOP_MENU_DISPATCH_INPUT mode=");
+                serial::puts(s_contextMenuMode == ContextMenuMode::Desktop ? "Desktop" : "Other");
+                serial::puts(" item=0x");
+                serial::put_hex8(static_cast<uint8_t>(menuItem));
+                serial::puts("\n");
                 handle_context_menu_command(menuItem);
             } else {
                 s_contextMenuMode = ContextMenuMode::Desktop;
@@ -11478,14 +12344,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             
             if (hit == SHELL_HIT_CLOSE_BTN) {
                 // Close button clicked
-                shell::close();
-                s_shellPosX = -1;  // Reset position for next open
-                s_shellPosY = -1;
-                s_shellW = -1;
-                s_shellH = -1;
-                s_shellMinimized = false;
-                s_shellMaximized = false;
-                s_shellActive = true;
+                close_shell_surface_if_open();
                 draw();
                 draw_cursor(mx, my);
                 return;
@@ -12115,6 +12974,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 void handle_mouse_wheel(int32_t mx, int32_t my, int8_t wheelDelta)
 {
     if (!s_initialized || wheelDelta == 0) return;
+    if (file_clipboard::operation_active()) return;
     if (s_desktopRename.active) return;
 
     apply_taskbar_layout();

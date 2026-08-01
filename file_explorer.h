@@ -66,6 +66,8 @@ namespace gxos { namespace apps {
         /// <param name="startPath">Optional starting directory path</param>
         /// <returns>Process ID of the launched FileExplorer</returns>
         static uint64_t Launch(const std::string& startPath = "");
+        /// Launch the existing Explorer confirmation UI for a stable target.
+        static uint64_t LaunchDeleteConfirmation(const std::string& targetPath, bool isDirectory);
         
     private:
         // Main entry point for FileExplorer process
@@ -101,6 +103,9 @@ namespace gxos { namespace apps {
         static void cancelDelete();
         static void pinSelectedToDesktop();
         static void showFolderOnDesktop();
+        static void copySelectedFile();
+        static void cutSelectedFile();
+        static void pasteFileTo(const std::string& destinationPath);
         
         // Keyboard handling
         static void handleKeyPress(int keyCode, const std::string& action);
@@ -123,16 +128,12 @@ namespace gxos { namespace apps {
         static std::string selectedPath();
         static std::string makeUniqueChildPath(const std::string& baseName, bool directory);
         static bool moveEntryToTrash(const ExplorerFileEntry& entry, std::string& error, std::string& trashedPath);
-        static std::string trashRootPath();
-        static std::string makeUniquePathInDirectory(const std::string& directoryPath, const std::string& baseName, bool directory);
-        static std::string trashInfoPathFor(const std::string& trashedPath);
-        static std::string jsonEscape(const std::string& value);
-        static void refreshTrashDesktopState();
         static bool handleNavigationPaneClick(int x, int y);
         static int hitTestEntryRow(int x, int y);
         static int hitTestFileListScrollbar(int x, int y);
         static int hitTestContextMenu(int x, int y);
         static void showContextMenuForRow(int rowIndex, int x, int y);
+        static void showContextMenuForEmptySpace(int x, int y);
         static bool handleContextMenuClick(int x, int y);
         static int fileListVisibleRowCount();
         static int fileListMaxScrollRows();
@@ -188,6 +189,8 @@ namespace gxos { namespace apps {
         static int s_contextMenuY;
         static int s_contextMenuHover;
         static std::vector<int> s_contextMenuActions;
+        static std::string s_contextMenuDestinationPath;
+        static uint64_t s_lastFileOperationGeneration;
     };
     
 }} // namespace gxos::apps

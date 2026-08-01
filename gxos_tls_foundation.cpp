@@ -1252,6 +1252,15 @@ void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
     result->tlsSetupStep[0] = '\0';
     result->tlsSetupErrorCode = 0;
     result->tlsSetupErrorName[0] = '\0';
+    result->tlsSuiteContractCount = 0;
+    result->tlsSuiteContractRealCount = 0;
+    result->tlsSuiteContractInstalled = false;
+    result->tlsClientHelloSent = false;
+    result->tlsClientHelloRealSuiteCount = 0;
+    result->tlsClientHelloScsvOnly = false;
+    result->tlsClientHelloCanonicalSuiteOffered = false;
+    result->tlsSuiteContractNames[0] = '\0';
+    result->tlsContractFailureClass[0] = '\0';
     result->sniHost[0] = '\0';
     result->stage[0] = '\0';
     result->protocol[0] = '\0';
@@ -2551,6 +2560,24 @@ struct GxosTlsHttpByteStreamSession {
     bool closed = false;
 };
 
+/*
+ * Keep the freestanding client offer explicit and limited to the four
+ * TLS 1.2 suites provided by the guideXOS Mbed TLS/PSA configuration. This
+ * avoids depending on the runtime-filtered default list while preserving the
+ * same RSA/ECDSA and AES-GCM capabilities.
+ */
+const int kGxosTlsClientCiphersuites[] = {
+    MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    MBEDTLS_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+    MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+    MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+    0
+};
+
+constexpr size_t kGxosTlsClientCiphersuiteCount = 4u;
+constexpr size_t kGxosTlsClientCiphersuiteMax = 4u;
+constexpr int kGxosTlsRenegotiationInfoScsv = 0x00ff;
+
 void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
                               gxos::web::HttpByteStreamTlsStatus status,
                               const char* errorText)
@@ -2560,6 +2587,135 @@ void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
     if (errorText && errorText[0]) {
         copy_text(result->error, sizeof(result->error), errorText);
     }
+}
+
+struct GxosTlsCapabilityContractValidation {
+    bool listExists = false;
+    bool terminated = false;
+    bool withinBound = false;
+    bool definitionsResolved = false;
+    size_t declaredCount = 0;
+    size_t realCount = 0;
+    const char* failure = nullptr;
+};
+
+bool tls_is_signaling_suite(int id)
+{
+    return id == kGxosTlsRenegotiationInfoScsv;
+}
+
+GxosTlsCapabilityContractValidation validate_tls_capability_contract(const int* suites,
+                                                                      size_t declaredCount,
+                                                                      bool installed)
+{
+    GxosTlsCapabilityContractValidation validation;
+    validation.listExists = suites != nullptr;
+    validation.declaredCount = declaredCount;
+    validation.withinBound = declaredCount <= kGxosTlsClientCiphersuiteMax;
+    validation.terminated = validation.listExists && validation.withinBound && suites[declaredCount] == 0;
+    validation.definitionsResolved = true;
+
+    if (!validation.listExists) {
+        validation.failure = "suite list is missing";
+        return validation;
+    }
+    if (!validation.withinBound) {
+        validation.failure = "suite count exceeds bounded maximum";
+        return validation;
+    }
+    if (!validation.terminated) {
+        validation.failure = "suite list is not correctly terminated";
+        return validation;
+    }
+
+    for (size_t index = 0; index < declaredCount; ++index) {
+        const int id = suites[index];
+        if (id == 0) {
+            validation.definitionsResolved = false;
+            validation.failure = "suite list contains an early terminator";
+            return validation;
+        }
+        if (tls_is_signaling_suite(id)) continue;
+        ++validation.realCount;
+        if (mbedtls_ssl_ciphersuite_from_id(id) == nullptr) {
+            validation.definitionsResolved = false;
+            validation.failure = "suite does not resolve to a compiled Mbed TLS definition";
+            return validation;
+        }
+    }
+
+    if (validation.realCount == 0) {
+        validation.failure = "suite list contains no usable real ciphersuite";
+        return validation;
+    }
+    if (!installed) {
+        return validation;
+    }
+    return validation;
+}
+
+void tls_copy_suite_contract_names(const int* suites, size_t suiteCount,
+                                   char* output, size_t outputSize)
+{
+    if (!output || outputSize == 0) return;
+    output[0] = '\0';
+    size_t used = 0;
+    for (size_t index = 0; index < suiteCount; ++index) {
+        const int id = suites[index];
+        if (tls_is_signaling_suite(id)) continue;
+        const mbedtls_ssl_ciphersuite_t* definition = mbedtls_ssl_ciphersuite_from_id(id);
+        const char* name = definition ? mbedtls_ssl_ciphersuite_get_name(definition) : "(unresolved)";
+        if (!name) name = "(unnamed)";
+        if (used != 0 && used + 1 < outputSize) output[used++] = ',';
+        for (size_t nameIndex = 0; name[nameIndex] != '\0' && used + 1 < outputSize; ++nameIndex) {
+            output[used++] = name[nameIndex];
+        }
+    }
+    output[used] = '\0';
+}
+
+void tls_set_capability_contract_failure(GxosTlsLocalHandshakeResult* result,
+                                         const GxosTlsCapabilityContractValidation& validation)
+{
+    (void)validation;
+    if (!result) return;
+    copy_text(result->tlsContractFailureClass, sizeof(result->tlsContractFailureClass),
+        "TLS_CAPABILITY_CONTRACT_FAILURE");
+    copy_text(result->tlsSetupStep, sizeof(result->tlsSetupStep), "capability_contract");
+    copy_text(result->tlsSetupErrorName, sizeof(result->tlsSetupErrorName),
+        "TLS_CAPABILITY_CONTRACT_FAILURE");
+    tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::CapabilityContractFailure,
+        "TLS_CAPABILITY_CONTRACT_FAILURE");
+}
+
+bool tls_install_capability_contract(mbedtls_ssl_config* config,
+                                     GxosTlsLocalHandshakeResult* result)
+{
+    if (!config || !result) return false;
+    result->tlsSuiteContractCount = kGxosTlsClientCiphersuiteCount;
+    const GxosTlsCapabilityContractValidation beforeInstall =
+        validate_tls_capability_contract(kGxosTlsClientCiphersuites,
+            kGxosTlsClientCiphersuiteCount, false);
+    result->tlsSuiteContractRealCount = beforeInstall.realCount;
+    tls_copy_suite_contract_names(kGxosTlsClientCiphersuites,
+        kGxosTlsClientCiphersuiteCount, result->tlsSuiteContractNames,
+        sizeof(result->tlsSuiteContractNames));
+    if (beforeInstall.failure || !beforeInstall.definitionsResolved || beforeInstall.realCount == 0) {
+        tls_set_capability_contract_failure(result, beforeInstall);
+        return false;
+    }
+
+    mbedtls_ssl_conf_ciphersuites(config, kGxosTlsClientCiphersuites);
+    result->tlsSuiteContractInstalled = true;
+    const GxosTlsCapabilityContractValidation afterInstall =
+        validate_tls_capability_contract(kGxosTlsClientCiphersuites,
+            kGxosTlsClientCiphersuiteCount, result->tlsSuiteContractInstalled);
+    if (afterInstall.failure || !afterInstall.definitionsResolved || afterInstall.realCount == 0) {
+        result->tlsSuiteContractInstalled = false;
+        tls_set_capability_contract_failure(result, afterInstall);
+        return false;
+    }
+    return true;
 }
 
 gxos::web::HttpByteStreamTlsStatus tls_status_from_backend_status(GxosTlsBackendStatus status)
@@ -3652,6 +3808,9 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         }
         result->sslConfigDefaultsStatus = ret;
         result->sslAuthmode = MBEDTLS_SSL_VERIFY_REQUIRED;
+        if (!tls_install_capability_contract(&session->conf, result)) {
+            break;
+        }
 
         mbedtls_ssl_conf_authmode(&session->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         mbedtls_ssl_conf_ca_chain(&session->conf, &runtime.caChain, nullptr);
@@ -3685,6 +3844,17 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
 
         mbedtls_ssl_set_bio(&session->ssl, &session->io, gxos_tls_stream_send, gxos_tls_stream_recv, nullptr);
         result->sslBioStatus = 0;
+
+        if (!result->tlsSuiteContractInstalled ||
+            result->tlsSuiteContractCount == 0 ||
+            result->tlsSuiteContractCount > kGxosTlsClientCiphersuiteMax ||
+            result->tlsSuiteContractRealCount == 0) {
+            GxosTlsCapabilityContractValidation validation =
+                validate_tls_capability_contract(kGxosTlsClientCiphersuites,
+                    result->tlsSuiteContractCount, result->tlsSuiteContractInstalled);
+            tls_set_capability_contract_failure(result, validation);
+            break;
+        }
 
         tls_set_stage(result, "handshake");
         tls_trace_stage("handshake");
@@ -3726,6 +3896,10 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         }
 
         result->handshakeSuccess = true;
+        result->tlsClientHelloSent = true;
+        result->tlsClientHelloRealSuiteCount = result->tlsSuiteContractRealCount;
+        result->tlsClientHelloScsvOnly = false;
+        result->tlsClientHelloCanonicalSuiteOffered = true;
         result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
         tls_copy_runtime_strings(&session->ssl, result);
         tls_set_stage(result, "peer_validation");
@@ -3762,6 +3936,31 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
     return false;
 #endif
 }
+
+#if defined(GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE)
+bool gxos_tls_capability_contract_negative_test(GxosTlsLocalHandshakeResult* result)
+{
+    if (!result) return false;
+    zero_local_handshake_result(result);
+    result->attempted = true;
+
+    // Test-only invalid profile: a signaling value is not a usable suite. The
+    // production canonical list above is never modified by this path, and no
+    // socket or Mbed TLS handshake is started.
+    const int invalidSuites[] = { kGxosTlsRenegotiationInfoScsv, 0 };
+    const GxosTlsCapabilityContractValidation validation =
+        validate_tls_capability_contract(invalidSuites, 1u, false);
+    result->tlsSuiteContractCount = validation.declaredCount;
+    result->tlsSuiteContractRealCount = validation.realCount;
+    result->tlsSuiteContractInstalled = false;
+    result->tlsClientHelloSent = false;
+    result->tlsClientHelloRealSuiteCount = 0;
+    result->tlsClientHelloScsvOnly = false;
+    result->tlsClientHelloCanonicalSuiteOffered = false;
+    tls_set_capability_contract_failure(result, validation);
+    return false;
+}
+#endif
 
 bool gxos_tls_smoke_https_request(const char* sniHostname,
                                   const char* requestBytes,

@@ -25,12 +25,15 @@ $ErrorActionPreference = "Stop"
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  guideXOS Complete Build System" -ForegroundColor Cyan
 Write-Host "====================================" -ForegroundColor Cyan
+Write-Host "  Build identity: GXOS-LARGE-FILE-PASTE-TRACE-V1" -ForegroundColor Cyan
+Write-Host "  Build probe ID: GXOS-LFPASTE-20260726-02" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
 $ProcessEnvironmentScript = Join-Path $RootDir "scripts\process_environment.ps1"
 . $ProcessEnvironmentScript
 Normalize-ProcessEnvironment
+. (Join-Path $RootDir "scripts\build-native-command.ps1")
 $ESPDir = Join-Path $RootDir "ESP"
 $KernelDir = Join-Path $RootDir "kernel"
 $BootloaderDir = Join-Path $RootDir "guideXOSBootLoader"
@@ -63,9 +66,9 @@ function Build-WallpaperRuntimeImage {
         Write-Host "      Building wallpaper filesystem image..." -ForegroundColor Cyan
         $smokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1"
         if ($smokeCaFixture) {
-            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -SmokeCaFixture
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDir (Join-Path $RootDir "Apps\PacMan") -SmokeCaFixture
         } else {
-            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDir (Join-Path $RootDir "Apps\PacMan")
         }
         $script:WallpaperRuntimeImageBuilt = $true
     } elseif (!(Test-Path $Ramdisk)) {
@@ -73,6 +76,30 @@ function Build-WallpaperRuntimeImage {
         [System.IO.File]::WriteAllBytes($Ramdisk, $emptyRamdisk)
         Write-Host "      WARNING: Wallpaper pack script missing; created empty ramdisk.img" -ForegroundColor Yellow
         $script:WallpaperRuntimeImageBuilt = $true
+    }
+}
+
+function Build-PacmanPackage {
+    if ($Arch -ne "amd64") {
+        Write-Host "      PacMan package build skipped for unsupported architecture: $Arch" -ForegroundColor Yellow
+        return
+    }
+
+    $pacmanBuildScript = Join-Path $RootDir "scripts\build-pacman-package.ps1"
+    if (!(Test-Path -LiteralPath $pacmanBuildScript -PathType Leaf)) {
+        Write-Host "      ERROR: PacMan build script not found at: $pacmanBuildScript" -ForegroundColor Red
+        exit 1
+    }
+
+    $pacmanBuildArgs = @{
+        OutputPackage = (Join-Path $RootDir "Apps\PacMan")
+        Clean = $Clean
+    }
+    Write-Host "      Building PacMan AMD64 Native ELF package..." -ForegroundColor Cyan
+    & $pacmanBuildScript @pacmanBuildArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "      ERROR: PacMan Native ELF package build failed" -ForegroundColor Red
+        exit 1
     }
 }
 
@@ -105,14 +132,24 @@ if ($Clean) {
         Remove-Item -Recurse -Force $RootKernelBuildDir
         Write-Host "      Removed kernel/build/$Arch/" -ForegroundColor Gray
     }
+
+    $LegacyRootBuildDir = Join-Path $RootDir "build\$Arch"
+    if (Test-Path $LegacyRootBuildDir) {
+        Remove-Item -Recurse -Force $LegacyRootBuildDir
+        Write-Host "      Removed legacy build/$Arch/" -ForegroundColor Gray
+    }
     
     Write-Host "      Clean complete" -ForegroundColor Green
     Write-Host ""
 }
 
-# Build the boot-time wallpaper filesystem image before the compile stages so a
-# failed bootloader/kernel prerequisite cannot leave QEMU using stale thumbnails.
-Write-Host "[1b/6] Building wallpaper runtime image..." -ForegroundColor Yellow
+Write-Host "[1c/6] Building PacMan Native ELF package..." -ForegroundColor Yellow
+Build-PacmanPackage
+Write-Host ""
+
+# Build the boot-time runtime filesystem after the package build so a clean
+# build cannot embed stale PacMan metadata or executable bytes in ramdisk.img.
+Write-Host "[1b/6] Building wallpaper and native-app runtime image..." -ForegroundColor Yellow
 Build-WallpaperRuntimeImage
 Write-Host ""
 
@@ -289,9 +326,49 @@ if (!$SkipKernel) {
         # directory, so push into kernel/ first (mirrors what the root Makefile
         # does: cd kernel && $(MAKE) ARCH=...).
         Push-Location $KernelDir
-        & $Make ARCH=$Arch
+        $KernelExtraCFlags = @()
+        if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
+            $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
+        }
+        # Keep the default bare-metal build free of boot-time smoke launches.
+        # The kernel makefile does not include CFLAGS in object dependencies. If
+        # an opt-in launch-smoke build ran immediately before a normal build,
+        # invalidate main.o so the old flagged startup path cannot be reused.
+        $cleanupSmokeEnabled = ($KernelExtraCFlags -join " ") -match "GXOS_DESKTOP_CLEANUP_RUNTIME_PASS"
+        if (-not $cleanupSmokeEnabled) {
+            Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\main.o")
+        }
+        # The file-operation runtime smoke adds run_runtime_smoke() to the
+        # clipboard translation unit. CFLAGS are not part of the Makefile's
+        # object dependency key, so invalidate that object when switching
+        # between normal and smoke kernels instead of allowing a stale object
+        # to produce an undefined symbol at link time.
+        # Always rebuild this translation unit on scripted builds so the
+        # normal build after a smoke run cannot retain the smoke-only symbol.
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\file_clipboard.o")
+        # Compiler diagnostics are written to stderr even for successful builds.
+        # Keep them visible, but let the native make exit code remain the build
+        # result instead of treating a warning as a terminating PowerShell error.
+        $kernelOutputs = @(
+            (Join-Path $KernelBinDir "kernel.elf")
+        )
+        if ($Arch -eq "amd64") {
+            $kernelOutputs += (Join-Path $KernelBinDir "kernel.pe")
+        }
+        $makeResult = Invoke-GxosNativeBuildCommand `
+            -FilePath $Make `
+            -ArgumentList @("ARCH=$Arch", "EXTRA_CFLAGS=$($KernelExtraCFlags -join ' ')") `
+            -ExpectedOutputPaths $kernelOutputs
 
-        if ($LASTEXITCODE -ne 0) {
+        if (-not $makeResult.Succeeded) {
+            if ($makeResult.ExitCode -ne 0) {
+                Write-Host "      ERROR: Kernel build failed with process exit code $($makeResult.ExitCode)" -ForegroundColor Red
+            } else {
+                Write-Host "      ERROR: Kernel build reported success but expected output is missing or empty" -ForegroundColor Red
+                foreach ($missingOutput in $makeResult.MissingOutputs) {
+                    Write-Host "             Missing output: $missingOutput" -ForegroundColor Red
+                }
+            }
             Write-Host "      ERROR: Kernel build failed" -ForegroundColor Red
             Pop-Location   # kernel dir
             Pop-Location   # root dir
@@ -346,14 +423,119 @@ elseif (Test-Path $KernelBin) {
     }
     Copy-Item $KernelBin $TargetKernel -Force
     Write-Host "      Copied: kernel.elf ($(((Get-Item $TargetKernel).Length / 1KB).ToString('0.0')) KB)" -ForegroundColor Cyan
+    $identityPath = Join-Path $ESPDir "build-identity.txt"
+    @(
+        "identity=GXOS-LARGE-FILE-PASTE-TRACE-V1"
+        "probe=GXOS-LFPASTE-20260726-02"
+        "imageKind=ESP-directory-used-as-QEMU-FAT-media"
+        "imageRoot=$ESPDir"
+        "bootloaderSource=$BootloaderBin"
+        "bootloaderSha256=$((Get-FileHash -LiteralPath $TargetBootloader -Algorithm SHA256).Hash)"
+        "kernelSource=$KernelBin"
+        "kernelSha256=$((Get-FileHash -LiteralPath $KernelBin -Algorithm SHA256).Hash)"
+        "espKernelSha256=$((Get-FileHash -LiteralPath $TargetKernel -Algorithm SHA256).Hash)"
+        "builtAtUtc=$([DateTime]::UtcNow.ToString('o'))"
+    ) | Set-Content -LiteralPath $identityPath -Encoding ascii
+    Write-Host "      Wrote: build-identity.txt" -ForegroundColor Cyan
 } else {
     Write-Host "      WARNING: Kernel binary not found at: $KernelBin" -ForegroundColor Yellow
     Write-Host "      ESP will boot but needs a kernel to run" -ForegroundColor Gray
 }
 
-# Ensure the boot-time wallpaper filesystem image exists in ESP. The bootloader
-# loads this as ramdisk.img and the kernel mounts it at /system/wall.
+# Ensure the boot-time runtime filesystem image exists in ESP. The bootloader
+# loads this as ramdisk.img; the kernel mounts it at /system when a persistent
+# root exists, or at / when booting from a release ISO without one.
 Build-WallpaperRuntimeImage
+
+# Stage the validated App Model package in the ESP root as well. The normal
+# QEMU path exposes the ESP FAT volume at /, while the release ISO uses the
+# same package from ramdisk.img when no persistent root is available.
+function Stage-PacmanPackage {
+    $packageRoot = Join-Path $RootDir "Apps\PacMan"
+    $manifestPath = Join-Path $packageRoot "app.json"
+    $elfPath = Join-Path $packageRoot "bin\amd64\pacman.elf"
+    $levelPath = Join-Path $packageRoot "resources\level1.gximg"
+    $spritesPath = Join-Path $packageRoot "resources\pacpics.gximg"
+    foreach ($required in @(
+        @{ Path = $manifestPath; Name = "PacMan manifest" },
+        @{ Path = $elfPath; Name = "PacMan AMD64 Native ELF" },
+        @{ Path = $levelPath; Name = "PacMan level asset" },
+        @{ Path = $spritesPath; Name = "PacMan sprite asset" }
+    )) {
+        if (!(Test-Path -LiteralPath $required.Path -PathType Leaf)) {
+            Write-Host "      ERROR: Missing $($required.Name): $($required.Path)" -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $entry = @($manifest.entries | Where-Object { $_.architecture -eq $Arch })
+        if ($manifest.id -ne "com.guidexos.pacman" -or $manifest.kind -ne "NativeElf" -or
+            $entry.Count -ne 1 -or $entry[0].path -ne "bin/amd64/pacman.elf" -or
+            $entry[0].entryPoint -ne "gx_main" -or $entry[0].abi -ne "guidexos-c-abi-v1" -or
+            $entry[0].runtime -ne "native-elf") {
+            throw "manifest identity, kind, architecture, path, entry point, ABI, or runtime is invalid"
+        }
+    } catch {
+        Write-Host "      ERROR: PacMan App Model manifest validation failed: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+
+    $elfBytes = [IO.File]::ReadAllBytes($elfPath)
+    if ($elfBytes.Length -lt 20 -or $elfBytes[0] -ne 0x7f -or $elfBytes[1] -ne 0x45 -or
+        $elfBytes[2] -ne 0x4c -or $elfBytes[3] -ne 0x46 -or $elfBytes[4] -ne 2 -or
+        $elfBytes[5] -ne 1 -or $elfBytes[18] -ne 0x3e -or $elfBytes[19] -ne 0) {
+        Write-Host "      ERROR: PacMan executable is not a little-endian AMD64 ELF64" -ForegroundColor Red
+        exit 1
+    }
+
+    $appsRoot = Join-Path $ESPDir "Apps"
+    $stageRoot = Join-Path $appsRoot "PacMan"
+    New-Item -ItemType Directory -Path $appsRoot -Force | Out-Null
+    if (Test-Path -LiteralPath $stageRoot) {
+        $resolvedAppsRoot = (Resolve-Path -LiteralPath $appsRoot).Path.TrimEnd('\')
+        $resolvedStageRoot = (Resolve-Path -LiteralPath $stageRoot).Path
+        if (!$resolvedStageRoot.StartsWith($resolvedAppsRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            Write-Host "      ERROR: refusing to remove PacMan stage outside ESP\Apps: $resolvedStageRoot" -ForegroundColor Red
+            exit 1
+        }
+        Remove-Item -LiteralPath $resolvedStageRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path (Join-Path $stageRoot "bin\amd64"), (Join-Path $stageRoot "resources") -Force | Out-Null
+    Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $stageRoot "app.json") -Force
+    Copy-Item -LiteralPath $elfPath -Destination (Join-Path $stageRoot "bin\amd64\pacman.elf") -Force
+    Copy-Item -LiteralPath $levelPath -Destination (Join-Path $stageRoot "resources\level1.gximg") -Force
+    Copy-Item -LiteralPath $spritesPath -Destination (Join-Path $stageRoot "resources\pacpics.gximg") -Force
+
+    $actualFiles = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File | ForEach-Object {
+        $_.FullName.Substring($stageRoot.Length + 1).Replace('\', '/')
+    } | Sort-Object)
+    $expectedFiles = @("app.json", "bin/amd64/pacman.elf", "resources/level1.gximg", "resources/pacpics.gximg")
+    if ((Compare-Object $expectedFiles $actualFiles).Count -ne 0) {
+        Write-Host "      ERROR: staged PacMan package tree is not exact: $($actualFiles -join ', ')" -ForegroundColor Red
+        exit 1
+    }
+
+    $stagedElf = Join-Path $stageRoot "bin\amd64\pacman.elf"
+    $stagedManifest = Join-Path $stageRoot "app.json"
+    $elfHash = (Get-FileHash -LiteralPath $stagedElf -Algorithm SHA256).Hash
+    $manifestHash = (Get-FileHash -LiteralPath $stagedManifest -Algorithm SHA256).Hash
+    Write-Host "      Staged /Apps/PacMan (manifest, AMD64 ELF, level, sprites)" -ForegroundColor Green
+    Write-Host "      PacMan ELF bytes=$((Get-Item -LiteralPath $stagedElf).Length) sha256=$elfHash" -ForegroundColor Cyan
+    Write-Host "      PacMan manifest bytes=$((Get-Item -LiteralPath $stagedManifest).Length) sha256=$manifestHash" -ForegroundColor Cyan
+    $identityPath = Join-Path $ESPDir "build-identity.txt"
+    if (Test-Path -LiteralPath $identityPath) {
+        Add-Content -LiteralPath $identityPath -Value @(
+            "pacmanPackageRoot=/Apps/PacMan"
+            "pacmanElfSha256=$elfHash"
+            "pacmanManifestSha256=$manifestHash"
+            "pacmanElfBytes=$((Get-Item -LiteralPath $stagedElf).Length)"
+            "pacmanManifestBytes=$((Get-Item -LiteralPath $stagedManifest).Length)"
+        )
+    }
+}
+Stage-PacmanPackage
 
 Write-Host "      ESP directory ready" -ForegroundColor Green
 Write-Host ""

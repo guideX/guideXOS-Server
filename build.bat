@@ -59,9 +59,12 @@ elf_validator.cpp ^
 executable_memory.cpp ^
 file_explorer.cpp ^
 file_icon_provider.cpp ^
+file_operations.cpp ^
 firewall.cpp ^
 focus_indicator.cpp ^
 fs.cpp ^
+background_service.cpp ^
+background_store.cpp ^
 gxapp_container.cpp ^
 gxapp_loader.cpp ^
 gxm_loader.cpp ^
@@ -99,6 +102,7 @@ package_manager.cpp ^
 paint.cpp ^
 process.cpp ^
 png_loader.cpp ^
+png_codec.cpp ^
 right_click_menu.cpp ^
 save_changes_dialog.cpp ^
 save_dialog.cpp ^
@@ -114,6 +118,7 @@ video_backend.cpp ^
 vfs.cpp ^
 vnc_server.cpp ^
 wallpaper_registry.cpp ^
+window_bounds_store.cpp ^
 welcome.cpp ^
 workspace_manager.cpp
 

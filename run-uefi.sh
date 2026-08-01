@@ -94,10 +94,10 @@ echo -e "${GREEN}Launching QEMU with UEFI boot...${NC}"
 echo ""
 
 # Launch QEMU with UEFI firmware
-# -machine q35,usb=off uses the Q35 chipset which includes HPET, LPC
-# (for i8042 PS/2), and other devices OVMF expects. usb=off disables
-# the implicit USB tablet so mouse events are routed to the PS/2
-# controller (IRQ12) instead.
+# -machine pc,usb=off exposes the ESP as a legacy IDE disk, which the
+# current bare-metal ATA driver can enumerate for persistent settings.
+# usb=off disables the implicit USB tablet so mouse events are routed to
+# the PS/2 controller (IRQ12) instead.
 #
 # Using pflash instead of -bios properly maps the firmware flash region
 # and eliminates "Invalid read at addr 0xFFC00000" errors from OVMF
@@ -111,7 +111,7 @@ cd "${SCRIPT_DIR}"
 if [ "$SPLIT_PFLASH" = "1" ]; then
     echo -e "${CYAN}Using split pflash: CODE + VARS${NC}"
     qemu-system-x86_64 \
-        -machine q35,usb=off \
+        -machine pc,usb=off \
         -drive if=pflash,format=raw,unit=0,readonly=on,file="${OVMF_CODE}" \
         -drive if=pflash,format=raw,unit=1,file="${OVMF_VARS}" \
         -drive file=fat:rw:ESP,format=raw \
@@ -127,7 +127,7 @@ if [ "$SPLIT_PFLASH" = "1" ]; then
 else
     echo -e "${CYAN}Using combined pflash: OVMF.fd${NC}"
     qemu-system-x86_64 \
-        -machine q35,usb=off \
+        -machine pc,usb=off \
         -drive if=pflash,format=raw,readonly=on,file="${OVMF_CODE}" \
         -drive file=fat:rw:ESP,format=raw \
         -netdev user,id=net0 \

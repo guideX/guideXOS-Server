@@ -24,6 +24,7 @@ static const uint16_t kCommandReg   = 0x43;
 static const uint32_t kBaseFrequency = 1193182;
 
 static volatile uint64_t s_ticks = 0;
+static volatile bool s_heartbeatSeen = false;
 
 void init(uint32_t hz)
 {
@@ -39,6 +40,7 @@ void init(uint32_t hz)
     arch::outb(kChannel0Data, static_cast<uint8_t>((divisor >> 8) & 0xFF));
 
     s_ticks = 0;
+    s_heartbeatSeen = false;
 
     serial::puts("[PIT] Timer configured at ~");
     serial::put_hex32(hz);
@@ -49,7 +51,13 @@ void init(uint32_t hz)
 
 void irq_handler()
 {
-    s_ticks++;
+    ++s_ticks;
+    s_heartbeatSeen = true;
+    if ((s_ticks % 100u) == 0u) {
+        serial::puts("[KERNEL-HEARTBEAT] ticks=");
+        serial::put_hex64(s_ticks);
+        serial::puts(" source=PIT_IRQ0\n");
+    }
 }
 
 uint64_t ticks()
@@ -57,11 +65,17 @@ uint64_t ticks()
     return s_ticks;
 }
 
+bool heartbeat_seen()
+{
+    return s_heartbeatSeen;
+}
+
 #else // !ARCH_HAS_PORT_IO
 
 void     init(uint32_t) { }
 void     irq_handler()  { }
 uint64_t ticks()        { return 0; }
+bool     heartbeat_seen() { return false; }
 
 #endif // ARCH_HAS_PORT_IO
 

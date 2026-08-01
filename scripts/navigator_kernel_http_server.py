@@ -8,24 +8,42 @@ import binascii
 import gzip
 import zlib
 import ssl
+import socket
 import struct
+import os
 
 
 def png_chunk(kind, data):
     return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", binascii.crc32(kind + data) & 0xFFFFFFFF)
 
 
-def make_smoke_png():
-    width = 2
-    height = 2
+def make_smoke_png(width, height):
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
-    row_a = b"\x00" + bytes([220, 40, 40, 255, 40, 160, 80, 255])
-    row_b = b"\x00" + bytes([40, 100, 220, 255, 245, 210, 70, 255])
-    data = zlib.compress(row_a + row_b)
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            row.extend([
+                (40 + (x * 29) + (y * 13)) % 256,
+                (90 + (x * 11) + (y * 31)) % 256,
+                (170 + (x * 17) + (y * 19)) % 256,
+                255,
+            ])
+        rows.append(bytes(row))
+    data = zlib.compress(b"".join(rows))
     return b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", ihdr) + png_chunk(b"IDAT", data) + png_chunk(b"IEND", b"")
 
 
-SMOKE_PNG = make_smoke_png()
+SMOKE_PNG = make_smoke_png(2, 2)
+SMOKE_WIDE_PNG = make_smoke_png(640, 160)
+SMOKE_TALL_PNG = make_smoke_png(160, 640)
+CANONICAL_TLS12_SUITES = {
+    0xC02F: "TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256",
+    0xC030: "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
+    0xC02B: "TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256",
+    0xC02C: "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384",
+}
+TLS_SIGNALING_SUITES = {0x00FF}
 INTERACTIVE_FORM_CONTROLS = (
     b"<input type=\"text\" name=\"q\" value=\"\">"
     b"<input type=\"text\" value=\"unnamed control omitted\">"
@@ -270,6 +288,499 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<hr>"
                              b"<p>Below the horizontal rule.</p>"
                              b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-phase1e.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { margin:16px; background:#f4efe6; color:#243447; line-height:1.55; }"
+                             b"main { max-width:560px; margin-left:auto; margin-right:auto; padding:12px 14px; background:#ffffff; }"
+                             b"figure, blockquote, dl, section, article, div { background:#f8fafc; padding:10px 12px; margin:12px 0; border-top:1px solid #d6dce8; border-bottom:1px solid #d6dce8; }"
+                             b"figure { max-width:100%; margin-left:auto; margin-right:auto; text-align:center; }"
+                             b"figcaption { color:#5b6472; font-style:italic; font-size:13px; margin:4px 0 6px; }"
+                             b"blockquote { margin-left:18px; padding-left:12px; background:#f1f5f9; }"
+                             b"dl { margin:8px 0 10px; }"
+                             b"dt { font-weight:bold; margin-top:6px; margin-bottom:2px; }"
+                             b"dd { margin-left:18px; margin-bottom:6px; }"
+                             b".fit { max-width:100%; margin-left:auto; margin-right:auto; }"
+                             b".width-only { margin-left:auto; margin-right:auto; }"
+                             b".height-only { margin-left:auto; margin-right:auto; }"
+                             b".clamped { margin-left:auto; margin-right:auto; }"
+                             b".missing { margin-left:auto; margin-right:auto; }"
+                             b".wrapsafe { overflow-wrap:break-word; word-wrap:break-word; white-space:normal; }"
+                             b".breakall { word-break:break-all; }"
+                             b".prewrap { white-space:pre-wrap; }"
+                             b".narrow { max-width:60px; margin-left:auto; margin-right:auto; background:#fff7ed; padding:8px 10px; }"
+                             b".narrow .clamp { max-width:48px; margin-left:auto; margin-right:auto; background:#eef2ff; padding:6px; }"
+                             b".unsupported { display:grid; grid-template-columns:1fr 1fr; position:absolute; transform:translateX(10px); transition:all 1s; }"
+                             b"</style></head><body><main>"
+                             b"<h1>Phase 1E Media and Text</h1>"
+                             b"<p class=\"wrapsafe\">Long URL marker https://example.com/really/long/path/that/should/wrap/safely/because/it/is/way/too/long/for/the/content/box.</p>"
+                             b"<p class=\"breakall\">Break-all marker: abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</p>"
+                             b"<p class=\"prewrap\">Pre-wrap marker line one\nline two with long token supercalifragilisticexpialidocioussupercalifragilisticexpialidocious</p>"
+                             b"<figure><figcaption>Max-width 100 percent figure marker</figcaption><img class=\"fit\" src=\"/navigator-smoke/wide.png\" alt=\"Max-width 100 percent figure marker\"></figure>"
+                             b"<figure><figcaption>Width-only aspect ratio marker</figcaption><img class=\"width-only\" src=\"/navigator-smoke/wide.png\" width=\"180\" alt=\"Width-only aspect ratio marker\"></figure>"
+                             b"<figure><figcaption>Height-only aspect ratio marker</figcaption><img class=\"height-only\" src=\"/navigator-smoke/tall.png\" height=\"180\" alt=\"Height-only aspect ratio marker\"></figure>"
+                             b"<figure><figcaption>Max-height aspect marker</figcaption><img class=\"height-only\" src=\"/navigator-smoke/tall.png\" style=\"max-height:180px;\" alt=\"Max-height aspect marker\"></figure>"
+                             b"<figure><figcaption>Oversized image clamped to content width marker</figcaption><img class=\"clamped\" src=\"/navigator-smoke/wide.png\" width=\"4096\" height=\"1024\" alt=\"Oversized image clamped to content width marker\"></figure>"
+                             b"<figure><figcaption>Malformed or huge dimensions are clamped marker</figcaption><img class=\"clamped\" src=\"/navigator-smoke/wide.png\" width=\"99999\" height=\"99999\" alt=\"Malformed or huge dimensions are clamped marker\"></figure>"
+                             b"<figure><figcaption>Missing image alt fallback marker</figcaption><img class=\"missing\" src=\"/navigator-smoke/missing.png\" width=\"360\" height=\"120\" alt=\"Missing image alt fallback marker\"></figure>"
+                             b"<blockquote><p>Blockquote marker line.</p><blockquote><p>Nested blockquote marker line.</p></blockquote><cite><p>Citation marker.</p></cite><q><p>q marker.</p></q></blockquote>"
+                             b"<dl><dt>Definition term alpha</dt><dd>Definition detail one with <a href=\"/navigator-smoke/basic.html\">a link</a>.</dd><dt>Definition term beta</dt><dd>Definition detail two.</dd></dl>"
+                             b"<section class=\"narrow\"><div class=\"narrow\"><article class=\"narrow\"><div class=\"clamp\">Nested wrapper backgrounds and padding marker.</div></article></div></section>"
+                             b"<p class=\"unsupported\">Unsupported properties remain nonfatal.</p>"
+                             b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-phase1f.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { margin:16px; background:#f4efe6; color:#243447; line-height:1.55; }"
+                             b"main { max-width:620px; margin-left:auto; margin-right:auto; }"
+                             b".shorthand-a { border: 1px solid #8ea2b5; padding:8px 10px; margin:10px 0; background:#ffffff; }"
+                             b".shorthand-b { border: solid 1px #4b5563; padding:8px 10px; margin:10px 0; background:#f8fafc; }"
+                             b".shorthand-c { border: #7b8794 solid 1px; padding:8px 10px; margin:10px 0; background:#ffffff; }"
+                             b".per-side { border-top: 3px dashed #0f766e; border-right: 2px dotted #b91c1c; border-bottom: 4px solid #1d4ed8; border-left: 2px solid #7c3aed; padding:8px 10px; margin:10px 0; background:#f8fafc; }"
+                             b".thick-clamp { border: 999px solid #111827; padding:4px 8px; margin:10px 0; background:#ffffff; }"
+                             b".malformed { border: 3px solid #64748b bogus-token; padding:4px 8px; margin:10px 0; background:#ffffff; }"
+                             b"blockquote { border-left:4px solid #94a3b8; margin:12px 0; padding:8px 12px; background:#f8fafc; }"
+                             b"figure { border:2px solid #cbd5e1; margin:12px 0; padding:8px 10px; background:#ffffff; }"
+                             b"figcaption { border-top:1px solid #cbd5e1; margin-top:6px; padding-top:4px; text-align:center; color:#5b6472; font-style:italic; }"
+                             b"pre { border:2px solid #cbd5e1; margin:0; padding:8px 10px; background:#f8fafc; font-family: monospace; }"
+                             b"code { border:2px solid #cbd5e1; margin:0; padding:2px 4px; background:#f8fafc; font-family: monospace; }"
+                             b"table.collapse { border-collapse: collapse; border:2px solid #64748b; width:100%; margin:12px 0; }"
+                             b"table.collapse th, table.collapse td { border:1px solid #94a3b8; padding:4px 6px; }"
+                             b"table.separate { border-collapse: separate; border-spacing: 999px 4px; border:2px solid #64748b; width:100%; margin:12px 0; background:#ffffff; }"
+                             b"table.separate th, table.separate td { border:1px solid #94a3b8; padding:4px 6px; background:#f8fafc; }"
+                             b"table.wide { border-collapse: separate; border-spacing: 8px 4px; border:1px solid #64748b; max-width:320px; margin:12px 0; background:#ffffff; }"
+                             b"table.wide th, table.wide td { border:1px solid #94a3b8; padding:4px 6px; background:#ffffff; }"
+                             b"ul.disc { list-style: disc; padding-left:28px; margin:8px 0; }"
+                             b"ul.circle { list-style: circle; padding-left:28px; margin:8px 0; }"
+                             b"ul.square { list-style: square; padding-left:28px; margin:8px 0; }"
+                             b"ol.decimal { list-style: decimal; padding-left:28px; margin:8px 0; }"
+                             b"ol.alpha { list-style: lower-alpha; padding-left:28px; margin:8px 0; }"
+                             b"ol.upper { list-style: upper-alpha; padding-left:28px; margin:8px 0; }"
+                             b"ul.none { list-style: none; padding-left:18px; margin:8px 0; }"
+                             b"li.wrap { max-width:280px; }"
+                             b".underline { text-decoration: underline; }"
+                             b".strike { text-decoration: line-through; }"
+                             b".sans { font-family: Arial, sans-serif; }"
+                             b".mono { font-family: \"Unavailable Font\", monospace; }"
+                             b".serif { font-family: Georgia, serif; }"
+                             b"</style></head><body><main>"
+                             b"<h1>Phase 1F Box and Text Fidelity</h1>"
+                             b"<p class=\"shorthand-a\">Wrapper with border shorthand 1px solid #888 marker.</p>"
+                             b"<p class=\"shorthand-b\">Wrapper with border shorthand solid 1px black marker.</p>"
+                             b"<p class=\"shorthand-c\">Wrapper with border shorthand #888 solid 1px marker.</p>"
+                             b"<div class=\"per-side\">Per-side border marker with dashed and dotted edges.</div>"
+                             b"<div class=\"thick-clamp\">Oversized border width clamp marker.</div>"
+                             b"<div class=\"malformed\">Malformed border declaration ignored safely marker.</div>"
+                             b"<blockquote>Bordered blockquote marker with wrapped text that should stay readable across lines.</blockquote>"
+                             b"<figure><div>Figure marker content.</div><figcaption>Figcaption marker stays spaced away from the figure border.</figcaption></figure>"
+                             b"<pre>Preformatted border marker with g j p q y and code sample.</pre>"
+                             b"<code>Code block border marker with monospace fallback.</code>"
+                             b"<table class=\"collapse\"><tr><th>Collapse</th><th>Grid</th><th>Marker</th></tr><tr><td>Collapse border cell</td><td>Second cell</td><td>Third cell</td></tr></table>"
+                             b"<table class=\"separate\"><caption>Caption spacing marker</caption><tr><th>Separate</th><th>Spacing</th><th>Marker</th></tr><tr><td>Separate border cell</td><td>Second cell</td><td class=\"strike\">Decorated cell marker</td></tr></table>"
+                             b"<table class=\"wide\"><tr><th>Wide</th><th>Table</th><th>Fallback</th><th>Bounded</th></tr><tr><td>Northwind Example</td><td>Southbound Example</td><td>Eastward Example</td><td>Westward Example</td></tr></table>"
+                             b"<ul class=\"disc\"><li class=\"wrap\">Disc list marker text wraps across lines so the next line stays aligned with the content.</li><li><ul class=\"circle\"><li class=\"wrap\">Circle nested marker text wraps across lines and keeps bounded indentation.</li><li><ul class=\"square\"><li class=\"wrap\">Square nested marker text wraps across lines and keeps bounded indentation.</li></ul></li></ul></li></ul>"
+                             b"<ol class=\"decimal\"><li class=\"wrap\">Decimal list marker wraps across lines and keeps numbering stable.</li><li class=\"wrap\">Second decimal item to show stable numbering.</li></ol>"
+                             b"<ol class=\"alpha\"><li class=\"wrap\">Lower alpha marker wraps across lines and stays readable.</li><li class=\"wrap\">Second lower alpha item remains bounded.</li></ol>"
+                             b"<ol class=\"upper\"><li class=\"wrap\">Upper alpha marker wraps across lines and stays readable.</li></ol>"
+                             b"<ul class=\"none\"><li class=\"wrap\">List style none item stays readable without markers.</li></ul>"
+                             b"<p class=\"underline\">Explicit underline marker text.</p>"
+                             b"<p class=\"strike\">Line-through marker text.</p>"
+                             b"<p><a href=\"/navigator-smoke/basic.html\" style=\"text-decoration:none;\">Link without underline marker</a> and <a href=\"/navigator-smoke/basic.html\">Default underlined link marker</a>.</p>"
+                             b"<table class=\"collapse\"><tr><td>Decorated cell marker</td><td class=\"strike\">Strike inside cell marker</td><td class=\"mono\">Monospace cell marker</td></tr></table>"
+                             b"<p class=\"sans\">Sans-serif font family marker.</p>"
+                             b"<p class=\"mono\">Unavailable font followed by monospace marker.</p>"
+                             b"<p class=\"serif\">Serif fallback marker.</p>"
+                             b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2a.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><link rel=\"stylesheet\" href=\"/navigator-smoke/css-phase2a-linked.css\"><style>"
+                             b"* { color:#111827; }"
+                             b"body { background:#f8fafc; color:#334155; font-size:16px; line-height:1.4; }"
+                             b"p { color:#475569; padding:2px; margin:2px 0; }"
+                             b".note { color:#2563eb; padding:4px; background:#e0f2fe; }"
+                             b".note.important { color:#be123c; }"
+                             b"p.note { border-top:1px solid #64748b; }"
+                             b"#phase2a-id { color:#7c3aed; }"
+                             b"article p { padding:6px; background:#fef3c7; }"
+                             b"article > p { padding:10px; }"
+                             b"h1, h2, h3 { margin:3px 0; }"
+                             b"#phase2a-order { color:#c2410c; }"
+                             b"#phase2a-partial { color:#0f766e; background:#dcfce7; padding:8px; border:2px solid #166534; }"
+                             b"#phase2a-partial { background:#fef3c7; }"
+                             b"#phase2a-duplicate { padding:2px; padding:11px; }"
+                             b"#phase2a-inline { color:#991b1b; background:#dbeafe; padding:4px; border:2px solid #1d4ed8; }"
+                             b".inherit-wrap { color:#0369a1; font-size:20px; line-height:1.8; background:#fce7f3; padding:12px; }"
+                             b".inherit-wrap .child-override { color:#15803d; }"
+                             b".deep-one { color:#7e22ce; } .deep-two { color:#7e22ce; }"
+                             b".table-parent { color:#92400e; font-size:18px; line-height:1.5; }"
+                             b".warning { background:#fee2e2; }"
+                             b"p + p { color:#dc2626; } p[data-phase2a='bad'] { color:#dc2626; }"
+                             b"#phase2a-important { color:#111827; } .important-class { color:#9333ea !important; }"
+                             b"#phase2a-malformed { color:#dc2626 !importantx; }"
+                             b".g1, .g2, .g3, .g4, .g5, .g6, .g7, .g8, .g9, .g10, .g11, .g12, .g13, .g14, .g15, .g16, .g17, .g18 { color:#0f766e; }"
+                             b"article section div p span em strong code kbd { color:#dc2626; }"
+                             b"</style></head><body>"
+                             b"<h1 id=\"phase2a-heading\">Phase 2A Selector Cascade</h1>"
+                             b"<p id=\"phase2a-universal\" class=\"notebook\">Universal and exact class token marker.</p>"
+                             b"<p id=\"phase2a-multi\" class=\"wide note important\">Multiple class matching marker.</p>"
+                             b"<p id=\"phase2a-id\" class=\"note\">Exact ID and compound selector marker.</p>"
+                             b"<article class=\"article-wrap\"><div class=\"nested-wrap\"><p id=\"phase2a-desc\" class=\"warning\">Descendant selector marker.</p></div><p id=\"phase2a-child\">Direct child selector marker.</p></article>"
+                             b"<p id=\"phase2a-order\">Equal specificity source-order marker.</p>"
+                             b"<p id=\"phase2a-partial\">Property-level partial cascade marker.</p>"
+                             b"<p id=\"phase2a-duplicate\">Duplicate declaration marker.</p>"
+                             b"<p id=\"phase2a-inline\" style=\"color:#1d4ed8;padding:12px;\">Inline precedence marker.</p>"
+                             b"<div class=\"inherit-wrap\"><section class=\"deep-one\"><article class=\"deep-two\"><p id=\"phase2a-inherited\">Wrapper inheritance marker.</p><p id=\"phase2a-inherit-override\" class=\"child-override\">Child inheritance override marker.</p></article></section></div>"
+                             b"<table class=\"table-parent\"><tr><td id=\"phase2a-cell\">Table cell text inheritance marker.</td></tr></table>"
+                             b"<p id=\"phase2a-important\" class=\"important-class\">Important precedence marker.</p>"
+                             b"<p id=\"phase2a-malformed\">Malformed important marker.</p>"
+                             b"<p id=\"phase2a-group\" class=\"g17\">Selector group cap marker.</p>"
+                             b"</body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2a-linked.css":
+            self.write_bytes(200, "text/css; charset=utf-8", b"#phase2a-order { color:#166534; }")
+            return
+        if path == "/navigator-smoke/css-phase2b.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2B Structural Selectors</title><style>"
+                             b":root { color:#334155; } body { color:#475569; font-size:16px; }"
+                             b"ul#phase2b-list > li { color:#64748b; }"
+                             b"#phase2b-list > li:first-child { color:#b91c1c; background:#fee2e2; }"
+                             b"#phase2b-list > li:last-child { color:#1d4ed8; }"
+                             b"#phase2b-only > p:only-child { color:#7c3aed; }"
+                             b"#phase2b-list > li:nth-child(1) { background:#fef3c7; }"
+                             b"#phase2b-list > li:nth-child(2) { background:#dcfce7; }"
+                             b"#phase2b-list > li:nth-child(odd) { border-top:1px solid #ef4444; }"
+                             b"#phase2b-list > li:nth-child(even) { border-bottom:1px solid #2563eb; }"
+                             b"#phase2b-list > li:nth-child(2n+1) { font-weight:bold; }"
+                             b"#phase2b-list > li:nth-child(3n+2) { text-decoration:underline; }"
+                             b"#phase2b-list > li:nth-child(99) { color:#000000; }"
+                             b"#phase2b-list > li:nth-child(what) { color:#000000; }"
+                             b"#phase2b-list > li:nth-child(999999999999999999999999n) { color:#000000; }"
+                             b"#phase2b-type > p:first-of-type { color:#047857; }"
+                             b"#phase2b-type > p:last-of-type { background:#d1fae5; }"
+                             b"#phase2b-type > p:nth-of-type(2) { border-left:2px solid #059669; }"
+                             b"#phase2b-only-type > p:only-of-type { color:#9333ea; }"
+                             b"p:not(.hidden) { font-size:18px; }"
+                             b"p:not(p.notice) { color:#0f766e; }"
+                             b"p:not(.a.b) { line-height:1.5; }"
+                             b".malformed:not(p .notice), p:has(.nope), p:hover, p:is(.nope), p#phase2b-group-valid { background:#e0f2fe; }"
+                             b"p:first-child:last-child:only-child:nth-child(1):not(.too-many) { color:#000000; }"
+                             b"a:link { color:#1d4ed8; text-decoration:none; }"
+                             b"a:visited { color:#7c3aed; font-weight:bold; background:#ff0000; }"
+                             b"</style></head><body>"
+                             b"<h1 id=\"phase2b-heading\">Phase 2B Structural Selectors</h1>"
+                             b"<ul id=\"phase2b-list\"><li id=\"phase2b-first\">First child marker</li>\n  <li id=\"phase2b-second\">Second child marker</li><li id=\"phase2b-third\">Third child marker</li></ul>"
+                             b"<div id=\"phase2b-only\"><p id=\"phase2b-only-child\">Only child marker</p></div>"
+                             b"<div id=\"phase2b-type\"><p id=\"phase2b-type-first\">First of type marker</p><span>Mixed tag marker</span><p id=\"phase2b-type-second\">Second of type marker</p></div>"
+                             b"<div id=\"phase2b-only-type\"><h2>Mixed heading marker</h2><p id=\"phase2b-only-type-p\">Only of type marker</p></div>"
+                             b"<p id=\"phase2b-not-visible\">Not hidden marker</p><p id=\"phase2b-hidden\" class=\"hidden\">Hidden class marker</p><p id=\"phase2b-not-notice\" class=\"notice\">Not notice marker</p><p id=\"phase2b-not-classes\" class=\"a b\">Multiple class marker</p>"
+                             b"<p id=\"phase2b-group-valid\">Valid selector-group member marker</p>"
+                             b"<a id=\"phase2b-visited\" href=\"/navigator-smoke/basic.html\">Visited link marker</a><a id=\"phase2b-link\" href=\"/navigator-smoke/css-phase2b-never-visited.html\">Unvisited link marker</a>"
+                             b"<img id=\"phase2b-image-url\" src=\"/navigator-smoke/tiny.png\" alt=\"Non-anchor URL marker\">"
+                             b"</body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2c.html":
+            scan_items = b"".join(
+                b"<p>bounded scan item %d</p>" % index for index in range(70)
+            )
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2C Sibling Combinators</title><style>"
+                             b"body { color:#334155; font-size:16px; }"
+                             b"h2 + p { color:#dc2626; background:#fef3c7; }"
+                             b"h2+p { border-top:1px solid #ef4444; }"
+                             b"section > h2 + p { padding:6px; }"
+                             b"h2 ~ p { color:#0f766e; background:#fef3c7; }"
+                             b"h2:first-of-type ~ p { border-left:2px solid #2563eb; }"
+                             b".a + .b { color:#7c3aed; }"
+                             b"li + li { text-decoration:underline; }"
+                             b"li:first-child + li { background:#dcfce7; }"
+                             b"li:nth-child(2) + li { border-bottom:1px solid #16a34a; }"
+                             b"li.selected ~ li { color:#0369a1; }"
+                             b"p:not(.hidden) + p { font-size:18px; }"
+                             b"p.warning ~ p.action { color:#b45309; }"
+                             b"a:link + a:visited { color:#7c3aed; }"
+                             b"article h2 ~ p.note { background:#dbeafe; }"
+                             b"#phase2c-cascade-wrap p { padding:7px; border-top:1px solid #64748b; }"
+                             b"h2 + p { color:#b91c1c; }"
+                             b"h2.phase2c-important-heading + p { color:#166534 !important; }"
+                             b".phase2c-group-valid, .bad + { color:#0f766e; }"
+                             b"h2 ++ p { color:#000000; } h2 ~~ p { color:#000000; } h2 + ~ p { color:#000000; }"
+                             b"* p { color:#000000; }"
+                             b"p[data-phase2c='bad'] + p { color:#000000; }"
+                             b"h2 + p + span + em + b + strong + code + i + small { color:#000000; }"
+                             b".phase2c-scan-start ~ p { color:#000000; }"
+                             b"</style></head><body>"
+                             b"<h1 id=\"phase2c-heading\">Phase 2C Sibling Combinators</h1>"
+                             b"<section id=\"phase2c-adj-wrap\"><h2 id=\"phase2c-adj-heading\">Adjacent heading</h2>\n  <p id=\"phase2c-adj-immediate\" class=\"a\">Immediate paragraph</p>\n  <p id=\"phase2c-adj-later\">Later paragraph</p></section>"
+                             b"<h2 class=\"phase2c-cross-source\">Cross parent source</h2><div><p id=\"phase2c-cross-parent\">Cross parent paragraph</p></div>"
+                             b"<ul id=\"phase2c-list\"><li id=\"phase2c-list-first\" class=\"selected a\">First item</li>\n  <li id=\"phase2c-list-second\" class=\"b\">Second item</li><li id=\"phase2c-list-third\">Third item</li></ul>"
+                             b"<article id=\"phase2c-article\"><p id=\"phase2c-general-before\">Earlier paragraph</p><h2 id=\"phase2c-general-heading\">General heading</h2><div>Intervening element</div><p id=\"phase2c-general-note\" class=\"note\">Later note</p><p id=\"phase2c-general-action\" class=\"action\">Later action</p></article>"
+                             b"<div id=\"phase2c-warning-wrap\"><p class=\"warning\">Warning source</p><span>Intervening span</span><p id=\"phase2c-warning-action\" class=\"action\">Warning action</p></div>"
+                             b"<div id=\"phase2c-not-wrap\"><p class=\"source\">Visible source</p><p id=\"phase2c-not-target\">Not hidden target</p><p class=\"hidden\">Hidden source</p><p id=\"phase2c-not-blocked\">Blocked target</p></div>"
+                             b"<div id=\"phase2c-link-wrap\"><a class=\"phase2c-link-source\" href=\"/navigator-smoke/css-phase2c-never-visited.html\">Unvisited source</a><a id=\"phase2c-visited\" href=\"/navigator-smoke/basic.html\">Visited sibling</a></div>"
+                             b"<div id=\"phase2c-cascade-wrap\"><h2>Source</h2><p id=\"phase2c-cascade-target\">Cascade target</p><h2>Inline source</h2><p id=\"phase2c-inline\" style=\"color:#1d4ed8;\">Inline target</p><h2 class=\"phase2c-important-heading\">Important source</h2><p id=\"phase2c-important\">Important target</p></div>"
+                             b"<p id=\"phase2c-group-valid\">Valid group member</p>"
+                             b"<div id=\"phase2c-scan-wrap\"><p class=\"phase2c-scan-start\">Scan source</p>" + scan_items +
+                             b"<p id=\"phase2c-scan-last\">Scan last</p></div>"
+                             b"</body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2d.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2D Empty and Parser Recovery</title><style>"
+                             b"body { color:#334155; font-size:16px; }"
+                             b"#phase2d-empty:empty { color:#166534; }"
+                             b"#phase2d-whitespace:empty { color:#166534; }"
+                             b"#phase2d-text:empty { color:#dc2626; }"
+                             b"#phase2d-child:empty { color:#dc2626; }"
+                             b"#phase2d-empty-child:empty { color:#dc2626; }"
+                             b"#phase2d-br:empty { color:#dc2626; }"
+                             b"#phase2d-image:empty { color:#dc2626; }"
+                             b"#phase2d-broken:empty { color:#dc2626; }"
+                             b"#phase2d-hr:empty { color:#dc2626; }"
+                             b"#phase2d-figure:empty { color:#dc2626; }"
+                             b"#phase2d-cell:empty { color:#dc2626; }"
+                             b"#phase2d-empty:empty + p { border-top:1px solid #16a34a; }"
+                             b".box:not(.keep):empty { border-left:2px solid #2563eb; }"
+                             b"section/*x*/>/*y*/ div:empty { border-right:2px solid #7c3aed; }"
+                             b"#phase2d-duplicate:empty { color:#dc2626; }"
+                             b"#phase2d-multiline-source\n +\n #phase2d-multiline-target { color:#0ea5e9; }"
+                             b"#phase2d-depth-good, h1 h2 h3 h4 h5 h6 h7 h8 { color:#15803d; }"
+                             b"#phase2d-cascade-wrap p { padding:7px; border-top:1px solid #64748b; }"
+                             b"#phase2d-cascade-empty:empty + #phase2d-cascade-target { color:#166534; }"
+                             b"#phase2d-cascade-target { color:#dc2626; }"
+                             b"#phase2d-inline { color:#1d4ed8; }"
+                             b"#phase2d-important { color:#166534 !important; }"
+                             b"#phase2d-comment-source/*x*/ + /*y*/ #phase2d-comment-target { color:#0f766e; }"
+                             b"#phase2d-general-source/*x*/ ~ /*y*/ #phase2d-general-target { color:#b45309; }"
+                             b"#phase2d-comment-group/*x*/, #phase2d-comment-group-two { color:#0891b2; }"
+                             b"#phase2d-declaration { color:red /* comment */; padding:5px /* between tokens */; border-top:1px solid #64748b; }"
+                             b"#phase2d-quoted { font-family:\"a;b,not-a-selector\"; color:#7c3aed; }"
+                             b"#phase2d-group-good, [bad], #phase2d-group-also { color:#15803d; }"
+                             b"#phase2d-pseudo-good, :hover, #phase2d-pseudo-also { color:#15803d; }"
+                             b"#phase2d-not-good, div:not(.a > .b), #phase2d-not-also { color:#15803d; }"
+                             b"#phase2d-attr-good, [data-x='a,b'], #phase2d-attr-also { color:#15803d; }"
+                             b"#phase2d-functional-good, :is(.a,.b), #phase2d-functional-also { color:#15803d; }"
+                             b"h1,,h2 { text-decoration:underline; }"
+                             b", #phase2d-leading { color:#15803d; }"
+                             b"#phase2d-trailing, { color:#15803d; }"
+                             b"#phase2d-combinator-source/*x*/+/*y*/#phase2d-combinator-target { color:#9333ea; }"
+                             b"#phase2d-general-source ~ #phase2d-general-target { background:#fef3c7; }"
+                             b"+ p, #phase2d-invalid-right + { color:#000000; }"
+                             b"#phase2d-invalid-repeat ++ p, #phase2d-invalid-mixed + ~ p { color:#000000; }"
+                             b"#phase2d-escape\\,bad, #phase2d-escape-good { color:#15803d; }"
+                             b"#phase2d-delimiter-good, div:not(.unclosed { color:#15803d; }"
+                             b"#phase2d-bracket-good, [data-bad { color:#15803d; }"
+                             b"#phase2d-incomplete:empty + #phase2d-incomplete-next { color:#dc2626; }"
+                             b"#phase2d-unclosed-string { font-family:\"oops }"
+                             b"</style><style>#phase2d-unterminated { color:#000000 /* unterminated"
+                             b"</style></head><body>"
+                             b"<h1 id=\"phase2d-heading\">Phase 2D Empty and Parser Recovery</h1>"
+                             b"<div id=\"phase2d-empty\"></div><p id=\"phase2d-empty-next\">Empty adjacent marker</p>"
+                             b"<div id=\"phase2d-whitespace\">   </div>"
+                             b"<p id=\"phase2d-duplicate\">duplicate first<span>duplicate second</span></p>"
+                             b"<p id=\"phase2d-multiline-source\">multiline source</p><p id=\"phase2d-multiline-target\">multiline target</p>"
+                             b"<div id=\"phase2d-text\">text marker</div>"
+                             b"<div id=\"phase2d-child\"><span>child marker</span></div>"
+                             b"<div id=\"phase2d-empty-child\"><span></span></div>"
+                             b"<div id=\"phase2d-br\"><br></div>"
+                             b"<div id=\"phase2d-image\"><img src=\"/navigator-smoke/tiny.png\" alt=\"image marker\"></div>"
+                             b"<div id=\"phase2d-broken\"><img src=\"/navigator-smoke/missing-phase2d.png\" alt=\"broken image fallback\"></div>"
+                             b"<div id=\"phase2d-hr\"><hr></div>"
+                             b"<figure id=\"phase2d-figure\"><img src=\"/navigator-smoke/tiny.png\" alt=\"figure image\"><figcaption>figure caption</figcaption></figure>"
+                             b"<table><tr><td id=\"phase2d-cell\">cell text</td></tr></table>"
+                             b"<div id=\"phase2d-cascade-wrap\"><div id=\"phase2d-cascade-empty\"></div><p id=\"phase2d-cascade-target\">cascade target</p><p id=\"phase2d-inline\" style=\"color:#1d4ed8;\">inline target</p><p id=\"phase2d-important\">important target</p></div>"
+                             b"<p id=\"phase2d-comment-source\">comment source</p><p id=\"phase2d-comment-target\">comment adjacent target</p>"
+                             b"<p id=\"phase2d-general-source\">general source</p><span>intervening</span><p id=\"phase2d-general-target\">general target</p>"
+                             b"<p id=\"phase2d-combinator-source\">combinator source</p><p id=\"phase2d-combinator-target\">combinator target</p>"
+                             b"<p id=\"phase2d-declaration\">declaration comment marker</p><p id=\"phase2d-quoted\">quoted value marker</p>"
+                             b"<div class=\"box\" id=\"phase2d-box\"></div><div class=\"box keep\" id=\"phase2d-keep\"></div>"
+                             b"<section id=\"phase2d-section\"><div id=\"phase2d-section-empty\"></div><div id=\"phase2d-section-text\">not empty</div></section>"
+                             b"<p id=\"phase2d-comment-group\">comment group one</p><p id=\"phase2d-comment-group-two\">comment group two</p>"
+                             b"<p id=\"phase2d-group-good\">group good</p><p id=\"phase2d-group-also\">group also</p>"
+                             b"<p id=\"phase2d-pseudo-good\">pseudo good</p><p id=\"phase2d-pseudo-also\">pseudo also</p>"
+                             b"<p id=\"phase2d-not-good\">not good</p><p id=\"phase2d-not-also\">not also</p>"
+                             b"<p id=\"phase2d-attr-good\">attribute good</p><p id=\"phase2d-attr-also\">attribute also</p>"
+                             b"<p id=\"phase2d-functional-good\">functional good</p><p id=\"phase2d-functional-also\">functional also</p>"
+                             b"<h1>empty member recovery heading</h1><h2>empty member recovery subheading</h2>"
+                             b"<p id=\"phase2d-leading\">leading comma marker</p><p class=\"phase2d-trailing\" id=\"phase2d-trailing\">trailing comma marker</p>"
+                             b"<p id=\"phase2d-invalid-right\">invalid right marker</p><p id=\"phase2d-invalid-repeat\">invalid repeat marker</p><p id=\"phase2d-invalid-mixed\">invalid mixed marker</p>"
+                             b"<p id=\"phase2d-escape-good\">escape recovery good</p>"
+                             b"<div id=\"phase2d-incomplete\"><x-uncertain></x-uncertain></div><p id=\"phase2d-incomplete-next\">incomplete metadata marker</p>"
+                             b"</body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2e.html":
+            oversized_value = b"oversized-value-" + (b"x" * 320)
+            oversized_button = b"Button label clamp " + (b"y" * 180)
+            option_clamp = b"".join(
+                b"<option>Clamped option %02d</option>" % index for index in range(70)
+            )
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2E Bounded Forms</title><style>"
+                             b"body { color:#334155; font-size:16px; background:#f8fafc; }"
+                             b"form { margin:8px; padding:8px; background:#ffffff; }"
+                             b"fieldset { margin:8px 0; padding:10px; border:2px solid #64748b; background:#f8fafc; }"
+                             b"legend { font-weight:bold; color:#1e3a8a; }"
+                             b"label { color:#334155; margin:3px 0; }"
+                             b"input, textarea, select { color:#111827; background:#ffffff; border:1px solid #94a3b8; padding:3px; }"
+                             b"button { color:#111827; background:#e2e8f0; border:1px solid #475569; padding:4px; }"
+                             b"input:checked, .choice:checked, option:checked { color:#166534; background:#dcfce7; font-weight:bold; }"
+                             b"button:disabled, input:disabled, textarea:disabled, select:disabled, fieldset :disabled { color:#64748b; background:#e2e8f0; }"
+                             b"input:enabled { border-color:#2563eb; }"
+                             b"textarea:required { border:2px solid #dc2626; }"
+                             b"input:read-only, textarea:read-only { background:#f1f5f9; }"
+                             b"input:read-write { background:#eff6ff; }"
+                             b"label + input:checked { border:3px solid #7c3aed; }"
+                             b"#phase2e-source-order { color:#b91c1c; } #phase2e-source-order { color:#166534; }"
+                             b"#phase2e-inline { color:#b91c1c; }"
+                             b"#phase2e-important { color:#b91c1c; } #phase2e-important { color:#166534 !important; }"
+                             b"input:hover, button:focus, input:active, input:has(.nope) { color:#000000; }"
+                             b"</style></head><body>"
+                             b"<h1 id=\"phase2e-heading\">Phase 2E Bounded Static Forms</h1>"
+                             b"<form id=\"phase2e-form\" action=\"/navigator-smoke/phase2e-submit\" method=\"post\">"
+                             b"<fieldset id=\"phase2e-fieldset\"><legend id=\"phase2e-legend\">Account controls</legend>"
+                             b"<button id=\"phase2e-disabled-button\" type=\"button\" disabled>Disabled button</button>"
+                             b"<p id=\"phase2e-source-order\">Source-order tie marker</p>"
+                             b"<p id=\"phase2e-inline\" style=\"color:#1d4ed8;\">Inline precedence marker</p>"
+                             b"<p id=\"phase2e-important\">Important precedence marker</p>"
+                             b"<select id=\"phase2e-option-clamp\">" + option_clamp + b"</select>"
+                             b"<label id=\"phase2e-wrap-label\"><input id=\"phase2e-wrap-choice\" class=\"choice\" type=\"checkbox\"> Wrapping choice</label>"
+                             b"<label for=\"phase2e-associated\">Associated checked choice</label><input id=\"phase2e-associated\" class=\"choice\" type=\"checkbox\" checked name=\"choice\" value=\"yes\">"
+                             b"<label for=\"phase2e-missing\">Missing association remains text</label>"
+                             b"<label for=\"phase2e-duplicate\">Duplicate association remains bounded</label>"
+                             b"<input id=\"phase2e-duplicate\" type=\"text\" value=\"duplicate one\"><input id=\"phase2e-duplicate\" type=\"text\" value=\"duplicate two\">"
+                             b"<input id=\"phase2e-text\" type=\"text\" size=\"9999\" value=\"regular text\">"
+                             b"<input id=\"phase2e-placeholder\" type=\"text\" placeholder=\"Placeholder marker\">"
+                             b"<input id=\"phase2e-password\" type=\"password\" value=\"secret-phase2e-value\">"
+                             b"<input id=\"phase2e-search\" type=\"search\" value=\"Search marker\">"
+                             b"<input id=\"phase2e-email\" type=\"email\" placeholder=\"Email fallback\">"
+                             b"<input id=\"phase2e-url\" type=\"url\" placeholder=\"URL fallback\">"
+                             b"<input id=\"phase2e-number\" type=\"number\" value=\"42\">"
+                             b"<input id=\"phase2e-readonly\" type=\"text\" readonly value=\"Read-only marker\">"
+                             b"<input id=\"phase2e-disabled\" type=\"text\" disabled value=\"Disabled marker\">"
+                             b"<input id=\"phase2e-required\" type=\"text\" required placeholder=\"Required marker\">"
+                             b"<input id=\"phase2e-oversized\" type=\"text\" value=\"" + oversized_value + b"\">"
+                             b"<input id=\"phase2e-hidden\" type=\"hidden\" value=\"hidden-secret-must-not-render\">"
+                             b"<input id=\"phase2e-unsupported\" type=\"date\" value=\"unsupported fallback\">"
+                             b"<input id=\"phase2e-unchecked\" class=\"choice\" type=\"checkbox\">"
+                             b"<input id=\"phase2e-disabled-checked\" class=\"choice\" type=\"checkbox\" checked disabled>"
+                             b"<input id=\"phase2e-radio-a\" class=\"choice\" type=\"radio\" name=\"same-choice\" checked>"
+                             b"<input id=\"phase2e-radio-b\" class=\"choice\" type=\"radio\" name=\"same-choice\">"
+                             b"<textarea id=\"phase2e-textarea\" rows=\"99\" cols=\"999\" required>Static textarea marker with bounded wrapping text.</textarea>"
+                             b"<textarea id=\"phase2e-readonly-textarea\" rows=\"3\" cols=\"24\" readonly>Readonly textarea marker.</textarea>"
+                             b"<textarea id=\"phase2e-disabled-textarea\" disabled>Disabled textarea marker.</textarea>"
+                             b"<select id=\"phase2e-selected\" name=\"selected\"><option disabled>Unavailable first</option><option selected>Selected option marker</option><option>Later option</option></select>"
+                             b"<select id=\"phase2e-default\"><option disabled>Disabled first</option><option>Default first enabled option</option><option>Later default option</option></select>"
+                             b"<select id=\"phase2e-disabled-select\" disabled><option>Disabled select option</option></select>"
+                             b"<select id=\"phase2e-multiple\" multiple size=\"3\"><option selected>Multiple selected one</option><option disabled>Multiple disabled option</option><option>Multiple option three</option></select>"
+                             b"<button id=\"phase2e-button\" type=\"button\">Element button</button>"
+                             b"<input id=\"phase2e-input-button\" type=\"button\" value=\"Input button\">"
+                             b"<input id=\"phase2e-submit\" type=\"submit\" value=\"Visual submit only\">"
+                             b"<input id=\"phase2e-reset\" type=\"reset\" value=\"Visual reset only\">"
+                             b"<button id=\"phase2e-overflow-button\" type=\"button\">" + oversized_button + b"</button>"
+                             b"</fieldset></form></body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2f.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2F Session Local Forms</title><style>"
+                             b"body { color:#334155; background:#f8fafc; }"
+                             b"form { padding:6px; } fieldset { padding:8px; border:2px solid #64748b; }"
+                             b"input, button { color:#111827; background:#ffffff; border:1px solid #94a3b8; padding:3px; }"
+                             b"input:checked { color:#166534; background:#dcfce7; font-weight:bold; }"
+                             b"fieldset input:checked { border-color:#2563eb; }"
+                             b"input:checked + label { color:#7c3aed; }"
+                             b"#phase2f-important { color:#b91c1c; } #phase2f-important { color:#166534 !important; }"
+                             b"</style></head><body><h1>Phase 2F Session Local Forms</h1>"
+                             b"<form id=\"phase2f-form-one\" action=\"/navigator-smoke/phase2f-submit\" method=\"post\"><fieldset>"
+                             b"<input id=\"phase2f-checkbox\" type=\"checkbox\"><label id=\"phase2f-checkbox-label\" for=\"phase2f-checkbox\">Phase 2F checkbox</label>"
+                             b"<input id=\"phase2f-disabled-checkbox\" type=\"checkbox\" checked disabled><label id=\"phase2f-disabled-checkbox-label\" for=\"phase2f-disabled-checkbox\">Disabled checkbox</label>"
+                             b"<input id=\"phase2f-radio-a\" type=\"radio\" name=\"choice\" checked><label id=\"phase2f-radio-a-label\" for=\"phase2f-radio-a\">Radio A</label>"
+                             b"<input id=\"phase2f-radio-b\" type=\"radio\" name=\"choice\"><label id=\"phase2f-radio-b-label\" for=\"phase2f-radio-b\">Radio B</label>"
+                             b"<input id=\"phase2f-disabled-radio\" type=\"radio\" name=\"choice\" checked disabled><label id=\"phase2f-disabled-radio-label\" for=\"phase2f-disabled-radio\">Disabled radio</label>"
+                             b"<input id=\"phase2f-nameless-a\" type=\"radio\"><input id=\"phase2f-nameless-b\" type=\"radio\">"
+                             b"<label id=\"phase2f-wrapping-label\"><input id=\"phase2f-wrapped-checkbox\" type=\"checkbox\"> Wrapping label checkbox</label>"
+                             b"<label id=\"phase2f-missing-label\" for=\"phase2f-missing\">Malformed association</label><label id=\"phase2f-duplicate-label\" for=\"phase2f-duplicate\">Duplicate association</label>"
+                             b"<input id=\"phase2f-duplicate\" type=\"text\" value=\"one\"><input id=\"phase2f-duplicate\" type=\"text\" value=\"two\">"
+                             b"<label id=\"phase2f-unrelated-label\" for=\"phase2f-unrelated\">Unrelated label</label>"
+                             b"<input id=\"phase2f-hidden\" type=\"hidden\" value=\"phase2f-secret\">"
+                             b"<button id=\"phase2f-button\" type=\"button\">Inert button</button>"
+                             b"<input id=\"phase2f-input-button\" type=\"button\" value=\"Input inert button\">"
+                             b"<input id=\"phase2f-submit\" type=\"submit\" value=\"Visual submit\"><input id=\"phase2f-reset\" type=\"reset\" value=\"Visual reset\">"
+                             b"<button id=\"phase2f-disabled-button\" type=\"button\" disabled>Disabled button</button>"
+                             b"<p id=\"phase2f-important\">Important cascade marker</p>"
+                             b"</fieldset></form>"
+                             b"<form id=\"phase2f-form-two\"><input id=\"phase2f-other-form-radio\" type=\"radio\" name=\"choice\" checked><label for=\"phase2f-other-form-radio\">Other form radio</label></form>"
+                             b"</body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2g.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2G Bounded Keyboard Focus</title><style>"
+                             b"body { color:#334155; background:#f8fafc; }"
+                             b"form { padding:6px; } fieldset { padding:8px; border:2px solid #64748b; }"
+                             b"input, textarea, select, button { color:#111827; background:#ffffff; border:1px solid #94a3b8; padding:3px; }"
+                             b"input:focus { color:#1d4ed8; background:#dbeafe; padding:5px; }"
+                             b"input:focus-visible { background:#e0f2fe; }"
+                             b"button:focus { color:#be123c; background:#fce7f3; }"
+                             b"input:checked:focus { border:3px solid #7c3aed; }"
+                             b"fieldset input:focus { border-color:#2563eb; }"
+                             b"label + input:focus { color:#166534; }"
+                             b"input:focus + label { color:#7c3aed; }"
+                             b".phase2g-choice:focus { border-color:#c026d3; }"
+                             b"#phase2g-source-order:focus { color:#f59e0b; } #phase2g-source-order:focus { color:#0f766e; }"
+                             b"#phase2g-inline:focus { color:#b91c1c; }"
+                             b"#phase2g-important:focus { color:#b91c1c !important; }"
+                             b"#phase2g-css-hidden { display:none; }"
+                             b"</style></head><body><h1>Phase 2G Bounded Keyboard Focus</h1>"
+                             b"<form id=\"phase2g-form\" action=\"/navigator-smoke/phase2g-submit\" method=\"post\"><fieldset id=\"phase2g-fieldset\">"
+                             b"<input id=\"phase2g-checkbox\" class=\"phase2g-choice\" type=\"checkbox\"><label id=\"phase2g-checkbox-label\" for=\"phase2g-checkbox\">Phase 2G checkbox</label>"
+                             b"<label id=\"phase2g-radio-a-label\" for=\"phase2g-radio-a\">Radio A</label><input id=\"phase2g-radio-a\" class=\"phase2g-choice\" type=\"radio\" name=\"phase2g-choice\">"
+                             b"<input id=\"phase2g-radio-b\" class=\"phase2g-choice\" type=\"radio\" name=\"phase2g-choice\"><label id=\"phase2g-radio-b-label\" for=\"phase2g-radio-b\">Radio B</label>"
+                             b"<input id=\"phase2g-disabled\" type=\"checkbox\" disabled><label id=\"phase2g-disabled-label\" for=\"phase2g-disabled\">Disabled checkbox</label>"
+                             b"<input id=\"phase2g-css-hidden\" type=\"checkbox\"><input id=\"phase2g-hidden\" type=\"hidden\" value=\"phase2g-hidden-marker\">"
+                             b"<input id=\"phase2g-malformed\" type=\"bogus\" value=\"unsupported marker\">"
+                             b"<input id=\"phase2g-text\" type=\"text\" value=\"stable text marker\"><textarea id=\"phase2g-textarea\">Stable textarea marker</textarea>"
+                             b"<select id=\"phase2g-select\"><option>First select option</option><option>Second select option</option></select>"
+                             b"<button id=\"phase2g-button\" type=\"button\">Inert button</button>"
+                             b"<input id=\"phase2g-submit\" type=\"submit\" value=\"Visual submit only\"><input id=\"phase2g-reset\" type=\"reset\" value=\"Visual reset only\">"
+                             b"<button id=\"phase2g-disabled-button\" type=\"button\" disabled>Disabled button</button>"
+                             b"<input id=\"phase2g-source-order\" type=\"checkbox\"><input id=\"phase2g-inline\" type=\"checkbox\" style=\"color:#1d4ed8;\"><input id=\"phase2g-important\" type=\"checkbox\">"
+                             b"</fieldset></form></body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2h.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2H Bounded Focus and Accessibility</title><style>"
+                             b"body { color:#334155; background:#f8fafc; }"
+                             b"form { padding:6px; } fieldset { padding:8px; border:2px solid #64748b; }"
+                             b"input, textarea, select, button { color:#111827; background:#ffffff; border:1px solid #94a3b8; padding:3px; }"
+                             b"input:focus, textarea:focus, select:focus, button:focus { background:#dbeafe; }"
+                             b"input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { color:#1d4ed8; }"
+                             b"#phase2h-thick:focus { border:4px solid #7c3aed; }"
+                             b"#phase2h-tiny:focus { width:1px; height:1px; padding:0; }"
+                             b"#phase2h-hidden { display:none; }"
+                             b".phase2h-nested { padding:12px; border:2px solid #cbd5e1; }"
+                             b".phase2h-table { border:2px solid #94a3b8; padding:4px; }"
+                             b"</style></head><body><h1>Phase 2H Bounded Focus and Accessibility</h1>"
+                             b'<form id="phase2h-form"><fieldset id="phase2h-fieldset"><legend>Bounded controls</legend>'
+                             b'<input id="phase2h-checkbox" type="checkbox"><label id="phase2h-checkbox-label" for="phase2h-checkbox">Phase 2H checkbox</label>'
+                             b'<label id="phase2h-wrapping-label"><input id="phase2h-wrapped" type="checkbox"> Wrapped checkbox</label>'
+                             b'<label id="phase2h-radio-label" for="phase2h-radio">Phase 2H radio</label><input id="phase2h-radio" type="radio" name="phase2h-choice">'
+                             b'<button id="phase2h-button" type="button">Phase 2H button</button>'
+                             b'<input id="phase2h-input-button" type="button" value="Input button">'
+                             b'<input id="phase2h-text" type="text" placeholder="Text placeholder" required readonly>'
+                             b'<input id="phase2h-password" type="password" placeholder="Password placeholder" value="do-not-log">'
+                             b'<textarea id="phase2h-textarea" placeholder="Textarea placeholder" required readonly>Stable textarea</textarea>'
+                             b'<select id="phase2h-select" required><option>First option</option><option selected>Second option</option></select>'
+                             b'<input id="phase2h-thick" type="checkbox"><label for="phase2h-thick">Thick border checkbox</label>'
+                             b'<div class="phase2h-nested"><input id="phase2h-tiny" type="checkbox"><label for="phase2h-tiny">Tiny control</label></div>'
+                             b'<table class="phase2h-table"><tr><td><input id="phase2h-table-control" type="radio" name="phase2h-table-choice"></td></tr></table>'
+                             b'<input id="phase2h-hidden" type="checkbox"><input id="phase2h-disabled" type="checkbox" disabled>'
+                             b'<label id="phase2h-missing-label" for="phase2h-missing">Missing association</label>'
+                             b'<label id="phase2h-duplicate-label" for="phase2h-duplicate">Duplicate association</label>'
+                             b'<input id="phase2h-duplicate" type="text" value="one"><input id="phase2h-duplicate" type="text" value="two">'
+                             b'<input id="phase2h-unnamed" type="checkbox">'
+                             b'</fieldset></form></body></html>')
             return
         if path == "/navigator-smoke/css-external-safety.html":
             self.write_bytes(200, "text/html; charset=utf-8",
@@ -538,6 +1049,15 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         if path == "/navigator-smoke/logo.png":
             self.write_bytes(200, "image/png", SMOKE_PNG)
             return
+        if path == "/navigator-smoke/wide.png":
+            self.write_bytes(200, "image/png", SMOKE_WIDE_PNG)
+            return
+        if path == "/navigator-smoke/tall.png":
+            self.write_bytes(200, "image/png", SMOKE_TALL_PNG)
+            return
+        if path == "/navigator-smoke/missing.png":
+            self.write_bytes(404, "text/plain; charset=utf-8", b"missing png")
+            return
         if path == "/navigator-smoke/redirect-png":
             self.write_redirect(302, "/navigator-smoke/logo.png")
             return
@@ -632,19 +1152,117 @@ class NavigatorTlsSmokeServer(ThreadingHTTPServer):
         super().__init__(server_address, request_handler_class)
         self._ssl_context = ssl_context
 
+    @staticmethod
+    def _log_client_hello(raw_socket):
+        if not os.environ.get("GXOS_NAVIGATOR_TLS_DIAGNOSTICS"):
+            return
+
+        old_timeout = raw_socket.gettimeout()
+        try:
+            raw_socket.settimeout(1.0)
+            header = raw_socket.recv(5, socket.MSG_PEEK)
+            if len(header) < 5:
+                print("TLS clienthello metadata=unavailable short_record_header", flush=True)
+                return
+            record_length = struct.unpack(">H", header[3:5])[0]
+            record = raw_socket.recv(5 + record_length, socket.MSG_PEEK)
+            if len(record) < 9 or record[0] != 0x16 or record[5] != 0x01:
+                print("TLS clienthello metadata=unavailable unexpected_record", flush=True)
+                return
+            hello_length = int.from_bytes(record[6:9], "big")
+            if len(record) < 9 + hello_length:
+                print("TLS clienthello metadata=unavailable short_clienthello", flush=True)
+                return
+
+            body = record[9:9 + hello_length]
+            if len(body) < 34:
+                print("TLS clienthello metadata=unavailable short_clienthello_body", flush=True)
+                return
+            legacy_version = "0x%04x" % struct.unpack(">H", body[0:2])[0]
+            offset = 34
+            session_id_length = body[offset]
+            offset += 1 + session_id_length
+            cipher_length = struct.unpack(">H", body[offset:offset + 2])[0]
+            offset += 2
+            cipher_suites = [
+                "0x%04x" % struct.unpack(">H", body[index:index + 2])[0]
+                for index in range(offset, offset + cipher_length, 2)
+            ]
+            cipher_suite_ids = [int(value, 16) for value in cipher_suites]
+            real_suite_ids = [value for value in cipher_suite_ids if value not in TLS_SIGNALING_SUITES]
+            canonical_offer = any(value in CANONICAL_TLS12_SUITES for value in real_suite_ids)
+            scsv_only = bool(cipher_suite_ids) and not real_suite_ids
+            offset += cipher_length
+            compression_length = body[offset]
+            offset += 1 + compression_length
+            extension_length = struct.unpack(">H", body[offset:offset + 2])[0]
+            offset += 2
+            extensions_end = min(offset + extension_length, len(body))
+            supported_versions = []
+            signature_algorithms = []
+            while offset + 4 <= extensions_end:
+                extension_type = struct.unpack(">H", body[offset:offset + 2])[0]
+                extension_size = struct.unpack(">H", body[offset + 2:offset + 4])[0]
+                extension_data = body[offset + 4:offset + 4 + extension_size]
+                if extension_type == 43 and len(extension_data) >= 1:
+                    versions_length = extension_data[0]
+                    supported_versions = [
+                        "0x%04x" % struct.unpack(">H", extension_data[index:index + 2])[0]
+                        for index in range(1, min(1 + versions_length, len(extension_data)), 2)
+                    ]
+                elif extension_type == 13 and len(extension_data) >= 2:
+                    algorithms_length = struct.unpack(">H", extension_data[0:2])[0]
+                    signature_algorithms = [
+                        "0x%04x" % struct.unpack(">H", extension_data[index:index + 2])[0]
+                        for index in range(2, min(2 + algorithms_length, len(extension_data)), 2)
+                    ]
+                offset += 4 + extension_size
+
+            print(
+                "TLS clienthello metadata record_version=0x%04x legacy_version=%s "
+                "cipher_suites=%s real_suite_count=%d scsv_only=%s canonical_offer=%s "
+                "supported_versions=%s signature_algorithms=%s"
+                % (
+                    struct.unpack(">H", header[1:3])[0],
+                    legacy_version,
+                    ",".join(cipher_suites) or "(none)",
+                    len(real_suite_ids),
+                    "yes" if scsv_only else "no",
+                    "yes" if canonical_offer else "no",
+                    ",".join(supported_versions) or "(none)",
+                    ",".join(signature_algorithms) or "(none)",
+                ),
+                flush=True,
+            )
+        except (OSError, IndexError, struct.error) as exc:
+            print("TLS clienthello metadata=unavailable error=%s" % exc, flush=True)
+        finally:
+            raw_socket.settimeout(old_timeout)
+
     def get_request(self):
         raw_socket, client_address = super().get_request()
         print("TLS accept from %s:%s" % (client_address[0], client_address[1]), flush=True)
         try:
+            self._log_client_hello(raw_socket)
             tls_socket = self._ssl_context.wrap_socket(raw_socket, server_side=True)
+            negotiated_suite = tls_socket.cipher()[0] if tls_socket.cipher() else None
+            negotiated_contract_name = {
+                "ECDHE-RSA-AES128-GCM-SHA256": "TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256",
+                "ECDHE-RSA-AES256-GCM-SHA384": "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
+                "ECDHE-ECDSA-AES128-GCM-SHA256": "TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256",
+                "ECDHE-ECDSA-AES256-GCM-SHA384": "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384",
+            }.get(negotiated_suite, "(not-in-contract)")
             print(
-                "TLS handshake ok from %s:%s sni=%s protocol=%s cipher=%s"
+                "TLS handshake ok from %s:%s sni=%s protocol=%s cipher=%s "
+                "negotiated_suite=%s fixture_suite_contract=%s"
                 % (
                     client_address[0],
                     client_address[1],
                     getattr(tls_socket, "_guidexos_sni", None),
                     tls_socket.version(),
-                    tls_socket.cipher()[0] if tls_socket.cipher() else None,
+                    negotiated_suite,
+                    negotiated_contract_name,
+                    "yes" if negotiated_contract_name in CANONICAL_TLS12_SUITES.values() else "no",
                 ),
                 flush=True,
             )

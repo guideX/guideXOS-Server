@@ -298,6 +298,15 @@ struct GxosTlsLocalHandshakeResult {
     char tlsSetupStep[32];
     int tlsSetupErrorCode;
     char tlsSetupErrorName[48];
+    size_t tlsSuiteContractCount;
+    size_t tlsSuiteContractRealCount;
+    bool tlsSuiteContractInstalled;
+    bool tlsClientHelloSent;
+    size_t tlsClientHelloRealSuiteCount;
+    bool tlsClientHelloScsvOnly;
+    bool tlsClientHelloCanonicalSuiteOffered;
+    char tlsSuiteContractNames[160];
+    char tlsContractFailureClass[48];
     char sniHost[64];
     char stage[48];
     char protocol[32];
@@ -324,5 +333,9 @@ const char* gxos_tls_certificate_validation_policy();
 
 bool gxos_tls_prerequisites_ready();
 const char* gxos_tls_prerequisites_blocker_reason();
+
+#if defined(GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE)
+bool gxos_tls_capability_contract_negative_test(GxosTlsLocalHandshakeResult* result);
+#endif
 
 } // namespace gxos

@@ -2,6 +2,7 @@
 
 #include "process.h"
 #include "guide_web_document.h"   // BlockType, DocBlock, WebDocument (gxos::web)
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -106,6 +107,7 @@ struct NavigatorPageMetadata {
 		int         unsupportedExternalStylesheetCount = 0;
 		int         unsupportedCssRuleCount = 0;
 		int         unsupportedCssDeclarationCount = 0;
+		int         cssUnsupportedSelectorCount = 0;
 		int         cssParseErrorCount = 0;
 		bool        cssStyleBlockCapped = false;
 		size_t      cssStyleBytesProcessed = 0;
@@ -124,6 +126,97 @@ struct NavigatorPageMetadata {
 		int         cssTableCaptionCount = 0;
 		int         cssTableHeaderCellCount = 0;
 		int         cssVisitedLinkCount = 0;
+		int         cssBorderedBlocksRendered = 0;
+		int         cssDashedBordersRendered = 0;
+		int         cssDottedBordersRendered = 0;
+		int         cssBorderWidthClamps = 0;
+		int         cssCollapsedTablesRendered = 0;
+		int         cssSeparateTablesRendered = 0;
+		int         cssTableBorderSpacingClamps = 0;
+		int         cssListStyleMarkersRendered = 0;
+		int         cssListStyleNoneApplied = 0;
+		int         cssTextDecorationsRendered = 0;
+		int         cssGenericFontFamilyApplied = 0;
+		int         cssGenericFontFamilyFallbacks = 0;
+		int         cssFiguresRendered = 0;
+		int         cssFigcaptionsRendered = 0;
+		int         cssBlockquotesRendered = 0;
+		int         cssDefinitionListsRendered = 0;
+		int         cssImagesConstrained = 0;
+		int         cssImagesAspectPreserved = 0;
+		int         cssImageAltFallbacks = 0;
+		int         cssImageSizeClamps = 0;
+		int         cssNestedLayoutClamps = 0;
+		int         cssMaxWrapperAncestorDepth = 0;
+		int         cssSelectorGroupsParsed = 0;
+		int         cssCompoundSelectorsParsed = 0;
+		int         cssChildCombinators = 0;
+		int         cssDescendantCombinators = 0;
+		int         cssAdjacentSiblingCombinators = 0;
+		int         cssGeneralSiblingCombinators = 0;
+		int         cssAdjacentSiblingMatches = 0;
+		int         cssGeneralSiblingMatches = 0;
+		int         cssSiblingScanSteps = 0;
+		int         cssSiblingScanClamps = 0;
+		int         cssSiblingMetadataClamps = 0;
+		int         cssSiblingMetadataErrors = 0;
+		int         cssSelectorMatches = 0;
+		int         cssSpecificityOverrides = 0;
+		int         cssSourceOrderOverrides = 0;
+		int         cssInlineOverrides = 0;
+		int         cssInheritedPropertiesApplied = 0;
+		int         cssSelectorDepthClamps = 0;
+		int         cssSelectorGroupClamps = 0;
+		int         cssCascadePropertyResolutions = 0;
+		int         cssImportantDeclarationsApplied = 0;
+		int         cssRuleCapCount = 0;
+		int         cssDeclarationCapCount = 0;
+		int         cssInheritanceDepthClamps = 0;
+		int         cssPseudoClassesParsed = 0;
+		int         cssStructuralPseudoMatches = 0;
+		int         cssFirstChildMatches = 0;
+		int         cssLastChildMatches = 0;
+		int         cssNthChildMatches = 0;
+		int         cssOfTypeMatches = 0;
+		int         cssNotMatches = 0;
+		int         cssLinkPseudoMatches = 0;
+		int         cssVisitedPseudoMatches = 0;
+		int         cssPseudoClassClamps = 0;
+		int         cssNthExpressionParseErrors = 0;
+		int         cssStructuralMetadataClamps = 0;
+		int         cssSelectorEvaluationStepClamps = 0;
+		int         cssEmptyPseudoParsed = 0;
+		int         cssEmptyPseudoMatches = 0;
+		int         cssEmptyMetadataIncomplete = 0;
+		int         cssContentMetadataClamps = 0;
+		int         cssSelectorGroupMemberRecoveries = 0;
+		int         cssCommentScanClamps = 0;
+		int         cssUnterminatedCommentErrors = 0;
+		int         cssUnbalancedParenthesisErrors = 0;
+		int         cssUnbalancedBracketErrors = 0;
+		int         cssUnterminatedStringErrors = 0;
+		int         cssInvalidCombinatorSequences = 0;
+		int         cssIdentifierEscapeRejections = 0;
+		int         cssSelectorMemberParseFailures = 0;
+		int         cssSelectorRecoverySuccesses = 0;
+		int         cssCheckedPseudoParsed = 0;
+		int         cssCheckedPseudoMatches = 0;
+		int         cssDisabledPseudoParsed = 0;
+		int         cssDisabledPseudoMatches = 0;
+		int         cssEnabledPseudoParsed = 0;
+		int         cssEnabledPseudoMatches = 0;
+		int         cssRequiredPseudoParsed = 0;
+		int         cssRequiredPseudoMatches = 0;
+		int         cssReadonlyPseudoParsed = 0;
+		int         cssReadonlyPseudoMatches = 0;
+		int         cssReadwritePseudoParsed = 0;
+		int         cssReadwritePseudoMatches = 0;
+		int         cssFocusPseudoParsed = 0;
+		int         cssFocusPseudoMatches = 0;
+		int         cssFocusVisiblePseudoParsed = 0;
+		int         cssFocusVisiblePseudoMatches = 0;
+		int         cssRuntimeFocusRecomputations = 0;
+		std::string cssComputedStyleEvidence;
 	bool        downloaded = false;
 	std::string downloadSavedPath;
 	size_t      downloadByteCount = 0;
@@ -133,7 +226,53 @@ struct NavigatorPageMetadata {
 	int         formRadioCount = 0;
 	int         formTextareaCount = 0;
 	int         formSelectCount = 0;
-	int         unsupportedFormControlCount = 0;
+		int         unsupportedFormControlCount = 0;
+		int         htmlFormsParsed = 0;
+		int         htmlFieldsetsParsed = 0;
+		int         htmlLabelsParsed = 0;
+		int         htmlInputsParsed = 0;
+		int         htmlButtonsParsed = 0;
+		int         htmlTextareasParsed = 0;
+		int         htmlSelectsParsed = 0;
+		int         htmlOptionsParsed = 0;
+		int         htmlHiddenControls = 0;
+		int         controlMetadataClamps = 0;
+		int         controlTextTruncations = 0;
+		int         formControlsRendered = 0;
+		int         formControlsUnsupported = 0;
+		int         formInteractionsDeferred = 0;
+		int         formRuntimeControlsInitialized = 0;
+		int         formCheckboxActivations = 0;
+		int         formCheckboxToggles = 0;
+		int         formRadioActivations = 0;
+		int         formRadioGroupUnchecks = 0;
+		int         formLabelActivations = 0;
+		int         formButtonActivations = 0;
+		int         formDisabledActivationBlocks = 0;
+		int         formHiddenHitTargetsSuppressed = 0;
+		int         formDuplicateActivationSuppressed = 0;
+		int         formRuntimeStateResets = 0;
+		int         formHitTargetsRegistered = 0;
+		int         formHitTargetClamps = 0;
+		int         formFocusableControls = 0;
+		int         formFocusChanges = 0;
+		int         formFocusClears = 0;
+		int         formFocusWraps = 0;
+		int         formTabForward = 0;
+		int         formTabBackward = 0;
+		int         formKeyboardActivations = 0;
+		int         formSpaceActivations = 0;
+		int         formEnterActivations = 0;
+		int         formKeyRepeatSuppressed = 0;
+		int         formStaleKeyActivationBlocks = 0;
+		int         formDisabledFocusSkips = 0;
+		int         formHiddenFocusSkips = 0;
+		int         formFocusStateResets = 0;
+		std::string formFocusOrigin;
+		uint64_t    formFocusGeneration = 0;
+		uint64_t    formFocusedLogicalSerial = 0;
+		int         cssCheckedRuntimeRecomputations = 0;
+		std::string formInteractionMode = "session_local_non_submitting";
 	bool        unsupportedFormMethod = false;
 	bool        unsupportedFormEncoding = false;
 	bool        postSupportedHosted = true;
@@ -170,6 +309,26 @@ public:
 	static int SmokeCurrentBlockCount();
 	static std::string SmokeCurrentDocumentText();
 	static std::string SmokeCurrentLinkUrl(const std::string& text);
+	static bool SmokeClickFormControlById(const std::string& id);
+	static bool SmokeClickFormLabelById(const std::string& id);
+	static bool SmokeFormControlCheckedById(const std::string& id);
+	static bool SmokeFormControlDisabledById(const std::string& id);
+	static bool SmokeFormHitTargetById(const std::string& id);
+	static int SmokeFormActivationCountById(const std::string& id);
+	static bool SmokeFormMouseSafetyById(const std::string& id);
+	static bool SmokeFocusFormControlById(const std::string& id, bool keyboardOrigin = true);
+	static bool SmokeFormControlFocusedById(const std::string& id);
+	static std::string SmokeFocusedFormControlId();
+	static std::string SmokeFormFocusOrigin();
+	static int SmokeFormFocusableCount();
+	static bool SmokeKeyPress(int keyCode, const std::string& action);
+	static bool SmokeSetFormControlDisabledById(const std::string& id, bool disabled);
+	static bool SmokeSetFormControlHiddenById(const std::string& id, bool hidden);
+	static void SmokeDeactivateWindow();
+	static bool SmokeForceFormFocusGenerationMismatch();
+	static int SmokeFormControlInputLengthById(const std::string& id);
+	static void SmokeFocusAddressBar();
+	static bool SmokeReloadCurrentDocument();
 	// Returns the widget IDs registered with the compositor toolbar.
 	// Used by hosted smoke to verify the full modern toolbar (7 buttons) is
 	// present and that the old stale four-button placeholder is not active.
@@ -225,6 +384,7 @@ private:
 		FormTextarea,
 		FormSelect,
 		FormSubmit,
+		FormLabel,
 	};
 
 	enum class MouseMode : uint8_t {
@@ -304,13 +464,43 @@ private:
 	static void handleDocumentClick(HitTarget target, int linkBlockIndex);
 	static void handleMouseInput(int x, int y, int button, const std::string& action);
 	static void handleKeyPress(int keyCode, const std::string& action);
-	static void focusDocumentInput(int blockIndex);
+	static void focusDocumentInput(int blockIndex,
+		gxos::web::FormFocusOrigin origin = gxos::web::FormFocusOrigin::ProgrammaticInternalSmoke);
 	static void blurDocumentInput();
 	static void submitFormForBlock(int blockIndex);
 	static void focusNextFormControl(bool reverse);
 	static bool isFocusableFormControl(const DocBlock& block);
+	static bool isFocusedFormControl(const DocBlock& block);
+	static int focusedFormControlBlockIndex();
+	static size_t buildFormFocusOrder(std::array<int, gxos::web::kFormRuntimeControlCap>& order);
+	static void clearKeyboardActivationState();
+	static void cancelKeyboardActivation(gxos::web::FormFocusCancellationReason reason);
+	static void armKeyboardActivation(int keyCode);
+	static void finishKeyboardActivation(int keyCode);
+	static void clearDocumentFocus(bool recomputeStyles = true,
+		gxos::web::FormFocusCancellationReason reason = gxos::web::FormFocusCancellationReason::StateChange);
+	static bool ensureFocusedControlStillValid();
+	static void revealFocusedFormControl(int blockIndex);
 	static int formControlHeight(const DocBlock& block);
 	static void activateFormControl(int blockIndex);
+	static void initializeFormRuntimeState();
+	static void updateFormAccessibilityMetadata();
+	static gxos::web::FormAccessibilityRecord* accessibilityRecordForSerial(uint64_t serial);
+	static void recomputeFormControlStyles();
+	static void clearMousePressState();
+	static bool isRuntimeFormControl(const DocBlock& block);
+	static bool isRuntimeCheckable(const DocBlock& block);
+	static bool isRuntimeButton(const DocBlock& block);
+	static bool runtimeChecked(const DocBlock& block);
+	static bool runtimeDisabled(const DocBlock& block);
+	static gxos::web::FormRuntimeControlState* runtimeStateForBlock(DocBlock& block);
+	static const gxos::web::FormRuntimeControlState* runtimeStateForBlock(const DocBlock& block);
+	static int findBlockById(const std::string& id, bool labelOnly);
+	static uint64_t associatedControlSerialForLabel(const DocBlock& label);
+	static int blockIndexForControlSerial(uint64_t serial);
+	static bool radioGroupMatches(const DocBlock& left, const DocBlock& right);
+	static bool activateLabelBlock(int blockIndex);
+	static bool smokeClickBlock(int blockIndex, bool label);
 	static void openFindMode();
 	static void closeFindMode();
 	static void updateFindMatches(bool keepCurrent);
@@ -374,6 +564,8 @@ private:
 	static int         s_addressCaret;     // insertion point index into s_addressBuffer
 	static int         s_focusedInputBlockIndex;
 	static int         s_inputCaret;
+	static uint64_t    s_documentGeneration;
+	static bool        s_tabKeyPressed;
 	static std::string s_lastSubmittedFormUrl;
 	static std::string s_lastSubmittedFormAction;
 	static std::string s_lastSubmittedFormMethod;

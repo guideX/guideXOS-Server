@@ -1,8 +1,12 @@
 #include "right_click_menu.h"
 #include "logger.h"
 #include "compositor.h"
+#include "desktop_folder.h"
 #include "desktop_service.h"
 #include "trash.h"
+#include "file_operations.h"
+#include "file_explorer.h"
+#include "notification_manager.h"
 #include "kernel/core/include/kernel/system_font.h"
 #include <cstring>
 
@@ -10,6 +14,19 @@ namespace gxos { namespace gui {
 
 namespace {
     constexpr int kFolderIconSizeOptionCount = 2;
+
+    bool desktopItemHasFilePath(const DesktopItem& item) {
+        return item.kind == DesktopItemKind::FilesystemEntry ||
+            (item.kind == DesktopItemKind::Shortcut &&
+                (item.shortcutType == "File" || item.shortcutType == "Folder"));
+    }
+
+    bool desktopItemIsDeletable(const DesktopItem& item) {
+        if (item.kind != DesktopItemKind::FilesystemEntry || !item.removable || item.path.empty()) return false;
+        return item.isDirectory
+            ? gxos::files::FileOperations::IsDirectory(item.path)
+            : gxos::files::FileOperations::IsRegularFile(item.path);
+    }
 
     const char* folderIconSizeLabel(int index) {
         switch (index) {
@@ -25,6 +42,9 @@ int RightClickMenu::s_x = 0;
 int RightClickMenu::s_y = 0;
 std::vector<RightClickMenu::MenuItem> RightClickMenu::s_items;
 int RightClickMenu::s_desktopItemIndex = -1;
+std::string RightClickMenu::s_desktopItemTargetPath;
+std::string RightClickMenu::s_desktopItemTargetLabel;
+bool RightClickMenu::s_desktopItemTargetIsDirectory = false;
 std::string RightClickMenu::s_startMenuAppName;
 bool RightClickMenu::s_iconSubmenuVisible = false;
 int RightClickMenu::s_iconSubmenuIndex = -1;
@@ -34,6 +54,9 @@ void RightClickMenu::Show(int x, int y) {
     s_y = y;
     s_visible = true;
     s_desktopItemIndex = -1;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     buildItems();
@@ -45,6 +68,17 @@ void RightClickMenu::ShowForDesktopItem(int x, int y, int desktopItemIndex) {
     s_y = y;
     s_visible = true;
     s_desktopItemIndex = desktopItemIndex;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
+    if (desktopItemIndex >= 0 && desktopItemIndex < static_cast<int>(Compositor::g_items.size())) {
+        const DesktopItem& target = Compositor::g_items[desktopItemIndex];
+        if (target.kind == DesktopItemKind::FilesystemEntry && target.removable) {
+            s_desktopItemTargetPath = gxos::files::FileOperations::NormalizePath(target.path);
+            s_desktopItemTargetLabel = target.label;
+            s_desktopItemTargetIsDirectory = target.isDirectory;
+        }
+    }
     s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     buildItems();
@@ -56,6 +90,9 @@ void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appNam
     s_y = y;
     s_visible = true;
     s_desktopItemIndex = -1;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName = appName;
     s_iconSubmenuVisible = false;
     buildItems();
@@ -65,6 +102,9 @@ void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appNam
 void RightClickMenu::Hide() {
     s_visible = false;
     s_desktopItemIndex = -1;
+    s_desktopItemTargetPath.clear();
+    s_desktopItemTargetLabel.clear();
+    s_desktopItemTargetIsDirectory = false;
     s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     s_items.clear();
@@ -119,15 +159,37 @@ void RightClickMenu::buildItems() {
 
         s_items.push_back({"Open", false, false, false});
         if (item) {
-            if (item->kind == DesktopItemKind::FilesystemEntry && item->isDirectory) {
-                s_items.push_back({"Rename", false, false, false});
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const bool isTrash = item->kind == DesktopItemKind::SystemObject && item->systemObject == DesktopSystemObjectKind::Trash;
+            if (!isTrash && (item->kind == DesktopItemKind::FilesystemEntry || item->kind == DesktopItemKind::Shortcut) &&
+                DesktopService::IsSetAsDesktopBackgroundEligible(item->path, item->isDirectory, false)) {
+                s_items.push_back({"Set as Desktop Background", false, false, false});
+                Logger::write(LogLevel::Info, std::string("[ShellActionVisibility] surface=Desktop identity=") +
+                    DesktopService::SetAsDesktopBackgroundActionIdentity() + " path=" + item->path);
             }
-            if (item->kind == DesktopItemKind::Shortcut) {
-                if (item->shortcutType == "File" || item->shortcutType == "Folder") {
-                    s_items.push_back({"Open Target Location", false, false, false});
+#endif
+                if (item->kind == DesktopItemKind::FilesystemEntry && item->isDirectory) {
+                    s_items.push_back({"Rename", false, false, false});
                 }
-                s_items.push_back({"Remove from Desktop", false, false, false});
-            }
+                if (desktopItemHasFilePath(*item)) {
+                    s_items.push_back({"Copy File", false, false, false});
+                    s_items.push_back({"Cut File", false, false, false});
+                    if (item->isDirectory) {
+                        std::string pasteError;
+                        if (gxos::files::FileOperations::CanPasteFile(item->path, pasteError)) {
+                            s_items.push_back({"Paste", false, false, false});
+                        }
+                    }
+                }
+                if (desktopItemIsDeletable(*item) && !gxos::files::FileOperations::IsOperationActive()) {
+                    s_items.push_back({"Delete", false, false, false});
+                }
+                if (item->kind == DesktopItemKind::Shortcut) {
+                    if (item->shortcutType == "File" || item->shortcutType == "Folder") {
+                        s_items.push_back({"Open Target Location", false, false, false});
+                    }
+                    s_items.push_back({"Remove from Desktop", false, false, false});
+                }
         }
         return;
     }
@@ -137,6 +199,11 @@ void RightClickMenu::buildItems() {
     s_items.push_back({"Auto Arrange", false, Compositor::hostedDesktopAutoArrangeIcons(), false});
     s_items.push_back({"Folder View Icon Size", true, false, false});
     s_iconSubmenuIndex = 4;
+    s_items.push_back({"New Folder", false, false, false});
+    std::string pasteError;
+    if (gxos::files::FileOperations::CanPasteFile(Compositor::hostedDesktopCurrentPath(), pasteError)) {
+        s_items.push_back({"Paste", false, false, false});
+    }
 }
 
 bool RightClickMenu::HandleClick(int mx, int my) {
@@ -188,9 +255,85 @@ bool RightClickMenu::HandleClick(int mx, int my) {
                     Logger::write(LogLevel::Info, "Desktop item Open selected");
                     Compositor::openDesktopItem(s_desktopItemIndex);
                 }
+            } else if (s_items[idx].label == "Set as Desktop Background" && s_desktopItemIndex >= 0) {
+                if (s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())) {
+                    const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
+                    std::string error;
+                    (void)DesktopService::DispatchSetAsDesktopBackground(item.path, "Desktop", error);
+                    if (!error.empty()) Logger::write(LogLevel::Warn, "Desktop set-background action failed: " + error);
+                }
             } else if (s_items[idx].label == "Rename" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop folder Rename selected");
                 Compositor::beginDesktopFolderRename(s_desktopItemIndex);
+            } else if (s_items[idx].label == "Copy File" && s_desktopItemIndex >= 0) {
+                if (s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())) {
+                    const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
+                    std::string error;
+                    if (!gxos::files::FileClipboard::Set(item.path, gxos::files::FileClipboardOperation::Copy, error)) {
+                        Logger::write(LogLevel::Warn, "Desktop Copy File failed: " + error);
+                    }
+                }
+            } else if (s_items[idx].label == "Cut File" && s_desktopItemIndex >= 0) {
+                if (s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())) {
+                    const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
+                    std::string error;
+                    if (!gxos::files::FileClipboard::Set(item.path, gxos::files::FileClipboardOperation::Move, error)) {
+                        Logger::write(LogLevel::Warn, "Desktop Cut File failed: " + error);
+                    }
+                }
+            } else if (s_items[idx].label == "Delete" && !s_desktopItemTargetPath.empty()) {
+                const std::string targetPath = s_desktopItemTargetPath;
+                const std::string targetLabel = s_desktopItemTargetLabel.empty()
+                    ? gxos::files::FileOperations::BaseName(targetPath) : s_desktopItemTargetLabel;
+                if (gxos::files::FileOperations::IsOperationActive()) {
+                    Logger::write(LogLevel::Warn, "Desktop Delete rejected: a file operation is already in progress");
+                    NotificationManager::Add("A file operation is already in progress", NotificationLevel::Error);
+                } else {
+                    const bool targetStillExists = s_desktopItemTargetIsDirectory
+                        ? gxos::files::FileOperations::IsDirectory(targetPath)
+                        : gxos::files::FileOperations::IsRegularFile(targetPath);
+                    if (!targetStillExists) {
+                        Logger::write(LogLevel::Warn, "Desktop Delete target is stale: " + targetPath);
+                        NotificationManager::Add("Delete failed: target not found", NotificationLevel::Error);
+                    } else {
+                        Logger::write(LogLevel::Info, "Desktop Delete confirmation requested path=" + targetPath);
+                        if (gxos::apps::FileExplorer::LaunchDeleteConfirmation(
+                                targetPath, s_desktopItemTargetIsDirectory) == 0) {
+                            Logger::write(LogLevel::Error, "Desktop Delete confirmation launch failed path=" + targetPath);
+                            NotificationManager::Add("Unable to open Delete confirmation", NotificationLevel::Error);
+                        } else {
+                            NotificationManager::Add("Confirm Delete in File Explorer: " + targetLabel,
+                                                     NotificationLevel::Info);
+                        }
+                    }
+                }
+            } else if (s_items[idx].label == "Paste") {
+                const std::string destination = s_desktopItemIndex >= 0 &&
+                    s_desktopItemIndex < static_cast<int>(Compositor::g_items.size())
+                    ? Compositor::g_items[s_desktopItemIndex].path
+                    : Compositor::hostedDesktopCurrentPath();
+                const gxos::files::FilePasteResult result = gxos::files::FileOperations::PasteFile(destination);
+                if (!result.success) {
+                    Logger::write(LogLevel::Warn, "Desktop Paste failed: " + result.error);
+                } else {
+                    Logger::write(LogLevel::Info, "Desktop Paste succeeded destination=" + result.destinationPath);
+                    Compositor::requestDesktopRefresh();
+                }
+            } else if (s_items[idx].label == "New Folder") {
+                const std::string desktopPath = Compositor::hostedDesktopCurrentPath();
+                std::string ensureError;
+                gxos::files::FileCreateResult result;
+                if (!DesktopFolderResolver::EnsureExists(desktopPath, ensureError, true)) {
+                    result.error = ensureError.empty() ? "Desktop folder is unavailable" : ensureError;
+                } else {
+                    result = gxos::files::FileOperations::CreateUniqueFolder(desktopPath);
+                }
+                if (!result.success) {
+                    Logger::write(LogLevel::Warn, "Desktop New Folder failed: " + result.error);
+                } else {
+                    Logger::write(LogLevel::Info, "Desktop New Folder created: " + result.path);
+                    Compositor::requestDesktopRefresh();
+                }
             } else if (s_items[idx].label == "Open Target Location" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop shortcut Open Target Location selected");
                 Compositor::openDesktopShortcutTargetLocation(s_desktopItemIndex);

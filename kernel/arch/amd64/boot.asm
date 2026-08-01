@@ -23,6 +23,9 @@ _start:
     
     ; Set up stack pointer (will be properly configured by bootloader)
     mov rsp, stack_top
+    ; Keep headroom below the fixed stack boundary for the integrated kernel
+    ; entry frame's final spill; stack_top itself is one-past the BSS stack.
+    sub rsp, 0x20
     
     ; Clear direction flag
     cld

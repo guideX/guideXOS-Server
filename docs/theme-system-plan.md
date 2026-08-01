@@ -329,6 +329,375 @@ Phase 3F is the next app-surface pilot for the guideXOS Server theme system.
 * Broad app redesign remains deferred.
 * Future app polish should continue one app at a time.
 
+## Phase 3F.1
+
+Phase 3F.1 is a stabilization-only review pass for the Clock app-surface pilot.
+
+* The Clock theme-aware repaint path was reviewed and kept local to Clock surfaces.
+* Repaint safety was reviewed: the clear-then-redraw path removes stale stacked text without changing timekeeping cadence or layout, and it still runs on the existing one-second update cadence.
+* Classic preservation was confirmed; the fallback remains visually close to the prior Clock look and no visible fallback tweak was needed.
+* Sci Fi readability was reviewed; the time/date readout stays readable on the darker body/face surfaces, and the muted date text remains legible.
+* No Clock timekeeping, timer, alarm, stopwatch, scheduling, persistence, layout geometry, hit-testing, or theme metric behavior changed.
+* No new effects or controls were added.
+* No blur, glass, animation, rounded clipping, or rounded hit-testing was added.
+* No additional readability or layout fix was needed in this pass.
+* Future app polish should remain one app at a time.
+
+## Phase 3G
+
+Phase 3G closes out the Sci Fi app-surface milestone through Phase 3F.1. It is a documentation, inventory, and smoke-hardening pass only. It does not add new rendering effects, app behavior, theme IDs, persistence keys, or chrome metrics.
+
+Classic remains the default theme. Sci Fi remains opt-in. No per-effect controls were introduced.
+
+### App-Surface Inventory
+
+* Display Options: Phase 3A / 3A.1; Sci Fi changes: conservative panel/card/accent polish plus clearer theme copy; Classic preservation: default look stays intact and the neutral card feel remains; Behavior changes: No; Stabilization: complete in 3A.1; Safety fix: tiny fallback tweak restored the neutral card feel.
+* Control Panel: Phase 3B / 3B.1; Sci Fi changes: conservative panel/card/accent polish that matches the hosted shell; Classic preservation: look stays close to the prior Control Panel surface; Behavior changes: No; Stabilization: complete in 3B.1; Safety fix: shared grid top offset stayed synchronized for drawing and hit-testing.
+* Notepad: Phase 3C / 3C.1; Sci Fi changes: conservative editor/body/border/text polish; Classic preservation: look stays close to the prior Notepad surface; Behavior changes: No; Stabilization: complete in 3C.1; Safety fix: surface helpers stayed centralized and no visible fallback tweak was needed.
+* Calculator: Phase 3D / 3D.1; Sci Fi changes: conservative body/display/button/accent polish; Classic preservation: look stays close to the prior Calculator surface; Behavior changes: No; Stabilization: complete in 3D.1; Safety fix: shared compositor widget guard stayed narrow to Calculator and Sci Fi.
+* File Explorer: Phase 3E / 3E.1; Sci Fi changes: conservative body/list/toolbar/address/selection/hover/border/status polish; Classic preservation: look stays close to the prior File Explorer surface; Behavior changes: No; Stabilization: complete in 3E.1; Safety fix: Sci Fi hover clears on scroll and offset changes so hover stays visual-only.
+* Clock: Phase 3F / 3F.1; Sci Fi changes: conservative body/readout/accent polish plus clear repaint handling; Classic preservation: look stays close to the prior Clock surface; Behavior changes: No; Stabilization: complete in 3F.1; Safety fix: clear-then-redraw removes stale stacked text without changing timekeeping cadence.
+
+### Deferred Boundaries
+
+* Rounded client clipping remains deferred.
+* Rounded hit-testing remains deferred.
+* Blur/glass remains deferred.
+* Animations remain deferred.
+* High-DPI/scaling polish remains deferred.
+* Taskbar shadows remain deferred.
+* Theme wallpaper selection remains deferred.
+* Broad app redesign remains deferred.
+* Bare-metal theme parity remains deferred.
+* Per-effect controls remain deferred.
+* Navigator, Image Viewer, Task Manager, and other future app-surface polish remain deferred.
+
+### Validation Checklist
+
+* `.\build.bat`
+* `.\scripts\smoke-theme-system.ps1 -SkipBuild`
+* `.\scripts\smoke-live-directory-desktop-status.ps1 -SkipBuild`
+* `git diff --check`
+* Skip the optional appmodel smoke unless there is a specific reason to run it.
+* Treat `guideXOSServer.exe`, `desktop.json`, screenshots, generated EXEs, and disk images as validation artifacts unless intentionally changed.
+
+## Phase 3H
+
+Phase 3H is a hosted visual validation pass for the Sci Fi app-surface milestone. It is a documentation and screenshot-checklist pass only. It does not add new rendering effects, app behavior, theme IDs, persistence keys, or chrome metrics.
+
+* Hosted compositor validation was performed for Classic and Sci Fi.
+* Classic preservation held: the default theme stayed familiar, and no accidental Sci Fi colors, layout drift, or missing fills or borders were observed on the inspected surfaces.
+* Sci Fi readability and cohesion held on the shell and app pilots: titlebars, menus, taskbar, desktop surfaces, and app chrome remained readable and cohesive without looking overdone.
+* Inspected surfaces: desktop background, taskbar, Start menu, taskbar context menu, Display Options, Control Panel, Notepad, Calculator, File Explorer, and Clock.
+* Tiny fixes made: none in repo source; the pass stayed documentation-only, with only temporary local validation harness retries to stabilize screenshot capture.
+* Screenshots and artifacts captured: local PNGs were captured in temporary validation artifact folders and were not added to git.
+* Deferred boundaries remain unchanged: rounded client clipping, rounded hit-testing, blur/glass, animations, taskbar shadows, high-DPI/scaling, bare-metal theme parity, per-effect controls, and broad app redesign remain deferred.
+* Readiness: the Sci Fi app-surface milestone is ready for the next layer of theme work.
+
+## Phase 4A
+
+Phase 4A is a readiness/defaults boundary checkpoint for the Sci Fi theme. It is a documentation-only pass that marks the hosted Sci Fi milestone as validated and safely opt-in while Classic remains the default. It does not add new styling, rendering effects, app behavior, theme IDs, persistence keys, or chrome metrics.
+
+* Sci Fi is now a validated hosted opt-in theme milestone.
+* Classic remains the default and fallback-safe theme.
+* Hosted shell and app-surface coverage are broad enough to continue from a stable checkpoint.
+* Bare-metal parity remains deferred.
+* Sci Fi is not yet declared a universal/default OS theme.
+* Future work should continue behind opt-in gates unless explicitly promoted.
+* No per-effect controls were introduced.
+
+### Default Safety Boundary
+
+* Classic remains default.
+* Sci Fi remains opt-in.
+* Missing or invalid theme config falls back to Classic.
+* Theme switching should not create tracked config changes that imply a default change.
+* Validation artifacts like `guideXOSServer.exe`, `desktop.json`, `desktop.state`, screenshots, temp harness files, and disk images are local-only and should not be committed unless a task explicitly changes defaults.
+
+### Ready for Next Layer
+
+* Theme wallpaper selection.
+* Navigator, Image Viewer, and Task Manager app-surface pilots.
+* Higher-quality manual screenshot harness.
+* High-DPI/scaling review.
+* Hosted shadow and taskbar polish.
+* Bare-metal parity inventory.
+* Rounded clipping and hit-testing research, still not implementation.
+* Theme asset and icon polish.
+
+## Phase 4B
+
+Phase 4B is a wallpaper/background inventory and design-readiness pass. It documents the current global background path before any theme-scoped wallpaper work begins. It does not change defaults, assets, rendering behavior, or persistence keys. Classic remains the default theme and Sci Fi remains opt-in for this inventory pass.
+
+### Inventory Summary
+
+* The current background selection is global, not theme-scoped.
+* DisplayOptionsStore persists one wallpaperId and one backgroundScaleMode; desktop.json also keeps the legacy wallpaper path and desktop.wallpaper.id for compatibility.
+* Compositor save/load keeps the same selection in both display-options.cfg and desktop.json, and DesktopService::SaveState preserves existing wallpaper fields when it refreshes pinned and recent entries.
+* DesktopTheme.desktopBackground is a color fallback, not a wallpaper asset binding.
+* On a fresh config, the default background is still the built-in image wallpaper, so Sci Fi does not currently own a separate wallpaper.
+* The dedicated background asset folder is assets/Backgrounds.
+* It currently contains 15 image wallpapers with matching thumbnails: ameoba, ameobagx, blueflower, cpu, dinos, flower, greenmedow, guidexosspace, guidexosspace3, merlin, merlin2, mountains, redflower, tronporche, and Wallpaper2.
+* wallpaper_registry.cpp also defines 8 built-in gradient backgrounds: midnight, ocean, aurora, violet, sunset, forest, ember, and graphite.
+* The registry and UI support BackgroundKind::SolidColor, but there are no built-in solid-color backgrounds today.
+
+### Render Paths
+
+* The hosted compositor uses DesktopWallpaper::DrawGradient and drawBackgroundImageToHdc for its desktop backdrop.
+* The bare-metal framebuffer path uses drawBackgroundGradientToPixels and drawBackgroundImageToPixels.
+* The hosted Sci Fi no-image fallback uses the theme desktopBackground color.
+* Bare-metal does not consult the Sci Fi desktopBackground field and stays on the procedural background state.
+* The current Sci Fi desktop therefore is not a separate wallpaper track; it is the shared global background selection plus hosted Sci Fi color fallback behavior when no image is present.
+
+### Safe Future Options
+
+* Keep Classic and Sci Fi color-only for now.
+* Allow Sci Fi to suggest a bundled wallpaper while Classic remains unchanged.
+* Add a theme-specific default wallpaper later, still opt-in only, with explicit override rules for user wallpaper.
+* Keep user-selected wallpaper independent of theme; that is already the current global model.
+* Add a Display Options wallpaper UI later. The current Background tab is global, so any theme-linked selector would still need new semantics.
+* Keep bare-metal wallpaper parity deferred.
+
+### Non-Changes
+
+* This pass does not promote a new default wallpaper.
+* No defaults changed.
+* No assets were added, removed, moved, or renamed.
+* No per-effect controls were introduced.
+* Wallpaper selection remains deferred until an implementation phase.
+
+## Phase 4C
+
+Phase 4C adds a small opt-in Sci Fi wallpaper recommendation note in Display Options. It is read-only and does not change the wallpaper automatically, the default wallpaper, the default theme, or the global wallpaper model.
+
+* The Theme tab now shows a read-only recommendation when Sci Fi is selected.
+* The recommendation points to existing bundled backgrounds only, and the user still has to choose a wallpaper through the existing Background tab controls.
+* No theme-scoped wallpaper persistence was added.
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* No default wallpaper changed.
+* No assets were added, removed, moved, or renamed.
+* Bare-metal wallpaper parity remains deferred.
+
+## Phase 4C.1
+
+Phase 4C.1 is a stabilization-only review pass for the Phase 4C Sci Fi wallpaper recommendation note. The note was reviewed in Display Options and remains read-only and opt-in. No wallpaper/default/persistence/assets changed, and no automatic wallpaper switching was added.
+
+* The Theme tab recommendation stays gated to Sci Fi selection and remains read-only.
+* Tiny copy fix: the note now says the recommendation is optional and tells users to pick any wallpaper on the Background tab.
+* Placement was reviewed and kept below the theme cards and above the footer action text.
+* No theme-scoped wallpaper persistence was added.
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* No default wallpaper changed.
+* No assets were added, removed, moved, or renamed.
+* No per-effect controls were introduced.
+
+## Phase 4D
+
+Phase 4D is the next app-surface pilot for the guideXOS Server theme system. It applies conservative Sci Fi toolbar, address, content, border, and text polish to Navigator while keeping Classic visually close to the current look. It does not change Navigator behavior, navigation logic, page loading, URL/path handling, history, bookmarks, persistence, App Model behavior, theme IDs, persistence keys, or theme metrics. It does not add new effects, blur, glass, animations, rounded clipping, rounded hit-testing, or per-effect controls.
+
+* Navigator is the next app-surface pilot.
+* Sci Fi gets conservative toolbar, address, content, border, and text polish so Navigator fits the shell more cleanly.
+* Classic is preserved and stays visually close to the current Navigator look.
+* No Navigator behavior changed: navigation logic, page loading, URL/path handling, history, bookmarks, and persistence all remain the same.
+* No App Model behavior changed.
+* No new effects were added.
+* Broad app redesign remains deferred.
+* Future app polish should continue one app at a time.
+
+## Phase 4D.1
+
+Phase 4D.1 is a stabilization-only review pass for the Navigator app-surface pilot. Navigator was reviewed conservatively and kept within the existing theme-surface scope.
+
+* The Navigator pilot was reviewed and stabilized.
+* The shared compositor widget guard was reviewed and tightened to match Navigator windows only.
+* Classic preservation was confirmed; the previous Navigator feel remains close to the current look.
+* Authored page background colors remain respected when present.
+* No Navigator behavior, navigation logic, page loading, URL/path handling, history, bookmarks, persistence, or App Model behavior changed.
+* No new effects, blur, glass, animation, rounded clipping, rounded hit-testing, or per-effect controls were added.
+* Tiny cleanup made: the shared compositor Navigator widget guard now uses a tighter title match to avoid accidental spillover.
+* Tiny readability fix made: Navigator's default page-body text now tracks the content surface in Sci Fi so dark content stays legible while authored colors still win.
+* No layout or hit-test change was needed in this pass.
+
+## Phase 4E
+
+Phase 4E is the next app-surface pilot for the guideXOS Server theme system. It applies conservative Sci Fi body, header, list, selection, border, and text polish to Task Manager while keeping Classic visually close to the current look. It does not change Task Manager behavior, process/app enumeration, refresh cadence, kill/close/end-task behavior, monitoring logic, App Model behavior, theme IDs, persistence keys, or theme metrics. It does not add new effects, blur, glass, animations, rounded clipping, rounded hit-testing, or per-effect controls.
+
+* Task Manager is the next app-surface pilot.
+* Sci Fi gets conservative body, header, list, selection, border, and text polish so Task Manager fits the shell more cleanly.
+* Classic is preserved and stays visually close to the current Task Manager look.
+* No Task Manager behavior changed: process/app enumeration, refresh cadence, kill/close/end-task behavior, and monitoring logic all remain the same.
+* No App Model behavior changed.
+* No new effects were added.
+* Broad app redesign remains deferred.
+* Future app polish should continue one app at a time.
+
+## Phase 4E.1
+
+Phase 4E.1 is a stabilization-only review pass for the Task Manager app-surface pilot.
+
+* The Task Manager pilot was reviewed and stabilized.
+* Readability and graph/status safety were reviewed.
+* Row/selection/End Task safety were reviewed.
+* Classic preservation stayed close to the prior Task Manager look.
+* No monitoring, enumeration, End Task, or App Model behavior changed.
+* No new effects were added.
+* Tiny readability/layout fix made: none.
+
+## Phase 4F
+
+Phase 4F closes out the extended Sci Fi app-surface milestone as a documentation, inventory, and smoke-hardening pass. It does not add new styling, rendering effects, app behavior, theme IDs, persistence keys, theme metrics, or App Model behavior. No per-effect controls were introduced.
+
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* Missing or invalid theme config falls back to Classic.
+* Wallpaper selection remains global, not theme-scoped.
+* The Sci Fi wallpaper recommendation in Display Options remains read-only and optional.
+* No automatic wallpaper switching exists.
+* No theme-scoped wallpaper persistence exists.
+* No App Model gate/status dependency was introduced.
+* No new effects were added.
+
+### App-Surface Inventory
+
+* Display Options: Phase 3A / 3A.1, plus Phase 4C / 4C.1; stabilization status: complete in 3A.1 and 4C.1; Sci Fi polish covers theme selection copy, the optional read-only wallpaper recommendation note, and conservative panel/card/accent treatment; Classic preservation: default look stays intact and the neutral card feel remains; Behavior changes: No; Safety fix / guard: the Sci Fi recommendation stays gated and read-only, and the earlier fallback tweak preserved the neutral card feel.
+* Control Panel: Phase 3B / 3B.1; stabilization status: complete in 3B.1; Sci Fi polish covers conservative panel/card/accent treatment; Classic preservation: look stays close to the prior Control Panel surface; Behavior changes: No; Safety fix / guard: shared grid top offset stays synchronized for drawing and hit-testing.
+* Notepad: Phase 3C / 3C.1; stabilization status: complete in 3C.1; Sci Fi polish covers conservative editor/body/border/text treatment; Classic preservation: look stays close to the prior Notepad surface; Behavior changes: No; Safety fix / guard: surface helpers stayed centralized and no visible fallback tweak was needed.
+* Calculator: Phase 3D / 3D.1; stabilization status: complete in 3D.1; Sci Fi polish covers conservative body/display/button/accent treatment; Classic preservation: look stays close to the prior Calculator surface; Behavior changes: No; Safety fix / guard: shared compositor widget guard stayed narrow to Calculator and Sci Fi.
+* File Explorer: Phase 3E / 3E.1; stabilization status: complete in 3E.1; Sci Fi polish covers conservative body/list/toolbar/address/selection/hover/border/status treatment; Classic preservation: look stays close to the prior File Explorer surface; Behavior changes: No; Safety fix / guard: Sci Fi hover clears on scroll and offset changes so hover stays visual-only.
+* Clock: Phase 3F / 3F.1; stabilization status: complete in 3F.1; Sci Fi polish covers conservative body/readout/accent treatment and clear repaint handling; Classic preservation: look stays close to the prior Clock surface; Behavior changes: No; Safety fix / guard: clear-then-redraw removes stale stacked text without changing timekeeping cadence.
+* Navigator: Phase 4D / 4D.1; stabilization status: complete in 4D.1; Sci Fi polish covers conservative toolbar/address/content/border/text treatment; Classic preservation: previous Navigator feel remains close to the current look; Behavior changes: No; Safety fix / guard: the shared compositor widget guard now matches Navigator windows only, and authored page colors still win when present.
+* Task Manager: Phase 4E / 4E.1; stabilization status: complete in 4E.1; Sci Fi polish covers conservative body/header/list/selection/border/text treatment; Classic preservation: stays close to the prior Task Manager look; Behavior changes: No; Safety fix / guard: readability and graph/status safety were reviewed, and row/selection/End Task safety stayed intact.
+* Image Viewer: Phase 4H; stabilization status: chrome-only hosted pilot complete; Sci Fi polish covers body/background, preview border/separators, status strip, and widget chrome outside the image area; Classic preservation: stays close to the current Image Viewer look; Behavior changes: No; Safety fix / guard: styling stayed outside decode/render/scaling/ownership/lifecycle paths, no bare-metal `ImageViewerApp` changes were made, and the shared compositor widget guard is narrow to Image Viewer and Sci Fi.
+
+### Wallpaper / Default Boundaries
+
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* Missing or invalid theme config falls back to Classic.
+* Wallpaper selection remains global and not theme-scoped.
+* The Sci Fi wallpaper recommendation in Display Options is read-only and optional.
+* No automatic wallpaper switching exists.
+* No theme-scoped wallpaper persistence exists.
+
+### Deferred Boundaries
+
+* Image Viewer stabilization/readability re-check.
+* Other future app-surface polish.
+* Bare-metal theme parity.
+* High-DPI/scaling.
+* Hosted shadow/taskbar polish.
+* Rounded client clipping.
+* Rounded hit-testing.
+* Blur/glass.
+* Animations.
+* Per-effect controls.
+* Theme-scoped wallpaper persistence.
+* Broader app redesign.
+
+### Image Viewer Caution
+
+* Image Viewer may be a future theme target, but it should be approached carefully because prior large-image, memory, and repaint concerns make it a higher-risk surface for theme changes.
+* This pass does not inspect or modify Image Viewer.
+
+## Phase 4G
+
+Phase 4G is a diagnostic, read-only readiness inventory for Image Viewer. It reviews drawing, repaint, and memory ownership paths before any styling decision is made. It does not change Image Viewer runtime behavior, image loading, image decoding, memory ownership, large-image handling, preview/window close behavior, file open behavior, theme IDs, persistence keys, theme metrics, App Model behavior, or bare-metal code. No Image Viewer styling was implemented in this pass, and no new effects were added.
+
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* Missing or invalid theme config falls back to Classic.
+* No per-effect controls were introduced.
+* No Image Viewer runtime behavior changed in this pass.
+* No Image Viewer styling was implemented in this pass.
+
+### Readiness Inventory
+
+* Image Viewer readiness inventory was performed before deciding whether to style the surface.
+* The inventory is hosted-app focused and is meant to guide a later Phase 4H styling pass, not replace it.
+
+### Drawing / Repaint Path
+
+* Hosted Image Viewer paints through its own app-local publish helpers: `MT_DrawText`, `MT_DrawTextAt`, `MT_DrawTextAtColor`, `MT_DrawRect`, `MT_DrawImage`, and `MT_WidgetAdd`.
+* `updateDisplay()` starts each repaint by clearing the compositor's text, positioned text, rect, and image layers with a form-feed `MT_DrawText` payload, then repaints the window body and content.
+* The body/background outside the image area is drawn with app-local rectangle publishes, not with shared theme widgets.
+* The image preview itself is drawn through `MT_DrawImage`.
+* The bottom button rows and status text are compositor widgets and positioned text, not a custom Image Viewer skin system.
+* `updateDisplayImage()` and `updateDisplay()` are the repaint entry points for image changes, zoom/pan changes, resize, edits, notice text, and error text.
+* The hosted and bare-metal image viewer paths are separate: hosted Image Viewer uses the compositor IPC path and `gui::ImagePtr`, while bare-metal `ImageViewerApp` uses framebuffer drawing and kernel-side image loading.
+* Stale image/text artifacts are less likely because the repaint path clears the compositor's draw layers before republishing, but the widget rows persist until rebuilt on resize or initial layout.
+
+### Image Loading / Memory Ownership
+
+* `gui::ImageAdapter::LoadFromFile` handles the hosted app load path and only accepts PNG input in this version.
+* `ImageAdapter` decodes through `PngLoader::LoadFromMemory`, and `PngLoader` allocates a `gui::Image` then copies decoded RGBA pixels into `Image::Pixels`.
+* `Image::~Image` frees the heap pixel buffer with `delete[]`.
+* `s_image` is a `std::shared_ptr<gui::Image>`, so replacing it on open or reload releases the previous decoded image once no other references remain.
+* Successful loads also snapshot full pixel data into `HistorySnapshot::pixels`, which means undo/redo and original-state tracking can temporarily duplicate large images.
+* Edit helpers such as rotate, flip, resize, crop, and restore paths allocate more full-image buffers, and edited previews may be written to the VFS under `tmp/imageviewer/...`.
+* On close, the app exits after sending `MT_Close`; there is no special close-time image cleanup beyond normal shared_ptr/vector destruction.
+* Opening a second image after the first one loads replaces the active image and refreshes snapshot/history state; prior large-image buffers are released when those owners are overwritten or cleared.
+* The large-image/freezing concern remains visible in code because the app still keeps full decoded images, full-pixel snapshots, and compositor-side image loads.
+
+### Safe Future Styling Targets
+
+* Window body/background outside the image area.
+* Bottom status strip and separator bands.
+* Empty-state, error, and notice text colors.
+* Border and separator colors around the preview area.
+* Existing compositor widget button fill, border, and text colors, if they are only restyled through the shared widget theme path and do not change widget behavior.
+* Small chrome-color tweaks around the image area, so long as they stay outside the decode, scaling, and buffer lifecycle paths.
+
+### Risky / Deferred Areas
+
+* Image decode/render path.
+* Large-image scaling path.
+* Cached bitmap ownership and preview-buffer ownership.
+* Close/reopen lifecycle.
+* Bare-metal framebuffer and kernel ImageAdapter paths.
+* Any new effects over the image area.
+* Blur/glass, animations, rounded client clipping, rounded hit-testing, and per-pixel image filters.
+* New retained buffers or theme-side image caches.
+
+### Blockers / Precautions Before Styling
+
+* Run a manual large-image open/close/reopen check before approving styling.
+* Verify the app releases its preview and snapshot state when switching images and on close.
+* Keep theme helpers outside image buffer ownership and decode paths.
+* Avoid new effects, retained buffers, and per-pixel processing over the image area.
+* Keep bare-metal validation separate; the kernel ImageViewer is a different app and remains out of scope for this pass.
+* Do not alter image loading, image decoding, memory ownership, large-image handling, file open behavior, or preview/window close behavior.
+
+## Phase 4G.1
+
+Phase 4G.1 is the hosted large-image lifecycle safety check for Image Viewer. It is diagnostic and read-only, and it does not change decode, scaling, ownership, close behavior, or any styling/runtime code.
+
+* Hosted lifecycle validation was performed with `desktop.open` and `gui.close`; `gui.start` was unreliable in this environment, so the hosted compositor was bootstrapped through the open path.
+* Images used: `assets/Backgrounds/redflower_thumb.png`, `assets/Backgrounds/ameoba.png`, and `assets/Backgrounds/blueflower.png`.
+* Open, close, reopen, and alternate-image cycles succeeded in one hosted session.
+* The large `ameoba.png` image opened twice in the same session without an obvious stale surface or repaint artifact.
+* No stale image surfaces, stale text, or stale button chrome were observed in the open/close screenshots.
+* No freeze or crash was observed.
+* Built-in `mem` output stayed at `0 KB peak=0 KB` throughout the run, so no obvious runaway was visible in the harness output.
+* Memory and lifecycle risk still remains in the implementation because the app continues to use full decoded images and snapshot buffers, so Image Viewer styling is conditionally ready next but only for surrounding chrome, status text, widget fills/borders, and other non-image chrome outside decode, scaling, ownership, and close/reopen lifecycle paths.
+
+## Phase 4H
+
+Phase 4H implements a conservative hosted Image Viewer app-surface pilot for Sci Fi. It is chrome-only: the body/background outside the image area, the preview border and separators, the bottom status strip, and the existing widget/button chrome were styled, while image decode/render/scaling/ownership/lifecycle paths stayed untouched. Classic remains the default theme, Sci Fi remains opt-in, and no theme IDs, persistence keys, theme metrics, or App Model behavior changed.
+
+* Sci Fi gets conservative chrome/status/widget/border polish for hosted Image Viewer.
+* Classic is preserved and stays visually close to the current Image Viewer look.
+* Styling stays outside image decode, render, scaling, ownership, preview-buffer, snapshot/history, and close/reopen lifecycle code.
+* No Image Viewer runtime behavior changed.
+* No large-image lifecycle code changed.
+* No bare-metal `ImageViewerApp` changes were made.
+* No App Model gate/status dependency was introduced.
+* No per-effect controls were introduced.
+* The shared compositor widget guard is narrow to Image Viewer and Sci Fi only.
+* The conditional styling boundary remains in force.
+* A future stabilization pass should re-check lifecycle and readability.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -392,11 +761,11 @@ Phase 3F is the next app-surface pilot for the guideXOS Server theme system.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, and the Phase 3F Clock app-surface pilot.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, the Phase 4F extended app-surface closeout, the Phase 4G Image Viewer readiness inventory, the Phase 4G.1 hosted large-image lifecycle safety check, and the Phase 4H hosted Image Viewer chrome-only app-surface pilot.
 
 ## Recommended Next Pass
 
 1. Phase 2G.1 manual visual validation fixes, if screenshots or manual testing finds issues.
 2. Phase 2H theme screenshot / manual smoke harness, if feasible.
-3. Next app-surface pilot, one app at a time, after Calculator.
+3. Future app-surface pilots, one app at a time.
 4. Future high-DPI and resolution work as a separate track.

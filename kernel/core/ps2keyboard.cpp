@@ -25,7 +25,69 @@ static bool s_hasKey = false;
 static bool s_shiftDown = false;
 static bool s_ctrlDown = false;
 static bool s_altDown = false;
+static bool s_rightAltDown = false;
+static bool s_f4Down = false;
+static bool s_lastKeyAltF4Candidate = false;
+static bool s_lastKeyAltLeftDown = false;
+static bool s_lastKeyAltRightDown = false;
 static bool s_capsLock = false;
+static const uint8_t kEventQueueCapacity = 64;
+static KeyEvent s_eventQueue[kEventQueueCapacity];
+static volatile uint8_t s_eventHead = 0;
+static volatile uint8_t s_eventTail = 0;
+static KeyEvent s_nativeEventQueue[kEventQueueCapacity];
+static volatile uint8_t s_nativeEventHead = 0;
+static volatile uint8_t s_nativeEventTail = 0;
+
+static void enqueue_event(uint32_t key, bool keyUp)
+{
+    if (key == 0) return;
+    const KeyAction action = keyUp ? KeyAction::Up : KeyAction::Down;
+
+    const uint8_t legacyNext = static_cast<uint8_t>((s_eventHead + 1u) % kEventQueueCapacity);
+    if (legacyNext != s_eventTail) {
+        s_eventQueue[s_eventHead].key = key;
+        s_eventQueue[s_eventHead].action = action;
+        s_eventHead = legacyNext;
+    }
+
+    // Keep Native ELF transitions independent from the legacy desktop
+    // get_key() compatibility path, which may consume key-downs while the
+    // desktop dispatcher is servicing other UI work.
+    const uint8_t nativeNext = static_cast<uint8_t>((s_nativeEventHead + 1u) % kEventQueueCapacity);
+    if (nativeNext != s_nativeEventTail) {
+        s_nativeEventQueue[s_nativeEventHead].key = key;
+        s_nativeEventQueue[s_nativeEventHead].action = action;
+        s_nativeEventHead = nativeNext;
+    }
+}
+
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+static void log_key_transition(const char* label, uint8_t scancode, bool keyUp, bool extended)
+{
+    serial::puts("[kbd] ");
+    serial::puts(label);
+    serial::puts(keyUp ? " up" : " down");
+    serial::puts(" raw=");
+    if (extended) {
+        serial::puts("E0 ");
+    }
+    if (keyUp) {
+        serial::puts("F0 ");
+    }
+    serial::puts("0x");
+    serial::put_hex8(scancode);
+    serial::puts(" ext=");
+    serial::puts(extended ? "1" : "0");
+    serial::puts(" leftAlt=");
+    serial::puts(s_altDown ? "1" : "0");
+    serial::puts(" rightAlt=");
+    serial::puts(s_rightAltDown ? "1" : "0");
+    serial::puts(" f4=");
+    serial::puts(s_f4Down ? "1" : "0");
+    serial::putc('\n');
+}
+#endif
 
 // Scancode set 2 to ASCII mapping (US QWERTY keyboard layout)
 // Many emulators use scancode set 2 (translated mode)
@@ -111,11 +173,23 @@ void init()
     s_shiftDown = false;
     s_ctrlDown = false;
     s_altDown = false;
+    s_rightAltDown = false;
+    s_f4Down = false;
+    s_lastKeyAltF4Candidate = false;
+    s_lastKeyAltLeftDown = false;
+    s_lastKeyAltRightDown = false;
     s_capsLock = false;
     s_extendedKey = false;
     s_breakCode = false;
+    s_eventHead = 0;
+    s_eventTail = 0;
+    s_nativeEventHead = 0;
+    s_nativeEventTail = 0;
     
     serial::puts("[PS2KB] Keyboard initialized (scancode set 2)\n");
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    serial::puts("[kbd] decoder=set2 controller-translation-off\n");
+#endif
 }
 
 void irq_handler()
@@ -127,7 +201,7 @@ void irq_handler()
     if (status & 0x20) return;  // Bit 5 = mouse data, skip it
     
     uint8_t scancode = arch::inb(kDataPort);
-    
+
     // Scancode set 2: Handle special prefixes
     // 0xE0 = extended key prefix
     // 0xF0 = break (key release) prefix
@@ -142,20 +216,39 @@ void irq_handler()
     
     bool keyUp = s_breakCode;
     s_breakCode = false;  // Reset for next scancode
+    bool altF4Candidate = false;
+    bool altF4LeftDown = false;
+    bool altF4RightDown = false;
     
     // Handle modifier keys (scancode set 2 values)
     if (scancode == SC2_LSHIFT || scancode == SC2_RSHIFT) {
         s_shiftDown = !keyUp;
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        log_key_transition(scancode == SC2_LSHIFT ? "shift-left" : "shift-right", scancode, keyUp, s_extendedKey);
+#endif
         s_extendedKey = false;
         return;
     }
     if (scancode == SC2_LCTRL) {
         s_ctrlDown = !keyUp;
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        log_key_transition("ctrl-left", scancode, keyUp, s_extendedKey);
+#endif
         s_extendedKey = false;
         return;
     }
     if (scancode == SC2_LALT) {
-        s_altDown = !keyUp;
+        if (s_extendedKey) {
+            s_rightAltDown = !keyUp;
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+            log_key_transition("alt-right", scancode, keyUp, true);
+#endif
+        } else {
+            s_altDown = !keyUp;
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+            log_key_transition("alt-left", scancode, keyUp, false);
+#endif
+        }
         s_extendedKey = false;
         return;
     }
@@ -164,11 +257,28 @@ void irq_handler()
         s_extendedKey = false;
         return;
     }
-    
-    // Only process key presses, not releases
-    if (keyUp) {
+    if (scancode == 0x0C) {  // F4
+        const bool wasDown = s_f4Down;
+        s_f4Down = !keyUp;
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        log_key_transition("f4", scancode, keyUp, s_extendedKey);
+#endif
+        if (!keyUp && !wasDown && (s_altDown || s_rightAltDown)) {
+            altF4Candidate = true;
+            altF4LeftDown = s_altDown;
+            altF4RightDown = s_rightAltDown;
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+            serial::puts("[kbd] shortcut alt-f4 candidate armed leftAlt=");
+            serial::puts(altF4LeftDown ? "1" : "0");
+            serial::puts(" rightAlt=");
+            serial::puts(altF4RightDown ? "1" : "0");
+            serial::putc('\n');
+#endif
+        }
         s_extendedKey = false;
-        return;
+        if (keyUp) {
+            return;
+        }
     }
     
     uint32_t key = 0;
@@ -221,8 +331,13 @@ void irq_handler()
     }
     
     if (key != 0) {
+        enqueue_event(key, keyUp);
+        if (keyUp) return;
         s_lastKey = key;
         s_hasKey = true;
+        s_lastKeyAltF4Candidate = altF4Candidate;
+        s_lastKeyAltLeftDown = altF4LeftDown;
+        s_lastKeyAltRightDown = altF4RightDown;
     }
 }
 
@@ -235,13 +350,41 @@ uint32_t get_key()
 {
     if (!s_hasKey) return 0;
     s_hasKey = false;
+    // Keep the legacy one-key API and the lossless transition queue in sync.
+    // The desktop consumes key-downs only; discard queued release transitions
+    // until the corresponding legacy key-down is reached.
+    while (s_eventTail != s_eventHead) {
+        const KeyEvent event = s_eventQueue[s_eventTail];
+        s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
+        if (event.action == KeyAction::Down) break;
+    }
     return s_lastKey;
+}
+
+bool has_event()
+{
+    return s_nativeEventTail != s_nativeEventHead;
+}
+
+bool get_event(KeyEvent* outEvent)
+{
+    if (!outEvent || s_nativeEventTail == s_nativeEventHead) return false;
+    *outEvent = s_nativeEventQueue[s_nativeEventTail];
+    s_nativeEventTail = static_cast<uint8_t>((s_nativeEventTail + 1u) % kEventQueueCapacity);
+    return true;
 }
 
 void clear()
 {
     s_hasKey = false;
     s_lastKey = 0;
+    s_lastKeyAltF4Candidate = false;
+    s_lastKeyAltLeftDown = false;
+    s_lastKeyAltRightDown = false;
+    s_eventHead = 0;
+    s_eventTail = 0;
+    s_nativeEventHead = 0;
+    s_nativeEventTail = 0;
 }
 
 bool is_ctrl_down()
@@ -256,7 +399,37 @@ bool is_shift_down()
 
 bool is_alt_down()
 {
+    return s_altDown || s_rightAltDown;
+}
+
+bool is_left_alt_down()
+{
     return s_altDown;
+}
+
+bool is_right_alt_down()
+{
+    return s_rightAltDown;
+}
+
+bool is_f4_down()
+{
+    return s_f4Down;
+}
+
+bool was_alt_f4_shortcut_candidate()
+{
+    return s_lastKeyAltF4Candidate;
+}
+
+bool last_key_alt_left_down()
+{
+    return s_lastKeyAltLeftDown;
+}
+
+bool last_key_alt_right_down()
+{
+    return s_lastKeyAltRightDown;
 }
 
 #else
@@ -265,10 +438,18 @@ void init() {}
 void irq_handler() {}
 bool has_key() { return false; }
 uint32_t get_key() { return 0; }
+bool has_event() { return false; }
+bool get_event(KeyEvent*) { return false; }
 void clear() {}
 bool is_ctrl_down() { return false; }
 bool is_shift_down() { return false; }
 bool is_alt_down() { return false; }
+bool is_left_alt_down() { return false; }
+bool is_right_alt_down() { return false; }
+bool is_f4_down() { return false; }
+bool was_alt_f4_shortcut_candidate() { return false; }
+bool last_key_alt_left_down() { return false; }
+bool last_key_alt_right_down() { return false; }
 #endif
 
 } // namespace ps2keyboard

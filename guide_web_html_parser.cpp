@@ -19,9 +19,11 @@
 #include "guide_web_http.h"
 #endif
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <cstdio>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -43,6 +45,119 @@ namespace {
 	constexpr int kCssLiteMaxLineHeightPx = 96;
 	constexpr int kCssLiteMaxWidthPx = 2048;
 	constexpr int kCssLiteMaxBorderWidthPx = 12;
+	constexpr size_t kCssLiteMaxStyleBlocks = 32;
+	constexpr size_t kCssLiteMaxRules = 256;
+	constexpr size_t kCssLiteMaxSelectorGroups = 16;
+	constexpr size_t kCssLiteMaxSelectorLength = 256;
+	constexpr size_t kCssLiteMaxSelectorComponents = 8;
+	constexpr size_t kCssLiteMaxSelectorClasses = 8;
+	constexpr size_t kCssLiteMaxPseudoClassesPerCompound = 4;
+	constexpr size_t kCssLiteMaxNotComponents = 8;
+	constexpr size_t kCssLiteMaxNthExpressionLength = 32;
+	constexpr int kCssLiteMaxNthCoefficient = 1024;
+	constexpr int kCssLiteMaxNthOffset = 4096;
+	constexpr size_t kCssLiteMaxCombinatorDepth = 6;
+	constexpr size_t kCssLiteMaxStructuralMetadata = 1024;
+	constexpr size_t kCssLiteMaxSelectorEvaluationSteps = 64;
+	constexpr size_t kCssLiteMaxSiblingScanSteps = 64;
+	constexpr size_t kCssLiteMaxDeclarationsPerRule = 64;
+	constexpr size_t kCssLiteMaxTotalDeclarations = 2048;
+	constexpr size_t kCssLiteMaxCascadeApplicationsPerNode = 512;
+	constexpr size_t kCssLiteMaxTotalStyleBytes = 64u * 1024u;
+	constexpr size_t kCssLiteMaxInheritanceDepth = 12;
+	constexpr size_t kCssLiteMaxEvidenceEntries = 32;
+	constexpr size_t kCssLiteMaxEvidenceBytes = 32768;
+	constexpr size_t kCssLiteMaxCommentBytes = 1024;
+	constexpr size_t kCssLiteMaxStringScanBytes = 4096;
+	constexpr size_t kCssLiteMaxDelimiterDepth = 4;
+	constexpr size_t kCssLiteMaxContentAggregationOperations = 1024;
+	constexpr size_t kCssLiteMaxOpenElementDepth = 1024;
+	constexpr size_t kCssLiteMaxVisibleTextBytesPerElement = 1024;
+	constexpr size_t kCssLiteMaxRecoveryAttemptsPerGroup = 16;
+	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
+	constexpr size_t kFormMaxControls = 128;
+	constexpr size_t kFormMaxValueBytes = 256;
+	constexpr size_t kFormMaxPlaceholderBytes = 128;
+	constexpr size_t kFormMaxLabelBytes = 128;
+	constexpr size_t kFormMaxOptions = 64;
+	constexpr size_t kFormMaxOptionTextBytes = 128;
+	constexpr int kFormMaxRows = 12;
+	constexpr int kFormMaxCols = 80;
+	constexpr int kFormMaxSize = 64;
+
+	enum class CssProperty : uint8_t {
+		Color = 0,
+		Background,
+		Bold,
+		Italic,
+		TextDecoration,
+		Display,
+		ListStyle,
+		BorderCollapse,
+		BorderSpacingHorizontal,
+		BorderSpacingVertical,
+		GenericFontFamily,
+		TextAlign,
+		LineHeight,
+		MarginTop,
+		MarginRight,
+		MarginBottom,
+		MarginLeft,
+		PaddingTop,
+		PaddingRight,
+		PaddingBottom,
+		PaddingLeft,
+		FontSize,
+		Width,
+		Height,
+		MaxWidth,
+		MaxHeight,
+		WhiteSpace,
+		OverflowWrap,
+		WordBreak,
+		BorderTopWidth,
+		BorderTopStyle,
+		BorderTopColor,
+		BorderRightWidth,
+		BorderRightStyle,
+		BorderRightColor,
+		BorderBottomWidth,
+		BorderBottomStyle,
+		BorderBottomColor,
+		BorderLeftWidth,
+		BorderLeftStyle,
+		BorderLeftColor,
+		Count,
+	};
+
+	constexpr uint64_t cssPropertyBit(CssProperty property)
+	{
+		return uint64_t(1) << static_cast<unsigned>(property);
+	}
+
+	constexpr uint64_t cssPropertyMask(CssProperty first, CssProperty last)
+	{
+		uint64_t mask = 0;
+		for (unsigned i = static_cast<unsigned>(first); i <= static_cast<unsigned>(last); ++i)
+			mask |= uint64_t(1) << i;
+		return mask;
+	}
+
+	static bool cssAccepted(WebStyle& style, uint64_t properties, bool important)
+	{
+		style.specifiedProperties |= properties;
+		if (important) style.importantProperties |= properties;
+		return true;
+	}
+
+	static void saturatingIncrement(int& value, int amount = 1)
+	{
+		if (amount <= 0 || value >= std::numeric_limits<int>::max() - amount) {
+			value = std::numeric_limits<int>::max();
+			return;
+		}
+		value += amount;
+	}
 
 // ASCII lower-case without locale dependency.
 static std::string toLower(const std::string& s)
@@ -80,6 +195,221 @@ static std::string collapseWs(const std::string& s)
 	// trim trailing space added above
 	if (!out.empty() && out.back() == ' ') out.pop_back();
 	return out;
+}
+
+// Replace CSS comments with one separator while preserving quoted strings.
+// The caller may safely parse the prefix already produced when this returns
+// false; the affected remainder is deliberately ignored.
+static bool normalizeCssComments(const std::string& input,
+	std::string& output,
+	CssDiagnostics& diag)
+{
+	output.clear();
+	output.reserve(input.size());
+	char quote = 0;
+	size_t quotedBytes = 0;
+	for (size_t i = 0; i < input.size(); ++i) {
+		const char c = input[i];
+		if (quote != 0) {
+			if (quotedBytes++ >= kCssLiteMaxStringScanBytes) {
+				saturatingIncrement(diag.unterminatedStringErrors);
+				return false;
+			}
+			output += c;
+			if (c == '\\' && i + 1 < input.size()) {
+				output += input[++i];
+				if (quotedBytes++ >= kCssLiteMaxStringScanBytes) {
+					saturatingIncrement(diag.unterminatedStringErrors);
+					return false;
+				}
+				continue;
+			}
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') {
+			quote = c;
+			quotedBytes = 0;
+			output += c;
+			continue;
+		}
+		if (c != '/' || i + 1 >= input.size() || input[i + 1] != '*') {
+			output += c;
+			continue;
+		}
+
+		output += ' ';
+		i += 2;
+		bool closed = false;
+		size_t scanned = 0;
+		while (i < input.size()) {
+			if (scanned++ >= kCssLiteMaxCommentBytes) {
+				saturatingIncrement(diag.commentScanClamps);
+				saturatingIncrement(diag.unterminatedCommentErrors);
+				return false;
+			}
+			if (input[i] == '*' && i + 1 < input.size() && input[i + 1] == '/') {
+				i += 1;
+				closed = true;
+				break;
+			}
+			++i;
+		}
+		if (!closed) {
+			saturatingIncrement(diag.unterminatedCommentErrors);
+			return false;
+		}
+	}
+	if (quote != 0) {
+		saturatingIncrement(diag.unterminatedStringErrors);
+		return false;
+	}
+	return true;
+}
+
+static bool scanCssBalancedRange(const std::string& text,
+	size_t start,
+	size_t end,
+	CssDiagnostics& diag,
+	bool allowBraces = false)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	int braces = 0;
+	char quote = 0;
+	for (size_t i = start; i < end; ++i) {
+		const char c = text[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < end) { ++i; continue; }
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+			--brackets;
+		} else if (allowBraces && c == '{') {
+			++braces;
+		} else if (allowBraces && c == '}') {
+			if (braces == 0) return false;
+			--braces;
+		}
+	}
+	if (quote != 0) {
+		saturatingIncrement(diag.unterminatedStringErrors);
+		return false;
+	}
+	if (parentheses != 0) {
+		saturatingIncrement(diag.unbalancedParenthesisErrors);
+		return false;
+	}
+	if (brackets != 0) {
+		saturatingIncrement(diag.unbalancedBracketErrors);
+		return false;
+	}
+	return true;
+}
+
+static std::vector<std::string> splitCssSelectorGroups(const std::string& text,
+	CssDiagnostics& diag)
+{
+	std::vector<std::string> groups;
+	std::string current;
+	bool memberCapped = false;
+	auto appendBounded = [&](char c) {
+		if (current.size() < kCssLiteMaxSelectorLength + 1) {
+			current += c;
+		}
+		if (current.size() > kCssLiteMaxSelectorLength) {
+			if (!memberCapped) {
+				memberCapped = true;
+				saturatingIncrement(diag.selectorDepthClamps);
+			}
+		}
+	};
+	auto finishMember = [&]() {
+		groups.push_back(current);
+		current.clear();
+		memberCapped = false;
+	};
+	int parentheses = 0;
+	int brackets = 0;
+	char quote = 0;
+	for (size_t i = 0; i < text.size(); ++i) {
+		const char c = text[i];
+		if (quote != 0) {
+			appendBounded(c);
+			if (c == '\\' && i + 1 < text.size()) appendBounded(text[++i]);
+			else if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\\') {
+			// Escapes are unsupported by the identifier policy, but the escaped
+			// byte remains part of this member so an escaped comma cannot leak
+			// the suffix into a new, accidentally valid selector.
+			appendBounded(c);
+			if (i + 1 < text.size()) appendBounded(text[++i]);
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; appendBounded(c); continue; }
+		if (c == '(') {
+			if (parentheses < static_cast<int>(kCssLiteMaxDelimiterDepth) + 1) ++parentheses;
+			if (parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+			} else {
+				--parentheses;
+			}
+		} else if (c == '[') {
+			if (brackets < static_cast<int>(kCssLiteMaxDelimiterDepth) + 1) ++brackets;
+			if (brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+			} else {
+				--brackets;
+			}
+		} else if (c == ',' && parentheses == 0 && brackets == 0) {
+			finishMember();
+			continue;
+		}
+		appendBounded(c);
+	}
+	if (quote != 0) {
+		saturatingIncrement(diag.unterminatedStringErrors);
+	}
+	if (parentheses != 0) {
+		saturatingIncrement(diag.unbalancedParenthesisErrors);
+	}
+	if (brackets != 0) {
+		saturatingIncrement(diag.unbalancedBracketErrors);
+	}
+	finishMember();
+	return groups;
 }
 
 // Decode minimal HTML entities: &amp; &lt; &gt; &quot; &apos; &#nn;
@@ -173,17 +503,66 @@ static bool supportedFormEncoding(const std::string& encoding)
 	return encoding.empty() || encoding == "application/x-www-form-urlencoded";
 }
 
-static int parsePositiveIntAttr(const std::string& tagBody, const std::string& attr)
+static int parsePositiveIntAttr(const std::string& tagBody, const std::string& attr, bool* wasClamped = nullptr)
 {
 	std::string value = trim(extractAttr(tagBody, attr));
+	if (wasClamped) *wasClamped = false;
 	if (value.empty()) return 0;
 	int result = 0;
+	bool sawDigit = false;
 	for (char c : value) {
 		if (c < '0' || c > '9') break;
-		result = result * 10 + (c - '0');
-		if (result > 4096) return 4096;
+		sawDigit = true;
+		const int digit = c - '0';
+		if (result > 409) {
+			if (wasClamped) *wasClamped = true;
+			return 4096;
+		}
+		result = result * 10 + digit;
+		if (result > 4096) {
+			if (wasClamped) *wasClamped = true;
+			return 4096;
+		}
 	}
+	if (!sawDigit) return 0;
 	return result > 0 ? result : 0;
+}
+
+static std::string boundedDecodedFormText(const std::string& raw,
+	size_t cap,
+	FormsDiagnostics& diagnostics)
+{
+	std::string decoded = decodeEntities(raw);
+	if (decoded.size() <= cap) return decoded;
+	++diagnostics.controlTextTruncations;
+	decoded.resize(cap);
+	return decoded;
+}
+
+static int parseBoundedFormInt(const std::string& tagBody,
+	const std::string& attr,
+	int maximum,
+	FormsDiagnostics& diagnostics)
+{
+	const std::string raw = trim(extractAttr(tagBody, attr));
+	if (raw.empty()) return 0;
+	int result = 0;
+	bool sawDigit = false;
+	for (char c : raw) {
+		if (c < '0' || c > '9') break;
+		sawDigit = true;
+		if (result > maximum / 10) {
+			++diagnostics.controlMetadataClamps;
+			return maximum;
+		}
+		result = result * 10 + (c - '0');
+		if (result > maximum) {
+			++diagnostics.controlMetadataClamps;
+			return maximum;
+		}
+	}
+	if (!sawDigit || result <= 0) return 0;
+	return result;
 }
 
 static bool isHexDigit(char c)
@@ -262,6 +641,7 @@ static bool parseCssColor(const std::string& rawValue, uint32_t& outColor)
 }
 
 static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDiagnostics& diag);
+static uint32_t allocateCssSourceOrder(CssDiagnostics& diag);
 
 static bool parseCssNumber(const std::string& rawValue, double& out)
 {
@@ -286,6 +666,24 @@ static int clampCssValue(CssDiagnostics& diag, int value, int minValue, int maxV
 	const int clamped = std::max(minValue, std::min(maxValue, value));
 	if (clamped != value) {
 		++diag.clampedValueCount;
+	}
+	return clamped;
+}
+
+static int clampBorderWidthPx(CssDiagnostics& diag, int value)
+{
+	const int clamped = clampCssValue(diag, std::max(0, value), 0, kCssLiteMaxBorderWidthPx);
+	if (clamped != std::max(0, value)) {
+		++diag.borderWidthClampCount;
+	}
+	return clamped;
+}
+
+static int clampBorderSpacingPx(CssDiagnostics& diag, int value)
+{
+	const int clamped = clampCssValue(diag, std::max(0, value), 0, kCssLiteMaxSpacingPx);
+	if (clamped != std::max(0, value)) {
+		++diag.borderSpacingClampCount;
 	}
 	return clamped;
 }
@@ -334,90 +732,486 @@ static bool parseCssLengthValue(const std::string& rawValue,
 	return true;
 }
 
-static bool parseCssSimpleSelectorPart(const std::string& rawPart, CssSelectorPart& part, int& specificity)
+static bool parseCssSignedInteger(const std::string& raw,
+	int maxAbs,
+	int& out,
+	CssDiagnostics& diag)
 {
-	std::string selector = toLower(trim(rawPart));
-	part = {};
-	specificity = 0;
-	if (selector.empty()) return false;
-	if (selector.find_first_of(">+~") != std::string::npos) return false;
-
-	std::string cleaned;
-	cleaned.reserve(selector.size());
-	bool inAttr = false;
-	for (size_t i = 0; i < selector.size(); ++i) {
-		char c = selector[i];
-		if (inAttr) {
-			if (c == ']') inAttr = false;
-			continue;
-		}
-		if (c == '[') {
-			inAttr = true;
-			continue;
-		}
-		cleaned += c;
-	}
-	selector = trim(cleaned);
-	if (selector.empty()) return false;
-	size_t pseudo = selector.find(':');
-	if (pseudo != std::string::npos) {
-		selector = trim(selector.substr(0, pseudo));
-	}
-	if (selector.empty()) return false;
-
+	if (raw.empty()) return false;
 	size_t pos = 0;
-	auto isIdentChar = [](char c) {
-		return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '*';
-	};
-	if (selector[pos] != '.' && selector[pos] != '#') {
-		size_t start = pos;
-		while (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') {
-			if (!isIdentChar(selector[pos])) return false;
-			++pos;
-		}
-		part.tagName = selector.substr(start, pos - start);
-		if (!part.tagName.empty()) specificity += 1;
+	int sign = 1;
+	if (raw[pos] == '+' || raw[pos] == '-') {
+		sign = raw[pos] == '-' ? -1 : 1;
+		if (++pos >= raw.size()) return false;
 	}
-	while (pos < selector.size()) {
-		char prefix = selector[pos];
-		if (prefix != '.' && prefix != '#') return false;
-		++pos;
-		size_t start = pos;
-		while (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') {
-			if (!isIdentChar(selector[pos])) return false;
-			++pos;
-		}
-		std::string token = selector.substr(start, pos - start);
-		if (token.empty()) return false;
-		if (prefix == '.') {
-			part.classNames.push_back(token);
-			specificity += 10;
-		} else {
-			if (!part.id.empty()) return false;
-			part.id = token;
-			specificity += 100;
-		}
+	uint64_t magnitude = 0;
+	for (; pos < raw.size(); ++pos) {
+		const char c = raw[pos];
+		if (c < '0' || c > '9') return false;
+		const uint64_t digit = static_cast<uint64_t>(c - '0');
+		if (magnitude > (static_cast<uint64_t>(std::numeric_limits<int>::max()) - digit) / 10u)
+			return false;
+		magnitude = magnitude * 10u + digit;
 	}
-	if (part.tagName.empty() && part.classNames.empty() && part.id.empty()) return false;
+	if (magnitude > static_cast<uint64_t>(maxAbs)) {
+		magnitude = static_cast<uint64_t>(maxAbs);
+		saturatingIncrement(diag.pseudoClassClamps);
+	}
+	out = sign < 0 ? -static_cast<int>(magnitude) : static_cast<int>(magnitude);
 	return true;
 }
 
-static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRule)
+static bool parseCssNthExpression(const std::string& raw,
+	CssNthExpression& out,
+	CssDiagnostics& diag)
 {
-	std::string selectorText = trim(rawSelector);
-	if (selectorText.empty()) return false;
-	std::stringstream ss(selectorText);
-	std::string partText;
-	outRule.selectorParts.clear();
-	outRule.specificity = 0;
-	while (ss >> partText) {
-		CssSelectorPart part;
-		int partSpecificity = 0;
-		if (!parseCssSimpleSelectorPart(partText, part, partSpecificity)) return false;
-		outRule.selectorParts.push_back(std::move(part));
-		outRule.specificity += partSpecificity;
+	if (raw.size() > kCssLiteMaxNthExpressionLength) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
 	}
-	if (outRule.selectorParts.empty()) return false;
+	std::string expression;
+	expression.reserve(raw.size());
+	for (unsigned char c : raw) {
+		if (c <= 32) continue;
+		expression += static_cast<char>(std::tolower(c));
+	}
+	if (expression.empty()) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+	if (expression == "odd") { out = { 2, 1 }; return true; }
+	if (expression == "even") { out = { 2, 0 }; return true; }
+
+	const size_t nPos = expression.find('n');
+	if (nPos == std::string::npos) {
+		int position = 0;
+		if (!parseCssSignedInteger(expression, kCssLiteMaxNthOffset, position, diag) || position <= 0) {
+			saturatingIncrement(diag.nthExpressionParseErrors);
+			return false;
+		}
+		out = { 0, position };
+		return true;
+	}
+	if (expression.find('n', nPos + 1) != std::string::npos) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+
+	const std::string coefficientText = expression.substr(0, nPos);
+	const std::string offsetText = expression.substr(nPos + 1);
+	int coefficient = 1;
+	if (coefficientText == "-") coefficient = -1;
+	else if (coefficientText == "+") coefficient = 1;
+	else if (!coefficientText.empty()) {
+		if (!parseCssSignedInteger(coefficientText, kCssLiteMaxNthCoefficient, coefficient, diag)) {
+			saturatingIncrement(diag.nthExpressionParseErrors);
+			return false;
+		}
+	}
+	int offset = 0;
+	if (!offsetText.empty() && !parseCssSignedInteger(offsetText, kCssLiteMaxNthOffset, offset, diag)) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+	if (coefficient == 0 && offset <= 0) {
+		saturatingIncrement(diag.nthExpressionParseErrors);
+		return false;
+	}
+	out = { coefficient, offset };
+	return true;
+}
+
+static bool parseCssSimpleSelectorCore(const std::string& rawSelector,
+	CssSimpleSelector& out,
+	CssSpecificity& specificity,
+	CssDiagnostics& diag)
+{
+	const std::string selector = toLower(trim(rawSelector));
+	out = {};
+	specificity = {};
+	if (selector.empty()) return false;
+	auto isIdentChar = [](char c) {
+		return static_cast<unsigned char>(c) < 128 &&
+			(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_');
+	};
+	size_t pos = 0;
+	if (selector[pos] != '.' && selector[pos] != '#') {
+		const size_t start = pos;
+		if (selector[pos] == '*') {
+			++pos;
+			if (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') return false;
+			out.tagName = "*";
+		} else {
+		while (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') {
+			if (!isIdentChar(selector[pos])) return false;
+			++pos;
+		}
+		out.tagName = selector.substr(start, pos - start);
+		if (out.tagName.empty()) {
+			return false;
+		} else {
+			++specificity.elementCount;
+		}
+		}
+	}
+	while (pos < selector.size()) {
+		const char prefix = selector[pos];
+		if (prefix != '.' && prefix != '#') return false;
+		++pos;
+		const size_t start = pos;
+		while (pos < selector.size() && selector[pos] != '.' && selector[pos] != '#') {
+			if (!isIdentChar(selector[pos])) return false;
+			++pos;
+		}
+		const std::string token = selector.substr(start, pos - start);
+		if (token.empty()) return false;
+		if (prefix == '.') {
+			if (out.classNames.size() >= kCssLiteMaxSelectorClasses) {
+				saturatingIncrement(diag.selectorDepthClamps);
+				return false;
+			}
+			out.classNames.push_back(token);
+			++specificity.classCount;
+		} else {
+			if (!out.id.empty()) return false;
+			out.id = token;
+			++specificity.idCount;
+		}
+	}
+	return !out.tagName.empty() || !out.classNames.empty() || !out.id.empty();
+}
+
+static bool parseCssSimpleSelectorPart(const std::string& rawPart,
+	CssSelectorPart& part,
+	CssSpecificity& specificity,
+	CssDiagnostics& diag,
+	bool allowPseudo = true)
+{
+	const std::string selector = toLower(trim(rawPart));
+	part = {};
+	specificity = {};
+	if (selector.empty()) return false;
+	if (selector.find('\\') != std::string::npos) {
+		saturatingIncrement(diag.identifierEscapeRejections);
+		return false;
+	}
+
+	CssSimpleSelector core;
+	CssSpecificity coreSpecificity;
+	std::string coreText;
+	size_t pos = 0;
+	int depth = 0;
+	while (pos < selector.size()) {
+		if (selector[pos] == '(') {
+			if (++depth > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		}
+		else if (selector[pos] == ')') {
+			if (depth == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--depth;
+		}
+		if (depth == 0 && selector[pos] == ':') break;
+		++pos;
+	}
+	coreText = selector.substr(0, pos);
+	if (!coreText.empty()) {
+		if (!parseCssSimpleSelectorCore(coreText, core, coreSpecificity, diag)) return false;
+		part.tagName = core.tagName;
+		part.classNames = core.classNames;
+		part.id = core.id;
+		specificity = coreSpecificity;
+	}
+	if (pos == selector.size()) return !part.tagName.empty() || !part.classNames.empty() || !part.id.empty();
+	if (!allowPseudo) return false;
+	while (pos < selector.size()) {
+		if (selector[pos++] != ':') return false;
+		if (pos >= selector.size() || selector[pos] == ':') return false;
+		const size_t nameStart = pos;
+		while (pos < selector.size() &&
+			(std::isalnum(static_cast<unsigned char>(selector[pos])) || selector[pos] == '-')) ++pos;
+		const std::string name = selector.substr(nameStart, pos - nameStart);
+		if (name.empty() || part.pseudoClasses.size() >= kCssLiteMaxPseudoClassesPerCompound) {
+			saturatingIncrement(diag.pseudoClassClamps);
+			return false;
+		}
+		std::string argument;
+		bool hasArgument = false;
+		if (pos < selector.size() && selector[pos] == '(') {
+			hasArgument = true;
+			const size_t argumentStart = ++pos;
+			int parentheses = 1;
+			char argumentQuote = 0;
+			while (pos < selector.size() && parentheses > 0) {
+				if (argumentQuote != 0) {
+					if (selector[pos] == '\\' && pos + 1 < selector.size()) { pos += 2; continue; }
+					if (selector[pos] == argumentQuote) argumentQuote = 0;
+					++pos;
+					continue;
+				}
+				if (selector[pos] == '\'' || selector[pos] == '"') argumentQuote = selector[pos];
+				else if (selector[pos] == '(') {
+					if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+						saturatingIncrement(diag.unbalancedParenthesisErrors);
+						return false;
+					}
+				} else if (selector[pos] == ')') --parentheses;
+				if (parentheses > 0) ++pos;
+			}
+			if (argumentQuote != 0) {
+				saturatingIncrement(diag.unterminatedStringErrors);
+				return false;
+			}
+			if (parentheses != 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			argument = selector.substr(argumentStart, pos - argumentStart);
+			++pos;
+		}
+		CssPseudoClassSelector pseudo;
+		if (name == "first-child" || name == "last-child" || name == "only-child" ||
+			name == "first-of-type" || name == "last-of-type" || name == "only-of-type" ||
+			name == "root" || name == "link" || name == "visited" || name == "empty" ||
+			name == "checked" || name == "disabled" || name == "enabled" || name == "required" ||
+			name == "read-only" || name == "read-write" || name == "focus" ||
+			name == "focus-visible") {
+			if (hasArgument) return false;
+			if (name == "first-child") pseudo.type = CssPseudoClass::FirstChild;
+			else if (name == "last-child") pseudo.type = CssPseudoClass::LastChild;
+			else if (name == "only-child") pseudo.type = CssPseudoClass::OnlyChild;
+			else if (name == "first-of-type") pseudo.type = CssPseudoClass::FirstOfType;
+			else if (name == "last-of-type") pseudo.type = CssPseudoClass::LastOfType;
+			else if (name == "only-of-type") pseudo.type = CssPseudoClass::OnlyOfType;
+			else if (name == "root") pseudo.type = CssPseudoClass::Root;
+			else if (name == "link") pseudo.type = CssPseudoClass::Link;
+			else if (name == "visited") pseudo.type = CssPseudoClass::Visited;
+			else if (name == "empty") {
+				pseudo.type = CssPseudoClass::Empty;
+				saturatingIncrement(diag.emptyPseudoParsed);
+			} else if (name == "checked") {
+				pseudo.type = CssPseudoClass::Checked;
+				saturatingIncrement(diag.checkedPseudoParsed);
+			} else if (name == "disabled") {
+				pseudo.type = CssPseudoClass::Disabled;
+				saturatingIncrement(diag.disabledPseudoParsed);
+			} else if (name == "enabled") {
+				pseudo.type = CssPseudoClass::Enabled;
+				saturatingIncrement(diag.enabledPseudoParsed);
+			} else if (name == "required") {
+				pseudo.type = CssPseudoClass::Required;
+				saturatingIncrement(diag.requiredPseudoParsed);
+			} else if (name == "read-only") {
+				pseudo.type = CssPseudoClass::ReadOnly;
+				saturatingIncrement(diag.readonlyPseudoParsed);
+			} else if (name == "read-write") {
+				pseudo.type = CssPseudoClass::ReadWrite;
+				saturatingIncrement(diag.readwritePseudoParsed);
+			} else if (name == "focus") {
+				pseudo.type = CssPseudoClass::Focus;
+				saturatingIncrement(diag.focusPseudoParsed);
+			} else {
+				pseudo.type = CssPseudoClass::FocusVisible;
+				saturatingIncrement(diag.focusVisiblePseudoParsed);
+			}
+			++specificity.classCount;
+		} else if (name == "nth-child" || name == "nth-of-type") {
+			if (!hasArgument || !parseCssNthExpression(argument, pseudo.nth, diag)) return false;
+			pseudo.type = name == "nth-child" ? CssPseudoClass::NthChild : CssPseudoClass::NthOfType;
+			++specificity.classCount;
+		} else if (name == "not") {
+			if (!hasArgument || argument.find_first_of(" :+~[]") != std::string::npos) return false;
+			CssSpecificity notSpecificity;
+			if (!parseCssSimpleSelectorCore(argument, pseudo.notSelector, notSpecificity, diag)) return false;
+			const size_t componentCount = pseudo.notSelector.classNames.size() +
+				(pseudo.notSelector.id.empty() ? 0u : 1u) +
+				(pseudo.notSelector.tagName.empty() || pseudo.notSelector.tagName == "*" ? 0u : 1u);
+			if (componentCount > kCssLiteMaxNotComponents) {
+				saturatingIncrement(diag.pseudoClassClamps);
+				return false;
+			}
+			pseudo.type = CssPseudoClass::Not;
+			specificity.idCount = static_cast<uint16_t>(std::min<uint32_t>(
+				std::numeric_limits<uint16_t>::max(), specificity.idCount + notSpecificity.idCount));
+			specificity.classCount = static_cast<uint16_t>(std::min<uint32_t>(
+				std::numeric_limits<uint16_t>::max(), specificity.classCount + notSpecificity.classCount));
+			specificity.elementCount = static_cast<uint16_t>(std::min<uint32_t>(
+				std::numeric_limits<uint16_t>::max(), specificity.elementCount + notSpecificity.elementCount));
+		} else {
+			return false;
+		}
+		saturatingIncrement(diag.pseudoClassesParsed);
+		part.pseudoClasses.push_back(std::move(pseudo));
+	}
+	return !part.tagName.empty() || !part.classNames.empty() || !part.id.empty() || !part.pseudoClasses.empty();
+}
+
+static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRule, CssDiagnostics& diag)
+{
+	std::string selectorText;
+	if (!normalizeCssComments(rawSelector, selectorText, diag)) return false;
+	selectorText = trim(selectorText);
+	if (selectorText.empty() || selectorText.size() > kCssLiteMaxSelectorLength) return false;
+	outRule.selectorParts.clear();
+	outRule.combinators.clear();
+	outRule.hasVisitedPseudo = false;
+	outRule.specificity = 0;
+	outRule.specificityTuple = {};
+	size_t cursor = 0;
+	while (true) {
+		while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
+		if (cursor >= selectorText.size()) break;
+		if (selectorText[cursor] == '>' || selectorText[cursor] == '+' || selectorText[cursor] == '~') {
+			saturatingIncrement(diag.invalidCombinatorSequences);
+			return false;
+		}
+		if (selectorText[cursor] == '[') {
+			// Consume the unsupported attribute fragment as part of this
+			// member, then reject the member without leaking its contents.
+			saturatingIncrement(diag.unsupportedSelectorCount);
+			if (selectorText.find(']', cursor) == std::string::npos)
+				saturatingIncrement(diag.unbalancedBracketErrors);
+			return false;
+		}
+		size_t start = cursor;
+		int parentheses = 0;
+		int brackets = 0;
+		char quote = 0;
+		while (cursor < selectorText.size()) {
+			const char c = selectorText[cursor];
+			if (quote != 0) {
+				if (c == '\\' && cursor + 1 < selectorText.size()) { cursor += 2; continue; }
+				if (c == quote) quote = 0;
+				++cursor;
+				continue;
+			}
+			if (c == '\'' || c == '"') {
+				quote = c;
+				++cursor;
+				continue;
+			}
+			if (c == '\\') {
+				// Keep escaped punctuation inside this member.  The bounded
+				// identifier policy rejects the member later, but skipping the
+				// escaped byte here prevents accidental combinator/group recovery.
+				if (cursor + 1 < selectorText.size()) cursor += 2;
+				else ++cursor;
+				continue;
+			}
+			if (c == '(') {
+				if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+					saturatingIncrement(diag.unbalancedParenthesisErrors);
+					return false;
+				}
+			} else if (c == '[') {
+				if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+					saturatingIncrement(diag.unbalancedBracketErrors);
+					return false;
+				}
+			} else if (c == ']') {
+				if (brackets == 0) {
+					saturatingIncrement(diag.unbalancedBracketErrors);
+					return false;
+				}
+				--brackets;
+			} else if (c == ')') {
+				if (parentheses == 0) {
+					saturatingIncrement(diag.unbalancedParenthesisErrors);
+					return false;
+				}
+				--parentheses;
+			}
+			if (parentheses == 0 && brackets == 0 &&
+				(std::isspace(static_cast<unsigned char>(c)) || c == '>' || c == '+' || c == '~')) break;
+			++cursor;
+		}
+		if (parentheses != 0) {
+			saturatingIncrement(diag.unbalancedParenthesisErrors);
+			return false;
+		}
+		if (brackets != 0) {
+			saturatingIncrement(diag.unbalancedBracketErrors);
+			return false;
+		}
+		if (quote != 0) {
+			saturatingIncrement(diag.unterminatedStringErrors);
+			return false;
+		}
+		if (start == cursor) return false;
+		if (outRule.selectorParts.size() >= kCssLiteMaxSelectorComponents) {
+			++diag.selectorDepthClamps;
+			return false;
+		}
+		CssSelectorPart part;
+		CssSpecificity partSpecificity;
+		if (!parseCssSimpleSelectorPart(selectorText.substr(start, cursor - start), part, partSpecificity, diag)) return false;
+		for (const CssPseudoClassSelector& pseudo : part.pseudoClasses) {
+			if (pseudo.type == CssPseudoClass::Visited) outRule.hasVisitedPseudo = true;
+		}
+		outRule.selectorParts.push_back(std::move(part));
+		outRule.specificityTuple.idCount = static_cast<uint16_t>(std::min<uint32_t>(
+			std::numeric_limits<uint16_t>::max(),
+			static_cast<uint32_t>(outRule.specificityTuple.idCount) + partSpecificity.idCount));
+		outRule.specificityTuple.classCount = static_cast<uint16_t>(std::min<uint32_t>(
+			std::numeric_limits<uint16_t>::max(),
+			static_cast<uint32_t>(outRule.specificityTuple.classCount) + partSpecificity.classCount));
+		outRule.specificityTuple.elementCount = static_cast<uint16_t>(std::min<uint32_t>(
+			std::numeric_limits<uint16_t>::max(),
+			static_cast<uint32_t>(outRule.specificityTuple.elementCount) + partSpecificity.elementCount));
+		bool hadWhitespace = false;
+		while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) {
+			hadWhitespace = true;
+			++cursor;
+		}
+		if (cursor >= selectorText.size()) break;
+		CssCombinator combinator = CssCombinator::Descendant;
+		const char next = selectorText[cursor];
+		if (next == '>' || next == '+' || next == '~') {
+			if (next == '>') combinator = CssCombinator::Child;
+			else if (next == '+') combinator = CssCombinator::AdjacentSibling;
+			else combinator = CssCombinator::GeneralSibling;
+			++cursor;
+			while (cursor < selectorText.size() && std::isspace(static_cast<unsigned char>(selectorText[cursor]))) ++cursor;
+			if (cursor >= selectorText.size() || selectorText[cursor] == '>' ||
+				selectorText[cursor] == '+' || selectorText[cursor] == '~') {
+				saturatingIncrement(diag.invalidCombinatorSequences);
+				return false;
+			}
+		} else if (!hadWhitespace) {
+			return false;
+		} else if (outRule.selectorParts.size() == 1 &&
+			outRule.selectorParts.front().tagName == "*" &&
+			outRule.selectorParts.front().classNames.empty() &&
+			outRule.selectorParts.front().id.empty() &&
+			outRule.selectorParts.front().pseudoClasses.empty()) {
+			// Keep the bounded grammar's explicit rejection of the ambiguous
+			// leading-universal descendant form while retaining standalone * and
+			// explicit child/sibling universal compounds.
+			return false;
+		}
+		outRule.combinators.push_back(combinator);
+		switch (combinator) {
+		case CssCombinator::Child: saturatingIncrement(diag.childCombinatorCount); break;
+		case CssCombinator::Descendant: saturatingIncrement(diag.descendantCombinatorCount); break;
+		case CssCombinator::AdjacentSibling: saturatingIncrement(diag.adjacentSiblingCombinatorCount); break;
+		case CssCombinator::GeneralSibling: saturatingIncrement(diag.generalSiblingCombinatorCount); break;
+		}
+		if (outRule.combinators.size() > kCssLiteMaxCombinatorDepth) {
+			saturatingIncrement(diag.selectorDepthClamps);
+			return false;
+		}
+	}
+	if (outRule.selectorParts.empty() ||
+		outRule.combinators.size() + 1 != outRule.selectorParts.size()) return false;
+	outRule.specificity = static_cast<int>(std::min<uint32_t>(
+		std::numeric_limits<int>::max(),
+		static_cast<uint32_t>(outRule.specificityTuple.idCount) * 100u +
+		static_cast<uint32_t>(outRule.specificityTuple.classCount) * 10u +
+		static_cast<uint32_t>(outRule.specificityTuple.elementCount)));
 	outRule.selector = toLower(selectorText);
 	const CssSelectorPart& last = outRule.selectorParts.back();
 	if (!last.id.empty()) outRule.selectorType = StyleSelectorType::Id;
@@ -508,107 +1302,699 @@ static bool applyLengthList(WebStyle& style,
 	return false;
 }
 
+enum class BorderSideIndex : uint8_t {
+	Top = 0,
+	Right = 1,
+	Bottom = 2,
+	Left = 3,
+};
+
+struct BorderSideValue {
+	bool hasWidth = false;
+	int width = 0;
+	bool hasColor = false;
+	uint32_t color = 0;
+	bool hasStyle = false;
+	BorderLineStyle style = BorderLineStyle::Inherit;
+	bool sawRecognized = false;
+};
+
+static bool parseBorderStyleToken(const std::string& token, BorderLineStyle& style)
+{
+	const std::string lower = toLower(trim(token));
+	if (lower == "none") {
+		style = BorderLineStyle::None;
+		return true;
+	}
+	if (lower == "hidden") {
+		style = BorderLineStyle::Hidden;
+		return true;
+	}
+	if (lower == "solid") {
+		style = BorderLineStyle::Solid;
+		return true;
+	}
+	if (lower == "dashed") {
+		style = BorderLineStyle::Dashed;
+		return true;
+	}
+	if (lower == "dotted") {
+		style = BorderLineStyle::Dotted;
+		return true;
+	}
+	return false;
+}
+
+static std::vector<std::string> splitCssCommaTokens(const std::string& text)
+{
+	std::vector<std::string> tokens;
+	std::string current;
+	bool inSingle = false;
+	bool inDouble = false;
+	for (char c : text) {
+		if (c == '\'' && !inDouble) {
+			inSingle = !inSingle;
+			current += c;
+			continue;
+		}
+		if (c == '"' && !inSingle) {
+			inDouble = !inDouble;
+			current += c;
+			continue;
+		}
+		if (c == ',' && !inSingle && !inDouble) {
+			tokens.push_back(trim(current));
+			current.clear();
+			continue;
+		}
+		current += c;
+	}
+	if (!current.empty() || !tokens.empty()) {
+		tokens.push_back(trim(current));
+	}
+	return tokens;
+}
+
+static std::string stripCssQuotes(const std::string& text)
+{
+	std::string value = trim(text);
+	if (value.size() >= 2) {
+		const char first = value.front();
+		const char last = value.back();
+		if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+			return value.substr(1, value.size() - 2);
+		}
+	}
+	return value;
+}
+
+static bool parseGenericFontFamily(const std::string& rawValue, GenericFontFamily& outFamily)
+{
+	const std::string value = toLower(trim(stripCssQuotes(rawValue)));
+	if (value == "sans-serif") {
+		outFamily = GenericFontFamily::SansSerif;
+		return true;
+	}
+	if (value == "serif") {
+		outFamily = GenericFontFamily::Serif;
+		return true;
+	}
+	if (value == "monospace") {
+		outFamily = GenericFontFamily::Monospace;
+		return true;
+	}
+	return false;
+}
+
+static bool parseBorderSideValue(const std::string& rawValue, BorderSideValue& out, CssDiagnostics& diag)
+{
+	out = {};
+	out.width = 1;
+	out.color = 0xFF000000u;
+	std::vector<std::string> tokens = splitCssTokens(rawValue);
+	if (tokens.empty()) return false;
+	for (const std::string& token : tokens) {
+		const std::string lower = toLower(token);
+		BorderLineStyle style = BorderLineStyle::Inherit;
+		bool tokenRecognized = false;
+		if (parseBorderStyleToken(lower, style)) {
+			out.hasStyle = true;
+			out.style = style;
+			tokenRecognized = true;
+			if (style == BorderLineStyle::None || style == BorderLineStyle::Hidden) {
+				if (!out.hasWidth) {
+					out.width = 0;
+				}
+			}
+		} else {
+			bool autoValue = false;
+			int px = 0;
+			if (parseCssLengthValue(token, 16, px, autoValue, false) && !autoValue) {
+				out.hasWidth = true;
+				out.width = clampBorderWidthPx(diag, px);
+				tokenRecognized = true;
+			} else {
+				uint32_t color = 0;
+				if (parseCssColor(token, color)) {
+					out.hasColor = true;
+					out.color = color;
+					tokenRecognized = true;
+				}
+			}
+		}
+		if (tokenRecognized) {
+			out.sawRecognized = true;
+			continue;
+		}
+		++diag.unsupportedDeclarationCount;
+	}
+	if (!out.sawRecognized) return false;
+	return true;
+}
+
+static void applyBorderSideValue(WebStyle& style, BorderSideIndex side, const BorderSideValue& value)
+{
+	switch (side) {
+	case BorderSideIndex::Top:
+		style.hasBorderTop = true;
+		if (value.hasWidth) style.borderTopWidth = value.width;
+		if (value.hasColor) style.borderTopColor = value.color;
+		if (value.hasStyle) style.borderTopStyle = value.style;
+		break;
+	case BorderSideIndex::Right:
+		style.hasBorderRight = true;
+		if (value.hasWidth) style.borderRightWidth = value.width;
+		if (value.hasColor) style.borderRightColor = value.color;
+		if (value.hasStyle) style.borderRightStyle = value.style;
+		break;
+	case BorderSideIndex::Bottom:
+		style.hasBorderBottom = true;
+		if (value.hasWidth) style.borderBottomWidth = value.width;
+		if (value.hasColor) style.borderBottomColor = value.color;
+		if (value.hasStyle) style.borderBottomStyle = value.style;
+		break;
+	case BorderSideIndex::Left:
+		style.hasBorderLeft = true;
+		if (value.hasWidth) style.borderLeftWidth = value.width;
+		if (value.hasColor) style.borderLeftColor = value.color;
+		if (value.hasStyle) style.borderLeftStyle = value.style;
+		break;
+	}
+}
+
+static BorderSideValue borderSideValueFromStyle(const WebStyle& style, BorderSideIndex side)
+{
+	BorderSideValue value;
+	switch (side) {
+	case BorderSideIndex::Top:
+		value.hasWidth = style.hasBorderTop;
+		value.width = style.borderTopWidth;
+		value.hasColor = style.hasBorderTop;
+		value.color = style.borderTopColor;
+		value.hasStyle = style.hasBorderTop;
+		value.style = style.borderTopStyle;
+		break;
+	case BorderSideIndex::Right:
+		value.hasWidth = style.hasBorderRight;
+		value.width = style.borderRightWidth;
+		value.hasColor = style.hasBorderRight;
+		value.color = style.borderRightColor;
+		value.hasStyle = style.hasBorderRight;
+		value.style = style.borderRightStyle;
+		break;
+	case BorderSideIndex::Bottom:
+		value.hasWidth = style.hasBorderBottom;
+		value.width = style.borderBottomWidth;
+		value.hasColor = style.hasBorderBottom;
+		value.color = style.borderBottomColor;
+		value.hasStyle = style.hasBorderBottom;
+		value.style = style.borderBottomStyle;
+		break;
+	case BorderSideIndex::Left:
+		value.hasWidth = style.hasBorderLeft;
+		value.width = style.borderLeftWidth;
+		value.hasColor = style.hasBorderLeft;
+		value.color = style.borderLeftColor;
+		value.hasStyle = style.hasBorderLeft;
+		value.style = style.borderLeftStyle;
+		break;
+	}
+	value.sawRecognized = value.hasWidth || value.hasColor || value.hasStyle;
+	return value;
+}
+
+static bool applyBorderWidthListToSides(WebStyle& style, const std::vector<std::string>& values, CssDiagnostics& diag)
+{
+	if (values.empty() || values.size() > 4) return false;
+	int widths[4] = { 0, 0, 0, 0 };
+	for (size_t i = 0; i < values.size(); ++i) {
+		bool autoValue = false;
+		int px = 0;
+		if (!parseCssLengthValue(values[i], 16, px, autoValue, false) || autoValue) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		widths[i] = clampBorderWidthPx(diag, px);
+	}
+	if (values.size() == 1) {
+		widths[1] = widths[2] = widths[3] = widths[0];
+	} else if (values.size() == 2) {
+		widths[2] = widths[0];
+		widths[3] = widths[1];
+	} else if (values.size() == 3) {
+		widths[3] = widths[1];
+	}
+	style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+	style.borderTopWidth = widths[0];
+	style.borderRightWidth = widths[1];
+	style.borderBottomWidth = widths[2];
+	style.borderLeftWidth = widths[3];
+	return true;
+}
+
+static bool applyBorderStyleListToSides(WebStyle& style, const std::vector<std::string>& values, CssDiagnostics& diag)
+{
+	if (values.empty() || values.size() > 4) return false;
+	BorderLineStyle styles[4] = {
+		BorderLineStyle::Inherit,
+		BorderLineStyle::Inherit,
+		BorderLineStyle::Inherit,
+		BorderLineStyle::Inherit,
+	};
+	for (size_t i = 0; i < values.size(); ++i) {
+		BorderLineStyle borderStyle = BorderLineStyle::Inherit;
+		if (!parseBorderStyleToken(values[i], borderStyle)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		styles[i] = borderStyle;
+	}
+	if (values.size() == 1) {
+		styles[1] = styles[2] = styles[3] = styles[0];
+	} else if (values.size() == 2) {
+		styles[2] = styles[0];
+		styles[3] = styles[1];
+	} else if (values.size() == 3) {
+		styles[3] = styles[1];
+	}
+	style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+	style.borderTopStyle = styles[0];
+	style.borderRightStyle = styles[1];
+	style.borderBottomStyle = styles[2];
+	style.borderLeftStyle = styles[3];
+	return true;
+}
+
+static bool applyBorderColorListToSides(WebStyle& style, const std::vector<std::string>& values, CssDiagnostics& diag)
+{
+	if (values.empty() || values.size() > 4) return false;
+	uint32_t colors[4] = { 0xFF000000u, 0xFF000000u, 0xFF000000u, 0xFF000000u };
+	for (size_t i = 0; i < values.size(); ++i) {
+		uint32_t color = 0;
+		if (!parseCssColor(values[i], color)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		colors[i] = color;
+	}
+	if (values.size() == 1) {
+		colors[1] = colors[2] = colors[3] = colors[0];
+	} else if (values.size() == 2) {
+		colors[2] = colors[0];
+		colors[3] = colors[1];
+	} else if (values.size() == 3) {
+		colors[3] = colors[1];
+	}
+	style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+	style.borderTopColor = colors[0];
+	style.borderRightColor = colors[1];
+	style.borderBottomColor = colors[2];
+	style.borderLeftColor = colors[3];
+	return true;
+}
+
+static bool applyBorderSpacingList(WebStyle& style, const std::vector<std::string>& values, CssDiagnostics& diag)
+{
+	if (values.empty() || values.size() > 2) return false;
+	int spacing[2] = { 0, 0 };
+	for (size_t i = 0; i < values.size(); ++i) {
+		bool autoValue = false;
+		int px = 0;
+		if (!parseCssLengthValue(values[i], 16, px, autoValue, false) || autoValue) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		spacing[i] = clampBorderSpacingPx(diag, px);
+	}
+	if (values.size() == 1) {
+		spacing[1] = spacing[0];
+	}
+	style.borderSpacingHorizontal = spacing[0];
+	style.borderSpacingVertical = spacing[1];
+	return true;
+}
+
+static BorderLineStyle defaultVisibleBorderStyle(const WebStyle& style, BorderSideIndex side)
+{
+	BorderSideValue value = borderSideValueFromStyle(style, side);
+	if (!value.hasStyle || value.style == BorderLineStyle::Inherit) {
+		return value.hasWidth && value.width > 0 ? BorderLineStyle::Solid : BorderLineStyle::None;
+	}
+	return value.style;
+}
+
+static const HtmlElementContentMetadata* findContentMetadata(const WebDocument& doc,
+	uint64_t serial);
+
+static bool contentMetadataProvesEmpty(const HtmlElementContentMetadata& metadata)
+{
+	return metadata.contentMetadataComplete &&
+		!metadata.hasElementChild &&
+		!metadata.hasNonWhitespaceText &&
+		!metadata.hasImageOrMediaChild &&
+		!metadata.hasVisibleBreak &&
+		!metadata.hasVisibleReplacedContent &&
+		!metadata.hasRenderableContent;
+}
+
+static std::string stripCssAtRulesBounded(const std::string& input, CssDiagnostics& diag)
+{
+	std::string output;
+	output.reserve(input.size());
+	size_t i = 0;
+	int outerBraces = 0;
+	char outerQuote = 0;
+	while (i < input.size()) {
+		const char current = input[i];
+		if (outerQuote != 0) {
+			output += current;
+			if (current == '\\' && i + 1 < input.size()) output += input[++i];
+			else if (current == outerQuote) outerQuote = 0;
+			++i;
+			continue;
+		}
+		if (current == '\'' || current == '"') {
+			outerQuote = current;
+			output += current;
+			++i;
+			continue;
+		}
+		if (current == '{') {
+			if (++outerBraces > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.parseErrorCount);
+				return output;
+			}
+			output += current;
+			++i;
+			continue;
+		}
+		if (current == '}') {
+			if (outerBraces > 0) --outerBraces;
+			output += current;
+			++i;
+			continue;
+		}
+		if (current != '@' || outerBraces != 0) {
+			output += input[i++];
+			continue;
+		}
+		size_t j = i + 1;
+		int parentheses = 0;
+		int brackets = 0;
+		int braces = 0;
+		char quote = 0;
+		bool skipped = false;
+		for (; j < input.size(); ++j) {
+			const char c = input[j];
+			if (quote != 0) {
+				if (c == '\\' && j + 1 < input.size()) { ++j; continue; }
+				if (c == quote) quote = 0;
+				continue;
+			}
+			if (c == '\'' || c == '"') { quote = c; continue; }
+			if (c == '(') ++parentheses;
+			else if (c == ')' && parentheses > 0) --parentheses;
+			else if (c == '[') ++brackets;
+			else if (c == ']' && brackets > 0) --brackets;
+			else if (parentheses == 0 && brackets == 0 && c == ';') {
+				i = j + 1;
+				skipped = true;
+				break;
+			} else if (parentheses == 0 && brackets == 0 && c == '{') {
+				braces = 1;
+				++j;
+				for (; j < input.size() && braces > 0; ++j) {
+					const char nested = input[j];
+					if (nested == '\'' || nested == '"') {
+						const char nestedQuote = nested;
+						++j;
+						while (j < input.size()) {
+							if (input[j] == '\\' && j + 1 < input.size()) { ++j; continue; }
+							if (input[j] == nestedQuote) break;
+							++j;
+						}
+					} else if (nested == '{') {
+						if (++braces > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+							saturatingIncrement(diag.selectorDepthClamps);
+							return output;
+						}
+					}
+					else if (nested == '}') --braces;
+				}
+				if (braces != 0) {
+					saturatingIncrement(diag.parseErrorCount);
+					return output;
+				}
+				i = j;
+				skipped = true;
+				break;
+			}
+		}
+		if (quote != 0) saturatingIncrement(diag.unterminatedStringErrors);
+		if (!skipped) {
+			saturatingIncrement(diag.parseErrorCount);
+			break;
+		}
+	}
+	return output;
+}
+
+static bool findCssRuleOpenBrace(const std::string& css,
+	size_t start,
+	size_t& outBrace,
+	CssDiagnostics& diag)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	char quote = 0;
+	for (size_t i = start; i < css.size(); ++i) {
+		const char c = css[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < css.size()) { ++i; continue; }
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '\\') {
+			if (i + 1 < css.size()) ++i;
+			continue;
+		}
+		if (c == '{') {
+			// A brace is the bounded rule boundary even when an unsupported
+			// selector fragment left a parenthesis/bracket open.  The affected
+			// member will fail in parseCssSelector, while later comma members
+			// and following rules remain recoverable.
+			outBrace = i;
+			return true;
+		}
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+			--brackets;
+		} else if (c == '}' && parentheses == 0 && brackets == 0) {
+			saturatingIncrement(diag.parseErrorCount);
+			return false;
+		}
+	}
+	if (quote != 0) saturatingIncrement(diag.unterminatedStringErrors);
+	if (parentheses != 0) saturatingIncrement(diag.unbalancedParenthesisErrors);
+	if (brackets != 0) saturatingIncrement(diag.unbalancedBracketErrors);
+	return false;
+}
+
+static bool findCssRuleCloseBrace(const std::string& css,
+	size_t start,
+	size_t& outBrace,
+	CssDiagnostics& diag)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	int braces = 1;
+	char quote = 0;
+	for (size_t i = start; i < css.size(); ++i) {
+		const char c = css[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < css.size()) { ++i; continue; }
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '\\') {
+			if (i + 1 < css.size()) ++i;
+			continue;
+		}
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+			--brackets;
+		} else if (c == '{') {
+			if (++braces > static_cast<int>(kCssLiteMaxCombinatorDepth)) {
+				saturatingIncrement(diag.selectorDepthClamps);
+				return false;
+			}
+		} else if (c == '}' && parentheses == 0 && brackets == 0) {
+			if (--braces == 0) {
+				outBrace = i;
+				return true;
+			}
+		}
+	}
+	if (quote != 0) saturatingIncrement(diag.unterminatedStringErrors);
+	if (parentheses != 0) saturatingIncrement(diag.unbalancedParenthesisErrors);
+	if (brackets != 0) saturatingIncrement(diag.unbalancedBracketErrors);
+	saturatingIncrement(diag.parseErrorCount);
+	return false;
+}
+
 static void parseEmbeddedCss(WebDocument& doc, const std::string& cssText)
 {
 	if (cssText.empty()) return;
 	doc.cssDiagnostics.cssDetected = true;
-	doc.cssDiagnostics.styleBlockCount++;
+	if (doc.cssDiagnostics.styleBlockCount >= static_cast<int>(kCssLiteMaxStyleBlocks)) {
+		doc.cssDiagnostics.styleBlockCapped = true;
+		saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
+		return;
+	}
+	++doc.cssDiagnostics.styleBlockCount;
 	std::string css = cssText;
-	if (css.size() > kCssLiteMaxStyleBytes) {
-		css.resize(kCssLiteMaxStyleBytes);
+	const size_t totalRemaining = doc.cssDiagnostics.styleBytesProcessed >= kCssLiteMaxTotalStyleBytes
+		? 0 : kCssLiteMaxTotalStyleBytes - doc.cssDiagnostics.styleBytesProcessed;
+	const size_t byteLimit = std::min(kCssLiteMaxStyleBytes, totalRemaining);
+	if (css.size() > byteLimit) {
+		css.resize(byteLimit);
 		doc.cssDiagnostics.styleBlockCapped = true;
 	}
 	doc.cssDiagnostics.styleBytesProcessed += css.size();
-	auto stripCssComments = [](const std::string& input) {
-		std::string out;
-		out.reserve(input.size());
-		for (size_t i = 0; i < input.size(); ++i) {
-			if (i + 1 < input.size() && input[i] == '/' && input[i + 1] == '*') {
-				i += 2;
-				while (i + 1 < input.size() && !(input[i] == '*' && input[i + 1] == '/')) ++i;
-				if (i + 1 < input.size()) ++i;
-				continue;
-			}
-			out += input[i];
-		}
-		return out;
-	};
-	css = stripCssComments(css);
-	auto stripAtRules = [](const std::string& input) {
-		std::string out;
-		out.reserve(input.size());
-		size_t i = 0;
-		while (i < input.size()) {
-			if (input[i] == '@') {
-				size_t semi = input.find(';', i);
-				size_t brace = input.find('{', i);
-				if (semi != std::string::npos && (brace == std::string::npos || semi < brace)) {
-					i = semi + 1;
-					continue;
-				}
-				if (brace != std::string::npos) {
-					int depth = 1;
-					i = brace + 1;
-					while (i < input.size() && depth > 0) {
-						if (input[i] == '{') ++depth;
-						else if (input[i] == '}') --depth;
-						++i;
-					}
-					continue;
-				}
-			}
-			out += input[i++];
-		}
-		return out;
-	};
-	css = stripAtRules(css);
+	if (css.empty()) return;
+	std::string normalizedCss;
+	const bool commentsComplete = normalizeCssComments(css, normalizedCss, doc.cssDiagnostics);
+	css = stripCssAtRulesBounded(normalizedCss, doc.cssDiagnostics);
+	if (!commentsComplete && css.empty()) return;
 
 	size_t cursor = 0;
 	while (cursor < css.size()) {
-		size_t brace = css.find('{', cursor);
-		if (brace == std::string::npos) {
-			if (trim(css.substr(cursor)).size() > 0) ++doc.cssDiagnostics.parseErrorCount;
+		size_t brace = 0;
+		if (!findCssRuleOpenBrace(css, cursor, brace, doc.cssDiagnostics)) {
+			if (!trim(css.substr(cursor)).empty()) saturatingIncrement(doc.cssDiagnostics.parseErrorCount);
 			break;
 		}
-		size_t endBrace = css.find('}', brace + 1);
-		if (endBrace == std::string::npos) {
-			++doc.cssDiagnostics.parseErrorCount;
-			break;
-		}
+		size_t endBrace = 0;
+		if (!findCssRuleCloseBrace(css, brace + 1, endBrace, doc.cssDiagnostics)) break;
 		std::string selectorText = trim(css.substr(cursor, brace - cursor));
 		std::string bodyText = css.substr(brace + 1, endBrace - brace - 1);
 		cursor = endBrace + 1;
-		if (selectorText.empty()) continue;
+		if (selectorText.empty()) {
+			saturatingIncrement(doc.cssDiagnostics.selectorMemberParseFailures);
+			continue;
+		}
 
-		std::stringstream selectors(selectorText);
-		std::string selector;
-		while (std::getline(selectors, selector, ',')) {
-			selector = trim(selector);
-			if (selector.empty()) continue;
+		const std::vector<std::string> selectors = splitCssSelectorGroups(selectorText, doc.cssDiagnostics);
+		if (selectors.empty()) {
+			saturatingIncrement(doc.cssDiagnostics.selectorMemberParseFailures);
+			continue;
+		}
+		size_t groupCount = 0;
+		size_t invalidMembers = 0;
+		size_t validMembers = 0;
+		size_t recoveryAttempts = 0;
+		for (const std::string& rawMember : selectors) {
+			if (groupCount >= kCssLiteMaxSelectorGroups) {
+				saturatingIncrement(doc.cssDiagnostics.selectorGroupClamps);
+				break;
+			}
+			if (recoveryAttempts++ >= kCssLiteMaxRecoveryAttemptsPerGroup) {
+				saturatingIncrement(doc.cssDiagnostics.selectorGroupClamps);
+				break;
+			}
+			++groupCount;
+			saturatingIncrement(doc.cssDiagnostics.selectorGroupsParsed);
+			const std::string selector = trim(rawMember);
+			if (selector.empty()) {
+				++invalidMembers;
+				saturatingIncrement(doc.cssDiagnostics.selectorMemberParseFailures);
+				continue;
+			}
+			if (doc.styleRules.size() >= kCssLiteMaxRules) {
+				saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
+				continue;
+			}
 			WebStyleRule rule;
-			if (!parseCssSelector(selector, rule)) {
-				++doc.cssDiagnostics.unsupportedRuleCount;
+			if (!parseCssSelector(selector, rule, doc.cssDiagnostics)) {
+				++invalidMembers;
+				saturatingIncrement(doc.cssDiagnostics.unsupportedRuleCount);
+				saturatingIncrement(doc.cssDiagnostics.unsupportedSelectorCount);
+				saturatingIncrement(doc.cssDiagnostics.selectorMemberParseFailures);
 				continue;
 			}
 			parseCssDeclarations(bodyText, rule.style, doc.cssDiagnostics);
-			doc.styleRules.push_back(rule);
-			++doc.cssDiagnostics.styleRuleCount;
+			rule.sourceOrder = allocateCssSourceOrder(doc.cssDiagnostics);
+			rule.evidenceRuleIndex = static_cast<uint16_t>(std::min<size_t>(
+			std::numeric_limits<uint16_t>::max(), doc.styleRules.size() + 1));
+			rule.evidenceGroupIndex = static_cast<uint8_t>(std::min<size_t>(255, groupCount));
+		uint32_t hash = 2166136261u;
+		for (unsigned char c : rule.selector) hash = (hash ^ c) * 16777619u;
+		rule.evidenceSelectorHash = hash;
+		doc.styleRules.push_back(rule);
+		saturatingIncrement(doc.cssDiagnostics.styleRuleCount);
+			saturatingIncrement(doc.cssDiagnostics.compoundSelectorsParsed, static_cast<int>(rule.selectorParts.size()));
+			++validMembers;
+		}
+		if (invalidMembers > 0 && validMembers > 0) {
+		saturatingIncrement(doc.cssDiagnostics.selectorGroupMemberRecoveries,
+			static_cast<int>(std::min<size_t>(invalidMembers, std::numeric_limits<int>::max())));
+		saturatingIncrement(doc.cssDiagnostics.selectorRecoverySuccesses);
 		}
 	}
 }
 
-static bool selectorPartMatchesElement(const HtmlElementRef& element, const CssSelectorPart& part)
+static bool simpleSelectorMatchesElement(const HtmlElementRef& element, const CssSimpleSelector& selector)
 {
-	std::string tag = toLower(element.tagName);
-	std::string id = toLower(element.id);
-	if (!part.tagName.empty() && part.tagName != "*" && part.tagName != tag) return false;
-	if (!part.id.empty() && part.id != id) return false;
-	if (!part.classNames.empty()) {
+	const std::string tag = toLower(element.tagName);
+	const std::string id = toLower(element.id);
+	if (!selector.tagName.empty() && selector.tagName != "*" && selector.tagName != tag) return false;
+	if (!selector.id.empty() && selector.id != id) return false;
+	if (!selector.classNames.empty()) {
 		std::stringstream classes(toLower(element.className));
 		std::string className;
 		std::vector<std::string> classList;
 		while (classes >> className) classList.push_back(className);
-		for (const std::string& required : part.classNames) {
+		for (const std::string& required : selector.classNames) {
 			bool found = false;
 			for (const std::string& actual : classList) {
 				if (actual == required) {
@@ -622,23 +2008,341 @@ static bool selectorPartMatchesElement(const HtmlElementRef& element, const CssS
 	return true;
 }
 
-static bool selectorMatchesPath(const std::vector<HtmlElementRef>& path, const WebStyleRule& rule)
+static bool nthExpressionMatches(const CssNthExpression& expression, int index)
 {
-	if (rule.selectorParts.empty() || path.empty()) return false;
-	int pathIndex = static_cast<int>(path.size()) - 1;
-	for (int partIndex = static_cast<int>(rule.selectorParts.size()) - 1; partIndex >= 0; --partIndex) {
-		const CssSelectorPart& part = rule.selectorParts[static_cast<size_t>(partIndex)];
+	if (index <= 0) return false;
+	if (expression.a == 0) return index == expression.b;
+	if (expression.a > 0) {
+		if (index < expression.b) return false;
+		return (index - expression.b) % expression.a == 0;
+	}
+	if (index > expression.b) return false;
+	return (expression.b - index) % (-expression.a) == 0;
+}
+
+static void recordPseudoMatch(CssDiagnostics& diag, CssPseudoClass type)
+{
+	saturatingIncrement(diag.structuralPseudoMatches);
+	switch (type) {
+	case CssPseudoClass::FirstChild: saturatingIncrement(diag.firstChildMatches); break;
+	case CssPseudoClass::LastChild: saturatingIncrement(diag.lastChildMatches); break;
+	case CssPseudoClass::NthChild: saturatingIncrement(diag.nthChildMatches); break;
+	case CssPseudoClass::FirstOfType:
+	case CssPseudoClass::LastOfType:
+	case CssPseudoClass::OnlyOfType:
+	case CssPseudoClass::NthOfType: saturatingIncrement(diag.ofTypeMatches); break;
+	case CssPseudoClass::Not: saturatingIncrement(diag.notMatches); break;
+	case CssPseudoClass::Link: saturatingIncrement(diag.linkPseudoMatches); break;
+	case CssPseudoClass::Visited: saturatingIncrement(diag.visitedPseudoMatches); break;
+	case CssPseudoClass::Empty: saturatingIncrement(diag.emptyPseudoMatches); break;
+	case CssPseudoClass::Checked: saturatingIncrement(diag.checkedPseudoMatches); break;
+	case CssPseudoClass::Disabled: saturatingIncrement(diag.disabledPseudoMatches); break;
+	case CssPseudoClass::Enabled: saturatingIncrement(diag.enabledPseudoMatches); break;
+	case CssPseudoClass::Required: saturatingIncrement(diag.requiredPseudoMatches); break;
+	case CssPseudoClass::ReadOnly: saturatingIncrement(diag.readonlyPseudoMatches); break;
+	case CssPseudoClass::ReadWrite: saturatingIncrement(diag.readwritePseudoMatches); break;
+	case CssPseudoClass::Focus: saturatingIncrement(diag.focusPseudoMatches); break;
+	case CssPseudoClass::FocusVisible: saturatingIncrement(diag.focusVisiblePseudoMatches); break;
+	default: break;
+	}
+}
+
+static const FormRuntimeControlState* runtimeControlState(const WebDocument& doc,
+	uint64_t logicalSerial)
+{
+	if (!doc.formRuntimeState.initialized || logicalSerial == 0) return nullptr;
+	const size_t count = std::min(doc.formRuntimeState.count, kFormRuntimeControlCap);
+	for (size_t i = 0; i < count; ++i) {
+		const FormRuntimeControlState& state = doc.formRuntimeState.controls[i];
+		if (state.logicalSerial == logicalSerial && state.metadataValid) return &state;
+	}
+	return nullptr;
+}
+
+static bool effectiveChecked(const WebDocument& doc, const HtmlElementRef& element)
+{
+	if (const FormRuntimeControlState* state = runtimeControlState(doc, element.serial))
+		return state->checked;
+	return element.formControl.type == FormControlType::Option
+		? element.formControl.selected : element.formControl.checked;
+}
+
+static bool effectiveDisabled(const WebDocument& doc, const HtmlElementRef& element)
+{
+	if (const FormRuntimeControlState* state = runtimeControlState(doc, element.serial))
+		return state->disabled;
+	return element.formControl.disabled;
+}
+
+static bool effectiveFocused(const WebDocument& doc, const HtmlElementRef& element)
+{
+	if (!doc.formRuntimeState.initialized || !doc.formRuntimeState.focusValid ||
+		element.serial == 0 || !element.formControl.metadataComplete ||
+		!element.formControl.supported || element.formControl.hidden ||
+		effectiveDisabled(doc, element)) return false;
+	return doc.formRuntimeState.documentGeneration != 0 &&
+		doc.formRuntimeState.focusedDocumentGeneration == doc.formRuntimeState.documentGeneration &&
+		doc.formRuntimeState.focusedLogicalSerial == element.serial;
+}
+
+static bool effectiveFocusVisible(const WebDocument& doc, const HtmlElementRef& element)
+{
+	return effectiveFocused(doc, element) &&
+		doc.formRuntimeState.focusOrigin == FormFocusOrigin::Keyboard;
+}
+
+static bool selectorPartMatchesElement(const HtmlElementRef& element,
+	const CssSelectorPart& part,
+	const std::vector<HtmlElementRef>& path,
+	size_t pathIndex,
+	const WebDocument& doc,
+	CssDiagnostics& diag)
+{
+	CssSimpleSelector core;
+	core.tagName = part.tagName;
+	core.classNames = part.classNames;
+	core.id = part.id;
+	if (!simpleSelectorMatchesElement(element, core)) return false;
+	for (const CssPseudoClassSelector& pseudo : part.pseudoClasses) {
 		bool matched = false;
-		for (int i = pathIndex; i >= 0; --i) {
-			if (selectorPartMatchesElement(path[static_cast<size_t>(i)], part)) {
-				pathIndex = i - 1;
-				matched = true;
+		switch (pseudo.type) {
+		case CssPseudoClass::FirstChild:
+			matched = element.childIndex == 1 && element.siblingCount > 0;
+			break;
+		case CssPseudoClass::LastChild:
+			matched = element.childIndex > 0 && element.childIndex == element.siblingCount;
+			break;
+		case CssPseudoClass::OnlyChild:
+			matched = element.childIndex == 1 && element.siblingCount == 1;
+			break;
+		case CssPseudoClass::NthChild:
+			matched = element.siblingCount > 0 && nthExpressionMatches(pseudo.nth, element.childIndex);
+			break;
+		case CssPseudoClass::FirstOfType:
+			matched = element.typeIndex == 1 && element.typeCount > 0;
+			break;
+		case CssPseudoClass::LastOfType:
+			matched = element.typeIndex > 0 && element.typeIndex == element.typeCount;
+			break;
+		case CssPseudoClass::OnlyOfType:
+			matched = element.typeIndex == 1 && element.typeCount == 1;
+			break;
+		case CssPseudoClass::NthOfType:
+			matched = element.typeCount > 0 && nthExpressionMatches(pseudo.nth, element.typeIndex);
+			break;
+		case CssPseudoClass::Not:
+			matched = !simpleSelectorMatchesElement(element, pseudo.notSelector);
+			break;
+		case CssPseudoClass::Root:
+			matched = pathIndex == 0 && (!doc.hasDocumentElement ||
+				doc.documentElement.serial == 0 || element.serial == doc.documentElement.serial);
+			break;
+		case CssPseudoClass::Link:
+			matched = element.tagName == "a" && element.hasLinkTarget && !element.visited;
+			break;
+		case CssPseudoClass::Visited:
+			matched = element.tagName == "a" && element.hasLinkTarget && element.visited;
+			break;
+		case CssPseudoClass::Empty: {
+			const HtmlElementContentMetadata* metadata = findContentMetadata(doc, element.serial);
+			if (!metadata || !metadata->contentMetadataComplete) {
+				saturatingIncrement(diag.emptyMetadataIncomplete);
+				matched = false;
 				break;
 			}
+			matched = contentMetadataProvesEmpty(*metadata);
+			break;
+		}
+		case CssPseudoClass::Checked:
+			matched = element.formControl.metadataComplete && element.formControl.supported &&
+				(element.formControl.type == FormControlType::Checkbox ||
+				 element.formControl.type == FormControlType::Radio ||
+				 element.formControl.type == FormControlType::Option) &&
+				effectiveChecked(doc, element);
+			break;
+		case CssPseudoClass::Disabled:
+			matched = element.formControl.metadataComplete && effectiveDisabled(doc, element);
+			break;
+		case CssPseudoClass::Enabled:
+			matched = element.formControl.metadataComplete && element.formControl.supported &&
+				!effectiveDisabled(doc, element);
+			break;
+		case CssPseudoClass::Required:
+			matched = element.formControl.metadataComplete && element.formControl.supported &&
+				element.formControl.required;
+			break;
+		case CssPseudoClass::ReadOnly:
+			matched = element.formControl.metadataComplete &&
+				(element.formControl.readOnly || !element.formControl.supported ||
+				 element.formControl.type == FormControlType::Checkbox ||
+				 element.formControl.type == FormControlType::Radio ||
+				 element.formControl.type == FormControlType::Button ||
+				 element.formControl.type == FormControlType::Submit ||
+				 element.formControl.type == FormControlType::Reset ||
+				 element.formControl.type == FormControlType::Select ||
+				 element.formControl.type == FormControlType::Option);
+			break;
+		case CssPseudoClass::ReadWrite:
+			matched = element.formControl.metadataComplete && element.formControl.supported &&
+				!element.formControl.readOnly &&
+				(element.formControl.type == FormControlType::Text ||
+				 element.formControl.type == FormControlType::Password ||
+				 element.formControl.type == FormControlType::Search ||
+				 element.formControl.type == FormControlType::Email ||
+				 element.formControl.type == FormControlType::Url ||
+				 element.formControl.type == FormControlType::Number ||
+				 element.formControl.type == FormControlType::Textarea);
+			break;
+		case CssPseudoClass::Focus:
+			matched = effectiveFocused(doc, element);
+			break;
+		case CssPseudoClass::FocusVisible:
+			matched = effectiveFocusVisible(doc, element);
+			break;
 		}
 		if (!matched) return false;
+		recordPseudoMatch(diag, pseudo.type);
 	}
 	return true;
+}
+
+struct CssSelectorMatchTrace {
+	size_t siblingScanSteps = 0;
+};
+
+static bool selectorMatchesPathAt(const std::vector<HtmlElementRef>& path,
+	const WebDocument& doc,
+	CssDiagnostics& diag,
+	const WebStyleRule& rule,
+	int partIndex,
+	int pathIndex,
+	size_t& evaluationSteps,
+	CssSelectorMatchTrace& trace);
+
+static const HtmlElementRef* structuralElementBySerial(const WebDocument& doc,
+	CssDiagnostics& diag,
+	uint64_t serial)
+{
+	if (serial == 0) {
+		saturatingIncrement(diag.siblingMetadataErrors);
+		return nullptr;
+	}
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.serial == serial) return &element;
+	}
+	saturatingIncrement(diag.siblingMetadataErrors);
+	return nullptr;
+}
+
+static bool selectorMatchesSiblingRelation(const std::vector<HtmlElementRef>& path,
+	const WebDocument& doc,
+	CssDiagnostics& diag,
+	const WebStyleRule& rule,
+	int partIndex,
+	int pathIndex,
+	CssCombinator combinator,
+	size_t& evaluationSteps,
+	CssSelectorMatchTrace& trace)
+{
+	if (pathIndex <= 0 || pathIndex >= static_cast<int>(path.size())) return false;
+	const HtmlElementRef& candidate = path[static_cast<size_t>(pathIndex)];
+	const HtmlElementRef& parent = path[static_cast<size_t>(pathIndex - 1)];
+	// A flattened text artifact has no structural serial. It is readable, but
+	// is intentionally excluded from element-sibling semantics.
+	if (candidate.serial == 0) return false;
+	if (candidate.parentSerial == 0 || parent.serial == 0 ||
+		candidate.parentSerial != parent.serial) {
+		saturatingIncrement(diag.siblingMetadataErrors);
+		return false;
+	}
+
+	uint64_t previousSerial = candidate.previousSiblingSerial;
+	if (previousSerial == 0) {
+		if (candidate.childIndex > 1 || candidate.childIndex == 0)
+			saturatingIncrement(diag.siblingMetadataErrors);
+		return false;
+	}
+
+	const bool adjacent = combinator == CssCombinator::AdjacentSibling;
+	size_t scanSteps = 0;
+	while (previousSerial != 0) {
+		if (++scanSteps > kCssLiteMaxSiblingScanSteps) {
+			saturatingIncrement(diag.siblingScanClamps);
+			return false;
+		}
+		saturatingIncrement(diag.siblingScanSteps);
+		++trace.siblingScanSteps;
+		const HtmlElementRef* previous = structuralElementBySerial(doc, diag, previousSerial);
+		if (!previous || previous->parentSerial != candidate.parentSerial ||
+			previous->serial >= candidate.serial) {
+			saturatingIncrement(diag.siblingMetadataErrors);
+			return false;
+		}
+
+		std::vector<HtmlElementRef> siblingPath(path.begin(), path.begin() + pathIndex);
+		siblingPath.push_back(*previous);
+		if (selectorMatchesPathAt(siblingPath, doc, diag, rule, partIndex - 1,
+			pathIndex, evaluationSteps, trace)) {
+			if (adjacent) saturatingIncrement(diag.adjacentSiblingMatches);
+			else saturatingIncrement(diag.generalSiblingMatches);
+			return true;
+		}
+		if (adjacent) return false;
+		previousSerial = previous->previousSiblingSerial;
+	}
+	return false;
+}
+
+static bool selectorMatchesPathAt(const std::vector<HtmlElementRef>& path,
+	const WebDocument& doc,
+	CssDiagnostics& diag,
+	const WebStyleRule& rule,
+	int partIndex,
+	int pathIndex,
+	size_t& evaluationSteps,
+	CssSelectorMatchTrace& trace)
+{
+	if (++evaluationSteps > kCssLiteMaxSelectorEvaluationSteps) {
+		saturatingIncrement(diag.selectorEvaluationStepClamps);
+		return false;
+	}
+	if (partIndex < 0 || pathIndex < 0 ||
+		partIndex >= static_cast<int>(rule.selectorParts.size()) ||
+		pathIndex >= static_cast<int>(path.size())) return false;
+	if (!selectorPartMatchesElement(path[static_cast<size_t>(pathIndex)],
+		rule.selectorParts[static_cast<size_t>(partIndex)], path,
+		static_cast<size_t>(pathIndex), doc, diag)) return false;
+	if (partIndex == 0) return true;
+	const CssCombinator combinator = rule.combinators[static_cast<size_t>(partIndex - 1)];
+	if (combinator == CssCombinator::Child) {
+		return selectorMatchesPathAt(path, doc, diag, rule, partIndex - 1, pathIndex - 1, evaluationSteps, trace);
+	}
+	if (combinator == CssCombinator::AdjacentSibling || combinator == CssCombinator::GeneralSibling) {
+		return selectorMatchesSiblingRelation(path, doc, diag, rule, partIndex, pathIndex,
+			combinator, evaluationSteps, trace);
+	}
+	for (int ancestorIndex = pathIndex - 1; ancestorIndex >= 0; --ancestorIndex) {
+		if (selectorMatchesPathAt(path, doc, diag, rule, partIndex - 1, ancestorIndex, evaluationSteps, trace)) return true;
+	}
+	return false;
+}
+
+static bool selectorMatchesPath(const std::vector<HtmlElementRef>& path,
+	const WebDocument& doc,
+	CssDiagnostics& diag,
+	const WebStyleRule& rule,
+	CssSelectorMatchTrace* traceOut = nullptr)
+{
+	if (rule.selectorParts.empty() || path.empty() ||
+		rule.selectorParts.size() != rule.combinators.size() + 1 ||
+		rule.combinators.size() > kCssLiteMaxCombinatorDepth) return false;
+	size_t evaluationSteps = 0;
+	CssSelectorMatchTrace trace;
+	const bool matched = selectorMatchesPathAt(path, doc, diag, rule,
+		static_cast<int>(rule.selectorParts.size()) - 1,
+		static_cast<int>(path.size()) - 1, evaluationSteps, trace);
+	if (traceOut) *traceOut = trace;
+	return matched;
 }
 
 static bool parseInlineStyleDeclaration(WebStyle& style,
@@ -647,20 +2351,32 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	CssDiagnostics& diag)
 {
 	std::string prop = toLower(trim(property));
-	std::string val = trim(value);
+	std::string normalizedValue;
+	if (!normalizeCssComments(value, normalizedValue, diag)) return false;
+	std::string val = trim(normalizedValue);
 	if (prop.empty() || val.empty()) return false;
-	while (!val.empty() && val.back() == '!') val.pop_back();
-	if (val.size() >= 10 && toLower(val.substr(val.size() - 10)) == "!important") {
+	bool important = false;
+	if (val.size() >= 10 && toLower(val.substr(val.size() - 10)) == "!important" &&
+		(val.size() == 10 || std::isspace(static_cast<unsigned char>(val[val.size() - 11])))) {
+		important = true;
 		val = trim(val.substr(0, val.size() - 10));
 	}
+	if (val.empty()) return false;
+	auto accept = [&](CssProperty propertyId) {
+		return cssAccepted(style, cssPropertyBit(propertyId), important);
+	};
+	auto acceptMask = [&](uint64_t properties) {
+		return cssAccepted(style, properties, important);
+	};
 	if (prop == "color" || prop == "background-color" || prop == "background") {
 		const std::string lower = toLower(val);
 		if (lower == "transparent" || lower == "inherit" || lower == "initial" || lower == "unset" || lower == "none" || lower == "0 0") {
 			if (prop != "color") {
 				style.hasBackgroundColor = false;
-				return true;
+				return accept(CssProperty::Background);
 			}
-			return true;
+			return lower == "inherit" || lower == "initial" || lower == "unset"
+				? true : accept(CssProperty::Color);
 		}
 		uint32_t color = 0;
 		if (parseCssColor(val, color)) {
@@ -671,7 +2387,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 				style.hasBackgroundColor = true;
 				style.backgroundColor = color;
 			}
-			return true;
+			return accept(prop == "color" ? CssProperty::Color : CssProperty::Background);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -680,11 +2396,11 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		std::string lower = toLower(val);
 		if (lower == "bold" || lower == "700" || lower == "800" || lower == "900") {
 			style.bold = true;
-			return true;
+			return accept(CssProperty::Bold);
 		}
 		if (lower == "normal" || lower == "400") {
 			style.bold = false;
-			return true;
+			return accept(CssProperty::Bold);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -693,20 +2409,90 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		std::string lower = toLower(val);
 		if (lower == "italic" || lower == "oblique") {
 			style.italic = true;
-			return true;
+			return accept(CssProperty::Italic);
 		}
 		if (lower == "normal") {
 			style.italic = false;
-			return true;
+			return accept(CssProperty::Italic);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
 	}
 	if (prop == "text-decoration") {
 		std::string lower = toLower(val);
-		style.underline = (lower.find("underline") != std::string::npos);
-		if (!style.underline && lower != "none") ++diag.unsupportedDeclarationCount;
-		return true;
+		if (lower == "inherit" || lower == "initial" || lower == "unset") {
+			return true;
+		}
+		if (lower == "none") {
+			style.hasTextDecoration = true;
+			style.underline = false;
+			style.lineThrough = false;
+			return accept(CssProperty::TextDecoration);
+		}
+		std::vector<std::string> tokens = splitCssTokens(lower);
+		if (tokens.empty()) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		bool sawDecoration = false;
+		bool underline = false;
+		bool lineThrough = false;
+		for (const std::string& token : tokens) {
+			if (token == "underline") {
+				underline = true;
+				sawDecoration = true;
+				continue;
+			}
+			if (token == "line-through") {
+				lineThrough = true;
+				sawDecoration = true;
+				continue;
+			}
+			++diag.unsupportedDeclarationCount;
+		}
+		if (!sawDecoration) return false;
+		style.hasTextDecoration = true;
+		style.underline = underline;
+		style.lineThrough = lineThrough;
+		return accept(CssProperty::TextDecoration);
+	}
+	if (prop == "text-decoration-line") {
+		std::string lower = toLower(val);
+		if (lower == "inherit" || lower == "initial" || lower == "unset") {
+			return true;
+		}
+		if (lower == "none") {
+			style.hasTextDecoration = true;
+			style.underline = false;
+			style.lineThrough = false;
+			return accept(CssProperty::TextDecoration);
+		}
+		std::vector<std::string> tokens = splitCssTokens(lower);
+		if (tokens.empty()) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		bool sawDecoration = false;
+		bool underline = false;
+		bool lineThrough = false;
+		for (const std::string& token : tokens) {
+			if (token == "underline") {
+				underline = true;
+				sawDecoration = true;
+				continue;
+			}
+			if (token == "line-through") {
+				lineThrough = true;
+				sawDecoration = true;
+				continue;
+			}
+			++diag.unsupportedDeclarationCount;
+		}
+		if (!sawDecoration) return false;
+		style.hasTextDecoration = true;
+		style.underline = underline;
+		style.lineThrough = lineThrough;
+		return accept(CssProperty::TextDecoration);
 	}
 	if (prop == "text-align") {
 		std::string lower = toLower(val);
@@ -715,17 +2501,17 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		else if (lower == "right") style.textAlign = TextAlign::Right;
 		else if (lower == "inherit") style.textAlign = TextAlign::Inherit;
 		else ++diag.unsupportedDeclarationCount;
-		return true;
+		return lower == "inherit" ? true : accept(CssProperty::TextAlign);
 	}
 	if (prop == "display") {
 		std::string lower = toLower(val);
 		if (lower == "none") {
 			style.displayNone = true;
-			return true;
+			return accept(CssProperty::Display);
 		}
 		if (lower == "block" || lower == "inline" || lower == "inline-block") {
 			style.displayNone = false;
-			return true;
+			return accept(CssProperty::Display);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
@@ -749,7 +2535,14 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		else if (prop == "padding-right") style.paddingRight = px;
 		else if (prop == "padding-bottom") style.paddingBottom = px;
 		else if (prop == "padding-left") style.paddingLeft = px;
-		return true;
+		if (prop == "margin-top") return accept(CssProperty::MarginTop);
+		if (prop == "margin-right") return accept(CssProperty::MarginRight);
+		if (prop == "margin-bottom") return accept(CssProperty::MarginBottom);
+		if (prop == "margin-left") return accept(CssProperty::MarginLeft);
+		if (prop == "padding-top") return accept(CssProperty::PaddingTop);
+		if (prop == "padding-right") return accept(CssProperty::PaddingRight);
+		if (prop == "padding-bottom") return accept(CssProperty::PaddingBottom);
+		return accept(CssProperty::PaddingLeft);
 	}
 	if (prop == "margin" || prop == "padding") {
 		std::vector<std::string> values = splitCssTokens(val);
@@ -760,7 +2553,8 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		if (!applyLengthList(style, values, prop, diag)) {
 			return false;
 		}
-		return true;
+		return acceptMask(cssPropertyMask(prop == "margin" ? CssProperty::MarginTop : CssProperty::PaddingTop,
+			prop == "margin" ? CssProperty::MarginLeft : CssProperty::PaddingLeft));
 	}
 	if (prop == "font-size") {
 		bool autoValue = false;
@@ -774,26 +2568,25 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			return false;
 		}
 		style.fontScaleOrSize = clampCssValue(diag, px, 8, kCssLiteMaxFontSizePx);
-		return true;
+		return accept(CssProperty::FontSize);
 	}
 	if (prop == "line-height") {
 		std::string lower = toLower(val);
 		if (lower == "normal") {
 			style.lineHeightNormal = true;
 			style.lineHeight = -1;
-			return true;
+			return accept(CssProperty::LineHeight);
 		}
 		bool autoValue = false;
 		int px = 0;
 		const int lineHeightBase = style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16;
-		if (!parseCssLengthValue(val, lineHeightBase, px, autoValue, true)) {
-			double numeric = 0.0;
-			if (parseCssNumber(val, numeric)) {
-				px = roundCssNumber(numeric * static_cast<double>(lineHeightBase));
-			} else {
-				++diag.unsupportedDeclarationCount;
-				return false;
-			}
+		double numeric = 0.0;
+		// A unitless line-height is a multiplier, unlike a unitless length.
+		if (parseCssNumber(val, numeric)) {
+			px = roundCssNumber(numeric * static_cast<double>(lineHeightBase));
+		} else if (!parseCssLengthValue(val, lineHeightBase, px, autoValue, true)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
 		}
 		if (autoValue) {
 			++diag.unsupportedDeclarationCount;
@@ -801,9 +2594,9 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		style.lineHeightNormal = false;
 		style.lineHeight = clampCssValue(diag, px, 8, kCssLiteMaxLineHeightPx);
-		return true;
+		return accept(CssProperty::LineHeight);
 	}
-	if (prop == "width" || prop == "max-width") {
+	if (prop == "width" || prop == "max-width" || prop == "height" || prop == "max-height") {
 		std::string lower = toLower(val);
 		bool autoValue = false;
 		int px = 0;
@@ -816,8 +2609,12 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			int percent = roundCssNumber(numeric);
 			percent = clampCssValue(diag, percent, 1, 100);
 			if (prop == "width") style.widthPercent = percent;
-			else style.maxWidthPercent = percent;
-			return true;
+			else if (prop == "max-width") style.maxWidthPercent = percent;
+			else if (prop == "height") style.heightPercent = percent;
+			else style.maxHeightPercent = percent;
+			return accept(prop == "width" ? CssProperty::Width :
+				prop == "height" ? CssProperty::Height :
+				prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
 		}
 		if (!parseCssLengthValue(val, 320, px, autoValue, false)) {
 			++diag.unsupportedDeclarationCount;
@@ -827,87 +2624,510 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			if (prop == "width") {
 				style.widthPercent = -1;
 				style.width = 0;
-			} else {
+			} else if (prop == "max-width") {
 				style.maxWidthPercent = -1;
 				style.maxWidth = 0;
+			} else if (prop == "height") {
+				style.heightPercent = -1;
+				style.height = 0;
+			} else {
+				style.maxHeightPercent = -1;
+				style.maxHeight = 0;
 			}
-			return true;
+			return accept(prop == "width" ? CssProperty::Width :
+				prop == "height" ? CssProperty::Height :
+				prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
 		}
 		px = clampCssValue(diag, px, 1, kCssLiteMaxWidthPx);
 		if (prop == "width") style.width = px;
-		else style.maxWidth = px;
-		return true;
+		else if (prop == "max-width") style.maxWidth = px;
+		else if (prop == "height") style.height = px;
+		else style.maxHeight = px;
+		return accept(prop == "width" ? CssProperty::Width :
+			prop == "height" ? CssProperty::Height :
+			prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
 	}
-	if (prop == "border-top" || prop == "border-bottom") {
+	if (prop == "white-space") {
+		std::string lower = toLower(val);
+		if (lower == "inherit") {
+			style.whiteSpace = WhiteSpaceMode::Inherit;
+			return true;
+		}
+		if (lower == "normal") {
+			style.whiteSpace = WhiteSpaceMode::Normal;
+			return accept(CssProperty::WhiteSpace);
+		}
+		if (lower == "pre") {
+			style.whiteSpace = WhiteSpaceMode::Pre;
+			return accept(CssProperty::WhiteSpace);
+		}
+		if (lower == "pre-wrap") {
+			style.whiteSpace = WhiteSpaceMode::PreWrap;
+			return accept(CssProperty::WhiteSpace);
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "overflow-wrap" || prop == "word-wrap") {
+		std::string lower = toLower(val);
+		if (lower == "inherit") {
+			style.overflowWrap = OverflowWrapMode::Inherit;
+			return true;
+		}
+		if (lower == "normal") {
+			style.overflowWrap = OverflowWrapMode::Normal;
+			return accept(CssProperty::OverflowWrap);
+		}
+		if (lower == "break-word") {
+			style.overflowWrap = OverflowWrapMode::BreakWord;
+			return accept(CssProperty::OverflowWrap);
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "word-break") {
+		std::string lower = toLower(val);
+		if (lower == "inherit") {
+			style.wordBreak = WordBreakMode::Inherit;
+			return true;
+		}
+		if (lower == "normal") {
+			style.wordBreak = WordBreakMode::Normal;
+			return accept(CssProperty::WordBreak);
+		}
+		if (lower == "break-all") {
+			style.wordBreak = WordBreakMode::BreakAll;
+			return accept(CssProperty::WordBreak);
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "font-family") {
+		std::vector<std::string> families = splitCssCommaTokens(val);
+		bool sawGeneric = false;
+		for (const std::string& family : families) {
+			GenericFontFamily genericFamily = GenericFontFamily::Inherit;
+			if (parseGenericFontFamily(family, genericFamily)) {
+				style.genericFontFamily = genericFamily;
+				sawGeneric = true;
+				return accept(CssProperty::GenericFontFamily);
+			}
+		}
+		if (!sawGeneric) {
+			++diag.unsupportedDeclarationCount;
+		}
+		return sawGeneric;
+	}
+	if (prop == "list-style" || prop == "list-style-type") {
 		std::vector<std::string> tokens = splitCssTokens(val);
 		if (tokens.empty()) {
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		int width = 1;
-		uint32_t color = 0xFF000000u;
-		bool skipBorder = false;
+		bool sawSupported = false;
 		for (const std::string& token : tokens) {
 			const std::string lower = toLower(token);
-			if (lower == "none" || lower == "hidden") {
-				skipBorder = true;
-				break;
-			}
-			if (lower == "solid") continue;
-			bool autoValue = false;
-			int px = 0;
-			if (parseCssLengthValue(token, 16, px, autoValue, false)) {
-				width = clampCssValue(diag, std::max(1, px), 1, kCssLiteMaxBorderWidthPx);
+			if (lower == "none") {
+				style.listStyleNone = true;
+				style.listStyleType = ListStyleType::None;
+				sawSupported = true;
 				continue;
 			}
-			if (parseCssColor(token, color)) continue;
+			if (lower == "disc") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::Disc;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "circle") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::Circle;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "square") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::Square;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "decimal" || lower == "decimal-leading-zero") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::Decimal;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "lower-alpha" || lower == "lower-latin") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::LowerAlpha;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "upper-alpha" || lower == "upper-latin") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::UpperAlpha;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "lower-roman") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::LowerRoman;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "upper-roman") {
+				style.listStyleNone = false;
+				style.listStyleType = ListStyleType::UpperRoman;
+				sawSupported = true;
+				continue;
+			}
+			if (lower == "inherit") {
+				sawSupported = true;
+				continue;
+			}
 			++diag.unsupportedDeclarationCount;
-			return false;
 		}
-		if (skipBorder) {
-			return true;
-		}
-		if (prop == "border-top") {
-			style.hasBorderTop = true;
-			style.borderTopWidth = width;
-			style.borderTopColor = color;
-		} else {
-			style.hasBorderBottom = true;
-			style.borderBottomWidth = width;
-			style.borderBottomColor = color;
-		}
-		return true;
+		return sawSupported ? accept(CssProperty::ListStyle) : false;
 	}
-	if (prop == "list-style" || prop == "list-style-type") {
+	if (prop == "border-collapse") {
 		std::string lower = toLower(val);
-		if (lower == "none") {
-			style.listStyleNone = true;
-			return true;
+		if (lower == "inherit" || lower == "initial" || lower == "unset") {
+			style.borderCollapse = TableBorderCollapseMode::Inherit;
+			return accept(CssProperty::BorderCollapse);
 		}
-		if (lower == "disc" || lower == "circle" || lower == "square" || lower == "decimal" || lower == "decimal-leading-zero" || lower == "inherit") {
-			if (lower != "inherit") style.listStyleNone = false;
-			return true;
+		if (lower == "collapse") {
+			style.borderCollapse = TableBorderCollapseMode::Collapse;
+			return accept(CssProperty::BorderCollapse);
+		}
+		if (lower == "separate") {
+			style.borderCollapse = TableBorderCollapseMode::Separate;
+			return accept(CssProperty::BorderCollapse);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
+	}
+	if (prop == "border-spacing") {
+		std::vector<std::string> values = splitCssTokens(val);
+		if (!applyBorderSpacingList(style, values, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return acceptMask(cssPropertyBit(CssProperty::BorderSpacingHorizontal) |
+			cssPropertyBit(CssProperty::BorderSpacingVertical));
+	}
+	if (prop == "border-width") {
+		std::vector<std::string> values = splitCssTokens(val);
+		if (!applyBorderWidthListToSides(style, values, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return acceptMask(cssPropertyBit(CssProperty::BorderTopWidth) |
+			cssPropertyBit(CssProperty::BorderRightWidth) |
+			cssPropertyBit(CssProperty::BorderBottomWidth) |
+			cssPropertyBit(CssProperty::BorderLeftWidth));
+	}
+	if (prop == "border-style") {
+		std::vector<std::string> values = splitCssTokens(val);
+		if (!applyBorderStyleListToSides(style, values, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return acceptMask(cssPropertyBit(CssProperty::BorderTopStyle) |
+			cssPropertyBit(CssProperty::BorderRightStyle) |
+			cssPropertyBit(CssProperty::BorderBottomStyle) |
+			cssPropertyBit(CssProperty::BorderLeftStyle));
+	}
+	if (prop == "border-color") {
+		std::vector<std::string> values = splitCssTokens(val);
+		if (!applyBorderColorListToSides(style, values, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return acceptMask(cssPropertyBit(CssProperty::BorderTopColor) |
+			cssPropertyBit(CssProperty::BorderRightColor) |
+			cssPropertyBit(CssProperty::BorderBottomColor) |
+			cssPropertyBit(CssProperty::BorderLeftColor));
+	}
+	if (prop == "border" || prop == "border-top" || prop == "border-right" || prop == "border-bottom" || prop == "border-left") {
+		BorderSideValue borderValue;
+		if (!parseBorderSideValue(val, borderValue, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		if (prop == "border") {
+			applyBorderSideValue(style, BorderSideIndex::Top, borderValue);
+			applyBorderSideValue(style, BorderSideIndex::Right, borderValue);
+			applyBorderSideValue(style, BorderSideIndex::Bottom, borderValue);
+			applyBorderSideValue(style, BorderSideIndex::Left, borderValue);
+			return acceptMask(
+				cssPropertyBit(CssProperty::BorderTopWidth) | cssPropertyBit(CssProperty::BorderTopStyle) | cssPropertyBit(CssProperty::BorderTopColor) |
+				cssPropertyBit(CssProperty::BorderRightWidth) | cssPropertyBit(CssProperty::BorderRightStyle) | cssPropertyBit(CssProperty::BorderRightColor) |
+				cssPropertyBit(CssProperty::BorderBottomWidth) | cssPropertyBit(CssProperty::BorderBottomStyle) | cssPropertyBit(CssProperty::BorderBottomColor) |
+				cssPropertyBit(CssProperty::BorderLeftWidth) | cssPropertyBit(CssProperty::BorderLeftStyle) | cssPropertyBit(CssProperty::BorderLeftColor));
+		}
+		if (prop == "border-top") {
+			applyBorderSideValue(style, BorderSideIndex::Top, borderValue);
+			return acceptMask(cssPropertyBit(CssProperty::BorderTopWidth) |
+				cssPropertyBit(CssProperty::BorderTopStyle) | cssPropertyBit(CssProperty::BorderTopColor));
+		}
+		if (prop == "border-right") {
+			applyBorderSideValue(style, BorderSideIndex::Right, borderValue);
+			return acceptMask(cssPropertyBit(CssProperty::BorderRightWidth) |
+				cssPropertyBit(CssProperty::BorderRightStyle) | cssPropertyBit(CssProperty::BorderRightColor));
+		}
+		if (prop == "border-bottom") {
+			applyBorderSideValue(style, BorderSideIndex::Bottom, borderValue);
+			return acceptMask(cssPropertyBit(CssProperty::BorderBottomWidth) |
+				cssPropertyBit(CssProperty::BorderBottomStyle) | cssPropertyBit(CssProperty::BorderBottomColor));
+		}
+		applyBorderSideValue(style, BorderSideIndex::Left, borderValue);
+		return acceptMask(cssPropertyBit(CssProperty::BorderLeftWidth) |
+			cssPropertyBit(CssProperty::BorderLeftStyle) | cssPropertyBit(CssProperty::BorderLeftColor));
+	}
+	if (prop == "border-top-width" || prop == "border-right-width" || prop == "border-bottom-width" || prop == "border-left-width" ||
+		prop == "border-top-style" || prop == "border-right-style" || prop == "border-bottom-style" || prop == "border-left-style" ||
+		prop == "border-top-color" || prop == "border-right-color" || prop == "border-bottom-color" || prop == "border-left-color") {
+		BorderSideIndex side = BorderSideIndex::Top;
+		if (prop.find("right") != std::string::npos) side = BorderSideIndex::Right;
+		else if (prop.find("bottom") != std::string::npos) side = BorderSideIndex::Bottom;
+		else if (prop.find("left") != std::string::npos) side = BorderSideIndex::Left;
+		BorderSideValue borderValue = borderSideValueFromStyle(style, side);
+		borderValue.sawRecognized = true;
+		if (prop.find("-width") != std::string::npos) {
+			bool autoValue = false;
+			int px = 0;
+			if (!parseCssLengthValue(val, 16, px, autoValue, false) || autoValue) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			borderValue.hasWidth = true;
+			borderValue.width = clampBorderWidthPx(diag, px);
+		} else if (prop.find("-style") != std::string::npos) {
+			BorderLineStyle borderStyle = BorderLineStyle::Inherit;
+			if (!parseBorderStyleToken(val, borderStyle)) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			borderValue.hasStyle = true;
+			borderValue.style = borderStyle;
+			if ((borderStyle == BorderLineStyle::Solid || borderStyle == BorderLineStyle::Dashed || borderStyle == BorderLineStyle::Dotted) &&
+				(!borderValue.hasWidth || borderValue.width <= 0)) {
+				borderValue.hasWidth = true;
+				borderValue.width = 1;
+			}
+			if ((borderStyle == BorderLineStyle::None || borderStyle == BorderLineStyle::Hidden) && !borderValue.hasWidth) {
+				borderValue.hasWidth = true;
+				borderValue.width = 0;
+			}
+		} else {
+			uint32_t color = 0;
+			if (!parseCssColor(val, color)) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			borderValue.hasColor = true;
+			borderValue.color = color;
+		}
+		applyBorderSideValue(style, side, borderValue);
+		CssProperty propertyId = CssProperty::BorderTopWidth;
+		if (side == BorderSideIndex::Right) propertyId = CssProperty::BorderRightWidth;
+		else if (side == BorderSideIndex::Bottom) propertyId = CssProperty::BorderBottomWidth;
+		else if (side == BorderSideIndex::Left) propertyId = CssProperty::BorderLeftWidth;
+		if (prop.find("-style") != std::string::npos) {
+			propertyId = propertyId == CssProperty::BorderTopWidth ? CssProperty::BorderTopStyle :
+				propertyId == CssProperty::BorderRightWidth ? CssProperty::BorderRightStyle :
+				propertyId == CssProperty::BorderBottomWidth ? CssProperty::BorderBottomStyle : CssProperty::BorderLeftStyle;
+		} else if (prop.find("-color") != std::string::npos) {
+			propertyId = propertyId == CssProperty::BorderTopWidth ? CssProperty::BorderTopColor :
+				propertyId == CssProperty::BorderRightWidth ? CssProperty::BorderRightColor :
+				propertyId == CssProperty::BorderBottomWidth ? CssProperty::BorderBottomColor : CssProperty::BorderLeftColor;
+		}
+		return accept(propertyId);
 	}
 	++diag.unsupportedDeclarationCount;
 	return false;
 }
 
+static void applyStyleProperty(WebStyle& destination, const WebStyle& source, CssProperty property)
+{
+	switch (property) {
+	case CssProperty::Color: destination.hasColor = source.hasColor; destination.color = source.color; break;
+	case CssProperty::Background: destination.hasBackgroundColor = source.hasBackgroundColor; destination.backgroundColor = source.backgroundColor; break;
+	case CssProperty::Bold: destination.bold = source.bold; break;
+	case CssProperty::Italic: destination.italic = source.italic; break;
+	case CssProperty::TextDecoration:
+		destination.hasTextDecoration = source.hasTextDecoration;
+		destination.underline = source.underline;
+		destination.lineThrough = source.lineThrough;
+		break;
+	case CssProperty::Display: destination.displayNone = source.displayNone; break;
+	case CssProperty::ListStyle:
+		destination.listStyleNone = source.listStyleNone;
+		destination.listStyleType = source.listStyleType;
+		break;
+	case CssProperty::BorderCollapse: destination.borderCollapse = source.borderCollapse; break;
+	case CssProperty::BorderSpacingHorizontal: destination.borderSpacingHorizontal = source.borderSpacingHorizontal; break;
+	case CssProperty::BorderSpacingVertical: destination.borderSpacingVertical = source.borderSpacingVertical; break;
+	case CssProperty::GenericFontFamily: destination.genericFontFamily = source.genericFontFamily; break;
+	case CssProperty::TextAlign: destination.textAlign = source.textAlign; break;
+	case CssProperty::LineHeight:
+		destination.lineHeightNormal = source.lineHeightNormal;
+		destination.lineHeight = source.lineHeight;
+		break;
+	case CssProperty::MarginTop: destination.marginTop = source.marginTop; break;
+	case CssProperty::MarginRight: destination.marginRight = source.marginRight; break;
+	case CssProperty::MarginBottom: destination.marginBottom = source.marginBottom; break;
+	case CssProperty::MarginLeft: destination.marginLeft = source.marginLeft; break;
+	case CssProperty::PaddingTop: destination.paddingTop = source.paddingTop; break;
+	case CssProperty::PaddingRight: destination.paddingRight = source.paddingRight; break;
+	case CssProperty::PaddingBottom: destination.paddingBottom = source.paddingBottom; break;
+	case CssProperty::PaddingLeft: destination.paddingLeft = source.paddingLeft; break;
+	case CssProperty::FontSize: destination.fontScaleOrSize = source.fontScaleOrSize; break;
+	case CssProperty::Width: destination.width = source.width; destination.widthPercent = source.widthPercent; break;
+	case CssProperty::Height: destination.height = source.height; destination.heightPercent = source.heightPercent; break;
+	case CssProperty::MaxWidth: destination.maxWidth = source.maxWidth; destination.maxWidthPercent = source.maxWidthPercent; break;
+	case CssProperty::MaxHeight: destination.maxHeight = source.maxHeight; destination.maxHeightPercent = source.maxHeightPercent; break;
+	case CssProperty::WhiteSpace: destination.whiteSpace = source.whiteSpace; break;
+	case CssProperty::OverflowWrap: destination.overflowWrap = source.overflowWrap; break;
+	case CssProperty::WordBreak: destination.wordBreak = source.wordBreak; break;
+	case CssProperty::BorderTopWidth: destination.hasBorderTop = source.hasBorderTop; destination.borderTopWidth = source.borderTopWidth; break;
+	case CssProperty::BorderTopStyle: destination.hasBorderTop = source.hasBorderTop; destination.borderTopStyle = source.borderTopStyle; break;
+	case CssProperty::BorderTopColor: destination.hasBorderTop = source.hasBorderTop; destination.borderTopColor = source.borderTopColor; break;
+	case CssProperty::BorderRightWidth: destination.hasBorderRight = source.hasBorderRight; destination.borderRightWidth = source.borderRightWidth; break;
+	case CssProperty::BorderRightStyle: destination.hasBorderRight = source.hasBorderRight; destination.borderRightStyle = source.borderRightStyle; break;
+	case CssProperty::BorderRightColor: destination.hasBorderRight = source.hasBorderRight; destination.borderRightColor = source.borderRightColor; break;
+	case CssProperty::BorderBottomWidth: destination.hasBorderBottom = source.hasBorderBottom; destination.borderBottomWidth = source.borderBottomWidth; break;
+	case CssProperty::BorderBottomStyle: destination.hasBorderBottom = source.hasBorderBottom; destination.borderBottomStyle = source.borderBottomStyle; break;
+	case CssProperty::BorderBottomColor: destination.hasBorderBottom = source.hasBorderBottom; destination.borderBottomColor = source.borderBottomColor; break;
+	case CssProperty::BorderLeftWidth: destination.hasBorderLeft = source.hasBorderLeft; destination.borderLeftWidth = source.borderLeftWidth; break;
+	case CssProperty::BorderLeftStyle: destination.hasBorderLeft = source.hasBorderLeft; destination.borderLeftStyle = source.borderLeftStyle; break;
+	case CssProperty::BorderLeftColor: destination.hasBorderLeft = source.hasBorderLeft; destination.borderLeftColor = source.borderLeftColor; break;
+	case CssProperty::Count: break;
+	}
+}
+
+static void mergeParsedDeclaration(WebStyle& destination, const WebStyle& source)
+{
+	for (unsigned i = 0; i < static_cast<unsigned>(CssProperty::Count); ++i) {
+		const CssProperty property = static_cast<CssProperty>(i);
+		const uint64_t bit = cssPropertyBit(property);
+		if ((source.specifiedProperties & bit) == 0) continue;
+		const bool sourceImportant = (source.importantProperties & bit) != 0;
+		const bool destinationImportant = (destination.importantProperties & bit) != 0;
+		if ((destination.specifiedProperties & bit) != 0 && destinationImportant && !sourceImportant) continue;
+		applyStyleProperty(destination, source, property);
+		destination.specifiedProperties |= bit;
+		if (sourceImportant) destination.importantProperties |= bit;
+		else destination.importantProperties &= ~bit;
+	}
+}
+
+static bool findCssDeclarationEnd(const std::string& text,
+	size_t start,
+	size_t& outEnd,
+	CssDiagnostics& diag)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	char quote = 0;
+	for (size_t i = start; i < text.size(); ++i) {
+		const char c = text[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < text.size()) { ++i; continue; }
+			if (c == quote) quote = 0;
+			if (i - start >= kCssLiteMaxStringScanBytes) {
+				saturatingIncrement(diag.unterminatedStringErrors);
+				return false;
+			}
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '(') {
+			if (++parentheses > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+		} else if (c == ')') {
+			if (parentheses == 0) {
+				saturatingIncrement(diag.unbalancedParenthesisErrors);
+				return false;
+			}
+			--parentheses;
+		} else if (c == '[') {
+			if (++brackets > static_cast<int>(kCssLiteMaxDelimiterDepth)) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+		} else if (c == ']') {
+			if (brackets == 0) {
+				saturatingIncrement(diag.unbalancedBracketErrors);
+				return false;
+			}
+			--brackets;
+		} else if (c == ';' && parentheses == 0 && brackets == 0) {
+			outEnd = i;
+			return true;
+		}
+	}
+	if (quote != 0) {
+		saturatingIncrement(diag.unterminatedStringErrors);
+		return false;
+	}
+	if (parentheses != 0) saturatingIncrement(diag.unbalancedParenthesisErrors);
+	if (brackets != 0) saturatingIncrement(diag.unbalancedBracketErrors);
+	outEnd = text.size();
+	return parentheses == 0 && brackets == 0;
+}
+
+static size_t findCssDeclarationColon(const std::string& text)
+{
+	int parentheses = 0;
+	int brackets = 0;
+	char quote = 0;
+	for (size_t i = 0; i < text.size(); ++i) {
+		const char c = text[i];
+		if (quote != 0) {
+			if (c == '\\' && i + 1 < text.size()) { ++i; continue; }
+			if (c == quote) quote = 0;
+			continue;
+		}
+		if (c == '\'' || c == '"') { quote = c; continue; }
+		if (c == '(') ++parentheses;
+		else if (c == ')' && parentheses > 0) --parentheses;
+		else if (c == '[') ++brackets;
+		else if (c == ']' && brackets > 0) --brackets;
+		else if (c == ':' && parentheses == 0 && brackets == 0) return i;
+	}
+	return std::string::npos;
+}
+
 static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDiagnostics& diag)
 {
+	std::string normalizedBody;
+	normalizeCssComments(body, normalizedBody, diag);
 	size_t cursor = 0;
-	while (cursor < body.size()) {
-		size_t semi = body.find(';', cursor);
-		std::string decl = body.substr(cursor, semi == std::string::npos ? std::string::npos : semi - cursor);
-		size_t colon = decl.find(':');
-		if (colon != std::string::npos) {
-			if (!parseInlineStyleDeclaration(style, decl.substr(0, colon), decl.substr(colon + 1), diag)) {
-				// parseInlineStyleDeclaration already recorded unsupported declarations.
-			}
+	size_t declarationCount = 0;
+	while (cursor < normalizedBody.size()) {
+		if (declarationCount >= kCssLiteMaxDeclarationsPerRule ||
+			diag.declarationsProcessed >= static_cast<int>(kCssLiteMaxTotalDeclarations)) {
+			saturatingIncrement(diag.declarationCapCount);
+			break;
 		}
-		cursor = semi == std::string::npos ? body.size() : semi + 1;
+		size_t end = normalizedBody.size();
+		if (!findCssDeclarationEnd(normalizedBody, cursor, end, diag)) break;
+		std::string decl = normalizedBody.substr(cursor, end - cursor);
+		size_t colon = findCssDeclarationColon(decl);
+		if (colon != std::string::npos) {
+			++declarationCount;
+			saturatingIncrement(diag.declarationsProcessed);
+			WebStyle parsed;
+			// Unitless line-height is relative to the font size established by
+			// an earlier declaration in this same bounded declaration list.
+			parsed.fontScaleOrSize = style.fontScaleOrSize;
+			parseInlineStyleDeclaration(parsed, decl.substr(0, colon), decl.substr(colon + 1), diag);
+			mergeParsedDeclaration(style, parsed);
+		}
+		cursor = end >= normalizedBody.size() ? normalizedBody.size() : end + 1;
 	}
 }
 
@@ -924,9 +3144,29 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	}
 	merged.bold = overrideStyle.bold ? true : merged.bold;
 	merged.italic = overrideStyle.italic ? true : merged.italic;
-	merged.underline = overrideStyle.underline ? true : merged.underline;
+	if (overrideStyle.hasTextDecoration) {
+		merged.hasTextDecoration = true;
+		merged.underline = overrideStyle.underline;
+		merged.lineThrough = overrideStyle.lineThrough;
+	}
 	merged.displayNone = overrideStyle.displayNone ? true : merged.displayNone;
 	merged.listStyleNone = overrideStyle.listStyleNone ? true : merged.listStyleNone;
+	if (overrideStyle.listStyleType != ListStyleType::Inherit) {
+		merged.listStyleType = overrideStyle.listStyleType;
+		if (overrideStyle.listStyleType != ListStyleType::None) {
+			merged.listStyleNone = false;
+		}
+	}
+	if (overrideStyle.borderCollapse != TableBorderCollapseMode::Inherit) {
+		merged.borderCollapse = overrideStyle.borderCollapse;
+	}
+	merged.borderSpacingHorizontal = overrideStyle.borderSpacingHorizontal != -1 ?
+		overrideStyle.borderSpacingHorizontal : merged.borderSpacingHorizontal;
+	merged.borderSpacingVertical = overrideStyle.borderSpacingVertical != -1 ?
+		overrideStyle.borderSpacingVertical : merged.borderSpacingVertical;
+	if (overrideStyle.genericFontFamily != GenericFontFamily::Inherit) {
+		merged.genericFontFamily = overrideStyle.genericFontFamily;
+	}
 	if (overrideStyle.textAlign != TextAlign::Inherit) {
 		merged.textAlign = overrideStyle.textAlign;
 	}
@@ -949,17 +3189,44 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	merged.fontScaleOrSize = overrideStyle.fontScaleOrSize > 0 ? overrideStyle.fontScaleOrSize : merged.fontScaleOrSize;
 	merged.width = overrideStyle.width != -1 ? overrideStyle.width : merged.width;
 	merged.widthPercent = overrideStyle.widthPercent != -1 ? overrideStyle.widthPercent : merged.widthPercent;
+	merged.height = overrideStyle.height != -1 ? overrideStyle.height : merged.height;
+	merged.heightPercent = overrideStyle.heightPercent != -1 ? overrideStyle.heightPercent : merged.heightPercent;
 	merged.maxWidth = overrideStyle.maxWidth != -1 ? overrideStyle.maxWidth : merged.maxWidth;
 	merged.maxWidthPercent = overrideStyle.maxWidthPercent != -1 ? overrideStyle.maxWidthPercent : merged.maxWidthPercent;
+	merged.maxHeight = overrideStyle.maxHeight != -1 ? overrideStyle.maxHeight : merged.maxHeight;
+	merged.maxHeightPercent = overrideStyle.maxHeightPercent != -1 ? overrideStyle.maxHeightPercent : merged.maxHeightPercent;
+	if (overrideStyle.whiteSpace != WhiteSpaceMode::Inherit) {
+		merged.whiteSpace = overrideStyle.whiteSpace;
+	}
+	if (overrideStyle.overflowWrap != OverflowWrapMode::Inherit) {
+		merged.overflowWrap = overrideStyle.overflowWrap;
+	}
+	if (overrideStyle.wordBreak != WordBreakMode::Inherit) {
+		merged.wordBreak = overrideStyle.wordBreak;
+	}
 	merged.hasBorderTop = overrideStyle.hasBorderTop ? true : merged.hasBorderTop;
 	if (overrideStyle.hasBorderTop) {
 		merged.borderTopWidth = overrideStyle.borderTopWidth;
 		merged.borderTopColor = overrideStyle.borderTopColor;
+		merged.borderTopStyle = overrideStyle.borderTopStyle;
+	}
+	merged.hasBorderRight = overrideStyle.hasBorderRight ? true : merged.hasBorderRight;
+	if (overrideStyle.hasBorderRight) {
+		merged.borderRightWidth = overrideStyle.borderRightWidth;
+		merged.borderRightColor = overrideStyle.borderRightColor;
+		merged.borderRightStyle = overrideStyle.borderRightStyle;
 	}
 	merged.hasBorderBottom = overrideStyle.hasBorderBottom ? true : merged.hasBorderBottom;
 	if (overrideStyle.hasBorderBottom) {
 		merged.borderBottomWidth = overrideStyle.borderBottomWidth;
 		merged.borderBottomColor = overrideStyle.borderBottomColor;
+		merged.borderBottomStyle = overrideStyle.borderBottomStyle;
+	}
+	merged.hasBorderLeft = overrideStyle.hasBorderLeft ? true : merged.hasBorderLeft;
+	if (overrideStyle.hasBorderLeft) {
+		merged.borderLeftWidth = overrideStyle.borderLeftWidth;
+		merged.borderLeftColor = overrideStyle.borderLeftColor;
+		merged.borderLeftStyle = overrideStyle.borderLeftStyle;
 	}
 	return merged;
 }
@@ -985,6 +3252,57 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.fontScaleOrSize = 24;
 		return style;
 	}
+	if (tagName == "form") {
+		style.marginTop = 4;
+		style.marginBottom = 8;
+		return style;
+	}
+	if (tagName == "fieldset") {
+		style.marginTop = 8;
+		style.marginBottom = 10;
+		style.padding = 8;
+		style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+		style.borderTopWidth = style.borderRightWidth = style.borderBottomWidth = style.borderLeftWidth = 1;
+		style.borderTopStyle = style.borderRightStyle = style.borderBottomStyle = style.borderLeftStyle = BorderLineStyle::Solid;
+		style.borderTopColor = style.borderRightColor = style.borderBottomColor = style.borderLeftColor = 0xFFB8C0CCu;
+		return style;
+	}
+	if (tagName == "legend") {
+		style.bold = true;
+		style.marginTop = 2;
+		style.marginBottom = 4;
+		style.fontScaleOrSize = 14;
+		return style;
+	}
+	if (tagName == "label") {
+		style.marginTop = 3;
+		style.marginBottom = 3;
+		return style;
+	}
+	if (tagName == "input" || tagName == "textarea" || tagName == "select") {
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFFFFFFFu;
+		style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+		style.borderTopWidth = style.borderRightWidth = style.borderBottomWidth = style.borderLeftWidth = 1;
+		style.borderTopStyle = style.borderRightStyle = style.borderBottomStyle = style.borderLeftStyle = BorderLineStyle::Solid;
+		style.borderTopColor = style.borderRightColor = style.borderBottomColor = style.borderLeftColor = 0xFF9AA6B2u;
+		style.padding = 4;
+		style.marginTop = 3;
+		style.marginBottom = 5;
+		return style;
+	}
+	if (tagName == "button") {
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFE6E8EEu;
+		style.hasBorderTop = style.hasBorderRight = style.hasBorderBottom = style.hasBorderLeft = true;
+		style.borderTopWidth = style.borderRightWidth = style.borderBottomWidth = style.borderLeftWidth = 1;
+		style.borderTopStyle = style.borderRightStyle = style.borderBottomStyle = style.borderLeftStyle = BorderLineStyle::Solid;
+		style.borderTopColor = style.borderRightColor = style.borderBottomColor = style.borderLeftColor = 0xFF8D99A8u;
+		style.padding = 4;
+		style.marginTop = 3;
+		style.marginBottom = 5;
+		return style;
+	}
 	if (tagName == "h2") {
 		style.bold = true;
 		style.marginTop = 12;
@@ -1004,6 +3322,50 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginBottom = 10;
 		return style;
 	}
+	if (tagName == "blockquote") {
+		style.marginTop = 8;
+		style.marginBottom = 10;
+		style.marginLeft = 18;
+		style.paddingLeft = 12;
+		style.paddingRight = 8;
+		style.paddingTop = 4;
+		style.paddingBottom = 4;
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFF1F5F9u;
+		return style;
+	}
+	if (tagName == "figure") {
+		style.marginTop = 10;
+		style.marginBottom = 10;
+		return style;
+	}
+	if (tagName == "figcaption") {
+		style.textAlign = TextAlign::Center;
+		style.hasColor = true;
+		style.color = 0xFF5B6472u;
+		style.italic = true;
+		style.fontScaleOrSize = 13;
+		style.marginTop = 4;
+		style.marginBottom = 6;
+		return style;
+	}
+	if (tagName == "dl") {
+		style.marginTop = 8;
+		style.marginBottom = 10;
+		return style;
+	}
+	if (tagName == "dt") {
+		style.bold = true;
+		style.marginTop = 6;
+		style.marginBottom = 2;
+		return style;
+	}
+	if (tagName == "dd") {
+		style.marginTop = 2;
+		style.marginBottom = 6;
+		style.marginLeft = 18;
+		return style;
+	}
 	if (tagName == "caption") {
 		style.textAlign = TextAlign::Center;
 		style.hasColor = true;
@@ -1018,6 +3380,7 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginTop = 8;
 		style.marginBottom = 10;
 		style.padding = 0;
+		style.borderCollapse = TableBorderCollapseMode::Separate;
 		return style;
 	}
 	if (tagName == "td" || tagName == "th") {
@@ -1055,6 +3418,16 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.fontScaleOrSize = 13;
 		return style;
 	}
+	if (tagName == "cite") {
+		style.italic = true;
+		style.hasColor = true;
+		style.color = 0xFF5B6472u;
+		return style;
+	}
+	if (tagName == "q") {
+		style.italic = true;
+		return style;
+	}
 	if (tagName == "code" || tagName == "kbd" || tagName == "samp") {
 		style.hasBackgroundColor = true;
 		style.backgroundColor = 0xFFE6E8EEu;
@@ -1070,6 +3443,7 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 	if (tagName == "a") {
 		style.hasColor = true;
 		style.color = 0xFF1E5CB8u;
+		style.hasTextDecoration = true;
 		style.underline = true;
 		style.marginTop = 4;
 		style.marginBottom = 4;
@@ -1085,6 +3459,7 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginTop = 6;
 		style.marginBottom = 8;
 		style.paddingLeft = 18;
+		style.listStyleType = tagName == "ol" ? ListStyleType::Decimal : ListStyleType::Disc;
 		return style;
 	}
 	if (tagName == "pre" || tagName == "code") {
@@ -1093,6 +3468,7 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginTop = 8;
 		style.marginBottom = 10;
 		style.padding = 8;
+		style.whiteSpace = WhiteSpaceMode::Pre;
 		return style;
 	}
 	if (tagName == "img") {
@@ -1103,14 +3479,394 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 	return style;
 }
 
+static void markDefaultStyleProperties(WebStyle& style)
+{
+	if (style.hasColor) style.specifiedProperties |= cssPropertyBit(CssProperty::Color);
+	if (style.hasBackgroundColor) style.specifiedProperties |= cssPropertyBit(CssProperty::Background);
+	if (style.bold) style.specifiedProperties |= cssPropertyBit(CssProperty::Bold);
+	if (style.italic) style.specifiedProperties |= cssPropertyBit(CssProperty::Italic);
+	if (style.hasTextDecoration) style.specifiedProperties |= cssPropertyBit(CssProperty::TextDecoration);
+	if (style.displayNone) style.specifiedProperties |= cssPropertyBit(CssProperty::Display);
+	if (style.listStyleNone || style.listStyleType != ListStyleType::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::ListStyle);
+	if (style.borderCollapse != TableBorderCollapseMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderCollapse);
+	if (style.borderSpacingHorizontal != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderSpacingHorizontal);
+	if (style.borderSpacingVertical != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderSpacingVertical);
+	if (style.genericFontFamily != GenericFontFamily::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::GenericFontFamily);
+	if (style.textAlign != TextAlign::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::TextAlign);
+	if (style.lineHeightNormal || style.lineHeight > 0) style.specifiedProperties |= cssPropertyBit(CssProperty::LineHeight);
+	if (style.marginTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginTop);
+	if (style.marginRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginRight);
+	if (style.marginBottom != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginBottom);
+	if (style.marginLeft != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginLeft);
+	if (style.padding != -1) style.specifiedProperties |= cssPropertyMask(CssProperty::PaddingTop, CssProperty::PaddingLeft);
+	if (style.paddingTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingTop);
+	if (style.paddingRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingRight);
+	if (style.paddingBottom != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingBottom);
+	if (style.paddingLeft != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingLeft);
+	if (style.fontScaleOrSize > 0) style.specifiedProperties |= cssPropertyBit(CssProperty::FontSize);
+	if (style.width != -1 || style.widthPercent != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::Width);
+	if (style.height != -1 || style.heightPercent != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::Height);
+	if (style.maxWidth != -1 || style.maxWidthPercent != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MaxWidth);
+	if (style.maxHeight != -1 || style.maxHeightPercent != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MaxHeight);
+	if (style.whiteSpace != WhiteSpaceMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::WhiteSpace);
+	if (style.overflowWrap != OverflowWrapMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::OverflowWrap);
+	if (style.wordBreak != WordBreakMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::WordBreak);
+	if (style.hasBorderTop) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderTopWidth) | cssPropertyBit(CssProperty::BorderTopStyle) | cssPropertyBit(CssProperty::BorderTopColor);
+	if (style.hasBorderRight) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderRightWidth) | cssPropertyBit(CssProperty::BorderRightStyle) | cssPropertyBit(CssProperty::BorderRightColor);
+	if (style.hasBorderBottom) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderBottomWidth) | cssPropertyBit(CssProperty::BorderBottomStyle) | cssPropertyBit(CssProperty::BorderBottomColor);
+	if (style.hasBorderLeft) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderLeftWidth) | cssPropertyBit(CssProperty::BorderLeftStyle) | cssPropertyBit(CssProperty::BorderLeftColor);
+}
+
 static std::string pathSignature(const std::vector<HtmlElementRef>& path)
 {
 	std::ostringstream oss;
 	for (const HtmlElementRef& element : path) {
 		oss << "|" << toLower(element.tagName) << "#" << toLower(element.id)
-			<< "." << toLower(element.className) << "{" << element.inlineStyle << "}";
+			<< "." << toLower(element.className) << "{" << element.inlineStyle << "}"
+			<< "@" << element.serial << ":" << element.parentSerial
+			<< ":" << element.childIndex << "/" << element.childCount
+			<< ":s" << element.siblingCount
+			<< ":prev=" << element.previousSiblingSerial
+			<< ":" << element.typeIndex << "/" << element.typeCount
+			<< ":form=" << static_cast<unsigned>(element.formControl.type)
+			<< ":state=" << (element.formControl.checked ? "c" : "-")
+			<< (element.formControl.disabled ? "d" : "-")
+			<< (element.formControl.required ? "r" : "-")
+			<< (element.formControl.readOnly ? "o" : "-")
+			<< (element.formControl.selected ? "s" : "-")
+			<< ":" << (element.hasLinkTarget ? (element.visited ? "visited" : "link") : "");
 	}
 	return oss.str();
+}
+
+struct CssCascadeWinner {
+	bool valid = false;
+	bool important = false;
+	bool inlineDeclaration = false;
+	bool inherited = false;
+	CssSpecificity specificity;
+	uint32_t sourceOrder = 0;
+	std::string pseudoCategory;
+	std::string combinatorCategory;
+	std::string selectorCategory;
+	uint16_t evidenceRuleIndex = 0;
+	uint8_t evidenceGroupIndex = 0;
+	uint32_t evidenceSelectorHash = 0;
+	size_t siblingScanSteps = 0;
+};
+
+static const char* cssPseudoName(CssPseudoClass type)
+{
+	switch (type) {
+	case CssPseudoClass::FirstChild: return "first-child";
+	case CssPseudoClass::LastChild: return "last-child";
+	case CssPseudoClass::OnlyChild: return "only-child";
+	case CssPseudoClass::NthChild: return "nth-child";
+	case CssPseudoClass::FirstOfType: return "first-of-type";
+	case CssPseudoClass::LastOfType: return "last-of-type";
+	case CssPseudoClass::OnlyOfType: return "only-of-type";
+	case CssPseudoClass::NthOfType: return "nth-of-type";
+	case CssPseudoClass::Not: return "not";
+	case CssPseudoClass::Root: return "root";
+	case CssPseudoClass::Link: return "link";
+	case CssPseudoClass::Visited: return "visited";
+	case CssPseudoClass::Empty: return "empty";
+	case CssPseudoClass::Checked: return "checked";
+	case CssPseudoClass::Disabled: return "disabled";
+	case CssPseudoClass::Enabled: return "enabled";
+	case CssPseudoClass::Required: return "required";
+	case CssPseudoClass::ReadOnly: return "read-only";
+	case CssPseudoClass::ReadWrite: return "read-write";
+	case CssPseudoClass::Focus: return "focus";
+	case CssPseudoClass::FocusVisible: return "focus-visible";
+	default: return "unknown";
+	}
+}
+
+static std::string selectorPseudoSummary(const WebStyleRule& rule)
+{
+	std::string summary;
+	for (const CssSelectorPart& part : rule.selectorParts) {
+		for (const CssPseudoClassSelector& pseudo : part.pseudoClasses) {
+			if (!summary.empty()) summary += "+";
+			summary += cssPseudoName(pseudo.type);
+		}
+	}
+	return summary;
+}
+
+static std::string selectorCombinatorSummary(const WebStyleRule& rule)
+{
+	std::string summary;
+	for (CssCombinator combinator : rule.combinators) {
+		const char* name = "descendant";
+		if (combinator == CssCombinator::Child) name = "child";
+		else if (combinator == CssCombinator::AdjacentSibling) name = "adjacent-sibling";
+		else if (combinator == CssCombinator::GeneralSibling) name = "general-sibling";
+		if (!summary.empty()) summary += "+";
+		summary += name;
+	}
+	return summary.empty() ? "none" : summary;
+}
+
+static const char* selectorTypeName(StyleSelectorType type)
+{
+	switch (type) {
+	case StyleSelectorType::Id: return "id";
+	case StyleSelectorType::Class: return "class";
+	default: return "element";
+	}
+}
+
+static bool specificityGreater(const CssSpecificity& left, const CssSpecificity& right)
+{
+	if (left.idCount != right.idCount) return left.idCount > right.idCount;
+	if (left.classCount != right.classCount) return left.classCount > right.classCount;
+	return left.elementCount > right.elementCount;
+}
+
+static bool specificityEqual(const CssSpecificity& left, const CssSpecificity& right)
+{
+	return left.idCount == right.idCount && left.classCount == right.classCount &&
+		left.elementCount == right.elementCount;
+}
+
+static bool cascadeCandidateWins(const CssCascadeWinner& candidate, const CssCascadeWinner& current)
+{
+	if (!current.valid) return true;
+	if (candidate.important != current.important) return candidate.important;
+	if (candidate.inlineDeclaration != current.inlineDeclaration) return candidate.inlineDeclaration;
+	if (specificityGreater(candidate.specificity, current.specificity)) return true;
+	if (specificityEqual(candidate.specificity, current.specificity)) return candidate.sourceOrder >= current.sourceOrder;
+	return false;
+}
+
+static uint32_t allocateCssSourceOrder(CssDiagnostics& diag)
+{
+	if (diag.nextSourceOrder == std::numeric_limits<uint32_t>::max()) return diag.nextSourceOrder;
+	return diag.nextSourceOrder++;
+}
+
+static bool styleHasEffectiveProperty(const WebStyle& style, CssProperty property)
+{
+	const uint64_t bit = cssPropertyBit(property);
+	return (style.specifiedProperties & bit) != 0 || (style.inheritedProperties & bit) != 0;
+}
+
+static void applyInheritedProperties(WebStyle& style, const WebStyle& parent, CssDiagnostics& diag)
+{
+	const CssProperty inherited[] = {
+		CssProperty::Color, CssProperty::Bold, CssProperty::Italic,
+		CssProperty::GenericFontFamily, CssProperty::FontSize, CssProperty::LineHeight,
+		CssProperty::TextAlign, CssProperty::WhiteSpace, CssProperty::OverflowWrap,
+		CssProperty::WordBreak,
+	};
+	for (CssProperty property : inherited) {
+		const uint64_t bit = cssPropertyBit(property);
+		if (styleHasEffectiveProperty(style, property) ||
+			(!styleHasEffectiveProperty(parent, property))) continue;
+		applyStyleProperty(style, parent, property);
+		style.inheritedProperties |= bit;
+		saturatingIncrement(diag.inheritedPropertiesApplied);
+	}
+}
+
+static std::string cssColorEvidence(bool present, uint32_t color)
+{
+	if (!present) return "none";
+	std::ostringstream oss;
+	oss << "#" << std::hex << std::setw(6) << std::setfill('0') << (color & 0xFFFFFFu);
+	return oss.str();
+}
+
+static std::string boundedEvidenceToken(const std::string& raw)
+{
+	std::string token = collapseWs(raw);
+	if (token.size() > kCssLiteMaxEvidenceTokenBytes)
+		token.resize(kCssLiteMaxEvidenceTokenBytes);
+	for (char& c : token) {
+		if (c == ';' || c == '\n' || c == '\r') c = '_';
+	}
+	return token;
+}
+
+static uint32_t formRadioGroupEvidenceHash(const HtmlElementRef& element)
+{
+	if (element.formControl.type != FormControlType::Radio) return 0;
+	uint32_t hash = 2166136261u;
+	auto mix = [&](uint64_t value) {
+		for (unsigned i = 0; i < sizeof(value); ++i) {
+			hash ^= static_cast<uint32_t>((value >> (i * 8)) & 0xFFu);
+			hash *= 16777619u;
+		}
+	};
+	mix(element.formControl.parentFormSerial);
+	mix(element.formControl.parentFieldsetSerial);
+	for (unsigned char c : element.formControl.name) {
+		hash ^= static_cast<uint32_t>(c);
+		hash *= 16777619u;
+	}
+	return hash;
+}
+
+static const char* formFocusOriginName(FormFocusOrigin origin)
+{
+	switch (origin) {
+	case FormFocusOrigin::Mouse: return "mouse";
+	case FormFocusOrigin::Keyboard: return "keyboard";
+	case FormFocusOrigin::ProgrammaticInternalSmoke: return "programmatic/internal-smoke";
+	default: return "none";
+	}
+}
+
+static void appendComputedStyleEvidence(WebDocument& doc,
+	const HtmlElementRef& element,
+	const WebStyle& style,
+	const std::array<CssCascadeWinner, static_cast<size_t>(CssProperty::Count)>& winners)
+{
+	const std::string id = toLower(element.id);
+	if (id.rfind("phase2a-", 0) != 0 && id.rfind("css2a-", 0) != 0 &&
+		id.rfind("phase2b-", 0) != 0 && id.rfind("css2b-", 0) != 0 &&
+		id.rfind("phase2c-", 0) != 0 && id.rfind("css2c-", 0) != 0 &&
+		id.rfind("phase2d-", 0) != 0 && id.rfind("css2d-", 0) != 0 &&
+		id.rfind("phase2e-", 0) != 0 && id.rfind("css2e-", 0) != 0 &&
+		id.rfind("phase2f-", 0) != 0 && id.rfind("css2f-", 0) != 0 &&
+		id.rfind("phase2g-", 0) != 0 && id.rfind("css2g-", 0) != 0 &&
+		id.rfind("phase2h-", 0) != 0 && id.rfind("css2h-", 0) != 0) return;
+	const bool phase2gEvidence = id.rfind("phase2g-", 0) == 0 || id.rfind("css2g-", 0) == 0;
+	const bool phase2hEvidence = id.rfind("phase2h-", 0) == 0 || id.rfind("css2h-", 0) == 0;
+	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
+		doc.cssDiagnostics.computedStyleEvidenceSerials.end(), element.serial) !=
+		doc.cssDiagnostics.computedStyleEvidenceSerials.end()) return;
+	if (doc.cssDiagnostics.computedStyleEvidence.size() >= kCssLiteMaxEvidenceBytes ||
+		doc.cssDiagnostics.computedStyleEvidenceSerials.size() >= kCssLiteMaxEvidenceEntries) return;
+	const CssCascadeWinner& colorWinner = winners[static_cast<size_t>(CssProperty::Color)];
+	const CssCascadeWinner& paddingWinner = winners[static_cast<size_t>(CssProperty::PaddingTop)];
+	const CssCascadeWinner& fontWinner = winners[static_cast<size_t>(CssProperty::FontSize)];
+	const CssCascadeWinner& borderWinner = winners[static_cast<size_t>(CssProperty::BorderTopWidth)];
+	std::string previousSiblingTag = "none";
+	if (element.previousSiblingSerial > 0 && element.previousSiblingSerial <= doc.structuralElements.size()) {
+		const HtmlElementRef& previous = doc.structuralElements[static_cast<size_t>(element.previousSiblingSerial - 1)];
+		if (previous.serial == element.previousSiblingSerial) previousSiblingTag = toLower(previous.tagName);
+	}
+	const HtmlElementContentMetadata* content = findContentMetadata(doc, element.serial);
+	const char* computedEmpty = "unknown";
+	if (content && content->contentMetadataComplete) {
+		computedEmpty = contentMetadataProvesEmpty(*content) ? "yes" : "no";
+	}
+	const uint64_t colorBit = cssPropertyBit(CssProperty::Color);
+	const uint64_t paddingBit = cssPropertyBit(CssProperty::PaddingTop);
+	const uint64_t fontBit = cssPropertyBit(CssProperty::FontSize);
+	const uint64_t borderBit = cssPropertyBit(CssProperty::BorderTopWidth);
+	const FormRuntimeControlState* runtime = runtimeControlState(doc, element.serial);
+	const bool checked = effectiveChecked(doc, element);
+	const bool disabled = effectiveDisabled(doc, element);
+	const bool focused = effectiveFocused(doc, element);
+	const bool focusVisible = effectiveFocusVisible(doc, element);
+	const bool focusable = element.serial != 0 && element.formControl.metadataComplete &&
+		element.formControl.supported && !element.formControl.hidden && !disabled &&
+		element.formControl.type != FormControlType::Option &&
+		element.formControl.type != FormControlType::Unsupported &&
+		element.formControl.type != FormControlType::None;
+	std::ostringstream oss;
+	oss << "id=" << boundedEvidenceToken(element.id) << ",tag=" << boundedEvidenceToken(toLower(element.tagName))
+		<< ",classes=" << boundedEvidenceToken(element.className)
+		<< ",color=" << cssColorEvidence(style.hasColor, style.color)
+		<< ",background=" << cssColorEvidence(style.hasBackgroundColor, style.backgroundColor)
+		<< ",font-size=" << style.fontScaleOrSize
+		<< ",line-height=" << (style.lineHeightNormal ? "normal" : std::to_string(style.lineHeight))
+		<< ",padding-top=" << style.paddingTop
+		<< ",border-top-width=" << style.borderTopWidth
+		<< ",color-specificity=" << colorWinner.specificity.idCount << "." << colorWinner.specificity.classCount << "." << colorWinner.specificity.elementCount
+		<< ",color-source-order=" << colorWinner.sourceOrder
+		<< ",color-inherited=" << ((style.inheritedProperties & colorBit) != 0 ? "yes" : "no")
+		<< ",color-explicit=" << ((style.specifiedProperties & colorBit) != 0 ? "yes" : "no")
+		<< ",color-important=" << (colorWinner.important ? "yes" : "no")
+		<< ",padding-source-order=" << paddingWinner.sourceOrder
+		<< ",padding-explicit=" << ((style.specifiedProperties & paddingBit) != 0 ? "yes" : "no")
+		<< ",padding-important=" << (paddingWinner.important ? "yes" : "no")
+		<< ",font-size-source-order=" << fontWinner.sourceOrder
+		<< ",font-size-explicit=" << ((style.specifiedProperties & fontBit) != 0 ? "yes" : "no")
+		<< ",font-size-important=" << (fontWinner.important ? "yes" : "no")
+		<< ",border-source-order=" << borderWinner.sourceOrder
+		<< ",border-explicit=" << ((style.specifiedProperties & borderBit) != 0 ? "yes" : "no")
+		<< ",border-important=" << (borderWinner.important ? "yes" : "no")
+		<< ",logical-serial=" << element.serial
+		<< ",parent-serial=" << element.parentSerial
+		<< ",content-metadata=" << (content ? (content->contentMetadataComplete ? "complete" : "incomplete") : "missing")
+		<< ",element-child-count=" << (content ? content->elementChildCount : 0)
+		<< ",has-nonwhitespace-text=" << (content && content->hasNonWhitespaceText ? "yes" : "no")
+		<< ",has-media-replaced=" << (content && (content->hasImageOrMediaChild || content->hasVisibleReplacedContent) ? "yes" : "no")
+		<< ",has-visible-break=" << (content && content->hasVisibleBreak ? "yes" : "no")
+		<< ",has-renderable-content=" << (content && content->hasRenderableContent ? "yes" : "no")
+		<< ",computed-empty=" << computedEmpty
+		<< ",previous-sibling-serial=" << element.previousSiblingSerial
+		<< ",previous-sibling-tag=" << previousSiblingTag
+		<< ",winning-combinator=" << (colorWinner.combinatorCategory.empty() ? "none" : colorWinner.combinatorCategory)
+		<< ",color-winning-selector=" << (colorWinner.selectorCategory.empty() ? "none" : colorWinner.selectorCategory)
+		<< ",color-winning-rule-index=" << colorWinner.evidenceRuleIndex
+		<< ",color-winning-group-index=" << static_cast<unsigned>(colorWinner.evidenceGroupIndex)
+		<< ",color-winning-selector-hash=" << (colorWinner.valid ? colorWinner.evidenceSelectorHash : 0)
+		<< ",sibling-scan-steps=" << colorWinner.siblingScanSteps
+		<< ",element-index=" << element.childIndex
+		<< ",element-count=" << element.siblingCount
+		<< ",type-index=" << element.typeIndex
+		<< ",type-count=" << element.typeCount
+		<< ",control-type=" << static_cast<unsigned>(element.formControl.type)
+		<< ",control-supported=" << (element.formControl.supported ? "yes" : "no")
+		<< ",control-checked=" << (checked ? "yes" : "no")
+		<< ",control-disabled=" << (disabled ? "yes" : "no")
+		<< ",control-enabled=" << (element.formControl.supported && !disabled ? "yes" : "no")
+		<< ",parsed-checked=" << ((element.formControl.checked || element.formControl.selected) ? "yes" : "no")
+		<< ",runtime-checked=" << (runtime ? (runtime->checked ? "yes" : "no") : "absent")
+		<< ",runtime-activation-count=" << (runtime ? runtime->activationCount : 0)
+		<< ",runtime-metadata-valid=" << (runtime ? (runtime->metadataValid ? "yes" : "no") : "no");
+	if (phase2gEvidence || phase2hEvidence) {
+		oss << ",document-generation=" << doc.formRuntimeState.documentGeneration
+			<< ",focusable=" << (focusable ? "yes" : "no")
+			<< ",focused=" << (focused ? "yes" : "no")
+			<< ",focus-origin=" << formFocusOriginName(doc.formRuntimeState.focusOrigin)
+			<< ",focus-document-generation=" << doc.formRuntimeState.focusedDocumentGeneration
+			<< ",focus-pseudo-match=" << (focused ? "yes" : "no")
+			<< ",focus-visible-pseudo-match=" << (focusVisible ? "yes" : "no");
+	}
+	oss << ",radio-group-hash=" << formRadioGroupEvidenceHash(element)
+		<< ",control-required=" << (element.formControl.required ? "yes" : "no")
+		<< ",control-readonly=" << (element.formControl.readOnly ? "yes" : "no")
+		<< ",color-winning-pseudo=" << (colorWinner.pseudoCategory.empty() ? "none" : colorWinner.pseudoCategory);
+	if (phase2gEvidence || phase2hEvidence) {
+		oss << ",winning-focus-pseudo=" << ((colorWinner.pseudoCategory.find("focus") != std::string::npos) ? colorWinner.pseudoCategory : "none");
+	}
+	oss << ";";
+	const std::string evidence = oss.str();
+	if (doc.cssDiagnostics.computedStyleEvidence.size() + evidence.size() <= kCssLiteMaxEvidenceBytes) {
+		doc.cssDiagnostics.computedStyleEvidence += evidence;
+		doc.cssDiagnostics.computedStyleEvidenceSerials.push_back(element.serial);
+	}
+}
+
+static bool buildStructuralPath(const WebDocument& doc,
+	uint64_t serial,
+	std::vector<HtmlElementRef>& outPath)
+{
+	outPath.clear();
+	if (serial == 0) return false;
+	uint64_t current = serial;
+	for (size_t depth = 0; depth < kCssLiteMaxInheritanceDepth + 2 && current != 0; ++depth) {
+		const HtmlElementRef* found = nullptr;
+		for (const HtmlElementRef& candidate : doc.structuralElements) {
+			if (candidate.serial == current) {
+				found = &candidate;
+				break;
+			}
+		}
+		if (!found) return false;
+		outPath.push_back(*found);
+		current = found->parentSerial;
+	}
+	if (current != 0) return false;
+	std::reverse(outPath.begin(), outPath.end());
+	return !outPath.empty();
 }
 
 static WebStyle computePathStyle(WebDocument& doc,
@@ -1123,23 +3879,98 @@ static WebStyle computePathStyle(WebDocument& doc,
 	if (it != cache.end()) return it->second;
 
 	WebStyle style = defaultStyleForTag(path.back().tagName);
-	auto applyBucket = [&](int minSpecificity, int maxSpecificity) {
-		for (const WebStyleRule& rule : doc.styleRules) {
-			if (rule.specificity < minSpecificity || rule.specificity >= maxSpecificity) continue;
-			if (selectorMatchesPath(path, rule)) {
-				style = mergeStyles(style, rule.style);
+	markDefaultStyleProperties(style);
+	std::array<CssCascadeWinner, static_cast<size_t>(CssProperty::Count)> winners{};
+	WebStyle parent;
+	bool hasParent = path.size() > 1 && path.size() <= kCssLiteMaxInheritanceDepth + 1;
+	size_t cascadeApplications = 0;
+	bool cascadeApplicationsCapped = false;
+	if (path.size() > kCssLiteMaxInheritanceDepth + 1) saturatingIncrement(doc.cssDiagnostics.inheritanceDepthClamps);
+	if (hasParent) {
+		std::vector<HtmlElementRef> parentPath(path.begin(), path.end() - 1);
+		parent = computePathStyle(doc, parentPath, cache);
+		applyInheritedProperties(style, parent, doc.cssDiagnostics);
+	}
+
+	for (const WebStyleRule& rule : doc.styleRules) {
+		CssSelectorMatchTrace matchTrace;
+		if (!selectorMatchesPath(path, doc, doc.cssDiagnostics, rule, &matchTrace)) continue;
+		saturatingIncrement(doc.cssDiagnostics.selectorMatches);
+		for (unsigned i = 0; i < static_cast<unsigned>(CssProperty::Count); ++i) {
+			const CssProperty property = static_cast<CssProperty>(i);
+			const uint64_t bit = cssPropertyBit(property);
+			if ((rule.style.specifiedProperties & bit) == 0) continue;
+			if (rule.hasVisitedPseudo && property != CssProperty::Color &&
+				property != CssProperty::Bold && property != CssProperty::TextDecoration) continue;
+			if (cascadeApplications >= kCssLiteMaxCascadeApplicationsPerNode) {
+				saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
+				cascadeApplicationsCapped = true;
+				break;
 			}
+			++cascadeApplications;
+			CssCascadeWinner candidate;
+			candidate.valid = true;
+			candidate.important = (rule.style.importantProperties & bit) != 0;
+			candidate.specificity = rule.specificityTuple;
+			candidate.sourceOrder = rule.sourceOrder;
+			candidate.pseudoCategory = selectorPseudoSummary(rule);
+			candidate.combinatorCategory = selectorCombinatorSummary(rule);
+			candidate.selectorCategory = selectorTypeName(rule.selectorType);
+			candidate.evidenceRuleIndex = rule.evidenceRuleIndex;
+			candidate.evidenceGroupIndex = rule.evidenceGroupIndex;
+			candidate.evidenceSelectorHash = rule.evidenceSelectorHash;
+			candidate.siblingScanSteps = matchTrace.siblingScanSteps;
+			if (!cascadeCandidateWins(candidate, winners[i])) continue;
+			if (winners[i].valid) {
+				if (specificityGreater(candidate.specificity, winners[i].specificity)) saturatingIncrement(doc.cssDiagnostics.specificityOverrides);
+				else if (specificityEqual(candidate.specificity, winners[i].specificity) && candidate.sourceOrder > winners[i].sourceOrder) saturatingIncrement(doc.cssDiagnostics.sourceOrderOverrides);
+			}
+			applyStyleProperty(style, rule.style, property);
+			style.specifiedProperties |= bit;
+			style.inheritedProperties &= ~bit;
+			style.importantProperties = (style.importantProperties & ~bit) | (candidate.important ? bit : 0);
+			winners[i] = candidate;
+			saturatingIncrement(doc.cssDiagnostics.cascadePropertyResolutions);
+			if (candidate.important) saturatingIncrement(doc.cssDiagnostics.importantDeclarationsApplied);
 		}
-	};
-	applyBucket(0, 10);
-	applyBucket(10, 100);
-	applyBucket(100, 1000000);
+		if (cascadeApplicationsCapped) break;
+	}
 
 	if (!path.back().inlineStyle.empty()) {
 		WebStyle inlineStyle;
 		parseCssDeclarations(path.back().inlineStyle, inlineStyle, doc.cssDiagnostics);
-		style = mergeStyles(style, inlineStyle);
+		const uint32_t inlineOrder = allocateCssSourceOrder(doc.cssDiagnostics);
+		for (unsigned i = 0; i < static_cast<unsigned>(CssProperty::Count); ++i) {
+			const CssProperty property = static_cast<CssProperty>(i);
+			const uint64_t bit = cssPropertyBit(property);
+			if ((inlineStyle.specifiedProperties & bit) == 0) continue;
+			if (cascadeApplications >= kCssLiteMaxCascadeApplicationsPerNode) {
+				saturatingIncrement(doc.cssDiagnostics.ruleCapCount);
+				break;
+			}
+			++cascadeApplications;
+			CssCascadeWinner candidate;
+			candidate.valid = true;
+			candidate.important = (inlineStyle.importantProperties & bit) != 0;
+			candidate.inlineDeclaration = true;
+			candidate.specificity = {};
+			candidate.sourceOrder = inlineOrder;
+			if (!cascadeCandidateWins(candidate, winners[i])) continue;
+			if (winners[i].valid) {
+				if (candidate.inlineDeclaration) saturatingIncrement(doc.cssDiagnostics.inlineOverrides);
+				else if (specificityGreater(candidate.specificity, winners[i].specificity)) saturatingIncrement(doc.cssDiagnostics.specificityOverrides);
+			}
+			applyStyleProperty(style, inlineStyle, property);
+			style.specifiedProperties |= bit;
+			style.inheritedProperties &= ~bit;
+			style.importantProperties = (style.importantProperties & ~bit) | (candidate.important ? bit : 0);
+			winners[i] = candidate;
+			saturatingIncrement(doc.cssDiagnostics.cascadePropertyResolutions);
+			if (candidate.important) saturatingIncrement(doc.cssDiagnostics.importantDeclarationsApplied);
+		}
 	}
+	if (hasParent && parent.displayNone) style.displayNone = true;
+	appendComputedStyleEvidence(doc, path.back(), style, winners);
 
 	cache.emplace(key, style);
 	return style;
@@ -1149,41 +3980,115 @@ static void applyDocumentStyles(WebDocument& doc)
 {
 	doc.cssDiagnostics.cssEnabled = true;
 	std::unordered_map<std::string, WebStyle> cache;
+	for (FormContainerMetadata& container : doc.formContainers) {
+		std::vector<HtmlElementRef> path;
+		if (buildStructuralPath(doc, container.serial, path)) {
+			container.style = computePathStyle(doc, path, cache);
+		} else {
+			container.metadataComplete = false;
+			container.style = defaultStyleForTag(container.tagName);
+			markDefaultStyleProperties(container.style);
+		}
+	}
 
 	if (doc.hasBodyElement) {
 		std::vector<HtmlElementRef> bodyPath;
-		bodyPath.push_back(doc.bodyElement);
+		if (doc.hasDocumentElement) bodyPath.push_back(doc.documentElement);
+		if (bodyPath.empty() || bodyPath.back().serial != doc.bodyElement.serial)
+			bodyPath.push_back(doc.bodyElement);
 		doc.bodyStyle = computePathStyle(doc, bodyPath, cache);
 	} else {
 		doc.bodyStyle = defaultStyleForTag("body");
+		markDefaultStyleProperties(doc.bodyStyle);
 	}
 
 	for (DocBlock& block : doc.blocks) {
-		WebStyle style = doc.bodyStyle;
 		std::vector<HtmlElementRef> path;
-		if (doc.hasBodyElement) {
+		if (doc.hasDocumentElement) path.push_back(doc.documentElement);
+		if (doc.hasBodyElement && (path.empty() || path.back().serial != doc.bodyElement.serial))
 			path.push_back(doc.bodyElement);
+		for (const HtmlElementRef& ancestor : block.ancestors) {
+			if (ancestor.serial != 0 && std::any_of(path.begin(), path.end(), [&](const HtmlElementRef& existing) {
+				return existing.serial == ancestor.serial;
+			})) continue;
+			path.push_back(ancestor);
 		}
 
-		size_t startIndex = 0;
-		if (!block.ancestors.empty() && doc.hasBodyElement &&
-			toLower(block.ancestors.front().tagName) == "body") {
-			startIndex = 1;
-		}
-
-		for (size_t i = startIndex; i < block.ancestors.size(); ++i) {
-			path.push_back(block.ancestors[i]);
-			style = mergeStyles(style, computePathStyle(doc, path, cache));
-		}
-
-		HtmlElementRef selfRef;
-		selfRef.tagName = block.tagName;
+		HtmlElementRef selfRef = block.elementMetadata;
+		if (selfRef.tagName.empty()) selfRef.tagName = block.tagName;
 		selfRef.className = block.className;
 		selfRef.id = block.id;
 		selfRef.inlineStyle = block.inlineStyle;
+		selfRef.formControl = block.formControl;
 		path.push_back(selfRef);
-		style = mergeStyles(style, computePathStyle(doc, path, cache));
-		block.style = style;
+		block.style = computePathStyle(doc, path, cache);
+		// Table geometry and wrapper borders are renderer metadata rather than
+		// inherited CSS.  Resolve them from bounded computed prefixes only when
+		// the block itself has no value, preserving explicit child declarations.
+		for (size_t prefixLength = path.size(); prefixLength > 1; --prefixLength) {
+			std::vector<HtmlElementRef> prefix(path.begin(), path.begin() + prefixLength - 1);
+			const WebStyle ancestorStyle = computePathStyle(doc, prefix, cache);
+			const std::string ancestorTag = toLower(prefix.back().tagName);
+			if (ancestorTag == "table" && block.style.borderCollapse == TableBorderCollapseMode::Inherit) {
+				block.style.borderCollapse = ancestorStyle.borderCollapse;
+				block.style.borderSpacingHorizontal = ancestorStyle.borderSpacingHorizontal;
+				block.style.borderSpacingVertical = ancestorStyle.borderSpacingVertical;
+			}
+			if (ancestorTag == "table") {
+				// The compact renderer represents a table through its cell blocks.
+				// Project only table sizing/placement metadata needed by that
+				// representation; backgrounds and text properties remain non-inherited.
+				if (block.style.width == -1 && block.style.widthPercent == -1) {
+					block.style.width = ancestorStyle.width;
+					block.style.widthPercent = ancestorStyle.widthPercent;
+				}
+				if (block.style.maxWidth == -1 && block.style.maxWidthPercent == -1) {
+					block.style.maxWidth = ancestorStyle.maxWidth;
+					block.style.maxWidthPercent = ancestorStyle.maxWidthPercent;
+				}
+				if (block.style.marginLeft == -1) block.style.marginLeft = ancestorStyle.marginLeft;
+				if (block.style.marginRight == -1) block.style.marginRight = ancestorStyle.marginRight;
+			}
+			if ((ancestorTag == "ul" || ancestorTag == "ol") && block.style.listStyleType == ListStyleType::Inherit) {
+				block.style.listStyleType = ancestorStyle.listStyleType;
+				block.style.listStyleNone = ancestorStyle.listStyleNone;
+			}
+			if (!block.style.hasBorderTop && ancestorStyle.hasBorderTop) {
+				block.style.hasBorderTop = true;
+				block.style.borderTopWidth = ancestorStyle.borderTopWidth;
+				block.style.borderTopStyle = ancestorStyle.borderTopStyle;
+				block.style.borderTopColor = ancestorStyle.borderTopColor;
+			}
+			if (!block.style.hasBorderRight && ancestorStyle.hasBorderRight) {
+				block.style.hasBorderRight = true;
+				block.style.borderRightWidth = ancestorStyle.borderRightWidth;
+				block.style.borderRightStyle = ancestorStyle.borderRightStyle;
+				block.style.borderRightColor = ancestorStyle.borderRightColor;
+			}
+			if (!block.style.hasBorderBottom && ancestorStyle.hasBorderBottom) {
+				block.style.hasBorderBottom = true;
+				block.style.borderBottomWidth = ancestorStyle.borderBottomWidth;
+				block.style.borderBottomStyle = ancestorStyle.borderBottomStyle;
+				block.style.borderBottomColor = ancestorStyle.borderBottomColor;
+			}
+			if (!block.style.hasBorderLeft && ancestorStyle.hasBorderLeft) {
+				block.style.hasBorderLeft = true;
+				block.style.borderLeftWidth = ancestorStyle.borderLeftWidth;
+				block.style.borderLeftStyle = ancestorStyle.borderLeftStyle;
+				block.style.borderLeftColor = ancestorStyle.borderLeftColor;
+			}
+		}
+	}
+	// Options do not become standalone layout blocks, but they still carry
+	// bounded state metadata.  Resolve their paths so option:checked and
+	// option:disabled participate in deterministic selector diagnostics without
+	// creating any popup or hidden layout surface.
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.formControl.type != FormControlType::Option || element.serial == 0)
+			continue;
+		std::vector<HtmlElementRef> path;
+		if (buildStructuralPath(doc, element.serial, path))
+			(void)computePathStyle(doc, path, cache);
 	}
 }
 
@@ -1194,7 +4099,8 @@ static DocBlock makeTextBlock(BlockType type,
 	const std::string& className,
 	const std::string& id,
 	const std::vector<HtmlElementRef>& ancestors = {},
-	const std::string& inlineStyle = {})
+	const std::string& inlineStyle = {},
+	const HtmlElementRef& elementMetadata = {})
 {
 	DocBlock block;
 	block.type = type;
@@ -1203,6 +4109,7 @@ static DocBlock makeTextBlock(BlockType type,
 	block.id = id;
 	block.inlineStyle = inlineStyle;
 	block.ancestors = ancestors;
+	block.elementMetadata = elementMetadata;
 	block.text = text;
 	block.url = url;
 	return block;
@@ -1215,6 +4122,9 @@ enum class OpenTag : uint8_t {
 	P,
 	A,
 	Li,
+	Dt,
+	Dd,
+	Figcaption,
 	Title,
 	Pre,   // <pre> block — whitespace preserved
 	Caption,
@@ -1222,6 +4132,15 @@ enum class OpenTag : uint8_t {
 	ButtonSubmit,
 	Textarea,
 	Option,
+	Legend,
+	Label,
+};
+
+struct StructuralChildCounter {
+	uint64_t serial = 0;
+	uint64_t lastChildSerial = 0;
+	uint16_t childCount = 0;
+	std::vector<std::pair<std::string, uint16_t>> typeCounts;
 };
 
 struct ParserState {
@@ -1232,7 +4151,13 @@ struct ParserState {
 	std::string  idBuf;
 	std::string  styleBuf;
 	std::vector<HtmlElementRef> openElements;
+	std::vector<HtmlElementRef> structuralElements;
+	std::vector<HtmlElementContentMetadata> contentMetadata;
+	std::vector<StructuralChildCounter> structuralCounters;
 	uint64_t     nextElementSerial = 1;
+	uint64_t     activeBlockSerial = 0;
+	size_t       uncapturedOpenElementDepth = 0;
+	const std::unordered_set<std::string>* visitedUrls = nullptr;
 	OpenTag      open    = OpenTag::None;
 	bool         inScript = false;
 	bool         inStyle  = false;
@@ -1244,18 +4169,35 @@ struct ParserState {
 	std::string  currentFormMethod;
 	std::string  currentFormEncoding;
 	bool         currentFormUnsupported = false;
+	uint64_t     currentFormSerial = 0;
 	std::string  currentTextareaName;
 	std::string  currentTextareaClass;
 	std::string  currentTextareaId;
+	std::string  currentTextareaPlaceholder;
+	bool         currentTextareaDisabled = false;
+	bool         currentTextareaRequired = false;
+	bool         currentTextareaReadOnly = false;
 	int          currentTextareaRows = 0;
 	int          currentTextareaCols = 0;
 	bool         inSelect = false;
 	std::string  currentSelectName;
 	std::string  currentSelectClass;
 	std::string  currentSelectId;
+	std::string  currentSelectInputType;
+	bool         currentSelectDisabled = false;
+	bool         currentSelectRequired = false;
+	bool         currentSelectMultiple = false;
+	int          currentSelectSize = 0;
+	uint64_t     currentSelectSerial = 0;
 	std::vector<FormOption> currentSelectOptions;
 	std::string  currentOptionValue;
 	bool         currentOptionSelected = false;
+	bool         currentOptionDisabled = false;
+	std::string  currentLabelFor;
+	std::string  currentLabelClass;
+	std::string  currentLabelId;
+	std::string  currentLegendText;
+	uint64_t     currentLegendSerial = 0;
 	std::string  currentTableCellText;
 	std::string  currentTableCaptionText;
 	bool         currentTableCellHeader = false;
@@ -1272,29 +4214,272 @@ static HtmlElementRef elementRefFromTagBody(const std::string& tagName, const st
 	return element;
 }
 
+static HtmlElementRef* findStructuralElement(ParserState& st, uint64_t serial)
+{
+	if (serial == 0) return nullptr;
+	for (HtmlElementRef& element : st.structuralElements) {
+		if (element.serial == serial) return &element;
+	}
+	return nullptr;
+}
+
+static StructuralChildCounter* findStructuralCounter(ParserState& st, uint64_t serial)
+{
+	if (serial == 0) return nullptr;
+	for (StructuralChildCounter& counter : st.structuralCounters) {
+		if (counter.serial == serial) return &counter;
+	}
+	return nullptr;
+}
+
+static HtmlElementContentMetadata* findContentMetadata(ParserState& st, uint64_t serial)
+{
+	if (serial == 0) return nullptr;
+	for (HtmlElementContentMetadata& metadata : st.contentMetadata) {
+		if (metadata.serial == serial) return &metadata;
+	}
+	return nullptr;
+}
+
+static const HtmlElementContentMetadata* findContentMetadata(const WebDocument& doc,
+	uint64_t serial)
+{
+	if (serial == 0) return nullptr;
+	for (const HtmlElementContentMetadata& metadata : doc.contentMetadata) {
+		if (metadata.serial == serial) return &metadata;
+	}
+	return nullptr;
+}
+
+static bool isNonRenderedMetadataElement(const std::string& tagName)
+{
+	const std::string tag = toLower(tagName);
+	return tag == "head" || tag == "title" || tag == "meta" ||
+		tag == "link" || tag == "base" || tag == "style" || tag == "script";
+}
+
+static void markContentMetadata(ParserState& st,
+	uint64_t serial,
+	bool hasText,
+	size_t textBytes,
+	bool hasImageOrMedia,
+	bool hasBreak,
+	bool hasReplaced,
+	bool hasRenderable,
+	bool uncertain = false)
+{
+	HtmlElementContentMetadata* metadata = findContentMetadata(st, serial);
+	if (!metadata) {
+		if (serial != 0) saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+		return;
+	}
+	metadata->hasNonWhitespaceText = metadata->hasNonWhitespaceText || hasText;
+	metadata->hasImageOrMediaChild = metadata->hasImageOrMediaChild || hasImageOrMedia;
+	metadata->hasVisibleBreak = metadata->hasVisibleBreak || hasBreak;
+	metadata->hasVisibleReplacedContent = metadata->hasVisibleReplacedContent || hasReplaced;
+	metadata->hasRenderableContent = metadata->hasRenderableContent || hasRenderable;
+	if (textBytes > 0) {
+		const size_t current = metadata->visibleTextByteCount;
+		const size_t next = std::min(kCssLiteMaxVisibleTextBytesPerElement,
+			current + textBytes);
+		metadata->visibleTextByteCount = static_cast<uint16_t>(next);
+		if (current + textBytes > kCssLiteMaxVisibleTextBytesPerElement)
+			saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+	}
+	if (uncertain) metadata->contentMetadataComplete = false;
+}
+
+static void markContentForOpenElements(ParserState& st,
+	bool hasText,
+	size_t textBytes,
+	bool hasImageOrMedia,
+	bool hasBreak,
+	bool hasReplaced,
+	bool hasRenderable,
+	bool uncertain = false)
+{
+	const size_t limit = std::min(st.openElements.size(), kCssLiteMaxContentAggregationOperations);
+	if (st.openElements.size() > limit)
+		saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+	for (size_t i = 0; i < limit; ++i) {
+		const HtmlElementRef& element = st.openElements[i];
+		if (isNonRenderedMetadataElement(element.tagName)) continue;
+		markContentMetadata(st, element.serial, hasText, textBytes,
+			hasImageOrMedia, hasBreak, hasReplaced, hasRenderable, uncertain);
+	}
+}
+
+static void markUncertainContent(ParserState& st)
+{
+	markContentForOpenElements(st, false, 0, false, false, false, true, true);
+}
+
+static HtmlElementRef registerStructuralElement(ParserState& st, HtmlElementRef element)
+{
+	element.tagName = toLower(element.tagName);
+	if (isNonRenderedMetadataElement(element.tagName)) {
+		// Metadata elements remain available to the forgiving HTML state
+		// machine, but they are deliberately not logical structural children.
+		// A zero serial also prevents head/title/style artifacts from affecting
+		// sibling counts or :empty content ownership.
+		element.serial = 0;
+		element.parentSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
+		return element;
+	}
+	element.serial = st.nextElementSerial++;
+	element.parentSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
+	if (StructuralChildCounter* parent = findStructuralCounter(st, element.parentSerial)) {
+		element.previousSiblingSerial = parent->lastChildSerial;
+		if (parent->childCount < std::numeric_limits<uint16_t>::max()) {
+			element.childIndex = static_cast<uint16_t>(++parent->childCount);
+		} else {
+			saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+			saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataClamps);
+		}
+		uint16_t* typeCount = nullptr;
+		for (auto& type : parent->typeCounts) {
+			if (type.first == element.tagName) {
+				typeCount = &type.second;
+				break;
+			}
+		}
+		if (!typeCount) {
+			if (parent->typeCounts.size() >= kCssLiteMaxNotComponents * 2) {
+				saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+				if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
+					parentMetadata->contentMetadataComplete = false;
+			} else {
+				parent->typeCounts.push_back({ element.tagName, 0 });
+				typeCount = &parent->typeCounts.back().second;
+			}
+		}
+		if (typeCount && *typeCount < std::numeric_limits<uint16_t>::max())
+			element.typeIndex = static_cast<uint16_t>(++(*typeCount));
+		parent->lastChildSerial = element.serial;
+		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial)) {
+			parentMetadata->hasElementChild = true;
+			if (parentMetadata->elementChildCount < std::numeric_limits<uint16_t>::max())
+				++parentMetadata->elementChildCount;
+			else {
+				saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+				parentMetadata->contentMetadataComplete = false;
+			}
+		} else {
+			saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+		}
+	} else if (element.parentSerial != 0) {
+		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataErrors);
+		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
+			parentMetadata->contentMetadataComplete = false;
+	}
+	if (st.structuralElements.size() >= kCssLiteMaxStructuralMetadata) {
+		saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+		saturatingIncrement(st.doc.cssDiagnostics.siblingMetadataClamps);
+		if (HtmlElementContentMetadata* parentMetadata = findContentMetadata(st, element.parentSerial))
+			parentMetadata->contentMetadataComplete = false;
+		return element;
+	}
+	st.structuralElements.push_back(element);
+	HtmlElementContentMetadata content;
+	content.serial = element.serial;
+	content.contentMetadataComplete = true;
+	st.contentMetadata.push_back(content);
+	st.structuralCounters.push_back({ element.serial, 0, {} });
+	return element;
+}
+
+static HtmlElementRef activeBlockElement(const ParserState& st)
+{
+	for (const HtmlElementRef& element : st.openElements) {
+		if (element.serial == st.activeBlockSerial) return element;
+	}
+	return {};
+}
+
 static std::vector<HtmlElementRef> captureBlockAncestors(const ParserState& st)
 {
-	std::vector<HtmlElementRef> ancestors = st.openElements;
-	switch (st.open) {
-	case OpenTag::H1:
-	case OpenTag::H2:
-	case OpenTag::H3:
-	case OpenTag::P:
-	case OpenTag::A:
-	case OpenTag::Li:
-	case OpenTag::Title:
-	case OpenTag::Pre:
-	case OpenTag::Caption:
-	case OpenTag::TableCell:
-	case OpenTag::ButtonSubmit:
-	case OpenTag::Textarea:
-	case OpenTag::Option:
-		if (!ancestors.empty()) ancestors.pop_back();
-		break;
-	default:
-		break;
+	std::vector<HtmlElementRef> ancestors;
+	if (st.activeBlockSerial != 0) {
+		for (const HtmlElementRef& element : st.openElements) {
+			if (element.serial == st.activeBlockSerial) break;
+			ancestors.push_back(element);
+		}
+		return ancestors;
 	}
+	ancestors = st.openElements;
 	return ancestors;
+}
+
+static std::vector<HtmlElementRef> captureControlAncestors(const ParserState& st)
+{
+	// <input> is a void element and is registered without being pushed onto
+	// openElements.  Preserve every represented wrapper here, including a
+	// wrapping <label>, so descendant selectors and label association retain
+	// their bounded structural path.
+	return st.openElements;
+}
+
+static uint64_t nearestAncestorSerial(const ParserState& st, const std::string& tagName)
+{
+	const std::string wanted = toLower(tagName);
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (toLower(it->tagName) == wanted && it->serial != 0) return it->serial;
+	}
+	return 0;
+}
+
+static bool disabledByFieldset(const ParserState& st)
+{
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (toLower(it->tagName) != "fieldset") continue;
+		return it->formControl.disabled;
+	}
+	return false;
+}
+
+static FormControlMetadata makeFormControlMetadata(const ParserState& st,
+	const HtmlElementRef& element,
+	FormControlType type,
+	const std::string& inputType,
+	bool supported)
+{
+	FormControlMetadata metadata;
+	metadata.type = type;
+	metadata.logicalSerial = element.serial;
+	metadata.parentFormSerial = nearestAncestorSerial(st, "form");
+	metadata.parentFieldsetSerial = nearestAncestorSerial(st, "fieldset");
+	metadata.inputType = inputType;
+	metadata.supported = supported;
+	metadata.metadataComplete = element.serial != 0 && st.uncapturedOpenElementDepth == 0;
+	metadata.disabled = disabledByFieldset(st);
+	return metadata;
+}
+
+static void registerFormContainer(ParserState& st,
+	const HtmlElementRef& element,
+	const std::string& tagName)
+{
+	if (st.doc.formContainers.size() >= kFormMaxControls) {
+		++st.doc.formsDiagnostics.controlMetadataClamps;
+		return;
+	}
+	FormContainerMetadata container;
+	container.tagName = toLower(tagName);
+	container.className = element.className;
+	container.id = element.id;
+	container.inlineStyle = element.inlineStyle;
+	container.serial = element.serial;
+	container.parentSerial = element.parentSerial;
+	container.metadataComplete = element.serial != 0;
+	st.doc.formContainers.push_back(std::move(container));
+}
+
+static FormContainerMetadata* findFormContainer(ParserState& st, uint64_t serial)
+{
+	for (FormContainerMetadata& container : st.doc.formContainers) {
+		if (container.serial == serial) return &container;
+	}
+	return nullptr;
 }
 
 static std::string openTagName(OpenTag tag)
@@ -1306,6 +4491,9 @@ static std::string openTagName(OpenTag tag)
 	case OpenTag::P: return "p";
 	case OpenTag::A: return "a";
 	case OpenTag::Li: return "li";
+	case OpenTag::Dt: return "dt";
+	case OpenTag::Dd: return "dd";
+	case OpenTag::Figcaption: return "figcaption";
 	case OpenTag::Title: return "title";
 	case OpenTag::Pre: return "pre";
 	case OpenTag::Caption: return "caption";
@@ -1313,6 +4501,8 @@ static std::string openTagName(OpenTag tag)
 	case OpenTag::ButtonSubmit: return "button";
 	case OpenTag::Textarea: return "textarea";
 	case OpenTag::Option: return "option";
+	case OpenTag::Legend: return "legend";
+	case OpenTag::Label: return "label";
 	default: return "";
 	}
 }
@@ -1321,6 +4511,11 @@ static void loadStylesheetForDocument(ParserState& st, const std::string& href)
 {
 	if (href.empty()) {
 		++st.doc.cssDiagnostics.unsupportedExternalStylesheetCount;
+		return;
+	}
+	if (st.doc.cssDiagnostics.externalStylesheetLoadedCount >= 8) {
+		++st.doc.cssDiagnostics.unsupportedExternalStylesheetCount;
+		st.doc.cssDiagnostics.styleBlockCapped = true;
 		return;
 	}
 	const std::string url = resolveRelativeUrl(st.doc.url, href);
@@ -1345,20 +4540,39 @@ static void loadStylesheetForDocument(ParserState& st, const std::string& href)
 	}
 }
 
-static void pushElement(ParserState& st, const HtmlElementRef& element)
+static bool pushElement(ParserState& st, const HtmlElementRef& element)
 {
+	if (st.openElements.size() >= kCssLiteMaxOpenElementDepth) {
+		markUncertainContent(st);
+		if (st.uncapturedOpenElementDepth < kCssLiteMaxOpenElementDepth)
+			++st.uncapturedOpenElementDepth;
+		saturatingIncrement(st.doc.cssDiagnostics.structuralMetadataClamps);
+		return false;
+	}
 	if (!element.inlineStyle.empty()) {
 		++st.doc.cssDiagnostics.inlineStyleCount;
 		st.doc.cssDiagnostics.cssDetected = true;
 	}
-	HtmlElementRef pushed = element;
-	pushed.serial = st.nextElementSerial++;
+	HtmlElementRef pushed = registerStructuralElement(st, element);
 	st.openElements.push_back(std::move(pushed));
+	return true;
+}
+
+static void activateCurrentBlock(ParserState& st)
+{
+	st.activeBlockSerial = st.openElements.empty() ? 0 : st.openElements.back().serial;
 }
 
 static void popElementByName(ParserState& st, const std::string& tagName)
 {
 	std::string target = toLower(tagName);
+	if (st.uncapturedOpenElementDepth > 0) {
+		// The bounded stack cannot retain the omitted tag names.  Consume one
+		// matching-depth close conservatively and leave the represented prefix
+		// intact so later sibling metadata cannot look valid by accident.
+		--st.uncapturedOpenElementDepth;
+		return;
+	}
 	for (int i = static_cast<int>(st.openElements.size()) - 1; i >= 0; --i) {
 		if (toLower(st.openElements[static_cast<size_t>(i)].tagName) == target) {
 			st.openElements.resize(static_cast<size_t>(i));
@@ -1383,6 +4597,15 @@ static void flushText(ParserState& st)
 	} else {
 		t = trim(collapseWs(decodeEntities(st.textBuf)));
 	}
+	if (st.open == OpenTag::Textarea && t.size() > kFormMaxValueBytes) {
+		++st.doc.formsDiagnostics.controlTextTruncations;
+		t.resize(kFormMaxValueBytes);
+	}
+	if (!t.empty()) {
+		markContentForOpenElements(st, true,
+			std::min(t.size(), kCssLiteMaxVisibleTextBytesPerElement),
+			false, false, false, true);
+	}
 	st.textBuf.clear();
 	if (t.empty()) return;
 	if (st.open == OpenTag::TableCell) {
@@ -1396,6 +4619,7 @@ static void flushText(ParserState& st)
 		return;
 	}
 	std::vector<HtmlElementRef> ancestors = captureBlockAncestors(st);
+	const HtmlElementRef elementMetadata = activeBlockElement(st);
 
 	switch (st.open) {
 	case OpenTag::H1:
@@ -1408,22 +4632,32 @@ static void flushText(ParserState& st)
 			st.classBuf,
 			st.idBuf,
 			ancestors,
-			st.styleBuf));
+			st.styleBuf,
+			elementMetadata));
 		break;
 	case OpenTag::P:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Li:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::ListItem, "li", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::ListItem, "li", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
+		break;
+	case OpenTag::Dt:
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "dt", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
+		break;
+	case OpenTag::Dd:
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "dd", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
+		break;
+	case OpenTag::Figcaption:
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "figcaption", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Pre:
-		st.doc.blocks.push_back(makeTextBlock(BlockType::Preformatted, "pre", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Preformatted, "pre", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::A:
 		if (!st.hrefBuf.empty())
-			st.doc.blocks.push_back(makeTextBlock(BlockType::Link, "a", t, st.hrefBuf, st.classBuf, st.idBuf, ancestors, st.styleBuf));
+			st.doc.blocks.push_back(makeTextBlock(BlockType::Link, "a", t, st.hrefBuf, st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		else
-			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf, elementMetadata));
 		break;
 	case OpenTag::Title:
 		st.doc.title = t;
@@ -1432,14 +4666,29 @@ static void flushText(ParserState& st)
 		DocBlock block;
 		block.type = BlockType::FormSubmit;
 		block.tagName = "button";
-		block.text = t.empty() ? "Submit" : t;
+		block.className = elementMetadata.className;
+		block.id = elementMetadata.id;
+		std::string buttonType = elementMetadata.formControl.inputType.empty() ? "submit" : elementMetadata.formControl.inputType;
+		block.text = t.empty() ? (buttonType == "reset" ? "Reset" : (buttonType == "button" ? "Button" : "Submit")) : t;
+		if (block.text.size() > kFormMaxLabelBytes) {
+			++st.doc.formsDiagnostics.controlTextTruncations;
+			block.text.resize(kFormMaxLabelBytes);
+		}
 		block.submitLabel = block.text;
+		block.inputType = buttonType;
 		block.formIndex = st.currentFormIndex;
 		block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 		block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
 		block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
 		block.formUnsupported = st.currentFormUnsupported;
+		block.formControl = elementMetadata.formControl;
+		block.formControl.type = buttonType == "button" ? FormControlType::Button :
+			buttonType == "reset" ? FormControlType::Reset : FormControlType::Submit;
+		block.formControl.logicalSerial = elementMetadata.serial;
+		block.formControl.label = block.text;
+		block.formControl.metadataComplete = elementMetadata.serial != 0 && st.uncapturedOpenElementDepth == 0;
 		block.ancestors = ancestors;
+		block.elementMetadata = elementMetadata;
 		block.inlineStyle = st.styleBuf;
 		st.doc.blocks.push_back(std::move(block));
 		++st.doc.formsDiagnostics.submitCount;
@@ -1461,19 +4710,72 @@ static void flushText(ParserState& st)
 		block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
 		block.visibleRows = st.currentTextareaRows > 0 ? st.currentTextareaRows : 4;
 		block.visibleCols = st.currentTextareaCols > 0 ? st.currentTextareaCols : 40;
+		block.placeholder = st.currentTextareaPlaceholder;
 		block.formUnsupported = st.currentFormUnsupported;
+		block.formControl.type = FormControlType::Textarea;
+		block.formControl.logicalSerial = elementMetadata.serial;
+		block.formControl.parentFormSerial = nearestAncestorSerial(st, "form");
+		block.formControl.parentFieldsetSerial = nearestAncestorSerial(st, "fieldset");
+		block.formControl.inputType = "textarea";
+		block.formControl.name = block.inputName;
+		block.formControl.value = block.inputValue;
+		block.formControl.placeholder = block.placeholder;
+		block.formControl.supported = true;
+		block.formControl.metadataComplete = elementMetadata.serial != 0 && st.uncapturedOpenElementDepth == 0;
+		block.formControl.disabled = st.currentTextareaDisabled;
+		block.formControl.required = st.currentTextareaRequired;
+		block.formControl.readOnly = st.currentTextareaReadOnly;
+		block.formControl.rows = block.visibleRows;
+		block.formControl.cols = block.visibleCols;
 		block.ancestors = ancestors;
+		block.elementMetadata = elementMetadata;
 		block.inlineStyle = st.styleBuf;
 		st.doc.blocks.push_back(std::move(block));
 		++st.doc.formsDiagnostics.textareaCount;
 		break;
 	}
 	case OpenTag::Option: {
+		if (st.currentSelectOptions.size() >= kFormMaxOptions) {
+			++st.doc.formsDiagnostics.controlMetadataClamps;
+			break;
+		}
+		if (t.size() > kFormMaxOptionTextBytes) {
+			++st.doc.formsDiagnostics.controlTextTruncations;
+			t.resize(kFormMaxOptionTextBytes);
+		}
 		FormOption option;
 		option.text = t;
 		option.value = st.currentOptionValue.empty() ? t : st.currentOptionValue;
 		option.selected = st.currentOptionSelected;
+		option.disabled = st.currentOptionDisabled;
 		st.currentSelectOptions.push_back(std::move(option));
+		break;
+	}
+	case OpenTag::Legend:
+		if (st.currentLegendText.size() + t.size() > kFormMaxLabelBytes) {
+			++st.doc.formsDiagnostics.controlTextTruncations;
+			const size_t remaining = st.currentLegendText.size() < kFormMaxLabelBytes
+				? kFormMaxLabelBytes - st.currentLegendText.size() : 0;
+			st.currentLegendText += t.substr(0, remaining);
+		} else {
+			st.currentLegendText += t;
+		}
+		break;
+	case OpenTag::Label: {
+		DocBlock block;
+		block.type = BlockType::FormLabel;
+		block.tagName = "label";
+		block.text = t;
+		block.className = st.currentLabelClass;
+		block.id = st.currentLabelId;
+		block.labelFor = st.currentLabelFor;
+		block.formIndex = st.currentFormIndex;
+		block.formControl.type = FormControlType::None;
+		block.formControl.metadataComplete = elementMetadata.serial != 0 && st.uncapturedOpenElementDepth == 0;
+		block.ancestors = ancestors;
+		block.elementMetadata = elementMetadata;
+		block.inlineStyle = st.styleBuf;
+		st.doc.blocks.push_back(std::move(block));
 		break;
 	}
 	default:
@@ -1511,21 +4813,50 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	// Mark body reached.
 	if (name == "body") {
 		st.bodyReached = true;
-		st.doc.hasBodyElement = true;
-		st.doc.bodyElement = elementRef;
+		st.doc.hasBodyElement = pushElement(st, elementRef);
+		if (st.doc.hasBodyElement && !st.openElements.empty())
+			st.doc.bodyElement = st.openElements.back();
+		return;
+	}
+	if (name == "html") {
+		st.doc.hasDocumentElement = pushElement(st, elementRef);
+		if (st.doc.hasDocumentElement && !st.openElements.empty())
+			st.doc.documentElement = st.openElements.back();
+		return;
+	}
+
+	if (name == "blockquote" || name == "figure" || name == "dl") {
+		flushText(st);
+		if (!st.bodyReached) return;
 		pushElement(st, elementRef);
+		return;
+	}
+
+	if (name == "dt" || name == "dd" || name == "figcaption") {
+		flushText(st);
+		if (!st.bodyReached) return;
+		st.classBuf = extractAttr(tagBody, "class");
+		st.idBuf = extractAttr(tagBody, "id");
+		st.styleBuf = extractAttr(tagBody, "style");
+		st.open = name == "dt" ? OpenTag::Dt : (name == "dd" ? OpenTag::Dd : OpenTag::Figcaption);
+		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		return;
 	}
 
 	if (name == "hr") {
 		flushText(st);
 		if (!st.bodyReached) return;
+		const HtmlElementRef hrElement = registerStructuralElement(st, elementRef);
+		markContentForOpenElements(st, false, 0, false, false, true, true);
+		markContentMetadata(st, hrElement.serial, false, 0, false, false, true, true);
 		DocBlock block;
 		block.type = BlockType::Paragraph;
 		block.tagName = "hr";
 		block.className = extractAttr(tagBody, "class");
 		block.id = extractAttr(tagBody, "id");
 		block.inlineStyle = extractAttr(tagBody, "style");
+		block.elementMetadata = hrElement;
 		block.ancestors = captureBlockAncestors(st);
 		st.doc.blocks.push_back(std::move(block));
 		return;
@@ -1535,14 +4866,16 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "html" || name == "head" || name == "ul" || name == "ol" ||
 		name == "div" || name == "span" || name == "strong" || name == "b" ||
 		name == "em" || name == "i" || name == "small" || name == "code" ||
+		name == "cite" || name == "q" ||
 		name == "kbd" || name == "samp" || name == "section" ||
 		name == "article" || name == "header" || name == "footer" || name == "nav" ||
 		name == "main" || name == "table" || name == "thead" || name == "tbody" ||
-		name == "tfoot" || name == "tr" || name == "noscript" || name == "form") {
+		name == "tfoot" || name == "tr" || name == "noscript" || name == "form" || name == "fieldset") {
 		if (name == "form") {
 			flushText(st);
 			st.inForm = true;
 			st.currentFormIndex = st.doc.formsDiagnostics.formCount++;
+			++st.doc.formsDiagnostics.htmlFormsParsed;
 			st.currentFormAction = trim(decodeEntities(extractAttr(tagBody, "action")));
 			if (st.currentFormAction.empty()) st.currentFormAction = st.doc.url;
 			st.currentFormAction = resolveRelativeUrl(st.doc.url, st.currentFormAction);
@@ -1555,6 +4888,22 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			st.currentFormUnsupported = unsupportedMethod || unsupportedEncoding;
 			if (unsupportedMethod) st.doc.formsDiagnostics.hasUnsupportedMethod = true;
 			if (unsupportedEncoding) st.doc.formsDiagnostics.hasUnsupportedEncoding = true;
+			const bool pushed = pushElement(st, elementRef);
+			st.currentFormSerial = pushed && !st.openElements.empty() ? st.openElements.back().serial : 0;
+			return;
+		}
+		if (name == "fieldset") {
+			flushText(st);
+			elementRef.formControl.type = FormControlType::None;
+			elementRef.formControl.disabled = hasAttr(tagBody, "disabled");
+			elementRef.formControl.metadataComplete = true;
+			const bool pushed = pushElement(st, elementRef);
+			if (pushed && !st.openElements.empty()) {
+				const HtmlElementRef& fieldset = st.openElements.back();
+				registerFormContainer(st, fieldset, "fieldset");
+			}
+			++st.doc.formsDiagnostics.htmlFieldsetsParsed;
+			return;
 		}
 		pushElement(st, elementRef);
 		return;
@@ -1568,6 +4917,37 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.idBuf = extractAttr(tagBody, "id");
 		st.styleBuf = extractAttr(tagBody, "style");
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
+		return;
+	}
+
+	if (name == "legend") {
+		flushText(st);
+		st.open = OpenTag::Legend;
+		st.currentLegendText.clear();
+		st.classBuf = extractAttr(tagBody, "class");
+		st.idBuf = extractAttr(tagBody, "id");
+		st.styleBuf = extractAttr(tagBody, "style");
+		if (pushElement(st, elementRef) && !st.openElements.empty()) {
+			registerFormContainer(st, st.openElements.back(), "legend");
+			st.currentLegendSerial = st.openElements.back().serial;
+			st.activeBlockSerial = st.currentLegendSerial;
+		}
+		return;
+	}
+
+	if (name == "label") {
+		flushText(st);
+		st.open = OpenTag::Label;
+		st.currentLabelFor = boundedDecodedFormText(extractAttr(tagBody, "for"), kFormMaxLabelBytes, st.doc.formsDiagnostics);
+		st.currentLabelClass = extractAttr(tagBody, "class");
+		st.currentLabelId = extractAttr(tagBody, "id");
+		st.classBuf = st.currentLabelClass;
+		st.idBuf = st.currentLabelId;
+		st.styleBuf = extractAttr(tagBody, "style");
+		if (pushElement(st, elementRef) && !st.openElements.empty())
+			st.activeBlockSerial = st.openElements.back().serial;
+		++st.doc.formsDiagnostics.htmlLabelsParsed;
 		return;
 	}
 
@@ -1581,6 +4961,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.idBuf = extractAttr(tagBody, "id");
 		st.styleBuf = extractAttr(tagBody, "style");
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		return;
 	}
 
@@ -1597,7 +4978,63 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		flushText(st);
 		std::string type = toLower(trim(extractAttr(tagBody, "type")));
 		if (type.empty()) type = "text";
-		if (type == "text" || type == "search") {
+		const bool hidden = type == "hidden";
+		const bool supported = type == "text" || type == "password" || type == "search" ||
+			type == "email" || type == "url" || type == "number" || type == "checkbox" ||
+			type == "radio" || type == "button" || type == "submit" || type == "reset";
+		FormControlType controlType = FormControlType::Unsupported;
+		if (type == "text") controlType = FormControlType::Text;
+		else if (type == "password") controlType = FormControlType::Password;
+		else if (type == "search") controlType = FormControlType::Search;
+		else if (type == "email") controlType = FormControlType::Email;
+		else if (type == "url") controlType = FormControlType::Url;
+		else if (type == "number") controlType = FormControlType::Number;
+		else if (type == "checkbox") controlType = FormControlType::Checkbox;
+		else if (type == "radio") controlType = FormControlType::Radio;
+		else if (type == "button") controlType = FormControlType::Button;
+		else if (type == "submit") controlType = FormControlType::Submit;
+		else if (type == "reset") controlType = FormControlType::Reset;
+
+		const int parsedControls = st.doc.formsDiagnostics.textInputCount +
+			st.doc.formsDiagnostics.checkboxCount + st.doc.formsDiagnostics.radioCount +
+			st.doc.formsDiagnostics.textareaCount + st.doc.formsDiagnostics.selectCount +
+			st.doc.formsDiagnostics.submitCount + st.doc.formsDiagnostics.htmlHiddenControls +
+			st.doc.formsDiagnostics.unsupportedControlCount;
+		if (parsedControls >= static_cast<int>(kFormMaxControls)) {
+			++st.doc.formsDiagnostics.controlMetadataClamps;
+			return;
+		}
+
+		elementRef.formControl.type = controlType;
+		elementRef.formControl.inputType = type;
+		elementRef.formControl.supported = supported;
+		elementRef.formControl.metadataComplete = true;
+		elementRef.formControl.disabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
+		elementRef.formControl.required = hasAttr(tagBody, "required");
+		elementRef.formControl.readOnly = hasAttr(tagBody, "readonly");
+		elementRef.formControl.hidden = hidden;
+		elementRef.formControl.checked = (type == "checkbox" || type == "radio") && hasAttr(tagBody, "checked");
+		elementRef.formControl.name = boundedDecodedFormText(extractAttr(tagBody, "name"), kFormMaxLabelBytes, st.doc.formsDiagnostics);
+		elementRef.formControl.value = boundedDecodedFormText(extractAttr(tagBody, "value"), kFormMaxValueBytes, st.doc.formsDiagnostics);
+		elementRef.formControl.placeholder = boundedDecodedFormText(extractAttr(tagBody, "placeholder"), kFormMaxPlaceholderBytes, st.doc.formsDiagnostics);
+		elementRef.formControl.size = parseBoundedFormInt(tagBody, "size", kFormMaxSize, st.doc.formsDiagnostics);
+		const HtmlElementRef inputElement = registerStructuralElement(st, elementRef);
+		for (HtmlElementRef& stored : st.structuralElements) {
+			if (stored.serial == inputElement.serial) stored.formControl.logicalSerial = inputElement.serial;
+		}
+		if (hidden) {
+			markContentForOpenElements(st, false, 0, false, false, false, false);
+			markContentMetadata(st, inputElement.serial, false, 0, false, false, false, false);
+		} else {
+			markContentForOpenElements(st, false, 0, true, false, true, true);
+			markContentMetadata(st, inputElement.serial, false, 0, true, false, true, true);
+		}
+		++st.doc.formsDiagnostics.htmlInputsParsed;
+		if (hidden) {
+			++st.doc.formsDiagnostics.htmlHiddenControls;
+			return;
+		}
+		if (type == "text" || type == "password" || type == "search" || type == "email" || type == "url" || type == "number" || !supported) {
 			DocBlock block;
 			block.type = BlockType::FormTextInput;
 			block.tagName = "input";
@@ -1607,13 +5044,23 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
 			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
-			block.inputName = decodeEntities(extractAttr(tagBody, "name"));
-			block.inputValue = decodeEntities(extractAttr(tagBody, "value"));
+			block.inputName = inputElement.formControl.name;
+			block.inputValue = supported ? inputElement.formControl.value : std::string();
 			block.inputType = type;
-			block.placeholder = decodeEntities(extractAttr(tagBody, "placeholder"));
+			block.visibleCols = inputElement.formControl.size;
+			block.placeholder = inputElement.formControl.placeholder;
 			block.formUnsupported = st.currentFormUnsupported;
-			block.text = block.inputValue;
-			block.ancestors = captureBlockAncestors(st);
+			block.text = block.inputValue.empty() && !block.placeholder.empty() ? block.placeholder : block.inputValue;
+			if (!supported) {
+				block.inputType = "unsupported";
+				block.placeholder = "[unsupported input]";
+				++st.doc.formsDiagnostics.unsupportedControlCount;
+				++st.doc.formsDiagnostics.formControlsUnsupported;
+			}
+			block.formControl = inputElement.formControl;
+			block.formControl.logicalSerial = inputElement.serial;
+			block.elementMetadata = inputElement;
+			block.ancestors = captureControlAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
 			if (!block.inlineStyle.empty()) {
 				++st.doc.cssDiagnostics.inlineStyleCount;
@@ -1631,14 +5078,18 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
 			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
-			block.inputName = decodeEntities(extractAttr(tagBody, "name"));
-			block.inputValue = decodeEntities(extractAttr(tagBody, "value"));
+			block.inputName = inputElement.formControl.name;
+			block.inputValue = inputElement.formControl.value;
 			if (block.inputValue.empty()) block.inputValue = "on";
 			block.inputType = type;
 			block.checked = hasAttr(tagBody, "checked");
 			block.text = block.inputName.empty() ? block.inputValue : block.inputName;
+			block.formControl = inputElement.formControl;
+			block.formControl.logicalSerial = inputElement.serial;
+			block.formControl.checked = block.checked;
+			block.elementMetadata = inputElement;
 			block.formUnsupported = st.currentFormUnsupported;
-			block.ancestors = captureBlockAncestors(st);
+			block.ancestors = captureControlAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
 			if (!block.inlineStyle.empty()) {
 				++st.doc.cssDiagnostics.inlineStyleCount;
@@ -1647,7 +5098,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			st.doc.blocks.push_back(std::move(block));
 			if (type == "checkbox") ++st.doc.formsDiagnostics.checkboxCount;
 			else ++st.doc.formsDiagnostics.radioCount;
-		} else if (type == "submit") {
+		} else if (type == "button" || type == "submit" || type == "reset") {
 			DocBlock block;
 			block.type = BlockType::FormSubmit;
 			block.tagName = "input";
@@ -1657,11 +5108,15 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
 			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
-			block.submitLabel = decodeEntities(extractAttr(tagBody, "value"));
-			if (block.submitLabel.empty()) block.submitLabel = "Submit";
+			block.submitLabel = inputElement.formControl.value;
+			if (block.submitLabel.empty()) block.submitLabel = type == "reset" ? "Reset" : (type == "button" ? "Button" : "Submit");
 			block.text = block.submitLabel;
+			block.inputType = type;
+			block.formControl = inputElement.formControl;
+			block.formControl.logicalSerial = inputElement.serial;
+			block.elementMetadata = inputElement;
 			block.formUnsupported = st.currentFormUnsupported;
-			block.ancestors = captureBlockAncestors(st);
+			block.ancestors = captureControlAncestors(st);
 			block.inlineStyle = extractAttr(tagBody, "style");
 			if (!block.inlineStyle.empty()) {
 				++st.doc.cssDiagnostics.inlineStyleCount;
@@ -1669,35 +5124,83 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			}
 			st.doc.blocks.push_back(std::move(block));
 			++st.doc.formsDiagnostics.submitCount;
+			++st.doc.formsDiagnostics.htmlButtonsParsed;
 		} else {
 			++st.doc.formsDiagnostics.unsupportedControlCount;
+			++st.doc.formsDiagnostics.formControlsUnsupported;
 		}
 		return;
 	}
 
 	if (name == "textarea") {
 		flushText(st);
+		const int parsedControls = st.doc.formsDiagnostics.textInputCount +
+			st.doc.formsDiagnostics.checkboxCount + st.doc.formsDiagnostics.radioCount +
+			st.doc.formsDiagnostics.textareaCount + st.doc.formsDiagnostics.selectCount +
+			st.doc.formsDiagnostics.submitCount + st.doc.formsDiagnostics.htmlHiddenControls +
+			st.doc.formsDiagnostics.unsupportedControlCount;
+		if (parsedControls >= static_cast<int>(kFormMaxControls)) {
+			++st.doc.formsDiagnostics.controlMetadataClamps;
+			return;
+		}
 		st.open = OpenTag::Textarea;
-		st.currentTextareaName = decodeEntities(extractAttr(tagBody, "name"));
+		st.currentTextareaName = boundedDecodedFormText(extractAttr(tagBody, "name"), kFormMaxLabelBytes, st.doc.formsDiagnostics);
 		st.currentTextareaClass = extractAttr(tagBody, "class");
 		st.currentTextareaId = extractAttr(tagBody, "id");
-		st.currentTextareaRows = parsePositiveIntAttr(tagBody, "rows");
-		st.currentTextareaCols = parsePositiveIntAttr(tagBody, "cols");
+		st.currentTextareaPlaceholder = boundedDecodedFormText(extractAttr(tagBody, "placeholder"), kFormMaxPlaceholderBytes, st.doc.formsDiagnostics);
+		st.currentTextareaDisabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
+		st.currentTextareaRequired = hasAttr(tagBody, "required");
+		st.currentTextareaReadOnly = hasAttr(tagBody, "readonly");
+		st.currentTextareaRows = parseBoundedFormInt(tagBody, "rows", kFormMaxRows, st.doc.formsDiagnostics);
+		st.currentTextareaCols = parseBoundedFormInt(tagBody, "cols", kFormMaxCols, st.doc.formsDiagnostics);
 		st.styleBuf = extractAttr(tagBody, "style");
+		elementRef.formControl = makeFormControlMetadata(st, elementRef, FormControlType::Textarea, "textarea", true);
+		elementRef.formControl.name = st.currentTextareaName;
+		elementRef.formControl.placeholder = st.currentTextareaPlaceholder;
+		elementRef.formControl.disabled = st.currentTextareaDisabled;
+		elementRef.formControl.required = st.currentTextareaRequired;
+		elementRef.formControl.readOnly = st.currentTextareaReadOnly;
+		elementRef.formControl.rows = st.currentTextareaRows;
+		elementRef.formControl.cols = st.currentTextareaCols;
 		pushElement(st, elementRef);
+		++st.doc.formsDiagnostics.htmlTextareasParsed;
+		activateCurrentBlock(st);
 		st.textBuf.clear();
 		return;
 	}
 
 	if (name == "select") {
 		flushText(st);
+		const int parsedControls = st.doc.formsDiagnostics.textInputCount +
+			st.doc.formsDiagnostics.checkboxCount + st.doc.formsDiagnostics.radioCount +
+			st.doc.formsDiagnostics.textareaCount + st.doc.formsDiagnostics.selectCount +
+			st.doc.formsDiagnostics.submitCount + st.doc.formsDiagnostics.htmlHiddenControls +
+			st.doc.formsDiagnostics.unsupportedControlCount;
+		if (parsedControls >= static_cast<int>(kFormMaxControls)) {
+			++st.doc.formsDiagnostics.controlMetadataClamps;
+			return;
+		}
 		st.inSelect = true;
-		st.currentSelectName = decodeEntities(extractAttr(tagBody, "name"));
+		st.currentSelectName = boundedDecodedFormText(extractAttr(tagBody, "name"), kFormMaxLabelBytes, st.doc.formsDiagnostics);
 		st.currentSelectClass = extractAttr(tagBody, "class");
 		st.currentSelectId = extractAttr(tagBody, "id");
+		st.currentSelectInputType = "select";
+		st.currentSelectDisabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
+		st.currentSelectRequired = hasAttr(tagBody, "required");
+		st.currentSelectMultiple = hasAttr(tagBody, "multiple");
+		st.currentSelectSize = parseBoundedFormInt(tagBody, "size", kFormMaxSize, st.doc.formsDiagnostics);
 		st.currentSelectOptions.clear();
 		st.styleBuf = extractAttr(tagBody, "style");
-		pushElement(st, elementRef);
+		elementRef.formControl = makeFormControlMetadata(st, elementRef, FormControlType::Select, "select", true);
+		elementRef.formControl.name = st.currentSelectName;
+		elementRef.formControl.disabled = st.currentSelectDisabled;
+		elementRef.formControl.required = st.currentSelectRequired;
+		elementRef.formControl.multiple = st.currentSelectMultiple;
+		elementRef.formControl.size = st.currentSelectSize;
+		if (pushElement(st, elementRef) && !st.openElements.empty())
+			st.currentSelectSerial = st.openElements.back().serial;
+		++st.doc.formsDiagnostics.htmlSelectsParsed;
+		activateCurrentBlock(st);
 		st.open = OpenTag::None;
 		return;
 	}
@@ -1705,10 +5208,17 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "option" && st.inSelect) {
 		flushText(st);
 		st.open = OpenTag::Option;
-		st.currentOptionValue = decodeEntities(extractAttr(tagBody, "value"));
+		st.currentOptionValue = boundedDecodedFormText(extractAttr(tagBody, "value"), kFormMaxOptionTextBytes, st.doc.formsDiagnostics);
 		st.currentOptionSelected = hasAttr(tagBody, "selected");
+		st.currentOptionDisabled = hasAttr(tagBody, "disabled") || st.currentSelectDisabled;
 		st.styleBuf = extractAttr(tagBody, "style");
+		elementRef.formControl = makeFormControlMetadata(st, elementRef, FormControlType::Option, "option", true);
+		elementRef.formControl.selected = st.currentOptionSelected;
+		elementRef.formControl.checked = st.currentOptionSelected;
+		elementRef.formControl.disabled = st.currentOptionDisabled;
 		pushElement(st, elementRef);
+		++st.doc.formsDiagnostics.htmlOptionsParsed;
+		activateCurrentBlock(st);
 		st.textBuf.clear();
 		return;
 	}
@@ -1717,6 +5227,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	// line break only if there is pending text (avoids empty Paragraph blocks).
 	if (name == "br") {
 		++st.doc.cssDiagnostics.lineBreakCount;
+		markContentForOpenElements(st, false, 0, false, true, false, true);
 		if (st.inPre) {
 			st.textBuf += '\n';
 		} else if (st.open == OpenTag::TableCell) {
@@ -1731,6 +5242,9 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "img") {
 		flushText(st);
 		std::string src = trim(decodeEntities(extractAttr(tagBody, "src")));
+		const HtmlElementRef imageElement = registerStructuralElement(st, elementRef);
+		markContentForOpenElements(st, false, 0, true, false, true, true);
+		markContentMetadata(st, imageElement.serial, false, 0, true, false, true, true);
 		if (src.empty()) return;
 		std::string alt = decodeEntities(extractAttr(tagBody, "alt"));
 		DocBlock block;
@@ -1747,8 +5261,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			++st.doc.cssDiagnostics.inlineStyleCount;
 			st.doc.cssDiagnostics.cssDetected = true;
 		}
-		block.width = parsePositiveIntAttr(tagBody, "width");
-		block.height = parsePositiveIntAttr(tagBody, "height");
+		bool widthAttrClamped = false;
+		bool heightAttrClamped = false;
+		block.width = parsePositiveIntAttr(tagBody, "width", &widthAttrClamped);
+		block.height = parsePositiveIntAttr(tagBody, "height", &heightAttrClamped);
+		block.imageSizeAttrClamped = widthAttrClamped || heightAttrClamped;
+		block.elementMetadata = imageElement;
 		block.ancestors = captureBlockAncestors(st);
 		st.doc.blocks.push_back(std::move(block));
 		st.open = OpenTag::None;
@@ -1766,17 +5284,18 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	st.idBuf = extractAttr(tagBody, "id");
 	st.styleBuf = extractAttr(tagBody, "style");
 
-	if (name == "h1")    { st.open = OpenTag::H1;    pushElement(st, elementRef); return; }
-	if (name == "h2")    { st.open = OpenTag::H2;    pushElement(st, elementRef); return; }
-	if (name == "h3")    { st.open = OpenTag::H3;    pushElement(st, elementRef); return; }
-	if (name == "p")     { st.open = OpenTag::P;     pushElement(st, elementRef); return; }
-	if (name == "li")    { st.open = OpenTag::Li;    pushElement(st, elementRef); return; }
-	if (name == "title") { st.open = OpenTag::Title; pushElement(st, elementRef); return; }
+	if (name == "h1")    { st.open = OpenTag::H1;    pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "h2")    { st.open = OpenTag::H2;    pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "h3")    { st.open = OpenTag::H3;    pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "p")     { st.open = OpenTag::P;     pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "li")    { st.open = OpenTag::Li;    pushElement(st, elementRef); activateCurrentBlock(st); return; }
+	if (name == "title") { st.open = OpenTag::Title; pushElement(st, elementRef); activateCurrentBlock(st); return; }
 
 	if (name == "pre") {
 		st.open  = OpenTag::Pre;
 		st.inPre = true;
 		pushElement(st, elementRef);
+		activateCurrentBlock(st);
 		return;
 	}
 	// <code>: if a <pre> is already open, stay in it; otherwise treat as plain text.
@@ -1790,6 +5309,8 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		if (!href.empty()) {
 			// Resolve relative URL against the document base.
 			st.hrefBuf = resolveRelativeUrl(st.doc.url, href);
+			elementRef.hasLinkTarget = true;
+			elementRef.visited = st.visitedUrls && st.visitedUrls->find(st.hrefBuf) != st.visitedUrls->end();
 			if (st.open == OpenTag::TableCell) {
 				st.currentTableCellHref = st.hrefBuf;
 			}
@@ -1800,14 +5321,21 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			st.open = OpenTag::A;
 		}
 		pushElement(st, elementRef);
+		if (st.open == OpenTag::A) activateCurrentBlock(st);
 		return;
 	}
 
 	if (name == "button") {
 		std::string type = toLower(trim(extractAttr(tagBody, "type")));
-		if (type.empty() || type == "submit") {
+		if (type.empty()) type = "submit";
+		if (type == "submit" || type == "button" || type == "reset") {
+			elementRef.formControl = makeFormControlMetadata(st, elementRef,
+				type == "button" ? FormControlType::Button : (type == "reset" ? FormControlType::Reset : FormControlType::Submit),
+				type, true);
+			elementRef.formControl.disabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
 			st.open = OpenTag::ButtonSubmit;
-			pushElement(st, elementRef);
+			if (pushElement(st, elementRef)) ++st.doc.formsDiagnostics.htmlButtonsParsed;
+			activateCurrentBlock(st);
 		} else {
 			++st.doc.formsDiagnostics.unsupportedControlCount;
 		}
@@ -1815,7 +5343,9 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	}
 
 	// Unknown open tag: leave current open context unchanged so text inside
-	// unknown tags flows into the current block.
+	// unknown tags flows into the current block.  Its ownership is uncertain,
+	// so :empty must fail closed for the enclosing logical elements.
+	markUncertainContent(st);
 }
 
 // Handle a closing tag.
@@ -1833,11 +5363,20 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 
 	// Close block-level contexts.
 	if (name == "h1" || name == "h2" || name == "h3" ||
-		name == "p"  || name == "li" || name == "title" ||
-		name == "button" || name == "textarea" || name == "option") {
+		name == "p"  || name == "li" || name == "dt" || name == "dd" || name == "figcaption" || name == "title" ||
+		name == "button" || name == "textarea" || name == "option" || name == "legend" || name == "label") {
+		const uint64_t closingSerial = st.activeBlockSerial;
 		flushText(st);
+		if (name == "legend") {
+			if (FormContainerMetadata* container = findFormContainer(st, closingSerial)) {
+				container->legendText = st.currentLegendText;
+				if (FormContainerMetadata* fieldset = findFormContainer(st, container->parentSerial))
+					fieldset->legendText = st.currentLegendText;
+			}
+		}
 		popElementByName(st, name);
 		st.open    = OpenTag::None;
+		st.activeBlockSerial = 0;
 		st.hrefBuf.clear();
 		st.classBuf.clear();
 		st.idBuf.clear();
@@ -1846,10 +5385,24 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			st.currentTextareaName.clear();
 			st.currentTextareaClass.clear();
 			st.currentTextareaId.clear();
+			st.currentTextareaPlaceholder.clear();
+			st.currentTextareaDisabled = false;
+			st.currentTextareaRequired = false;
+			st.currentTextareaReadOnly = false;
 		}
 		if (name == "option") {
 			st.currentOptionValue.clear();
 			st.currentOptionSelected = false;
+			st.currentOptionDisabled = false;
+		}
+		if (name == "legend") {
+			st.currentLegendText.clear();
+			st.currentLegendSerial = 0;
+		}
+		if (name == "label") {
+			st.currentLabelFor.clear();
+			st.currentLabelClass.clear();
+			st.currentLabelId.clear();
 		}
 	}
 	if (name == "a") {
@@ -1857,6 +5410,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			flushText(st);
 			popElementByName(st, name);
 			st.open = OpenTag::None;
+			st.activeBlockSerial = 0;
 			st.hrefBuf.clear();
 			st.classBuf.clear();
 			st.idBuf.clear();
@@ -1867,15 +5421,21 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			st.hrefBuf.clear();
 		}
 	}
+	if (name == "blockquote" || name == "figure" || name == "dl") {
+		flushText(st);
+		popElementByName(st, name);
+	}
 	if (name == "caption") {
 		flushText(st);
 		if (!st.currentTableCaptionText.empty()) {
 			DocBlock block = makeTextBlock(BlockType::Paragraph, "caption",
 				st.currentTableCaptionText, "", st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+			block.elementMetadata = activeBlockElement(st);
 			st.doc.blocks.push_back(std::move(block));
 		}
 		st.currentTableCaptionText.clear();
 		st.open = OpenTag::None;
+		st.activeBlockSerial = 0;
 		popElementByName(st, name);
 		st.classBuf.clear();
 		st.idBuf.clear();
@@ -1885,6 +5445,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		flushText(st);
 		DocBlock block = makeTextBlock(BlockType::Paragraph, name, st.currentTableCellText, "",
 			st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+		block.elementMetadata = activeBlockElement(st);
 		if (!st.currentTableCellHref.empty()) {
 			block.url = st.currentTableCellHref;
 		}
@@ -1893,6 +5454,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.currentTableCellHeader = false;
 		st.currentTableCellHref.clear();
 		st.open = OpenTag::None;
+		st.activeBlockSerial = 0;
 		popElementByName(st, name);
 		st.classBuf.clear();
 		st.idBuf.clear();
@@ -1912,6 +5474,8 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		block.inputName = st.currentSelectName;
 		block.inputType = "select";
 		block.options = st.currentSelectOptions;
+		block.visibleRows = st.currentSelectSize;
+		block.visibleCols = 0;
 		block.formUnsupported = st.currentFormUnsupported;
 		for (int i = 0; i < static_cast<int>(block.options.size()); ++i) {
 			if (block.options[i].selected) {
@@ -1919,24 +5483,55 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 				break;
 			}
 		}
-		if (block.selectedOption < 0 && !block.options.empty()) block.selectedOption = 0;
+		if (block.selectedOption < 0) {
+			for (int i = 0; i < static_cast<int>(block.options.size()); ++i) {
+				if (!block.options[static_cast<size_t>(i)].disabled) {
+					block.selectedOption = i;
+					break;
+				}
+			}
+		}
 		if (block.selectedOption >= 0 && block.selectedOption < static_cast<int>(block.options.size())) {
 			block.inputValue = block.options[static_cast<size_t>(block.selectedOption)].value;
 			block.text = block.options[static_cast<size_t>(block.selectedOption)].text;
 		}
 		block.ancestors = st.openElements;
 		if (!block.ancestors.empty()) block.ancestors.pop_back();
+		block.elementMetadata = {};
+		if (const HtmlElementRef* selectElement = findStructuralElement(st, st.currentSelectSerial))
+			block.elementMetadata = *selectElement;
 		block.inlineStyle = st.styleBuf;
+		block.formControl.type = FormControlType::Select;
+		block.formControl.logicalSerial = block.elementMetadata.serial;
+		block.formControl.parentFormSerial = nearestAncestorSerial(st, "form");
+		block.formControl.parentFieldsetSerial = nearestAncestorSerial(st, "fieldset");
+		block.formControl.inputType = "select";
+		block.formControl.name = block.inputName;
+		block.formControl.supported = true;
+		block.formControl.metadataComplete = block.elementMetadata.serial != 0 && st.uncapturedOpenElementDepth == 0;
+		block.formControl.disabled = st.currentSelectDisabled;
+		block.formControl.required = st.currentSelectRequired;
+		block.formControl.multiple = st.currentSelectMultiple;
+		block.formControl.size = st.currentSelectSize;
+		block.formControl.optionCount = static_cast<int>(block.options.size());
+		block.formControl.selectedOptionIndex = block.selectedOption;
 		st.doc.blocks.push_back(std::move(block));
 		++st.doc.formsDiagnostics.selectCount;
 		st.inSelect = false;
 		st.currentSelectName.clear();
 		st.currentSelectClass.clear();
 		st.currentSelectId.clear();
+		st.currentSelectInputType.clear();
+		st.currentSelectDisabled = false;
+		st.currentSelectRequired = false;
+		st.currentSelectMultiple = false;
+		st.currentSelectSize = 0;
+		st.currentSelectSerial = 0;
 		st.currentSelectOptions.clear();
 		st.styleBuf.clear();
 		popElementByName(st, name);
 		st.open = OpenTag::None;
+		st.activeBlockSerial = 0;
 	}
 	if (name == "form") {
 		flushText(st);
@@ -1946,11 +5541,17 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.currentFormMethod.clear();
 		st.currentFormEncoding.clear();
 		st.currentFormUnsupported = false;
+		st.currentFormSerial = 0;
+		popElementByName(st, name);
+	}
+	if (name == "fieldset") {
+		flushText(st);
 		popElementByName(st, name);
 	}
 	if (name == "pre") {
 		flushText(st);
 		st.open  = OpenTag::None;
+		st.activeBlockSerial = 0;
 		st.inPre = false;
 		st.classBuf.clear();
 		st.idBuf.clear();
@@ -1960,16 +5561,64 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	if (name == "body") {
 		popElementByName(st, name);
 	}
+	if (name == "div" || name == "section" || name == "article" ||
+		name == "header" || name == "footer" || name == "nav" || name == "main" ||
+		name == "figure" || name == "blockquote" || name == "dl") {
+		flushText(st);
+		popElementByName(st, name);
+		return;
+	}
 	if (name == "strong" || name == "b" || name == "em" || name == "i" || name == "code" ||
 		name == "small" || name == "kbd" || name == "samp" ||
-		name == "span" || name == "div" || name == "section" || name == "article" ||
-		name == "header" || name == "footer" || name == "nav" || name == "main" ||
+		name == "cite" || name == "q" ||
+		name == "span" ||
 		name == "table" || name == "thead" || name == "tbody" || name == "tfoot" ||
 		name == "tr" || name == "ul" || name == "ol" || name == "noscript" || name == "html" || name == "head") {
 		popElementByName(st, name);
 	}
 	// </code> inside <pre>: stay in pre context.
 	// </code> outside: nothing to do.
+}
+
+static void finalizeStructuralMetadata(ParserState& st)
+{
+	// Any parser state still open at EOF has uncertain ownership.  Preserve
+	// readable blocks, but make content-sensitive selectors fail closed.
+	for (const HtmlElementRef& element : st.openElements) {
+		if (HtmlElementContentMetadata* metadata = findContentMetadata(st, element.serial))
+			metadata->contentMetadataComplete = false;
+	}
+	if (st.uncapturedOpenElementDepth > 0) {
+		for (const HtmlElementRef& element : st.openElements) {
+			if (HtmlElementContentMetadata* metadata = findContentMetadata(st, element.serial))
+				metadata->contentMetadataComplete = false;
+		}
+	}
+	for (HtmlElementRef& element : st.structuralElements) {
+		if (StructuralChildCounter* counter = findStructuralCounter(st, element.serial)) {
+			element.childCount = counter->childCount;
+		}
+		if (StructuralChildCounter* parent = findStructuralCounter(st, element.parentSerial)) {
+			element.siblingCount = parent->childCount;
+			for (const auto& type : parent->typeCounts) {
+				if (type.first == element.tagName) {
+					element.typeCount = type.second;
+					break;
+				}
+			}
+		}
+	}
+	auto updateRef = [&](HtmlElementRef& ref) {
+		if (HtmlElementRef* stored = findStructuralElement(st, ref.serial)) ref = *stored;
+	};
+	updateRef(st.doc.documentElement);
+	updateRef(st.doc.bodyElement);
+	for (DocBlock& block : st.doc.blocks) {
+		updateRef(block.elementMetadata);
+		for (HtmlElementRef& ancestor : block.ancestors) updateRef(ancestor);
+	}
+	st.doc.structuralElements = std::move(st.structuralElements);
+	st.doc.contentMetadata = std::move(st.contentMetadata);
 }
 
 } // anonymous namespace
@@ -2015,13 +5664,26 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 	return baseNoQuery.substr(0, lastSlash + 1) + href;
 }
 
+void recomputeDocumentStyles(WebDocument& document)
+{
+	// Evidence is a snapshot of the current computed state.  Drop the prior
+	// bounded snapshot before recomputing so runtime :checked changes are
+	// observable without retaining an unbounded history.
+	document.cssDiagnostics.computedStyleEvidence.clear();
+	document.cssDiagnostics.computedStyleEvidenceSerials.clear();
+	applyDocumentStyles(document);
+}
+
 // ---------------------------------------------------------------------------
 // parseHtml
 // ---------------------------------------------------------------------------
-WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText)
+WebDocument parseHtml(const std::string& pageUrl,
+	const std::string& htmlText,
+	const std::unordered_set<std::string>& visitedUrls)
 {
 	ParserState st;
 	st.doc.url = pageUrl;
+	st.visitedUrls = &visitedUrls;
 
 	const size_t len = htmlText.size();
 	size_t i = 0;
@@ -2087,6 +5749,7 @@ WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText)
 
 	// Flush any trailing text not closed by a tag.
 	flushText(st);
+	finalizeStructuralMetadata(st);
 	applyDocumentStyles(st.doc);
 
 	// If no title was parsed, use the filename from the URL.

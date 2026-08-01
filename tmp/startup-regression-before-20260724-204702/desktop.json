@@ -1,0 +1,23 @@
+{
+  "wallpaper": "/system/wallpapers/ameobagx.png",
+  "desktop.wallpaper.id": "legacy_ameobagx",
+  "desktop.theme.id": "classic",
+  "desktop.background.scale": "fill",
+  "desktop.taskbar.position": "bottom",
+  "desktop.clock.timeZoneId": "pacific",
+  "desktop.clock.use24HourTime": false,
+  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation"],
+  "recent": ["Nexgen PacMan","Notepad","Resource Viewer","Image Viewer","DisplayOptions","ControlPanel","guideXOS Navigator"],
+  "desktopShortcuts": [
+  ],
+  "showDesktopTrash": true,
+  "showDesktopThisSystem": true,
+  "showDesktopFileManager": true,
+  "showDesktopSystemSettings": false,
+  "smallLiveDesktopFolderIcons": true,
+  "autoArrangeDesktopIcons": false,
+  "windows": [
+  ],
+  "iconPositions": [
+  ]
+}

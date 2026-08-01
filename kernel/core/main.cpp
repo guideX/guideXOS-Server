@@ -7,6 +7,7 @@
 //
 
 #include "include/kernel/version.h"
+#include "include/kernel/build_identity.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/vga.h"
 #include "include/kernel/framebuffer.h"
@@ -28,6 +29,8 @@
 #include "include/kernel/qemu_display_resolution_rebuild_proof.h"
 #include "include/kernel/qemu_display_resolution_persistence_proof.h"
 #include "display_configuration_service.h"
+#include "include/kernel/file_clipboard.h"
+#include "include/kernel/native_elf_baremetal.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -671,6 +674,43 @@ static bool initialize_qemu_display_configuration_storage()
 }
 #endif
 
+static bool is_transient_block_device(const kernel::block::BlockDevice* device)
+{
+    if (!device || !device->name[0]) return true;
+    if (device->name[0] == 'r' && device->name[1] == 'a' && device->name[2] == 'm') return true;
+    if (device->name[0] == 'w' && device->name[1] == 'a' && device->name[2] == 'l' &&
+        device->name[3] == 'l' && device->name[4] == 'i' && device->name[5] == 'm' &&
+        device->name[6] == 'g' && device->name[7] == '\0') return true;
+    return false;
+}
+
+static bool mount_persistent_storage()
+{
+    if (kernel::vfs::get_mount("/")) {
+        kernel::serial::puts("[KERNEL] Persistent storage already mounted at /\n");
+        return true;
+    }
+
+    for (uint8_t index = 0; index < kernel::block::MAX_BLOCK_DEVICES; ++index) {
+        const kernel::block::BlockDevice* device = kernel::block::get_device(index);
+        if (!device || is_transient_block_device(device) || !device->readFn || !device->writeFn) continue;
+
+        kernel::serial::puts("[KERNEL] Trying persistent storage device ");
+        kernel::serial::puts(device->name);
+        kernel::serial::puts(" at /\n");
+        const uint8_t mountResult = kernel::vfs::mount("/", index);
+        if (mountResult != 0xFF) {
+            kernel::serial::puts("[KERNEL] Successfully mounted persistent storage from ");
+            kernel::serial::puts(device->name);
+            kernel::serial::puts("\n");
+            return true;
+        }
+    }
+
+    kernel::serial::puts("[KERNEL] WARNING: No writable persistent storage filesystem found\n");
+    return false;
+}
+
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
@@ -680,7 +720,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
     // Initialize serial debug output early
     kernel::serial::init();
+    kernel::serial::puts("[GXOS-BUILD] identity=");
+    kernel::serial::puts(GXOS_BUILD_IDENTITY);
+    kernel::serial::puts(" probe=");
+    kernel::serial::puts(GXOS_BUILD_PROBE_ID);
+    kernel::serial::puts("\n");
     kernel::serial::puts("[KERNEL] guideXOS kernel_main entered\n");
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2\n");
+#endif
 
     // Support both Multiboot (legacy) and BootInfo (UEFI) boot
     bool is_multiboot = (boot_magic == 0x2BADB002);
@@ -902,35 +950,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::put_hex32(kernel::block::device_count());
         kernel::serial::putc('\n');
         
-        // Auto-mount first available block device to /
-        // Try device 0 first, then device 1 if that fails
-        bool mounted = false;
-        if (kernel::block::device_count() > 0) {
-            kernel::serial::puts("[KERNEL] Auto-mounting block device 0 to /\n");
-            uint8_t mountResult = kernel::vfs::mount("/", 0);
-            if (mountResult == 0) {
-                kernel::serial::puts("[KERNEL] Successfully mounted / from device 0\n");
-                mounted = true;
-            } else {
-                kernel::serial::puts("[KERNEL] WARNING: Failed to auto-mount device 0\n");
-                
-                // Try device 1 if available
-                if (kernel::block::device_count() > 1) {
-                    kernel::serial::puts("[KERNEL] Attempting to mount block device 1 to /\n");
-                    mountResult = kernel::vfs::mount("/", 1);
-                    if (mountResult == 0) {
-                        kernel::serial::puts("[KERNEL] Successfully mounted / from device 1\n");
-                        mounted = true;
-                    } else {
-                        kernel::serial::puts("[KERNEL] WARNING: Failed to auto-mount device 1\n");
-                    }
-                }
-            }
-        }
-        
-        if (!mounted && kernel::block::device_count() > 0) {
-            kernel::serial::puts("[KERNEL] WARNING: No filesystem could be mounted automatically\n");
-        }
+        const bool mounted = mount_persistent_storage();
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
@@ -945,6 +965,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #if defined(GXOS_BARE_METAL)
         kernel::desktop::refresh_bare_metal_desktop_folders_after_vfs_ready();
 #endif
+        // Discover external NativeElf packages only after the persistent FAT
+        // filesystem is mounted. The loader consumes /Apps through VFS and
+        // never reaches back to a host filesystem path at runtime.
+        kernel::native_elf::discover();
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
@@ -958,7 +982,19 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #else
         manualPersistenceReady = false;
 #endif
+#ifdef GXOS_FILE_OPERATIONS_RUNTIME_SMOKE_ACTIVE
+        // Run the storage/clipboard regression immediately after VFS mount.
+        // Network initialization can wait for DHCP on QEMU or physical
+        // hardware, so it must not gate this filesystem-specific smoke result.
+        kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] issuing command=file-operations.runtime\n");
+#ifdef GXOS_FILE_OPERATIONS_TRASH_RUNTIME_SMOKE_ACTIVE
+        kernel::file_clipboard::run_trash_runtime_smoke();
+#else
+        kernel::file_clipboard::run_runtime_smoke();
 #endif
+        kernel::serial::puts("[FILE-OPS-RUNTIME-SMOKE] done\n");
+#endif
+#endif // GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE
         
         // ============================================================
         
@@ -1080,6 +1116,22 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                                      kernel::input::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
         kernel::apps::printNavigatorRuntimeSmokeReport();
+#ifdef GXOS_DESKTOP_CLEANUP_RUNTIME_PASS
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke begin\n");
+        const bool cleanupDisplayOptionsLaunched = kernel::desktop::launch_app("DisplayOptions");
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch app=DisplayOptions result=");
+        kernel::serial::puts(cleanupDisplayOptionsLaunched ? "PASS" : "FAIL");
+        kernel::serial::puts("\n");
+        const bool cleanupNotepadLaunched = kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch app=Notepad result=");
+        kernel::serial::puts(cleanupNotepadLaunched ? "PASS" : "FAIL");
+        kernel::serial::puts("\n");
+        const bool cleanupCalculatorLaunched = kernel::desktop::launch_app("Calculator");
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch app=Calculator result=");
+        kernel::serial::puts(cleanupCalculatorLaunched ? "PASS" : "FAIL");
+        kernel::serial::puts("\n");
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke end\n");
+#endif
 #ifdef GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE
         kernel::serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing command=desktop.smoke.launchshadow\n");
         kernel::appmodel::printLaunchTargetShadowSmokeDiagnostic(kernel::serial::puts);
@@ -1099,7 +1151,6 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::run_imageviewer_runtime_smoke();
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
 #endif
-        
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         

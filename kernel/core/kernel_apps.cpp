@@ -15,6 +15,7 @@
 #include "include/kernel/time.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
+#include "include/kernel/file_clipboard.h"
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/nic.h"
 #include "include/kernel/ipv4.h"
@@ -597,45 +598,7 @@ static bool startsWithText(const char* value, const char* prefix) {
     return true;
 }
 
-static bool endsWithText(const char* value, const char* suffix) {
-    if (!value || !suffix) return false;
-    int valueLen = strlen_local(value);
-    int suffixLen = strlen_local(suffix);
-    if (suffixLen > valueLen) return false;
-    for (int i = 0; i < suffixLen; ++i) {
-        if (value[valueLen - suffixLen + i] != suffix[i]) return false;
-    }
-    return true;
-}
-
 static const char* kKernelTrashRootPath = "/Trash";
-static const char* kKernelTrashInfoSuffix = ".trashinfo";
-
-static bool kernel_path_matches_mount(const char* path, const char* mountPath)
-{
-    if (!path || !mountPath || !mountPath[0]) return false;
-    int mountLen = strlen_local(mountPath);
-    for (int i = 0; i < mountLen; ++i) {
-        if (path[i] != mountPath[i]) return false;
-    }
-    return path[mountLen] == '\0' || path[mountLen] == '/' || (mountLen == 1 && mountPath[0] == '/');
-}
-
-static const vfs::MountPoint* kernel_mount_for_path(const char* path)
-{
-    const vfs::MountPoint* best = nullptr;
-    int bestLen = -1;
-    for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS; ++i) {
-        const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
-        if (!mp || !mp->active) continue;
-        int len = strlen_local(mp->path);
-        if (len > bestLen && kernel_path_matches_mount(path, mp->path)) {
-            best = mp;
-            bestLen = len;
-        }
-    }
-    return best;
-}
 
 static void kernel_trash_root_for_mount(const char* mountPath, char* out, int outSize)
 {
@@ -648,14 +611,6 @@ static void kernel_trash_root_for_mount(const char* mountPath, char* out, int ou
     strappend(out, "/Trash", outSize);
 }
 
-static bool kernel_trash_root_for_path(const char* sourcePath, char* out, int outSize)
-{
-    const vfs::MountPoint* mp = kernel_mount_for_path(sourcePath);
-    if (!mp) return false;
-    kernel_trash_root_for_mount(mp->path, out, outSize);
-    return out && out[0];
-}
-
 static bool kernel_trash_root_has_items(const char* trashRoot)
 {
     vfs::DirEntry entry{};
@@ -664,7 +619,7 @@ static bool kernel_trash_root_has_items(const char* trashRoot)
     bool hasItems = false;
     while (vfs::readdir(dir, &entry)) {
         if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
-        if (endsWithText(entry.name, kKernelTrashInfoSuffix)) continue;
+        if (file_clipboard::is_trash_metadata_name(entry.name)) continue;
         hasItems = true;
         break;
     }
@@ -692,12 +647,6 @@ static bool kernel_trash_exists()
     serial::puts("\n");
     return hasItems;
 }
-static void kernel_write_text_file(const char* path, const char* text)
-{
-    if (!path || !text) return;
-    vfs::write_file(path, text, (uint32_t)strlen_local(text));
-}
-
 static void kernel_desktop_refresh_trash_state()
 {
     serial::puts("[trash] desktop refresh requested; hasItems=");
@@ -723,73 +672,14 @@ static const char* kernel_vfs_status_text(vfs::Status status)
         case vfs::VFS_ERR_BUSY: return "Filesystem busy";
         case vfs::VFS_ERR_TOO_MANY: return "Too many open filesystem objects";
         case vfs::VFS_ERR_NOT_SUPPORTED: return "Filesystem operation not supported";
+        case vfs::VFS_ERR_DIRECTORY_NOT_EMPTY: return "Directory is not empty";
+        case vfs::VFS_ERR_RECURSION_LIMIT: return "Directory traversal is too deep";
+        case vfs::VFS_ERR_ENTRY_LIMIT: return "Too many directory entries";
+        case vfs::VFS_ERR_CORRUPT_DIRECTORY: return "Directory is corrupt";
+        case vfs::VFS_ERR_INVALID_DESTINATION: return "Invalid destination";
+        case vfs::VFS_ERR_ROLLBACK_FAILED: return "Rollback failed";
         default: return "Filesystem operation failed";
     }
-}
-
-static bool kernel_make_directory_if_missing(const char* path)
-{
-    vfs::FileInfo info{};
-    vfs::Status statStatus = vfs::stat(path, &info);
-    if (statStatus == vfs::VFS_OK) return info.type == vfs::FILE_TYPE_DIRECTORY;
-    vfs::Status mkdirStatus = vfs::mkdir(path);
-    serial::puts("[trash] mkdir ");
-    serial::puts(path ? path : "<null>");
-    serial::puts(" result=");
-    serial::puts(kernel_vfs_status_text(mkdirStatus));
-    serial::puts("\n");
-    return mkdirStatus == vfs::VFS_OK;
-}
-
-static bool kernel_copy_file_to_trash_then_delete(const char* sourcePath, const char* destPath, char* error, int errorSize)
-{
-    vfs::FileInfo info{};
-    vfs::Status statStatus = vfs::stat(sourcePath, &info);
-    if (statStatus != vfs::VFS_OK) {
-        strcopy(error, kernel_vfs_status_text(statStatus), errorSize);
-        return false;
-    }
-    if (info.type == vfs::FILE_TYPE_DIRECTORY) {
-        strcopy(error, "Folder move requires filesystem rename support", errorSize);
-        return false;
-    }
-    if (info.size > 1024 * 1024) {
-        strcopy(error, "File too large for Trash fallback", errorSize);
-        return false;
-    }
-
-    static char buffer[1024 * 1024];
-    int32_t bytesRead = vfs::read_file(sourcePath, buffer, (uint32_t)info.size);
-    if (bytesRead < 0 || (uint64_t)bytesRead != info.size) {
-        strcopy(error, "Unable to read source for Trash copy", errorSize);
-        serial::puts("[trash] copy fallback read failed\n");
-        return false;
-    }
-
-    int32_t bytesWritten = vfs::write_file(destPath, buffer, (uint32_t)bytesRead);
-    if (bytesWritten < 0 || bytesWritten != bytesRead) {
-        strcopy(error, "Unable to write Trash copy", errorSize);
-        serial::puts("[trash] copy fallback write failed\n");
-        return false;
-    }
-
-    vfs::FileInfo destInfo{};
-    vfs::Status destStat = vfs::stat(destPath, &destInfo);
-    if (destStat != vfs::VFS_OK || destInfo.size != info.size) {
-        strcopy(error, "Trash copy verification failed", errorSize);
-        serial::puts("[trash] copy fallback verify failed\n");
-        return false;
-    }
-
-    vfs::Status unlinkStatus = vfs::unlink(sourcePath);
-    if (unlinkStatus != vfs::VFS_OK) {
-        strcopy(error, "Copied to Trash but source delete failed", errorSize);
-        serial::puts("[trash] copy fallback source unlink failed\n");
-        return false;
-    }
-
-    serial::puts("[trash] filesystem operation=copy-verify-delete fallback\n");
-    return true;
 }
 
 static void kernel_join_path(const char* base, const char* name, char* out, int outSize)
@@ -825,8 +715,8 @@ static bool kernel_join_path_within_base(const char* base, const char* name, cha
 static void kernel_trash_info_path_for(const char* trashedPath, char* out, int outSize)
 {
     if (!out || outSize <= 0) return;
-    strcopy(out, trashedPath, outSize);
-    strappend(out, kKernelTrashInfoSuffix, outSize);
+    out[0] = '\0';
+    file_clipboard::trash_metadata_path_for(trashedPath, out, static_cast<size_t>(outSize));
 }
 
 static void kernel_make_fat_safe_collision_name(const char* baseName, bool isDir, int index, char* out, int outSize)
@@ -881,80 +771,28 @@ static void kernel_make_fat_safe_collision_name(const char* baseName, bool isDir
     }
 }
 
-static void kernel_unique_trash_path(const char* trashRoot, const char* baseName, bool isDir, char* out, int outSize)
-{
-    kernel_join_path(trashRoot, baseName, out, outSize);
-    if (!vfs::exists(out)) return;
-
-    for (int index = 1; index < 100; ++index) {
-        char candidate[vfs::VFS_MAX_FILENAME];
-        kernel_make_fat_safe_collision_name(baseName, isDir, index, candidate, sizeof(candidate));
-        kernel_join_path(trashRoot, candidate, out, outSize);
-        if (!vfs::exists(out)) return;
-    }
-}
 static bool kernel_move_path_to_trash(const char* sourcePath, const char* sourceName, bool isDir, char* movedPath, int movedPathSize, char* error, int errorSize)
 {
-    serial::puts("[trash] delete requested path=");
-    serial::puts(sourcePath ? sourcePath : "<null>");
-    serial::puts("\n");
-    serial::puts("[trash] selected full item name=");
-    serial::puts(sourceName ? sourceName : "<null>");
-    serial::puts("\n");
-
-    char trashRoot[256];
-    if (!kernel_trash_root_for_path(sourcePath, trashRoot, sizeof(trashRoot))) {
-        strcopy(error, "No mounted filesystem for Trash", errorSize);
-        serial::puts("[trash] no source mount for Trash\n");
-        return false;
-    }
-
-    if (!kernel_make_directory_if_missing(trashRoot)) {
-        strcopy(error, "Unable to create Trash directory", errorSize);
-        serial::puts("[trash] Trash directory unavailable\n");
-        return false;
-    }
-
-    serial::puts("[trash] selected trash dir=");
-    serial::puts(trashRoot);
-    serial::puts("\n");
-
-    kernel_unique_trash_path(trashRoot, sourceName, isDir, movedPath, movedPathSize);
-    serial::puts("[trash] collision-safe target=");
-    serial::puts(movedPath);
-    serial::puts("\n");
-
-    serial::puts("[trash] filesystem operation=rename/move\n");
-    vfs::Status renameStatus = vfs::rename(sourcePath, movedPath);
-    if (renameStatus != vfs::VFS_OK) {
-        serial::puts("[trash] rename/move failed result=");
-        serial::puts(kernel_vfs_status_text(renameStatus));
+    (void)sourceName;
+    (void)isDir;
+    if (!movedPath || movedPathSize <= 0 || !error || errorSize <= 0) return false;
+    movedPath[0] = '\0';
+    error[0] = '\0';
+    const file_clipboard::PasteResult result = file_clipboard::move_to_trash(
+        sourcePath, movedPath, static_cast<size_t>(movedPathSize));
+    if (result == file_clipboard::PasteResult::Success) {
+        serial::puts("[fileexplorer-bm] shared move-to-trash success path=");
+        serial::puts(movedPath);
         serial::puts("\n");
-        if (!kernel_copy_file_to_trash_then_delete(sourcePath, movedPath, error, errorSize)) {
-            if (!error[0]) strcopy(error, kernel_vfs_status_text(renameStatus), errorSize);
-            serial::puts("[trash] move-to-trash failed\n");
-            return false;
-        }
+        return true;
     }
-
-    char infoPath[256];
-    kernel_trash_info_path_for(movedPath, infoPath, sizeof(infoPath));
-    char metadata[512];
-    metadata[0] = '\0';
-    strappend(metadata, "{\n  \"originalPath\": \"", sizeof(metadata));
-    strappend(metadata, sourcePath, sizeof(metadata));
-    strappend(metadata, "\",\n  \"originalName\": \"", sizeof(metadata));
-    strappend(metadata, sourceName, sizeof(metadata));
-    strappend(metadata, "\",\n  \"isDirectory\": ", sizeof(metadata));
-    strappend(metadata, isDir ? "true" : "false", sizeof(metadata));
-    strappend(metadata, "\n}", sizeof(metadata));
-    kernel_write_text_file(infoPath, metadata);
-
-    serial::puts("[trash] move-to-trash success path=");
-    serial::puts(movedPath);
+    strcopy(error, file_clipboard::paste_diagnostic_message(), errorSize);
+    serial::puts("[fileexplorer-bm] shared move-to-trash failed path=");
+    serial::puts(sourcePath ? sourcePath : "<null>");
+    serial::puts(" reason=");
+    serial::puts(error);
     serial::puts("\n");
-    kernel_desktop_refresh_trash_state();
-    return true;
+    return false;
 }
 
 static void appDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color) {
@@ -4459,24 +4297,24 @@ FileExplorerApp::FileExplorerApp()
     : m_entryCount(0), m_selected(0), m_scroll(0),
       m_lastClickIndex(-1), m_lastClickTick(0),
       m_backBtnId(-1), m_upBtnId(-1), m_refreshBtnId(-1), m_rootBtnId(-1),
+      m_createFolderBtnId(-1),
       m_renameFileBtnId(-1), m_deleteFileBtnId(-1), m_renameFolderBtnId(-1), m_deleteFolderBtnId(-1),
       m_confirmDeleteBtnId(-1), m_cancelDeleteBtnId(-1), m_renamePrompt(false), m_deleteConfirm(false),
-      m_deleteTargetIsDir(false) {
+      m_deleteTargetIsDir(false), m_lastFileOperationGeneration(0) {
     strcopy(m_name, "Files", app::MAX_APP_NAME);
     strcopy(m_currentPath, "/", MAX_PATH_LEN);
     strcopy(m_status, "Ready", sizeof(m_status));
     m_renameValue[0] = '\0';
+    m_createFolderPrompt = false;
     m_deleteTarget[0] = '\0';
     m_deleteTargetName[0] = '\0';
-    m_clipboard.sourcePath[0] = '\0';
-    m_clipboard.sourceName[0] = '\0';
-    m_clipboard.sourceMount[0] = '\0';
-    m_clipboard.sourceIsDir = false;
-    m_clipboard.operation = ClipboardOperation::None;
     m_contextMenuOpen = false;
     m_contextMenuX = 0;
     m_contextMenuY = 0;
     m_contextMenuHover = -1;
+    m_contextMenuPasteVisible = false;
+    m_contextMenuCreateFolderVisible = false;
+    m_contextMenuTarget = ContextMenuTarget::Entry;
     m_propertiesOpen = false;
     m_propertiesIsDir = false;
     m_propertiesName[0] = '\0';
@@ -4597,8 +4435,35 @@ bool FileExplorerApp::init() {
 }
 
 bool FileExplorerApp::initWithParam(const char* startPath) {
+    bool launchDeleteConfirmation = false;
+    bool launchDeleteIsDir = false;
+    char launchDeletePath[MAX_PATH_LEN] = {0};
+    char requestedStartPath[MAX_PATH_LEN + 32] = {0};
+    strcopy(requestedStartPath, startPath && startPath[0] ? startPath : "/", sizeof(requestedStartPath));
+    const char* deletePrefix = "--confirm-delete|";
+    if (startsWithText(requestedStartPath, deletePrefix)) {
+        const int prefixLength = strlen_local(deletePrefix);
+        const char* payload = requestedStartPath + prefixLength;
+        int separator = -1;
+        for (int i = 0; payload[i]; ++i) {
+            if (payload[i] == '|') {
+                separator = i;
+                break;
+            }
+        }
+        if (separator > 0 && payload[separator + 1] != '\0') {
+            for (int i = 0; i < separator && i < MAX_PATH_LEN - 1; ++i) launchDeletePath[i] = payload[i];
+            launchDeletePath[separator < MAX_PATH_LEN ? separator : MAX_PATH_LEN - 1] = '\0';
+            char normalizedDeletePath[MAX_PATH_LEN] = {0};
+            vfs::normalize_path(launchDeletePath, normalizedDeletePath, sizeof(normalizedDeletePath));
+            strcopy(launchDeletePath, normalizedDeletePath, sizeof(launchDeletePath));
+            launchDeleteIsDir = payload[separator + 1] == '1';
+            launchDeleteConfirmation = launchDeletePath[0] != '\0';
+            parentPath(launchDeletePath, requestedStartPath, sizeof(requestedStartPath));
+        }
+    }
     char resolvedStartPath[MAX_PATH_LEN];
-    if (!fileExplorerPrepareStartPath(startPath, resolvedStartPath, sizeof(resolvedStartPath), "launch")) {
+    if (!fileExplorerPrepareStartPath(requestedStartPath, resolvedStartPath, sizeof(resolvedStartPath), "launch")) {
         return false;
     }
 
@@ -4621,6 +4486,7 @@ bool FileExplorerApp::initWithParam(const char* startPath) {
     m_upBtnId = addButton(66, 5, 38, 20, "Up");
     m_refreshBtnId = addButton(108, 5, 58, 20, "Refresh");
     m_rootBtnId = addButton(170, 5, 70, 20, "Mounts");
+    m_createFolderBtnId = addButton(436, 5, 94, 20, "New Folder");
     m_renameFileBtnId = addButton(248, 5, 82, 20, "Rename File");
     m_deleteFileBtnId = addButton(334, 5, 78, 20, "Delete File");
     m_renameFolderBtnId = addButton(248, 5, 92, 20, "Rename Dir");
@@ -4630,7 +4496,15 @@ bool FileExplorerApp::initWithParam(const char* startPath) {
 
     strcopy(m_currentPath, resolvedStartPath, MAX_PATH_LEN);
     refresh();
+    if (launchDeleteConfirmation) {
+        strcopy(m_deleteTarget, launchDeletePath, sizeof(m_deleteTarget));
+        strcopy(m_deleteTargetName, vfs::basename(launchDeletePath), sizeof(m_deleteTargetName));
+        m_deleteTargetIsDir = launchDeleteIsDir;
+        m_deleteConfirm = true;
+        setStatus("Confirm delete");
+    }
     updateActionButtons();
+    m_lastFileOperationGeneration = file_clipboard::operation_generation();
     m_state = app::AppState::Running;
     return true;
 }
@@ -4640,6 +4514,14 @@ void FileExplorerApp::shutdown() {
 }
 
 void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    const uint64_t fileOperationGeneration = file_clipboard::operation_generation();
+    if (!file_clipboard::operation_active() &&
+        fileOperationGeneration != m_lastFileOperationGeneration) {
+        m_lastFileOperationGeneration = fileOperationGeneration;
+        refresh();
+        updateActionButtons();
+    }
+
     static const uint32_t kIconSize = 16;
     framebuffer::fill_rect(x, y, w, h, rgb(246, 246, 246));
 
@@ -4734,7 +4616,7 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     appDrawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
 
     if (m_contextMenuOpen) {
-        static const int kContextMenuItems = 5;
+        const int kContextMenuItems = contextMenuItemCount();
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, rgb(245, 245, 248));
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY + CONTEXT_MENU_ITEM_H * kContextMenuItems + 1, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
@@ -4745,18 +4627,22 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 framebuffer::fill_rect(x + m_contextMenuX + 1, y + m_contextMenuY + 1 + i * CONTEXT_MENU_ITEM_H, CONTEXT_MENU_W - 2, CONTEXT_MENU_ITEM_H, rgb(60, 90, 140));
             }
         }
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6,  "Open", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H, "Pin to Desktop", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 2, "Rename", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 3, "Move to Trash", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 4, "Properties", rgb(20, 20, 20));
+        for (int i = 0; i < kContextMenuItems; ++i) {
+            appDrawText(x + m_contextMenuX + 8,
+                        y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * i,
+                        contextMenuItemLabel(i), rgb(20, 20, 20));
+        }
     }
 
     if (m_renamePrompt) {
         framebuffer::fill_rect(x + 220, y + 165, 360, 92, rgb(245, 245, 250));
-        appDrawText(x + 232, y + 182, "Rename selected item", rgb(30, 30, 30));
+        appDrawText(x + 232, y + 182, m_createFolderPrompt ? "Create folder" : "Rename selected item", rgb(30, 30, 30));
         appDrawText(x + 232, y + 205, m_renameValue, rgb(20, 20, 20));
-        appDrawText(x + 232, y + 230, "Enter=OK  Esc=Cancel  Backspace=Delete", rgb(80, 80, 80));
+        appDrawText(x + 232, y + 230,
+                    m_createFolderPrompt
+                        ? "Enter=Create  Esc=Cancel  Backspace=Delete"
+                        : "Enter=OK  Esc=Cancel  Backspace=Delete",
+                    rgb(80, 80, 80));
     } else if (m_deleteConfirm) {
         framebuffer::fill_rect(x + 220, y + 165, 390, 92, rgb(250, 245, 245));
         appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Move this folder to Trash?" : "Move this file to Trash?", rgb(80, 30, 30));
@@ -4786,6 +4672,7 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 }
 
 void FileExplorerApp::onKeyDown(uint32_t key) {
+    if (file_clipboard::operation_active()) return;
     if (m_propertiesOpen) {
         if (key == 27 || key == '\n' || key == '\r') {
             closeProperties();
@@ -4795,9 +4682,11 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
 
     if (m_renamePrompt) {
         if (key == '\n' || key == '\r') {
-            commitRename();
+            if (m_createFolderPrompt) commitCreateFolder();
+            else commitRename();
         } else if (key == 27) {
-            cancelRename();
+            if (m_createFolderPrompt) cancelCreateFolder();
+            else cancelRename();
         } else if (key == '\b') {
             int len = strlen_local(m_renameValue);
             if (len > 0) m_renameValue[len - 1] = '\0';
@@ -4889,7 +4778,8 @@ void FileExplorerApp::onKeyChar(char c) {
     if (!m_renamePrompt) return;
     if (c >= 32 && c < 127) {
         int len = strlen_local(m_renameValue);
-        if (len < (int)sizeof(m_renameValue) - 1 && c != '/') {
+        int maxNameLength = m_createFolderPrompt ? 8 : (int)sizeof(m_renameValue) - 1;
+        if (len < maxNameLength && c != '/' && c != '\\' && (!m_createFolderPrompt || c != ' ')) {
             m_renameValue[len] = c;
             m_renameValue[len + 1] = '\0';
         }
@@ -4941,12 +4831,26 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
         if (index >= 0 && index < m_entryCount) {
             m_selected = index;
             updateActionButtons();
+            m_contextMenuTarget = ContextMenuTarget::Entry;
+            m_contextMenuPasteVisible = false;
+            m_contextMenuCreateFolderVisible = false;
+            if (m_entries[m_selected].isDir) {
+                char destinationDirectory[MAX_PATH_LEN];
+                joinPath(m_currentPath, m_entries[m_selected].name, destinationDirectory, sizeof(destinationDirectory));
+                m_contextMenuPasteVisible = file_clipboard::can_paste_to(destinationDirectory);
+            }
+            m_contextMenuOpen = true;
+        } else {
+            m_contextMenuTarget = ContextMenuTarget::CurrentDirectory;
+            m_contextMenuPasteVisible = file_clipboard::can_paste_to(m_currentPath);
+            m_contextMenuCreateFolderVisible = canCreateFolderHere();
+            m_contextMenuOpen = contextMenuHasCurrentDirectoryPaste() ||
+                                contextMenuHasCurrentDirectoryCreateFolder();
         }
-        m_contextMenuOpen = (index >= 0 && index < m_entryCount);
         m_contextMenuX = localX;
         m_contextMenuY = localY;
         m_contextMenuHover = -1;
-        serial::puts("[fileexplorer-bm] context menu open\n");
+        if (m_contextMenuOpen) serial::puts("[fileexplorer-bm] context menu open\n");
         invalidate();
         return;
     }
@@ -5020,6 +4924,7 @@ bool FileExplorerApp::handleNavigationPaneClick(int localX, int localY) {
 }
 
 void FileExplorerApp::onWidgetClick(int widgetId) {
+    if (file_clipboard::operation_active()) return;
     closeTransientUi();
     if (widgetId == m_backBtnId || widgetId == m_rootBtnId) {
         navigate("/");
@@ -5029,6 +4934,8 @@ void FileExplorerApp::onWidgetClick(int widgetId) {
         refresh();
         updateActionButtons();
         invalidate();
+    } else if (widgetId == m_createFolderBtnId) {
+        beginCreateFolder();
     } else if (widgetId == m_renameFileBtnId || widgetId == m_renameFolderBtnId) {
         beginRenameSelected();
     } else if (widgetId == m_deleteFileBtnId || widgetId == m_deleteFolderBtnId) {
@@ -5173,10 +5080,24 @@ void FileExplorerApp::goUp() {
     }
 }
 
+bool FileExplorerApp::canCreateFolderHere() const {
+    vfs::FileInfo info{};
+    if (vfs::stat(m_currentPath, &info) != vfs::VFS_OK ||
+        info.type != vfs::FILE_TYPE_DIRECTORY) {
+        return false;
+    }
+
+    const vfs::MountPoint* mount = vfs::get_mount(m_currentPath);
+    return mount && mount->active && !mount->readOnly &&
+           mount->fsType == vfs::FS_TYPE_FAT32;
+}
+
 void FileExplorerApp::updateActionButtons() {
     bool hasSelection = m_selected >= 0 && m_selected < m_entryCount;
     bool isDir = hasSelection && m_entries[m_selected].isDir;
+    const bool fileOperationActive = file_clipboard::operation_active();
 
+    app::Widget* createFolder = getWidget(m_createFolderBtnId);
     app::Widget* renameFile = getWidget(m_renameFileBtnId);
     app::Widget* deleteFile = getWidget(m_deleteFileBtnId);
     app::Widget* renameFolder = getWidget(m_renameFolderBtnId);
@@ -5184,12 +5105,34 @@ void FileExplorerApp::updateActionButtons() {
     app::Widget* confirmDelete = getWidget(m_confirmDeleteBtnId);
     app::Widget* cancelDelete = getWidget(m_cancelDeleteBtnId);
 
-    if (renameFile) renameFile->visible = hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
-    if (deleteFile) deleteFile->visible = hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
-    if (renameFolder) renameFolder->visible = hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
-    if (deleteFolder) deleteFolder->visible = hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
-    if (confirmDelete) confirmDelete->visible = m_deleteConfirm;
-    if (cancelDelete) cancelDelete->visible = m_deleteConfirm;
+    if (createFolder) {
+        createFolder->visible = !fileOperationActive && canCreateFolderHere() && !m_renamePrompt && !m_deleteConfirm;
+        createFolder->enabled = createFolder->visible;
+    }
+    if (renameFile) {
+        renameFile->visible = !fileOperationActive && hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
+        renameFile->enabled = renameFile->visible;
+    }
+    if (deleteFile) {
+        deleteFile->visible = !fileOperationActive && hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
+        deleteFile->enabled = deleteFile->visible;
+    }
+    if (renameFolder) {
+        renameFolder->visible = !fileOperationActive && hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
+        renameFolder->enabled = renameFolder->visible;
+    }
+    if (deleteFolder) {
+        deleteFolder->visible = !fileOperationActive && hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
+        deleteFolder->enabled = deleteFolder->visible;
+    }
+    if (confirmDelete) {
+        confirmDelete->visible = !fileOperationActive && m_deleteConfirm;
+        confirmDelete->enabled = confirmDelete->visible;
+    }
+    if (cancelDelete) {
+        cancelDelete->visible = m_deleteConfirm;
+        cancelDelete->enabled = cancelDelete->visible;
+    }
 }
 
 int FileExplorerApp::visibleRowCount() const {
@@ -5336,9 +5279,69 @@ bool FileExplorerApp::isWheelTarget(int localX, int localY) const {
     return localY >= listTop && localY < listBottom;
 }
 
+void FileExplorerApp::beginCreateFolder() {
+    if (file_clipboard::operation_active()) return;
+    if (!canCreateFolderHere()) {
+        setStatus("Folder creation is unavailable here");
+        invalidate();
+        return;
+    }
+
+    m_deleteConfirm = false;
+    m_createFolderPrompt = true;
+    m_renamePrompt = true;
+    strcopy(m_renameValue, "NEWDIR", sizeof(m_renameValue));
+    setStatus("Type a folder name (up to 8 characters), then press Enter.");
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::commitCreateFolder() {
+    if (file_clipboard::operation_active()) return;
+    if (!m_createFolderPrompt || !m_renameValue[0]) {
+        cancelCreateFolder();
+        return;
+    }
+
+    char path[MAX_PATH_LEN];
+    joinPath(m_currentPath, m_renameValue, path, sizeof(path));
+
+    vfs::FileInfo existing{};
+    if (vfs::stat(path, &existing) == vfs::VFS_OK) {
+        setStatus("A file or folder with that name already exists");
+        updateActionButtons();
+        invalidate();
+        return;
+    }
+
+    vfs::Status status = vfs::mkdir(path);
+    if (status == vfs::VFS_OK) {
+        m_createFolderPrompt = false;
+        m_renamePrompt = false;
+        refresh();
+        setStatus("Created folder");
+    } else if (status == vfs::VFS_ERR_READ_ONLY) {
+        setStatus("Folder cannot be created in a read-only location");
+    } else {
+        setStatus("Could not create folder");
+    }
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::cancelCreateFolder() {
+    m_createFolderPrompt = false;
+    m_renamePrompt = false;
+    setStatus("Create folder cancelled");
+    updateActionButtons();
+    invalidate();
+}
+
 void FileExplorerApp::beginRenameSelected() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     m_deleteConfirm = false;
+    m_createFolderPrompt = false;
     m_renamePrompt = true;
     strcopy(m_renameValue, m_entries[m_selected].name, sizeof(m_renameValue));
     setStatus("Type a new name, then press Enter.");
@@ -5347,6 +5350,7 @@ void FileExplorerApp::beginRenameSelected() {
 }
 
 void FileExplorerApp::commitRename() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount || !m_renameValue[0]) {
         cancelRename();
         return;
@@ -5359,6 +5363,7 @@ void FileExplorerApp::commitRename() {
 
     vfs::Status status = vfs::rename(oldPath, newPath);
     m_renamePrompt = false;
+    m_createFolderPrompt = false;
     if (status == vfs::VFS_OK) {
         setStatus("Renamed item");
     } else {
@@ -5370,6 +5375,7 @@ void FileExplorerApp::commitRename() {
 }
 
 void FileExplorerApp::cancelRename() {
+    m_createFolderPrompt = false;
     m_renamePrompt = false;
     setStatus("Rename cancelled");
     updateActionButtons();
@@ -5377,11 +5383,13 @@ void FileExplorerApp::cancelRename() {
 }
 
 void FileExplorerApp::showDeleteConfirmation() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
     joinPath(m_currentPath, entry.name, m_deleteTarget, sizeof(m_deleteTarget));
     strcopy(m_deleteTargetName, entry.name, sizeof(m_deleteTargetName));
     m_deleteTargetIsDir = entry.isDir;
+    m_createFolderPrompt = false;
     m_renamePrompt = false;
     m_deleteConfirm = true;
     setStatus("Confirm delete");
@@ -5398,6 +5406,7 @@ void FileExplorerApp::showDeleteConfirmation() {
 }
 
 void FileExplorerApp::confirmDelete() {
+    if (file_clipboard::operation_active()) return;
     if (!m_deleteConfirm || !m_deleteTarget[0]) return;
     char movedPath[MAX_PATH_LEN];
     char error[96];
@@ -5405,13 +5414,20 @@ void FileExplorerApp::confirmDelete() {
     error[0] = '\0';
     m_deleteConfirm = false;
     bool moved = kernel_move_path_to_trash(m_deleteTarget, m_deleteTargetName, m_deleteTargetIsDir, movedPath, sizeof(movedPath), error, sizeof(error));
+    m_lastFileOperationGeneration = file_clipboard::operation_generation();
     if (moved) {
         setStatus("Moved item to Trash");
     } else {
         setStatus(error[0] ? error : "Move to Trash failed");
     }
-    refresh();
     if (moved) {
+        // Refresh only after a completed filesystem transaction.  A refused
+        // non-empty folder has not mutated the source or Trash and must not
+        // re-enter enumeration from inside the Delete failure path.
+        refresh();
+        desktop_request_folder_refresh();
+        kernel_desktop_refresh_trash_state();
+        file_clipboard::note_trash_refresh(true);
         setStatus("Moved item to Trash");
     } else {
         setStatus(error[0] ? error : "Move to Trash failed");
@@ -5467,97 +5483,213 @@ void FileExplorerApp::closeProperties() {
 }
 
 void FileExplorerApp::beginCopySelected() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
-    joinPath(m_currentPath, entry.name, m_clipboard.sourcePath, sizeof(m_clipboard.sourcePath));
-    strcopy(m_clipboard.sourceName, entry.name, sizeof(m_clipboard.sourceName));
-    strcopy(m_clipboard.sourceMount, m_currentPath, sizeof(m_clipboard.sourceMount));
-    m_clipboard.sourceIsDir = entry.isDir;
-    m_clipboard.operation = ClipboardOperation::Copy;
-    setStatus("Copied item path to File Explorer clipboard");
-    serial::puts("[fileexplorer-bm] clipboard copy prepared\n");
+    char fullPath[MAX_PATH_LEN];
+    joinPath(m_currentPath, entry.name, fullPath, sizeof(fullPath));
+    serial::puts("[fileexplorer-bm] FILE_CLIPBOARD_CONTEXT_COMMAND=COPY\n");
+    if (file_clipboard::set_file(fullPath, file_clipboard::Operation::Copy)) {
+        setStatus("Copied file to guideXOS clipboard");
+        serial::puts("[fileexplorer-bm] shared file clipboard copy prepared\n");
+    } else {
+        setStatus(file_clipboard::paste_diagnostic_message());
+    }
     invalidate();
 }
 
 void FileExplorerApp::beginMoveSelected() {
+    if (file_clipboard::operation_active()) return;
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
-    joinPath(m_currentPath, entry.name, m_clipboard.sourcePath, sizeof(m_clipboard.sourcePath));
-    strcopy(m_clipboard.sourceName, entry.name, sizeof(m_clipboard.sourceName));
-    strcopy(m_clipboard.sourceMount, m_currentPath, sizeof(m_clipboard.sourceMount));
-    m_clipboard.sourceIsDir = entry.isDir;
-    m_clipboard.operation = ClipboardOperation::Move;
-    setStatus("Prepared move in File Explorer clipboard");
-    serial::puts("[fileexplorer-bm] clipboard move prepared\n");
+    char fullPath[MAX_PATH_LEN];
+    joinPath(m_currentPath, entry.name, fullPath, sizeof(fullPath));
+    serial::puts("[fileexplorer-bm] FILE_CLIPBOARD_CONTEXT_COMMAND=CUT\n");
+    if (file_clipboard::set_file(fullPath, file_clipboard::Operation::Move)) {
+        setStatus("Cut file to guideXOS clipboard");
+        serial::puts("[fileexplorer-bm] shared file clipboard move prepared\n");
+    } else {
+        setStatus(file_clipboard::paste_diagnostic_message());
+    }
     invalidate();
-}
-
-bool FileExplorerApp::copyFileContents(const char* sourcePath, const char* destPath) {
-    char buffer[8192];
-    int32_t bytesRead = vfs::read_file(sourcePath, buffer, sizeof(buffer));
-    if (bytesRead < 0) return false;
-    int32_t bytesWritten = vfs::write_file(destPath, buffer, (uint32_t)bytesRead);
-    return bytesWritten == bytesRead;
 }
 
 void FileExplorerApp::pasteClipboard() {
-    if (m_clipboard.operation == ClipboardOperation::None || !m_clipboard.sourcePath[0]) {
-        setStatus("Clipboard is empty");
-        invalidate();
-        return;
-    }
+    pasteClipboardTo(m_currentPath);
+}
 
-    char destPath[MAX_PATH_LEN];
-    joinPath(m_currentPath, m_clipboard.sourceName, destPath, sizeof(destPath));
-
-    if (m_clipboard.sourceIsDir) {
-        setStatus("copy/paste not yet supported for folders");
-        serial::puts("[fileexplorer-bm] copy/paste not yet supported for folders\n");
-        invalidate();
-        return;
-    }
-
-    if (m_clipboard.operation == ClipboardOperation::Copy) {
-        if (copyFileContents(m_clipboard.sourcePath, destPath)) {
-            setStatus("Copied item into current directory");
-            refresh();
-        } else {
-            setStatus("copy/paste not yet supported");
-            serial::puts("[fileexplorer-bm] file copy failed or unsupported\n");
-        }
-    } else if (m_clipboard.operation == ClipboardOperation::Move) {
-        vfs::Status status = vfs::rename(m_clipboard.sourcePath, destPath);
-        if (status == vfs::VFS_OK) {
-            setStatus("Moved item into current directory");
-            m_clipboard.operation = ClipboardOperation::None;
-            m_clipboard.sourcePath[0] = '\0';
-            refresh();
-        } else {
-            setStatus("Move not yet supported");
-            serial::puts("[fileexplorer-bm] move failed\n");
-        }
+void FileExplorerApp::pasteClipboardTo(const char* destinationDirectory) {
+    if (file_clipboard::operation_active()) return;
+    serial::puts("[fileexplorer-bm] FILE_CLIPBOARD_CONTEXT_COMMAND=PASTE destination=");
+    serial::puts(destinationDirectory ? destinationDirectory : "(null)");
+    serial::puts("\n");
+    file_clipboard::PasteResult result = file_clipboard::paste_to_directory(destinationDirectory);
+    setStatus(file_clipboard::paste_result_message(result));
+    if (result == file_clipboard::PasteResult::Success) {
+        file_clipboard::begin_paste_refresh();
+        refresh();
+        file_clipboard::note_paste_refresh(true);
     }
     invalidate();
+}
+
+bool FileExplorerApp::contextMenuHasFileOperations() const {
+    return m_contextMenuTarget == ContextMenuTarget::Entry &&
+           m_selected >= 0 && m_selected < m_entryCount;
+}
+
+bool FileExplorerApp::contextMenuHasFolderPaste() const {
+    if (m_contextMenuTarget != ContextMenuTarget::Entry ||
+        m_selected < 0 || m_selected >= m_entryCount || !m_entries[m_selected].isDir) {
+        return false;
+    }
+    return m_contextMenuPasteVisible;
+}
+
+bool FileExplorerApp::contextMenuHasCurrentDirectoryPaste() const {
+    return m_contextMenuTarget == ContextMenuTarget::CurrentDirectory &&
+           m_contextMenuPasteVisible;
+}
+
+bool FileExplorerApp::contextMenuHasCurrentDirectoryCreateFolder() const {
+    return m_contextMenuTarget == ContextMenuTarget::CurrentDirectory &&
+           m_contextMenuCreateFolderVisible;
+}
+
+int FileExplorerApp::contextMenuItemCount() const {
+    if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
+        int count = 0;
+        if (contextMenuHasCurrentDirectoryPaste()) ++count;
+        if (contextMenuHasCurrentDirectoryCreateFolder()) ++count;
+        return count;
+    }
+    if (contextMenuHasFileOperations()) return m_entries[m_selected].isDir && contextMenuHasFolderPaste() ? 8 : 7;
+    return contextMenuHasFolderPaste() ? 6 : 5;
+}
+
+const char* FileExplorerApp::contextMenuItemLabel(int item) const {
+    if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
+        if (contextMenuHasCurrentDirectoryPaste()) {
+            if (item == 0) return "Paste";
+            if (item == 1 && contextMenuHasCurrentDirectoryCreateFolder()) return "Create Folder";
+        } else if (contextMenuHasCurrentDirectoryCreateFolder() && item == 0) {
+            return "Create Folder";
+        }
+        return "";
+    }
+
+    if (contextMenuHasFileOperations()) {
+        if (m_entries[m_selected].isDir && contextMenuHasFolderPaste()) {
+            switch (item) {
+                case 0: return "Open";
+                case 1: return "Copy File";
+                case 2: return "Cut File";
+                case 3: return "Paste";
+                case 4: return "Pin to Desktop";
+                case 5: return "Rename";
+                case 6: return "Move to Trash";
+                case 7: return "Properties";
+                default: return "";
+            }
+        }
+        switch (item) {
+            case 0: return "Open";
+            case 1: return "Copy File";
+            case 2: return "Cut File";
+            case 3: return "Pin to Desktop";
+            case 4: return "Rename";
+            case 5: return "Move to Trash";
+            case 6: return "Properties";
+            default: return "";
+        }
+    }
+
+    if (contextMenuHasFolderPaste()) {
+        switch (item) {
+            case 0: return "Open";
+            case 1: return "Paste";
+            case 2: return "Pin to Desktop";
+            case 3: return "Rename";
+            case 4: return "Move to Trash";
+            case 5: return "Properties";
+            default: return "";
+        }
+    }
+
+    switch (item) {
+        case 0: return "Open";
+        case 1: return "Pin to Desktop";
+        case 2: return "Rename";
+        case 3: return "Move to Trash";
+        case 4: return "Properties";
+        default: return "";
+    }
 }
 
 int FileExplorerApp::hitTestContextMenu(int x, int y) const {
     if (!m_contextMenuOpen) return -1;
     if (x < m_contextMenuX || x >= m_contextMenuX + CONTEXT_MENU_W) return -1;
-    if (y < m_contextMenuY || y >= m_contextMenuY + CONTEXT_MENU_ITEM_H * 5) return -1;
+    if (y < m_contextMenuY || y >= m_contextMenuY + CONTEXT_MENU_ITEM_H * contextMenuItemCount()) return -1;
     return (y - m_contextMenuY) / CONTEXT_MENU_ITEM_H;
 }
 
 bool FileExplorerApp::handleContextMenuClick(int x, int y) {
+    if (file_clipboard::operation_active()) return false;
     int item = hitTestContextMenu(x, y);
     if (item < 0) return false;
     m_contextMenuOpen = false;
-    switch (item) {
-        case 0: openSelected(); break;
-        case 1: pinSelectedToDesktop(); break;
-        case 2: beginRenameSelected(); break;
-        case 3: showDeleteConfirmation(); break;
-        case 4: showPropertiesForSelected(); break;
-        default: break;
+    if (m_contextMenuTarget == ContextMenuTarget::CurrentDirectory) {
+        if (contextMenuHasCurrentDirectoryPaste() && item == 0) {
+            pasteClipboard();
+        } else {
+            const int createFolderItem = contextMenuHasCurrentDirectoryPaste() ? 1 : 0;
+            if (contextMenuHasCurrentDirectoryCreateFolder() && item == createFolderItem) {
+                beginCreateFolder();
+            }
+        }
+    } else if (contextMenuHasFileOperations()) {
+        const bool folderPaste = m_entries[m_selected].isDir && contextMenuHasFolderPaste();
+        if (folderPaste && item == 3) {
+            char destinationDirectory[MAX_PATH_LEN];
+            joinPath(m_currentPath, m_entries[m_selected].name, destinationDirectory, sizeof(destinationDirectory));
+            pasteClipboardTo(destinationDirectory);
+            return true;
+        }
+        switch (item) {
+            case 0: openSelected(); break;
+            case 1: beginCopySelected(); break;
+            case 2: beginMoveSelected(); break;
+            case 3: if (!folderPaste) pinSelectedToDesktop(); break;
+            case 4: if (folderPaste) pinSelectedToDesktop(); else beginRenameSelected(); break;
+            case 5: if (folderPaste) beginRenameSelected(); else showDeleteConfirmation(); break;
+            case 6: if (folderPaste) showDeleteConfirmation(); else showPropertiesForSelected(); break;
+            case 7: if (folderPaste) showPropertiesForSelected(); break;
+            default: break;
+        }
+    } else if (contextMenuHasFolderPaste()) {
+        switch (item) {
+            case 0: openSelected(); break;
+            case 1: {
+                char destinationDirectory[MAX_PATH_LEN];
+                joinPath(m_currentPath, m_entries[m_selected].name, destinationDirectory, sizeof(destinationDirectory));
+                pasteClipboardTo(destinationDirectory);
+                break;
+            }
+            case 2: pinSelectedToDesktop(); break;
+            case 3: beginRenameSelected(); break;
+            case 4: showDeleteConfirmation(); break;
+            case 5: showPropertiesForSelected(); break;
+            default: break;
+        }
+    } else {
+        switch (item) {
+            case 0: openSelected(); break;
+            case 1: pinSelectedToDesktop(); break;
+            case 2: beginRenameSelected(); break;
+            case 3: showDeleteConfirmation(); break;
+            case 4: showPropertiesForSelected(); break;
+            default: break;
+        }
     }
     return true;
 }
@@ -5574,6 +5706,8 @@ int FileExplorerApp::hitTestEntryRow(int x, int y) const {
 void FileExplorerApp::closeTransientUi() {
     m_contextMenuOpen = false;
     m_contextMenuHover = -1;
+    m_contextMenuPasteVisible = false;
+    m_contextMenuCreateFolderVisible = false;
     m_propertiesOpen = false;
 }
 
@@ -6255,7 +6389,7 @@ void TrashApp::refreshEntries()
         vfs::DirEntry entry{};
         while (m_entryCount < MAX_TRASH_ENTRIES && vfs::readdir(dir, &entry)) {
             if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
-            if (endsWithText(entry.name, kKernelTrashInfoSuffix)) continue;
+            if (file_clipboard::is_trash_metadata_name(entry.name)) continue;
 
             TrashEntry& item = m_entries[m_entryCount];
             strcopy(item.name, entry.name, sizeof(item.name));
@@ -6375,7 +6509,7 @@ bool TrashApp::purgeContents(int* deletedCount)
         vfs::DirEntry entry{};
         while (vfs::readdir(dir, &entry)) {
             if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
-            if (endsWithText(entry.name, kKernelTrashInfoSuffix)) continue;
+            if (file_clipboard::is_trash_metadata_name(entry.name)) continue;
             ++finalCount;
         }
         vfs::closedir(dir);
@@ -9436,7 +9570,7 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_allowlisted_tls_transp
         true,
         true,
         true,
-        "Mbed TLS bare-metal",
+        "mbedtls",
         "Controlled local HTTPS allowlist matched."
     };
 }
@@ -9451,7 +9585,7 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_policy_validated_tls_t
         true,
         true,
         true,
-        "Mbed TLS bare-metal",
+        "mbedtls",
         reason ? reason : "Explicit validated HTTPS policy matched."
     };
 }
@@ -9466,7 +9600,7 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_blocked_https_transpor
         false,
         true,
         true,
-        "Mbed TLS bare-metal",
+        "mbedtls",
         reason ? reason : "General bare-metal HTTPS is disabled by policy."
     };
 }
@@ -13481,6 +13615,8 @@ static bool printNavigatorLocalTlsSmokeCase()
             nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
             error[0] != '\0';
 
+    const gxos::GxosTlsLocalHandshakeResult& tlsResult = s_kernelHttpResponse.tlsResult;
+
     serial::puts("[NAVIGATOR-SMOKE] tls_smoke.url=");
     serial::puts(url);
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.local_ready=");
@@ -13511,12 +13647,32 @@ static bool printNavigatorLocalTlsSmokeCase()
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_status=");
     serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.byte_stream=shared TLS HttpByteStream policy layer");
-    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_backend=Mbed TLS bare-metal");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_backend=mbedtls");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.evidence_lane=kernel_local_fixture");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract=explicit_bounded");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSuiteContractCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_real_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSuiteContractRealCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_installed=");
+    serial::puts(tlsResult.tlsSuiteContractInstalled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_suite_contract_names=");
+    serial::puts(tlsResult.tlsSuiteContractNames[0] ? tlsResult.tlsSuiteContractNames : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_real_suite_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsClientHelloRealSuiteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_scsv_only=");
+    serial::puts(tlsResult.tlsClientHelloScsvOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_clienthello_contract_match=");
+    serial::puts(tlsResult.tlsClientHelloCanonicalSuiteOffered ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.sni_host=");
     serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.protocol=");
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_negotiated_suite=");
     serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.http_status=");
     serial_put_dec((uint32_t)statusCode);
@@ -13760,6 +13916,44 @@ static bool printNavigatorLocalTlsWrongHostnameFailureCase()
     serial::puts(pass ? "PASS\n" : "FAIL\n");
     return pass;
 }
+
+#if defined(GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE)
+static bool printNavigatorTlsCapabilityContractNegativeCase()
+{
+    gxos::GxosTlsLocalHandshakeResult result{};
+    const bool requestOk = gxos::gxos_tls_capability_contract_negative_test(&result);
+    const bool pass = !requestOk &&
+        result.attempted &&
+        !result.tcpConnected &&
+        !result.tlsClientHelloSent &&
+        result.tlsSuiteContractCount == 1u &&
+        result.tlsSuiteContractRealCount == 0u &&
+        !result.tlsSuiteContractInstalled &&
+        result.transportStatus == gxos::web::HttpByteStreamTlsStatus::CapabilityContractFailure &&
+        nav_smoke_text_equals(result.tlsContractFailureClass, "TLS_CAPABILITY_CONTRACT_FAILURE");
+
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.contract_negative.test_only=yes\n");
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_suite_contract=invalid_signaling_only\n");
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_suite_contract_count=");
+    serial_put_dec64((uint64_t)result.tlsSuiteContractCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_suite_contract_real_count=");
+    serial_put_dec64((uint64_t)result.tlsSuiteContractRealCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_suite_contract_installed=");
+    serial::puts(result.tlsSuiteContractInstalled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_clienthello_sent=");
+    serial::puts(result.tlsClientHelloSent ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_clienthello_real_suite_count=");
+    serial_put_dec64((uint64_t)result.tlsClientHelloRealSuiteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_contract_failure_class=");
+    serial::puts(result.tlsContractFailureClass[0] ? result.tlsContractFailureClass : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.tls_status=");
+    serial::puts(gxos::web::httpSharedTlsStatusName(result.transportStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.plaintext_fallback=no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.contract_negative.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+#endif
 
 static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int expectedStatus,
                                         const char* expectedFinalUrl, bool expectedFetchOk,
@@ -14379,6 +14573,7 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
         tlsProtocol, sizeof(tlsProtocol), tlsCipherSuite, sizeof(tlsCipherSuite),
         transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
         &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
+    const gxos::GxosTlsLocalHandshakeResult& tlsResult = s_kernelHttpResponse.tlsResult;
 
     const bool contentTypeOk =
         gxos::web::httpSharedEqualsInsensitive(contentType, "text/html") ||
@@ -14448,9 +14643,36 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.allowlist_mode=");
     serial::puts(tlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "explicit-policy validated HTTPS");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_backend=mbedtls");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.evidence_lane=kernel_local_fixture");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract=explicit_bounded");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_count=");
+    serial_put_dec((uint32_t)tlsResult.tlsSuiteContractCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_real_count=");
+    serial_put_dec((uint32_t)tlsResult.tlsSuiteContractRealCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_suite_contract_installed=");
+    serial::puts(tlsResult.tlsSuiteContractInstalled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_real_suite_count=");
+    serial_put_dec((uint32_t)tlsResult.tlsClientHelloRealSuiteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_scsv_only=");
+    serial::puts(tlsResult.tlsClientHelloScsvOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_clienthello_contract_match=");
+    serial::puts(tlsResult.tlsClientHelloCanonicalSuiteOffered ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.certificate_validated=");
+    serial::puts(tlsValidated ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.hostname_validated=");
+    serial::puts(tlsHostnameValidated ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.body_bytes=");
+    serial_put_dec((uint32_t)bodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.parsed_blocks=");
+    serial_put_dec((uint32_t)parsedBlocks);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=");
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_negotiated_suite=");
     serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.error=");
     serial::puts(error[0] ? error : "(none)");
@@ -15381,11 +15603,29 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec64((uint64_t)verifyFlags);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_backend=");
     serial::puts(tlsBackend[0] ? tlsBackend : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.evidence_lane=kernel_public_https");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_suite_contract=explicit_bounded");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_suite_contract_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSuiteContractCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_suite_contract_real_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSuiteContractRealCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_suite_contract_installed=");
+    serial::puts(tlsResult.tlsSuiteContractInstalled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_clienthello_real_suite_count=");
+    serial_put_dec64((uint64_t)tlsResult.tlsClientHelloRealSuiteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_clienthello_scsv_only=");
+    serial::puts(tlsResult.tlsClientHelloScsvOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_clienthello_contract_match=");
+    serial::puts(tlsResult.tlsClientHelloCanonicalSuiteOffered ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.sni_host=");
     serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.protocol=");
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_negotiated_suite=");
     serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_abort_used=");
     serial::puts(tcpAbortUsed ? "yes" : "no");
@@ -15689,6 +15929,9 @@ static bool printNavigatorHttpSmokeCases()
     httpOk = printNavigatorLocalTlsSmokeCase() && httpOk;
     httpOk = printNavigatorLocalTlsRedirectCase() && httpOk;
     httpOk = printNavigatorLocalTlsWrongHostnameFailureCase() && httpOk;
+#if defined(GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE)
+    httpOk = printNavigatorTlsCapabilityContractNegativeCase() && httpOk;
+#endif
     httpOk = printNavigatorLocalTlsBlockedHostCase() && httpOk;
     httpOk = printNavigatorPolicyValidatedTlsSmokeCase() && httpOk;
     httpOk = printNavigatorPolicyValidatedRedirectCase() && httpOk;

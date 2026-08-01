@@ -5,6 +5,7 @@
 #include "process.h"
 #include "allocator.h"
 #include "logger.h"
+#include <algorithm>
 #include <thread>
 #include <chrono>
 
@@ -107,6 +108,32 @@ namespace gxos {
             }
             
             return false;
+        }
+
+        bool Bus::popType(const std::string& name, uint32_t type, Message& out, uint64_t timeoutMs) {
+            const uint64_t pid = Allocator::currentPid();
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+            auto ch = get(name);
+            while (true) {
+                if (pid != 0 && ProcessTable::try_recv(pid, out)) {
+                    if (out.type == type) return true;
+                    ProcessTable::send(pid, std::move(out));
+                }
+                {
+                    std::lock_guard<std::mutex> lk(ch->mu);
+                    auto it = std::find_if(ch->queue.begin(), ch->queue.end(), [type](const Message& message) {
+                        return message.type == type;
+                    });
+                    if (it != ch->queue.end()) {
+                        out = std::move(*it);
+                        ch->queue.erase(it);
+                        ch->cv.notify_all();
+                        return true;
+                    }
+                }
+                if (timeoutMs == 0 || std::chrono::steady_clock::now() >= deadline) return false;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
         }
 
         bool Bus::setCapacity(const std::string& name, size_t cap) {

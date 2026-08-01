@@ -9,8 +9,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 
@@ -30,13 +33,32 @@ constexpr int kMinDrawCoordinate = 0;
 constexpr int kMaxDrawCoordinate = 16384;
 constexpr int kMinDrawSize = 1;
 constexpr int kMaxDrawSize = 4096;
-constexpr uint64_t kWindowCreateTimeoutMs = 500;
+// A compositor can briefly drain queued input/paint work between repeated
+// Native ELF launches. Keep window creation bounded, but allow that queue to
+// clear before reporting a false compositor-unavailable result.
+constexpr uint64_t kWindowCreateTimeoutMs = 5000;
 constexpr int kMinWaitForCloseTimeoutMs = 0;
 constexpr int kMaxWaitForCloseTimeoutMs = 300000;
 constexpr int kMinPollEventTimeoutMs = 0;
 constexpr int kMaxPollEventTimeoutMs = 30000;
 constexpr uint32_t kMaxFilePathLength = 240;
 constexpr uint32_t kMaxFileReadBytes = 64u * 1024u;
+constexpr uint64_t kMaxPresentFrameBytes = 16ull * 1024ull * 1024ull;
+constexpr uint64_t kMaxNativeAppStackBytes = 8ull * 1024ull * 1024ull;
+
+bool frameDiagnosticsEnabled() {
+    static const bool enabled = []() {
+        const char* value = std::getenv("GXOS_PACMAN_FRAME_DIAGNOSTICS");
+        if (!value || !*value) return false;
+        std::string lower;
+        lower.reserve(std::char_traits<char>::length(value));
+        for (const char* p = value; *p; ++p) {
+            lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
+        }
+        return !(lower == "0" || lower == "false" || lower == "off" || lower == "no");
+    }();
+    return enabled;
+}
 
 std::string appLabel(const NativeAppRuntimeContext* context) {
     if (!context) return "<unknown>";
@@ -73,10 +95,139 @@ bool experimentalExecutionEnabled() {
 
 NativeAppRuntimeContext* runtimeContextFor(NativeGxAppContext* ctx) {
     if (!ctx) return nullptr;
+    if (!g_activeRuntimeContext || ctx != g_activeRuntimeContext->activeGxContext) return nullptr;
     if (!ctx->host) return nullptr;
     if (ctx->size < sizeof(NativeGxAppContext)) return nullptr;
-    if (g_activeRuntimeContext && ctx->host == &g_activeRuntimeContext->hostCalls) return g_activeRuntimeContext;
+    if (ctx->host == &g_activeRuntimeContext->hostCalls) return g_activeRuntimeContext;
     return nullptr;
+}
+
+std::string pointerText(const void* pointer) {
+    std::ostringstream oss;
+    oss << "0x" << std::hex << reinterpret_cast<uintptr_t>(pointer) << std::dec;
+    return oss.str();
+}
+
+bool addressRangeContains(uint64_t base, uint64_t end, uint64_t address, uint64_t bytes) {
+    return end > base && address >= base && address < end && bytes <= end - address;
+}
+
+bool nativeBufferRangeContains(const NativeAppRuntimeContext& context, const void* pointer, uint64_t bytes) {
+    if (!pointer || bytes == 0) return false;
+
+    const uint64_t address = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer));
+    return addressRangeContains(context.nativeImageBaseAddress, context.nativeImageEndAddress, address, bytes) ||
+        addressRangeContains(context.nativeStackBaseAddress, context.nativeStackEndAddress, address, bytes);
+}
+
+std::string nativeImageRangeClassification(const NativeAppRuntimeContext& context, const void* pointer, uint64_t bytes) {
+    if (!pointer) return "null";
+    if (bytes == 0) return "zero-length";
+    const uint64_t address = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer));
+    if (addressRangeContains(context.nativeImageBaseAddress, context.nativeImageEndAddress, address, bytes)) return "inside-native-image";
+    if (addressRangeContains(context.nativeStackBaseAddress, context.nativeStackEndAddress, address, bytes)) return "inside-active-native-stack";
+    if (context.nativeImageEndAddress <= context.nativeImageBaseAddress && context.nativeStackEndAddress <= context.nativeStackBaseAddress) return "native-memory-ranges-unavailable";
+    return "outside-native-memory";
+}
+
+bool copyNativePath(const NativeAppRuntimeContext& context, const char* path, std::string& output, std::string& failureReason) {
+    output.clear();
+    failureReason.clear();
+    if (!path) {
+        failureReason = "null-path";
+        return false;
+    }
+
+    const uint64_t start = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(path));
+    for (uint32_t i = 0; i <= kMaxFilePathLength; ++i) {
+        if (start > std::numeric_limits<uint64_t>::max() - i) {
+            failureReason = "path-address-overflow";
+            return false;
+        }
+
+        const char* current = reinterpret_cast<const char*>(static_cast<uintptr_t>(start + i));
+        if (!nativeBufferRangeContains(context, current, 1)) {
+            failureReason = "path-outside-native-image";
+            return false;
+        }
+
+        const char value = *current;
+        if (value == '\0') return true;
+        output.push_back(value);
+    }
+
+    failureReason = "path-not-null-terminated-within-limit";
+    return false;
+}
+
+void logInvalidFileReadContext(
+    NativeGxAppContext* ctx,
+    const char* operation,
+    uint64_t offset,
+    uint32_t requestedBytes,
+    const void* destination,
+    const uint32_t* outBytesRead,
+    gx_result result) {
+    const bool active = g_activeRuntimeContext != nullptr;
+    const bool contextPointerMatches = active && ctx != nullptr && ctx == g_activeRuntimeContext->activeGxContext;
+    std::ostringstream oss;
+    oss << "[NativeAppHost] " << operation
+        << " phase=context-resolution"
+        << " runtimeId=" << (active ? std::to_string(g_activeRuntimeContext->runtimeId) : "<none>")
+        << " appId=" << (active ? g_activeRuntimeContext->appId : "<none>")
+        << " processId=" << (active && g_activeRuntimeContext->processId != 0 ? std::to_string(g_activeRuntimeContext->processId) : std::to_string(Allocator::currentPid()))
+        << " contextActive=" << (active ? "yes" : "no")
+        << " contextPointerMatched=" << (contextPointerMatches ? "yes" : "no")
+        << " requestedPath=<unavailable>"
+        << " offset=" << offset
+        << " length=" << requestedBytes
+        << " destination=" << pointerText(destination)
+        << " destinationRange=<unavailable>"
+        << " outBytesRead=" << pointerText(outBytesRead)
+        << " result=" << result
+        << " actualHostRead=not-started"
+        << " returnPropagation=about-to-return";
+    Logger::write(LogLevel::Warn, oss.str());
+}
+
+void logFileReadBoundary(
+    const NativeAppRuntimeContext& context,
+    const char* operation,
+    const std::string& requestedPath,
+    const std::string& resolvedPath,
+    uint64_t offset,
+    uint32_t requestedBytes,
+    const void* destination,
+    uint32_t bytesRead,
+    const uint32_t* outBytesRead,
+    const char* phase,
+    const char* actualHostRead,
+    bool contextActive,
+    bool contextMatched,
+    gx_result result) {
+    std::ostringstream oss;
+    oss << "[NativeAppHost] " << operation
+        << " phase=" << phase
+        << " runtimeId=" << context.runtimeId
+        << " appId=" << context.appId
+        << " processId=" << (context.processId != 0 ? context.processId : Allocator::currentPid())
+        << " contextActive=" << (contextActive ? "yes" : "no")
+        << " contextPointerMatched=" << (contextMatched ? "yes" : "no")
+        << " requestedPath=\"" << (requestedPath.empty() ? "<unavailable>" : requestedPath) << "\""
+        << " offset=" << offset
+        << " length=" << requestedBytes
+        << " destination=" << pointerText(destination)
+        << " destinationRange=" << nativeImageRangeClassification(context, destination, requestedBytes)
+        << " outBytesRead=" << pointerText(outBytesRead)
+        << " outBytesReadRange=" << nativeImageRangeClassification(context, outBytesRead, sizeof(uint32_t))
+        << " resolvedPackagePath=\"" << context.appDirectory << "\""
+        << " resolvedPath=\"" << (resolvedPath.empty() ? "<none>" : resolvedPath) << "\""
+        << " bytesRead=" << bytesRead
+        << " result=" << result
+        << " actualHostRead=" << actualHostRead
+        << " returnPropagation=about-to-return";
+    Logger::write(result == GX_OK ? LogLevel::Info : LogLevel::Warn, oss.str());
+    NativeAppDebugLog::Add(context.runtimeId, context.appId, result == GX_OK ? "info" : "warn", oss.str());
 }
 
 bool hasPermission(const NativeAppRuntimeContext& context, const std::string& permission) {
@@ -99,12 +250,15 @@ bool pathContainsTraversal(const std::string& path) {
 gx_result resolveFileReadPath(NativeAppRuntimeContext& context, const char* path, std::string& resolvedPath) {
     context.lastFilePath.clear();
 
-    if (!path || !path[0]) return GX_ERROR_INVALID_ARGUMENT;
+    std::string requestedPath;
+    std::string pathFailure;
+    if (!copyNativePath(context, path, requestedPath, pathFailure) || requestedPath.empty()) {
+        context.lastFilePath = pathFailure.empty() ? "<empty-path>" : "<" + pathFailure + ">";
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
 
-    std::string requestedPath(path);
     context.lastFilePath = requestedPath;
     if (requestedPath.size() > kMaxFilePathLength) return GX_ERROR_INVALID_ARGUMENT;
-    if (requestedPath.find('\0') != std::string::npos) return GX_ERROR_INVALID_ARGUMENT;
     if (requestedPath.find(':') != std::string::npos) return GX_ERROR_PERMISSION_DENIED;
     if (!context.appDirectory.empty() && requestedPath.rfind(context.appDirectory, 0) == 0) return GX_ERROR_PERMISSION_DENIED;
     if (requestedPath[0] == '/' || requestedPath[0] == static_cast<char>(92)) return GX_ERROR_PERMISSION_DENIED;
@@ -271,6 +425,7 @@ void initializeEvent(gx_event* outEvent) {
 gx_event_type eventTypeForMessage(uint32_t messageType) {
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_Close)) return GX_EVENT_WINDOW_CLOSE;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_SetFocus)) return GX_EVENT_WINDOW_FOCUS;
+    if (messageType == static_cast<uint32_t>(gui::MsgType::MT_ClearFocus)) return GX_EVENT_WINDOW_BLUR;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_InputKey)) return GX_EVENT_KEY;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_InputMouse)) return GX_EVENT_MOUSE;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_RequestFrame)) return GX_EVENT_WINDOW_PAINT;
@@ -317,6 +472,18 @@ uint32_t hostGetApiVersion(NativeGxAppContext* ctx) {
     return kGuideXOSNativeApiVersion;
 }
 
+uint64_t hostGetTicksMs(NativeGxAppContext* ctx) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] get_ticks_ms rejected: invalid app context or host table");
+        return 0;
+    }
+
+    static const std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - epoch).count();
+    return elapsed < 0 ? 0u : static_cast<uint64_t>(elapsed);
+}
+
 gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -327,9 +494,10 @@ gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* ou
     ++context->fileExistsCallCount;
     context->lastFileReadBytes = 0;
     context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
-    if (outExists) *outExists = 0;
+    const bool outputPointerValid = nativeBufferRangeContains(*context, outExists, sizeof(uint32_t));
+    if (outputPointerValid) *outExists = 0;
 
-    if (!outExists) {
+    if (!outputPointerValid) {
         Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists rejected: null output pointer");
         NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_exists failed: null output pointer");
         NativeAppProcessTable::UpdateFromRuntime(*context);
@@ -372,9 +540,9 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
     ++context->fileReadCallCount;
     context->lastFileReadBytes = 0;
     context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
-    if (outBytesRead) *outBytesRead = 0;
-
-    if (!buffer || bufferSize == 0 || !outBytesRead) {
+    const bool outputPointerValid = nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t));
+    if (outputPointerValid) *outBytesRead = 0;
+    if (!buffer || bufferSize == 0 || !outputPointerValid || !nativeBufferRangeContains(*context, buffer, bufferSize)) {
         Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all rejected: invalid buffer or output pointer");
         NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_read_all failed: invalid buffer or output pointer");
         NativeAppProcessTable::UpdateFromRuntime(*context);
@@ -449,7 +617,83 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
     return context->lastFileIoResult;
 }
 
-gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) {
+gx_result hostFileRead(NativeGxAppContext* ctx, const char* path, uint64_t offset, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
+    const bool contextActive = g_activeRuntimeContext != nullptr;
+    const bool contextPointerMatched = contextActive && ctx != nullptr && ctx == g_activeRuntimeContext->activeGxContext;
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        logInvalidFileReadContext(ctx, "file_read", offset, bufferSize, buffer, outBytesRead, GX_ERROR_INVALID_ARGUMENT);
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    ++context->fileReadChunkCallCount;
+    context->lastFileReadOffset = offset;
+    context->lastFileReadBytes = 0;
+    context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
+    std::string resolvedPath;
+    std::string requestedPath;
+    std::string pathFailure;
+    if (copyNativePath(*context, path, requestedPath, pathFailure)) context->lastFilePath = requestedPath;
+    else context->lastFilePath = pathFailure.empty() ? "<unavailable>" : "<" + pathFailure + ">";
+
+    auto finish = [&](gx_result result, const char* phase, const char* actualHostRead) -> gx_result {
+        context->lastFileReadBytes = (outBytesRead && nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t))) ? *outBytesRead : 0;
+        context->lastFileIoResult = result;
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        logFileReadBoundary(*context, "file_read", requestedPath, resolvedPath, offset, bufferSize, buffer,
+            context->lastFileReadBytes, outBytesRead, phase, actualHostRead, contextActive, contextPointerMatched, result);
+        return result;
+    };
+
+    const bool outputPointerValid = nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t));
+    if (outputPointerValid) *outBytesRead = 0;
+    if (!buffer || bufferSize == 0 || !outputPointerValid || bufferSize > kMaxFileReadBytes) {
+        return finish(context->lastFileIoResult, "destination-validation", "not-started");
+    }
+    if (!nativeBufferRangeContains(*context, buffer, bufferSize)) {
+        return finish(GX_ERROR_INVALID_ARGUMENT, "destination-validation", "not-started");
+    }
+    if (!hasPermission(*context, "file.read")) {
+        return finish(GX_ERROR_PERMISSION_DENIED, "permission-validation", "not-started");
+    }
+
+    context->lastFileIoResult = resolveFileReadPath(*context, path, resolvedPath);
+    if (context->lastFileIoResult != GX_OK) {
+        return finish(context->lastFileIoResult, "package-path-validation", "not-started");
+    }
+
+    try {
+        std::ifstream input(resolvedPath.c_str(), std::ios::binary);
+        if (!input) {
+            return finish(GX_ERROR_FAILED, "file-open", "open-failed");
+        } else {
+            input.seekg(0, std::ios::end);
+            const std::streamoff streamSize = input.tellg();
+            if (streamSize < 0) return finish(GX_ERROR_FAILED, "file-size", "open-complete");
+            const uint64_t fileSize = static_cast<uint64_t>(streamSize);
+            if (offset > fileSize) return finish(GX_ERROR_INVALID_ARGUMENT, "offset-validation", "open-complete");
+
+            const uint64_t available = fileSize - offset;
+            const uint32_t bytesToRead = static_cast<uint32_t>(std::min<uint64_t>(available, bufferSize));
+            input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+            if (!input) return finish(GX_ERROR_FAILED, "file-seek", "open-complete");
+
+            if (bytesToRead > 0) {
+                if (!input.read(static_cast<char*>(buffer), static_cast<std::streamsize>(bytesToRead)) ||
+                    static_cast<uint32_t>(input.gcount()) != bytesToRead) {
+                    return finish(GX_ERROR_FAILED, "file-read", "read-attempt-failed");
+                }
+            }
+
+            *outBytesRead = bytesToRead;
+            return finish(GX_OK, "return", "read-complete");
+        }
+    } catch (...) {
+        return finish(GX_ERROR_FAILED, "file-read-exception", "read-attempt-failed");
+    }
+}
+
+gx_result hostRequestWindowEx(NativeGxAppContext* ctx, const char* title, int width, int height, uint32_t flags, gx_handle* outWindow) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
         Logger::write(LogLevel::Warn, "[NativeAppHost] request_window rejected: invalid app context or host table");
@@ -482,7 +726,7 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
     ipc::Message request;
     request.srcPid = nativeAppPid;
     request.type = static_cast<uint32_t>(gui::MsgType::MT_Create);
-    std::string payload = std::string(title) + "|" + std::to_string(width) + "|" + std::to_string(height);
+    std::string payload = std::string(title) + "|" + std::to_string(width) + "|" + std::to_string(height) + "|" + std::to_string(flags);
     request.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(request), false);
 
@@ -509,6 +753,10 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
     Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " request_window failed: compositor unavailable or no MT_Create ack");
     NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "request_window failed: compositor unavailable or no MT_Create ack");
     return context->lastRequestWindowResult;
+}
+
+gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) {
+    return hostRequestWindowEx(ctx, title, width, height, 1u, outWindow);
 }
 
 gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, const char* text) {
@@ -634,6 +882,86 @@ gx_result hostDrawRect(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
     return GX_OK;
 }
 
+gx_result hostPresentFrame(NativeGxAppContext* ctx, gx_handle window, int x, int y, int width, int height,
+                           uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) return GX_ERROR_INVALID_ARGUMENT;
+
+    ++context->presentFrameCallCount;
+    context->lastPresentFrameWindow = window;
+    context->lastPresentFrameX = x;
+    context->lastPresentFrameY = y;
+    context->lastPresentFrameWidth = width;
+    context->lastPresentFrameHeight = height;
+    context->lastPresentFrameStrideBytes = strideBytes;
+    context->lastPresentFramePixelFormat = pixelFormat;
+    context->lastPresentFrameBytes = pixelBytes;
+    context->lastPresentFrameResult = GX_ERROR_INVALID_ARGUMENT;
+
+    const auto logFrameBoundary = [&](const char* validation, const char* presentation) {
+        if (!frameDiagnosticsEnabled()) return;
+        std::ostringstream oss;
+        oss << "Native ELF frame boundary runtimeId=" << context->runtimeId
+            << " windowId=" << window
+            << " incomingFrameSeq=" << context->presentFrameCallCount
+            << " width=" << width
+            << " height=" << height
+            << " stride=" << strideBytes
+            << " format=" << pixelFormat
+            << " bytes=" << pixelBytes
+            << " validation=" << validation
+            << " presentation=" << presentation
+            << " result=" << context->lastPresentFrameResult;
+        Logger::write(LogLevel::Info, oss.str());
+    };
+
+    if (window == 0 || !pixels || x < 0 || y < 0 || width < 1 || height < 1 || width > kMaxWindowWidth || height > kMaxWindowHeight ||
+        pixelFormat != gui::kPixelFormatXrgb8888 || strideBytes < static_cast<uint32_t>(width * 4)) {
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
+        return context->lastPresentFrameResult;
+    }
+    if (!ownsWindow(*context, window)) {
+        context->lastPresentFrameResult = GX_ERROR_PERMISSION_DENIED;
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
+        return context->lastPresentFrameResult;
+    }
+    if (!hasPermission(*context, "draw") && !hasPermission(*context, "window")) {
+        context->lastPresentFrameResult = GX_ERROR_PERMISSION_DENIED;
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
+        return context->lastPresentFrameResult;
+    }
+
+    const uint64_t requiredBytes = static_cast<uint64_t>(strideBytes) * static_cast<uint64_t>(height);
+    if (requiredBytes > kMaxPresentFrameBytes || requiredBytes != pixelBytes) {
+        context->lastPresentFrameResult = GX_ERROR_UNSUPPORTED;
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
+        return context->lastPresentFrameResult;
+    }
+    if (!nativeBufferRangeContains(*context, pixels, requiredBytes)) {
+        context->lastPresentFrameResult = GX_ERROR_INVALID_ARGUMENT;
+        logFrameBoundary("FAIL", "NOT_ATTEMPTED");
+        return context->lastPresentFrameResult;
+    }
+
+    try {
+        ipc::Message request;
+        request.srcPid = Allocator::currentPid();
+        request.type = static_cast<uint32_t>(gui::MsgType::MT_FramePresent);
+        request.data = gui::packFramePresent(window, x, y, width, height, strideBytes, pixelFormat, pixels, pixelBytes,
+            frameDiagnosticsEnabled() ? context->presentFrameCallCount : 0);
+        ipc::Bus::publish("gui.input", std::move(request), false);
+        context->lastPresentFrameResult = GX_OK;
+    } catch (...) {
+        context->lastPresentFrameResult = GX_ERROR_INTERNAL;
+    }
+    logFrameBoundary("PASS", context->lastPresentFrameResult == GX_OK ? "PASS" : "FAIL");
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, context->lastPresentFrameResult == GX_OK ? "info" : "warn",
+        "present_frame windowId=" + std::to_string(window) + " size=" + std::to_string(width) + "x" + std::to_string(height) +
+        " bytes=" + std::to_string(pixelBytes) + " result=" + std::to_string(context->lastPresentFrameResult));
+    return context->lastPresentFrameResult;
+}
+
 gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeoutMs) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -702,10 +1030,8 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         }
 
         if (!ownsWindow(*context, window)) {
-            context->lastPollEventResult = GX_ERROR_UNSUPPORTED;
-            Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " poll_event unsupported: encountered event for an unowned window");
-            NativeAppProcessTable::UpdateFromRuntime(*context);
-            return context->lastPollEventResult;
+            Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " poll_event skipped event for an unowned window");
+            continue;
         }
 
         outEvent->type = eventType;
@@ -719,6 +1045,8 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             context->lastPaintHeight = paintHeight;
         } else if (eventType == GX_EVENT_WINDOW_FOCUS) {
             context->focusedOwnedWindow = window;
+        } else if (eventType == GX_EVENT_WINDOW_BLUR) {
+            if (context->focusedOwnedWindow == window) context->focusedOwnedWindow = 0;
         } else if (eventType == GX_EVENT_KEY) {
             outEvent->param1 = keyCode;
             outEvent->param2 = keyAction;
@@ -856,6 +1184,10 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.architecture = launchResult.architecture.empty() ? launchDecision.architecture : launchResult.architecture;
     context.processId = 0;
     context.appDirectory = app.appDirectory.string();
+    context.nativeImageBaseAddress = image.preferredBaseAddress;
+    if (image.imageSize <= std::numeric_limits<uint64_t>::max() - context.nativeImageBaseAddress) {
+        context.nativeImageEndAddress = context.nativeImageBaseAddress + image.imageSize;
+    }
     context.permissions = app.manifest.permissions;
     context.arguments.push_back(context.displayName.empty() ? context.appId : context.displayName);
     context.environment["GX_APP_ID"] = context.appId;
@@ -878,6 +1210,10 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.exit = hostExit;
     context.hostCalls.file_read_all = hostFileReadAll;
     context.hostCalls.file_exists = hostFileExists;
+    context.hostCalls.request_window_ex = hostRequestWindowEx;
+    context.hostCalls.file_read = hostFileRead;
+    context.hostCalls.present_frame = hostPresentFrame;
+    context.hostCalls.get_ticks_ms = hostGetTicksMs;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");
@@ -910,6 +1246,12 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
 }
 
 void NativeAppRuntime::BeginHostCallDispatch(NativeAppRuntimeContext& context) {
+    if (context.processId == 0) context.processId = Allocator::currentPid();
+    volatile uint8_t stackMarker = 0;
+    const uint64_t stackAddress = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&stackMarker));
+    context.nativeStackBaseAddress = stackAddress > kMaxNativeAppStackBytes ? stackAddress - kMaxNativeAppStackBytes : 0;
+    context.nativeStackEndAddress = stackAddress <= std::numeric_limits<uint64_t>::max() - kMaxNativeAppStackBytes
+        ? stackAddress + kMaxNativeAppStackBytes : std::numeric_limits<uint64_t>::max();
     context.lifecycleState = NativeAppLifecycleState::Running;
     context.startTime = std::chrono::steady_clock::now();
     g_hostLifecycleState = NativeAppLifecycleState::Running;

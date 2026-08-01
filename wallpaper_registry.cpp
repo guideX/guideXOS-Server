@@ -171,6 +171,15 @@ const char* WallpaperRegistry::KindName(BackgroundKind kind)
     }
 }
 
+const char* WallpaperRegistry::OwnerName(BackgroundOwner owner)
+{
+    switch (owner) {
+    case BackgroundOwner::BuiltIn: return "builtin";
+    case BackgroundOwner::UserImported: return "user";
+    default: return "unknown";
+    }
+}
+
 BackgroundScaleMode WallpaperRegistry::ParseScaleMode(const std::string& value)
 {
     if (value == "fit" || value == "contain") return BackgroundScaleMode::Fit;

@@ -105,6 +105,18 @@ enum Status : int8_t {
     VFS_ERR_BUSY      = -11,
     VFS_ERR_TOO_MANY  = -12,
     VFS_ERR_NOT_SUPPORTED = -13,
+    VFS_ERR_IO_TIMEOUT = -14,
+    VFS_ERR_CORRUPT_CHAIN = -15,
+    VFS_ERR_NO_PROGRESS = -16,
+    VFS_ERR_ALLOCATION_FAILED = -17,
+    // Directory and transactional traversal errors are kept distinct so a
+    // caller can refuse a risky operation without treating it as generic I/O.
+    VFS_ERR_DIRECTORY_NOT_EMPTY = -18,
+    VFS_ERR_RECURSION_LIMIT = -19,
+    VFS_ERR_ENTRY_LIMIT = -20,
+    VFS_ERR_CORRUPT_DIRECTORY = -21,
+    VFS_ERR_INVALID_DESTINATION = -22,
+    VFS_ERR_ROLLBACK_FAILED = -23,
 };
 
 // ================================================================
@@ -208,6 +220,9 @@ Status unmount(const char* path);
 
 // Get mount point info by path.
 const MountPoint* get_mount(const char* path);
+
+// Return the stable mount-table slot selected for a path, or 0xFF.
+uint8_t mount_index_for_path(const char* path);
 
 // Get mount point info by index.
 const MountPoint* get_mount_by_index(uint8_t index);
@@ -314,6 +329,10 @@ int32_t read_file(const char* path, void* buffer, uint32_t maxSize);
 // Returns bytes written, or negative on error.
 int32_t write_file(const char* path, const void* buffer, uint32_t size);
 
+// Create a new regular file without replacing an existing entry.
+// Returns bytes written, or negative on error.
+int32_t create_file(const char* path, const void* buffer, uint32_t size);
+
 // Append data to a file.
 int32_t append_file(const char* path, const void* buffer, uint32_t size);
 
@@ -329,6 +348,9 @@ uint64_t free_space(const char* mountPath);
 
 // Get filesystem type name as string.
 const char* fs_type_name(FSType type);
+
+// Translate a VFS status into a stable diagnostic name.
+const char* status_name(Status status);
 
 } // namespace vfs
 } // namespace kernel

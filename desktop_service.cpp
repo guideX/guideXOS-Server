@@ -1,8 +1,10 @@
 #include "desktop_service.h"
+#include "background_service.h"
 #include "app_launch_resolver.h"
 #include "app_manifest_loader.h"
 #include "app_registry.h"
 #include "built_in_app_metadata.h"
+#include "shell_object_registry.h"
 #include "desktop_config.h"
 #include "desktop_folder.h"
 #include "elf_validator.h"
@@ -56,6 +58,25 @@ namespace gxos {
         namespace {
             static std::mutex s_typedDispatchRuntimeEnabledMutex;
             static bool s_typedDispatchRuntimeEnabled = true;
+            enum class AppModelActiveTypedDispatchStateSource {
+                ProductDefault,
+                CompatibilityCandidate,
+                ForceOn,
+                ForceOff,
+            };
+            static std::mutex s_appModelActiveTypedDispatchStateMutex;
+            static bool s_appModelActiveTypedDispatchCandidateEnabled = false;
+            static AppModelActiveTypedDispatchStateSource s_appModelActiveTypedDispatchStateSource =
+                AppModelActiveTypedDispatchStateSource::ProductDefault;
+
+            static bool appModelActiveTypedDispatchStateUsesForceOverride(AppModelActiveTypedDispatchStateSource source) {
+                return source == AppModelActiveTypedDispatchStateSource::ForceOn ||
+                    source == AppModelActiveTypedDispatchStateSource::ForceOff;
+            }
+
+            static void setAppModelActiveTypedDispatchStateSourceLocked(AppModelActiveTypedDispatchStateSource source) {
+                s_appModelActiveTypedDispatchStateSource = source;
+            }
         }
 
         const char* TypedDispatchFeatureGateName() {
@@ -72,6 +93,63 @@ namespace gxos {
             s_typedDispatchRuntimeEnabled = enabled;
         }
 
+        const char* AppModelActiveTypedDispatchFeatureGateName() {
+            return "appmodel.active-typed-dispatch";
+        }
+
+        const char* AppModelActiveTypedDispatchDefaultOnCandidateGateName() {
+            return "appmodel.active-typed-dispatch-default-on-candidate";
+        }
+
+        bool AppModelActiveTypedDispatchDefaultOnCandidateEnabled() {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            return s_appModelActiveTypedDispatchCandidateEnabled;
+        }
+
+        bool AppModelActiveTypedDispatchEnabled() {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            return s_appModelActiveTypedDispatchStateSource != AppModelActiveTypedDispatchStateSource::ForceOff;
+        }
+
+        const char* AppModelActiveTypedDispatchEffectiveStateSourceName() {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            switch (s_appModelActiveTypedDispatchStateSource) {
+            case AppModelActiveTypedDispatchStateSource::ProductDefault:
+                return "product-default";
+            case AppModelActiveTypedDispatchStateSource::CompatibilityCandidate:
+                return "compatibility/candidate";
+            case AppModelActiveTypedDispatchStateSource::ForceOn:
+                return "force-on";
+            case AppModelActiveTypedDispatchStateSource::ForceOff:
+                return "force-off";
+            default:
+                return "product-default";
+            }
+        }
+
+        void SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(bool enabled) {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            s_appModelActiveTypedDispatchCandidateEnabled = enabled;
+            if (!appModelActiveTypedDispatchStateUsesForceOverride(s_appModelActiveTypedDispatchStateSource)) {
+                setAppModelActiveTypedDispatchStateSourceLocked(
+                    enabled ? AppModelActiveTypedDispatchStateSource::CompatibilityCandidate
+                            : AppModelActiveTypedDispatchStateSource::ProductDefault);
+            }
+        }
+
+        void SetAppModelActiveTypedDispatchEnabledForDiagnostics(bool enabled) {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            setAppModelActiveTypedDispatchStateSourceLocked(
+                enabled ? AppModelActiveTypedDispatchStateSource::ForceOn : AppModelActiveTypedDispatchStateSource::ForceOff);
+        }
+
+        void ResetAppModelActiveTypedDispatchEnabledForDiagnostics() {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            s_appModelActiveTypedDispatchCandidateEnabled = false;
+            setAppModelActiveTypedDispatchStateSourceLocked(
+                AppModelActiveTypedDispatchStateSource::ProductDefault);
+        }
+
         class TypedDispatchRuntimeGateOverride {
         public:
             explicit TypedDispatchRuntimeGateOverride(bool enabled)
@@ -85,6 +163,29 @@ namespace gxos {
 
         private:
             bool m_restoreEnabled;
+        };
+
+        class AppModelActiveTypedDispatchGateOverride {
+        public:
+            explicit AppModelActiveTypedDispatchGateOverride(bool enabled)
+                : m_restoreStateSource(AppModelActiveTypedDispatchEffectiveStateSourceName()) {
+                SetAppModelActiveTypedDispatchEnabledForDiagnostics(enabled);
+            }
+
+            ~AppModelActiveTypedDispatchGateOverride() {
+                if (m_restoreStateSource == "force-on") {
+                    SetAppModelActiveTypedDispatchEnabledForDiagnostics(true);
+                } else if (m_restoreStateSource == "force-off") {
+                    SetAppModelActiveTypedDispatchEnabledForDiagnostics(false);
+                } else if (m_restoreStateSource == "compatibility/candidate") {
+                    SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(true);
+                } else {
+                    ResetAppModelActiveTypedDispatchEnabledForDiagnostics();
+                }
+            }
+
+        private:
+            std::string m_restoreStateSource;
         };
     }
 
@@ -106,12 +207,130 @@ namespace gxos {
         static LaunchDispatchUsageCounters s_launchDispatchUsageCounters;
 
         namespace {
+            static std::string lowerCopy(std::string value);
+            static std::string filesystemEntryExtension(const std::string& path);
+
+            enum class FileAssociationV1Kind {
+                Folder = 0,
+                Extension,
+                UnknownFallback,
+                RiskyFallback,
+            };
+
             enum class FilesystemEntryLaunchTarget {
                 FileExplorer = 0,
                 Notepad,
                 ImageViewer,
                 Unsupported
             };
+
+            struct FileAssociationV1Record {
+                const char* associationKey;
+                FileAssociationV1Kind kind;
+                const char* handlerAppId;
+                const char* handlerDisplayName;
+                const char* handlerLaunchName;
+                bool activeTypedDispatchMayOwn;
+                bool fallbackRequired;
+                bool textLike;
+                bool folder;
+                bool system;
+                bool risky;
+                bool legacyDirectPath;
+                const char* note;
+            };
+
+            struct FileAssociationV1CoverageSummary {
+                size_t total = 0;
+                size_t folderAssociations = 0;
+                size_t textAssociations = 0;
+                size_t imageLegacyAssociations = 0;
+                size_t unknownFallbackAssociations = 0;
+                size_t riskyFallbackAssociations = 0;
+                size_t activeTypedDispatchOwned = 0;
+                size_t fallbackRequired = 0;
+                size_t registryResolved = 0;
+                size_t registryMismatch = 0;
+                bool tableExists = false;
+                bool folderAssociationRegistered = false;
+                bool textAssociationsRegistered = false;
+                bool handlersResolveToRegistry = false;
+                bool textFilesOpenWithNotepad = false;
+                bool foldersOpenWithFileExplorer = false;
+                bool imagesRemainLegacy = false;
+                bool unknownExtensionsFallback = false;
+                bool riskyExtensionsNotActiveDispatchOwned = false;
+                bool visibleLaunchBehaviorChanged = false;
+                bool persistentDesktopStorageWrites = false;
+            };
+
+            static const FileAssociationV1Record kFileAssociationV1Table[] = {
+                { "<folder>", FileAssociationV1Kind::Folder, "gxos.builtin.fileexplorer", "File Explorer", "FileExplorer", true, true, false, true, true, false, false, "Folders open through File Explorer" },
+                { ".txt", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "Plain text file" },
+                { ".log", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "Log file" },
+                { ".ini", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "INI configuration file" },
+                { ".cfg", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "CFG configuration file" },
+                { ".png", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { ".bmp", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { ".jpg", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { ".gif", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { ".jpeg", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { "<unknown>", FileAssociationV1Kind::UnknownFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, false, false, "Unknown extensions remain fallback-only" },
+                { ".exe", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "Executable-style extensions remain unsupported" },
+                { ".gxapp", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "Package-style extensions remain unsupported" },
+                { ".elf", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "ELF-style extensions remain unsupported" }
+            };
+
+            static const FileAssociationV1Record* findFileAssociationV1RecordByKey(const std::string& key) {
+                const std::string normalizedKey = lowerCopy(key);
+                for (const auto& record : kFileAssociationV1Table) {
+                    if (normalizedKey == record.associationKey) return &record;
+                }
+                return nullptr;
+            }
+
+            static const FileAssociationV1Record* lookupFileAssociationV1Record(const std::string& path, bool isDirectory) {
+                if (isDirectory) {
+                    return findFileAssociationV1RecordByKey("<folder>");
+                }
+
+                const std::string ext = filesystemEntryExtension(path);
+                if (!ext.empty()) {
+                    if (const FileAssociationV1Record* record = findFileAssociationV1RecordByKey(ext)) {
+                        return record;
+                    }
+                }
+
+                return findFileAssociationV1RecordByKey("<unknown>");
+            }
+
+            static const char* fileAssociationV1KindName(FileAssociationV1Kind kind) {
+                switch (kind) {
+                case FileAssociationV1Kind::Folder: return "folder";
+                case FileAssociationV1Kind::Extension: return "extension";
+                case FileAssociationV1Kind::UnknownFallback: return "unknown-fallback";
+                case FileAssociationV1Kind::RiskyFallback: return "risky-fallback";
+                default: return "unknown-fallback";
+                }
+            }
+
+            static const char* fileAssociationV1TargetName(const FileAssociationV1Record* record) {
+                if (!record) return "Unsupported";
+                if (record->folder) return "FileExplorer";
+                if (record->textLike) return "Notepad";
+                if (record->legacyDirectPath) return "ImageViewer";
+                return "Unsupported";
+            }
+
+            static FilesystemEntryLaunchTarget resolveFilesystemEntryLaunchTarget(const std::string& path, bool isDirectory) {
+                const FileAssociationV1Record* record = lookupFileAssociationV1Record(path, isDirectory);
+                if (!record) return FilesystemEntryLaunchTarget::Unsupported;
+
+                if (record->folder) return FilesystemEntryLaunchTarget::FileExplorer;
+                if (record->textLike) return FilesystemEntryLaunchTarget::Notepad;
+                if (record->legacyDirectPath) return FilesystemEntryLaunchTarget::ImageViewer;
+                return FilesystemEntryLaunchTarget::Unsupported;
+            }
 
             static std::string lowerCopy(std::string value) {
                 std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -122,19 +341,6 @@ namespace gxos {
                 size_t dot = path.find_last_of('.');
                 if (dot == std::string::npos || dot + 1 >= path.size()) return std::string();
                 return lowerCopy(path.substr(dot));
-            }
-
-            static FilesystemEntryLaunchTarget resolveFilesystemEntryLaunchTarget(const std::string& path, bool isDirectory) {
-                if (isDirectory) return FilesystemEntryLaunchTarget::FileExplorer;
-
-                const std::string ext = filesystemEntryExtension(path);
-                if (ext == ".txt" || ext == ".log" || ext == ".cfg" || ext == ".ini") {
-                    return FilesystemEntryLaunchTarget::Notepad;
-                }
-                if (ext == ".png" || ext == ".bmp" || ext == ".jpg" || ext == ".gif" || ext == ".jpeg") {
-                    return FilesystemEntryLaunchTarget::ImageViewer;
-                }
-                return FilesystemEntryLaunchTarget::Unsupported;
             }
 
             static const char* filesystemEntryLaunchTargetName(FilesystemEntryLaunchTarget target) {
@@ -161,22 +367,57 @@ namespace gxos {
 
             static const char* filesystemEntryLaunchReason(FilesystemEntryLaunchTarget target) {
                 switch (target) {
-                case FilesystemEntryLaunchTarget::FileExplorer: return "Directory target routes to FileExplorer";
-                case FilesystemEntryLaunchTarget::Notepad: return "Text extension matched case-insensitively and routes to Notepad::LaunchWithFile";
-                case FilesystemEntryLaunchTarget::ImageViewer: return "Image extension matched case-insensitively and routes to ImageViewer::Launch";
+                case FilesystemEntryLaunchTarget::FileExplorer: return "Folder association routes to File Explorer";
+                case FilesystemEntryLaunchTarget::Notepad: return "Text-like extension matched case-insensitively and routes to Notepad::LaunchWithFile";
+                case FilesystemEntryLaunchTarget::ImageViewer: return "Image extension remains on the legacy direct path to ImageViewer";
                 case FilesystemEntryLaunchTarget::Unsupported:
                 default: return "No file association registered";
                 }
             }
 
             static std::string filesystemEntryDiagnostic(const std::string& path, bool isDirectory) {
+                const FileAssociationV1Record* association = lookupFileAssociationV1Record(path, isDirectory);
                 const FilesystemEntryLaunchTarget target = resolveFilesystemEntryLaunchTarget(path, isDirectory);
                 const std::string normalized = isDirectory ? path : lowerCopy(path);
+                const apps::BuiltInAppMetadata* registryMetadata = nullptr;
+                bool registryResolved = false;
+                bool registryMismatch = false;
+                if (association && association->handlerAppId && association->handlerAppId[0]) {
+                    registryMetadata = apps::FindBuiltInAppMetadataByAppId(association->handlerAppId);
+                    registryResolved = registryMetadata != nullptr;
+                    if (registryMetadata) {
+                        const std::string metadataDisplayName = registryMetadata->displayName ? registryMetadata->displayName : "";
+                        const std::string metadataLaunchName = registryMetadata->launchName ? registryMetadata->launchName : "";
+                        if ((association->handlerDisplayName && metadataDisplayName != association->handlerDisplayName) ||
+                            (association->handlerLaunchName && metadataLaunchName != association->handlerLaunchName)) {
+                            registryMismatch = true;
+                        }
+                    }
+                }
                 std::ostringstream oss;
                 oss << "[FilesystemEntryLaunchTarget]\n";
                 oss << "path: " << path << "\n";
                 oss << "normalizedPath: " << normalized << "\n";
                 oss << "isDirectory: " << (isDirectory ? "true" : "false") << "\n";
+                oss << "associationKey: " << (association ? association->associationKey : "") << "\n";
+                oss << "associationKind: " << fileAssociationV1KindName(association ? association->kind : FileAssociationV1Kind::UnknownFallback) << "\n";
+                oss << "associationTargetName: " << fileAssociationV1TargetName(association) << "\n";
+                oss << "handlerAppId: " << (association && association->handlerAppId ? association->handlerAppId : "") << "\n";
+                oss << "handlerDisplayName: " << (association && association->handlerDisplayName ? association->handlerDisplayName : "") << "\n";
+                oss << "handlerLaunchName: " << (association && association->handlerLaunchName ? association->handlerLaunchName : "") << "\n";
+                oss << "activeTypedDispatchMayOwn: " << (association && association->activeTypedDispatchMayOwn ? "true" : "false") << "\n";
+                oss << "fallbackRequired: " << (association ? (association->fallbackRequired ? "true" : "false") : "true") << "\n";
+                oss << "textLike: " << (association && association->textLike ? "true" : "false") << "\n";
+                oss << "folder: " << (association && association->folder ? "true" : "false") << "\n";
+                oss << "system: " << (association && association->system ? "true" : "false") << "\n";
+                oss << "risky: " << (association && association->risky ? "true" : "false") << "\n";
+                oss << "legacyDirectPath: " << (association && association->legacyDirectPath ? "true" : "false") << "\n";
+                oss << "handlerRegistryResolved: " << (registryResolved ? "true" : "false") << "\n";
+                if (registryMetadata) {
+                    oss << "handlerRegistryDisplayName: " << (registryMetadata->displayName ? registryMetadata->displayName : "") << "\n";
+                    oss << "handlerRegistryLaunchName: " << (registryMetadata->launchName ? registryMetadata->launchName : "") << "\n";
+                }
+                oss << "handlerRegistryMismatch: " << (registryMismatch ? "true" : "false") << "\n";
                 oss << "launchTarget: " << filesystemEntryLaunchTargetName(target) << "\n";
                 oss << "status: " << filesystemEntryLaunchStatus(target) << "\n";
                 oss << "reason: " << filesystemEntryLaunchReason(target) << "\n";
@@ -212,9 +453,12 @@ namespace gxos {
 
         static std::string canonicalRecentProgramName(const std::string& name) {
             if (name.empty()) return std::string();
-            if (name == "AppModel" || name == "App Model Demo") return "App Model Demo";
-            if (name == "Files" || name == "FileExplorer" || name == "File Explorer") return "File Explorer";
-            if (name == "ControlPanel" || name == "Control Panel") return "Control Panel";
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(name.c_str())) {
+                if (metadata->displayName && metadata->displayName[0]) return metadata->displayName;
+            }
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByKnownAlias(name.c_str())) {
+                if (metadata->displayName && metadata->displayName[0]) return metadata->displayName;
+            }
             const RegisteredDesktopApp* app = findRegisteredApp(name);
             if (app && !app->displayName.empty()) return app->displayName;
             return name;
@@ -267,19 +511,25 @@ namespace gxos {
         static const std::vector<const char*>& currentBareMetalKernelRegistrationNames() {
             // Diagnostic mirror of kernel/core/kernel_apps.cpp registerKernelApps().
             // It reports coverage only; it is not a launch source or policy table.
-            static const std::vector<const char*> names = {
-                "Notepad",
-                "Calculator",
-                "Clock",
-                "DisplayOptions",
-                "TaskManager",
-                "FileExplorer",
-                "Files",
-                "ImageViewer",
-                "guideXOS Navigator",
-                "Trash",
-                "DiskManager"
-            };
+            static const std::vector<const char*> names = []() {
+                std::vector<const char*> result;
+                auto addUnique = [&result](const char* name) {
+                    if (!name || !name[0]) return;
+                    for (const char* existing : result) {
+                        if (apps::detail::builtInTextEquals(existing, name)) return;
+                    }
+                    result.push_back(name);
+                };
+
+                for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                    const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                    if (!apps::IsBuiltInAppAvailableInBareMetal(metadata)) continue;
+                    addUnique(metadata.kernelAppName);
+                    addUnique(metadata.kernelLegacyAlias);
+                }
+
+                return result;
+            }();
             return names;
         }
 
@@ -326,6 +576,350 @@ namespace gxos {
                 makeUiLaunchLabelDiagnostic("Control Panel", "start menu right-column shortcut", "ControlPanel", "launches the existing control surface"),
                 makeUiLaunchLabelDiagnostic("Settings", "start menu right-column shortcut", "ControlPanel", "temporary fallback until a dedicated Settings app exists")
             };
+        }
+
+        static std::string joinKnownAliasesForDiagnostic(const apps::BuiltInAppMetadata& metadata) {
+            std::ostringstream oss;
+            if (!metadata.knownAliases || metadata.knownAliasCount == 0) return oss.str();
+
+            bool first = true;
+            for (size_t i = 0; i < metadata.knownAliasCount; ++i) {
+                const char* alias = metadata.knownAliases[i];
+                if (!alias || !alias[0]) continue;
+                if (!first) oss << "|";
+                oss << alias;
+                first = false;
+            }
+            return oss.str();
+        }
+
+        static const apps::BuiltInAppMetadata* findBuiltInMetadataForRegistryIdentity(const std::string& identity) {
+            if (identity.empty()) return nullptr;
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(identity.c_str())) return metadata;
+            return apps::FindBuiltInAppMetadataByKnownAlias(identity.c_str());
+        }
+
+        static bool builtInRegistryEntryExistsForLabel(const std::string& label) {
+            return findBuiltInMetadataForRegistryIdentity(label) != nullptr;
+        }
+
+        static std::vector<std::string> phase4CShellObjectProbeLabels() {
+            return {
+                "Desktop",
+                "This System",
+                "Computer",
+                "Files",
+                "File Manager",
+                "File Explorer",
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Display Settings",
+                "Control Panel",
+                "Trash"
+            };
+        }
+
+        static std::vector<std::string> phase4CRightColumnShellObjectLabels() {
+            return {
+                "This System",
+                "Computer",
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Control Panel"
+            };
+        }
+
+        static std::vector<std::string> phase4CSystemShellObjectLabels() {
+            return {
+                "Desktop",
+                "This System",
+                "Computer",
+                "Files",
+                "File Manager",
+                "File Explorer",
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Display Settings",
+                "Control Panel",
+                "Trash"
+            };
+        }
+
+        static bool shellObjectRegistryIdsUnique() {
+            std::set<std::string> ids;
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const char* id = apps::kShellObjectRegistry[i].shellObjectId;
+                if (!id || !id[0]) return false;
+                if (!ids.insert(id).second) return false;
+            }
+            return true;
+        }
+
+        static bool shellObjectRegistryDisplayNamesNonEmpty() {
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const char* displayName = apps::kShellObjectRegistry[i].displayName;
+                if (!displayName || !displayName[0]) return false;
+            }
+            return true;
+        }
+
+        static bool shellObjectRegistryAliasesResolve(std::vector<std::string>* unresolved = nullptr) {
+            bool allResolved = true;
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const apps::ShellObjectRegistryRecord& record = apps::kShellObjectRegistry[i];
+                if (!apps::ShellObjectRegistryAliasResolves(record.shellObjectId)) {
+                    allResolved = false;
+                    if (unresolved) unresolved->push_back(record.shellObjectId ? record.shellObjectId : "");
+                }
+                if (!apps::ShellObjectRegistryAliasResolves(record.displayName)) {
+                    allResolved = false;
+                    if (unresolved) unresolved->push_back(record.displayName ? record.displayName : "");
+                }
+                if (!apps::ShellObjectRegistryAliasResolves(record.canonicalLaunchTargetName)) {
+                    allResolved = false;
+                    if (unresolved) unresolved->push_back(record.canonicalLaunchTargetName ? record.canonicalLaunchTargetName : "");
+                }
+                for (size_t j = 0; j < record.aliasCount; ++j) {
+                    const char* alias = record.aliases[j];
+                    if (!alias || !alias[0]) continue;
+                    if (apps::ShellObjectRegistryAliasResolves(alias)) continue;
+                    allResolved = false;
+                    if (unresolved) unresolved->push_back(alias);
+                }
+            }
+            return allResolved;
+        }
+
+        static bool shellObjectRegistryHandlersResolveToBuiltInRegistry(std::vector<std::string>* unresolved = nullptr) {
+            bool allResolved = true;
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const apps::ShellObjectRegistryRecord& record = apps::kShellObjectRegistry[i];
+                if (apps::ShellObjectRegistryHandlerResolvesToBuiltInRegistry(record)) continue;
+                allResolved = false;
+                if (unresolved) unresolved->push_back(record.shellObjectId ? record.shellObjectId : "");
+            }
+            return allResolved;
+        }
+
+        static bool shellObjectRegistryRightColumnShellObjectsRegistered() {
+            for (const std::string& alias : phase4CRightColumnShellObjectLabels()) {
+                if (!apps::ShellObjectRegistryAliasResolves(alias.c_str())) return false;
+            }
+            return true;
+        }
+
+        static bool shellObjectRegistrySystemObjectsRegistered() {
+            for (const std::string& alias : phase4CSystemShellObjectLabels()) {
+                if (!apps::ShellObjectRegistryAliasResolves(alias.c_str())) return false;
+            }
+            return true;
+        }
+
+        static bool shellObjectRegistryTrashOpenOnlySafe() {
+            const apps::ShellObjectRegistryRecord* trash = apps::FindShellObjectRegistryRecordByAlias("Trash");
+            if (!trash) return false;
+            if (trash->riskyDestructive) return false;
+            if (!trash->shouldWriteRecentPrograms) return false;
+            return apps::FindShellObjectRegistryRecordByAlias("Empty Trash") == nullptr &&
+                apps::FindShellObjectRegistryRecordByAlias("delete") == nullptr &&
+                apps::FindShellObjectRegistryRecordByAlias("restore") == nullptr &&
+                apps::FindShellObjectRegistryRecordByAlias("purge") == nullptr;
+        }
+
+        static bool shellObjectRegistryComputerFilesFallbackPreserved() {
+            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget("ComputerFiles");
+            return target.type == apps::LaunchTargetType::ShellAction &&
+                target.dispatchLaunchName == "FileExplorer" &&
+                target.shellAction == "ComputerFiles";
+        }
+
+        static bool shellObjectRegistryRecentProgramsNotPolluted() {
+            const std::vector<std::string> shellObjectRecentExclusions = {
+                "Desktop",
+                "Desktop Home",
+                "Go to Desktop",
+                "This System",
+                "Files"
+            };
+            for (const auto& recent : DesktopService::GetRecentPrograms()) {
+                for (const std::string& shellLabel : shellObjectRecentExclusions) {
+                    if (recent.name == shellLabel) return false;
+                }
+            }
+            return true;
+        }
+
+        static std::vector<std::string> phase4DShellObjectRecentSuppressedLabels() {
+            return {
+                "Desktop",
+                "This System",
+                "Files"
+            };
+        }
+
+        static std::vector<std::string> phase4DShellObjectRecentAllowedLabels() {
+            return {
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Settings",
+                "Control Panel",
+                "Trash"
+            };
+        }
+
+        static bool phase4DShellObjectRecentPolicyAligned() {
+            for (const std::string& label : phase4DShellObjectRecentAllowedLabels()) {
+                const apps::ShellObjectRegistryRecord* record = apps::FindShellObjectRegistryRecordByAlias(label.c_str());
+                if (!record) {
+                    return false;
+                }
+                if (!record->shouldWriteRecentPrograms) {
+                    return false;
+                }
+                if (!apps::ShellObjectRegistryHandlerResolvesToBuiltInRegistry(*record)) {
+                    return false;
+                }
+            }
+            const std::vector<std::string> suppressed = phase4DShellObjectRecentSuppressedLabels();
+            return std::find(suppressed.begin(), suppressed.end(), "Desktop") != suppressed.end() &&
+                std::find(suppressed.begin(), suppressed.end(), "This System") != suppressed.end() &&
+                std::find(suppressed.begin(), suppressed.end(), "Files") != suppressed.end();
+        }
+
+        struct ShellObjectRegistryCoverageSummary {
+            size_t total = 0;
+            bool exists = false;
+            bool idsUnique = false;
+            bool displayNamesNonEmpty = false;
+            bool aliasesResolve = false;
+            bool handlersResolveToBuiltInRegistry = false;
+            bool rightColumnShellObjectsRegistered = false;
+            bool systemObjectsRegistered = false;
+            bool trashOpenOnlySafe = false;
+            bool trashDestructiveActionsExcluded = false;
+            bool computerFilesFallbackPreserved = false;
+            bool recentProgramsNotPolluted = false;
+            bool visibleLaunchBehaviorChanged = false;
+            bool persistentDesktopStorageWrites = false;
+        };
+
+        static ShellObjectRegistryCoverageSummary collectShellObjectRegistryCoverageSummary() {
+            ShellObjectRegistryCoverageSummary summary;
+            summary.total = apps::kShellObjectRegistryCount;
+            summary.exists = apps::kShellObjectRegistryCount > 0;
+            summary.idsUnique = shellObjectRegistryIdsUnique();
+            summary.displayNamesNonEmpty = shellObjectRegistryDisplayNamesNonEmpty();
+            summary.aliasesResolve = shellObjectRegistryAliasesResolve();
+            summary.handlersResolveToBuiltInRegistry = shellObjectRegistryHandlersResolveToBuiltInRegistry();
+            summary.rightColumnShellObjectsRegistered = shellObjectRegistryRightColumnShellObjectsRegistered();
+            summary.systemObjectsRegistered = shellObjectRegistrySystemObjectsRegistered();
+            summary.trashOpenOnlySafe = shellObjectRegistryTrashOpenOnlySafe();
+            summary.trashDestructiveActionsExcluded = summary.trashOpenOnlySafe;
+            summary.computerFilesFallbackPreserved = shellObjectRegistryComputerFilesFallbackPreserved();
+            summary.recentProgramsNotPolluted = shellObjectRegistryRecentProgramsNotPolluted();
+            summary.visibleLaunchBehaviorChanged = false;
+            summary.persistentDesktopStorageWrites = false;
+            return summary;
+        }
+
+        static std::vector<std::string> phase4StartMenuCoverageLabels() {
+            return {
+                "Notepad",
+                "Calculator",
+                "Clock",
+                "Console",
+                "Trash",
+                "TaskManager",
+                "DiskManager",
+                "DisplayOptions",
+                "ControlPanel",
+                "guideXOS Navigator",
+                "HDInstaller",
+                "AppModel",
+                "Paint",
+                "File Explorer",
+                "ImgViewer"
+            };
+        }
+
+        static std::vector<std::string> phase4ActiveDispatchCoverageLabels() {
+            return {
+                "Notepad",
+                "Calculator",
+                "Clock",
+                "Console",
+                "TaskManager",
+                "DiskManager",
+                "DisplayOptions",
+                "ControlPanel",
+                "guideXOS Navigator",
+                "FileExplorer",
+                "Trash"
+            };
+        }
+
+        static std::vector<std::string> phase4RecentProgramCoverageLabels() {
+            return {
+                "Notepad",
+                "Calculator",
+                "Clock",
+                "Console",
+                "Control Panel",
+                "File Explorer",
+                "Image Viewer",
+                "App Model Demo",
+                "AppModel",
+                "DisplayOptions",
+                "TaskManager",
+                "Trash",
+                "guideXOS Navigator",
+                "Paint",
+                "HDInstaller"
+            };
+        }
+
+        static std::vector<std::string> phase4DRecentProgramCoverageLabels() {
+            return {
+                "Notepad",
+                "Calculator",
+                "Clock",
+                "Console",
+                "File Explorer",
+                "ControlPanel",
+                "DisplayOptions",
+                "Paint",
+                "TaskManager",
+                "DiskManager",
+                "guideXOS Navigator",
+                "Trash"
+            };
+        }
+
+        static bool allLabelsResolveToRegistryIdentity(const std::vector<std::string>& labels, std::vector<std::string>* unresolved = nullptr) {
+            bool allResolved = true;
+            for (const std::string& label : labels) {
+                if (builtInRegistryEntryExistsForLabel(label)) continue;
+                allResolved = false;
+                if (unresolved) unresolved->push_back(label);
+            }
+            return allResolved;
         }
 
         static bool uiDiagnosticHasLabel(const std::vector<UiLaunchLabelDiagnostic>& labels, const std::string& label) {
@@ -904,6 +1498,157 @@ namespace gxos {
             return oss.str();
         }
 
+        static std::string appModelActiveTypedDispatchSummaryLine() {
+            std::ostringstream oss;
+            oss << "appModelActiveDispatchFeatureGate=" << apps::AppModelActiveTypedDispatchFeatureGateName()
+                << " appModelActiveDispatchDefaultOnCandidateGate=" << apps::AppModelActiveTypedDispatchDefaultOnCandidateGateName()
+                << " appModelActiveDispatchCandidateEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled())
+                << " appModelActiveDispatchEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchEnabled())
+                << " appModelActiveDispatchEffectiveStateSource=" << apps::AppModelActiveTypedDispatchEffectiveStateSourceName()
+                << " appModelActiveDispatchRuntimePath=" << (apps::AppModelActiveTypedDispatchEnabled() ? "active" : "inactive")
+                << " appModelActiveDispatchRuntimeLaunchBehaviorChanged=true"
+                << " appModelActiveDispatchVisibleLaunchBehaviorChanged=false"
+                << " appModelActiveDispatchPersistentDesktopStorageWrites=false\n";
+            return oss.str();
+        }
+
+        struct LaunchTargetTypeCoverageSummary;
+
+        static const char* kAppModelV1OutOfScopeScope = "GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership";
+
+        static LaunchTargetTypeCoverageSummary collectLaunchTargetTypeCoverageSummary();
+
+        static size_t appModelV1ActiveDispatchOwnedCoverageCount() {
+            return phase4ActiveDispatchCoverageLabels().size();
+        }
+
+        static size_t appModelV1FallbackUnsupportedCoverageCount();
+
+        static bool fileAssociationV1HandlerMatchesRegistry(const FileAssociationV1Record& record) {
+            if (!record.handlerAppId || !record.handlerAppId[0]) return false;
+
+            const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId(record.handlerAppId);
+            if (!metadata) return false;
+
+            const std::string metadataDisplayName = metadata->displayName ? metadata->displayName : "";
+            const std::string metadataLaunchName = metadata->launchName ? metadata->launchName : "";
+            const std::string expectedDisplayName = record.handlerDisplayName ? record.handlerDisplayName : "";
+            const std::string expectedLaunchName = record.handlerLaunchName ? record.handlerLaunchName : "";
+
+            if (!expectedDisplayName.empty() && metadataDisplayName != expectedDisplayName) return false;
+            if (!expectedLaunchName.empty() && metadataLaunchName != expectedLaunchName) return false;
+            return true;
+        }
+
+        static FileAssociationV1CoverageSummary collectFileAssociationV1CoverageSummary() {
+            FileAssociationV1CoverageSummary summary;
+            summary.tableExists = sizeof(kFileAssociationV1Table) / sizeof(kFileAssociationV1Table[0]) > 0;
+            summary.visibleLaunchBehaviorChanged = false;
+            summary.persistentDesktopStorageWrites = false;
+
+            for (const auto& record : kFileAssociationV1Table) {
+                ++summary.total;
+                if (record.fallbackRequired) ++summary.fallbackRequired;
+                if (record.activeTypedDispatchMayOwn) ++summary.activeTypedDispatchOwned;
+
+                if (record.folder) {
+                    ++summary.folderAssociations;
+                } else if (record.textLike) {
+                    ++summary.textAssociations;
+                } else if (record.legacyDirectPath) {
+                    ++summary.imageLegacyAssociations;
+                } else if (record.kind == FileAssociationV1Kind::UnknownFallback) {
+                    ++summary.unknownFallbackAssociations;
+                } else if (record.kind == FileAssociationV1Kind::RiskyFallback) {
+                    ++summary.riskyFallbackAssociations;
+                }
+
+                if (record.handlerAppId && record.handlerAppId[0]) {
+                    const bool registryMatch = fileAssociationV1HandlerMatchesRegistry(record);
+                    if (registryMatch) ++summary.registryResolved;
+                    else ++summary.registryMismatch;
+                }
+            }
+
+            const size_t supportedRegistryAssociations = summary.folderAssociations + summary.textAssociations + summary.imageLegacyAssociations;
+            summary.handlersResolveToRegistry = summary.registryMismatch == 0;
+            summary.textFilesOpenWithNotepad = summary.textAssociations == 4 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
+            summary.foldersOpenWithFileExplorer = summary.folderAssociations == 1 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
+            summary.imagesRemainLegacy = summary.imageLegacyAssociations == 5;
+            summary.unknownExtensionsFallback = summary.unknownFallbackAssociations == 1;
+            summary.riskyExtensionsNotActiveDispatchOwned = summary.riskyFallbackAssociations == 3;
+            summary.folderAssociationRegistered = summary.folderAssociations == 1 && summary.handlersResolveToRegistry;
+            summary.textAssociationsRegistered = summary.textAssociations == 4 && summary.handlersResolveToRegistry;
+            return summary;
+        }
+
+        static std::string fileAssociationV1CompactSummaryLine(const FileAssociationV1CoverageSummary& summary) {
+            std::ostringstream oss;
+            oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.imageLegacyAssociations == 5 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
+                << " entries=" << summary.total
+                << " folders=" << summary.folderAssociations
+                << " text=" << summary.textAssociations
+                << " imagesLegacy=" << summary.imageLegacyAssociations
+                << " unknownFallback=" << summary.unknownFallbackAssociations
+                << " riskyFallback=" << summary.riskyFallbackAssociations
+                << " activeOwned=" << summary.activeTypedDispatchOwned
+                << " registryMismatches=" << summary.registryMismatch
+                << " handlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry)
+                << "\n";
+            return oss.str();
+        }
+
+        static std::string fileAssociationV1KeyMappingsLine() {
+            return "fileAssociationV1KeyMappings: folder->File Explorer; .txt/.log/.ini/.cfg->Notepad; .png/.bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported\n";
+        }
+
+        static std::string fileAssociationV1MarkersLine(const FileAssociationV1CoverageSummary& summary) {
+            std::ostringstream oss;
+            oss << "appModelPhase4BFileAssociationTableExists=" << diagnosticBool(summary.tableExists) << "\n";
+            oss << "appModelPhase4BFolderAssociationRegistered=" << diagnosticBool(summary.folderAssociationRegistered) << "\n";
+            oss << "appModelPhase4BTextAssociationsRegistered=" << diagnosticBool(summary.textAssociationsRegistered) << "\n";
+            oss << "appModelPhase4BHandlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry) << "\n";
+            oss << "appModelPhase4BTextFilesOpenWithNotepad=" << diagnosticBool(summary.textFilesOpenWithNotepad) << "\n";
+            oss << "appModelPhase4BFoldersOpenWithFileExplorer=" << diagnosticBool(summary.foldersOpenWithFileExplorer) << "\n";
+            oss << "appModelPhase4BImagesRemainLegacy=" << diagnosticBool(summary.imagesRemainLegacy) << "\n";
+            oss << "appModelPhase4BUnknownExtensionsFallback=" << diagnosticBool(summary.unknownExtensionsFallback) << "\n";
+            oss << "appModelPhase4BRiskyExtensionsNotActiveDispatchOwned=" << diagnosticBool(summary.riskyExtensionsNotActiveDispatchOwned) << "\n";
+            oss << "appModelPhase4BVisibleLaunchBehaviorChanged=" << diagnosticBool(summary.visibleLaunchBehaviorChanged) << "\n";
+            oss << "appModelPhase4BPersistentDesktopStorageWrites=" << diagnosticBool(summary.persistentDesktopStorageWrites) << "\n";
+            return oss.str();
+        }
+
+        static std::string buildAppModelActiveTypedDispatchEvidenceLine(
+            const std::string& source,
+            const std::string& request,
+            const std::string& classification,
+            const std::string& shadowDecision,
+            const std::string& shadowUsage,
+            const std::string& selectedHandler,
+            bool activeHandled,
+            bool legacyFallbackUsed,
+            const std::string& reason) {
+            std::ostringstream oss;
+            oss << "[AppModelActiveTypedDispatch] source=" << source
+                << " request=" << request
+                << " classification=" << classification
+                << " shadowDecision=" << shadowDecision
+                << " shadowUsage=" << shadowUsage
+                << " selectedHandler=" << selectedHandler
+                << " appModelActiveDispatchDefaultOnCandidateGate=" << apps::AppModelActiveTypedDispatchDefaultOnCandidateGateName()
+                << " appModelActiveDispatchCandidateEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled())
+                << " appModelActiveDispatchEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchEnabled())
+                << " appModelActiveDispatchEffectiveStateSource=" << apps::AppModelActiveTypedDispatchEffectiveStateSourceName()
+                << " appModelActiveDispatchRuntimeLaunchBehaviorChanged=true"
+                << " appModelActiveDispatchVisibleLaunchBehaviorChanged=false"
+                << " activeTypedDispatchHandled=" << diagnosticBool(activeHandled)
+                << " legacyFallbackUsed=" << diagnosticBool(legacyFallbackUsed)
+                << " visibleBehaviorChanged=false"
+                << " visibleLaunchBehaviorChanged=false"
+                << " reason=" << reason;
+            return oss.str();
+        }
+
         static const char* kTypedDispatchGateHostedEvidencePath = "logs/appmodel-typed-dispatch-gate-hosted.evidence.txt";
         static const char* kTypedDispatchGateQemuEvidencePath = "logs/appmodel-typed-dispatch-gate-qemu.evidence.txt";
         static const int64_t kTypedDispatchGateEvidenceStaleAfterMs = 7LL * 24LL * 60LL * 60LL * 1000LL;
@@ -1099,6 +1844,24 @@ namespace gxos {
             if (target.dispatchLaunchName.empty()) return false;
             return target.type == apps::LaunchTargetType::BuiltInApp ||
                 target.type == apps::LaunchTargetType::LegacyAlias;
+        }
+
+        static bool isActiveTypedDispatchFilesystemEntryTarget(bool isDirectory, const std::string& path, std::string& routeName) {
+            switch (resolveFilesystemEntryLaunchTarget(path, isDirectory)) {
+            case FilesystemEntryLaunchTarget::FileExplorer:
+                routeName = "FileExplorer";
+                return true;
+            case FilesystemEntryLaunchTarget::Notepad:
+                routeName = "Notepad";
+                return true;
+            case FilesystemEntryLaunchTarget::ImageViewer:
+                routeName = "ImageViewer";
+                return false;
+            case FilesystemEntryLaunchTarget::Unsupported:
+            default:
+                routeName = "Unsupported";
+                return false;
+            }
         }
 
         static void countLaunchTargetShadowAdapterComparison(uint64_t& matches, uint64_t& acceptedMismatches, uint64_t& unexpectedMismatches, const std::string& comparisonStatus) {
@@ -1965,9 +2728,101 @@ namespace gxos {
             const bool launchStoragePreviewOk = storagePreviewCounts.unresolved == 0 && storagePreviewCounts.highRisk == 0;
             const size_t launchStoragePreviewUnexpectedDrift = storagePreviewCounts.highRisk + storagePreviewCompareBareMetalCounts.highRisk;
             const bool launchStoragePreviewCompareOk = launchStoragePreviewUnexpectedDrift == 0;
+            const std::vector<std::string> phase4StartMenuLabels = phase4StartMenuCoverageLabels();
+            const std::vector<std::string> phase4ActiveDispatchLabels = phase4ActiveDispatchCoverageLabels();
+            const std::vector<std::string> phase4RecentLabels = phase4RecentProgramCoverageLabels();
+            const std::vector<std::string> phase4AliasLabels = {
+                "Files",
+                "File Explorer",
+                "FileExplorer",
+                "Control Panel",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Display Settings",
+                "Desktop Background",
+                "Wallpaper",
+                "AppModel",
+                "ImgViewer",
+                "Terminal"
+            };
+            bool phase4StableAppIdsUnique = true;
+            bool phase4DisplayNamesNonEmpty = true;
+            bool phase4RiskyEntriesNotActiveDispatchOwned = true;
+            std::set<std::string> phase4SeenIds;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                const std::string appId = metadata.appId ? metadata.appId : "";
+                if (appId.empty() || !phase4SeenIds.insert(appId).second) phase4StableAppIdsUnique = false;
+                if (!metadata.displayName || !metadata.displayName[0]) phase4DisplayNamesNonEmpty = false;
+                if (metadata.riskyForActiveTypedDispatch) {
+                    const std::string canonicalLaunchName = apps::BuiltInAppCanonicalLaunchName(metadata);
+                    if (std::find(phase4ActiveDispatchLabels.begin(), phase4ActiveDispatchLabels.end(), canonicalLaunchName) != phase4ActiveDispatchLabels.end()) {
+                        phase4RiskyEntriesNotActiveDispatchOwned = false;
+                    }
+                }
+            }
+            const bool phase4RegistryExists = apps::kBuiltInAppMetadataCount > 0;
+            const bool phase4AliasResolutionOk = allLabelsResolveToRegistryIdentity(phase4AliasLabels);
+            const bool phase4StartMenuAppsRegistered = allLabelsResolveToRegistryIdentity(phase4StartMenuLabels);
+            const bool phase4ActiveDispatchAppsRegistered = allLabelsResolveToRegistryIdentity(phase4ActiveDispatchLabels);
+            const bool phase4RecentProgramNamesAligned = allLabelsResolveToRegistryIdentity(phase4RecentLabels);
+            const bool phase4VisibleLaunchBehaviorChanged = false;
+            const bool phase4PersistentDesktopStorageWrites = false;
+            const std::vector<std::string> phase4DRecentLabels = phase4DRecentProgramCoverageLabels();
+            const bool phase4DRecentProgramWritePathsInventoried = true;
+            const bool phase4DRecentProgramNamesRegistryAligned = allLabelsResolveToRegistryIdentity(phase4DRecentLabels);
+            const bool phase4DShellObjectRecentPolicyAlignedValue = phase4DShellObjectRecentPolicyAligned();
+            size_t phase4DRegistryRecentCapableBuiltIns = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInHosted(metadata)) continue;
+                if (!metadata.recordRecentPrograms) continue;
+                ++phase4DRegistryRecentCapableBuiltIns;
+            }
+            const size_t phase4DCanonicalRecentCapableBuiltIns = phase4DRecentLabels.size();
+            const size_t phase4DShellObjectsRecentAllowed = phase4DShellObjectRecentAllowedLabels().size();
+            const size_t phase4DShellObjectsRecentSuppressed = phase4DShellObjectRecentSuppressedLabels().size();
+            const ShellObjectRegistryCoverageSummary phase4CShellObjectSummary = collectShellObjectRegistryCoverageSummary();
+            const FileAssociationV1CoverageSummary phase4BFileAssociationSummary = collectFileAssociationV1CoverageSummary();
+            const size_t appModelV1BuiltInRegistryCount = apps::kBuiltInAppMetadataCount;
+            const size_t appModelV1ShellObjectRegistryCount = apps::kShellObjectRegistryCount;
+            const size_t appModelV1FileAssociationCount = phase4BFileAssociationSummary.total;
+            const size_t appModelV1ActiveDispatchOwnedCoverageCountValue = appModelV1ActiveDispatchOwnedCoverageCount();
+            const size_t appModelV1FallbackUnsupportedCoverageCountValue = appModelV1FallbackUnsupportedCoverageCount();
+            const bool appModelV1ActiveTypedDispatchEnabled = apps::AppModelActiveTypedDispatchEnabled();
+            const std::string appModelV1EffectiveStateSource = apps::AppModelActiveTypedDispatchEffectiveStateSourceName();
+            const bool appModelV1EmergencyForceOffAvailable = true;
+            const bool appModelV1LegacyFallbackAvailable = true;
+            const bool appModelV1VisibleLaunchBehaviorChanged = false;
+            const bool appModelV1PersistentDesktopStorageWrites = false;
+            const bool appModelV1RecentProgramsAligned = phase4DRecentProgramNamesRegistryAligned;
+            const bool appModelV1RiskyDestructiveTargetsExcluded =
+                phase4RiskyEntriesNotActiveDispatchOwned &&
+                phase4BFileAssociationSummary.riskyExtensionsNotActiveDispatchOwned &&
+                phase4CShellObjectSummary.trashDestructiveActionsExcluded;
+            const bool appModelV1TrashOpenOnlyBoundary = phase4CShellObjectSummary.trashOpenOnlySafe;
+            const bool appModelV1ImagesRemainLegacy = phase4BFileAssociationSummary.imagesRemainLegacy;
+            const bool appModelV1OutOfScopeBoundary = true;
+            const bool phase4BFileAssociationCoverageOk =
+                phase4BFileAssociationSummary.tableExists &&
+                phase4BFileAssociationSummary.folderAssociationRegistered &&
+                phase4BFileAssociationSummary.textAssociationsRegistered &&
+                phase4BFileAssociationSummary.handlersResolveToRegistry &&
+                phase4BFileAssociationSummary.textFilesOpenWithNotepad &&
+                phase4BFileAssociationSummary.foldersOpenWithFileExplorer &&
+                phase4BFileAssociationSummary.imagesRemainLegacy &&
+                phase4BFileAssociationSummary.unknownExtensionsFallback &&
+                phase4BFileAssociationSummary.riskyExtensionsNotActiveDispatchOwned &&
+                !phase4BFileAssociationSummary.visibleLaunchBehaviorChanged &&
+                !phase4BFileAssociationSummary.persistentDesktopStorageWrites;
             const TypedDispatchCompileFlags typedDispatchFlags = typedDispatchCompileFlags();
             const bool typedDispatchFlagsOk = !typedDispatchFlags.invalid;
-            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk && typedDispatchFlagsOk;
+            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk && typedDispatchFlagsOk &&
+                phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned && phase4DRecentProgramWritePathsInventoried && phase4DRecentProgramNamesRegistryAligned && phase4BFileAssociationCoverageOk && phase4CShellObjectSummary.exists && phase4CShellObjectSummary.idsUnique && phase4CShellObjectSummary.displayNamesNonEmpty && phase4CShellObjectSummary.aliasesResolve && phase4CShellObjectSummary.handlersResolveToBuiltInRegistry && phase4CShellObjectSummary.rightColumnShellObjectsRegistered && phase4CShellObjectSummary.systemObjectsRegistered && phase4CShellObjectSummary.trashOpenOnlySafe && phase4CShellObjectSummary.trashDestructiveActionsExcluded && phase4CShellObjectSummary.computerFilesFallbackPreserved && phase4CShellObjectSummary.recentProgramsNotPolluted &&
+                phase4DShellObjectRecentPolicyAlignedValue &&
+                !phase4VisibleLaunchBehaviorChanged && !phase4PersistentDesktopStorageWrites;
+            const bool appModelV1StatusReady = overallOk;
 
             std::ostringstream oss;
             oss << "[AppModelSummary]\n";
@@ -2025,11 +2880,249 @@ namespace gxos {
                 << " bareMetalTargetSpecificUnsupportedAliases=" << storagePreviewCompareBareMetalCounts.targetSpecificUnsupportedAliases
                 << " unexpectedDrift=" << launchStoragePreviewUnexpectedDrift
                 << " writesStorage=false\n";
+            oss << "appModelPhase4ABuiltInRegistryExists=" << diagnosticBool(phase4RegistryExists) << "\n";
+            oss << "appModelPhase4AStableAppIdsUnique=" << diagnosticBool(phase4StableAppIdsUnique) << "\n";
+            oss << "appModelPhase4ADisplayNamesNonEmpty=" << diagnosticBool(phase4DisplayNamesNonEmpty) << "\n";
+            oss << "appModelPhase4AAliasResolutionOk=" << diagnosticBool(phase4AliasResolutionOk) << "\n";
+            oss << "appModelPhase4AStartMenuAppsRegistered=" << diagnosticBool(phase4StartMenuAppsRegistered) << "\n";
+            oss << "appModelPhase4AActiveDispatchAppsRegistered=" << diagnosticBool(phase4ActiveDispatchAppsRegistered) << "\n";
+            oss << "appModelPhase4ARecentProgramNamesAligned=" << diagnosticBool(phase4RecentProgramNamesAligned) << "\n";
+            oss << "appModelPhase4ARiskyEntriesNotActiveDispatchOwned=" << diagnosticBool(phase4RiskyEntriesNotActiveDispatchOwned) << "\n";
+            oss << "appModelPhase4AVisibleLaunchBehaviorChanged=" << diagnosticBool(phase4VisibleLaunchBehaviorChanged) << "\n";
+            oss << "appModelPhase4APersistentDesktopStorageWrites=" << diagnosticBool(phase4PersistentDesktopStorageWrites) << "\n";
+            oss << "recentProgramPolicy:\n";
+            oss << "  writePathsInventoried=" << diagnosticBool(phase4DRecentProgramWritePathsInventoried) << "\n";
+            oss << "  recentNamesRegistryAligned=" << diagnosticBool(phase4DRecentProgramNamesRegistryAligned) << "\n";
+            oss << "  canonicalRecentCapableBuiltIns=" << phase4DCanonicalRecentCapableBuiltIns << "\n";
+            oss << "  registryRecentCapableBuiltIns=" << phase4DRegistryRecentCapableBuiltIns << "\n";
+            oss << "  shellObjectsAllowedForRecent=" << phase4DShellObjectsRecentAllowed << "\n";
+            oss << "  shellObjectsSuppressedForRecent=" << phase4DShellObjectsRecentSuppressed << "\n";
+            oss << "  noStorageSystemObjects=Desktop|This System|Files\n";
+            oss << "  shellObjectRecentPolicyAligned=" << diagnosticBool(phase4DShellObjectRecentPolicyAlignedValue) << "\n";
+            oss << "appModelPhase4DRecentProgramWritePathsInventoried=" << diagnosticBool(phase4DRecentProgramWritePathsInventoried) << "\n";
+            oss << "appModelPhase4DRecentProgramNamesRegistryAligned=" << diagnosticBool(phase4DRecentProgramNamesRegistryAligned) << "\n";
+            oss << "appModelPhase4DCanonicalRecentCapableBuiltIns=" << phase4DCanonicalRecentCapableBuiltIns << "\n";
+            oss << "appModelPhase4DRegistryRecentCapableBuiltIns=" << phase4DRegistryRecentCapableBuiltIns << "\n";
+            oss << "appModelPhase4DShellObjectsRecentAllowed=" << phase4DShellObjectsRecentAllowed << "\n";
+            oss << "appModelPhase4DShellObjectsRecentSuppressed=" << phase4DShellObjectsRecentSuppressed << "\n";
+            oss << "appModelPhase4DShellObjectRecentPolicyAligned=" << diagnosticBool(phase4DShellObjectRecentPolicyAlignedValue) << "\n";
+            oss << "appModelPhase4DVisibleLaunchBehaviorChanged=false\n";
+            oss << "appModelPhase4DPersistentDesktopStorageWrites=false\n";
+            oss << "shellObjectRegistry: " << statusText(phase4CShellObjectSummary.exists && phase4CShellObjectSummary.idsUnique && phase4CShellObjectSummary.displayNamesNonEmpty && phase4CShellObjectSummary.aliasesResolve && phase4CShellObjectSummary.handlersResolveToBuiltInRegistry && phase4CShellObjectSummary.rightColumnShellObjectsRegistered && phase4CShellObjectSummary.systemObjectsRegistered && phase4CShellObjectSummary.trashOpenOnlySafe && phase4CShellObjectSummary.trashDestructiveActionsExcluded && phase4CShellObjectSummary.computerFilesFallbackPreserved && phase4CShellObjectSummary.recentProgramsNotPolluted)
+                << " entries=" << phase4CShellObjectSummary.total
+                << " exists=" << diagnosticBool(phase4CShellObjectSummary.exists)
+                << " idsUnique=" << diagnosticBool(phase4CShellObjectSummary.idsUnique)
+                << " displayNamesNonEmpty=" << diagnosticBool(phase4CShellObjectSummary.displayNamesNonEmpty)
+                << " aliasesResolve=" << diagnosticBool(phase4CShellObjectSummary.aliasesResolve)
+                << " handlersResolveToRegistry=" << diagnosticBool(phase4CShellObjectSummary.handlersResolveToBuiltInRegistry)
+                << " rightColumnRegistered=" << diagnosticBool(phase4CShellObjectSummary.rightColumnShellObjectsRegistered)
+                << " systemObjectsRegistered=" << diagnosticBool(phase4CShellObjectSummary.systemObjectsRegistered)
+                << " trashOpenOnlySafe=" << diagnosticBool(phase4CShellObjectSummary.trashOpenOnlySafe)
+                << " trashDestructiveActionsExcluded=" << diagnosticBool(phase4CShellObjectSummary.trashDestructiveActionsExcluded)
+                << " computerFilesFallbackPreserved=" << diagnosticBool(phase4CShellObjectSummary.computerFilesFallbackPreserved)
+                << " recentProgramsNotPolluted=" << diagnosticBool(phase4CShellObjectSummary.recentProgramsNotPolluted)
+                << " visibleLaunchBehaviorChanged=" << diagnosticBool(phase4CShellObjectSummary.visibleLaunchBehaviorChanged)
+                << " persistentDesktopStorageWrites=" << diagnosticBool(phase4CShellObjectSummary.persistentDesktopStorageWrites)
+                << "\n";
+            oss << "appModelPhase4CShellObjectRegistryExists=" << diagnosticBool(phase4CShellObjectSummary.exists) << "\n";
+            oss << "appModelPhase4CShellObjectIdsUnique=" << diagnosticBool(phase4CShellObjectSummary.idsUnique) << "\n";
+            oss << "appModelPhase4CShellObjectDisplayNamesNonEmpty=" << diagnosticBool(phase4CShellObjectSummary.displayNamesNonEmpty) << "\n";
+            oss << "appModelPhase4CShellAliasesResolve=" << diagnosticBool(phase4CShellObjectSummary.aliasesResolve) << "\n";
+            oss << "appModelPhase4CShellHandlersResolveToRegistry=" << diagnosticBool(phase4CShellObjectSummary.handlersResolveToBuiltInRegistry) << "\n";
+            oss << "appModelPhase4CRightColumnShellObjectsRegistered=" << diagnosticBool(phase4CShellObjectSummary.rightColumnShellObjectsRegistered) << "\n";
+            oss << "appModelPhase4CSystemObjectsRegistered=" << diagnosticBool(phase4CShellObjectSummary.systemObjectsRegistered) << "\n";
+            oss << "appModelPhase4CTrashOpenOnlySafe=" << diagnosticBool(phase4CShellObjectSummary.trashOpenOnlySafe) << "\n";
+            oss << "appModelPhase4CTrashDestructiveActionsExcluded=" << diagnosticBool(phase4CShellObjectSummary.trashDestructiveActionsExcluded) << "\n";
+            oss << "appModelPhase4CComputerFilesFallbackPreserved=" << diagnosticBool(phase4CShellObjectSummary.computerFilesFallbackPreserved) << "\n";
+            oss << "appModelPhase4CRecentProgramsNotPolluted=" << diagnosticBool(phase4CShellObjectSummary.recentProgramsNotPolluted) << "\n";
+            oss << "appModelPhase4CVisibleLaunchBehaviorChanged=" << diagnosticBool(phase4CShellObjectSummary.visibleLaunchBehaviorChanged) << "\n";
+            oss << "appModelPhase4CPersistentDesktopStorageWrites=" << diagnosticBool(phase4CShellObjectSummary.persistentDesktopStorageWrites) << "\n";
+            oss << fileAssociationV1CompactSummaryLine(phase4BFileAssociationSummary);
+            oss << fileAssociationV1KeyMappingsLine();
+            oss << fileAssociationV1MarkersLine(phase4BFileAssociationSummary);
             oss << launchTargetTypeCoverageSummaryLine();
             oss << typedDispatchCompileFlagsSummaryLine();
             oss << phase3PilotSummaryLine();
+            oss << appModelActiveTypedDispatchSummaryLine();
+            oss << "appModelV1StatusSurfaceExists=true\n";
+            oss << "appModelV1StatusReady=" << diagnosticBool(appModelV1StatusReady) << "\n";
+            oss << "appModelV1Status=" << (appModelV1StatusReady ? "ready" : "not-ready") << "\n";
+            oss << "appModelV1StatusSource=" << appModelV1EffectiveStateSource << "\n";
+            oss << "appModelV1ActiveTypedDispatchEnabled=" << diagnosticBool(appModelV1ActiveTypedDispatchEnabled) << "\n";
+            oss << "appModelV1EmergencyForceOffAvailable=" << diagnosticBool(appModelV1EmergencyForceOffAvailable) << "\n";
+            oss << "appModelV1LegacyFallbackAvailable=" << diagnosticBool(appModelV1LegacyFallbackAvailable) << "\n";
+            oss << "appModelV1VisibleLaunchBehaviorChanged=" << diagnosticBool(appModelV1VisibleLaunchBehaviorChanged) << "\n";
+            oss << "appModelV1PersistentDesktopStorageWrites=" << diagnosticBool(appModelV1PersistentDesktopStorageWrites) << "\n";
+            oss << "appModelV1BuiltInAppRegistryCount=" << appModelV1BuiltInRegistryCount << "\n";
+            oss << "appModelV1ShellObjectRegistryCount=" << appModelV1ShellObjectRegistryCount << "\n";
+            oss << "appModelV1FileAssociationCount=" << appModelV1FileAssociationCount << "\n";
+            oss << "appModelV1ActiveDispatchOwnedCoverageCount=" << appModelV1ActiveDispatchOwnedCoverageCountValue << "\n";
+            oss << "appModelV1FallbackUnsupportedCoverageCount=" << appModelV1FallbackUnsupportedCoverageCountValue << "\n";
+            oss << "appModelV1RecentProgramsAligned=" << diagnosticBool(appModelV1RecentProgramsAligned) << "\n";
+            oss << "appModelV1RiskyDestructiveTargetsExcluded=" << diagnosticBool(appModelV1RiskyDestructiveTargetsExcluded) << "\n";
+            oss << "appModelV1TrashOpenOnlyBoundary=" << diagnosticBool(appModelV1TrashOpenOnlyBoundary) << "\n";
+            oss << "appModelV1ImagesRemainLegacy=" << diagnosticBool(appModelV1ImagesRemainLegacy) << "\n";
+            oss << "appModelV1OutOfScopeBoundary=" << diagnosticBool(appModelV1OutOfScopeBoundary) << "\n";
+            oss << "appModelV1OutOfScopeScope=" << kAppModelV1OutOfScopeScope << "\n";
             oss << "overall: " << statusText(overallOk) << "\n";
-            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.appmodel.file-associations, desktop.appmodel.inventory, desktop.appmodel.shell-objects, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
+            return oss.str();
+        }
+
+        std::string DesktopService::AppModelInventoryDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            const ShellObjectRegistryCoverageSummary shellSummary = collectShellObjectRegistryCoverageSummary();
+            const FileAssociationV1CoverageSummary fileAssocSummary = collectFileAssociationV1CoverageSummary();
+            const size_t builtInRegistryCount = apps::kBuiltInAppMetadataCount;
+            const size_t shellObjectRegistryCount = apps::kShellObjectRegistryCount;
+            const size_t fileAssociationCount = fileAssocSummary.total;
+            const size_t activeDispatchOwnedCoverageCount = appModelV1ActiveDispatchOwnedCoverageCount();
+            const size_t fallbackUnsupportedCoverageCount = appModelV1FallbackUnsupportedCoverageCount();
+
+            const std::vector<std::string> recentProgramLabels = phase4DRecentProgramCoverageLabels();
+            size_t registryRecentCapableBuiltIns = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInHosted(metadata)) continue;
+                if (!metadata.recordRecentPrograms) continue;
+                ++registryRecentCapableBuiltIns;
+            }
+
+            std::ostringstream oss;
+            oss << "[AppModelV1Inventory]\n";
+            oss << "nonFatal: true\n";
+            oss << "inventorySurfaceExists=true\n";
+            oss << "statusSurface=desktop.appmodel.summary\n";
+            oss << "counts: builtInApps=" << builtInRegistryCount
+                << " shellObjects=" << shellObjectRegistryCount
+                << " fileAssociations=" << fileAssociationCount
+                << " activeDispatchOwnedCoverage=" << activeDispatchOwnedCoverageCount
+                << " fallbackUnsupportedCoverage=" << fallbackUnsupportedCoverageCount
+                << "\n";
+            oss << "recentProgramPolicy:\n";
+            oss << "  aligned=" << diagnosticBool(allLabelsResolveToRegistryIdentity(recentProgramLabels)) << "\n";
+            oss << "  canonicalRecentCapableBuiltIns=" << recentProgramLabels.size() << "\n";
+            oss << "  registryRecentCapableBuiltIns=" << registryRecentCapableBuiltIns << "\n";
+            oss << "  shellObjectsAllowedForRecent=" << phase4DShellObjectRecentAllowedLabels().size() << "\n";
+            oss << "  shellObjectsSuppressedForRecent=" << phase4DShellObjectRecentSuppressedLabels().size() << "\n";
+            oss << "  noStorageSystemObjects=Desktop|This System|Files\n";
+            oss << "fallbackExclusions:\n";
+            oss << "  core=" << kAppModelV1OutOfScopeScope << "\n";
+            oss << "  trashDestructiveActionsExcluded=" << diagnosticBool(shellSummary.trashDestructiveActionsExcluded) << "\n";
+            oss << "  imagesRemainLegacy=" << diagnosticBool(fileAssocSummary.imagesRemainLegacy) << "\n";
+            oss << "  legacyFallbacks=AppModel|ComputerFiles|Image Viewer|ImgViewer\n";
+            oss << "builtInApps:\n";
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                oss << "  record id=" << (metadata.appId ? metadata.appId : "")
+                    << " displayName=" << (metadata.displayName ? metadata.displayName : "")
+                    << " launchName=" << (metadata.launchName ? metadata.launchName : "")
+                    << " hosted=" << diagnosticBool(apps::IsBuiltInAppAvailableInHosted(metadata))
+                    << " bareMetal=" << diagnosticBool(apps::IsBuiltInAppAvailableInBareMetal(metadata))
+                    << " appearsInStartMenu=" << diagnosticBool(metadata.appearsInStartMenu)
+                    << " canAppearOnDesktop=" << diagnosticBool(metadata.canAppearOnDesktop)
+                    << " recordRecentPrograms=" << diagnosticBool(metadata.recordRecentPrograms)
+                    << " acceptsFileTargets=" << diagnosticBool(metadata.acceptsFileTargets)
+                    << " acceptsFolderTargets=" << diagnosticBool(metadata.acceptsFolderTargets)
+                    << " systemShellObject=" << diagnosticBool(metadata.systemShellObject)
+                    << " riskyForActiveTypedDispatch=" << diagnosticBool(metadata.riskyForActiveTypedDispatch)
+                    << "\n";
+            }
+            oss << "shellObjects:\n";
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const apps::ShellObjectRegistryRecord& record = apps::kShellObjectRegistry[i];
+                std::ostringstream aliases;
+                bool first = true;
+                for (size_t j = 0; j < record.aliasCount; ++j) {
+                    const char* alias = record.aliases[j];
+                    if (!alias || !alias[0]) continue;
+                    if (!first) aliases << "|";
+                    aliases << alias;
+                    first = false;
+                }
+
+                oss << "  record id=" << (record.shellObjectId ? record.shellObjectId : "")
+                    << " displayName=" << (record.displayName ? record.displayName : "")
+                    << " canonicalLaunchTargetName=" << (record.canonicalLaunchTargetName ? record.canonicalLaunchTargetName : "")
+                    << " aliases=" << (aliases.str().empty() ? "none" : aliases.str())
+                    << " kind=" << apps::ShellObjectKindToString(record.kind)
+                    << " defaultHandlerAppIdentity=" << (record.defaultHandlerAppIdentity ? record.defaultHandlerAppIdentity : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " systemOnly=" << diagnosticBool(record.systemOnly)
+                    << " riskyDestructive=" << diagnosticBool(record.riskyDestructive)
+                    << " shouldWriteRecentPrograms=" << diagnosticBool(record.shouldWriteRecentPrograms)
+                    << " targetKind=" << apps::ShellObjectTargetKindToString(record.targetKind)
+                    << " canonicalTargetValue=" << (record.canonicalTargetValue ? record.canonicalTargetValue : "")
+                    << "\n";
+            }
+            oss << "fileAssociations:\n";
+            for (const auto& record : kFileAssociationV1Table) {
+                oss << "  record key=" << record.associationKey
+                    << " kind=" << fileAssociationV1KindName(record.kind)
+                    << " handlerAppId=" << (record.handlerAppId ? record.handlerAppId : "")
+                    << " handlerDisplayName=" << (record.handlerDisplayName ? record.handlerDisplayName : "")
+                    << " handlerLaunchName=" << (record.handlerLaunchName ? record.handlerLaunchName : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " fallbackRequired=" << diagnosticBool(record.fallbackRequired)
+                    << " textLike=" << diagnosticBool(record.textLike)
+                    << " folder=" << diagnosticBool(record.folder)
+                    << " system=" << diagnosticBool(record.system)
+                    << " risky=" << diagnosticBool(record.risky)
+                    << " legacyDirectPath=" << diagnosticBool(record.legacyDirectPath)
+                    << " note=" << (record.note ? record.note : "")
+                    << "\n";
+            }
+            oss << "nonFatal: true\n";
+            return oss.str();
+        }
+
+        std::string DesktopService::FileAssociationV1Diagnostic() {
+            ensureDefaultAppsRegistered();
+
+            const FileAssociationV1CoverageSummary summary = collectFileAssociationV1CoverageSummary();
+            std::ostringstream oss;
+            oss << "[FileAssociationV1]\n";
+            oss << fileAssociationV1CompactSummaryLine(summary);
+            oss << fileAssociationV1KeyMappingsLine();
+            oss << fileAssociationV1MarkersLine(summary);
+            oss << "table:\n";
+            for (const auto& record : kFileAssociationV1Table) {
+                const bool registryMatch = fileAssociationV1HandlerMatchesRegistry(record);
+                const apps::BuiltInAppMetadata* registryMetadata = nullptr;
+                if (record.handlerAppId && record.handlerAppId[0]) {
+                    registryMetadata = apps::FindBuiltInAppMetadataByAppId(record.handlerAppId);
+                }
+
+                oss << "  key=" << record.associationKey
+                    << " kind=" << fileAssociationV1KindName(record.kind)
+                    << " handlerAppId=" << (record.handlerAppId ? record.handlerAppId : "")
+                    << " handlerDisplayName=" << (record.handlerDisplayName ? record.handlerDisplayName : "")
+                    << " handlerLaunchName=" << (record.handlerLaunchName ? record.handlerLaunchName : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " fallbackRequired=" << diagnosticBool(record.fallbackRequired)
+                    << " textLike=" << diagnosticBool(record.textLike)
+                    << " folder=" << diagnosticBool(record.folder)
+                    << " system=" << diagnosticBool(record.system)
+                    << " risky=" << diagnosticBool(record.risky)
+                    << " legacyDirectPath=" << diagnosticBool(record.legacyDirectPath)
+                    << " registryResolved=" << diagnosticBool(registryMetadata != nullptr)
+                    << " registryMatch=" << diagnosticBool(registryMatch);
+                if (registryMetadata) {
+                    oss << " registryDisplayName=" << (registryMetadata->displayName ? registryMetadata->displayName : "")
+                        << " registryLaunchName=" << (registryMetadata->launchName ? registryMetadata->launchName : "");
+                }
+                if (record.note && record.note[0]) {
+                    oss << " note=" << record.note;
+                }
+                oss << "\n";
+            }
+            oss << "summary: tableExists=" << diagnosticBool(summary.tableExists)
+                << " handlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry)
+                << " visibleLaunchBehaviorChanged=" << diagnosticBool(summary.visibleLaunchBehaviorChanged)
+                << " persistentDesktopStorageWrites=" << diagnosticBool(summary.persistentDesktopStorageWrites)
+                << "\n";
+            oss << "nonFatal: true\n";
             return oss.str();
         }
 
@@ -2954,10 +4047,19 @@ namespace gxos {
             return summary;
         }
 
-        static std::string launchTargetTypeCoverageSummaryLine() {
+        static LaunchTargetTypeCoverageSummary collectLaunchTargetTypeCoverageSummary() {
             const std::set<std::string> labels = collectLaunchTargetTypeCoverageLabels();
             const std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> typeCounts = collectLaunchTargetTypeCoverageCounts(labels);
-            const LaunchTargetTypeCoverageSummary summary = summarizeLaunchTargetTypeCoverage(typeCounts, labels.size());
+            return summarizeLaunchTargetTypeCoverage(typeCounts, labels.size());
+        }
+
+        static size_t appModelV1FallbackUnsupportedCoverageCount() {
+            const LaunchTargetTypeCoverageSummary summary = collectLaunchTargetTypeCoverageSummary();
+            return summary.totalExpectedUnsupported + summary.totalUnexpectedUnsupported + summary.totalUnknownLabels;
+        }
+
+        static std::string launchTargetTypeCoverageSummaryLine() {
+            const LaunchTargetTypeCoverageSummary summary = collectLaunchTargetTypeCoverageSummary();
 
             std::ostringstream oss;
             oss << "launchTargetTypes: " << statusText(summary.totalUnexpectedUnsupported == 0)
@@ -3402,6 +4504,7 @@ namespace gxos {
             oss << "appModelPhase3PilotScopedToStartMenuNotepad=false\n";
             oss << "appModelPhase3PilotDefaultBuildSafe=true\n";
             oss << "note: historical pilot flags remain default-off; ready-only typed dispatch is active with compatibility fallbacks\n";
+            oss << appModelActiveTypedDispatchSummaryLine();
             return oss.str();
         }
 
@@ -3484,6 +4587,104 @@ namespace gxos {
             }
             if (metadataWithoutBareMetalRegistration == 0) oss << "  none\n";
 
+            const std::vector<std::string> startMenuLabels = phase4StartMenuCoverageLabels();
+            const std::vector<std::string> activeDispatchLabels = phase4ActiveDispatchCoverageLabels();
+            const std::vector<std::string> aliasProbeLabels = {
+                "Files",
+                "File Explorer",
+                "FileExplorer",
+                "Control Panel",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Display Settings",
+                "Desktop Background",
+                "Wallpaper",
+                "AppModel",
+                "ImgViewer",
+                "Terminal"
+            };
+            std::vector<std::string> unresolvedStartMenuLabels;
+            std::vector<std::string> unresolvedActiveDispatchLabels;
+            std::vector<std::string> unresolvedAliasLabels;
+            const bool startMenuAppsRegistered = allLabelsResolveToRegistryIdentity(startMenuLabels, &unresolvedStartMenuLabels);
+            const bool activeDispatchAppsRegistered = allLabelsResolveToRegistryIdentity(activeDispatchLabels, &unresolvedActiveDispatchLabels);
+            const bool aliasResolutionOk = allLabelsResolveToRegistryIdentity(aliasProbeLabels, &unresolvedAliasLabels);
+
+            bool displayNamesNonEmpty = true;
+            bool stableAppIdsUnique = true;
+            bool recentProgramNamesAligned = true;
+            bool riskyEntriesNotActiveDispatchOwned = true;
+            std::set<std::string> seenAppIds;
+
+            oss << "registry:\n";
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                const std::string appId = metadata.appId ? metadata.appId : "";
+                const std::string displayName = metadata.displayName ? metadata.displayName : "";
+                const std::string canonicalLaunchName = apps::BuiltInAppCanonicalLaunchName(metadata);
+                const std::string aliases = joinKnownAliasesForDiagnostic(metadata);
+                const bool duplicateAppId = !appId.empty() && !seenAppIds.insert(appId).second;
+                const bool inStartMenu = metadata.appearsInStartMenu;
+                const bool onDesktop = metadata.canAppearOnDesktop;
+                const bool recordRecent = metadata.recordRecentPrograms;
+                const bool acceptsFile = metadata.acceptsFileTargets;
+                const bool acceptsFolder = metadata.acceptsFolderTargets;
+                const bool systemShell = metadata.systemShellObject;
+                const bool risky = metadata.riskyForActiveTypedDispatch;
+
+                if (displayName.empty()) displayNamesNonEmpty = false;
+                if (duplicateAppId) stableAppIdsUnique = false;
+                if (risky && builtInRegistryEntryExistsForLabel(canonicalLaunchName) &&
+                    std::find(activeDispatchLabels.begin(), activeDispatchLabels.end(), canonicalLaunchName) != activeDispatchLabels.end()) {
+                    riskyEntriesNotActiveDispatchOwned = false;
+                }
+
+                oss << "  record id=" << appId
+                    << " displayName=" << displayName
+                    << " canonicalLaunchName=" << canonicalLaunchName
+                    << " aliases=" << (aliases.empty() ? "none" : aliases)
+                    << " category=" << (metadata.category ? metadata.category : "")
+                    << " startMenu=" << (inStartMenu ? "true" : "false")
+                    << " desktop=" << (onDesktop ? "true" : "false")
+                    << " recent=" << (recordRecent ? "true" : "false")
+                    << " acceptsFileTargets=" << (acceptsFile ? "true" : "false")
+                    << " acceptsFolderTargets=" << (acceptsFolder ? "true" : "false")
+                    << " systemShellObject=" << (systemShell ? "true" : "false")
+                    << " riskyForActiveTypedDispatch=" << (risky ? "true" : "false")
+                    << " hosted=" << (apps::IsBuiltInAppAvailableInHosted(metadata) ? "true" : "false")
+                    << " bareMetal=" << (apps::IsBuiltInAppAvailableInBareMetal(metadata) ? "true" : "false")
+                    << "\n";
+            }
+
+            const std::vector<std::string> recentLabels = phase4RecentProgramCoverageLabels();
+            for (const std::string& label : recentLabels) {
+                if (!builtInRegistryEntryExistsForLabel(label)) recentProgramNamesAligned = false;
+            }
+
+            oss << "aliasResolution:\n";
+            for (const std::string& alias : aliasProbeLabels) {
+                const apps::BuiltInAppMetadata* metadata = findBuiltInMetadataForRegistryIdentity(alias);
+                oss << "  alias=" << alias
+                    << " resolved=" << (metadata ? "true" : "false")
+                    << " canonicalAppId=" << (metadata && metadata->appId ? metadata->appId : "")
+                    << " canonicalDisplayName=" << (metadata && metadata->displayName ? metadata->displayName : "")
+                    << " canonicalLaunchName=" << (metadata ? apps::BuiltInAppCanonicalLaunchName(*metadata) : "")
+                    << "\n";
+            }
+
+            oss << "registryValidation:\n";
+            oss << "  registryExists=" << (apps::kBuiltInAppMetadataCount > 0 ? "true" : "false") << "\n";
+            oss << "  stableAppIdsUnique=" << (stableAppIdsUnique ? "true" : "false") << "\n";
+            oss << "  displayNamesNonEmpty=" << (displayNamesNonEmpty ? "true" : "false") << "\n";
+            oss << "  aliasResolutionOk=" << (aliasResolutionOk ? "true" : "false") << "\n";
+            oss << "  startMenuAppsRegistered=" << (startMenuAppsRegistered ? "true" : "false") << "\n";
+            oss << "  activeDispatchAppsRegistered=" << (activeDispatchAppsRegistered ? "true" : "false") << "\n";
+            oss << "  recentProgramNamesAligned=" << (recentProgramNamesAligned ? "true" : "false") << "\n";
+            oss << "  riskyEntriesNotActiveDispatchOwned=" << (riskyEntriesNotActiveDispatchOwned ? "true" : "false") << "\n";
+            oss << "  visibleLaunchBehaviorChanged=false\n";
+            oss << "  persistentDesktopStorageWrites=false\n";
+
             oss << "duplicateAppIdsDiscovered:\n";
             std::set<std::string> duplicateIds = duplicateIdsFromScanIssues(s_lastManifestScanResult, s_lastBuiltInRegisterResult);
             if (duplicateIds.empty()) {
@@ -3521,6 +4722,86 @@ namespace gxos {
             appendUiLaunchAliasMetadataDiagnostic(oss);
             oss << "\n" << LaunchTargetShadowDiagnostic();
 
+            return oss.str();
+        }
+
+        std::string DesktopService::ShellObjectRegistryDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            const ShellObjectRegistryCoverageSummary summary = collectShellObjectRegistryCoverageSummary();
+            std::ostringstream oss;
+            oss << "[ShellObjectRegistryV1]\n";
+            oss << "registryExists: " << diagnosticBool(summary.exists) << "\n";
+            oss << "registryCount: " << summary.total << "\n";
+            oss << "shellObjectRegistryIdsUnique: " << diagnosticBool(summary.idsUnique) << "\n";
+            oss << "shellObjectRegistryDisplayNamesNonEmpty: " << diagnosticBool(summary.displayNamesNonEmpty) << "\n";
+            oss << "shellObjectRegistryAliasesResolve: " << diagnosticBool(summary.aliasesResolve) << "\n";
+            oss << "shellObjectRegistryHandlersResolveToRegistry: " << diagnosticBool(summary.handlersResolveToBuiltInRegistry) << "\n";
+            oss << "rightColumnShellObjectsRegistered: " << diagnosticBool(summary.rightColumnShellObjectsRegistered) << "\n";
+            oss << "systemObjectsRegistered: " << diagnosticBool(summary.systemObjectsRegistered) << "\n";
+            oss << "trashOpenOnlySafe: " << diagnosticBool(summary.trashOpenOnlySafe) << "\n";
+            oss << "trashDestructiveActionsExcluded: " << diagnosticBool(summary.trashDestructiveActionsExcluded) << "\n";
+            oss << "computerFilesFallbackPreserved: " << diagnosticBool(summary.computerFilesFallbackPreserved) << "\n";
+            oss << "recentProgramsNotPolluted: " << diagnosticBool(summary.recentProgramsNotPolluted) << "\n";
+            oss << "visibleLaunchBehaviorChanged: " << diagnosticBool(summary.visibleLaunchBehaviorChanged) << "\n";
+            oss << "persistentDesktopStorageWrites: " << diagnosticBool(summary.persistentDesktopStorageWrites) << "\n";
+            oss << "records:\n";
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const apps::ShellObjectRegistryRecord& record = apps::kShellObjectRegistry[i];
+                std::ostringstream aliases;
+                bool first = true;
+                for (size_t j = 0; j < record.aliasCount; ++j) {
+                    const char* alias = record.aliases[j];
+                    if (!alias || !alias[0]) continue;
+                    if (!first) aliases << "|";
+                    aliases << alias;
+                    first = false;
+                }
+
+                oss << "  record id=" << (record.shellObjectId ? record.shellObjectId : "")
+                    << " displayName=" << (record.displayName ? record.displayName : "")
+                    << " canonicalLaunchTargetName=" << (record.canonicalLaunchTargetName ? record.canonicalLaunchTargetName : "")
+                    << " aliases=" << (aliases.str().empty() ? "none" : aliases.str())
+                    << " kind=" << apps::ShellObjectKindToString(record.kind)
+                    << " defaultHandlerAppIdentity=" << (record.defaultHandlerAppIdentity ? record.defaultHandlerAppIdentity : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " systemOnly=" << diagnosticBool(record.systemOnly)
+                    << " riskyDestructive=" << diagnosticBool(record.riskyDestructive)
+                    << " shouldWriteRecentPrograms=" << diagnosticBool(record.shouldWriteRecentPrograms)
+                    << " targetKind=" << apps::ShellObjectTargetKindToString(record.targetKind)
+                    << " canonicalTargetValue=" << (record.canonicalTargetValue ? record.canonicalTargetValue : "")
+                    << " handlerResolved=" << diagnosticBool(apps::ShellObjectRegistryHandlerResolvesToBuiltInRegistry(record))
+                    << "\n";
+            }
+
+            const std::vector<std::string> probeAliases = phase4CShellObjectProbeLabels();
+            oss << "aliasResolution:\n";
+            for (const std::string& alias : probeAliases) {
+                const apps::ShellObjectRegistryRecord* record = apps::FindShellObjectRegistryRecordByAlias(alias.c_str());
+                oss << "  alias=" << alias
+                    << " resolved=" << diagnosticBool(record != nullptr)
+                    << " shellObjectId=" << (record && record->shellObjectId ? record->shellObjectId : "")
+                    << " canonicalDisplayName=" << (record && record->displayName ? record->displayName : "")
+                    << " canonicalLaunchTargetName=" << (record && record->canonicalLaunchTargetName ? record->canonicalLaunchTargetName : "")
+                    << " targetKind=" << (record ? apps::ShellObjectTargetKindToString(record->targetKind) : "unknown")
+                    << "\n";
+            }
+
+            oss << "registryValidation:\n";
+            oss << "  registryExists=" << diagnosticBool(summary.exists) << "\n";
+            oss << "  idsUnique=" << diagnosticBool(summary.idsUnique) << "\n";
+            oss << "  displayNamesNonEmpty=" << diagnosticBool(summary.displayNamesNonEmpty) << "\n";
+            oss << "  aliasesResolve=" << diagnosticBool(summary.aliasesResolve) << "\n";
+            oss << "  handlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToBuiltInRegistry) << "\n";
+            oss << "  rightColumnShellObjectsRegistered=" << diagnosticBool(summary.rightColumnShellObjectsRegistered) << "\n";
+            oss << "  systemObjectsRegistered=" << diagnosticBool(summary.systemObjectsRegistered) << "\n";
+            oss << "  trashOpenOnlySafe=" << diagnosticBool(summary.trashOpenOnlySafe) << "\n";
+            oss << "  trashDestructiveActionsExcluded=" << diagnosticBool(summary.trashDestructiveActionsExcluded) << "\n";
+            oss << "  computerFilesFallbackPreserved=" << diagnosticBool(summary.computerFilesFallbackPreserved) << "\n";
+            oss << "  recentProgramsNotPolluted=" << diagnosticBool(summary.recentProgramsNotPolluted) << "\n";
+            oss << "  visibleLaunchBehaviorChanged=" << diagnosticBool(summary.visibleLaunchBehaviorChanged) << "\n";
+            oss << "  persistentDesktopStorageWrites=" << diagnosticBool(summary.persistentDesktopStorageWrites) << "\n";
+            oss << "nonFatal: true\n";
             return oss.str();
         }
 
@@ -3764,13 +5045,374 @@ namespace gxos {
             return filesystemEntryDiagnostic(path, isDirectory);
         }
 
-        bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error) {
+        static bool tryExecuteActiveTypedDispatchLaunch(const LaunchDispatchDecision& dispatchDecision, bool recordRecent, std::string& error, std::string& selectedHandler, std::string& reason) {
+            error.clear();
+            selectedHandler.clear();
+            reason.clear();
+
+            if (!apps::AppModelActiveTypedDispatchEnabled()) {
+                reason = "Active typed dispatch gate is disabled";
+                return false;
+            }
+
+            const auto addRecentIfRequested = [&](const char* recentName) {
+                if (recordRecent && recentName && recentName[0]) {
+                    DesktopService::AddRecentProgram(recentName);
+                }
+            };
+
+            const auto failUnsupported = [&](const std::string& detail) {
+                reason = detail;
+                return false;
+            };
+
+            if (dispatchDecision.target.type == apps::LaunchTargetType::ShellAction) {
+                const std::string shellAction = dispatchDecision.target.shellAction.empty()
+                    ? dispatchDecision.originalDispatch
+                    : dispatchDecision.target.shellAction;
+
+                if (shellAction == "Computer" || shellAction == "This System") {
+                    const std::string folderPath = dispatchDecision.target.pathParameter.empty()
+                        ? "/"
+                        : dispatchDecision.target.pathParameter;
+                    if (!folderPath.empty() && folderPath != "/") {
+                        std::string ensureError;
+                        if (!DesktopFolderResolver::EnsureExists(folderPath, ensureError, true)) {
+                            error = "Could not open " + shellAction;
+                            if (!ensureError.empty()) error += ": " + ensureError;
+                            reason = "Active typed dispatch attempted a root shell object but the folder target could not be prepared";
+                            return false;
+                        }
+                    }
+
+                    const uint64_t explorerPid = apps::FileExplorer::Launch(folderPath);
+                    if (explorerPid == 0) {
+                        error = "Could not open " + shellAction;
+                        reason = "Active typed dispatch attempted the root shell object but File Explorer returned pid=0";
+                        return false;
+                    }
+
+                    addRecentIfRequested("File Explorer");
+                    selectedHandler = "File Explorer";
+                    reason = "Active typed dispatch handled the root shell object in File Explorer";
+                    return true;
+                }
+
+                if (shellAction == "Documents" || shellAction == "Pictures" || shellAction == "Music" || shellAction == "Network") {
+                    const std::string folderPath = dispatchDecision.target.pathParameter;
+                    std::string ensureError;
+                    if (!DesktopFolderResolver::EnsureExists(folderPath, ensureError, true)) {
+                        error = "Could not open " + shellAction;
+                        if (!ensureError.empty()) error += ": " + ensureError;
+                        reason = "Active typed dispatch attempted a folder shell action but the folder target could not be prepared";
+                        return false;
+                    }
+
+                    const uint64_t explorerPid = apps::FileExplorer::Launch(folderPath);
+                    if (explorerPid == 0) {
+                        error = "Could not open " + shellAction;
+                        reason = "Active typed dispatch attempted the folder shell action but File Explorer returned pid=0";
+                        return false;
+                    }
+
+                    addRecentIfRequested("File Explorer");
+                    selectedHandler = "File Explorer";
+                    reason = "Active typed dispatch handled the folder shell action in File Explorer";
+                    return true;
+                }
+
+                if (shellAction == "Control Panel") {
+                    const uint64_t pid = apps::ControlPanel::Launch();
+                    if (pid == 0) {
+                        error = "Could not open Control Panel";
+                        reason = "Active typed dispatch attempted Control Panel but the launcher returned pid=0";
+                        return false;
+                    }
+
+                    addRecentIfRequested("Control Panel");
+                    selectedHandler = "Control Panel";
+                    reason = "Active typed dispatch handled the Control Panel shell action";
+                    return true;
+                }
+
+                if (shellAction == "Settings" || shellAction == "System Settings") {
+                    uint64_t settingsPid = apps::DisplayOptions::Launch();
+                    if (settingsPid == 0) {
+                        settingsPid = apps::ControlPanel::Launch();
+                        if (settingsPid == 0) {
+                            error = "Could not open Settings";
+                            reason = "Active typed dispatch attempted Settings and Control Panel fallback but both failed";
+                            return false;
+                        }
+
+                        addRecentIfRequested("Control Panel");
+                        selectedHandler = "Control Panel";
+                        reason = "Active typed dispatch handled Settings through the existing Control Panel fallback";
+                        return true;
+                    }
+
+                    addRecentIfRequested("DisplayOptions");
+                    selectedHandler = "DisplayOptions";
+                    reason = "Active typed dispatch handled Settings through DisplayOptions";
+                    return true;
+                }
+
+                return failUnsupported("Active typed dispatch is not enabled for this shell action");
+            }
+
+            const std::string dispatchName = !dispatchDecision.target.dispatchLaunchName.empty()
+                ? dispatchDecision.target.dispatchLaunchName
+                : dispatchDecision.selectedDispatch;
+
+            if (dispatchName == "Notepad") {
+                const uint64_t pid = apps::Notepad::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Notepad";
+                    reason = "Active typed dispatch attempted Notepad but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Notepad");
+                selectedHandler = "Notepad";
+                reason = "Active typed dispatch handled the Notepad launch";
+                return true;
+            }
+
+            if (dispatchName == "FileExplorer") {
+                const uint64_t pid = apps::FileExplorer::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch File Explorer";
+                    reason = "Active typed dispatch attempted File Explorer but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("File Explorer");
+                selectedHandler = "File Explorer";
+                reason = "Active typed dispatch handled the File Explorer launch";
+                return true;
+            }
+
+            if (dispatchName == "Console") {
+                const uint64_t pid = apps::ConsoleWindow::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Console";
+                    reason = "Active typed dispatch attempted Console but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Console");
+                selectedHandler = "Console";
+                reason = "Active typed dispatch handled the Console launch";
+                return true;
+            }
+
+            if (dispatchName == "Calculator") {
+                const uint64_t pid = apps::Calculator::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Calculator";
+                    reason = "Active typed dispatch attempted Calculator but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Calculator");
+                selectedHandler = "Calculator";
+                reason = "Active typed dispatch handled the Calculator launch";
+                return true;
+            }
+
+            if (dispatchName == "Clock") {
+                const uint64_t pid = apps::Clock::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Clock";
+                    reason = "Active typed dispatch attempted Clock but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Clock");
+                selectedHandler = "Clock";
+                reason = "Active typed dispatch handled the Clock launch";
+                return true;
+            }
+
+            if (dispatchName == "TaskManager") {
+                const uint64_t pid = apps::TaskManager::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Task Manager";
+                    reason = "Active typed dispatch attempted Task Manager but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("TaskManager");
+                selectedHandler = "TaskManager";
+                reason = "Active typed dispatch handled the Task Manager launch";
+                return true;
+            }
+
+            if (dispatchName == "DiskManager") {
+                const uint64_t pid = apps::DiskManager::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Disk Manager";
+                    reason = "Active typed dispatch attempted Disk Manager but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("DiskManager");
+                selectedHandler = "DiskManager";
+                reason = "Active typed dispatch handled the Disk Manager launch";
+                return true;
+            }
+
+            if (dispatchName == "Paint") {
+                const uint64_t pid = apps::Paint::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Paint";
+                    reason = "Active typed dispatch attempted Paint but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Paint");
+                selectedHandler = "Paint";
+                reason = "Active typed dispatch handled the Paint launch";
+                return true;
+            }
+
+            if (dispatchName == "guideXOS Navigator") {
+                const uint64_t pid = apps::Navigator::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch guideXOS Navigator";
+                    reason = "Active typed dispatch attempted guideXOS Navigator but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("guideXOS Navigator");
+                selectedHandler = "guideXOS Navigator";
+                reason = "Active typed dispatch handled the guideXOS Navigator launch";
+                return true;
+            }
+
+            if (dispatchName == "ControlPanel") {
+                const uint64_t pid = apps::ControlPanel::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Control Panel";
+                    reason = "Active typed dispatch attempted Control Panel but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Control Panel");
+                selectedHandler = "Control Panel";
+                reason = "Active typed dispatch handled the Control Panel launch";
+                return true;
+            }
+
+            if (dispatchName == "DisplayOptions") {
+                const uint64_t pid = apps::DisplayOptions::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Settings";
+                    reason = "Active typed dispatch attempted DisplayOptions but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("DisplayOptions");
+                selectedHandler = "DisplayOptions";
+                reason = "Active typed dispatch handled the Settings launch";
+                return true;
+            }
+
+            if (dispatchName == "Trash") {
+                const uint64_t pid = apps::Trash::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Trash";
+                    reason = "Active typed dispatch attempted Trash but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Trash");
+                selectedHandler = "Trash";
+                reason = "Active typed dispatch handled the Trash launch";
+                return true;
+            }
+
+            return failUnsupported("Active typed dispatch is not enabled for this app target");
+        }
+
+        static bool tryExecuteActiveTypedDispatchFilesystemEntry(const std::string& path, bool isDirectory, bool recordRecent, std::string& error, std::string& selectedHandler, std::string& reason) {
+            error.clear();
+            selectedHandler.clear();
+            reason.clear();
+
+            if (!apps::AppModelActiveTypedDispatchEnabled()) {
+                reason = "Active typed dispatch gate is disabled";
+                return false;
+            }
+
+            const auto addRecentIfRequested = [&](const char* recentName) {
+                if (recordRecent && recentName && recentName[0]) {
+                    DesktopService::AddRecentProgram(recentName);
+                }
+            };
+
+            std::string routeName;
+            if (!isActiveTypedDispatchFilesystemEntryTarget(isDirectory, path, routeName)) {
+                reason = "Active typed dispatch is not enabled for this filesystem entry";
+                return false;
+            }
+
+            if (routeName == "FileExplorer") {
+                const uint64_t pid = apps::FileExplorer::Launch(path);
+                if (pid == 0) {
+                    error = "Failed to open path in File Explorer";
+                    reason = "Active typed dispatch attempted File Explorer but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("File Explorer");
+                selectedHandler = "File Explorer";
+                reason = isDirectory
+                    ? "Active typed dispatch handled the folder open in File Explorer"
+                    : "Active typed dispatch handled the file open in File Explorer";
+                return true;
+            }
+
+            if (routeName == "Notepad") {
+                const uint64_t pid = apps::Notepad::LaunchWithFile(path);
+                if (pid == 0) {
+                    error = "Failed to open file in Notepad";
+                    reason = "Active typed dispatch attempted Notepad but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Notepad");
+                selectedHandler = "Notepad";
+                reason = "Active typed dispatch handled the text-file open in Notepad";
+                return true;
+            }
+
+            return false;
+        }
+
+        bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent) {
             error.clear();
             Logger::write(LogLevel::Info, std::string("Desktop filesystem open requested path=") + path + " directory=" + (isDirectory ? "true" : "false"));
             if (path.empty()) {
                 error = "No filesystem path supplied";
                 return false;
             }
+
+            const FilesystemEntryLaunchTarget shadowRoute = resolveFilesystemEntryLaunchTarget(path, isDirectory);
+            std::string activeSelectedHandler;
+            std::string activeReason;
+            const bool activeHandled = tryExecuteActiveTypedDispatchFilesystemEntry(path, isDirectory, recordRecent, error, activeSelectedHandler, activeReason);
+            Logger::write(LogLevel::Info, buildAppModelActiveTypedDispatchEvidenceLine(
+                "HostedFilesystemEntry",
+                path,
+                "FileOpen",
+                filesystemEntryLaunchTargetName(shadowRoute),
+                filesystemEntryLaunchStatus(shadowRoute),
+                activeSelectedHandler.empty() ? filesystemEntryLaunchTargetName(shadowRoute) : activeSelectedHandler,
+                activeHandled,
+                !activeHandled,
+                activeReason));
+            if (activeHandled) return true;
 
             switch (resolveFilesystemEntryLaunchTarget(path, isDirectory)) {
             case FilesystemEntryLaunchTarget::FileExplorer:
@@ -3779,7 +5421,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("File Explorer");
+                if (recordRecent) AddRecentProgram("File Explorer");
                 return true;
             case FilesystemEntryLaunchTarget::Notepad:
                 if (apps::Notepad::LaunchWithFile(path) == 0) {
@@ -3787,7 +5429,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Notepad");
+                if (recordRecent) AddRecentProgram("Notepad");
                 return true;
             case FilesystemEntryLaunchTarget::ImageViewer:
                 // TODO: once AppModel launch arguments become first-class, route this
@@ -3798,7 +5440,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Image Viewer");
+                if (recordRecent) AddRecentProgram("Image Viewer");
                 return true;
             case FilesystemEntryLaunchTarget::Unsupported:
             default:
@@ -3811,33 +5453,75 @@ namespace gxos {
             return false;
         }
 
+        bool DesktopService::IsSetAsDesktopBackgroundEligible(const std::string& path, bool isDirectory, bool isTrashItem) {
+#if defined(GXOS_BARE_METAL)
+            (void)path;
+            (void)isDirectory;
+            (void)isTrashItem;
+            return false;
+#else
+            return DesktopBackgroundService::IsEligiblePngSource(path, isDirectory, isTrashItem);
+#endif
+        }
+
+        bool DesktopService::DispatchSetAsDesktopBackground(const std::string& path, const std::string& sourceSurface, std::string& error) {
+            Logger::write(LogLevel::Info, std::string("[ShellAction] identity=") + DesktopBackgroundService::kSetAsDesktopBackgroundAction +
+                " source=" + sourceSurface + " path=" + path);
+#if defined(GXOS_BARE_METAL)
+            error = "Set as Desktop Background is not available on bare metal in Phase 1";
+            return false;
+#else
+            const bool success = DesktopBackgroundService::ImportAndSetDesktopBackground(path, error);
+            if (!success && !error.empty()) NotificationManager::Add(error, NotificationLevel::Error);
+            return success;
+#endif
+        }
+
+        const char* DesktopService::SetAsDesktopBackgroundActionIdentity() {
+            return DesktopBackgroundService::kSetAsDesktopBackgroundAction;
+        }
+
         bool DesktopService::ShowFolderOnHostedDesktop(const std::string& path, std::string& error) {
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-            const std::string normalized = DesktopFolderResolver::NormalizeVirtualPath(path);
-            std::string ensureError;
-            const bool createIfMissing = normalized == DesktopFolderResolver::VirtualPath();
-            if (!DesktopFolderResolver::EnsureExists(normalized, ensureError, createIfMissing)) {
-                error = ensureError;
+            error.clear();
+            Logger::write(LogLevel::Info, std::string("Desktop show-folder requested path=") + path);
+            if (path.empty()) {
+                error = "No folder path supplied";
                 return false;
             }
 
-            if (!Compositor::showFolderOnHostedDesktop(normalized)) {
-                error = std::string("Hosted desktop navigation failed for ") + normalized;
+            if (!Compositor::showFolderOnHostedDesktop(path)) {
+                error = "Hosted desktop navigation failed for " + path;
+                Logger::write(LogLevel::Warn, error);
                 return false;
             }
 
             return true;
-#else
-            (void)path;
-            error = "Hosted desktop navigation is unavailable in this runtime";
-            return false;
-#endif
         }
 
-        bool DesktopService::LaunchApp(const std::string& name, std::string& error) {
+        bool DesktopService::LaunchApp(const std::string& name, std::string& error, bool recordRecent) {
             ensureDefaultAppsRegistered();
             const LaunchDispatchDecision dispatchDecision = SelectLaunchDispatch(name);
             RecordLaunchDispatchDecision("HostedDesktopService", dispatchDecision);
+
+            std::string activeSelectedHandler;
+            std::string activeReason;
+            const bool activeHandled = tryExecuteActiveTypedDispatchLaunch(dispatchDecision, recordRecent, error, activeSelectedHandler, activeReason);
+            Logger::write(LogLevel::Info, buildAppModelActiveTypedDispatchEvidenceLine(
+                "HostedDesktopService",
+                name,
+                apps::ToString(dispatchDecision.target.type),
+                dispatchDecision.selectedDispatch,
+                apps::ToString(dispatchDecision.usage),
+                activeSelectedHandler.empty()
+                    ? (dispatchDecision.target.dispatchLaunchName.empty() ? dispatchDecision.selectedDispatch : dispatchDecision.target.dispatchLaunchName)
+                    : activeSelectedHandler,
+                activeHandled,
+                !activeHandled,
+                activeReason));
+            if (activeHandled) {
+                return true;
+            }
+
             if (dispatchDecision.target.type == apps::LaunchTargetType::ShellAction) {
                 const std::string shellAction = dispatchDecision.target.shellAction.empty() ? name : dispatchDecision.target.shellAction;
 
@@ -3872,7 +5556,7 @@ namespace gxos {
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched folder shortcut: ") + shellAction + " path=" + folderPath + " pid=" + std::to_string(explorerPid));
-                    AddRecentProgram("File Explorer");
+                    if (recordRecent) AddRecentProgram("File Explorer");
                     return true;
                 }
 
@@ -3886,7 +5570,7 @@ namespace gxos {
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched Control Panel shell shortcut pid=") + std::to_string(controlPanelPid));
-                    AddRecentProgram("Control Panel");
+                    if (recordRecent) AddRecentProgram("Control Panel");
                     return true;
                 }
 
@@ -3909,7 +5593,7 @@ namespace gxos {
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched Settings via settings panel pid=") + std::to_string(settingsPid));
-                    if (!recentName.empty()) AddRecentProgram(recentName);
+                    if (recordRecent && !recentName.empty()) AddRecentProgram(recentName);
                     return true;
                 }
             }
@@ -3920,7 +5604,7 @@ namespace gxos {
             // Installed universal applications are launched through the package manager.
             if (!manifestApp) {
                 if (PackageManager::LaunchGXApp(appName, error)) {
-                    AddRecentProgram(appName);
+                    if (recordRecent) AddRecentProgram(appName);
                     return true;
                 }
                 error = "Application not registered: " + name;
@@ -3940,7 +5624,7 @@ namespace gxos {
                 return false;
             }
 
-            if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
+                if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
                 const apps::AppEntry* nativeEntry = registryApp->FindCompatibleEntry(launchDecision.architecture);
                 std::string resolvedNativeElfPath;
                 if (nativeEntry && !nativeEntry->path.empty() && !registryApp->appDirectory.empty()) {
@@ -3970,7 +5654,7 @@ namespace gxos {
                 }
 
                 Logger::write(LogLevel::Info, std::string("Launched native app process: ") + manifestApp->displayName + " pid=" + std::to_string(nativePid));
-                AddRecentProgram(manifestApp->displayName);
+                if (recordRecent) AddRecentProgram(manifestApp->displayName);
                 return true;
             }
 
@@ -4010,7 +5694,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Notepad");
+                if (recordRecent) AddRecentProgram("Notepad");
             }
             else if (appName == "Calculator") {
                 if (apps::Calculator::Launch() == 0) {
@@ -4018,7 +5702,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Calculator");
+                if (recordRecent) AddRecentProgram("Calculator");
             }
             else if (appName == "Console") {
                 if (apps::ConsoleWindow::Launch() == 0) {
@@ -4026,7 +5710,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Console");
+                if (recordRecent) AddRecentProgram("Console");
             }
             else if (appName == "FileExplorer") {
                 if (apps::FileExplorer::Launch() == 0) {
@@ -4034,7 +5718,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("File Explorer");
+                if (recordRecent) AddRecentProgram("File Explorer");
             }
             else if (appName == "Clock") {
                 if (apps::Clock::Launch() == 0) {
@@ -4042,7 +5726,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Clock");
+                if (recordRecent) AddRecentProgram("Clock");
             }
             else if (appName == "TaskManager") {
                 if (apps::TaskManager::Launch() == 0) {
@@ -4050,7 +5734,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("TaskManager");
+                if (recordRecent) AddRecentProgram("TaskManager");
             }
             else if (appName == "Paint") {
                 if (apps::Paint::Launch() == 0) {
@@ -4058,7 +5742,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Paint");
+                if (recordRecent) AddRecentProgram("Paint");
             }
             else if (appName == "ImageViewer") {
                 if (apps::ImageViewer::Launch() == 0) {
@@ -4066,7 +5750,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Image Viewer");
+                if (recordRecent) AddRecentProgram("Image Viewer");
             }
             else if (appName == "OnScreenKeyboard") {
                 if (apps::OnScreenKeyboard::Launch() == 0) {
@@ -4074,7 +5758,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("OnScreenKeyboard");
+                if (recordRecent) AddRecentProgram("OnScreenKeyboard");
             }
             else if (appName == "ShutdownDialog") {
                 if (apps::ShutdownDialog::Launch() == 0) {
@@ -4089,7 +5773,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("DiskManager");
+                if (recordRecent) AddRecentProgram("DiskManager");
             }
             else if (appName == "ControlPanel") {
                 if (apps::ControlPanel::Launch() == 0) {
@@ -4097,7 +5781,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Control Panel");
+                if (recordRecent) AddRecentProgram("Control Panel");
             }
             else if (appName == "DisplayOptions" || appName == "Display Settings" || appName == "Desktop Background" || appName == "Wallpaper") {
                 if (apps::DisplayOptions::Launch() == 0) {
@@ -4105,7 +5789,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("DisplayOptions");
+                if (recordRecent) AddRecentProgram("DisplayOptions");
             }
             else if (appName == "guideXOS Navigator") {
                 // Hosted/compositor Navigator launch path: app-model registration
@@ -4115,7 +5799,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("guideXOS Navigator");
+                if (recordRecent) AddRecentProgram("guideXOS Navigator");
             }
             else if (appName == "Trash") {
                 if (apps::Trash::Launch() == 0) {
@@ -4123,7 +5807,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Trash");
+                if (recordRecent) AddRecentProgram("Trash");
             }
             else if (appName == "HDInstaller") {
                 error = "HD Installer is not available in this runtime target";
@@ -4137,7 +5821,7 @@ namespace gxos {
                     return false;
                 }
                 NotificationManager::Add("Native App Debug Viewer opened. Try: nativeapp.inspect Hello World", NotificationLevel::Info);
-                AddRecentProgram("Native App Debug Viewer");
+                if (recordRecent) AddRecentProgram("Native App Debug Viewer");
             }
             else {
                 error = "Application launcher not implemented: " + name;

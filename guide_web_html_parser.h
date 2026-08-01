@@ -16,10 +16,18 @@
 //   <code>           – inside <pre>: stays in Preformatted; elsewhere: plain text
 //   <form method="GET|POST" action="...">
 //                    – starts a simple GET form scope
-//   <input type="text" name="..." value="..." placeholder="...">
-//                    – FormTextInput block
+//   <fieldset><legend>...</legend>...</fieldset>
+//                    – bounded bordered form group
+//   <label for="...">...</label>
+//                    – bounded label text and association metadata
+//   <input type="text|password|search|email|url|number" ...>
+//                    – static text-like control block
 //   <input type="checkbox|radio" name="..." value="..." checked>
 //                    - FormCheckbox/FormRadio block
+//   <input type="button|submit|reset" value="...">
+//                    – visual button block; no submission is added by this phase
+//   <input type="hidden" ...>
+//                    – metadata only, no visible block
 //   <textarea name="...">Text</textarea>
 //                    - FormTextarea block
 //   <select name="..."><option value="..." selected>Text</option></select>
@@ -27,13 +35,19 @@
 //   <input type="submit" value="...">
 //                    – FormSubmit block
 //   <button type="submit">Text</button>
-//                    – FormSubmit block
+//                    – bounded visual button block
 //
 // Ignored with content stripped:
 //   <script>
 //
 // Parsed for CSS-lite rules:
 //   <style>          – embedded stylesheet; supported selectors/properties only
+// CSS-lite selectors use bounded group recovery, CSS comments as token
+// separators, and reject escaped identifiers rather than normalizing them.
+// The bounded :empty interpretation matches only complete logical-element
+// metadata with no element-like child, non-whitespace text, image/media,
+// visible break, replaced content, or other renderable content.  Whitespace
+// outside whitespace-preserving blocks is discarded before this test.
 //
 // All other tags: tag token skipped, inner text preserved.
 //
@@ -43,6 +57,7 @@
 #include "guide_web_document.h"   // for gxos::web::WebDocument / DocBlock / BlockType
 
 #include <string>
+#include <unordered_set>
 
 namespace gxos {
 namespace web {
@@ -79,7 +94,13 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 // Never throws; on any internal error the returned document may have
 // fewer blocks than expected but will always be usable by renderDocument().
 // ---------------------------------------------------------------------------
-WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText);
+WebDocument parseHtml(const std::string& pageUrl,
+	const std::string& htmlText,
+	const std::unordered_set<std::string>& visitedUrls = {});
+
+// Recompute bounded document styles after Navigator changes its session-local
+// form state table.  Parsed author metadata is not rewritten.
+void recomputeDocumentStyles(WebDocument& document);
 
 } // namespace web
 } // namespace gxos

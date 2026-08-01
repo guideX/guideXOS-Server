@@ -1,6 +1,6 @@
 # guideXOS App Model Current-State Map
 
-Status: inspection pass only
+Status: Phase 5A final App Model v1 snapshot
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
 
@@ -447,7 +447,7 @@ At minimum:
 5. A shared built-in app registry table
    - hosted synthetic manifests and bare-metal kernel registration should derive from the same metadata where possible
 6. Association resolution
-   - file associations should become a queryable service instead of hardcoded extension branches
+   - file associations now have a narrow v1 service for folders and safe text-like files; broader Open With / editable associations remain out of scope
 7. Clear unsupported-path diagnostics
    - especially where hosted or bare-metal cannot yet execute a given runtime
 
@@ -519,7 +519,7 @@ Two new compile flags are defined for the future pilot. Both are **default-off**
 
 Neither flag is defined in `build.bat`, `build.ps1`, or any normal build configuration.
 
-### 13.3 Default-off status markers
+### 13.3 Product-default-on status markers
 
 The following markers are emitted by `desktop.appmodel.summary` and `desktop.appmodel.typed-dispatch-gate` in every normal build:
 
@@ -532,9 +532,18 @@ appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false
 appModelPhase3PilotRuntimeLaunchBehaviorChanged=false
 appModelPhase3PilotScopedToStartMenuNotepad=true
 appModelPhase3PilotDefaultBuildSafe=true
+appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch
+appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate
+appModelActiveDispatchCandidateEnabled=false
+appModelActiveDispatchEnabled=true
+appModelActiveDispatchEffectiveStateSource=product-default
+appModelActiveDispatchRuntimePath=active
+appModelActiveDispatchRuntimeLaunchBehaviorChanged=true
+appModelActiveDispatchVisibleLaunchBehaviorChanged=false
+appModelActiveDispatchPersistentDesktopStorageWrites=false
 ```
 
-These markers are asserted by `scripts/smoke-appmodel-typed-dispatch-flags.ps1` and `scripts/smoke-appmodel-phase2-status.ps1`.
+The candidate gate is now a compatibility/testing marker only. `desktop.appmodel.active-typed-dispatch-gate reset` returns to the product default, which is enabled, and emergency `force-off` / `force-on` overrides are still preserved. These markers are asserted by `scripts/smoke-appmodel-typed-dispatch-flags.ps1` and `scripts/smoke-appmodel-phase2-status.ps1`.
 
 ### 13.4 What is not implemented yet
 
@@ -547,4 +556,362 @@ The fallback flag requirement (`GXOS_APPMODEL_TYPED_DISPATCH_PILOT_FALLBACK_TO_L
 ### 13.5 Compile-flag discovery location
 
 `kernel/core/desktop.cpp` contains a compile-time comment block documenting the two pilot flags and the future hook location. It does not add any runtime code. `desktop_service.cpp` contains discovery/reporting for both flags in the `TypedDispatchCompileFlags` struct and the `phase3PilotSummaryLine()` helper.
+
+## 14. Phase 4A built-in identity registry
+
+Status: cleanup in progress, no visible launch behavior change.
+
+Active typed dispatch is still product-default-on, emergency force-off remains available, and legacy fallback remains intact.
+
+The shared built-in identity registry now lives in `built_in_app_metadata.h`. It owns:
+
+- stable app IDs
+- display names
+- canonical launch names
+- known aliases
+- category/group
+- Start Menu and desktop coverage flags
+- recent-program eligibility
+- file/folder target acceptance
+- system/shell-object classification
+- risky/destructive dispatch exclusion flags
+
+Phase 4A stays out of scope for:
+
+- GXApp runtime and package execution changes
+- ELF/native app runtime broadening
+- package install, uninstall, or app store behavior
+- sandboxing, permissions, IDE, or Open With behavior
+- broader file-association cleanup
+- any visible launch behavior change
+
+The current evidence markers include:
+
+- `appModelPhase4ABuiltInRegistryExists=true`
+- `appModelPhase4AStableAppIdsUnique=true`
+- `appModelPhase4AStartMenuAppsRegistered=true`
+- `appModelPhase4AActiveDispatchAppsRegistered=true`
+- `appModelPhase4ARecentProgramNamesAligned=true`
+- `appModelPhase4ARiskyEntriesNotActiveDispatchOwned=true`
+- `appModelPhase4AVisibleLaunchBehaviorChanged=false`
+- `appModelPhase4APersistentDesktopStorageWrites=false`
+
+## 15. Phase 4B file association v1 cleanup
+
+Status: complete, still narrow, no visible launch behavior change.
+
+Phase 4B adds a small explicit file association table in `desktop_service.cpp`. The table is intentionally limited to safe routing only:
+
+- folders -> `File Explorer`
+- text-like files -> `Notepad`
+  - `.txt`
+  - `.log`
+  - `.ini`
+  - `.cfg`
+- images -> remain on the legacy direct path for now
+  - `.png`
+  - `.bmp`
+  - `.jpg`
+  - `.gif`
+  - `.jpeg`
+- unknown extensions -> unsupported / fallback
+- executable, package-style, and ELF-style targets -> unsupported / fallback
+
+The table is diagnostic and routing-only. It does not add:
+
+- Open With UI
+- editable user associations
+- GXApp execution
+- ELF loading
+- package install/update/uninstall behavior
+- destructive shell actions
+
+The new file-association diagnostics and markers live in `desktop_service.cpp` and are surfaced through `desktop.appmodel.summary` and `desktop.appmodel.file-associations`.
+
+Current Phase 4B evidence markers:
+
+- `appModelPhase4BFileAssociationTableExists=true`
+- `appModelPhase4BFolderAssociationRegistered=true`
+- `appModelPhase4BTextAssociationsRegistered=true`
+- `appModelPhase4BHandlersResolveToRegistry=true`
+- `appModelPhase4BTextFilesOpenWithNotepad=true`
+- `appModelPhase4BFoldersOpenWithFileExplorer=true`
+- `appModelPhase4BImagesRemainLegacy=true`
+- `appModelPhase4BUnknownExtensionsFallback=true`
+- `appModelPhase4BRiskyExtensionsNotActiveDispatchOwned=true`
+- `appModelPhase4BVisibleLaunchBehaviorChanged=false`
+- `appModelPhase4BPersistentDesktopStorageWrites=false`
+
+`desktop.appmodel.active-typed-dispatch-gate` still reports product-default active dispatch as enabled, and `force-off` / `reset` continue to work. `desktop.appmodel.file-associations` is the detailed read-only table dump for smoke and troubleshooting.
+
+## 16. Phase 4C shell object registry cleanup
+
+Status: cleanup/stabilization in progress, no visible launch behavior change.
+
+The canonical shell object registry now lives in `shell_object_registry.h` and is surfaced through `desktop.appmodel.shell-objects` plus a compact `shellObjectRegistry:` block in `desktop.appmodel.summary`.
+
+The registry is intentionally narrow and only covers safe, existing shell/system targets:
+
+- `gxos.shell.desktop` -> `Desktop`
+- `gxos.shell.this-system` -> `This System`
+- `gxos.shell.files` -> `Files`
+- `gxos.shell.documents` -> `Documents`
+- `gxos.shell.pictures` -> `Pictures`
+- `gxos.shell.music` -> `Music`
+- `gxos.shell.network` -> `Network`
+- `gxos.shell.settings` -> `Settings`
+- `gxos.shell.control-panel` -> `Control Panel`
+- `gxos.shell.trash-open` -> `Trash`
+
+Normalized aliases tracked by the registry include:
+
+- `Desktop`, `Desktop Home`, `Go to Desktop`
+- `This System`, `Computer`
+- `Files`, `File Manager`, `File Explorer`, `FileExplorer`
+- `Documents`
+- `Pictures`
+- `Music`
+- `Network`
+- `Settings`, `System Settings`, `Display Options`, `Display Settings`, `Desktop Background`, `Wallpaper`
+- `Control Panel`
+- `Trash`
+
+Default handler app identities are reused from the built-in app registry where applicable:
+
+- `gxos.builtin.fileexplorer` for `This System`, `Files`, and the folder objects
+- `gxos.builtin.displayoptions` for `Settings`
+- `gxos.builtin.controlpanel` for `Control Panel`
+- `gxos.builtin.trash` for `Trash`
+- `Desktop` is a virtual object and intentionally has no built-in handler app identity
+
+Mapped object kinds are intentionally limited to:
+
+- filesystem folder
+- virtual object
+- app/system panel
+
+Current boundaries:
+
+- `Trash` is open-only and non-destructive
+- empty/delete/restore/purge-style trash actions remain out of the registry
+- `ComputerFiles` remains the preserved compatibility fallback and is not added as a canonical shell object
+- arbitrary shell commands remain out of scope
+- GXApp, ELF, package install, sandboxing, permissions, IDE, Open With, app store, and lifecycle behavior remain out of scope
+
+Current Phase 4C evidence markers:
+
+- `appModelPhase4CShellObjectRegistryExists=true`
+- `appModelPhase4CShellObjectIdsUnique=true`
+- `appModelPhase4CShellObjectDisplayNamesNonEmpty=true`
+- `appModelPhase4CShellAliasesResolve=true`
+- `appModelPhase4CShellHandlersResolveToRegistry=true`
+- `appModelPhase4CRightColumnShellObjectsRegistered=true`
+- `appModelPhase4CSystemObjectsRegistered=true`
+- `appModelPhase4CTrashOpenOnlySafe=true`
+- `appModelPhase4CTrashDestructiveActionsExcluded=true`
+- `appModelPhase4CComputerFilesFallbackPreserved=true`
+- `appModelPhase4CRecentProgramsNotPolluted=true`
+- `appModelPhase4CVisibleLaunchBehaviorChanged=false`
+- `appModelPhase4CPersistentDesktopStorageWrites=false`
+- `appModelPhase4CTemporarySmokeStateRestored=true`
+
+`desktop.appmodel.shell-objects` is the deterministic read-only dump for smoke and troubleshooting. It shows the registry records, alias resolution, handler resolution, and the current validation snapshot without changing launch behavior or persistent storage.
+
+## 17. Phase 4D recent programs integration review
+
+Status: complete, compatibility-only, no visible launch behavior change.
+
+Phase 4D hardens the connection between Recent Programs and the App Model registries without expanding launch scope or adding new UI.
+
+Recent-program identity is now aligned with the built-in app registry:
+
+- `AddRecentProgram()` and `RemoveRecentProgram()` canonicalize through built-in app metadata first, then known aliases, then hosted registered apps.
+- Recent entries are stored and rehydrated using the canonical registry-backed identity when one exists.
+- The recent-program smoke and summary surfaces validate canonical names rather than display-only aliases.
+
+The intended recent-capable built-ins are:
+
+- `Notepad`
+- `Calculator`
+- `Clock`
+- `Console`
+- `File Explorer`
+- `ControlPanel`
+- `DisplayOptions`
+- `Paint`
+- `TaskManager`
+- `DiskManager`
+- `guideXOS Navigator`
+- `Trash` open only
+
+Paths that can write to Recent Programs were inventoried and reviewed:
+
+- Start Menu left-column app launches
+- desktop icon app launches
+- active typed dispatch app launches
+- legacy fallback app launches
+- shell object opens
+- file and folder opens
+- direct server-command launch paths used by smokes
+- no-storage and system-object launch paths that intentionally suppress recent writes
+
+Shell-object recent behavior is now explicit:
+
+- `Desktop`, `Desktop Home`, `Go to Desktop`, `This System`, and `Files` suppress recent writes.
+- `Documents`, `Pictures`, `Music`, `Network`, `Settings`, `Control Panel`, and `Trash` use canonical registry-backed identities when they do record a recent entry.
+- `Trash` remains open-only and non-destructive; no destructive trash actions were added.
+
+File and folder handling remains stable:
+
+- folders record `File Explorer` when routed through the existing folder-open path
+- text-like files record `Notepad` when routed through the existing text-file path
+- image files remain on the legacy image-viewer path and are not reclassified by App Model
+- unsupported, unknown, risky, executable-style, package-style, and ELF-style targets do not pollute Recent Programs
+
+Phase 4D deliberately does not add:
+
+- Open With
+- GXApp execution
+- ELF loading
+- package install, sandboxing, permissions, IDE, uninstall, update, or app store behavior
+- destructive Trash actions
+- broader parameterized launches
+- display/options UI changes, File Explorer scrolling, theme polish, or compositor refactors
+
+Current Phase 4D evidence markers:
+
+- `appModelPhase4DRecentProgramWritePathsInventoried=true`
+- `appModelPhase4DRecentProgramNamesRegistryAligned=true`
+- `appModelPhase4DNormalAppLaunchesRecordCanonicalRecents=true`
+- `appModelPhase4DShellObjectsNoUnexpectedRecents=true`
+- `appModelPhase4DFileFolderRecentsStable=true`
+- `appModelPhase4DUnsupportedTargetsDoNotPolluteRecents=true`
+- `appModelPhase4DRemoveRecentStillWorks=true`
+- `appModelPhase4DForceOffRecentsStable=true`
+- `appModelPhase4DResetProductDefaultRecentsStable=true`
+- `appModelPhase4DVisibleLaunchBehaviorChanged=false`
+- `appModelPhase4DPersistentDesktopStorageWrites=false`
+- `appModelPhase4DTemporarySmokeStateRestored=true`
+
+`desktop.appmodel.summary` now includes compact read-only evidence for:
+
+- recent-program registry alignment
+- recent write suppression state
+- the count of canonical recent-capable built-ins
+- the count of shell objects allowed and suppressed for recents
+
+The phase 4D smoke restores its temporary fixture state after running and leaves the tracked desktop runtime files unchanged outside the smoke-only temporary fixtures.
+
+## 18. Phase 5A final App Model v1 snapshot
+
+This is the final App Model v1 closeout state.
+
+`desktop.appmodel.summary` is the authoritative status surface. It now reports:
+
+- `appModelV1StatusSurfaceExists=true`
+- `appModelV1StatusReady=true`
+- `appModelV1StatusSource=product-default`, `force-on`, or `force-off` depending on the current diagnostic gate state
+- `appModelV1ActiveTypedDispatchEnabled=true` when the product default is active
+- `appModelV1EmergencyForceOffAvailable=true`
+- `appModelV1LegacyFallbackAvailable=true`
+- `appModelV1VisibleLaunchBehaviorChanged=false`
+- `appModelV1PersistentDesktopStorageWrites=false`
+- `appModelV1BuiltInAppRegistryCount=18`
+- `appModelV1ShellObjectRegistryCount=10`
+- `appModelV1FileAssociationCount=14`
+- `appModelV1ActiveDispatchOwnedCoverageCount=11`
+- `appModelV1FallbackUnsupportedCoverageCount` as the compact unsupported/legacy-coverage total
+- `appModelV1RecentProgramsAligned=true`
+- `appModelV1RiskyDestructiveTargetsExcluded=true`
+- `appModelV1TrashOpenOnlyBoundary=true`
+- `appModelV1ImagesRemainLegacy=true`
+- `appModelV1OutOfScopeBoundary=true`
+- `appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership`
+
+`desktop.appmodel.inventory` is the compact read-only inventory dump. It lists:
+
+- registered built-in apps
+- registered shell objects
+- file association v1 rows
+- recent-program policy summary
+- fallback exclusions and the v1 out-of-scope boundary
+
+App Model v1 owns:
+
+- the shared built-in app registry for the current hosted and bare-metal coverage set
+- the shell object registry for `Desktop`, `This System`, `Files`, `Documents`, `Pictures`, `Music`, `Network`, `Settings`, `Control Panel`, and `Trash`
+- the file association v1 table for folders, text-like files, legacy images, and risky/unsupported fallbacks
+- recent-program identity alignment with the built-in app registry
+- the emergency force-off and reset diagnostics for active typed dispatch
+
+Active typed dispatch owns by default:
+
+- safe built-in app launches
+- safe shell objects that already map to registry-backed handlers
+- folder opens through File Explorer
+- text-like file opens through Notepad
+
+What still falls back to legacy:
+
+- `AppModel` legacy compatibility
+- `ComputerFiles` compatibility bridge behavior
+- image opens on the legacy direct path
+- unsupported, unknown, risky, GXApp, ELF, and package-style cases
+
+Built-in app registry scope:
+
+- hosted and bare-metal built-in metadata identities
+- canonical launch names and aliases already present in `built_in_app_metadata.h`
+- no new built-in identities were added in Phase 5A
+
+File association v1 scope:
+
+- folders -> File Explorer
+- `.txt`, `.log`, `.ini`, `.cfg` -> Notepad
+- `.png`, `.bmp`, `.jpg`, `.gif`, `.jpeg` -> legacy Image Viewer path
+- unknown/risky -> unsupported fallback
+
+Shell object registry scope:
+
+- virtual desktop and filesystem shell objects already present in `shell_object_registry.h`
+- open-only Trash behavior
+- no destructive Trash actions
+- `ComputerFiles` remains a compatibility bridge, not a canonical shell object
+
+Recent Programs integration:
+
+- canonical names are aligned to the built-in app registry
+- shell-object recent writes are intentionally limited
+- `Desktop`, `This System`, and `Files` remain no-storage system objects
+
+Emergency force-off behavior:
+
+- `desktop.appmodel.active-typed-dispatch-gate force-off` temporarily disables active typed dispatch for diagnostics
+- `desktop.appmodel.active-typed-dispatch-gate reset` returns to product-default enabled state
+- visible launch behavior stays unchanged in all cases
+
+Known non-goals for v1:
+
+- GXApp execution
+- ELF loading
+- package install
+- sandboxing
+- permissions
+- IDE behavior
+- Open With
+- app store
+- uninstall/update lifecycle
+- Trash destructive actions
+- image active-dispatch ownership
+
+Phase 5A smoke coverage is captured by `scripts\smoke-appmodel-phase5a-status.ps1`, which verifies the status summary, the inventory dump, the force-off/reset gate behavior, and cleanup of temporary smoke artifacts.
+
+## 19. Phase 5B regression closeout
+
+Status: passed on 2026-07-05.
+
+Phase 5B is the final read-only App Model v1 regression closeout. It uses `scripts\smoke-appmodel-phase5b-regression-closeout.ps1` to verify summary/inventory agreement, the product-default active-dispatch rollback path, representative launch equivalence, recent-program canonicalization, trash open-only safety, legacy image retention, out-of-scope boundaries, and cleanup of temporary smoke artifacts.
+
+App Model v1 is complete.
+
 

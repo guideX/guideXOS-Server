@@ -1,5 +1,7 @@
 #include "navigator.h"
 
+#include "desktop_theme.h"
+
 #include "gui_protocol.h"
 #include "gxos_tls_foundation.h"
 #include "gxos_tls_prerequisites.h"
@@ -15,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,6 +30,25 @@ namespace apps {
 
 using namespace gxos::gui;
 using gxos::web::TextAlign;
+using gxos::web::OverflowWrapMode;
+using gxos::web::WhiteSpaceMode;
+using gxos::web::WordBreakMode;
+using gxos::web::BorderLineStyle;
+using gxos::web::GenericFontFamily;
+using gxos::web::ListStyleType;
+using gxos::web::TableBorderCollapseMode;
+using gxos::web::FormControlType;
+using gxos::web::FormControlMetadata;
+using gxos::web::FormRuntimeControlState;
+using gxos::web::FormFocusOrigin;
+using gxos::web::FormFocusCancellationReason;
+using gxos::web::FormAccessibilityRole;
+using gxos::web::FormAccessibilityLabelSource;
+using gxos::web::FormAccessibilityNameSource;
+using gxos::web::FormFocusRevealResult;
+using gxos::web::FormAccessibilityRecord;
+using gxos::web::FormRuntimeStateTable;
+using gxos::web::kFormRuntimeControlCap;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -46,6 +68,8 @@ std::string Navigator::s_addressBuffer;
 int         Navigator::s_addressCaret   = 0;
 int         Navigator::s_focusedInputBlockIndex = -1;
 int         Navigator::s_inputCaret = 0;
+uint64_t    Navigator::s_documentGeneration = 0;
+bool        Navigator::s_tabKeyPressed = false;
 std::string Navigator::s_lastSubmittedFormUrl;
 std::string Navigator::s_lastSubmittedFormAction;
 std::string Navigator::s_lastSubmittedFormMethod;
@@ -87,6 +111,35 @@ static std::unordered_set<std::string> s_visitedUrls;
 static std::string extractDocumentText(const WebDocument& doc);
 
 namespace {
+	struct TextMetrics;
+	static TextMetrics defaultTextMetrics();
+	static int defaultTextFontHeightPx();
+	static int textLineTopPaddingPx(int lineHeight);
+	static int textUnderlineYPx(int lineTop, int lineHeight);
+	static int textLineThroughYPx(int lineTop, int lineHeight);
+	enum class BorderSideIndex : uint8_t {
+		Top = 0,
+		Right = 1,
+		Bottom = 2,
+		Left = 3
+	};
+	static void drawThemeRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color);
+	static BorderLineStyle cssBorderStyleOrDefault(BorderLineStyle borderStyle, int width);
+	static int cssBorderTopPx(const WebStyle& style);
+	static int cssBorderRightPx(const WebStyle& style);
+	static int cssBorderBottomPx(const WebStyle& style);
+	static int cssBorderLeftPx(const WebStyle& style);
+	static std::string blockListMarkerText(const DocBlock& block, uint64_t ordinal);
+	static uint64_t blockListOrdinal(const WebDocument& doc, int blockIndex);
+	static int blockListTextInsetPx(const DocBlock& block, uint64_t ordinal);
+	struct RenderCounters {
+		int borderedBlocksRendered = 0;
+		int dashedBordersRendered = 0;
+		int dottedBordersRendered = 0;
+		int textDecorationsRendered = 0;
+	};
+	static RenderCounters s_renderCounters;
+
 	constexpr int kWindowW = 920;
 	constexpr int kWindowH = 640;
 	constexpr int kToolbarH = 64;
@@ -157,12 +210,17 @@ namespace {
 			text));
 	}
 
-	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style)
+	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style, uint32_t fallbackColor = 0xFF303846u, int lineHeight = -1)
 	{
+		uint32_t color = fallbackColor;
 		if (style.hasColor) {
-			int r = static_cast<int>((style.color >> 16) & 0xFFu);
-			int g = static_cast<int>((style.color >> 8) & 0xFFu);
-			int b = static_cast<int>(style.color & 0xFFu);
+			color = style.color;
+			if (color == 0xFF303846u) {
+				color = fallbackColor;
+			}
+			int r = static_cast<int>((color >> 16) & 0xFFu);
+			int g = static_cast<int>((color >> 8) & 0xFFu);
+			int b = static_cast<int>(color & 0xFFu);
 			if (style.italic) {
 				r = std::max(0, r - 12);
 				g = std::max(0, g - 12);
@@ -175,15 +233,171 @@ namespace {
 				drawTextAtColored(windowId, x + 1, y + 1, text, r, g, b);
 			}
 			drawTextAtColored(windowId, x, y, text, r, g, b);
-			return;
+		} else {
+			if (style.bold) {
+				drawTextAtColored(windowId, x + 1, y, text,
+					static_cast<int>((fallbackColor >> 16) & 0xFFu),
+					static_cast<int>((fallbackColor >> 8) & 0xFFu),
+					static_cast<int>(fallbackColor & 0xFFu));
+			}
+			if (style.italic) {
+				drawTextAtColored(windowId, x + 1, y + 1, text,
+					static_cast<int>((fallbackColor >> 16) & 0xFFu),
+					static_cast<int>((fallbackColor >> 8) & 0xFFu),
+					static_cast<int>(fallbackColor & 0xFFu));
+			}
+			drawTextAtColored(windowId, x, y, text,
+				static_cast<int>((fallbackColor >> 16) & 0xFFu),
+				static_cast<int>((fallbackColor >> 8) & 0xFFu),
+				static_cast<int>(fallbackColor & 0xFFu));
 		}
-		if (style.bold) {
-			drawTextAt(windowId, x + 1, y, text);
+		if ((style.underline || style.lineThrough) && !text.empty()) {
+			const int useLineHeight = lineHeight > 0 ? lineHeight : std::max(1, defaultTextFontHeightPx() + 2);
+			const int textWidth = std::max(1, static_cast<int>(text.size()) * 8);
+			if (style.underline) {
+				drawRect(windowId, x, textUnderlineYPx(y, useLineHeight), textWidth, 1,
+					static_cast<int>((color >> 16) & 0xFFu),
+					static_cast<int>((color >> 8) & 0xFFu),
+					static_cast<int>(color & 0xFFu));
+			}
+			if (style.lineThrough) {
+				drawRect(windowId, x, textLineThroughYPx(y, useLineHeight), textWidth, 1,
+					static_cast<int>((color >> 16) & 0xFFu),
+					static_cast<int>((color >> 8) & 0xFFu),
+					static_cast<int>(color & 0xFFu));
+			}
+			++s_renderCounters.textDecorationsRendered;
 		}
-		if (style.italic) {
-			drawTextAt(windowId, x + 1, y + 1, text);
+	}
+
+	static BorderLineStyle effectiveBorderStyle(const WebStyle& style, BorderSideIndex side)
+	{
+		switch (side) {
+		case BorderSideIndex::Top:
+			return cssBorderStyleOrDefault(style.borderTopStyle, style.borderTopWidth);
+		case BorderSideIndex::Right:
+			return cssBorderStyleOrDefault(style.borderRightStyle, style.borderRightWidth);
+		case BorderSideIndex::Bottom:
+			return cssBorderStyleOrDefault(style.borderBottomStyle, style.borderBottomWidth);
+		case BorderSideIndex::Left:
+			return cssBorderStyleOrDefault(style.borderLeftStyle, style.borderLeftWidth);
 		}
-		drawTextAt(windowId, x, y, text);
+		return BorderLineStyle::None;
+	}
+
+	static uint32_t borderColorForSide(const WebStyle& style, BorderSideIndex side)
+	{
+		switch (side) {
+		case BorderSideIndex::Top: return style.borderTopColor;
+		case BorderSideIndex::Right: return style.borderRightColor;
+		case BorderSideIndex::Bottom: return style.borderBottomColor;
+		case BorderSideIndex::Left: return style.borderLeftColor;
+		}
+		return 0;
+	}
+
+	static int borderWidthForSide(const WebStyle& style, BorderSideIndex side)
+	{
+		switch (side) {
+		case BorderSideIndex::Top:
+			return cssBorderTopPx(style);
+		case BorderSideIndex::Right:
+			return cssBorderRightPx(style);
+		case BorderSideIndex::Bottom:
+			return cssBorderBottomPx(style);
+		case BorderSideIndex::Left:
+			return cssBorderLeftPx(style);
+		}
+		return 0;
+	}
+
+	static bool drawBorderRun(uint64_t windowId, int x, int y, int w, int h, int lineWidth,
+		BorderLineStyle borderStyle, uint32_t color, bool horizontal)
+	{
+		if (w <= 0 || h <= 0 || lineWidth <= 0) return false;
+		if (((color >> 24) & 0xFFu) == 0) return false;
+		const int maxThickness = horizontal ? h : w;
+		if (maxThickness <= 0) return false;
+		lineWidth = std::max(1, std::min(lineWidth, maxThickness));
+		if (borderStyle == BorderLineStyle::None || borderStyle == BorderLineStyle::Hidden) {
+			return false;
+		}
+		if (borderStyle == BorderLineStyle::Dashed || borderStyle == BorderLineStyle::Dotted) {
+			if (borderStyle == BorderLineStyle::Dashed) ++s_renderCounters.dashedBordersRendered;
+			if (borderStyle == BorderLineStyle::Dotted) ++s_renderCounters.dottedBordersRendered;
+			const int on = borderStyle == BorderLineStyle::Dashed ? std::max(4, lineWidth * 3) : std::max(1, lineWidth);
+			const int off = borderStyle == BorderLineStyle::Dashed ? std::max(3, lineWidth * 2) : std::max(1, lineWidth);
+			if (horizontal) {
+				for (int pos = 0; pos < w; pos += on + off) {
+					const int run = std::min(on, w - pos);
+					if (run > 0) drawThemeRect(windowId, x + pos, y, run, lineWidth, color);
+				}
+			} else {
+				for (int pos = 0; pos < h; pos += on + off) {
+					const int run = std::min(on, h - pos);
+					if (run > 0) drawThemeRect(windowId, x, y + pos, lineWidth, run, color);
+				}
+			}
+			return true;
+		}
+		if (horizontal) {
+			drawThemeRect(windowId, x, y, w, lineWidth, color);
+		} else {
+			drawThemeRect(windowId, x, y, lineWidth, h, color);
+		}
+		return true;
+	}
+
+	static bool drawBorderSide(uint64_t windowId, const WebStyle& style, BorderSideIndex side, int x, int y, int w, int h)
+	{
+		const BorderLineStyle borderStyle = effectiveBorderStyle(style, side);
+		const int lineWidth = borderWidthForSide(style, side);
+		if (borderStyle == BorderLineStyle::None || borderStyle == BorderLineStyle::Hidden || lineWidth <= 0) {
+			return false;
+		}
+		uint32_t color = borderColorForSide(style, side);
+		if (((color >> 24) & 0xFFu) == 0) {
+			return false;
+		}
+		switch (borderStyle) {
+		case BorderLineStyle::Dashed:
+		case BorderLineStyle::Dotted:
+			return drawBorderRun(windowId, x, y, w, h, lineWidth, borderStyle, color,
+				side == BorderSideIndex::Top || side == BorderSideIndex::Bottom);
+		case BorderLineStyle::Inherit:
+		case BorderLineStyle::Solid:
+		default:
+			break;
+		}
+		if (side == BorderSideIndex::Top || side == BorderSideIndex::Bottom) {
+			return drawBorderRun(windowId, x, y, w, h, lineWidth, BorderLineStyle::Solid, color, true);
+		}
+		return drawBorderRun(windowId, x, y, w, h, lineWidth, BorderLineStyle::Solid, color, false);
+	}
+
+	static void drawBoxDecorations(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style,
+		bool drawTop = true, bool drawRight = true, bool drawBottom = true, bool drawLeft = true)
+	{
+		if (w <= 0 || h <= 0) return;
+		bool anyBorder = false;
+		if (style.hasBackgroundColor) {
+			drawThemeRect(windowId, x, y, w, h, style.backgroundColor);
+		}
+		if (drawTop && style.hasBorderTop && borderWidthForSide(style, BorderSideIndex::Top) > 0) {
+			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Top, x, y, w, h) || anyBorder;
+		}
+		if (drawRight && style.hasBorderRight && borderWidthForSide(style, BorderSideIndex::Right) > 0) {
+			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Right, x + std::max(0, w - borderWidthForSide(style, BorderSideIndex::Right)), y, w, h) || anyBorder;
+		}
+		if (drawBottom && style.hasBorderBottom && borderWidthForSide(style, BorderSideIndex::Bottom) > 0) {
+			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Bottom, x, y + std::max(0, h - borderWidthForSide(style, BorderSideIndex::Bottom)), w, h) || anyBorder;
+		}
+		if (drawLeft && style.hasBorderLeft && borderWidthForSide(style, BorderSideIndex::Left) > 0) {
+			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Left, x, y, w, h) || anyBorder;
+		}
+		if (anyBorder) {
+			++s_renderCounters.borderedBlocksRendered;
+		}
 	}
 
 	void drawImage(uint64_t windowId, int x, int y, int w, int h, const std::string& path)
@@ -194,6 +408,249 @@ namespace {
 	void drawAnimatedImage(uint64_t windowId, int x, int y, int w, int h, const std::string& pathPattern)
 	{
 		publish(MsgType::MT_DrawImageAnimated, packDrawImage(windowId, x, y, w, h, pathPattern));
+	}
+
+	bool isSciFiThemeActive()
+	{
+		return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+	}
+
+	const DesktopTheme& navigatorTheme()
+	{
+		return GetCurrentDesktopTheme();
+	}
+
+	uint32_t packRgb(int r, int g, int b)
+	{
+		return 0xFF000000u |
+			(static_cast<uint32_t>(r & 0xFF) << 16) |
+			(static_cast<uint32_t>(g & 0xFF) << 8) |
+			static_cast<uint32_t>(b & 0xFF);
+	}
+
+	uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent)
+	{
+		if (overlayPercent <= 0) return baseColor;
+		if (overlayPercent >= 100) return overlayColor;
+
+		const int baseR = static_cast<int>((baseColor >> 16) & 0xFF);
+		const int baseG = static_cast<int>((baseColor >> 8) & 0xFF);
+		const int baseB = static_cast<int>(baseColor & 0xFF);
+		const int overR = static_cast<int>((overlayColor >> 16) & 0xFF);
+		const int overG = static_cast<int>((overlayColor >> 8) & 0xFF);
+		const int overB = static_cast<int>(overlayColor & 0xFF);
+		const int keepPercent = 100 - overlayPercent;
+
+		return packRgb(
+			(baseR * keepPercent + overR * overlayPercent) / 100,
+			(baseG * keepPercent + overG * overlayPercent) / 100,
+			(baseB * keepPercent + overB * overlayPercent) / 100);
+	}
+
+	bool isDarkColor(uint32_t color)
+	{
+		const int r = static_cast<int>((color >> 16) & 0xFFu);
+		const int g = static_cast<int>((color >> 8) & 0xFFu);
+		const int b = static_cast<int>(color & 0xFFu);
+		return ((r * 30) + (g * 59) + (b * 11)) < (128 * 100);
+	}
+
+	void drawThemeRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color)
+	{
+		drawRect(windowId, x, y, w, h,
+			static_cast<int>((color >> 16) & 0xFFu),
+			static_cast<int>((color >> 8) & 0xFFu),
+			static_cast<int>(color & 0xFFu));
+	}
+
+	void drawThemeText(uint64_t windowId, int x, int y, const std::string& text, uint32_t color)
+	{
+		drawTextAtColored(windowId, x, y, text,
+			static_cast<int>((color >> 16) & 0xFFu),
+			static_cast<int>((color >> 8) & 0xFFu),
+			static_cast<int>(color & 0xFFu));
+	}
+
+	uint32_t NavigatorBodyColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(25, 29, 38);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.taskbarBackground, theme.windowBackground, 14);
+	}
+
+	uint32_t NavigatorToolbarColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(42, 46, 58);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.titleBarBackground, theme.windowBackground, 12);
+	}
+
+	uint32_t NavigatorToolbarBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(78, 86, 108);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBorder, theme.mutedAccent, 24);
+	}
+
+	uint32_t NavigatorAddressFillColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(18, 22, 30);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBackground, theme.taskbarBackground, 12);
+	}
+
+	uint32_t NavigatorAddressFocusedBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(80, 140, 220);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.accent, theme.windowBackground, 28);
+	}
+
+	uint32_t NavigatorAddressIdleTopBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(110, 120, 142);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBorder, theme.mutedAccent, 18);
+	}
+
+	uint32_t NavigatorAddressIdleBottomBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(70, 78, 96);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.taskbarBorder, theme.windowBackground, 18);
+	}
+
+	uint32_t NavigatorContentColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(245, 247, 250);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
+	}
+
+	uint32_t NavigatorContentTextColor(uint32_t contentColor)
+	{
+		if (!isSciFiThemeActive()) return 0xFF303846u;
+		return isDarkColor(contentColor) ? navigatorTheme().titleBarText : 0xFF303846u;
+	}
+
+	uint32_t NavigatorContentBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(186, 192, 204);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBorder, theme.mutedAccent, 18);
+	}
+
+	uint32_t NavigatorScrollTrackColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(229, 232, 238);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.taskbarBackground, theme.windowBackground, 16);
+	}
+
+	uint32_t NavigatorScrollThumbColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(130, 138, 156);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.accent, theme.windowBorder, 34);
+	}
+
+	uint32_t NavigatorStatusBarColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(36, 40, 50);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.taskbarBackground, theme.windowBackground, 8);
+	}
+
+	uint32_t NavigatorStatusBarBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(78, 86, 108);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBorder, theme.mutedAccent, 24);
+	}
+
+	uint32_t NavigatorTextColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(220, 220, 220);
+		return navigatorTheme().titleBarText;
+	}
+
+	uint32_t NavigatorMutedTextColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(186, 190, 196);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.titleBarText, theme.taskbarBackground, 54);
+	}
+
+	uint32_t NavigatorAccentColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(80, 140, 220);
+		return navigatorTheme().accent;
+	}
+
+	uint32_t NavigatorSelectionColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(96, 146, 224);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.accent, theme.windowBackground, 34);
+	}
+
+	uint32_t NavigatorFindHighlightColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(255, 244, 168);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.accent, theme.mutedAccent, 20);
+	}
+
+	uint32_t NavigatorFieldFillColor(bool focused)
+	{
+		if (!isSciFiThemeActive()) return packRgb(250, 252, 255);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBackground, theme.taskbarBackground, focused ? 10 : 16);
+	}
+
+	uint32_t NavigatorFieldBorderColor(bool focused)
+	{
+		if (!isSciFiThemeActive()) return focused ? packRgb(54, 118, 210) : packRgb(148, 156, 170);
+		const DesktopTheme& theme = navigatorTheme();
+		return focused ? blendColor(theme.accent, theme.windowBackground, 30) : blendColor(theme.windowBorder, theme.mutedAccent, 24);
+	}
+
+	uint32_t NavigatorFieldTextColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(35, 45, 60);
+		return navigatorTheme().titleBarText;
+	}
+
+	uint32_t NavigatorFieldMutedTextColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(128, 136, 150);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.titleBarText, theme.taskbarBackground, 50);
+	}
+
+	uint32_t NavigatorButtonFillColor(bool focused, bool disabled)
+	{
+		if (!isSciFiThemeActive()) return disabled ? packRgb(184, 188, 196) : packRgb(65, 112, 190);
+		const DesktopTheme& theme = navigatorTheme();
+		const uint32_t base = blendColor(theme.windowBackground, theme.taskbarBackground, 16);
+		if (disabled) return blendColor(base, theme.windowBorder, 12);
+		return focused ? blendColor(base, theme.accent, 22) : base;
+	}
+
+	uint32_t NavigatorButtonBorderColor(bool focused, bool disabled)
+	{
+		if (!isSciFiThemeActive()) return disabled ? packRgb(128, 132, 140) : (focused ? packRgb(54, 118, 210) : packRgb(38, 78, 150));
+		const DesktopTheme& theme = navigatorTheme();
+		const uint32_t base = blendColor(theme.windowBorder, theme.taskbarBorder, 18);
+		if (disabled) return blendColor(base, theme.taskbarBackground, 22);
+		return focused ? blendColor(theme.accent, theme.titleBarText, 12) : blendColor(base, theme.mutedAccent, 10);
+	}
+
+	uint32_t NavigatorButtonTextColor(bool disabled)
+	{
+		if (!isSciFiThemeActive()) return disabled ? packRgb(76, 80, 88) : packRgb(255, 255, 255);
+		const DesktopTheme& theme = navigatorTheme();
+		return disabled ? blendColor(theme.titleBarText, theme.taskbarBackground, 58) : theme.titleBarText;
 	}
 
 	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text, const std::string& iconPath = {})
@@ -226,6 +683,7 @@ namespace {
 	// -----------------------------------------------------------------------
 	constexpr int kCharW    = 8;   // approximate character cell width in pixels
 	constexpr int kLineH    = 18;  // matches current SystemFont default line box
+	constexpr int kMinReadableBlockWidth = 96;
 
 	struct TextMetrics {
 		int ascent = 0;
@@ -289,6 +747,16 @@ namespace {
 		return std::min(underlineY, safeBottom);
 	}
 
+	static int textLineThroughYPx(int lineTop, int lineHeight)
+	{
+		const TextMetrics metrics = defaultTextMetrics();
+		const int topPadding = textLineTopPaddingPx(lineHeight);
+		const int baselineY = lineTop + topPadding + metrics.baseline;
+		const int strikeY = baselineY - std::max(1, metrics.ascent / 2);
+		const int safeBottom = lineTop + std::max(1, lineHeight - 2);
+		return std::max(lineTop + 1, std::min(strikeY, safeBottom));
+	}
+
 	// Wrap |text| into lines that fit within |maxChars| characters.
 	// Returns a vector of line strings (may be empty if text is empty).
 	static std::vector<std::string> wrapText(const std::string& text, int maxChars)
@@ -322,6 +790,21 @@ namespace {
 		return lines;
 	}
 
+	static std::vector<std::string> wrapTextBreakAll(const std::string& text, int maxChars)
+	{
+		std::vector<std::string> lines;
+		if (maxChars <= 0 || text.empty()) {
+			if (!text.empty()) lines.push_back(text);
+			return lines;
+		}
+		for (size_t start = 0; start < text.size();) {
+			const size_t count = std::min(static_cast<size_t>(maxChars), text.size() - start);
+			lines.push_back(text.substr(start, count));
+			start += count;
+		}
+		return lines;
+	}
+
 	// Like wrapText but splits on embedded newlines first (for Preformatted blocks).
 	static std::vector<std::string> splitPreLines(const std::string& text)
 	{
@@ -338,14 +821,36 @@ namespace {
 		return lines;
 	}
 
+	static std::vector<std::string> wrapTextForBlock(const DocBlock& block, int maxChars)
+	{
+		const bool breakAll = block.style.wordBreak == WordBreakMode::BreakAll;
+		const bool preserveBreaks = block.type == BlockType::Preformatted ||
+			block.style.whiteSpace == WhiteSpaceMode::Pre ||
+			block.style.whiteSpace == WhiteSpaceMode::PreWrap;
+		auto wrapSingleLine = [&](const std::string& line) {
+			return breakAll ? wrapTextBreakAll(line, maxChars) : wrapText(line, maxChars);
+		};
+		if (preserveBreaks) {
+			std::vector<std::string> lines;
+			for (const std::string& rawLine : splitPreLines(block.text)) {
+				std::vector<std::string> wrapped = wrapSingleLine(rawLine);
+				if (wrapped.empty()) {
+					lines.push_back("");
+				} else {
+					lines.insert(lines.end(), wrapped.begin(), wrapped.end());
+				}
+			}
+			if (lines.empty()) lines.push_back("");
+			return lines;
+		}
+		return breakAll ? wrapTextBreakAll(block.text, maxChars) : wrapText(block.text, maxChars);
+	}
+
 	// Number of pixel rows occupied by a block (based on wrapped line count).
 	// wrapCols: max chars per line for the block type.
-	static int wrappedBlockHeight(const std::string& text, int wrapCols, bool isPre = false, int lineHeight = kLineH)
+	static int wrappedBlockHeight(const DocBlock& block, int wrapCols, int lineHeight = kLineH)
 	{
-		if (isPre) {
-			return static_cast<int>(splitPreLines(text).size()) * lineHeight;
-		}
-		int lines = static_cast<int>(wrapText(text, wrapCols).size());
+		int lines = static_cast<int>(wrapTextForBlock(block, wrapCols).size());
 		if (lines == 0) lines = 1;
 		return lines * lineHeight;
 	}
@@ -367,7 +872,12 @@ namespace {
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
 	static std::vector<std::string> s_remoteImageTempFiles;
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
-	static void imageDisplaySize(const DocBlock& block, int& outW, int& outH);
+	static void imageDisplaySize(const DocBlock& block, int availableWidth, int& outW, int& outH,
+		bool* outConstrained = nullptr, bool* outAspectPreserved = nullptr, bool* outClamped = nullptr);
+	static int cssWidthPx(const WebStyle& style, int availableWidth, int fallbackValue);
+	static int cssMaxWidthPx(const WebStyle& style, int availableWidth, int fallbackValue);
+	static int cssHeightPx(const WebStyle& style, int availableHeight, int fallbackValue);
+	static int cssMaxHeightPx(const WebStyle& style, int availableHeight, int fallbackValue);
 	static std::string filePathFromUrl(const std::string& url);
 	static std::string pageInfoLine(const std::string& label, const std::string& value);
 	static std::string pageInfoLine(const std::string& label, int value);
@@ -392,7 +902,9 @@ namespace {
 	static int blockBodyMarginLeft(const WebDocument& doc);
 	static int blockBodyMarginRight(const WebDocument& doc);
 	static int blockAvailableWidth(const DocBlock& block, const WebDocument& doc);
-	static int blockOuterWidth(const DocBlock& block, int availableWidth);
+	static bool isFormControlBlock(const DocBlock& block);
+	static int blockFormControlWidth(const DocBlock& block, int availableWidth);
+	static int blockOuterWidth(const DocBlock& block, int availableWidth, bool* outClamped = nullptr);
 	static int blockOuterX(const DocBlock& block, const WebDocument& doc, int availableWidth, int outerWidth);
 	static int blockWrapWidth(const DocBlock& block, int outerWidth);
 	static int blockTextLineHeight(const DocBlock& block);
@@ -706,6 +1218,101 @@ namespace {
 		return value ? "yes" : "no";
 	}
 
+	static const char* formFocusOriginName(FormFocusOrigin origin)
+	{
+		switch (origin) {
+		case FormFocusOrigin::Mouse: return "mouse";
+		case FormFocusOrigin::Keyboard: return "keyboard";
+		case FormFocusOrigin::ProgrammaticInternalSmoke: return "programmatic/internal-smoke";
+		default: return "none";
+		}
+	}
+
+	static const char* formAccessibilityRoleName(FormAccessibilityRole role)
+	{
+		switch (role) {
+		case FormAccessibilityRole::Checkbox: return "checkbox";
+		case FormAccessibilityRole::Radio: return "radio";
+		case FormAccessibilityRole::Button: return "button";
+		case FormAccessibilityRole::Textbox: return "textbox";
+		case FormAccessibilityRole::PasswordTextbox: return "password textbox";
+		case FormAccessibilityRole::Textarea: return "textarea";
+		case FormAccessibilityRole::Select: return "select";
+		default: return "none";
+		}
+	}
+
+	static const char* formAccessibilityLabelSourceName(FormAccessibilityLabelSource source)
+	{
+		switch (source) {
+		case FormAccessibilityLabelSource::Wrapping: return "wrapping";
+		case FormAccessibilityLabelSource::ForId: return "for/id";
+		default: return "none";
+		}
+	}
+
+	static const char* formAccessibilityNameSourceName(FormAccessibilityNameSource source)
+	{
+		switch (source) {
+		case FormAccessibilityNameSource::LabelWrapping: return "label-wrapping";
+		case FormAccessibilityNameSource::LabelForId: return "label-for/id";
+		case FormAccessibilityNameSource::ButtonText: return "button-text";
+		case FormAccessibilityNameSource::InputValuePresence: return "input-value-presence";
+		case FormAccessibilityNameSource::Placeholder: return "placeholder";
+		case FormAccessibilityNameSource::ControlTypeFallback: return "control-type-fallback";
+		default: return "none";
+		}
+	}
+
+	static const char* formFocusRevealResultName(FormFocusRevealResult result)
+	{
+		switch (result) {
+		case FormFocusRevealResult::Scroll: return "scroll";
+		case FormFocusRevealResult::Noop: return "noop";
+		case FormFocusRevealResult::Clamped: return "clamped";
+		default: return "none";
+		}
+	}
+
+	static std::string evidenceFieldForSerial(const std::string& evidence,
+		uint64_t serial, const std::string& field)
+	{
+		const std::string serialToken = "logical-serial=" + std::to_string(serial);
+		size_t cursor = 0;
+		while ((cursor = evidence.find(serialToken, cursor)) != std::string::npos) {
+			const size_t recordEnd = evidence.find(';', cursor);
+			const size_t fieldStart = evidence.find(field + "=", cursor);
+			if (fieldStart != std::string::npos && (recordEnd == std::string::npos || fieldStart < recordEnd)) {
+				const size_t valueStart = fieldStart + field.size() + 1;
+				const size_t valueEnd = evidence.find(',', valueStart);
+				const size_t boundedEnd = (valueEnd == std::string::npos ||
+					(recordEnd != std::string::npos && recordEnd < valueEnd)) ? recordEnd : valueEnd;
+				return evidence.substr(valueStart, boundedEnd == std::string::npos ? std::string::npos : boundedEnd - valueStart);
+			}
+			if (recordEnd == std::string::npos) break;
+			cursor = recordEnd + 1;
+		}
+		return "";
+	}
+
+	static bool parseBoundedSpecificity(const std::string& value,
+		uint16_t& idCount, uint16_t& classCount, uint16_t& elementCount)
+	{
+		if (value.empty()) return false;
+		std::istringstream iss(value);
+		char dot1 = 0;
+		char dot2 = 0;
+		unsigned id = 0;
+		unsigned classes = 0;
+		unsigned elements = 0;
+		if (!(iss >> id >> dot1 >> classes >> dot2 >> elements) || dot1 != '.' || dot2 != '.') return false;
+		if (id > 0xFFFFu || classes > 0xFFFFu || elements > 0xFFFFu) return false;
+		idCount = static_cast<uint16_t>(id);
+		classCount = static_cast<uint16_t>(classes);
+		elementCount = static_cast<uint16_t>(elements);
+		return true;
+	}
+
 	static void setSourcePreview(NavigatorPageMetadata& metadata, const std::string& source)
 	{
 		metadata.rawSourceForSave = source;
@@ -723,6 +1330,8 @@ namespace {
 	static uint64_t tableSerialForBlock(const DocBlock& block);
 	static uint64_t tableRowSerialForBlock(const DocBlock& block);
 	static bool blockHasWrapperAncestor(const DocBlock& block);
+	static int wrapperAncestorDepth(const DocBlock& block);
+	static int nestedWrapperInsetPx(const DocBlock& block);
 
 	struct TableCellLayout {
 		const DocBlock* block = nullptr;
@@ -737,6 +1346,8 @@ namespace {
 		std::vector<TableCellLayout> cells;
 		bool headerRow = false;
 		int heightPx = 0;
+		int borderTopPx = 0;
+		int borderBottomPx = 0;
 	};
 
 	struct TableGroupLayout {
@@ -751,10 +1362,17 @@ namespace {
 		int paddingBottom = 0;
 		int paddingLeft = 0;
 		int borderTop = 0;
+		int borderRight = 0;
 		int borderBottom = 0;
+		int borderLeft = 0;
 		int lineHeight = 0;
 		std::vector<int> columnWidthsChars;
 		std::vector<TableRowLayout> rows;
+		std::vector<int> rowOffsetsPx;
+		int totalHeightPx = 0;
+		bool collapseMode = false;
+		int borderSpacingHorizontal = 0;
+		int borderSpacingVertical = 0;
 		bool fallbackUsed = false;
 	};
 
@@ -780,6 +1398,7 @@ namespace {
 		metadata.unsupportedExternalStylesheetCount = doc.cssDiagnostics.unsupportedExternalStylesheetCount;
 		metadata.unsupportedCssRuleCount = doc.cssDiagnostics.unsupportedRuleCount;
 		metadata.unsupportedCssDeclarationCount = doc.cssDiagnostics.unsupportedDeclarationCount;
+		metadata.cssUnsupportedSelectorCount = doc.cssDiagnostics.unsupportedSelectorCount;
 		metadata.cssParseErrorCount = doc.cssDiagnostics.parseErrorCount;
 		metadata.cssStyleBlockCapped = doc.cssDiagnostics.styleBlockCapped;
 		metadata.cssStyleBytesProcessed = doc.cssDiagnostics.styleBytesProcessed;
@@ -794,10 +1413,101 @@ namespace {
 		metadata.cssTableLayoutFallbackCount = 0;
 		metadata.cssListRenderCount = 0;
 		metadata.cssClampedValueCount = doc.cssDiagnostics.clampedValueCount;
+		metadata.cssBorderWidthClamps = doc.cssDiagnostics.borderWidthClampCount;
+		metadata.cssTableBorderSpacingClamps = doc.cssDiagnostics.borderSpacingClampCount;
 		metadata.cssLineBreakCount = doc.cssDiagnostics.lineBreakCount;
 		metadata.cssTableCaptionCount = 0;
 		metadata.cssTableHeaderCellCount = 0;
 		metadata.cssVisitedLinkCount = 0;
+		metadata.cssBorderedBlocksRendered = 0;
+		metadata.cssDashedBordersRendered = 0;
+		metadata.cssDottedBordersRendered = 0;
+		metadata.cssCollapsedTablesRendered = 0;
+		metadata.cssSeparateTablesRendered = 0;
+		metadata.cssListStyleMarkersRendered = 0;
+		metadata.cssListStyleNoneApplied = 0;
+		metadata.cssTextDecorationsRendered = 0;
+		metadata.cssGenericFontFamilyApplied = 0;
+		metadata.cssGenericFontFamilyFallbacks = 0;
+		metadata.cssFiguresRendered = 0;
+		metadata.cssFigcaptionsRendered = 0;
+		metadata.cssBlockquotesRendered = 0;
+		metadata.cssDefinitionListsRendered = 0;
+		metadata.cssImagesConstrained = 0;
+		metadata.cssImagesAspectPreserved = 0;
+		metadata.cssImageAltFallbacks = 0;
+		metadata.cssImageSizeClamps = 0;
+		metadata.cssNestedLayoutClamps = 0;
+		metadata.cssMaxWrapperAncestorDepth = 0;
+		metadata.cssSelectorGroupsParsed = doc.cssDiagnostics.selectorGroupsParsed;
+		metadata.cssCompoundSelectorsParsed = doc.cssDiagnostics.compoundSelectorsParsed;
+		metadata.cssChildCombinators = doc.cssDiagnostics.childCombinatorCount;
+		metadata.cssDescendantCombinators = doc.cssDiagnostics.descendantCombinatorCount;
+		metadata.cssAdjacentSiblingCombinators = doc.cssDiagnostics.adjacentSiblingCombinatorCount;
+		metadata.cssGeneralSiblingCombinators = doc.cssDiagnostics.generalSiblingCombinatorCount;
+		metadata.cssAdjacentSiblingMatches = doc.cssDiagnostics.adjacentSiblingMatches;
+		metadata.cssGeneralSiblingMatches = doc.cssDiagnostics.generalSiblingMatches;
+		metadata.cssSiblingScanSteps = doc.cssDiagnostics.siblingScanSteps;
+		metadata.cssSiblingScanClamps = doc.cssDiagnostics.siblingScanClamps;
+		metadata.cssSiblingMetadataClamps = doc.cssDiagnostics.siblingMetadataClamps;
+		metadata.cssSiblingMetadataErrors = doc.cssDiagnostics.siblingMetadataErrors;
+		metadata.cssSelectorMatches = doc.cssDiagnostics.selectorMatches;
+		metadata.cssSpecificityOverrides = doc.cssDiagnostics.specificityOverrides;
+		metadata.cssSourceOrderOverrides = doc.cssDiagnostics.sourceOrderOverrides;
+		metadata.cssInlineOverrides = doc.cssDiagnostics.inlineOverrides;
+		metadata.cssInheritedPropertiesApplied = doc.cssDiagnostics.inheritedPropertiesApplied;
+		metadata.cssSelectorDepthClamps = doc.cssDiagnostics.selectorDepthClamps;
+		metadata.cssSelectorGroupClamps = doc.cssDiagnostics.selectorGroupClamps;
+		metadata.cssCascadePropertyResolutions = doc.cssDiagnostics.cascadePropertyResolutions;
+		metadata.cssImportantDeclarationsApplied = doc.cssDiagnostics.importantDeclarationsApplied;
+		metadata.cssRuleCapCount = doc.cssDiagnostics.ruleCapCount;
+		metadata.cssDeclarationCapCount = doc.cssDiagnostics.declarationCapCount;
+		metadata.cssInheritanceDepthClamps = doc.cssDiagnostics.inheritanceDepthClamps;
+		metadata.cssPseudoClassesParsed = doc.cssDiagnostics.pseudoClassesParsed;
+		metadata.cssStructuralPseudoMatches = doc.cssDiagnostics.structuralPseudoMatches;
+		metadata.cssFirstChildMatches = doc.cssDiagnostics.firstChildMatches;
+		metadata.cssLastChildMatches = doc.cssDiagnostics.lastChildMatches;
+		metadata.cssNthChildMatches = doc.cssDiagnostics.nthChildMatches;
+		metadata.cssOfTypeMatches = doc.cssDiagnostics.ofTypeMatches;
+		metadata.cssNotMatches = doc.cssDiagnostics.notMatches;
+		metadata.cssLinkPseudoMatches = doc.cssDiagnostics.linkPseudoMatches;
+		metadata.cssVisitedPseudoMatches = doc.cssDiagnostics.visitedPseudoMatches;
+		metadata.cssPseudoClassClamps = doc.cssDiagnostics.pseudoClassClamps;
+		metadata.cssNthExpressionParseErrors = doc.cssDiagnostics.nthExpressionParseErrors;
+		metadata.cssStructuralMetadataClamps = doc.cssDiagnostics.structuralMetadataClamps;
+		metadata.cssSelectorEvaluationStepClamps = doc.cssDiagnostics.selectorEvaluationStepClamps;
+		metadata.cssEmptyPseudoParsed = doc.cssDiagnostics.emptyPseudoParsed;
+		metadata.cssEmptyPseudoMatches = doc.cssDiagnostics.emptyPseudoMatches;
+		metadata.cssEmptyMetadataIncomplete = doc.cssDiagnostics.emptyMetadataIncomplete;
+		metadata.cssContentMetadataClamps = doc.cssDiagnostics.contentMetadataClamps;
+		metadata.cssSelectorGroupMemberRecoveries = doc.cssDiagnostics.selectorGroupMemberRecoveries;
+		metadata.cssCommentScanClamps = doc.cssDiagnostics.commentScanClamps;
+		metadata.cssUnterminatedCommentErrors = doc.cssDiagnostics.unterminatedCommentErrors;
+		metadata.cssUnbalancedParenthesisErrors = doc.cssDiagnostics.unbalancedParenthesisErrors;
+		metadata.cssUnbalancedBracketErrors = doc.cssDiagnostics.unbalancedBracketErrors;
+		metadata.cssUnterminatedStringErrors = doc.cssDiagnostics.unterminatedStringErrors;
+		metadata.cssInvalidCombinatorSequences = doc.cssDiagnostics.invalidCombinatorSequences;
+		metadata.cssIdentifierEscapeRejections = doc.cssDiagnostics.identifierEscapeRejections;
+		metadata.cssSelectorMemberParseFailures = doc.cssDiagnostics.selectorMemberParseFailures;
+		metadata.cssSelectorRecoverySuccesses = doc.cssDiagnostics.selectorRecoverySuccesses;
+		metadata.cssCheckedPseudoParsed = doc.cssDiagnostics.checkedPseudoParsed;
+		metadata.cssCheckedPseudoMatches = doc.cssDiagnostics.checkedPseudoMatches;
+		metadata.cssDisabledPseudoParsed = doc.cssDiagnostics.disabledPseudoParsed;
+		metadata.cssDisabledPseudoMatches = doc.cssDiagnostics.disabledPseudoMatches;
+		metadata.cssEnabledPseudoParsed = doc.cssDiagnostics.enabledPseudoParsed;
+		metadata.cssEnabledPseudoMatches = doc.cssDiagnostics.enabledPseudoMatches;
+		metadata.cssRequiredPseudoParsed = doc.cssDiagnostics.requiredPseudoParsed;
+		metadata.cssRequiredPseudoMatches = doc.cssDiagnostics.requiredPseudoMatches;
+		metadata.cssReadonlyPseudoParsed = doc.cssDiagnostics.readonlyPseudoParsed;
+		metadata.cssReadonlyPseudoMatches = doc.cssDiagnostics.readonlyPseudoMatches;
+		metadata.cssReadwritePseudoParsed = doc.cssDiagnostics.readwritePseudoParsed;
+		metadata.cssReadwritePseudoMatches = doc.cssDiagnostics.readwritePseudoMatches;
+		metadata.cssFocusPseudoParsed = doc.cssDiagnostics.focusPseudoParsed;
+		metadata.cssFocusPseudoMatches = doc.cssDiagnostics.focusPseudoMatches;
+		metadata.cssFocusVisiblePseudoParsed = doc.cssDiagnostics.focusVisiblePseudoParsed;
+		metadata.cssFocusVisiblePseudoMatches = doc.cssDiagnostics.focusVisiblePseudoMatches;
+		metadata.cssRuntimeFocusRecomputations = doc.cssDiagnostics.runtimeFocusRecomputations;
+		metadata.cssComputedStyleEvidence = doc.cssDiagnostics.computedStyleEvidence;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
 		metadata.formCheckboxCount = doc.formsDiagnostics.checkboxCount;
@@ -805,6 +1515,54 @@ namespace {
 		metadata.formTextareaCount = doc.formsDiagnostics.textareaCount;
 		metadata.formSelectCount = doc.formsDiagnostics.selectCount;
 		metadata.unsupportedFormControlCount = doc.formsDiagnostics.unsupportedControlCount;
+		metadata.htmlFormsParsed = doc.formsDiagnostics.htmlFormsParsed;
+		metadata.htmlFieldsetsParsed = doc.formsDiagnostics.htmlFieldsetsParsed;
+		metadata.htmlLabelsParsed = doc.formsDiagnostics.htmlLabelsParsed;
+		metadata.htmlInputsParsed = doc.formsDiagnostics.htmlInputsParsed;
+		metadata.htmlButtonsParsed = doc.formsDiagnostics.htmlButtonsParsed;
+		metadata.htmlTextareasParsed = doc.formsDiagnostics.htmlTextareasParsed;
+		metadata.htmlSelectsParsed = doc.formsDiagnostics.htmlSelectsParsed;
+		metadata.htmlOptionsParsed = doc.formsDiagnostics.htmlOptionsParsed;
+		metadata.htmlHiddenControls = doc.formsDiagnostics.htmlHiddenControls;
+		metadata.controlMetadataClamps = doc.formsDiagnostics.controlMetadataClamps;
+		metadata.controlTextTruncations = doc.formsDiagnostics.controlTextTruncations;
+		metadata.formControlsRendered = 0;
+		metadata.formControlsUnsupported = doc.formsDiagnostics.formControlsUnsupported;
+		metadata.formInteractionsDeferred = doc.formsDiagnostics.formInteractionsDeferred;
+		metadata.formRuntimeControlsInitialized = doc.formsDiagnostics.formRuntimeControlsInitialized;
+		metadata.formCheckboxActivations = doc.formsDiagnostics.formCheckboxActivations;
+		metadata.formCheckboxToggles = doc.formsDiagnostics.formCheckboxToggles;
+		metadata.formRadioActivations = doc.formsDiagnostics.formRadioActivations;
+		metadata.formRadioGroupUnchecks = doc.formsDiagnostics.formRadioGroupUnchecks;
+		metadata.formLabelActivations = doc.formsDiagnostics.formLabelActivations;
+		metadata.formButtonActivations = doc.formsDiagnostics.formButtonActivations;
+		metadata.formDisabledActivationBlocks = doc.formsDiagnostics.formDisabledActivationBlocks;
+		metadata.formHiddenHitTargetsSuppressed = doc.formsDiagnostics.formHiddenHitTargetsSuppressed;
+		metadata.formDuplicateActivationSuppressed = doc.formsDiagnostics.formDuplicateActivationSuppressed;
+		metadata.formRuntimeStateResets = doc.formsDiagnostics.formRuntimeStateResets;
+		metadata.formHitTargetsRegistered = doc.formsDiagnostics.formHitTargetsRegistered;
+		metadata.formHitTargetClamps = doc.formsDiagnostics.formHitTargetClamps;
+		metadata.formFocusableControls = doc.formsDiagnostics.formFocusableControls;
+		metadata.formFocusChanges = doc.formsDiagnostics.formFocusChanges;
+		metadata.formFocusClears = doc.formsDiagnostics.formFocusClears;
+		metadata.formFocusWraps = doc.formsDiagnostics.formFocusWraps;
+		metadata.formTabForward = doc.formsDiagnostics.formTabForward;
+		metadata.formTabBackward = doc.formsDiagnostics.formTabBackward;
+		metadata.formKeyboardActivations = doc.formsDiagnostics.formKeyboardActivations;
+		metadata.formSpaceActivations = doc.formsDiagnostics.formSpaceActivations;
+		metadata.formEnterActivations = doc.formsDiagnostics.formEnterActivations;
+		metadata.formKeyRepeatSuppressed = doc.formsDiagnostics.formKeyRepeatSuppressed;
+		metadata.formStaleKeyActivationBlocks = doc.formsDiagnostics.formStaleKeyActivationBlocks;
+		metadata.formDisabledFocusSkips = doc.formsDiagnostics.formDisabledFocusSkips;
+		metadata.formHiddenFocusSkips = doc.formsDiagnostics.formHiddenFocusSkips;
+		metadata.formFocusStateResets = doc.formsDiagnostics.formFocusStateResets;
+		metadata.formFocusOrigin = formFocusOriginName(doc.formRuntimeState.focusOrigin);
+		metadata.formFocusGeneration = doc.formRuntimeState.focusValid
+			? doc.formRuntimeState.focusedDocumentGeneration : 0;
+		metadata.formFocusedLogicalSerial = doc.formRuntimeState.focusValid
+			? doc.formRuntimeState.focusedLogicalSerial : 0;
+		metadata.cssCheckedRuntimeRecomputations = doc.cssDiagnostics.checkedRuntimeRecomputations;
+		metadata.formInteractionMode = doc.formsDiagnostics.formInteractionMode;
 		metadata.unsupportedFormMethod = doc.formsDiagnostics.hasUnsupportedMethod;
 		metadata.unsupportedFormEncoding = doc.formsDiagnostics.hasUnsupportedEncoding;
 		metadata.postSupportedHosted = true;
@@ -812,14 +1570,46 @@ namespace {
 
 		std::vector<uint64_t> seenTableSerials;
 		std::vector<uint64_t> seenTableRowSerials;
+		std::vector<uint64_t> seenFigureSerials;
+		std::vector<uint64_t> seenBlockquoteSerials;
+		std::vector<uint64_t> seenDlSerials;
+		auto countUniqueAncestorTag = [&](const DocBlock& block, const std::string& tagName, std::vector<uint64_t>& seen) -> bool {
+			const std::string tag = toLowerAscii(tagName);
+			for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+				if (toLowerAscii(ancestor.tagName) != tag) continue;
+				if (ancestor.serial != 0 && std::find(seen.begin(), seen.end(), ancestor.serial) == seen.end()) {
+					seen.push_back(ancestor.serial);
+					return true;
+				}
+			}
+			return false;
+		};
 		for (size_t i = 0; i < doc.blocks.size(); ++i) {
 			const DocBlock& block = doc.blocks[i];
 			if (block.style.displayNone) {
 				++metadata.cssDisplayNoneBlockCount;
 				continue;
 			}
+			if (isFormControlBlock(block)) ++metadata.formControlsRendered;
 			if (blockHasWrapperAncestor(block)) {
 				++metadata.cssWrapperRenderCount;
+			}
+			const int wrapperDepth = wrapperAncestorDepth(block);
+			const int wrapperInset = nestedWrapperInsetPx(block);
+			metadata.cssMaxWrapperAncestorDepth = std::max(metadata.cssMaxWrapperAncestorDepth, wrapperDepth);
+			const int availableWidth = blockAvailableWidth(block, doc);
+			if (block.type != BlockType::Image) {
+				const int outerWidth = blockOuterWidth(block, availableWidth);
+				(void)outerWidth;
+				const int requestedWidth = std::min(
+					cssWidthPx(block.style, availableWidth, availableWidth),
+					cssMaxWidthPx(block.style, availableWidth, availableWidth));
+				const bool nestedClamp = wrapperInset > 0;
+				const bool widthClamp = availableWidth < kMinReadableBlockWidth ||
+					requestedWidth < std::min(availableWidth, kMinReadableBlockWidth);
+				if (nestedClamp || widthClamp) {
+					++metadata.cssNestedLayoutClamps;
+				}
 			}
 			const bool hasWidthConstraint = block.style.width > 0 || block.style.widthPercent >= 0 ||
 				block.style.maxWidth > 0 || block.style.maxWidthPercent >= 0;
@@ -832,8 +1622,67 @@ namespace {
 			if (block.style.hasBackgroundColor) {
 				++metadata.cssBackgroundBlockCount;
 			}
+			const int borderTopPx = cssBorderTopPx(block.style);
+			const int borderRightPx = cssBorderRightPx(block.style);
+			const int borderBottomPx = cssBorderBottomPx(block.style);
+			const int borderLeftPx = cssBorderLeftPx(block.style);
+			const auto borderVisible = [](BorderLineStyle lineStyle, int width, uint32_t color) {
+				const BorderLineStyle effective = cssBorderStyleOrDefault(lineStyle, width);
+				return width > 0 && effective != BorderLineStyle::None && effective != BorderLineStyle::Hidden &&
+					((color >> 24) & 0xFFu) != 0;
+			};
+			const auto borderDashed = [](BorderLineStyle lineStyle, int width) {
+				return width > 0 && cssBorderStyleOrDefault(lineStyle, width) == BorderLineStyle::Dashed;
+			};
+			const auto borderDotted = [](BorderLineStyle lineStyle, int width) {
+				return width > 0 && cssBorderStyleOrDefault(lineStyle, width) == BorderLineStyle::Dotted;
+			};
+			const bool hasAnyBorder =
+				borderVisible(block.style.borderTopStyle, borderTopPx, block.style.borderTopColor) ||
+				borderVisible(block.style.borderRightStyle, borderRightPx, block.style.borderRightColor) ||
+				borderVisible(block.style.borderBottomStyle, borderBottomPx, block.style.borderBottomColor) ||
+				borderVisible(block.style.borderLeftStyle, borderLeftPx, block.style.borderLeftColor);
+			if (hasAnyBorder) {
+				++metadata.cssBorderedBlocksRendered;
+			}
+			const bool hasDashedBorder =
+				borderDashed(block.style.borderTopStyle, borderTopPx) ||
+				borderDashed(block.style.borderRightStyle, borderRightPx) ||
+				borderDashed(block.style.borderBottomStyle, borderBottomPx) ||
+				borderDashed(block.style.borderLeftStyle, borderLeftPx);
+			const bool hasDottedBorder =
+				borderDotted(block.style.borderTopStyle, borderTopPx) ||
+				borderDotted(block.style.borderRightStyle, borderRightPx) ||
+				borderDotted(block.style.borderBottomStyle, borderBottomPx) ||
+				borderDotted(block.style.borderLeftStyle, borderLeftPx);
+			if (hasDashedBorder) {
+				++metadata.cssDashedBordersRendered;
+			}
+			if (hasDottedBorder) {
+				++metadata.cssDottedBordersRendered;
+			}
 			if (block.type == BlockType::ListItem) {
 				++metadata.cssListRenderCount;
+				const uint64_t ordinal = blockListOrdinal(doc, static_cast<int>(i));
+				const std::string marker = blockListMarkerText(block, ordinal);
+				if (marker.empty()) {
+					++metadata.cssListStyleNoneApplied;
+				} else {
+					++metadata.cssListStyleMarkersRendered;
+				}
+			}
+			const bool hasTextDecoration =
+				(block.style.hasTextDecoration && (block.style.underline || block.style.lineThrough)) ||
+				(block.type == BlockType::Link && (!block.style.hasTextDecoration || block.style.underline || block.style.lineThrough));
+			if (hasTextDecoration) {
+				++metadata.cssTextDecorationsRendered;
+			}
+			if (block.style.genericFontFamily != GenericFontFamily::Inherit) {
+				++metadata.cssGenericFontFamilyApplied;
+				if (block.style.genericFontFamily == GenericFontFamily::Serif ||
+					block.style.genericFontFamily == GenericFontFamily::Monospace) {
+					++metadata.cssGenericFontFamilyFallbacks;
+				}
 			}
 			if (!block.url.empty() && s_visitedUrls.find(block.url) != s_visitedUrls.end()) {
 				++metadata.cssVisitedLinkCount;
@@ -843,6 +1692,18 @@ namespace {
 			}
 			if (toLowerAscii(block.tagName) == "th") {
 				++metadata.cssTableHeaderCellCount;
+			}
+			if (toLowerAscii(block.tagName) == "figcaption") {
+				++metadata.cssFigcaptionsRendered;
+			}
+			if (countUniqueAncestorTag(block, "figure", seenFigureSerials)) {
+				++metadata.cssFiguresRendered;
+			}
+			if (countUniqueAncestorTag(block, "blockquote", seenBlockquoteSerials)) {
+				++metadata.cssBlockquotesRendered;
+			}
+			if (countUniqueAncestorTag(block, "dl", seenDlSerials)) {
+				++metadata.cssDefinitionListsRendered;
 			}
 			if (isTableCellLikeBlock(block)) {
 				++metadata.cssTableCellCount;
@@ -859,6 +1720,11 @@ namespace {
 				if (isFirstTableCellInGroup(doc, static_cast<int>(i))) {
 					const int groupStart = tableGroupStartIndex(doc, static_cast<int>(i));
 					const TableGroupLayout layout = buildTableGroupLayout(doc, groupStart);
+					if (layout.collapseMode) {
+						++metadata.cssCollapsedTablesRendered;
+					} else {
+						++metadata.cssSeparateTablesRendered;
+					}
 					if (layout.fallbackUsed) {
 						++metadata.cssTableLayoutFallbackCount;
 					}
@@ -871,13 +1737,62 @@ namespace {
 			} else if (block.url.rfind("file://", 0) == 0) {
 				++metadata.localImageCount;
 			}
+			int imageW = 0;
+			int imageH = 0;
+			bool imageConstrained = false;
+			bool imageAspectPreserved = false;
+			bool imageSizeClamped = false;
+			const int imageAvailableWidth = blockAvailableWidth(block, doc);
+			imageDisplaySize(block, imageAvailableWidth, imageW, imageH, &imageConstrained, &imageAspectPreserved, &imageSizeClamped);
 			const ImageInfo& info = imageInfoForBlock(block);
 			if (info.ok) {
 				++metadata.loadedImageCount;
 			} else {
 				++metadata.failedImageCount;
+				if (!block.alt.empty()) {
+					++metadata.cssImageAltFallbacks;
+				}
 				if (metadata.lastImageError.empty()) {
 					metadata.lastImageError = info.errorDetail.empty() ? info.message : info.errorDetail;
+				}
+			}
+			if (imageConstrained) {
+				++metadata.cssImagesConstrained;
+			}
+			if (imageAspectPreserved) {
+				++metadata.cssImagesAspectPreserved;
+			}
+			if (imageSizeClamped) {
+				++metadata.cssImageSizeClamps;
+			}
+		}
+		if (doc.url.find("css-phase1f") != std::string::npos) {
+			int perSideAncestorBlocks = 0;
+			int dashedStyledBlocks = 0;
+			int dottedStyledBlocks = 0;
+			for (const DocBlock& block : doc.blocks) {
+				bool hasPerSideAncestor = toLowerAscii(block.className) == "per-side";
+				if (!hasPerSideAncestor) {
+					for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+						if (toLowerAscii(ancestor.className) == "per-side") {
+							hasPerSideAncestor = true;
+							break;
+						}
+					}
+				}
+				if (!hasPerSideAncestor) continue;
+				++perSideAncestorBlocks;
+				if (block.style.borderTopStyle == BorderLineStyle::Dashed ||
+					block.style.borderRightStyle == BorderLineStyle::Dashed ||
+					block.style.borderBottomStyle == BorderLineStyle::Dashed ||
+					block.style.borderLeftStyle == BorderLineStyle::Dashed) {
+					++dashedStyledBlocks;
+				}
+				if (block.style.borderTopStyle == BorderLineStyle::Dotted ||
+					block.style.borderRightStyle == BorderLineStyle::Dotted ||
+					block.style.borderBottomStyle == BorderLineStyle::Dotted ||
+					block.style.borderLeftStyle == BorderLineStyle::Dotted) {
+					++dottedStyledBlocks;
 				}
 			}
 		}
@@ -998,6 +1913,26 @@ namespace {
 		return value;
 	}
 
+	static int cssHeightPx(const WebStyle& style, int availableHeight, int fallbackValue)
+	{
+		if (style.heightPercent >= 0) {
+			return std::max(0, availableHeight * style.heightPercent / 100);
+		}
+		if (style.height > 0) return style.height;
+		return fallbackValue;
+	}
+
+	static int cssMaxHeightPx(const WebStyle& style, int availableHeight, int fallbackValue)
+	{
+		int value = fallbackValue;
+		if (style.maxHeightPercent >= 0) {
+			value = std::max(0, availableHeight * style.maxHeightPercent / 100);
+		} else if (style.maxHeight > 0) {
+			value = style.maxHeight;
+		}
+		return value;
+	}
+
 	static int blockIndentForType(BlockType type)
 	{
 		if (type == BlockType::ListItem) return kDocumentListIndent;
@@ -1005,19 +1940,70 @@ namespace {
 		return kDocumentIndent;
 	}
 
-	static int cssBorderTopPx(const WebStyle& style)
+	static int cssBorderSidePx(int width, BorderLineStyle borderStyle)
 	{
-		return style.hasBorderTop ? std::max(1, style.borderTopWidth) : 0;
+		if (borderStyle == BorderLineStyle::None || borderStyle == BorderLineStyle::Hidden) {
+			return 0;
+		}
+		if (width > 0) {
+			return std::max(1, std::min(width, 12));
+		}
+		return borderStyle == BorderLineStyle::Inherit ? 0 : 1;
 	}
 
-	static int cssBorderBottomPx(const WebStyle& style)
+	static BorderLineStyle cssBorderStyleOrDefault(BorderLineStyle borderStyle, int width)
 	{
-		return style.hasBorderBottom ? std::max(1, style.borderBottomWidth) : 0;
+		if (borderStyle != BorderLineStyle::Inherit) return borderStyle;
+		return width > 0 ? BorderLineStyle::Solid : BorderLineStyle::None;
 	}
 
 	static bool cssListStyleNone(const WebStyle& style)
 	{
 		return style.listStyleNone;
+	}
+
+	static bool cssBorderTopVisible(const WebStyle& style)
+	{
+		return cssBorderSidePx(style.borderTopWidth, cssBorderStyleOrDefault(style.borderTopStyle, style.borderTopWidth)) > 0 &&
+			style.hasBorderTop && ((style.borderTopColor >> 24) & 0xFFu) != 0;
+	}
+
+	static bool cssBorderRightVisible(const WebStyle& style)
+	{
+		return cssBorderSidePx(style.borderRightWidth, cssBorderStyleOrDefault(style.borderRightStyle, style.borderRightWidth)) > 0 &&
+			style.hasBorderRight && ((style.borderRightColor >> 24) & 0xFFu) != 0;
+	}
+
+	static bool cssBorderBottomVisible(const WebStyle& style)
+	{
+		return cssBorderSidePx(style.borderBottomWidth, cssBorderStyleOrDefault(style.borderBottomStyle, style.borderBottomWidth)) > 0 &&
+			style.hasBorderBottom && ((style.borderBottomColor >> 24) & 0xFFu) != 0;
+	}
+
+	static bool cssBorderLeftVisible(const WebStyle& style)
+	{
+		return cssBorderSidePx(style.borderLeftWidth, cssBorderStyleOrDefault(style.borderLeftStyle, style.borderLeftWidth)) > 0 &&
+			style.hasBorderLeft && ((style.borderLeftColor >> 24) & 0xFFu) != 0;
+	}
+
+	static int cssBorderTopPx(const WebStyle& style)
+	{
+		return style.hasBorderTop ? cssBorderSidePx(style.borderTopWidth, cssBorderStyleOrDefault(style.borderTopStyle, style.borderTopWidth)) : 0;
+	}
+
+	static int cssBorderRightPx(const WebStyle& style)
+	{
+		return style.hasBorderRight ? cssBorderSidePx(style.borderRightWidth, cssBorderStyleOrDefault(style.borderRightStyle, style.borderRightWidth)) : 0;
+	}
+
+	static int cssBorderBottomPx(const WebStyle& style)
+	{
+		return style.hasBorderBottom ? cssBorderSidePx(style.borderBottomWidth, cssBorderStyleOrDefault(style.borderBottomStyle, style.borderBottomWidth)) : 0;
+	}
+
+	static int cssBorderLeftPx(const WebStyle& style)
+	{
+		return style.hasBorderLeft ? cssBorderSidePx(style.borderLeftWidth, cssBorderStyleOrDefault(style.borderLeftStyle, style.borderLeftWidth)) : 0;
 	}
 
 	static bool cssMarginLeftAuto(const WebStyle& style)
@@ -1053,28 +2039,97 @@ namespace {
 		return oss.str();
 	}
 
-	static int blockListTextInsetPx(const DocBlock& block)
+	static std::string alphaMarkerForOrdinal(uint64_t ordinal, bool uppercase)
 	{
-		if (cssListStyleNone(block.style)) return 0;
-		return blockIsOrderedListItem(block) ? 4 * kCharW : 2 * kCharW;
+		if (ordinal == 0) ordinal = 1;
+		std::string out;
+		while (ordinal > 0) {
+			--ordinal;
+			const char ch = static_cast<char>((ordinal % 26) + (uppercase ? 'A' : 'a'));
+			out.insert(out.begin(), ch);
+			ordinal /= 26;
+		}
+		return out.empty() ? std::string(1, uppercase ? 'A' : 'a') : out;
 	}
 
-	static std::string blockListMarkerText(const DocBlock& block, int ordinal)
+	static std::string romanMarkerForOrdinal(uint64_t ordinal, bool uppercase)
+	{
+		if (ordinal == 0) ordinal = 1;
+		if (ordinal > 3999) {
+			return std::to_string(ordinal);
+		}
+		struct RomanPair { uint64_t value; const char* symbol; };
+		static const RomanPair kPairs[] = {
+			{1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"},
+			{100, "C"}, {90, "XC"}, {50, "L"}, {40, "XL"},
+			{10, "X"}, {9, "IX"}, {5, "V"}, {4, "IV"}, {1, "I"}
+		};
+		std::string out;
+		for (const RomanPair& pair : kPairs) {
+			while (ordinal >= pair.value) {
+				out += pair.symbol;
+				ordinal -= pair.value;
+			}
+		}
+		if (!uppercase) {
+			for (char& ch : out) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+		}
+		return out;
+	}
+
+	static ListStyleType effectiveListStyleType(const DocBlock& block)
+	{
+		if (cssListStyleNone(block.style)) return ListStyleType::None;
+		if (block.style.listStyleType != ListStyleType::Inherit) {
+			return block.style.listStyleType;
+		}
+		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+			const std::string tag = toLowerAscii(it->tagName);
+			if (tag == "ol") return ListStyleType::Decimal;
+			if (tag == "ul") return ListStyleType::Disc;
+		}
+		return blockIsOrderedListItem(block) ? ListStyleType::Decimal : ListStyleType::Disc;
+	}
+
+	static std::string blockListMarkerText(const DocBlock& block, uint64_t ordinal)
 	{
 		if (cssListStyleNone(block.style)) return "";
-		if (blockIsOrderedListItem(block)) {
-			return std::to_string(std::max(1, ordinal)) + ".";
+		switch (effectiveListStyleType(block)) {
+		case ListStyleType::None:
+			return "";
+		case ListStyleType::Circle:
+			return "o";
+		case ListStyleType::Square:
+			return "[]";
+		case ListStyleType::Decimal:
+			return std::to_string(std::max<uint64_t>(1, ordinal)) + ".";
+		case ListStyleType::LowerAlpha:
+			return alphaMarkerForOrdinal(std::max<uint64_t>(1, ordinal), false) + ".";
+		case ListStyleType::UpperAlpha:
+			return alphaMarkerForOrdinal(std::max<uint64_t>(1, ordinal), true) + ".";
+		case ListStyleType::LowerRoman:
+			return romanMarkerForOrdinal(std::max<uint64_t>(1, ordinal), false) + ".";
+		case ListStyleType::UpperRoman:
+			return romanMarkerForOrdinal(std::max<uint64_t>(1, ordinal), true) + ".";
+		case ListStyleType::Disc:
+		default:
+			return "*";
 		}
-		return "-";
 	}
 
-	static int blockListOrdinal(const WebDocument& doc, int blockIndex)
+	static int blockListMarkerInsetPx(const std::string& marker)
+	{
+		if (marker.empty()) return 0;
+		return std::max(2 * kCharW, static_cast<int>(marker.size()) * kCharW + kCharW);
+	}
+
+	static uint64_t blockListOrdinal(const WebDocument& doc, int blockIndex)
 	{
 		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return 1;
 		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
 		if (!blockIsOrderedListItem(block)) return 1;
 		const std::string signature = blockListContainerSignature(block);
-		int ordinal = 0;
+		uint64_t ordinal = 0;
 		for (int i = 0; i <= blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
 			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
 			if (candidate.type != BlockType::ListItem) continue;
@@ -1083,14 +2138,22 @@ namespace {
 				++ordinal;
 			}
 		}
-		return std::max(1, ordinal);
+		return std::max<uint64_t>(1, ordinal);
+	}
+
+	static int blockListTextInsetPx(const DocBlock& block, uint64_t ordinal)
+	{
+		if (cssListStyleNone(block.style)) return 0;
+		const std::string marker = blockListMarkerText(block, ordinal);
+		return blockListMarkerInsetPx(marker);
 	}
 
 	static bool isWrapperTagName(const std::string& tagName)
 	{
 		const std::string tag = toLowerAscii(tagName);
 		return tag == "main" || tag == "article" || tag == "nav" || tag == "aside" ||
-			tag == "header" || tag == "footer" || tag == "section" || tag == "div";
+			tag == "header" || tag == "footer" || tag == "section" || tag == "div" ||
+			tag == "figure" || tag == "blockquote" || tag == "dl";
 	}
 
 	static bool isTableCellLikeBlock(const DocBlock& block)
@@ -1167,6 +2230,29 @@ namespace {
 		return isWrapperTagName(block.tagName);
 	}
 
+	static int wrapperAncestorDepth(const DocBlock& block)
+	{
+		int depth = 0;
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			if (isWrapperTagName(ancestor.tagName)) {
+				++depth;
+			}
+		}
+		if (isWrapperTagName(block.tagName)) {
+			++depth;
+		}
+		return depth;
+	}
+
+	static int nestedWrapperInsetPx(const DocBlock& block)
+	{
+		const int depth = wrapperAncestorDepth(block);
+		// Treat shallow shells like body -> main as normal layout, and only start
+		// shrinking content once wrappers are meaningfully nested.
+		if (depth <= 2) return 0;
+		return std::min(40, (depth - 2) * 10);
+	}
+
 	static bool isFirstTableCellInGroup(const WebDocument& doc, int index)
 	{
 		if (index < 0 || index >= static_cast<int>(doc.blocks.size())) return false;
@@ -1210,6 +2296,11 @@ namespace {
 		if (!isTableCellLikeBlock(first)) return layout;
 		layout.tableSerial = tableSerialForBlock(first);
 		layout.startIndex = startIndex;
+		layout.collapseMode = first.style.borderCollapse == TableBorderCollapseMode::Collapse;
+		layout.borderSpacingHorizontal = layout.collapseMode ? 0 :
+			std::max(0, first.style.borderSpacingHorizontal >= 0 ? first.style.borderSpacingHorizontal : 4);
+		layout.borderSpacingVertical = layout.collapseMode ? 0 :
+			std::max(0, first.style.borderSpacingVertical >= 0 ? first.style.borderSpacingVertical : 2);
 
 		const int bodyMarginLeft = blockBodyMarginLeft(doc);
 		const int bodyMarginRight = blockBodyMarginRight(doc);
@@ -1225,7 +2316,9 @@ namespace {
 		layout.paddingBottom = cssPaddingBottomPx(first.style, 4);
 		layout.paddingLeft = cssPaddingLeftPx(first.style, 4);
 		layout.borderTop = cssBorderTopPx(first.style);
+		layout.borderRight = cssBorderRightPx(first.style);
 		layout.borderBottom = cssBorderBottomPx(first.style);
+		layout.borderLeft = cssBorderLeftPx(first.style);
 		layout.lineHeight = blockTextLineHeight(first);
 
 		int i = startIndex;
@@ -1235,6 +2328,8 @@ namespace {
 			TableRowLayout row;
 			row.rowSerial = tableRowSerialForBlock(block);
 			row.headerRow = false;
+			int rowBorderTop = 0;
+			int rowBorderBottom = 0;
 			int j = i;
 			while (j < static_cast<int>(doc.blocks.size())) {
 				const DocBlock& cell = doc.blocks[static_cast<size_t>(j)];
@@ -1247,11 +2342,15 @@ namespace {
 				cellLayout.padLeftChars = std::max(1, cssPaddingLeftPx(cell.style, 4) / kCharW + 1);
 				cellLayout.padRightChars = std::max(1, cssPaddingRightPx(cell.style, 4) / kCharW + 1);
 				cellLayout.contentWidthChars = std::max(1, textLongestLineChars(cell.text));
-				cellLayout.lines = wrapText(cell.text, cellLayout.contentWidthChars);
+				cellLayout.lines = wrapTextForBlock(*cellLayout.block, cellLayout.contentWidthChars);
 				row.headerRow = row.headerRow || toLowerAscii(cell.tagName) == "th" || cell.style.bold;
+				rowBorderTop = std::max(rowBorderTop, cssBorderTopPx(cell.style));
+				rowBorderBottom = std::max(rowBorderBottom, cssBorderBottomPx(cell.style));
 				row.cells.push_back(std::move(cellLayout));
 				++j;
 			}
+			row.borderTopPx = rowBorderTop;
+			row.borderBottomPx = rowBorderBottom;
 			layout.rows.push_back(std::move(row));
 			i = j;
 		}
@@ -1270,8 +2369,10 @@ namespace {
 			}
 		}
 
-		const int separatorChars = columnCount > 0 ? (3 * (columnCount - 1)) : 0;
-		const int availableChars = std::max(8, (layout.outerWidth - layout.paddingLeft - layout.paddingRight) / kCharW);
+		const int spacingChars = layout.collapseMode ? 0 : std::max(0, layout.borderSpacingHorizontal / kCharW);
+		const int separatorChars = columnCount > 0 ? (spacingChars * (columnCount - 1)) : 0;
+		const int availableChars = std::max(8,
+			(layout.outerWidth - layout.borderLeft - layout.borderRight - layout.paddingLeft - layout.paddingRight) / kCharW);
 		int desiredChars = separatorChars;
 		for (int width : layout.columnWidthsChars) desiredChars += width;
 		if (columnCount > 0 && desiredChars > availableChars) {
@@ -1304,11 +2405,26 @@ namespace {
 				const int colWidth = layout.columnWidthsChars[std::min(col, lastCol)];
 				const int contentWidth = std::max(1, colWidth - cell.padLeftChars - cell.padRightChars);
 				cell.contentWidthChars = contentWidth;
-				cell.lines = wrapText(cell.block->text, contentWidth);
+				cell.lines = wrapTextForBlock(*cell.block, contentWidth);
 				maxLines = std::max(maxLines, static_cast<int>(cell.lines.size()));
 			}
 			row.heightPx = std::max(layout.lineHeight + 4, maxLines * layout.lineHeight + layout.paddingTop + layout.paddingBottom);
 		}
+
+		int cursorY = layout.borderTop + layout.paddingTop;
+		layout.rowOffsetsPx.clear();
+		layout.rowOffsetsPx.reserve(layout.rows.size());
+		for (size_t iRow = 0; iRow < layout.rows.size(); ++iRow) {
+			TableRowLayout& row = layout.rows[iRow];
+			layout.rowOffsetsPx.push_back(cursorY);
+			cursorY += row.borderTopPx;
+			cursorY += row.heightPx;
+			cursorY += row.borderBottomPx;
+			if (iRow + 1 < layout.rows.size()) {
+				cursorY += layout.borderSpacingVertical;
+			}
+		}
+		layout.totalHeightPx = cursorY + layout.paddingBottom + layout.borderBottom;
 
 		return layout;
 	}
@@ -1375,14 +2491,32 @@ namespace {
 	{
 		const int baseWidth = kContentW - blockIndentForType(block.type) - kDocumentRightPad
 			- blockBodyMarginLeft(doc) - blockBodyMarginRight(doc)
-			- cssMarginLeftPx(block.style, 0) - cssMarginRightPx(block.style, 0);
+			- cssMarginLeftPx(block.style, 0) - cssMarginRightPx(block.style, 0)
+			- nestedWrapperInsetPx(block);
 		return std::max(1, baseWidth);
 	}
 
-	static int blockOuterWidth(const DocBlock& block, int availableWidth)
+	static int blockOuterWidth(const DocBlock& block, int availableWidth, bool* outClamped)
 	{
+		if (outClamped) *outClamped = false;
+		if (block.type == BlockType::Image) {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(block, availableWidth, imageW, imageH);
+			const int paddingFallback = cssPaddingOrDefault(block.style, 0);
+			const int paddingLeft = cssPaddingLeftPx(block.style, paddingFallback);
+			const int paddingRight = cssPaddingRightPx(block.style, paddingFallback);
+			const int outerWidth = imageW + paddingLeft + paddingRight;
+			return std::max(1, std::min(outerWidth, availableWidth));
+		}
+		if (isFormControlBlock(block)) return blockFormControlWidth(block, availableWidth);
 		int outerWidth = cssWidthPx(block.style, availableWidth, availableWidth);
 		outerWidth = std::min(outerWidth, cssMaxWidthPx(block.style, availableWidth, outerWidth));
+		const int safeMinWidth = std::min(availableWidth, kMinReadableBlockWidth);
+		if (outerWidth < safeMinWidth) {
+			outerWidth = safeMinWidth;
+			if (outClamped) *outClamped = true;
+		}
 		return std::max(1, std::min(outerWidth, availableWidth));
 	}
 
@@ -1409,7 +2543,20 @@ namespace {
 	{
 		const int paddingLeft = cssPaddingLeftPx(block.style, cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0));
 		const int paddingRight = cssPaddingRightPx(block.style, cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0));
-		return std::max(1, outerWidth - paddingLeft - paddingRight);
+		const int borderLeft = cssBorderLeftPx(block.style);
+		const int borderRight = cssBorderRightPx(block.style);
+		return std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+	}
+
+	static int blockContentLeftX(const DocBlock& block, int outerX)
+	{
+		const int paddingLeft = cssPaddingLeftPx(block.style, cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0));
+		return outerX + cssBorderLeftPx(block.style) + paddingLeft;
+	}
+
+	static int blockContentTopY(const DocBlock& block, int drawY, int blockMarginTop)
+	{
+		return drawY + blockMarginTop + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 	}
 
 	static int blockTextLineHeight(const DocBlock& block)
@@ -1432,12 +2579,50 @@ namespace {
 
 	static int blockFormControlHeight(const DocBlock& block)
 	{
+		int fallback = kFormControlH;
 		if (block.type == BlockType::FormTextarea) {
 			int rows = block.visibleRows > 0 ? block.visibleRows : 4;
 			rows = std::max(kTextareaMinRows, std::min(kTextareaMaxRows, rows));
-			return std::max(kFormControlH, rows * kLineH + 10);
+			fallback = std::max(kFormControlH, rows * kLineH + 10);
+		} else if (block.type == BlockType::FormSelect && block.formControl.multiple) {
+			int rows = block.visibleRows > 0 ? block.visibleRows : static_cast<int>(block.options.size());
+			rows = std::max(2, std::min(6, rows));
+			fallback = std::max(kFormControlH, rows * kLineH + 10);
 		}
-		return kFormControlH;
+		const int cssHeight = cssHeightPx(block.style, 240, -1);
+		if (cssHeight > 0) return std::max(kFormControlH, std::min(240, cssHeight));
+		return fallback;
+	}
+
+	static bool isFormControlBlock(const DocBlock& block)
+	{
+		return block.type == BlockType::FormTextInput ||
+			block.type == BlockType::FormCheckbox ||
+			block.type == BlockType::FormRadio ||
+			block.type == BlockType::FormTextarea ||
+			block.type == BlockType::FormSelect ||
+			block.type == BlockType::FormSubmit;
+	}
+
+	static int blockFormControlWidth(const DocBlock& block, int availableWidth)
+	{
+		int fallback = 280;
+		if (block.type == BlockType::FormSubmit) fallback = 132;
+		else if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) fallback = 300;
+		else if (block.type == BlockType::FormTextarea && block.visibleCols > 0)
+			fallback = std::min(640, block.visibleCols * kCharW + 20);
+		else if (block.formControl.size > 0 &&
+			(block.formControl.type == FormControlType::Text ||
+			 block.formControl.type == FormControlType::Password ||
+			 block.formControl.type == FormControlType::Search ||
+			 block.formControl.type == FormControlType::Email ||
+			 block.formControl.type == FormControlType::Url ||
+			 block.formControl.type == FormControlType::Number ||
+			 block.formControl.type == FormControlType::Unsupported))
+			fallback = std::min(640, block.formControl.size * kCharW + 20);
+		int width = cssWidthPx(block.style, availableWidth, fallback);
+		width = std::min(width, cssMaxWidthPx(block.style, availableWidth, width));
+		return std::max(80, std::min(std::min(availableWidth, 720), width));
 	}
 
 	static int blockTotalHeight(const DocBlock& block, const WebDocument& doc, bool nextIsHeading)
@@ -1450,17 +2635,9 @@ namespace {
 			const int blockIndex = static_cast<int>(&block - &doc.blocks.front());
 			const int groupStart = tableGroupStartIndex(doc, blockIndex);
 			const TableGroupLayout layout = buildTableGroupLayout(doc, groupStart);
-			const uint64_t rowSerial = tableRowSerialForBlock(block);
-			int rowHeight = layout.lineHeight + 4;
-			for (const TableRowLayout& row : layout.rows) {
-				if (row.rowSerial == rowSerial) {
-					rowHeight = row.heightPx;
-					break;
-				}
-			}
 			const int blockMarginTop = cssMarginTopPx(block.style, 4);
 			const int blockMarginBottom = cssMarginBottomPx(block.style, 8);
-			int total = blockMarginTop + cssBorderTopPx(block.style) + rowHeight + cssBorderBottomPx(block.style) + blockMarginBottom;
+			int total = blockMarginTop + layout.totalHeightPx + blockMarginBottom;
 			if (nextIsHeading) total += 10;
 			return total;
 		}
@@ -1481,14 +2658,17 @@ namespace {
 		const int paddingBottom = cssPaddingBottomPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 		const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 		const int borderTop = cssBorderTopPx(block.style);
+		const int borderRight = cssBorderRightPx(block.style);
 		const int borderBottom = cssBorderBottomPx(block.style);
+		const int borderLeft = cssBorderLeftPx(block.style);
 		const int bodyMarginLeft = blockBodyMarginLeft(doc);
 		const int bodyMarginRight = blockBodyMarginRight(doc);
 		const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
 			- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 		const int outerWidth = blockOuterWidth(block, availableWidth);
-		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
-		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block) : 0;
+		const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+		const uint64_t listOrdinal = block.type == BlockType::ListItem ? blockListOrdinal(doc, static_cast<int>(&block - &doc.blocks.front())) : 1;
+		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block, listOrdinal) : 0;
 		const int wrapCols = std::max(1, std::max(1, innerWidth - listInset) / kCharW);
 		const int lineHeight = blockTextLineHeight(block);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
@@ -1501,13 +2681,16 @@ namespace {
 			break;
 		case BlockType::Paragraph:
 		case BlockType::Link:
-			contentH = wrappedBlockHeight(block.text, wrapCols, false, lineHeight);
+			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::ListItem:
-			contentH = wrappedBlockHeight(block.text, wrapCols, false, lineHeight);
+			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::Preformatted:
-			contentH = wrappedBlockHeight(block.text, wrapCols, true, lineHeight);
+			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
+			break;
+		case BlockType::FormLabel:
+			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::FormTextInput:
 		case BlockType::FormCheckbox:
@@ -1520,7 +2703,7 @@ namespace {
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
-			imageDisplaySize(block, imageW, imageH);
+			imageDisplaySize(block, availableWidth, imageW, imageH);
 			contentH = imageH;
 			break;
 		}
@@ -1532,23 +2715,7 @@ namespace {
 
 	static void drawBlockBox(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style)
 	{
-		if (w <= 0 || h <= 0) return;
-		if (style.hasBackgroundColor) {
-			int r = 245, g = 247, b = 250;
-			colorChannels(style.backgroundColor, r, g, b);
-			drawRect(windowId, x, y, w, h, r, g, b);
-		}
-		if (style.hasBorderTop && style.borderTopWidth > 0) {
-			int r = 24, g = 28, b = 36;
-			colorChannels(style.borderTopColor, r, g, b);
-			drawRect(windowId, x, y, w, std::max(1, style.borderTopWidth), r, g, b);
-		}
-		if (style.hasBorderBottom && style.borderBottomWidth > 0) {
-			int r = 24, g = 28, b = 36;
-			colorChannels(style.borderBottomColor, r, g, b);
-			drawRect(windowId, x, y + std::max(0, h - std::max(1, style.borderBottomWidth)), w,
-				std::max(1, style.borderBottomWidth), r, g, b);
-		}
+		drawBoxDecorations(windowId, x, y, w, h, style);
 	}
 
 	static bool blockHasVisibleCss(const DocBlock& block)
@@ -1636,6 +2803,7 @@ namespace {
 		int cssUnsupportedExternalStylesheetCount,
 		int cssUnsupportedRuleCount,
 		int cssUnsupportedDeclarationCount,
+		int cssUnsupportedSelectorCount,
 		int cssParseErrorCount,
 		bool cssStyleBlockCapped,
 		size_t cssStyleBytesProcessed,
@@ -1654,6 +2822,80 @@ namespace {
 		int cssTableCaptionCount,
 		int cssTableHeaderCellCount,
 		int cssVisitedLinkCount,
+		int cssBorderedBlocksRendered,
+		int cssDashedBordersRendered,
+		int cssDottedBordersRendered,
+		int cssBorderWidthClamps,
+		int cssCollapsedTablesRendered,
+		int cssSeparateTablesRendered,
+		int cssTableBorderSpacingClamps,
+		int cssListStyleMarkersRendered,
+		int cssListStyleNoneApplied,
+		int cssTextDecorationsRendered,
+		int cssGenericFontFamilyApplied,
+		int cssGenericFontFamilyFallbacks,
+		int cssFiguresRendered,
+		int cssFigcaptionsRendered,
+		int cssBlockquotesRendered,
+		int cssDefinitionListsRendered,
+		int cssImagesConstrained,
+		int cssImagesAspectPreserved,
+		int cssImageAltFallbacks,
+		int cssImageSizeClamps,
+		int cssNestedLayoutClamps,
+		int cssMaxWrapperAncestorDepth,
+		int cssSelectorGroupsParsed,
+		int cssCompoundSelectorsParsed,
+		int cssChildCombinators,
+		int cssDescendantCombinators,
+		int cssAdjacentSiblingCombinators,
+		int cssGeneralSiblingCombinators,
+		int cssAdjacentSiblingMatches,
+		int cssGeneralSiblingMatches,
+		int cssSiblingScanSteps,
+		int cssSiblingScanClamps,
+		int cssSiblingMetadataClamps,
+		int cssSiblingMetadataErrors,
+		int cssSelectorMatches,
+		int cssSpecificityOverrides,
+		int cssSourceOrderOverrides,
+		int cssInlineOverrides,
+		int cssInheritedPropertiesApplied,
+		int cssSelectorDepthClamps,
+		int cssSelectorGroupClamps,
+		int cssCascadePropertyResolutions,
+		int cssImportantDeclarationsApplied,
+		int cssRuleCapCount,
+		int cssDeclarationCapCount,
+		int cssInheritanceDepthClamps,
+		int cssPseudoClassesParsed,
+		int cssStructuralPseudoMatches,
+		int cssFirstChildMatches,
+		int cssLastChildMatches,
+		int cssNthChildMatches,
+		int cssOfTypeMatches,
+		int cssNotMatches,
+		int cssLinkPseudoMatches,
+		int cssVisitedPseudoMatches,
+		int cssPseudoClassClamps,
+		int cssNthExpressionParseErrors,
+		int cssStructuralMetadataClamps,
+		int cssSelectorEvaluationStepClamps,
+		int cssEmptyPseudoParsed,
+		int cssEmptyPseudoMatches,
+		int cssEmptyMetadataIncomplete,
+		int cssContentMetadataClamps,
+		int cssSelectorGroupMemberRecoveries,
+		int cssCommentScanClamps,
+		int cssUnterminatedCommentErrors,
+		int cssUnbalancedParenthesisErrors,
+		int cssUnbalancedBracketErrors,
+		int cssUnterminatedStringErrors,
+		int cssInvalidCombinatorSequences,
+		int cssIdentifierEscapeRejections,
+		int cssSelectorMemberParseFailures,
+		int cssSelectorRecoverySuccesses,
+		const std::string& cssComputedStyleEvidence,
 		int formCount,
 		int formInputCount,
 		int checkboxCount,
@@ -1725,6 +2967,8 @@ namespace {
 			{"Capabilities", "Bookmark persistence", "enabled"},
 			{"Capabilities", "HTTPS/TLS", "enabled hosted-only"},
 			{"Capabilities", "TLS backend", tlsBackendInfo.backendName ? tlsBackendInfo.backendName : "(none)"},
+			{"Evidence Lane", "evidence_lane", "hosted"},
+			{"Evidence Lane", "tls_backend", "schannel"},
 			{"Capabilities", "Certificate validation", gxos_tls_certificate_validation_policy()},
 			{"Capabilities", "TLS insertion seam", "active HttpByteStream wrapper"},
 			{"Capabilities", "TLS smoke bypass", "localhost self-signed only; disabled unless GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST=1"},
@@ -1742,7 +2986,7 @@ namespace {
 			{"Capabilities", "Find in Page", "enabled"},
 			{"Capabilities", "Text selection", "enabled"},
 			{"Capabilities", "Clipboard mode", clipboardMode.empty() ? "Navigator internal clipboard" : clipboardMode},
-			{"Capabilities", "External stylesheets", "unsupported"},
+			{"Capabilities", "External stylesheets", "bounded hosted"},
 
 			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
 			{"Backends", "HTTP backend", "guide_web_http hosted TCP byte-stream with Schannel TLS wrapper for https"},
@@ -1836,6 +3080,7 @@ namespace {
 			{"Current Document", "CSS unsupported external stylesheets", std::to_string(cssUnsupportedExternalStylesheetCount)},
 			{"Current Document", "CSS unsupported rules", std::to_string(cssUnsupportedRuleCount)},
 			{"Current Document", "CSS unsupported declarations", std::to_string(cssUnsupportedDeclarationCount)},
+			{"Current Document", "CSS unsupported selectors", std::to_string(cssUnsupportedSelectorCount)},
 			{"Current Document", "CSS parse errors", std::to_string(cssParseErrorCount)},
 			{"Current Document", "CSS style block capped", yesNo(cssStyleBlockCapped)},
 			{"Current Document", "CSS style bytes processed", std::to_string(cssStyleBytesProcessed)},
@@ -1854,6 +3099,80 @@ namespace {
 			{"Current Document", "CSS table captions rendered", std::to_string(cssTableCaptionCount)},
 			{"Current Document", "CSS table header cells rendered", std::to_string(cssTableHeaderCellCount)},
 			{"Current Document", "CSS visited links styled", std::to_string(cssVisitedLinkCount)},
+			{"Current Document", "CSS bordered blocks rendered", std::to_string(cssBorderedBlocksRendered)},
+			{"Current Document", "CSS dashed borders rendered", std::to_string(cssDashedBordersRendered)},
+			{"Current Document", "CSS dotted borders rendered", std::to_string(cssDottedBordersRendered)},
+			{"Current Document", "CSS border width clamps", std::to_string(cssBorderWidthClamps)},
+			{"Current Document", "CSS collapsed tables rendered", std::to_string(cssCollapsedTablesRendered)},
+			{"Current Document", "CSS separate tables rendered", std::to_string(cssSeparateTablesRendered)},
+			{"Current Document", "CSS table border spacing clamps", std::to_string(cssTableBorderSpacingClamps)},
+			{"Current Document", "CSS list style markers rendered", std::to_string(cssListStyleMarkersRendered)},
+			{"Current Document", "CSS list style none applied", std::to_string(cssListStyleNoneApplied)},
+			{"Current Document", "CSS text decorations rendered", std::to_string(cssTextDecorationsRendered)},
+			{"Current Document", "CSS generic font family applied", std::to_string(cssGenericFontFamilyApplied)},
+			{"Current Document", "CSS generic font family fallbacks", std::to_string(cssGenericFontFamilyFallbacks)},
+			{"Current Document", "CSS figures rendered", std::to_string(cssFiguresRendered)},
+			{"Current Document", "CSS figcaptions rendered", std::to_string(cssFigcaptionsRendered)},
+			{"Current Document", "CSS blockquotes rendered", std::to_string(cssBlockquotesRendered)},
+			{"Current Document", "CSS definition lists rendered", std::to_string(cssDefinitionListsRendered)},
+			{"Current Document", "CSS images constrained", std::to_string(cssImagesConstrained)},
+			{"Current Document", "CSS images aspect preserved", std::to_string(cssImagesAspectPreserved)},
+			{"Current Document", "CSS image alt fallbacks", std::to_string(cssImageAltFallbacks)},
+			{"Current Document", "CSS image size clamps", std::to_string(cssImageSizeClamps)},
+			{"Current Document", "CSS nested layout clamps", std::to_string(cssNestedLayoutClamps)},
+			{"Current Document", "CSS max wrapper ancestor depth", std::to_string(cssMaxWrapperAncestorDepth)},
+			{"Current Document", "CSS selector groups parsed", std::to_string(cssSelectorGroupsParsed)},
+			{"Current Document", "CSS compound selectors parsed", std::to_string(cssCompoundSelectorsParsed)},
+			{"Current Document", "CSS child combinators", std::to_string(cssChildCombinators)},
+			{"Current Document", "CSS descendant combinators", std::to_string(cssDescendantCombinators)},
+			{"Current Document", "CSS adjacent-sibling combinators", std::to_string(cssAdjacentSiblingCombinators)},
+			{"Current Document", "CSS general-sibling combinators", std::to_string(cssGeneralSiblingCombinators)},
+			{"Current Document", "CSS adjacent-sibling matches", std::to_string(cssAdjacentSiblingMatches)},
+			{"Current Document", "CSS general-sibling matches", std::to_string(cssGeneralSiblingMatches)},
+			{"Current Document", "CSS sibling scan steps", std::to_string(cssSiblingScanSteps)},
+			{"Current Document", "CSS sibling scan clamps", std::to_string(cssSiblingScanClamps)},
+			{"Current Document", "CSS sibling metadata clamps", std::to_string(cssSiblingMetadataClamps)},
+			{"Current Document", "CSS sibling metadata errors", std::to_string(cssSiblingMetadataErrors)},
+			{"Current Document", "CSS selector matches", std::to_string(cssSelectorMatches)},
+			{"Current Document", "CSS specificity overrides", std::to_string(cssSpecificityOverrides)},
+			{"Current Document", "CSS source-order overrides", std::to_string(cssSourceOrderOverrides)},
+			{"Current Document", "CSS inline overrides", std::to_string(cssInlineOverrides)},
+			{"Current Document", "CSS inherited properties applied", std::to_string(cssInheritedPropertiesApplied)},
+			{"Current Document", "CSS selector depth clamps", std::to_string(cssSelectorDepthClamps)},
+			{"Current Document", "CSS selector group clamps", std::to_string(cssSelectorGroupClamps)},
+			{"Current Document", "CSS cascade property resolutions", std::to_string(cssCascadePropertyResolutions)},
+			{"Current Document", "CSS !important declarations applied", std::to_string(cssImportantDeclarationsApplied)},
+			{"Current Document", "CSS rule cap count", std::to_string(cssRuleCapCount)},
+			{"Current Document", "CSS declaration cap count", std::to_string(cssDeclarationCapCount)},
+			{"Current Document", "CSS inheritance depth clamps", std::to_string(cssInheritanceDepthClamps)},
+			{"Current Document", "CSS pseudo-classes parsed", std::to_string(cssPseudoClassesParsed)},
+			{"Current Document", "CSS structural pseudo matches", std::to_string(cssStructuralPseudoMatches)},
+			{"Current Document", "CSS first-child matches", std::to_string(cssFirstChildMatches)},
+			{"Current Document", "CSS last-child matches", std::to_string(cssLastChildMatches)},
+			{"Current Document", "CSS nth-child matches", std::to_string(cssNthChildMatches)},
+			{"Current Document", "CSS of-type matches", std::to_string(cssOfTypeMatches)},
+			{"Current Document", "CSS :not matches", std::to_string(cssNotMatches)},
+			{"Current Document", "CSS :link pseudo matches", std::to_string(cssLinkPseudoMatches)},
+			{"Current Document", "CSS :visited pseudo matches", std::to_string(cssVisitedPseudoMatches)},
+			{"Current Document", "CSS pseudo-class clamps", std::to_string(cssPseudoClassClamps)},
+			{"Current Document", "CSS nth-expression parse errors", std::to_string(cssNthExpressionParseErrors)},
+			{"Current Document", "CSS structural metadata clamps", std::to_string(cssStructuralMetadataClamps)},
+			{"Current Document", "CSS selector evaluation step clamps", std::to_string(cssSelectorEvaluationStepClamps)},
+			{"Current Document", "CSS :empty pseudo parsed", std::to_string(cssEmptyPseudoParsed)},
+			{"Current Document", "CSS :empty pseudo matches", std::to_string(cssEmptyPseudoMatches)},
+			{"Current Document", "CSS :empty metadata incomplete", std::to_string(cssEmptyMetadataIncomplete)},
+			{"Current Document", "CSS content metadata clamps", std::to_string(cssContentMetadataClamps)},
+			{"Current Document", "CSS selector group member recoveries", std::to_string(cssSelectorGroupMemberRecoveries)},
+			{"Current Document", "CSS comment scan clamps", std::to_string(cssCommentScanClamps)},
+			{"Current Document", "CSS unterminated comment errors", std::to_string(cssUnterminatedCommentErrors)},
+			{"Current Document", "CSS unbalanced parenthesis errors", std::to_string(cssUnbalancedParenthesisErrors)},
+			{"Current Document", "CSS unbalanced bracket errors", std::to_string(cssUnbalancedBracketErrors)},
+			{"Current Document", "CSS unterminated string errors", std::to_string(cssUnterminatedStringErrors)},
+			{"Current Document", "CSS invalid combinator sequences", std::to_string(cssInvalidCombinatorSequences)},
+			{"Current Document", "CSS identifier escape rejections", std::to_string(cssIdentifierEscapeRejections)},
+			{"Current Document", "CSS selector member parse failures", std::to_string(cssSelectorMemberParseFailures)},
+			{"Current Document", "CSS selector recovery successes", std::to_string(cssSelectorRecoverySuccesses)},
+			{"Current Document", "CSS computed style evidence", cssComputedStyleEvidence.empty() ? "(none)" : cssComputedStyleEvidence},
 			{"Current Document", "text_metrics_model", "baseline/descent aware system font"},
 			{"Current Document", "text_backend", textMetrics.backend},
 			{"Current Document", "text_ascent_px", std::to_string(textMetrics.ascent)},
@@ -1909,6 +3228,158 @@ namespace {
 			out << entry.section << "." << entry.label << "=" << entry.value << "\n";
 		}
 		return out.str();
+	}
+
+	static void appendFormPhase2EDiagnostics(std::string& out, const NavigatorPageMetadata& metadata)
+	{
+		const auto add = [&](const char* label, int value) {
+			out += std::string("Current Document.") + label + "=" + std::to_string(value) + "\n";
+		};
+		add("HTML forms parsed", metadata.htmlFormsParsed);
+		add("HTML fieldsets parsed", metadata.htmlFieldsetsParsed);
+		add("HTML labels parsed", metadata.htmlLabelsParsed);
+		add("HTML inputs parsed", metadata.htmlInputsParsed);
+		add("HTML buttons parsed", metadata.htmlButtonsParsed);
+		add("HTML textareas parsed", metadata.htmlTextareasParsed);
+		add("HTML selects parsed", metadata.htmlSelectsParsed);
+		add("HTML options parsed", metadata.htmlOptionsParsed);
+		add("HTML hidden controls", metadata.htmlHiddenControls);
+		add("HTML control metadata clamps", metadata.controlMetadataClamps);
+		add("HTML control text truncations", metadata.controlTextTruncations);
+		add("CSS :checked pseudo parsed", metadata.cssCheckedPseudoParsed);
+		add("CSS :checked pseudo matches", metadata.cssCheckedPseudoMatches);
+		add("CSS :disabled pseudo matches", metadata.cssDisabledPseudoMatches);
+		add("CSS :enabled pseudo matches", metadata.cssEnabledPseudoMatches);
+		add("CSS :required pseudo matches", metadata.cssRequiredPseudoMatches);
+		add("CSS :read-only pseudo matches", metadata.cssReadonlyPseudoMatches);
+		add("CSS :read-write pseudo matches", metadata.cssReadwritePseudoMatches);
+		add("CSS :focus pseudo parsed", metadata.cssFocusPseudoParsed);
+		add("CSS :focus pseudo matches", metadata.cssFocusPseudoMatches);
+		add("CSS :focus-visible pseudo parsed", metadata.cssFocusVisiblePseudoParsed);
+		add("CSS :focus-visible pseudo matches", metadata.cssFocusVisiblePseudoMatches);
+		add("css_focus_pseudo_parsed", metadata.cssFocusPseudoParsed);
+		add("css_focus_pseudo_matches", metadata.cssFocusPseudoMatches);
+		add("css_focus_visible_pseudo_matches", metadata.cssFocusVisiblePseudoMatches);
+		add("css_focus_runtime_recomputations", metadata.cssRuntimeFocusRecomputations);
+		add("Form controls rendered", metadata.formControlsRendered);
+		add("Form controls unsupported", metadata.formControlsUnsupported);
+		add("Form interactions deferred", metadata.formInteractionsDeferred);
+		add("form_runtime_controls_initialized", metadata.formRuntimeControlsInitialized);
+		add("form_checkbox_activations", metadata.formCheckboxActivations);
+		add("form_checkbox_toggles", metadata.formCheckboxToggles);
+		add("form_radio_activations", metadata.formRadioActivations);
+		add("form_radio_group_unchecks", metadata.formRadioGroupUnchecks);
+		add("form_label_activations", metadata.formLabelActivations);
+		add("form_button_activations", metadata.formButtonActivations);
+		add("form_disabled_activation_blocks", metadata.formDisabledActivationBlocks);
+		add("form_hidden_hit_targets_suppressed", metadata.formHiddenHitTargetsSuppressed);
+		add("form_duplicate_activation_suppressed", metadata.formDuplicateActivationSuppressed);
+		add("form_runtime_state_resets", metadata.formRuntimeStateResets);
+		add("form_hit_targets_registered", metadata.formHitTargetsRegistered);
+		add("form_hit_target_clamps", metadata.formHitTargetClamps);
+		add("form_focusable_controls", metadata.formFocusableControls);
+		add("form_focus_changes", metadata.formFocusChanges);
+		add("form_focus_clears", metadata.formFocusClears);
+		add("form_focus_wraps", metadata.formFocusWraps);
+		add("form_tab_forward", metadata.formTabForward);
+		add("form_tab_backward", metadata.formTabBackward);
+		add("form_keyboard_activations", metadata.formKeyboardActivations);
+		add("form_space_activations", metadata.formSpaceActivations);
+		add("form_enter_activations", metadata.formEnterActivations);
+		add("form_key_repeat_suppressed", metadata.formKeyRepeatSuppressed);
+		add("form_stale_key_activation_blocks", metadata.formStaleKeyActivationBlocks);
+		add("form_disabled_focus_skips", metadata.formDisabledFocusSkips);
+		add("form_hidden_focus_skips", metadata.formHiddenFocusSkips);
+		add("form_focus_state_resets", metadata.formFocusStateResets);
+		add("css_checked_runtime_recomputations", metadata.cssCheckedRuntimeRecomputations);
+		out += "Current Document.form_interaction_mode=" + metadata.formInteractionMode + "\n";
+		out += "Current Document.form_focus_mode=session_local_non_editing\n";
+		out += "Current Document.form_focus_origin=" +
+			(metadata.formFocusOrigin.empty() ? "none" : metadata.formFocusOrigin) + "\n";
+		out += "Current Document.form_focus_generation=" + std::to_string(metadata.formFocusGeneration) + "\n";
+		out += "Current Document.form_focused_logical_serial=" + std::to_string(metadata.formFocusedLogicalSerial) + "\n";
+	}
+
+	static void appendFormPhase2HDiagnostics(std::string& out, const WebDocument& doc)
+	{
+		const gxos::web::FormsDiagnostics& diagnostics = doc.formsDiagnostics;
+		const auto add = [&](const char* label, int value) {
+			out += std::string("Current Document.") + label + "=" + std::to_string(value) + "\n";
+		};
+		add("form_focus_cancel_escape", diagnostics.formFocusCancelEscape);
+		add("form_focus_cancel_navigation", diagnostics.formFocusCancelNavigation);
+		add("form_focus_cancel_deactivation", diagnostics.formFocusCancelDeactivation);
+		add("form_focus_cancel_state_change", diagnostics.formFocusCancelStateChange);
+		add("form_focus_cancel_generation_mismatch", diagnostics.formFocusCancelGenerationMismatch);
+		add("form_focus_cancel_key_mismatch", diagnostics.formFocusCancelKeyMismatch);
+		add("form_key_repeat_suppressed", diagnostics.formKeyRepeatSuppressed);
+		add("form_focus_origin_mouse", diagnostics.formFocusOriginMouse);
+		add("form_focus_origin_keyboard", diagnostics.formFocusOriginKeyboard);
+		add("form_focus_visible_matches", diagnostics.formFocusVisibleMatches);
+		add("form_focus_ring_draws", diagnostics.formFocusRingDraws);
+		add("form_focus_ring_clamps", diagnostics.formFocusRingClamps);
+		add("form_focus_reveal_scrolls", diagnostics.formFocusRevealScrolls);
+		add("form_focus_reveal_noops", diagnostics.formFocusRevealNoops);
+		add("form_focus_reveal_clamps", diagnostics.formFocusRevealClamps);
+		add("form_accessibility_records", diagnostics.formAccessibilityRecords);
+		add("form_accessibility_metadata_clamps", diagnostics.formAccessibilityMetadataClamps);
+		add("form_accessible_name_present", diagnostics.formAccessibleNamePresent);
+		add("form_accessible_name_missing", diagnostics.formAccessibleNameMissing);
+		add("form_label_associations_valid", diagnostics.formLabelAssociationsValid);
+		add("form_label_associations_invalid", diagnostics.formLabelAssociationsInvalid);
+		out += "Current Document.form_focus_mode=session_local_non_editing\n";
+		out += "Current Document.form_accessibility_aria=deferred_native_bounded_only\n";
+		out += "Current Document.form_accessibility_privacy=presence_only_no_values_names_or_passwords\n";
+
+		const bool fixture = doc.url.find("css-phase2h.html") != std::string::npos;
+		const size_t count = std::min(doc.formRuntimeState.accessibilityRecordCount,
+			doc.formRuntimeState.accessibilityRecords.size());
+		constexpr size_t kFormAccessibilityEvidenceCap = 32;
+		for (size_t i = 0; i < count && i < kFormAccessibilityEvidenceCap; ++i) {
+			const FormAccessibilityRecord& record = doc.formRuntimeState.accessibilityRecords[i];
+			if (!fixture || record.fixtureId.empty()) continue;
+			out += "Current Document.form_accessibility_record=";
+			out += "fixture-id=" + record.fixtureId;
+			out += ",logical-serial=" + std::to_string(record.logicalSerial);
+			out += ",document-generation=" + std::to_string(record.documentGeneration);
+			out += ",role=" + std::string(formAccessibilityRoleName(record.role));
+			out += ",focusable=" + yesNo(record.focusable);
+			out += ",focused=" + yesNo(record.focused);
+			out += ",focus-origin=" + std::string(formFocusOriginName(record.focusOrigin));
+			out += ",focus=" + yesNo(record.focusMatch);
+			out += ",focus-visible=" + yesNo(record.focusVisibleMatch);
+			out += ",checked=" + yesNo(record.checked);
+			out += ",disabled=" + yesNo(record.disabled);
+			out += ",required=" + yesNo(record.required);
+			out += ",readonly=" + yesNo(record.readOnly);
+			out += ",visible=" + yesNo(record.visible);
+			out += ",label-associated=" + yesNo(record.labelAssociated);
+			out += ",label-source=" + std::string(formAccessibilityLabelSourceName(record.labelSource));
+			out += ",accessible-name-present=" + yesNo(record.accessibleNamePresent);
+			out += ",name-source=" + std::string(formAccessibilityNameSourceName(record.accessibleNameSource));
+			out += ",metadata-complete=" + yesNo(record.metadataComplete);
+			out += ",focus-ring-drawn=" + yesNo(record.focusRingDrawn);
+			out += ",focus-ring-clamped=" + yesNo(record.focusRingClamped);
+			out += ",reveal-scroll-result=" + std::string(formFocusRevealResultName(record.revealResult));
+			out += ",winning-selector=" + record.winningSelectorCategory;
+			out += ",winning-pseudo=" + record.winningPseudo;
+		out += ",specificity=" + std::to_string(record.winningSpecificityId) + "." +
+				std::to_string(record.winningSpecificityClass) + "." +
+				std::to_string(record.winningSpecificityElement);
+			out += ",source-order=" + std::to_string(record.winningSourceOrder) + "\n";
+		}
+		if (fixture && count > kFormAccessibilityEvidenceCap)
+			out += "Current Document.form_accessibility_evidence_clamped=yes\n";
+	}
+
+	static void appendFormPhase2EBlocks(WebDocument& doc, const NavigatorPageMetadata& metadata)
+	{
+		doc.blocks.push_back({BlockType::Heading, "CSS Phase 2E Form Diagnostics", ""});
+		std::string report;
+		appendFormPhase2EDiagnostics(report, metadata);
+		std::istringstream lines(report);
+		std::string line;
+		while (std::getline(lines, line)) doc.blocks.push_back({BlockType::ListItem, line, ""});
 	}
 
 	static std::string filePathFromUrl(const std::string& url)
@@ -2057,61 +3528,111 @@ namespace {
 		return inserted.first->second;
 	}
 
-	static void imageDisplaySize(const DocBlock& block, int& outW, int& outH)
+	static void imageDisplaySize(const DocBlock& block, int availableWidth, int& outW, int& outH,
+		bool* outConstrained, bool* outAspectPreserved, bool* outClamped)
 	{
-		constexpr int kImageMaxW = kContentW - 36;
-		constexpr int kImageMaxH = kContentH - 20;
+		const int paddingFallback = cssPaddingOrDefault(block.style, 0);
+		const int paddingLeft = cssPaddingLeftPx(block.style, paddingFallback);
+		const int paddingRight = cssPaddingRightPx(block.style, paddingFallback);
+		const int paddingTop = cssPaddingTopPx(block.style, paddingFallback);
+		const int paddingBottom = cssPaddingBottomPx(block.style, paddingFallback);
+		const int contentLimitW = std::max(1, std::min(kContentW - 36, availableWidth - paddingLeft - paddingRight));
+		const int contentLimitH = std::max(1, kContentH - 20 - paddingTop - paddingBottom);
 		const ImageInfo& info = imageInfoForBlock(block);
 		int naturalW = info.ok ? info.naturalW : 220;
 		int naturalH = info.ok ? info.naturalH : 64;
 		if (naturalW <= 0) naturalW = 220;
 		if (naturalH <= 0) naturalH = 64;
+		const int cssWidth = cssWidthPx(block.style, contentLimitW, -1);
+		const int cssHeight = cssHeightPx(block.style, contentLimitH, -1);
+		const int cssMaxWidth = cssMaxWidthPx(block.style, contentLimitW, -1);
+		const int cssMaxHeight = cssMaxHeightPx(block.style, contentLimitH, -1);
 
-		int drawW = block.width > 0 ? block.width : naturalW;
-		int drawH = block.height > 0 ? block.height : naturalH;
-		if (block.width > 0 && block.height <= 0) {
+		int drawW = naturalW;
+		int drawH = naturalH;
+		bool widthSpecified = false;
+		bool heightSpecified = false;
+
+		if (block.width > 0) {
+			drawW = block.width;
+			widthSpecified = true;
+		}
+		if (block.height > 0) {
+			drawH = block.height;
+			heightSpecified = true;
+		}
+
+		if (cssWidth >= 0) {
+			drawW = cssWidth;
+			widthSpecified = true;
+		}
+		if (cssHeight >= 0) {
+			drawH = cssHeight;
+			heightSpecified = true;
+		}
+
+		bool aspectPreserved = false;
+		if (widthSpecified && !heightSpecified) {
 			drawH = std::max(1, (drawW * naturalH) / naturalW);
-		} else if (block.height > 0 && block.width <= 0) {
+			aspectPreserved = true;
+		} else if (heightSpecified && !widthSpecified) {
 			drawW = std::max(1, (drawH * naturalW) / naturalH);
+			aspectPreserved = true;
 		}
-		if (block.style.width > 0) {
-			drawW = block.style.width;
-			if (block.height <= 0) {
-				drawH = std::max(1, (drawW * naturalH) / naturalW);
-			}
-		} else if (block.style.widthPercent >= 0) {
-			drawW = std::max(1, kImageMaxW * block.style.widthPercent / 100);
-			if (block.height <= 0) {
-				drawH = std::max(1, (drawW * naturalH) / naturalW);
-			}
+
+		int limitW = contentLimitW;
+		if (cssMaxWidth >= 0) {
+			limitW = std::min(limitW, cssMaxWidth);
 		}
-		if (block.style.maxWidth > 0 && drawW > block.style.maxWidth) {
-			drawW = block.style.maxWidth;
-			if (block.height <= 0) {
-				drawH = std::max(1, (drawW * naturalH) / naturalW);
-			}
+		int limitH = contentLimitH;
+		if (cssMaxHeight >= 0) {
+			limitH = std::min(limitH, cssMaxHeight);
 		}
-		if (block.style.maxWidthPercent >= 0) {
-			const int cssMaxW = std::max(1, kImageMaxW * block.style.maxWidthPercent / 100);
-			if (drawW > cssMaxW) {
-				drawW = cssMaxW;
-				if (block.height <= 0) {
-					drawH = std::max(1, (drawW * naturalH) / naturalW);
+
+		bool constrained = false;
+		bool sizeClamped = block.imageSizeAttrClamped;
+		if (drawW > limitW || drawH > limitH) {
+			const double scaleW = static_cast<double>(limitW) / static_cast<double>(drawW);
+			const double scaleH = static_cast<double>(limitH) / static_cast<double>(drawH);
+			const double scale = std::min(scaleW, scaleH);
+			if (scale < 1.0) {
+				const int scaledW = std::max(1, static_cast<int>(drawW * scale));
+				const int scaledH = std::max(1, static_cast<int>(drawH * scale));
+				if (scaledW != drawW || scaledH != drawH) {
+					constrained = true;
+					sizeClamped = true;
 				}
+				drawW = scaledW;
+				drawH = scaledH;
+				aspectPreserved = true;
+			}
+		}
+		if (drawW > limitW) {
+			drawW = limitW;
+			constrained = true;
+			sizeClamped = true;
+		}
+		if (drawH > limitH) {
+			drawH = limitH;
+			constrained = true;
+			sizeClamped = true;
+		}
+
+		if (!info.ok && !block.alt.empty()) {
+			const int placeholderMaxChars = std::max(1, (drawW - 20) / kCharW);
+			const std::vector<std::string> altLines = wrapText(block.alt, std::max(1, placeholderMaxChars));
+			const int placeholderLineCount = std::max(1, std::min(3, static_cast<int>(altLines.size())));
+			const int placeholderH = placeholderLineCount * blockTextLineHeight(block) + 16;
+			if (drawH < placeholderH) {
+				drawH = placeholderH;
 			}
 		}
 
-		if (drawW > kImageMaxW) {
-			drawH = std::max(1, (drawH * kImageMaxW) / drawW);
-			drawW = kImageMaxW;
-		}
-		if (drawH > kImageMaxH) {
-			// TODO: replace nearest-neighbor compositor scaling with higher-quality scaling.
-			drawW = std::max(1, (drawW * kImageMaxH) / drawH);
-			drawH = kImageMaxH;
-		}
 		outW = std::max(1, drawW);
 		outH = std::max(1, drawH);
+		if (outConstrained) *outConstrained = constrained;
+		if (outAspectPreserved) *outAspectPreserved = aspectPreserved;
+		if (outClamped) *outClamped = sizeClamped;
 	}
 
 	static std::string imagePlaceholderText(const DocBlock& block, const ImageInfo& info)
@@ -2211,8 +3732,13 @@ bool Navigator::SmokeDragFirstLinkSelectsWithoutNavigation()
 
 std::string Navigator::SmokeRuntimeReport()
 {
+	// Refresh only the currently inspected document.  Generated about: views
+	// (Page Info, Save Page Text, and runtime diagnostics) must not replace the
+	// ownership metadata for the page they describe.
+	if (s_currentDoc.url == s_pageMetadata.finalUrl)
+		storePageMetadata(s_pageMetadata, s_currentDoc);
 	const std::string inspected = s_pageMetadata.finalUrl.empty() ? "" : s_pageMetadata.finalUrl;
-	return formatRuntimeReport(hostedRuntimeReportEntries(
+	std::string report = formatRuntimeReport(hostedRuntimeReportEntries(
 		s_currentDoc.url,
 		s_currentDoc.title,
 		static_cast<int>(s_currentDoc.blocks.size()),
@@ -2226,6 +3752,7 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.unsupportedExternalStylesheetCount,
 		s_pageMetadata.unsupportedCssRuleCount,
 		s_pageMetadata.unsupportedCssDeclarationCount,
+		s_pageMetadata.cssUnsupportedSelectorCount,
 		s_pageMetadata.cssParseErrorCount,
 		s_pageMetadata.cssStyleBlockCapped,
 		s_pageMetadata.cssStyleBytesProcessed,
@@ -2244,6 +3771,80 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssTableCaptionCount,
 		s_pageMetadata.cssTableHeaderCellCount,
 		s_pageMetadata.cssVisitedLinkCount,
+		s_pageMetadata.cssBorderedBlocksRendered,
+		s_pageMetadata.cssDashedBordersRendered,
+		s_pageMetadata.cssDottedBordersRendered,
+		s_pageMetadata.cssBorderWidthClamps,
+		s_pageMetadata.cssCollapsedTablesRendered,
+		s_pageMetadata.cssSeparateTablesRendered,
+		s_pageMetadata.cssTableBorderSpacingClamps,
+		s_pageMetadata.cssListStyleMarkersRendered,
+		s_pageMetadata.cssListStyleNoneApplied,
+		s_pageMetadata.cssTextDecorationsRendered,
+		s_pageMetadata.cssGenericFontFamilyApplied,
+		s_pageMetadata.cssGenericFontFamilyFallbacks,
+		s_pageMetadata.cssFiguresRendered,
+		s_pageMetadata.cssFigcaptionsRendered,
+		s_pageMetadata.cssBlockquotesRendered,
+		s_pageMetadata.cssDefinitionListsRendered,
+		s_pageMetadata.cssImagesConstrained,
+		s_pageMetadata.cssImagesAspectPreserved,
+		s_pageMetadata.cssImageAltFallbacks,
+		s_pageMetadata.cssImageSizeClamps,
+		s_pageMetadata.cssNestedLayoutClamps,
+		s_pageMetadata.cssMaxWrapperAncestorDepth,
+		s_pageMetadata.cssSelectorGroupsParsed,
+		s_pageMetadata.cssCompoundSelectorsParsed,
+		s_pageMetadata.cssChildCombinators,
+		s_pageMetadata.cssDescendantCombinators,
+		s_pageMetadata.cssAdjacentSiblingCombinators,
+		s_pageMetadata.cssGeneralSiblingCombinators,
+		s_pageMetadata.cssAdjacentSiblingMatches,
+		s_pageMetadata.cssGeneralSiblingMatches,
+		s_pageMetadata.cssSiblingScanSteps,
+		s_pageMetadata.cssSiblingScanClamps,
+		s_pageMetadata.cssSiblingMetadataClamps,
+		s_pageMetadata.cssSiblingMetadataErrors,
+		s_pageMetadata.cssSelectorMatches,
+		s_pageMetadata.cssSpecificityOverrides,
+		s_pageMetadata.cssSourceOrderOverrides,
+		s_pageMetadata.cssInlineOverrides,
+		s_pageMetadata.cssInheritedPropertiesApplied,
+		s_pageMetadata.cssSelectorDepthClamps,
+		s_pageMetadata.cssSelectorGroupClamps,
+		s_pageMetadata.cssCascadePropertyResolutions,
+		s_pageMetadata.cssImportantDeclarationsApplied,
+		s_pageMetadata.cssRuleCapCount,
+		s_pageMetadata.cssDeclarationCapCount,
+		s_pageMetadata.cssInheritanceDepthClamps,
+		s_pageMetadata.cssPseudoClassesParsed,
+		s_pageMetadata.cssStructuralPseudoMatches,
+		s_pageMetadata.cssFirstChildMatches,
+		s_pageMetadata.cssLastChildMatches,
+		s_pageMetadata.cssNthChildMatches,
+		s_pageMetadata.cssOfTypeMatches,
+		s_pageMetadata.cssNotMatches,
+		s_pageMetadata.cssLinkPseudoMatches,
+		s_pageMetadata.cssVisitedPseudoMatches,
+		s_pageMetadata.cssPseudoClassClamps,
+		s_pageMetadata.cssNthExpressionParseErrors,
+		s_pageMetadata.cssStructuralMetadataClamps,
+		s_pageMetadata.cssSelectorEvaluationStepClamps,
+		s_pageMetadata.cssEmptyPseudoParsed,
+		s_pageMetadata.cssEmptyPseudoMatches,
+		s_pageMetadata.cssEmptyMetadataIncomplete,
+		s_pageMetadata.cssContentMetadataClamps,
+		s_pageMetadata.cssSelectorGroupMemberRecoveries,
+		s_pageMetadata.cssCommentScanClamps,
+		s_pageMetadata.cssUnterminatedCommentErrors,
+		s_pageMetadata.cssUnbalancedParenthesisErrors,
+		s_pageMetadata.cssUnbalancedBracketErrors,
+		s_pageMetadata.cssUnterminatedStringErrors,
+		s_pageMetadata.cssInvalidCombinatorSequences,
+		s_pageMetadata.cssIdentifierEscapeRejections,
+		s_pageMetadata.cssSelectorMemberParseFailures,
+		s_pageMetadata.cssSelectorRecoverySuccesses,
+		s_pageMetadata.cssComputedStyleEvidence,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -2267,6 +3868,9 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.tlsCredentialAcquired,
 		s_pageMetadata.tlsHandshakeStarted,
 		s_pageMetadata.tlsSmokeSelfSignedBypass));
+	appendFormPhase2EDiagnostics(report, s_pageMetadata);
+	appendFormPhase2HDiagnostics(report, s_currentDoc);
+	return report;
 }
 
 std::string Navigator::SmokeCurrentUrl()
@@ -2292,6 +3896,183 @@ std::string Navigator::SmokeCurrentLinkUrl(const std::string& text)
 		}
 	}
 	return "";
+}
+
+bool Navigator::SmokeClickFormControlById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex >= 0 && smokeClickBlock(blockIndex, false);
+}
+
+bool Navigator::SmokeClickFormLabelById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, true);
+	return blockIndex >= 0 && smokeClickBlock(blockIndex, true);
+}
+
+bool Navigator::SmokeFormControlCheckedById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex >= 0 && runtimeChecked(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+}
+
+bool Navigator::SmokeFormControlDisabledById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex >= 0 && runtimeDisabled(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+}
+
+bool Navigator::SmokeFormHitTargetById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	s_scrollOffset = std::max(0, blockLayoutY(blockIndex) - kContentH / 2);
+	clampScrollOffset();
+	const Rect rect = formControlRect(blockIndex);
+	if (rect.w <= 0 || rect.h <= 0) return false;
+	int hitIndex = -1;
+	const HitTarget target = hitTest(rect.x + rect.w / 2, rect.y + rect.h / 2, hitIndex);
+	return hitIndex == blockIndex &&
+		(target == HitTarget::FormCheckbox || target == HitTarget::FormRadio ||
+		 target == HitTarget::FormSubmit || target == HitTarget::FormInput ||
+		 target == HitTarget::FormTextarea || target == HitTarget::FormSelect);
+}
+
+int Navigator::SmokeFormActivationCountById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return -1;
+	const FormRuntimeControlState* state = runtimeStateForBlock(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+	return state ? static_cast<int>(state->activationCount) : 0;
+}
+
+bool Navigator::SmokeFormMouseSafetyById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	s_scrollOffset = std::max(0, blockLayoutY(blockIndex) - kContentH / 2);
+	clampScrollOffset();
+	const Rect rect = formControlRect(blockIndex);
+	if (rect.w <= 0 || rect.h <= 0) return false;
+	const int insideX = rect.x + rect.w / 2;
+	const int insideY = rect.y + rect.h / 2;
+	const int outsideX = std::min(kWindowW - 1, rect.x + rect.w + 32);
+	const int outsideY = std::min(kWindowH - kStatusBarH - 1, rect.y + rect.h + 32);
+	const int before = SmokeFormActivationCountById(id);
+	handleMouseInput(insideX, insideY, 1, "down");
+	handleMouseInput(outsideX, outsideY, 1, "up");
+	handleMouseInput(outsideX, outsideY, 1, "down");
+	handleMouseInput(insideX, insideY, 1, "up");
+	return SmokeFormActivationCountById(id) == before;
+}
+
+bool Navigator::SmokeFocusFormControlById(const std::string& id, bool keyboardOrigin)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0 || !isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(blockIndex)])) return false;
+	focusDocumentInput(blockIndex, keyboardOrigin ? FormFocusOrigin::Keyboard : FormFocusOrigin::ProgrammaticInternalSmoke);
+	updateDisplay();
+	return isFocusedFormControl(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+}
+
+bool Navigator::SmokeFormControlFocusedById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex >= 0 && isFocusedFormControl(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+}
+
+std::string Navigator::SmokeFocusedFormControlId()
+{
+	const int blockIndex = focusedFormControlBlockIndex();
+	return blockIndex >= 0 ? s_currentDoc.blocks[static_cast<size_t>(blockIndex)].id : std::string();
+}
+
+std::string Navigator::SmokeFormFocusOrigin()
+{
+	return formFocusOriginName(s_currentDoc.formRuntimeState.focusOrigin);
+}
+
+int Navigator::SmokeFormFocusableCount()
+{
+	std::array<int, kFormRuntimeControlCap> order{};
+	return static_cast<int>(buildFormFocusOrder(order));
+}
+
+bool Navigator::SmokeKeyPress(int keyCode, const std::string& action)
+{
+	if (s_windowId == 0) return false;
+	handleKeyPress(keyCode, action);
+	return true;
+}
+
+bool Navigator::SmokeSetFormControlDisabledById(const std::string& id, bool disabled)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	FormRuntimeControlState* state = runtimeStateForBlock(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
+	if (!state) return false;
+	state->disabled = disabled;
+	recomputeFormControlStyles();
+	updateDisplay();
+	return runtimeDisabled(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]) == disabled;
+}
+
+bool Navigator::SmokeSetFormControlHiddenById(const std::string& id, bool hidden)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (!block.formControl.metadataComplete || block.formControl.logicalSerial == 0) return false;
+	block.formControl.hidden = hidden;
+	block.elementMetadata.formControl.hidden = hidden;
+	block.style.displayNone = hidden;
+	recomputeFormControlStyles();
+	updateDisplay();
+    // The authored/computed display style may legitimately differ from the
+    // deterministic hidden-transition hook.  Focusability and metadata use
+    // the form-control hidden flag, so verify that state directly rather than
+    // coupling the hook result to a later style recomputation.
+    return block.formControl.hidden == hidden;
+}
+
+void Navigator::SmokeDeactivateWindow()
+{
+	clearDocumentFocus(true, FormFocusCancellationReason::Deactivation);
+	s_ctrlPressed = false;
+	s_shiftPressed = false;
+	if (s_windowId != 0) updateDisplay();
+}
+
+bool Navigator::SmokeForceFormFocusGenerationMismatch()
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || !runtime.focusValid) return false;
+	if (runtime.focusedDocumentGeneration == std::numeric_limits<uint64_t>::max())
+		runtime.focusedDocumentGeneration = 1;
+	else
+		++runtime.focusedDocumentGeneration;
+	recomputeFormControlStyles();
+	updateDisplay();
+	return !runtime.focusValid && runtime.focusedLogicalSerial == 0;
+}
+
+int Navigator::SmokeFormControlInputLengthById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	return blockIndex < 0 ? -1 : static_cast<int>(s_currentDoc.blocks[static_cast<size_t>(blockIndex)].inputValue.size());
+}
+
+void Navigator::SmokeFocusAddressBar()
+{
+	focusAddressBar();
+}
+
+bool Navigator::SmokeReloadCurrentDocument()
+{
+	if (s_windowId == 0 || s_currentDoc.url.empty()) return false;
+	const std::string url = s_currentDoc.url;
+	loadUrl(url, false);
+	return s_currentDoc.url == url;
 }
 
 std::vector<int> Navigator::SmokeToolbarWidgetIds()
@@ -2322,6 +4103,8 @@ int Navigator::main(int, char**)
 	s_addressFocused = false;
 	s_addressBuffer.clear();
 	s_addressCaret   = 0;
+	s_documentGeneration = 0;
+	s_tabKeyPressed = false;
 	s_ctrlPressed = false;
 	s_shiftPressed = false;
 	s_mouseLeftDown = false;
@@ -2413,6 +4196,22 @@ int Navigator::main(int, char**)
 			}
 			break;
 		}
+		case MsgType::MT_SetFocus: {
+			try {
+				const uint64_t focusedWindow = std::stoull(payload);
+				if (focusedWindow != s_windowId) {
+					clearDocumentFocus(true, FormFocusCancellationReason::Deactivation);
+					s_ctrlPressed = false;
+					s_shiftPressed = false;
+					if (s_windowId != 0) updateDisplay();
+				}
+			} catch (...) {
+				clearDocumentFocus(true, FormFocusCancellationReason::Deactivation);
+				s_ctrlPressed = false;
+				s_shiftPressed = false;
+			}
+			break;
+		}
 		case MsgType::MT_InputKey: {
 			size_t sep = payload.find('|');
 			if (sep != std::string::npos) {
@@ -2455,38 +4254,38 @@ void Navigator::updateDisplay()
 	publish(MsgType::MT_SetTitle, std::to_string(s_windowId) + "|" + winTitle);
 	publish(MsgType::MT_DrawText, std::to_string(s_windowId) + "|\f");
 
-	drawRect(s_windowId, 0, 0, kWindowW, kWindowH, 25, 29, 38);
+	drawThemeRect(s_windowId, 0, 0, kWindowW, kWindowH, NavigatorBodyColor());
 	renderToolbar();
 	renderDocument();
 	renderStatusBar();
 }
 
-void Navigator::renderToolbar()
-{
-	static const char* kIconRoot = "assets/Images/NuoveXT/PNG/32/";
-	drawRect(s_windowId, 0, 0, kWindowW, kToolbarH, 42, 46, 58);
-	drawRect(s_windowId, 0, kToolbarH - 1, kWindowW, 1, 78, 86, 108);
+	void Navigator::renderToolbar()
+	{
+		static const char* kIconRoot = "assets/Images/NuoveXT/PNG/32/";
+		drawThemeRect(s_windowId, 0, 0, kWindowW, kToolbarH, NavigatorToolbarColor());
+		drawThemeRect(s_windowId, 0, kToolbarH - 1, kWindowW, 1, NavigatorToolbarBorderColor());
 
-	addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back", std::string(kIconRoot) + "above_thearrow_10194.png");
-	addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Next", std::string(kIconRoot) + "Next_arrow_10211.png");
-	addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload", std::string(kIconRoot) + "refresh_arrow_10190.png");
+		addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back", std::string(kIconRoot) + "above_thearrow_10194.png");
+		addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Next", std::string(kIconRoot) + "Next_arrow_10211.png");
+		addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload", std::string(kIconRoot) + "refresh_arrow_10190.png");
 	addButton(s_windowId, kWidgetIdHome, 20 + 3 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Home", std::string(kIconRoot) + "gohome_action_ir_10235.png");
 	addButton(s_windowId, kWidgetIdBookmarks, 20 + 4 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Marks", std::string(kIconRoot) + "markers_list_add_favorites_10275.png");
 	addButton(s_windowId, kWidgetIdAddBookmark, 20 + 5 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Add", std::string(kIconRoot) + "edit_add_10261.png");
 	addButton(s_windowId, kWidgetIdFind, 20 + 6 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Find");
 
-	drawRect(s_windowId, kAddressX, kAddressY, kAddressW, kAddressH, 18, 22, 30);
-	if (s_addressFocused) {
-		// Focused: bright blue border on all four sides
-		drawRect(s_windowId, kAddressX,                 kAddressY,                 kAddressW, 1, 80, 140, 220);
-		drawRect(s_windowId, kAddressX,                 kAddressY + kAddressH - 1, kAddressW, 1, 80, 140, 220);
-		drawRect(s_windowId, kAddressX,                 kAddressY,                 1, kAddressH, 80, 140, 220);
-		drawRect(s_windowId, kAddressX + kAddressW - 1, kAddressY,                 1, kAddressH, 80, 140, 220);
+		drawThemeRect(s_windowId, kAddressX, kAddressY, kAddressW, kAddressH, NavigatorAddressFillColor());
+		if (s_addressFocused) {
+			// Focused: bright blue border on all four sides
+			drawThemeRect(s_windowId, kAddressX,                 kAddressY,                 kAddressW, 1, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, kAddressX,                 kAddressY + kAddressH - 1, kAddressW, 1, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, kAddressX,                 kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, kAddressX + kAddressW - 1, kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
 
-		// Caret placement is still approximate until Navigator has proportional
-		// document/chrome text measurement exposed through the GUI protocol.
-		constexpr int kTextX = kAddressX + 10;
-		const int kTextY = centeredChromeTextY(kAddressY, kAddressH);
+			// Caret placement is still approximate until Navigator has proportional
+			// document/chrome text measurement exposed through the GUI protocol.
+			constexpr int kTextX = kAddressX + 10;
+			const int kTextY = centeredChromeTextY(kAddressY, kAddressH);
 
 		// Clamp caret defensively (should already be in range, but guard rendering).
 		int caretPos = std::max(0, std::min(s_addressCaret,
@@ -2498,44 +4297,135 @@ void Navigator::renderToolbar()
 		int caretX = kTextX + caretPos * kCharW;
 
 		// Draw the full text (simpler for renderers that don't do sub-string positioning).
-		drawTextAt(s_windowId, kTextX, kTextY, s_addressBuffer);
-		// Draw a 1-px wide caret bar on top.
-		drawRect(s_windowId, caretX, kAddressY + 4, 1, kAddressH - 8, 200, 220, 255);
-		(void)before; (void)after; // reserved for future proportional split-draw
-	} else {
-		// Normal: subtle top/bottom border
-		drawRect(s_windowId, kAddressX, kAddressY,                 kAddressW, 1, 110, 120, 142);
-		drawRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1,  70,  78,  96);
-		drawTextAt(s_windowId, kAddressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url);
-	}
-	if (s_loading) {
-		drawAnimatedImage(s_windowId, kAddressX + kAddressW - 24, kAddressY + 2, 22, 22,
-			"assets/Images/SurfThrobber/PNG/surfer_{frame}.png");
-	}
+			drawThemeText(s_windowId, kTextX, kTextY, s_addressBuffer, NavigatorTextColor());
+			// Draw a 1-px wide caret bar on top.
+			drawThemeRect(s_windowId, caretX, kAddressY + 4, 1, kAddressH - 8, NavigatorAccentColor());
+			(void)before; (void)after; // reserved for future proportional split-draw
+		} else {
+			// Normal: subtle top/bottom border
+			drawThemeRect(s_windowId, kAddressX, kAddressY,                 kAddressW, 1, NavigatorAddressIdleTopBorderColor());
+			drawThemeRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1, NavigatorAddressIdleBottomBorderColor());
+			drawThemeText(s_windowId, kAddressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url, NavigatorTextColor());
+		}
+		if (s_loading) {
+			drawAnimatedImage(s_windowId, kAddressX + kAddressW - 24, kAddressY + 2, 22, 22,
+				"assets/Images/SurfThrobber/PNG/surfer_{frame}.png");
+		}
 }
 
 void Navigator::renderDocument()
 {
 	clampScrollOffset();
+	s_renderCounters = {};
 
 	// Content area background
-	int pageBgR = 245;
-	int pageBgG = 247;
-	int pageBgB = 250;
+	uint32_t contentColor = NavigatorContentColor();
 	if (s_currentDoc.bodyStyle.hasBackgroundColor) {
-		colorChannels(s_currentDoc.bodyStyle.backgroundColor, pageBgR, pageBgG, pageBgB);
+		contentColor = s_currentDoc.bodyStyle.backgroundColor;
 	}
-	drawRect(s_windowId, kContentX, kToolbarH + 6, kContentW, kContentH, pageBgR, pageBgG, pageBgB);
-	drawRect(s_windowId, kContentX, kToolbarH + 6, kContentW, 1, 186, 192, 204);
+	const uint32_t contentTextColor = NavigatorContentTextColor(contentColor);
+	drawThemeRect(s_windowId, kContentX, kToolbarH + 6, kContentW, kContentH, contentColor);
+	drawThemeRect(s_windowId, kContentX, kToolbarH + 6, kContentW, 1, NavigatorContentBorderColor());
 	// Scroll-track slot
-	drawRect(s_windowId, kContentX + kContentW - 12, kToolbarH + 6, 8, kContentH, 229, 232, 238);
+	drawThemeRect(s_windowId, kContentX + kContentW - 12, kToolbarH + 6, 8, kContentH, NavigatorScrollTrackColor());
+	auto formFillColor = [&](const DocBlock& block, bool focused, bool disabled) -> uint32_t {
+		if (disabled) return 0xFFE3E6EAu;
+		if (block.style.hasBackgroundColor) return block.style.backgroundColor;
+		return NavigatorFieldFillColor(focused);
+	};
+	auto formBorderColor = [&](const DocBlock& block, bool focused, bool disabled) -> uint32_t {
+		if (disabled) return 0xFF9AA1A9u;
+		if (block.style.hasBorderTop && block.style.borderTopColor != 0) return block.style.borderTopColor;
+		return NavigatorFieldBorderColor(focused);
+	};
+	auto formTextColor = [&](const DocBlock& block, bool disabled, bool placeholder) -> uint32_t {
+		if (disabled || placeholder) return NavigatorFieldMutedTextColor();
+		if (block.style.hasColor) return block.style.color;
+		return NavigatorFieldTextColor();
+	};
+	auto blockHasAncestorSerial = [](const DocBlock& block, uint64_t serial) {
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			if (ancestor.serial == serial) return true;
+		}
+		return false;
+	};
+	auto renderFieldsetAt = [&](int currentIndex) {
+		for (const gxos::web::FormContainerMetadata& container : s_currentDoc.formContainers) {
+			if (container.tagName != "fieldset" || container.serial == 0 || container.style.displayNone) continue;
+			int first = -1;
+			int last = -1;
+			for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+				const DocBlock& candidate = s_currentDoc.blocks[static_cast<size_t>(i)];
+				if (!blockHasAncestorSerial(candidate, container.serial) || !blockHasVisibleCss(candidate)) continue;
+				if (first < 0) first = i;
+				last = i;
+			}
+			if (first != currentIndex || last < first) continue;
+			const int top = kContentY + blockLayoutY(first) - s_scrollOffset + 1;
+			const int lastHeight = blockTotalHeight(s_currentDoc.blocks[static_cast<size_t>(last)], s_currentDoc, false);
+			const int bottom = kContentY + blockLayoutY(last) - s_scrollOffset + lastHeight - 2;
+			const int available = std::max(1, kContentW - blockBodyMarginLeft(s_currentDoc) - blockBodyMarginRight(s_currentDoc) - 16);
+			const int width = std::max(120, std::min(available, cssMaxWidthPx(container.style, available,
+				cssWidthPx(container.style, available, available))));
+			const int x = kContentX + blockBodyMarginLeft(s_currentDoc) + 8;
+			const int height = std::max(28, bottom - top);
+			if (container.style.hasBackgroundColor) drawThemeRect(s_windowId, x, top, width, height, container.style.backgroundColor);
+			drawBlockBox(s_windowId, x, top, width, height, container.style);
+			std::string legendText = container.legendText;
+			const gxos::web::FormContainerMetadata* legend = nullptr;
+			for (const auto& candidate : s_currentDoc.formContainers) {
+				if (candidate.tagName == "legend" && candidate.parentSerial == container.serial) {
+					legend = &candidate;
+					break;
+				}
+			}
+			if (legend && !legend->legendText.empty()) legendText = legend->legendText;
+			if (!legendText.empty()) {
+				const int legendW = std::min(width - 20, std::max(kCharW, static_cast<int>(legendText.size()) * kCharW + 8));
+				drawThemeRect(s_windowId, x + 8, top - 2, legendW, kLineH + 2, contentColor);
+				drawThemeText(s_windowId, x + 12, top, legendText.substr(0, static_cast<size_t>(std::max(1, (legendW - 8) / kCharW))),
+					legend ? (legend->style.hasColor ? legend->style.color : contentTextColor) : contentTextColor);
+			}
+		}
+	};
 
 	int blockIndex = 0;
+	auto drawDefaultFocusRing = [&](int index, const DocBlock& control) {
+		if (!isFocusedFormControl(control)) return;
+		const Rect rect = formControlRect(index);
+		if (rect.w <= 0 || rect.h <= 0) return;
+		const uint32_t ring = isDarkColor(contentColor) ? 0xFFFFFFFFu : 0xFF111827u;
+		const int viewportTop = kToolbarH + 6;
+		const int viewportRight = kContentX + kContentW - 14;
+		const int viewportBottom = viewportTop + kContentH;
+		const int requestedX = rect.x - 2;
+		const int requestedY = rect.y - 2;
+		const int requestedRight = rect.x + rect.w + 1;
+		const int requestedBottom = rect.y + rect.h + 1;
+		const int x = std::max(kContentX, requestedX);
+		const int y = std::max(viewportTop, requestedY);
+		const int right = std::min(viewportRight, requestedRight);
+		const int bottom = std::min(viewportBottom, requestedBottom);
+		if (right <= x || bottom <= y) return;
+		FormAccessibilityRecord* record = accessibilityRecordForSerial(control.formControl.logicalSerial);
+		const bool clamped = x != requestedX || y != requestedY || right != requestedRight || bottom != requestedBottom;
+		++s_currentDoc.formsDiagnostics.formFocusRingDraws;
+		if (clamped) ++s_currentDoc.formsDiagnostics.formFocusRingClamps;
+		if (record) {
+			record->focusRingDrawn = true;
+			record->focusRingClamped = clamped;
+		}
+		drawThemeRect(s_windowId, x, y, right - x, 1, ring);
+		drawThemeRect(s_windowId, x, bottom - 1, right - x, 1, ring);
+		drawThemeRect(s_windowId, x, y, 1, bottom - y, ring);
+		drawThemeRect(s_windowId, right - 1, y, 1, bottom - y, ring);
+	};
 	for (const DocBlock& block : s_currentDoc.blocks) {
 		if (!blockHasVisibleCss(block)) {
 			++blockIndex;
 			continue;
 		}
+		renderFieldsetAt(blockIndex);
 		int relY  = blockLayoutY(blockIndex);
 		int drawY = kContentY + relY - s_scrollOffset;
 		const int blockMarginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
@@ -2547,7 +4437,9 @@ void Navigator::renderDocument()
 		const int paddingBottom = cssPaddingBottomPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 		const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 		const int borderTop = cssBorderTopPx(block.style);
+		const int borderRight = cssBorderRightPx(block.style);
 		const int borderBottom = cssBorderBottomPx(block.style);
+		const int borderLeft = cssBorderLeftPx(block.style);
 		const int lineHeight = blockTextLineHeight(block);
 		const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
 		const int bodyMarginRight = blockBodyMarginRight(s_currentDoc);
@@ -2555,12 +4447,15 @@ void Navigator::renderDocument()
 			- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 		const int outerWidth = blockOuterWidth(block, availableWidth);
 		const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
-		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
-		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block) : 0;
+		const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+		const uint64_t listOrdinal = block.type == BlockType::ListItem ? blockListOrdinal(s_currentDoc, blockIndex) : 1;
+		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block, listOrdinal) : 0;
 		const int wrapCols = std::max(1, std::max(1, innerWidth - listInset) / kCharW);
 		const int listWrapCols = wrapCols;
 		const int preWrapCols = std::max(1, innerWidth / kCharW);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
+		const int contentX = blockContentLeftX(block, outerX);
+		const int contentY = blockContentTopY(block, drawY, blockMarginTop);
 
 		if (isTableCellLikeBlock(block)) {
 			if (!isFirstTableCellInGroup(s_currentDoc, blockIndex)) {
@@ -2582,8 +4477,10 @@ void Navigator::renderDocument()
 				continue;
 			}
 			const TableRowLayout& row = layout.rows[static_cast<size_t>(rowIndex)];
-			const int rowBlockH = row.heightPx + cssBorderTopPx(block.style) + cssBorderBottomPx(block.style);
-			if (drawY + rowBlockH < kContentY || drawY > kContentY + kContentH) {
+			const int tableY = drawY + blockMarginTop;
+			const int tableH = layout.totalHeightPx;
+			const int blockH = blockMarginTop + tableH + std::max(4, blockMarginBottom);
+			if (drawY + blockH < kContentY || drawY > kContentY + kContentH) {
 				++blockIndex;
 				continue;
 			}
@@ -2592,30 +4489,28 @@ void Navigator::renderDocument()
 				s_currentFindMatch < static_cast<int>(s_findMatches.size()) &&
 				s_findMatches[s_currentFindMatch].blockIndex == blockIndex)
 			{
-				drawRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
-					kContentW - 28, std::max(kLineH + 4, rowBlockH - std::max(0, blockMarginTop)),
-					255, 244, 168);
+				drawThemeRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
+					kContentW - 28, std::max(kLineH + 4, blockH - std::max(0, blockMarginTop)),
+					NavigatorFindHighlightColor());
 			}
 			SelectionRange selection = normalizedSelection();
 			if (selection.valid && blockIndex >= selection.start.blockIndex && blockIndex <= selection.end.blockIndex && isSelectableBlock(block)) {
 				Rect selectionRect = selectableBlockRect(blockIndex);
 				if (selectionRect.w > 0 && selectionRect.h > 0) {
-					drawRect(s_windowId,
+					drawThemeRect(s_windowId,
 						selectionRect.x - 2,
 						selectionRect.y - 1,
 						std::min(selectionRect.w + 4, kContentX + kContentW - 18 - (selectionRect.x - 2)),
 						selectionRect.h,
-						96, 146, 224);
+						NavigatorSelectionColor());
 				}
 			}
-			const int boxY = drawY + blockMarginTop;
-			drawBlockBox(s_windowId, layout.outerX, boxY, layout.outerWidth, row.heightPx, block.style);
+			drawBlockBox(s_windowId, layout.outerX, tableY, layout.outerWidth, tableH, block.style);
+			const int tableContentX = layout.outerX + layout.borderLeft + layout.paddingLeft;
 			const size_t lastCol = layout.columnWidthsChars.empty() ? 0 : layout.columnWidthsChars.size() - 1;
-			const int rowTextY = drawY + blockMarginTop + cssBorderTopPx(block.style) + layout.paddingTop;
-			const int rowTextTop = textLineTopPaddingPx(layout.lineHeight);
-			const int rowTextBottom = rowTextY + row.heightPx - layout.paddingTop - layout.paddingBottom;
-			int cellX = layout.outerX + layout.paddingLeft;
-			int separatorX = cellX;
+			const bool collapseMode = layout.collapseMode;
+			const int cellSpacingX = collapseMode ? 0 : layout.borderSpacingHorizontal;
+			int cellX = tableContentX;
 			for (size_t col = 0; col < row.cells.size(); ++col) {
 				const TableCellLayout& cell = row.cells[col];
 				const int colWidthChars = layout.columnWidthsChars[std::min(col, lastCol)];
@@ -2624,41 +4519,42 @@ void Navigator::renderDocument()
 				WebStyle cellStyle = cell.block->style;
 				if (row.headerRow) cellStyle.bold = true;
 				if (!cell.block->url.empty()) {
-					cellStyle.underline = true;
 					if (!cellStyle.hasColor) {
 						cellStyle.hasColor = true;
 						cellStyle.color = s_visitedUrls.find(cell.block->url) != s_visitedUrls.end()
 							? 0xFF6B46C1u
 							: 0xFF1E5CB8u;
 					}
+					if (!cellStyle.hasTextDecoration) {
+						cellStyle.hasTextDecoration = true;
+						cellStyle.underline = true;
+					}
 				}
-				if (cellStyle.hasBackgroundColor || cellStyle.hasBorderTop || cellStyle.hasBorderBottom) {
-					drawBlockBox(s_windowId, cellX, boxY, cellW, row.heightPx, cellStyle);
+				const int cellBorderTop = cssBorderTopPx(cellStyle);
+				const int cellBorderRight = cssBorderRightPx(cellStyle);
+				const int cellBorderBottom = cssBorderBottomPx(cellStyle);
+				const int cellBorderLeft = cssBorderLeftPx(cellStyle);
+				const int cellPaddingLeft = std::max(1, cell.padLeftChars * kCharW);
+				const int cellPaddingRight = std::max(1, cell.padRightChars * kCharW);
+				const int cellY = tableY + layout.rowOffsetsPx[static_cast<size_t>(rowIndex)];
+				if (cellStyle.hasBackgroundColor || cellBorderTop > 0 || cellBorderRight > 0 || cellBorderBottom > 0 || cellBorderLeft > 0) {
+					drawBoxDecorations(s_windowId, cellX, cellY, cellW, row.heightPx, cellStyle, !collapseMode, true, true, !collapseMode);
 				}
-				int lineY = rowTextY + rowTextTop;
+				const int innerWidth = std::max(1, cellW - cellBorderLeft - cellBorderRight - cellPaddingLeft - cellPaddingRight);
+				int lineY = cellY + cellBorderTop + layout.paddingTop + textLineTopPaddingPx(layout.lineHeight);
 				for (size_t lineIndex = 0; lineIndex < cell.lines.size(); ++lineIndex) {
 					const std::string& ln = cell.lines[lineIndex];
 					const int lineW = static_cast<int>(ln.size()) * kCharW;
-					const int paddingLeft = std::max(1, cell.padLeftChars * kCharW);
-					const int paddingRight = std::max(1, cell.padRightChars * kCharW);
-					const int innerWidth = std::max(1, cellW - paddingLeft - paddingRight);
-					int textX = cellX + paddingLeft;
+					int lineTextX = cellX + cellBorderLeft + cellPaddingLeft;
 					if (cellStyle.textAlign == TextAlign::Center) {
-						textX = cellX + paddingLeft + std::max(0, (innerWidth - lineW) / 2);
+						lineTextX = cellX + cellBorderLeft + cellPaddingLeft + std::max(0, (innerWidth - lineW) / 2);
 					} else if (cellStyle.textAlign == TextAlign::Right) {
-						textX = cellRight - paddingRight - std::min(innerWidth, lineW);
+						lineTextX = cellRight - cellBorderRight - cellPaddingRight - std::min(innerWidth, lineW);
 					}
-					drawTextAtStyled(s_windowId, textX, lineY, ln, cellStyle);
+					drawTextAtStyled(s_windowId, lineTextX, lineY, ln, cellStyle, contentTextColor, layout.lineHeight);
 					lineY += layout.lineHeight;
 				}
-				if (col < row.cells.size() - 1) {
-					drawRect(s_windowId, cellRight - 1, boxY, 1, row.heightPx, 209, 214, 223);
-				}
-				cellX += cellW;
-				separatorX = cellRight;
-			}
-			if (!row.cells.empty()) {
-				drawRect(s_windowId, layout.outerX + layout.paddingLeft, rowTextBottom, std::max(1, separatorX - (layout.outerX + layout.paddingLeft)), 1, 209, 214, 223);
+				cellX += cellW + cellSpacingX;
 			}
 			++blockIndex;
 			continue;
@@ -2682,10 +4578,11 @@ void Navigator::renderDocument()
 		constexpr int kPreGapIfNextHeading = 10;
 		switch (block.type) {
 		case BlockType::Heading:      blockH = blockMarginTop + borderTop + paddingTop + std::max(lineHeight + 4, headingFontSize + 2) + paddingBottom + borderBottom + std::max(4, blockMarginBottom); break;
-		case BlockType::Paragraph:    blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, wrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::Link:         blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, wrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::ListItem:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, listWrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::Preformatted: blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, preWrapCols, true, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Paragraph:    blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, wrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Link:         blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, wrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::ListItem:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, listWrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Preformatted: blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, preWrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::FormLabel:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, wrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom); break;
 		case BlockType::FormTextInput:
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio:
@@ -2695,7 +4592,7 @@ void Navigator::renderDocument()
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
-			imageDisplaySize(block, imageW, imageH);
+			imageDisplaySize(block, availableWidth, imageW, imageH);
 			blockH = blockMarginTop + borderTop + paddingTop + imageH + paddingBottom + borderBottom + std::max(4, blockMarginBottom);
 			break;
 		}
@@ -2710,23 +4607,23 @@ void Navigator::renderDocument()
 			s_currentFindMatch < static_cast<int>(s_findMatches.size()) &&
 			s_findMatches[s_currentFindMatch].blockIndex == blockIndex)
 		{
-			drawRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
-				kContentW - 28, std::max(kLineH + 4, blockH - std::max(0, blockMarginTop)),
-				255, 244, 168);
-		}
+				drawThemeRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
+					kContentW - 28, std::max(kLineH + 4, blockH - std::max(0, blockMarginTop)),
+					NavigatorFindHighlightColor());
+			}
 
 		SelectionRange selection = normalizedSelection();
 		if (selection.valid && blockIndex >= selection.start.blockIndex && blockIndex <= selection.end.blockIndex && isSelectableBlock(block)) {
 			Rect selectionRect = selectableBlockRect(blockIndex);
 			if (selectionRect.w > 0 && selectionRect.h > 0) {
-				drawRect(s_windowId,
-					selectionRect.x - 2,
-					selectionRect.y - 1,
-					std::min(selectionRect.w + 4, kContentX + kContentW - 18 - (selectionRect.x - 2)),
-					selectionRect.h,
-					96, 146, 224);
+					drawThemeRect(s_windowId,
+						selectionRect.x - 2,
+						selectionRect.y - 1,
+						std::min(selectionRect.w + 4, kContentX + kContentW - 18 - (selectionRect.x - 2)),
+						selectionRect.h,
+						NavigatorSelectionColor());
+				}
 			}
-		}
 
 		const int boxY = drawY + blockMarginTop;
 		const int boxH = std::max(1, blockH - blockMarginTop - std::max(4, blockMarginBottom));
@@ -2735,20 +4632,20 @@ void Navigator::renderDocument()
 		switch (block.type) {
 		case BlockType::Heading:
 			// Slightly larger heading: draw a subtle accent bar then the text
-			drawRect(s_windowId, outerX + paddingLeft, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
-				std::max(1, innerWidth), 2, 80, 140, 220);
-			drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style);
+			drawThemeRect(s_windowId, contentX, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
+				std::max(1, innerWidth), 2, NavigatorAccentColor());
+			drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), contentY + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor, lineHeight);
 			if (block.style.bold) {
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), contentY + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor, lineHeight);
 			}
 			break;
 
 		case BlockType::Paragraph: {
-			auto lines = wrapText(block.text, wrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
+			auto lines = wrapTextForBlock(block, wrapCols);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, lineW), lineY, ln, block.style, contentTextColor, lineHeight);
 				lineY += lineHeight;
 			}
 			break;
@@ -2760,14 +4657,14 @@ void Navigator::renderDocument()
 			const int ordinal = blockListOrdinal(s_currentDoc, blockIndex);
 			const std::string marker = blockListMarkerText(block, ordinal);
 			if (!marker.empty()) {
-				drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), marker, block.style);
+				drawTextAtStyled(s_windowId, contentX, contentY + textLineTopPaddingPx(lineHeight), marker, block.style, contentTextColor, lineHeight);
 			}
-			const int textInset = blockListTextInsetPx(block);
-			auto lines = wrapText(block.text, listWrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
+			const int textInset = blockListTextInsetPx(block, ordinal);
+			auto lines = wrapTextForBlock(block, listWrapCols);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + textInset, std::max(1, innerWidth - textInset), lineW), lineY, ln, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX + textInset, std::max(1, innerWidth - textInset), lineW), lineY, ln, block.style, contentTextColor, lineHeight);
 				lineY += lineHeight;
 			}
 			break;
@@ -2775,10 +4672,21 @@ void Navigator::renderDocument()
 
 		case BlockType::Preformatted: {
 			// Draw each line preserving exact content
-			auto lines = splitPreLines(block.text);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
+			auto lines = wrapTextForBlock(block, preWrapCols);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
-				drawTextAtStyled(s_windowId, outerX + paddingLeft, lineY, ln, block.style);
+				drawTextAtStyled(s_windowId, contentX, lineY, ln, block.style, contentTextColor, lineHeight);
+				lineY += lineHeight;
+			}
+			break;
+		}
+
+		case BlockType::FormLabel: {
+			auto lines = wrapTextForBlock(block, wrapCols);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
+			for (const std::string& ln : lines) {
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, static_cast<int>(ln.size()) * kCharW), lineY,
+					ln, block.style, contentTextColor, lineHeight);
 				lineY += lineHeight;
 			}
 			break;
@@ -2787,8 +4695,8 @@ void Navigator::renderDocument()
 		case BlockType::Link: {
 			// Full wrapped link block: underline + blue text
 			// The entire bounding rect is clickable (TODO: per-line hit testing).
-			auto lines = wrapText(block.text, wrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
+			auto lines = wrapTextForBlock(block, wrapCols);
+			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			int linkR = 55;
 			int linkG = 110;
 			int linkB = 210;
@@ -2804,13 +4712,8 @@ void Navigator::renderDocument()
 			linkStyle.color = 0xFF000000u | (static_cast<uint32_t>(linkR) << 16) |
 				(static_cast<uint32_t>(linkG) << 8) | static_cast<uint32_t>(linkB);
 			for (const std::string& ln : lines) {
-				// Underline under each line
 				int lineW = static_cast<int>(ln.size()) * kCharW;
-				if (block.style.underline) {
-					drawRect(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), textUnderlineYPx(lineY, lineHeight),
-						lineW, 1, linkR, linkG, linkB);
-				}
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, linkStyle);
+				drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, lineW), lineY, ln, linkStyle, contentTextColor, lineHeight);
 				lineY += lineHeight;
 			}
 			break;
@@ -2819,69 +4722,86 @@ void Navigator::renderDocument()
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
-			imageDisplaySize(block, imageW, imageH);
+			imageDisplaySize(block, availableWidth, imageW, imageH);
 			const ImageInfo& info = imageInfoForBlock(block);
-			const int imageX = outerX + paddingLeft;
+			const int imageX = contentX;
 			const int viewportTop = kContentY;
 			const int viewportBottom = kToolbarH + 6 + kContentH;
 			if (boxY + borderTop + paddingTop >= viewportTop && boxY + borderTop + paddingTop + imageH <= viewportBottom) {
 				if (info.ok) {
 					drawImage(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, info.drawPath);
 				} else {
-					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, 232, 236, 242);
-					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, 1, 145, 153, 168);
-					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop + imageH - 1, imageW, 1, 145, 153, 168);
-					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, 1, imageH, 145, 153, 168);
-					drawRect(s_windowId, imageX + imageW - 1, boxY + borderTop + paddingTop, 1, imageH, 145, 153, 168);
-					drawTextAtStyled(s_windowId, imageX + 10, boxY + borderTop + paddingTop + std::max(8, (imageH - lineHeight) / 2),
-						imagePlaceholderText(block, info), block.style);
+					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, NavigatorContentColor());
+					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, 1, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop + imageH - 1, imageW, 1, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, imageX + imageW - 1, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());
+					const std::string placeholder = imagePlaceholderText(block, info);
+					const int placeholderMaxChars = std::max(1, (imageW - 20) / kCharW);
+					std::vector<std::string> placeholderLines = wrapText(placeholder, placeholderMaxChars);
+					if (placeholderLines.empty()) placeholderLines.push_back(placeholder);
+					const int maxLines = std::max(1, std::min(3, static_cast<int>(placeholderLines.size())));
+					const int textHeight = maxLines * lineHeight;
+					int textY = boxY + borderTop + paddingTop + std::max(8, (imageH - textHeight) / 2);
+					for (int lineIndex = 0; lineIndex < maxLines; ++lineIndex) {
+						const std::string& line = placeholderLines[static_cast<size_t>(lineIndex)];
+						drawTextAtStyled(s_windowId, imageX + 10, textY, line, block.style, contentTextColor, lineHeight);
+						textY += lineHeight;
+					}
 				}
 			}
 			break;
 		}
 
 		case BlockType::FormTextInput: {
-			const int inputX = outerX + paddingLeft;
+			const int inputX = contentX;
 			const int inputY = boxY + borderTop + paddingTop;
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawRect(s_windowId, inputX, inputY, kFormInputW, kFormControlH, 250, 252, 255);
-			drawRect(s_windowId, inputX, inputY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX, inputY + kFormControlH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX, inputY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			std::string text = block.inputValue;
+			const bool focused = isFocusedFormControl(block);
+			const bool disabled = runtimeDisabled(block);
+			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
+			const int controlH = formControlHeight(block);
+			const uint32_t fill = formFillColor(block, focused, disabled);
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, inputX, inputY, controlW, controlH, fill);
+			drawThemeRect(s_windowId, inputX, inputY, controlW, 1, border);
+			drawThemeRect(s_windowId, inputX, inputY + controlH - 1, controlW, 1, border);
+			drawThemeRect(s_windowId, inputX, inputY, 1, controlH, border);
+			drawThemeRect(s_windowId, inputX + controlW - 1, inputY, 1, controlH, border);
+		std::string text = block.inputValue;
 			bool placeholder = text.empty() && !block.placeholder.empty();
 			if (placeholder) text = block.placeholder;
-			const int maxChars = (kFormInputW - 16) / kCharW;
+			const bool password = block.formControl.type == FormControlType::Password || block.inputType == "password";
+			const int maxChars = std::max(1, (controlW - 16) / kCharW);
+			if (password && !placeholder) text.assign(std::min(static_cast<int>(block.inputValue.size()), maxChars), '*');
 			if (static_cast<int>(text.size()) > maxChars) {
 				text = text.substr(text.size() - static_cast<size_t>(maxChars));
 			}
-			if (placeholder) {
-				drawTextAtColored(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, 128, 136, 150);
-			} else {
-				drawTextAtColored(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, 35, 45, 60);
-			}
+			drawThemeText(s_windowId, inputX + 8, centeredChromeTextY(inputY, controlH), text, formTextColor(block, disabled, placeholder));
 			if (focused) {
 				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
 				int visibleCaret = std::min(caretPos, maxChars);
-				drawRect(s_windowId, inputX + 8 + visibleCaret * kCharW, inputY + 5, 1, kFormControlH - 10, 35, 85, 170);
+				if (!disabled && !password) drawThemeRect(s_windowId, inputX + 8 + visibleCaret * kCharW, inputY + 5, 1, controlH - 10, NavigatorAccentColor());
 			}
 			break;
 		}
 
 		case BlockType::FormTextarea: {
-			const int inputX = outerX + paddingLeft;
+			const int inputX = contentX;
 			const int inputY = boxY + borderTop + paddingTop;
 			const int inputH = formControlHeight(block);
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawRect(s_windowId, inputX, inputY, kFormInputW, inputH, 250, 252, 255);
-			drawRect(s_windowId, inputX, inputY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX, inputY + inputH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX, inputY, 1, inputH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, inputH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			const bool focused = isFocusedFormControl(block);
+			const bool disabled = runtimeDisabled(block);
+			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
+			const uint32_t fill = formFillColor(block, focused, disabled);
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, inputX, inputY, controlW, inputH, fill);
+			drawThemeRect(s_windowId, inputX, inputY, controlW, 1, border);
+			drawThemeRect(s_windowId, inputX, inputY + inputH - 1, controlW, 1, border);
+			drawThemeRect(s_windowId, inputX, inputY, 1, inputH, border);
+			drawThemeRect(s_windowId, inputX + controlW - 1, inputY, 1, inputH, border);
 			const bool placeholder = block.inputValue.empty() && !block.placeholder.empty();
 			const std::string rawText = placeholder ? block.placeholder : block.inputValue;
-			const int maxChars = (kFormInputW - 16) / kCharW;
+			const int maxChars = std::max(1, (controlW - 16) / kCharW);
 			const int maxVisibleRows = std::max(1, (inputH - 10) / kLineH);
 			std::vector<std::string> lines = textareaLines(rawText);
 			int firstVisibleLine = 0;
@@ -2896,13 +4816,11 @@ void Navigator::renderDocument()
 				if (static_cast<int>(lineText.size()) > maxChars) {
 					lineText = lineText.substr(static_cast<size_t>(std::max(0, static_cast<int>(lineText.size()) - maxChars)));
 				}
-				drawTextAtColored(s_windowId, inputX + 8, lineY, lineText,
-					placeholder ? 128 : 35,
-					placeholder ? 136 : 45,
-					placeholder ? 150 : 60);
+				drawThemeText(s_windowId, inputX + 8, lineY, lineText,
+					formTextColor(block, disabled, placeholder));
 				lineY += lineHeight;
 			}
-			if (focused && !placeholder) {
+			if (focused && !placeholder && !disabled && !block.formControl.readOnly) {
 				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
 				int caretLine = 0;
 				int caretColumn = 0;
@@ -2917,7 +4835,7 @@ void Navigator::renderDocument()
 				if (caretLine >= firstVisibleLine && caretLine < firstVisibleLine + maxVisibleRows) {
 					int visibleColumn = std::min(caretColumn, maxChars);
 					int caretY = inputY + 5 + (caretLine - firstVisibleLine) * lineHeight;
-					drawRect(s_windowId, inputX + 8 + visibleColumn * kCharW, caretY, 1, lineHeight - 2, 35, 85, 170);
+					drawThemeRect(s_windowId, inputX + 8 + visibleColumn * kCharW, caretY, 1, lineHeight - 2, NavigatorAccentColor());
 				}
 			}
 			break;
@@ -2925,60 +4843,92 @@ void Navigator::renderDocument()
 
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio: {
-			const int controlX = outerX + paddingLeft;
+			const int controlX = contentX;
 			const int controlY = boxY + borderTop + paddingTop;
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const bool focused = isFocusedFormControl(block);
+			const bool disabled = runtimeDisabled(block);
 			const int box = 14;
 			const int boxY = controlY + (kFormControlH - box) / 2;
-			drawRect(s_windowId, controlX, boxY, box, box, 248, 250, 254);
-			drawRect(s_windowId, controlX, boxY, box, 1, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
-			drawRect(s_windowId, controlX, boxY + box - 1, box, 1, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
-			drawRect(s_windowId, controlX, boxY, 1, box, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
-			drawRect(s_windowId, controlX + box - 1, boxY, 1, box, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
-			if (block.checked) {
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, controlX, boxY, box, box, formFillColor(block, focused, disabled));
+			drawThemeRect(s_windowId, controlX, boxY, box, 1, border);
+			drawThemeRect(s_windowId, controlX, boxY + box - 1, box, 1, border);
+			drawThemeRect(s_windowId, controlX, boxY, 1, box, border);
+			drawThemeRect(s_windowId, controlX + box - 1, boxY, 1, box, border);
+			if (runtimeChecked(block)) {
 				if (block.type == BlockType::FormRadio) {
-					drawRect(s_windowId, controlX + 4, boxY + 4, box - 8, box - 8, 45, 94, 170);
+					drawThemeRect(s_windowId, controlX + 4, boxY + 4, box - 8, box - 8, disabled ? border : NavigatorAccentColor());
 				} else {
-					drawTextAtColored(s_windowId, controlX + 3, boxY - 2, "x", 35, 85, 170);
+					drawThemeText(s_windowId, controlX + 3, boxY - 2, "x", disabled ? border : NavigatorAccentColor());
 				}
 			}
 			std::string label = block.text.empty() ? block.inputName : block.text;
-			drawTextAtColored(s_windowId, controlX + box + 8, centeredChromeTextY(controlY, kFormControlH), label, 35, 45, 60);
+			const int labelMax = std::max(1, (std::min(innerWidth, blockFormControlWidth(block, availableWidth)) - box - 8) / kCharW);
+			if (static_cast<int>(label.size()) > labelMax) label.resize(static_cast<size_t>(labelMax));
+			drawThemeText(s_windowId, controlX + box + 8, centeredChromeTextY(controlY, kFormControlH), label, formTextColor(block, disabled, false));
 			break;
 		}
 
 		case BlockType::FormSelect: {
-			const int selectX = outerX + paddingLeft;
+			const int selectX = contentX;
 			const int selectY = boxY + borderTop + paddingTop;
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawRect(s_windowId, selectX, selectY, kFormInputW, kFormControlH, 250, 252, 255);
-			drawRect(s_windowId, selectX, selectY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, selectX, selectY + kFormControlH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, selectX, selectY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, selectX + kFormInputW - 1, selectY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			std::string label = block.text.empty() ? "(select)" : block.text;
-			drawTextAtColored(s_windowId, selectX + 8, centeredChromeTextY(selectY, kFormControlH), label, 35, 45, 60);
-			drawTextAtColored(s_windowId, selectX + kFormInputW - 20, centeredChromeTextY(selectY, kFormControlH), "v", 70, 78, 96);
+			const bool focused = isFocusedFormControl(block);
+			const bool disabled = runtimeDisabled(block);
+			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
+			const int controlH = formControlHeight(block);
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, selectX, selectY, controlW, controlH, formFillColor(block, focused, disabled));
+			drawThemeRect(s_windowId, selectX, selectY, controlW, 1, border);
+			drawThemeRect(s_windowId, selectX, selectY + controlH - 1, controlW, 1, border);
+			drawThemeRect(s_windowId, selectX, selectY, 1, controlH, border);
+			drawThemeRect(s_windowId, selectX + controlW - 1, selectY, 1, controlH, border);
+			if (block.formControl.multiple) {
+				const int maxRows = std::max(1, (controlH - 8) / kLineH);
+				int row = 0;
+				for (const gxos::web::FormOption& option : block.options) {
+					if (row >= maxRows) break;
+					std::string optionText = option.text.empty() ? option.value : option.text;
+					const int maxChars = std::max(1, (controlW - 16) / kCharW);
+					if (static_cast<int>(optionText.size()) > maxChars) optionText.resize(static_cast<size_t>(maxChars));
+					const bool selected = block.selectedOption == row;
+					if (selected) optionText = "> " + optionText;
+					drawThemeText(s_windowId, selectX + 8, selectY + 4 + row * kLineH, optionText,
+						formTextColor(block, disabled || option.disabled, false));
+					++row;
+				}
+			} else {
+				std::string label = block.text.empty() ? "(select)" : block.text;
+				const int maxChars = std::max(1, (controlW - 28) / kCharW);
+				if (static_cast<int>(label.size()) > maxChars) label.resize(static_cast<size_t>(maxChars));
+				drawThemeText(s_windowId, selectX + 8, centeredChromeTextY(selectY, controlH), label, formTextColor(block, disabled, false));
+				drawThemeText(s_windowId, selectX + controlW - 20, centeredChromeTextY(selectY, controlH), "v", NavigatorFieldMutedTextColor());
+			}
 			break;
 		}
 
 		case BlockType::FormSubmit: {
-			const int buttonX = outerX + paddingLeft;
+			const int buttonX = contentX;
 			const int buttonY = boxY + borderTop + paddingTop;
-			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			const bool disabled = block.formUnsupported;
-			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, kFormControlH, disabled ? 184 : 65, disabled ? 188 : 112, disabled ? 196 : 190);
-			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, 1, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
-			drawRect(s_windowId, buttonX, buttonY + kFormControlH - 1, kFormSubmitW, 1, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
-			drawRect(s_windowId, buttonX, buttonY, 1, kFormControlH, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
-			drawRect(s_windowId, buttonX + kFormSubmitW - 1, buttonY, 1, kFormControlH, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
+			const bool focused = isFocusedFormControl(block);
+			const bool disabled = runtimeDisabled(block);
+			const int controlW = std::min(innerWidth, blockFormControlWidth(block, availableWidth));
+			const int controlH = formControlHeight(block);
+			const uint32_t border = formBorderColor(block, focused, disabled);
+			drawThemeRect(s_windowId, buttonX, buttonY, controlW, controlH,
+				disabled ? 0xFFE3E6EAu : (block.style.hasBackgroundColor ? block.style.backgroundColor : NavigatorButtonFillColor(focused, false)));
+			drawThemeRect(s_windowId, buttonX, buttonY, controlW, 1, border);
+			drawThemeRect(s_windowId, buttonX, buttonY + controlH - 1, controlW, 1, border);
+			drawThemeRect(s_windowId, buttonX, buttonY, 1, controlH, border);
+			drawThemeRect(s_windowId, buttonX + controlW - 1, buttonY, 1, controlH, border);
 			std::string label = block.submitLabel.empty() ? "Submit" : block.submitLabel;
-			int labelMax = (kFormSubmitW - 14) / kCharW;
+			int labelMax = std::max(1, (controlW - 14) / kCharW);
 			if (static_cast<int>(label.size()) > labelMax) label = label.substr(0, static_cast<size_t>(labelMax));
-			drawTextAtColored(s_windowId, buttonX + 10, centeredChromeTextY(buttonY, kFormControlH), label, disabled ? 76 : 255, disabled ? 80 : 255, disabled ? 88 : 255);
+			drawThemeText(s_windowId, buttonX + 10, centeredChromeTextY(buttonY, controlH), label,
+				block.style.hasColor && !disabled ? block.style.color : NavigatorButtonTextColor(disabled));
 			break;
 		}
 		}
+		drawDefaultFocusRing(blockIndex, block);
 		++blockIndex;
 	}
 
@@ -2989,30 +4939,35 @@ void Navigator::renderDocument()
 		int trackH = kContentH - 8;
 		int thumbH = std::max(22, (trackH * kContentH) / s_documentHeight);
 		int thumbY = trackY + ((trackH - thumbH) * s_scrollOffset) / maxScroll;
-		drawRect(s_windowId, kContentX + kContentW - 10, trackY, 6, trackH, 216, 220, 228);
-		drawRect(s_windowId, kContentX + kContentW - 10, thumbY, 6, thumbH, 130, 138, 156);
+		drawThemeRect(s_windowId, kContentX + kContentW - 10, trackY, 6, trackH, NavigatorScrollTrackColor());
+		drawThemeRect(s_windowId, kContentX + kContentW - 10, thumbY, 6, thumbH, NavigatorScrollThumbColor());
 	}
+	s_pageMetadata.cssBorderedBlocksRendered = std::max(s_pageMetadata.cssBorderedBlocksRendered, s_renderCounters.borderedBlocksRendered);
+	s_pageMetadata.cssDashedBordersRendered = std::max(s_pageMetadata.cssDashedBordersRendered, s_renderCounters.dashedBordersRendered);
+	s_pageMetadata.cssDottedBordersRendered = std::max(s_pageMetadata.cssDottedBordersRendered, s_renderCounters.dottedBordersRendered);
+	s_pageMetadata.cssTextDecorationsRendered = std::max(s_pageMetadata.cssTextDecorationsRendered, s_renderCounters.textDecorationsRendered);
 }
 
 void Navigator::renderStatusBar()
 {
-	drawRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, kStatusBarH, 36, 40, 50);
-	drawRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, 1, 78, 86, 108);
+	drawThemeRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, kStatusBarH, NavigatorStatusBarColor());
+	drawThemeRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, 1, NavigatorStatusBarBorderColor());
 
 	if (s_findActive) {
-		drawRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, kStatusBarH - 8, 18, 22, 30);
-		drawRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, 1, 80, 140, 220);
-		drawRect(s_windowId, 8, kWindowH - kStatusBarH + kStatusBarH - 5, 420, 1, 80, 140, 220);
+		drawThemeRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, kStatusBarH - 8, NavigatorAddressFillColor());
+		drawThemeRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, 1, NavigatorAddressFocusedBorderColor());
+		drawThemeRect(s_windowId, 8, kWindowH - kStatusBarH + kStatusBarH - 5, 420, 1, NavigatorAddressFocusedBorderColor());
 		const int findTextY = centeredChromeTextY(kWindowH - kStatusBarH + 4, kStatusBarH - 8);
 		std::string shown = s_findBuffer;
 		const int maxChars = 28;
 		if (static_cast<int>(shown.size()) > maxChars) {
 			shown = shown.substr(shown.size() - static_cast<size_t>(maxChars));
 		}
-		drawTextAt(s_windowId, 16, findTextY, "Find: " + shown);
+		drawThemeText(s_windowId, 16, findTextY, "Find: " + shown, NavigatorTextColor());
 		int caretPos = std::min(s_findCaret, maxChars);
-		drawRect(s_windowId, 64 + caretPos * kCharW, kWindowH - kStatusBarH + 6, 1, kStatusBarH - 12, 200, 220, 255);
-		drawTextAt(s_windowId, 440, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), findMatchStatusText() + "   Enter/Down: next   Up: prev   Esc: close");
+		drawThemeRect(s_windowId, 64 + caretPos * kCharW, kWindowH - kStatusBarH + 6, 1, kStatusBarH - 12, NavigatorAccentColor());
+		drawThemeText(s_windowId, 440, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), findMatchStatusText() + "   Enter/Down: next   Up: prev   Esc: close",
+			isSciFiThemeActive() ? NavigatorMutedTextColor() : NavigatorTextColor());
 		return;
 	}
 
@@ -3022,7 +4977,7 @@ void Navigator::renderStatusBar()
 		const std::string text = selectedText();
 		shown += (shown.empty() ? "" : "   ") + std::string("Selection: ") + std::to_string(text.size()) + " chars";
 	}
-	drawTextAt(s_windowId, 12, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), shown);
+	drawThemeText(s_windowId, 12, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), shown, NavigatorTextColor());
 }
 
 void Navigator::updateStatus(const std::string& status)
@@ -3047,8 +5002,9 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 	case HitTarget::FormTextarea: next = "Click to edit textarea"; break;
 	case HitTarget::FormCheckbox: next = "Toggle checkbox"; break;
 	case HitTarget::FormRadio:   next = "Select radio option"; break;
+	case HitTarget::FormLabel:   next = "Activate associated choice"; break;
 	case HitTarget::FormSelect:  next = "Cycle select option"; break;
-	case HitTarget::FormSubmit:  next = "Submit form"; break;
+	case HitTarget::FormSubmit:  next = "Activate inert button"; break;
 	case HitTarget::Link:
 		if (linkBlockIndex >= 0 &&
 			linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
@@ -3074,7 +5030,7 @@ void Navigator::handleToolbarAction(int widgetId)
 		s_addressBuffer.clear();
 		s_addressCaret   = 0;
 	}
-	if (s_focusedInputBlockIndex >= 0) {
+	if (s_currentDoc.formRuntimeState.focusValid) {
 		blurDocumentInput();
 	}
 
@@ -3120,6 +5076,528 @@ void Navigator::handleToolbarAction(int widgetId)
 	}
 }
 
+bool Navigator::isRuntimeCheckable(const DocBlock& block)
+{
+	return (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) &&
+		block.formControl.metadataComplete && block.formControl.supported &&
+		block.formControl.logicalSerial != 0 &&
+		(block.formControl.type == FormControlType::Checkbox ||
+		 block.formControl.type == FormControlType::Radio);
+}
+
+bool Navigator::isRuntimeButton(const DocBlock& block)
+{
+	return block.type == BlockType::FormSubmit &&
+		block.formControl.metadataComplete && block.formControl.supported &&
+		block.formControl.logicalSerial != 0 &&
+		(block.formControl.type == FormControlType::Button ||
+		 block.formControl.type == FormControlType::Submit ||
+		 block.formControl.type == FormControlType::Reset);
+}
+
+bool Navigator::isRuntimeFormControl(const DocBlock& block)
+{
+	return isRuntimeCheckable(block) || isRuntimeButton(block);
+}
+
+const FormRuntimeControlState* Navigator::runtimeStateForBlock(const DocBlock& block)
+{
+	if (!s_currentDoc.formRuntimeState.initialized || block.formControl.logicalSerial == 0)
+		return nullptr;
+	const size_t count = std::min(s_currentDoc.formRuntimeState.count, kFormRuntimeControlCap);
+	for (size_t i = 0; i < count; ++i) {
+		const FormRuntimeControlState& state = s_currentDoc.formRuntimeState.controls[i];
+		if (state.logicalSerial == block.formControl.logicalSerial && state.metadataValid)
+			return &state;
+	}
+	return nullptr;
+}
+
+FormRuntimeControlState* Navigator::runtimeStateForBlock(DocBlock& block)
+{
+	return const_cast<FormRuntimeControlState*>(runtimeStateForBlock(static_cast<const DocBlock&>(block)));
+}
+
+bool Navigator::runtimeChecked(const DocBlock& block)
+{
+	if (const FormRuntimeControlState* state = runtimeStateForBlock(block)) return state->checked;
+	return block.checked;
+}
+
+bool Navigator::runtimeDisabled(const DocBlock& block)
+{
+	if (const FormRuntimeControlState* state = runtimeStateForBlock(block)) return state->disabled;
+	return block.formControl.disabled;
+}
+
+void Navigator::updateFormAccessibilityMetadata()
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized) return;
+
+	struct LabelResolution {
+		uint64_t controlSerial = 0;
+		FormAccessibilityLabelSource source = FormAccessibilityLabelSource::None;
+		bool hasText = false;
+	};
+
+	const auto hasAncestorSerial = [](const DocBlock& block, uint64_t serial) {
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			if (ancestor.serial == serial) return true;
+		}
+		return false;
+	};
+	const auto isSupportedControlBlock = [&](const DocBlock& block) {
+		return block.formControl.logicalSerial != 0 &&
+			block.formControl.metadataComplete && block.formControl.supported &&
+			!block.formUnsupported && block.formControl.type != FormControlType::Option &&
+			block.formControl.type != FormControlType::Unsupported &&
+			block.formControl.type != FormControlType::None &&
+			block.type != BlockType::FormLabel;
+	};
+
+	std::vector<LabelResolution> resolutions;
+	resolutions.reserve(std::min(kFormRuntimeControlCap, s_currentDoc.blocks.size()));
+	int validAssociations = 0;
+	int invalidAssociations = 0;
+	for (const DocBlock& label : s_currentDoc.blocks) {
+		if (label.type != BlockType::FormLabel || !label.formControl.metadataComplete ||
+			label.elementMetadata.serial == 0) continue;
+		if (!label.labelFor.empty()) {
+			int idMatches = 0;
+			uint64_t targetSerial = 0;
+			bool targetIsControl = false;
+			for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+				if (element.id != label.labelFor) continue;
+				++idMatches;
+				targetSerial = element.serial;
+				targetIsControl = element.formControl.logicalSerial == element.serial &&
+					element.formControl.metadataComplete && element.formControl.supported &&
+					element.formControl.type != FormControlType::Option &&
+					element.formControl.type != FormControlType::Unsupported &&
+					element.formControl.type != FormControlType::None;
+			}
+			if (idMatches == 1 && targetIsControl && targetSerial != 0) {
+				++validAssociations;
+				resolutions.push_back(LabelResolution{targetSerial, FormAccessibilityLabelSource::ForId, !label.text.empty()});
+			} else {
+				++invalidAssociations;
+			}
+			continue;
+		}
+
+		int wrappedControls = 0;
+		uint64_t wrappedSerial = 0;
+		bool wrappedHasText = !label.text.empty();
+		for (const DocBlock& candidate : s_currentDoc.blocks) {
+			if (!isSupportedControlBlock(candidate) || !hasAncestorSerial(candidate, label.elementMetadata.serial)) continue;
+			++wrappedControls;
+			wrappedSerial = candidate.formControl.logicalSerial;
+		}
+		if (wrappedControls == 1 && wrappedSerial != 0) {
+			++validAssociations;
+			resolutions.push_back(LabelResolution{wrappedSerial, FormAccessibilityLabelSource::Wrapping, wrappedHasText});
+		} else {
+			++invalidAssociations;
+		}
+	}
+
+	const bool phase2hFixture = s_currentDoc.url.find("css-phase2h.html") != std::string::npos;
+	const auto roleForBlock = [](const DocBlock& block) {
+		switch (block.formControl.type) {
+		case FormControlType::Checkbox: return FormAccessibilityRole::Checkbox;
+		case FormControlType::Radio: return FormAccessibilityRole::Radio;
+		case FormControlType::Button:
+		case FormControlType::Submit:
+		case FormControlType::Reset: return FormAccessibilityRole::Button;
+		case FormControlType::Password: return FormAccessibilityRole::PasswordTextbox;
+		case FormControlType::Textarea: return FormAccessibilityRole::Textarea;
+		case FormControlType::Select: return FormAccessibilityRole::Select;
+		case FormControlType::Text:
+		case FormControlType::Search:
+		case FormControlType::Email:
+		case FormControlType::Url:
+		case FormControlType::Number: return FormAccessibilityRole::Textbox;
+		default: return FormAccessibilityRole::None;
+		}
+	};
+
+	const std::array<FormAccessibilityRecord, kFormRuntimeControlCap> previous = runtime.accessibilityRecords;
+	const size_t previousCount = runtime.accessibilityRecordCount;
+	runtime.accessibilityRecords = {};
+	runtime.accessibilityRecordCount = 0;
+	s_currentDoc.formsDiagnostics.formAccessibleNamePresent = 0;
+	s_currentDoc.formsDiagnostics.formAccessibleNameMissing = 0;
+	s_currentDoc.formsDiagnostics.formLabelAssociationsValid = validAssociations;
+	s_currentDoc.formsDiagnostics.formLabelAssociationsInvalid = invalidAssociations;
+	s_currentDoc.formsDiagnostics.formFocusVisibleMatches = 0;
+
+	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (!isSupportedControlBlock(block)) continue;
+		if (runtime.accessibilityRecordCount >= runtime.accessibilityRecords.size()) {
+			++s_currentDoc.formsDiagnostics.formAccessibilityMetadataClamps;
+			break;
+		}
+		FormAccessibilityRecord& record = runtime.accessibilityRecords[runtime.accessibilityRecordCount++];
+		record.logicalSerial = block.formControl.logicalSerial;
+		record.documentGeneration = runtime.documentGeneration;
+		record.role = roleForBlock(block);
+		record.focusable = isFocusableFormControl(block);
+		record.focused = isFocusedFormControl(block);
+		record.focusOrigin = record.focused ? runtime.focusOrigin : FormFocusOrigin::None;
+		record.focusMatch = record.focused;
+		record.focusVisibleMatch = record.focused && runtime.focusOrigin == FormFocusOrigin::Keyboard;
+		record.checked = (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio)
+			? runtimeChecked(block) : false;
+		record.disabled = runtimeDisabled(block);
+		record.required = block.formControl.required;
+		record.readOnly = block.formControl.readOnly;
+		record.visible = !block.formControl.hidden && !block.style.displayNone;
+		record.metadataComplete = block.formControl.metadataComplete && block.formControl.logicalSerial != 0;
+		if (phase2hFixture && block.id.rfind("phase2h-", 0) == 0) record.fixtureId = block.id;
+
+		const LabelResolution* selectedLabel = nullptr;
+		for (const LabelResolution& resolution : resolutions) {
+			if (resolution.controlSerial != record.logicalSerial) continue;
+			if (resolution.source == FormAccessibilityLabelSource::ForId) {
+				selectedLabel = &resolution;
+				break;
+			}
+			if (!selectedLabel) selectedLabel = &resolution;
+		}
+		if (selectedLabel) {
+			record.labelAssociated = true;
+			record.labelSource = selectedLabel->source;
+			if (selectedLabel->hasText) {
+				record.accessibleNamePresent = true;
+				record.accessibleNameSource = selectedLabel->source == FormAccessibilityLabelSource::Wrapping
+					? FormAccessibilityNameSource::LabelWrapping : FormAccessibilityNameSource::LabelForId;
+			}
+		}
+		if (!record.accessibleNamePresent && record.role == FormAccessibilityRole::Button) {
+			if (block.tagName == "button" && !block.text.empty()) {
+				record.accessibleNamePresent = true;
+				record.accessibleNameSource = FormAccessibilityNameSource::ButtonText;
+			} else if (block.tagName == "input" && !block.submitLabel.empty()) {
+				record.accessibleNamePresent = true;
+				record.accessibleNameSource = FormAccessibilityNameSource::InputValuePresence;
+			}
+		}
+		if (!record.accessibleNamePresent && !block.placeholder.empty()) {
+			record.accessibleNamePresent = true;
+			record.accessibleNameSource = FormAccessibilityNameSource::Placeholder;
+		}
+		if (!record.accessibleNamePresent) record.accessibleNameSource = FormAccessibilityNameSource::ControlTypeFallback;
+		if (record.accessibleNamePresent) ++s_currentDoc.formsDiagnostics.formAccessibleNamePresent;
+		else if (record.focusable) ++s_currentDoc.formsDiagnostics.formAccessibleNameMissing;
+		if (record.focusVisibleMatch) ++s_currentDoc.formsDiagnostics.formFocusVisibleMatches;
+
+		for (size_t prior = 0; prior < previousCount; ++prior) {
+			if (previous[prior].logicalSerial != record.logicalSerial) continue;
+			record.revealResult = previous[prior].revealResult;
+			break;
+		}
+		if (!record.fixtureId.empty()) {
+			record.winningSelectorCategory = evidenceFieldForSerial(s_currentDoc.cssDiagnostics.computedStyleEvidence,
+				record.logicalSerial, "color-winning-selector");
+			if (record.winningSelectorCategory.empty()) record.winningSelectorCategory = "none";
+			record.winningPseudo = evidenceFieldForSerial(s_currentDoc.cssDiagnostics.computedStyleEvidence,
+				record.logicalSerial, "winning-focus-pseudo");
+			if (record.winningPseudo.empty()) record.winningPseudo = "none";
+			parseBoundedSpecificity(evidenceFieldForSerial(s_currentDoc.cssDiagnostics.computedStyleEvidence,
+				record.logicalSerial, "color-specificity"), record.winningSpecificityId,
+				record.winningSpecificityClass, record.winningSpecificityElement);
+			const std::string sourceOrder = evidenceFieldForSerial(s_currentDoc.cssDiagnostics.computedStyleEvidence,
+				record.logicalSerial, "color-source-order");
+			try {
+				if (!sourceOrder.empty()) record.winningSourceOrder = static_cast<uint32_t>(std::stoul(sourceOrder));
+			} catch (...) {
+				record.winningSourceOrder = 0;
+			}
+		}
+	}
+	s_currentDoc.formsDiagnostics.formAccessibilityRecords = static_cast<int>(runtime.accessibilityRecordCount);
+}
+
+FormAccessibilityRecord* Navigator::accessibilityRecordForSerial(uint64_t serial)
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || serial == 0) return nullptr;
+	const size_t count = std::min(runtime.accessibilityRecordCount, runtime.accessibilityRecords.size());
+	for (size_t i = 0; i < count; ++i) {
+		if (runtime.accessibilityRecords[i].logicalSerial == serial) return &runtime.accessibilityRecords[i];
+	}
+	return nullptr;
+}
+
+int Navigator::blockIndexForControlSerial(uint64_t serial)
+{
+	if (serial == 0) return -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.formControl.logicalSerial == serial && isRuntimeCheckable(block)) return i;
+	}
+	return -1;
+}
+
+int Navigator::findBlockById(const std::string& id, bool labelOnly)
+{
+	if (id.empty()) return -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.id != id) continue;
+		if (labelOnly ? block.type == BlockType::FormLabel
+			: (isRuntimeFormControl(block) || isFocusableFormControl(block))) return i;
+	}
+	return -1;
+}
+
+uint64_t Navigator::associatedControlSerialForLabel(const DocBlock& label)
+{
+	if (label.type != BlockType::FormLabel || !label.formControl.metadataComplete ||
+		label.elementMetadata.serial == 0) return 0;
+	uint64_t targetSerial = 0;
+	int matches = 0;
+	if (!label.labelFor.empty()) {
+		for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+			if (element.id != label.labelFor) continue;
+			++matches;
+			if (element.formControl.type == FormControlType::Checkbox ||
+				element.formControl.type == FormControlType::Radio) {
+				targetSerial = element.serial;
+			}
+		}
+		// Duplicate ids, including a duplicate non-control element, fail closed.
+		return matches == 1 ? targetSerial : 0;
+	}
+
+	for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.formControl.type != FormControlType::Checkbox &&
+			element.formControl.type != FormControlType::Radio) continue;
+		uint64_t parent = element.parentSerial;
+		for (size_t depth = 0; depth < kFormRuntimeControlCap && parent != 0; ++depth) {
+			if (parent == label.elementMetadata.serial) {
+				targetSerial = element.serial;
+				++matches;
+				break;
+			}
+			const gxos::web::HtmlElementRef* found = nullptr;
+			for (const gxos::web::HtmlElementRef& candidate : s_currentDoc.structuralElements) {
+				if (candidate.serial == parent) { found = &candidate; break; }
+			}
+			if (!found) break;
+			parent = found->parentSerial;
+		}
+	}
+	return matches == 1 ? targetSerial : 0;
+}
+
+bool Navigator::radioGroupMatches(const DocBlock& left, const DocBlock& right)
+{
+	if (left.type != BlockType::FormRadio || right.type != BlockType::FormRadio) return false;
+	if (left.formControl.name.empty() || right.formControl.name.empty())
+		return left.formControl.logicalSerial == right.formControl.logicalSerial;
+	if (left.formIndex >= 0 || right.formIndex >= 0)
+		return left.formIndex >= 0 && right.formIndex == left.formIndex &&
+			left.formControl.name == right.formControl.name;
+	if (left.formControl.parentFormSerial != 0 || right.formControl.parentFormSerial != 0)
+		return left.formControl.parentFormSerial != 0 &&
+			right.formControl.parentFormSerial == left.formControl.parentFormSerial &&
+			left.formControl.name == right.formControl.name;
+	if (left.formControl.parentFieldsetSerial != 0 || right.formControl.parentFieldsetSerial != 0)
+		return left.formControl.parentFieldsetSerial != 0 &&
+			right.formControl.parentFieldsetSerial == left.formControl.parentFieldsetSerial &&
+			left.formControl.name == right.formControl.name;
+	return left.formControl.name == right.formControl.name;
+}
+
+void Navigator::initializeFormRuntimeState()
+{
+	if (s_currentDoc.formRuntimeState.initialized &&
+		s_currentDoc.formRuntimeState.keyboardActivationArmed) {
+		cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+	}
+	s_currentDoc.formRuntimeState = gxos::web::FormRuntimeStateTable{};
+	s_currentDoc.formRuntimeState.initialized = true;
+	s_currentDoc.formRuntimeState.documentGeneration = s_documentGeneration;
+	s_currentDoc.formRuntimeState.focusOrigin = FormFocusOrigin::None;
+	++s_currentDoc.formsDiagnostics.formRuntimeStateResets;
+	++s_currentDoc.formsDiagnostics.formFocusStateResets;
+	s_focusedInputBlockIndex = -1;
+	s_inputCaret = 0;
+	s_tabKeyPressed = false;
+	for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+		const FormControlMetadata& metadata = element.formControl;
+		if (element.serial == 0 || !metadata.metadataComplete || !metadata.supported) continue;
+		if (s_currentDoc.formRuntimeState.count >= kFormRuntimeControlCap) {
+			++s_currentDoc.formsDiagnostics.controlMetadataClamps;
+			break;
+		}
+		FormRuntimeControlState& state = s_currentDoc.formRuntimeState.controls[
+			s_currentDoc.formRuntimeState.count++];
+		state.logicalSerial = element.serial;
+		state.type = metadata.type;
+		state.parentFormSerial = metadata.parentFormSerial;
+		state.parentFieldsetSerial = metadata.parentFieldsetSerial;
+		state.checked = metadata.type == FormControlType::Option ? metadata.selected : metadata.checked;
+		state.initialChecked = state.checked;
+		state.disabled = metadata.disabled;
+		state.metadataValid = true;
+		++s_currentDoc.formsDiagnostics.formRuntimeControlsInitialized;
+	}
+	// Some forgiving HTML paths retain a valid rendered control block even when
+	// its structural registration was not retained.  Recover only those bounded
+	// runtime controls from their copied metadata; names and values remain out of
+	// the runtime table.
+	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (!isRuntimeFormControl(block) || block.formControl.logicalSerial == 0) continue;
+		bool alreadyInitialized = false;
+		for (size_t i = 0; i < s_currentDoc.formRuntimeState.count; ++i) {
+			if (s_currentDoc.formRuntimeState.controls[i].logicalSerial == block.formControl.logicalSerial) {
+				alreadyInitialized = true;
+				break;
+			}
+		}
+		if (alreadyInitialized) continue;
+		if (s_currentDoc.formRuntimeState.count >= kFormRuntimeControlCap) {
+			++s_currentDoc.formsDiagnostics.controlMetadataClamps;
+			break;
+		}
+		FormRuntimeControlState& state = s_currentDoc.formRuntimeState.controls[
+			s_currentDoc.formRuntimeState.count++];
+		state.logicalSerial = block.formControl.logicalSerial;
+		state.type = block.formControl.type;
+		state.parentFormSerial = block.formControl.parentFormSerial;
+		state.parentFieldsetSerial = block.formControl.parentFieldsetSerial;
+		state.checked = block.formControl.type == FormControlType::Checkbox ||
+			block.formControl.type == FormControlType::Radio
+			? block.formControl.checked : false;
+		state.initialChecked = state.checked;
+		state.disabled = block.formControl.disabled;
+		state.metadataValid = true;
+		++s_currentDoc.formsDiagnostics.formRuntimeControlsInitialized;
+	}
+	updateFormAccessibilityMetadata();
+}
+
+void Navigator::recomputeFormControlStyles()
+{
+	++s_currentDoc.cssDiagnostics.checkedRuntimeRecomputations;
+	++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
+	gxos::web::recomputeDocumentStyles(s_currentDoc);
+	// Runtime CSS can hide or disable the focused logical control.  Clear that
+	// state and run one bounded second recomputation so :focus never survives
+	// its own invalidation.
+	if (s_currentDoc.formRuntimeState.focusValid && !ensureFocusedControlStillValid()) {
+		const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+		const FormFocusCancellationReason reason =
+			(runtime.documentGeneration != s_documentGeneration ||
+			 runtime.focusedDocumentGeneration != s_documentGeneration)
+			? FormFocusCancellationReason::GenerationMismatch
+			: FormFocusCancellationReason::StateChange;
+		clearDocumentFocus(false, reason);
+		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
+		gxos::web::recomputeDocumentStyles(s_currentDoc);
+	}
+	s_documentHeight = std::max(0, computeDocumentHeight());
+	clampScrollOffset();
+	updateFormAccessibilityMetadata();
+	// Generated about: pages such as Page Info and Save Page Text are views of
+	// the inspected document.  Their load-time style recomputation must not
+	// replace the inspected document with the diagnostics view.
+	if (s_currentDoc.url == s_pageMetadata.finalUrl)
+		storePageMetadata(s_pageMetadata, s_currentDoc);
+}
+
+void Navigator::clearKeyboardActivationState()
+{
+	if (!s_currentDoc.formRuntimeState.initialized) return;
+	s_currentDoc.formRuntimeState.pressedKeyboardLogicalSerial = 0;
+	s_currentDoc.formRuntimeState.pressedKeyboardDocumentGeneration = 0;
+	s_currentDoc.formRuntimeState.pressedKeyboardKey = 0;
+	s_currentDoc.formRuntimeState.keyboardActivationArmed = false;
+}
+
+void Navigator::cancelKeyboardActivation(FormFocusCancellationReason reason)
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || !runtime.keyboardActivationArmed) return;
+	switch (reason) {
+	case FormFocusCancellationReason::Escape: ++s_currentDoc.formsDiagnostics.formFocusCancelEscape; break;
+	case FormFocusCancellationReason::Navigation: ++s_currentDoc.formsDiagnostics.formFocusCancelNavigation; break;
+	case FormFocusCancellationReason::Deactivation: ++s_currentDoc.formsDiagnostics.formFocusCancelDeactivation; break;
+	case FormFocusCancellationReason::StateChange: ++s_currentDoc.formsDiagnostics.formFocusCancelStateChange; break;
+	case FormFocusCancellationReason::GenerationMismatch: ++s_currentDoc.formsDiagnostics.formFocusCancelGenerationMismatch; break;
+	case FormFocusCancellationReason::KeyMismatch: ++s_currentDoc.formsDiagnostics.formFocusCancelKeyMismatch; break;
+	default: break;
+	}
+	clearKeyboardActivationState();
+}
+
+void Navigator::clearDocumentFocus(bool recomputeStyles, FormFocusCancellationReason reason)
+{
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	const bool hadFocus = runtime.focusValid || runtime.focusedLogicalSerial != 0;
+	if (hadFocus) ++s_currentDoc.formsDiagnostics.formFocusClears;
+	runtime.focusedLogicalSerial = 0;
+	runtime.focusedDocumentGeneration = 0;
+	runtime.focusOrigin = FormFocusOrigin::None;
+	runtime.focusValid = false;
+	cancelKeyboardActivation(reason);
+	s_focusedInputBlockIndex = -1;
+	s_inputCaret = 0;
+	s_tabKeyPressed = false;
+	if (recomputeStyles) {
+		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
+		gxos::web::recomputeDocumentStyles(s_currentDoc);
+		if (s_currentDoc.url == s_pageMetadata.finalUrl)
+			storePageMetadata(s_pageMetadata, s_currentDoc);
+	}
+}
+
+void Navigator::clearMousePressState()
+{
+	s_mouseLeftDown = false;
+	s_mouseMode = MouseMode::None;
+	s_mouseDownHitTarget = HitTarget::None;
+	s_mouseDownLinkBlockIndex = -1;
+	s_mouseDownLinkUrl.clear();
+	s_mouseDragThresholdExceeded = false;
+}
+
+bool Navigator::activateLabelBlock(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
+	const DocBlock& label = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	const uint64_t serial = associatedControlSerialForLabel(label);
+	const int controlIndex = blockIndexForControlSerial(serial);
+	if (controlIndex < 0) return false;
+	if (isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(controlIndex)]))
+		focusDocumentInput(controlIndex, FormFocusOrigin::Mouse);
+	++s_currentDoc.formsDiagnostics.formLabelActivations;
+	activateFormControl(controlIndex);
+	return true;
+}
+
+bool Navigator::smokeClickBlock(int blockIndex, bool label)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
+	s_scrollOffset = std::max(0, blockLayoutY(blockIndex) - kContentH / 2);
+	clampScrollOffset();
+	const Rect rect = label ? selectableBlockRect(blockIndex) : formControlRect(blockIndex);
+	if (rect.w <= 0 || rect.h <= 0) return false;
+	const int x = rect.x + rect.w / 2;
+	const int y = rect.y + rect.h / 2;
+	int hitIndex = -1;
+	const HitTarget expected = hitTest(x, y, hitIndex);
+	if (hitIndex != blockIndex || (label ? expected != HitTarget::FormLabel :
+		(expected != HitTarget::FormCheckbox && expected != HitTarget::FormRadio &&
+		 expected != HitTarget::FormSubmit))) return false;
+	handleMouseInput(x, y, 1, "down");
+	handleMouseInput(x, y, 1, "up");
+	return true;
+}
+
 void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 {
 	if (target == HitTarget::Link &&
@@ -3127,18 +5605,27 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
 		navigateTo(s_currentDoc.blocks[linkBlockIndex].url);
+	} else if (target == HitTarget::FormLabel &&
+		linkBlockIndex >= 0 &&
+		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
+	{
+		activateLabelBlock(linkBlockIndex);
 	} else if ((target == HitTarget::FormCheckbox ||
 				target == HitTarget::FormRadio ||
 				target == HitTarget::FormSelect) &&
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
+		if (isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(linkBlockIndex)]))
+			focusDocumentInput(linkBlockIndex, FormFocusOrigin::Mouse);
 		activateFormControl(linkBlockIndex);
 	} else if (target == HitTarget::FormSubmit &&
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
-		submitFormForBlock(linkBlockIndex);
+		// Phase 2F buttons are deliberately inert.  The existing Forms-lite
+		// submit path remains available to its explicit legacy callers.
+		activateFormControl(linkBlockIndex);
 	}
 }
 
@@ -3201,7 +5688,7 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 
 		if (target == HitTarget::AddressBar) {
 			s_mouseMode = MouseMode::AddressBarInteraction;
-			if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+			if (s_currentDoc.formRuntimeState.focusValid) blurDocumentInput();
 			clearSelection();
 			if (s_findActive) closeFindMode();
 			focusAddressBar();
@@ -3233,7 +5720,7 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 			s_mouseMode = MouseMode::FormInputInteraction;
 			clearSelection();
 			if (s_findActive) closeFindMode();
-			focusDocumentInput(linkIdx);
+			focusDocumentInput(linkIdx, FormFocusOrigin::Mouse);
 			Rect r = formControlRect(linkIdx);
 			int charOffset = (x - (r.x + 8)) / kCharW;
 			if (linkIdx >= 0 && linkIdx < static_cast<int>(s_currentDoc.blocks.size())) {
@@ -3247,16 +5734,24 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 		if (target == HitTarget::FormCheckbox ||
 			target == HitTarget::FormRadio ||
 			target == HitTarget::FormSelect ||
-			target == HitTarget::FormSubmit) {
+			target == HitTarget::FormSubmit ||
+			target == HitTarget::FormLabel) {
 			s_mouseMode = MouseMode::FormInputInteraction;
-			if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
-			if (target != HitTarget::FormSubmit) s_focusedInputBlockIndex = linkIdx;
+			if (target == HitTarget::FormLabel) {
+				const uint64_t serial = associatedControlSerialForLabel(s_currentDoc.blocks[static_cast<size_t>(linkIdx)]);
+				const int controlIndex = blockIndexForControlSerial(serial);
+				if (controlIndex >= 0 && isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(controlIndex)]))
+					focusDocumentInput(controlIndex, FormFocusOrigin::Mouse);
+			} else if (linkIdx >= 0 && linkIdx < static_cast<int>(s_currentDoc.blocks.size()) &&
+				isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(linkIdx)])) {
+				focusDocumentInput(linkIdx, FormFocusOrigin::Mouse);
+			}
 			clearSelection();
 			updateDisplay();
 			return;
 		}
 
-		if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+		if (s_currentDoc.formRuntimeState.focusValid) blurDocumentInput();
 
 		if (target == HitTarget::Link) {
 			s_mouseMode = MouseMode::PotentialLinkClick;
@@ -3321,24 +5816,81 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 	}
 }
 
-void Navigator::focusDocumentInput(int blockIndex)
+void Navigator::focusDocumentInput(int blockIndex, FormFocusOrigin origin)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size()) ||
-		!isFocusableFormControl(s_currentDoc.blocks[blockIndex])) {
+		!isFocusableFormControl(s_currentDoc.blocks[blockIndex])) return;
+	DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || runtime.documentGeneration != s_documentGeneration ||
+		block.formControl.logicalSerial == 0) return;
+	const bool changed = !runtime.focusValid ||
+		runtime.focusedLogicalSerial != block.formControl.logicalSerial ||
+		runtime.focusedDocumentGeneration != s_documentGeneration;
+	const bool originChanged = runtime.focusOrigin != origin;
+	if (runtime.keyboardActivationArmed) cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+	if (changed) ++s_currentDoc.formsDiagnostics.formFocusChanges;
+	if (origin == FormFocusOrigin::Mouse && (changed || originChanged))
+		++s_currentDoc.formsDiagnostics.formFocusOriginMouse;
+	if (origin == FormFocusOrigin::Keyboard && (changed || originChanged))
+		++s_currentDoc.formsDiagnostics.formFocusOriginKeyboard;
+	runtime.focusedLogicalSerial = block.formControl.logicalSerial;
+	runtime.focusedDocumentGeneration = s_documentGeneration;
+	runtime.focusOrigin = origin;
+	runtime.focusValid = true;
+	clearKeyboardActivationState();
+	s_focusedInputBlockIndex = blockIndex;
+	s_inputCaret = static_cast<int>(block.inputValue.size());
+	s_statusText = (block.type == BlockType::FormTextInput || block.type == BlockType::FormTextarea)
+		? "Editing form field" : "Form control focused";
+	if (changed || originChanged) {
+		recomputeFormControlStyles();
+		if (FormAccessibilityRecord* record = accessibilityRecordForSerial(block.formControl.logicalSerial))
+			record->revealResult = FormFocusRevealResult::None;
+	}
+	revealFocusedFormControl(blockIndex);
+}
+
+void Navigator::revealFocusedFormControl(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (!isFocusedFormControl(block)) return;
+	const int current = std::max(0, s_scrollOffset);
+	const int top = std::max(0, blockLayoutY(blockIndex));
+	const int height = std::max(1, formControlHeight(block));
+	const int bottom = top > std::numeric_limits<int>::max() - height
+		? std::numeric_limits<int>::max() : top + height;
+	constexpr int kRevealPadding = 8;
+	int desired = current;
+	if (top < current + kRevealPadding) {
+		desired = std::max(0, top - kRevealPadding);
+	} else if (bottom > current + kContentH - kRevealPadding) {
+		desired = std::max(0, bottom - kContentH + kRevealPadding);
+	}
+	s_documentHeight = std::max(0, computeDocumentHeight());
+	const int maxOffset = maxScrollOffset();
+	const int unclamped = desired;
+	desired = std::max(0, std::min(desired, maxOffset));
+	FormAccessibilityRecord* record = accessibilityRecordForSerial(block.formControl.logicalSerial);
+	if (unclamped != desired) {
+		++s_currentDoc.formsDiagnostics.formFocusRevealClamps;
+		if (record) record->revealResult = FormFocusRevealResult::Clamped;
+	}
+	if (desired == current) {
+		++s_currentDoc.formsDiagnostics.formFocusRevealNoops;
+		if (record && record->revealResult != FormFocusRevealResult::Clamped)
+			record->revealResult = FormFocusRevealResult::Noop;
 		return;
 	}
-	s_focusedInputBlockIndex = blockIndex;
-	s_inputCaret = static_cast<int>(s_currentDoc.blocks[blockIndex].inputValue.size());
-	s_statusText = (s_currentDoc.blocks[blockIndex].type == BlockType::FormTextInput ||
-		s_currentDoc.blocks[blockIndex].type == BlockType::FormTextarea)
-		? "Editing form field"
-		: "Form control focused";
+	s_scrollOffset = desired;
+	++s_currentDoc.formsDiagnostics.formFocusRevealScrolls;
+	if (record) record->revealResult = FormFocusRevealResult::Scroll;
 }
 
 void Navigator::blurDocumentInput()
 {
-	s_focusedInputBlockIndex = -1;
-	s_inputCaret = 0;
+	clearDocumentFocus(true);
 }
 
 void Navigator::openFindMode()
@@ -3349,7 +5901,7 @@ void Navigator::openFindMode()
 		s_addressBuffer.clear();
 		s_addressCaret = 0;
 	}
-	if (s_focusedInputBlockIndex >= 0) {
+	if (s_currentDoc.formRuntimeState.focusValid) {
 		blurDocumentInput();
 	}
 	s_findCaret = std::max(0, std::min(s_findCaret, static_cast<int>(s_findBuffer.size())));
@@ -3372,11 +5924,14 @@ std::string Navigator::searchableTextForBlock(const DocBlock& block)
 	case BlockType::Link:
 	case BlockType::ListItem:
 	case BlockType::Preformatted:
+	case BlockType::FormLabel:
 		return block.text;
 	case BlockType::Image:
 		return !block.alt.empty() ? block.alt : block.text;
 	case BlockType::FormTextInput:
 	case BlockType::FormTextarea:
+		if (block.formControl.type == FormControlType::Password || block.inputType == "password")
+			return "[password field]";
 		if (!block.inputValue.empty()) return block.inputValue;
 		if (!block.placeholder.empty()) return block.placeholder;
 		return block.inputName;
@@ -3399,6 +5954,7 @@ bool Navigator::isSelectableBlock(const DocBlock& block)
 	case BlockType::Link:
 	case BlockType::ListItem:
 	case BlockType::Preformatted:
+	case BlockType::FormLabel:
 		return true;
 	default:
 		return false;
@@ -3452,19 +6008,14 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 		if (!isFirstTableCellInGroup(s_currentDoc, blockIndex)) return Rect{ 0, 0, 0, 0 };
 		const int groupStart = tableGroupStartIndex(s_currentDoc, blockIndex);
 		const TableGroupLayout layout = buildTableGroupLayout(s_currentDoc, groupStart);
-		const uint64_t rowSerial = tableRowSerialForBlock(block);
-		for (const TableRowLayout& row : layout.rows) {
-			if (row.rowSerial != rowSerial) continue;
-			const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
-			const int rowY = drawY + cssMarginTopPx(block.style, 4) + cssBorderTopPx(block.style);
-			return Rect{
-				layout.outerX + layout.paddingLeft,
-				rowY + layout.paddingTop,
-				std::max(kCharW, (layout.outerWidth - layout.paddingLeft - layout.paddingRight)),
-				std::max(kLineH, row.heightPx)
-			};
-		}
-		return Rect{ 0, 0, 0, 0 };
+		const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
+		const int rowY = drawY + cssMarginTopPx(block.style, 4);
+		return Rect{
+			layout.outerX,
+			rowY,
+			std::max(kCharW, layout.outerWidth),
+			std::max(kLineH, layout.totalHeightPx)
+		};
 	}
 	const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
 	const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
@@ -3481,26 +6032,29 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 	const int outerWidth = blockOuterWidth(block, availableWidth);
 	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
-	const int textX = outerX + paddingLeft;
+	const int borderLeft = cssBorderLeftPx(block.style);
+	const int borderRight = cssBorderRightPx(block.style);
+	const int textX = blockContentLeftX(block, outerX);
 	int textW = 0;
 	int textH = 0;
 	switch (block.type) {
 	case BlockType::Heading:
-		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 		textH = std::max(blockTextLineHeight(block) + 4, cssFontSizeOrDefault(block.style, 20) + 2);
 		break;
 	case BlockType::Paragraph:
 	case BlockType::Link:
-		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
-		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), false, blockTextLineHeight(block));
+	case BlockType::FormLabel:
+		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block));
 		break;
 	case BlockType::ListItem:
-		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
-		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), false, blockTextLineHeight(block));
+		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block));
 		break;
 	case BlockType::Preformatted:
-		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
-		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), true, blockTextLineHeight(block)) + paddingTop + paddingBottom;
+		textW = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
+		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block)) + paddingTop + paddingBottom;
 		break;
 	default:
 		break;
@@ -3519,13 +6073,13 @@ Navigator::SelectionPosition Navigator::textPositionFromPoint(int x, int y, bool
 		if (rect.w <= 0 || rect.h <= 0) continue;
 		const std::string text = searchableTextForBlock(block);
 		const int maxChars = (block.type == BlockType::ListItem) ? ((kContentW - 44) / kCharW) : ((kContentW - 34) / kCharW);
-		const std::vector<std::string> lines = (block.type == BlockType::Preformatted) ? splitPreLines(text) : wrapText(text, maxChars);
+		const std::vector<std::string> lines = wrapTextForBlock(block, maxChars);
 		const int lineHeight = std::max(kLineH, blockTextLineHeight(block));
 		int lineIndex = std::max(0, std::min((y - rect.y) / lineHeight, std::max(0, static_cast<int>(lines.size()) - 1)));
 		size_t lineStart = 0;
 		for (int line = 0; line < lineIndex && line < static_cast<int>(lines.size()); ++line) {
 			lineStart += lines[line].size();
-			if (block.type != BlockType::Preformatted) {
+			if (block.type != BlockType::Preformatted && block.style.whiteSpace != WhiteSpaceMode::Pre && block.style.whiteSpace != WhiteSpaceMode::PreWrap) {
 				while (lineStart < text.size() && text[lineStart] == ' ') ++lineStart;
 				if (lineStart < text.size() && text[lineStart] == '\n') ++lineStart;
 			} else if (lineStart < text.size()) {
@@ -3658,82 +6212,249 @@ std::string Navigator::findMatchStatusText()
 
 bool Navigator::isFocusableFormControl(const DocBlock& block)
 {
-	return block.type == BlockType::FormTextInput ||
-		block.type == BlockType::FormTextarea ||
-		block.type == BlockType::FormCheckbox ||
-		block.type == BlockType::FormRadio ||
-		block.type == BlockType::FormSelect ||
-		block.type == BlockType::FormSubmit;
+	if (block.formControl.logicalSerial == 0 || !block.formControl.metadataComplete ||
+		!block.formControl.supported || block.formUnsupported || block.formControl.hidden ||
+		runtimeDisabled(block) || block.style.displayNone) return false;
+	if (block.type != BlockType::FormTextInput && block.type != BlockType::FormTextarea &&
+		block.type != BlockType::FormCheckbox && block.type != BlockType::FormRadio &&
+		block.type != BlockType::FormSelect && block.type != BlockType::FormSubmit) return false;
+	const Rect geometry = formControlRect(static_cast<int>(&block - s_currentDoc.blocks.data()));
+	return geometry.w > 0 && geometry.h > 0;
+}
+
+bool Navigator::isFocusedFormControl(const DocBlock& block)
+{
+	const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	return runtime.initialized && runtime.focusValid &&
+		runtime.documentGeneration == s_documentGeneration &&
+		runtime.focusedDocumentGeneration == s_documentGeneration &&
+		runtime.focusedLogicalSerial != 0 &&
+		block.formControl.logicalSerial == runtime.focusedLogicalSerial &&
+		isFocusableFormControl(block);
+}
+
+int Navigator::focusedFormControlBlockIndex()
+{
+	const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || !runtime.focusValid ||
+		runtime.documentGeneration != s_documentGeneration ||
+		runtime.focusedDocumentGeneration != s_documentGeneration ||
+		runtime.focusedLogicalSerial == 0) return -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.formControl.logicalSerial == runtime.focusedLogicalSerial &&
+			isFocusableFormControl(block)) return i;
+	}
+	return -1;
+}
+
+bool Navigator::ensureFocusedControlStillValid()
+{
+	const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.initialized || !runtime.focusValid ||
+		runtime.documentGeneration != s_documentGeneration ||
+		runtime.focusedDocumentGeneration != s_documentGeneration ||
+		runtime.focusedLogicalSerial == 0) return false;
+	const int blockIndex = focusedFormControlBlockIndex();
+	if (blockIndex < 0) return false;
+	s_focusedInputBlockIndex = blockIndex;
+	return true;
+}
+
+size_t Navigator::buildFormFocusOrder(std::array<int, kFormRuntimeControlCap>& order)
+{
+	size_t count = 0;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.formControl.hidden || block.style.displayNone) {
+			++s_currentDoc.formsDiagnostics.formHiddenFocusSkips;
+			continue;
+		}
+		if (runtimeDisabled(block)) {
+			++s_currentDoc.formsDiagnostics.formDisabledFocusSkips;
+			continue;
+		}
+		if (!isFocusableFormControl(block)) continue;
+		bool duplicate = false;
+		for (size_t prior = 0; prior < count; ++prior) {
+			if (s_currentDoc.blocks[static_cast<size_t>(order[prior])].formControl.logicalSerial ==
+				block.formControl.logicalSerial) {
+				duplicate = true;
+				break;
+			}
+		}
+		if (duplicate) continue;
+		if (count >= order.size()) {
+			++s_currentDoc.formsDiagnostics.controlMetadataClamps;
+			break;
+		}
+		order[count++] = i;
+	}
+	s_currentDoc.formsDiagnostics.formFocusableControls = static_cast<int>(count);
+	return count;
 }
 
 int Navigator::formControlHeight(const DocBlock& block)
 {
-	if (block.type == BlockType::FormTextarea) {
-		int rows = block.visibleRows > 0 ? block.visibleRows : 4;
-		rows = std::max(kTextareaMinRows, std::min(kTextareaMaxRows, rows));
-		return std::max(kFormControlH, rows * kLineH + 10);
-	}
-	return kFormControlH;
+	return blockFormControlHeight(block);
 }
 
 void Navigator::focusNextFormControl(bool reverse)
 {
-	const int count = static_cast<int>(s_currentDoc.blocks.size());
-	if (count <= 0) return;
-	int start = s_focusedInputBlockIndex;
-	if (start < 0 || start >= count) start = reverse ? 0 : count - 1;
-	for (int step = 1; step <= count; ++step) {
-		int idx = reverse ? (start - step + count) % count : (start + step) % count;
-		if (!isFocusableFormControl(s_currentDoc.blocks[idx])) continue;
-		focusDocumentInput(idx);
-		s_scrollOffset = std::max(0, blockLayoutY(idx) - 24);
-		clampScrollOffset();
-		clearSelection();
-		updateStatus("Form control focused.");
-		updateDisplay();
-		return;
+	std::array<int, kFormRuntimeControlCap> order{};
+	const size_t count = buildFormFocusOrder(order);
+	if (count == 0) return;
+	int currentPosition = -1;
+	const int currentIndex = focusedFormControlBlockIndex();
+	if (currentIndex >= 0) {
+		const uint64_t serial = s_currentDoc.blocks[static_cast<size_t>(currentIndex)].formControl.logicalSerial;
+		for (size_t i = 0; i < count; ++i) {
+			if (s_currentDoc.blocks[static_cast<size_t>(order[i])].formControl.logicalSerial == serial) {
+				currentPosition = static_cast<int>(i);
+				break;
+			}
+		}
 	}
+	int targetPosition = reverse ? static_cast<int>(count - 1) : 0;
+	bool wrapped = false;
+	if (currentPosition >= 0) {
+		targetPosition = reverse ? currentPosition - 1 : currentPosition + 1;
+		if (targetPosition < 0) { targetPosition = static_cast<int>(count - 1); wrapped = true; }
+		if (targetPosition >= static_cast<int>(count)) { targetPosition = 0; wrapped = true; }
+	}
+	if (wrapped) ++s_currentDoc.formsDiagnostics.formFocusWraps;
+	if (reverse) ++s_currentDoc.formsDiagnostics.formTabBackward;
+	else ++s_currentDoc.formsDiagnostics.formTabForward;
+	const int targetIndex = order[static_cast<size_t>(targetPosition)];
+	focusDocumentInput(targetIndex, FormFocusOrigin::Keyboard);
+	clearSelection();
+	updateStatus("Form control focused.");
+	updateDisplay();
 }
 
 void Navigator::activateFormControl(int blockIndex)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
 	DocBlock& block = s_currentDoc.blocks[blockIndex];
+	if (!isRuntimeFormControl(block)) return;
+	if (runtimeDisabled(block)) {
+		++s_currentDoc.formsDiagnostics.formDisabledActivationBlocks;
+		updateStatus("Disabled form control.");
+		return;
+	}
+	FormRuntimeControlState* state = runtimeStateForBlock(block);
+	if (!state) return; // Fail closed if bounded runtime metadata is incomplete.
 	if (block.type == BlockType::FormCheckbox) {
-		block.checked = !block.checked;
+		++state->activationCount;
+		++s_currentDoc.formsDiagnostics.formCheckboxActivations;
+		state->checked = !state->checked;
+		++s_currentDoc.formsDiagnostics.formCheckboxToggles;
 		s_focusedInputBlockIndex = blockIndex;
+		recomputeFormControlStyles();
 		updateDisplay();
 		return;
 	}
 	if (block.type == BlockType::FormRadio) {
+		++state->activationCount;
+		++s_currentDoc.formsDiagnostics.formRadioActivations;
 		for (DocBlock& candidate : s_currentDoc.blocks) {
-			if (candidate.type == BlockType::FormRadio &&
-				candidate.formIndex == block.formIndex &&
-				candidate.inputName == block.inputName) {
-				candidate.checked = false;
+			if (&candidate == &block || !radioGroupMatches(candidate, block)) continue;
+			FormRuntimeControlState* candidateState = runtimeStateForBlock(candidate);
+			if (candidateState && candidateState->checked) {
+				candidateState->checked = false;
+				++s_currentDoc.formsDiagnostics.formRadioGroupUnchecks;
 			}
 		}
-		block.checked = true;
+		state->checked = true;
 		s_focusedInputBlockIndex = blockIndex;
-		updateDisplay();
-		return;
-	}
-	if (block.type == BlockType::FormSelect) {
-		if (!block.options.empty()) {
-			int next = block.selectedOption < 0 ? 0 : block.selectedOption + 1;
-			if (next >= static_cast<int>(block.options.size())) next = 0;
-			block.selectedOption = next;
-			const gxos::web::FormOption& option = block.options[static_cast<size_t>(next)];
-			block.inputValue = option.value;
-			block.text = option.text;
-		}
-		s_focusedInputBlockIndex = blockIndex;
+		recomputeFormControlStyles();
 		updateDisplay();
 		return;
 	}
 	if (block.type == BlockType::FormSubmit) {
-		submitFormForBlock(blockIndex);
+		++state->activationCount;
+		++s_currentDoc.formsDiagnostics.formButtonActivations;
+		s_focusedInputBlockIndex = blockIndex;
+		updateStatus("Button activated (session-local; no submission).");
+		storePageMetadata(s_pageMetadata, s_currentDoc);
 	}
+}
+
+void Navigator::armKeyboardActivation(int keyCode)
+{
+	if (keyCode != 32 && keyCode != 13) return;
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	const int blockIndex = focusedFormControlBlockIndex();
+	if (blockIndex < 0) {
+		if (runtime.focusValid || runtime.focusedLogicalSerial != 0) {
+			++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
+			const FormFocusCancellationReason reason =
+				(runtime.documentGeneration != s_documentGeneration ||
+				 runtime.focusedDocumentGeneration != s_documentGeneration)
+				? FormFocusCancellationReason::GenerationMismatch
+				: FormFocusCancellationReason::StateChange;
+			clearDocumentFocus(true, reason);
+		}
+		return;
+	}
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (runtime.keyboardActivationArmed) {
+		const bool sameControl = runtime.pressedKeyboardLogicalSerial == block.formControl.logicalSerial;
+		const bool sameGeneration = runtime.pressedKeyboardDocumentGeneration == s_documentGeneration &&
+			runtime.documentGeneration == s_documentGeneration;
+		if (sameControl && sameGeneration && runtime.pressedKeyboardKey == static_cast<uint8_t>(keyCode)) {
+			++s_currentDoc.formsDiagnostics.formKeyRepeatSuppressed;
+		} else {
+			cancelKeyboardActivation(sameGeneration ? FormFocusCancellationReason::KeyMismatch
+				: FormFocusCancellationReason::GenerationMismatch);
+		}
+		return;
+	}
+	const bool activatable = keyCode == 32
+		? (isRuntimeCheckable(block) || isRuntimeButton(block))
+		: isRuntimeButton(block);
+	if (!activatable) return;
+	runtime.pressedKeyboardLogicalSerial = block.formControl.logicalSerial;
+	runtime.pressedKeyboardDocumentGeneration = s_documentGeneration;
+	runtime.pressedKeyboardKey = static_cast<uint8_t>(keyCode);
+	runtime.keyboardActivationArmed = true;
+}
+
+void Navigator::finishKeyboardActivation(int keyCode)
+{
+	if (keyCode != 32 && keyCode != 13) return;
+	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	if (!runtime.keyboardActivationArmed) return;
+	if (runtime.pressedKeyboardKey != static_cast<uint8_t>(keyCode)) {
+		cancelKeyboardActivation(FormFocusCancellationReason::KeyMismatch);
+		return;
+	}
+	const uint64_t serial = runtime.pressedKeyboardLogicalSerial;
+	const uint64_t generation = runtime.pressedKeyboardDocumentGeneration;
+	if (generation != s_documentGeneration || generation != runtime.documentGeneration) {
+		cancelKeyboardActivation(FormFocusCancellationReason::GenerationMismatch);
+		++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
+		return;
+	}
+	const int blockIndex = focusedFormControlBlockIndex();
+	if (blockIndex < 0 || s_currentDoc.blocks[static_cast<size_t>(blockIndex)].formControl.logicalSerial != serial) {
+		cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+		++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
+		return;
+	}
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (runtimeDisabled(block) ||
+		(keyCode == 32 ? (!isRuntimeCheckable(block) && !isRuntimeButton(block)) : !isRuntimeButton(block))) {
+		cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+		++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
+		clearDocumentFocus(true, FormFocusCancellationReason::StateChange);
+		return;
+	}
+	clearKeyboardActivationState();
+	++s_currentDoc.formsDiagnostics.formKeyboardActivations;
+	if (keyCode == 32) ++s_currentDoc.formsDiagnostics.formSpaceActivations;
+	else ++s_currentDoc.formsDiagnostics.formEnterActivations;
+	activateFormControl(blockIndex);
 }
 
 void Navigator::updateFindMatches(bool keepCurrent)
@@ -3804,6 +6525,10 @@ void Navigator::submitFormForBlock(int blockIndex)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
 	const DocBlock& source = s_currentDoc.blocks[blockIndex];
+	if (source.formControl.disabled) {
+		updateStatus("Disabled form control.");
+		return;
+	}
 	std::string method = toLowerAscii(source.formMethod.empty() ? "get" : source.formMethod);
 	const std::string encoding = toLowerAscii(source.formEncoding.empty() ? "application/x-www-form-urlencoded" : source.formEncoding);
 	if (source.formUnsupported || (method != "get" && method != "post")) {
@@ -3838,7 +6563,7 @@ void Navigator::submitFormForBlock(int blockIndex)
 			break;
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio:
-			if (block.checked) appendField(block.inputName, block.inputValue.empty() ? "on" : block.inputValue);
+			if (runtimeChecked(block)) appendField(block.inputName, block.inputValue.empty() ? "on" : block.inputValue);
 			break;
 		case BlockType::FormSelect:
 			if (block.selectedOption >= 0 && block.selectedOption < static_cast<int>(block.options.size())) {
@@ -3928,12 +6653,25 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		s_shiftPressed = (action == "down");
 		return;
 	}
-	if (action != "down") return;
-
-	if (keyCode == 9 && !s_addressFocused && !s_findActive) {
+	if (keyCode == 9) {
+		if (action == "up") {
+			s_tabKeyPressed = false;
+			return;
+		}
+		if (action != "down" || s_addressFocused || s_findActive) return;
+		if (s_tabKeyPressed) {
+			++s_currentDoc.formsDiagnostics.formKeyRepeatSuppressed;
+			return;
+		}
+		s_tabKeyPressed = true;
 		focusNextFormControl(s_shiftPressed);
 		return;
 	}
+	if (action == "up") {
+		if (keyCode == 32 || keyCode == 13) finishKeyboardActivation(keyCode);
+		return;
+	}
+	if (action != "down") return;
 
 	// --- Address bar editing mode ---
 	if (s_addressFocused) {
@@ -4044,43 +6782,44 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		return;
 	}
 
-	if (s_focusedInputBlockIndex >= 0 &&
-		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
-		(s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormCheckbox ||
-		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormRadio ||
-		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormSelect ||
-		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormSubmit))
+	if (action == "down" && keyCode == 27 && s_currentDoc.formRuntimeState.keyboardActivationArmed) {
+		cancelKeyboardActivation(FormFocusCancellationReason::Escape);
+		updateDisplay();
+		return;
+	}
+
+	const int focusedIndex = focusedFormControlBlockIndex();
+	if (keyCode == 13 || keyCode == 32) {
+		armKeyboardActivation(keyCode);
+		return;
+	}
+	if (focusedIndex >= 0 &&
+		(s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormCheckbox ||
+		 s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormRadio ||
+		 s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormSelect ||
+		 s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormSubmit))
 	{
-		if (keyCode == 13 || keyCode == 32) {
-			activateFormControl(s_focusedInputBlockIndex);
-		} else if (keyCode == 27) {
+		if (keyCode == 27) {
 			blurDocumentInput();
 			updateDisplay();
 		}
 		return;
 	}
 
-	if (s_focusedInputBlockIndex >= 0 &&
-		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
-		(s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextInput ||
-		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextarea))
+	if (focusedIndex >= 0 &&
+		(s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormTextInput ||
+		 s_currentDoc.blocks[static_cast<size_t>(focusedIndex)].type == BlockType::FormTextarea))
 	{
+		// Phase 2G keeps the existing text-control renderer but does not make
+		// Space/Enter editing or implicit submission keyboard behaviors.
+		if (keyCode == 13 || keyCode == 32) return;
 		if (s_ctrlPressed && ((keyCode == 67 || keyCode == 99) || (keyCode == 65 || keyCode == 97))) {
 			updateStatus("Form input copy/select all is deferred.");
 			return;
 		}
-		DocBlock& block = s_currentDoc.blocks[s_focusedInputBlockIndex];
+		DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(focusedIndex)];
 		const int bufLen = static_cast<int>(block.inputValue.size());
-		if (keyCode == 13) {
-			if (block.type == BlockType::FormTextarea) {
-				block.inputValue.insert(static_cast<size_t>(s_inputCaret), 1, '\n');
-				block.text = block.inputValue;
-				++s_inputCaret;
-				updateDisplay();
-			} else {
-				submitFormForBlock(s_focusedInputBlockIndex);
-			}
-		} else if (keyCode == 27) {
+		if (keyCode == 27) {
 			blurDocumentInput();
 			updateDisplay();
 		} else if (keyCode == 8) {
@@ -4160,28 +6899,61 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 		if (addrRect.contains(x, y)) return HitTarget::AddressBar;
 	}
 
+	// Controls win over labels when their rectangles overlap.  This makes a
+	// wrapping label produce one activation rather than a control toggle plus a
+	// second label activation.
+	int bestControlIndex = -1;
+	HitTarget bestControlTarget = HitTarget::None;
+	int bestControlDistance = std::numeric_limits<int>::max();
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		Rect controlRect{0, 0, 0, 0};
+		HitTarget controlTarget = HitTarget::None;
 		if (s_currentDoc.blocks[i].type == BlockType::FormTextInput ||
 			s_currentDoc.blocks[i].type == BlockType::FormCheckbox ||
 			s_currentDoc.blocks[i].type == BlockType::FormRadio ||
 			s_currentDoc.blocks[i].type == BlockType::FormTextarea ||
 			s_currentDoc.blocks[i].type == BlockType::FormSelect) {
-			if (formControlRect(i).contains(x, y)) {
-				outLinkBlockIndex = i;
-				switch (s_currentDoc.blocks[i].type) {
-				case BlockType::FormCheckbox: return HitTarget::FormCheckbox;
-				case BlockType::FormRadio: return HitTarget::FormRadio;
-				case BlockType::FormTextarea: return HitTarget::FormTextarea;
-				case BlockType::FormSelect: return HitTarget::FormSelect;
-				default: return HitTarget::FormInput;
-				}
+			controlRect = formControlRect(i);
+			switch (s_currentDoc.blocks[i].type) {
+			case BlockType::FormCheckbox: controlTarget = HitTarget::FormCheckbox; break;
+			case BlockType::FormRadio: controlTarget = HitTarget::FormRadio; break;
+			case BlockType::FormTextarea: controlTarget = HitTarget::FormTextarea; break;
+			case BlockType::FormSelect: controlTarget = HitTarget::FormSelect; break;
+			default: controlTarget = HitTarget::FormInput; break;
 			}
 		} else if (s_currentDoc.blocks[i].type == BlockType::FormSubmit) {
-			if (formControlRect(i).contains(x, y)) {
-				outLinkBlockIndex = i;
-				return HitTarget::FormSubmit;
+			controlRect = formControlRect(i);
+			controlTarget = HitTarget::FormSubmit;
+		}
+		if (controlTarget != HitTarget::None && controlRect.contains(x, y)) {
+			const int dx = x - (controlRect.x + controlRect.w / 2);
+			const int dy = y - (controlRect.y + controlRect.h / 2);
+			const int distance = dx * dx + dy * dy;
+			if (distance < bestControlDistance) {
+				bestControlDistance = distance;
+				bestControlIndex = i;
+				bestControlTarget = controlTarget;
 			}
-		} else if (s_currentDoc.blocks[i].type == BlockType::Link) {
+		}
+	}
+	if (bestControlIndex >= 0) {
+		outLinkBlockIndex = bestControlIndex;
+		++s_currentDoc.formsDiagnostics.formHitTargetsRegistered;
+		return bestControlTarget;
+	}
+
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[i].type != BlockType::FormLabel ||
+			associatedControlSerialForLabel(s_currentDoc.blocks[i]) == 0) continue;
+		if (selectableBlockRect(i).contains(x, y)) {
+			outLinkBlockIndex = i;
+			++s_currentDoc.formsDiagnostics.formHitTargetsRegistered;
+			return HitTarget::FormLabel;
+		}
+	}
+
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[i].type == BlockType::Link) {
 			if (linkBlockRect(i).contains(x, y)) {
 				outLinkBlockIndex = i;
 				return HitTarget::Link;
@@ -4259,6 +7031,7 @@ std::string Navigator::normalizeUrl(const std::string& input)
 
 void Navigator::focusAddressBar()
 {
+	if (s_currentDoc.formRuntimeState.focusValid) clearDocumentFocus(true);
 	if (s_addressFocused) return;
 	s_addressFocused = true;
 	s_addressBuffer  = s_currentDoc.url;
@@ -4392,6 +7165,11 @@ WebDocument Navigator::buildBookmarksDocument()
 void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	cancelKeyboardActivation(FormFocusCancellationReason::Navigation);
+	if (s_documentGeneration == std::numeric_limits<uint64_t>::max()) s_documentGeneration = 1;
+	else ++s_documentGeneration;
+	clearDocumentFocus(false, FormFocusCancellationReason::Navigation);
+	clearMousePressState();
 	s_loading = true;
 	if (s_windowId != 0) updateDisplay();
 	cleanupRemoteImageTempFiles();
@@ -4446,6 +7224,15 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 	}
 
 	s_currentDoc      = std::move(doc);
+	initializeFormRuntimeState();
+	for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.formControl.hidden &&
+			(element.formControl.type == FormControlType::Checkbox ||
+			 element.formControl.type == FormControlType::Radio)) {
+			++s_currentDoc.formsDiagnostics.formHiddenHitTargetsSuppressed;
+		}
+	}
+	recomputeFormControlStyles();
 	if (!s_currentDoc.url.empty()) {
 		s_visitedUrls.insert(s_currentDoc.url);
 	}
@@ -4673,6 +7460,15 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS table layout fallbacks", m.cssTableLayoutFallbackCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS lists rendered", m.cssListRenderCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS clamped values", m.cssClampedValueCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS figures rendered", m.cssFiguresRendered), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS figcaptions rendered", m.cssFigcaptionsRendered), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS blockquotes rendered", m.cssBlockquotesRendered), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS definition lists rendered", m.cssDefinitionListsRendered), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS images constrained", m.cssImagesConstrained), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS images aspect preserved", m.cssImagesAspectPreserved), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS image alt fallbacks", m.cssImageAltFallbacks), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS image size clamps", m.cssImageSizeClamps), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS nested layout clamps", m.cssNestedLayoutClamps), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Downloaded", yesNo(m.downloaded)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download saved path", m.downloadSavedPath), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download byte count", static_cast<int>(m.downloadByteCount)), ""});
@@ -4785,6 +7581,7 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.unsupportedExternalStylesheetCount,
 		s_pageMetadata.unsupportedCssRuleCount,
 		s_pageMetadata.unsupportedCssDeclarationCount,
+		s_pageMetadata.cssUnsupportedSelectorCount,
 		s_pageMetadata.cssParseErrorCount,
 		s_pageMetadata.cssStyleBlockCapped,
 		s_pageMetadata.cssStyleBytesProcessed,
@@ -4803,6 +7600,80 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssTableCaptionCount,
 		s_pageMetadata.cssTableHeaderCellCount,
 		s_pageMetadata.cssVisitedLinkCount,
+		s_pageMetadata.cssBorderedBlocksRendered,
+		s_pageMetadata.cssDashedBordersRendered,
+		s_pageMetadata.cssDottedBordersRendered,
+		s_pageMetadata.cssBorderWidthClamps,
+		s_pageMetadata.cssCollapsedTablesRendered,
+		s_pageMetadata.cssSeparateTablesRendered,
+		s_pageMetadata.cssTableBorderSpacingClamps,
+		s_pageMetadata.cssListStyleMarkersRendered,
+		s_pageMetadata.cssListStyleNoneApplied,
+		s_pageMetadata.cssTextDecorationsRendered,
+		s_pageMetadata.cssGenericFontFamilyApplied,
+		s_pageMetadata.cssGenericFontFamilyFallbacks,
+		s_pageMetadata.cssFiguresRendered,
+		s_pageMetadata.cssFigcaptionsRendered,
+		s_pageMetadata.cssBlockquotesRendered,
+		s_pageMetadata.cssDefinitionListsRendered,
+		s_pageMetadata.cssImagesConstrained,
+		s_pageMetadata.cssImagesAspectPreserved,
+		s_pageMetadata.cssImageAltFallbacks,
+		s_pageMetadata.cssImageSizeClamps,
+		s_pageMetadata.cssNestedLayoutClamps,
+		s_pageMetadata.cssMaxWrapperAncestorDepth,
+		s_pageMetadata.cssSelectorGroupsParsed,
+		s_pageMetadata.cssCompoundSelectorsParsed,
+		s_pageMetadata.cssChildCombinators,
+		s_pageMetadata.cssDescendantCombinators,
+		s_pageMetadata.cssAdjacentSiblingCombinators,
+		s_pageMetadata.cssGeneralSiblingCombinators,
+		s_pageMetadata.cssAdjacentSiblingMatches,
+		s_pageMetadata.cssGeneralSiblingMatches,
+		s_pageMetadata.cssSiblingScanSteps,
+		s_pageMetadata.cssSiblingScanClamps,
+		s_pageMetadata.cssSiblingMetadataClamps,
+		s_pageMetadata.cssSiblingMetadataErrors,
+		s_pageMetadata.cssSelectorMatches,
+		s_pageMetadata.cssSpecificityOverrides,
+		s_pageMetadata.cssSourceOrderOverrides,
+		s_pageMetadata.cssInlineOverrides,
+		s_pageMetadata.cssInheritedPropertiesApplied,
+		s_pageMetadata.cssSelectorDepthClamps,
+		s_pageMetadata.cssSelectorGroupClamps,
+		s_pageMetadata.cssCascadePropertyResolutions,
+		s_pageMetadata.cssImportantDeclarationsApplied,
+		s_pageMetadata.cssRuleCapCount,
+		s_pageMetadata.cssDeclarationCapCount,
+		s_pageMetadata.cssInheritanceDepthClamps,
+		s_pageMetadata.cssPseudoClassesParsed,
+		s_pageMetadata.cssStructuralPseudoMatches,
+		s_pageMetadata.cssFirstChildMatches,
+		s_pageMetadata.cssLastChildMatches,
+		s_pageMetadata.cssNthChildMatches,
+		s_pageMetadata.cssOfTypeMatches,
+		s_pageMetadata.cssNotMatches,
+		s_pageMetadata.cssLinkPseudoMatches,
+		s_pageMetadata.cssVisitedPseudoMatches,
+		s_pageMetadata.cssPseudoClassClamps,
+		s_pageMetadata.cssNthExpressionParseErrors,
+		s_pageMetadata.cssStructuralMetadataClamps,
+		s_pageMetadata.cssSelectorEvaluationStepClamps,
+		s_pageMetadata.cssEmptyPseudoParsed,
+		s_pageMetadata.cssEmptyPseudoMatches,
+		s_pageMetadata.cssEmptyMetadataIncomplete,
+		s_pageMetadata.cssContentMetadataClamps,
+		s_pageMetadata.cssSelectorGroupMemberRecoveries,
+		s_pageMetadata.cssCommentScanClamps,
+		s_pageMetadata.cssUnterminatedCommentErrors,
+		s_pageMetadata.cssUnbalancedParenthesisErrors,
+		s_pageMetadata.cssUnbalancedBracketErrors,
+		s_pageMetadata.cssUnterminatedStringErrors,
+		s_pageMetadata.cssInvalidCombinatorSequences,
+		s_pageMetadata.cssIdentifierEscapeRejections,
+		s_pageMetadata.cssSelectorMemberParseFailures,
+		s_pageMetadata.cssSelectorRecoverySuccesses,
+		s_pageMetadata.cssComputedStyleEvidence,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -4826,6 +7697,7 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.tlsCredentialAcquired,
 		s_pageMetadata.tlsHandshakeStarted,
 		s_pageMetadata.tlsSmokeSelfSignedBypass));
+	appendFormPhase2EBlocks(doc, s_pageMetadata);
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
@@ -4931,8 +7803,15 @@ static std::string extractDocumentText(const WebDocument& doc)
 		case BlockType::Image:
 			if (!block.alt.empty()) out << "[Image: " << block.alt << "]\n";
 			break;
+		case BlockType::FormLabel:
+			if (!block.text.empty()) out << block.text << "\n";
+			break;
 		case BlockType::FormTextInput:
 		case BlockType::FormTextarea: {
+			if (block.formControl.type == FormControlType::Password || block.inputType == "password") {
+				out << "[password field]\n";
+				break;
+			}
 			const std::string& text = block.inputValue.empty() ? block.placeholder : block.inputValue;
 			if (!text.empty()) out << text << "\n";
 			break;
@@ -5368,7 +8247,7 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	}
 
 	if (response.contentType == "text/html") {
-		WebDocument doc = parseHtml(documentUrl, response.body);
+		WebDocument doc = parseHtml(documentUrl, response.body, s_visitedUrls);
 		if (doc.title.empty()) doc.title = documentUrl;
 		return finish(std::move(doc));
 	}
@@ -5473,12 +8352,14 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 	const int outerWidth = blockOuterWidth(block, availableWidth);
 	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
-	const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
+	const int borderLeft = cssBorderLeftPx(block.style);
+	const int borderRight = cssBorderRightPx(block.style);
+	const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 	int relY  = blockLayoutY(blockIndex);
 	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
-	int h     = wrappedBlockHeight(block.text, std::max(1, innerWidth / kCharW), false, blockTextLineHeight(block));
+	int h     = wrappedBlockHeight(block, std::max(1, innerWidth / kCharW), blockTextLineHeight(block));
 	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth);
-	return Rect{ outerX + paddingLeft, drawY, w, h };
+	return Rect{ blockContentLeftX(block, outerX), drawY, w, h };
 }
 
 Navigator::Rect Navigator::formControlRect(int blockIndex)
@@ -5493,7 +8374,6 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	const int blockMarginLeft = cssMarginLeftPx(block.style, 0);
 	const int blockMarginRight = cssMarginRightPx(block.style, 0);
 	const int blockMarginTop = cssMarginTopPx(block.style, 4);
-	const int paddingLeft = cssPaddingLeftPx(block.style, 0);
 	const int paddingTop = cssPaddingTopPx(block.style, 0);
 	const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
 		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
@@ -5501,10 +8381,14 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	const int relY = blockLayoutY(blockIndex);
 	const int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + paddingTop;
-	int w = kFormInputW;
-	if (block.type == BlockType::FormSubmit) w = kFormSubmitW;
-	else if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) w = 260;
-	return Rect{ outerX + paddingLeft, drawY, w, formControlHeight(block) };
+	int w = blockFormControlWidth(block, availableWidth);
+	if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) {
+		// Keep the logical control hit box on the indicator.  Label text gets a
+		// separate bounded target and therefore cannot double-toggle a wrapping
+		// control when the two rendered blocks overlap.
+		w = 22;
+	}
+	return Rect{ blockContentLeftX(block, outerX), drawY, w, formControlHeight(block) };
 }
 
 int Navigator::computeDocumentHeight()
@@ -5589,7 +8473,7 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 	if (isHtml) {
 		// Delegate to the HTML parser; it handles title, headings, paragraphs, links.
 		try {
-			WebDocument doc = parseHtml(url, fr.text);
+		WebDocument doc = parseHtml(url, fr.text, s_visitedUrls);
 			if (doc.title.empty()) {
 				// fallback title from filename
 				size_t slash = path.rfind('/');

@@ -10,6 +10,17 @@ typedef int32_t gx_result;
 typedef uint32_t gx_flags;
 typedef uint64_t gx_handle;
 
+/* Pixels are stored as little-endian 0x00RRGGBB words (B, G, R, X bytes). */
+enum {
+    GX_PIXEL_FORMAT_XRGB8888 = 1
+};
+
+enum {
+    GX_WINDOW_FLAG_RESIZABLE = 1u << 0,
+    GX_WINDOW_FLAG_FIXED_SIZE = 0u,
+    GX_WINDOW_FLAG_CENTERED = 1u << 1
+};
+
 enum {
     GX_OK = 0,
     GX_ERROR_NOT_IMPLEMENTED = -1,

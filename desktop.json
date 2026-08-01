@@ -6,12 +6,12 @@
   "desktop.taskbar.position": "bottom",
   "desktop.display.mode": "mirror",
   "desktop.display.primaryId": "display-1",
-  "desktop.display.arrangement": "",
-  "desktop.display.resolution": "",
+  "desktop.display.arrangement": "display-1|Display 1|0|0|1024|768|1|1|1|0|0|XRGB32|",
+  "desktop.display.resolution": "1024x768",
   "desktop.clock.timeZoneId": "pacific",
   "desktop.clock.use24HourTime": false,
-  "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
-  "recent": ["ComputerFiles","guideXOS Navigator","DisplayOptions","Console","App Model Demo","Hello World","Resource Viewer","Notepad","Control Panel","Calculator"],
+  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation","Nexgen PacMan Bare-Metal Fruit Validation","Nexgen PacMan Fruit Validation","Nexgen PacMan Level Validation","ComputerFiles","Trash"],
+  "recent": ["guideXOS Navigator","Notepad","File Explorer","DisplayOptions","ControlPanel","Nexgen PacMan Danger Validation","Nexgen PacMan","Resource Viewer","Image Viewer","ComputerFiles"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,
@@ -21,7 +21,6 @@
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
   "windows": [
-    {"id": 1000, "title": "Task Manager", "x": 300, "y": 300, "w": 760, "h": 520, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0, "restoreX": 300, "restoreY": 300, "restoreW": 760, "restoreH": 520}
   ],
   "iconPositions": [
   ]

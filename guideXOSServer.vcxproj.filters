@@ -93,7 +93,16 @@
     <ClInclude Include="file_explorer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="file_explorer_navigation_policy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="file_icon_provider.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="file_operations.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="window_interaction_policy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="clock.h">
@@ -136,6 +145,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="wallpaper_registry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="window_bounds_store.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\multiboot.h">
@@ -800,6 +812,9 @@
     <ClCompile Include="file_icon_provider.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="file_operations.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="clock.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -834,6 +849,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="wallpaper_registry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="window_bounds_store.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\framebuffer.cpp">

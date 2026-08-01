@@ -1,0 +1,2 @@
+Phase 3A active typed dispatch smoke fixture
+This file should open through Notepad when guarded active typed dispatch is enabled.

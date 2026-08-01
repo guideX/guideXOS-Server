@@ -1,4 +1,5 @@
 #include "task_manager.h"
+#include "desktop_theme.h"
 #include "gui_protocol.h"
 #include "logger.h"
 #include "allocator.h"
@@ -84,6 +85,143 @@ namespace gxos { namespace apps {
         static uint64_t steadyClockMicros() {
             return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count());
+        }
+
+        static uint32_t packRgb(uint8_t r, uint8_t g, uint8_t b) {
+            return (0xFFu << 24) | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
+        }
+
+        static uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent) {
+            overlayPercent = std::clamp(overlayPercent, 0, 100);
+            const int basePercent = 100 - overlayPercent;
+            const uint8_t baseR = static_cast<uint8_t>((baseColor >> 16) & 0xFF);
+            const uint8_t baseG = static_cast<uint8_t>((baseColor >> 8) & 0xFF);
+            const uint8_t baseB = static_cast<uint8_t>(baseColor & 0xFF);
+            const uint8_t overlayR = static_cast<uint8_t>((overlayColor >> 16) & 0xFF);
+            const uint8_t overlayG = static_cast<uint8_t>((overlayColor >> 8) & 0xFF);
+            const uint8_t overlayB = static_cast<uint8_t>(overlayColor & 0xFF);
+            return packRgb(
+                static_cast<uint8_t>((baseR * basePercent + overlayR * overlayPercent) / 100),
+                static_cast<uint8_t>((baseG * basePercent + overlayG * overlayPercent) / 100),
+                static_cast<uint8_t>((baseB * basePercent + overlayB * overlayPercent) / 100));
+        }
+
+        static bool isSciFiThemeActive() {
+            return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+        }
+
+        static const DesktopTheme& taskManagerTheme() {
+            return GetCurrentDesktopTheme();
+        }
+
+        static uint32_t TaskManagerBodyColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(26, 26, 26);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 10);
+        }
+
+        static uint32_t TaskManagerPanelColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(26, 26, 26);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 14);
+        }
+
+        static uint32_t TaskManagerHeaderColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(36, 36, 36);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 22);
+        }
+
+        static uint32_t TaskManagerListColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(24, 24, 24);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
+        }
+
+        static uint32_t TaskManagerRowColor() {
+            return TaskManagerListColor();
+        }
+
+        static uint32_t TaskManagerRowSelectedColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(42, 59, 82);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.windowBackground, theme.accent, 18);
+        }
+
+        static uint32_t TaskManagerBorderColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(68, 68, 68);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.windowBorder, theme.taskbarBorder, 24);
+        }
+
+        static uint32_t TaskManagerTextColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(220, 220, 220);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.titleBarText, theme.windowBackground, 8);
+        }
+
+        static uint32_t TaskManagerHeaderTextColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(236, 240, 248);
+            }
+
+            return taskManagerTheme().titleBarText;
+        }
+
+        static uint32_t TaskManagerValueTextColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(224, 228, 238);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.titleBarText, theme.windowBackground, 12);
+        }
+
+        static uint32_t TaskManagerMutedTextColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(160, 166, 176);
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(theme.titleBarText, theme.taskbarBackground, 58);
+        }
+
+        static uint32_t TaskManagerAccentColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(228, 232, 240);
+            }
+
+            return taskManagerTheme().accent;
+        }
+
+        static uint32_t TaskManagerIndicatorColor(uint32_t baseColor) {
+            if (!isSciFiThemeActive()) {
+                return baseColor;
+            }
+
+            const DesktopTheme& theme = taskManagerTheme();
+            return blendColor(baseColor, theme.accent, 14);
         }
 
         static uint64_t microsToMillisCeil(uint64_t micros) {
@@ -194,14 +332,34 @@ namespace gxos { namespace apps {
     }
 
     namespace {
-        static void publishTextAt(uint64_t windowId, int x, int y, const std::string& text) {
+        static void publishTextAtColor(uint64_t windowId, int x, int y, uint32_t color, const std::string& text) {
             ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawTextAt;
+            msg.type = (uint32_t)MsgType::MT_DrawTextAtColor;
             std::ostringstream oss;
-            oss << windowId << "|" << x << "|" << y << "|" << text;
+            oss << windowId << "|" << x << "|" << y << "|"
+                << static_cast<int>((color >> 16) & 0xFF) << "|"
+                << static_cast<int>((color >> 8) & 0xFF) << "|"
+                << static_cast<int>(color & 0xFF) << "|" << text;
             const std::string payload = oss.str();
             msg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        static void publishRectColor(uint64_t windowId, int x, int y, int w, int h, uint32_t color) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawRect;
+            std::ostringstream oss;
+            oss << windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|"
+                << static_cast<int>((color >> 16) & 0xFF) << "|"
+                << static_cast<int>((color >> 8) & 0xFF) << "|"
+                << static_cast<int>(color & 0xFF);
+            const std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        static void publishTextAt(uint64_t windowId, int x, int y, const std::string& text) {
+            publishTextAtColor(windowId, x, y, TaskManagerTextColor(), text);
         }
 
         static void publishTextAtColor(uint64_t windowId, int x, int y, uint8_t r, uint8_t g, uint8_t b, const std::string& text) {
@@ -264,16 +422,14 @@ namespace gxos { namespace apps {
                                  const uint64_t* history,
                                  int historyCount,
                                  int historyHead,
-                                 uint8_t accentR,
-                                 uint8_t accentG,
-                                 uint8_t accentB) {
-            publishRect(windowId, x, y, w, h, 0x22, 0x22, 0x22);
-            publishRect(windowId, x, y, w, 1, 0x44, 0x44, 0x44);
-            publishRect(windowId, x, y + h - 1, w, 1, 0x44, 0x44, 0x44);
-            publishRect(windowId, x, y, 1, h, 0x44, 0x44, 0x44);
-            publishRect(windowId, x + w - 1, y, 1, h, 0x44, 0x44, 0x44);
-            publishTextAtColor(windowId, x + 8, y + 6, accentR, accentG, accentB, title);
-            publishTextAt(windowId, x + w - 72, y + 6, valueText);
+                                 uint32_t accentColor) {
+            publishRectColor(windowId, x, y, w, h, TaskManagerPanelColor());
+            publishRectColor(windowId, x, y, w, 1, TaskManagerBorderColor());
+            publishRectColor(windowId, x, y + h - 1, w, 1, TaskManagerBorderColor());
+            publishRectColor(windowId, x, y, 1, h, TaskManagerBorderColor());
+            publishRectColor(windowId, x + w - 1, y, 1, h, TaskManagerBorderColor());
+            publishTextAtColor(windowId, x + 8, y + 6, accentColor, title);
+            publishTextAtColor(windowId, x + w - 72, y + 6, TaskManagerValueTextColor(), valueText);
 
             const int plotX = x + 8;
             const int plotY = y + 22;
@@ -281,14 +437,14 @@ namespace gxos { namespace apps {
             const int plotH = h - 30;
 
             if (!hasData || historyCount <= 0 || plotW <= 0 || plotH <= 0) {
-                publishRect(windowId, plotX, plotY, plotW, plotH, 0x1B, 0x1B, 0x1B);
-                publishTextAtColor(windowId, plotX + 12, plotY + plotH / 2 - 4, 160, 160, 160, "N/A");
+                publishRectColor(windowId, plotX, plotY, plotW, plotH, TaskManagerRowColor());
+                publishTextAtColor(windowId, plotX + 12, plotY + plotH / 2 - 4, TaskManagerMutedTextColor(), "N/A");
                 return;
             }
 
-            publishRect(windowId, plotX, plotY, plotW, plotH, 0x19, 0x19, 0x19);
+            publishRectColor(windowId, plotX, plotY, plotW, plotH, TaskManagerRowColor());
             if (historyCount < 2) {
-                publishTextAtColor(windowId, plotX + 12, plotY + plotH / 2 - 4, accentR, accentG, accentB, valueText);
+                publishTextAtColor(windowId, plotX + 12, plotY + plotH / 2 - 4, TaskManagerValueTextColor(), valueText);
                 return;
             }
 
@@ -302,7 +458,7 @@ namespace gxos { namespace apps {
                 const int barHeight = std::max(1, (plotH * valuePct) / 100);
                 const int barX = plotX + i * columnWidth;
                 const int barY = plotY + plotH - barHeight;
-                publishRect(windowId, barX, barY, std::max(1, columnWidth - 1), barHeight, accentR, accentG, accentB);
+                publishRectColor(windowId, barX, barY, std::max(1, columnWidth - 1), barHeight, accentColor);
             }
         }
 
@@ -1255,13 +1411,13 @@ namespace gxos { namespace apps {
         const int w = 736;
         const int h = 92;
 
-        publishRect(s_windowId, x, y, w, h, 0x1A, 0x1A, 0x1A);
-        publishRect(s_windowId, x, y, w, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x, y + h - 1, w, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x, y, 1, h, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x + w - 1, y, 1, h, 0x44, 0x44, 0x44);
+        publishRectColor(s_windowId, x, y, w, h, TaskManagerBodyColor());
+        publishRectColor(s_windowId, x, y, w, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x, y + h - 1, w, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x, y, 1, h, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x + w - 1, y, 1, h, TaskManagerBorderColor());
 
-        publishTextAtColor(s_windowId, x + 12, y + 10, 240, 244, 248, "Task Manager");
+        publishTextAtColor(s_windowId, x + 12, y + 10, TaskManagerHeaderTextColor(), "Task Manager");
 
         std::ostringstream memoryLine;
         memoryLine << "Memory: " << formatMemory(mem.usedBytes);
@@ -1284,7 +1440,7 @@ namespace gxos { namespace apps {
         footerLine << (s_snapshot.performance.cpuAvailable ? std::to_string(s_snapshot.performance.cpuPct) + "%" : std::string("N/A"));
         footerLine << "  Disk: " << diskRateSummary(s_snapshot.performance);
         footerLine << "  Network: " << networkRateSummary(s_snapshot.performance);
-        publishTextAtColor(s_windowId, x + 12, y + 66, 170, 176, 186, footerLine.str());
+        publishTextAtColor(s_windowId, x + 12, y + 66, TaskManagerMutedTextColor(), footerLine.str());
     }
     
     void TaskManager::updateDisplay() {
@@ -1303,36 +1459,36 @@ namespace gxos { namespace apps {
             const int startIndex = std::max(0, std::min(s_scrollOffset, std::max(0, rowCount - visibleRows)));
             const int endIndex = std::min(rowCount, startIndex + visibleRows);
 
-            publishRect(s_windowId, tableX, tableY, tableW, headerH, 0x24, 0x24, 0x24);
-            publishRect(s_windowId, tableX, tableY, tableW, 1, 0x44, 0x44, 0x44);
-            publishRect(s_windowId, tableX, tableY + headerH - 1, tableW, 1, 0x44, 0x44, 0x44);
-            publishRect(s_windowId, tableX, tableY, 1, headerH, 0x44, 0x44, 0x44);
-            publishRect(s_windowId, tableX + tableW - 1, tableY, 1, headerH, 0x44, 0x44, 0x44);
+            publishRectColor(s_windowId, tableX, tableY, tableW, headerH, TaskManagerHeaderColor());
+            publishRectColor(s_windowId, tableX, tableY, tableW, 1, TaskManagerBorderColor());
+            publishRectColor(s_windowId, tableX, tableY + headerH - 1, tableW, 1, TaskManagerBorderColor());
+            publishRectColor(s_windowId, tableX, tableY, 1, headerH, TaskManagerBorderColor());
+            publishRectColor(s_windowId, tableX + tableW - 1, tableY, 1, headerH, TaskManagerBorderColor());
 
-            publishTextAtColor(s_windowId, tableX + 12, tableY + 3, 236, 240, 248, "Name");
-            publishTextAtColor(s_windowId, tableX + 330, tableY + 3, 236, 240, 248, "CPU%");
-            publishTextAtColor(s_windowId, tableX + 394, tableY + 3, 236, 240, 248, "Memory");
-            publishTextAtColor(s_windowId, tableX + 534, tableY + 3, 236, 240, 248, "Disk%");
-            publishTextAtColor(s_windowId, tableX + 606, tableY + 3, 236, 240, 248, "Network%");
+            publishTextAtColor(s_windowId, tableX + 12, tableY + 3, TaskManagerHeaderTextColor(), "Name");
+            publishTextAtColor(s_windowId, tableX + 330, tableY + 3, TaskManagerHeaderTextColor(), "CPU%");
+            publishTextAtColor(s_windowId, tableX + 394, tableY + 3, TaskManagerHeaderTextColor(), "Memory");
+            publishTextAtColor(s_windowId, tableX + 534, tableY + 3, TaskManagerHeaderTextColor(), "Disk%");
+            publishTextAtColor(s_windowId, tableX + 606, tableY + 3, TaskManagerHeaderTextColor(), "Network%");
 
-            publishRect(s_windowId, tableX, rowY - 2, tableW, visibleRows * rowH + 4, 0x18, 0x18, 0x18);
+            publishRectColor(s_windowId, tableX, rowY - 2, tableW, visibleRows * rowH + 4, TaskManagerRowColor());
 
             for (int i = startIndex; i < endIndex; ++i) {
                 const ProcessSnapshot& proc = s_snapshot.processes[i];
                 const int y = rowY + (i - startIndex) * rowH;
                 if (i == s_selectedIndex) {
-                    publishRect(s_windowId, tableX + 1, y, tableW - 2, rowH - 1, 0x2A, 0x3B, 0x52);
+                    publishRectColor(s_windowId, tableX + 1, y, tableW - 2, rowH - 1, TaskManagerRowSelectedColor());
                 }
 
-                publishTextAt(s_windowId, tableX + 8, y + 5, i == s_selectedIndex ? "> " : "  ");
+                publishTextAtColor(s_windowId, tableX + 8, y + 5, i == s_selectedIndex ? TaskManagerAccentColor() : TaskManagerTextColor(), i == s_selectedIndex ? "> " : "  ");
                 publishTextAt(s_windowId, tableX + 24, y + 5, trimDisplayName(proc.displayName, 30));
-                publishTextAtColor(s_windowId, tableX + 330, y + 5, 224, 228, 238, pctOrNa(proc.cpuPctAvailable, proc.cpuPct));
-                publishTextAt(s_windowId, tableX + 394, y + 5, formatMemory(proc.memoryBytes));
-                publishTextAtColor(s_windowId, tableX + 534, y + 5, 224, 228, 238, proc.diskPctAvailable ? std::to_string(proc.diskPct) + "%" : "N/A");
-                publishTextAtColor(s_windowId, tableX + 606, y + 5, 224, 228, 238, proc.networkPctAvailable ? std::to_string(proc.networkPct) + "%" : "N/A");
+                publishTextAtColor(s_windowId, tableX + 330, y + 5, TaskManagerValueTextColor(), pctOrNa(proc.cpuPctAvailable, proc.cpuPct));
+                publishTextAtColor(s_windowId, tableX + 394, y + 5, TaskManagerTextColor(), formatMemory(proc.memoryBytes));
+                publishTextAtColor(s_windowId, tableX + 534, y + 5, TaskManagerValueTextColor(), proc.diskPctAvailable ? std::to_string(proc.diskPct) + "%" : "N/A");
+                publishTextAtColor(s_windowId, tableX + 606, y + 5, TaskManagerValueTextColor(), proc.networkPctAvailable ? std::to_string(proc.networkPct) + "%" : "N/A");
             }
 
-            publishRect(s_windowId, tableX, 456, tableW, 1, 0x44, 0x44, 0x44);
+            publishRectColor(s_windowId, tableX, 456, tableW, 1, TaskManagerBorderColor());
             std::ostringstream selectedLine;
             if (s_selectedIndex >= 0 && s_selectedIndex < static_cast<int>(s_snapshot.processes.size())) {
                 const ProcessSnapshot& proc = s_snapshot.processes[s_selectedIndex];
@@ -1345,7 +1501,7 @@ namespace gxos { namespace apps {
             } else {
                 selectedLine << "Selected: N/A";
             }
-            publishTextAt(s_windowId, tableX + 12, 462, selectedLine.str());
+            publishTextAtColor(s_windowId, tableX + 12, 462, TaskManagerMutedTextColor(), selectedLine.str());
             updateStatusBar();
         } else if (s_currentTab == 1) {
             updatePerformanceTab();
@@ -1376,19 +1532,19 @@ namespace gxos { namespace apps {
         const int navItemH = 88;
         const int navStartY = y + 34;
 
-        publishRect(s_windowId, x, y, navW, h, 0x1A, 0x1A, 0x1A);
-        publishRect(s_windowId, detailX, y, detailW, h, 0x1A, 0x1A, 0x1A);
-        publishRect(s_windowId, x, y, navW, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, detailX, y, detailW, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x, y + h - 1, navW, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, detailX, y + h - 1, detailW, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x, y, 1, h, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, detailX, y, 1, h, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x + navW - 1, y, 1, h, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, detailX + detailW - 1, y, 1, h, 0x44, 0x44, 0x44);
+        publishRectColor(s_windowId, x, y, navW, h, TaskManagerPanelColor());
+        publishRectColor(s_windowId, detailX, y, detailW, h, TaskManagerPanelColor());
+        publishRectColor(s_windowId, x, y, navW, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, detailX, y, detailW, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x, y + h - 1, navW, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, detailX, y + h - 1, detailW, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x, y, 1, h, TaskManagerBorderColor());
+        publishRectColor(s_windowId, detailX, y, 1, h, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x + navW - 1, y, 1, h, TaskManagerBorderColor());
+        publishRectColor(s_windowId, detailX + detailW - 1, y, 1, h, TaskManagerBorderColor());
 
-        publishTextAtColor(s_windowId, x + 12, y + 10, 240, 244, 248, "Performance");
-        publishTextAtColor(s_windowId, detailX + 12, y + 10, 240, 244, 248, s_perfCategoryIndex == 0 ? "CPU" : s_perfCategoryIndex == 1 ? "Memory" : s_perfCategoryIndex == 2 ? "Disk" : "Network");
+        publishTextAtColor(s_windowId, x + 12, y + 10, TaskManagerHeaderTextColor(), "Performance");
+        publishTextAtColor(s_windowId, detailX + 12, y + 10, TaskManagerHeaderTextColor(), s_perfCategoryIndex == 0 ? "CPU" : s_perfCategoryIndex == 1 ? "Memory" : s_perfCategoryIndex == 2 ? "Disk" : "Network");
 
         const char* navLabels[] = { "CPU", "Memory", "Disk", "Network" };
         const bool navAvailable[] = { perf.cpuAvailable, perf.memoryAvailable, perf.diskAvailable, perf.networkAvailable };
@@ -1401,17 +1557,17 @@ namespace gxos { namespace apps {
         const uint64_t* navHistories[] = { s_cpuHistory, s_memoryHistory, s_diskHistory, nullptr };
         const int navHistoryCounts[] = { s_cpuHistoryCount, s_memoryHistoryCount, s_diskHistoryCount, 0 };
         const int navHistoryHeads[] = { s_cpuHistoryHead, s_memoryHistoryHead, s_diskHistoryHead, 0 };
-        const uint8_t navColors[4][3] = {
-            { 93, 173, 226 },
-            { 88, 214, 141 },
-            { 230, 126, 34 },
-            { 155, 89, 182 }
+        const uint32_t navColors[4] = {
+            packRgb(93, 173, 226),
+            packRgb(88, 214, 141),
+            packRgb(230, 126, 34),
+            packRgb(155, 89, 182)
         };
 
         for (int i = 0; i < 4; ++i) {
             const int itemY = navStartY + i * 96;
             if (i == s_perfCategoryIndex) {
-                publishRect(s_windowId, x + 8, itemY - 2, navW - 16, navItemH + 2, 0x25, 0x32, 0x44);
+                publishRectColor(s_windowId, x + 8, itemY - 2, navW - 16, navItemH + 2, TaskManagerRowSelectedColor());
             }
             const bool showHistory = navAvailable[i] && navHistoryCounts[i] > 0;
             drawGraphBox(
@@ -1426,9 +1582,7 @@ namespace gxos { namespace apps {
                 navHistories[i],
                 navHistoryCounts[i],
                 navHistoryHeads[i],
-                navColors[i][0],
-                navColors[i][1],
-                navColors[i][2]
+                TaskManagerIndicatorColor(navColors[i])
             );
         }
 
@@ -1436,11 +1590,11 @@ namespace gxos { namespace apps {
                                       (s_perfCategoryIndex == 1 && mem.heapUtilPctAvailable && s_memoryHistoryCount > 0) ||
                                       (s_perfCategoryIndex == 2 && perf.diskAvailable && perf.diskActivePctAvailable && s_diskHistoryCount > 0);
         const char* detailLabels[] = { "CPU", "Memory", "Disk", "Network" };
-        const uint8_t detailColors[4][3] = {
-            { 93, 173, 226 },
-            { 88, 214, 141 },
-            { 230, 126, 34 },
-            { 155, 89, 182 }
+        const uint32_t detailColors[4] = {
+            packRgb(93, 173, 226),
+            packRgb(88, 214, 141),
+            packRgb(230, 126, 34),
+            packRgb(155, 89, 182)
         };
         const uint64_t* detailHistory = s_perfCategoryIndex == 0 ? s_cpuHistory
                                       : s_perfCategoryIndex == 1 ? s_memoryHistory
@@ -1471,9 +1625,7 @@ namespace gxos { namespace apps {
             detailHistory,
             detailHistoryCount,
             detailHistoryHead,
-            detailColors[s_perfCategoryIndex][0],
-            detailColors[s_perfCategoryIndex][1],
-            detailColors[s_perfCategoryIndex][2]
+            TaskManagerIndicatorColor(detailColors[s_perfCategoryIndex])
         );
 
         const int detailTop = y + 256;
@@ -1482,8 +1634,8 @@ namespace gxos { namespace apps {
         const int lineH = 18;
         auto detailRow = [&](int row, const std::string& label, const std::string& value) {
             const int rowY = detailTop + row * lineH;
-            publishTextAt(s_windowId, labelX, rowY, label);
-            publishTextAt(s_windowId, valueX, rowY, value);
+            publishTextAtColor(s_windowId, labelX, rowY, TaskManagerTextColor(), label);
+            publishTextAtColor(s_windowId, valueX, rowY, TaskManagerValueTextColor(), value);
         };
 
         if (s_perfCategoryIndex == 0) {
@@ -1518,7 +1670,7 @@ namespace gxos { namespace apps {
             detailRow(6, "Received bytes:", perf.networkAvailable ? std::to_string(perf.networkBytesReceivedTotal) : std::string("N/A"));
         }
 
-        publishTextAtColor(s_windowId, detailX + 12, y + h - 22, 160, 166, 176, "Left/Right switches categories");
+        publishTextAtColor(s_windowId, detailX + 12, y + h - 22, TaskManagerMutedTextColor(), "Left/Right switches categories");
     }
     
     void TaskManager::updateTombstonedTab() {
@@ -1542,46 +1694,46 @@ namespace gxos { namespace apps {
             s_selectedTombIndex = -1;
         }
 
-        publishRect(s_windowId, x, y, w, h, 0x1A, 0x1A, 0x1A);
-        publishRect(s_windowId, x, y, w, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x, y + h - 1, w, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x, y, 1, h, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x + w - 1, y, 1, h, 0x44, 0x44, 0x44);
-        publishTextAtColor(s_windowId, x + 12, y + 10, 240, 244, 248, "Tombstoned");
+        publishRectColor(s_windowId, x, y, w, h, TaskManagerBodyColor());
+        publishRectColor(s_windowId, x, y, w, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x, y + h - 1, w, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x, y, 1, h, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x + w - 1, y, 1, h, TaskManagerBorderColor());
+        publishTextAtColor(s_windowId, x + 12, y + 10, TaskManagerHeaderTextColor(), "Tombstoned");
 
-        publishRect(s_windowId, x + 10, headerY, w - 20, 22, 0x24, 0x24, 0x24);
-        publishTextAtColor(s_windowId, x + 22, headerY + 3, 236, 240, 248, "Name");
-        publishTextAtColor(s_windowId, x + 168, headerY + 3, 236, 240, 248, "PID");
-        publishTextAtColor(s_windowId, x + 238, headerY + 3, 236, 240, 248, "App ID");
-        publishTextAtColor(s_windowId, x + 352, headerY + 3, 236, 240, 248, "Reason");
-        publishTextAtColor(s_windowId, x + 488, headerY + 3, 236, 240, 248, "Exit");
-        publishTextAtColor(s_windowId, x + 552, headerY + 3, 236, 240, 248, "Runtime");
-        publishTextAtColor(s_windowId, x + 624, headerY + 3, 236, 240, 248, "Restore");
-        publishTextAtColor(s_windowId, x + 688, headerY + 3, 236, 240, 248, "End");
+        publishRectColor(s_windowId, x + 10, headerY, w - 20, 22, TaskManagerHeaderColor());
+        publishTextAtColor(s_windowId, x + 22, headerY + 3, TaskManagerHeaderTextColor(), "Name");
+        publishTextAtColor(s_windowId, x + 168, headerY + 3, TaskManagerHeaderTextColor(), "PID");
+        publishTextAtColor(s_windowId, x + 238, headerY + 3, TaskManagerHeaderTextColor(), "App ID");
+        publishTextAtColor(s_windowId, x + 352, headerY + 3, TaskManagerHeaderTextColor(), "Reason");
+        publishTextAtColor(s_windowId, x + 488, headerY + 3, TaskManagerHeaderTextColor(), "Exit");
+        publishTextAtColor(s_windowId, x + 552, headerY + 3, TaskManagerHeaderTextColor(), "Runtime");
+        publishTextAtColor(s_windowId, x + 624, headerY + 3, TaskManagerHeaderTextColor(), "Restore");
+        publishTextAtColor(s_windowId, x + 688, headerY + 3, TaskManagerHeaderTextColor(), "End");
 
-        publishRect(s_windowId, x + 10, rowY - 2, w - 20, visibleRows * rowH + 4, 0x18, 0x18, 0x18);
+        publishRectColor(s_windowId, x + 10, rowY - 2, w - 20, visibleRows * rowH + 4, TaskManagerRowColor());
 
         for (int i = 0; i < rowCount && i < visibleRows; ++i) {
             const TombstoneSnapshot& tomb = s_snapshot.tombstoned[i];
             const int row = rowY + i * rowH;
             if (i == s_selectedTombIndex) {
-                publishRect(s_windowId, x + 11, row, w - 22, rowH - 1, 0x30, 0x30, 0x46);
+                publishRectColor(s_windowId, x + 11, row, w - 22, rowH - 1, TaskManagerRowSelectedColor());
             }
-            publishTextAt(s_windowId, x + 20, row + 5, i == s_selectedTombIndex ? "> " : "  ");
+            publishTextAtColor(s_windowId, x + 20, row + 5, i == s_selectedTombIndex ? TaskManagerAccentColor() : TaskManagerTextColor(), i == s_selectedTombIndex ? "> " : "  ");
             publishTextAt(s_windowId, x + 36, row + 5, trimDisplayName(tomb.displayName, 20));
             publishTextAt(s_windowId, x + 168, row + 5, std::to_string(tomb.pid));
             publishTextAt(s_windowId, x + 238, row + 5, trimDisplayName(tomb.appId.empty() ? std::string("N/A") : tomb.appId, 17));
             publishTextAt(s_windowId, x + 352, row + 5, trimDisplayName(tomb.reason.empty() ? std::string("Unknown") : tomb.reason, 18));
             publishTextAt(s_windowId, x + 488, row + 5, tomb.exitCodeAvailable ? std::to_string(tomb.exitCode) : std::string("N/A"));
             publishTextAt(s_windowId, x + 552, row + 5, tomb.runtimeMsAvailable ? formatUptime(tomb.runtimeMs) : std::string("N/A"));
-            publishTextAtColor(s_windowId, x + 624, row + 5, 224, 228, 238, tomb.restoreSupported ? "Yes" : "No");
-            publishTextAtColor(s_windowId, x + 688, row + 5, 224, 228, 238, tomb.endSupported ? "Yes" : "No");
+            publishTextAtColor(s_windowId, x + 624, row + 5, TaskManagerValueTextColor(), tomb.restoreSupported ? "Yes" : "No");
+            publishTextAtColor(s_windowId, x + 688, row + 5, TaskManagerValueTextColor(), tomb.endSupported ? "Yes" : "No");
         }
 
         const int detailY = rowY + visibleRows * rowH + 10;
-        publishRect(s_windowId, x + 10, detailY - 6, w - 20, h - (detailY - 6) - 28, 0x16, 0x16, 0x16);
-        publishRect(s_windowId, x + 10, detailY - 6, w - 20, 1, 0x44, 0x44, 0x44);
-        publishTextAtColor(s_windowId, x + 22, detailY + 2, 236, 240, 248, "Selected Tombstone Details");
+        publishRectColor(s_windowId, x + 10, detailY - 6, w - 20, h - (detailY - 6) - 28, TaskManagerPanelColor());
+        publishRectColor(s_windowId, x + 10, detailY - 6, w - 20, 1, TaskManagerBorderColor());
+        publishTextAtColor(s_windowId, x + 22, detailY + 2, TaskManagerHeaderTextColor(), "Selected Tombstone Details");
 
         const TombstoneSnapshot* selected = (rowCount > 0 && s_selectedTombIndex >= 0 && s_selectedTombIndex < rowCount)
             ? &s_snapshot.tombstoned[s_selectedTombIndex]
@@ -1596,10 +1748,10 @@ namespace gxos { namespace apps {
                                  const std::string& leftValue,
                                  const std::string& rightLabel,
                                  const std::string& rightValue) {
-            publishTextAt(s_windowId, detailLeftLabelX, detailRowY, leftLabel);
-            publishTextAt(s_windowId, detailLeftValueX, detailRowY, leftValue);
-            publishTextAt(s_windowId, detailRightLabelX, detailRowY, rightLabel);
-            publishTextAt(s_windowId, detailRightValueX, detailRowY, rightValue);
+            publishTextAtColor(s_windowId, detailLeftLabelX, detailRowY, TaskManagerTextColor(), leftLabel);
+            publishTextAtColor(s_windowId, detailLeftValueX, detailRowY, TaskManagerValueTextColor(), leftValue);
+            publishTextAtColor(s_windowId, detailRightLabelX, detailRowY, TaskManagerTextColor(), rightLabel);
+            publishTextAtColor(s_windowId, detailRightValueX, detailRowY, TaskManagerValueTextColor(), rightValue);
             detailRowY += detailRowH;
         };
         if (selected) {
@@ -1651,7 +1803,7 @@ namespace gxos { namespace apps {
         const int footerY = y + h - 20;
         std::ostringstream footer;
         footer << rowCount << " tombstoned | Up/Down=Select | Restore=No | Del/E=End";
-        publishTextAtColor(s_windowId, x + 12, footerY, 160, 166, 176, footer.str());
+        publishTextAtColor(s_windowId, x + 12, footerY, TaskManagerMutedTextColor(), footer.str());
     }
     
     void TaskManager::updateStatusBar() {
@@ -1663,7 +1815,7 @@ namespace gxos { namespace apps {
         }
         oss << " | F5=Refresh | Del/E=End";
         std::string payload = oss.str();
-        publishTextAtColor(s_windowId, 12, 496, 160, 166, 176, payload);
+        publishTextAtColor(s_windowId, 12, 496, TaskManagerMutedTextColor(), payload);
     }
     
     // --- Tombstoned management (matching Legacy TaskManager.cs) ---
@@ -1765,26 +1917,26 @@ namespace gxos { namespace apps {
         const int w = 736;
         const int h = 452;
 
-        publishRect(s_windowId, x, y, w, h, 0x1A, 0x1A, 0x1A);
-        publishRect(s_windowId, x, y, w, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x, y + h - 1, w, 1, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x, y, 1, h, 0x44, 0x44, 0x44);
-        publishRect(s_windowId, x + w - 1, y, 1, h, 0x44, 0x44, 0x44);
-        publishTextAtColor(s_windowId, x + 12, y + 10, 240, 244, 248, "Memory Details");
+        publishRectColor(s_windowId, x, y, w, h, TaskManagerBodyColor());
+        publishRectColor(s_windowId, x, y, w, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x, y + h - 1, w, 1, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x, y, 1, h, TaskManagerBorderColor());
+        publishRectColor(s_windowId, x + w - 1, y, 1, h, TaskManagerBorderColor());
+        publishTextAtColor(s_windowId, x + 12, y + 10, TaskManagerHeaderTextColor(), "Memory Details");
 
-        publishTextAtColor(s_windowId, x + 12, y + 34, 236, 240, 248, "=== Memory Allocator Details ===");
-        publishTextAtColor(s_windowId, x + 12, y + 52, 236, 240, 248, "=== Free() Call Statistics ===");
+        publishTextAtColor(s_windowId, x + 12, y + 34, TaskManagerHeaderTextColor(), "=== Memory Allocator Details ===");
+        publishTextAtColor(s_windowId, x + 12, y + 52, TaskManagerHeaderTextColor(), "=== Free() Call Statistics ===");
 
         const int labelX = x + 12;
         const int valueX = x + 300;
         const int rowH = 18;
         int rowY = y + 70;
         auto row = [&](const std::string& label, const std::string& value, bool highlight = false) {
-            publishTextAt(s_windowId, labelX, rowY, label);
+            publishTextAtColor(s_windowId, labelX, rowY, TaskManagerTextColor(), label);
             if (highlight) {
                 publishTextAtColor(s_windowId, valueX, rowY, 208, 92, 92, value);
             } else {
-                publishTextAt(s_windowId, valueX, rowY, value);
+                publishTextAtColor(s_windowId, valueX, rowY, TaskManagerValueTextColor(), value);
             }
             rowY += rowH;
         };
@@ -1794,7 +1946,7 @@ namespace gxos { namespace apps {
         row("Failed Invalid Ptr:", "N/A");
         row("Failed No Pages:", "N/A");
 
-        publishRect(s_windowId, x + 12, rowY + 2, w - 24, 1, 0x44, 0x44, 0x44);
+        publishRectColor(s_windowId, x + 12, rowY + 2, w - 24, 1, TaskManagerBorderColor());
         rowY += 12;
 
         row("Allocated Pages:", std::to_string(allocatedPages));
@@ -1804,10 +1956,10 @@ namespace gxos { namespace apps {
         row("Leak Exists:", mem.leakStateAvailable ? (mem.leakState ? std::string("Yes") : std::string("No")) : std::string("N/A"), mem.leakStateAvailable && mem.leakState);
         row("Free/Alloc Ratio:", allocatedPages > 0 ? std::to_string((freedPages * 100ULL) / allocatedPages) + "%" : std::string("N/A"));
 
-        publishRect(s_windowId, x + 12, rowY + 2, w - 24, 1, 0x44, 0x44, 0x44);
+        publishRectColor(s_windowId, x + 12, rowY + 2, w - 24, 1, TaskManagerBorderColor());
         rowY += 12;
 
-        publishTextAtColor(s_windowId, x + 12, rowY, 236, 240, 248, "=== Heap Allocator ===");
+        publishTextAtColor(s_windowId, x + 12, rowY, TaskManagerHeaderTextColor(), "=== Heap Allocator ===");
         rowY += 18;
         row("Total Heap Size:", heapTotal > 0 ? formatMemory(heapTotal) + " (allocator heap)" : std::string("N/A"));
         row("Heap In Use:", formatMemory(usedBytes));
@@ -1817,7 +1969,7 @@ namespace gxos { namespace apps {
         row("Top Tag:", mem.topTagAvailable ? mem.topTagName + " (" + formatMemory(mem.topTagBytes) + ")" : std::string("N/A"));
         row("Top Owner:", mem.topOwnerAvailable ? std::string("PID ") + std::to_string(mem.topOwnerPid) + " (" + formatMemory(mem.topOwnerBytes) + ")" : std::string("N/A"));
 
-        publishTextAtColor(s_windowId, x + 12, y + h - 20, 160, 166, 176, "F5=Refresh | Tab=Switch Tab");
+        publishTextAtColor(s_windowId, x + 12, y + h - 20, TaskManagerMutedTextColor(), "F5=Refresh | Tab=Switch Tab");
     }
     
     // --- Helper functions ---

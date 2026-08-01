@@ -332,6 +332,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     appContext.host = &runtimeContext.hostCalls;
     appContext.userData = nullptr;
     gx_entry_fn entry = reinterpret_cast<gx_entry_fn>(entryAddress);
+    runtimeContext.activeGxContext = &appContext;
     NativeAppProcessTable::RegisterPrepared(runtimeContext, true, hostArchitecture());
     NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
     NativeAppProcessTable::MarkRunning(runtimeContext.runtimeId);
@@ -378,6 +379,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
 #endif
     if (smokeTestCloseThread.joinable()) smokeTestCloseThread.join();
     NativeAppRuntime::EndHostCallDispatch(runtimeContext);
+    runtimeContext.activeGxContext = nullptr;
     if (runtimeContext.lastWaitResult == GX_ERROR_TIMEOUT && result.exitCode == GX_OK) addDiagnostic(result, "wait_for_close timed out; cleaning up remaining owned windows");
     NativeAppRuntime::Cleanup(runtimeContext, (executionFailed || result.exitCode != GX_OK) ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited, result.exitCode, failureReason);
     const gxos::ProcessTombstoneRecord tombstone = makeNativeTombstoneRecord(runtimeContext, executionFailed, failureReason);
@@ -432,6 +434,14 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.lastFilePath = runtimeContext.lastFilePath;
     result.lastFileReadBytes = runtimeContext.lastFileReadBytes;
     result.lastFileIoResult = runtimeContext.lastFileIoResult;
+    result.fileReadChunkCallCount = runtimeContext.fileReadChunkCallCount;
+    result.lastFileReadOffset = runtimeContext.lastFileReadOffset;
+    result.presentFrameCallCount = runtimeContext.presentFrameCallCount;
+    result.lastPresentFrameWindow = runtimeContext.lastPresentFrameWindow;
+    result.lastPresentFrameWidth = runtimeContext.lastPresentFrameWidth;
+    result.lastPresentFrameHeight = runtimeContext.lastPresentFrameHeight;
+    result.lastPresentFrameBytes = runtimeContext.lastPresentFrameBytes;
+    result.lastPresentFrameResult = runtimeContext.lastPresentFrameResult;
     result.lifecycleStateAfterExecution = NativeAppRuntime::ToString(runtimeContext.lifecycleState);
     result.cleanupAttempted = runtimeContext.cleanupAttempted;
     result.cleanedWindowCount = runtimeContext.cleanedWindowCount;
@@ -490,6 +500,12 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     if (!result.lastFilePath.empty()) addDiagnostic(result, "last file path: " + result.lastFilePath);
     addDiagnostic(result, "last file read bytes: " + std::to_string(result.lastFileReadBytes));
     addDiagnostic(result, "last file IO result: " + std::to_string(result.lastFileIoResult));
+    addDiagnostic(result, "fileRead chunk call count: " + std::to_string(result.fileReadChunkCallCount));
+    addDiagnostic(result, "present_frame call count: " + std::to_string(result.presentFrameCallCount));
+    addDiagnostic(result, "last present_frame window: " + std::to_string(result.lastPresentFrameWindow));
+    addDiagnostic(result, "last present_frame size: " + std::to_string(result.lastPresentFrameWidth) + "x" + std::to_string(result.lastPresentFrameHeight));
+    addDiagnostic(result, "last present_frame bytes: " + std::to_string(result.lastPresentFrameBytes));
+    addDiagnostic(result, "last present_frame result: " + std::to_string(result.lastPresentFrameResult));
     if (result.lastFileIoResult == GX_ERROR_PERMISSION_DENIED) addDiagnostic(result, "missing permission: file.read");
     if (result.lastFileIoResult == GX_ERROR_FAILED && !result.lastFilePath.empty()) addDiagnostic(result, "missing resource file: " + result.lastFilePath);
     if (result.requestWindowResult == GX_ERROR_PERMISSION_DENIED) addDiagnostic(result, "missing permission: window");

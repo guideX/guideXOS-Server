@@ -115,6 +115,16 @@ static bool ata_wait_bsy(uint16_t ioBase, uint32_t timeout)
     return false;
 }
 
+static bool ata_wait_command_idle(uint16_t ioBase, uint32_t timeout)
+{
+    for (uint32_t i = 0; i < timeout; ++i) {
+        uint8_t st = arch::inb(static_cast<uint16_t>(ioBase + ATA_REG_STATUS));
+        if (st & (ATA_SR_ERR | ATA_SR_DF)) return false;
+        if (!(st & (ATA_SR_BSY | ATA_SR_DRQ))) return true;
+    }
+    return false;
+}
+
 static bool ata_wait_drq(uint16_t ioBase, uint32_t timeout)
 {
     for (uint32_t i = 0; i < timeout; ++i) {
@@ -309,13 +319,29 @@ static block::Status ata_pio_write(uint8_t devIdx,
         for (uint32_t w = 0; w < dev.sectorSize / 2; ++w) {
             arch::outw(static_cast<uint16_t>(dev.ioBase + ATA_REG_DATA), wbuf[w]);
         }
-
-        // Flush cache
-        arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
-                   dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
-        if (!ata_wait_bsy(dev.ioBase, 500000))
+        // Complete one PIO write command before programming the next sector.
+        if (!ata_wait_command_idle(dev.ioBase, 500000))
             return block::BLOCK_ERR_TIMEOUT;
+
     }
+
+    return block::BLOCK_OK;
+}
+
+// Cache flush is deliberately separate from a block write. FAT commits call
+// this after data and metadata are complete, instead of paying for a device
+// cache flush after every cluster and FAT-entry update.
+static block::Status ata_pio_flush(uint8_t devIdx)
+{
+    if (devIdx >= MAX_ATA_DEVICES || !s_devices[devIdx].active)
+        return block::BLOCK_ERR_INVALID;
+
+    ATADevice& dev = s_devices[devIdx];
+    arch::outb(static_cast<uint16_t>(dev.ioBase + ATA_REG_COMMAND),
+               dev.lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
+    if (!ata_wait_bsy(dev.ioBase, 500000))
+        return block::BLOCK_ERR_TIMEOUT;
+
     return block::BLOCK_OK;
 }
 
@@ -399,6 +425,7 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         bdev.sectorSize   = dev.sectorSize;
         bdev.readFn       = ata_pio_read;
         bdev.writeFn      = ata_pio_write;
+        bdev.flushFn      = ata_pio_flush;
         memcopy(bdev.name, dev.name, 6);
 
         block::register_device(bdev);

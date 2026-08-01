@@ -88,6 +88,10 @@ Status read_sectors(uint8_t devIndex,
     if (!s_devices[devIndex].active)   return BLOCK_ERR_INVALID;
     if (!s_devices[devIndex].readFn)   return BLOCK_ERR_UNSUPPORTED;
     if (!buffer || count == 0)         return BLOCK_ERR_INVALID;
+    if (lba > s_devices[devIndex].totalSectors ||
+        static_cast<uint64_t>(count) > s_devices[devIndex].totalSectors - lba) {
+        return BLOCK_ERR_INVALID;
+    }
 
     return s_devices[devIndex].readFn(
         s_devices[devIndex].driverIndex, lba, count, buffer);
@@ -102,9 +106,21 @@ Status write_sectors(uint8_t devIndex,
     if (!s_devices[devIndex].active)    return BLOCK_ERR_INVALID;
     if (!s_devices[devIndex].writeFn)   return BLOCK_ERR_UNSUPPORTED;
     if (!buffer || count == 0)          return BLOCK_ERR_INVALID;
+    if (lba > s_devices[devIndex].totalSectors ||
+        static_cast<uint64_t>(count) > s_devices[devIndex].totalSectors - lba) {
+        return BLOCK_ERR_INVALID;
+    }
 
     return s_devices[devIndex].writeFn(
         s_devices[devIndex].driverIndex, lba, count, buffer);
+}
+
+Status flush(uint8_t devIndex)
+{
+    if (devIndex >= MAX_BLOCK_DEVICES) return BLOCK_ERR_INVALID;
+    if (!s_devices[devIndex].active) return BLOCK_ERR_INVALID;
+    if (!s_devices[devIndex].flushFn) return BLOCK_OK;
+    return s_devices[devIndex].flushFn(s_devices[devIndex].driverIndex);
 }
 
 } // namespace block

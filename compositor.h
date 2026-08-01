@@ -12,6 +12,7 @@
 #include "logger.h"
 #include "desktop_config.h"
 #include "display_configuration.h"
+#include "window_interaction_policy.h"
 #include "desktop_service.h"
 #include "vnc_server.h"
 #include "system_tray.h"
@@ -31,6 +32,15 @@
 namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
     struct DrawImageItem { int x; int y; int w; int h; std::string path; ImageBitmap image; std::vector<ImageBitmap> frames; };
+    struct FrameSurfaceItem {
+        int x{0};
+        int y{0};
+        int w{0};
+        int h{0};
+        uint32_t strideBytes{0};
+        uint32_t pixelFormat{0};
+        std::vector<uint8_t> pixels;
+    };
     struct DrawTextItem { int x; int y; std::string text; bool hasColor{false}; uint8_t r{220}; uint8_t g{220}; uint8_t b{220}; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; std::string iconPath; ImageBitmap icon; bool hover=false; bool pressed=false; };
@@ -42,12 +52,28 @@ namespace gxos { namespace gui {
         std::vector<DrawTextItem> positionedTexts;
         std::vector<DrawRectItem> rects; 
         std::vector<DrawImageItem> images;
+        FrameSurfaceItem frame;
+        bool hasFrame{false};
+        uint64_t frameGeneration{0};
+        uint64_t paintGeneration{0};
+        uint64_t captureGeneration{0};
+        uint64_t frameByteCount{0};
+        uint64_t frameSequence{0};
+        bool captureFrozen{false};
+        uint64_t captureFrozenGeneration{0};
+        uint64_t captureFrozenSequence{0};
+        FrameSurfaceItem captureFrozenFrame;
         std::vector<Widget> widgets; 
         bool minimized{false}; 
         bool maximized{false}; 
         // Restore bounds remain in virtual desktop coordinates so synthetic viewport switching
         // does not move windows between monitors.
         int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; 
+        // Normal/restored bounds are retained separately from temporary
+        // maximized or snapped geometry.
+        int normalX{0}; int normalY{0}; int normalW{0}; int normalH{0};
+        bool hasNormalBounds{false};
+        std::string persistenceKey;
         bool dirty{true}; 
         int snapState{0}; 
         bool tombstoned{false}; 
@@ -64,6 +90,7 @@ namespace gxos { namespace gui {
         // Animation state - ported from guideXOS.Legacy Window.cs
         WindowAnimState animState{};
         bool visible{true};
+        bool resizable{true};
     };
     enum class DesktopItemKind {
         SystemObject,
@@ -116,6 +143,7 @@ namespace gxos { namespace gui {
         static std::string RunLaunchShadowSmokeDiagnostic();
         static void requestDesktopRefresh();
         static bool showFolderOnHostedDesktop(const std::string& path);
+        static std::string hostedDesktopCurrentPath();
         static bool beginDesktopFolderRename(int index);
         static void cancelDesktopFolderRename();
         static bool isDesktopFolderRenameActive();
@@ -155,6 +183,7 @@ namespace gxos { namespace gui {
         static int hostedDisplayViewportIndex();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
+        static constexpr UINT kHostedTitleInputDiagnosticMessage = WM_APP + 0x5A1;
 #endif
         static std::vector<DesktopItem> g_items; // expose for icon renderer
 
@@ -166,11 +195,15 @@ namespace gxos { namespace gui {
         static std::vector<std::string> g_hostedDesktopBackHistory;
         static int main(int argc, char** argv);
         static void handleMessage(const ipc::Message& m);
+        static void tryCompleteFrameSync(uint64_t windowId);
         static void drawAll();
         static void pumpEvents();
         static void invalidate(uint64_t winId);
         static void sendFocus(uint64_t winId);
-        static void handleMouse(int mx, int my, bool down, bool up, const DisplayViewport* viewportOverride = nullptr);
+        static void sendFocusChange(uint64_t previousWindow, uint64_t nextWindow);
+        static bool handleMouse(int mx, int my, bool down, bool up, const DisplayViewport* viewportOverride = nullptr);
+        static void handleMouseCaptureLost();
+        static std::string hostedTitleInputStateDiagnostic(int mx, int my);
         static std::string packMousePayloadForTarget(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0);
         static void emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value);
         static WinInfo* hitWindowAt(int mx, int my);
@@ -240,6 +273,8 @@ namespace gxos { namespace gui {
 #endif
         static std::atomic<uint64_t> s_nextWinId;
         static std::unordered_map<uint64_t, WinInfo> g_windows; static std::vector<uint64_t> g_z; static std::mutex g_lock; static uint64_t g_focus;
+        struct PendingFrameSync { uint64_t expectedFrameGeneration{0}; uint64_t expectedFrameSequence{0}; bool freezeForCapture{false}; };
+        static std::unordered_map<uint64_t, PendingFrameSync> g_pendingFrameSync;
         static uint64_t g_modalWindow;
         static bool g_dragActive; static int g_dragOffX; static int g_dragOffY; static uint64_t g_dragWin; static int g_dragStartX; static int g_dragStartY;
         static bool g_dragPending; static uint64_t g_dragPendingWin;
@@ -255,7 +290,7 @@ namespace gxos { namespace gui {
 #else
         struct SnapRect { int l; int t; int r; int b; }; static SnapRect g_snapPreviewRect;
 #endif
-        static bool g_showDesktopActive; static std::vector<uint64_t> g_showDesktopMinimized; static uint64_t g_lastClickTicks; static uint64_t g_lastClickWin;
+        static bool g_showDesktopActive; static std::vector<uint64_t> g_showDesktopMinimized; static TitleBarDoubleClickTracker g_titleBarDoubleClick;
         static bool g_altTabOverlayActive; static uint64_t g_altTabOverlayTicks; static int g_altTabCycleIndex;
         static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;
