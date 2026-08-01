@@ -90,3 +90,16 @@ milestone fully closed**. Bounded primitive-array allocations through
 Workstation GC are authorized until the first subsequent allocation-context
 refill, without allowing collection. Repeated allocations were not run during
 closure validation.
+
+## First subsequent refill validation
+
+The bounded repeated-allocation follow-up is documented in
+[NATIVEAOT_WORKSTATION_GC_FIRST_REFILL.md](NATIVEAOT_WORKSTATION_GC_FIRST_REFILL.md).
+It passed in three fresh disposable QEMU processes and stopped immediately
+after validating the first object returned from the later allocation-context
+refill. Each run recorded 15 requests, 13 fast allocations, two rare/real-GC
+allocations, and two context refills. The refill-2 object was a valid
+non-LOH `byte[256]` with aligned size `0x118` / 280 bytes and GC ownership;
+collection and finalization counters were zero. This advances the bounded
+authorization through that exact refill boundary, while preserving the
+process-lifetime shutdown restriction.

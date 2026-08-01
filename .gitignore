@@ -40,6 +40,7 @@
 /out/dotnet/gc-shutdown-boundary/
 /out/dotnet/gc-first-real-allocation/
 /out/dotnet/gc-first-allocation-hang/
+/out/dotnet/gc-first-refill/
 /out/dotnet/closure-*/
 /out/dotnet/gc-first-allocation-closure/
 /out/dotnet/gc-process-teardown-policy/

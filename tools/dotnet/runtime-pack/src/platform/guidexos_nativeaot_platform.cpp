@@ -45,6 +45,9 @@ constexpr gx_uint32 kManagedArrayDataOffset = 0x10u;
 // generated allocation envelope and must be included in the boundary check.
 constexpr gx_uint32 kManagedArrayBaseSize = 0x18u;
 constexpr gx_uint32 kManagedArrayComponentSize = 1u;
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+constexpr gx_size kNativeAotLargeObjectSize = 85000u;
+#endif
 #if !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 constexpr gx_size kManagedHeapBytes = static_cast<gx_size>(GUIDEXOS_MANAGED_HEAP_BYTES);
 static_assert(kManagedHeapBytes >= 0x1000u, "The bounded diagnostic heap must leave room for runtime setup and several arrays.");
@@ -238,6 +241,15 @@ bool sourceDerivedArrayObjectSize(void* eeType, gx_size length, gx_size* objectS
     return true;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION) && defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+void markFirstRefillFailure(gx_uint32 reason) {
+    ++g_guideXosAllocationDiagnostics.pointerContractFailures;
+    if (g_guideXosAllocationDiagnostics.failureReason == 0u) {
+        g_guideXosAllocationDiagnostics.failureReason = reason;
+    }
+}
+#endif
+
 gx_size alignedArrayObjectSize(gx_size length) {
     if (length > ((~static_cast<gx_size>(0)) - kManagedArrayBaseSize - 7u) / kManagedArrayComponentSize) {
         return 0u;
@@ -347,11 +359,6 @@ void initializeRuntimeState(unsigned char* block) {
 } // namespace
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-extern "C" __declspec(noinline) int __cdecl guideXosManagedArrayHostLog(void* context, void* arrayObject);
-extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationCanFit(gx_size length);
-extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationValidateObject(void* arrayObject, gx_size length, gx_uint32 sequence, gx_uint32 zeroInitialized, gx_uint32 patternValid);
-extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationRecordFailure(gx_uint32 reason);
-extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationReport(void* context, gx_uint32 status);
 // HostLogProof's generated NativeAOT P/Invoke slot is intentionally bound by
 // the application-scoped runtime pack. The ELF loader does not run the Windows
 // module resolver that would normally populate this slot.
@@ -363,6 +370,10 @@ extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllo
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationRecordFailure__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationReport__Ansi;
+#elif defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetLoopStatus__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetHardLimit__Ansi;
 #endif
 #endif
 
@@ -404,6 +415,10 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A04_OBJECT_SIZE_COMPUTED,
                           eeType, length, objectSize);
     ++g_guideXosAllocationDiagnostics.rhpNewArrayEntries;
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+    ++g_guideXosAllocationDiagnostics.allocationRequestCount;
+    ++g_guideXosAllocationDiagnostics.rhpNewArrayCount;
+#endif
     g_guideXosAllocationDiagnostics.eeType = reinterpret_cast<gx_uintptr>(eeType);
 
     gx_uintptr allocationPointerBefore = 0;
@@ -458,6 +473,53 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     g_guideXosAllocationDiagnostics.lastIndirectCell = gcAllocCell;
     g_guideXosAllocationDiagnostics.lastIndirectTarget =
         *reinterpret_cast<const gx_uintptr*>(gcAllocCell);
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+    const gx_uintptr remainingBefore = allocationLimitBefore >= allocationPointerBefore
+        ? allocationLimitBefore - allocationPointerBefore : 0u;
+    const bool contextIsValid = allocationPointerBefore != 0u &&
+        allocationLimitBefore >= allocationPointerBefore;
+    const bool fastPath = contextIsValid && objectSize <= remainingBefore;
+    g_guideXosAllocationDiagnostics.currentIteration =
+        g_guideXosAllocationDiagnostics.allocationRequestCount - 1u;
+    g_guideXosAllocationDiagnostics.currentAllocPtr = allocationPointerBefore;
+    g_guideXosAllocationDiagnostics.currentAllocLimit = allocationLimitBefore;
+    g_guideXosAllocationDiagnostics.derivedObjectSize = objectSize;
+    g_guideXosAllocationDiagnostics.sourceSizeValid = 1u;
+    g_guideXosAllocationDiagnostics.primitiveArrayValid = 1u;
+    g_guideXosAllocationDiagnostics.belowLargeObjectThreshold =
+        objectSize < kNativeAotLargeObjectSize ? 1u : 0u;
+    if (objectSize >= kNativeAotLargeObjectSize) {
+        ++g_guideXosAllocationDiagnostics.largeObjectCount;
+        markFirstRefillFailure(10u);
+        recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_ALLOCATION,
+                              eeType, length, objectSize, allocationPointerBefore,
+                              allocationLimitBefore, currentThread);
+        guideXosFailFast(6u);
+    }
+    if (fastPath) {
+        ++g_guideXosAllocationDiagnostics.fastAllocationCount;
+    } else {
+        ++g_guideXosAllocationDiagnostics.rarePathCount;
+        ++g_guideXosAllocationDiagnostics.slowAllocationCount;
+        ++g_guideXosAllocationDiagnostics.collectionConsideredCount;
+        recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A07_RARE_REFILL_ENTERED,
+                              eeType, length, objectSize, allocationPointerBefore,
+                              allocationLimitBefore, currentThread);
+        if (g_guideXosAllocationDiagnostics.allocationContextRefills >= 1u) {
+            if (g_guideXosAllocationDiagnostics.refill2Attempted != 0u) {
+                markFirstRefillFailure(11u);
+                guideXosFailFast(6u);
+            }
+            g_guideXosAllocationDiagnostics.refill2Attempted = 1u;
+            g_guideXosAllocationDiagnostics.refill2AllocPtrBefore = allocationPointerBefore;
+            g_guideXosAllocationDiagnostics.refill2AllocLimitBefore = allocationLimitBefore;
+            g_guideXosAllocationDiagnostics.refill2RemainingBytesBefore = remainingBefore;
+        }
+        recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A08_GC_HEAP_ALLOCATION_ENTERED,
+                              eeType, length, objectSize, allocationPointerBefore,
+                              allocationLimitBefore, currentThread);
+    }
+#endif
     void* result = guideXosStockRhpNewArray(eeType, length);
     if (result == nullptr) {
         ++g_guideXosAllocationDiagnostics.pointerContractFailures;
@@ -489,11 +551,26 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     }
 
     g_guideXosAllocationDiagnostics.allocationCount += 1u;
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+    if (!fastPath) {
+        ++g_guideXosAllocationDiagnostics.realGcAllocationEntries;
+        ++g_guideXosAllocationDiagnostics.realGcAllocationCount;
+    }
+#else
     g_guideXosAllocationDiagnostics.realGcAllocationEntries += 1u;
+#endif
     if (allocationPointerBefore == 0u || allocationLimitBefore == 0u) {
         ++g_guideXosAllocationDiagnostics.slowAllocationEntries;
         ++g_guideXosAllocationDiagnostics.allocationContextRefills;
     }
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+    if (!fastPath && allocationPointerBefore != 0u &&
+        allocationLimitBefore >= allocationPointerBefore) {
+        ++g_guideXosAllocationDiagnostics.allocationContextRefills;
+    }
+    g_guideXosAllocationDiagnostics.allocationContextRefillCount =
+        g_guideXosAllocationDiagnostics.allocationContextRefills;
+#endif
     g_guideXosAllocationDiagnostics.returnedObject = reinterpret_cast<gx_uintptr>(result);
     g_guideXosAllocationDiagnostics.objectAddress = reinterpret_cast<gx_uintptr>(result);
     g_guideXosAllocationDiagnostics.arrayData = reinterpret_cast<gx_uintptr>(result) + kManagedArrayDataOffset;
@@ -509,6 +586,14 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     g_guideXosAllocationDiagnostics.collectionTriggeringEntries =
         g_guideXosAllocationDiagnostics.collectionsEntered;
 
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+    if (gcCountAfter != gcCountBefore || gcInProgressBefore != 0u || gcInProgressAfter != 0u) {
+        ++g_guideXosAllocationDiagnostics.collectionRequestCount;
+        ++g_guideXosAllocationDiagnostics.collectionEntryCount;
+        ++g_guideXosAllocationDiagnostics.collectionBoundaryFailures;
+    }
+#endif
+
     gx_uint32 heapOwned = 0;
     gx_uintptr heapBase = 0;
     gx_uintptr heapAllocated = 0;
@@ -522,6 +607,76 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     g_guideXosAllocationDiagnostics.heapAllocated = heapAllocated;
     g_guideXosAllocationDiagnostics.heapReserved = heapReserved;
     g_guideXosAllocationDiagnostics.heapOwnershipVerified = heapOwned;
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+    const gx_uintptr objectAddress = reinterpret_cast<gx_uintptr>(result);
+    const gx_uintptr objectEnd = objectAddress + objectSize;
+    const gx_uintptr previousEnd = g_guideXosAllocationDiagnostics.currentObjectEnd;
+    g_guideXosAllocationDiagnostics.currentObject = objectAddress;
+    g_guideXosAllocationDiagnostics.currentObjectEnd = objectEnd;
+    g_guideXosAllocationDiagnostics.currentAllocPtr = allocationPointerAfter;
+    g_guideXosAllocationDiagnostics.currentAllocLimit = allocationLimitAfter;
+    if (g_guideXosAllocationDiagnostics.allocationCount > 1u &&
+        objectAddress < previousEnd) {
+        ++g_guideXosAllocationDiagnostics.overlapFailures;
+    }
+    if (g_guideXosAllocationDiagnostics.allocationCount > 1u &&
+        allocationPointerBefore != 0u &&
+        allocationLimitBefore >= allocationPointerBefore &&
+        objectAddress < allocationPointerBefore) {
+        ++g_guideXosAllocationDiagnostics.monotonicityFailures;
+    }
+    if (g_guideXosAllocationDiagnostics.allocationCount == 1u) {
+        g_guideXosAllocationDiagnostics.initialAllocPtr = allocationPointerAfter;
+        g_guideXosAllocationDiagnostics.initialAllocLimit = allocationLimitAfter;
+        g_guideXosAllocationDiagnostics.initialAvailableBytes =
+            allocationLimitAfter >= allocationPointerAfter
+                ? allocationLimitAfter - allocationPointerAfter : 0u;
+        g_guideXosAllocationDiagnostics.expectedFastAllocationCount =
+            objectSize == 0u ? 0u :
+                g_guideXosAllocationDiagnostics.initialAvailableBytes / objectSize;
+        g_guideXosAllocationDiagnostics.hardAllocationLimit =
+            static_cast<gx_uint32>(g_guideXosAllocationDiagnostics.expectedFastAllocationCount + 2u);
+        g_guideXosAllocationDiagnostics.initialSegmentBase = heapBase;
+        g_guideXosAllocationDiagnostics.initialSegmentAllocated = heapAllocated;
+        g_guideXosAllocationDiagnostics.initialSegmentReserved = heapReserved;
+        g_guideXosAllocationDiagnostics.newContextSupplied = 1u;
+    }
+    if (fastPath) {
+        if (objectAddress != allocationPointerBefore ||
+            allocationPointerAfter != allocationPointerBefore + objectSize ||
+            allocationLimitAfter != allocationLimitBefore) {
+            ++g_guideXosAllocationDiagnostics.contextGeometryFailures;
+        }
+        g_guideXosAllocationDiagnostics.lastFastObject = objectAddress;
+        g_guideXosAllocationDiagnostics.lastFastObjectEnd = objectEnd;
+    } else {
+        const bool directBeforeContext = objectEnd == allocationPointerAfter;
+        const bool firstInsideContext = objectAddress >= allocationPointerBefore &&
+            objectEnd <= allocationLimitAfter;
+        if (directBeforeContext) {
+            g_guideXosAllocationDiagnostics.ownershipModel = 1u;
+        } else if (firstInsideContext) {
+            g_guideXosAllocationDiagnostics.ownershipModel = 2u;
+        } else {
+            ++g_guideXosAllocationDiagnostics.contextGeometryFailures;
+        }
+        if (g_guideXosAllocationDiagnostics.refill2Attempted != 0u &&
+            g_guideXosAllocationDiagnostics.refill2Returned == 0u) {
+            g_guideXosAllocationDiagnostics.refill2Returned = 1u;
+            g_guideXosAllocationDiagnostics.refill2Object = objectAddress;
+            g_guideXosAllocationDiagnostics.refill2ObjectEnd = objectEnd;
+            g_guideXosAllocationDiagnostics.refill2AllocPtrAfter = allocationPointerAfter;
+            g_guideXosAllocationDiagnostics.refill2AllocLimitAfter = allocationLimitAfter;
+            g_guideXosAllocationDiagnostics.refill2ContextPublished = 1u;
+            g_guideXosAllocationDiagnostics.refill2ContextChanged =
+                allocationPointerAfter != allocationPointerBefore ||
+                allocationLimitAfter != allocationLimitBefore ? 1u : 0u;
+            g_guideXosAllocationDiagnostics.refill2SegmentBase = heapBase;
+            g_guideXosAllocationDiagnostics.refill2SegmentAllocated = heapAllocated;
+            g_guideXosAllocationDiagnostics.refill2SegmentReserved = heapReserved;
+        }
+    }
+#endif
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A16_ALLOCATION_RETURNED,
                           eeType, length, objectSize, allocationPointerAfter,
                           allocationLimitAfter, currentThreadAfter, transitionFrame);
@@ -568,6 +723,46 @@ __cdecl guideXosManagedAllocationGetDiagnostics() {
 extern "C" __declspec(dllexport) int __cdecl
 guideXosManagedAllocationFinalize(gx_uint32 managedReturnCode) {
     g_guideXosAllocationDiagnostics.managedReturnCode = managedReturnCode;
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+    const bool pass = managedReturnCode == 0u &&
+        g_guideXosAllocationDiagnostics.managedEntryCount == 1u &&
+        g_guideXosAllocationDiagnostics.allocationRequestCount ==
+            g_guideXosAllocationDiagnostics.allocationCount &&
+        g_guideXosAllocationDiagnostics.rhpNewArrayCount ==
+            g_guideXosAllocationDiagnostics.allocationCount &&
+        g_guideXosAllocationDiagnostics.allocationContextRefillCount == 2u &&
+        g_guideXosAllocationDiagnostics.fastAllocationCount ==
+            g_guideXosAllocationDiagnostics.expectedFastAllocationCount &&
+        g_guideXosAllocationDiagnostics.rarePathCount == 2u &&
+        g_guideXosAllocationDiagnostics.realGcAllocationCount == 2u &&
+        g_guideXosAllocationDiagnostics.slowAllocationCount == 2u &&
+        g_guideXosAllocationDiagnostics.refill2Attempted == 1u &&
+        g_guideXosAllocationDiagnostics.refill2Returned == 1u &&
+        g_guideXosAllocationDiagnostics.newContextSupplied == 1u &&
+        g_guideXosAllocationDiagnostics.refill2ContextPublished == 1u &&
+        g_guideXosAllocationDiagnostics.collectionConsideredCount == 2u &&
+        g_guideXosAllocationDiagnostics.collectionRequestCount == 0u &&
+        g_guideXosAllocationDiagnostics.collectionEntryCount == 0u &&
+        g_guideXosAllocationDiagnostics.collectionsEntered == 0u &&
+        g_guideXosAllocationDiagnostics.finalizationScanCount == 0u &&
+        g_guideXosAllocationDiagnostics.managedFinalizerCount == 0u &&
+        g_guideXosAllocationDiagnostics.finalizersExecuted == 0u &&
+        g_guideXosAllocationDiagnostics.zeroValidationFailures == 0u &&
+        g_guideXosAllocationDiagnostics.patternValidationFailures == 0u &&
+        g_guideXosAllocationDiagnostics.layoutFailures == 0u &&
+        g_guideXosAllocationDiagnostics.ownershipFailures == 0u &&
+        g_guideXosAllocationDiagnostics.overlapFailures == 0u &&
+        g_guideXosAllocationDiagnostics.monotonicityFailures == 0u &&
+        g_guideXosAllocationDiagnostics.contextGeometryFailures == 0u &&
+        g_guideXosAllocationDiagnostics.belowLargeObjectThreshold == 1u &&
+        g_guideXosAllocationDiagnostics.noPostRefillAllocation == 1u &&
+        g_guideXosAllocationDiagnostics.pointerContractFailures == 0u;
+    g_guideXosAllocationDiagnostics.finalizerStateValid =
+        g_guideXosAllocationDiagnostics.finalizersExecuted == 0u ? 1u : 0u;
+    g_guideXosAllocationDiagnostics.helperStateValid = 1u;
+    g_guideXosAllocationDiagnostics.allocationSucceeded = pass ? 1u : 0u;
+    return pass ? 0 : -1;
+#else
     g_guideXosAllocationDiagnostics.zeroByteCount = (managedReturnCode >> 8u) & 0xFFu;
     g_guideXosAllocationDiagnostics.patternVerified = (managedReturnCode & 1u) != 0u ? 1u : 0u;
 
@@ -614,6 +809,69 @@ guideXosManagedAllocationFinalize(gx_uint32 managedReturnCode) {
         g_guideXosAllocationDiagnostics.pointerContractFailures == 0u;
     g_guideXosAllocationDiagnostics.allocationSucceeded = pass ? 1u : 0u;
     return pass ? 0 : -1;
+#endif
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+extern "C" __declspec(noinline) __declspec(dllexport) int __cdecl
+guideXosManagedAllocationValidateObject(
+    void* arrayObject, gx_size length, gx_uint32 sequence,
+    gx_uint32 zeroByteCount, gx_uint32 patternValid) {
+    const gx_uintptr objectAddress = reinterpret_cast<gx_uintptr>(arrayObject);
+    const gx_size objectSize = g_guideXosAllocationDiagnostics.derivedObjectSize;
+    const gx_uintptr objectEnd = objectAddress + objectSize;
+    gx_uint32 failure = 0u;
+    g_guideXosAllocationDiagnostics.currentIteration = sequence;
+    g_guideXosAllocationDiagnostics.zeroByteCount = zeroByteCount;
+    g_guideXosAllocationDiagnostics.patternVerified = patternValid;
+    if (zeroByteCount != length) {
+        ++g_guideXosAllocationDiagnostics.zeroValidationFailures;
+        failure = 1u;
+    }
+    if (patternValid == 0u) {
+        ++g_guideXosAllocationDiagnostics.patternValidationFailures;
+        failure = 1u;
+    }
+    if (arrayObject == nullptr || objectAddress != g_guideXosAllocationDiagnostics.currentObject ||
+        objectEnd != g_guideXosAllocationDiagnostics.currentObjectEnd ||
+        objectAddress == 0u || (objectAddress & 7u) != 0u ||
+        *reinterpret_cast<const gx_uint32*>(objectAddress + 8u) != length ||
+        *reinterpret_cast<const gx_uintptr*>(objectAddress) != g_guideXosAllocationDiagnostics.eeType) {
+        ++g_guideXosAllocationDiagnostics.layoutFailures;
+        failure = 1u;
+    }
+    gx_uint32 heapOwned = 0u;
+    if (guidexos_nativeaot_gc_describe_object(
+            arrayObject, nullptr, nullptr, nullptr,
+            &heapOwned) != 0 || heapOwned == 0u) {
+        ++g_guideXosAllocationDiagnostics.ownershipFailures;
+        failure = 1u;
+    }
+    g_guideXosAllocationDiagnostics.heapOwnershipVerified = heapOwned;
+    if (g_guideXosAllocationDiagnostics.refill2Returned != 0u &&
+        sequence + 1u != g_guideXosAllocationDiagnostics.allocationCount) {
+        ++g_guideXosAllocationDiagnostics.contextGeometryFailures;
+        failure = 1u;
+    }
+    return failure == 0u ? 0 : -1;
+}
+
+extern "C" __declspec(noinline) __declspec(dllexport) int __cdecl
+guideXosManagedAllocationGetLoopStatus() {
+    if (g_guideXosAllocationDiagnostics.failureReason != 0u ||
+        g_guideXosAllocationDiagnostics.pointerContractFailures != 0u) return -1;
+    if (g_guideXosAllocationDiagnostics.refill2Returned != 0u) {
+        g_guideXosAllocationDiagnostics.managedStopObserved = 1u;
+        g_guideXosAllocationDiagnostics.noPostRefillAllocation = 1u;
+        return 2;
+    }
+    return 1;
+}
+
+extern "C" __declspec(noinline) __declspec(dllexport) gx_uint32 __cdecl
+guideXosManagedAllocationGetHardLimit() {
+    return g_guideXosAllocationDiagnostics.hardAllocationLimit;
 }
 #endif
 
@@ -835,6 +1093,7 @@ extern "C" __declspec(selectany) void* __imp_FlsSetValue = reinterpret_cast<void
 #if !defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
 extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
+    ++g_guideXosAllocationDiagnostics.managedEntryCount;
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A00_MANAGED_ENTRY,
                           nullptr, 0, 0, 0, 0, 0,
                           reinterpret_cast<gx_uintptr>(frame));
@@ -872,6 +1131,13 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationValidateObjectFn>(guideXosManagedAllocationValidateObject));
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationRecordFailure__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationRecordFailureFn>(guideXosManagedAllocationRecordFailure));
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationReport__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationReportFn>(guideXosManagedAllocationReport));
+#elif defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION)
+    using GuideXosManagedAllocationValidateObjectFn = int (__cdecl*)(void*, gx_size, gx_uint32, gx_uint32, gx_uint32);
+    using GuideXosManagedAllocationGetLoopStatusFn = int (__cdecl*)(void);
+    using GuideXosManagedAllocationGetHardLimitFn = gx_uint32 (__cdecl*)(void);
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationValidateObjectFn>(guideXosManagedAllocationValidateObject));
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetLoopStatus__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationGetLoopStatusFn>(guideXosManagedAllocationGetLoopStatus));
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetHardLimit__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationGetHardLimitFn>(guideXosManagedAllocationGetHardLimit));
 #endif
 #endif
     unsigned char* cell = runtimeCell(block);

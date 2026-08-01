@@ -29,6 +29,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_REAL_ALLOCATION</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstRefill'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_REFILL_ALLOCATION</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Repeated'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING;HOSTLOGPROOF_REPEATED_ALLOCATION</DefineConstants>
   </PropertyGroup>

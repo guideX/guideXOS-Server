@@ -287,18 +287,19 @@ try {
     if ($serial -match '\[nativeaot-gc-startup-qemu-test\] ALL_PASS') { throw "Startup-only QEMU success was accepted in the allocation log." }
     if ($serial -match 'DesktopStateReady|AppRegistry initialized|desktop\.apps|Welcome to guideXOS') { throw "Ordinary desktop boot marker appeared in the allocation run." }
     if ($serial -match 'GC\.Collect|RhShutdown|RhpShutdown|GC_Shutdown') { throw "Forbidden collection or runtime-shutdown marker appeared." }
-    Assert-RegexCount $serial '\[nativeaot-gc-first-allocation\] Managed entry once: PASS' 1 "managed entry"
-    Assert-RegexCount $serial 'rhpNewArrayEntries=00000001' 1 "RhpNewArray entry count"
-    Assert-RegexCount $serial 'realGcAllocationEntries=00000001' 1 "real GC allocation count"
-    Assert-Regex $serial 'wrapperCallCount=1 managedEntryCallCount=1 shutdownCalls=0' "wrapper and managed entry counters"
-    Assert-Regex $serial 'returnedObject=([0-9A-Fa-f]{16})' "returned object"
-    $returnedObject = ([regex]::Match($serial, 'returnedObject=([0-9A-Fa-f]{16})')).Groups[1].Value
+    $assertSerial = $serial -replace '\[IRQ\] dispatch irq=00\r?\n', ''
+    Assert-RegexCount $assertSerial '\[nativeaot-gc-first-allocation\] Managed entry once: PASS' 1 "managed entry"
+    Assert-RegexCount $assertSerial 'rhpNewArrayEntries=00000001' 1 "RhpNewArray entry count"
+    Assert-RegexCount $assertSerial 'realGcAllocationEntries=00000001' 1 "real GC allocation count"
+    Assert-Regex $assertSerial 'wrapperCallCount=1 managedEntryCallCount=1 shutdownCalls=0' "wrapper and managed entry counters"
+    Assert-Regex $assertSerial 'returnedObject=([0-9A-Fa-f]{16})' "returned object"
+    $returnedObject = ([regex]::Match($assertSerial, 'returnedObject=([0-9A-Fa-f]{16})')).Groups[1].Value
     if ($returnedObject -eq '0000000000000000') { throw "Returned object was null." }
-    Assert-Regex $serial 'length=00000018 requestedLength=00000018 size=00000030 zeroBytes=00000018 pattern=00000001 alignment=00000001 layout=00000001 range=00000001 ownership=00000001' "object geometry and ownership"
-    Assert-Regex $serial 'gcCountBefore=00000000 gcCountAfter=00000000 collectionsEntered=00000000 collectionTriggeringEntries=00000000 gcInProgressBefore=00000000 gcInProgressAfter=00000000 finalizableBefore=00000000 finalizableAfter=00000000 finalizationScans=00000000 finalizersExecuted=00000000' "collection/finalizer counters"
-    Assert-Regex $serial '\[nativeaot-gc-first-allocation\] One real Workstation GC allocation: PASS' "real allocation"
-    Assert-Regex $serial '\[nativeaot-gc-first-allocation\] Finalizer worker parked: PASS' "parked finalizer worker"
-    Assert-Regex $serial '\[nativeaot-gc-first-allocation\] ALL_PASS' "allocation completion"
+    Assert-Regex $assertSerial 'length=00000018 requestedLength=00000018 size=00000030 zeroBytes=00000018 pattern=00000001 alignment=00000001 layout=00000001 range=00000001 ownership=00000001' "object geometry and ownership"
+    Assert-Regex $assertSerial 'gcCountBefore=00000000 gcCountAfter=00000000 collectionsEntered=00000000 collectionTriggeringEntries=00000000 gcInProgressBefore=00000000 gcInProgressAfter=00000000 finalizableBefore=00000000 finalizableAfter=00000000 finalizationScans=00000000 finalizersExecuted=00000000' "collection/finalizer counters"
+    Assert-Regex $assertSerial '\[nativeaot-gc-first-allocation\] One real Workstation GC allocation: PASS' "real allocation"
+    Assert-Regex $assertSerial '\[nativeaot-gc-first-allocation\] Finalizer worker parked: PASS' "parked finalizer worker"
+    Assert-Regex $assertSerial '\[nativeaot-gc-first-allocation\] ALL_PASS' "allocation completion"
 
     $manifest = [ordered]@{
         allocationPe = $pePath

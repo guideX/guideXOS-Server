@@ -19,6 +19,9 @@ extern "C" uint32_t GetModuleFileNameW(...) { return 0; }
 extern "C" void* GetStdHandle(...) { return nullptr; }
 extern "C" long GetThreadPriority(...) { return 0; }
 extern "C" long IsDebuggerPresent(...) { return 0; }
+extern "C" void* LoadLibraryExW(...) { return nullptr; }
+extern "C" long FreeLibrary(...) { return 0; }
+extern "C" uint32_t SetThreadErrorMode(...) { return 0; }
 extern "C" void* LocalFree(...) { return nullptr; }
 extern "C" int32_t MultiByteToWideChar(...) { return 0; }
 extern "C" void* RegisterEventSourceW(...) { return nullptr; }

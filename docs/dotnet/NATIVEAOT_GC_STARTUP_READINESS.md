@@ -102,3 +102,16 @@ collector-backed allocation milestone fully closed**. Bounded primitive-array
 allocations are authorized only until the first subsequent allocation-context
 refill and without allowing collection; repeated allocations were not begun in
 this pass.
+
+## First subsequent allocation-context refill
+
+The follow-up repeated primitive-array experiment is now complete and is
+reported in [NATIVEAOT_WORKSTATION_GC_FIRST_REFILL.md](NATIVEAOT_WORKSTATION_GC_FIRST_REFILL.md).
+Three fresh QEMU processes each performed 15 real Workstation-GC-backed
+`byte[256]` allocations: one initial real-GC allocation, 13 fast context
+allocations, and one later real-GC allocation that supplied the first
+subsequent context refill. The refill-2 object, source-derived `0x118` / 280
+byte geometry, context publication, and GC ownership all passed. Collections,
+finalization scans, and managed finalizers remained zero. The decision is
+**Outcome A** for this bounded boundary only; no post-refill allocation or
+same-process shutdown is authorized.

@@ -77,6 +77,83 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t lastIndirectTarget;
     uintptr_t lastLockId;
     uintptr_t lastEventId;
+
+    /*
+     * Bounded first-subsequent-refill experiment fields.  These are appended
+     * to preserve the closed first-allocation record layout.  All values are
+     * scalar, fixed-storage diagnostics written by the allocating thread.
+     */
+    uint32_t managedEntryCount;
+    uint32_t allocationRequestCount;
+    uint32_t rhpNewArrayCount;
+    uint32_t fastAllocationCount;
+    uint32_t rarePathCount;
+    uint32_t realGcAllocationCount;
+    uint32_t allocationContextRefillCount;
+    uint32_t slowAllocationCount;
+    uint32_t largeObjectCount;
+    uint32_t pinnedObjectCount;
+    uint32_t collectionRequestCount;
+    uint32_t collectionEntryCount;
+    uint32_t finalizationScanCount;
+    uint32_t managedFinalizerCount;
+    uint32_t collectionConsideredCount;
+    uint32_t suspensionRequestCount;
+    uint32_t gcLockTransitionCount;
+    uint32_t helperWakeCount;
+    uint32_t refill2Attempted;
+    uint32_t refill2Returned;
+    uint32_t newContextSupplied;
+    uint32_t managedStopObserved;
+    uint32_t ownershipModel;
+    uint32_t failureReason;
+    uint32_t hardAllocationLimit;
+    uint32_t reservedRefill;
+
+    uintptr_t derivedObjectSize;
+    uintptr_t initialAllocPtr;
+    uintptr_t initialAllocLimit;
+    uintptr_t initialAvailableBytes;
+    uintptr_t expectedFastAllocationCount;
+    uintptr_t currentIteration;
+    uintptr_t currentObject;
+    uintptr_t currentObjectEnd;
+    uintptr_t currentAllocPtr;
+    uintptr_t currentAllocLimit;
+    uintptr_t lastFastObject;
+    uintptr_t lastFastObjectEnd;
+    uintptr_t refill2Object;
+    uintptr_t refill2ObjectEnd;
+    uintptr_t refill2AllocPtrBefore;
+    uintptr_t refill2AllocLimitBefore;
+    uintptr_t refill2RemainingBytesBefore;
+    uintptr_t refill2AllocPtrAfter;
+    uintptr_t refill2AllocLimitAfter;
+    uintptr_t initialSegmentBase;
+    uintptr_t initialSegmentAllocated;
+    uintptr_t initialSegmentReserved;
+    uintptr_t refill2SegmentBase;
+    uintptr_t refill2SegmentAllocated;
+    uintptr_t refill2SegmentReserved;
+
+    uint32_t zeroValidationFailures;
+    uint32_t patternValidationFailures;
+    uint32_t layoutFailures;
+    uint32_t ownershipFailures;
+    uint32_t overlapFailures;
+    uint32_t monotonicityFailures;
+    uint32_t contextGeometryFailures;
+    uint32_t collectionBoundaryFailures;
+    uint32_t refill2ContextChanged;
+    uint32_t refill2ContextPublished;
+    uint32_t finalizerStateValid;
+    uint32_t helperStateValid;
+    uint32_t sourceSizeValid;
+    uint32_t belowLargeObjectThreshold;
+    uint32_t primitiveArrayValid;
+    uint32_t noPostRefillAllocation;
+    uint32_t finalizationQueueScans;
+    uint32_t reservedValidation[4];
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
