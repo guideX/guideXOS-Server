@@ -120,3 +120,58 @@ exit. Multiple subsequent refills, segment transitions, new page commitment,
 collection, and allocation beyond the established boundary remain blocked.
 The detailed evidence is in
 [NATIVEAOT_4K_PROOF_EXIT_REGRESSION.md](NATIVEAOT_4K_PROOF_EXIT_REGRESSION.md).
+
+## Final 4 KiB provenance closure - 2026-08-01
+
+The separate capture-only audit completed the requested source-boundary check.
+The historical `0xC0000419` remains preserved, and its initial source was not
+assignable because the original report lacked a complete same-run process,
+guest, teardown, cleanup, WER, staging, and PowerShell chain.
+
+The five fresh launches used one frozen artifact pair: managed PE
+`46BFE1192562DE8ABAC4A87D94BADA93E3115568AC5898E01DB2F7D584555DAB`, converted
+and staged ELF
+`17E7CE9DB772B0117FA04F0ED9669CDC191C401011308E929D309B1CAB7A082B`, runtime
+identity
+`guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1`,
+kernel
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`, and
+four-file ESP tree
+`1A3C951A184A6FD0FA1FA730265B4D861E3FC4FE5B15F82B98B7219CBB04B894`.
+The proof runner hash was
+`4E5CEC37209A533F888FBFC4F0B93C20130F75009B0E63AF9E73526A2E1B1D10`; the
+capture runner hash was
+`AFE90B4722D4633FFDA64B88D24EC51236A22D238191098BFDF506884ADAF1E8`.
+
+PIDs 21872, 11108, 20536, 9564, and 25832 all returned signed/unsigned zero
+(`0x00000000`), with PowerShell exit 0, pipeline success, runner return 0,
+cleanup PASS, and guest PASS. Each run recorded managed entry 1, 15 attempts,
+14 successful allocations, controlled OOM 1, managed/native/Server returns 0,
+zero collections, zero GC-backed allocations, and zero heap expansion. The
+authoritative path is hosted Server execution; QEMU and serial are explicitly
+not applicable to these captures. One WER Application Error matched PID,
+executable identity, and time window and reported `0xC0000005`; four runs had
+no correlated WER event. No captured layer produced or propagated
+`0xC0000419`.
+
+Classification: **Provenance Outcome A - historical nonreproducible exit
+observation with no source-backed association to the current guest, runtime,
+teardown, staging, QEMU, or PowerShell paths.** The 4 KiB proof remains
+`14` successful allocations with controlled OOM PASS; the 64 KiB proof remains
+`234` with controlled OOM PASS. Startup-only, first allocation, first
+subsequent refill (`15` total / `13` fast / `2` refill), HostLog, runtime-pack
+state/hash, generic ELF, and inventory-isolation regressions passed. The
+ordinary kernel was restored to the hash above, and generated evidence remains
+ignored and untracked.
+
+The first-refill milestone is closed. Multiple refills are authorized only as
+the next bounded experiment: continue primitive-array allocations through
+multiple allocation-context refills until the first new heap-segment commitment
+or segment transition, without allowing collection. Review checkpoint:
+
+```text
+dotnet: validate first Workstation GC context refill
+```
+
+No multiple-refill or segment-transition testing was performed during this
+closure pass.

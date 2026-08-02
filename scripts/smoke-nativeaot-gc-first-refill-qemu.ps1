@@ -304,14 +304,17 @@ exit /b %errorlevel%
         $serial = Get-Content -LiteralPath $serialPath -Raw
         Set-Content -LiteralPath (Join-Path $oneRoot "serial.sha256") -Value (Hash-File $serialPath) -Encoding ASCII
         if ($serial -match 'nativeaot-gc-startup-qemu-test\] ALL_PASS|DesktopStateReady|AppRegistry initialized|Welcome to guideXOS|GC\.Collect|RhShutdown|RhpShutdown|GC_Shutdown') { throw "Forbidden or startup-only marker appeared in $name." }
-        Assert-Text $serial '\[nativeaot-gc-first-refill\] Managed entry once: PASS' "managed entry"
-        Assert-Text $serial '\[nativeaot-gc-first-refill\] Managed byte\[256\] loop return: PASS' "managed loop"
-        Assert-Text $serial '\[nativeaot-gc-first-refill\] Exact allocation counters: PASS' "exact counters"
-        Assert-Text $serial '\[nativeaot-gc-first-refill\] Refill 1 and Refill 2 context geometry: PASS' "context geometry"
-        Assert-Text $serial '\[nativeaot-gc-first-refill\] No collection or finalization: PASS' "no collection"
-        Assert-Text $serial '\[nativeaot-gc-first-refill\] Primitive-array object and ownership validation: PASS' "object validation"
-        Assert-Text $serial '\[nativeaot-gc-first-refill\] Process teardown: PASS' "teardown"
-        Assert-Text $serial '\[nativeaot-gc-first-refill\] ALL_PASS' "completion"
+        # Timer diagnostics can be interleaved into a serial line. Preserve the raw
+        # serial above, but normalize only for marker validation.
+        $validationText = ($serial -replace '\[IRQ\] dispatch irq=00', ' ') -replace '\s+', ' '
+        Assert-Text $validationText '\[nativeaot-gc-first-refill\] Managed entry once: PASS' "managed entry"
+        Assert-Text $validationText '\[nativeaot-gc-first-refill\] Managed byte\[256\] loop return: PASS' "managed loop"
+        Assert-Text $validationText '\[nativeaot-gc-first-refill\] Exact allocation counters: PASS' "exact counters"
+        Assert-Text $validationText '\[nativeaot-gc-first-refill\] Refill 1 and Refill 2 context geometry: PASS' "context geometry"
+        Assert-Text $validationText '\[nativeaot-gc-first-refill\] No collection or finalization: PASS' "no collection"
+        Assert-Text $validationText '\[nativeaot-gc-first-refill\] Primitive-array object and ownership validation: PASS' "object validation"
+        Assert-Text $validationText '\[nativeaot-gc-first-refill\] Process teardown: PASS' "teardown"
+        Assert-Text $validationText '\[nativeaot-gc-first-refill\] ALL_PASS' "completion"
         $experimentalEspHash = Hash-File (Join-Path $espRoot "kernel.elf")
         $runResults += [ordered]@{ name = $name; serial = $serialPath; serialSha256 = Hash-File $serialPath; kernelSha256 = $experimentalEspHash; experimentalKernelSha256 = $experimentalEspHash; experimentalEspSha256 = $experimentalEspHash }
     }

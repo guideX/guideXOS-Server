@@ -130,3 +130,55 @@ correction was applied. See
 The first-refill experiment remains technically Outcome A, but milestone
 closure is pending the unbound 4 KiB exit classification. No multiple-refill
 or segment-transition experiment is authorized.
+
+## Final 4 KiB provenance closure - 2026-08-01
+
+The separate exit audit closed the remaining provenance question without
+changing GC startup, allocation, PAL, or teardown behavior. The original
+`0xC0000419` remains a historical opaque observation; it initially had no
+source association because the failing record did not preserve every same-run
+process, guest, cleanup, WER, staging, and PowerShell layer.
+
+One immutable 4 KiB PE/ELF pair was captured in five fresh authoritative
+Server launches. PE:
+`46BFE1192562DE8ABAC4A87D94BADA93E3115568AC5898E01DB2F7D584555DAB`; ELF and
+staged ELF:
+`17E7CE9DB772B0117FA04F0ED9669CDC191C401011308E929D309B1CAB7A082B`;
+runtime-pack identity:
+`guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1`;
+kernel:
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`; ESP
+tree manifest:
+`1A3C951A184A6FD0FA1FA730265B4D861E3FC4FE5B15F82B98B7219CBB04B894`;
+proof runner:
+`4E5CEC37209A533F888FBFC4F0B93C20130F75009B0E63AF9E73526A2E1B1D10`; capture
+runner:
+`AFE90B4722D4633FFDA64B88D24EC51236A22D238191098BFDF506884ADAF1E8`.
+
+PIDs 21872, 11108, 20536, 9564, and 25832 each returned signed 0, unsigned
+0, and `0x00000000`; PowerShell exit 0; pipeline success; runner return 0;
+cleanup PASS; and guest PASS. Each recorded managed entry 1, 15 attempts,
+14 successful allocations, controlled OOM 1, managed/native/Server returns 0,
+zero collections, zero GC-backed allocations, and zero heap expansion. This
+proof is hosted by guideXOS Server, so QEMU and serial are explicitly recorded
+as not applicable for these same runs. One WER Application Error event matched
+PID, executable path, and time window and reported `0xC0000005`; the other
+four runs had no correlated WER event. No WER or execution layer reported
+`0xC0000419`.
+
+The historical value therefore remains a nonreproducible exit observation with
+no source-backed association to the current guest, runtime, teardown, staging,
+QEMU, or PowerShell paths. Focused 4 KiB, 64 KiB, startup-only, first
+allocation, first subsequent refill, HostLog, runtime-pack state/hash, generic
+ELF, and inventory-isolation regressions passed; the ordinary kernel was
+restored to the hash above. The first-refill milestone is closed under
+Provenance Outcome A.
+
+The next experiment is authorized but was not run here: continue bounded
+primitive-array allocations through multiple allocation-context refills until
+the first new heap-segment commitment or segment transition, without allowing
+collection. Review checkpoint:
+
+```text
+dotnet: validate first Workstation GC context refill
+```

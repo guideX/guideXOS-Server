@@ -291,3 +291,95 @@ PE/ELF and a process-launch capture that records, in one immutable run:
 Do not start multiple refills or segment-transition testing until that single
 4 KiB event is either reproduced with a first generating layer or conclusively
 shown to be an external harness/staging event.
+
+## 21. Final immutable exit-provenance closure - 2026-08-01
+
+The historical `0xC0000419` observation is preserved exactly as reported. It
+was initially opaque because the failing capture did not contain a complete
+same-run PID, raw-process, guest-marker, cleanup, WER, staging, and
+PowerShell return chain. No source-backed association was made to Windows,
+WER, QEMU, guideXOS, NativeAOT, PowerShell, or cleanup.
+
+The final capture used the already-authorized 4 KiB snapshot at
+`out/dotnet/gc-first-refill-closure/four-kib-baseline`. After freezing, no PE
+build, PE-to-ELF conversion, specialized-kernel build, or runtime shutdown was
+performed. The immutable identities were:
+
+| Item | SHA-256 / identity |
+|---|---|
+| Managed PE | `46BFE1192562DE8ABAC4A87D94BADA93E3115568AC5898E01DB2F7D584555DAB` |
+| Converted ELF and staged ELF | `17E7CE9DB772B0117FA04F0ED9669CDC191C401011308E929D309B1CAB7A082B` |
+| Runtime-pack identity | `guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1` |
+| Runtime-pack manifest | `4D9DC025201B2DBD81D11877777CD66BB05E4AC03481E3363B47E09A39AB1A0D` |
+| Runtime-pack object | `055CA4FDE943F744CB48A89E8C5345565EDFF7010ECC6D9F8AB68493463EE0BF` |
+| Kernel | `D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C` |
+| ESP tree manifest (4 files) | `1A3C951A184A6FD0FA1FA730265B4D861E3FC4FE5B15F82B98B7219CBB04B894` |
+| Proof runner | `4E5CEC37209A533F888FBFC4F0B93C20130F75009B0E63AF9E73526A2E1B1D10` |
+| Capture runner | `AFE90B4722D4633FFDA64B88D24EC51236A22D238191098BFDF506884ADAF1E8` |
+
+The reusable capture runner is
+`scripts/capture-nativeaot-4k-exit-provenance.ps1`. Each run received a new
+run ID and fresh stdout, stderr, serial-status, stage, and ESP paths. It
+captured the child PID, creation and exit timestamps, signed/unsigned/hex
+`Process.ExitCode`, immediate numeric PowerShell exit field before cleanup,
+pipeline state, exceptions, runner return, timeout, cleanup/finally state,
+all guest markers, and before/after PE, ELF, staged ELF, Server, kernel, and
+ESP hashes. The hosted authoritative Server path does not use QEMU or emit a
+serial stream; each run therefore records serial as explicitly not applicable,
+while the same run captures the nativeapp/Server guest markers and teardown.
+The PowerShell exit field is copied from the raw child exit immediately after
+the .NET process wait, because this PID-preserving launch API does not itself
+mutate PowerShell's automatic variable.
+
+Five fresh immutable runs completed:
+
+| Run | PID | Raw child exit (signed / unsigned / hex) | `$LASTEXITCODE` | Guest chain | WER |
+|---:|---:|---|---:|---|---|
+| 1 | 21872 | `0 / 0 / 0x00000000` | 0 | 1 entry, 15 attempts, 14 success, OOM 1, managed/native/Server 0, PASS | 1 correlated `0xC0000005` |
+| 2 | 11108 | `0 / 0 / 0x00000000` | 0 | same; PASS | none |
+| 3 | 20536 | `0 / 0 / 0x00000000` | 0 | same; PASS | none |
+| 4 | 9564 | `0 / 0 / 0x00000000` | 0 | same; PASS | none |
+| 5 | 25832 | `0 / 0 / 0x00000000` | 0 | same; PASS | none |
+
+All five runs had zero collections, zero GC-backed allocations, zero heap
+expansion, process teardown PASS, runner return 0, cleanup PASS, no cleanup
+overwrite, and matching pre/post hashes. The one correlated WER Application
+Error event was PID 21872, the exact immutable `server-snapshot.exe` path,
+inside the execution window, with exception code `0xC0000005`. It is recorded
+as a correlated diagnostic event, not as the proof result, and it does not
+correlate the historical `0xC0000419` value. Correlated WER events for
+`0xC0000419`: 0.
+
+Final capture record: `out/dotnet/gc-first-refill-closure/exit-provenance-final/capture-20260801-153009004-11d42f22/summary.json`.
+
+The historical value did not recur. First producing layer: none. Source-backed
+origin: none. Final classification:
+
+> Historical nonreproducible exit observation. No current layer in the immutable proof path generated or propagated `0xC0000419`.
+
+The focused regressions after the capture set passed: 4 KiB `14` successful
+allocations with controlled OOM; 64 KiB `234` allocations with controlled OOM;
+startup-only QEMU; first collector-backed allocation; first subsequent refill
+(`15` total / `13` fast / `2` refill); HostLog; runtime-pack state/hash; generic
+ELF; and inventory isolation. Collections, finalization scans, and managed
+finalizers remained zero where applicable. The ordinary kernel was restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
+
+## 22. Final decision
+
+**Provenance Outcome A - historical value is nonreproducible; first-refill
+milestone closed.** The historical observation remains preserved but is not
+associated with the current immutable proof path and is not a current release
+blocker.
+
+Multiple refills are authorized only as the next bounded experiment: continue
+primitive-array allocations through multiple allocation-context refills until
+the first new heap-segment commitment or segment transition, without allowing
+collection. After review, the exact checkpoint is:
+
+```text
+dotnet: validate first Workstation GC context refill
+```
+
+That checkpoint was authorized, not created or run, during this pass. No
+multiple-refill or segment-transition testing occurred here.

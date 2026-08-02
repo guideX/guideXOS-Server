@@ -288,3 +288,61 @@ The first-refill Outcome A result remains technically valid. First-refill
 milestone closure is pending this separate 4 KiB exit classification; multiple
 subsequent refills, segment transitions, new page commitments, collection, and
 allocation beyond the established first-refill boundary remain unauthorized.
+
+## Final 4 KiB provenance closure - 2026-08-01
+
+The pending classification was completed without changing the first-refill
+experiment. The original opaque `0xC0000419` observation remains preserved;
+its initial source was unassignable because the failing report lacked a
+complete same-run process, guest, cleanup, WER, staging, and PowerShell chain.
+
+Five fresh launches consumed one frozen 4 KiB artifact pair. The managed PE
+hash was `46BFE1192562DE8ABAC4A87D94BADA93E3115568AC5898E01DB2F7D584555DAB`;
+the converted and staged ELF hash was
+`17E7CE9DB772B0117FA04F0ED9669CDC191C401011308E929D309B1CAB7A082B`; the
+runtime-pack identity was
+`guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1`;
+the kernel hash was
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`; and the
+four-file ESP tree hash was
+`1A3C951A184A6FD0FA1FA730265B4D861E3FC4FE5B15F82B98B7219CBB04B894`.
+The proof runner hash was
+`4E5CEC37209A533F888FBFC4F0B93C20130F75009B0E63AF9E73526A2E1B1D10`; the
+capture runner hash was
+`AFE90B4722D4633FFDA64B88D24EC51236A22D238191098BFDF506884ADAF1E8`.
+
+The raw exit chain was zero in all five runs: PIDs 21872, 11108, 20536,
+9564, and 25832 each returned signed 0, unsigned 0, and `0x00000000`, with
+PowerShell exit value 0, pipeline success, runner return 0, cleanup PASS, and
+guest PASS. Each run recorded entry 1, 15 attempts, 14 successful allocations,
+controlled OOM 1, managed/native/Server return 0, zero collections, zero
+GC-backed allocations, and zero heap expansion. The hosted Server launch does
+not use QEMU or produce serial output, so serial is recorded as explicitly not
+applicable rather than inferred.
+
+WER correlation found one exact PID/path/time-window Application Error event on
+PID 21872 with `0xC0000005`; four runs had no correlated WER event. No
+correlated WER event contained `0xC0000419`, and no captured layer generated
+or propagated it. The final classification is:
+
+> Historical nonreproducible exit observation with no source-backed association to the current guest, runtime, teardown, staging, QEMU, or PowerShell paths.
+
+The focused regressions remained green: 4 KiB `14` / controlled OOM PASS,
+64 KiB `234` / controlled OOM PASS, startup-only PASS, first-allocation PASS,
+first subsequent refill PASS (`15` total / `13` fast / `2` refill), HostLog
+PASS, runtime-pack state/hash PASS, generic ELF PASS, and inventory isolation
+PASS. Collections, finalization scans, and managed finalizers remained zero.
+The ordinary kernel was restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
+
+**Provenance Outcome A is complete.** The first-refill milestone is closed and
+multiple refills are authorized only for the next bounded experiment: continue
+primitive-array allocations through multiple allocation-context refills until
+the first new heap-segment commitment or segment transition, without allowing
+collection. Exact next checkpoint after review:
+
+```text
+dotnet: validate first Workstation GC context refill
+```
+
+No multiple-refill or segment-transition testing was performed in this pass.
