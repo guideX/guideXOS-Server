@@ -222,3 +222,15 @@ An exploratory 246-allocation cap entered six collections and is explicitly
 discarded. The exact next experiment is a first-GC collection-readiness audit,
 not collection execution. The ordinary kernel remains restored to
 `D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
+
+## Transition-gate cross-reference - 2026-08-02
+
+The later bounded segment-transition audit preserved the startup-readiness
+contract: `RhInitialize` returned `0`, the managed entry ran once, and all
+three disposable QEMU runs completed with process teardown PASS. The audit
+stopped before collection and classified the source path as **Outcome B**:
+standalone Workstation GC reaches collection handling before a new SOH segment
+can be selected. This does not change the earlier startup and first
+post-startup-commit milestones, and it does not authorize collection
+execution. Details and fresh hashes are in
+[NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).

@@ -229,3 +229,14 @@ The final decision is **Outcome B — collection is required before a SOH segmen
 transition**. The exact next experiment is a first-GC collection-readiness
 audit, not collection execution. The ordinary kernel was restored to
 `D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
+
+## Transition-gate update - 2026-08-02
+
+The fresh bounded transition audit supports the feasibility boundary rather
+than expanding it: sub-LOH `byte[4096]` allocations can commit more pages in
+the current reserved SOH segment, but source inspection shows collection is
+required before a standalone Workstation-GC SOH segment transition. The run
+therefore ended with **Outcome B**, zero collection entry, zero suspension,
+zero segment transitions, and three of three QEMU passes. The exact next
+experiment is a separately authorized first-GC collection-readiness audit.
+See [NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).

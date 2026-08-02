@@ -433,3 +433,21 @@ collections and was discarded; it is not part of the authoritative evidence.
 The exact next experiment is a first-GC collection-readiness audit, not
 collection execution. The ordinary kernel was restored to
 `D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
+
+## Transition follow-up rerun - 2026-08-02
+
+The first post-startup commitment result above remains **Outcome A**: the
+commit grew the committed boundary within segment `0x104014730`. The bounded
+follow-up then continued through 32 allocations and two post-startup commit
+observations without observing a new SOH segment or entering collection.
+Source inspection classifies the next SOH boundary as **Outcome B** for the
+separate transition question; see
+[NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).
+
+The fresh 2026-08-02 transition rerun reproduced three of three QEMU passes,
+with `15` fast allocations, `17` rare/refill allocations, `17` refills, two
+same-segment commits, zero collection requests/entries/suspensions, zero
+transitions, and a valid stop object. The specialized-kernel SHA256 was
+`5E91F5AA77C56431D821C7EC78C5328214A5B864A768CAE4A862FFB2B28564C8`; the
+ordinary kernel was restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.

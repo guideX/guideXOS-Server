@@ -171,4 +171,73 @@ reserved/committed geometry, and stop before the first collection request.
 Any future collection-entry experiment requires a separately authorized
 collection contract covering suspension, roots, finalization, post-GC segment
 identity, and process teardown. It must not be folded into this no-collection
-transition runner.
+ transition runner.
+
+## Fresh rerun and regression closure - 2026-08-02
+
+The authoritative runner was rerun from a clean task-local build and completed
+three disposable QEMU runs:
+
+`out/dotnet/gc-first-segment-transition/run-20260802-075204462/`
+
+The decision remains **Outcome B - collection is required before a SOH segment
+transition**. This is a source-backed classification, not an observed
+collection: the bounded run stopped before the first collection request.
+
+The locked identity and artifacts were:
+
+- source commit `9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3`;
+- active PAL archive SHA256
+  `C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F`;
+- transition PE SHA256
+  `8DB62CA7F5227832E2B6D8775F87AA4BB073EF3F0977D42929F63BE349F271A4`;
+- transition ELF SHA256
+  `C197C50A2DC4BDE1148B87D483BE618DBA2DD827483666B002EBFEFD12404646`;
+- adapted GC archive SHA256
+  `9347DCE8AD4FCE7848D955EA9D3FEAD83AD98D862A6D01763661E87DB4CFA79F`;
+- embedded transition object SHA256
+  `4127AC5E6534288E5B48675E46CFD15CD14B1D0571E55024C3FB348CC60872B9`;
+- specialized kernel SHA256
+  `5E91F5AA77C56431D821C7EC78C5328214A5B864A768CAE4A862FFB2B28564C8`.
+
+All three run manifests reported `RhInitialize` return `0`, one managed
+entry, `transitionModel=collection-first`, and the source decision path
+`soh_try_fit->a_fit_segment_end_p->trigger_ephemeral_gc`. The bounded
+diagnostic result was:
+
+| Field | Result |
+| --- | --- |
+| Allocations | `32` |
+| Fast / rare allocations | `15 / 17` |
+| Real-GC allocations / refills | `17 / 17` |
+| Post-startup commit observations | `2` |
+| Collection considered / requested / entered | `17 / 0 / 0` |
+| Suspensions / finalization scans / managed finalizers | `0 / 0 / 0` |
+| Segment transitions | `0` |
+| Boundary type | `1` (same-segment commit-only observation) |
+| Initial/current segment identity | `0x104014730 / 0x104014730` |
+| Initial/current committed boundary | `0x100A11000 / 0x100A31000` |
+| Reserved boundary | `0x100B00000` |
+| Stop object | `0x100A1F490`, end `0x100A204A8` |
+| Stop reason / post-refill allocation | `1` / `0` |
+| Stop-object validation, process teardown, QEMU | PASS / PASS / 3 of 3 PASS |
+
+The serial hashes were, in order, `3779368EB699CA3EEADE399056B45E0ABDBB5C5254F6646FACCD69B12AA209BF`,
+`34808CEFA6CF0610C1AC248C23B4A20797CC88BC03F4BE9FEA3BBB50CAD68D4F`, and
+`183BE44435AE9C004482576DCD572B892BC215D45E51FCDCD20A3A11560C8BD1`.
+
+Fresh regressions also passed: startup QEMU, first-allocation QEMU,
+first-refill QEMU, the first post-startup commitment baseline, 4 KiB static
+and hosted execution (`14` allocations, controlled OOM), 64 KiB static and
+hosted execution (`234` allocations, controlled OOM), runtime-pack state and
+static checks, generic ELF, local storage/FLS-before-init, virtual memory,
+thread runtime, and stack bounds. The standalone thread-runtime QEMU subcase
+was not counted as a pass because that script reported QEMU unavailable; the
+transition runner itself found and passed QEMU. The virtual-memory expected
+fault-guard subcase remains explicitly blocked by that probe's no-safe-fault
+harness policy.
+
+The ordinary kernel was restored after all checks. Both
+`kernel/build/amd64/bin/kernel.elf` and `ESP/kernel.elf` hash to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
+Generated evidence remains ignored and no commit was created.
