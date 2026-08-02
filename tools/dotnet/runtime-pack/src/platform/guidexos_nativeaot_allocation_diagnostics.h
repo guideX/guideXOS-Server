@@ -223,6 +223,14 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t lastSegmentFlags;
     uint32_t initialHeapCommitObserved;
     uint32_t initialHeapCommitEventCount;
+    uint32_t hardRefillLimit;
+    uint32_t hardCommitLimit;
+    uint32_t hardSegmentTransitionLimit;
+    uint32_t collectionDecisionObserved;
+    uint32_t collectionDecisionPath;
+    uint32_t stopReason;
+    uint32_t currentSegmentFlags;
+    uint32_t currentSegmentGeneration;
     uint32_t reservedBoundary[4];
 
     uintptr_t initialSegmentIdentity;
@@ -252,6 +260,14 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t initialHeapCommitActual;
     uintptr_t initialHeapCommittedBefore;
     uintptr_t initialHeapCommittedAfter;
+    uintptr_t currentSegmentBase;
+    uintptr_t currentSegmentAllocated;
+    uintptr_t currentSegmentReserved;
+    uintptr_t collectionDecisionSegment;
+    uintptr_t collectionDecisionAllocPtr;
+    uintptr_t collectionDecisionAllocLimit;
+    uintptr_t collectionDecisionIteration;
+    uintptr_t collectionDecisionRemainingBytes;
 
     guidexos_nativeaot_refill_history_entry refillHistory[
         GUIDEXOS_NATIVEAOT_MAX_REFILL_HISTORY];
@@ -279,6 +295,21 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_REVERSE_PINVOKE = 0xF02u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_GC_STATE = 0xF08u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_ALLOCATION = 0xF06u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S00_ALLOCATION_REQUEST = 0xB00u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S01_FAST_CAPACITY_FAILURE = 0xB01u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S02_RARE_PATH_ENTERED = 0xB02u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S03_GC_HEAP_ALLOC_ENTERED = 0xB03u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S04_CURRENT_SEGMENT_INSPECTED = 0xB04u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S05_CURRENT_SEGMENT_UNSUITABLE = 0xB05u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S06_COLLECTION_DECISION_EVALUATED = 0xB06u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S07_NEW_SEGMENT_SEARCH = 0xB07u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S08_EXISTING_SEGMENT_SELECTED = 0xB08u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S09_NEW_SEGMENT_RESERVE = 0xB09u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S10_NEW_SEGMENT_COMMIT = 0xB0Au,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S11_SEGMENT_METADATA_INITIALIZED = 0xB0Bu,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S12_SEGMENT_LINKED = 0xB0Cu,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S13_ALLOCATION_CONTEXT_PUBLISHED = 0xB0Du,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S14_STOP_OBJECT_RETURNED = 0xB0Eu,
 };
 
 #ifdef __cplusplus

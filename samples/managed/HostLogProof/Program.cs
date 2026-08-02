@@ -24,7 +24,7 @@ public static unsafe class Program
     private static extern int GuideXosManagedAllocationReport(NativeGxAppContext* context, uint status);
 #endif
 
-#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION
+#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationValidateObject")]
     private static extern int GuideXosManagedAllocationValidateObject(
         nint arrayObject,
@@ -40,7 +40,7 @@ public static unsafe class Program
     private static extern uint GuideXosManagedAllocationGetHardLimit();
 #endif
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedArrayHostLog")]
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
 #endif
@@ -67,7 +67,7 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION
         if (ctx->host == null || ctx->host->log == null)
         {
             return GxAbi.ErrorInvalidArgument;
@@ -153,10 +153,10 @@ public static unsafe class Program
         }
 
         return GxAbi.ErrorInvalidArgument;
-#elif HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION
+#elif HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION
         // Allocate one fixed-size primitive array at a time.  The native
-        // diagnostic hook stops the loop immediately after the first new
-        // GC-heap commit or source-backed segment transition; no managed
+        // diagnostic hook stops the loop at the first measured boundary or
+        // the source-backed safe hard limit; no managed
         // collection, retained array set, string, delegate, exception, or
         // second allocation is introduced after that boundary.
         const int arrayLength = 4096;
@@ -338,7 +338,7 @@ public static unsafe class Program
 #endif
     }
 
-#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_REPEATED_ALLOCATION
+#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION || HOSTLOGPROOF_REPEATED_ALLOCATION
     private static uint CountZeroBytes(byte[] buffer)
     {
         uint count = 0u;

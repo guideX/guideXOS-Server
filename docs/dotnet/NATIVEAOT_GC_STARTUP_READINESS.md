@@ -205,3 +205,20 @@ This is **Outcome A for the first post-startup commitment boundary**. The exact
 next experiment is to continue bounded allocations until the first GC segment
 transition, without allowing collection. The ordinary kernel was restored to
 `D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
+
+## First segment-transition gate - 2026-08-01
+
+That follow-up is now closed by
+[NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).
+The source-backed result is **Outcome B — collection is required before a SOH
+segment transition**. The authoritative no-collection runner used a
+`byte[4096]` object (`0x1018` / 4120 bytes), stopped at 32 allocations after
+17 context refills and two post-startup commit observations, and reproduced
+the same segment identity across three fresh QEMU processes. It recorded zero
+collection requests, entries, suspensions, finalization scans, managed
+finalizers, and segment transitions.
+
+An exploratory 246-allocation cap entered six collections and is explicitly
+discarded. The exact next experiment is a first-GC collection-readiness audit,
+not collection execution. The ordinary kernel remains restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.

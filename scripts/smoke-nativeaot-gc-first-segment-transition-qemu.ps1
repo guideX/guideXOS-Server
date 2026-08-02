@@ -13,7 +13,7 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = Join-Path $root "out\dotnet\gc-multiple-refills-first-segment-boundary"
+    $EvidenceRoot = Join-Path $root "out\dotnet\gc-first-segment-transition"
 }
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
 $runRoot = Join-Path $evidence (Get-Date -Format "run-yyyyMMdd-HHmmssfff")
@@ -22,9 +22,9 @@ $artifactRoot = Join-Path $buildRoot "artifact"
 $runtimeRoot = Join-Path $buildRoot "runtime-pack"
 $oldRoot = Join-Path $root "out\dotnet\gc-first-real-allocation"
 $oldArtifact = Join-Path $oldRoot "managed-artifact"
-$pePath = Join-Path $artifactRoot "NativeAotGcMultipleRefillsBoundary.exe"
-$elfPath = Join-Path $artifactRoot "NativeAotGcMultipleRefillsBoundary.elf"
-$mapPath = Join-Path $artifactRoot "NativeAotGcMultipleRefillsBoundary.map"
+$pePath = Join-Path $artifactRoot "NativeAotGcFirstSegmentTransition.exe"
+$elfPath = Join-Path $artifactRoot "NativeAotGcFirstSegmentTransition.elf"
+$mapPath = Join-Path $artifactRoot "NativeAotGcFirstSegmentTransition.map"
 $kernelPath = Join-Path $root "kernel\build\amd64\bin\kernel.elf"
 $normalKernelSource = Join-Path $root "out\dotnet\gc-first-allocation-hang\baseline\kernel-build-current.elf"
 $normalKernelHash = "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C"
@@ -81,7 +81,7 @@ function Invoke-Batch([string]$Path, [string]$LogName) {
 }
 
 function Assert-Text([string]$Text, [string]$Pattern, [string]$Label) {
-    if ($Text -notmatch $Pattern) { throw "Missing segment-boundary evidence for ${Label}: ${Pattern}" }
+    if ($Text -notmatch $Pattern) { throw "Missing segment-transition evidence for ${Label}: ${Pattern}" }
 }
 
 function Extract-MapAddress([string]$MapText, [string]$Symbol) {
@@ -133,7 +133,7 @@ $identityManifestPath = Join-Path $root "out\dotnet\gc-first-real-allocation\ide
 $gcStartupRoot = Join-Path $root "out\dotnet\gc-initialization-dry-run\artifact"
 $palBridge = Join-Path $root "out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.bridge.obj"
 $gcEnv = Join-Path $replacementRoot "guidexos_gcenv.obj"
-$gcEnvBoundary = Join-Path $runtimeRoot "guidexos_gcenv.segment-boundary.obj"
+$gcEnvBoundary = Join-Path $runtimeRoot "guidexos_gcenv.segment-transition.obj"
 $vmAdapter = Join-Path $replacementRoot "guidexos_nativeaot_virtual_memory_adapter.obj"
 $vmRegion = Join-Path $replacementRoot "guidexos_virtual_memory_region.obj"
 $gcPlatformServices = Join-Path $replacementRoot "guidexos_gc_platform_services.obj"
@@ -155,13 +155,13 @@ $gcHelpersAlign = Join-Path $gcStartupRoot "gc-helpers-align-up.obj"
 $threadObj = Join-Path $oldArtifact "thread.renamed.obj"
 $ehObj = Join-Path $oldArtifact "EHHelpers.renamed.obj"
 $allocFastObj = Join-Path $oldArtifact "AllocFast.renamed.obj"
-$platformObj = Join-Path $runtimeRoot "guidexos_nativeaot_platform.segment-boundary.obj"
-$probeObj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_allocation_probe.segment-boundary.obj"
-$gcBridgeBoundary = Join-Path $runtimeRoot "guidexos_nativeaot_gcenv_startup_bridge.segment-boundary.obj"
+$platformObj = Join-Path $runtimeRoot "guidexos_nativeaot_platform.segment-transition.obj"
+$probeObj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_allocation_probe.segment-transition.obj"
+$gcBridgeBoundary = Join-Path $runtimeRoot "guidexos_nativeaot_gcenv_startup_bridge.segment-transition.obj"
 $hostShimObj = Join-Path $artifactRoot "guidexos_nativeaot_managed_host_shims.obj"
 $startupProbeObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_startup_probe.managed.obj"
 $runtimeSupportObj = Join-Path $artifactRoot "runtime_support.obj"
-$adaptedArchive = Join-Path $artifactRoot "Runtime.WorkstationGC.guidexos-nativeaot-gc-segment-boundary.lib"
+$adaptedArchive = Join-Path $artifactRoot "Runtime.WorkstationGC.guidexos-nativeaot-gc-segment-transition.lib"
 $managedPublishRoot = Join-Path $buildRoot "managed"
 
 foreach ($path in @($palBridge,$gcEnv,$gcBridge,$platformContract,$palStartup,$startupDiagnostic,$gcHelpersDiagnostic,$gcHelpersAlign,$threadObj,$ehObj,$allocFastObj)) {
@@ -173,7 +173,7 @@ try {
     Set-Content -LiteralPath (Join-Path $runRoot "baseline.txt") -Value @(
         "experiment=bounded byte[4096] allocations through multiple context refills to first GC heap commit or segment transition",
         "arrayLength=4096",
-        "hardAllocationLimit=384",
+        "hardAllocationLimit=32",
         "nativeAotSourceCommit=9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
         "runtimePack=9.0.0 AMD64 Workstation GC interface=5.3 EE=2",
         "activePalArchiveSha256=$(Hash-File $activeArchive)",
@@ -183,29 +183,29 @@ try {
         "lifetime=process teardown only; same-process reinitialization unsupported"
     ) -Encoding ASCII
 
-    $runtimeBat = Write-Batch "build-segment-boundary-runtime-pack.bat" @"
+    $runtimeBat = Write-Batch "build-segment-transition-runtime-pack.bat" @"
 @echo off
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_HARD_LIMIT=384 /Fo:"$platformObj" "$platformSource"
+cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_HARD_LIMIT=384 /DGUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_LIMIT=32 /DGUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_REFILL_LIMIT=20 /DGUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_COMMIT_LIMIT=4 /Fo:"$platformObj" "$platformSource"
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DGXOS_BARE_METAL /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$nativeAotRoot\Runtime" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$gcBridgeBoundary" "$gcBridgeSource"
+cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DGXOS_BARE_METAL /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$nativeAotRoot\Runtime" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$gcBridgeBoundary" "$gcBridgeSource"
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DGXOS_BARE_METAL /DGXOS_TRUE_VIRTUAL_MEMORY /D_FEATURE_NATIVEAOT /DNATIVEAOT /DTARGET_AMD64 /DHOST_AMD64 /DHOST_64BIT /D_WIN64 /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime" /I"$sourceRoot\native" /Fo:"$gcEnvBoundary" "$(Join-Path $root 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp')"
+cl.exe /nologo /std=c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DGXOS_BARE_METAL /DGXOS_TRUE_VIRTUAL_MEMORY /D_FEATURE_NATIVEAOT /DNATIVEAOT /DTARGET_AMD64 /DHOST_AMD64 /DHOST_64BIT /D_WIN64 /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime" /I"$sourceRoot\native" /Fo:"$gcEnvBoundary" "$(Join-Path $root 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp')"
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\eventpipe" /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$sourceRoot\pal\src\include" /FI"$sourceRoot\gc\env\common.h" /Fo:"$probeObj" "$probeSource"
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
-    $artifactBat = Write-Batch "build-segment-boundary-artifact.bat" @"
+    $artifactBat = Write-Batch "build-segment-transition-artifact.bat" @"
 @echo off
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /TC /c /GS- /Zl /Fo:"$runtimeSupportObj" "$runtimeSupportSource"
 if errorlevel 1 exit /b %errorlevel%
-"$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=SegmentBoundary -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ -p:HostLogProofRuntimePackObj=$platformObj -p:IlcSdkPath=$oldArtifact\sdk\
+"$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=SegmentTransition -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ -p:HostLogProofRuntimePackObj=$platformObj -p:IlcSdkPath=$oldArtifact\sdk\
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /Fo:"$hostShimObj" "$hostShimSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -213,7 +213,7 @@ cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /B
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
-    $archiveBat = Write-Batch "build-segment-boundary-gc-archive.bat" @"
+    $archiveBat = Write-Batch "build-segment-transition-gc-archive.bat" @"
 @echo off
 setlocal
 call "$vsBat" >nul
@@ -222,10 +222,10 @@ lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $ro
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
-    $linkBat = Write-Batch "link-segment-boundary.bat" @"
+    $linkBat = Write-Batch "link-segment-transition.bat" @"
 @echo off
 call "$vsBat" >nul
-link.exe /nologo /MANIFEST:NO /INCREMENTAL:NO /fixed /base:0x10000000 /SUBSYSTEM:NATIVE /ENTRY:GuideXosNativeAotGcStartupMain /OUT:"$pePath" /MAP:"$mapPath" /INCLUDE:RhInitialize /EXPORT:GuideXosNativeAotGcStartupMain /EXPORT:GuideXosNativeAotGcStartupInstallPalHooks /EXPORT:GuideXosNativeAotGcStartupInstallHookTable /EXPORT:GuideXosNativeAotGcStartupInstallPlatformHooks /EXPORT:GuideXosNativeAotGcStartupGetState /EXPORT:GuideXosNativeAotGcStartupGetPreGcState /EXPORT:GuideXosNativeAotGcStartupGetAllocationCount /EXPORT:GuideXosNativeAotGcStartupGetLastAllocationSize /EXPORT:GuideXosNativeAotGcStartupGetDiagnosticStage /EXPORT:ManagedMain /EXPORT:guideXosManagedAllocationBeginSegmentBoundaryExperiment /EXPORT:guideXosManagedAllocationFinalize /EXPORT:guideXosManagedAllocationGetDiagnostics /EXPORT:guideXosManagedAllocationValidateObject /EXPORT:guideXosManagedAllocationGetLoopStatus /EXPORT:guideXosManagedAllocationGetHardLimit /NODEFAULTLIB:libucrt.lib /DEFAULTLIB:ucrt.lib /IGNORE:4104 "$managedPublishRoot\obj\x64\Release\net9.0\win-x64\native\HostLogProof.obj" "$runtimeSupportObj" "$platformObj" "$oldArtifact\sdk\bootstrapper.obj" "$adaptedArchive" "$startupProbeObj" "$hostShimObj" "$startupDiagnostic" "$gcHelpersDiagnostic" "$gcHelpersAlign" "$oldArtifact\sdk\eventpipe-disabled.lib" "$oldArtifact\sdk\Runtime.VxsortEnabled.lib" "$oldArtifact\sdk\standalonegc-disabled.lib" "$oldArtifact\sdk\zlibstatic.lib" "$oldArtifact\sdk\System.Globalization.Native.Aot.lib" "$oldArtifact\sdk\System.IO.Compression.Native.Aot.lib"
+link.exe /nologo /MANIFEST:NO /INCREMENTAL:NO /fixed /base:0x10000000 /SUBSYSTEM:NATIVE /ENTRY:GuideXosNativeAotGcStartupMain /OUT:"$pePath" /MAP:"$mapPath" /INCLUDE:RhInitialize /EXPORT:GuideXosNativeAotGcStartupMain /EXPORT:GuideXosNativeAotGcStartupInstallPalHooks /EXPORT:GuideXosNativeAotGcStartupInstallHookTable /EXPORT:GuideXosNativeAotGcStartupInstallPlatformHooks /EXPORT:GuideXosNativeAotGcStartupGetState /EXPORT:GuideXosNativeAotGcStartupGetPreGcState /EXPORT:GuideXosNativeAotGcStartupGetAllocationCount /EXPORT:GuideXosNativeAotGcStartupGetLastAllocationSize /EXPORT:GuideXosNativeAotGcStartupGetDiagnosticStage /EXPORT:ManagedMain /EXPORT:guideXosManagedAllocationBeginSegmentTransitionExperiment /EXPORT:guideXosManagedAllocationFinalize /EXPORT:guideXosManagedAllocationGetDiagnostics /EXPORT:guideXosManagedAllocationValidateObject /EXPORT:guideXosManagedAllocationGetLoopStatus /EXPORT:guideXosManagedAllocationGetHardLimit /NODEFAULTLIB:libucrt.lib /DEFAULTLIB:ucrt.lib /IGNORE:4104 "$managedPublishRoot\obj\x64\Release\net9.0\win-x64\native\HostLogProof.obj" "$runtimeSupportObj" "$platformObj" "$oldArtifact\sdk\bootstrapper.obj" "$adaptedArchive" "$startupProbeObj" "$hostShimObj" "$startupDiagnostic" "$gcHelpersDiagnostic" "$gcHelpersAlign" "$oldArtifact\sdk\eventpipe-disabled.lib" "$oldArtifact\sdk\Runtime.VxsortEnabled.lib" "$oldArtifact\sdk\standalonegc-disabled.lib" "$oldArtifact\sdk\zlibstatic.lib" "$oldArtifact\sdk\System.Globalization.Native.Aot.lib" "$oldArtifact\sdk\System.IO.Compression.Native.Aot.lib"
 exit /b %errorlevel%
 "@
 
@@ -245,15 +245,15 @@ exit /b %errorlevel%
         Invoke-Batch $archiveBat "gc-archive-build.log"
         Invoke-Batch $linkBat "managed-link.log"
     }
-    foreach ($path in @($platformObj,$gcEnvBoundary,$probeObj,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$mapPath)) { Require-File $path "Segment-boundary build output" }
+    foreach ($path in @($platformObj,$gcEnvBoundary,$probeObj,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$mapPath)) { Require-File $path "Segment-transition build output" }
     Invoke-LoggedCommand $python @($converter,$pePath,$elfPath,"--map",$mapPath,"--symbol","ManagedMain") (Join-Path $runRoot "pe-to-elf.log")
-    Require-File $elfPath "Segment-boundary ELF"
+    Require-File $elfPath "Segment-transition ELF"
     Invoke-LoggedCommand $objdump @("-p",$pePath) (Join-Path $runRoot "pe-imports.txt")
     Invoke-LoggedCommand $readelf @("-h","-l","-S","-r","-s","-d",$elfPath) (Join-Path $runRoot "elf-inspection.txt")
     $imports = Get-Content -LiteralPath (Join-Path $runRoot "pe-imports.txt") -Raw
-    if ($imports -match 'FlsGetValue|FlsSetValue') { throw "Segment-boundary PE still exposes live Windows FLS imports." }
+    if ($imports -match 'FlsGetValue|FlsSetValue') { throw "Segment-transition PE still exposes live Windows FLS imports." }
     $mapText = Get-Content -LiteralPath $mapPath -Raw
-    foreach ($symbol in @("ManagedMain","RhpNewArray","guideXosStockRhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginSegmentBoundaryExperiment","guideXosManagedAllocationFinalize","guideXosManagedAllocationGetDiagnostics","guideXosManagedAllocationValidateObject","guideXosManagedAllocationGetLoopStatus","guideXosManagedAllocationGetHardLimit")) { [void](Extract-MapAddress $mapText $symbol) }
+    foreach ($symbol in @("ManagedMain","RhpNewArray","guideXosStockRhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginSegmentTransitionExperiment","guideXosManagedAllocationFinalize","guideXosManagedAllocationGetDiagnostics","guideXosManagedAllocationValidateObject","guideXosManagedAllocationGetLoopStatus","guideXosManagedAllocationGetHardLimit")) { [void](Extract-MapAddress $mapText $symbol) }
     Assert-Text $mapText 'GcAllocInternal' "decorated GcAllocInternal map symbol"
     $exports = [ordered]@{
         GUIDEXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_INSTALL_PAL_ADDRESS = "GuideXosNativeAotGcStartupInstallPalHooks"
@@ -266,7 +266,7 @@ exit /b %errorlevel%
         GUIDEXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_GET_LAST_ALLOCATION_SIZE_ADDRESS = "GuideXosNativeAotGcStartupGetLastAllocationSize"
         GUIDEXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_GET_DIAGNOSTIC_STAGE_ADDRESS = "GuideXosNativeAotGcStartupGetDiagnosticStage"
         GUIDEXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_MANAGED_MAIN_ADDRESS = "ManagedMain"
-        GUIDEXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_BEGIN_EXPERIMENT_ADDRESS = "guideXosManagedAllocationBeginSegmentBoundaryExperiment"
+        GUIDEXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_BEGIN_EXPERIMENT_ADDRESS = "guideXosManagedAllocationBeginSegmentTransitionExperiment"
         GUIDEXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_FINALIZE_ADDRESS = "guideXosManagedAllocationFinalize"
         GUIDEXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_GET_DIAGNOSTICS_ADDRESS = "guideXosManagedAllocationGetDiagnostics"
     }
@@ -275,8 +275,8 @@ exit /b %errorlevel%
     $exportHeader = Join-Path $artifactRoot "guidexos_nativeaot_gc_segment_boundary_exports.h"
     Set-Content -LiteralPath $exportHeader -Value $headerLines -Encoding ASCII
     Copy-Item -LiteralPath $exportHeader -Destination (Join-Path $runRoot "guidexos_nativeaot_gc_segment_boundary_exports.h") -Force
-    $rawObj = Join-Path $buildRoot "gc-segment-boundary-artifact.raw.o"
-    $embeddedObj = Join-Path $buildRoot "gc-segment-boundary-artifact.o"
+    $rawObj = Join-Path $buildRoot "gc-segment-transition-artifact.raw.o"
+    $embeddedObj = Join-Path $buildRoot "gc-segment-transition-artifact.o"
     Invoke-LoggedCommand $objcopy @("-I","binary","-O","pe-x86-64","-B","i386:x86-64",$elfPath,$rawObj) (Join-Path $runRoot "embed-raw.log")
     $symbols = & $objdump -t $rawObj
     $startSymbol = ($symbols | Where-Object { $_ -match '(_binary_\S+_start)\s*$' } | ForEach-Object { $Matches[1] } | Select-Object -First 1)
@@ -286,12 +286,14 @@ exit /b %errorlevel%
     Copy-Item -LiteralPath $rawObj -Destination $embeddedObj -Force
     Invoke-LoggedCommand $objcopy @("--redefine-sym","${startSymbol}=guidexos_nativeaot_gc_startup_artifact_start","--redefine-sym","${endSymbol}=guidexos_nativeaot_gc_startup_artifact_end","--redefine-sym","${sizeSymbol}=guidexos_nativeaot_gc_startup_artifact_size","--set-section-alignment",".data=4096","--rename-section",".data=.data,alloc,load,readonly,data,contents",$embeddedObj) (Join-Path $runRoot "embed-final.log")
 
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST -I$artifactRoot"
-    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST -I$artifactRoot"
+    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
-    if (Test-Path -LiteralPath $kernelPath) { Remove-Item -LiteralPath $kernelPath -Force }
-    Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
-    Require-File $kernelPath "Specialized segment-boundary kernel"
+    # Make the selector and EXTRA_CFLAGS change effective even when a prior
+    # smoke run left compatible-looking kernel objects behind.
+    Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","clean") (Join-Path $runRoot "kernel-preclean.log")
+    Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
+    Require-File $kernelPath "Specialized segment-transition kernel"
     $specializedKernelHash = Hash-File $kernelPath
     Copy-Item -LiteralPath (Join-Path $runRoot "kernel-build.log") -Destination (Join-Path $runRoot "kernel-build-current.log") -Force
     Set-Content -LiteralPath (Join-Path $runRoot "kernel-symbols.txt") -Value (& $objdump -t $kernelPath) -Encoding ASCII
@@ -319,11 +321,17 @@ exit /b %errorlevel%
                 Start-Sleep -Milliseconds 250
                 if (Test-Path -LiteralPath $serialPath) {
                     $liveText = Get-Content -LiteralPath $serialPath -Raw
-                    $liveValidation = ($liveText -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' '
-                    if ($liveValidation -match '\[nativeaot-gc-segment-boundary\] ALL_(PASS|FAIL)') { $completed = $true; break }
+                    if (((($liveText -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' ')) -match '\[nativeaot-gc-segment-transition\] ALL_(PASS|FAIL)') { $completed = $true; break }
                 }
             }
-            if (-not $completed) { $timedOut = $true; Read-Monitor $port $monitorPath; throw "QEMU $name timed out after $TimeoutSeconds seconds." }
+            if (-not $completed) {
+                $timedOut = $true
+                Read-Monitor $port $monitorPath
+                if ($qemuProcess.HasExited) {
+                    throw "QEMU $name exited before the transition completion marker was emitted."
+                }
+                throw "QEMU $name timed out after $TimeoutSeconds seconds."
+            }
         } finally {
             if (-not $qemuProcess.HasExited) { Stop-Process -Id $qemuProcess.Id -Force }
             try { $qemuProcess.WaitForExit() } catch { }
@@ -338,15 +346,15 @@ exit /b %errorlevel%
         # replacing it with whitespace, so a split marker such as
         # `P[IRQ] dispatch irq=00` + `rocess` remains matchable.
         $validationText = ($serial -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' '
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Managed entry once: PASS' "managed entry"
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Managed byte\[4096\] bounded loop return: PASS' "managed loop"
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Exact multi-refill allocation counters: PASS' "exact counters"
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] First GC heap commit or segment transition boundary: PASS' "boundary"
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Source-backed segment identity and size: PASS' "segment metadata"
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] No collection or finalization: PASS' "no collection"
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Primitive-array object and ownership validation: PASS' "object validation"
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Process teardown: PASS' "teardown"
-        Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] ALL_PASS' "completion"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] Managed entry once: PASS' "managed entry"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] Managed byte\[4096\] bounded loop return: PASS' "managed loop"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] Fixed hard limits and allocation history: PASS' "hard-limit counters"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] Source-backed collection-first decision: PASS' "collection-first decision"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] Current segment geometry and ownership: PASS' "segment geometry"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] No collection or collection suspension: PASS' "no collection"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] Primitive-array stop-object validation: PASS' "stop object"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] Process teardown: PASS' "teardown"
+        Assert-Text $validationText '\[nativeaot-gc-segment-transition\] ALL_PASS' "completion"
         $experimentalEspHash = Hash-File (Join-Path $espRoot "kernel.elf")
         $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); experimentalKernelSha256=$experimentalEspHash; experimentalEspSha256=$experimentalEspHash }
     }
@@ -354,8 +362,8 @@ exit /b %errorlevel%
     $identity = Get-Content -LiteralPath $identityManifestPath -Raw | ConvertFrom-Json
     $replacementHashes = @($identity.replacementObjects | ForEach-Object { [ordered]@{ path=$_.path; sha256=$_.sha256 } })
     $manifest = [ordered]@{
-        outcome="A/Bounded primitive-array allocations through multiple refills to first GC heap commit or segment transition"
-        arrayLength=4096; hardAllocationLimit=384
+        outcome="B/Workstation GC requests collection before a SOH segment transition"
+        arrayLength=4096; hardAllocationLimit=32; hardRefillLimit=20; hardCommitLimit=4; hardSegmentTransitionLimit=1
         artifactPe=$pePath; artifactPeSha256=(Hash-File $pePath)
         artifactElf=$elfPath; artifactElfSha256=(Hash-File $elfPath)
         adaptedGcArchive=$adaptedArchive; adaptedGcArchiveSha256=(Hash-File $adaptedArchive)
@@ -364,11 +372,11 @@ exit /b %errorlevel%
         specializedKernelSha256=$specializedKernelHash
         authorizedNormalizedAdaptedGcIdentity=[ordered]@{ strategy=$identity.strategy; sourceCommit=$identity.sourceCommit; stockSha256=$identity.stockSha256; adaptedSha256=$identity.adaptedSha256; adaptedLength=$identity.adaptedLength; replacementObjects=$replacementHashes; prohibitedInventoryCount=$identity.prohibitedInventoryCount; stockUnchanged=$identity.stockUnchanged }
         palReplacementHashes=$replacementHashes
-        selectors=@("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST=1")
+        selectors=@("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST=1")
         runs=$runResults; processTeardown="PASS"; runtimeLevelShutdown="NOT SUPPORTED"; normalKernelSha256=$normalKernelHash
     }
     $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $runRoot "manifest.json") -Encoding ASCII
-    Write-Host "Segment-boundary QEMU experiment: PASS" -ForegroundColor Green
+    Write-Host "Segment-transition QEMU experiment: PASS" -ForegroundColor Green
     Write-Host "PE SHA256: $($manifest.artifactPeSha256)" -ForegroundColor Cyan
     Write-Host "ELF SHA256: $($manifest.artifactElfSha256)" -ForegroundColor Cyan
     Write-Host "Specialized kernel SHA256: $specializedKernelHash" -ForegroundColor Cyan

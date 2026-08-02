@@ -61,6 +61,24 @@ constexpr gx_size kNativeAotLargeObjectSize = 85000u;
 constexpr gx_uint32 kSegmentBoundaryArrayLength = GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ARRAY_LENGTH;
 constexpr gx_uint32 kSegmentBoundaryHardLimit = GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_HARD_LIMIT;
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
+#ifndef GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ARRAY_LENGTH
+#define GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ARRAY_LENGTH 4096u
+#endif
+#ifndef GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_LIMIT
+#define GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_LIMIT 32u
+#endif
+#ifndef GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_REFILL_LIMIT
+#define GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_REFILL_LIMIT 20u
+#endif
+#ifndef GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_COMMIT_LIMIT
+#define GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_COMMIT_LIMIT 4u
+#endif
+constexpr gx_uint32 kSegmentTransitionArrayLength = GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ARRAY_LENGTH;
+constexpr gx_uint32 kSegmentTransitionHardLimit = GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_LIMIT;
+constexpr gx_uint32 kSegmentTransitionHardRefillLimit = GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_REFILL_LIMIT;
+constexpr gx_uint32 kSegmentTransitionHardCommitLimit = GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_HARD_COMMIT_LIMIT;
+#endif
 #if !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 constexpr gx_size kManagedHeapBytes = static_cast<gx_size>(GUIDEXOS_MANAGED_HEAP_BYTES);
 static_assert(kManagedHeapBytes >= 0x1000u, "The bounded diagnostic heap must leave room for runtime setup and several arrays.");
@@ -178,6 +196,23 @@ void beginSegmentBoundaryExperiment() {
     g_guideXosAllocationDiagnostics.vmTraceEndCount =
         static_cast<gx_uint32>(traceCount);
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
+void beginSegmentTransitionExperiment() {
+    g_guideXosSegmentBoundaryExperimentRequested = true;
+    const gx_size traceCount = g_guideXosVmTraceCount == nullptr
+        ? 0u : g_guideXosVmTraceCount();
+    g_guideXosAllocationDiagnostics.experimentMode = 3u;
+    g_guideXosAllocationDiagnostics.selectedArrayLength = kSegmentTransitionArrayLength;
+    g_guideXosAllocationDiagnostics.hardAllocationLimit = kSegmentTransitionHardLimit;
+    g_guideXosAllocationDiagnostics.hardRefillLimit = kSegmentTransitionHardRefillLimit;
+    g_guideXosAllocationDiagnostics.hardCommitLimit = kSegmentTransitionHardCommitLimit;
+    g_guideXosAllocationDiagnostics.hardSegmentTransitionLimit = 1u;
+    g_guideXosAllocationDiagnostics.vmTraceStartCount = static_cast<gx_uint32>(traceCount);
+    g_guideXosAllocationDiagnostics.vmTraceCursor = static_cast<gx_uint32>(traceCount);
+    g_guideXosAllocationDiagnostics.vmTraceEndCount = static_cast<gx_uint32>(traceCount);
+}
+#endif
 
 void inspectSegmentBoundaryTrace(
     gx_uintptr segmentBase, gx_uintptr segmentReserved,
@@ -348,6 +383,13 @@ extern "C" __declspec(dllexport) void __cdecl
 guideXosManagedAllocationBeginSegmentBoundaryExperiment() {
     beginSegmentBoundaryExperiment();
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
+extern "C" __declspec(dllexport) void __cdecl
+guideXosManagedAllocationBeginSegmentTransitionExperiment() {
+    beginSegmentTransitionExperiment();
+}
+#endif
 
 extern "C" void __cdecl guideXosManagedAllocationInstallVmTraceCallbacks(
     gx_uintptr traceCount, gx_uintptr traceAt) {
@@ -638,6 +680,8 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     ++g_guideXosObservedRhpNewArrayEntries;
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A02_RHP_NEW_ARRAY_ENTRY,
                           eeType, length);
+    recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S00_ALLOCATION_REQUEST,
+                          eeType, length);
 #endif
     if (eeType == nullptr || length > 0x7FFFFFFFu) {
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
@@ -755,9 +799,15 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     if (fastPath) {
         ++g_guideXosAllocationDiagnostics.fastAllocationCount;
     } else {
+        recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S01_FAST_CAPACITY_FAILURE,
+                              eeType, length, objectSize, allocationPointerBefore,
+                              allocationLimitBefore, currentThread);
         ++g_guideXosAllocationDiagnostics.rarePathCount;
         ++g_guideXosAllocationDiagnostics.slowAllocationCount;
         ++g_guideXosAllocationDiagnostics.collectionConsideredCount;
+        recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S02_RARE_PATH_ENTERED,
+                              eeType, length, objectSize, allocationPointerBefore,
+                              allocationLimitBefore, currentThread);
         recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A07_RARE_REFILL_ENTERED,
                               eeType, length, objectSize, allocationPointerBefore,
                               allocationLimitBefore, currentThread);
@@ -774,6 +824,9 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
         }
 #endif
         recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A08_GC_HEAP_ALLOCATION_ENTERED,
+                              eeType, length, objectSize, allocationPointerBefore,
+                              allocationLimitBefore, currentThread);
+        recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S03_GC_HEAP_ALLOC_ENTERED,
                               eeType, length, objectSize, allocationPointerBefore,
                               allocationLimitBefore, currentThread);
     }
@@ -894,6 +947,14 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     g_guideXosAllocationDiagnostics.currentSegmentCommitted = segmentCommitted;
     g_guideXosAllocationDiagnostics.lastSegmentGeneration = segmentGeneration;
     g_guideXosAllocationDiagnostics.lastSegmentFlags = segmentFlags;
+    g_guideXosAllocationDiagnostics.currentSegmentBase = segmentBase;
+    g_guideXosAllocationDiagnostics.currentSegmentAllocated = segmentAllocated;
+    g_guideXosAllocationDiagnostics.currentSegmentReserved = segmentReserved;
+    g_guideXosAllocationDiagnostics.currentSegmentFlags = segmentFlags;
+    g_guideXosAllocationDiagnostics.currentSegmentGeneration = segmentGeneration;
+    recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S04_CURRENT_SEGMENT_INSPECTED,
+                          eeType, length, objectSize, allocationPointerBefore,
+                          allocationLimitBefore, currentThread);
     g_guideXosAllocationDiagnostics.segmentTransitionCount +=
         segmentChanged ? 1u : 0u;
 #else
@@ -929,7 +990,9 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
             objectSize == 0u ? 0u :
                 g_guideXosAllocationDiagnostics.initialAvailableBytes / objectSize;
         g_guideXosAllocationDiagnostics.hardAllocationLimit =
-#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
+            kSegmentTransitionHardLimit;
+#elif defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
             kSegmentBoundaryHardLimit;
 #else
             static_cast<gx_uint32>(g_guideXosAllocationDiagnostics.expectedFastAllocationCount + 2u);
@@ -939,8 +1002,16 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
         g_guideXosAllocationDiagnostics.initialSegmentReserved = heapReserved;
         g_guideXosAllocationDiagnostics.newContextSupplied = 1u;
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
+        g_guideXosAllocationDiagnostics.experimentMode = 3u;
+        g_guideXosAllocationDiagnostics.selectedArrayLength = kSegmentTransitionArrayLength;
+        g_guideXosAllocationDiagnostics.hardRefillLimit = kSegmentTransitionHardRefillLimit;
+        g_guideXosAllocationDiagnostics.hardCommitLimit = kSegmentTransitionHardCommitLimit;
+        g_guideXosAllocationDiagnostics.hardSegmentTransitionLimit = 1u;
+#else
         g_guideXosAllocationDiagnostics.experimentMode = 2u;
         g_guideXosAllocationDiagnostics.selectedArrayLength = kSegmentBoundaryArrayLength;
+#endif
         g_guideXosAllocationDiagnostics.initialSegmentIdentity = segmentIdentity;
         g_guideXosAllocationDiagnostics.initialSegmentCommitted = segmentCommitted;
         g_guideXosAllocationDiagnostics.initialSegmentGeneration = segmentGeneration;
@@ -999,6 +1070,14 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A16_ALLOCATION_RETURNED,
                           eeType, length, objectSize, allocationPointerAfter,
                           allocationLimitAfter, currentThreadAfter, transitionFrame);
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
+    if (g_guideXosAllocationDiagnostics.allocationCount >=
+        g_guideXosAllocationDiagnostics.hardAllocationLimit) {
+        recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S14_STOP_OBJECT_RETURNED,
+                              eeType, length, objectSize, allocationPointerAfter,
+                              allocationLimitAfter, currentThreadAfter, transitionFrame);
+    }
+#endif
     return result;
 #else
     unsigned char* block = currentTlsBlock();
@@ -1049,7 +1128,64 @@ __cdecl guideXosManagedAllocationGetDiagnostics() {
 extern "C" __declspec(dllexport) int __cdecl
 guideXosManagedAllocationFinalize(gx_uint32 managedReturnCode) {
     g_guideXosAllocationDiagnostics.managedReturnCode = managedReturnCode;
-#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
+    g_guideXosAllocationDiagnostics.collectionDecisionObserved = 1u;
+    g_guideXosAllocationDiagnostics.collectionDecisionPath = 2u;
+    g_guideXosAllocationDiagnostics.completionStatus = 4u;
+    const bool sameSegment =
+        g_guideXosAllocationDiagnostics.initialSegmentIdentity != 0u &&
+        g_guideXosAllocationDiagnostics.currentSegmentIdentity ==
+            g_guideXosAllocationDiagnostics.initialSegmentIdentity;
+    const bool geometry =
+        g_guideXosAllocationDiagnostics.initialSegmentReserved >
+            g_guideXosAllocationDiagnostics.initialSegmentBase &&
+        g_guideXosAllocationDiagnostics.currentSegmentCommitted >=
+            g_guideXosAllocationDiagnostics.currentSegmentBase &&
+        g_guideXosAllocationDiagnostics.currentSegmentCommitted <=
+            g_guideXosAllocationDiagnostics.currentSegmentReserved;
+    const bool pass = managedReturnCode == 0u &&
+        g_guideXosAllocationDiagnostics.managedEntryCount == 1u &&
+        g_guideXosAllocationDiagnostics.allocationCount ==
+            g_guideXosAllocationDiagnostics.hardAllocationLimit &&
+        g_guideXosAllocationDiagnostics.allocationRequestCount ==
+            g_guideXosAllocationDiagnostics.allocationCount &&
+        g_guideXosAllocationDiagnostics.rhpNewArrayCount ==
+            g_guideXosAllocationDiagnostics.allocationCount &&
+        g_guideXosAllocationDiagnostics.refillHistoryCount <=
+            g_guideXosAllocationDiagnostics.hardRefillLimit &&
+        g_guideXosAllocationDiagnostics.vmCommitEventCount <=
+            g_guideXosAllocationDiagnostics.hardCommitLimit &&
+        g_guideXosAllocationDiagnostics.hardSegmentTransitionLimit == 1u &&
+        g_guideXosAllocationDiagnostics.segmentTransitionCount == 0u &&
+        g_guideXosAllocationDiagnostics.managedStopObserved == 1u &&
+        g_guideXosAllocationDiagnostics.noPostRefillAllocation == 1u &&
+        sameSegment && geometry &&
+        g_guideXosAllocationDiagnostics.collectionRequestCount == 0u &&
+        g_guideXosAllocationDiagnostics.collectionEntryCount == 0u &&
+        g_guideXosAllocationDiagnostics.collectionsEntered == 0u &&
+        g_guideXosAllocationDiagnostics.gcCountBefore ==
+            g_guideXosAllocationDiagnostics.gcCountAfter &&
+        g_guideXosAllocationDiagnostics.finalizationScanCount == 0u &&
+        g_guideXosAllocationDiagnostics.managedFinalizerCount == 0u &&
+        g_guideXosAllocationDiagnostics.finalizersExecuted == 0u &&
+        g_guideXosAllocationDiagnostics.zeroValidationFailures == 0u &&
+        g_guideXosAllocationDiagnostics.patternValidationFailures == 0u &&
+        g_guideXosAllocationDiagnostics.layoutFailures == 0u &&
+        g_guideXosAllocationDiagnostics.ownershipFailures == 0u &&
+        g_guideXosAllocationDiagnostics.overlapFailures == 0u &&
+        g_guideXosAllocationDiagnostics.monotonicityFailures == 0u &&
+        g_guideXosAllocationDiagnostics.contextGeometryFailures == 0u &&
+        g_guideXosAllocationDiagnostics.sourceSizeValid == 1u &&
+        g_guideXosAllocationDiagnostics.primitiveArrayValid == 1u &&
+        g_guideXosAllocationDiagnostics.belowLargeObjectThreshold == 1u &&
+        g_guideXosAllocationDiagnostics.refillHistoryOverflow == 0u &&
+        g_guideXosAllocationDiagnostics.pointerContractFailures == 0u;
+    g_guideXosAllocationDiagnostics.finalizerStateValid =
+        g_guideXosAllocationDiagnostics.finalizersExecuted == 0u ? 1u : 0u;
+    g_guideXosAllocationDiagnostics.helperStateValid = 1u;
+    g_guideXosAllocationDiagnostics.allocationSucceeded = pass ? 1u : 0u;
+    return pass ? 0 : -1;
+#elif defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
     const bool boundaryReached =
         g_guideXosAllocationDiagnostics.boundaryStopObserved != 0u &&
         (g_guideXosAllocationDiagnostics.boundaryType == 1u ||
@@ -1241,6 +1377,16 @@ guideXosManagedAllocationGetLoopStatus() {
     if (g_guideXosAllocationDiagnostics.failureReason != 0u ||
         g_guideXosAllocationDiagnostics.pointerContractFailures != 0u) return -1;
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
+    if (g_guideXosAllocationDiagnostics.allocationCount >=
+        g_guideXosAllocationDiagnostics.hardAllocationLimit) {
+        g_guideXosAllocationDiagnostics.managedStopObserved = 1u;
+        g_guideXosAllocationDiagnostics.noPostRefillAllocation = 1u;
+        g_guideXosAllocationDiagnostics.stopReason = 1u;
+        g_guideXosAllocationDiagnostics.completionStatus = 4u;
+        return 2;
+    }
+#else
     if (g_guideXosAllocationDiagnostics.boundaryType != 0u) {
         g_guideXosAllocationDiagnostics.managedStopObserved = 1u;
         g_guideXosAllocationDiagnostics.noPostRefillAllocation = 1u;
@@ -1252,6 +1398,7 @@ guideXosManagedAllocationGetLoopStatus() {
         g_guideXosAllocationDiagnostics.completionStatus = 3u;
         return 3;
     }
+#endif
 #else
     if (g_guideXosAllocationDiagnostics.refill2Returned != 0u) {
         g_guideXosAllocationDiagnostics.managedStopObserved = 1u;

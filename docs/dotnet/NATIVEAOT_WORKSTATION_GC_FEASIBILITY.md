@@ -206,3 +206,26 @@ allowing collection. Physical-frame and mapping deltas remain a documented
 limitation because the locked startup-platform hook exposes the exact virtual
 commit operation but not those kernel counters to the NativeAOT diagnostic
 record.
+
+## First segment-transition gate - 2026-08-01
+
+The source-backed transition follow-up is complete and is documented in
+[NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).
+The selected 4120-byte primitive array remains on the SOH path. In the locked
+standalone Workstation build, `soh_try_fit` can grow commitment within the
+current reserved segment, but the non-region SOH path proceeds to collection
+handling when the segment is unsuitable; the `uoh_get_new_seg` path is not
+applicable to this sub-LOH object.
+
+Three fresh QEMU runs used a fixed cap of 32 allocations, 20 refills, 4
+post-startup commit observations, and one allowed transition observation. The
+runs recorded 32 allocations (`15` fast / `17` rare), 17 refills, 2 commits,
+zero collection requests/entries/suspensions, zero segment transitions, valid
+stop-object ownership, and the same segment identity `0x104014730`. A
+246-allocation calibration run entered six collections and was discarded as
+unsafe evidence.
+
+The final decision is **Outcome B — collection is required before a SOH segment
+transition**. The exact next experiment is a first-GC collection-readiness
+audit, not collection execution. The ordinary kernel was restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.

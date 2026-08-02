@@ -270,7 +270,8 @@ try {
             Start-Sleep -Milliseconds 250
             if (Test-Path -LiteralPath $serialPath) {
                 $liveText = Get-Content -LiteralPath $serialPath -Raw
-                if ($liveText -match '\[nativeaot-gc-first-allocation\] ALL_(PASS|FAIL)') {
+                $liveValidation = ($liveText -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' '
+                if ($liveValidation -match '\[nativeaot-gc-first-allocation\] ALL_(PASS|FAIL)') {
                     $sawCompletion = $true
                     break
                 }

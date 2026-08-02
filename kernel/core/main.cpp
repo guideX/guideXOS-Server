@@ -6,6 +6,10 @@
 // Copyright (c) 2026 guideXOS Server
 //
 
+#if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
+#define GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST 1
+#endif
+
 #include "include/kernel/version.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/vga.h"
@@ -307,7 +311,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::interrupts::init();
     kernel::pit::init(100);
     kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
-    kernel::serial::puts("[nativeaot-gc-segment-boundary] timer services ready\n");
+    kernel::serial::puts(
+#if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
+        "[nativeaot-gc-segment-transition] timer services ready\n"
+#else
+        "[nativeaot-gc-segment-boundary] timer services ready\n"
+#endif
+    );
     kernel::nativeaot_pal_qemu_test::runFirstRealAllocation(
         guidexos_nativeaot_gc_startup_artifact_start,
         static_cast<size_t>(guidexos_nativeaot_gc_startup_artifact_end -

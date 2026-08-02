@@ -290,7 +290,8 @@ exit /b %errorlevel%
                 Start-Sleep -Milliseconds 250
                 if (Test-Path -LiteralPath $serialPath) {
                     $liveText = Get-Content -LiteralPath $serialPath -Raw
-                    if ($liveText -match '\[nativeaot-gc-first-refill\] ALL_(PASS|FAIL)') { $completed = $true; break }
+                    $liveValidation = ($liveText -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' '
+                    if ($liveValidation -match '\[nativeaot-gc-first-refill\] ALL_(PASS|FAIL)') { $completed = $true; break }
                 }
             }
             if (-not $completed) { $timedOut = $true; Read-Monitor $port $monitorPath; throw "QEMU $name timed out after $TimeoutSeconds seconds." }
@@ -306,7 +307,7 @@ exit /b %errorlevel%
         if ($serial -match 'nativeaot-gc-startup-qemu-test\] ALL_PASS|DesktopStateReady|AppRegistry initialized|Welcome to guideXOS|GC\.Collect|RhShutdown|RhpShutdown|GC_Shutdown') { throw "Forbidden or startup-only marker appeared in $name." }
         # Timer diagnostics can be interleaved into a serial line. Preserve the raw
         # serial above, but normalize only for marker validation.
-        $validationText = ($serial -replace '\[IRQ\] dispatch irq=00', ' ') -replace '\s+', ' '
+        $validationText = ($serial -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' '
         Assert-Text $validationText '\[nativeaot-gc-first-refill\] Managed entry once: PASS' "managed entry"
         Assert-Text $validationText '\[nativeaot-gc-first-refill\] Managed byte\[256\] loop return: PASS' "managed loop"
         Assert-Text $validationText '\[nativeaot-gc-first-refill\] Exact allocation counters: PASS' "exact counters"

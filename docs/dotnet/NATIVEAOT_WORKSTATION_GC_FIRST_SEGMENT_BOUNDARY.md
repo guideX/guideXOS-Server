@@ -409,3 +409,27 @@ outside scope.
 | Restored kernel hash | `D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C` |
 | Evidence ignored | PASS; new evidence root added to `.gitignore` |
 | `git diff --check` | PASS |
+
+## First segment-transition gate - 2026-08-01
+
+The next bounded experiment is documented in
+[NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).
+The locked source gate classified the selected 4120-byte `byte[4096]` object
+as SOH and showed that standalone Workstation GC reaches collection handling
+before a new SOH segment can be selected. The new-segment path was therefore
+not entered.
+
+Three fresh QEMU runs used a fixed no-collection cap of 32 allocations, 20
+context refills, and 4 post-startup commit observations. Each recorded 32
+allocations (`15` fast / `17` rare), 17 refills, two post-startup commits,
+zero collection requests/entries/suspensions, zero segment transitions, the
+same segment identity `0x104014730`, and a valid stop object. A commit-boundary
+flag was observed inside the same segment, but `boundaryStopObserved` remained
+zero; this is not a segment transition.
+
+The single decision is **Outcome B — collection is required before a SOH
+segment transition**. An overlong 246-allocation calibration probe entered six
+collections and was discarded; it is not part of the authoritative evidence.
+The exact next experiment is a first-GC collection-readiness audit, not
+collection execution. The ordinary kernel was restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
