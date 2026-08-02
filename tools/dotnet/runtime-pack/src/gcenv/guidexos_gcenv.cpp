@@ -21,6 +21,22 @@
 #include "../platform/guidexos_nativeaot_virtual_memory_adapter.h"
 #include "guidexos_gc_platform_services.h"
 
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+extern "C" void __cdecl guideXosManagedAllocationInstallVmTraceCallbacks(
+    uintptr_t traceCount, uintptr_t traceAt);
+extern "C" void __cdecl guideXosManagedAllocationInstallSegmentDescriber(
+    uintptr_t describeSegment);
+extern "C" int32_t guidexos_nativeaot_gc_describe_segment(
+    void* object,
+    uintptr_t* segmentIdentity,
+    uintptr_t* segmentBase,
+    uintptr_t* segmentAllocated,
+    uintptr_t* segmentCommitted,
+    uintptr_t* segmentReserved,
+    uint32_t* segmentFlags,
+    uint32_t* segmentGeneration);
+#endif
+
 GCSystemInfo g_SystemInfo = {
     1,
     4096,
@@ -176,7 +192,17 @@ bool GCToOSInterface::Initialize() {
     g_SystemInfo.dwPageSize = static_cast<uint32_t>(getPageSize());
     g_SystemInfo.dwAllocationGranularity =
         static_cast<uint32_t>(getAllocationGranularity());
-    return initializeVirtualMemoryAdapter() == VmResult::Ok;
+    const VmResult result = initializeVirtualMemoryAdapter();
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+    if (result == VmResult::Ok) {
+        guideXosManagedAllocationInstallVmTraceCallbacks(
+            reinterpret_cast<uintptr_t>(traceEventCount),
+            reinterpret_cast<uintptr_t>(traceEventAt));
+        guideXosManagedAllocationInstallSegmentDescriber(
+            reinterpret_cast<uintptr_t>(guidexos_nativeaot_gc_describe_segment));
+    }
+#endif
+    return result == VmResult::Ok;
 }
 
 void GCToOSInterface::Shutdown() {

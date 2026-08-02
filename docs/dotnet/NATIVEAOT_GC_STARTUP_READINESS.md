@@ -182,3 +182,26 @@ collection. Review checkpoint:
 ```text
 dotnet: validate first Workstation GC context refill
 ```
+
+## First post-startup segment boundary follow-up - 2026-08-01
+
+The authorized follow-up is now complete and is documented in
+[NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_BOUNDARY.md).
+It used `byte[4096]`, derived object size `0x1018` / 4120 bytes, and an
+immutable 384-allocation limit. Three fresh QEMU processes each reached the
+first post-establishment Workstation-GC commitment at allocation 16, refill 9,
+within source segment identity `0x104014730`.
+
+The initial allocation's segment-quantum commitment was recorded separately as
+the startup commitment excluded by the boundary definition. The measured
+commit was `0x10000` bytes at `0x100A11000`, advancing the source segment's
+committed boundary from `0x100A11000` to `0x100A21000`. Each run recorded 16
+allocations, 7 fast allocations, 9 rare/refill allocations, one measured
+commit, zero segment transitions, zero collection entry, zero suspension for
+collection, zero finalization scans, zero managed finalizers, valid stop-object
+ownership, and no post-boundary allocation.
+
+This is **Outcome A for the first post-startup commitment boundary**. The exact
+next experiment is to continue bounded allocations until the first GC segment
+transition, without allowing collection. The ordinary kernel was restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.

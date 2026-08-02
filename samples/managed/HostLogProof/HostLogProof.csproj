@@ -33,6 +33,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_REFILL_ALLOCATION</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'SegmentBoundary'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Repeated'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING;HOSTLOGPROOF_REPEATED_ALLOCATION</DefineConstants>
   </PropertyGroup>

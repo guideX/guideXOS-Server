@@ -346,3 +346,24 @@ dotnet: validate first Workstation GC context refill
 ```
 
 No multiple-refill or segment-transition testing was performed in this pass.
+
+## Authorized post-startup boundary follow-up - 2026-08-01
+
+The first-refill result above remains the closed baseline. A separate bounded
+experiment then continued through multiple real refills using
+`byte[4096]` and an immutable hard limit of 384 allocations. Its full report
+is [NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_BOUNDARY.md).
+
+The first allocation's initial heap commitment was captured as startup
+establishment evidence and excluded under the boundary definition. The first
+later commitment occurred at allocation 16/refill 9 in the same source segment,
+with one `0x10000` commit from `0x100A11000` to `0x100A21000`. Each of three
+fresh QEMU processes recorded 16 allocations, 7 fast allocations, 9
+rare/refill entries, valid stop-object ownership, zero collection/finalizer
+activity, and no post-boundary allocation. The result is Outcome A for the
+first post-startup commitment. It does not alter the closed first-refill
+artifact or authorize runtime shutdown.
+
+The exact next experiment is the first GC segment transition without allowing
+collection. The ordinary kernel remains restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.

@@ -175,3 +175,34 @@ dotnet: validate first Workstation GC context refill
 
 No multiple-refill or segment-transition testing was performed during this
 closure pass.
+
+## First post-startup segment boundary follow-up - 2026-08-01
+
+The next bounded experiment was executed with the dedicated
+`smoke-nativeaot-gc-multiple-refills-first-segment-boundary-qemu.ps1` runner.
+The selected `byte[4096]` object has source-derived size `0x1018` / 4120
+bytes, remains below the 85,000-byte large-object threshold, and uses a fixed
+384-allocation hard limit.
+
+The first collector-backed allocation committed the initial segment quantum;
+that startup commitment was captured but excluded from the measured boundary.
+The first later commitment occurred at allocation 16/refill 9 within the same
+source segment identity `0x104014730`: address `0x100A11000`, requested and
+actual size `0x10000`, old committed boundary `0x100A11000`, new committed
+boundary `0x100A21000`. The run recorded 16 total allocations, 7 fast
+allocations, 9 real collector/refill entries, one measured commit, and zero
+segment transitions.
+
+Three fresh QEMU processes reproduced the same boundary and stop-object
+geometry. All reported zero collection requests/entries, zero collections,
+zero suspension-for-collection requests, zero finalization scans, zero managed
+finalizers, valid collector ownership, and no post-boundary allocation. The
+normal kernel was restored to
+`D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
+
+The decision is **Outcome A** for the first post-startup GC commitment. The
+exact next experiment is the first GC segment transition, still without
+allowing collection. Physical-frame and mapping deltas remain a documented
+limitation because the locked startup-platform hook exposes the exact virtual
+commit operation but not those kernel counters to the NativeAOT diagnostic
+record.

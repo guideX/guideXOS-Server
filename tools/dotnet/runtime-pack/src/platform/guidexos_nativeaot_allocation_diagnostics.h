@@ -6,6 +6,48 @@
 extern "C" {
 #endif
 
+enum {
+    GUIDEXOS_NATIVEAOT_MAX_REFILL_HISTORY = 128u,
+};
+
+/*
+ * One bounded record is written for each rare-path context refill.  The
+ * record deliberately contains only scalar values so the allocator-side
+ * probe cannot allocate, wait, or call back into the PAL while publishing
+ * evidence.
+ */
+typedef struct guidexos_nativeaot_refill_history_entry {
+    uint32_t ordinal;
+    uint32_t allocationOrdinal;
+    uint32_t fastPath;
+    uint32_t vmCommitObserved;
+    uint32_t segmentChanged;
+    uint32_t boundaryType;
+    uint32_t collectionBefore;
+    uint32_t collectionAfter;
+    uint32_t traceStart;
+    uint32_t traceEnd;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    uintptr_t contextBefore;
+    uintptr_t limitBefore;
+    uintptr_t remainingBefore;
+    uintptr_t objectAddress;
+    uintptr_t objectEnd;
+    uintptr_t contextAfter;
+    uintptr_t limitAfter;
+    uintptr_t segmentIdentity;
+    uintptr_t segmentBase;
+    uintptr_t segmentAllocated;
+    uintptr_t segmentCommitted;
+    uintptr_t segmentReserved;
+    uintptr_t commitAddress;
+    uintptr_t commitRequested;
+    uintptr_t commitActual;
+    uintptr_t committedBefore;
+    uintptr_t committedAfter;
+} guidexos_nativeaot_refill_history_entry;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -154,6 +196,65 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t noPostRefillAllocation;
     uint32_t finalizationQueueScans;
     uint32_t reservedValidation[4];
+
+    /*
+     * Appended multi-refill/segment-boundary evidence.  The original
+     * first-allocation and first-refill records above are intentionally not
+     * reordered or resized.
+     */
+    uint32_t experimentMode;
+    uint32_t selectedArrayLength;
+    uint32_t vmTraceStartCount;
+    uint32_t vmTraceCursor;
+    uint32_t vmTraceEndCount;
+    uint32_t vmCommitEventCount;
+    uint32_t heapCommitEventCount;
+    uint32_t segmentTransitionCount;
+    uint32_t refillHistoryCount;
+    uint32_t refillHistoryOverflow;
+    uint32_t boundaryType;
+    uint32_t boundaryAllocationOrdinal;
+    uint32_t boundaryRefillOrdinal;
+    uint32_t boundaryStopObserved;
+    uint32_t boundaryCommitValidated;
+    uint32_t boundarySegmentValidated;
+    uint32_t completionStatus;
+    uint32_t lastSegmentGeneration;
+    uint32_t lastSegmentFlags;
+    uint32_t initialHeapCommitObserved;
+    uint32_t initialHeapCommitEventCount;
+    uint32_t reservedBoundary[4];
+
+    uintptr_t initialSegmentIdentity;
+    uintptr_t initialSegmentCommitted;
+    uintptr_t initialSegmentGeneration;
+    uintptr_t currentSegmentIdentity;
+    uintptr_t currentSegmentCommitted;
+    uintptr_t boundarySegmentIdentity;
+    uintptr_t boundarySegmentBase;
+    uintptr_t boundarySegmentAllocated;
+    uintptr_t boundarySegmentCommitted;
+    uintptr_t boundarySegmentReserved;
+    uintptr_t boundaryCommitAddress;
+    uintptr_t boundaryCommitRequested;
+    uintptr_t boundaryCommitActual;
+    uintptr_t boundaryCommittedBefore;
+    uintptr_t boundaryCommittedAfter;
+    uintptr_t boundaryObjectAddress;
+    uintptr_t boundaryObjectEnd;
+    uintptr_t boundaryAllocationContextBefore;
+    uintptr_t boundaryAllocationContextAfter;
+    uintptr_t boundaryAllocationLimitBefore;
+    uintptr_t boundaryAllocationLimitAfter;
+    uintptr_t initialHeapCommitTraceIndex;
+    uintptr_t initialHeapCommitAddress;
+    uintptr_t initialHeapCommitRequested;
+    uintptr_t initialHeapCommitActual;
+    uintptr_t initialHeapCommittedBefore;
+    uintptr_t initialHeapCommittedAfter;
+
+    guidexos_nativeaot_refill_history_entry refillHistory[
+        GUIDEXOS_NATIVEAOT_MAX_REFILL_HISTORY];
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

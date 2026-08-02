@@ -186,8 +186,45 @@ namespace guidexos {
 namespace nativeaot {
 namespace virtual_memory {
 
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+namespace {
+
+constexpr nativeaot_vm_size kSegmentBoundaryTraceCapacity = 128;
+TraceEvent g_segmentBoundaryTrace[kSegmentBoundaryTraceCapacity]{};
+nativeaot_vm_size g_segmentBoundaryTraceCount = 0;
+nativeaot_vm_uint64 g_segmentBoundaryTraceSequence = 0;
+
+void recordSegmentBoundaryTrace(TraceOperation operation, void* address,
+                                nativeaot_vm_size size, VmResult result) {
+    if (g_segmentBoundaryTraceCount >= kSegmentBoundaryTraceCapacity) return;
+    TraceEvent& event = g_segmentBoundaryTrace[g_segmentBoundaryTraceCount++];
+    event = TraceEvent{};
+    event.sequence = ++g_segmentBoundaryTraceSequence;
+    event.operation = operation;
+    event.address = address;
+    event.size = size;
+    event.result = result;
+}
+
+} // namespace
+
+nativeaot_vm_size traceEventCount() {
+    return g_segmentBoundaryTraceCount;
+}
+
+bool traceEventAt(nativeaot_vm_size index, TraceEvent* event) {
+    if (event == nullptr || index >= g_segmentBoundaryTraceCount) return false;
+    *event = g_segmentBoundaryTrace[index];
+    return true;
+}
+#endif
+
 VmResult initializeVirtualMemoryAdapter() {
     g_guidexos_nativeaot_gc_startup_stage = 0x10u;
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+    g_segmentBoundaryTraceCount = 0;
+    g_segmentBoundaryTraceSequence = 0;
+#endif
     return guidexos_nativeaot_gc_page_size() == kPageSize
         ? VmResult::Ok : VmResult::HostFailure;
 }
@@ -210,27 +247,52 @@ void* gcVirtualReserve(nativeaot_vm_size size, nativeaot_vm_size alignment,
             ? 0xFFFFFFFFu : (size >> 20));
     g_guidexos_nativeaot_gc_startup_stage = 0x11000000u |
         static_cast<uint32_t>((size >> 12) & 0x00FFFFFFu);
-    return guidexos_nativeaot_gc_reserve(size, alignment, flags, node);
+    void* result = guidexos_nativeaot_gc_reserve(size, alignment, flags, node);
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+    recordSegmentBoundaryTrace(TraceOperation::Reserve, result, size,
+                               result == nullptr ? VmResult::HostFailure : VmResult::Ok);
+#endif
+    return result;
 }
 
 bool gcVirtualCommit(void* address, nativeaot_vm_size size,
                      nativeaot_vm_uint16 node) {
     g_guidexos_nativeaot_gc_startup_stage = 0x12u;
-    return guidexos_nativeaot_gc_commit(address, size, node) == 0;
+    const bool success = guidexos_nativeaot_gc_commit(address, size, node) == 0;
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+    recordSegmentBoundaryTrace(TraceOperation::Commit, address, size,
+                               success ? VmResult::Ok : VmResult::HostFailure);
+#endif
+    return success;
 }
 
 bool gcVirtualDecommit(void* address, nativeaot_vm_size size) {
     g_guidexos_nativeaot_gc_startup_stage = 0x13u;
-    return guidexos_nativeaot_gc_decommit(address, size) == 0;
+    const bool success = guidexos_nativeaot_gc_decommit(address, size) == 0;
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+    recordSegmentBoundaryTrace(TraceOperation::Decommit, address, size,
+                               success ? VmResult::Ok : VmResult::HostFailure);
+#endif
+    return success;
 }
 
 bool gcVirtualRelease(void* address, nativeaot_vm_size size) {
     g_guidexos_nativeaot_gc_startup_stage = 0x14u;
-    return guidexos_nativeaot_gc_release(address, size) == 0;
+    const bool success = guidexos_nativeaot_gc_release(address, size) == 0;
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+    recordSegmentBoundaryTrace(TraceOperation::Release, address, size,
+                               success ? VmResult::Ok : VmResult::HostFailure);
+#endif
+    return success;
 }
 
 bool gcVirtualReset(void* address, nativeaot_vm_size size, bool unlock) {
-    return guidexos_nativeaot_gc_reset(address, size, unlock ? 1u : 0u) == 0;
+    const bool success = guidexos_nativeaot_gc_reset(address, size, unlock ? 1u : 0u) == 0;
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+    recordSegmentBoundaryTrace(TraceOperation::Reset, address, size,
+                               success ? VmResult::Ok : VmResult::HostFailure);
+#endif
+    return success;
 }
 
 bool supportsWriteWatch() { return false; }

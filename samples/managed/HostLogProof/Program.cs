@@ -24,7 +24,7 @@ public static unsafe class Program
     private static extern int GuideXosManagedAllocationReport(NativeGxAppContext* context, uint status);
 #endif
 
-#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION
+#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationValidateObject")]
     private static extern int GuideXosManagedAllocationValidateObject(
         nint arrayObject,
@@ -40,7 +40,7 @@ public static unsafe class Program
     private static extern uint GuideXosManagedAllocationGetHardLimit();
 #endif
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedArrayHostLog")]
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
 #endif
@@ -67,7 +67,7 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION
         if (ctx->host == null || ctx->host->log == null)
         {
             return GxAbi.ErrorInvalidArgument;
@@ -153,6 +153,70 @@ public static unsafe class Program
         }
 
         return GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION
+        // Allocate one fixed-size primitive array at a time.  The native
+        // diagnostic hook stops the loop immediately after the first new
+        // GC-heap commit or source-backed segment transition; no managed
+        // collection, retained array set, string, delegate, exception, or
+        // second allocation is introduced after that boundary.
+        const int arrayLength = 4096;
+        byte[] current = new byte[arrayLength];
+        uint iteration = 0u;
+        uint zeroByteCount = CountZeroBytes(current);
+        WriteIdentifyingPattern(current, iteration);
+        bool patternValid = HasIdentifyingPattern(current, iteration);
+        nint objectReference = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(ref current);
+        int validationResult = GuideXosManagedAllocationValidateObject(
+            objectReference, arrayLength, iteration, zeroByteCount,
+            patternValid ? 1u : 0u);
+        int loopStatus = GuideXosManagedAllocationGetLoopStatus();
+        GC.KeepAlive(current);
+        if (validationResult != 0 || loopStatus < 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        if (loopStatus == 2)
+        {
+            return 0;
+        }
+
+        uint hardLimit = GuideXosManagedAllocationGetHardLimit();
+        if (hardLimit < 2u || hardLimit > 2048u)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        for (iteration = 1u; iteration < hardLimit; iteration++)
+        {
+            current = new byte[arrayLength];
+            zeroByteCount = CountZeroBytes(current);
+            WriteIdentifyingPattern(current, iteration);
+            patternValid = HasIdentifyingPattern(current, iteration);
+            objectReference = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(ref current);
+            validationResult = GuideXosManagedAllocationValidateObject(
+                objectReference, arrayLength, iteration, zeroByteCount,
+                patternValid ? 1u : 0u);
+            loopStatus = GuideXosManagedAllocationGetLoopStatus();
+            GC.KeepAlive(current);
+            if (validationResult != 0 || loopStatus < 0)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+            if (loopStatus == 2)
+            {
+                return 0;
+            }
+            if (loopStatus == 3)
+            {
+                return GxAbi.ErrorUnsupported;
+            }
+            if (loopStatus != 1)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+        }
+
+        return GxAbi.ErrorUnsupported;
 #elif HOSTLOGPROOF_ALLOCATING
 #if HOSTLOGPROOF_REPEATED_ALLOCATION
         const int arrayLength = 256;
@@ -274,7 +338,7 @@ public static unsafe class Program
 #endif
     }
 
-#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_REPEATED_ALLOCATION
+#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_REPEATED_ALLOCATION
     private static uint CountZeroBytes(byte[] buffer)
     {
         uint count = 0u;
@@ -308,7 +372,7 @@ public static unsafe class Program
 
     private static bool HasIdentifyingPattern(byte[] buffer, uint sequence)
     {
-        if (buffer.Length != 256) return false;
+        if (buffer.Length < 4) return false;
         if (buffer[0] != (byte)sequence ||
             buffer[1] != (byte)(sequence >> 8) ||
             buffer[2] != (byte)(sequence >> 16) ||

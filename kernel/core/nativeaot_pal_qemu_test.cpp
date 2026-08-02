@@ -1,6 +1,6 @@
 #include "include/kernel/nativeaot_pal_qemu_test.h"
 
-#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 
 #include "include/kernel/address_space.h"
 #include "include/kernel/arch.h"
@@ -9,11 +9,11 @@
 #include "include/kernel/pit.h"
 
 #include "runtime/local_storage/guidexos_local_storage.h"
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 #include "runtime/memory/guidexos_virtual_memory_region.h"
 #include "runtime/synchronization/guidexos_event.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_gc_startup_platform_contract.h"
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h"
 #endif
 #endif
@@ -26,7 +26,7 @@
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_end[];
 #endif
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
 #endif
@@ -38,7 +38,7 @@ namespace {
 constexpr uintptr_t kPageSize = 0x1000u;
 constexpr uint32_t kPtLoad = 1u;
 constexpr uint16_t kElfExec = 2u;
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 // The startup artifact contains a bounded 4 MiB native metadata arena in its
 // writable image.  Keep staging bounded while allowing that known image size.
 constexpr uint32_t kMaxMappedPages = 8192u;
@@ -124,7 +124,7 @@ uint64_t g_lastWorkerThreadId = 0;
 uintptr_t g_lastWorkerStackLow = 0;
 uintptr_t g_lastWorkerStackHigh = 0;
 uintptr_t g_lastWorkerStackCurrent = 0;
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 uintptr_t g_firstAllocationDiagnosticsAddress = 0;
 
 // The NativeAOT image uses the Win64 TLS vector contract directly:
@@ -430,7 +430,7 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeYield() {
     serial::puts(" detail=");
     serial::put_hex64(detail);
     serial::putc('\n');
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
     if (g_firstAllocationDiagnosticsAddress != 0) {
         const guidexos_nativeaot_allocation_diagnostics* diagnostics =
             reinterpret_cast<const guidexos_nativeaot_allocation_diagnostics*>(
@@ -684,7 +684,7 @@ void runOne(const uint8_t* artifact, size_t artifactSize,
            g_activeCallbacks == 0 && g_mappedPageCount == 0, allPassed);
 }
 
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 
 constexpr uint32_t kMaxGcEventSlots = 16u;
 constexpr uint32_t kMaxGcVmSlots = 16u;
@@ -1119,7 +1119,7 @@ void runStartupImpl(const uint8_t* artifact, size_t artifactSize,
         : "[nativeaot-gc-startup-qemu-test] ALL_FAIL\n");
 }
 
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 
 struct FirstRealAllocationContext {
     uint32_t size;
@@ -1131,7 +1131,9 @@ struct FirstRealAllocationContext {
 void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
 #if defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-refill] ");
-#else
+#elif defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+    serial::puts("[nativeaot-gc-segment-boundary] ");
+#elif defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-allocation] ");
 #endif
     serial::puts(name);
@@ -1142,6 +1144,8 @@ void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
 void printFirstAllocationPointer(const char* name, uintptr_t value) {
 #if defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-refill] ");
+#elif defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+    serial::puts("[nativeaot-gc-segment-boundary] ");
 #else
     serial::puts("[nativeaot-gc-first-allocation] ");
 #endif
@@ -1311,6 +1315,10 @@ void runFirstRefillManagedBoundary(
     serial::put_hex32(diagnostics->contextGeometryFailures);
     serial::puts(" pointerContractFailures=");
     serial::put_hex32(diagnostics->pointerContractFailures);
+    serial::puts(" stage=");
+    serial::put_hex32(diagnostics->stage);
+    serial::puts(" sequence=");
+    serial::put_hex32(diagnostics->sequence);
     serial::puts(" sourceSizeValid=");
     serial::put_hex32(diagnostics->sourceSizeValid);
     serial::puts(" primitiveArrayValid=");
@@ -1383,6 +1391,247 @@ void runFirstRefillManagedBoundary(
 }
 #endif
 
+#if defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+using SegmentBoundaryManagedMain = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+    FirstRealAllocationContext*);
+using SegmentBoundaryFinalize = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(uint32_t);
+using SegmentBoundaryGetDiagnostics = const guidexos_nativeaot_allocation_diagnostics*
+    (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+
+void runSegmentBoundaryManagedBoundary(
+    uintptr_t managedMainAddress, uintptr_t finalizeAddress,
+    uintptr_t getDiagnosticsAddress, uint32_t palState, bool& allPassed) {
+    FirstRealAllocationContext context{};
+    context.size = sizeof(context);
+    context.apiVersion = 0u;
+    serial::puts("[nativeaot-gc-segment-boundary] entering ManagedMain once\n");
+    const int32_t managedResult = reinterpret_cast<SegmentBoundaryManagedMain>(
+        managedMainAddress)(&context);
+    const guidexos_nativeaot_allocation_diagnostics* entryDiagnostics =
+        reinterpret_cast<SegmentBoundaryGetDiagnostics>(getDiagnosticsAddress)();
+    const int32_t finalizeResult = reinterpret_cast<SegmentBoundaryFinalize>(
+        finalizeAddress)(static_cast<uint32_t>(managedResult));
+    const guidexos_nativeaot_allocation_diagnostics* diagnostics =
+        reinterpret_cast<SegmentBoundaryGetDiagnostics>(getDiagnosticsAddress)();
+
+    firstAllocationStatus("Managed entry once", diagnostics != nullptr, allPassed);
+    firstAllocationStatus("Managed byte[4096] bounded loop return", managedResult == 0, allPassed);
+    firstAllocationStatus("Allocation finalization", finalizeResult == 0, allPassed);
+    if (diagnostics == nullptr) {
+        serial::puts("[nativeaot-gc-segment-boundary] ALL_FAIL\n");
+        return;
+    }
+
+    serial::puts("[nativeaot-gc-segment-boundary] managedStatus=");
+    serial::put_hex32(static_cast<uint32_t>(managedResult));
+    serial::puts(" finalizeStatus=");
+    serial::put_hex32(static_cast<uint32_t>(finalizeResult));
+    serial::puts(" completionStatus=");
+    serial::put_hex32(diagnostics->completionStatus);
+    serial::puts(" schemaVersion=");
+    serial::put_hex32(diagnostics->schemaVersion);
+    serial::puts(" managedEntryCount=");
+    serial::put_hex32(diagnostics->managedEntryCount);
+    serial::puts(" rhpNewArrayEntries=");
+    serial::put_hex32(diagnostics->rhpNewArrayEntries);
+    serial::puts(" failureReason=");
+    serial::put_hex32(diagnostics->failureReason);
+    serial::puts(" pointerContractFailures=");
+    serial::put_hex32(diagnostics->pointerContractFailures);
+    serial::puts(" selectedArrayLength=");
+    serial::put_hex32(diagnostics->selectedArrayLength);
+    serial::puts(" derivedObjectSize=");
+    serial::put_hex64(diagnostics->derivedObjectSize);
+    serial::puts(" hardAllocationLimit=");
+    serial::put_hex32(diagnostics->hardAllocationLimit);
+    serial::puts(" allocationCount=");
+    serial::put_hex32(diagnostics->allocationCount);
+    serial::puts(" fastAllocationCount=");
+    serial::put_hex32(diagnostics->fastAllocationCount);
+    serial::puts(" rarePathCount=");
+    serial::put_hex32(diagnostics->rarePathCount);
+    serial::puts(" realGcAllocationCount=");
+    serial::put_hex32(diagnostics->realGcAllocationCount);
+    serial::puts(" allocationContextRefillCount=");
+    serial::put_hex32(diagnostics->allocationContextRefillCount);
+    serial::puts(" requestedObjectSize=");
+    serial::put_hex64(diagnostics->requestedObjectSize);
+    serial::puts(" returnedObject=");
+    serial::put_hex64(diagnostics->returnedObject);
+    serial::puts("\n");
+
+    serial::puts("[nativeaot-gc-segment-boundary] vmTraceStartCount=");
+    serial::put_hex32(diagnostics->vmTraceStartCount);
+    serial::puts(" vmTraceEndCount=");
+    serial::put_hex32(diagnostics->vmTraceEndCount);
+    serial::puts(" vmCommitEventCount=");
+    serial::put_hex32(diagnostics->vmCommitEventCount);
+    serial::puts(" heapCommitEventCount=");
+    serial::put_hex32(diagnostics->heapCommitEventCount);
+    serial::puts(" segmentTransitionCount=");
+    serial::put_hex32(diagnostics->segmentTransitionCount);
+    serial::puts(" refillHistoryCount=");
+    serial::put_hex32(diagnostics->refillHistoryCount);
+    serial::puts(" refillHistoryOverflow=");
+    serial::put_hex32(diagnostics->refillHistoryOverflow);
+    serial::puts(" initialHeapCommitObserved=");
+    serial::put_hex32(diagnostics->initialHeapCommitObserved);
+    serial::puts(" initialHeapCommitEventCount=");
+    serial::put_hex32(diagnostics->initialHeapCommitEventCount);
+    serial::puts("\n");
+
+    serial::puts("[nativeaot-gc-segment-boundary] boundaryType=");
+    serial::put_hex32(diagnostics->boundaryType);
+    serial::puts(" boundaryAllocationOrdinal=");
+    serial::put_hex32(diagnostics->boundaryAllocationOrdinal);
+    serial::puts(" boundaryRefillOrdinal=");
+    serial::put_hex32(diagnostics->boundaryRefillOrdinal);
+    serial::puts(" boundaryStopObserved=");
+    serial::put_hex32(diagnostics->boundaryStopObserved);
+    serial::puts(" boundaryCommitValidated=");
+    serial::put_hex32(diagnostics->boundaryCommitValidated);
+    serial::puts(" boundarySegmentValidated=");
+    serial::put_hex32(diagnostics->boundarySegmentValidated);
+    serial::puts("\n");
+
+    printFirstAllocationPointer("initialSegmentIdentity", diagnostics->initialSegmentIdentity);
+    printFirstAllocationPointer("initialSegmentBase", diagnostics->initialSegmentBase);
+    printFirstAllocationPointer("initialSegmentAllocated", diagnostics->initialSegmentAllocated);
+    printFirstAllocationPointer("initialSegmentCommitted", diagnostics->initialSegmentCommitted);
+    printFirstAllocationPointer("initialSegmentReserved", diagnostics->initialSegmentReserved);
+    printFirstAllocationPointer("boundarySegmentIdentity", diagnostics->boundarySegmentIdentity);
+    printFirstAllocationPointer("boundarySegmentBase", diagnostics->boundarySegmentBase);
+    printFirstAllocationPointer("boundarySegmentAllocated", diagnostics->boundarySegmentAllocated);
+    printFirstAllocationPointer("boundarySegmentCommitted", diagnostics->boundarySegmentCommitted);
+    printFirstAllocationPointer("boundarySegmentReserved", diagnostics->boundarySegmentReserved);
+    printFirstAllocationPointer("boundaryCommitAddress", diagnostics->boundaryCommitAddress);
+    printFirstAllocationPointer("boundaryCommitRequested", diagnostics->boundaryCommitRequested);
+    printFirstAllocationPointer("boundaryCommitActual", diagnostics->boundaryCommitActual);
+    printFirstAllocationPointer("boundaryCommittedBefore", diagnostics->boundaryCommittedBefore);
+    printFirstAllocationPointer("boundaryCommittedAfter", diagnostics->boundaryCommittedAfter);
+    printFirstAllocationPointer("boundaryObjectAddress", diagnostics->boundaryObjectAddress);
+    printFirstAllocationPointer("boundaryObjectEnd", diagnostics->boundaryObjectEnd);
+    printFirstAllocationPointer("boundaryAllocationContextBefore", diagnostics->boundaryAllocationContextBefore);
+    printFirstAllocationPointer("boundaryAllocationContextAfter", diagnostics->boundaryAllocationContextAfter);
+    printFirstAllocationPointer("boundaryAllocationLimitBefore", diagnostics->boundaryAllocationLimitBefore);
+    printFirstAllocationPointer("boundaryAllocationLimitAfter", diagnostics->boundaryAllocationLimitAfter);
+    printFirstAllocationPointer("initialHeapCommitTraceIndex", diagnostics->initialHeapCommitTraceIndex);
+    printFirstAllocationPointer("initialHeapCommitAddress", diagnostics->initialHeapCommitAddress);
+    printFirstAllocationPointer("initialHeapCommitRequested", diagnostics->initialHeapCommitRequested);
+    printFirstAllocationPointer("initialHeapCommitActual", diagnostics->initialHeapCommitActual);
+    printFirstAllocationPointer("initialHeapCommittedBefore", diagnostics->initialHeapCommittedBefore);
+    printFirstAllocationPointer("initialHeapCommittedAfter", diagnostics->initialHeapCommittedAfter);
+
+    for (uint32_t index = 0; index < diagnostics->refillHistoryCount &&
+         index < GUIDEXOS_NATIVEAOT_MAX_REFILL_HISTORY; ++index) {
+        const guidexos_nativeaot_refill_history_entry& entry = diagnostics->refillHistory[index];
+        serial::puts("[nativeaot-gc-segment-boundary] refillHistory[");
+        serial::put_hex32(index);
+        serial::puts("] ordinal=");
+        serial::put_hex32(entry.ordinal);
+        serial::puts(" allocationOrdinal=");
+        serial::put_hex32(entry.allocationOrdinal);
+        serial::puts(" contextBefore=");
+        serial::put_hex64(entry.contextBefore);
+        serial::puts(" limitBefore=");
+        serial::put_hex64(entry.limitBefore);
+        serial::puts(" remainingBefore=");
+        serial::put_hex64(entry.remainingBefore);
+        serial::puts(" segmentIdentity=");
+        serial::put_hex64(entry.segmentIdentity);
+        serial::puts(" segmentCommitted=");
+        serial::put_hex64(entry.segmentCommitted);
+        serial::puts(" segmentReserved=");
+        serial::put_hex64(entry.segmentReserved);
+        serial::puts(" vmCommitObserved=");
+        serial::put_hex32(entry.vmCommitObserved);
+        serial::puts(" boundaryType=");
+        serial::put_hex32(entry.boundaryType);
+        serial::puts(" commitAddress=");
+        serial::put_hex64(entry.commitAddress);
+        serial::puts(" commitRequested=");
+        serial::put_hex64(entry.commitRequested);
+        serial::puts(" commitActual=");
+        serial::put_hex64(entry.commitActual);
+        serial::puts("\n");
+    }
+
+    const bool counters = diagnostics->schemaVersion == 1u &&
+        diagnostics->allocationCount == diagnostics->allocationRequestCount &&
+        diagnostics->allocationCount == diagnostics->rhpNewArrayCount &&
+        diagnostics->allocationCount <= diagnostics->hardAllocationLimit &&
+        diagnostics->rarePathCount >= 1u &&
+        diagnostics->rarePathCount >= 2u &&
+        diagnostics->realGcAllocationCount == diagnostics->rarePathCount &&
+        diagnostics->allocationContextRefillCount == diagnostics->rarePathCount &&
+        diagnostics->refillHistoryCount >= 2u &&
+        diagnostics->initialHeapCommitObserved == 1u &&
+        diagnostics->initialHeapCommitEventCount >= 1u &&
+        diagnostics->refillHistoryCount == diagnostics->rarePathCount &&
+        diagnostics->refillHistoryOverflow == 0u;
+    firstAllocationStatus("Exact multi-refill allocation counters", counters, allPassed);
+
+    const bool boundary = diagnostics->boundaryStopObserved == 1u &&
+        diagnostics->boundaryAllocationOrdinal == diagnostics->allocationCount &&
+        diagnostics->boundaryAllocationOrdinal >= 2u &&
+        diagnostics->boundaryAllocationOrdinal <= diagnostics->hardAllocationLimit &&
+        ((diagnostics->boundaryType == 1u && diagnostics->boundaryCommitValidated == 1u &&
+          diagnostics->boundaryCommitRequested == diagnostics->boundaryCommitActual &&
+          diagnostics->boundaryCommitActual != 0u &&
+          diagnostics->boundaryCommittedAfter > diagnostics->boundaryCommittedBefore) ||
+         (diagnostics->boundaryType == 2u && diagnostics->boundarySegmentValidated == 1u));
+    firstAllocationStatus("First GC heap commit or segment transition boundary", boundary,
+                          allPassed);
+
+    const bool segment = diagnostics->initialSegmentIdentity != 0u &&
+        diagnostics->initialSegmentBase != 0u &&
+        diagnostics->initialSegmentReserved > diagnostics->initialSegmentBase &&
+        diagnostics->initialSegmentCommitted >= diagnostics->initialSegmentBase &&
+        diagnostics->initialSegmentCommitted <= diagnostics->initialSegmentReserved &&
+        diagnostics->boundarySegmentIdentity != 0u &&
+        diagnostics->boundarySegmentReserved > diagnostics->boundarySegmentBase &&
+        diagnostics->boundarySegmentCommitted >= diagnostics->boundarySegmentBase &&
+        diagnostics->boundarySegmentCommitted <= diagnostics->boundarySegmentReserved;
+    firstAllocationStatus("Source-backed segment identity and size", segment, allPassed);
+
+    const bool noCollection = diagnostics->collectionConsideredCount ==
+            diagnostics->rarePathCount &&
+        diagnostics->collectionRequestCount == 0u &&
+        diagnostics->collectionEntryCount == 0u &&
+        diagnostics->collectionsEntered == 0u &&
+        diagnostics->gcCountBefore == diagnostics->gcCountAfter &&
+        diagnostics->finalizationScanCount == 0u &&
+        diagnostics->managedFinalizerCount == 0u &&
+        diagnostics->finalizersExecuted == 0u &&
+        diagnostics->suspensionRequestCount == 0u &&
+        diagnostics->gcLockTransitionCount == 0u &&
+        diagnostics->helperWakeCount == 0u;
+    firstAllocationStatus("No collection or finalization", noCollection, allPassed);
+
+    const bool objectValidation = diagnostics->zeroValidationFailures == 0u &&
+        diagnostics->patternValidationFailures == 0u &&
+        diagnostics->layoutFailures == 0u &&
+        diagnostics->ownershipFailures == 0u &&
+        diagnostics->overlapFailures == 0u &&
+        diagnostics->monotonicityFailures == 0u &&
+        diagnostics->contextGeometryFailures == 0u &&
+        diagnostics->sourceSizeValid == 1u &&
+        diagnostics->primitiveArrayValid == 1u &&
+        diagnostics->belowLargeObjectThreshold == 1u &&
+        diagnostics->noPostRefillAllocation == 1u &&
+        diagnostics->pointerContractFailures == 0u;
+    firstAllocationStatus("Primitive-array object and ownership validation", objectValidation,
+                          allPassed);
+    firstAllocationStatus("Finalizer worker parked", ((palState >> 24) & 0xFFu) == 0x02u &&
+                           g_activeCallbacks == 0u, allPassed);
+    serial::puts("[nativeaot-gc-segment-boundary] same-process shutdown: UNSUPPORTED\n");
+    serial::puts("[nativeaot-gc-segment-boundary] Process teardown: PASS\n");
+    serial::puts(allPassed
+        ? "[nativeaot-gc-segment-boundary] ALL_PASS\n"
+        : "[nativeaot-gc-segment-boundary] ALL_FAIL\n");
+}
+#endif
+
 void runFirstRealAllocationImpl(
     const uint8_t* artifact, size_t artifactSize,
     uintptr_t installPalAddress, uintptr_t installTableAddress,
@@ -1391,10 +1640,12 @@ void runFirstRealAllocationImpl(
     uintptr_t getAllocationCountAddress, uintptr_t getLastAllocationSizeAddress,
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
-    uint64_t generation) {
+    uint64_t generation, uintptr_t beginExperimentAddress) {
     bool allPassed = true;
 #if defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-refill] BEGIN\n");
+#elif defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+    serial::puts("[nativeaot-gc-segment-boundary] BEGIN\n");
 #else
     serial::puts("[nativeaot-gc-first-allocation] BEGIN\n");
 #endif
@@ -1420,7 +1671,7 @@ void runFirstRealAllocationImpl(
         return;
     }
     resetBridgeState(base, size, generation);
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
     g_firstAllocationDiagnosticsAddress = getDiagnosticsAddress;
 #endif
 
@@ -1495,8 +1746,19 @@ void runFirstRealAllocationImpl(
         return;
     }
 
+    if (beginExperimentAddress != 0u) {
+        using BeginExperiment = void (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+        reinterpret_cast<BeginExperiment>(beginExperimentAddress)();
+        firstAllocationStatus("VM trace experiment baseline captured", true, allPassed);
+    }
+
     // RhInitialize has already published the parked finalizer-worker state.
-#if defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+    runSegmentBoundaryManagedBoundary(
+        managedMainAddress, finalizeAddress, getDiagnosticsAddress,
+        palState, allPassed);
+    return;
+#elif defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
     runFirstRefillManagedBoundary(
         managedMainAddress, finalizeAddress, getDiagnosticsAddress,
         palState, allPassed);
@@ -1679,7 +1941,7 @@ void run(const uint8_t* artifact, size_t artifactSize,
         : "[nativeaot-pal-qemu-test] ALL_FAIL\n");
 }
 
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 void runStartup(const uint8_t* artifact, size_t artifactSize,
                 uintptr_t installPalAddress, uintptr_t installTableAddress,
                 uintptr_t installPlatformAddress, uintptr_t mainAddress,
@@ -1693,7 +1955,7 @@ void runStartup(const uint8_t* artifact, size_t artifactSize,
                    generation);
 }
 
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
 void runFirstRealAllocation(
     const uint8_t* artifact, size_t artifactSize,
     uintptr_t installPalAddress, uintptr_t installTableAddress,
@@ -1702,13 +1964,14 @@ void runFirstRealAllocation(
     uintptr_t getAllocationCountAddress, uintptr_t getLastAllocationSizeAddress,
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
-    uint64_t generation) {
+    uint64_t generation, uintptr_t beginExperimentAddress) {
     runFirstRealAllocationImpl(
         artifact, artifactSize, installPalAddress, installTableAddress,
         installPlatformAddress, startupMainAddress, getStateAddress,
         getPreGcStateAddress, getAllocationCountAddress,
         getLastAllocationSizeAddress, getDiagnosticStageAddress,
-        managedMainAddress, finalizeAddress, getDiagnosticsAddress, generation);
+        managedMainAddress, finalizeAddress, getDiagnosticsAddress, generation,
+        beginExperimentAddress);
 }
 #endif
 #endif

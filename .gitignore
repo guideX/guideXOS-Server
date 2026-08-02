@@ -41,6 +41,7 @@
 /out/dotnet/gc-first-real-allocation/
 /out/dotnet/gc-first-allocation-hang/
 /out/dotnet/gc-first-refill/
+/out/dotnet/gc-multiple-refills-first-segment-boundary/
 /out/dotnet/closure-*/
 /out/dotnet/gc-first-refill-closure/
 /out/dotnet/gc-first-allocation-closure/
