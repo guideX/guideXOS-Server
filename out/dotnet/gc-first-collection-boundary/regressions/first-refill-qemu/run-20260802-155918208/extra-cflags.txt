@@ -1,0 +1,1 @@
+-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST -ID:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-collection-boundary\regressions\first-refill-qemu\build\artifact

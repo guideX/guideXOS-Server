@@ -28,6 +28,7 @@ void runFirstRealAllocation(
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
     uint64_t generation, uintptr_t beginExperimentAddress = 0);
+
 #endif
 
 } // namespace nativeaot_pal_qemu_test

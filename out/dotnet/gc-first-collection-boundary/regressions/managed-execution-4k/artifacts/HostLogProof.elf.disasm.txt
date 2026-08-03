@@ -1,0 +1,3 @@
+
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-collection-boundary\regressions\managed-execution-4k\artifacts\HostLogProof.elf:     file format elf64-x86-64
+

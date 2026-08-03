@@ -209,7 +209,20 @@ transition, without allowing collection. The ordinary kernel was restored to
 ## First segment-transition gate - 2026-08-01
 
 That follow-up is now closed by
-[NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).
+ [NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).
+
+## First Workstation GC collection boundary - 2026-08-02
+
+The first collection-control boundary is documented in
+[NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md).
+The dedicated proof reached one real Workstation GC collection request and
+one real collection entry after 40 validated `byte[4096]` allocations, 21
+refills, and two same-segment commitment extensions. It stopped at the first
+guideXOS EE contract, `GCToEEInterface::SuspendEE`, before
+`ThreadStore::LockThreadStore`; no suspension entry, heap mutation, restart,
+or managed resume occurred. This is **Outcome A for collection request and
+entry**, not completed GC support. The earlier segment-transition result
+remains **Outcome B** and is not rewritten.
 The source-backed result is **Outcome B — collection is required before a SOH
 segment transition**. The authoritative no-collection runner used a
 `byte[4096]` object (`0x1018` / 4120 bytes), stopped at 32 allocations after
@@ -234,3 +247,16 @@ can be selected. This does not change the earlier startup and first
 post-startup-commit milestones, and it does not authorize collection
 execution. Details and fresh hashes are in
 [NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).
+
+## First Workstation GC collection boundary - 2026-08-02
+
+The first collection-control boundary is documented in
+[NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md).
+The dedicated proof reached one real Workstation GC collection request and
+one real collection entry after 40 validated `byte[4096]` allocations, 21
+refills, and two same-segment commitment extensions. It stopped at the first
+guideXOS EE contract, `GCToEEInterface::SuspendEE`, before
+`ThreadStore::LockThreadStore`; no suspension entry, heap mutation, restart,
+or managed resume occurred. This is **Outcome A for collection request and
+entry**, not completed GC support. The earlier segment-transition result
+remains **Outcome B** and is not rewritten.

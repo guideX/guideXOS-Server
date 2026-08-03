@@ -1,3 +1,6 @@
+#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+#define GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST 1
+#endif
 #if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
 #define GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST 1
 #endif
@@ -429,6 +432,84 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeYield() {
 
 [[noreturn]] void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeFailFast(
     uint32_t reason, uintptr_t detail) {
+#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+    if (g_firstAllocationDiagnosticsAddress != 0) {
+        const guidexos_nativeaot_allocation_diagnostics* diagnostics =
+            reinterpret_cast<const guidexos_nativeaot_allocation_diagnostics*>(
+                g_firstAllocationDiagnosticsAddress);
+        if (diagnostics->safeStopObserved != 0u &&
+            diagnostics->firstCollectionBoundaryMarker ==
+                GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_SAFE_STOP_MARKER) {
+            serial::puts("[nativeaot-gc-first-collection-boundary] SAFE_STOP marker=");
+            serial::put_hex32(diagnostics->firstCollectionBoundaryMarker);
+            serial::puts(" callback=GCToEEInterface::SuspendEE requestCount=");
+            serial::put_hex32(diagnostics->firstCollectionRequestCount);
+            serial::puts(" entryCount=");
+            serial::put_hex32(diagnostics->firstCollectionEntryCount);
+            serial::puts(" requestedGeneration=");
+            serial::put_hex32(diagnostics->requestedGeneration);
+            serial::puts(" reason=");
+            serial::put_hex32(diagnostics->collectionReason);
+            serial::puts(" blocking=");
+            serial::put_hex32(diagnostics->collectionBlockingMode);
+            serial::puts(" compacting=");
+            serial::put_hex32(diagnostics->collectionCompactingMode);
+            serial::puts(" suspensionRequestCount=");
+            serial::put_hex32(diagnostics->suspensionRequestCount);
+            serial::puts(" suspensionEntryCount=");
+            serial::put_hex32(diagnostics->suspensionEntryCount);
+            serial::puts(" restartResumeCount=");
+            serial::put_hex32(diagnostics->restartResumeCount);
+            serial::puts(" heapMutationStarted=");
+            serial::put_hex32(diagnostics->heapMutationStarted);
+            serial::puts(" managedExecutionResumed=");
+            serial::put_hex32(diagnostics->managedExecutionResumed);
+            serial::puts(" unsupportedContract=");
+            serial::put_hex32(diagnostics->firstUnsupportedContract);
+            serial::puts(" allocations=");
+            serial::put_hex32(diagnostics->allocationCount);
+            serial::puts(" fast=");
+            serial::put_hex32(diagnostics->fastAllocationCount);
+            serial::puts(" rare=");
+            serial::put_hex32(diagnostics->rarePathCount);
+            serial::puts(" allocationRequests=");
+            serial::put_hex32(diagnostics->allocationRequestCount);
+            serial::puts(" collectionConsidered=");
+            serial::put_hex32(diagnostics->collectionConsideredCount);
+            serial::puts(" allocationOrdinal=");
+            serial::put_hex32(diagnostics->collectionRequestAllocationOrdinal);
+            serial::puts(" lastObject=");
+            serial::put_hex64(diagnostics->currentObject);
+            serial::puts(" objectAddress=0 requestedObjectSize=");
+            serial::put_hex32(diagnostics->requestedObjectSize);
+            serial::puts(" actualAlignedSize=");
+            serial::put_hex64(diagnostics->derivedObjectSize);
+            serial::puts(" allocPtr=");
+            serial::put_hex64(diagnostics->collectionEntryAllocPtr);
+            serial::puts(" allocLimit=");
+            serial::put_hex64(diagnostics->collectionEntryAllocLimit);
+            serial::puts(" committed=");
+            serial::put_hex64(diagnostics->currentSegmentCommitted);
+            serial::puts(" reserved=");
+            serial::put_hex64(diagnostics->currentSegmentReserved);
+            serial::puts(" segment=");
+            serial::put_hex64(diagnostics->currentSegmentIdentity);
+            serial::puts(" refills=");
+            serial::put_hex32(diagnostics->allocationContextRefillCount);
+            serial::puts(" sameSegmentCommits=");
+            serial::put_hex32(diagnostics->heapCommitEventCount);
+            serial::puts(" segmentTransitions=");
+            serial::put_hex32(diagnostics->segmentTransitionCount);
+            serial::puts(" sentinelChecks=");
+            serial::put_hex32(diagnostics->sentinelValidationCount);
+            serial::puts(" sentinelFailures=");
+            serial::put_hex32(diagnostics->sentinelValidationFailures);
+            serial::puts(" liveSentinels=");
+            serial::put_hex32(diagnostics->liveSentinelCount);
+            serial::puts("\n");
+        }
+    }
+#endif
     serial::puts("[nativeaot-pal-qemu-test] FAIL_FAST reason=");
     serial::put_hex32(reason);
     serial::puts(" detail=");
@@ -1133,7 +1214,9 @@ struct FirstRealAllocationContext {
 };
 
 void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
-#if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+    serial::puts("[nativeaot-gc-first-collection-boundary] ");
+#elif defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
     serial::puts("[nativeaot-gc-segment-transition] ");
 #elif defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-refill] ");
@@ -1148,7 +1231,9 @@ void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
 }
 
 void printFirstAllocationPointer(const char* name, uintptr_t value) {
-#if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+    serial::puts("[nativeaot-gc-first-collection-boundary] ");
+#elif defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
     serial::puts("[nativeaot-gc-segment-transition] ");
 #elif defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-refill] ");
@@ -1412,7 +1497,12 @@ void runSegmentBoundaryManagedBoundary(
     FirstRealAllocationContext context{};
     context.size = sizeof(context);
     context.apiVersion = 0u;
-#if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+    serial::puts("[nativeaot-gc-first-collection-boundary] entering ManagedMain once\n");
+    reinterpret_cast<SegmentBoundaryManagedMain>(managedMainAddress)(&context);
+    return;
+}
+#elif defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
     serial::puts("[nativeaot-gc-segment-transition] entering ManagedMain once\n");
     const int32_t managedResult = reinterpret_cast<SegmentBoundaryManagedMain>(
         managedMainAddress)(&context);
@@ -1788,7 +1878,9 @@ void runFirstRealAllocationImpl(
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
     uint64_t generation, uintptr_t beginExperimentAddress) {
     bool allPassed = true;
-#if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+    serial::puts("[nativeaot-gc-first-collection-boundary] BEGIN\n");
+#elif defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
     serial::puts("[nativeaot-gc-segment-transition] BEGIN\n");
 #elif defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-refill] BEGIN\n");

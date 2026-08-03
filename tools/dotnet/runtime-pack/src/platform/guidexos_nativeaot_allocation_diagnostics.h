@@ -271,6 +271,41 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
 
     guidexos_nativeaot_refill_history_entry refillHistory[
         GUIDEXOS_NATIVEAOT_MAX_REFILL_HISTORY];
+
+    /*
+     * First-collection-boundary proof fields. These are append-only so the
+     * established first-allocation/refill/segment records retain their
+     * offsets. The proof stops in GCToEEInterface::SuspendEE before the EE
+     * thread store or heap state is mutated.
+     */
+    uint32_t firstCollectionBoundaryMarker;
+    uint32_t firstCollectionRequestCount;
+    uint32_t firstCollectionEntryCount;
+    uint32_t requestedGeneration;
+    uint32_t collectionReason;
+    uint32_t collectionBlockingMode;
+    uint32_t collectionCompactingMode;
+    uint32_t suspensionEntryCount;
+    uint32_t restartResumeCount;
+    uint32_t heapMutationStarted;
+    uint32_t managedExecutionResumed;
+    uint32_t firstUnsupportedContract;
+    uint32_t safeStopObserved;
+    uint32_t collectionRequestAllocationOrdinal;
+    uint32_t collectionEntryAllocationOrdinal;
+    uint32_t sentinelValidationCount;
+    uint32_t sentinelValidationFailures;
+    uint32_t liveSentinelCount;
+    uint32_t reservedFirstCollection[5];
+
+    uintptr_t collectionEntryThread;
+    uintptr_t collectionEntryHeap;
+    uintptr_t collectionEntryAllocPtr;
+    uintptr_t collectionEntryAllocLimit;
+    uintptr_t collectionEntryObjectSize;
+    uintptr_t collectionEntrySegmentIdentity;
+    uintptr_t collectionEntrySegmentCommitted;
+    uintptr_t collectionEntrySegmentReserved;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -310,6 +345,15 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S12_SEGMENT_LINKED = 0xB0Cu,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S13_ALLOCATION_CONTEXT_PUBLISHED = 0xB0Du,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S14_STOP_OBJECT_RETURNED = 0xB0Eu,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F20_FIRST_COLLECTION_SAFE_STOP = 0xF20u,
+};
+
+enum {
+    GUIDEXOS_NATIVEAOT_COLLECTION_REASON_OUT_OF_SO_H = 5u,
+    GUIDEXOS_NATIVEAOT_COLLECTION_BLOCKING = 1u,
+    GUIDEXOS_NATIVEAOT_COLLECTION_NONCOMPACTING_NOT_SELECTED = 0u,
+    GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_SAFE_STOP_MARKER = 0xC011EC01u,
+    GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_UNSUPPORTED_SUSPEND_EE = 1u,
 };
 
 #ifdef __cplusplus

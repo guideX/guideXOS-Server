@@ -1,0 +1,35 @@
+{
+    "schemaVersion":  1,
+    "id":  "com.guidexos.experimental.nativeaot.hostlogproof",
+    "displayName":  "Managed HostLogProof",
+    "version":  "0.1.0",
+    "publisher":  "guideXOS Experimental",
+    "description":  "NativeAOT managed-code execution proof",
+    "category":  "Experimental",
+    "kind":  "NativeElf",
+    "icon":  "",
+    "minGuideXOSVersion":  "0.1.0",
+    "supportedArchitectures":  [
+                                   "amd64"
+                               ],
+    "desktopRegistryHints":  {
+                                 "gxos.nativeelf.tlsIndexAddress":  "0x100B993C",
+                                 "gxos.nativeelf.tlsBlockSize":  "0x110"
+                             },
+    "entries":  [
+                    {
+                        "architecture":  "amd64",
+                        "path":  "bin/amd64/HostLogProof.elf",
+                        "entryPoint":  "ManagedMain",
+                        "entryCategory":  "guidexos-runtime-pack-reverse-pinvoke",
+                        "abi":  "guidexos-c-abi-v1",
+                        "runtime":  "native-elf"
+                    }
+                ],
+    "permissions":  [
+                        "log"
+                    ],
+    "fileAssociations":  [
+
+                         ]
+}

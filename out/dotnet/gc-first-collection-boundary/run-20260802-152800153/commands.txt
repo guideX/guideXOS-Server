@@ -1,0 +1,2 @@
+"cmd.exe" /d /c "call \"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-collection-boundary\build\build-first-collection-boundary-runtime-pack.bat\""
+"cmd.exe" /d /c "call \"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-collection-boundary\build\build-first-collection-boundary-artifact.bat\""

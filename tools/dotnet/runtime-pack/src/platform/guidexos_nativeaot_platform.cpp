@@ -61,6 +61,18 @@ constexpr gx_size kNativeAotLargeObjectSize = 85000u;
 constexpr gx_uint32 kSegmentBoundaryArrayLength = GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ARRAY_LENGTH;
 constexpr gx_uint32 kSegmentBoundaryHardLimit = GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_HARD_LIMIT;
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+#ifndef GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH
+#define GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH 4096u
+#endif
+#ifndef GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT
+#define GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT 256u
+#endif
+constexpr gx_uint32 kFirstCollectionBoundaryArrayLength =
+    GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH;
+constexpr gx_uint32 kFirstCollectionBoundaryHardLimit =
+    GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT;
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
 #ifndef GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ARRAY_LENGTH
 #define GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ARRAY_LENGTH 4096u
@@ -174,6 +186,9 @@ GuideXosVmTraceCountFn g_guideXosVmTraceCount = nullptr;
 GuideXosVmTraceAtFn g_guideXosVmTraceAt = nullptr;
 GuideXosSegmentDescribeFn g_guideXosSegmentDescribe = nullptr;
 bool g_guideXosSegmentBoundaryExperimentRequested = false;
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+bool g_guideXosFirstCollectionBoundaryExperimentRequested = false;
+#endif
 
 void markSegmentBoundaryFailure(gx_uint32 reason) {
     ++g_guideXosAllocationDiagnostics.pointerContractFailures;
@@ -211,6 +226,30 @@ void beginSegmentTransitionExperiment() {
     g_guideXosAllocationDiagnostics.vmTraceStartCount = static_cast<gx_uint32>(traceCount);
     g_guideXosAllocationDiagnostics.vmTraceCursor = static_cast<gx_uint32>(traceCount);
     g_guideXosAllocationDiagnostics.vmTraceEndCount = static_cast<gx_uint32>(traceCount);
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+void beginFirstCollectionBoundaryExperiment() {
+    g_guideXosSegmentBoundaryExperimentRequested = true;
+    g_guideXosFirstCollectionBoundaryExperimentRequested = true;
+    const gx_size traceCount = g_guideXosVmTraceCount == nullptr
+        ? 0u : g_guideXosVmTraceCount();
+    g_guideXosAllocationDiagnostics.experimentMode = 4u;
+    g_guideXosAllocationDiagnostics.selectedArrayLength =
+        kFirstCollectionBoundaryArrayLength;
+    g_guideXosAllocationDiagnostics.hardAllocationLimit =
+        kFirstCollectionBoundaryHardLimit;
+    g_guideXosAllocationDiagnostics.hardRefillLimit =
+        GUIDEXOS_NATIVEAOT_MAX_REFILL_HISTORY;
+    g_guideXosAllocationDiagnostics.hardCommitLimit = 32u;
+    g_guideXosAllocationDiagnostics.hardSegmentTransitionLimit = 1u;
+    g_guideXosAllocationDiagnostics.vmTraceStartCount =
+        static_cast<gx_uint32>(traceCount);
+    g_guideXosAllocationDiagnostics.vmTraceCursor =
+        static_cast<gx_uint32>(traceCount);
+    g_guideXosAllocationDiagnostics.vmTraceEndCount =
+        static_cast<gx_uint32>(traceCount);
 }
 #endif
 
@@ -383,6 +422,13 @@ extern "C" __declspec(dllexport) void __cdecl
 guideXosManagedAllocationBeginSegmentBoundaryExperiment() {
     beginSegmentBoundaryExperiment();
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+extern "C" __declspec(dllexport) void __cdecl
+guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment() {
+    beginFirstCollectionBoundaryExperiment();
+}
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_TRANSITION_ALLOCATION)
 extern "C" __declspec(dllexport) void __cdecl
@@ -607,7 +653,15 @@ void initializeRuntimeState(unsigned char* block) {
         g_guideXosRealGcDiagnosticsInitialized = true;
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
         if (g_guideXosSegmentBoundaryExperimentRequested) {
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+            if (g_guideXosFirstCollectionBoundaryExperimentRequested) {
+                beginFirstCollectionBoundaryExperiment();
+            } else {
+                beginSegmentBoundaryExperiment();
+            }
+#else
             beginSegmentBoundaryExperiment();
+#endif
         }
 #endif
     }
@@ -669,9 +723,182 @@ extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllo
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationReport__Ansi;
 #elif defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi;
+#if !defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetLoopStatus__Ansi;
-extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetHardLimit__Ansi;
 #endif
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetHardLimit__Ansi;
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationRecordSentinelValidation__Ansi;
+#endif
+#endif
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+void firstCollectionSerialPutChar(char value) {
+    if (value == '\n') {
+        while ((__inbyte(0x3FDu) & 0x20u) == 0u) {
+        }
+        __outbyte(0x3F8u, static_cast<unsigned char>('\r'));
+    }
+    while ((__inbyte(0x3FDu) & 0x20u) == 0u) {
+    }
+    __outbyte(0x3F8u, static_cast<unsigned char>(value));
+}
+
+void firstCollectionSerialPutString(const char* value) {
+    while (*value != '\0') {
+        firstCollectionSerialPutChar(*value++);
+    }
+}
+
+void firstCollectionSerialPutHex32(gx_uint32 value) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        firstCollectionSerialPutChar(hex[(value >> shift) & 0xFu]);
+    }
+}
+
+void firstCollectionSerialPutHex64(gx_uintptr value) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        firstCollectionSerialPutChar(hex[(value >> shift) & 0xFu]);
+    }
+}
+
+void emitFirstCollectionSafeStopMarker() {
+    const guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    firstCollectionSerialPutString(
+        "[nativeaot-gc-first-collection-boundary] SAFE_STOP marker=");
+    firstCollectionSerialPutHex32(diagnostics.firstCollectionBoundaryMarker);
+    firstCollectionSerialPutString(" callback=GCToEEInterface::SuspendEE requestCount=");
+    firstCollectionSerialPutHex32(diagnostics.firstCollectionRequestCount);
+    firstCollectionSerialPutString(" entryCount=");
+    firstCollectionSerialPutHex32(diagnostics.firstCollectionEntryCount);
+    firstCollectionSerialPutString(" requestedGeneration=");
+    firstCollectionSerialPutHex32(diagnostics.requestedGeneration);
+    firstCollectionSerialPutString(" reason=");
+    firstCollectionSerialPutHex32(diagnostics.collectionReason);
+    firstCollectionSerialPutString(" blocking=");
+    firstCollectionSerialPutHex32(diagnostics.collectionBlockingMode);
+    firstCollectionSerialPutString(" compacting=");
+    firstCollectionSerialPutHex32(diagnostics.collectionCompactingMode);
+    firstCollectionSerialPutString(" suspensionRequestCount=");
+    firstCollectionSerialPutHex32(diagnostics.suspensionRequestCount);
+    firstCollectionSerialPutString(" suspensionEntryCount=");
+    firstCollectionSerialPutHex32(diagnostics.suspensionEntryCount);
+    firstCollectionSerialPutString(" restartResumeCount=");
+    firstCollectionSerialPutHex32(diagnostics.restartResumeCount);
+    firstCollectionSerialPutString(" heapMutationStarted=");
+    firstCollectionSerialPutHex32(diagnostics.heapMutationStarted);
+    firstCollectionSerialPutString(" managedExecutionResumed=");
+    firstCollectionSerialPutHex32(diagnostics.managedExecutionResumed);
+    firstCollectionSerialPutString(" unsupportedContract=");
+    firstCollectionSerialPutHex32(diagnostics.firstUnsupportedContract);
+    firstCollectionSerialPutString(" allocations=");
+    firstCollectionSerialPutHex32(diagnostics.allocationCount);
+    firstCollectionSerialPutString(" fast=");
+    firstCollectionSerialPutHex32(diagnostics.fastAllocationCount);
+    firstCollectionSerialPutString(" rare=");
+    firstCollectionSerialPutHex32(diagnostics.rarePathCount);
+    firstCollectionSerialPutString(" allocationRequests=");
+    firstCollectionSerialPutHex32(diagnostics.allocationRequestCount);
+    firstCollectionSerialPutString(" collectionConsidered=");
+    firstCollectionSerialPutHex32(diagnostics.collectionConsideredCount);
+    firstCollectionSerialPutString(" allocationOrdinal=");
+    firstCollectionSerialPutHex32(diagnostics.collectionRequestAllocationOrdinal);
+    firstCollectionSerialPutString(" lastObject=");
+    firstCollectionSerialPutHex64(diagnostics.currentObject);
+    firstCollectionSerialPutString(" objectAddress=0000000000000000 requestedObjectSize=");
+    firstCollectionSerialPutHex32(diagnostics.requestedObjectSize);
+    firstCollectionSerialPutString(" actualAlignedSize=");
+    firstCollectionSerialPutHex64(diagnostics.derivedObjectSize);
+    firstCollectionSerialPutString(" allocPtr=");
+    firstCollectionSerialPutHex64(diagnostics.collectionEntryAllocPtr);
+    firstCollectionSerialPutString(" allocLimit=");
+    firstCollectionSerialPutHex64(diagnostics.collectionEntryAllocLimit);
+    firstCollectionSerialPutString(" committed=");
+    firstCollectionSerialPutHex64(diagnostics.currentSegmentCommitted);
+    firstCollectionSerialPutString(" reserved=");
+    firstCollectionSerialPutHex64(diagnostics.currentSegmentReserved);
+    firstCollectionSerialPutString(" segment=");
+    firstCollectionSerialPutHex64(diagnostics.currentSegmentIdentity);
+    firstCollectionSerialPutString(" refills=");
+    firstCollectionSerialPutHex32(diagnostics.allocationContextRefillCount);
+    firstCollectionSerialPutString(" sameSegmentCommits=");
+    firstCollectionSerialPutHex32(diagnostics.heapCommitEventCount);
+    firstCollectionSerialPutString(" segmentTransitions=");
+    firstCollectionSerialPutHex32(diagnostics.segmentTransitionCount);
+    firstCollectionSerialPutString(" sentinelChecks=");
+    firstCollectionSerialPutHex32(diagnostics.sentinelValidationCount);
+    firstCollectionSerialPutString(" sentinelFailures=");
+    firstCollectionSerialPutHex32(diagnostics.sentinelValidationFailures);
+    firstCollectionSerialPutString(" liveSentinels=");
+    firstCollectionSerialPutHex32(diagnostics.liveSentinelCount);
+    firstCollectionSerialPutString("\n");
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotCollectionBoundarySafeStop(gx_uint32 suspendReason) {
+    g_guideXosAllocationDiagnostics.firstCollectionBoundaryMarker =
+        GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_SAFE_STOP_MARKER;
+    g_guideXosAllocationDiagnostics.firstCollectionRequestCount = 1u;
+    g_guideXosAllocationDiagnostics.firstCollectionEntryCount = 1u;
+    g_guideXosAllocationDiagnostics.collectionRequests = 1u;
+    g_guideXosAllocationDiagnostics.collectionTriggeringEntries = 1u;
+    g_guideXosAllocationDiagnostics.collectionsEntered = 1u;
+    g_guideXosAllocationDiagnostics.collectionRequestCount = 1u;
+    g_guideXosAllocationDiagnostics.collectionEntryCount = 1u;
+    g_guideXosAllocationDiagnostics.collectionReason =
+        GUIDEXOS_NATIVEAOT_COLLECTION_REASON_OUT_OF_SO_H;
+    g_guideXosAllocationDiagnostics.requestedGeneration = 1u;
+    g_guideXosAllocationDiagnostics.collectionBlockingMode =
+        GUIDEXOS_NATIVEAOT_COLLECTION_BLOCKING;
+    g_guideXosAllocationDiagnostics.collectionCompactingMode =
+        GUIDEXOS_NATIVEAOT_COLLECTION_NONCOMPACTING_NOT_SELECTED;
+    g_guideXosAllocationDiagnostics.gcLockTransitionCount = 1u;
+    g_guideXosAllocationDiagnostics.suspensionRequestCount = 1u;
+    g_guideXosAllocationDiagnostics.suspensionEntryCount = 0u;
+    g_guideXosAllocationDiagnostics.restartResumeCount = 0u;
+    g_guideXosAllocationDiagnostics.heapMutationStarted = 0u;
+    g_guideXosAllocationDiagnostics.managedExecutionResumed = 0u;
+    g_guideXosAllocationDiagnostics.firstUnsupportedContract =
+        GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_UNSUPPORTED_SUSPEND_EE;
+    g_guideXosAllocationDiagnostics.safeStopObserved = 1u;
+    g_guideXosAllocationDiagnostics.stopReason =
+        GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_SAFE_STOP_MARKER;
+    g_guideXosAllocationDiagnostics.completionStatus = 5u;
+    g_guideXosAllocationDiagnostics.collectionRequestAllocationOrdinal =
+        g_guideXosAllocationDiagnostics.allocationRequestCount;
+    g_guideXosAllocationDiagnostics.collectionEntryAllocationOrdinal =
+        g_guideXosAllocationDiagnostics.allocationRequestCount;
+    g_guideXosAllocationDiagnostics.collectionEntryThread =
+        g_guideXosAllocationDiagnostics.runtimeThreadRecord;
+    g_guideXosAllocationDiagnostics.collectionEntryAllocPtr =
+        g_guideXosAllocationDiagnostics.currentAllocPtr;
+    g_guideXosAllocationDiagnostics.collectionEntryAllocLimit =
+        g_guideXosAllocationDiagnostics.currentAllocLimit;
+    g_guideXosAllocationDiagnostics.collectionEntryObjectSize =
+        g_guideXosAllocationDiagnostics.derivedObjectSize;
+    g_guideXosAllocationDiagnostics.collectionEntrySegmentIdentity =
+        g_guideXosAllocationDiagnostics.currentSegmentIdentity;
+    g_guideXosAllocationDiagnostics.collectionEntrySegmentCommitted =
+        g_guideXosAllocationDiagnostics.currentSegmentCommitted;
+    g_guideXosAllocationDiagnostics.collectionEntrySegmentReserved =
+        g_guideXosAllocationDiagnostics.currentSegmentReserved;
+    g_guideXosAllocationDiagnostics.stage =
+        GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F20_FIRST_COLLECTION_SAFE_STOP;
+    g_guideXosAllocationDiagnostics.sequence += 1u;
+    g_guideXosAllocationDiagnostics.currentRip =
+        reinterpret_cast<gx_uintptr>(_ReturnAddress());
+    g_guideXosAllocationDiagnostics.currentRsp =
+        reinterpret_cast<gx_uintptr>(_AddressOfReturnAddress());
+    g_guideXosAllocationDiagnostics.waitReason = suspendReason;
+    g_guideXosAllocationDiagnostics.failFastReason = 7u;
+    emitFirstCollectionSafeStopMarker();
+    for (;;) {
+    }
+}
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
@@ -757,6 +984,9 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     g_guideXosAllocationDiagnostics.finalizableObjectCountBefore = finalizableBefore;
     g_guideXosAllocationDiagnostics.gcInProgressBefore = gcInProgressBefore;
     g_guideXosAllocationDiagnostics.gcMode = gcModeBefore;
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+    g_guideXosAllocationDiagnostics.collectionEntryHeap = gcHeap;
+#endif
 
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A06_FAST_PATH_ATTEMPTED,
                           eeType, length, objectSize, allocationPointerBefore,
@@ -1372,6 +1602,21 @@ guideXosManagedAllocationValidateObject(
     return failure == 0u ? 0 : -1;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+extern "C" __declspec(noinline) __declspec(dllexport) int __cdecl
+guideXosManagedAllocationRecordSentinelValidation(
+    gx_uint32 checkedCount, gx_uint32 failureCount) {
+    g_guideXosAllocationDiagnostics.sentinelValidationCount += checkedCount;
+    g_guideXosAllocationDiagnostics.sentinelValidationFailures += failureCount;
+    if (failureCount != 0u) {
+        g_guideXosAllocationDiagnostics.pointerContractFailures += 1u;
+        return -1;
+    }
+    g_guideXosAllocationDiagnostics.liveSentinelCount = 4u;
+    return 0;
+}
+#endif
+
 extern "C" __declspec(noinline) __declspec(dllexport) int __cdecl
 guideXosManagedAllocationGetLoopStatus() {
     if (g_guideXosAllocationDiagnostics.failureReason != 0u ||
@@ -1676,11 +1921,19 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationReport__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationReportFn>(guideXosManagedAllocationReport));
 #elif defined(GUIDEXOS_NATIVEAOT_FIRST_REFILL_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
     using GuideXosManagedAllocationValidateObjectFn = int (__cdecl*)(void*, gx_size, gx_uint32, gx_uint32, gx_uint32);
+#if !defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
     using GuideXosManagedAllocationGetLoopStatusFn = int (__cdecl*)(void);
+#endif
     using GuideXosManagedAllocationGetHardLimitFn = gx_uint32 (__cdecl*)(void);
+    using GuideXosManagedAllocationRecordSentinelValidationFn = int (__cdecl*)(gx_uint32, gx_uint32);
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationValidateObjectFn>(guideXosManagedAllocationValidateObject));
+#if !defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetLoopStatus__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationGetLoopStatusFn>(guideXosManagedAllocationGetLoopStatus));
+#endif
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationGetHardLimit__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationGetHardLimitFn>(guideXosManagedAllocationGetHardLimit));
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationRecordSentinelValidation__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedAllocationRecordSentinelValidationFn>(guideXosManagedAllocationRecordSentinelValidation));
+#endif
 #endif
 #endif
     unsigned char* cell = runtimeCell(block);

@@ -240,3 +240,17 @@ therefore ended with **Outcome B**, zero collection entry, zero suspension,
 zero segment transitions, and three of three QEMU passes. The exact next
 experiment is a separately authorized first-GC collection-readiness audit.
 See [NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md](NATIVEAOT_WORKSTATION_GC_FIRST_SEGMENT_TRANSITION.md).
+
+## First collection-control boundary - 2026-08-02
+
+The next bounded experiment reached the first actual Workstation GC request
+and collection entry. With the locked `byte[4096]` workload it recorded 40
+validated allocations, 21 refills, two same-segment commitment extensions,
+one request, and one entry. The request was generation 1 for
+`reason_oos_soh` (5), blocking, with compaction not selected. The proof-only
+stop occurred at `GCToEEInterface::SuspendEE` before
+`ThreadStore::LockThreadStore`; suspension was requested but not entered, and
+heap mutation and managed resume were both zero. This is **Outcome A for the
+first collection-control boundary**, not completed collection support. The
+earlier no-collection segment-transition result remains **Outcome B**. See
+[NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md).

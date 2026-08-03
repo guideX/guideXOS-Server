@@ -1,0 +1,8 @@
+{
+    "run":  "first-run",
+    "timeoutSeconds":  90,
+    "triggered":  false,
+    "processId":  13952,
+    "serialPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\run-20260802-161654535\\first-run\\serial.log",
+    "monitorPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\run-20260802-161654535\\first-run\\watchdog-monitor.txt"
+}

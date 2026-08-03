@@ -1,0 +1,8 @@
+{
+    "run":  "first-run",
+    "timeoutSeconds":  90,
+    "triggered":  false,
+    "processId":  16148,
+    "serialPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\first-post-startup-commit-qemu\\run-20260802-160158301\\first-run\\serial.log",
+    "monitorPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\first-post-startup-commit-qemu\\run-20260802-160158301\\first-run\\watchdog-monitor.txt"
+}

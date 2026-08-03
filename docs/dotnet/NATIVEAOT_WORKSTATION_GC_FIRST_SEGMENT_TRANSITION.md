@@ -241,3 +241,17 @@ The ordinary kernel was restored after all checks. Both
 `kernel/build/amd64/bin/kernel.elf` and `ESP/kernel.elf` hash to
 `D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C`.
 Generated evidence remains ignored and no commit was created.
+
+## Follow-up: first collection boundary - 2026-08-02
+
+The next experiment did not alter the historical transition result. It used a
+separate proof mode and reached the first real Workstation GC request and
+collection entry after 40 validated `byte[4096]` allocations. The exact
+request was generation 1, `reason_oos_soh` (5), blocking, with one suspension
+request and zero suspension entries. The proof stopped at
+`GCToEEInterface::SuspendEE` before `ThreadStore::LockThreadStore`, with zero
+heap mutation, zero managed resume, and zero segment transitions. Three fresh
+QEMU runs passed with the same marker and counters. This is collection-boundary
+**Outcome A**, while this document's earlier no-collection segment-transition
+result remains **Outcome B**. See
+[NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md).

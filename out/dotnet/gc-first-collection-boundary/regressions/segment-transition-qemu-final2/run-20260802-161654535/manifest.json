@@ -1,0 +1,159 @@
+{
+    "outcome":  "B/Workstation GC requests collection before a SOH segment transition",
+    "arrayLength":  4096,
+    "hardAllocationLimit":  32,
+    "hardRefillLimit":  20,
+    "hardCommitLimit":  4,
+    "hardSegmentTransitionLimit":  1,
+    "artifactPe":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\build\\artifact\\NativeAotGcFirstSegmentTransition.exe",
+    "artifactPeSha256":  "1E3CCE705AB3748F6374FB79F9D143AE794283688B5570F31993DB2D215023BE",
+    "artifactElf":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\build\\artifact\\NativeAotGcFirstSegmentTransition.elf",
+    "artifactElfSha256":  "417AEF5F7CC5FD3C58A489DAACAD417B44858EA3C72727EE6EB37DF9BB73166A",
+    "adaptedGcArchive":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\build\\artifact\\Runtime.WorkstationGC.guidexos-nativeaot-gc-segment-transition.lib",
+    "adaptedGcArchiveSha256":  "27E50651450E9C2268B65D0E0631C6398D034C29C8F8824FFB683D71A8F9E143",
+    "activePalArchive":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\pal-runtime-active-replacement\\archives\\Runtime.WorkstationGC.guidexos-nativeaot-pal.lib",
+    "activePalArchiveSha256":  "C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F",
+    "embeddedObject":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\build\\gc-segment-transition-artifact.o",
+    "embeddedObjectSha256":  "C47873943F34ED7AAB24965925E0AF25F97D4BE5293E5D8E95700C3E4EF6ED8B",
+    "specializedKernelSha256":  "70CCDCB7C5EF5897D28D6FDEB1F25E8F52B0C8D026971A5EF7D638F885C076E4",
+    "authorizedNormalizedAdaptedGcIdentity":  {
+                                                  "strategy":  "A-complete-gcenv-object",
+                                                  "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                                                  "stockSha256":  "0E6A134AD4150CD604317A47860DAE82EB30AAE4D9CDB14144E06454E7BB1948",
+                                                  "adaptedSha256":  "3220504AF0D2D71FA66AAB0AF789788F2AE83EA00470EB30BAEE49D06A71973B",
+                                                  "adaptedLength":  5937120,
+                                                  "replacementObjects":  [
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_gcenv.obj",
+                                                                                 "sha256":  "5C01020E9E81077A51703903EECF929F7CC27F39D1EA844BC8713B15B6C706D6"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_mutex.obj",
+                                                                                 "sha256":  "D630A1D3CEFF6C191CF98D1278473C060861682010F078539478D6C1055B68C1"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_event.obj",
+                                                                                 "sha256":  "EE74472760E8384739EC133EC451068F70F5449F956CB1898DB87F14CB507AF5"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_critical_section_adapter.obj",
+                                                                                 "sha256":  "D38007ACDA613520AB276F3A9A1F6C6451E526929D003691E2D7D060A32A098C"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_virtual_memory_adapter.obj",
+                                                                                 "sha256":  "3CB12F7DF624F53D469C485D2AB230F86846BF9AC5D93206E80DBAAADABC76A7"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_event_adapter.obj",
+                                                                                 "sha256":  "22BD28A6017692D265276DE014A3972AEFF022DDA50D2B009A3BF101BCAB3DDA"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_fls_adapter.obj",
+                                                                                 "sha256":  "A66952D40DABC7848470E849BB170A2578565BA120F8946C86EDF39F1704DBEF"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_thread_adapter.obj",
+                                                                                 "sha256":  "7E393B188832231AC189A64128BA752520F6659EE0D444CDDD04B6F15C32EB73"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_native_thread.obj",
+                                                                                 "sha256":  "4ADC494189FA5AC6F572A4D7C83668CC1C37EB52A3ED6BF5D5534CC56FD6C2C8"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_virtual_memory_region.obj",
+                                                                                 "sha256":  "3068B95E35570150E80634789CC68E13A80138566E33A37CEB1C88976464F185"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_local_storage.obj",
+                                                                                 "sha256":  "ED7E36941EB925C24AE51F6793248343006C32563AB717088A43F0908689DB4C"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_gc_platform_services.obj",
+                                                                                 "sha256":  "545CCAE753B90094F973C32C19CE4590C8A3DC3B97E736C3C1212AD9B241BE45"
+                                                                             }
+                                                                         ],
+                                                  "prohibitedInventoryCount":  19,
+                                                  "stockUnchanged":  true
+                                              },
+    "palReplacementHashes":  [
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_gcenv.obj",
+                                     "sha256":  "5C01020E9E81077A51703903EECF929F7CC27F39D1EA844BC8713B15B6C706D6"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_mutex.obj",
+                                     "sha256":  "D630A1D3CEFF6C191CF98D1278473C060861682010F078539478D6C1055B68C1"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_event.obj",
+                                     "sha256":  "EE74472760E8384739EC133EC451068F70F5449F956CB1898DB87F14CB507AF5"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_critical_section_adapter.obj",
+                                     "sha256":  "D38007ACDA613520AB276F3A9A1F6C6451E526929D003691E2D7D060A32A098C"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_virtual_memory_adapter.obj",
+                                     "sha256":  "3CB12F7DF624F53D469C485D2AB230F86846BF9AC5D93206E80DBAAADABC76A7"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_event_adapter.obj",
+                                     "sha256":  "22BD28A6017692D265276DE014A3972AEFF022DDA50D2B009A3BF101BCAB3DDA"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_fls_adapter.obj",
+                                     "sha256":  "A66952D40DABC7848470E849BB170A2578565BA120F8946C86EDF39F1704DBEF"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_thread_adapter.obj",
+                                     "sha256":  "7E393B188832231AC189A64128BA752520F6659EE0D444CDDD04B6F15C32EB73"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_native_thread.obj",
+                                     "sha256":  "4ADC494189FA5AC6F572A4D7C83668CC1C37EB52A3ED6BF5D5534CC56FD6C2C8"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_virtual_memory_region.obj",
+                                     "sha256":  "3068B95E35570150E80634789CC68E13A80138566E33A37CEB1C88976464F185"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_local_storage.obj",
+                                     "sha256":  "ED7E36941EB925C24AE51F6793248343006C32563AB717088A43F0908689DB4C"
+                                 },
+                                 {
+                                     "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_gc_platform_services.obj",
+                                     "sha256":  "545CCAE753B90094F973C32C19CE4590C8A3DC3B97E736C3C1212AD9B241BE45"
+                                 }
+                             ],
+    "selectors":  [
+                      "GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1",
+                      "GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST=1"
+                  ],
+    "runs":  [
+                 {
+                     "name":  "first-run",
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\run-20260802-161654535\\first-run\\serial.log",
+                     "serialSha256":  "C08E82B466386C7E45DE17B47B96069C0ABD811C696D0219AAC616ABD2E2763E",
+                     "experimentalKernelSha256":  "70CCDCB7C5EF5897D28D6FDEB1F25E8F52B0C8D026971A5EF7D638F885C076E4",
+                     "experimentalEspSha256":  "70CCDCB7C5EF5897D28D6FDEB1F25E8F52B0C8D026971A5EF7D638F885C076E4"
+                 },
+                 {
+                     "name":  "repeat-1",
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\run-20260802-161654535\\repeat-1\\serial.log",
+                     "serialSha256":  "2AEC34C93F0856A346C51174AB2B7ABA1F9383A654C24729F596FDACA1283826",
+                     "experimentalKernelSha256":  "70CCDCB7C5EF5897D28D6FDEB1F25E8F52B0C8D026971A5EF7D638F885C076E4",
+                     "experimentalEspSha256":  "70CCDCB7C5EF5897D28D6FDEB1F25E8F52B0C8D026971A5EF7D638F885C076E4"
+                 },
+                 {
+                     "name":  "repeat-2",
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\segment-transition-qemu-final2\\run-20260802-161654535\\repeat-2\\serial.log",
+                     "serialSha256":  "FCA1D6A9943E9E25A2C29E9A7AB5F5363EC4DEA8D027004FF595FEB14B4DB5A4",
+                     "experimentalKernelSha256":  "70CCDCB7C5EF5897D28D6FDEB1F25E8F52B0C8D026971A5EF7D638F885C076E4",
+                     "experimentalEspSha256":  "70CCDCB7C5EF5897D28D6FDEB1F25E8F52B0C8D026971A5EF7D638F885C076E4"
+                 }
+             ],
+    "processTeardown":  "PASS",
+    "runtimeLevelShutdown":  "NOT SUPPORTED",
+    "normalKernelSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "restoredNormalKernelSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C"
+}

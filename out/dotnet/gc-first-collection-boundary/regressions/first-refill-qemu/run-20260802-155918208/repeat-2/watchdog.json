@@ -1,0 +1,8 @@
+{
+    "run":  "repeat-2",
+    "timeoutSeconds":  90,
+    "triggered":  false,
+    "processId":  1860,
+    "serialPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\first-refill-qemu\\run-20260802-155918208\\repeat-2\\serial.log",
+    "monitorPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-collection-boundary\\regressions\\first-refill-qemu\\run-20260802-155918208\\repeat-2\\watchdog-monitor.txt"
+}

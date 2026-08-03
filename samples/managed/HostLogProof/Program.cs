@@ -24,7 +24,7 @@ public static unsafe class Program
     private static extern int GuideXosManagedAllocationReport(NativeGxAppContext* context, uint status);
 #endif
 
-#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION
+#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION || HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationValidateObject")]
     private static extern int GuideXosManagedAllocationValidateObject(
         nint arrayObject,
@@ -33,14 +33,22 @@ public static unsafe class Program
         uint zeroByteCount,
         uint patternValid);
 
+#if !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationGetLoopStatus")]
     private static extern int GuideXosManagedAllocationGetLoopStatus();
+#endif
 
     [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationGetHardLimit")]
     private static extern uint GuideXosManagedAllocationGetHardLimit();
+
+#if HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION
+    [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationRecordSentinelValidation")]
+    private static extern int GuideXosManagedAllocationRecordSentinelValidation(
+        uint checkedCount, uint failureCount);
+#endif
 #endif
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedArrayHostLog")]
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
 #endif
@@ -67,7 +75,7 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION
         if (ctx->host == null || ctx->host->log == null)
         {
             return GxAbi.ErrorInvalidArgument;
@@ -150,6 +158,61 @@ public static unsafe class Program
             {
                 return GxAbi.ErrorInvalidArgument;
             }
+        }
+
+        return GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION
+        // Keep four early objects live and validate their deterministic
+        // contents before each next allocation. The native safe stop is
+        // reached by the next allocation request; this body never returns
+        // from an allocation that the GC could not complete.
+        const int arrayLength = 4096;
+        byte[] sentinel0 = null;
+        byte[] sentinel1 = null;
+        byte[] sentinel2 = null;
+        byte[] sentinel3 = null;
+        byte[] current = null;
+        uint hardLimit = GuideXosManagedAllocationGetHardLimit();
+        if (hardLimit < 8u || hardLimit > 1024u)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        for (uint iteration = 0u; iteration < hardLimit; iteration++)
+        {
+            bool sentinelsValid = ValidateSample(sentinel0, 0u) &&
+                ValidateSample(sentinel1, 1u) &&
+                ValidateSample(sentinel2, 2u) &&
+                ValidateSample(sentinel3, 3u);
+            GuideXosManagedAllocationRecordSentinelValidation(
+                iteration == 0u ? 0u : 4u, sentinelsValid ? 0u : 1u);
+            if (!sentinelsValid)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+
+            current = new byte[arrayLength];
+            uint zeroByteCount = CountZeroBytes(current);
+            WriteIdentifyingPattern(current, iteration);
+            bool patternValid = HasIdentifyingPattern(current, iteration);
+            nint objectReference = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(ref current);
+            int validationResult = GuideXosManagedAllocationValidateObject(
+                objectReference, arrayLength, iteration, zeroByteCount,
+                patternValid ? 1u : 0u);
+            if (validationResult != 0)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+
+            if (iteration == 0u) sentinel0 = current;
+            else if (iteration == 1u) sentinel1 = current;
+            else if (iteration == 2u) sentinel2 = current;
+            else if (iteration == 3u) sentinel3 = current;
+            GC.KeepAlive(sentinel0);
+            GC.KeepAlive(sentinel1);
+            GC.KeepAlive(sentinel2);
+            GC.KeepAlive(sentinel3);
+            GC.KeepAlive(current);
         }
 
         return GxAbi.ErrorInvalidArgument;
@@ -338,7 +401,7 @@ public static unsafe class Program
 #endif
     }
 
-#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION || HOSTLOGPROOF_REPEATED_ALLOCATION
+#if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION || HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION || HOSTLOGPROOF_REPEATED_ALLOCATION
     private static uint CountZeroBytes(byte[] buffer)
     {
         uint count = 0u;

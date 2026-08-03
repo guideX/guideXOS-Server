@@ -41,6 +41,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstCollectionBoundary'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Repeated'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING;HOSTLOGPROOF_REPEATED_ALLOCATION</DefineConstants>
   </PropertyGroup>
