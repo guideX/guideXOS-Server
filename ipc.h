@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <vector>
 #include <cstdint>
 #include <mutex>
@@ -35,7 +36,22 @@ namespace gxos { namespace ipc {
         }
         bool try_pop(Message& out){
             std::lock_guard<std::mutex> lk(_mu);
-            if (_q.empty()) return false; out = std::move(_q.front()); _q.pop_front(); return true;
+            if (_q.empty()) return false;
+            out = std::move(_q.front());
+            _q.pop_front();
+            _cv.notify_all();
+            return true;
+        }
+        bool try_pop_type(uint32_t type, Message& out){
+            std::lock_guard<std::mutex> lk(_mu);
+            auto it = std::find_if(_q.begin(), _q.end(), [type](const Message& message) {
+                return message.type == type;
+            });
+            if (it == _q.end()) return false;
+            out = std::move(*it);
+            _q.erase(it);
+            _cv.notify_all();
+            return true;
         }
     private:
         mutable std::mutex _mu; std::condition_variable _cv; std::deque<Message> _q; size_t _cap;
