@@ -78,6 +78,7 @@ namespace gxos {
         static uint64_t spawn(const ProcessSpec& spec, const std::vector<std::string>& args);
         static bool send(uint64_t dstPid, ipc::Message&& msg);
         static bool try_recv(uint64_t pid, ipc::Message& out);
+        static bool try_recv_type(uint64_t pid, uint32_t type, ipc::Message& out);
         static bool wait_recv(uint64_t pid, ipc::Message& out, uint64_t timeoutMs);
         static bool terminate(uint64_t pid);
         static std::vector<uint64_t> list();

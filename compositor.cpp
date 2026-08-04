@@ -818,6 +818,15 @@ namespace gxos {
             if (hostedInputDiagnosticsEnabled( )) Logger::write(LogLevel::Info, "Hosted title input diag: " + message);
         }
 
+        static void hostedInputKeyDiagnostic(const std::string& message) {
+            if (!hostedInputDiagnosticsEnabled( )) return;
+            static uint32_t count = 0;
+            if (count >= 128) return;
+            ++count;
+            Logger::write(LogLevel::Info, "Hosted key trace #" + std::to_string(count) +
+                " monoMs=" + std::to_string(nowMs( )) + ": " + message);
+        }
+
         static std::string hostedInputHandle(HWND hwnd) {
             std::ostringstream oss;
             oss << "0x" << std::hex << reinterpret_cast<uintptr_t>(hwnd) << std::dec;
@@ -841,7 +850,18 @@ namespace gxos {
             if (type == MsgType::MT_Create) {
                 Logger::write(LogLevel::Info, std::string("publishOut MT_Create payload=") + payload + " dstPid=" + std::to_string(dstPid));
             }
-            ipc::Message out; out.type = (uint32_t)type; out.dstPid = dstPid; out.data.assign(payload.begin( ), payload.end( )); ipc::Bus::publish(kGuiChanOut, std::move(out), false); 
+            ipc::Message out; out.type = (uint32_t)type; out.dstPid = dstPid; out.data.assign(payload.begin( ), payload.end( ));
+            const bool renderAck = type == MsgType::MT_DrawText || type == MsgType::MT_DrawTextAt ||
+                type == MsgType::MT_DrawTextAtColor || type == MsgType::MT_DrawRect ||
+                type == MsgType::MT_FramePresent || type == MsgType::MT_DrawImage ||
+                type == MsgType::MT_DrawImageAnimated;
+            if (renderAck && dstPid != 0) {
+                // Rendering is fire-and-forget at the native host API. Do not
+                // enqueue draw acknowledgments in the bounded app mailbox;
+                // the app never consumes them and they can block real input.
+                return;
+            }
+            ipc::Bus::publish(kGuiChanOut, std::move(out), false);
         }
 
         struct BackgroundDrawRect {
@@ -4467,6 +4487,18 @@ namespace gxos {
             }
             case WM_KEYDOWN: case WM_SYSKEYDOWN: {
                 int key = (int)w;
+                uint64_t traceOwnerPid = 0;
+                uint64_t traceTargetWindow = 0;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    traceOwnerPid = inputOwnerPid( );
+                    traceTargetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                }
+                hostedInputKeyDiagnostic("wm=" + std::to_string(msg) +
+                    " action=down key=" + std::to_string(key) +
+                    " ownerPid=" + std::to_string(traceOwnerPid) +
+                    " targetWindow=" + std::to_string(traceTargetWindow) +
+                    " " + hostedInputWindowContext(h));
                 if (Compositor::isDesktopFolderRenameActive()) {
                     Compositor::handleDesktopFolderRenameKeyDown(static_cast<uint32_t>(key));
                     requestRepaint();
@@ -4557,16 +4589,26 @@ namespace gxos {
                 if (IsShiftDown( )) modifiers |= 1;
                 if ((GetKeyState(VK_MENU) & 0x8000) != 0) modifiers |= 4;
                 publishOut(MsgType::MT_InputKey, std::to_string(key) + "|down|" + std::to_string(modifiers), ownerPid);
+                hostedInputKeyDiagnostic("routed action=down key=" + std::to_string(key) +
+                    " modifiers=" + std::to_string(modifiers) +
+                    " ownerPid=" + std::to_string(ownerPid));
             } break;
-            case WM_KEYUP: {
+            case WM_KEYUP: case WM_SYSKEYUP: {
                 int key = (int)w;
                 uint64_t ownerPid = 0;
                 { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
+                hostedInputKeyDiagnostic("wm=" + std::to_string(msg) +
+                    " action=up key=" + std::to_string(key) +
+                    " ownerPid=" + std::to_string(ownerPid) +
+                    " " + hostedInputWindowContext(h));
                 int modifiers = 0;
                 if (IsCtrlDown( )) modifiers |= 2;
                 if (IsShiftDown( )) modifiers |= 1;
                 if ((GetKeyState(VK_MENU) & 0x8000) != 0) modifiers |= 4;
                 publishOut(MsgType::MT_InputKey, std::to_string(key) + "|up|" + std::to_string(modifiers), ownerPid);
+                hostedInputKeyDiagnostic("routed action=up key=" + std::to_string(key) +
+                    " modifiers=" + std::to_string(modifiers) +
+                    " ownerPid=" + std::to_string(ownerPid));
             } break;
             }
             return DefWindowProcA(h, msg, w, l);
@@ -5626,12 +5668,33 @@ namespace gxos {
             renderToFramebuffer();
 #endif
             
-            bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiSyncChanIn, m, 0) ||
-                ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_InputKey), m, 0) ||
-                ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_Activate), m, 0) ||
-                ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_Close), m, 0) ||
-                ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_FramePresent), m, 0) ||
-                ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
+            const auto popNextHostedMessage = [&](ipc::Message& message, uint64_t timeoutMs) {
+                return ipc::Bus::pop(kGuiSyncChanIn, message, 0) ||
+                    ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_InputKey), message, 0) ||
+                    ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_Activate), message, 0) ||
+                    ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_Close), message, 0) ||
+                    ipc::Bus::popType(kGuiChanIn, static_cast<uint32_t>(MsgType::MT_FramePresent), message, 0) ||
+                    ipc::Bus::pop(kGuiChanIn, message, timeoutMs);
+            };
+            constexpr uint32_t kHostedIpcMessageBatchBudget = 64;
+            bool running = true;
+            while (running) {
+                uint32_t handled = 0;
+                while (handled < kHostedIpcMessageBatchBudget) {
+                    ipc::Message m;
+                    if (!popNextHostedMessage(m, handled == 0 ? 30 : 0)) break;
+                    ++handled;
+                    if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") {
+                        running = false;
+                        break;
+                    }
+                    const uint64_t msgStartMs = nowMs( );
+                    hostedFreezeDiagnosticsOnMessageBegin(m.type);
+                    handleMessage(m);
+                    hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs);
+                }
+                pumpEvents( );
+            }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; outCfg.windows.push_back(rec); } }
             std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); DisplayOptionsStoreData shutdownDisplayStore = displayOptionsFromDesktopConfig(outCfg); std::string shutdownDisplayErr; DisplayOptionsStore::Save("display-options.cfg", shutdownDisplayStore, shutdownDisplayErr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)

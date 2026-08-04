@@ -67,6 +67,31 @@ bool frameDiagnosticsEnabled() {
     return enabled;
 }
 
+bool hostedInputDiagnosticsEnabled() {
+    static const bool enabled = []() {
+        const char* value = std::getenv("GXOS_HOSTED_INPUT_DIAGNOSTICS");
+        if (!value || !*value) return false;
+        std::string lower;
+        lower.reserve(std::char_traits<char>::length(value));
+        for (const char* p = value; *p; ++p) {
+            lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
+        }
+        return !(lower == "0" || lower == "false" || lower == "off" || lower == "no");
+    }();
+    return enabled;
+}
+
+void hostedInputDiagnostic(const std::string& message) {
+    if (!hostedInputDiagnosticsEnabled()) return;
+    static uint32_t count = 0;
+    if (count >= 128) return;
+    ++count;
+    const auto monoMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    Logger::write(LogLevel::Info, "Hosted runtime key trace #" + std::to_string(count) +
+        " monoMs=" + std::to_string(monoMs) + ": " + message);
+}
+
 std::string appLabel(const NativeAppRuntimeContext* context) {
     if (!context) return "<unknown>";
     if (!context->displayName.empty()) return context->appId + " (" + context->displayName + ")";
@@ -618,8 +643,10 @@ gx_event_type eventTypeForMessage(uint32_t messageType) {
 }
 
 void requestPaintForOwnedWindows(NativeAppRuntimeContext& context) {
+    if (!context.paintRequestNeeded || context.paintRequestOutstanding) return;
     uint64_t nativeAppPid = context.processId != 0 ? context.processId : Allocator::currentPid();
     if (context.processId == 0) context.processId = nativeAppPid;
+    bool requested = false;
     for (gx_handle window : context.createdWindowHandles) {
         if (window == 0) continue;
         ipc::Message request;
@@ -628,6 +655,11 @@ void requestPaintForOwnedWindows(NativeAppRuntimeContext& context) {
         std::string payload = std::to_string(window);
         request.data.assign(payload.begin(), payload.end());
         ipc::Bus::publish("gui.input", std::move(request), false);
+        requested = true;
+    }
+    if (requested) {
+        context.paintRequestNeeded = false;
+        context.paintRequestOutstanding = true;
     }
 }
 
@@ -1238,7 +1270,15 @@ gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
     ipc::Message request;
     request.srcPid = Allocator::currentPid();
     request.type = static_cast<uint32_t>(gui::MsgType::MT_DrawText);
-    std::string payload = std::to_string(window) + "|@" + std::to_string(x) + "," + std::to_string(y) + "|" + context->lastDrawText;
+    std::string payload;
+    if (context->lastDrawText == "\f") {
+        // Form-feed is the existing retained-surface clear command. Preserve
+        // its protocol form instead of adding the draw_text coordinates to
+        // the clear payload.
+        payload = std::to_string(window) + "|\f";
+    } else {
+        payload = std::to_string(window) + "|@" + std::to_string(x) + "," + std::to_string(y) + "|" + context->lastDrawText;
+    }
     request.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(request), false);
 
@@ -1431,7 +1471,15 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             if (remainingMs > 25) remainingMs = 25;
         }
 
-        if (!ipc::Bus::pop("gui.output", message, remainingMs)) break;
+        // Compositor draw acknowledgments are deliberately retained in the
+        // bounded app mailbox for compatibility, but they are not app events.
+        // Prefer a pending key without changing queue capacity or dropping
+        // those acknowledgments so a render-heavy modal transition cannot
+        // starve keyboard delivery.
+        const uint32_t inputKeyType = static_cast<uint32_t>(gui::MsgType::MT_InputKey);
+        bool received = ipc::Bus::popType("gui.output", inputKeyType, message, 0);
+        if (!received) received = ipc::Bus::pop("gui.output", message, remainingMs);
+        if (!received) break;
 
         gx_event_type eventType = eventTypeForMessage(message.type);
         if (eventType == GX_EVENT_NONE) continue;
@@ -1466,6 +1514,17 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             return context->lastPollEventResult;
         }
 
+        if (eventType == GX_EVENT_KEY) {
+            hostedInputDiagnostic("dequeued runtimeId=" + std::to_string(context->runtimeId) +
+                " appId=" + context->appId +
+                " key=" + std::to_string(keyCode) +
+                " action=" + std::to_string(keyAction) +
+                " modifiers=" + std::to_string(keyModifiers) +
+                " window=" + std::to_string(window) +
+                " focusedWindow=" + std::to_string(context->focusedOwnedWindow) +
+                " ownsWindow=" + (ownsWindow(*context, window) ? "1" : "0"));
+        }
+
         if (!ownsWindow(*context, window)) {
             Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " poll_event skipped event for an unowned window");
             continue;
@@ -1476,6 +1535,7 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         if (eventType == GX_EVENT_WINDOW_PAINT) {
             outEvent->param1 = paintWidth;
             outEvent->param2 = paintHeight;
+            context->paintRequestOutstanding = false;
             ++context->paintEventCount;
             context->lastPaintWindow = window;
             context->lastPaintWidth = paintWidth;
@@ -1493,6 +1553,7 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             context->lastKeyCode = keyCode;
             context->lastKeyAction = keyAction;
             context->lastKeyModifiers = keyModifiers;
+            context->paintRequestNeeded = true;
         } else if (eventType == GX_EVENT_MOUSE) {
             outEvent->param1 = mouseX;
             outEvent->param2 = mouseY;
@@ -1504,6 +1565,7 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             context->lastMouseY = mouseY;
             context->lastMousePackedButtonAction = mousePackedButtonAction;
             context->lastMouseModifiers = mouseModifiers;
+            context->paintRequestNeeded = true;
         }
         context->lastEventType = eventType;
         context->lastEventWindow = window;

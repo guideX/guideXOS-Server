@@ -228,6 +228,8 @@ struct NativeAppRuntimeContext {
     gx_event_type lastEventType = GX_EVENT_NONE;
     gx_handle lastEventWindow = 0;
     gx_result lastPollEventResult = GX_OK;
+    bool paintRequestNeeded = true;
+    bool paintRequestOutstanding = false;
     uint32_t paintEventCount = 0;
     gx_handle lastPaintWindow = 0;
     int lastPaintWidth = 0;

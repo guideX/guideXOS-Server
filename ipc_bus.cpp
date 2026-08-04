@@ -43,7 +43,8 @@ namespace gxos {
             }
             if (!fanout && msg.dstPid != 0) {
                 Logger::write(LogLevel::Info, std::string("Bus::publish directing msg type=") + std::to_string(msg.type) + " to pid=" + std::to_string(msg.dstPid));
-                ProcessTable::send(msg.dstPid, std::move(msg));
+                const uint64_t destination = msg.dstPid;
+                ProcessTable::send(destination, std::move(msg));
                 return;
             }
 
@@ -76,8 +77,11 @@ namespace gxos {
             
             while (std::chrono::steady_clock::now() < deadline) {
                 // Check process mailbox first (directed messages have priority)
-                if (pid != 0 && ProcessTable::try_recv(pid, out)) {
-                    return true;
+                if (pid != 0) {
+                    const bool received = ProcessTable::try_recv(pid, out);
+                    if (received) {
+                        return true;
+                    }
                 }
                 
                 // Check channel queue
@@ -86,6 +90,7 @@ namespace gxos {
                     if (!ch->queue.empty()) {
                         out = std::move(ch->queue.front());
                         ch->queue.pop_front();
+                        ch->cv.notify_all();
                         return true;
                     }
                 }
@@ -95,14 +100,18 @@ namespace gxos {
             }
             
             // Final check before giving up
-            if (pid != 0 && ProcessTable::try_recv(pid, out)) {
-                return true;
+            if (pid != 0) {
+                const bool received = ProcessTable::try_recv(pid, out);
+                if (received) {
+                    return true;
+                }
             }
             {
                 std::lock_guard<std::mutex> lk(ch->mu);
                 if (!ch->queue.empty()) {
                     out = std::move(ch->queue.front());
                     ch->queue.pop_front();
+                    ch->cv.notify_all();
                     return true;
                 }
             }
@@ -115,9 +124,8 @@ namespace gxos {
             auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
             auto ch = get(name);
             while (true) {
-                if (pid != 0 && ProcessTable::try_recv(pid, out)) {
-                    if (out.type == type) return true;
-                    ProcessTable::send(pid, std::move(out));
+                if (pid != 0 && ProcessTable::try_recv_type(pid, type, out)) {
+                    return true;
                 }
                 {
                     std::lock_guard<std::mutex> lk(ch->mu);
