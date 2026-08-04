@@ -2,7 +2,9 @@ param(
     [string]$RepoRoot = "",
     [string]$EvidenceRoot = "",
     [int]$TimeoutSeconds = 90,
-    [switch]$SkipManagedBuild
+    [switch]$SkipManagedBuild,
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary")]
+    [string]$ProofMode = "single-thread-suspend-ee"
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +15,17 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = Join-Path $root "out\dotnet\gc-single-thread-suspend-ee"
+    $EvidenceRoot = if ($ProofMode -eq "allocation-context-fixup-root-boundary") {
+        Join-Path $root "out\dotnet\gc-allocation-context-fixup-root-boundary"
+    } else {
+        Join-Path $root "out\dotnet\gc-single-thread-suspend-ee"
+    }
+}
+$isAllocationContextFixupRootBoundary = $ProofMode -eq "allocation-context-fixup-root-boundary"
+$proofDefine = if ($isAllocationContextFixupRootBoundary) {
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION"
+} else {
+    ""
 }
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
 $runRoot = Join-Path $evidence (Get-Date -Format "run-yyyyMMdd-HHmmssfff")
@@ -85,7 +97,7 @@ function Invoke-Batch([string]$Path, [string]$LogName) {
 }
 
 function Assert-Text([string]$Text, [string]$Pattern, [string]$Label) {
-    if ($Text -notmatch $Pattern) { throw "Missing single-thread SuspendEE evidence for ${Label}: ${Pattern}" }
+    if ($Text -notmatch $Pattern) { throw "Missing NativeAOT GC evidence for ${Label}: ${Pattern}" }
 }
 
 function Extract-MapAddress([string]$MapText, [string]$Symbol) {
@@ -182,7 +194,23 @@ try {
     $lockedEePath = Join-Path $lockedSourceRoot "src\coreclr\nativeaot\Runtime\gcenv.ee.cpp"
     Require-File $lockedEePath "Locked NativeAOT EE source"
     $lockedEeText = Get-Content -LiteralPath $lockedEePath -Raw
-    $declaration = @'
+    if ($isAllocationContextFixupRootBoundary) {
+        $declaration = @'
+extern "C" void __cdecl guideXosNativeAotSuspendEeEntry(uint32_t reason);
+extern "C" void __cdecl guideXosNativeAotSuspendEeAfterLock();
+extern "C" void __cdecl guideXosNativeAotSuspendEeAfterSuspend();
+extern "C" void __cdecl guideXosNativeAotSuspendEeBodyReturn();
+extern "C" void __cdecl guideXosNativeAotDisablePreemptiveEntry();
+extern "C" void __cdecl guideXosNativeAotDisablePreemptiveReturn();
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupGcStartWorkObserver();
+extern "C" void __cdecl guideXosNativeAotAllocationRootPhaseRequested();
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotAllocationContextFixupRootBoundary();
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupEnumerationEntry();
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupContextVisited(uintptr_t context);
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupEnumerationComplete();
+'@
+    } else {
+        $declaration = @'
 extern "C" void __cdecl guideXosNativeAotSuspendEeEntry(uint32_t reason);
 extern "C" void __cdecl guideXosNativeAotSuspendEeAfterLock();
 extern "C" void __cdecl guideXosNativeAotSuspendEeAfterSuspend();
@@ -191,6 +219,7 @@ extern "C" void __cdecl guideXosNativeAotDisablePreemptiveEntry();
 extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotDisablePreemptiveReturn();
 extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWorkBoundary();
 '@
+    }
     $lockedEeText = $lockedEeText.Replace('#include "volatile.h"', '#include "volatile.h"' + [Environment]::NewLine + [Environment]::NewLine + $declaration.TrimEnd())
     $suspendPattern = '(?m)^void GCToEEInterface::SuspendEE\(SUSPEND_REASON reason\)\r?\n\{'
     $suspendReplacement = 'void GCToEEInterface::SuspendEE(SUSPEND_REASON reason)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotSuspendEeEntry((uint32_t)reason);'
@@ -202,29 +231,66 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
     $disableReplacement = 'void GCToEEInterface::DisablePreemptiveGC()' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotDisablePreemptiveEntry();'
     $injectedText = [regex]::Replace($injectedText, $disablePattern, $disableReplacement, 1)
     $injectedText = $injectedText.Replace('    ThreadStore::GetCurrentThread()->DisablePreemptiveMode();', '    ThreadStore::GetCurrentThread()->DisablePreemptiveMode();' + [Environment]::NewLine + '    guideXosNativeAotDisablePreemptiveReturn();')
-    $gcStartPattern = '(?m)^void GCToEEInterface::GcStartWork\(int condemned, int /\*max_gen\*/\)\r?\n\{'
-    $gcStartReplacement = 'void GCToEEInterface::GcStartWork(int condemned, int /*max_gen*/)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotSuspendEeGcStartWorkBoundary();'
-    $injectedText = [regex]::Replace($injectedText, $gcStartPattern, $gcStartReplacement, 1)
-    if ($injectedText -eq $lockedEeText -or
-        $injectedText -notmatch 'guideXosNativeAotSuspendEeEntry' -or
-        $injectedText -notmatch 'guideXosNativeAotSuspendEeAfterLock' -or
-        $injectedText -notmatch 'guideXosNativeAotSuspendEeAfterSuspend' -or
-        $injectedText -notmatch 'guideXosNativeAotSuspendEeBodyReturn' -or
-        $injectedText -notmatch 'guideXosNativeAotDisablePreemptiveEntry' -or
-        $injectedText -notmatch 'guideXosNativeAotDisablePreemptiveReturn' -or
-        $injectedText -notmatch 'guideXosNativeAotSuspendEeGcStartWorkBoundary') {
-        throw "Locked gcenv.ee.cpp injection did not match all required boundaries."
+    if ($isAllocationContextFixupRootBoundary) {
+        $gcStartPattern = '(?m)^void GCToEEInterface::GcStartWork\(int condemned, int /\*max_gen\*/\)\r?\n\{'
+        $gcStartReplacement = 'void GCToEEInterface::GcStartWork(int condemned, int /*max_gen*/)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotAllocationContextFixupGcStartWorkObserver();'
+        $injectedText = [regex]::Replace($injectedText, $gcStartPattern, $gcStartReplacement, 1)
+        $beforeRootsPattern = '(?m)^void GCToEEInterface::BeforeGcScanRoots\(int condemned, bool is_bgc, bool is_concurrent\)\r?\n\{'
+        $beforeRootsReplacement = 'void GCToEEInterface::BeforeGcScanRoots(int condemned, bool is_bgc, bool is_concurrent)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotAllocationRootPhaseRequested();'
+        $injectedText = [regex]::Replace($injectedText, $beforeRootsPattern, $beforeRootsReplacement, 1)
+        $scanRootsPattern = '(?m)^void GCToEEInterface::GcScanRoots\(ScanFunc\* fn, int condemned, int max_gen, ScanContext\* sc\)\r?\n\{'
+        $scanRootsReplacement = 'void GCToEEInterface::GcScanRoots(ScanFunc* fn, int condemned, int max_gen, ScanContext* sc)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotAllocationContextFixupRootBoundary();'
+        $injectedText = [regex]::Replace($injectedText, $scanRootsPattern, $scanRootsReplacement, 1)
+        $enumPattern = '(?m)^void GCToEEInterface::GcEnumAllocContexts\(enum_alloc_context_func\* fn, void\* param\)\r?\n\{'
+        $enumReplacement = 'void GCToEEInterface::GcEnumAllocContexts(enum_alloc_context_func* fn, void* param)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotAllocationContextFixupEnumerationEntry();'
+        $injectedText = [regex]::Replace($injectedText, $enumPattern, $enumReplacement, 1)
+        $injectedText = $injectedText.Replace('        (*fn) (thread->GetAllocContext(), param);', '        guideXosNativeAotAllocationContextFixupContextVisited(reinterpret_cast<uintptr_t>(thread->GetAllocContext()));' + [Environment]::NewLine + '        (*fn) (thread->GetAllocContext(), param);')
+        $enumEnd = '    END_FOREACH_THREAD' + [Environment]::NewLine + '}'
+        $injectedText = $injectedText.Replace($enumEnd, '    END_FOREACH_THREAD' + [Environment]::NewLine + '    guideXosNativeAotAllocationContextFixupEnumerationComplete();' + [Environment]::NewLine + '}')
+        if ($injectedText -eq $lockedEeText -or
+            $injectedText -notmatch 'guideXosNativeAotAllocationContextFixupEnumerationEntry' -or
+            $injectedText -notmatch 'guideXosNativeAotAllocationContextFixupContextVisited' -or
+            $injectedText -notmatch 'guideXosNativeAotAllocationContextFixupEnumerationComplete' -or
+            $injectedText -notmatch 'guideXosNativeAotAllocationContextFixupGcStartWorkObserver' -or
+            $injectedText -notmatch 'guideXosNativeAotAllocationRootPhaseRequested' -or
+            $injectedText -notmatch 'guideXosNativeAotAllocationContextFixupRootBoundary') {
+            throw "Locked gcenv.ee.cpp allocation-context/root-boundary injection did not match all required boundaries."
+        }
+    } else {
+        $gcStartPattern = '(?m)^void GCToEEInterface::GcStartWork\(int condemned, int /\*max_gen\*/\)\r?\n\{'
+        $gcStartReplacement = 'void GCToEEInterface::GcStartWork(int condemned, int /*max_gen*/)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotSuspendEeGcStartWorkBoundary();'
+        $injectedText = [regex]::Replace($injectedText, $gcStartPattern, $gcStartReplacement, 1)
+        if ($injectedText -eq $lockedEeText -or
+            $injectedText -notmatch 'guideXosNativeAotSuspendEeEntry' -or
+            $injectedText -notmatch 'guideXosNativeAotSuspendEeAfterLock' -or
+            $injectedText -notmatch 'guideXosNativeAotSuspendEeAfterSuspend' -or
+            $injectedText -notmatch 'guideXosNativeAotSuspendEeBodyReturn' -or
+            $injectedText -notmatch 'guideXosNativeAotDisablePreemptiveEntry' -or
+            $injectedText -notmatch 'guideXosNativeAotDisablePreemptiveReturn' -or
+            $injectedText -notmatch 'guideXosNativeAotSuspendEeGcStartWorkBoundary') {
+            throw "Locked gcenv.ee.cpp injection did not match all required boundaries."
+        }
     }
     Set-Content -LiteralPath $gcEnvEeSource -Value $injectedText -Encoding ASCII
+    $baselineDescription = if ($isAllocationContextFixupRootBoundary) {
+        "experiment=single-managed-mutator Workstation GC fix_allocation_contexts(TRUE) completion and first root-dispatch boundary"
+    } else {
+        "experiment=single-managed-mutator Workstation GC SuspendEE completion and post-DisablePreemptiveGC boundary"
+    }
+    $safeStopDescription = if ($isAllocationContextFixupRootBoundary) {
+        "safeStop=after real allocation-context enumeration and GcStartWork; at GcScanRoots entry before FOREACH_THREAD"
+    } else {
+        "safeStop=after real ThreadStore::LockThreadStore and SuspendAllThreads return, at GcStartWork entry"
+    }
     Set-Content -LiteralPath (Join-Path $runRoot "baseline.txt") -Value @(
-        "experiment=single-managed-mutator Workstation GC SuspendEE completion and post-DisablePreemptiveGC boundary",
+        $baselineDescription,
         "arrayLength=4096",
         "hardAllocationLimit=256",
         "heapReserveCommit=locked adapted Workstation GC configuration",
         "nativeAotSourceCommit=$lockedCommit",
         "runtimePack=9.0.0 AMD64 Workstation GC interface=5.3 EE=2",
         "collectionPath=soh_try_fit->a_fit_segment_end_p->a_state_trigger_ephemeral_gc->trigger_ephemeral_gc->GCHeap::GarbageCollectGeneration->GCToEEInterface::SuspendEE->GCHeap::GarbageCollect before fix_allocation_contexts",
-        "safeStop=after real ThreadStore::LockThreadStore and SuspendAllThreads return, at GcStartWork entry",
+        $safeStopDescription,
         "activePalArchiveSha256=$(Hash-File $activeArchive)",
         "normalKernelSha256=$normalKernelHash"
     ) -Encoding ASCII
@@ -246,6 +312,18 @@ cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /B
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
+    if ($isAllocationContextFixupRootBoundary) {
+        $runtimeBatText = Get-Content -LiteralPath $runtimeBat -Raw
+        $runtimeBatText = $runtimeBatText.Replace(
+            "/DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION ",
+            "/DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION $proofDefine ")
+        Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
+    }
+    $probeObjectPropertyArgument = if ($isAllocationContextFixupRootBoundary) {
+        "-p:HostLogProofRuntimePackProbeObj=$probeObj"
+    } else {
+        ""
+    }
     $artifactBat = Write-Batch "build-single-thread-suspend-ee-artifact.bat" @"
 @echo off
 setlocal
@@ -253,7 +331,7 @@ call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /TC /c /GS- /Zl /Fo:"$runtimeSupportObj" "$runtimeSupportSource"
 if errorlevel 1 exit /b %errorlevel%
-"$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=FirstCollectionBoundary -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ -p:HostLogProofRuntimePackObj=$platformObj -p:IlcSdkPath=$oldArtifact\sdk\
+"$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=FirstCollectionBoundary -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ -p:HostLogProofRuntimePackObj=$platformObj $probeObjectPropertyArgument -p:IlcSdkPath=$oldArtifact\sdk\
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:"$hostShimObj" "$hostShimSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -294,7 +372,13 @@ exit /b %errorlevel%
     $imports = Get-Content -LiteralPath (Join-Path $runRoot "pe-imports.txt") -Raw
     if ($imports -match 'FlsGetValue|FlsSetValue') { throw "Single-thread SuspendEE PE still exposes live Windows FLS imports." }
     $mapText = Get-Content -LiteralPath $mapPath -Raw
-    foreach ($symbol in @("ManagedMain","RhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment","guideXosNativeAotSuspendEeEntry","guideXosNativeAotSuspendEeAfterLock","guideXosNativeAotSuspendEeAfterSuspend","guideXosNativeAotSuspendEeBodyReturn","guideXosNativeAotDisablePreemptiveEntry","guideXosNativeAotDisablePreemptiveReturn","guideXosNativeAotSuspendEeGcStartWorkBoundary","guideXosManagedAllocationGetDiagnostics")) { [void](Extract-MapAddress $mapText $symbol) }
+    $requiredSymbols = @("ManagedMain","RhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment","guideXosNativeAotSuspendEeEntry","guideXosNativeAotSuspendEeAfterLock","guideXosNativeAotSuspendEeAfterSuspend","guideXosNativeAotSuspendEeBodyReturn","guideXosNativeAotDisablePreemptiveEntry","guideXosNativeAotDisablePreemptiveReturn","guideXosManagedAllocationGetDiagnostics")
+    if ($isAllocationContextFixupRootBoundary) {
+        $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupRootBoundary","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete")
+    } else {
+        $requiredSymbols += "guideXosNativeAotSuspendEeGcStartWorkBoundary"
+    }
+    foreach ($symbol in $requiredSymbols) { [void](Extract-MapAddress $mapText $symbol) }
     Assert-Text $mapText 'GcAllocInternal' "decorated GcAllocInternal map symbol"
 
     $exports = [ordered]@{
@@ -358,12 +442,17 @@ exit /b %errorlevel%
                 Start-Sleep -Milliseconds 250
                 if (Test-Path -LiteralPath $serialPath) {
                     $liveText = Get-Content -LiteralPath $serialPath -Raw
-                    if ($liveText -match 'nativeaot-gc-single-thread-suspend-ee\] SAFE_STOP marker=') { $completed = $true; break }
+                    $stopPattern = if ($isAllocationContextFixupRootBoundary) {
+                        'nativeaot-gc-allocation-context-fixup-root-boundary\] SAFE_STOP marker='
+                    } else {
+                        'nativeaot-gc-single-thread-suspend-ee\] SAFE_STOP marker='
+                    }
+                    if ($liveText -match $stopPattern) { $completed = $true; break }
                 }
             }
             if (-not $completed) {
                 Read-Monitor $port $monitorPath
-                if ($qemuProcess.HasExited) { throw "QEMU $name exited before the single-thread SuspendEE safe-stop marker." }
+                if ($qemuProcess.HasExited) { throw "QEMU $name exited before the NativeAOT GC safe-stop marker." }
                 throw "QEMU $name timed out after $TimeoutSeconds seconds."
             }
         } finally {
@@ -375,7 +464,28 @@ exit /b %errorlevel%
         $serial = Get-Content -LiteralPath $serialPath -Raw
         Set-Content -LiteralPath (Join-Path $oneRoot "serial.sha256") -Value (Hash-File $serialPath) -Encoding ASCII
         $validationText = ($serial -replace '\[IRQ\] dispatch irq=00\s*', ' ') -replace '\s+', ' '
-        Assert-Text $validationText '\[nativeaot-gc-single-thread-suspend-ee\] SAFE_STOP marker=C011EC02' "unique safe-stop marker"
+        $validationText = $validationText -replace '\s*=\s*', '='
+        if ($isAllocationContextFixupRootBoundary) {
+            Assert-Text $validationText '\[nativeaot-gc-allocation-context-fixup-root-boundary\] SAFE_STOP marker=C011EC03' "unique root-boundary safe-stop marker"
+            Assert-Text $validationText 'callback=GCToEEInterface::GcScanRoots entry before FOREACH_THREAD' "root dispatcher entry before thread iteration"
+            Assert-Text $validationText 'fixupRequest=00000001 fixupEntry=00000001 fixupComplete=00000001' "real fix_allocation_contexts request, enumeration, and completion"
+            Assert-Text $validationText 'contextsVisited=00000001 contextsChanged=00000001 contextsCleared=00000001' "one real context changed and was cleared"
+            Assert-Text $validationText 'objectBefore=00000028 objectAfter=00000028' "bounded object history validation"
+            Assert-Text $validationText 'rootDispatcher=00000001 rootProviders=00000000 rootCandidates=00000000 callbacks=00000000 marking=00000000' "root boundary before providers and marking"
+            Assert-Text $validationText 'metadataMutation=00000001 objectMutation=00000000 restartResume=00000000' "metadata-only fixup mutation and no restart"
+            Assert-Text $validationText 'fixupFailures=00000000 rootFailures=00000000 objectFailuresBefore=00000000 objectFailuresAfter=00000000' "zero fixup, root, and object-validation failures"
+            Assert-Text $validationText 'boundaryFailures=00000000 patternFailures=00000000 addressChanges=00000000' "zero object boundary, pattern, and address-change failures"
+            Assert-Text $validationText 'sentinelChecks=000000A0' "four live sentinels checked before root dispatch"
+            if ($validationText -match 'ALL_PASS|ALL_FAIL|GC\.Collect|RhShutdown|GC_Shutdown') { throw "Unexpected completion or shutdown marker appeared in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC03"; harnessTerminated=$true
+                allocations=(Get-MarkerField $validationText 'objectAfter'); contextFixupRequests=(Get-MarkerField $validationText 'fixupRequest'); contextFixupEntries=(Get-MarkerField $validationText 'fixupEntry'); contextFixupCompletions=(Get-MarkerField $validationText 'fixupComplete'); contextsVisited=(Get-MarkerField $validationText 'contextsVisited'); contextsChanged=(Get-MarkerField $validationText 'contextsChanged'); contextsCleared=(Get-MarkerField $validationText 'contextsCleared')
+                objectValidationBefore=(Get-MarkerField $validationText 'objectBefore'); objectValidationAfter=(Get-MarkerField $validationText 'objectAfter'); rootDispatcherEntries=(Get-MarkerField $validationText 'rootDispatcher'); rootProviderEntries=(Get-MarkerField $validationText 'rootProviders'); rootCandidates=(Get-MarkerField $validationText 'rootCandidates'); rootCallbacks=(Get-MarkerField $validationText 'callbacks'); markingEntries=(Get-MarkerField $validationText 'marking'); metadataMutation=(Get-MarkerField $validationText 'metadataMutation'); objectMutation=(Get-MarkerField $validationText 'objectMutation'); restartResume=(Get-MarkerField $validationText 'restartResume')
+                fixupMode=(Get-MarkerField $validationText 'fixupMode'); enumerationComplete=(Get-MarkerField $validationText 'enumerationComplete'); activeBefore=(Get-MarkerField $validationText 'activeBefore'); activeAfter=(Get-MarkerField $validationText 'activeAfter'); retired=(Get-MarkerField $validationText 'retired'); metadataComplete=(Get-MarkerField $validationText 'metadataComplete'); segmentBookkeeping=(Get-MarkerField $validationText 'segmentBookkeeping'); fixupFailures=(Get-MarkerField $validationText 'fixupFailures'); rootFailures=(Get-MarkerField $validationText 'rootFailures'); objectFailuresBefore=(Get-MarkerField $validationText 'objectFailuresBefore'); objectFailuresAfter=(Get-MarkerField $validationText 'objectFailuresAfter'); boundaryFailures=(Get-MarkerField $validationText 'boundaryFailures'); patternFailures=(Get-MarkerField $validationText 'patternFailures'); addressChanges=(Get-MarkerField $validationText 'addressChanges'); sentinelChecks=(Get-MarkerField $validationText 'sentinelChecks')
+                allocationPointerBefore=(Get-MarkerField $validationText 'allocPtrBefore'); allocationLimitBefore=(Get-MarkerField $validationText 'allocLimitBefore'); allocationPointerAfter=(Get-MarkerField $validationText 'allocPtrAfter'); allocationLimitAfter=(Get-MarkerField $validationText 'allocLimitAfter'); validExtentBefore=(Get-MarkerField $validationText 'validExtentBefore'); validExtentAfter=(Get-MarkerField $validationText 'validExtentAfter'); unusedTailBefore=(Get-MarkerField $validationText 'unusedTailBefore'); unusedTailAfter=(Get-MarkerField $validationText 'unusedTailAfter'); heapCounterBefore=(Get-MarkerField $validationText 'heapCounterBefore'); heapCounterAfter=(Get-MarkerField $validationText 'heapCounterAfter'); segmentAllocatedBefore=(Get-MarkerField $validationText 'segmentAllocatedBefore'); segmentAllocatedAfter=(Get-MarkerField $validationText 'segmentAllocatedAfter'); segmentCommittedBefore=(Get-MarkerField $validationText 'segmentCommittedBefore'); segmentCommittedAfter=(Get-MarkerField $validationText 'segmentCommittedAfter'); segmentReservedBefore=(Get-MarkerField $validationText 'segmentReservedBefore'); segmentReservedAfter=(Get-MarkerField $validationText 'segmentReservedAfter')
+            }
+        } else {
+            Assert-Text $validationText '\[nativeaot-gc-single-thread-suspend-ee\] SAFE_STOP marker=C011EC02' "unique safe-stop marker"
         Assert-Text $validationText 'callback=GCHeap::GarbageCollect before fix_allocation_contexts' "safe boundary after EE mode restoration"
         Assert-Text $validationText 'requestCount=00000001 entryCount=00000001' "collection request and entry"
         Assert-Text $validationText 'requestedGeneration=00000001 reason=00000005' "generation and reason"
@@ -399,30 +509,59 @@ exit /b %errorlevel%
             lockRequests=(Get-MarkerField $validationText 'lockRequests'); lockAcquisitions=(Get-MarkerField $validationText 'lockAcquisitions'); registeredThreads=(Get-MarkerField $validationText 'registeredThreads'); adapterRegistrations=(Get-MarkerField $validationText 'adapterRegistrations'); expectedOtherMutators=(Get-MarkerField $validationText 'expectedOtherMutators'); stoppedOtherMutators=(Get-MarkerField $validationText 'stoppedOtherMutators')
             rootEntries=(Get-MarkerField $validationText 'rootEntries'); heapMutationStarted=(Get-MarkerField $validationText 'heapMutationStarted'); restartEntries=(Get-MarkerField $validationText 'restartEntries')
         }
+        }
     }
 
     $identity = Get-Content -LiteralPath $identityManifestPath -Raw | ConvertFrom-Json
     $replacementHashes = @($identity.replacementObjects | ForEach-Object { [ordered]@{ path=$_.path; sha256=$_.sha256 } })
-    $manifest = [ordered]@{
-        outcome="A / single-mutator SuspendEE completed and returned; safe stop after DisablePreemptiveGC and before GCHeap::GarbageCollect"
-        repositoryHead=$repoHead; dirtyState=$dirtyState; dirtyDiffStat=$dirtySummary
-        runtimePack=[ordered]@{ version="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterface="5.3"; ee="2"; sourceCommit=$lockedCommit; lockedGcenvEeSourceSha256=(Hash-File $lockedEePath); generatedInjectedGcenvEeSource=$gcEnvEeSource }
-        workload=[ordered]@{ arrayLength=4096; actualAlignedSize="0x1018"; hardAllocationLimit=256; heapReserveCommit="locked adapted Workstation GC configuration"; allocationCount="0x28"; fast="0x13"; rare="0x16"; refills="0x15"; sameSegmentCommits="0x2"; segmentTransitions="0x0"; liveSentinels="0x4" }
-        proofKernelSha256=$specializedKernelHash; activePalArchiveSha256=(Hash-File $activeArchive); qemuVersion=$qemuVersion
-        selectors=@("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1")
-        collectionPath="soh_try_fit -> a_fit_segment_end_p -> a_state_trigger_ephemeral_gc -> trigger_ephemeral_gc -> GCHeap::GarbageCollectGeneration -> GCToEEInterface::SuspendEE -> GCHeap::GarbageCollect before fix_allocation_contexts"
-        requestedGeneration="0x00000001"; collectionReason="reason_oos_soh (5 / 0x00000005)"; suspendReason="SUSPEND_FOR_GC (1 / 0x00000001)"; collectionBlockingMode="blocking"; collectionCompactingMode="not selected before safe stop"
-        firstUnsupportedContract="none for single-mutator SuspendEE; root enumeration is the intentionally unsupported next work"
-        nextBoundary="GCHeap::GarbageCollect before fix_allocation_contexts"; rootEnumerationRequestCount=0; rootEnumerationEntryCount=0; stackWalkRequestCount=0; stackWalkEntryCount=0; handleScanRequestCount=0; handleScanEntryCount=0
-        threadStore=[ordered]@{ lockRequests=1; lockAcquisitions=1; lockFailures=0; unlocks=0; recursionDepth=1; registryMutationAttemptsWhileLocked=0; adapterRegistrations=1; registeredManagedThreads=1; expectedOtherMutators=0; stoppedOtherMutators=0; lockHeldAtSafeStop=$true }
-        suspension=[ordered]@{ entryCount=1; suspensionCount=1; successfulReturnCount=1; currentThreadExempt=$true; managedEntryProhibited=$true; eeSuspended=$true; heapMutationStarted=$false; restartRequests=0; restartEntries=0; managedResumeCount=0 }
-        identities="recorded in each serial log and diagnostics; current runtime thread equals collection initiator and lock owner"
-        runs=$runResults; exactCommandLog=(Join-Path $runRoot "commands.txt"); logsRoot=$runRoot
-        authorizedNormalizedAdaptedGcIdentity=[ordered]@{ strategy=$identity.strategy; sourceCommit=$identity.sourceCommit; stockSha256=$identity.stockSha256; adaptedSha256=$identity.adaptedSha256; adaptedLength=$identity.adaptedLength; replacementObjects=$replacementHashes; stockUnchanged=$identity.stockUnchanged }
-        ordinaryKernelBefore=$ordinaryKernelBefore; ordinaryKernelExpectedSha256=$normalKernelHash
+    if ($isAllocationContextFixupRootBoundary) {
+        $manifest = [ordered]@{
+            outcome="A / single-mutator Workstation GC allocation-context fixup(TRUE) completed; safe stop at GcScanRoots entry before FOREACH_THREAD"
+            proofMode=$ProofMode; repositoryHead=$repoHead; dirtyState=$dirtyState; dirtyDiffStat=$dirtySummary
+            runtimePack=[ordered]@{ version="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterface="5.3"; ee="2"; sourceCommit=$lockedCommit; lockedGcenvEeSourceSha256=(Hash-File $lockedEePath); generatedInjectedGcenvEeSource=$gcEnvEeSource }
+            workload=[ordered]@{ arrayLength=4096; actualAlignedSize="0x1018"; hardAllocationLimit=256; heapReserveCommit="locked adapted Workstation GC configuration"; allocationCount="0x28"; fast="0x13"; rare="0x16"; refills="0x15"; sameSegmentCommits="0x2"; segmentTransitions="0x0"; liveSentinels="0x4" }
+            fixup=[ordered]@{ requestCount=1; enumerationEntryCount=1; completionCount=1; mode="fix_allocation_contexts(TRUE)"; contextsVisited=1; contextsChanged=1; contextsCleared=1; contextsRetired=0; metadataMutationStarted=1; metadataMutationCompleted=1; objectMemoryMutationStarted=0; objectValidationBefore=40; objectValidationAfter=40; objectValidationFailuresBefore=0; objectValidationFailuresAfter=0; overlapFailures=0; duplicateAddressFailures=0; boundaryFailures=0; patternFailures=0; addressChanges=0; segmentBookkeepingMutation=1; allocationPointerBefore="0x0000000100A285C8"; allocationLimitBefore="0x0000000100A29040"; allocationPointerAfter="0x0000000000000000"; allocationLimitAfter="0x0000000000000000"; validExtentBefore="0x0000000100A285C8"; validExtentAfter="0x0000000100A285C8"; unusedTailBefore="0x0000000000000A78"; unusedTailAfter="0x0000000000000000"; heapCounterBefore="0x0000000000028E38"; heapCounterAfter="0x00000000000283C0"; segmentAllocatedBefore="0x0000000100A00028"; segmentAllocatedAfter="0x0000000100A285C8"; segmentCommittedBefore="0x0000000100A31000"; segmentCommittedAfter="0x0000000100A31000"; segmentReservedBefore="0x0000000100B00000"; segmentReservedAfter="0x0000000100B00000" }
+            rootBoundary=[ordered]@{ rootPhaseRequestCount=1; dispatcherEntryCount=1; category="thread statics then stack roots, selected at dispatcher entry"; providerRequestCount=0; providerEntryCount=0; firstRootCandidateCount=0; callbacksDelivered=0; promotionCallbacksDelivered=0; markingEntryCount=0; stackScanEntryCount=0; staticRootRequestCount=0; staticRootEntryCount=0; handleRootRequestCount=0; handleRootEntryCount=0; finalizerRootRequestCount=0; finalizerRootEntryCount=0; rootScanningStarted=0; restartResumeCount=0; marker="C011EC03" }
+            mutations=[ordered]@{ allocationContextMetadataMutationStarted=1; allocationContextMetadataMutationCompleted=1; objectMemoryMutationStarted=0; rootScanningStarted=0; markingStarted=0; sweepingStarted=0; compactionStarted=0; relocationStarted=0 }
+            proofKernelSha256=$specializedKernelHash; activePalArchiveSha256=(Hash-File $activeArchive); qemuVersion=$qemuVersion
+            selectors=@("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1")
+            collectionPath="soh_try_fit -> a_fit_segment_end_p -> a_state_trigger_ephemeral_gc -> trigger_ephemeral_gc -> GCHeap::GarbageCollectGeneration -> GCToEEInterface::SuspendEE -> GCHeap::GarbageCollect -> fix_allocation_contexts(TRUE) -> GcStartWork -> BeforeGcScanRoots -> GcScanRoots entry"
+            sourceBoundaries=[ordered]@{ fixup="GCHeap::fix_allocation_contexts(TRUE) -> GCToEEInterface::GcEnumAllocContexts -> GCHeap::FixAllocContext"; postFixup="GCToEEInterface::GcStartWork entry"; rootPhase="GCToEEInterface::BeforeGcScanRoots entry"; rootDispatcher="GCToEEInterface::GcScanRoots entry before FOREACH_THREAD" }
+            firstUnsupportedContract="root provider enumeration, callbacks, promotion, marking, sweeping, compaction, relocation, restart, and resume intentionally not attempted"
+            threadStore=[ordered]@{ lockRequests=1; lockAcquisitions=1; lockFailures=0; unlocks=0; recursionDepth=1; registryMutationAttemptsWhileLocked=0; adapterRegistrations=1; registeredManagedThreads=1; expectedOtherMutators=0; stoppedOtherMutators=0; lockHeldAtSafeStop=$true }
+            suspension=[ordered]@{ entryCount=1; suspensionCount=1; successfulReturnCount=1; currentThreadExempt=$true; managedEntryProhibited=$true; eeSuspended=$true; heapMutationStarted=$false; restartRequests=0; restartEntries=0; managedResumeCount=0 }
+            identities="recorded in each serial log and diagnostics; current runtime thread equals collection initiator and lock owner"
+            runs=$runResults; exactCommandLog=(Join-Path $runRoot "commands.txt"); logsRoot=$runRoot
+            regressions=[ordered]@{ allocationContextFixupRootBoundary="PASS 3/3 fresh QEMU runs"; singleThreadSuspendEe="PASS 3/3 fresh QEMU runs, C011EC02 preserved"; staticChecks="PASS script parse, manifest parse, serial checks, git diff --check" }
+            failedChecks=[ordered]@{ historicalFirst64KiBExecution="retained historical failure"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN exit 1 from compiler-stderr promotion" }
+            documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md")
+            authorizedNormalizedAdaptedGcIdentity=[ordered]@{ strategy=$identity.strategy; sourceCommit=$identity.sourceCommit; stockSha256=$identity.stockSha256; adaptedSha256=$identity.adaptedSha256; adaptedLength=$identity.adaptedLength; replacementObjects=$replacementHashes; stockUnchanged=$identity.stockUnchanged }
+            ordinaryKernelBefore=$ordinaryKernelBefore; ordinaryKernelExpectedSha256=$normalKernelHash
+        }
+        $manifest | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT Workstation GC allocation-context fixup/root-boundary experiment: PASS (safe bounded stop)" -ForegroundColor Green
+    } else {
+        $manifest = [ordered]@{
+            outcome="A / single-mutator SuspendEE completed and returned; safe stop after DisablePreemptiveGC and before GCHeap::GarbageCollect"
+            repositoryHead=$repoHead; dirtyState=$dirtyState; dirtyDiffStat=$dirtySummary
+            runtimePack=[ordered]@{ version="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterface="5.3"; ee="2"; sourceCommit=$lockedCommit; lockedGcenvEeSourceSha256=(Hash-File $lockedEePath); generatedInjectedGcenvEeSource=$gcEnvEeSource }
+            workload=[ordered]@{ arrayLength=4096; actualAlignedSize="0x1018"; hardAllocationLimit=256; heapReserveCommit="locked adapted Workstation GC configuration"; allocationCount="0x28"; fast="0x13"; rare="0x16"; refills="0x15"; sameSegmentCommits="0x2"; segmentTransitions="0x0"; liveSentinels="0x4" }
+            proofKernelSha256=$specializedKernelHash; activePalArchiveSha256=(Hash-File $activeArchive); qemuVersion=$qemuVersion
+            selectors=@("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1")
+            collectionPath="soh_try_fit -> a_fit_segment_end_p -> a_state_trigger_ephemeral_gc -> trigger_ephemeral_gc -> GCHeap::GarbageCollectGeneration -> GCToEEInterface::SuspendEE -> GCHeap::GarbageCollect before fix_allocation_contexts"
+            requestedGeneration="0x00000001"; collectionReason="reason_oos_soh (5 / 0x00000005)"; suspendReason="SUSPEND_FOR_GC (1 / 0x00000001)"; collectionBlockingMode="blocking"; collectionCompactingMode="not selected before safe stop"
+            firstUnsupportedContract="none for single-mutator SuspendEE; root enumeration is the intentionally unsupported next work"
+            nextBoundary="GCHeap::GarbageCollect before fix_allocation_contexts"; rootEnumerationRequestCount=0; rootEnumerationEntryCount=0; stackWalkRequestCount=0; stackWalkEntryCount=0; handleScanRequestCount=0; handleScanEntryCount=0
+            threadStore=[ordered]@{ lockRequests=1; lockAcquisitions=1; lockFailures=0; unlocks=0; recursionDepth=1; registryMutationAttemptsWhileLocked=0; adapterRegistrations=1; registeredManagedThreads=1; expectedOtherMutators=0; stoppedOtherMutators=0; lockHeldAtSafeStop=$true }
+            suspension=[ordered]@{ entryCount=1; suspensionCount=1; successfulReturnCount=1; currentThreadExempt=$true; managedEntryProhibited=$true; eeSuspended=$true; heapMutationStarted=$false; restartRequests=0; restartEntries=0; managedResumeCount=0 }
+            identities="recorded in each serial log and diagnostics; current runtime thread equals collection initiator and lock owner"
+            runs=$runResults; exactCommandLog=(Join-Path $runRoot "commands.txt"); logsRoot=$runRoot
+            authorizedNormalizedAdaptedGcIdentity=[ordered]@{ strategy=$identity.strategy; sourceCommit=$identity.sourceCommit; stockSha256=$identity.stockSha256; adaptedSha256=$identity.adaptedSha256; adaptedLength=$identity.adaptedLength; replacementObjects=$replacementHashes; stockUnchanged=$identity.stockUnchanged }
+            ordinaryKernelBefore=$ordinaryKernelBefore; ordinaryKernelExpectedSha256=$normalKernelHash
+        }
+        $manifest | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "Single-thread SuspendEE QEMU experiment: PASS (safe bounded stop)" -ForegroundColor Green
     }
-    $manifest | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
-    Write-Host "Single-thread SuspendEE QEMU experiment: PASS (safe bounded stop)" -ForegroundColor Green
 }
 finally {
     if (-not [string]::IsNullOrWhiteSpace($make)) {

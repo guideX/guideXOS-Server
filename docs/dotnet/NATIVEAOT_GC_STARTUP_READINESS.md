@@ -8,6 +8,10 @@ process-lifetime GC model: full orderly same-process GC shutdown is not
 available in the locked NativeAOT source, so QEMU runs use disposable
 processes and never signal the finalizer event.
 
+The later bounded continuation through real allocation-context fixup and the
+first root-dispatch boundary is documented in
+[NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md).
+
 Evidence: `out/dotnet/pal-win64-qemu-bridge/` and
 `out/dotnet/gc-initialization-dry-run/`. See also
 [NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md](NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md) and

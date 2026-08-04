@@ -14,6 +14,11 @@ The prior no-collection segment-transition proof remains authoritative:
 continued pressure committed within the current SOH segment but recorded zero
 collection requests, zero collection entries, and zero SOH segment transitions.
 
+The next bounded continuation is
+[NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md),
+which preserves this pre-fixup boundary and advances only through allocation
+context fixup to the first root-dispatch boundary.
+
 ## Locked identity
 
 - NativeAOT/runtime-pack source commit:

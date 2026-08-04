@@ -48,6 +48,9 @@ constexpr gx_uint32 kMinimumTlsBlockSize = 0x110u;
 extern "C" guidexos_nativeaot_allocation_diagnostics
     g_guideXosAllocationDiagnostics;
 [[noreturn]] void guideXosFailFast(gx_uint32 reason);
+#if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupRequest();
+#endif
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
@@ -421,6 +424,11 @@ extern "C" void __cdecl guideXosNativeAotDisablePreemptiveEntry() {
         "[nativeaot-gc-single-thread-suspend-ee] DisablePreemptiveGC entry\n");
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
+extern "C" void __cdecl guideXosNativeAotDisablePreemptiveReturn() {
+    guideXosNativeAotAllocationContextFixupRequest();
+}
+#else
 extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotDisablePreemptiveReturn() {
     suspendEeSerialPutString(
         "[nativeaot-gc-single-thread-suspend-ee] DisablePreemptiveGC returned; safe boundary before GCHeap::GarbageCollect\n");
@@ -504,11 +512,20 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotDisablePreemptiveR
     for (;;) {
     }
 }
+#endif
 
+#if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
+extern "C" void __cdecl guideXosNativeAotSuspendEeGcStartWorkBoundary() {
+    // Kept as a compatibility export for the prior source-injection mode;
+    // the fixup proof observes GcStartWork without stopping there.
+    guideXosNativeAotAllocationContextFixupRequest();
+}
+#else
 extern "C" __declspec(noreturn) void __cdecl
 guideXosNativeAotSuspendEeGcStartWorkBoundary() {
     guideXosNativeAotDisablePreemptiveReturn();
 }
+#endif
 } // namespace
 #endif
 
@@ -625,7 +642,10 @@ extern "C" int32_t guidexos_nativeaot_gc_read_state(
     gx_uintptr* allocatedBytes,
     gx_uint32* finalizableObjects,
     gx_uint32* gcInProgress,
-    gx_uint32* gcMode);
+    gx_uint32* gcMode,
+    gx_uintptr* contextIdentity,
+    gx_uintptr* allocBytes,
+    gx_uintptr* allocBytesUoh);
 extern "C" int32_t guidexos_nativeaot_gc_describe_object(
     void* object,
     gx_uintptr* heapBase,
@@ -644,6 +664,499 @@ extern "C" int32_t guidexos_nativeaot_gc_describe_segment(
     gx_uint32* segmentGeneration);
 #endif
 #endif
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
+bool g_guideXosAllocationContextFixupPending = false;
+
+void allocationContextFixupInvariantFailure() {
+    ++g_guideXosAllocationDiagnostics.allocationContextFixupInvariantFailures;
+}
+
+void allocationContextFixupRootInvariantFailure() {
+    ++g_guideXosAllocationDiagnostics.rootBoundaryInvariantFailures;
+}
+
+gx_uintptr allocationContextFixupLastObjectEnd() {
+    gx_uintptr lastEnd = 0u;
+    for (gx_uint32 index = 0u;
+         index < g_guideXosAllocationDiagnostics.objectHistoryCount;
+         ++index) {
+        const guidexos_nativeaot_object_history_entry& entry =
+            g_guideXosAllocationDiagnostics.objectHistory[index];
+        if (entry.end > lastEnd) {
+            lastEnd = entry.end;
+        }
+    }
+    return lastEnd;
+}
+
+void captureAllocationContextFixupSnapshot(
+    guidexos_nativeaot_allocation_context_snapshot* snapshot) {
+    if (snapshot == nullptr) {
+        allocationContextFixupInvariantFailure();
+        return;
+    }
+    *snapshot = {};
+
+    gx_uintptr allocationPointer = 0u;
+    gx_uintptr allocationLimit = 0u;
+    gx_uintptr currentThread = 0u;
+    gx_uintptr gcHeap = 0u;
+    gx_uint32 gcCount = 0u;
+    gx_uintptr allocatedBytes = 0u;
+    gx_uint32 finalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    gx_uintptr contextIdentity = 0u;
+    gx_uintptr allocBytes = 0u;
+    gx_uintptr allocBytesUoh = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationPointer, &allocationLimit, &currentThread, &gcHeap,
+            &gcCount, &allocatedBytes, &finalizableObjects, &gcInProgress,
+            &gcMode, &contextIdentity, &allocBytes, &allocBytesUoh) != 0 ||
+        contextIdentity == 0u || currentThread == 0u || gcHeap == 0u) {
+        allocationContextFixupInvariantFailure();
+        return;
+    }
+
+    snapshot->contextIdentity = contextIdentity;
+    snapshot->owningRuntimeThread = currentThread;
+    snapshot->owningGcHeap = gcHeap;
+    snapshot->allocPtr = allocationPointer;
+    snapshot->allocLimit = allocationLimit;
+    snapshot->allocationStart = allocationPointer;
+    snapshot->allocationSize = allocationLimit >= allocationPointer
+        ? allocationLimit - allocationPointer : 0u;
+    snapshot->unusedTailBytes = snapshot->allocationSize;
+    snapshot->heapAllocatedBytes = allocatedBytes;
+    snapshot->allocBytes = allocBytes;
+    snapshot->allocBytesUoh = allocBytesUoh;
+    snapshot->active = 1u;
+    snapshot->current = 1u;
+    snapshot->cleared = allocationPointer == 0u && allocationLimit == 0u
+        ? 1u : 0u;
+
+    void* objectForSegment = nullptr;
+    if (g_guideXosAllocationDiagnostics.objectHistoryCount != 0u) {
+        objectForSegment = reinterpret_cast<void*>(
+            g_guideXosAllocationDiagnostics.objectHistory[
+                g_guideXosAllocationDiagnostics.objectHistoryCount - 1u].address);
+    } else if (allocationPointer != 0u) {
+        objectForSegment = reinterpret_cast<void*>(allocationPointer);
+    }
+    if (objectForSegment != nullptr &&
+        guidexos_nativeaot_gc_describe_segment(
+            objectForSegment, &snapshot->segmentIdentity,
+            &snapshot->segmentBase, &snapshot->segmentAllocated,
+            &snapshot->segmentCommitted, &snapshot->segmentReserved,
+            reinterpret_cast<gx_uint32*>(&snapshot->segmentFlags),
+            reinterpret_cast<gx_uint32*>(&snapshot->segmentGeneration)) != 0) {
+        allocationContextFixupInvariantFailure();
+    }
+    snapshot->generationAllocationStart = snapshot->segmentAllocated;
+}
+
+bool validateAllocationContextFixupObject(
+    guidexos_nativeaot_object_history_entry& entry,
+    const guidexos_nativeaot_allocation_context_snapshot& snapshot,
+    bool afterFixup) {
+    bool valid = true;
+    const gx_uintptr address = entry.address;
+    const gx_uintptr end = entry.end;
+    if (address == 0u || end <= address || (address & 7u) != 0u) {
+        ++g_guideXosAllocationDiagnostics.objectAlignmentFailuresAfterFixup;
+        valid = false;
+    }
+    if (address != 0u &&
+        *reinterpret_cast<const gx_uintptr*>(address) != entry.eeType) {
+        ++g_guideXosAllocationDiagnostics.objectTypeLayoutFailuresAfterFixup;
+        valid = false;
+    }
+    const gx_uint32 observedLength = address == 0u
+        ? 0u : *reinterpret_cast<const gx_uint32*>(address + 8u);
+    if (observedLength != entry.length) {
+        ++g_guideXosAllocationDiagnostics.objectTypeLayoutFailuresAfterFixup;
+        valid = false;
+    }
+    gx_uint32 heapOwned = 0u;
+    gx_uintptr heapBase = 0u;
+    gx_uintptr heapAllocated = 0u;
+    gx_uintptr heapReserved = 0u;
+    if (guidexos_nativeaot_gc_describe_object(
+            reinterpret_cast<void*>(address), &heapBase, &heapAllocated,
+            &heapReserved, &heapOwned) != 0 || heapOwned == 0u) {
+        ++g_guideXosAllocationDiagnostics.objectBoundaryFailuresAfterFixup;
+        valid = false;
+    } else if ((afterFixup && end > heapAllocated) || end > heapReserved ||
+               (afterFixup && snapshot.segmentAllocated != 0u &&
+                end > snapshot.segmentAllocated)) {
+        ++g_guideXosAllocationDiagnostics.objectBoundaryFailuresAfterFixup;
+        valid = false;
+    }
+    if (address != 0u && entry.length >= 4u) {
+        const unsigned char* data = reinterpret_cast<const unsigned char*>(
+            address + 0x10u);
+        for (gx_uint32 index = 0u; index < entry.length; ++index) {
+            const unsigned char expected = index < 4u
+                ? static_cast<unsigned char>(entry.sequence >> (index * 8u))
+                : static_cast<unsigned char>(
+                    (index * 17u + entry.sequence * 31u) & 0xFFu);
+            if (data[index] != expected) {
+                ++g_guideXosAllocationDiagnostics.objectPatternFailuresAfterFixup;
+                valid = false;
+                break;
+            }
+        }
+    } else {
+        ++g_guideXosAllocationDiagnostics.objectPatternFailuresAfterFixup;
+        valid = false;
+    }
+    if (end > allocationContextFixupLastObjectEnd()) {
+        ++g_guideXosAllocationDiagnostics.objectTailClassificationFailures;
+        valid = false;
+    }
+    if (afterFixup) {
+        entry.afterValid = valid ? 1u : 0u;
+    } else {
+        entry.beforeValid = valid ? 1u : 0u;
+    }
+    return valid;
+}
+
+void validateAllocationContextFixupObjects(bool afterFixup) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    if (diagnostics.objectHistoryOverflow != 0u) {
+        allocationContextFixupInvariantFailure();
+    }
+    const uint32_t beforeFailures =
+        diagnostics.objectValidationFailuresBeforeFixup;
+    const uint32_t afterFailures =
+        diagnostics.objectValidationFailuresAfterFixup;
+    const guidexos_nativeaot_allocation_context_snapshot& snapshot = afterFixup
+        ? diagnostics.allocationContextFixupAfter[0]
+        : diagnostics.allocationContextFixupBefore[0];
+    for (gx_uint32 index = 0u; index < diagnostics.objectHistoryCount; ++index) {
+        guidexos_nativeaot_object_history_entry& entry =
+            diagnostics.objectHistory[index];
+        if (!validateAllocationContextFixupObject(entry, snapshot, afterFixup)) {
+            if (afterFixup) {
+                ++diagnostics.objectValidationFailuresAfterFixup;
+            } else {
+                ++diagnostics.objectValidationFailuresBeforeFixup;
+            }
+        }
+        for (gx_uint32 other = 0u; other < index; ++other) {
+            const guidexos_nativeaot_object_history_entry& prior =
+                diagnostics.objectHistory[other];
+            if (entry.address == prior.address) {
+                ++diagnostics.duplicateObjectAddressFailures;
+                ++diagnostics.objectOverlapFailuresAfterFixup;
+            } else if (entry.address < prior.end && prior.address < entry.end) {
+                ++diagnostics.objectOverlapFailuresAfterFixup;
+            }
+        }
+    }
+    if (afterFixup) {
+        diagnostics.objectValidationAfterFixupCount =
+            diagnostics.objectHistoryCount;
+        diagnostics.sentinelChecksAfterFixup = diagnostics.sentinelValidationCount;
+        (void)afterFailures;
+    } else {
+        diagnostics.objectValidationBeforeFixupCount =
+            diagnostics.objectHistoryCount;
+        diagnostics.sentinelChecksBeforeFixup = diagnostics.sentinelValidationCount;
+        (void)beforeFailures;
+    }
+}
+
+void emitAllocationContextFixupRootBoundarySafeStop() {
+    const guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-allocation-context-fixup-root-boundary] SAFE_STOP marker=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupRootBoundaryMarker);
+    suspendEeSerialPutString(" callback=GCToEEInterface::GcScanRoots entry before FOREACH_THREAD");
+    suspendEeSerialPutString(" fixupRequest=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupRequestCount);
+    suspendEeSerialPutString(" fixupEntry=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupEntryCount);
+    suspendEeSerialPutString(" fixupComplete=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupCompletionCount);
+    suspendEeSerialPutString(" contextsVisited=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsVisited);
+    suspendEeSerialPutString(" contextsChanged=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsChanged);
+    suspendEeSerialPutString(" contextsCleared=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsCleared);
+    suspendEeSerialPutString(" objectBefore=");
+    suspendEeSerialPutHex32(diagnostics.objectValidationBeforeFixupCount);
+    suspendEeSerialPutString(" objectAfter=");
+    suspendEeSerialPutHex32(diagnostics.objectValidationAfterFixupCount);
+    suspendEeSerialPutString(" sentinelChecks=");
+    suspendEeSerialPutHex32(diagnostics.sentinelChecksAtRootBoundary);
+    suspendEeSerialPutString(" rootDispatcher=");
+    suspendEeSerialPutHex32(diagnostics.rootDispatcherEntryCount);
+    suspendEeSerialPutString(" rootProviders=");
+    suspendEeSerialPutHex32(diagnostics.rootProviderEntryCount);
+    suspendEeSerialPutString(" rootCandidates=");
+    suspendEeSerialPutHex32(diagnostics.firstRootCandidateCount);
+    suspendEeSerialPutString(" callbacks=");
+    suspendEeSerialPutHex32(diagnostics.rootCallbacksDelivered);
+    suspendEeSerialPutString(" marking=");
+    suspendEeSerialPutHex32(diagnostics.markingEntryCount);
+    suspendEeSerialPutString(" metadataMutation=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextMetadataMutationStarted);
+    suspendEeSerialPutString(" objectMutation=");
+    suspendEeSerialPutHex32(diagnostics.objectMemoryMutationStarted);
+    suspendEeSerialPutString(" restartResume=");
+    suspendEeSerialPutHex32(diagnostics.restartResumeCount);
+    suspendEeSerialPutString(" fixupMode=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupMode);
+    suspendEeSerialPutString(" enumerationComplete=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupEnumerationComplete);
+    suspendEeSerialPutString(" activeBefore=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsActiveBefore);
+    suspendEeSerialPutString(" activeAfter=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsActiveAfter);
+    suspendEeSerialPutString(" retired=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsRetired);
+    suspendEeSerialPutString(" metadataComplete=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextMetadataMutationCompleted);
+    suspendEeSerialPutString(" segmentBookkeeping=");
+    suspendEeSerialPutHex32(diagnostics.segmentBookkeepingMutationCount);
+    suspendEeSerialPutString(" fixupFailures=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupInvariantFailures);
+    suspendEeSerialPutString(" rootFailures=");
+    suspendEeSerialPutHex32(diagnostics.rootBoundaryInvariantFailures);
+    suspendEeSerialPutString(" objectFailuresBefore=");
+    suspendEeSerialPutHex32(diagnostics.objectValidationFailuresBeforeFixup);
+    suspendEeSerialPutString(" objectFailuresAfter=");
+    suspendEeSerialPutHex32(diagnostics.objectValidationFailuresAfterFixup);
+    suspendEeSerialPutString(" overlapFailures=");
+    suspendEeSerialPutHex32(diagnostics.objectOverlapFailuresAfterFixup);
+    suspendEeSerialPutString(" duplicateFailures=");
+    suspendEeSerialPutHex32(diagnostics.duplicateObjectAddressFailures);
+    suspendEeSerialPutString(" typeLayoutFailures=");
+    suspendEeSerialPutHex32(diagnostics.objectTypeLayoutFailuresAfterFixup);
+    suspendEeSerialPutString(" boundaryFailures=");
+    suspendEeSerialPutHex32(diagnostics.objectBoundaryFailuresAfterFixup);
+    suspendEeSerialPutString(" patternFailures=");
+    suspendEeSerialPutHex32(diagnostics.objectPatternFailuresAfterFixup);
+    suspendEeSerialPutString(" addressChanges=");
+    suspendEeSerialPutHex32(diagnostics.objectAddressChangesAfterFixup);
+    suspendEeSerialPutString(" allocPtrBefore=");
+    suspendEeSerialPutHex64(diagnostics.allocationPointerBeforeFixup);
+    suspendEeSerialPutString(" allocLimitBefore=");
+    suspendEeSerialPutHex64(diagnostics.allocationLimitBeforeFixup);
+    suspendEeSerialPutString(" allocPtrAfter=");
+    suspendEeSerialPutHex64(diagnostics.allocationPointerAfterFixup);
+    suspendEeSerialPutString(" allocLimitAfter=");
+    suspendEeSerialPutHex64(diagnostics.allocationLimitAfterFixup);
+    suspendEeSerialPutString(" validExtentBefore=");
+    suspendEeSerialPutHex64(diagnostics.validAllocatedExtentBeforeFixup);
+    suspendEeSerialPutString(" validExtentAfter=");
+    suspendEeSerialPutHex64(diagnostics.validAllocatedExtentAfterFixup);
+    suspendEeSerialPutString(" unusedTailBefore=");
+    suspendEeSerialPutHex64(diagnostics.unusedTailBytesBeforeFixup);
+    suspendEeSerialPutString(" unusedTailAfter=");
+    suspendEeSerialPutHex64(diagnostics.unusedTailBytesAfterFixup);
+    suspendEeSerialPutString(" heapCounterBefore=");
+    suspendEeSerialPutHex64(diagnostics.heapAllocationCounterBeforeFixup);
+    suspendEeSerialPutString(" heapCounterAfter=");
+    suspendEeSerialPutHex64(diagnostics.heapAllocationCounterAfterFixup);
+    suspendEeSerialPutString(" segmentAllocatedBefore=");
+    suspendEeSerialPutHex64(diagnostics.segmentAllocatedBeforeFixup);
+    suspendEeSerialPutString(" segmentAllocatedAfter=");
+    suspendEeSerialPutHex64(diagnostics.segmentAllocatedAfterFixup);
+    suspendEeSerialPutString(" contextBefore=");
+    suspendEeSerialPutHex64(diagnostics.allocationContextFixupBefore[0].contextIdentity);
+    suspendEeSerialPutString(" contextAfter=");
+    suspendEeSerialPutHex64(diagnostics.allocationContextFixupAfter[0].contextIdentity);
+    suspendEeSerialPutString(" allocBytesBefore=");
+    suspendEeSerialPutHex64(diagnostics.allocationContextFixupBefore[0].allocBytes);
+    suspendEeSerialPutString(" allocBytesAfter=");
+    suspendEeSerialPutHex64(diagnostics.allocationContextFixupAfter[0].allocBytes);
+    suspendEeSerialPutString(" segmentCommittedBefore=");
+    suspendEeSerialPutHex64(diagnostics.segmentCommittedBeforeFixup);
+    suspendEeSerialPutString(" segmentCommittedAfter=");
+    suspendEeSerialPutHex64(diagnostics.segmentCommittedAfterFixup);
+    suspendEeSerialPutString(" segmentReservedBefore=");
+    suspendEeSerialPutHex64(diagnostics.segmentReservedBeforeFixup);
+    suspendEeSerialPutString(" segmentReservedAfter=");
+    suspendEeSerialPutHex64(diagnostics.segmentReservedAfterFixup);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupRequest() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.allocationContextFixupRequestCount;
+    diagnostics.allocationContextFixupMode = 1u;
+    g_guideXosAllocationContextFixupPending = true;
+    diagnostics.objectMemoryMutationStarted = 0u;
+    diagnostics.allocationContextMetadataMutationStarted = 0u;
+    diagnostics.allocationContextMetadataMutationCompleted = 0u;
+    diagnostics.allocationContextBeforeCount = 1u;
+    captureAllocationContextFixupSnapshot(&diagnostics.allocationContextFixupBefore[0]);
+    diagnostics.allocationPointerBeforeFixup =
+        diagnostics.allocationContextFixupBefore[0].allocPtr;
+    diagnostics.allocationLimitBeforeFixup =
+        diagnostics.allocationContextFixupBefore[0].allocLimit;
+    diagnostics.heapAllocationCounterBeforeFixup =
+        diagnostics.allocationContextFixupBefore[0].heapAllocatedBytes;
+    diagnostics.segmentAllocatedBeforeFixup =
+        diagnostics.allocationContextFixupBefore[0].segmentAllocated;
+    diagnostics.segmentCommittedBeforeFixup =
+        diagnostics.allocationContextFixupBefore[0].segmentCommitted;
+    diagnostics.segmentReservedBeforeFixup =
+        diagnostics.allocationContextFixupBefore[0].segmentReserved;
+    diagnostics.validAllocatedExtentBeforeFixup =
+        allocationContextFixupLastObjectEnd();
+    diagnostics.unusedTailBytesBeforeFixup =
+        diagnostics.allocationContextFixupBefore[0].unusedTailBytes;
+    diagnostics.sentinelChecksBeforeFixup = diagnostics.sentinelValidationCount;
+    validateAllocationContextFixupObjects(false);
+}
+
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupEnumerationEntry() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.allocationContextFixupEntryCount;
+    if (diagnostics.allocationContextFixupRequestCount != 1u) {
+        allocationContextFixupInvariantFailure();
+    }
+    diagnostics.allocationContextMetadataMutationStarted = 1u;
+}
+
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupContextVisited(
+    gx_uintptr context) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.allocationContextFixupContextsVisited;
+    if (context == 0u ||
+        diagnostics.allocationContextBeforeCount == 0u ||
+        context != diagnostics.allocationContextFixupBefore[0].contextIdentity) {
+        allocationContextFixupInvariantFailure();
+    }
+}
+
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupEnumerationComplete() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    diagnostics.allocationContextFixupEnumerationComplete = 1u;
+    if (diagnostics.allocationContextFixupContextsVisited == 0u) {
+        allocationContextFixupInvariantFailure();
+    }
+}
+
+extern "C" void __cdecl guideXosNativeAotAllocationContextFixupGcStartWorkObserver() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    if (!g_guideXosAllocationContextFixupPending ||
+        diagnostics.allocationContextFixupEnumerationComplete == 0u) {
+        allocationContextFixupInvariantFailure();
+    }
+    diagnostics.allocationContextAfterCount = 1u;
+    captureAllocationContextFixupSnapshot(&diagnostics.allocationContextFixupAfter[0]);
+    diagnostics.allocationPointerAfterFixup =
+        diagnostics.allocationContextFixupAfter[0].allocPtr;
+    diagnostics.allocationLimitAfterFixup =
+        diagnostics.allocationContextFixupAfter[0].allocLimit;
+    diagnostics.heapAllocationCounterAfterFixup =
+        diagnostics.allocationContextFixupAfter[0].heapAllocatedBytes;
+    diagnostics.segmentAllocatedAfterFixup =
+        diagnostics.allocationContextFixupAfter[0].segmentAllocated;
+    diagnostics.segmentCommittedAfterFixup =
+        diagnostics.allocationContextFixupAfter[0].segmentCommitted;
+    diagnostics.segmentReservedAfterFixup =
+        diagnostics.allocationContextFixupAfter[0].segmentReserved;
+    diagnostics.validAllocatedExtentAfterFixup = allocationContextFixupLastObjectEnd();
+    diagnostics.unusedTailBytesAfterFixup =
+        diagnostics.allocationContextFixupAfter[0].unusedTailBytes;
+    diagnostics.allocationContextMetadataMutationCompleted = 1u;
+    const guidexos_nativeaot_allocation_context_snapshot& before =
+        diagnostics.allocationContextFixupBefore[0];
+    const guidexos_nativeaot_allocation_context_snapshot& after =
+        diagnostics.allocationContextFixupAfter[0];
+    diagnostics.allocationContextFixupContextsChanged =
+        before.allocPtr != after.allocPtr || before.allocLimit != after.allocLimit ||
+        before.allocBytes != after.allocBytes || before.allocBytesUoh != after.allocBytesUoh
+            ? 1u : 0u;
+    diagnostics.allocationContextFixupContextsActiveBefore = before.active;
+    diagnostics.allocationContextFixupContextsActiveAfter = after.active;
+    diagnostics.allocationContextFixupContextsCleared = after.cleared;
+    diagnostics.allocationContextFixupContextsRetired = after.retired;
+    if (before.segmentAllocated != after.segmentAllocated ||
+        before.segmentCommitted != after.segmentCommitted ||
+        before.segmentReserved != after.segmentReserved) {
+        ++diagnostics.segmentBookkeepingMutationCount;
+    }
+    validateAllocationContextFixupObjects(true);
+    ++diagnostics.allocationContextFixupCompletionCount;
+    g_guideXosAllocationContextFixupPending = false;
+}
+
+extern "C" void __cdecl guideXosNativeAotAllocationRootPhaseRequested() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.rootPhaseRequestCount;
+    if (diagnostics.allocationContextFixupCompletionCount != 1u ||
+        diagnostics.allocationContextMetadataMutationCompleted == 0u) {
+        allocationContextFixupRootInvariantFailure();
+    }
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotAllocationContextFixupRootBoundary() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.rootDispatcherEntryCount;
+    diagnostics.rootCategorySelected = 1u; // thread statics, then stack roots
+    diagnostics.sentinelChecksAtRootBoundary = diagnostics.sentinelValidationCount;
+    validateAllocationContextFixupObjects(true);
+    if (diagnostics.rootPhaseRequestCount != 1u ||
+        diagnostics.allocationContextFixupCompletionCount != 1u ||
+        diagnostics.allocationContextFixupContextsVisited != 1u ||
+        diagnostics.allocationContextFixupEnumerationComplete != 1u ||
+        diagnostics.allocationContextMetadataMutationStarted != 1u ||
+        diagnostics.allocationContextMetadataMutationCompleted != 1u ||
+        diagnostics.objectMemoryMutationStarted != 0u ||
+        diagnostics.rootProviderRequestCount != 0u ||
+        diagnostics.rootProviderEntryCount != 0u ||
+        diagnostics.firstRootCandidateCount != 0u ||
+        diagnostics.rootCallbacksDelivered != 0u ||
+        diagnostics.promotionCallbacksDelivered != 0u ||
+        diagnostics.markingEntryCount != 0u ||
+        diagnostics.sweepingEntryCount != 0u ||
+        diagnostics.compactionEntryCount != 0u ||
+        diagnostics.relocationEntryCount != 0u ||
+        diagnostics.stackScanEntryCount != 0u ||
+        diagnostics.staticRootEntryCount != 0u ||
+        diagnostics.handleRootEntryCount != 0u ||
+        diagnostics.finalizerRootEntryCount != 0u ||
+        diagnostics.restartResumeCount != 0u) {
+        allocationContextFixupRootInvariantFailure();
+    }
+    diagnostics.allocationContextFixupRootBoundaryMarker =
+        GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP_MARKER;
+    diagnostics.allocationContextFixupSafeStopObserved = 1u;
+    diagnostics.safeStopObserved = 1u;
+    diagnostics.stopReason = diagnostics.allocationContextFixupRootBoundaryMarker;
+    diagnostics.allocationContextFixupStopReason = diagnostics.stopReason;
+    diagnostics.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F22_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP;
+    diagnostics.sequence += 1u;
+    diagnostics.currentRip = reinterpret_cast<gx_uintptr>(_ReturnAddress());
+    diagnostics.currentRsp = reinterpret_cast<gx_uintptr>(_AddressOfReturnAddress());
+    diagnostics.rootBoundaryFunction = reinterpret_cast<gx_uintptr>(
+        &guideXosNativeAotAllocationContextFixupRootBoundary);
+    diagnostics.firstRootProviderFunction = 0u;
+    emitAllocationContextFixupRootBoundarySafeStop();
+    for (;;) {
+    }
+}
+
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) && defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
@@ -1431,6 +1944,9 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     gx_uint32 finalizableBefore = 0;
     gx_uint32 gcInProgressBefore = 0;
     gx_uint32 gcModeBefore = 0;
+    gx_uintptr contextIdentityBefore = 0;
+    gx_uintptr allocBytesBefore = 0;
+    gx_uintptr allocBytesUohBefore = 0;
     unsigned char* tlsBlock = currentTlsBlock();
     unsigned char* tlsCell = runtimeCell(tlsBlock);
     const gx_uintptr transitionFrame = tlsCell != nullptr
@@ -1440,7 +1956,8 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     if (guidexos_nativeaot_gc_read_state(
             &allocationPointerBefore, &allocationLimitBefore, &currentThread,
             &gcHeap, &gcCountBefore, &gcBytesBefore, &finalizableBefore,
-            &gcInProgressBefore, &gcModeBefore) != 0 || currentThread == 0 || gcHeap == 0) {
+            &gcInProgressBefore, &gcModeBefore, &contextIdentityBefore,
+            &allocBytesBefore, &allocBytesUohBefore) != 0 || currentThread == 0 || gcHeap == 0) {
         ++g_guideXosAllocationDiagnostics.pointerContractFailures;
         recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_GC_STATE,
                               eeType, length, objectSize, allocationPointerBefore,
@@ -1553,10 +2070,14 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     gx_uint32 finalizableAfter = 0;
     gx_uint32 gcInProgressAfter = 0;
     gx_uint32 gcModeAfter = 0;
+    gx_uintptr contextIdentityAfter = 0;
+    gx_uintptr allocBytesAfter = 0;
+    gx_uintptr allocBytesUohAfter = 0;
     if (guidexos_nativeaot_gc_read_state(
             &allocationPointerAfter, &allocationLimitAfter, &currentThreadAfter,
             &gcHeapAfter, &gcCountAfter, &gcBytesAfter, &finalizableAfter,
-            &gcInProgressAfter, &gcModeAfter) != 0 || currentThreadAfter != currentThread ||
+            &gcInProgressAfter, &gcModeAfter, &contextIdentityAfter,
+            &allocBytesAfter, &allocBytesUohAfter) != 0 || currentThreadAfter != currentThread ||
         gcHeapAfter != gcHeap) {
         ++g_guideXosAllocationDiagnostics.pointerContractFailures;
         recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_FAILFAST_GC_STATE,
@@ -2040,6 +2561,24 @@ guideXosManagedAllocationValidateObject(
     const gx_uintptr objectAddress = reinterpret_cast<gx_uintptr>(arrayObject);
     const gx_size objectSize = g_guideXosAllocationDiagnostics.derivedObjectSize;
     const gx_uintptr objectEnd = objectAddress + objectSize;
+#if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
+    if (g_guideXosAllocationDiagnostics.objectHistoryCount <
+        GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY) {
+        guidexos_nativeaot_object_history_entry& history =
+            g_guideXosAllocationDiagnostics.objectHistory[
+                g_guideXosAllocationDiagnostics.objectHistoryCount++];
+        history.address = objectAddress;
+        history.end = objectEnd;
+        history.eeType = g_guideXosAllocationDiagnostics.eeType;
+        history.length = static_cast<gx_uint32>(length);
+        history.sequence = sequence;
+        history.zeroByteCount = zeroByteCount;
+        history.patternValid = patternValid;
+        history.sentinel = sequence < 4u ? 1u : 0u;
+    } else {
+        g_guideXosAllocationDiagnostics.objectHistoryOverflow = 1u;
+    }
+#endif
     gx_uint32 failure = 0u;
     g_guideXosAllocationDiagnostics.currentIteration = sequence;
     g_guideXosAllocationDiagnostics.zeroByteCount = zeroByteCount;

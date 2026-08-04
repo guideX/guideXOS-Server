@@ -48,6 +48,54 @@ typedef struct guidexos_nativeaot_refill_history_entry {
     uintptr_t committedAfter;
 } guidexos_nativeaot_refill_history_entry;
 
+enum {
+    GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS = 8u,
+    GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY = 64u,
+};
+
+typedef struct guidexos_nativeaot_allocation_context_snapshot {
+    uintptr_t contextIdentity;
+    uintptr_t owningRuntimeThread;
+    uintptr_t owningGcHeap;
+    uintptr_t allocPtr;
+    uintptr_t allocLimit;
+    uintptr_t allocationStart;
+    uintptr_t allocationSize;
+    uintptr_t unusedTailBytes;
+    uintptr_t segmentIdentity;
+    uintptr_t segmentBase;
+    uintptr_t segmentAllocated;
+    uintptr_t segmentCommitted;
+    uintptr_t segmentReserved;
+    uintptr_t generationAllocationStart;
+    uintptr_t heapAllocatedBytes;
+    uintptr_t allocBytes;
+    uintptr_t allocBytesUoh;
+    uint32_t active;
+    uint32_t current;
+    uint32_t retired;
+    uint32_t cleared;
+    uint32_t segmentFlags;
+    uint32_t segmentGeneration;
+    uint32_t reserved0;
+    uint32_t reserved1;
+} guidexos_nativeaot_allocation_context_snapshot;
+
+typedef struct guidexos_nativeaot_object_history_entry {
+    uintptr_t address;
+    uintptr_t end;
+    uintptr_t eeType;
+    uint32_t length;
+    uint32_t sequence;
+    uint32_t zeroByteCount;
+    uint32_t patternValid;
+    uint32_t beforeValid;
+    uint32_t afterValid;
+    uint32_t sentinel;
+    uint32_t reserved0;
+    uint32_t reserved1;
+} guidexos_nativeaot_object_history_entry;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -365,6 +413,98 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t suspendEeCurrentStackHigh;
     uintptr_t suspendEeCurrentTransitionFrame;
     uintptr_t suspendEeCollectionInitiatorNativeThreadId;
+
+    /*
+     * Bounded allocation-context fixup and first-root-boundary proof fields.
+     * These are append-only. They describe the source-defined fixup contract
+     * and the pre-dispatch root boundary; they do not implement root scanning.
+     */
+    uint32_t allocationContextFixupRequestCount;
+    uint32_t allocationContextFixupEntryCount;
+    uint32_t allocationContextFixupCompletionCount;
+    uint32_t allocationContextFixupMode;
+    uint32_t allocationContextFixupContextsVisited;
+    uint32_t allocationContextFixupContextsChanged;
+    uint32_t allocationContextFixupContextsActiveBefore;
+    uint32_t allocationContextFixupContextsActiveAfter;
+    uint32_t allocationContextFixupContextsCleared;
+    uint32_t allocationContextFixupContextsRetired;
+    uint32_t allocationContextFixupEnumerationComplete;
+    uint32_t allocationContextFixupInvariantFailures;
+    uint32_t allocationContextMetadataMutationStarted;
+    uint32_t allocationContextMetadataMutationCompleted;
+    uint32_t segmentBookkeepingMutationCount;
+    uint32_t objectMemoryMutationStarted;
+    uint32_t objectValidationBeforeFixupCount;
+    uint32_t objectValidationAfterFixupCount;
+    uint32_t objectValidationFailuresBeforeFixup;
+    uint32_t objectValidationFailuresAfterFixup;
+    uint32_t objectOverlapFailuresAfterFixup;
+    uint32_t objectBoundaryFailuresAfterFixup;
+    uint32_t objectAlignmentFailuresAfterFixup;
+    uint32_t objectTypeLayoutFailuresAfterFixup;
+    uint32_t objectPatternFailuresAfterFixup;
+    uint32_t objectAddressChangesAfterFixup;
+    uint32_t duplicateObjectAddressFailures;
+    uint32_t objectTailClassificationFailures;
+    uint32_t sentinelChecksBeforeFixup;
+    uint32_t sentinelChecksAfterFixup;
+    uint32_t sentinelChecksAtRootBoundary;
+    uint32_t rootPhaseRequestCount;
+    uint32_t rootDispatcherEntryCount;
+    uint32_t rootCategorySelected;
+    uint32_t rootProviderRequestCount;
+    uint32_t rootProviderEntryCount;
+    uint32_t firstRootCandidateCount;
+    uint32_t rootCallbacksDelivered;
+    uint32_t promotionCallbacksDelivered;
+    uint32_t markingEntryCount;
+    uint32_t sweepingEntryCount;
+    uint32_t compactionEntryCount;
+    uint32_t relocationEntryCount;
+    uint32_t stackBoundRequestCount;
+    uint32_t stackScanEntryCount;
+    uint32_t staticRootRequestCount;
+    uint32_t staticRootEntryCount;
+    uint32_t handleRootRequestCount;
+    uint32_t handleRootEntryCount;
+    uint32_t finalizerRootRequestCount;
+    uint32_t finalizerRootEntryCount;
+    uint32_t rootBoundaryInvariantFailures;
+    uint32_t allocationContextFixupSafeStopObserved;
+    uint32_t allocationContextFixupStopReason;
+    uint32_t allocationContextFixupRootBoundaryMarker;
+    uint32_t reservedAllocationContextProof[5];
+
+    uintptr_t validAllocatedExtentBeforeFixup;
+    uintptr_t validAllocatedExtentAfterFixup;
+    uintptr_t unusedTailBytesBeforeFixup;
+    uintptr_t unusedTailBytesAfterFixup;
+    uintptr_t heapAllocationCounterBeforeFixup;
+    uintptr_t heapAllocationCounterAfterFixup;
+    uintptr_t allocationPointerBeforeFixup;
+    uintptr_t allocationLimitBeforeFixup;
+    uintptr_t allocationPointerAfterFixup;
+    uintptr_t allocationLimitAfterFixup;
+    uintptr_t segmentAllocatedBeforeFixup;
+    uintptr_t segmentAllocatedAfterFixup;
+    uintptr_t segmentCommittedBeforeFixup;
+    uintptr_t segmentCommittedAfterFixup;
+    uintptr_t segmentReservedBeforeFixup;
+    uintptr_t segmentReservedAfterFixup;
+    uintptr_t rootBoundaryFunction;
+    uintptr_t firstRootProviderFunction;
+
+    guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
+        GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
+    guidexos_nativeaot_allocation_context_snapshot allocationContextFixupAfter[
+        GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
+    guidexos_nativeaot_object_history_entry objectHistory[
+        GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
+    uint32_t allocationContextBeforeCount;
+    uint32_t allocationContextAfterCount;
+    uint32_t objectHistoryCount;
+    uint32_t objectHistoryOverflow;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -406,6 +546,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S14_STOP_OBJECT_RETURNED = 0xB0Eu,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F20_FIRST_COLLECTION_SAFE_STOP = 0xF20u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F21_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP = 0xF21u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F22_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP = 0xF22u,
 };
 
 enum {
@@ -415,6 +556,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_SAFE_STOP_MARKER = 0xC011EC01u,
     GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_UNSUPPORTED_SUSPEND_EE = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP_MARKER = 0xC011EC02u,
+    GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC03u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

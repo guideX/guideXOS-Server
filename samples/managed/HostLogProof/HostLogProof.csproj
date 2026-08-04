@@ -62,5 +62,6 @@
   <ItemGroup>
     <NativeLibrary Include="$(HostLogProofRuntimeSupportObj)" Condition="'$(HostLogProofRuntimeSupportObj)' != '' and Exists('$(HostLogProofRuntimeSupportObj)')" />
     <NativeLibrary Include="$(HostLogProofRuntimePackObj)" Condition="'$(HostLogProofRuntimePackObj)' != '' and Exists('$(HostLogProofRuntimePackObj)')" />
+    <NativeLibrary Include="$(HostLogProofRuntimePackProbeObj)" Condition="'$(HostLogProofRuntimePackProbeObj)' != '' and Exists('$(HostLogProofRuntimePackProbeObj)')" />
   </ItemGroup>
 </Project>

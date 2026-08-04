@@ -10,6 +10,10 @@ See [NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md](NATIVEAOT_PAL_RUNTIME_REPLACEMENT.md)
 [NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md](NATIVEAOT_PAL_WIN64_QEMU_BRIDGE.md), and
 [NATIVEAOT_GC_STARTUP_READINESS.md](NATIVEAOT_GC_STARTUP_READINESS.md).
 
+The focused follow-up for real `fix_allocation_contexts(TRUE)` and the
+pre-root-dispatch safe stop is
+[NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md).
+
 The startup artifact calls `RhInitialize` from a probe-specific export and
 returns successfully in first, repeat, and fresh disposable QEMU processes.
 The authorized next image entered the real managed `byte[24]` path once in

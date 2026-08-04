@@ -6,6 +6,11 @@ It does not rewrite that earlier result: the earlier proof stopped before
 `ThreadStore::LockThreadStore`; this proof reaches and uses the real lock and
 single-thread suspension path.
 
+The next bounded continuation is documented in
+[NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md).
+That report preserves this C011EC02 result and continues through real
+`fix_allocation_contexts(TRUE)` to the first root-dispatch boundary.
+
 ## 1. Outcome
 
 **Outcome A — single-thread suspension completed.** A real Workstation GC

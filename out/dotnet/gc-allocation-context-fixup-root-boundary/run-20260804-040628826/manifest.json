@@ -1,0 +1,255 @@
+{
+    "outcome":  "A / single-mutator Workstation GC allocation-context fixup(TRUE) completed; safe stop at GcScanRoots entry before FOREACH_THREAD",
+    "proofMode":  "allocation-context-fixup-root-boundary",
+    "repositoryHead":  "0d7cdac0845a2b20d8a40091de3dd3262c65035e",
+    "dirtyState":  [
+                       " M samples/managed/HostLogProof/HostLogProof.csproj",
+                       " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                       " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                       " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                       " M tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_gc_allocation_probe.cpp",
+                       "?? out/dotnet/gc-allocation-context-fixup-root-boundary/"
+                   ],
+    "dirtyDiffStat":  " samples/managed/HostLogProof/HostLogProof.csproj   |   1 +\n ...-nativeaot-gc-single-thread-suspend-ee-qemu.ps1 | 214 ++++++++--\n .../guidexos_nativeaot_allocation_diagnostics.h    | 142 +++++++\n .../src/platform/guidexos_nativeaot_platform.cpp   | 471 ++++++++++++++++++++-\n .../guidexos_nativeaot_gc_allocation_probe.cpp     |  14 +-\n 5 files changed, 796 insertions(+), 46 deletions(-)",
+    "runtimePack":  {
+                        "version":  "9.0.0",
+                        "architecture":  "AMD64",
+                        "gc":  "Workstation",
+                        "gcInterface":  "5.3",
+                        "ee":  "2",
+                        "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                        "lockedGcenvEeSourceSha256":  "EA603651D418F45F6847B7F3EC57C23BEB0A153ECCF94C2107EB5EB40B6C9A6B",
+                        "generatedInjectedGcenvEeSource":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-allocation-context-fixup-root-boundary\\build\\runtime-pack\\gcenv.ee.single-thread-suspend-ee.cpp"
+                    },
+    "workload":  {
+                     "arrayLength":  4096,
+                     "actualAlignedSize":  "0x1018",
+                     "hardAllocationLimit":  256,
+                     "heapReserveCommit":  "locked adapted Workstation GC configuration",
+                     "allocationCount":  "0x28",
+                     "fast":  "0x13",
+                     "rare":  "0x16",
+                     "refills":  "0x15",
+                     "sameSegmentCommits":  "0x2",
+                     "segmentTransitions":  "0x0",
+                     "liveSentinels":  "0x4"
+                 },
+    "fixup":  {
+                  "requestCount":  1,
+                  "enumerationEntryCount":  1,
+                  "completionCount":  1,
+                  "mode":  "fix_allocation_contexts(TRUE)",
+                  "contextsVisited":  1,
+                  "contextsChanged":  1,
+                  "contextsCleared":  1,
+                  "metadataMutationStarted":  1,
+                  "metadataMutationCompleted":  1,
+                  "objectMemoryMutationStarted":  0,
+                  "objectValidationBefore":  40,
+                  "objectValidationAfter":  40,
+                  "objectValidationFailuresBefore":  0,
+                  "objectValidationFailuresAfter":  0,
+                  "segmentBookkeepingMutation":  "recorded from source-owned segment fields"
+              },
+    "rootBoundary":  {
+                         "rootPhaseRequestCount":  1,
+                         "dispatcherEntryCount":  1,
+                         "category":  "thread statics then stack roots, selected at dispatcher entry",
+                         "providerRequestCount":  0,
+                         "providerEntryCount":  0,
+                         "firstRootCandidateCount":  0,
+                         "callbacksDelivered":  0,
+                         "promotionCallbacksDelivered":  0,
+                         "markingEntryCount":  0,
+                         "stackScanEntryCount":  0,
+                         "staticRootEntryCount":  0,
+                         "handleRootEntryCount":  0,
+                         "finalizerRootEntryCount":  0,
+                         "restartResumeCount":  0,
+                         "marker":  "C011EC03"
+                     },
+    "proofKernelSha256":  "B626C3F90B4B358773389626F25402697940864681415027A5F024284D71F0E9",
+    "activePalArchiveSha256":  "C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F",
+    "qemuVersion":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "selectors":  [
+                      "GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1",
+                      "GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1"
+                  ],
+    "collectionPath":  "soh_try_fit -\u003e a_fit_segment_end_p -\u003e a_state_trigger_ephemeral_gc -\u003e trigger_ephemeral_gc -\u003e GCHeap::GarbageCollectGeneration -\u003e GCToEEInterface::SuspendEE -\u003e GCHeap::GarbageCollect -\u003e fix_allocation_contexts(TRUE) -\u003e GcStartWork -\u003e BeforeGcScanRoots -\u003e GcScanRoots entry",
+    "sourceBoundaries":  {
+                             "fixup":  "GCHeap::fix_allocation_contexts(TRUE) -\u003e GCToEEInterface::GcEnumAllocContexts -\u003e GCHeap::FixAllocContext",
+                             "postFixup":  "GCToEEInterface::GcStartWork entry",
+                             "rootPhase":  "GCToEEInterface::BeforeGcScanRoots entry",
+                             "rootDispatcher":  "GCToEEInterface::GcScanRoots entry before FOREACH_THREAD"
+                         },
+    "firstUnsupportedContract":  "root provider enumeration, callbacks, promotion, marking, sweeping, compaction, relocation, restart, and resume intentionally not attempted",
+    "threadStore":  {
+                        "lockRequests":  1,
+                        "lockAcquisitions":  1,
+                        "lockFailures":  0,
+                        "unlocks":  0,
+                        "recursionDepth":  1,
+                        "registryMutationAttemptsWhileLocked":  0,
+                        "adapterRegistrations":  1,
+                        "registeredManagedThreads":  1,
+                        "expectedOtherMutators":  0,
+                        "stoppedOtherMutators":  0,
+                        "lockHeldAtSafeStop":  true
+                    },
+    "suspension":  {
+                       "entryCount":  1,
+                       "suspensionCount":  1,
+                       "successfulReturnCount":  1,
+                       "currentThreadExempt":  true,
+                       "managedEntryProhibited":  true,
+                       "eeSuspended":  true,
+                       "heapMutationStarted":  false,
+                       "restartRequests":  0,
+                       "restartEntries":  0,
+                       "managedResumeCount":  0
+                   },
+    "identities":  "recorded in each serial log and diagnostics; current runtime thread equals collection initiator and lock owner",
+    "runs":  [
+                 {
+                     "name":  "first-run",
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-allocation-context-fixup-root-boundary\\run-20260804-040628826\\first-run\\serial.log",
+                     "serialSha256":  "24C89F356EB6AA203CB4C2EE2B8842D31FBD72F74619402F6EBC6A806B77F7D4",
+                     "safeStopMarker":  "C011EC03",
+                     "harnessTerminated":  true,
+                     "allocations":  "0x00000028",
+                     "contextFixupRequests":  "0x00000001",
+                     "contextFixupEntries":  "0x00000001",
+                     "contextFixupCompletions":  "0x00000001",
+                     "contextsVisited":  "0x00000001",
+                     "contextsChanged":  "0x00000001",
+                     "contextsCleared":  "0x00000001",
+                     "objectValidationBefore":  "0x00000028",
+                     "objectValidationAfter":  "0x00000028",
+                     "rootDispatcherEntries":  "0x00000001",
+                     "rootProviderEntries":  "0x00000000",
+                     "rootCandidates":  "0x00000000",
+                     "rootCallbacks":  "0x00000000",
+                     "markingEntries":  "0x00000000",
+                     "metadataMutation":  "0x00000001",
+                     "objectMutation":  "0x00000000",
+                     "restartResume":  "0x00000000"
+                 },
+                 {
+                     "name":  "repeat-1",
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-allocation-context-fixup-root-boundary\\run-20260804-040628826\\repeat-1\\serial.log",
+                     "serialSha256":  "8A80679E2624C6C8D769926135FB21837ABF49BD578E7F92F783529C5528B436",
+                     "safeStopMarker":  "C011EC03",
+                     "harnessTerminated":  true,
+                     "allocations":  "0x00000028",
+                     "contextFixupRequests":  "0x00000001",
+                     "contextFixupEntries":  "0x00000001",
+                     "contextFixupCompletions":  "0x00000001",
+                     "contextsVisited":  "0x00000001",
+                     "contextsChanged":  "0x00000001",
+                     "contextsCleared":  "0x00000001",
+                     "objectValidationBefore":  "0x00000028",
+                     "objectValidationAfter":  "0x00000028",
+                     "rootDispatcherEntries":  "0x00000001",
+                     "rootProviderEntries":  "0x00000000",
+                     "rootCandidates":  "0x00000000",
+                     "rootCallbacks":  "0x00000000",
+                     "markingEntries":  "0x00000000",
+                     "metadataMutation":  "0x00000001",
+                     "objectMutation":  "0x00000000",
+                     "restartResume":  "0x00000000"
+                 },
+                 {
+                     "name":  "repeat-2",
+                     "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-allocation-context-fixup-root-boundary\\run-20260804-040628826\\repeat-2\\serial.log",
+                     "serialSha256":  "7E0034F173C3220EA4EEFB6EE7F867A2D6E911BA801EADA55D1E041569018A2F",
+                     "safeStopMarker":  "C011EC03",
+                     "harnessTerminated":  true,
+                     "allocations":  "0x00000028",
+                     "contextFixupRequests":  "0x00000001",
+                     "contextFixupEntries":  "0x00000001",
+                     "contextFixupCompletions":  "0x00000001",
+                     "contextsVisited":  "0x00000001",
+                     "contextsChanged":  "0x00000001",
+                     "contextsCleared":  "0x00000001",
+                     "objectValidationBefore":  "0x00000028",
+                     "objectValidationAfter":  "0x00000028",
+                     "rootDispatcherEntries":  "0x00000001",
+                     "rootProviderEntries":  "0x00000000",
+                     "rootCandidates":  "0x00000000",
+                     "rootCallbacks":  "0x00000000",
+                     "markingEntries":  "0x00000000",
+                     "metadataMutation":  "0x00000001",
+                     "objectMutation":  "0x00000000",
+                     "restartResume":  "0x00000000"
+                 }
+             ],
+    "exactCommandLog":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-allocation-context-fixup-root-boundary\\run-20260804-040628826\\commands.txt",
+    "logsRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-allocation-context-fixup-root-boundary\\run-20260804-040628826",
+    "authorizedNormalizedAdaptedGcIdentity":  {
+                                                  "strategy":  "A-complete-gcenv-object",
+                                                  "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                                                  "stockSha256":  "0E6A134AD4150CD604317A47860DAE82EB30AAE4D9CDB14144E06454E7BB1948",
+                                                  "adaptedSha256":  "3220504AF0D2D71FA66AAB0AF789788F2AE83EA00470EB30BAEE49D06A71973B",
+                                                  "adaptedLength":  5937120,
+                                                  "replacementObjects":  [
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_gcenv.obj",
+                                                                                 "sha256":  "5C01020E9E81077A51703903EECF929F7CC27F39D1EA844BC8713B15B6C706D6"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_mutex.obj",
+                                                                                 "sha256":  "D630A1D3CEFF6C191CF98D1278473C060861682010F078539478D6C1055B68C1"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_event.obj",
+                                                                                 "sha256":  "EE74472760E8384739EC133EC451068F70F5449F956CB1898DB87F14CB507AF5"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_critical_section_adapter.obj",
+                                                                                 "sha256":  "D38007ACDA613520AB276F3A9A1F6C6451E526929D003691E2D7D060A32A098C"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_virtual_memory_adapter.obj",
+                                                                                 "sha256":  "3CB12F7DF624F53D469C485D2AB230F86846BF9AC5D93206E80DBAAADABC76A7"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_event_adapter.obj",
+                                                                                 "sha256":  "22BD28A6017692D265276DE014A3972AEFF022DDA50D2B009A3BF101BCAB3DDA"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_fls_adapter.obj",
+                                                                                 "sha256":  "A66952D40DABC7848470E849BB170A2578565BA120F8946C86EDF39F1704DBEF"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_thread_adapter.obj",
+                                                                                 "sha256":  "7E393B188832231AC189A64128BA752520F6659EE0D444CDDD04B6F15C32EB73"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_native_thread.obj",
+                                                                                 "sha256":  "4ADC494189FA5AC6F572A4D7C83668CC1C37EB52A3ED6BF5D5534CC56FD6C2C8"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_virtual_memory_region.obj",
+                                                                                 "sha256":  "3068B95E35570150E80634789CC68E13A80138566E33A37CEB1C88976464F185"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_local_storage.obj",
+                                                                                 "sha256":  "ED7E36941EB925C24AE51F6793248343006C32563AB717088A43F0908689DB4C"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_gc_platform_services.obj",
+                                                                                 "sha256":  "545CCAE753B90094F973C32C19CE4590C8A3DC3B97E736C3C1212AD9B241BE45"
+                                                                             }
+                                                                         ],
+                                                  "stockUnchanged":  true
+                                              },
+    "ordinaryKernelBefore":  {
+                                 "build":  "B626C3F90B4B358773389626F25402697940864681415027A5F024284D71F0E9",
+                                 "esp":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C"
+                             },
+    "ordinaryKernelExpectedSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "ordinaryKernelAfter":  {
+                                "build":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+                                "esp":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C"
+                            }
+}
