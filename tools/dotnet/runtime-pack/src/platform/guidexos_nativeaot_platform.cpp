@@ -1,5 +1,21 @@
 #include <intrin.h>
 #include "guidexos_nativeaot_allocation_diagnostics.h"
+#if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
+// This proof uses the locked runtime's actual ThreadStore. The startup-only
+// guideXOS threadstore adapter below the runtime-pack boundary remains opaque
+// and is intentionally not used for GC suspension.
+#include "common.h"
+#include "CommonTypes.h"
+// daccess.h uses the Win32 spelling even in this non-event-trace proof
+// object; CommonTypes only declares it when FEATURE_EVENT_TRACE is enabled.
+#if !defined(FEATURE_EVENT_TRACE)
+typedef void* LPVOID;
+#endif
+#include "thread.h"
+#include "threadstore.h"
+#include "threadstore.inl"
+#include "thread.inl"
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
 #include "guidexos_nativeaot_virtual_memory_adapter.h"
 #endif
@@ -28,6 +44,12 @@ constexpr gx_uint32 kFlsCellOffset = 0x80u;
 constexpr gx_uint32 kFlsCellCount = 8u;
 constexpr gx_uint32 kMinimumTlsBlockSize = 0x110u;
 
+#if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
+extern "C" guidexos_nativeaot_allocation_diagnostics
+    g_guideXosAllocationDiagnostics;
+[[noreturn]] void guideXosFailFast(gx_uint32 reason);
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 constexpr gx_uint32 kReadyToRunDehydratedDataSection = 0xCFu;
 constexpr gx_uint32 kReadyToRunHeaderSectionCountOffset = 0x0Cu;
@@ -36,6 +58,458 @@ constexpr gx_uint32 kReadyToRunSectionEntrySize = 0x18u;
 constexpr gx_uint32 kReadyToRunSectionTypeOffset = 0x00u;
 constexpr gx_uint32 kReadyToRunSectionStartOffset = 0x08u;
 constexpr gx_uint32 kReadyToRunSectionEndOffset = 0x10u;
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
+namespace {
+
+using SuspendEeThread = Thread;
+
+SuspendEeThread* suspendEeCurrentThread() {
+    return ThreadStore::GetCurrentThreadIfAvailable();
+}
+
+uint32_t suspendEeThreadFlags(SuspendEeThread* thread) {
+    return thread == nullptr
+        ? 0u
+        : reinterpret_cast<RuntimeThreadLocals*>(thread)->m_ThreadStateFlags;
+}
+
+void captureSuspendEeThreadState(
+    guidexos_nativeaot_allocation_diagnostics& diagnostics,
+    SuspendEeThread* thread,
+    bool beforeLock) {
+    if (thread == nullptr) {
+        return;
+    }
+    const gx_uintptr nativeId =
+        static_cast<gx_uintptr>(thread->GetPalThreadIdForLogging());
+    PTR_VOID stackLow = nullptr;
+    PTR_VOID stackHigh = nullptr;
+    thread->GetStackBounds(&stackLow, &stackHigh);
+    if (beforeLock) {
+        diagnostics.suspendEeCurrentNativeThreadId = nativeId;
+        diagnostics.suspendEeCurrentStackLow =
+            reinterpret_cast<gx_uintptr>(stackLow);
+        diagnostics.suspendEeCurrentStackHigh =
+            reinterpret_cast<gx_uintptr>(stackHigh);
+        diagnostics.suspendEeCurrentTransitionFrame =
+            reinterpret_cast<gx_uintptr>(
+                reinterpret_cast<RuntimeThreadLocals*>(thread)->m_pTransitionFrame);
+        diagnostics.currentThreadStateFlagsBefore =
+            suspendEeThreadFlags(thread);
+        diagnostics.currentThreadCooperativeBefore =
+            thread->IsCurrentThreadInCooperativeMode() ? 1u : 0u;
+    } else {
+        diagnostics.currentThreadStateFlagsDuring =
+            suspendEeThreadFlags(thread);
+        diagnostics.currentThreadCooperativeDuring =
+            thread->IsCurrentThreadInCooperativeMode() ? 1u : 0u;
+    }
+}
+
+void suspendEeSerialPutString(const char* value);
+
+// The locked NativeAOT runtime's ThreadStore starts with SList<Thread>
+// m_ThreadList, whose only data member is the intrusive-list head.  The
+// bare-metal startup path constructs the current TLS Thread and marks it
+// initialized, but it does not call ThreadStore::AttachCurrentThread; that
+// runtime method therefore returns before linking the thread.  Bridge that
+// startup omission before LockThreadStore, while the registry is not locked,
+// so the real LockThreadStore/SuspendAllThreads/Iterator path observes the
+// actual mutator.  Do not change the list after the lock is acquired.
+struct SuspendEeThreadStorePrefix {
+    SuspendEeThread* head;
+};
+
+void registerCurrentThreadInThreadStoreBeforeLock(SuspendEeThread* current) {
+    if (current == nullptr) {
+        return;
+    }
+
+    SuspendEeThreadStorePrefix* store =
+        reinterpret_cast<SuspendEeThreadStorePrefix*>(GetThreadStore());
+    if (store->head == nullptr) {
+        reinterpret_cast<RuntimeThreadLocals*>(current)->m_pNext = nullptr;
+        store->head = current;
+        ++g_guideXosAllocationDiagnostics.threadStoreAdapterRegistrationCount;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-single-thread-suspend-ee] ThreadStore adapter registered current mutator\n");
+    }
+}
+
+uint32_t countRegisteredThreads(SuspendEeThread* current,
+                                uint32_t* peerCount) {
+    uint32_t count = 0u;
+    uint32_t peers = 0u;
+    ThreadStore::Iterator iterator;
+    SuspendEeThread* thread = iterator.GetNext();
+    for (uint32_t iterations = 0u;
+         thread != nullptr && iterations < 32u;
+         ++iterations, thread = iterator.GetNext()) {
+        ++count;
+        if (thread != current) {
+            ++peers;
+        }
+    }
+    if (thread != nullptr) {
+        suspendEeSerialPutString(
+            "[nativeaot-gc-single-thread-suspend-ee] ThreadStore registry traversal exceeded bound\n");
+        guideXosFailFast(9u);
+    }
+    if (peerCount != nullptr) {
+        *peerCount = peers;
+    }
+    return count;
+}
+
+void suspendEeSerialPutChar(char value) {
+    if (value == '\n') {
+        while ((__inbyte(0x3FDu) & 0x20u) == 0u) {
+        }
+        __outbyte(0x3F8u, static_cast<unsigned char>('\r'));
+    }
+    while ((__inbyte(0x3FDu) & 0x20u) == 0u) {
+    }
+    __outbyte(0x3F8u, static_cast<unsigned char>(value));
+}
+
+void suspendEeSerialPutString(const char* value) {
+    while (*value != '\0') {
+        suspendEeSerialPutChar(*value++);
+    }
+}
+
+void suspendEeSerialPutHex32(gx_uint32 value) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        suspendEeSerialPutChar(hex[(value >> shift) & 0xFu]);
+    }
+}
+
+void suspendEeSerialPutHex64(gx_uintptr value) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        suspendEeSerialPutChar(hex[(value >> shift) & 0xFu]);
+    }
+}
+
+void emitSingleThreadSuspendEeSafeStop(const char* callback) {
+    const guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] SAFE_STOP marker=");
+    suspendEeSerialPutHex32(diagnostics.singleThreadSuspendEeMarker);
+    suspendEeSerialPutString(" callback=");
+    suspendEeSerialPutString(callback);
+    suspendEeSerialPutString(" requestCount=");
+    suspendEeSerialPutHex32(diagnostics.firstCollectionRequestCount);
+    suspendEeSerialPutString(" entryCount=");
+    suspendEeSerialPutHex32(diagnostics.firstCollectionEntryCount);
+    suspendEeSerialPutString(" requestedGeneration=");
+    suspendEeSerialPutHex32(diagnostics.requestedGeneration);
+    suspendEeSerialPutString(" reason=");
+    suspendEeSerialPutHex32(diagnostics.collectionReason);
+    suspendEeSerialPutString(" suspendReason=");
+    suspendEeSerialPutHex32(diagnostics.suspendEeReason);
+    suspendEeSerialPutString(" blocking=");
+    suspendEeSerialPutHex32(diagnostics.collectionBlockingMode);
+    suspendEeSerialPutString(" compacting=");
+    suspendEeSerialPutHex32(diagnostics.collectionCompactingMode);
+    suspendEeSerialPutString(" suspendEeEntryCount=");
+    suspendEeSerialPutHex32(diagnostics.suspendEeEntryCount);
+    suspendEeSerialPutString(" suspendEeReturnCount=");
+    suspendEeSerialPutHex32(diagnostics.suspendEeReturnCount);
+    suspendEeSerialPutString(" suspendEeSuspensionCount=");
+    suspendEeSerialPutHex32(diagnostics.suspendEeSuspensionCount);
+    suspendEeSerialPutString(" lockRequests=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreLockRequestCount);
+    suspendEeSerialPutString(" lockAcquisitions=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreLockAcquisitionCount);
+    suspendEeSerialPutString(" lockFailures=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreLockFailureCount);
+    suspendEeSerialPutString(" unlocks=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreUnlockCount);
+    suspendEeSerialPutString(" lockOwner=");
+    suspendEeSerialPutHex64(diagnostics.threadStoreLockOwner);
+    suspendEeSerialPutString(" lockOwnerNativeId=");
+    suspendEeSerialPutHex64(diagnostics.threadStoreLockOwnerNativeThreadId);
+    suspendEeSerialPutString(" lockDepth=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreLockRecursionDepth);
+    suspendEeSerialPutString(" registeredThreads=");
+    suspendEeSerialPutHex32(diagnostics.registeredManagedThreadCount);
+    suspendEeSerialPutString(" initiator=");
+    suspendEeSerialPutHex64(diagnostics.suspendEeInitiatingRuntimeThread);
+    suspendEeSerialPutString(" currentRuntimeThread=");
+    suspendEeSerialPutHex64(diagnostics.suspendEeCurrentRuntimeThread);
+    suspendEeSerialPutString(" currentNativeId=");
+    suspendEeSerialPutHex64(diagnostics.suspendEeCurrentNativeThreadId);
+    suspendEeSerialPutString(" identitiesMatch=");
+    suspendEeSerialPutHex32(diagnostics.currentAndInitiatorMatch);
+    suspendEeSerialPutString(" expectedOtherMutators=");
+    suspendEeSerialPutHex32(diagnostics.expectedOtherMutators);
+    suspendEeSerialPutString(" stoppedOtherMutators=");
+    suspendEeSerialPutHex32(diagnostics.stoppedOtherMutators);
+    suspendEeSerialPutString(" currentThreadExempt=");
+    suspendEeSerialPutHex32(diagnostics.currentThreadExemptFromPeerStop);
+    suspendEeSerialPutString(" managedEntryProhibited=");
+    suspendEeSerialPutHex32(diagnostics.managedEntryProhibited);
+    suspendEeSerialPutString(" eeSuspended=");
+    suspendEeSerialPutHex32(diagnostics.eeSuspended);
+    suspendEeSerialPutString(" nextBoundary=");
+    suspendEeSerialPutHex32(diagnostics.nextBoundary);
+    suspendEeSerialPutString(" rootRequests=");
+    suspendEeSerialPutHex32(diagnostics.rootEnumerationRequestCount);
+    suspendEeSerialPutString(" rootEntries=");
+    suspendEeSerialPutHex32(diagnostics.rootEnumerationEntryCount);
+    suspendEeSerialPutString(" stackWalkRequests=");
+    suspendEeSerialPutHex32(diagnostics.stackWalkRequestCount);
+    suspendEeSerialPutString(" stackWalkEntries=");
+    suspendEeSerialPutHex32(diagnostics.stackWalkEntryCount);
+    suspendEeSerialPutString(" handleScanRequests=");
+    suspendEeSerialPutHex32(diagnostics.handleScanRequestCount);
+    suspendEeSerialPutString(" handleScanEntries=");
+    suspendEeSerialPutHex32(diagnostics.handleScanEntryCount);
+    suspendEeSerialPutString(" heapMutationStarted=");
+    suspendEeSerialPutHex32(diagnostics.suspendEeHeapMutationStarted);
+    suspendEeSerialPutString(" restartRequests=");
+    suspendEeSerialPutHex32(diagnostics.restartRequestCount);
+    suspendEeSerialPutString(" restartEntries=");
+    suspendEeSerialPutHex32(diagnostics.restartEntryCount);
+    suspendEeSerialPutString(" managedResumeCount=");
+    suspendEeSerialPutHex32(diagnostics.managedResumeCount);
+    suspendEeSerialPutString(" registryMutationAttemptsWhileLocked=");
+    suspendEeSerialPutHex32(
+        diagnostics.threadStoreRegistryMutationAttemptsWhileLocked);
+    suspendEeSerialPutString(" adapterRegistrations=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreAdapterRegistrationCount);
+    suspendEeSerialPutString(" safeStopReason=");
+    suspendEeSerialPutHex32(diagnostics.suspendEeStopReason);
+    suspendEeSerialPutString(" allocations=");
+    suspendEeSerialPutHex32(diagnostics.allocationCount);
+    suspendEeSerialPutString(" fast=");
+    suspendEeSerialPutHex32(diagnostics.fastAllocationCount);
+    suspendEeSerialPutString(" rare=");
+    suspendEeSerialPutHex32(diagnostics.rarePathCount);
+    suspendEeSerialPutString(" refills=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextRefillCount);
+    suspendEeSerialPutString(" sameSegmentCommits=");
+    suspendEeSerialPutHex32(diagnostics.heapCommitEventCount);
+    suspendEeSerialPutString(" segmentTransitions=");
+    suspendEeSerialPutHex32(diagnostics.segmentTransitionCount);
+    suspendEeSerialPutString(" sentinelChecks=");
+    suspendEeSerialPutHex32(diagnostics.sentinelValidationCount);
+    suspendEeSerialPutString(" sentinelFailures=");
+    suspendEeSerialPutHex32(diagnostics.sentinelValidationFailures);
+    suspendEeSerialPutString(" liveSentinels=");
+    suspendEeSerialPutHex32(diagnostics.liveSentinelCount);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotSuspendEeEntry(gx_uint32 reason) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] SuspendEE entry\n");
+    SuspendEeThread* current = suspendEeCurrentThread();
+    SuspendEeThread* initiator = reinterpret_cast<SuspendEeThread*>(
+        diagnostics.runtimeThreadRecord);
+    ++diagnostics.suspendEeEntryCount;
+    ++diagnostics.suspendEeEpoch;
+    ++diagnostics.threadStoreLockRequestCount;
+    ++diagnostics.suspensionRequestCount;
+    diagnostics.suspendEeReason = reason;
+    diagnostics.requestedGeneration = 1u;
+    diagnostics.collectionReason =
+        GUIDEXOS_NATIVEAOT_COLLECTION_REASON_OUT_OF_SO_H;
+    diagnostics.collectionBlockingMode = GUIDEXOS_NATIVEAOT_COLLECTION_BLOCKING;
+    diagnostics.collectionCompactingMode =
+        GUIDEXOS_NATIVEAOT_COLLECTION_NONCOMPACTING_NOT_SELECTED;
+    diagnostics.firstCollectionRequestCount = 1u;
+    diagnostics.firstCollectionEntryCount = 1u;
+    diagnostics.collectionRequestCount = 1u;
+    diagnostics.collectionEntryCount = 1u;
+    diagnostics.collectionsEntered = 1u;
+    diagnostics.collectionTriggeringEntries = 1u;
+    diagnostics.suspendEeCurrentRuntimeThread =
+        reinterpret_cast<gx_uintptr>(current);
+    diagnostics.suspendEeInitiatingRuntimeThread =
+        reinterpret_cast<gx_uintptr>(initiator);
+    diagnostics.suspendEeCollectionInitiatorNativeThreadId =
+        initiator == nullptr ? 0u
+                             : static_cast<gx_uintptr>(
+                                   initiator->GetPalThreadIdForLogging());
+    diagnostics.currentThreadRegistered =
+        current != nullptr && current->IsInitialized() ? 1u : 0u;
+    diagnostics.currentThreadIsInitiator = current != nullptr &&
+        current == initiator ? 1u : 0u;
+    diagnostics.currentAndInitiatorMatch =
+        diagnostics.currentThreadIsInitiator;
+    diagnostics.suspendEeGcMode = diagnostics.gcMode;
+    captureSuspendEeThreadState(diagnostics, current, true);
+    registerCurrentThreadInThreadStoreBeforeLock(current);
+}
+
+extern "C" void __cdecl guideXosNativeAotSuspendEeAfterLock() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] ThreadStore lock acquired\n");
+    SuspendEeThread* current = suspendEeCurrentThread();
+    ++diagnostics.threadStoreLockAcquisitionCount;
+    diagnostics.threadStoreLockOwner =
+        reinterpret_cast<gx_uintptr>(current);
+    diagnostics.threadStoreLockOwnerNativeThreadId = current == nullptr
+        ? 0u
+        : static_cast<gx_uintptr>(current->GetPalThreadIdForLogging());
+    diagnostics.threadStoreLockRecursionDepth = 1u;
+    diagnostics.suspendEeCurrentRuntimeThread =
+        reinterpret_cast<gx_uintptr>(current);
+    diagnostics.registeredManagedThreadCount =
+        countRegisteredThreads(current, nullptr);
+    diagnostics.expectedOtherMutators =
+        diagnostics.registeredManagedThreadCount == 0u
+            ? 0u : diagnostics.registeredManagedThreadCount - 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] ThreadStore registry count complete\n");
+    diagnostics.currentThreadRegistered =
+        current != nullptr && current->IsInitialized() ? 1u : 0u;
+    diagnostics.currentThreadIsInitiator =
+        current != nullptr && current == reinterpret_cast<SuspendEeThread*>(
+            diagnostics.suspendEeInitiatingRuntimeThread) ? 1u : 0u;
+    diagnostics.currentAndInitiatorMatch =
+        diagnostics.currentThreadIsInitiator;
+    captureSuspendEeThreadState(diagnostics, current, false);
+    diagnostics.threadStoreRegistryMutationAttemptsWhileLocked = 0u;
+}
+
+extern "C" void __cdecl guideXosNativeAotSuspendEeAfterSuspend() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] SuspendAllThreads returned\n");
+    ++diagnostics.suspendEeSuspensionCount;
+    diagnostics.suspensionEntryCount = 1u;
+    // The registry count was captured after the real lock acquisition. The
+    // lock remains held across SuspendAllThreads, whose source contract
+    // skips only the collector thread; no second iterator traversal is
+    // needed, and for the one-mutator proof the stopped-peer count is zero.
+    diagnostics.stoppedOtherMutators =
+        diagnostics.expectedOtherMutators;
+    // The locked source assigns RhpSuspendingThread to pThisThread and sets
+    // TrapThreads before the wait loop. Returning from SuspendAllThreads is
+    // the source-backed publication point for this state.
+    diagnostics.currentThreadExemptFromPeerStop = 1u;
+    diagnostics.suspendEeSuspensionOwner =
+        diagnostics.suspendEeCurrentRuntimeThread;
+    diagnostics.managedEntryProhibited = 1u;
+    diagnostics.eeSuspended =
+        diagnostics.threadStoreLockAcquisitionCount != 0u &&
+        diagnostics.currentThreadExemptFromPeerStop != 0u &&
+        diagnostics.managedEntryProhibited != 0u ? 1u : 0u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] SuspendEE observer complete\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotSuspendEeBodyReturn() {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] SuspendEE body complete\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotDisablePreemptiveEntry() {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] DisablePreemptiveGC entry\n");
+}
+
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotDisablePreemptiveReturn() {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] DisablePreemptiveGC returned; safe boundary before GCHeap::GarbageCollect\n");
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-single-thread-suspend-ee] safeValidation entry=");
+    suspendEeSerialPutHex32(diagnostics.suspendEeEntryCount);
+    suspendEeSerialPutString(" lockReq=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreLockRequestCount);
+    suspendEeSerialPutString(" lockAcq=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreLockAcquisitionCount);
+    suspendEeSerialPutString(" registered=");
+    suspendEeSerialPutHex32(diagnostics.registeredManagedThreadCount);
+    suspendEeSerialPutString(" currentRegistered=");
+    suspendEeSerialPutHex32(diagnostics.currentThreadRegistered);
+    suspendEeSerialPutString(" identities=");
+    suspendEeSerialPutHex32(diagnostics.currentAndInitiatorMatch);
+    suspendEeSerialPutString(" expectedPeers=");
+    suspendEeSerialPutHex32(diagnostics.expectedOtherMutators);
+    suspendEeSerialPutString(" stoppedPeers=");
+    suspendEeSerialPutHex32(diagnostics.stoppedOtherMutators);
+    suspendEeSerialPutString(" exempt=");
+    suspendEeSerialPutHex32(diagnostics.currentThreadExemptFromPeerStop);
+    suspendEeSerialPutString(" entryProhibited=");
+    suspendEeSerialPutHex32(diagnostics.managedEntryProhibited);
+    suspendEeSerialPutString(" eeSuspended=");
+    suspendEeSerialPutHex32(diagnostics.eeSuspended);
+    suspendEeSerialPutString("\n");
+    const bool valid = diagnostics.suspendEeEntryCount == 1u &&
+        diagnostics.threadStoreLockRequestCount == 1u &&
+        diagnostics.threadStoreLockAcquisitionCount == 1u &&
+        diagnostics.registeredManagedThreadCount == 1u &&
+        diagnostics.currentThreadRegistered == 1u &&
+        diagnostics.currentAndInitiatorMatch == 1u &&
+        diagnostics.expectedOtherMutators == 0u &&
+        diagnostics.stoppedOtherMutators == 0u &&
+        diagnostics.currentThreadExemptFromPeerStop == 1u &&
+        diagnostics.managedEntryProhibited == 1u &&
+        diagnostics.eeSuspended == 1u;
+    if (!valid) {
+        ++diagnostics.threadStoreLockFailureCount;
+        guideXosFailFast(9u);
+    }
+
+    ++diagnostics.suspendEeReturnCount;
+    diagnostics.nextBoundary =
+        GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE;
+    diagnostics.rootEnumerationRequestCount = 0u;
+    diagnostics.rootEnumerationEntryCount = 0u;
+    diagnostics.stackWalkRequestCount = 0u;
+    diagnostics.stackWalkEntryCount = 0u;
+    diagnostics.handleScanRequestCount = 0u;
+    diagnostics.handleScanEntryCount = 0u;
+    diagnostics.suspendEeHeapMutationStarted = 0u;
+    diagnostics.heapMutationStarted = 0u;
+    diagnostics.restartRequestCount = 0u;
+    diagnostics.restartEntryCount = 0u;
+    diagnostics.managedResumeCount = 0u;
+    diagnostics.suspendEeSafeStopObserved = 1u;
+    diagnostics.safeStopObserved = 1u;
+    diagnostics.singleThreadSuspendEeMarker =
+        GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP_MARKER;
+    diagnostics.suspendEeStopReason =
+        GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP_MARKER;
+    diagnostics.stopReason = diagnostics.suspendEeStopReason;
+    diagnostics.stage =
+        GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F21_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP;
+    diagnostics.sequence += 1u;
+    diagnostics.currentRip = reinterpret_cast<gx_uintptr>(_ReturnAddress());
+    diagnostics.currentRsp = reinterpret_cast<gx_uintptr>(_AddressOfReturnAddress());
+    diagnostics.waitReason = diagnostics.suspendEeReason;
+    diagnostics.failFastReason = 7u;
+    diagnostics.collectionEntryThread = diagnostics.suspendEeCurrentRuntimeThread;
+    diagnostics.collectionRequestAllocationOrdinal =
+        diagnostics.allocationRequestCount;
+    diagnostics.collectionEntryAllocationOrdinal =
+        diagnostics.allocationRequestCount;
+    emitSingleThreadSuspendEeSafeStop(
+        "GCHeap::GarbageCollect before fix_allocation_contexts");
+    for (;;) {
+    }
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotSuspendEeGcStartWorkBoundary() {
+    guideXosNativeAotDisablePreemptiveReturn();
+}
+} // namespace
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)

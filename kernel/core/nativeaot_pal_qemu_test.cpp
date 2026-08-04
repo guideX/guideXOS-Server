@@ -1,6 +1,9 @@
 #if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
 #define GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST 1
 #endif
+#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+#define GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST 1
+#endif
 #if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
 #define GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST 1
 #endif
@@ -432,7 +435,9 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeYield() {
 
 [[noreturn]] void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeFailFast(
     uint32_t reason, uintptr_t detail) {
-#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+    serial::puts("[nativeaot-gc-single-thread-suspend-ee] ");
+#elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     if (g_firstAllocationDiagnosticsAddress != 0) {
         const guidexos_nativeaot_allocation_diagnostics* diagnostics =
             reinterpret_cast<const guidexos_nativeaot_allocation_diagnostics*>(
@@ -1214,7 +1219,9 @@ struct FirstRealAllocationContext {
 };
 
 void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
-#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+    serial::puts("[nativeaot-gc-single-thread-suspend-ee] ");
+#elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-collection-boundary] ");
 #elif defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
     serial::puts("[nativeaot-gc-segment-transition] ");
@@ -1231,7 +1238,9 @@ void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
 }
 
 void printFirstAllocationPointer(const char* name, uintptr_t value) {
-#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+    serial::puts("[nativeaot-gc-single-thread-suspend-ee] ");
+#elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-collection-boundary] ");
 #elif defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
     serial::puts("[nativeaot-gc-segment-transition] ");
@@ -1497,7 +1506,12 @@ void runSegmentBoundaryManagedBoundary(
     FirstRealAllocationContext context{};
     context.size = sizeof(context);
     context.apiVersion = 0u;
-#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+    serial::puts("[nativeaot-gc-single-thread-suspend-ee] entering ManagedMain once\n");
+    reinterpret_cast<SegmentBoundaryManagedMain>(managedMainAddress)(&context);
+    return;
+}
+#elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-collection-boundary] entering ManagedMain once\n");
     reinterpret_cast<SegmentBoundaryManagedMain>(managedMainAddress)(&context);
     return;
@@ -1878,7 +1892,9 @@ void runFirstRealAllocationImpl(
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
     uint64_t generation, uintptr_t beginExperimentAddress) {
     bool allPassed = true;
-#if defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+    serial::puts("[nativeaot-gc-single-thread-suspend-ee] BEGIN\n");
+#elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-collection-boundary] BEGIN\n");
 #elif defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
     serial::puts("[nativeaot-gc-segment-transition] BEGIN\n");

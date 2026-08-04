@@ -306,6 +306,65 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t collectionEntrySegmentIdentity;
     uintptr_t collectionEntrySegmentCommitted;
     uintptr_t collectionEntrySegmentReserved;
+
+    /*
+     * Single-mutator SuspendEE proof fields. These are append-only so the
+     * established allocation, refill, segment, and first-collection records
+     * retain their offsets. The fields describe the real locked runtime
+     * ThreadStore path; they are not an application-scoped replacement.
+     */
+    uint32_t singleThreadSuspendEeMarker;
+    uint32_t suspendEeEntryCount;
+    uint32_t suspendEeReturnCount;
+    uint32_t suspendEeSuspensionCount;
+    uint32_t suspendEeReason;
+    uint32_t suspendEeEpoch;
+    uint32_t threadStoreLockRequestCount;
+    uint32_t threadStoreLockAcquisitionCount;
+    uint32_t threadStoreLockFailureCount;
+    uint32_t threadStoreUnlockCount;
+    uint32_t threadStoreLockRecursionDepth;
+    uint32_t threadStoreRegistryMutationAttemptsWhileLocked;
+    uint32_t threadStoreAdapterRegistrationCount;
+    uint32_t registeredManagedThreadCount;
+    uint32_t expectedOtherMutators;
+    uint32_t stoppedOtherMutators;
+    uint32_t currentThreadRegistered;
+    uint32_t currentThreadIsInitiator;
+    uint32_t currentAndInitiatorMatch;
+    uint32_t currentThreadExemptFromPeerStop;
+    uint32_t managedEntryProhibited;
+    uint32_t eeSuspended;
+    uint32_t currentThreadStateFlagsBefore;
+    uint32_t currentThreadStateFlagsDuring;
+    uint32_t currentThreadCooperativeBefore;
+    uint32_t currentThreadCooperativeDuring;
+    uint32_t nextBoundary;
+    uint32_t rootEnumerationRequestCount;
+    uint32_t rootEnumerationEntryCount;
+    uint32_t stackWalkRequestCount;
+    uint32_t stackWalkEntryCount;
+    uint32_t handleScanRequestCount;
+    uint32_t handleScanEntryCount;
+    uint32_t restartRequestCount;
+    uint32_t restartEntryCount;
+    uint32_t managedResumeCount;
+    uint32_t suspendEeHeapMutationStarted;
+    uint32_t suspendEeSafeStopObserved;
+    uint32_t suspendEeStopReason;
+    uint32_t suspendEeGcMode;
+    uint32_t reservedSingleThreadSuspendEe[5];
+
+    uintptr_t suspendEeCurrentNativeThreadId;
+    uintptr_t suspendEeCurrentRuntimeThread;
+    uintptr_t suspendEeInitiatingRuntimeThread;
+    uintptr_t suspendEeSuspensionOwner;
+    uintptr_t threadStoreLockOwner;
+    uintptr_t threadStoreLockOwnerNativeThreadId;
+    uintptr_t suspendEeCurrentStackLow;
+    uintptr_t suspendEeCurrentStackHigh;
+    uintptr_t suspendEeCurrentTransitionFrame;
+    uintptr_t suspendEeCollectionInitiatorNativeThreadId;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -346,6 +405,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S13_ALLOCATION_CONTEXT_PUBLISHED = 0xB0Du,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_S14_STOP_OBJECT_RETURNED = 0xB0Eu,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F20_FIRST_COLLECTION_SAFE_STOP = 0xF20u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F21_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP = 0xF21u,
 };
 
 enum {
@@ -354,6 +414,9 @@ enum {
     GUIDEXOS_NATIVEAOT_COLLECTION_NONCOMPACTING_NOT_SELECTED = 0u,
     GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_SAFE_STOP_MARKER = 0xC011EC01u,
     GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_UNSUPPORTED_SUSPEND_EE = 1u,
+    GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP_MARKER = 0xC011EC02u,
+    GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
+    GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };
 
 #ifdef __cplusplus

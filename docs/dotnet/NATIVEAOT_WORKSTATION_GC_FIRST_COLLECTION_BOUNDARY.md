@@ -196,3 +196,14 @@ valid single-managed-thread `SuspendEE`/thread-store adapter that can observe
 the first suspension entry and stop before root enumeration or heap mutation;
 it must not fabricate thread enumeration, roots, restart, or collection
 success.
+
+## Single-managed-mutator SuspendEE follow-up - 2026-08-02
+
+The follow-up bounded experiment is documented in
+[NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md](NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md).
+It advanced the same locked source path through the real `ThreadStore` lock
+and single-mutator suspension, returned from `SuspendEE`, and stopped at the
+next exact boundary after `DisablePreemptiveGC`, before root/stack/handle
+enumeration or heap mutation. This report remains historical: its earlier
+statement that execution stopped before `ThreadStore::LockThreadStore` has
+not been rewritten.

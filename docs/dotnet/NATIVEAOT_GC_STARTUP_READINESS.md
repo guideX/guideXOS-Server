@@ -223,6 +223,16 @@ guideXOS EE contract, `GCToEEInterface::SuspendEE`, before
 or managed resume occurred. This is **Outcome A for collection request and
 entry**, not completed GC support. The earlier segment-transition result
 remains **Outcome B** and is not rewritten.
+
+## Single-mutator SuspendEE follow-up - 2026-08-02
+
+The later bounded proof is documented in
+[NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md](NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md).
+It preserves the startup-readiness conclusions while advancing one managed
+mutator through the real Workstation-GC `ThreadStore` lock and suspension
+path. `SuspendEE` returned successfully, and the proof stopped before roots,
+stack/handle enumeration, heap mutation, restart, or resume. It is a
+collection-control milestone, not completed NativeAOT GC support.
 The source-backed result is **Outcome B — collection is required before a SOH
 segment transition**. The authoritative no-collection runner used a
 `byte[4096]` object (`0x1018` / 4120 bytes), stopped at 32 allocations after

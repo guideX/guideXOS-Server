@@ -254,3 +254,13 @@ heap mutation and managed resume were both zero. This is **Outcome A for the
 first collection-control boundary**, not completed collection support. The
 earlier no-collection segment-transition result remains **Outcome B**. See
 [NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md](NATIVEAOT_WORKSTATION_GC_FIRST_COLLECTION_BOUNDARY.md).
+
+## Single-managed-mutator SuspendEE follow-up - 2026-08-02
+
+The next bounded feasibility result is recorded in
+[NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md](NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md).
+It is **Outcome A** for the single-mutator suspension boundary: the locked
+runtime acquired the real thread-store lock, suspended the zero-peer
+single-mutator set, and returned from `SuspendEE`. The proof stopped before
+root/stack/handle enumeration and heap mutation, so this advances the
+feasibility boundary without claiming full collection support.

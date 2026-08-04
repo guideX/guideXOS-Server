@@ -368,7 +368,7 @@ exit /b %errorlevel%
         Require-File $serialPath "Fresh QEMU serial log"
         $serial = Get-Content -LiteralPath $serialPath -Raw
         Set-Content -LiteralPath (Join-Path $oneRoot "serial.sha256") -Value (Hash-File $serialPath) -Encoding ASCII
-        $validationText = ($serial -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' '
+        $validationText = ($serial -replace '\[IRQ\] dispatch irq=00\s*', ' ') -replace '\s+', ' '
         Assert-Text $validationText '\[nativeaot-gc-first-collection-boundary\] SAFE_STOP marker=C011EC01' "unique safe-stop marker"
         Assert-Text $validationText 'callback=GCToEEInterface::SuspendEE' "suspension callback"
         Assert-Text $validationText 'requestCount=00000001 entryCount=00000001' "request and entry counts"
