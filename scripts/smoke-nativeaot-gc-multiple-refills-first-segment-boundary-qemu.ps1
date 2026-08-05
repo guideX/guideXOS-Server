@@ -337,7 +337,7 @@ exit /b %errorlevel%
         # characters.  Remove that fixed diagnostic token, rather than
         # replacing it with whitespace, so a split marker such as
         # `P[IRQ] dispatch irq=00` + `rocess` remains matchable.
-        $validationText = ($serial -replace '\[IRQ\] dispatch irq=00\s*', ' ') -replace '\s+', ' '
+        $validationText = ($serial -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' '
         Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Managed entry once: PASS' "managed entry"
         Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Managed byte\[4096\] bounded loop return: PASS' "managed loop"
         Assert-Text $validationText '\[nativeaot-gc-segment-boundary\] Exact multi-refill allocation counters: PASS' "exact counters"

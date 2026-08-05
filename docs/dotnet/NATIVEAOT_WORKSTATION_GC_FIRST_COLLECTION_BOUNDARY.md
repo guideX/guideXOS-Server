@@ -191,6 +191,13 @@ and regression runs. Both hashes match the expected normal image:
 No ordinary-kernel source change was required, and no proof kernel remains
 deployed as the ordinary kernel.
 
+## First real per-thread provider follow-up - 2026-08-04
+
+The subsequent root-dispatch result is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md`. It advances past
+the collection and `SuspendEE` boundaries described here, without implying
+that complete root enumeration or GC is implemented.
+
 ## Outcome and next milestone
 
 This is **Outcome A**: a real Workstation GC collection request occurred and

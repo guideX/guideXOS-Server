@@ -228,6 +228,11 @@ or managed resume occurred. This is **Outcome A for collection request and
 entry**, not completed GC support. The earlier segment-transition result
 remains **Outcome B** and is not rewritten.
 
+The next bounded root-dispatch milestone is recorded in
+`NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md`: real thread-list
+enumeration and first provider entry are proven, with the stop still before
+managed-reference candidate access.
+
 ## Single-mutator SuspendEE follow-up - 2026-08-02
 
 The later bounded proof is documented in

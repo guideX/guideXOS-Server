@@ -51,6 +51,7 @@ typedef struct guidexos_nativeaot_refill_history_entry {
 enum {
     GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS = 8u,
     GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY = 64u,
+    GUIDEXOS_NATIVEAOT_MAX_ROOT_THREAD_RECORDS = 32u,
 };
 
 typedef struct guidexos_nativeaot_allocation_context_snapshot {
@@ -95,6 +96,31 @@ typedef struct guidexos_nativeaot_object_history_entry {
     uint32_t reserved0;
     uint32_t reserved1;
 } guidexos_nativeaot_object_history_entry;
+
+typedef struct guidexos_nativeaot_root_thread_record {
+    uint32_t enumerationOrdinal;
+    uint32_t registered;
+    uint32_t initialized;
+    uint32_t lifecycleState;
+    uint32_t threadStateFlags;
+    uint32_t cooperative;
+    uint32_t preemptive;
+    uint32_t gcSpecial;
+    uint32_t included;
+    uint32_t excluded;
+    uint32_t inclusionReason;
+    uint32_t collectionInitiatorMatch;
+    uint32_t currentThreadMatch;
+    uint32_t lockOwnerMatch;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    uintptr_t runtimeThread;
+    uintptr_t nativeThreadId;
+    uintptr_t stackLow;
+    uintptr_t stackHigh;
+    uintptr_t allocationContext;
+    uintptr_t nextThread;
+} guidexos_nativeaot_root_thread_record;
 
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
@@ -495,6 +521,71 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t rootBoundaryFunction;
     uintptr_t firstRootProviderFunction;
 
+    /*
+     * Bounded first-per-thread-root-provider proof fields.  These fields are
+     * proof-only and stop before a GC candidate value is loaded.  They record
+     * the real ThreadStore iterator, the actual registered thread, and the
+     * first selected provider without implementing root enumeration.
+     */
+    uint32_t gcScanRootsRequestCount;
+    uint32_t gcScanRootsEntryCount;
+    uint32_t foreachThreadRequestCount;
+    uint32_t foreachThreadEntryCount;
+    uint32_t threadIteratorInitializationCount;
+    uint32_t threadIteratorCompletionCount;
+    uint32_t rootPerThreadDispatchRequestCount;
+    uint32_t rootPerThreadDispatchEntryCount;
+    uint32_t rootProviderSourceOrderCategory;
+    uint32_t rootProviderRuntimeCategory;
+    uint32_t rootProviderSkipCount;
+    uint32_t rootProviderSkipReason;
+    uint32_t metadataContainerCount;
+    uint32_t candidateMetadataLocationCount;
+    uint32_t candidateValueReadCount;
+    uint32_t rootCandidateDiscoveryCount;
+    uint32_t rootProviderInvariantFailures;
+    uint32_t rootProviderSafeStopObserved;
+    uint32_t rootProviderStopReason;
+    uint32_t registeredThreadCountBeforeRoot;
+    uint32_t registeredThreadCountAfterRoot;
+    uint32_t enumeratedThreadCount;
+    uint32_t includedThreadCount;
+    uint32_t excludedThreadCount;
+    uint32_t duplicateThreadCount;
+    uint32_t threadListIntegrityFailures;
+    uint32_t threadRegistryMutationCountBeforeRoot;
+    uint32_t threadRegistryMutationCountAfterRoot;
+    uint32_t stackBoundsRequested;
+    uint32_t stackScanningStarted;
+    uint32_t threadStaticStorageRequested;
+    uint32_t threadStaticScanningStarted;
+    uint32_t frameChainRequested;
+    uint32_t frameScanningStarted;
+    uint32_t exceptionRootRequested;
+    uint32_t explicitThreadRootRequested;
+    uint32_t rootProviderFunctionCode;
+    uint32_t rootProviderMetadataKind;
+    uint32_t rootThreadRecordCount;
+    uint32_t rootThreadRegistryGenerationBefore;
+    uint32_t rootThreadRegistryGenerationAfter;
+    uint32_t reservedFirstPerThreadRootProvider[3];
+
+    uintptr_t rootCurrentThreadIdentity;
+    uintptr_t rootEnumeratedThreadIdentity;
+    uintptr_t rootCollectionInitiatorIdentity;
+    uintptr_t rootLockOwnerIdentity;
+    uintptr_t rootThreadListHeadBefore;
+    uintptr_t rootThreadListTailBefore;
+    uintptr_t rootThreadListHeadAfter;
+    uintptr_t rootThreadListTailAfter;
+    uintptr_t firstRootProviderThread;
+    uintptr_t firstRootProviderMetadataContainer;
+    uintptr_t firstRootCandidateMetadataLocation;
+    uintptr_t rootProviderEntryFunction;
+
+    guidexos_nativeaot_root_thread_record rootThreadRecords[
+        GUIDEXOS_NATIVEAOT_MAX_ROOT_THREAD_RECORDS];
+
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
         GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupAfter[
@@ -547,6 +638,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F20_FIRST_COLLECTION_SAFE_STOP = 0xF20u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F21_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP = 0xF21u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F22_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP = 0xF22u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F23_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP = 0xF23u,
 };
 
 enum {
@@ -557,6 +649,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_UNSUPPORTED_SUSPEND_EE = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP_MARKER = 0xC011EC02u,
     GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC03u,
+    GUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP_MARKER = 0xC011EC04u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

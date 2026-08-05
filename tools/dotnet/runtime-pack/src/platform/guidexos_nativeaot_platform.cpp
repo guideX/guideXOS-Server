@@ -1157,6 +1157,475 @@ guideXosNativeAotAllocationContextFixupRootBoundary() {
     }
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION)
+
+enum {
+    kRootProviderSourceThreadStatics = 1u,
+    kRootProviderFunctionInlineThreadStaticList = 1u,
+    kRootProviderFunctionThreadStaticStorage = 2u,
+    kRootProviderMetadataInlineList = 1u,
+    kRootProviderMetadataThreadStaticStorage = 2u,
+    kRootProviderSkipNoInlineRoots = 1u,
+};
+
+void firstPerThreadRootProviderInvariantFailure() {
+    ++g_guideXosAllocationDiagnostics.rootProviderInvariantFailures;
+}
+
+[[noreturn]] void firstPerThreadRootProviderSafeStop();
+
+void snapshotFirstPerThreadRootList(bool before) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    SuspendEeThreadStorePrefix* store = reinterpret_cast<SuspendEeThreadStorePrefix*>(
+        GetThreadStore());
+    SuspendEeThread* head = store == nullptr ? nullptr : store->head;
+    uintptr_t* headField = before
+        ? &diagnostics.rootThreadListHeadBefore
+        : &diagnostics.rootThreadListHeadAfter;
+    uintptr_t* tailField = before
+        ? &diagnostics.rootThreadListTailBefore
+        : &diagnostics.rootThreadListTailAfter;
+    uint32_t* countField = before
+        ? &diagnostics.registeredThreadCountBeforeRoot
+        : &diagnostics.registeredThreadCountAfterRoot;
+    uint32_t* generationField = before
+        ? &diagnostics.rootThreadRegistryGenerationBefore
+        : &diagnostics.rootThreadRegistryGenerationAfter;
+    *headField = reinterpret_cast<gx_uintptr>(head);
+    *tailField = 0u;
+    *countField = 0u;
+    *generationField = diagnostics.threadStoreRegistryMutationAttemptsWhileLocked;
+
+    SuspendEeThread* seen[GUIDEXOS_NATIVEAOT_MAX_ROOT_THREAD_RECORDS] = {};
+    SuspendEeThread* current = head;
+    for (gx_uint32 ordinal = 0u;
+         current != nullptr && ordinal < GUIDEXOS_NATIVEAOT_MAX_ROOT_THREAD_RECORDS;
+         ++ordinal) {
+        for (gx_uint32 prior = 0u; prior < ordinal; ++prior) {
+            if (seen[prior] == current) {
+                ++diagnostics.duplicateThreadCount;
+                ++diagnostics.threadListIntegrityFailures;
+                return;
+            }
+        }
+        seen[ordinal] = current;
+        *tailField = reinterpret_cast<gx_uintptr>(current);
+        ++*countField;
+        current = reinterpret_cast<RuntimeThreadLocals*>(current)->m_pNext;
+    }
+    if (current != nullptr) {
+        ++diagnostics.threadListIntegrityFailures;
+    }
+}
+
+void recordFirstPerThreadRootThread(SuspendEeThread* thread) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.enumeratedThreadCount;
+    if (diagnostics.rootThreadRecordCount >=
+        GUIDEXOS_NATIVEAOT_MAX_ROOT_THREAD_RECORDS) {
+        ++diagnostics.threadListIntegrityFailures;
+        firstPerThreadRootProviderInvariantFailure();
+        return;
+    }
+    const gx_uint32 ordinal = diagnostics.rootThreadRecordCount++;
+    guidexos_nativeaot_root_thread_record& record =
+        diagnostics.rootThreadRecords[ordinal];
+    record = {};
+    record.enumerationOrdinal = ordinal + 1u;
+    record.runtimeThread = reinterpret_cast<gx_uintptr>(thread);
+    if (thread == nullptr) {
+        ++diagnostics.threadListIntegrityFailures;
+        firstPerThreadRootProviderInvariantFailure();
+        return;
+    }
+    RuntimeThreadLocals* locals = reinterpret_cast<RuntimeThreadLocals*>(thread);
+    record.nativeThreadId = static_cast<gx_uintptr>(
+        thread->GetPalThreadIdForLogging());
+    record.threadStateFlags = locals->m_ThreadStateFlags;
+    record.lifecycleState = locals->m_ThreadStateFlags & 0x3u;
+    record.initialized = thread->IsInitialized() ? 1u : 0u;
+    record.registered = record.initialized &&
+        (record.threadStateFlags & 0x1u) != 0u ? 1u : 0u;
+    record.cooperative = thread->IsCurrentThreadInCooperativeMode() ? 1u : 0u;
+    record.preemptive = record.cooperative == 0u ? 1u : 0u;
+    record.gcSpecial = thread->IsGCSpecial() ? 1u : 0u;
+    record.stackLow = reinterpret_cast<gx_uintptr>(locals->m_pStackLow);
+    record.stackHigh = reinterpret_cast<gx_uintptr>(locals->m_pStackHigh);
+    record.allocationContext = reinterpret_cast<gx_uintptr>(
+        thread->GetAllocContext());
+    record.nextThread = reinterpret_cast<gx_uintptr>(locals->m_pNext);
+    SuspendEeThread* current = suspendEeCurrentThread();
+    SuspendEeThread* initiator = reinterpret_cast<SuspendEeThread*>(
+        diagnostics.suspendEeInitiatingRuntimeThread);
+    SuspendEeThread* lockOwner = reinterpret_cast<SuspendEeThread*>(
+        diagnostics.threadStoreLockOwner);
+    record.collectionInitiatorMatch = thread == initiator ? 1u : 0u;
+    record.currentThreadMatch = thread == current ? 1u : 0u;
+    record.lockOwnerMatch = thread == lockOwner ? 1u : 0u;
+    diagnostics.rootCurrentThreadIdentity = reinterpret_cast<gx_uintptr>(current);
+    diagnostics.rootCollectionInitiatorIdentity = reinterpret_cast<gx_uintptr>(initiator);
+    diagnostics.rootLockOwnerIdentity = reinterpret_cast<gx_uintptr>(lockOwner);
+    diagnostics.rootEnumeratedThreadIdentity = reinterpret_cast<gx_uintptr>(thread);
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootGcScanRootsEntered() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.gcScanRootsRequestCount;
+    ++diagnostics.gcScanRootsEntryCount;
+    ++diagnostics.foreachThreadRequestCount;
+    diagnostics.rootProviderSourceOrderCategory =
+        kRootProviderSourceThreadStatics;
+    diagnostics.rootCurrentThreadIdentity = reinterpret_cast<gx_uintptr>(
+        suspendEeCurrentThread());
+    diagnostics.rootCollectionInitiatorIdentity =
+        diagnostics.suspendEeInitiatingRuntimeThread;
+    diagnostics.rootLockOwnerIdentity = diagnostics.threadStoreLockOwner;
+    snapshotFirstPerThreadRootList(true);
+    if (diagnostics.gcScanRootsEntryCount != 1u ||
+        diagnostics.suspendEeEntryCount != 1u ||
+        diagnostics.suspendEeSuspensionCount != 1u ||
+        diagnostics.threadStoreLockAcquisitionCount != 1u ||
+        diagnostics.managedEntryProhibited == 0u ||
+        diagnostics.eeSuspended == 0u ||
+        diagnostics.registeredThreadCountBeforeRoot != 1u ||
+        diagnostics.rootThreadListHeadBefore == 0u) {
+        firstPerThreadRootProviderInvariantFailure();
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootForeachThreadEntered() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.foreachThreadEntryCount;
+    if (diagnostics.foreachThreadRequestCount != 1u ||
+        diagnostics.threadStoreLockAcquisitionCount != 1u ||
+        diagnostics.eeSuspended == 0u) {
+        firstPerThreadRootProviderInvariantFailure();
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootIteratorInitialized() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.threadIteratorInitializationCount;
+    if (diagnostics.foreachThreadEntryCount != 1u ||
+        diagnostics.rootThreadListHeadBefore == 0u) {
+        firstPerThreadRootProviderInvariantFailure();
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootIteratorCompletion() {
+    ++g_guideXosAllocationDiagnostics.threadIteratorCompletionCount;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootThreadEnumerated(uintptr_t thread) {
+    recordFirstPerThreadRootThread(reinterpret_cast<SuspendEeThread*>(thread));
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootThreadExcluded(uintptr_t thread,
+                                                   uint32_t reason) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.excludedThreadCount;
+    if (diagnostics.rootThreadRecordCount != 0u) {
+        guidexos_nativeaot_root_thread_record& record =
+            diagnostics.rootThreadRecords[diagnostics.rootThreadRecordCount - 1u];
+        if (record.runtimeThread == thread) {
+            record.excluded = 1u;
+            record.inclusionReason = reason;
+        }
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootThreadIncluded(uintptr_t thread) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.includedThreadCount;
+    ++diagnostics.rootPerThreadDispatchRequestCount;
+    ++diagnostics.rootPerThreadDispatchEntryCount;
+    if (diagnostics.rootThreadRecordCount == 0u) {
+        firstPerThreadRootProviderInvariantFailure();
+        return;
+    }
+    guidexos_nativeaot_root_thread_record& record =
+        diagnostics.rootThreadRecords[diagnostics.rootThreadRecordCount - 1u];
+    if (record.runtimeThread != thread || record.registered == 0u) {
+        firstPerThreadRootProviderInvariantFailure();
+    }
+    record.included = 1u;
+    record.inclusionReason = 0u;
+    diagnostics.firstRootProviderThread = thread;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootThreadStaticListObserved(uintptr_t thread,
+                                                             uintptr_t list) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.rootProviderRequestCount;
+    if (list == 0u) {
+        ++diagnostics.rootProviderSkipCount;
+        diagnostics.rootProviderSkipReason = kRootProviderSkipNoInlineRoots;
+        return;
+    }
+    ++diagnostics.rootProviderEntryCount;
+    diagnostics.rootProviderRuntimeCategory = kRootProviderSourceThreadStatics;
+    diagnostics.rootProviderFunctionCode =
+        kRootProviderFunctionInlineThreadStaticList;
+    diagnostics.rootProviderMetadataKind = kRootProviderMetadataInlineList;
+    diagnostics.firstRootProviderThread = thread;
+    diagnostics.firstRootProviderMetadataContainer = list;
+    for (uintptr_t current = list; current != 0u &&
+         diagnostics.metadataContainerCount < GUIDEXOS_NATIVEAOT_MAX_ROOT_THREAD_RECORDS;
+         current = reinterpret_cast<uintptr_t>(
+             reinterpret_cast<InlinedThreadStaticRoot*>(current)->m_next)) {
+        ++diagnostics.metadataContainerCount;
+    }
+    firstPerThreadRootProviderSafeStop();
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered(uintptr_t thread,
+                                                               uintptr_t storage) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.rootProviderRequestCount;
+    ++diagnostics.rootProviderEntryCount;
+    diagnostics.rootProviderRuntimeCategory = kRootProviderSourceThreadStatics;
+    diagnostics.rootProviderFunctionCode = kRootProviderFunctionThreadStaticStorage;
+    diagnostics.rootProviderMetadataKind = kRootProviderMetadataThreadStaticStorage;
+    diagnostics.threadStaticStorageRequested = 1u;
+    diagnostics.metadataContainerCount = 1u;
+    diagnostics.firstRootProviderThread = thread;
+    diagnostics.firstRootProviderMetadataContainer = storage;
+    diagnostics.candidateMetadataLocationCount = 1u;
+    diagnostics.firstRootCandidateMetadataLocation = storage;
+    firstPerThreadRootProviderSafeStop();
+}
+
+void emitFirstPerThreadRootProviderSafeStop() {
+    const guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-first-per-thread-root-provider] SAFE_STOP marker=");
+    suspendEeSerialPutHex32(diagnostics.rootProviderStopReason);
+    suspendEeSerialPutString(" gcScanRootsRequest=");
+    suspendEeSerialPutHex32(diagnostics.gcScanRootsRequestCount);
+    suspendEeSerialPutString(" gcScanRootsEntry=");
+    suspendEeSerialPutHex32(diagnostics.gcScanRootsEntryCount);
+    suspendEeSerialPutString(" foreachRequest=");
+    suspendEeSerialPutHex32(diagnostics.foreachThreadRequestCount);
+    suspendEeSerialPutString(" foreachEntry=");
+    suspendEeSerialPutHex32(diagnostics.foreachThreadEntryCount);
+    suspendEeSerialPutString(" iteratorInit=");
+    suspendEeSerialPutHex32(diagnostics.threadIteratorInitializationCount);
+    suspendEeSerialPutString(" registeredBefore=");
+    suspendEeSerialPutHex32(diagnostics.registeredThreadCountBeforeRoot);
+    suspendEeSerialPutString(" registeredAfter=");
+    suspendEeSerialPutHex32(diagnostics.registeredThreadCountAfterRoot);
+    suspendEeSerialPutString(" enumerated=");
+    suspendEeSerialPutHex32(diagnostics.enumeratedThreadCount);
+    suspendEeSerialPutString(" included=");
+    suspendEeSerialPutHex32(diagnostics.includedThreadCount);
+    suspendEeSerialPutString(" excluded=");
+    suspendEeSerialPutHex32(diagnostics.excludedThreadCount);
+    suspendEeSerialPutString(" current=");
+    suspendEeSerialPutHex64(diagnostics.rootCurrentThreadIdentity);
+    suspendEeSerialPutString(" nativeId=");
+    suspendEeSerialPutHex64(diagnostics.rootThreadRecords[0].nativeThreadId);
+    suspendEeSerialPutString(" enumeratedThread=");
+    suspendEeSerialPutHex64(diagnostics.rootEnumeratedThreadIdentity);
+    suspendEeSerialPutString(" initiator=");
+    suspendEeSerialPutHex64(diagnostics.rootCollectionInitiatorIdentity);
+    suspendEeSerialPutString(" lockOwner=");
+    suspendEeSerialPutHex64(diagnostics.rootLockOwnerIdentity);
+    suspendEeSerialPutString(" lifecycle=");
+    suspendEeSerialPutHex32(diagnostics.rootThreadRecords[0].lifecycleState);
+    suspendEeSerialPutString(" stateFlags=");
+    suspendEeSerialPutHex32(diagnostics.rootThreadRecords[0].threadStateFlags);
+    suspendEeSerialPutString(" cooperative=");
+    suspendEeSerialPutHex32(diagnostics.rootThreadRecords[0].cooperative);
+    suspendEeSerialPutString(" preemptive=");
+    suspendEeSerialPutHex32(diagnostics.rootThreadRecords[0].preemptive);
+    suspendEeSerialPutString(" allocContext=");
+    suspendEeSerialPutHex64(diagnostics.rootThreadRecords[0].allocationContext);
+    suspendEeSerialPutString(" stackLow=");
+    suspendEeSerialPutHex64(diagnostics.rootThreadRecords[0].stackLow);
+    suspendEeSerialPutString(" stackHigh=");
+    suspendEeSerialPutHex64(diagnostics.rootThreadRecords[0].stackHigh);
+    suspendEeSerialPutString(" listHeadBefore=");
+    suspendEeSerialPutHex64(diagnostics.rootThreadListHeadBefore);
+    suspendEeSerialPutString(" listTailBefore=");
+    suspendEeSerialPutHex64(diagnostics.rootThreadListTailBefore);
+    suspendEeSerialPutString(" listHeadAfter=");
+    suspendEeSerialPutHex64(diagnostics.rootThreadListHeadAfter);
+    suspendEeSerialPutString(" listTailAfter=");
+    suspendEeSerialPutHex64(diagnostics.rootThreadListTailAfter);
+    suspendEeSerialPutString(" listIntegrityFailures=");
+    suspendEeSerialPutHex32(diagnostics.threadListIntegrityFailures);
+    suspendEeSerialPutString(" duplicates=");
+    suspendEeSerialPutHex32(diagnostics.duplicateThreadCount);
+    suspendEeSerialPutString(" registryMutationBefore=");
+    suspendEeSerialPutHex32(diagnostics.threadRegistryMutationCountBeforeRoot);
+    suspendEeSerialPutString(" registryMutationAfter=");
+    suspendEeSerialPutHex32(diagnostics.threadRegistryMutationCountAfterRoot);
+    suspendEeSerialPutString(" providerSource=thread-static-provider providerRuntime=thread-static-provider");
+    suspendEeSerialPutString(" providerFunction=");
+    suspendEeSerialPutHex32(diagnostics.rootProviderFunctionCode);
+    suspendEeSerialPutString(" providerThread=");
+    suspendEeSerialPutHex64(diagnostics.firstRootProviderThread);
+    suspendEeSerialPutString(" providerRequests=");
+    suspendEeSerialPutHex32(diagnostics.rootProviderRequestCount);
+    suspendEeSerialPutString(" providerEntries=");
+    suspendEeSerialPutHex32(diagnostics.rootProviderEntryCount);
+    suspendEeSerialPutString(" providerSkips=");
+    suspendEeSerialPutHex32(diagnostics.rootProviderSkipCount);
+    suspendEeSerialPutString(" metadataContainers=");
+    suspendEeSerialPutHex32(diagnostics.metadataContainerCount);
+    suspendEeSerialPutString(" firstMetadata=");
+    suspendEeSerialPutHex64(diagnostics.firstRootProviderMetadataContainer);
+    suspendEeSerialPutString(" candidateMetadata=");
+    suspendEeSerialPutHex32(diagnostics.candidateMetadataLocationCount);
+    suspendEeSerialPutString(" candidateReads=");
+    suspendEeSerialPutHex32(diagnostics.candidateValueReadCount);
+    suspendEeSerialPutString(" candidates=");
+    suspendEeSerialPutHex32(diagnostics.rootCandidateDiscoveryCount);
+    suspendEeSerialPutString(" callbacks=");
+    suspendEeSerialPutHex32(diagnostics.rootCallbacksDelivered);
+    suspendEeSerialPutString(" promotions=");
+    suspendEeSerialPutHex32(diagnostics.promotionCallbacksDelivered);
+    suspendEeSerialPutString(" marking=");
+    suspendEeSerialPutHex32(diagnostics.markingEntryCount);
+    suspendEeSerialPutString(" objectMutation=");
+    suspendEeSerialPutHex32(diagnostics.objectMemoryMutationStarted);
+    suspendEeSerialPutString(" restartRequests=");
+    suspendEeSerialPutHex32(diagnostics.restartRequestCount);
+    suspendEeSerialPutString(" restartEntries=");
+    suspendEeSerialPutHex32(diagnostics.restartEntryCount);
+    suspendEeSerialPutString(" managedResume=");
+    suspendEeSerialPutHex32(diagnostics.managedResumeCount);
+    suspendEeSerialPutString(" stackBoundsRequested=");
+    suspendEeSerialPutHex32(diagnostics.stackBoundsRequested);
+    suspendEeSerialPutString(" stackScanning=");
+    suspendEeSerialPutHex32(diagnostics.stackScanningStarted);
+    suspendEeSerialPutString(" threadStaticRequested=");
+    suspendEeSerialPutHex32(diagnostics.threadStaticStorageRequested);
+    suspendEeSerialPutString(" threadStaticScanning=");
+    suspendEeSerialPutHex32(diagnostics.threadStaticScanningStarted);
+    suspendEeSerialPutString(" sentinelChecks=");
+    suspendEeSerialPutHex32(diagnostics.sentinelChecksAtRootBoundary);
+    suspendEeSerialPutString(" objectBefore=");
+    suspendEeSerialPutHex32(diagnostics.objectValidationBeforeFixupCount);
+    suspendEeSerialPutString(" objectAfter=");
+    suspendEeSerialPutHex32(diagnostics.objectValidationAfterFixupCount);
+    suspendEeSerialPutString(" fixupFailures=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupInvariantFailures);
+    suspendEeSerialPutString(" rootFailures=");
+    suspendEeSerialPutHex32(diagnostics.rootProviderInvariantFailures);
+    suspendEeSerialPutString(" eeSuspended=");
+    suspendEeSerialPutHex32(diagnostics.eeSuspended);
+    suspendEeSerialPutString(" lockDepth=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreLockRecursionDepth);
+    suspendEeSerialPutString(" marker=C011EC04\n");
+}
+
+[[noreturn]] void firstPerThreadRootProviderSafeStop() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.rootProviderSafeStopObserved;
+    diagnostics.sentinelChecksAtRootBoundary = diagnostics.sentinelValidationCount;
+    validateAllocationContextFixupObjects(true);
+    snapshotFirstPerThreadRootList(false);
+    diagnostics.threadRegistryMutationCountBeforeRoot =
+        diagnostics.rootThreadRegistryGenerationBefore;
+    diagnostics.threadRegistryMutationCountAfterRoot =
+        diagnostics.rootThreadRegistryGenerationAfter;
+    const guidexos_nativeaot_root_thread_record& record =
+        diagnostics.rootThreadRecords[0];
+    const bool valid =
+        diagnostics.rootProviderSafeStopObserved == 1u &&
+        diagnostics.gcScanRootsEntryCount == 1u &&
+        diagnostics.foreachThreadRequestCount == 1u &&
+        diagnostics.foreachThreadEntryCount == 1u &&
+        diagnostics.threadIteratorInitializationCount == 1u &&
+        diagnostics.registeredThreadCountBeforeRoot == 1u &&
+        diagnostics.registeredThreadCountAfterRoot == 1u &&
+        diagnostics.enumeratedThreadCount == 1u &&
+        diagnostics.includedThreadCount == 1u &&
+        diagnostics.excludedThreadCount == 0u &&
+        diagnostics.rootThreadRecordCount == 1u &&
+        diagnostics.duplicateThreadCount == 0u &&
+        diagnostics.threadListIntegrityFailures == 0u &&
+        diagnostics.rootThreadListHeadBefore == diagnostics.rootThreadListHeadAfter &&
+        diagnostics.rootThreadListTailBefore == diagnostics.rootThreadListTailAfter &&
+        diagnostics.rootThreadRegistryGenerationBefore ==
+            diagnostics.rootThreadRegistryGenerationAfter &&
+        record.registered == 1u && record.initialized == 1u &&
+        record.collectionInitiatorMatch == 1u &&
+        record.currentThreadMatch == 1u && record.lockOwnerMatch == 1u &&
+        diagnostics.rootCurrentThreadIdentity == diagnostics.rootEnumeratedThreadIdentity &&
+        diagnostics.rootEnumeratedThreadIdentity == diagnostics.rootCollectionInitiatorIdentity &&
+        diagnostics.rootEnumeratedThreadIdentity == diagnostics.rootLockOwnerIdentity &&
+        record.allocationContext == diagnostics.allocationContextFixupAfter[0].contextIdentity &&
+        diagnostics.rootProviderSourceOrderCategory == kRootProviderSourceThreadStatics &&
+        diagnostics.rootProviderRuntimeCategory == kRootProviderSourceThreadStatics &&
+        diagnostics.rootProviderRequestCount == 2u &&
+        diagnostics.rootProviderEntryCount == 1u &&
+        diagnostics.rootProviderSkipCount == 1u &&
+        diagnostics.metadataContainerCount == 1u &&
+        diagnostics.candidateMetadataLocationCount == 1u &&
+        diagnostics.candidateValueReadCount == 0u &&
+        diagnostics.rootCandidateDiscoveryCount == 0u &&
+        diagnostics.rootCallbacksDelivered == 0u &&
+        diagnostics.promotionCallbacksDelivered == 0u &&
+        diagnostics.markingEntryCount == 0u &&
+        diagnostics.objectMemoryMutationStarted == 0u &&
+        diagnostics.restartRequestCount == 0u &&
+        diagnostics.restartEntryCount == 0u &&
+        diagnostics.managedResumeCount == 0u &&
+        diagnostics.stackBoundsRequested == 0u &&
+        diagnostics.stackScanningStarted == 0u &&
+        diagnostics.threadStaticStorageRequested == 1u &&
+        diagnostics.threadStaticScanningStarted == 0u &&
+        diagnostics.threadStoreLockRecursionDepth == 1u &&
+        diagnostics.managedEntryProhibited == 1u && diagnostics.eeSuspended == 1u &&
+        diagnostics.allocationContextFixupCompletionCount == 1u &&
+        diagnostics.allocationContextFixupContextsCleared == 1u &&
+        diagnostics.objectValidationFailuresBeforeFixup == 0u &&
+        diagnostics.objectValidationFailuresAfterFixup == 0u &&
+        diagnostics.objectAddressChangesAfterFixup == 0u;
+    if (!valid) {
+        firstPerThreadRootProviderInvariantFailure();
+        diagnostics.rootProviderStopReason = 0xE004u;
+        emitFirstPerThreadRootProviderSafeStop();
+        guideXosFailFast(9u);
+    }
+    diagnostics.rootProviderStopReason =
+        GUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP_MARKER;
+    diagnostics.safeStopObserved = 1u;
+    diagnostics.stopReason = diagnostics.rootProviderStopReason;
+    diagnostics.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F23_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP;
+    diagnostics.currentRip = reinterpret_cast<gx_uintptr>(_ReturnAddress());
+    diagnostics.currentRsp = reinterpret_cast<gx_uintptr>(_AddressOfReturnAddress());
+    diagnostics.rootBoundaryFunction = reinterpret_cast<gx_uintptr>(
+        &firstPerThreadRootProviderSafeStop);
+    emitFirstPerThreadRootProviderSafeStop();
+    for (;;) {
+    }
+}
+
+#endif
+
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) && defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)

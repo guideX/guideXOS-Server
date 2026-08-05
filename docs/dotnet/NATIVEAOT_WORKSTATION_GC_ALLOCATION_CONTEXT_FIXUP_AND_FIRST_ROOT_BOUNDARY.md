@@ -182,3 +182,12 @@ commands, build logs, selectors, kernel symbols, and restoration hash.
 The next unsupported boundary is the first actual thread-static or stack-root
 provider inside the locked `GcScanRoots` body. This report intentionally stops
 before that boundary and does not authorize continuing the collection.
+
+## First real per-thread provider follow-up - 2026-08-04
+
+The next bounded result is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md`. It advances from
+`C011EC03` through the real `ThreadStore::Iterator`, enumerates the registered
+managed thread, enters the runtime-selected thread-static provider, and stops
+before any candidate value is read. This report remains the historical
+pre-`FOREACH_THREAD` checkpoint.

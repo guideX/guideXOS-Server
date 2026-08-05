@@ -268,3 +268,9 @@ runtime acquired the real thread-store lock, suspended the zero-peer
 single-mutator set, and returned from `SuspendEE`. The proof stopped before
 root/stack/handle enumeration and heap mutation, so this advances the
 feasibility boundary without claiming full collection support.
+
+The next bounded result is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md`: the real
+registered thread is enumerated and the first runtime-selected per-thread
+provider is entered, but candidate reads, callbacks, marking, restart, and
+managed resumption remain unproven.

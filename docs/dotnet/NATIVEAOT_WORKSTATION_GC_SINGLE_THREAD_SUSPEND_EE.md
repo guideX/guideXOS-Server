@@ -280,3 +280,10 @@ empty root set, begin marking, mutate heap state, or implement restart until
 that root contract is separately established.
 
 No commit was created.
+
+## First real per-thread provider follow-up - 2026-08-04
+
+The subsequent root-dispatch experiment is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md`. It preserves the
+single-mutator lock and suspension invariants while entering the first
+thread-static provider and stopping before candidate access.
