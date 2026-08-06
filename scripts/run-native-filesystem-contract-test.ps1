@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$OutputPath = "tmp\native-filesystem-contract-test.exe"
+    [string]$OutputPath = "out\validation\native-filesystem-contract-test.exe"
 )
 
 $ErrorActionPreference = "Stop"

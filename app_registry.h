@@ -20,6 +20,12 @@ enum class AppSourceKind {
     DevelopmentTemporary
 };
 
+enum class DisplayNameResolutionStatus {
+    NotFound = 0,
+    Resolved,
+    Ambiguous
+};
+
 struct RegisteredApp {
     AppManifest manifest;
     AppSourceKind sourceKind = AppSourceKind::UserApps;
@@ -52,6 +58,20 @@ struct AppRegistrySource {
     std::filesystem::path path;
 };
 
+struct DisplayNameMatch {
+    const RegisteredApp* app = nullptr;
+    bool eligible = false;
+    int sourcePriority = 0;
+    std::string reason;
+};
+
+struct DisplayNameResolution {
+    DisplayNameResolutionStatus status = DisplayNameResolutionStatus::NotFound;
+    const RegisteredApp* app = nullptr;
+    std::vector<DisplayNameMatch> matches;
+    std::string reason;
+};
+
 class AppRegistry {
 public:
     AppRegistry();
@@ -77,10 +97,15 @@ public:
     const std::vector<RegisteredApp>& GetAllApps() const;
     const RegisteredApp* FindById(const std::string& appId) const;
     const RegisteredApp* FindByDisplayName(const std::string& displayName) const;
+    DisplayNameResolution ResolveByDisplayName(const std::string& displayName,
+                                               const std::string& architecture = "amd64",
+                                               bool includeTemporaryDevelopment = false) const;
     const AppEntry* FindCompatibleEntry(const std::string& appId, const std::string& currentArchitecture) const;
 
     static std::vector<AppRegistrySource> DefaultSources();
     static const char* ToString(AppSourceKind kind);
+    static const char* ToString(DisplayNameResolutionStatus status);
+    static int DisplayNameSourcePriority(AppSourceKind kind);
 
 private:
     bool RegisterApp(const RegisteredApp& app, AppScanResult& result);

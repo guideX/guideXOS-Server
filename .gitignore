@@ -26,6 +26,7 @@
 /tmp/developer-studio-phase-build*.log
 /tmp/native-filesystem-contract-test*
 /tmp/native_abi_layout_test-phase-current.exe
+/out/validation/
 /logs
 # Vendor trees remain ignored except for the reproducible stb_image.h header
 # required by the hosted Native ELF/App Model build.

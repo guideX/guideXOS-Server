@@ -10,8 +10,8 @@ a production filesystem sandbox or a bare-metal VFS contract.
 local source selected for this checkout is:
 
 ```text
-source:      D:\dev\guideXOSServerV0.2\third_party\stb\stb_image.h
-destination: third_party/stb/stb_image.h
+source:      <SERVER_ROOT>/third_party/stb/stb_image.h
+destination: <SERVER_ROOT>/third_party/stb/stb_image.h
 version:     stb_image v2.30
 revision:    1692fe6e21ce7b7abbc6fcb6d1d3ff6ebe0b8537
 SHA-256:     1F8C1B6B408F26E3B20CBFBBD4758AFB3DC9B837FF1E17C258928F406148A87C
@@ -24,9 +24,9 @@ source and destination Git blob are both
 `9eedabedc45b3e6fd88fae6f14a160b4d53272ec`. Other vendor content remains
 ignored; only this required header is permitted by `.gitignore`.
 
-To restore a fresh checkout, copy the canonical header from the source path
-above and verify the SHA-256 before building. Do not substitute an arbitrary
-latest stb release or retrieve an unpinned dependency.
+To restore a fresh checkout, verify the repository-relative destination and
+SHA-256 before building. Do not substitute an arbitrary latest stb release or
+retrieve an unpinned dependency.
 
 ## Hosted build
 
@@ -42,26 +42,31 @@ binutils 2.46.0. The build enables
 `guideXOSServer.experimental.exe`. The Developer Studio repository build is:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\dev\guideXOS_Developer_Studio\build.ps1
+$DeveloperStudioRoot = (Resolve-Path (Join-Path (Split-Path (Get-Location) -Parent) "guideXOS_Developer_Studio")).Path
+Set-Location -LiteralPath $DeveloperStudioRoot
+powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-That build refreshes `Apps/DeveloperStudio/bin/amd64/developerstudio.elf` from
-the Developer Studio checkout. The current packaged ELF is ELF64,
-`ET_EXEC`, `EM_X86_64`, entry point `gx_main`, and SHA-256
-`70FE5D4F66F0F401958C220DBF1E7752DB4AB5B62155EB4664259B545A2B5126`.
-Packaged ELF files are tracked release/package inputs in the Server checkout;
-they are not tracked build output in the Developer Studio checkout. The
-binary must be refreshed by the Developer Studio build before a hosted smoke
-run; its SHA-256 should be reported rather than hard-coded as a reproducibility
-claim.
+That build refreshes the tracked package input at
+`Apps/DeveloperStudio/bin/amd64/developerstudio.elf` in the Server checkout.
+Audit snapshot from 2026-08-05: size `675664` bytes, ELF64 `ET_EXEC`,
+`EM_X86_64`, symbol `gx_main`, SHA-256
+`1104FC755272069692A3075622B7434FE59FBD4C00659E16239D5ED0FB851B5F`.
+The hash is evidence for that package snapshot, not a permanent build-output
+claim; recompute it after rebuilding the Developer Studio checkout.
 
 ## Filesystem ABI semantics
 
-The four append-only Native ABI calls are `file_stat`,
-`file_read_workspace`, `file_list`, and `file_write_all`. The latter name is
-historical: `file_read_workspace` is a full-file read with no offset, while
-all four calls operate on an explicit hosted absolute path. The calls require
-the corresponding `filesystem.read` or `filesystem.write` permission.
+The Native ABI is append-only. After the original slots, the current table
+keeps `get_ticks_ms`, then appends `file_stat`, `file_read_workspace`,
+`file_list`, `file_write_all`, `file_create_directory`, `file_remove`,
+`build_project_start`, `build_project_poll`, `build_project_release`,
+`development_run_prepare`, `development_run_start`,
+`development_run_poll`, `development_run_request_close`, and
+`development_run_release`. The workspace calls use an explicit hosted
+absolute path and require the corresponding `filesystem.read` or
+`filesystem.write` permission. `file_read_workspace` is a full-file read with
+no offset.
 
 Hosted validation enforces:
 
@@ -85,16 +90,75 @@ and recovery from a power loss are not claimed. The Server intentionally does
 not know the Developer Studio-selected workspace root, so the Developer Studio
 guest model enforces root containment. This hosted policy must not be treated
 as unrestricted production filesystem access or as the future bare-metal
-semantics.
+semantics. File-read boundary diagnostics are opt-in through
+`GXOS_HOSTED_INPUT_DIAGNOSTICS`; their fields are semantic and do not emit
+raw process-memory addresses.
+
+## App Model identity and duplicate-display policy
+
+Canonical application IDs are the activation identity. Exact IDs resolve
+directly, while display-name compatibility is centralized in the Server
+registry and never depends on filesystem traversal order. A display-name
+candidate must match the current architecture and have a valid, contained
+launch entry when its kind requires a Native ELF or GXApp package. The source
+priority is:
+
+```text
+Package > BuiltIn > UserApps > SystemApps > DevelopmentTemporary
+```
+
+Only one eligible candidate at the best priority resolves. Equal-priority
+eligible candidates are reported as ambiguous and are not launched. Temporary
+Development Run records are excluded from display-name compatibility and must
+be reached through their exact temporary ID plus owner/generation checks.
+This preserves the existing owner-bound development route while preventing a
+temporary or SDK record from shadowing an installed package.
+
+The Start Menu carries a parallel canonical-ID list for its display labels,
+and desktop shortcuts persist `targetAppId`. Mouse, keyboard, context-menu,
+Start Menu, and desktop-shortcut activation all pass that ID through to the
+launch resolver. An ambiguous legacy label remains visible for diagnosis but
+is not dispatched. The focused repro commands are:
+
+```text
+desktop.apps.verbose
+desktop.launch.resolve Hello World
+desktop.launch.resolve Resource Viewer
+desktop.launch.resolve com.guidexos.helloworld
+desktop.launch.resolve com.guidexos.resourceviewer
+```
+
+The packaged records should win the two display-name lookups, while the
+canonical-ID lookups should remain exact. The SDK sample manifests are still
+discoverable for inspection, but their missing native entry files make them
+ineligible compatibility candidates.
+
+## Native render acknowledgement and keyboard evidence
+
+Native `draw_text`, `draw_rect`, image, and `present_frame` messages are
+fire-and-forget. The compositor intentionally drops render acknowledgements
+for a nonzero native destination because the host API does not consume them;
+`MT_RequestFrame` remains the paint event delivered through `poll_event`.
+No new draw/present waits are permitted. `request_window` still waits for its
+creation response, and input/paint/close events still use the existing bounded
+poll path.
+
+Keyboard validation must exercise both key-down and key-up for ordinary keys
+and modifiers, including an Alt down/up pair, and verify that the focused
+window receives the matching transitions without duplicate or missing events.
+The bounded hosted shell remains a diagnostic aid; the complete editor
+keyboard/edit/save sequence is still manual unless that interaction has been
+run and recorded separately.
 
 ## Validation procedure and evidence
 
 Normal startup is run without a launch command, then checked with
 `desktop.apps`, `desktop.appmodel.inventory`, `desktop.windows.owners`, and
-`nativeapp.processes`. Developer Studio is then launched explicitly with:
+`nativeapp.processes`. Developer Studio is then launched explicitly by
+canonical ID with:
 
 ```text
-desktop.launch guideXOS Developer Studio
+desktop.launch com.guidexos.developerstudio
 ```
 
 The App Model registry identity is `com.guidexos.developerstudio`; the package
@@ -121,7 +185,7 @@ as automated until that manual portion has been performed.
 
 Observed validation on 2026-07-25 includes a normal experimental-server start
 with no Developer Studio construction marker, `windowCount=0`, and zero native
-processes; a live `D:\gxws` workspace open with deterministic Explorer entries;
+processes; a live `<WORKSPACE_ROOT>` workspace open with deterministic Explorer entries;
 the automated host-side workflow over `sample.cpp`, `notes.txt`, nested JSON,
 binary, oversized, save, discard, and cancel cases; and two explicit launches
 in one Server process. The repeated launches used window IDs 1000 and 1001,
@@ -131,12 +195,12 @@ live keyboard edit/save/dirty-close sequence remains a manual follow-up, not
 an asserted acceptance result, because the bounded shell input path is not yet
 a reliable scripted driver for every interaction.
 
-The ordinary `scripts/smoke-startup-appmodel-regression.ps1` path was also
-attempted. Its static checks passed, but execution stopped before server
-startup because this checkout has no ordinary `guideXOSServer.exe` at the
-expected root location. The experimental executable produced by
-`build-native-experimental.bat` is the authoritative hosted Native ELF path
-used for the live evidence above.
+The ordinary `scripts/smoke-startup-appmodel-regression.ps1 -SkipBuild` path
+completed its normal-startup, persistence, and explicit-canonical-launch
+checks. The normal `build.bat` executable is suitable for App Model identity
+and registry validation; the executable produced by
+`build-native-experimental.bat` remains the authoritative hosted Native ELF
+path used for native lifecycle evidence.
 
 The deterministic contract command is:
 
@@ -144,13 +208,16 @@ The deterministic contract command is:
 powershell -ExecutionPolicy Bypass -File .\scripts\run-native-filesystem-contract-test.ps1
 ```
 
-It completed with `Native filesystem contract build and test PASS`. The layout
-command completed with `Native ABI layout test PASS`.
+The filesystem-contract wrapper can outlive the bounded shell command while
+the compiler is still running; after the executable appeared, running it
+returned `Native filesystem contract test PASS`. The layout command completed
+with `Native ABI layout test PASS`.
 
 The repeated lifecycle and close-ownership command is:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\dev\guideXOS_Developer_Studio\tests\smoke-developer-studio-repeated.ps1
+$DeveloperStudioRoot = (Resolve-Path (Join-Path (Split-Path (Get-Location) -Parent) "guideXOS_Developer_Studio")).Path
+powershell -ExecutionPolicy Bypass -File (Join-Path $DeveloperStudioRoot "tests\smoke-developer-studio-repeated.ps1")
 ```
 
 It completed with two unique window IDs, zero windows after each close,

@@ -467,7 +467,9 @@ namespace gxos {
         int Compositor::g_startMenuSel = 0; int Compositor::g_startMenuScroll = 0;
         bool Compositor::g_startMenuAllProgs = false; // "All Programs" view toggle
         std::vector<std::string> Compositor::g_startMenuAllProgsSorted; // Alphabetically sorted app list
+        std::vector<std::string> Compositor::g_startMenuAllProgsTargetIds; // Stable App Model ids parallel to labels
         std::vector<std::string> Compositor::g_startMenuPinnedRecent; // Start menu app pins/recent, independent of desktop files.
+        std::vector<std::string> Compositor::g_startMenuPinnedRecentTargetIds; // Stable App Model ids parallel to labels
         bool Compositor::g_taskbarMenuVisible = false;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         RECT Compositor::g_taskbarMenuRect{ 0,0,0,0 };
@@ -1398,8 +1400,14 @@ namespace gxos {
         }
 
         static const RegisteredDesktopApp* findDesktopAppByNameOrId(const std::string& value) {
+            const apps::LaunchTarget resolved = DesktopService::ResolveLaunchTarget(value);
+            if (!resolved.appId.empty()) {
+                for (const auto& app : DesktopService::GetRegisteredApps()) {
+                    if (app.id == resolved.appId) return &app;
+                }
+            }
             for (const auto& app : DesktopService::GetRegisteredApps()) {
-                if (app.id == value || app.displayName == value || app.launchName == value || namesEquivalent(app.displayName, value)) return &app;
+                if (app.id == value) return &app;
             }
             return nullptr;
         }
@@ -1481,6 +1489,22 @@ namespace gxos {
             }
             if (items.size() > 10) items.resize(10);
             logCompositorList("start menu recent", items);
+        }
+
+        static void refreshStartMenuPinnedRecentTargetIds(const std::vector<std::string>& labels, std::vector<std::string>& ids) {
+            ids.clear();
+            ids.reserve(labels.size());
+            for (const std::string& label : labels) {
+                const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(label);
+                ids.push_back(
+                    target.diagnosticStatus == "resolved" ? target.appId : std::string());
+            }
+        }
+
+        static std::string startMenuActionAt(const std::vector<std::string>& labels, const std::vector<std::string>& targetIds, int index) {
+            if (index < 0 || index >= static_cast<int>(labels.size())) return std::string();
+            if (index < static_cast<int>(targetIds.size()) && !targetIds[index].empty()) return targetIds[index];
+            return labels[index];
         }
 
         static const char* kHostedTrashPath = "/Trash";
@@ -1752,7 +1776,9 @@ namespace gxos {
                 if (idx >= 0 && idx < itemCount) {
                     uint64_t now = nowMs();
                     if (Compositor::g_lastItemIndex == idx && (now - Compositor::g_lastItemClickTicks) < 450) {
-                        std::string action = Compositor::g_startMenuAllProgs ? Compositor::g_startMenuAllProgsSorted[idx] : Compositor::g_startMenuPinnedRecent[idx];
+                        std::string action = Compositor::g_startMenuAllProgs
+                            ? startMenuActionAt(Compositor::g_startMenuAllProgsSorted, Compositor::g_startMenuAllProgsTargetIds, idx)
+                            : startMenuActionAt(Compositor::g_startMenuPinnedRecent, Compositor::g_startMenuPinnedRecentTargetIds, idx);
                         logStartMenuLaunchTargetShadowDiagnostic(action);
                         Compositor::launchAction(action);
                         Compositor::g_startMenuVisible = false;
@@ -1873,6 +1899,7 @@ namespace gxos {
             }
 
             refreshStartMenuPinnedRecentFromConfig(g_cfg, g_startMenuPinnedRecent);
+            refreshStartMenuPinnedRecentTargetIds(g_startMenuPinnedRecent, g_startMenuPinnedRecentTargetIds);
 
             std::vector<DesktopItem> refreshedItems;
             std::vector<std::string> seenLayoutKeys;
@@ -2024,26 +2051,52 @@ namespace gxos {
 
         void Compositor::refreshAllProgramsList( ) {
             g_startMenuAllProgsSorted.clear( );
+            g_startMenuAllProgsTargetIds.clear( );
+            std::vector<std::pair<std::string, std::string>> entries;
+            const auto hasEntryLabel = [&entries](const std::string& label) {
+                for (const auto& entry : entries) {
+                    if (namesEquivalent(entry.first, label)) return true;
+                }
+                return false;
+            };
             for (const auto& app : DesktopService::GetRegisteredApps()) {
                 if (app.displayName.empty()) {
                     Logger::write(LogLevel::Info, "Compositor start menu skipped empty app display name");
                     continue;
                 }
-                if (hasEquivalentListItem(g_startMenuAllProgsSorted, app.displayName)) {
-                    Logger::write(LogLevel::Info, std::string("Compositor start menu skipped duplicate app: ") + app.displayName + " id=" + app.id + " source=" + app.source);
+
+                const apps::LaunchTarget canonicalTarget = DesktopService::ResolveLaunchTarget(app.id);
+                const apps::LaunchTarget displayTarget = DesktopService::ResolveLaunchTarget(app.displayName);
+                if (displayTarget.diagnosticStatus == "ambiguous") {
+                    if (hasEntryLabel(app.displayName)) continue;
+                    Logger::write(LogLevel::Warn, "Compositor start menu retained ambiguous display name: " + app.displayName);
+                    entries.emplace_back(app.displayName, std::string());
                     continue;
                 }
-                Logger::write(LogLevel::Info, std::string("Compositor start menu include: ") + app.displayName + " id=" + app.id + " source=" + app.source);
-                g_startMenuAllProgsSorted.push_back(app.displayName);
+
+                if (!displayTarget.appId.empty() && displayTarget.appId != app.id) {
+                    Logger::write(LogLevel::Info, std::string("Compositor start menu skipped shadowed app: ") + app.displayName + " id=" + app.id + " selectedId=" + displayTarget.appId + " source=" + app.source);
+                    continue;
+                }
+                if (hasEntryLabel(app.displayName)) continue;
+
+                const std::string targetId = canonicalTarget.appId.empty() ? app.id : canonicalTarget.appId;
+                Logger::write(LogLevel::Info, std::string("Compositor start menu include: ") + app.displayName + " targetAppId=" + targetId + " source=" + app.source);
+                entries.emplace_back(app.displayName, targetId);
             }
             // Sort alphabetically (case-insensitive)
-            std::sort(g_startMenuAllProgsSorted.begin( ), g_startMenuAllProgsSorted.end( ),
-                [] (const std::string& a, const std::string& b) {
-                    std::string al = a, bl = b;
+            std::sort(entries.begin( ), entries.end( ),
+                [] (const std::pair<std::string, std::string>& a, const std::pair<std::string, std::string>& b) {
+                    std::string al = a.first, bl = b.first;
                     std::transform(al.begin( ), al.end( ), al.begin( ), ::tolower);
                     std::transform(bl.begin( ), bl.end( ), bl.begin( ), ::tolower);
-                    return al < bl;
+                    if (al != bl) return al < bl;
+                    return a.second < b.second;
                 });
+            for (const auto& entry : entries) {
+                g_startMenuAllProgsSorted.push_back(entry.first);
+                g_startMenuAllProgsTargetIds.push_back(entry.second);
+            }
             logCompositorList("start menu app", g_startMenuAllProgsSorted);
         }
 
@@ -2429,10 +2482,10 @@ namespace gxos {
         }
 
         void Compositor::openStartMenuApp(const std::string& appName) {
-            Logger::write(LogLevel::Info, "Start Menu context Open selected: " + appName);
+            Logger::write(LogLevel::Info, "Start Menu context Open selected target: " + appName);
             logStartMenuLaunchTargetShadowDiagnostic(appName);
-            // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
-            // the original legacy Start Menu dispatch string.
+            // The list stores the canonical App Model id when resolution succeeds.  An
+            // ambiguous legacy label remains visible but is intentionally not launched.
             launchAction(appName);
             g_startMenuVisible = false;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -3011,9 +3064,9 @@ namespace gxos {
                 } else {
                     Logger::write(LogLevel::Info, "Desktop shortcut launched: " + desktopLayoutKey(item) + " -> " + app->displayName);
                     logDesktopShortcutLaunchTargetShadowDiagnostic(item.label, item.targetAppId, app->displayName);
-                    // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
-                    // the original legacy desktop shortcut dispatch string.
-                    launchAction(app->displayName);
+                    // Desktop shortcuts persist targetAppId, so activation must preserve
+                    // that canonical identity instead of converting back to a label.
+                    launchAction(item.targetAppId);
                     return;
                 }
             } else if (item.kind == DesktopItemKind::Shortcut && (item.shortcutType == "File" || item.shortcutType == "Folder")) {
@@ -4275,7 +4328,9 @@ namespace gxos {
                         int idx = (my - listTop) / rowH + g_startMenuScroll;
                         int itemCount = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size() : (int)g_startMenuPinnedRecent.size();
                         if (idx >= 0 && idx < itemCount) {
-                            std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[idx] : g_startMenuPinnedRecent[idx];
+                            std::string action = g_startMenuAllProgs
+                                ? startMenuActionAt(g_startMenuAllProgsSorted, g_startMenuAllProgsTargetIds, idx)
+                                : startMenuActionAt(g_startMenuPinnedRecent, g_startMenuPinnedRecentTargetIds, idx);
                             Logger::write(LogLevel::Info, "Start Menu context menu creation requested for app: " + action);
                             g_startMenuSel = idx;
                             RightClickMenu::ShowForStartMenuApp(mx, my, action);
@@ -4536,10 +4591,12 @@ namespace gxos {
                     }
                     if (key == VK_RETURN) {
                         if (g_startMenuSel >= 0 && g_startMenuSel < maxItems) {
-                            std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[g_startMenuSel] : g_startMenuPinnedRecent[g_startMenuSel];
+                            std::string action = g_startMenuAllProgs
+                                ? startMenuActionAt(g_startMenuAllProgsSorted, g_startMenuAllProgsTargetIds, g_startMenuSel)
+                                : startMenuActionAt(g_startMenuPinnedRecent, g_startMenuPinnedRecentTargetIds, g_startMenuSel);
                             logStartMenuLaunchTargetShadowDiagnostic(action);
-                            // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
-                            // the original legacy Start Menu dispatch string.
+                            // Keyboard activation follows the same canonical-ID path as a
+                            // mouse activation; ambiguous labels remain non-launchable.
                             launchAction(action);
                             g_startMenuVisible = false;
                             requestRepaint( );
