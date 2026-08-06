@@ -2,7 +2,7 @@
     "schema_version":  "guidexos.navigator.ca-bundle-manifest.v0.1",
     "bundle_type":  "smoke-fixture",
     "source":  "repo-fixture:scripts/fixtures/navigator-smoke-root-ca-bundle.pem",
-    "generated_utc":  "2026-08-06T03:36:19.7600999Z",
+    "generated_utc":  "2026-08-06T14:41:38.1855421Z",
     "root_count":  1,
     "pem_bytes":  1256,
     "sha256":  "11f1fecaeddaaa2504e72dd6bd4ccc3a33bbf38aa759f55ae0547ac4679ad4ce",

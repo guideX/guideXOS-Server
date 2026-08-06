@@ -346,6 +346,14 @@ if (!$SkipKernel) {
         # Always rebuild this translation unit on scripted builds so the
         # normal build after a smoke run cannot retain the smoke-only symbol.
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\file_clipboard.o")
+        # The Navigator kernel smoke adds the TLS capability-contract negative
+        # test through EXTRA_CFLAGS.  CFLAGS are not part of the Makefile's
+        # object dependency key, so invalidate both translation units that
+        # consume that flag before every scripted build.  This keeps a failed
+        # smoke rebuild from leaving a macro-bearing kernel_apps.o paired with
+        # a normal gxos_tls_foundation.o in the next link.
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\kernel_apps.o")
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\gxos_tls_foundation.o")
         # Compiler diagnostics are written to stderr even for successful builds.
         # Keep them visible, but let the native make exit code remain the build
         # result instead of treating a warning as a terminating PowerShell error.

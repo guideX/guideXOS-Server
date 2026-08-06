@@ -529,7 +529,7 @@ private:
 	// -------------------------------------------------------------------------
 	// Rendering
 	// -------------------------------------------------------------------------
-	static void updateDisplay();
+	static void updateDisplay(bool renderDocumentContent = true);
 	static void renderToolbar();
 	static void renderDocument();
 	static void renderStatusBar();

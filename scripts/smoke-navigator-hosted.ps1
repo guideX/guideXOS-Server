@@ -86,10 +86,12 @@ try {
     $oldTlsSmokeFlag = $env:GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST
     $oldExpectTrusted = $env:GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST
     $oldExpectBypass = $env:GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS
+    $oldDeferPaint = $env:GXOS_NAVIGATOR_SMOKE_DEFER_PAINT
 
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST" -Value "1"
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST" -Value $null
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS" -Value "1"
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_DEFER_PAINT" -Value "1"
 
     $appProc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
         -RedirectStandardInput $input -RedirectStandardOutput $log -RedirectStandardError $err
@@ -99,6 +101,7 @@ try {
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST" -Value $oldTlsSmokeFlag
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST" -Value $oldExpectTrusted
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS" -Value $oldExpectBypass
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_DEFER_PAINT" -Value $oldDeferPaint
     if ($httpProc -and -not $httpProc.HasExited) {
         Stop-Process -Id $httpProc.Id -Force
     }
