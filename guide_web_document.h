@@ -225,6 +225,59 @@ enum class TextAlign : uint8_t {
 	Right   = 3,
 };
 
+// Phase 3A keeps CSS lengths deliberately compact.  The payload is pixels for
+// Px/Zero and a whole percentage for Percent.  Unset is the cascade sentinel;
+// Auto and None remain explicit so an accepted declaration cannot be confused
+// with an omitted property.  Parser-side validity/clamp state is retained for
+// bounded evidence and is never used to turn an unsupported unit into zero.
+enum class CssLengthType : uint8_t {
+	Unset = 0,
+	Auto,
+	Px,
+	Percent,
+	Zero,
+	None,
+};
+
+struct CssLengthValue {
+	CssLengthType type = CssLengthType::Unset;
+	int value = 0;
+	bool valid = false;
+	bool clamped = false;
+};
+
+enum class BoxSizingMode : uint8_t {
+	ContentBox = 0,
+	BorderBox = 1,
+};
+
+enum class OverflowMode : uint8_t {
+	Inherit = 0,
+	Visible,
+	Hidden,
+	Auto,
+	Scroll,
+};
+
+enum class VisibilityMode : uint8_t {
+	Visible = 0,
+	Hidden = 1,
+};
+
+enum class VerticalAlignMode : uint8_t {
+	Inherit = 0,
+	Baseline,
+	Middle,
+	Top,
+	Bottom,
+	TextTop,
+	TextBottom,
+	Sub,
+	Super,
+	LengthPx,
+	Percent,
+};
+
 enum class WhiteSpaceMode : uint8_t {
 	Inherit = 0,
 	Normal  = 1,
@@ -390,6 +443,21 @@ struct WebStyle {
 	bool     lineThrough = false;
 	bool     hasTextDecoration = false;
 	bool     displayNone = false;
+	BoxSizingMode boxSizing = BoxSizingMode::ContentBox;
+	CssLengthValue widthValue;
+	CssLengthValue heightValue;
+	CssLengthValue minWidthValue;
+	CssLengthValue maxWidthValue;
+	CssLengthValue minHeightValue;
+	CssLengthValue maxHeightValue;
+	OverflowMode overflowX = OverflowMode::Visible;
+	OverflowMode overflowY = OverflowMode::Visible;
+	VisibilityMode visibility = VisibilityMode::Visible;
+	int      opacityPercent = 100;
+	int      effectiveOpacityPercent = 100;
+	VerticalAlignMode verticalAlign = VerticalAlignMode::Baseline;
+	int      verticalAlignValue = 0;
+	bool     verticalAlignValueClamped = false;
 	bool     listStyleNone = false;
 	ListStyleType listStyleType = ListStyleType::Inherit;
 	TableBorderCollapseMode borderCollapse = TableBorderCollapseMode::Inherit;
@@ -413,10 +481,16 @@ struct WebStyle {
 	int      widthPercent = -1;
 	int      height = -1;
 	int      heightPercent = -1;
+	int      minWidth = -1;
+	int      minWidthPercent = -1;
 	int      maxWidth = -1;
 	int      maxWidthPercent = -1;
+	bool     maxWidthNone = false;
+	int      minHeight = -1;
+	int      minHeightPercent = -1;
 	int      maxHeight = -1;
 	int      maxHeightPercent = -1;
+	bool     maxHeightNone = false;
 	WhiteSpaceMode   whiteSpace = WhiteSpaceMode::Inherit;
 	OverflowWrapMode overflowWrap = OverflowWrapMode::Inherit;
 	WordBreakMode    wordBreak = WordBreakMode::Inherit;
@@ -450,6 +524,16 @@ struct FormContainerMetadata {
 	bool metadataComplete = false;
 };
 
+// Computed styles for structural ancestors are retained in one bounded,
+// serial-addressed table.  This lets Navigator resolve descendant percentages
+// against a definite containing-block basis without adding a DOM tree or
+// duplicating a full style object on every ancestor reference.
+struct CssComputedStyleRecord {
+	uint64_t serial = 0;
+	WebStyle style;
+	bool valid = false;
+};
+
 struct WebStyleRule {
 	StyleSelectorType selectorType = StyleSelectorType::Element;
 	std::string       selector;
@@ -480,6 +564,8 @@ struct CssDiagnostics {
 	bool   styleBlockCapped = false;
 	size_t styleBytesProcessed = 0;
 	int    clampedValueCount = 0;
+	int    lengthValueClampCount = 0;
+	int    invalidLengthValueCount = 0;
 	int    borderWidthClampCount = 0;
 	int    borderSpacingClampCount = 0;
 	int    lineBreakCount = 0;
@@ -690,6 +776,7 @@ struct WebDocument {
 	// Bounded content summaries keyed by the same logical serials as
 	// structuralElements.  Entries are capped with the structural registry.
 	std::vector<HtmlElementContentMetadata> contentMetadata;
+	std::vector<CssComputedStyleRecord> computedStyles;
 	WebStyle              bodyStyle;
 	std::vector<WebStyleRule> styleRules;
 	CssDiagnostics        cssDiagnostics;

@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstdio>
 #include <iomanip>
@@ -92,6 +93,8 @@ namespace {
 		Italic,
 		TextDecoration,
 		Display,
+		BoxSizing,
+		MinWidth,
 		ListStyle,
 		BorderCollapse,
 		BorderSpacingHorizontal,
@@ -112,6 +115,12 @@ namespace {
 		Height,
 		MaxWidth,
 		MaxHeight,
+		MinHeight,
+		OverflowX,
+		OverflowY,
+		Visibility,
+		Opacity,
+		VerticalAlign,
 		WhiteSpace,
 		OverflowWrap,
 		WordBreak,
@@ -650,7 +659,7 @@ static bool parseCssNumber(const std::string& rawValue, double& out)
 	try {
 		size_t consumed = 0;
 		out = std::stod(value, &consumed);
-		return consumed == value.size();
+		return consumed == value.size() && std::isfinite(out);
 	} catch (...) {
 		return false;
 	}
@@ -658,7 +667,10 @@ static bool parseCssNumber(const std::string& rawValue, double& out)
 
 static int roundCssNumber(double value)
 {
-	return value <= 0.0 ? 0 : static_cast<int>(value + 0.5);
+	if (!std::isfinite(value) || value <= 0.0) return 0;
+	if (value >= static_cast<double>(std::numeric_limits<int>::max() - 1))
+		return std::numeric_limits<int>::max();
+	return static_cast<int>(value + 0.5);
 }
 
 static int clampCssValue(CssDiagnostics& diag, int value, int minValue, int maxValue)
@@ -729,6 +741,153 @@ static bool parseCssLengthValue(const std::string& rawValue,
 	}
 	if (!parseCssNumber(value, numeric)) return false;
 	outPx = roundCssNumber(numeric * scale);
+	return true;
+}
+
+static bool parseCssBoundedDimension(const std::string& rawValue,
+	CssLengthValue& out,
+	CssDiagnostics& diag,
+	bool allowAuto,
+	bool allowNone,
+	bool allowPercent)
+{
+	out = CssLengthValue();
+	std::string value = toLower(trim(rawValue));
+	if (value.empty()) return false;
+	if (value == "auto") {
+		if (!allowAuto) return false;
+		out.type = CssLengthType::Auto;
+		out.valid = true;
+		return true;
+	}
+	if (value == "none") {
+		if (!allowNone) return false;
+		out.type = CssLengthType::None;
+		out.valid = true;
+		return true;
+	}
+
+	bool percent = false;
+	double scale = 1.0;
+	if (value.size() >= 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "em") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 16.0;
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "pt") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 96.0 / 72.0;
+	} else if (!value.empty() && value.back() == '%') {
+		if (!allowPercent) return false;
+		value.pop_back();
+		percent = true;
+		scale = 1.0;
+	} else {
+		// Only unitless zero is accepted in this bounded CSS subset.
+		if (value != "0") return false;
+	}
+
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric) || numeric < 0.0) return false;
+	if (percent) {
+		int percentValue = roundCssNumber(numeric);
+		if (percentValue > 100) {
+			percentValue = 100;
+			out.clamped = true;
+			++diag.clampedValueCount;
+			++diag.lengthValueClampCount;
+		}
+		out.type = CssLengthType::Percent;
+		out.value = percentValue;
+		out.valid = true;
+		return true;
+	}
+
+	const double scaled = numeric * scale;
+	if (!std::isfinite(scaled) || scaled < 0.0) return false;
+	int pixels = roundCssNumber(scaled);
+	if (pixels > kCssLiteMaxWidthPx) {
+		pixels = kCssLiteMaxWidthPx;
+		out.clamped = true;
+		++diag.clampedValueCount;
+		++diag.lengthValueClampCount;
+	}
+	out.type = pixels == 0 ? CssLengthType::Zero : CssLengthType::Px;
+	out.value = pixels;
+	out.valid = true;
+	return true;
+}
+
+static bool parseCssOpacityValue(const std::string& rawValue, int& outPercent, CssDiagnostics& diag)
+{
+	std::string value = toLower(trim(rawValue));
+	bool percent = !value.empty() && value.back() == '%';
+	if (percent) value.pop_back();
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric)) return false;
+	if (percent) {
+		if (numeric < 0.0 || numeric > 100.0) {
+			numeric = std::max(0.0, std::min(100.0, numeric));
+			++diag.clampedValueCount;
+		}
+	} else {
+		if (numeric < 0.0 || numeric > 1.0) {
+			numeric = std::max(0.0, std::min(1.0, numeric));
+			++diag.clampedValueCount;
+		}
+		numeric *= 100.0;
+	}
+	outPercent = std::max(0, std::min(100, roundCssNumber(numeric)));
+	return true;
+}
+
+static bool parseCssVerticalAlignValue(const std::string& rawValue,
+	VerticalAlignMode& outMode,
+	int& outValue,
+	bool& outClamped,
+	CssDiagnostics& diag)
+{
+	std::string value = toLower(trim(rawValue));
+	outMode = VerticalAlignMode::Baseline;
+	outValue = 0;
+	outClamped = false;
+	if (value == "baseline") { outMode = VerticalAlignMode::Baseline; return true; }
+	if (value == "middle") { outMode = VerticalAlignMode::Middle; return true; }
+	if (value == "top") { outMode = VerticalAlignMode::Top; return true; }
+	if (value == "bottom") { outMode = VerticalAlignMode::Bottom; return true; }
+	if (value == "text-top") { outMode = VerticalAlignMode::TextTop; return true; }
+	if (value == "text-bottom") { outMode = VerticalAlignMode::TextBottom; return true; }
+	if (value == "sub") { outMode = VerticalAlignMode::Sub; return true; }
+	if (value == "super") { outMode = VerticalAlignMode::Super; return true; }
+	if (value.empty()) return false;
+	bool percent = value.back() == '%';
+	if (percent) value.pop_back();
+	double numeric = 0.0;
+	double scale = 1.0;
+	if (!percent && value.size() >= 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	} else if (!percent && value.size() >= 2 && value.substr(value.size() - 2) == "em") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 16.0;
+	} else if (!percent && value.size() >= 2 && value.substr(value.size() - 2) == "pt") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 96.0 / 72.0;
+	} else if (!percent && value != "0") {
+		return false;
+	}
+	if (!parseCssNumber(value, numeric)) return false;
+	const double scaled = numeric * scale;
+	if (!std::isfinite(scaled)) return false;
+	int bounded = scaled < 0.0
+		? -roundCssNumber(-scaled) : roundCssNumber(scaled);
+	const int maxValue = percent ? 100 : 128;
+	if (bounded < -maxValue || bounded > maxValue) {
+		bounded = std::max(-maxValue, std::min(maxValue, bounded));
+		outClamped = true;
+		++diag.clampedValueCount;
+	}
+	outValue = bounded;
+	outMode = percent ? VerticalAlignMode::Percent : VerticalAlignMode::LengthPx;
 	return true;
 }
 
@@ -2516,6 +2675,82 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		++diag.unsupportedDeclarationCount;
 		return false;
 	}
+	if (prop == "box-sizing") {
+		const std::string lower = toLower(val);
+		if (lower == "content-box") {
+			style.boxSizing = BoxSizingMode::ContentBox;
+			return accept(CssProperty::BoxSizing);
+		}
+		if (lower == "border-box") {
+			style.boxSizing = BoxSizingMode::BorderBox;
+			return accept(CssProperty::BoxSizing);
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "overflow" || prop == "overflow-x" || prop == "overflow-y") {
+		const std::vector<std::string> tokens = splitCssTokens(toLower(val));
+		if (tokens.empty() || tokens.size() > (prop == "overflow" ? 2u : 1u)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		auto parseOverflow = [](const std::string& token, OverflowMode& mode) {
+			if (token == "visible") mode = OverflowMode::Visible;
+			else if (token == "hidden") mode = OverflowMode::Hidden;
+			else if (token == "auto") mode = OverflowMode::Auto;
+			else if (token == "scroll") mode = OverflowMode::Scroll;
+			else return false;
+			return true;
+		};
+		OverflowMode first = OverflowMode::Visible;
+		OverflowMode second = OverflowMode::Visible;
+		if (!parseOverflow(tokens[0], first) || (tokens.size() == 2 && !parseOverflow(tokens[1], second))) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		if (prop == "overflow-x") {
+			style.overflowX = first;
+			return accept(CssProperty::OverflowX);
+		}
+		if (prop == "overflow-y") {
+			style.overflowY = first;
+			return accept(CssProperty::OverflowY);
+		}
+		style.overflowX = first;
+		style.overflowY = tokens.size() == 2 ? second : first;
+		return acceptMask(cssPropertyBit(CssProperty::OverflowX) | cssPropertyBit(CssProperty::OverflowY));
+	}
+	if (prop == "visibility") {
+		const std::string lower = toLower(val);
+		if (lower == "visible") {
+			style.visibility = VisibilityMode::Visible;
+			return accept(CssProperty::Visibility);
+		}
+		if (lower == "hidden") {
+			style.visibility = VisibilityMode::Hidden;
+			return accept(CssProperty::Visibility);
+		}
+		// collapse is deliberately unsupported; it is not a hidden alias.
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "opacity") {
+		int opacity = 100;
+		if (!parseCssOpacityValue(val, opacity, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		style.opacityPercent = opacity;
+		return accept(CssProperty::Opacity);
+	}
+	if (prop == "vertical-align") {
+		if (!parseCssVerticalAlignValue(val, style.verticalAlign, style.verticalAlignValue,
+			style.verticalAlignValueClamped, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::VerticalAlign);
+	}
 	if (prop == "margin-top" || prop == "margin-right" || prop == "margin-bottom" || prop == "margin-left" ||
 		prop == "padding-top" || prop == "padding-right" || prop == "padding-bottom" || prop == "padding-left") {
 		bool autoValue = false;
@@ -2596,56 +2831,57 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		style.lineHeight = clampCssValue(diag, px, 8, kCssLiteMaxLineHeightPx);
 		return accept(CssProperty::LineHeight);
 	}
-	if (prop == "width" || prop == "max-width" || prop == "height" || prop == "max-height") {
-		std::string lower = toLower(val);
-		bool autoValue = false;
-		int px = 0;
-		if (lower.size() > 1 && lower.back() == '%') {
-			double numeric = 0.0;
-			if (!parseCssNumber(lower.substr(0, lower.size() - 1), numeric)) {
-				++diag.unsupportedDeclarationCount;
-				return false;
-			}
-			int percent = roundCssNumber(numeric);
-			percent = clampCssValue(diag, percent, 1, 100);
-			if (prop == "width") style.widthPercent = percent;
-			else if (prop == "max-width") style.maxWidthPercent = percent;
-			else if (prop == "height") style.heightPercent = percent;
-			else style.maxHeightPercent = percent;
-			return accept(prop == "width" ? CssProperty::Width :
-				prop == "height" ? CssProperty::Height :
-				prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
-		}
-		if (!parseCssLengthValue(val, 320, px, autoValue, false)) {
+	if (prop == "width" || prop == "min-width" || prop == "max-width" ||
+		prop == "height" || prop == "min-height" || prop == "max-height") {
+		const bool isMax = prop == "max-width" || prop == "max-height";
+		CssLengthValue parsed;
+		if (!parseCssBoundedDimension(val, parsed, diag, !isMax && prop != "min-width" && prop != "min-height", isMax, true)) {
 			++diag.unsupportedDeclarationCount;
+			++diag.invalidLengthValueCount;
 			return false;
 		}
-		if (autoValue) {
-			if (prop == "width") {
-				style.widthPercent = -1;
-				style.width = 0;
-			} else if (prop == "max-width") {
-				style.maxWidthPercent = -1;
-				style.maxWidth = 0;
-			} else if (prop == "height") {
-				style.heightPercent = -1;
-				style.height = 0;
+		auto setLegacy = [&](int& px, int& percent, bool* none) {
+			px = -1;
+			percent = -1;
+			if (none) *none = false;
+			if (parsed.type == CssLengthType::Auto) {
+				px = 0;
+			} else if (parsed.type == CssLengthType::None) {
+				if (none) *none = true;
+			} else if (parsed.type == CssLengthType::Percent) {
+				percent = parsed.value;
 			} else {
-				style.maxHeightPercent = -1;
-				style.maxHeight = 0;
+				px = parsed.value;
 			}
-			return accept(prop == "width" ? CssProperty::Width :
-				prop == "height" ? CssProperty::Height :
-				prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
+		};
+		if (prop == "width") {
+			style.widthValue = parsed;
+			setLegacy(style.width, style.widthPercent, nullptr);
+			return accept(CssProperty::Width);
 		}
-		px = clampCssValue(diag, px, 1, kCssLiteMaxWidthPx);
-		if (prop == "width") style.width = px;
-		else if (prop == "max-width") style.maxWidth = px;
-		else if (prop == "height") style.height = px;
-		else style.maxHeight = px;
-		return accept(prop == "width" ? CssProperty::Width :
-			prop == "height" ? CssProperty::Height :
-			prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
+		if (prop == "min-width") {
+			style.minWidthValue = parsed;
+			setLegacy(style.minWidth, style.minWidthPercent, nullptr);
+			return accept(CssProperty::MinWidth);
+		}
+		if (prop == "max-width") {
+			style.maxWidthValue = parsed;
+			setLegacy(style.maxWidth, style.maxWidthPercent, &style.maxWidthNone);
+			return accept(CssProperty::MaxWidth);
+		}
+		if (prop == "height") {
+			style.heightValue = parsed;
+			setLegacy(style.height, style.heightPercent, nullptr);
+			return accept(CssProperty::Height);
+		}
+		if (prop == "min-height") {
+			style.minHeightValue = parsed;
+			setLegacy(style.minHeight, style.minHeightPercent, nullptr);
+			return accept(CssProperty::MinHeight);
+		}
+		style.maxHeightValue = parsed;
+		setLegacy(style.maxHeight, style.maxHeightPercent, &style.maxHeightNone);
+		return accept(CssProperty::MaxHeight);
 	}
 	if (prop == "white-space") {
 		std::string lower = toLower(val);
@@ -2961,6 +3197,12 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 		destination.lineThrough = source.lineThrough;
 		break;
 	case CssProperty::Display: destination.displayNone = source.displayNone; break;
+	case CssProperty::BoxSizing: destination.boxSizing = source.boxSizing; break;
+	case CssProperty::MinWidth:
+		destination.minWidthValue = source.minWidthValue;
+		destination.minWidth = source.minWidth;
+		destination.minWidthPercent = source.minWidthPercent;
+		break;
 	case CssProperty::ListStyle:
 		destination.listStyleNone = source.listStyleNone;
 		destination.listStyleType = source.listStyleType;
@@ -2983,10 +3225,44 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 	case CssProperty::PaddingBottom: destination.paddingBottom = source.paddingBottom; break;
 	case CssProperty::PaddingLeft: destination.paddingLeft = source.paddingLeft; break;
 	case CssProperty::FontSize: destination.fontScaleOrSize = source.fontScaleOrSize; break;
-	case CssProperty::Width: destination.width = source.width; destination.widthPercent = source.widthPercent; break;
-	case CssProperty::Height: destination.height = source.height; destination.heightPercent = source.heightPercent; break;
-	case CssProperty::MaxWidth: destination.maxWidth = source.maxWidth; destination.maxWidthPercent = source.maxWidthPercent; break;
-	case CssProperty::MaxHeight: destination.maxHeight = source.maxHeight; destination.maxHeightPercent = source.maxHeightPercent; break;
+	case CssProperty::Width:
+		destination.widthValue = source.widthValue;
+		destination.width = source.width;
+		destination.widthPercent = source.widthPercent;
+		break;
+	case CssProperty::Height:
+		destination.heightValue = source.heightValue;
+		destination.height = source.height;
+		destination.heightPercent = source.heightPercent;
+		break;
+	case CssProperty::MaxWidth:
+		destination.maxWidthValue = source.maxWidthValue;
+		destination.maxWidth = source.maxWidth;
+		destination.maxWidthPercent = source.maxWidthPercent;
+		destination.maxWidthNone = source.maxWidthNone;
+		break;
+	case CssProperty::MaxHeight:
+		destination.maxHeightValue = source.maxHeightValue;
+		destination.maxHeight = source.maxHeight;
+		destination.maxHeightPercent = source.maxHeightPercent;
+		destination.maxHeightNone = source.maxHeightNone;
+		break;
+	case CssProperty::MinHeight:
+		destination.minHeightValue = source.minHeightValue;
+		destination.minHeight = source.minHeight;
+		destination.minHeightPercent = source.minHeightPercent;
+		break;
+	case CssProperty::OverflowX: destination.overflowX = source.overflowX; break;
+	case CssProperty::OverflowY: destination.overflowY = source.overflowY; break;
+	case CssProperty::Visibility: destination.visibility = source.visibility; break;
+	case CssProperty::Opacity:
+		destination.opacityPercent = source.opacityPercent;
+		break;
+	case CssProperty::VerticalAlign:
+		destination.verticalAlign = source.verticalAlign;
+		destination.verticalAlignValue = source.verticalAlignValue;
+		destination.verticalAlignValueClamped = source.verticalAlignValueClamped;
+		break;
 	case CssProperty::WhiteSpace: destination.whiteSpace = source.whiteSpace; break;
 	case CssProperty::OverflowWrap: destination.overflowWrap = source.overflowWrap; break;
 	case CssProperty::WordBreak: destination.wordBreak = source.wordBreak; break;
@@ -3150,6 +3426,21 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 		merged.lineThrough = overrideStyle.lineThrough;
 	}
 	merged.displayNone = overrideStyle.displayNone ? true : merged.displayNone;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::BoxSizing)) != 0)
+		merged.boxSizing = overrideStyle.boxSizing;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::OverflowX)) != 0)
+		merged.overflowX = overrideStyle.overflowX;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::OverflowY)) != 0)
+		merged.overflowY = overrideStyle.overflowY;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Visibility)) != 0)
+		merged.visibility = overrideStyle.visibility;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Opacity)) != 0)
+		merged.opacityPercent = overrideStyle.opacityPercent;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::VerticalAlign)) != 0) {
+		merged.verticalAlign = overrideStyle.verticalAlign;
+		merged.verticalAlignValue = overrideStyle.verticalAlignValue;
+		merged.verticalAlignValueClamped = overrideStyle.verticalAlignValueClamped;
+	}
 	merged.listStyleNone = overrideStyle.listStyleNone ? true : merged.listStyleNone;
 	if (overrideStyle.listStyleType != ListStyleType::Inherit) {
 		merged.listStyleType = overrideStyle.listStyleType;
@@ -3189,12 +3480,28 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	merged.fontScaleOrSize = overrideStyle.fontScaleOrSize > 0 ? overrideStyle.fontScaleOrSize : merged.fontScaleOrSize;
 	merged.width = overrideStyle.width != -1 ? overrideStyle.width : merged.width;
 	merged.widthPercent = overrideStyle.widthPercent != -1 ? overrideStyle.widthPercent : merged.widthPercent;
+	if (overrideStyle.widthValue.valid) merged.widthValue = overrideStyle.widthValue;
 	merged.height = overrideStyle.height != -1 ? overrideStyle.height : merged.height;
 	merged.heightPercent = overrideStyle.heightPercent != -1 ? overrideStyle.heightPercent : merged.heightPercent;
+	if (overrideStyle.heightValue.valid) merged.heightValue = overrideStyle.heightValue;
+	merged.minWidth = overrideStyle.minWidth != -1 ? overrideStyle.minWidth : merged.minWidth;
+	merged.minWidthPercent = overrideStyle.minWidthPercent != -1 ? overrideStyle.minWidthPercent : merged.minWidthPercent;
+	if (overrideStyle.minWidthValue.valid) merged.minWidthValue = overrideStyle.minWidthValue;
 	merged.maxWidth = overrideStyle.maxWidth != -1 ? overrideStyle.maxWidth : merged.maxWidth;
 	merged.maxWidthPercent = overrideStyle.maxWidthPercent != -1 ? overrideStyle.maxWidthPercent : merged.maxWidthPercent;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::MaxWidth)) != 0) {
+		merged.maxWidthNone = overrideStyle.maxWidthNone;
+	}
+	if (overrideStyle.maxWidthValue.valid) merged.maxWidthValue = overrideStyle.maxWidthValue;
+	merged.minHeight = overrideStyle.minHeight != -1 ? overrideStyle.minHeight : merged.minHeight;
+	merged.minHeightPercent = overrideStyle.minHeightPercent != -1 ? overrideStyle.minHeightPercent : merged.minHeightPercent;
+	if (overrideStyle.minHeightValue.valid) merged.minHeightValue = overrideStyle.minHeightValue;
 	merged.maxHeight = overrideStyle.maxHeight != -1 ? overrideStyle.maxHeight : merged.maxHeight;
 	merged.maxHeightPercent = overrideStyle.maxHeightPercent != -1 ? overrideStyle.maxHeightPercent : merged.maxHeightPercent;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::MaxHeight)) != 0) {
+		merged.maxHeightNone = overrideStyle.maxHeightNone;
+	}
+	if (overrideStyle.maxHeightValue.valid) merged.maxHeightValue = overrideStyle.maxHeightValue;
 	if (overrideStyle.whiteSpace != WhiteSpaceMode::Inherit) {
 		merged.whiteSpace = overrideStyle.whiteSpace;
 	}
@@ -3659,7 +3966,7 @@ static void applyInheritedProperties(WebStyle& style, const WebStyle& parent, Cs
 		CssProperty::Color, CssProperty::Bold, CssProperty::Italic,
 		CssProperty::GenericFontFamily, CssProperty::FontSize, CssProperty::LineHeight,
 		CssProperty::TextAlign, CssProperty::WhiteSpace, CssProperty::OverflowWrap,
-		CssProperty::WordBreak,
+		CssProperty::WordBreak, CssProperty::Visibility,
 	};
 	for (CssProperty property : inherited) {
 		const uint64_t bit = cssPropertyBit(property);
@@ -3709,6 +4016,30 @@ static uint32_t formRadioGroupEvidenceHash(const HtmlElementRef& element)
 	return hash;
 }
 
+static const char* cssLengthTypeName(CssLengthType type)
+{
+	switch (type) {
+	case CssLengthType::Auto: return "auto";
+	case CssLengthType::Px: return "px";
+	case CssLengthType::Percent: return "percent";
+	case CssLengthType::Zero: return "zero";
+	case CssLengthType::None: return "none";
+	default: return "unset";
+	}
+}
+
+static std::string cssLengthEvidence(const CssLengthValue& value)
+{
+	std::ostringstream oss;
+	oss << cssLengthTypeName(value.type);
+	if (value.type == CssLengthType::Px || value.type == CssLengthType::Percent ||
+		value.type == CssLengthType::Zero) {
+		oss << ":" << value.value;
+	}
+	if (value.clamped) oss << ":clamped";
+	return oss.str();
+}
+
 static const char* formFocusOriginName(FormFocusOrigin origin)
 {
 	switch (origin) {
@@ -3732,7 +4063,9 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		id.rfind("phase2e-", 0) != 0 && id.rfind("css2e-", 0) != 0 &&
 		id.rfind("phase2f-", 0) != 0 && id.rfind("css2f-", 0) != 0 &&
 		id.rfind("phase2g-", 0) != 0 && id.rfind("css2g-", 0) != 0 &&
-		id.rfind("phase2h-", 0) != 0 && id.rfind("css2h-", 0) != 0) return;
+		id.rfind("phase2h-", 0) != 0 && id.rfind("css2h-", 0) != 0 &&
+		id.rfind("phase3a-", 0) != 0 && id.rfind("css3a-", 0) != 0) return;
+	const bool phase3aEvidence = id.rfind("phase3a-", 0) == 0 || id.rfind("css3a-", 0) == 0;
 	const bool phase2gEvidence = id.rfind("phase2g-", 0) == 0 || id.rfind("css2g-", 0) == 0;
 	const bool phase2hEvidence = id.rfind("phase2h-", 0) == 0 || id.rfind("css2h-", 0) == 0;
 	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
@@ -3821,6 +4154,22 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",runtime-checked=" << (runtime ? (runtime->checked ? "yes" : "no") : "absent")
 		<< ",runtime-activation-count=" << (runtime ? runtime->activationCount : 0)
 		<< ",runtime-metadata-valid=" << (runtime ? (runtime->metadataValid ? "yes" : "no") : "no");
+	if (phase3aEvidence) {
+		oss << ",box-sizing=" << (style.boxSizing == BoxSizingMode::BorderBox ? "border-box" : "content-box")
+			<< ",width-specified=" << cssLengthEvidence(style.widthValue)
+			<< ",height-specified=" << cssLengthEvidence(style.heightValue)
+			<< ",min-width-specified=" << cssLengthEvidence(style.minWidthValue)
+			<< ",max-width-specified=" << cssLengthEvidence(style.maxWidthValue)
+			<< ",min-height-specified=" << cssLengthEvidence(style.minHeightValue)
+			<< ",max-height-specified=" << cssLengthEvidence(style.maxHeightValue)
+			<< ",overflow-x=" << static_cast<unsigned>(style.overflowX)
+			<< ",overflow-y=" << static_cast<unsigned>(style.overflowY)
+			<< ",visibility=" << (style.visibility == VisibilityMode::Hidden ? "hidden" : "visible")
+			<< ",opacity-percent=" << style.opacityPercent
+			<< ",effective-opacity-percent=" << style.effectiveOpacityPercent
+			<< ",vertical-align=" << static_cast<unsigned>(style.verticalAlign)
+			<< ",vertical-align-value=" << style.verticalAlignValue;
+	}
 	if (phase2gEvidence || phase2hEvidence) {
 		oss << ",document-generation=" << doc.formRuntimeState.documentGeneration
 			<< ",focusable=" << (focusable ? "yes" : "no")
@@ -3891,6 +4240,10 @@ static WebStyle computePathStyle(WebDocument& doc,
 		parent = computePathStyle(doc, parentPath, cache);
 		applyInheritedProperties(style, parent, doc.cssDiagnostics);
 	}
+	const int parentOpacity = hasParent ? parent.effectiveOpacityPercent : 100;
+	const int localOpacity = std::max(0, std::min(100, style.opacityPercent));
+	style.effectiveOpacityPercent = std::max(0, std::min(100,
+		(parentOpacity * localOpacity + 50) / 100));
 
 	for (const WebStyleRule& rule : doc.styleRules) {
 		CssSelectorMatchTrace matchTrace;
@@ -3969,6 +4322,8 @@ static WebStyle computePathStyle(WebDocument& doc,
 			if (candidate.important) saturatingIncrement(doc.cssDiagnostics.importantDeclarationsApplied);
 		}
 	}
+	style.effectiveOpacityPercent = std::max(0, std::min(100,
+		(parentOpacity * std::max(0, std::min(100, style.opacityPercent)) + 50) / 100));
 	if (hasParent && parent.displayNone) style.displayNone = true;
 	appendComputedStyleEvidence(doc, path.back(), style, winners);
 
@@ -3979,6 +4334,7 @@ static WebStyle computePathStyle(WebDocument& doc,
 static void applyDocumentStyles(WebDocument& doc)
 {
 	doc.cssDiagnostics.cssEnabled = true;
+	doc.computedStyles.clear();
 	std::unordered_map<std::string, WebStyle> cache;
 	for (FormContainerMetadata& container : doc.formContainers) {
 		std::vector<HtmlElementRef> path;
@@ -4041,10 +4397,15 @@ static void applyDocumentStyles(WebDocument& doc)
 				if (block.style.width == -1 && block.style.widthPercent == -1) {
 					block.style.width = ancestorStyle.width;
 					block.style.widthPercent = ancestorStyle.widthPercent;
+					block.style.widthValue = ancestorStyle.widthValue;
 				}
+				if (block.style.minWidth == -1 && block.style.minWidthPercent == -1)
+					block.style.minWidthValue = ancestorStyle.minWidthValue;
 				if (block.style.maxWidth == -1 && block.style.maxWidthPercent == -1) {
 					block.style.maxWidth = ancestorStyle.maxWidth;
 					block.style.maxWidthPercent = ancestorStyle.maxWidthPercent;
+					block.style.maxWidthNone = ancestorStyle.maxWidthNone;
+					block.style.maxWidthValue = ancestorStyle.maxWidthValue;
 				}
 				if (block.style.marginLeft == -1) block.style.marginLeft = ancestorStyle.marginLeft;
 				if (block.style.marginRight == -1) block.style.marginRight = ancestorStyle.marginRight;
@@ -4078,6 +4439,20 @@ static void applyDocumentStyles(WebDocument& doc)
 				block.style.borderLeftColor = ancestorStyle.borderLeftColor;
 			}
 		}
+	}
+	// Retain one bounded computed-style record per structural serial so the
+	// Navigator can resolve descendant percentages against ancestor content
+	// boxes without constructing a live DOM tree.
+	doc.computedStyles.reserve(std::min<size_t>(doc.structuralElements.size(), 1024));
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.serial == 0 || doc.computedStyles.size() >= 1024) break;
+		std::vector<HtmlElementRef> path;
+		if (!buildStructuralPath(doc, element.serial, path)) continue;
+		CssComputedStyleRecord record;
+		record.serial = element.serial;
+		record.style = computePathStyle(doc, path, cache);
+		record.valid = true;
+		doc.computedStyles.push_back(std::move(record));
 	}
 	// Options do not become standalone layout blocks, but they still carry
 	// bounded state metadata.  Resolve their paths so option:checked and

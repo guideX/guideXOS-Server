@@ -896,6 +896,56 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS table captions rendered="),
         cssPhase1fDetail);
 
+    bool cssPhase3aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3a.html");
+    std::string cssPhase3aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3aMetric = [&](const std::string& prefix, std::size_t limit) {
+        const std::size_t pos = cssPhase3aReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        return cssPhase3aReport.substr(pos, limit);
+    };
+    add("CSS phase 3A fixture loads",
+        cssPhase3aLoaded &&
+        contains(cssPhase3aText, "Phase 3A Box Constraint Fixture") &&
+        contains(cssPhase3aText, "50 percent nested child marker.") &&
+        contains(cssPhase3aText, "Auto width and content-derived auto height marker.") &&
+        contains(cssPhase3aText, "Intrinsic ratio image marker") &&
+        !contains(cssPhase3aText, "Hidden visibility marker must retain space but not paint or extract."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3A box and constraint diagnostics",
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_box_sizing_content_box=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_box_sizing_border_box=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_width_auto_resolutions=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_height_auto_resolutions=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_percentage_width_resolved=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_percentage_height_resolved=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_percentage_indefinite_basis=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_min_width_constraints=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_max_width_constraints=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_min_height_constraints=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_max_height_constraints=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_constraint_conflicts=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_box_geometry_clamps=") ,
+        "report=\"" + summarizeText(cssPhase3aReport, 360) + "\"" +
+        " metrics=" + cssPhase3aMetric("Current Document.css_box_sizing_content_box=", 900));
+    add("CSS phase 3A overflow visibility opacity diagnostics",
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_overflow_hidden_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_overflow_auto_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_overflow_scroll_deferred=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_visibility_hidden_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_opacity_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_opacity_zero_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_vertical_align_applications=") &&
+        contains(cssPhase3aReport, "Current Document.css_overflow_auto_semantics=bounded_clipped_noninteractive") &&
+        contains(cssPhase3aReport, "Current Document.css_geometry_evidence=id=phase3a-"),
+        "report=\"" + summarizeText(cssPhase3aReport, 360) + "\"");
+    add("CSS phase 3A hidden control focus and shared clipping",
+        !gxos::apps::Navigator::SmokeFocusFormControlById("phase3a-hidden-control") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase3a-control") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_clip_records="),
+        "report=\"" + summarizeText(cssPhase3aReport, 260) + "\"" +
+        " clip=" + cssPhase3aMetric("Current Document.css_clip_records=", 300));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();

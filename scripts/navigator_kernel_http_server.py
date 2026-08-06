@@ -394,6 +394,42 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p class=\"serif\">Serif fallback marker.</p>"
                              b"</main></body></html>")
             return
+        if path == "/navigator-smoke/css-phase3a.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>CSS Phase 3A Box Constraints</title><style>"
+                             b"body { color:#243447; background:#f8fafc; }"
+                             b"#phase3a-parent { box-sizing:border-box; width:70%; height:180px; padding:10px; border:2px solid #334155; overflow:hidden; }"
+                             b"#phase3a-percent { width:50%; height:50%; padding:4px; border:1px solid #2563eb; box-sizing:content-box; }"
+                             b"#phase3a-indefinite { height:50%; min-height:24px; padding:2px; }"
+                             b"#phase3a-indefinite-parent { padding:2px; border:1px solid #64748b; } #phase3a-indefinite-child { height:50%; min-height:24px; }"
+                             b"#phase3a-min { width:10px; min-width:180px; padding:3px; border:2px solid #0f766e; }"
+                             b"#phase3a-max { width:90%; max-width:160px; padding:3px; border:2px solid #b45309; }"
+                             b"#phase3a-conflict { width:20px; min-width:130px; max-width:40px; padding:2px; }"
+                             b"#phase3a-max-height { height:90px; max-height:32px; padding:2px; border:1px solid #be123c; }"
+                             b"#phase3a-small-border { box-sizing:border-box; width:12px; height:12px; padding:10px; border:4px solid #7c3aed; }"
+                             b"#phase3a-overflow { width:120px; height:26px; padding:3px; overflow:hidden; border:1px solid #dc2626; }"
+                             b"#phase3a-axis { width:120px; height:28px; overflow-x:hidden; overflow-y:visible; border:1px solid #0891b2; }"
+                             b"#phase3a-auto { width:auto; height:auto; max-width:220px; min-height:30px; overflow:auto; border:1px solid #64748b; }"
+                             b"#phase3a-scroll { width:110px; height:24px; overflow:scroll; border:1px solid #7c3aed; }"
+                             b"#phase3a-hidden { visibility:hidden; padding:4px; border:2px solid #ef4444; }"
+                             b"#phase3a-opacity-parent { opacity:.5; border:1px solid #9333ea; padding:3px; }"
+                             b"#phase3a-opacity-child { opacity:50%; padding:3px; }"
+                             b"#phase3a-zero { opacity:0; }"
+                             b"#phase3a-important { overflow:scroll; overflow:visible !important; overflow-x:hidden; width:110px; height:24px; }"
+                             b"#phase3a-table { border:1px solid #475569; } #phase3a-table td { height:42px; vertical-align:middle; padding:3px; border:1px solid #94a3b8; }"
+                             b"#phase3a-table .top { vertical-align:top; } #phase3a-table .bottom { vertical-align:bottom; }"
+                             b"#phase3a-image { width:96px; max-width:120px; height:auto; border:2px solid #1d4ed8; box-sizing:border-box; }"
+                             b"#phase3a-form { width:220px; min-width:180px; box-sizing:border-box; }"
+                             b"</style></head><body>"
+                             b"<h1 id='phase3a-heading'>Phase 3A Box Constraint Fixture</h1>"
+                             b"<div id='phase3a-parent'><p id='phase3a-percent'>50 percent nested child marker.</p><p id='phase3a-indefinite'>Definite parent percentage height resolves.</p><p id='phase3a-overflow'>Hidden overflow text must be clipped beyond the fixed box.</p></div>"
+                             b"<div id='phase3a-indefinite-parent'><p id='phase3a-indefinite-child'>Indefinite percentage height becomes auto.</p></div><p id='phase3a-min'>Minimum width enlarges this box.</p><p id='phase3a-max'>Maximum width constrains this box.</p><p id='phase3a-conflict'>Minimum wins over maximum marker.</p><p id='phase3a-max-height'>Maximum height constrains this box.</p><p id='phase3a-small-border'>Padding and border exceed border-box marker.</p>"
+                             b"<p id='phase3a-axis'>Axis clipping marker with a deliberately long line.</p><p id='phase3a-auto'>Auto width and content-derived auto height marker.</p><p id='phase3a-scroll'>Deferred scroll marker.</p>"
+                             b"<p id='phase3a-hidden'>Hidden visibility marker must retain space but not paint or extract.</p><p id='phase3a-opacity-parent'>Opacity group <span id='phase3a-opacity-child'>nested opacity multiplication</span>.</p><p id='phase3a-zero'>Zero opacity remains layout-present.</p><p id='phase3a-important'>Important overflow cascade marker.</p>"
+                             b"<table id='phase3a-table'><tr><td class='top' id='phase3a-top'>Top</td><td id='phase3a-middle'>Middle</td><td class='bottom' id='phase3a-bottom'>Bottom</td></tr></table>"
+                             b"<img id='phase3a-image' src='/navigator-smoke/wide.png' alt='Intrinsic ratio image marker'><form id='phase3a-form'><input id='phase3a-control' type='text' value='Readable constrained control'><input id='phase3a-hidden-control' type='checkbox' style='visibility:hidden'><button id='phase3a-button' type='button'>Visible control</button></form>"
+                             b"<p id='phase3a-inline' style='box-sizing:border-box; width:160px; padding:8px; border:2px solid #16a34a;'>Inline box-sizing marker.</p></body></html>")
+            return
         if path == "/navigator-smoke/css-phase2a.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><link rel=\"stylesheet\" href=\"/navigator-smoke/css-phase2a-linked.css\"><style>"
