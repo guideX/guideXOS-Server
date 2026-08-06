@@ -43,6 +43,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -445,10 +446,38 @@ namespace gxos {
         }
 
         static const RegisteredDesktopApp* findRegisteredApp(const std::string& name) {
-            for (const auto& app : DesktopService::GetRegisteredApps()) {
-                if (app.displayName == name || app.launchName == name || app.id == name) return &app;
+            const apps::RegisteredApp* registryApp = s_appRegistry.FindById(name);
+            if (!registryApp) {
+                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(name.c_str())) {
+                    registryApp = s_appRegistry.FindById(metadata->appId ? metadata->appId : "");
+                }
             }
-            return nullptr;
+            if (!registryApp) {
+                const apps::DisplayNameResolution resolution = s_appRegistry.ResolveByDisplayName(
+                    name, apps::AppLaunchResolver::CurrentArchitecture());
+                if (resolution.status == apps::DisplayNameResolutionStatus::Resolved) registryApp = resolution.app;
+            }
+            if (registryApp) {
+                for (const auto& app : DesktopService::GetRegisteredApps()) {
+                    if (app.id == registryApp->manifest.id) return &app;
+                }
+            }
+
+            // Preserve the legacy launch-name surface for built-ins that use a
+            // dispatch name different from their presentation label. The
+            // metadata identity check above keeps this fallback canonical.
+            const RegisteredDesktopApp* selected = nullptr;
+            int selectedPriority = std::numeric_limits<int>::max();
+            for (const auto& app : DesktopService::GetRegisteredApps()) {
+                if (app.launchName != name) continue;
+                const apps::RegisteredApp* candidate = s_appRegistry.FindById(app.id);
+                const int priority = candidate ? apps::AppRegistry::DisplayNameSourcePriority(candidate->sourceKind) : 5;
+                if (!selected || priority < selectedPriority || (priority == selectedPriority && app.id < selected->id)) {
+                    selected = &app;
+                    selectedPriority = priority;
+                }
+            }
+            return selected;
         }
 
         static std::string canonicalRecentProgramName(const std::string& name) {
@@ -465,9 +494,11 @@ namespace gxos {
         }
 
         static const apps::RegisteredApp* findRegistryApp(const RegisteredDesktopApp& app) {
-            const apps::RegisteredApp* registryApp = s_appRegistry.FindById(app.id);
-            if (registryApp) return registryApp;
-            return s_appRegistry.FindByDisplayName(app.displayName);
+            if (const apps::RegisteredApp* registryApp = s_appRegistry.FindById(app.id)) return registryApp;
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(app.displayName.c_str())) {
+                return s_appRegistry.FindById(metadata->appId ? metadata->appId : "");
+            }
+            return nullptr;
         }
 
         static bool isAppModelDemoApp(const RegisteredDesktopApp& app) {
@@ -3230,16 +3261,37 @@ namespace gxos {
             if (desktopApp) {
                 fillLaunchTargetFromRegisteredApp(target, *desktopApp);
                 target.diagnosticStatus = "resolved";
-                target.diagnosticReason = "Matched hosted registered desktop app by id, display name, or dispatch launch name";
+                target.diagnosticReason = target.originalLabel == target.appId
+                    ? "Matched hosted registered desktop app by exact canonical application id"
+                    : "Matched hosted registered desktop app by deterministic display-name compatibility policy";
                 return target;
             }
 
             const apps::RegisteredApp* registryApp = s_appRegistry.FindById(label);
-            if (!registryApp) registryApp = s_appRegistry.FindByDisplayName(label);
+            if (!registryApp) {
+                const apps::DisplayNameResolution resolution = s_appRegistry.ResolveByDisplayName(
+                    label, apps::AppLaunchResolver::CurrentArchitecture());
+                if (resolution.status == apps::DisplayNameResolutionStatus::Ambiguous) {
+                    target.type = apps::LaunchTargetType::Unknown;
+                    target.diagnosticStatus = "ambiguous";
+                    target.diagnosticReason = "Ambiguous display name '" + label + "': " + resolution.reason;
+                    for (const apps::DisplayNameMatch& match : resolution.matches) {
+                        if (!match.app) continue;
+                        target.diagnosticReason += " [id=" + match.app->manifest.id +
+                            " source=" + apps::AppRegistry::ToString(match.app->sourceKind) +
+                            " eligible=" + (match.eligible ? "true" : "false") +
+                            (match.reason.empty() ? std::string() : " reason=" + match.reason) + "]";
+                    }
+                    return target;
+                }
+                if (resolution.status == apps::DisplayNameResolutionStatus::Resolved) registryApp = resolution.app;
+            }
             if (registryApp) {
                 fillLaunchTargetFromRegistryApp(target, *registryApp);
                 target.diagnosticStatus = "resolved";
-                target.diagnosticReason = "Matched manifest app registry by id or display name";
+                target.diagnosticReason = target.originalLabel == target.appId
+                    ? "Matched manifest app registry by exact canonical application id"
+                    : "Matched manifest app registry by deterministic display-name compatibility policy";
                 return target;
             }
 
@@ -4859,7 +4911,24 @@ namespace gxos {
             oss << "nativeapp.inspect " << appIdOrDisplayName << "\n";
 
             const apps::RegisteredApp* app = s_appRegistry.FindById(appIdOrDisplayName);
-            if (!app) app = s_appRegistry.FindByDisplayName(appIdOrDisplayName);
+            if (!app) {
+                const apps::DisplayNameResolution resolution = s_appRegistry.ResolveByDisplayName(
+                    appIdOrDisplayName, apps::AppLaunchResolver::CurrentArchitecture());
+                if (resolution.status == apps::DisplayNameResolutionStatus::Resolved) {
+                    app = resolution.app;
+                } else if (resolution.status == apps::DisplayNameResolutionStatus::Ambiguous) {
+                    oss << "Result: ambiguous display name\n";
+                    oss << "reason: " << resolution.reason << "\n";
+                    for (const apps::DisplayNameMatch& match : resolution.matches) {
+                        if (!match.app) continue;
+                        oss << "  appId=" << match.app->manifest.id
+                            << " source=" << apps::AppRegistry::ToString(match.app->sourceKind)
+                            << " eligible=" << (match.eligible ? "true" : "false")
+                            << (match.reason.empty() ? std::string() : " reason=" + match.reason) << "\n";
+                    }
+                    return oss.str();
+                }
+            }
             if (!app) {
                 oss << "Result: app not found\n";
                 return oss.str();
@@ -5529,6 +5598,13 @@ namespace gxos {
                 activeReason));
             if (activeHandled) {
                 return true;
+            }
+
+            if (dispatchDecision.target.diagnosticStatus == "ambiguous") {
+                error = dispatchDecision.target.diagnosticReason;
+                Logger::write(LogLevel::Warn, "Launch blocked by ambiguous display name: " + error);
+                NotificationManager::Add(error, NotificationLevel::Error);
+                return false;
             }
 
             if (dispatchDecision.target.type == apps::LaunchTargetType::ShellAction) {

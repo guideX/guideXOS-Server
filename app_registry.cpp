@@ -3,6 +3,10 @@
 #include "app_manifest_loader.h"
 #include "built_in_app_metadata.h"
 
+#include <algorithm>
+#include <limits>
+#include <utility>
+
 namespace gxos {
 namespace apps {
 namespace {
@@ -22,6 +26,21 @@ std::string joinKnownAliases(const BuiltInAppMetadata& metadata) {
 
 bool architectureMatches(const std::string& entryArchitecture, const std::string& currentArchitecture) {
     return entryArchitecture == currentArchitecture || entryArchitecture == "any" || entryArchitecture == "*";
+}
+
+bool entryPathIsContainedAndPresent(const RegisteredApp& app, const AppEntry& entry) {
+    if (entry.path.empty() || app.appDirectory.empty()) return false;
+
+    std::error_code error;
+    const std::filesystem::path root = std::filesystem::weakly_canonical(app.appDirectory, error);
+    if (error) return false;
+    const std::filesystem::path candidate = std::filesystem::weakly_canonical(app.appDirectory / std::filesystem::path(entry.path), error);
+    if (error) return false;
+    const std::filesystem::path relative = std::filesystem::relative(candidate, root, error);
+    if (error || relative.empty() || relative == "." || relative == ".." || relative.string().rfind(".." + std::string(1, std::filesystem::path::preferred_separator), 0) == 0) {
+        return false;
+    }
+    return std::filesystem::is_regular_file(candidate, error) && !error;
 }
 
 RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
@@ -217,10 +236,94 @@ const RegisteredApp* AppRegistry::FindById(const std::string& appId) const {
 }
 
 const RegisteredApp* AppRegistry::FindByDisplayName(const std::string& displayName) const {
-    for (const RegisteredApp& app : m_apps) {
-        if (app.manifest.displayName == displayName) return &app;
+    const DisplayNameResolution resolution = ResolveByDisplayName(displayName);
+    return resolution.status == DisplayNameResolutionStatus::Resolved ? resolution.app : nullptr;
+}
+
+DisplayNameResolution AppRegistry::ResolveByDisplayName(const std::string& displayName,
+                                                        const std::string& architecture,
+                                                        bool includeTemporaryDevelopment) const {
+    DisplayNameResolution resolution;
+    if (displayName.empty()) {
+        resolution.reason = "Display name is empty";
+        return resolution;
     }
-    return nullptr;
+
+    const std::string currentArchitecture = architecture.empty() ? "amd64" : architecture;
+    for (const RegisteredApp& app : m_apps) {
+        if (app.manifest.displayName != displayName) continue;
+
+        DisplayNameMatch match;
+        match.app = &app;
+        match.sourcePriority = DisplayNameSourcePriority(app.sourceKind);
+        match.eligible = true;
+
+        if (app.manifest.id.empty()) {
+            match.eligible = false;
+            match.reason = "missing canonical application id";
+        } else if (app.manifest.displayName.empty()) {
+            match.eligible = false;
+            match.reason = "missing display name";
+        } else if (app.temporaryDevelopment && !includeTemporaryDevelopment) {
+            match.eligible = false;
+            match.reason = "temporary development registrations require an explicit development route";
+        } else {
+            const AppEntry* entry = app.FindCompatibleEntry(currentArchitecture);
+            if (!entry) {
+                match.eligible = false;
+                match.reason = "no compatible launch entry";
+            } else if ((app.manifest.kind == AppKind::NativeElf || app.manifest.kind == AppKind::GXAppPackage) &&
+                       (entry->path.empty() || app.appDirectory.empty())) {
+                match.eligible = false;
+                match.reason = "entry path is unavailable";
+            } else if ((app.manifest.kind == AppKind::NativeElf || app.manifest.kind == AppKind::GXAppPackage) &&
+                       !entryPathIsContainedAndPresent(app, *entry)) {
+                match.eligible = false;
+                match.reason = "entry path is missing or outside the application directory";
+            }
+        }
+
+        resolution.matches.push_back(std::move(match));
+    }
+
+    std::sort(resolution.matches.begin(), resolution.matches.end(), [](const DisplayNameMatch& left, const DisplayNameMatch& right) {
+        if (left.sourcePriority != right.sourcePriority) return left.sourcePriority < right.sourcePriority;
+        const std::string leftId = left.app ? left.app->manifest.id : std::string();
+        const std::string rightId = right.app ? right.app->manifest.id : std::string();
+        if (leftId != rightId) return leftId < rightId;
+        const std::string leftPath = left.app ? left.app->manifestPath.generic_string() : std::string();
+        const std::string rightPath = right.app ? right.app->manifestPath.generic_string() : std::string();
+        return leftPath < rightPath;
+    });
+
+    int bestPriority = std::numeric_limits<int>::max();
+    size_t eligibleCount = 0;
+    for (const DisplayNameMatch& match : resolution.matches) {
+        if (!match.eligible) continue;
+        bestPriority = std::min(bestPriority, match.sourcePriority);
+    }
+    if (bestPriority == std::numeric_limits<int>::max()) {
+        resolution.reason = "No eligible display-name registration";
+        return resolution;
+    }
+
+    const DisplayNameMatch* selected = nullptr;
+    for (const DisplayNameMatch& match : resolution.matches) {
+        if (!match.eligible || match.sourcePriority != bestPriority) continue;
+        ++eligibleCount;
+        selected = &match;
+    }
+
+    if (eligibleCount == 1 && selected) {
+        resolution.status = DisplayNameResolutionStatus::Resolved;
+        resolution.app = selected->app;
+        resolution.reason = "Resolved by explicit source priority and stable canonical-id ordering";
+        return resolution;
+    }
+
+    resolution.status = DisplayNameResolutionStatus::Ambiguous;
+    resolution.reason = "Multiple equally eligible display-name registrations at source priority " + std::to_string(bestPriority);
+    return resolution;
 }
 
 const AppEntry* AppRegistry::FindCompatibleEntry(const std::string& appId, const std::string& currentArchitecture) const {
@@ -294,6 +397,29 @@ const char* AppRegistry::ToString(AppSourceKind kind) {
     case AppSourceKind::Package: return "Package";
     case AppSourceKind::DevelopmentTemporary: return "DevelopmentTemporary";
     default: return "Unknown";
+    }
+}
+
+const char* AppRegistry::ToString(DisplayNameResolutionStatus status) {
+    switch (status) {
+    case DisplayNameResolutionStatus::Resolved: return "Resolved";
+    case DisplayNameResolutionStatus::Ambiguous: return "Ambiguous";
+    case DisplayNameResolutionStatus::NotFound:
+    default: return "NotFound";
+    }
+}
+
+int AppRegistry::DisplayNameSourcePriority(AppSourceKind kind) {
+    // Persistent packaged identity is authoritative for compatibility labels.
+    // Built-ins remain ahead of SDK/validation manifests, while temporary
+    // development records are available only through their canonical route.
+    switch (kind) {
+    case AppSourceKind::Package: return 0;
+    case AppSourceKind::BuiltIn: return 1;
+    case AppSourceKind::UserApps: return 2;
+    case AppSourceKind::SystemApps: return 3;
+    case AppSourceKind::DevelopmentTemporary: return 4;
+    default: return 5;
     }
 }
 

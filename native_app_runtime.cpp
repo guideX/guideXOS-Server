@@ -134,12 +134,6 @@ NativeAppRuntimeContext* runtimeContextFor(NativeGxAppContext* ctx) {
     return nullptr;
 }
 
-std::string pointerText(const void* pointer) {
-    std::ostringstream oss;
-    oss << "0x" << std::hex << reinterpret_cast<uintptr_t>(pointer) << std::dec;
-    return oss.str();
-}
-
 bool addressRangeContains(uint64_t base, uint64_t end, uint64_t address, uint64_t bytes) {
     return end > base && address >= base && address < end && bytes <= end - address;
 }
@@ -375,9 +369,10 @@ void logInvalidFileReadContext(
     const char* operation,
     uint64_t offset,
     uint32_t requestedBytes,
-    const void* destination,
-    const uint32_t* outBytesRead,
     gx_result result) {
+    // File-read boundary traces are intentionally opt-in.  Keep their fields
+    // stable and semantic; never serialize process-memory addresses.
+    if (!hostedInputDiagnosticsEnabled()) return;
     const bool active = g_activeRuntimeContext != nullptr;
     const bool contextPointerMatches = active && ctx != nullptr && ctx == g_activeRuntimeContext->activeGxContext;
     std::ostringstream oss;
@@ -391,9 +386,6 @@ void logInvalidFileReadContext(
         << " requestedPath=<unavailable>"
         << " offset=" << offset
         << " length=" << requestedBytes
-        << " destination=" << pointerText(destination)
-        << " destinationRange=<unavailable>"
-        << " outBytesRead=" << pointerText(outBytesRead)
         << " result=" << result
         << " actualHostRead=not-started"
         << " returnPropagation=about-to-return";
@@ -407,14 +399,13 @@ void logFileReadBoundary(
     const std::string& resolvedPath,
     uint64_t offset,
     uint32_t requestedBytes,
-    const void* destination,
     uint32_t bytesRead,
-    const uint32_t* outBytesRead,
     const char* phase,
     const char* actualHostRead,
     bool contextActive,
     bool contextMatched,
     gx_result result) {
+    if (!hostedInputDiagnosticsEnabled()) return;
     std::ostringstream oss;
     oss << "[NativeAppHost] " << operation
         << " phase=" << phase
@@ -426,10 +417,6 @@ void logFileReadBoundary(
         << " requestedPath=\"" << (requestedPath.empty() ? "<unavailable>" : requestedPath) << "\""
         << " offset=" << offset
         << " length=" << requestedBytes
-        << " destination=" << pointerText(destination)
-        << " destinationRange=" << nativeImageRangeClassification(context, destination, requestedBytes)
-        << " outBytesRead=" << pointerText(outBytesRead)
-        << " outBytesReadRange=" << nativeImageRangeClassification(context, outBytesRead, sizeof(uint32_t))
         << " resolvedPackagePath=\"" << context.appDirectory << "\""
         << " resolvedPath=\"" << (resolvedPath.empty() ? "<none>" : resolvedPath) << "\""
         << " bytesRead=" << bytesRead
@@ -1091,7 +1078,7 @@ gx_result hostFileRead(NativeGxAppContext* ctx, const char* path, uint64_t offse
     const bool contextPointerMatched = contextActive && ctx != nullptr && ctx == g_activeRuntimeContext->activeGxContext;
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
-        logInvalidFileReadContext(ctx, "file_read", offset, bufferSize, buffer, outBytesRead, GX_ERROR_INVALID_ARGUMENT);
+        logInvalidFileReadContext(ctx, "file_read", offset, bufferSize, GX_ERROR_INVALID_ARGUMENT);
         return GX_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1109,8 +1096,8 @@ gx_result hostFileRead(NativeGxAppContext* ctx, const char* path, uint64_t offse
         context->lastFileReadBytes = (outBytesRead && nativeBufferRangeContains(*context, outBytesRead, sizeof(uint32_t))) ? *outBytesRead : 0;
         context->lastFileIoResult = result;
         NativeAppProcessTable::UpdateFromRuntime(*context);
-        logFileReadBoundary(*context, "file_read", requestedPath, resolvedPath, offset, bufferSize, buffer,
-            context->lastFileReadBytes, outBytesRead, phase, actualHostRead, contextActive, contextPointerMatched, result);
+        logFileReadBoundary(*context, "file_read", requestedPath, resolvedPath, offset, bufferSize,
+            context->lastFileReadBytes, phase, actualHostRead, contextActive, contextPointerMatched, result);
         return result;
     };
 

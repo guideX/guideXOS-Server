@@ -328,7 +328,9 @@ namespace gxos { namespace gui {
         static int g_startMenuSel; static int g_startMenuScroll;
         static bool g_startMenuAllProgs; // "All Programs" view
         static std::vector<std::string> g_startMenuAllProgsSorted; // Sorted app names
+        static std::vector<std::string> g_startMenuAllProgsTargetIds; // Stable App Model ids parallel to labels
         static std::vector<std::string> g_startMenuPinnedRecent; // Start menu app pins/recent, separate from desktop files.
+        static std::vector<std::string> g_startMenuPinnedRecentTargetIds; // Stable App Model ids parallel to labels
         // Taskbar menu state
         static bool g_taskbarMenuVisible;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
