@@ -1563,7 +1563,29 @@ namespace gxos {
         }
 #endif
 
-        static void publishOut(MsgType type, const std::string& payload, uint64_t dstPid = 0) { 
+        static bool isOneWayPaintCompletion(MsgType type, uint64_t dstPid) {
+            if (dstPid == 0) return false;
+            switch (type) {
+            case MsgType::MT_DrawText:
+            case MsgType::MT_DrawRect:
+            case MsgType::MT_DrawImage:
+            case MsgType::MT_DrawTextAt:
+            case MsgType::MT_DrawTextAtColor:
+            case MsgType::MT_DrawImageAnimated:
+            case MsgType::MT_SetTitle:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        static void publishOut(MsgType type, const std::string& payload, uint64_t dstPid = 0) {
+            // Draw commands replace retained compositor state and are complete
+            // once that state has been updated. Their directed acknowledgements
+            // are not consumed by applications and can fill a synchronous
+            // painter's mailbox before it returns to its receive loop. Keep
+            // input, window-control, and lifecycle responses directed.
+            if (isOneWayPaintCompletion(type, dstPid)) return;
             if (type == MsgType::MT_Create) {
                 Logger::write(LogLevel::Info, std::string("publishOut MT_Create payload=") + payload + " dstPid=" + std::to_string(dstPid));
             }

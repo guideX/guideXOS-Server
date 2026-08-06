@@ -1,5 +1,6 @@
 param(
-    [switch]$Build
+    [switch]$Build,
+    [switch]$DisablePaintDefer
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,7 +92,8 @@ try {
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST" -Value "1"
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST" -Value $null
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS" -Value "1"
-    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_DEFER_PAINT" -Value "1"
+    $paintDeferValue = if ($DisablePaintDefer) { $null } else { "1" }
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_DEFER_PAINT" -Value $paintDeferValue
 
     $appProc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
         -RedirectStandardInput $input -RedirectStandardOutput $log -RedirectStandardError $err
