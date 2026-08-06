@@ -1814,6 +1814,155 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("navigation=") + yesNo(phase2hNavigationStaleKeyUp) +
         ",reload=" + yesNo(phase2hReloadStaleKeyUp));
 
+    // CSS Phase 2I: exercise the existing real Navigator paths across one
+    // parsed document, URL-only history, generated inspection views, local
+    // files, redirects, failures, and pressed-input boundaries.  The fixture
+    // assertions use only bounded categories/flags and never log page values.
+    const std::string cssPhase2iUrl = "http://127.0.0.1:8080/navigator-smoke/css-phase2i.html";
+    const std::string cssPhase2iAltUrl = "http://127.0.0.1:8080/navigator-smoke/css-phase2i-alt.html";
+    const bool cssPhase2iLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl);
+    const bool phase2iFocusedCheckbox =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-checkbox", true);
+    const bool phase2iCheckedRecompute =
+        phase2iFocusedCheckbox &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "keyboard";
+    const bool phase2iRadioRecompute =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-radio-a", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-radio-a") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2i-radio-a");
+    const std::string phase2iSameDocumentReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 2I same-document recomputation preserves bounded focus state",
+        cssPhase2iLoaded && phase2iCheckedRecompute && phase2iRadioRecompute &&
+        hasPositiveCount(phase2iSameDocumentReport, "navigator_same_document_recomputations=") &&
+        hasPositiveCount(phase2iSameDocumentReport, "navigator_focus_preserved_recompute=") &&
+        contains(phase2iSameDocumentReport, "id=phase2i-radio-a") &&
+        contains(phase2iSameDocumentReport, "focus-origin=keyboard") &&
+        contains(phase2iSameDocumentReport, "focus-visible=yes") &&
+        contains(phase2iSameDocumentReport, "navigator_source_reference_valid=yes"),
+        std::string("same-document focus/checked/accessibility evidence=") + yesNo(cssPhase2iLoaded));
+
+    const bool phase2iReloadKeyboard =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeReloadCurrentDocument() &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2i-checkbox") == 0;
+    const bool phase2iReloadMouse =
+        gxos::apps::Navigator::SmokeMouseDownFormControlById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeReloadCurrentDocument() &&
+        gxos::apps::Navigator::SmokeMouseUp() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    const std::string phase2iReloadReport = gxos::apps::Navigator::SmokeLifecycleReport();
+    add("CSS phase 2I reload clears focus, runtime state, and pressed input",
+        phase2iReloadKeyboard && phase2iReloadMouse &&
+        contains(phase2iReloadReport, "navigator_transition_category=reload") &&
+        hasPositiveCount(phase2iReloadReport, "navigator_focus_cleared_reload=") &&
+        hasPositiveCount(phase2iReloadReport, "navigator_stale_key_release_blocks=") &&
+        hasPositiveCount(phase2iReloadReport, "navigator_stale_mouse_release_blocks="),
+        std::string("reload lifecycle evidence=") + yesNo(phase2iReloadKeyboard && phase2iReloadMouse));
+
+    const bool phase2iPageInfoSource =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-checkbox", true) &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    const std::string phase2iPageInfoText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool phase2iPageInfoEvidence = phase2iPageInfoSource &&
+        contains(phase2iPageInfoText, "Phase 2I Ownership Evidence") &&
+        contains(phase2iPageInfoText, "Visible document category: generated-about") &&
+        contains(phase2iPageInfoText, "Inspected source category: http") &&
+        contains(phase2iPageInfoText, "Generated page: yes") &&
+        contains(phase2iPageInfoText, "Source reference valid: yes") &&
+        contains(phase2iPageInfoText, "Focus serial present: no") &&
+        contains(phase2iPageInfoText, "Ownership guard: pass");
+    const bool phase2iSavePageSource =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:save-page-text");
+    const std::string phase2iSavePageText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("CSS phase 2I generated Page Info and Save Page Text preserve source ownership",
+        phase2iPageInfoEvidence && phase2iSavePageSource &&
+        contains(phase2iSavePageText, "Actual exported source category: http") &&
+        contains(phase2iSavePageText, "Generated-page exclusion: yes") &&
+        contains(phase2iSavePageText, "Password redaction: yes") &&
+        contains(phase2iSavePageText, "Hidden-control exclusion: yes") &&
+        contains(phase2iSavePageText, "Diagnostics exclusion: yes") &&
+        !contains(phase2iSavePageText, "phase2i-secret") &&
+        !contains(phase2iSavePageText, "Phase 2I Lifecycle Fixture"),
+        std::string("page-info=") + yesNo(phase2iPageInfoEvidence) + ",save=" + yesNo(phase2iSavePageSource));
+
+    const bool phase2iHistoryBack =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeNavigateToWithHistory(cssPhase2iAltUrl) &&
+        gxos::apps::Navigator::SmokeGoBack() &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    const bool phase2iHistoryForward =
+        gxos::apps::Navigator::SmokeGoForward() &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    const bool phase2iHistoryMouse =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl) &&
+        gxos::apps::Navigator::SmokeMouseDownFormControlById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeNavigateToWithHistory(cssPhase2iAltUrl) &&
+        gxos::apps::Navigator::SmokeGoBack() &&
+        gxos::apps::Navigator::SmokeMouseUp() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox");
+    const std::string phase2iHistoryReport = gxos::apps::Navigator::SmokeLifecycleReport();
+    add("CSS phase 2I history is URL-only and non-persistent",
+        phase2iHistoryBack && phase2iHistoryForward && phase2iHistoryMouse &&
+        hasPositiveCount(phase2iHistoryReport, "navigator_focus_cleared_history=") &&
+        hasPositiveCount(phase2iHistoryReport, "navigator_history_state_nonpersistent=") &&
+        hasPositiveCount(phase2iHistoryReport, "navigator_stale_key_release_blocks=") &&
+        hasPositiveCount(phase2iHistoryReport, "navigator_stale_mouse_release_blocks="),
+        std::string("back=") + yesNo(phase2iHistoryBack) + ",forward=" + yesNo(phase2iHistoryForward));
+
+    const bool phase2iRedirectPressedSafety =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/redirect-relative") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up");
+    const std::string phase2iRedirectReport = gxos::apps::Navigator::SmokeLifecycleReport();
+    const bool phase2iRedirectInfo =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Requested/final URL equal: no");
+    add("CSS phase 2I redirect replacement owns final document and blocks stale activation",
+        phase2iRedirectPressedSafety && phase2iRedirectInfo &&
+        contains(phase2iRedirectReport, "navigator_transition_category=redirect-replacement") &&
+        hasPositiveCount(phase2iRedirectReport, "navigator_focus_cleared_redirect=") &&
+        hasPositiveCount(phase2iRedirectReport, "navigator_stale_key_release_blocks=") &&
+        contains(phase2iRedirectReport, "navigator_visible_document_category=http"),
+        std::string("redirect=") + yesNo(phase2iRedirectPressedSafety) + ",page-info=" + yesNo(phase2iRedirectInfo));
+
+    const bool phase2iLocalLifecycle =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/forms.html") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/index.html") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        contains(gxos::apps::Navigator::SmokeLifecycleReport(), "navigator_visible_document_category=local-file");
+    const bool phase2iMissingLocal =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/phase2i-missing.html") &&
+        contains(gxos::apps::Navigator::SmokeLifecycleReport(), "navigator_visible_document_category=error") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Inspected source category: error");
+    const bool phase2iParserRecovery =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2i-malformed.html") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Phase 2I Malformed Recovery") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        contains(gxos::apps::Navigator::SmokeLifecycleReport(), "navigator_source_reference_valid=yes");
+    add("CSS phase 2I local-file, failure, and parser-recovery ownership",
+        phase2iLocalLifecycle && phase2iMissingLocal && phase2iParserRecovery,
+        std::string("local=") + yesNo(phase2iLocalLifecycle) + ",missing=" + yesNo(phase2iMissingLocal) +
+        ",parser=" + yesNo(phase2iParserRecovery));
+
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
     std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();

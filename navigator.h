@@ -285,6 +285,78 @@ struct NavigatorPageMetadata {
 	std::string lastPostContentType;
 };
 
+// Phase 2I keeps lifecycle evidence deliberately smaller than the parsed
+// document model.  These enums are used only for bounded diagnostics and
+// deterministic smoke assertions; they are not a navigation/session model.
+enum class NavigatorDocumentCategory : uint8_t {
+	None = 0,
+	LocalFile,
+	Http,
+	Https,
+	GeneratedAbout,
+	Error,
+	Unsupported,
+};
+
+enum class NavigatorTransitionCategory : uint8_t {
+	InitialNavigation = 0,
+	Navigation,
+	SameDocumentRecomputation,
+	Reload,
+	HistoryBack,
+	HistoryForward,
+	RedirectReplacement,
+	LocalFileNavigation,
+	GeneratedAboutNavigation,
+	PageInfoGeneration,
+	SavePageTextGeneration,
+	NavigationFailure,
+	ParseFailure,
+	TlsPolicyFailure,
+	AbortedNavigation,
+	WindowDocumentTeardown,
+};
+
+struct NavigatorLifecycleDiagnostics {
+	uint64_t documentGenerationChanges = 0;
+	uint64_t sameDocumentRecomputations = 0;
+	uint64_t documentReplacements = 0;
+	uint64_t focusPreservedRecompute = 0;
+	uint64_t focusClearedReload = 0;
+	uint64_t focusClearedHistory = 0;
+	uint64_t focusClearedRedirect = 0;
+	uint64_t focusClearedGeneratedPage = 0;
+	uint64_t focusClearedNavigationFailure = 0;
+	uint64_t runtimeStateClears = 0;
+	uint64_t staleMouseReleaseBlocks = 0;
+	uint64_t staleKeyReleaseBlocks = 0;
+	uint64_t inspectedDocumentGuardPass = 0;
+	uint64_t inspectedDocumentGuardBlock = 0;
+	uint64_t pageInfoSourceValid = 0;
+	uint64_t saveTextSourceValid = 0;
+	uint64_t historyStateNonpersistent = 0;
+	uint64_t transitionMetadataClamps = 0;
+
+	uint64_t visibleDocumentGeneration = 0;
+	uint64_t inspectedDocumentGeneration = 0;
+	NavigatorDocumentCategory visibleDocumentCategory = NavigatorDocumentCategory::None;
+	NavigatorDocumentCategory inspectedSourceCategory = NavigatorDocumentCategory::None;
+	NavigatorTransitionCategory lastTransition = NavigatorTransitionCategory::InitialNavigation;
+	bool requestedFinalUrlEqual = true;
+	bool visibleDocumentGenerated = false;
+	bool visibleDocumentInspectionView = false;
+	bool sourceReferenceValid = false;
+	bool ownershipGuardPassed = false;
+
+	std::string saveTextIntendedSourceCategory = "none";
+	std::string saveTextActualSourceCategory = "none";
+	uint64_t saveTextVisibleTextByteCount = 0;
+	bool saveTextGeneratedPageExcluded = false;
+	bool saveTextPasswordRedacted = false;
+	bool saveTextHiddenControlExcluded = false;
+	bool saveTextDiagnosticsExcluded = true;
+};
+
 // =============================================================================
 // Navigator – first-class guideXOS app
 //
@@ -300,11 +372,13 @@ public:
 	static uint64_t Launch();
 	static bool SmokeNavigateTo(const std::string& url);
 	static bool SmokeNavigateToQuiet(const std::string& url);
+	static bool SmokeNavigateToWithHistory(const std::string& url);
 	static bool SmokeSubmitFirstForm(const std::string& value);
 	static int SmokeFindInPage(const std::string& query);
 	static bool SmokeClickFirstLink();
 	static bool SmokeDragFirstLinkSelectsWithoutNavigation();
 	static std::string SmokeRuntimeReport();
+	static std::string SmokeLifecycleReport();
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
 	static std::string SmokeCurrentDocumentText();
@@ -329,6 +403,10 @@ public:
 	static int SmokeFormControlInputLengthById(const std::string& id);
 	static void SmokeFocusAddressBar();
 	static bool SmokeReloadCurrentDocument();
+	static bool SmokeGoBack();
+	static bool SmokeGoForward();
+	static bool SmokeMouseDownFormControlById(const std::string& id);
+	static bool SmokeMouseUp();
 	// Returns the widget IDs registered with the compositor toolbar.
 	// Used by hosted smoke to verify the full modern toolbar (7 buttons) is
 	// present and that the old stale four-button placeholder is not active.
@@ -409,7 +487,8 @@ private:
 	// loadUrl() is the raw document-loading engine.  It fetches and renders
 	// the document but does NOT modify history.  All callers that represent
 	// user navigation (links, Home, Back, Forward) go through the helpers below.
-	static void loadUrl(const std::string& url, bool updateDisplayAfterLoad = true);
+	static void loadUrl(const std::string& url, bool updateDisplayAfterLoad = true,
+		NavigatorTransitionCategory transition = NavigatorTransitionCategory::Navigation);
 
 	// navigateTo() – normal forward navigation (link clicks, Home).
 	//   Pushes the current URL onto the back stack, clears the forward stack,
@@ -527,6 +606,15 @@ private:
 	static void commitAddressBar();  // navigate to typed URL, then blur
 	static std::string normalizeUrl(const std::string& input); // scheme normalizer
 	static void storePageMetadata(NavigatorPageMetadata metadata, const WebDocument& doc);
+	static NavigatorTransitionCategory transitionCategoryForUrl(const std::string& url);
+	static NavigatorDocumentCategory documentCategoryForUrl(const std::string& url,
+		const NavigatorPageMetadata& metadata);
+	static const char* documentCategoryName(NavigatorDocumentCategory category);
+	static const char* transitionCategoryName(NavigatorTransitionCategory category);
+	static bool isGeneratedInspectionViewUrl(const std::string& url);
+	static bool visibleDocumentOwnsInspectedSource();
+	static void refreshLifecycleOwnershipEvidence();
+	static void noteFocusClearedForTransition(NavigatorTransitionCategory transition, bool hadFocus);
 
 	// -------------------------------------------------------------------------
 	// Hit testing & layout helpers
@@ -553,6 +641,15 @@ private:
 	static WebDocument          s_currentDoc;
 	static WebDocument          s_inspectedDoc;
 	static NavigatorPageMetadata s_pageMetadata;
+	static NavigatorLifecycleDiagnostics s_lifecycleDiagnostics;
+	static NavigatorDocumentCategory s_visibleDocumentCategory;
+	static NavigatorDocumentCategory s_inspectedSourceCategory;
+	static bool s_visibleDocumentInspectionView;
+	static uint64_t s_inspectedDocumentGeneration;
+	static std::string s_pendingDocumentUrl;
+	static NavigatorTransitionCategory s_pendingTransitionCategory;
+	static uint64_t s_staleMouseReleaseGeneration;
+	static uint64_t s_staleKeyReleaseGeneration;
 	// Navigation history – scheme-agnostic URL stacks.
 	static std::vector<std::string> s_backStack;
 	static std::vector<std::string> s_forwardStack;

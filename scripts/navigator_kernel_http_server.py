@@ -782,6 +782,37 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b'<input id="phase2h-unnamed" type="checkbox">'
                              b'</fieldset></form></body></html>')
             return
+        if path == "/navigator-smoke/css-phase2i.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2I Lifecycle Fixture</title><style>"
+                             b"body { color:#334155; background:#f8fafc; }"
+                             b"input, button { color:#111827; background:#ffffff; border:1px solid #94a3b8; padding:3px; }"
+                             b"input:focus { background:#dbeafe; } input:focus-visible { color:#1d4ed8; }"
+                             b"input:checked:focus { border:3px solid #7c3aed; }"
+                             b"#phase2i-hidden { display:none; }"
+                             b"</style></head><body><h1>Phase 2I Lifecycle Fixture</h1>"
+                             b'<form id="phase2i-form"><input id="phase2i-checkbox" type="checkbox">'
+                             b'<label for="phase2i-checkbox">Phase 2I checkbox</label>'
+                             b'<input id="phase2i-radio-a" type="radio" name="phase2i-choice">'
+                             b'<label for="phase2i-radio-a">Phase 2I radio A</label>'
+                             b'<input id="phase2i-radio-b" type="radio" name="phase2i-choice">'
+                             b'<label for="phase2i-radio-b">Phase 2I radio B</label>'
+                             b'<button id="phase2i-button" type="button">Phase 2I button</button>'
+                             b'<input id="phase2i-password" type="password" value="phase2i-secret">'
+                             b'<input id="phase2i-hidden" type="hidden" value="phase2i-hidden-marker">'
+                             b'<a href="/navigator-smoke/css-phase2i-alt.html">Phase 2I alternate</a>'
+                             b'</form></body></html>')
+            return
+        if path == "/navigator-smoke/css-phase2i-alt.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Phase 2I Alternate</title></head><body>"
+                             b"<h1>Phase 2I Alternate</h1><p>alternate lifecycle document</p></body></html>")
+            return
+        if path == "/navigator-smoke/css-phase2i-malformed.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Phase 2I Malformed Recovery</h1>"
+                             b"<form><input id='phase2i-incomplete' type='checkbox'><label>")
+            return
         if path == "/navigator-smoke/css-external-safety.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head>"

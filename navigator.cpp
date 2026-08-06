@@ -59,6 +59,15 @@ int                Navigator::s_hitLinkBlockIndex = -1;
 WebDocument        Navigator::s_currentDoc;
 WebDocument        Navigator::s_inspectedDoc;
 NavigatorPageMetadata Navigator::s_pageMetadata;
+NavigatorLifecycleDiagnostics Navigator::s_lifecycleDiagnostics;
+NavigatorDocumentCategory Navigator::s_visibleDocumentCategory = NavigatorDocumentCategory::None;
+NavigatorDocumentCategory Navigator::s_inspectedSourceCategory = NavigatorDocumentCategory::None;
+bool Navigator::s_visibleDocumentInspectionView = false;
+uint64_t Navigator::s_inspectedDocumentGeneration = 0;
+std::string Navigator::s_pendingDocumentUrl;
+NavigatorTransitionCategory Navigator::s_pendingTransitionCategory = NavigatorTransitionCategory::Navigation;
+uint64_t Navigator::s_staleMouseReleaseGeneration = 0;
+uint64_t Navigator::s_staleKeyReleaseGeneration = 0;
 std::vector<std::string> Navigator::s_backStack;
 std::vector<std::string> Navigator::s_forwardStack;
 std::vector<Bookmark>    Navigator::s_bookmarks;
@@ -107,6 +116,13 @@ std::string Navigator::s_navigatorClipboard;
 std::string Navigator::s_clipboardMode = "Navigator internal clipboard";
 std::vector<int> Navigator::s_registeredWidgetIds;
 static std::unordered_set<std::string> s_visitedUrls;
+
+constexpr uint64_t kNavigatorLifecycleCounterCap = 1000000;
+
+static void incrementLifecycleCounter(uint64_t& value)
+{
+	if (value < kNavigatorLifecycleCounterCap) ++value;
+}
 
 static std::string extractDocumentText(const WebDocument& doc);
 
@@ -3331,7 +3347,8 @@ namespace {
 		out += "Current Document.form_accessibility_aria=deferred_native_bounded_only\n";
 		out += "Current Document.form_accessibility_privacy=presence_only_no_values_names_or_passwords\n";
 
-		const bool fixture = doc.url.find("css-phase2h.html") != std::string::npos;
+	const bool fixture = doc.url.find("css-phase2h.html") != std::string::npos ||
+		doc.url.find("css-phase2i.html") != std::string::npos;
 		const size_t count = std::min(doc.formRuntimeState.accessibilityRecordCount,
 			doc.formRuntimeState.accessibilityRecords.size());
 		constexpr size_t kFormAccessibilityEvidenceCap = 32;
@@ -3653,14 +3670,21 @@ uint64_t Navigator::Launch()
 bool Navigator::SmokeNavigateTo(const std::string& url)
 {
 	if (s_windowId == 0) return false;
-	loadUrl(url);
+	loadUrl(url, true, transitionCategoryForUrl(url));
 	return s_currentDoc.url == url;
 }
 
 bool Navigator::SmokeNavigateToQuiet(const std::string& url)
 {
 	if (s_windowId == 0) return false;
-	loadUrl(url, false);
+	loadUrl(url, false, transitionCategoryForUrl(url));
+	return s_currentDoc.url == url;
+}
+
+bool Navigator::SmokeNavigateToWithHistory(const std::string& url)
+{
+	if (s_windowId == 0) return false;
+	navigateTo(url);
 	return s_currentDoc.url == url;
 }
 
@@ -3735,7 +3759,7 @@ std::string Navigator::SmokeRuntimeReport()
 	// Refresh only the currently inspected document.  Generated about: views
 	// (Page Info, Save Page Text, and runtime diagnostics) must not replace the
 	// ownership metadata for the page they describe.
-	if (s_currentDoc.url == s_pageMetadata.finalUrl)
+	if (visibleDocumentOwnsInspectedSource())
 		storePageMetadata(s_pageMetadata, s_currentDoc);
 	const std::string inspected = s_pageMetadata.finalUrl.empty() ? "" : s_pageMetadata.finalUrl;
 	std::string report = formatRuntimeReport(hostedRuntimeReportEntries(
@@ -3870,6 +3894,7 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.tlsSmokeSelfSignedBypass));
 	appendFormPhase2EDiagnostics(report, s_pageMetadata);
 	appendFormPhase2HDiagnostics(report, s_currentDoc);
+	report += SmokeLifecycleReport();
 	return report;
 }
 
@@ -3886,6 +3911,185 @@ int Navigator::SmokeCurrentBlockCount()
 std::string Navigator::SmokeCurrentDocumentText()
 {
 	return extractDocumentText(s_currentDoc);
+}
+
+const char* Navigator::documentCategoryName(NavigatorDocumentCategory category)
+{
+	switch (category) {
+	case NavigatorDocumentCategory::LocalFile: return "local-file";
+	case NavigatorDocumentCategory::Http: return "http";
+	case NavigatorDocumentCategory::Https: return "https";
+	case NavigatorDocumentCategory::GeneratedAbout: return "generated-about";
+	case NavigatorDocumentCategory::Error: return "error";
+	case NavigatorDocumentCategory::Unsupported: return "unsupported";
+	default: return "none";
+	}
+}
+
+const char* Navigator::transitionCategoryName(NavigatorTransitionCategory category)
+{
+	switch (category) {
+	case NavigatorTransitionCategory::InitialNavigation: return "initial-navigation";
+	case NavigatorTransitionCategory::Navigation: return "navigation";
+	case NavigatorTransitionCategory::SameDocumentRecomputation: return "same-document-recomputation";
+	case NavigatorTransitionCategory::Reload: return "reload";
+	case NavigatorTransitionCategory::HistoryBack: return "history-back";
+	case NavigatorTransitionCategory::HistoryForward: return "history-forward";
+	case NavigatorTransitionCategory::RedirectReplacement: return "redirect-replacement";
+	case NavigatorTransitionCategory::LocalFileNavigation: return "local-file-navigation";
+	case NavigatorTransitionCategory::GeneratedAboutNavigation: return "generated-about-navigation";
+	case NavigatorTransitionCategory::PageInfoGeneration: return "page-info-generation";
+	case NavigatorTransitionCategory::SavePageTextGeneration: return "save-page-text-generation";
+	case NavigatorTransitionCategory::NavigationFailure: return "navigation-failure";
+	case NavigatorTransitionCategory::ParseFailure: return "parse-failure";
+	case NavigatorTransitionCategory::TlsPolicyFailure: return "tls-policy-failure";
+	case NavigatorTransitionCategory::AbortedNavigation: return "aborted-navigation";
+	case NavigatorTransitionCategory::WindowDocumentTeardown: return "window-document-teardown";
+	default: return "navigation";
+	}
+}
+
+NavigatorTransitionCategory Navigator::transitionCategoryForUrl(const std::string& url)
+{
+	if (url == "about:page-info") return NavigatorTransitionCategory::PageInfoGeneration;
+	if (url == "about:save-page-text") return NavigatorTransitionCategory::SavePageTextGeneration;
+	if (url.rfind("about:", 0) == 0) return NavigatorTransitionCategory::GeneratedAboutNavigation;
+	if (url.rfind("file://", 0) == 0) return NavigatorTransitionCategory::LocalFileNavigation;
+	return NavigatorTransitionCategory::Navigation;
+}
+
+NavigatorDocumentCategory Navigator::documentCategoryForUrl(
+	const std::string& url, const NavigatorPageMetadata& metadata)
+{
+	if (url.rfind("about:", 0) == 0) return NavigatorDocumentCategory::GeneratedAbout;
+	if (!metadata.errorStatus.empty()) return NavigatorDocumentCategory::Error;
+	if (url.rfind("file://", 0) == 0) return NavigatorDocumentCategory::LocalFile;
+	if (url.rfind("https://", 0) == 0) return NavigatorDocumentCategory::Https;
+	if (url.rfind("http://", 0) == 0) return NavigatorDocumentCategory::Http;
+	return NavigatorDocumentCategory::Unsupported;
+}
+
+bool Navigator::isGeneratedInspectionViewUrl(const std::string& url)
+{
+	return url == "about:page-info" ||
+		url == "about:save-page-text" ||
+		url == "about:save-page-source" ||
+		url == "about:view-source" ||
+		url == "about:downloads" ||
+		url == "about:navigator-runtime";
+}
+
+bool Navigator::visibleDocumentOwnsInspectedSource()
+{
+	const uint64_t visibleGeneration = s_currentDoc.formRuntimeState.documentGeneration;
+	const bool sourceReference = s_inspectedDocumentGeneration != 0 &&
+		!s_inspectedDoc.url.empty() &&
+		!s_pageMetadata.finalUrl.empty() &&
+		s_inspectedDoc.url == s_pageMetadata.finalUrl;
+	if (!sourceReference) return false;
+	if (s_visibleDocumentInspectionView) return true;
+	return visibleGeneration != 0 &&
+		s_inspectedDocumentGeneration == visibleGeneration &&
+		s_currentDoc.url == s_pageMetadata.finalUrl;
+}
+
+void Navigator::refreshLifecycleOwnershipEvidence()
+{
+	const uint64_t visibleGeneration = s_currentDoc.formRuntimeState.documentGeneration;
+	const bool sourceReference = s_inspectedDocumentGeneration != 0 &&
+		!s_inspectedDoc.url.empty() &&
+		!s_pageMetadata.finalUrl.empty() &&
+		s_inspectedDoc.url == s_pageMetadata.finalUrl;
+	s_lifecycleDiagnostics.visibleDocumentGeneration = visibleGeneration;
+	s_lifecycleDiagnostics.inspectedDocumentGeneration = s_inspectedDocumentGeneration;
+	s_lifecycleDiagnostics.visibleDocumentCategory = s_visibleDocumentCategory;
+	s_lifecycleDiagnostics.inspectedSourceCategory = s_inspectedSourceCategory;
+	s_lifecycleDiagnostics.requestedFinalUrlEqual =
+		s_pageMetadata.requestedUrl.empty() || s_pageMetadata.requestedUrl == s_pageMetadata.finalUrl;
+	s_lifecycleDiagnostics.visibleDocumentGenerated =
+		s_currentDoc.url.rfind("about:", 0) == 0;
+	s_lifecycleDiagnostics.visibleDocumentInspectionView = s_visibleDocumentInspectionView;
+	s_lifecycleDiagnostics.sourceReferenceValid = sourceReference;
+	s_lifecycleDiagnostics.ownershipGuardPassed = visibleDocumentOwnsInspectedSource();
+	if (s_lifecycleDiagnostics.ownershipGuardPassed)
+		incrementLifecycleCounter(s_lifecycleDiagnostics.inspectedDocumentGuardPass);
+	else
+		incrementLifecycleCounter(s_lifecycleDiagnostics.inspectedDocumentGuardBlock);
+}
+
+void Navigator::noteFocusClearedForTransition(
+	NavigatorTransitionCategory transition, bool hadFocus)
+{
+	if (!hadFocus) return;
+	switch (transition) {
+	case NavigatorTransitionCategory::Reload:
+		incrementLifecycleCounter(s_lifecycleDiagnostics.focusClearedReload);
+		break;
+	case NavigatorTransitionCategory::HistoryBack:
+	case NavigatorTransitionCategory::HistoryForward:
+		incrementLifecycleCounter(s_lifecycleDiagnostics.focusClearedHistory);
+		break;
+	case NavigatorTransitionCategory::RedirectReplacement:
+		incrementLifecycleCounter(s_lifecycleDiagnostics.focusClearedRedirect);
+		break;
+	case NavigatorTransitionCategory::PageInfoGeneration:
+	case NavigatorTransitionCategory::SavePageTextGeneration:
+	case NavigatorTransitionCategory::GeneratedAboutNavigation:
+		incrementLifecycleCounter(s_lifecycleDiagnostics.focusClearedGeneratedPage);
+		break;
+	case NavigatorTransitionCategory::NavigationFailure:
+	case NavigatorTransitionCategory::ParseFailure:
+	case NavigatorTransitionCategory::TlsPolicyFailure:
+		incrementLifecycleCounter(s_lifecycleDiagnostics.focusClearedNavigationFailure);
+		break;
+	default:
+		break;
+	}
+}
+
+std::string Navigator::SmokeLifecycleReport()
+{
+	refreshLifecycleOwnershipEvidence();
+	std::ostringstream out;
+	out << "navigator.lifecycle.report\n";
+	out << "navigator_visible_document_generation=" << s_lifecycleDiagnostics.visibleDocumentGeneration << "\n";
+	out << "navigator_inspected_document_generation=" << s_lifecycleDiagnostics.inspectedDocumentGeneration << "\n";
+	out << "navigator_visible_document_category=" << documentCategoryName(s_lifecycleDiagnostics.visibleDocumentCategory) << "\n";
+	out << "navigator_inspected_source_category=" << documentCategoryName(s_lifecycleDiagnostics.inspectedSourceCategory) << "\n";
+	out << "navigator_requested_final_url_equal=" << yesNo(s_lifecycleDiagnostics.requestedFinalUrlEqual) << "\n";
+	out << "navigator_generated_page=" << yesNo(s_lifecycleDiagnostics.visibleDocumentGenerated) << "\n";
+	out << "navigator_source_reference_valid=" << yesNo(s_lifecycleDiagnostics.sourceReferenceValid) << "\n";
+	out << "navigator_focus_serial_present=" << yesNo(s_currentDoc.formRuntimeState.focusValid &&
+		s_currentDoc.formRuntimeState.focusedLogicalSerial != 0) << "\n";
+	out << "navigator_runtime_control_state_count=" << s_currentDoc.formRuntimeState.count << "\n";
+	out << "navigator_ownership_guard=" << (s_lifecycleDiagnostics.ownershipGuardPassed ? "pass" : "block") << "\n";
+	out << "navigator_transition_category=" << transitionCategoryName(s_lifecycleDiagnostics.lastTransition) << "\n";
+	out << "navigator_document_generation_changes=" << s_lifecycleDiagnostics.documentGenerationChanges << "\n";
+	out << "navigator_same_document_recomputations=" << s_lifecycleDiagnostics.sameDocumentRecomputations << "\n";
+	out << "navigator_document_replacements=" << s_lifecycleDiagnostics.documentReplacements << "\n";
+	out << "navigator_focus_preserved_recompute=" << s_lifecycleDiagnostics.focusPreservedRecompute << "\n";
+	out << "navigator_focus_cleared_reload=" << s_lifecycleDiagnostics.focusClearedReload << "\n";
+	out << "navigator_focus_cleared_history=" << s_lifecycleDiagnostics.focusClearedHistory << "\n";
+	out << "navigator_focus_cleared_redirect=" << s_lifecycleDiagnostics.focusClearedRedirect << "\n";
+	out << "navigator_focus_cleared_generated_page=" << s_lifecycleDiagnostics.focusClearedGeneratedPage << "\n";
+	out << "navigator_focus_cleared_navigation_failure=" << s_lifecycleDiagnostics.focusClearedNavigationFailure << "\n";
+	out << "navigator_runtime_state_clears=" << s_lifecycleDiagnostics.runtimeStateClears << "\n";
+	out << "navigator_stale_mouse_release_blocks=" << s_lifecycleDiagnostics.staleMouseReleaseBlocks << "\n";
+	out << "navigator_stale_key_release_blocks=" << s_lifecycleDiagnostics.staleKeyReleaseBlocks << "\n";
+	out << "navigator_inspected_document_guard_pass=" << s_lifecycleDiagnostics.inspectedDocumentGuardPass << "\n";
+	out << "navigator_inspected_document_guard_block=" << s_lifecycleDiagnostics.inspectedDocumentGuardBlock << "\n";
+	out << "navigator_page_info_source_valid=" << s_lifecycleDiagnostics.pageInfoSourceValid << "\n";
+	out << "navigator_save_text_source_valid=" << s_lifecycleDiagnostics.saveTextSourceValid << "\n";
+	out << "navigator_history_state_nonpersistent=" << s_lifecycleDiagnostics.historyStateNonpersistent << "\n";
+	out << "navigator_transition_metadata_clamps=" << s_lifecycleDiagnostics.transitionMetadataClamps << "\n";
+	out << "navigator_save_text_intended_source_category=" << s_lifecycleDiagnostics.saveTextIntendedSourceCategory << "\n";
+	out << "navigator_save_text_actual_source_category=" << s_lifecycleDiagnostics.saveTextActualSourceCategory << "\n";
+	out << "navigator_save_text_visible_text_byte_count=" << s_lifecycleDiagnostics.saveTextVisibleTextByteCount << "\n";
+	out << "navigator_save_text_generated_page_excluded=" << yesNo(s_lifecycleDiagnostics.saveTextGeneratedPageExcluded) << "\n";
+	out << "navigator_save_text_password_redacted=" << yesNo(s_lifecycleDiagnostics.saveTextPasswordRedacted) << "\n";
+	out << "navigator_save_text_hidden_control_excluded=" << yesNo(s_lifecycleDiagnostics.saveTextHiddenControlExcluded) << "\n";
+	out << "navigator_save_text_diagnostics_excluded=" << yesNo(s_lifecycleDiagnostics.saveTextDiagnosticsExcluded) << "\n";
+	return out.str();
 }
 
 std::string Navigator::SmokeCurrentLinkUrl(const std::string& text)
@@ -4071,8 +4275,43 @@ bool Navigator::SmokeReloadCurrentDocument()
 {
 	if (s_windowId == 0 || s_currentDoc.url.empty()) return false;
 	const std::string url = s_currentDoc.url;
-	loadUrl(url, false);
+	loadUrl(url, false, NavigatorTransitionCategory::Reload);
 	return s_currentDoc.url == url;
+}
+
+bool Navigator::SmokeGoBack()
+{
+	if (s_windowId == 0 || s_backStack.empty()) return false;
+	const std::string before = s_currentDoc.url;
+	goBack();
+	return s_currentDoc.url != before;
+}
+
+bool Navigator::SmokeGoForward()
+{
+	if (s_windowId == 0 || s_forwardStack.empty()) return false;
+	const std::string before = s_currentDoc.url;
+	goForward();
+	return s_currentDoc.url != before;
+}
+
+bool Navigator::SmokeMouseDownFormControlById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return false;
+	s_scrollOffset = std::max(0, blockLayoutY(blockIndex) - kContentH / 2);
+	clampScrollOffset();
+	const Rect rect = formControlRect(blockIndex);
+	if (rect.w <= 0 || rect.h <= 0) return false;
+	handleMouseInput(rect.x + rect.w / 2, rect.y + rect.h / 2, 1, "down");
+	return s_mouseLeftDown && s_mouseDownLinkBlockIndex == blockIndex;
+}
+
+bool Navigator::SmokeMouseUp()
+{
+	if (s_windowId == 0) return false;
+	handleMouseInput(s_mouseCurrentX, s_mouseCurrentY, 1, "up");
+	return true;
 }
 
 std::vector<int> Navigator::SmokeToolbarWidgetIds()
@@ -4092,6 +4331,15 @@ int Navigator::main(int, char**)
 	s_backStack.clear();
 	s_forwardStack.clear();
 	s_pageMetadata = NavigatorPageMetadata{};
+	s_lifecycleDiagnostics = NavigatorLifecycleDiagnostics{};
+	s_visibleDocumentCategory = NavigatorDocumentCategory::None;
+	s_inspectedSourceCategory = NavigatorDocumentCategory::None;
+	s_visibleDocumentInspectionView = false;
+	s_inspectedDocumentGeneration = 0;
+	s_pendingDocumentUrl.clear();
+	s_pendingTransitionCategory = NavigatorTransitionCategory::Navigation;
+	s_staleMouseReleaseGeneration = 0;
+	s_staleKeyReleaseGeneration = 0;
 	s_inspectedDoc = WebDocument{};
 	s_lastSubmittedFormUrl.clear();
 	s_lastSubmittedFormAction.clear();
@@ -4127,7 +4375,7 @@ int Navigator::main(int, char**)
 
 	// Load the startup page through the normal URL path.
 	// Later phases make this read from a config or command-line argument.
-	loadUrl("about:navigator");
+	loadUrl("about:navigator", true, NavigatorTransitionCategory::InitialNavigation);
 
 	ipc::Bus::ensure("gui.input");
 	ipc::Bus::ensure("gui.output");
@@ -5043,7 +5291,7 @@ void Navigator::handleToolbarAction(int widgetId)
 		break;
 	case kWidgetIdReload:
 		// Reload: re-fetch the current URL without touching history.
-		loadUrl(s_currentDoc.url);
+		loadUrl(s_currentDoc.url, true, NavigatorTransitionCategory::Reload);
 		break;
 	case kWidgetIdHome:
 		// Home is a normal forward navigation unless already there.
@@ -5203,6 +5451,8 @@ void Navigator::updateFormAccessibilityMetadata()
 	}
 
 	const bool phase2hFixture = s_currentDoc.url.find("css-phase2h.html") != std::string::npos;
+	const bool phase2iFixture = s_currentDoc.url.find("css-phase2i.html") != std::string::npos;
+	const bool phase2Fixture = phase2hFixture || phase2iFixture;
 	const auto roleForBlock = [](const DocBlock& block) {
 		switch (block.formControl.type) {
 		case FormControlType::Checkbox: return FormAccessibilityRole::Checkbox;
@@ -5254,7 +5504,8 @@ void Navigator::updateFormAccessibilityMetadata()
 		record.readOnly = block.formControl.readOnly;
 		record.visible = !block.formControl.hidden && !block.style.displayNone;
 		record.metadataComplete = block.formControl.metadataComplete && block.formControl.logicalSerial != 0;
-		if (phase2hFixture && block.id.rfind("phase2h-", 0) == 0) record.fixtureId = block.id;
+		if (phase2Fixture && (block.id.rfind("phase2h-", 0) == 0 || block.id.rfind("phase2i-", 0) == 0))
+			record.fixtureId = block.id;
 
 		const LabelResolution* selectedLabel = nullptr;
 		for (const LabelResolution& resolution : resolutions) {
@@ -5482,6 +5733,15 @@ void Navigator::initializeFormRuntimeState()
 
 void Navigator::recomputeFormControlStyles()
 {
+	const bool sameDocumentRecompute = s_pendingDocumentUrl.empty();
+	const bool focusWasValid = sameDocumentRecompute &&
+		s_currentDoc.formRuntimeState.initialized &&
+		s_currentDoc.formRuntimeState.documentGeneration == s_documentGeneration &&
+		s_currentDoc.formRuntimeState.focusValid &&
+		s_currentDoc.formRuntimeState.focusedDocumentGeneration == s_documentGeneration &&
+		focusedFormControlBlockIndex() >= 0;
+	if (sameDocumentRecompute)
+		incrementLifecycleCounter(s_lifecycleDiagnostics.sameDocumentRecomputations);
 	++s_currentDoc.cssDiagnostics.checkedRuntimeRecomputations;
 	++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
 	gxos::web::recomputeDocumentStyles(s_currentDoc);
@@ -5499,13 +5759,17 @@ void Navigator::recomputeFormControlStyles()
 		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
 		gxos::web::recomputeDocumentStyles(s_currentDoc);
 	}
+	if (focusWasValid && s_currentDoc.formRuntimeState.focusValid &&
+		ensureFocusedControlStillValid()) {
+		incrementLifecycleCounter(s_lifecycleDiagnostics.focusPreservedRecompute);
+	}
 	s_documentHeight = std::max(0, computeDocumentHeight());
 	clampScrollOffset();
 	updateFormAccessibilityMetadata();
 	// Generated about: pages such as Page Info and Save Page Text are views of
 	// the inspected document.  Their load-time style recomputation must not
 	// replace the inspected document with the diagnostics view.
-	if (s_currentDoc.url == s_pageMetadata.finalUrl)
+	if (visibleDocumentOwnsInspectedSource())
 		storePageMetadata(s_pageMetadata, s_currentDoc);
 }
 
@@ -5550,7 +5814,7 @@ void Navigator::clearDocumentFocus(bool recomputeStyles, FormFocusCancellationRe
 	if (recomputeStyles) {
 		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
 		gxos::web::recomputeDocumentStyles(s_currentDoc);
-		if (s_currentDoc.url == s_pageMetadata.finalUrl)
+		if (visibleDocumentOwnsInspectedSource())
 			storePageMetadata(s_pageMetadata, s_currentDoc);
 	}
 }
@@ -5631,6 +5895,13 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 
 void Navigator::handleMouseInput(int x, int y, int button, const std::string& action)
 {
+	if (button == 1 && action == "up" && !s_mouseLeftDown &&
+		s_staleMouseReleaseGeneration == s_documentGeneration &&
+		s_staleMouseReleaseGeneration != 0) {
+		incrementLifecycleCounter(s_lifecycleDiagnostics.staleMouseReleaseBlocks);
+		s_staleMouseReleaseGeneration = 0;
+		return;
+	}
 	int linkIdx = -1;
 	HitTarget target = hitTest(x, y, linkIdx);
 
@@ -6645,6 +6916,13 @@ void Navigator::submitFormForBlock(int blockIndex)
 
 void Navigator::handleKeyPress(int keyCode, const std::string& action)
 {
+	if (action == "up" && (keyCode == 32 || keyCode == 13) &&
+		s_staleKeyReleaseGeneration == s_documentGeneration &&
+		s_staleKeyReleaseGeneration != 0) {
+		incrementLifecycleCounter(s_lifecycleDiagnostics.staleKeyReleaseBlocks);
+		s_staleKeyReleaseGeneration = 0;
+		return;
+	}
 	if (keyCode == 17) {
 		s_ctrlPressed = (action == "down");
 		return;
@@ -7162,19 +7440,46 @@ WebDocument Navigator::buildBookmarksDocument()
 // URL loading
 // -----------------------------------------------------------------------------
 
-void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
+void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
+	NavigatorTransitionCategory transition)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	const std::string requestedDocumentUrl = url.empty() ? "about:navigator" : url;
+	if (transition == NavigatorTransitionCategory::Navigation) {
+		const NavigatorTransitionCategory byUrl = transitionCategoryForUrl(requestedDocumentUrl);
+		if (byUrl != NavigatorTransitionCategory::Navigation) transition = byUrl;
+	}
+	s_pendingDocumentUrl = requestedDocumentUrl;
+	s_pendingTransitionCategory = transition;
+	const bool hadFocus = s_currentDoc.formRuntimeState.initialized &&
+		s_currentDoc.formRuntimeState.focusValid &&
+		s_currentDoc.formRuntimeState.focusedLogicalSerial != 0;
+	const bool hadRuntimeState = s_currentDoc.formRuntimeState.initialized;
+	const bool hadMousePress = s_mouseLeftDown;
+	const bool hadKeyboardPress = s_currentDoc.formRuntimeState.initialized &&
+		s_currentDoc.formRuntimeState.keyboardActivationArmed;
+	const bool staleMouseReleasePending = s_staleMouseReleaseGeneration != 0;
+	const bool staleKeyReleasePending = s_staleKeyReleaseGeneration != 0;
+	if (hadRuntimeState) incrementLifecycleCounter(s_lifecycleDiagnostics.runtimeStateClears);
 	cancelKeyboardActivation(FormFocusCancellationReason::Navigation);
 	if (s_documentGeneration == std::numeric_limits<uint64_t>::max()) s_documentGeneration = 1;
 	else ++s_documentGeneration;
+	incrementLifecycleCounter(s_lifecycleDiagnostics.documentGenerationChanges);
 	clearDocumentFocus(false, FormFocusCancellationReason::Navigation);
+	if (hadKeyboardPress || staleKeyReleasePending) s_staleKeyReleaseGeneration = s_documentGeneration;
+	else s_staleKeyReleaseGeneration = 0;
+	if (hadMousePress || staleMouseReleasePending) s_staleMouseReleaseGeneration = s_documentGeneration;
+	else s_staleMouseReleaseGeneration = 0;
 	clearMousePressState();
 	s_loading = true;
 	if (s_windowId != 0) updateDisplay();
 	cleanupRemoteImageTempFiles();
 	s_imageCache.clear();
-	blurDocumentInput();
+	// clearDocumentFocus() above is the complete replacement boundary.  Do not
+	// call blurDocumentInput() here: its recomputation guard intentionally
+	// refreshes an active source document, and doing that against the old
+	// document after the generation changed could reassign inspected ownership
+	// to the document being replaced.
 	clearSelection();
 
 	WebDocument doc;
@@ -7224,6 +7529,30 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 	}
 
 	s_currentDoc      = std::move(doc);
+	NavigatorTransitionCategory committedTransition = transition;
+	if (s_pageMetadata.redirected && committedTransition == NavigatorTransitionCategory::Navigation)
+		committedTransition = NavigatorTransitionCategory::RedirectReplacement;
+	if (!s_pageMetadata.errorStatus.empty() &&
+		committedTransition != NavigatorTransitionCategory::PageInfoGeneration &&
+		committedTransition != NavigatorTransitionCategory::SavePageTextGeneration) {
+		const std::string lowerError = [&]() {
+			std::string result = s_pageMetadata.errorStatus;
+			std::transform(result.begin(), result.end(), result.begin(),
+				[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+			return result;
+		}();
+		if (lowerError.find("parse") != std::string::npos)
+			committedTransition = NavigatorTransitionCategory::ParseFailure;
+		else if (s_pageMetadata.sourceType == "https" &&
+			(lowerError.find("tls") != std::string::npos ||
+			 lowerError.find("certificate") != std::string::npos ||
+			 lowerError.find("hostname") != std::string::npos ||
+			 lowerError.find("redirect") != std::string::npos ||
+			 lowerError.find("policy") != std::string::npos))
+			committedTransition = NavigatorTransitionCategory::TlsPolicyFailure;
+		else
+			committedTransition = NavigatorTransitionCategory::NavigationFailure;
+	}
 	initializeFormRuntimeState();
 	for (const gxos::web::HtmlElementRef& element : s_currentDoc.structuralElements) {
 		if (element.formControl.hidden &&
@@ -7235,6 +7564,19 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 	recomputeFormControlStyles();
 	if (!s_currentDoc.url.empty()) {
 		s_visitedUrls.insert(s_currentDoc.url);
+	}
+	s_visibleDocumentCategory = documentCategoryForUrl(s_currentDoc.url, s_pageMetadata);
+	s_visibleDocumentInspectionView = isGeneratedInspectionViewUrl(s_currentDoc.url);
+	s_lifecycleDiagnostics.lastTransition = committedTransition;
+	incrementLifecycleCounter(s_lifecycleDiagnostics.documentReplacements);
+	noteFocusClearedForTransition(committedTransition, hadFocus);
+	if (committedTransition == NavigatorTransitionCategory::HistoryBack ||
+		committedTransition == NavigatorTransitionCategory::HistoryForward) {
+		if (!s_currentDoc.formRuntimeState.focusValid &&
+			s_currentDoc.formRuntimeState.pressedKeyboardLogicalSerial == 0 &&
+			s_currentDoc.formRuntimeState.count <= kFormRuntimeControlCap) {
+			incrementLifecycleCounter(s_lifecycleDiagnostics.historyStateNonpersistent);
+		}
 	}
 	s_scrollOffset    = 0;
 	s_documentHeight  = computeDocumentHeight();
@@ -7250,6 +7592,9 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 	}
 
 	s_loading = false;
+	s_pendingDocumentUrl.clear();
+	s_pendingTransitionCategory = NavigatorTransitionCategory::Navigation;
+	refreshLifecycleOwnershipEvidence();
 	if (updateDisplayAfterLoad) {
 		updateDisplay();
 	}
@@ -7265,7 +7610,7 @@ void Navigator::navigateTo(const std::string& url)
 	// Any forward history is invalidated by a new navigation.
 	s_forwardStack.clear();
 
-	loadUrl(url);
+	loadUrl(url, true, transitionCategoryForUrl(url));
 }
 
 void Navigator::goBack()
@@ -7283,7 +7628,7 @@ void Navigator::goBack()
 		s_forwardStack.push_back(s_currentDoc.url);
 	}
 
-	loadUrl(target);
+	loadUrl(target, true, NavigatorTransitionCategory::HistoryBack);
 }
 
 void Navigator::goForward()
@@ -7301,7 +7646,7 @@ void Navigator::goForward()
 		s_backStack.push_back(s_currentDoc.url);
 	}
 
-	loadUrl(target);
+	loadUrl(target, true, NavigatorTransitionCategory::HistoryForward);
 }
 
 WebDocument Navigator::buildAboutNavigatorDocument()
@@ -7363,6 +7708,9 @@ void Navigator::storePageMetadata(NavigatorPageMetadata metadata, const WebDocum
 	metadata.lastPostContentType = s_lastPostContentType;
 	s_pageMetadata = std::move(metadata);
 	s_inspectedDoc = doc;
+	s_inspectedDocumentGeneration = s_documentGeneration;
+	s_inspectedSourceCategory = documentCategoryForUrl(s_inspectedDoc.url, s_pageMetadata);
+	if (!s_loading) refreshLifecycleOwnershipEvidence();
 }
 
 WebDocument Navigator::buildPageInfoDocument()
@@ -7378,9 +7726,43 @@ WebDocument Navigator::buildPageInfoDocument()
 		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 		return doc;
 	}
+	const bool buildingPendingDocument = s_loading && !s_pendingDocumentUrl.empty();
+	const std::string visibleUrl = buildingPendingDocument ? s_pendingDocumentUrl : s_currentDoc.url;
+	const uint64_t visibleGeneration = buildingPendingDocument
+		? s_documentGeneration : s_currentDoc.formRuntimeState.documentGeneration;
+	const NavigatorDocumentCategory visibleCategory = buildingPendingDocument
+		? documentCategoryForUrl(visibleUrl, m) : s_visibleDocumentCategory;
+	const bool inspectionView = buildingPendingDocument
+		? isGeneratedInspectionViewUrl(visibleUrl) : s_visibleDocumentInspectionView;
+	const bool sourceReferenceValid = s_inspectedDocumentGeneration != 0 &&
+		!s_inspectedDoc.url.empty() && !m.finalUrl.empty() && s_inspectedDoc.url == m.finalUrl;
+	const bool ownershipGuardPassed = sourceReferenceValid &&
+		(inspectionView || (visibleUrl == m.finalUrl && s_inspectedDocumentGeneration == visibleGeneration));
+	const bool focusSerialPresent = !buildingPendingDocument &&
+		s_currentDoc.formRuntimeState.focusValid &&
+		s_currentDoc.formRuntimeState.focusedLogicalSerial != 0;
+	const size_t runtimeControlCount = buildingPendingDocument ? 0 : s_currentDoc.formRuntimeState.count;
+	const int visibleGenerationEvidence = static_cast<int>(std::min<uint64_t>(
+		visibleGeneration, static_cast<uint64_t>(std::numeric_limits<int>::max())));
+	const int inspectedGenerationEvidence = static_cast<int>(std::min<uint64_t>(
+		s_inspectedDocumentGeneration, static_cast<uint64_t>(std::numeric_limits<int>::max())));
+	const int runtimeControlCountEvidence = static_cast<int>(std::min<size_t>(
+		runtimeControlCount, static_cast<size_t>(std::numeric_limits<int>::max())));
 
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Requested URL", m.requestedUrl), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", m.finalUrl), ""});
+	doc.blocks.push_back({BlockType::Heading, "Phase 2I Ownership Evidence", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Visible document generation", visibleGenerationEvidence), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Inspected document generation", inspectedGenerationEvidence), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Visible document category", documentCategoryName(visibleCategory)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Inspected source category", documentCategoryName(s_inspectedSourceCategory)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Requested/final URL equal", yesNo(m.requestedUrl == m.finalUrl)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Generated page", yesNo(visibleUrl.rfind("about:", 0) == 0)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source reference valid", yesNo(sourceReferenceValid)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Focus serial present", yesNo(focusSerialPresent)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Runtime control-state count", runtimeControlCountEvidence), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Ownership guard", ownershipGuardPassed ? "pass" : "block"), ""});
+	if (sourceReferenceValid) incrementLifecycleCounter(s_lifecycleDiagnostics.pageInfoSourceValid);
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source type", m.sourceType), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Scheme", m.scheme), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", m.contentType), ""});
@@ -7836,9 +8218,29 @@ WebDocument Navigator::buildSavePageTextDocument()
 	WebDocument result;
 	result.url   = "about:save-page-text";
 	result.title = "Page Saved";
+	s_lifecycleDiagnostics.saveTextIntendedSourceCategory = "none";
+	s_lifecycleDiagnostics.saveTextActualSourceCategory = "none";
+	s_lifecycleDiagnostics.saveTextVisibleTextByteCount = 0;
+	s_lifecycleDiagnostics.saveTextGeneratedPageExcluded = false;
+	s_lifecycleDiagnostics.saveTextPasswordRedacted = false;
+	s_lifecycleDiagnostics.saveTextHiddenControlExcluded = false;
+	s_lifecycleDiagnostics.saveTextDiagnosticsExcluded = true;
 
 	const std::string& pageUrl = s_pageMetadata.finalUrl.empty()
 		? s_pageMetadata.requestedUrl : s_pageMetadata.finalUrl;
+	const bool buildingPendingDocument = s_loading && !s_pendingDocumentUrl.empty();
+	const std::string visibleUrl = buildingPendingDocument ? s_pendingDocumentUrl : s_currentDoc.url;
+	const bool visibleIsInspectionView = buildingPendingDocument
+		? isGeneratedInspectionViewUrl(visibleUrl) : s_visibleDocumentInspectionView;
+	const bool sourceReferenceValid = s_inspectedDocumentGeneration != 0 &&
+		!s_inspectedDoc.url.empty() && !s_pageMetadata.finalUrl.empty() &&
+		s_inspectedDoc.url == s_pageMetadata.finalUrl;
+	const NavigatorDocumentCategory sourceCategory = s_inspectedSourceCategory;
+	s_lifecycleDiagnostics.saveTextIntendedSourceCategory = documentCategoryName(sourceCategory);
+	s_lifecycleDiagnostics.saveTextActualSourceCategory = documentCategoryName(sourceCategory);
+	s_lifecycleDiagnostics.saveTextGeneratedPageExcluded = sourceReferenceValid &&
+		visibleIsInspectionView && visibleUrl != pageUrl;
+	if (sourceReferenceValid) incrementLifecycleCounter(s_lifecycleDiagnostics.saveTextSourceValid);
 
 	if (pageUrl.empty()) {
 		result.blocks.push_back({BlockType::Heading, "Save Page Text", ""});
@@ -7848,6 +8250,40 @@ WebDocument Navigator::buildSavePageTextDocument()
 	}
 
 	const std::string text = extractDocumentText(s_inspectedDoc);
+	s_lifecycleDiagnostics.saveTextVisibleTextByteCount = text.size();
+	bool passwordFound = false;
+	bool hiddenControlsFound = false;
+	bool hiddenControlsExcluded = true;
+	for (const DocBlock& block : s_inspectedDoc.blocks) {
+		if (block.formControl.type == FormControlType::Password || block.inputType == "password") {
+			passwordFound = true;
+			continue;
+		}
+		if (block.formControl.hidden || block.style.displayNone) {
+			hiddenControlsFound = true;
+			if (blockHasVisibleCss(block)) hiddenControlsExcluded = false;
+		}
+	}
+	s_lifecycleDiagnostics.saveTextPasswordRedacted = !passwordFound ||
+		text.find("[password field]") != std::string::npos;
+	s_lifecycleDiagnostics.saveTextHiddenControlExcluded = !hiddenControlsFound || hiddenControlsExcluded;
+	result.blocks.push_back({BlockType::Heading, "Phase 2I Save Ownership Evidence", ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Intended source category",
+		s_lifecycleDiagnostics.saveTextIntendedSourceCategory), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Actual exported source category",
+		s_lifecycleDiagnostics.saveTextActualSourceCategory), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Visible-text byte count",
+		static_cast<int>(std::min<size_t>(text.size(), static_cast<size_t>(std::numeric_limits<int>::max())))), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Generated-page exclusion",
+		yesNo(s_lifecycleDiagnostics.saveTextGeneratedPageExcluded)), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Password redaction",
+		yesNo(s_lifecycleDiagnostics.saveTextPasswordRedacted)), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Hidden-control exclusion",
+		yesNo(s_lifecycleDiagnostics.saveTextHiddenControlExcluded)), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Diagnostics exclusion",
+		yesNo(s_lifecycleDiagnostics.saveTextDiagnosticsExcluded)), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Current visible document ownership",
+		yesNo(sourceReferenceValid)), ""});
 	if (text.empty()) {
 		result.blocks.push_back({BlockType::Heading, "Save Page Text", ""});
 		result.blocks.push_back({BlockType::Paragraph, "The current page has no visible text to save.", ""});
@@ -8044,7 +8480,9 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.httpReasonPhrase = response.reasonPhrase;
 	metadata.contentType = response.contentType;
 	metadata.contentEncoding = response.contentEncoding;
-	metadata.redirectCount = response.redirectCount;
+	if (response.redirectCount < 0 || response.redirectCount > gxos::web::kHttpMaxRedirects)
+		incrementLifecycleCounter(s_lifecycleDiagnostics.transitionMetadataClamps);
+	metadata.redirectCount = std::max(0, std::min(response.redirectCount, gxos::web::kHttpMaxRedirects));
 	metadata.redirected = response.redirectCount > 0 || metadata.requestedUrl != metadata.finalUrl;
 	metadata.headerCapHit = response.headerCapHit;
 	metadata.bodyCapHit = response.bodyCapHit;
