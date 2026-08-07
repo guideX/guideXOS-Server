@@ -75,6 +75,8 @@ namespace {
 	constexpr size_t kCssLiteMaxContentAggregationOperations = 1024;
 	constexpr size_t kCssLiteMaxOpenElementDepth = 1024;
 	constexpr size_t kCssLiteMaxVisibleTextBytesPerElement = 1024;
+	constexpr size_t kCssLiteMaxInlineItems = 2048;
+	constexpr size_t kCssLiteMaxInlineTextBytes = 4096;
 	constexpr size_t kCssLiteMaxRecoveryAttemptsPerGroup = 16;
 	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
 	constexpr size_t kFormMaxControls = 128;
@@ -2812,25 +2814,63 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		std::string lower = toLower(val);
 		if (lower == "normal") {
 			style.lineHeightNormal = true;
+			style.lineHeightMode = LineHeightMode::Normal;
+			style.lineHeightValue = 0;
 			style.lineHeight = -1;
+			return accept(CssProperty::LineHeight);
+		}
+		double numeric = 0.0;
+		// A unitless line-height is a multiplier, unlike a unitless length.
+		if (parseCssNumber(val, numeric)) {
+			if (!std::isfinite(numeric) || numeric < 0.0) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			int multiplier = roundCssNumber(numeric * 1000.0);
+			if (multiplier > kCssLiteMaxLineHeightPx * 1000) {
+				multiplier = kCssLiteMaxLineHeightPx * 1000;
+				++diag.clampedValueCount;
+			}
+			style.lineHeightNormal = false;
+			style.lineHeightMode = LineHeightMode::Unitless;
+			style.lineHeightValue = multiplier;
+			style.lineHeight = std::max(0, std::min(kCssLiteMaxLineHeightPx,
+				roundCssNumber(numeric * static_cast<double>(style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16))));
+			return accept(CssProperty::LineHeight);
+		}
+		std::string unitValue = lower;
+		bool percent = !unitValue.empty() && unitValue.back() == '%';
+		if (percent) unitValue.pop_back();
+		if (percent) {
+			if (!parseCssNumber(unitValue, numeric) || !std::isfinite(numeric) || numeric < 0.0) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			int percentage = roundCssNumber(numeric);
+			if (percentage > 600) {
+				percentage = 600;
+				++diag.clampedValueCount;
+			}
+			style.lineHeightNormal = false;
+			style.lineHeightMode = LineHeightMode::Percent;
+			style.lineHeightValue = percentage;
+			style.lineHeight = std::max(0, std::min(kCssLiteMaxLineHeightPx,
+				roundCssNumber((style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16) * numeric / 100.0)));
 			return accept(CssProperty::LineHeight);
 		}
 		bool autoValue = false;
 		int px = 0;
-		const int lineHeightBase = style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16;
-		double numeric = 0.0;
-		// A unitless line-height is a multiplier, unlike a unitless length.
-		if (parseCssNumber(val, numeric)) {
-			px = roundCssNumber(numeric * static_cast<double>(lineHeightBase));
-		} else if (!parseCssLengthValue(val, lineHeightBase, px, autoValue, true)) {
+		if (!parseCssLengthValue(lower, 16, px, autoValue, false)) {
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		if (autoValue) {
+		if (autoValue || px < 0) {
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
 		style.lineHeightNormal = false;
+		style.lineHeightMode = LineHeightMode::Px;
+		style.lineHeightValue = clampCssValue(diag, px, 0, kCssLiteMaxLineHeightPx);
 		style.lineHeight = clampCssValue(diag, px, 8, kCssLiteMaxLineHeightPx);
 		return accept(CssProperty::LineHeight);
 	}
@@ -2902,6 +2942,14 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		if (lower == "pre-wrap") {
 			style.whiteSpace = WhiteSpaceMode::PreWrap;
+			return accept(CssProperty::WhiteSpace);
+		}
+		if (lower == "nowrap") {
+			style.whiteSpace = WhiteSpaceMode::Nowrap;
+			return accept(CssProperty::WhiteSpace);
+		}
+		if (lower == "pre-line") {
+			style.whiteSpace = WhiteSpaceMode::PreLine;
 			return accept(CssProperty::WhiteSpace);
 		}
 		++diag.unsupportedDeclarationCount;
@@ -3220,6 +3268,8 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 	case CssProperty::TextAlign: destination.textAlign = source.textAlign; break;
 	case CssProperty::LineHeight:
 		destination.lineHeightNormal = source.lineHeightNormal;
+		destination.lineHeightMode = source.lineHeightMode;
+		destination.lineHeightValue = source.lineHeightValue;
 		destination.lineHeight = source.lineHeight;
 		break;
 	case CssProperty::MarginTop: destination.marginTop = source.marginTop; break;
@@ -3403,8 +3453,8 @@ static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDi
 			++declarationCount;
 			saturatingIncrement(diag.declarationsProcessed);
 			WebStyle parsed;
-			// Unitless line-height is relative to the font size established by
-			// an earlier declaration in this same bounded declaration list.
+			// Preserve the unitless multiplier so inheritance can resolve it
+			// against the inheriting element's font size during inline layout.
 			parsed.fontScaleOrSize = style.fontScaleOrSize;
 			parseInlineStyleDeclaration(parsed, decl.substr(0, colon), decl.substr(colon + 1), diag);
 			mergeParsedDeclaration(style, parsed);
@@ -3469,11 +3519,16 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	if (overrideStyle.textAlign != TextAlign::Inherit) {
 		merged.textAlign = overrideStyle.textAlign;
 	}
-	if (overrideStyle.lineHeightNormal) {
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::LineHeight)) != 0 &&
+		overrideStyle.lineHeightNormal) {
 		merged.lineHeightNormal = true;
+		merged.lineHeightMode = LineHeightMode::Normal;
+		merged.lineHeightValue = 0;
 		merged.lineHeight = -1;
-	} else if (overrideStyle.lineHeight > 0) {
+	} else if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::LineHeight)) != 0) {
 		merged.lineHeightNormal = false;
+		merged.lineHeightMode = overrideStyle.lineHeightMode;
+		merged.lineHeightValue = overrideStyle.lineHeightValue;
 		merged.lineHeight = overrideStyle.lineHeight;
 	}
 	merged.marginTop = overrideStyle.marginTop != -1 ? overrideStyle.marginTop : merged.marginTop;
@@ -3808,7 +3863,8 @@ static void markDefaultStyleProperties(WebStyle& style)
 	if (style.borderSpacingVertical != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderSpacingVertical);
 	if (style.genericFontFamily != GenericFontFamily::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::GenericFontFamily);
 	if (style.textAlign != TextAlign::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::TextAlign);
-	if (style.lineHeightNormal || style.lineHeight > 0) style.specifiedProperties |= cssPropertyBit(CssProperty::LineHeight);
+	if (style.lineHeightNormal || style.lineHeight > 0 || style.lineHeightValue > 0)
+		style.specifiedProperties |= cssPropertyBit(CssProperty::LineHeight);
 	if (style.marginTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginTop);
 	if (style.marginRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginRight);
 	if (style.marginBottom != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginBottom);
@@ -4805,6 +4861,74 @@ static std::vector<HtmlElementRef> captureControlAncestors(const ParserState& st
 	return st.openElements;
 }
 
+static bool isInlineFlowBoundaryTag(const std::string& rawTag)
+{
+	const std::string tag = toLower(rawTag);
+	return tag == "body" || tag == "p" || tag == "h1" || tag == "h2" ||
+		tag == "h3" || tag == "li" || tag == "dt" || tag == "dd" ||
+		tag == "pre" || tag == "td" || tag == "th" || tag == "caption" ||
+		tag == "label";
+}
+
+static const HtmlElementRef* inlineOwnerElement(const ParserState& st)
+{
+	return st.openElements.empty() ? nullptr : &st.openElements.back();
+}
+
+static uint64_t inlineFlowSerial(const ParserState& st)
+{
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (isInlineFlowBoundaryTag(it->tagName)) return it->serial;
+	}
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (it->serial != 0) return it->serial;
+	}
+	return 0;
+}
+
+static void appendInlineItem(ParserState& st,
+	InlineItemKind kind,
+	const std::string& text,
+	int blockIndex,
+	uint64_t flowSerial,
+	const HtmlElementRef* owner)
+{
+	if (st.doc.inlineItems.size() >= kCssLiteMaxInlineItems) {
+		saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+		return;
+	}
+	WebInlineItem item;
+	item.kind = kind;
+	item.flowSerial = flowSerial;
+	item.ownerSerial = owner ? owner->serial : 0;
+	item.parentSerial = owner ? owner->parentSerial : 0;
+	item.blockIndex = blockIndex;
+	if (text.size() > kCssLiteMaxInlineTextBytes) {
+		item.text = text.substr(0, kCssLiteMaxInlineTextBytes);
+		saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+	} else {
+		item.text = text;
+	}
+	st.doc.inlineItems.push_back(std::move(item));
+}
+
+static void markInlineFlowOnNewBlocks(ParserState& st,
+	size_t firstBlock,
+	uint64_t flowSerial)
+{
+	for (size_t i = firstBlock; i < st.doc.blocks.size(); ++i)
+		st.doc.blocks[i].inlineFlowSerial = flowSerial;
+}
+
+static int inlineFlowAnchorBlock(ParserState& st, uint64_t flowSerial)
+{
+	if (flowSerial == 0) return -1;
+	for (int i = 0; i < static_cast<int>(st.doc.blocks.size()); ++i) {
+		if (st.doc.blocks[static_cast<size_t>(i)].inlineFlowSerial == flowSerial) return i;
+	}
+	return -1;
+}
+
 static uint64_t nearestAncestorSerial(const ParserState& st, const std::string& tagName)
 {
 	const std::string wanted = toLower(tagName);
@@ -4970,10 +5094,13 @@ static void popElementByName(ParserState& st, const std::string& tagName)
 // Flush textBuf into a DocBlock, if non-empty.
 static void flushText(ParserState& st)
 {
+	const std::string rawDecoded = decodeEntities(st.textBuf);
+	const uint64_t flowSerial = inlineFlowSerial(st);
+	const HtmlElementRef* owner = inlineOwnerElement(st);
 	std::string t;
 	if (st.inPre || st.open == OpenTag::Textarea) {
 		// Inside <pre>: decode entities but preserve whitespace/newlines.
-		t = decodeEntities(st.textBuf);
+		t = rawDecoded;
 		if (st.inPre) {
 			// Strip a single leading newline that immediately follows <pre>
 			if (!t.empty() && t[0] == '\n') t = t.substr(1);
@@ -4993,7 +5120,15 @@ static void flushText(ParserState& st)
 			false, false, false, true);
 	}
 	st.textBuf.clear();
-	if (t.empty()) return;
+	if (t.empty()) {
+		if (!rawDecoded.empty() && st.open != OpenTag::Textarea &&
+			st.open != OpenTag::Option && st.open != OpenTag::Title &&
+			st.open != OpenTag::Legend && st.open != OpenTag::Caption &&
+			st.open != OpenTag::TableCell) {
+			appendInlineItem(st, InlineItemKind::TextRun, rawDecoded, -1, flowSerial, owner);
+		}
+		return;
+	}
 	if (st.open == OpenTag::TableCell) {
 		if (!st.currentTableCellText.empty()) st.currentTableCellText += ' ';
 		st.currentTableCellText += t;
@@ -5006,6 +5141,7 @@ static void flushText(ParserState& st)
 	}
 	std::vector<HtmlElementRef> ancestors = captureBlockAncestors(st);
 	const HtmlElementRef elementMetadata = activeBlockElement(st);
+	const size_t blockStart = st.doc.blocks.size();
 
 	switch (st.open) {
 	case OpenTag::H1:
@@ -5169,6 +5305,19 @@ static void flushText(ParserState& st)
 		if (st.bodyReached)
 			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", "", "", ancestors, st.styleBuf));
 		break;
+	}
+	markInlineFlowOnNewBlocks(st, blockStart, flowSerial);
+	if (st.open == OpenTag::ButtonSubmit || st.open == OpenTag::Textarea) {
+		if (st.doc.blocks.size() > blockStart) {
+			appendInlineItem(st, InlineItemKind::FormControl, {},
+				static_cast<int>(blockStart), flowSerial, owner);
+		}
+	} else if (st.open != OpenTag::Option && st.open != OpenTag::Title &&
+		st.open != OpenTag::Legend && st.open != OpenTag::Caption &&
+		st.open != OpenTag::TableCell && !rawDecoded.empty()) {
+		appendInlineItem(st, InlineItemKind::TextRun, rawDecoded,
+			st.doc.blocks.size() > blockStart ? static_cast<int>(blockStart) : -1,
+			flowSerial, owner);
 	}
 }
 
@@ -5452,7 +5601,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 				++st.doc.cssDiagnostics.inlineStyleCount;
 				st.doc.cssDiagnostics.cssDetected = true;
 			}
+			const uint64_t flowSerial = inlineFlowSerial(st);
+			block.inlineFlowSerial = flowSerial;
+			const int blockIndex = static_cast<int>(st.doc.blocks.size());
 			st.doc.blocks.push_back(std::move(block));
+			appendInlineItem(st, InlineItemKind::FormControl, {}, blockIndex, flowSerial,
+				findStructuralElement(st, inputElement.serial));
 			++st.doc.formsDiagnostics.textInputCount;
 		} else if (type == "checkbox" || type == "radio") {
 			DocBlock block;
@@ -5481,7 +5635,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 				++st.doc.cssDiagnostics.inlineStyleCount;
 				st.doc.cssDiagnostics.cssDetected = true;
 			}
+			const uint64_t flowSerial = inlineFlowSerial(st);
+			block.inlineFlowSerial = flowSerial;
+			const int blockIndex = static_cast<int>(st.doc.blocks.size());
 			st.doc.blocks.push_back(std::move(block));
+			appendInlineItem(st, InlineItemKind::FormControl, {}, blockIndex, flowSerial,
+				findStructuralElement(st, inputElement.serial));
 			if (type == "checkbox") ++st.doc.formsDiagnostics.checkboxCount;
 			else ++st.doc.formsDiagnostics.radioCount;
 		} else if (type == "button" || type == "submit" || type == "reset") {
@@ -5508,7 +5667,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 				++st.doc.cssDiagnostics.inlineStyleCount;
 				st.doc.cssDiagnostics.cssDetected = true;
 			}
+			const uint64_t flowSerial = inlineFlowSerial(st);
+			block.inlineFlowSerial = flowSerial;
+			const int blockIndex = static_cast<int>(st.doc.blocks.size());
 			st.doc.blocks.push_back(std::move(block));
+			appendInlineItem(st, InlineItemKind::FormControl, {}, blockIndex, flowSerial,
+				findStructuralElement(st, inputElement.serial));
 			++st.doc.formsDiagnostics.submitCount;
 			++st.doc.formsDiagnostics.htmlButtonsParsed;
 		} else {
@@ -5619,8 +5783,19 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		} else if (st.open == OpenTag::TableCell) {
 			flushText(st);
 			st.currentTableCellText += ' ';
-		} else if (!trim(collapseWs(st.textBuf)).empty()) {
+		} else {
 			flushText(st);
+			const uint64_t flowSerial = inlineFlowSerial(st);
+			int anchorBlock = inlineFlowAnchorBlock(st, flowSerial);
+			if (anchorBlock < 0 && flowSerial != 0 && st.bodyReached) {
+				const size_t blockStart = st.doc.blocks.size();
+				st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", "", "", st.classBuf,
+					st.idBuf, captureBlockAncestors(st), st.styleBuf, activeBlockElement(st)));
+				markInlineFlowOnNewBlocks(st, blockStart, flowSerial);
+				anchorBlock = static_cast<int>(blockStart);
+			}
+			appendInlineItem(st, InlineItemKind::ForcedBreak, {}, anchorBlock,
+				flowSerial, inlineOwnerElement(st));
 		}
 		return;
 	}
@@ -5654,7 +5829,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		block.imageSizeAttrClamped = widthAttrClamped || heightAttrClamped;
 		block.elementMetadata = imageElement;
 		block.ancestors = captureBlockAncestors(st);
+		const uint64_t flowSerial = inlineFlowSerial(st);
+		block.inlineFlowSerial = flowSerial;
+		const int blockIndex = static_cast<int>(st.doc.blocks.size());
 		st.doc.blocks.push_back(std::move(block));
+		appendInlineItem(st, InlineItemKind::ReplacedImage, {}, blockIndex, flowSerial,
+			findStructuralElement(st, imageElement.serial));
 		st.open = OpenTag::None;
 		st.hrefBuf.clear();
 		st.classBuf.clear();
@@ -5901,7 +6081,12 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		block.formControl.size = st.currentSelectSize;
 		block.formControl.optionCount = static_cast<int>(block.options.size());
 		block.formControl.selectedOptionIndex = block.selectedOption;
+		const uint64_t flowSerial = inlineFlowSerial(st);
+		block.inlineFlowSerial = flowSerial;
+		const int blockIndex = static_cast<int>(st.doc.blocks.size());
 		st.doc.blocks.push_back(std::move(block));
+		appendInlineItem(st, InlineItemKind::FormControl, {}, blockIndex, flowSerial,
+			findStructuralElement(st, st.currentSelectSerial));
 		++st.doc.formsDiagnostics.selectCount;
 		st.inSelect = false;
 		st.currentSelectName.clear();

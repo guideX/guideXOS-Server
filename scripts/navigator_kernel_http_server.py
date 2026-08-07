@@ -394,6 +394,38 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p class=\"serif\">Serif fallback marker.</p>"
                              b"</main></body></html>")
             return
+        if path == "/navigator-smoke/css-phase3b.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>CSS Phase 3B Inline Layout</title><style>"
+                             b"body { color:#243447; background:#f8fafc; font-size:16px; line-height:1.35; }"
+                             b"p { width:300px; margin:4px 0; padding:2px; }"
+                             b"#phase3b-basic { border:1px solid #64748b; }"
+                             b"#phase3b-link { width:190px; } #phase3b-link a { color:#1e5cb8; background:#dbeafe; padding:1px; border:1px solid #2563eb; }"
+                             b"#phase3b-mixed strong { font-weight:bold; } #phase3b-mixed em { font-style:italic; } #phase3b-mixed code { font-family:monospace; }"
+                             b"#phase3b-middle img { vertical-align:middle; } #phase3b-top img { vertical-align:top; } #phase3b-bottom img { vertical-align:bottom; }"
+                             b"#phase3b-text-top img { vertical-align:text-top; } #phase3b-text-bottom img { vertical-align:text-bottom; }"
+                             b"#phase3b-super { vertical-align:super; } #phase3b-sub { vertical-align:sub; } #phase3b-offset { vertical-align:4px; }"
+                             b"#phase3b-normal { white-space:normal; width:170px; } #phase3b-nowrap { white-space:nowrap; width:120px; }"
+                             b"#phase3b-pre-wrap { white-space:pre-wrap; width:170px; } #phase3b-pre-line { white-space:pre-line; width:170px; }"
+                             b"#phase3b-clip { width:120px; height:24px; overflow:hidden; border:2px solid #dc2626; }"
+                             b"</style></head><body>"
+                             b"<p id='phase3b-basic'>g j p q y descenders, UPPERCASE, punctuation: !?; one line becomes several bounded lines when the inline width is reduced.</p>"
+                             b"<p id='phase3b-mixed'>Multiple   spaces\tand source\n indentation <span id='phase3b-span' style='background:#fef3c7;padding:2px;border:1px solid #b45309;'>span <strong>bold</strong> <em>italic</em> <code>code</code></span> around <a id='phase3b-inline-link' href='/navigator-smoke/basic.html'>a wrapped inline link with a second fragment</a>.</p>"
+                             b"<p id='phase3b-middle'>Text <img id='phase3b-image-middle' src='/navigator-smoke/wide.png' width='40' height='24' alt='middle image'> middle <input id='phase3b-input' type='text' value='input'> <button id='phase3b-button' type='button'>Button</button>.</p>"
+                             b"<p id='phase3b-top'>top <img id='phase3b-image-top' src='/navigator-smoke/wide.png' width='28' height='20' alt='top image'> bottom</p>"
+                             b"<p id='phase3b-bottom'>bottom <img id='phase3b-image-bottom' src='/navigator-smoke/wide.png' width='28' height='20' alt='bottom image'> end</p>"
+                             b"<p id='phase3b-text-top'>text top <img src='/navigator-smoke/wide.png' width='28' height='20' alt='text top image'> end</p>"
+                             b"<p id='phase3b-text-bottom'>text bottom <img src='/navigator-smoke/wide.png' width='28' height='20' alt='text bottom image'> end</p>"
+                             b"<p id='phase3b-align'>base <span id='phase3b-super'>super</span> <span id='phase3b-sub'>sub</span> <span id='phase3b-offset'>offset</span><br>empty line follows break<br>then text.</p>"
+                             b"<p id='phase3b-normal'>  normal   whitespace wraps at safe spaces across this deliberately narrow paragraph.  </p>"
+                             b"<p id='phase3b-nowrap'>nowrap text remains one unbroken inline run even when it exceeds the bounded width.</p>"
+                             b"<p id='phase3b-pre-wrap' style='white-space:pre-wrap;'>pre  wrap\nsecond line with spaces</p>"
+                             b"<p id='phase3b-pre-line' style='white-space:pre-line;'>pre   line\nsecond line collapses spaces</p>"
+                             b"<pre id='phase3b-pre'>pre  formatted\n  preserved spaces\nthird line</pre>"
+                             b"<p id='phase3b-controls'>Checkbox <input id='phase3b-check' type='checkbox' checked> Radio <input id='phase3b-radio' type='radio' checked> Select <select id='phase3b-select'><option>One</option><option>Two</option></select></p>"
+                             b"<p id='phase3b-clip'><a id='phase3b-clipped-link' href='/navigator-smoke/basic.html'>clipped link fragment must not hit beyond its ancestor clip</a></p>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-phase3a.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><title>CSS Phase 3A Box Constraints</title><style>"

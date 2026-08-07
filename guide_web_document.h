@@ -281,8 +281,35 @@ enum class VerticalAlignMode : uint8_t {
 enum class WhiteSpaceMode : uint8_t {
 	Inherit = 0,
 	Normal  = 1,
-	Pre     = 2,
-	PreWrap = 3,
+	Nowrap  = 2,
+	Pre     = 3,
+	PreWrap = 4,
+	PreLine = 5,
+};
+
+enum class LineHeightMode : uint8_t {
+	Normal = 0,
+	Px,
+	Unitless,
+	Percent,
+};
+
+// Phase 3B keeps inline participation separate from the legacy block stream.
+// Items are bounded runs/atoms, never glyph objects or a retained DOM tree.
+enum class InlineItemKind : uint8_t {
+	TextRun       = 0,
+	ForcedBreak   = 1,
+	ReplacedImage = 2,
+	FormControl   = 3,
+};
+
+struct WebInlineItem {
+	InlineItemKind kind = InlineItemKind::TextRun;
+	uint64_t flowSerial = 0;       // nearest block/line-flow element
+	uint64_t ownerSerial = 0;      // closest inline/replaced logical element
+	uint64_t parentSerial = 0;
+	int      blockIndex = -1;      // legacy target identity for hit/focus routing
+	std::string text;              // bounded text run; empty for atomic items
 };
 
 enum class OverflowWrapMode : uint8_t {
@@ -470,6 +497,8 @@ struct WebStyle {
 	GenericFontFamily genericFontFamily = GenericFontFamily::Inherit;
 	TextAlign textAlign = TextAlign::Inherit;
 	bool     lineHeightNormal = false;
+	LineHeightMode lineHeightMode = LineHeightMode::Normal;
+	int      lineHeightValue = 0; // px, percent, or unitless multiplier ×1000
 	int      marginTop = -1;
 	int      marginRight = -1;
 	int      marginBottom = -1;
@@ -763,12 +792,18 @@ struct DocBlock {
 	bool        formUnsupported = false;
 	FormControlMetadata formControl;
 	std::string labelFor;
+	// Non-zero when this legacy block was emitted from the bounded inline flow
+	// belonging to the serial.  It lets Navigator collapse adjacent parser
+	// records into one line-formatting context without changing existing block
+	// consumers.
+	uint64_t    inlineFlowSerial = 0;
 };
 
 struct WebDocument {
 	std::string           url;
 	std::string           title;
 	std::vector<DocBlock> blocks;
+	std::vector<WebInlineItem> inlineItems;
 	HtmlElementRef        documentElement;
 	bool                  hasDocumentElement = false;
 	HtmlElementRef        bodyElement;

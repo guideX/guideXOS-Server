@@ -37,6 +37,7 @@ using gxos::web::BoxSizingMode;
 using gxos::web::OverflowMode;
 using gxos::web::VisibilityMode;
 using gxos::web::VerticalAlignMode;
+using gxos::web::LineHeightMode;
 using gxos::web::OverflowWrapMode;
 using gxos::web::WhiteSpaceMode;
 using gxos::web::WordBreakMode;
@@ -56,6 +57,8 @@ using gxos::web::FormFocusRevealResult;
 using gxos::web::FormAccessibilityRecord;
 using gxos::web::FormRuntimeStateTable;
 using gxos::web::kFormRuntimeControlCap;
+using gxos::web::InlineItemKind;
+using gxos::web::WebInlineItem;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -209,6 +212,80 @@ namespace {
 		bool constraintConflict = false;
 		bool clamped = false;
 	};
+
+	struct InlineFragmentLayout {
+		int itemIndex = -1;
+		int blockIndex = -1;
+		int lineIndex = 0;
+		int sourceOffset = 0;
+		int sourceLength = 0;
+		int x = 0;
+		int y = 0;
+		int w = 0;
+		int h = 0;
+		int contentOffsetX = 0;
+		int baselineOffset = 0;
+		int verticalShift = 0;
+		uint64_t ownerSerial = 0;
+		uint64_t hitSerial = 0;
+		InlineItemKind kind = InlineItemKind::TextRun;
+		bool whitespace = false;
+		bool collapsedWhitespace = false;
+		bool visible = true;
+	};
+
+	struct InlineLineLayout {
+		int lineIndex = 0;
+		int top = 0;
+		int baseline = 0;
+		int ascent = 0;
+		int descent = 0;
+		int usedLineHeight = 0;
+		int horizontalExtent = 0;
+		int firstFragment = 0;
+		int fragmentCount = 0;
+	};
+
+	struct InlineFlowLayout {
+		uint64_t flowSerial = 0;
+		int anchorBlockIndex = -1;
+		int outerX = 0;
+		int outerWidth = 0;
+		int contentX = 0;
+		int contentWidth = 1;
+		int contentOffsetY = 0;
+		int totalHeight = 0;
+		WebStyle style;
+		std::vector<InlineLineLayout> lines;
+		std::vector<InlineFragmentLayout> fragments;
+	};
+
+	struct InlineLayoutSnapshot {
+		bool valid = false;
+		std::string url;
+		size_t blockCount = 0;
+		size_t itemCount = 0;
+		std::vector<InlineFlowLayout> flows;
+		int textRuns = 0;
+		int whitespaceRuns = 0;
+		int forcedBreaks = 0;
+		int replacedItems = 0;
+		int controlItems = 0;
+		int lineWraps = 0;
+		int whitespaceCollapses = 0;
+		int leadingSpaceSuppressions = 0;
+		int trailingSpaceSuppressions = 0;
+		int verticalAlignAdjustments = 0;
+		int lineHeightClamps = 0;
+		int baselineIterationClamps = 0;
+		int inlineFragmentClamps = 0;
+		int descenderSafeLines = 0;
+		int nestingClamps = 0;
+		int wrapScanClamps = 0;
+	};
+
+	static InlineLayoutSnapshot s_inlineLayoutSnapshot;
+	static bool s_inlineLayoutDirty = true;
 
 	constexpr int kCssClipStackDepth = 16;
 	static std::array<CssPaintRect, kCssClipStackDepth> s_cssClipStack{};
@@ -1099,6 +1176,13 @@ namespace {
 	static int blockOuterX(const DocBlock& block, const WebDocument& doc, int availableWidth, int outerWidth);
 	static int blockWrapWidth(const DocBlock& block, int outerWidth);
 	static int blockTextLineHeight(const DocBlock& block);
+	static void ensureInlineLayout(const WebDocument& doc);
+	static void rebuildInlineLayout(const WebDocument& doc, InlineLayoutSnapshot& snapshot);
+	static const WebStyle* inlineOwnerStyle(const WebDocument& doc, const WebInlineItem& item,
+		const WebStyle& fallback);
+	static const InlineFlowLayout* inlineFlowForBlock(const WebDocument& doc, int blockIndex);
+	static const InlineFlowLayout* inlineFlowForAnchor(const WebDocument& doc, int blockIndex);
+	static bool blockUsesInlineFlow(const WebDocument& doc, int blockIndex);
 	static int blockTextX(const DocBlock& block, int outerX, int innerWidth, int lineWidth);
 	static void drawBlockBox(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style);
 	static bool blockHasVisibleCss(const DocBlock& block);
@@ -1707,6 +1791,29 @@ namespace {
 		metadata.cssComputedStyleEvidence = doc.cssDiagnostics.computedStyleEvidence;
 		metadata.cssGeometryEvidence.clear();
 		metadata.cssEvidenceRecordCount = 0;
+		metadata.cssInlineItems = 0;
+		metadata.cssInlineTextRuns = 0;
+		metadata.cssInlineWhitespaceRuns = 0;
+		metadata.cssInlineForcedBreaks = 0;
+		metadata.cssLineBoxes = 0;
+		metadata.cssLineWraps = 0;
+		metadata.cssWhitespaceCollapses = 0;
+		metadata.cssLeadingSpaceSuppressions = 0;
+		metadata.cssTrailingSpaceSuppressions = 0;
+		metadata.cssReplacedInlineItems = 0;
+		metadata.cssControlInlineItems = 0;
+		metadata.cssVerticalAlignAdjustments = 0;
+		metadata.cssLineHeightClamps = 0;
+		metadata.cssBaselineIterationClamps = 0;
+		metadata.cssInlineFragments = 0;
+		metadata.cssInlineFragmentClamps = 0;
+		metadata.cssInlineHitFragments = 0;
+		metadata.cssDescenderSafeLines = 0;
+		metadata.cssInlineBlockItems = 0;
+		metadata.cssInlineNestingClamps = 0;
+		metadata.cssInlineWrapScanClamps = 0;
+		metadata.cssInlineEvidenceRecordCount = 0;
+		metadata.cssInlineEvidence.clear();
 		metadata.cssBoxSizingContentBox = 0;
 		metadata.cssBoxSizingBorderBox = 0;
 		metadata.cssWidthAutoResolutions = 0;
@@ -2080,6 +2187,96 @@ namespace {
 				++metadata.cssImageSizeClamps;
 			}
 		}
+
+		InlineLayoutSnapshot inlineSnapshot;
+		rebuildInlineLayout(doc, inlineSnapshot);
+		metadata.cssInlineItems = static_cast<int>(std::min<size_t>(std::numeric_limits<int>::max(), inlineSnapshot.itemCount));
+		metadata.cssInlineTextRuns = inlineSnapshot.textRuns;
+		metadata.cssInlineWhitespaceRuns = inlineSnapshot.whitespaceRuns;
+		metadata.cssInlineForcedBreaks = inlineSnapshot.forcedBreaks;
+		metadata.cssLineWraps = inlineSnapshot.lineWraps;
+		metadata.cssWhitespaceCollapses = inlineSnapshot.whitespaceCollapses;
+		metadata.cssLeadingSpaceSuppressions = inlineSnapshot.leadingSpaceSuppressions;
+		metadata.cssTrailingSpaceSuppressions = inlineSnapshot.trailingSpaceSuppressions;
+		metadata.cssReplacedInlineItems = inlineSnapshot.replacedItems;
+		metadata.cssControlInlineItems = inlineSnapshot.controlItems;
+		metadata.cssVerticalAlignAdjustments = inlineSnapshot.verticalAlignAdjustments;
+		metadata.cssLineHeightClamps = inlineSnapshot.lineHeightClamps;
+		metadata.cssBaselineIterationClamps = inlineSnapshot.baselineIterationClamps;
+		metadata.cssInlineNestingClamps = inlineSnapshot.nestingClamps;
+		metadata.cssInlineWrapScanClamps = inlineSnapshot.wrapScanClamps;
+		for (const InlineFlowLayout& flow : inlineSnapshot.flows) {
+			metadata.cssLineBoxes += static_cast<int>(std::min<size_t>(
+				std::numeric_limits<int>::max() - static_cast<size_t>(std::max(0, metadata.cssLineBoxes)),
+				flow.lines.size()));
+			metadata.cssInlineFragments += static_cast<int>(std::min<size_t>(
+				std::numeric_limits<int>::max() - static_cast<size_t>(std::max(0, metadata.cssInlineFragments)),
+				flow.fragments.size()));
+			for (const InlineFragmentLayout& fragment : flow.fragments) {
+				if (!fragment.visible || fragment.whitespace || fragment.blockIndex < 0 ||
+					fragment.blockIndex >= static_cast<int>(doc.blocks.size())) continue;
+				const DocBlock& fragmentBlock = doc.blocks[static_cast<size_t>(fragment.blockIndex)];
+				if (fragmentBlock.type == BlockType::Link || fragmentBlock.type == BlockType::FormLabel ||
+					isFormControlBlock(fragmentBlock)) {
+					++metadata.cssInlineHitFragments;
+				}
+				const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(fragment.itemIndex)];
+				std::string evidenceId = fragmentBlock.id;
+				if (evidenceId.empty() && item.ownerSerial != 0) {
+					for (const gxos::web::HtmlElementRef& element : doc.structuralElements) {
+						if (element.serial == item.ownerSerial && !element.id.empty()) {
+							evidenceId = element.id;
+							break;
+						}
+					}
+				}
+				const bool phase3bId = evidenceId.rfind("phase3b-", 0) == 0 ||
+					evidenceId.rfind("css3b-", 0) == 0;
+				if (!phase3bId || metadata.cssInlineEvidenceRecordCount >= 64 ||
+					metadata.cssInlineEvidence.size() >= 32768) continue;
+				const InlineLineLayout* line = nullptr;
+				for (const InlineLineLayout& candidate : flow.lines) {
+					if (candidate.lineIndex == fragment.lineIndex) {
+						line = &candidate;
+						break;
+					}
+				}
+				if (!line) continue;
+				const char* kind = "text";
+				if (item.kind == InlineItemKind::ForcedBreak) kind = "forced-break";
+				else if (item.kind == InlineItemKind::ReplacedImage) kind = "image";
+				else if (item.kind == InlineItemKind::FormControl) kind = "control";
+				std::string boundedId = evidenceId.substr(0, std::min<size_t>(64, evidenceId.size()));
+				for (char& ch : boundedId) if (ch == '\n' || ch == '\r' || ch == ';') ch = '_';
+				std::ostringstream evidence;
+					evidence << "id=" << boundedId
+					<< ",flow-content-width=" << flow.contentWidth
+					<< ",line=" << line->lineIndex
+					<< ",line-top=" << line->top
+					<< ",line-bottom=" << (line->top + line->usedLineHeight)
+					<< ",baseline=" << line->baseline
+					<< ",ascent=" << line->ascent
+					<< ",descent=" << line->descent
+					<< ",used-line-height=" << line->usedLineHeight
+					<< ",kind=" << kind
+					<< ",fragment=" << fragment.x << ":" << fragment.y << ":" << fragment.w << ":" << fragment.h
+					<< ",item-baseline=" << fragment.baselineOffset
+					<< ",vertical-align=" << static_cast<unsigned>(inlineOwnerStyle(doc, item, flow.style)->verticalAlign)
+					<< ",whitespace-collapsed=" << (fragment.collapsedWhitespace ? "yes" : "no")
+					<< ",logical-serial=" << item.ownerSerial
+					<< ",parent-serial=" << item.parentSerial
+					<< ",hit-target-serial=" << fragment.hitSerial
+					<< ",visibility=" << (fragmentBlock.style.visibility == VisibilityMode::Hidden ? "hidden" : "visible")
+					<< ",opacity=" << fragmentBlock.style.effectiveOpacityPercent << "\n";
+				const std::string lineText = evidence.str();
+				if (metadata.cssInlineEvidence.size() + lineText.size() <= 32768) {
+					metadata.cssInlineEvidence += lineText;
+					++metadata.cssInlineEvidenceRecordCount;
+				}
+			}
+		}
+		metadata.cssInlineFragmentClamps = inlineSnapshot.inlineFragmentClamps;
+		metadata.cssDescenderSafeLines = inlineSnapshot.descenderSafeLines;
 		if (doc.url.find("css-phase1f") != std::string::npos) {
 			int perSideAncestorBlocks = 0;
 			int dashedStyledBlocks = 0;
@@ -3219,11 +3416,15 @@ namespace {
 	static int blockTotalHeight(const DocBlock& block, const WebDocument& doc, bool nextIsHeading)
 	{
 		if (block.style.displayNone) return 0;
+		const int blockIndex = static_cast<int>(&block - &doc.blocks.front());
+		if (const InlineFlowLayout* flow = inlineFlowForBlock(doc, blockIndex)) {
+			if (flow->anchorBlockIndex != blockIndex) return 0;
+			return flow->totalHeight + (nextIsHeading ? 10 : 0);
+		}
 		if (isTableCellLikeBlock(block)) {
 			if (!isFirstTableCellInGroup(doc, static_cast<int>(&block - &doc.blocks.front()))) {
 				return 0;
 			}
-			const int blockIndex = static_cast<int>(&block - &doc.blocks.front());
 			const int groupStart = tableGroupStartIndex(doc, blockIndex);
 			const TableGroupLayout layout = buildTableGroupLayout(doc, groupStart);
 			const int blockMarginTop = cssMarginTopPx(block.style, 4);
@@ -4376,6 +4577,29 @@ namespace {
 		out += "Current Document.css_visibility_hidden_layout=retained\n";
 		out += "Current Document.css_opacity_zero_hit_testing=eligible_when_visible\n";
 		if (!metadata.cssGeometryEvidence.empty()) out += "Current Document.css_geometry_evidence=" + metadata.cssGeometryEvidence;
+		add("css_inline_items", metadata.cssInlineItems);
+		add("css_inline_text_runs", metadata.cssInlineTextRuns);
+		add("css_inline_whitespace_runs", metadata.cssInlineWhitespaceRuns);
+		add("css_inline_forced_breaks", metadata.cssInlineForcedBreaks);
+		add("css_line_boxes", metadata.cssLineBoxes);
+		add("css_line_wraps", metadata.cssLineWraps);
+		add("css_whitespace_collapses", metadata.cssWhitespaceCollapses);
+		add("css_leading_space_suppressions", metadata.cssLeadingSpaceSuppressions);
+		add("css_trailing_space_suppressions", metadata.cssTrailingSpaceSuppressions);
+		add("css_replaced_inline_items", metadata.cssReplacedInlineItems);
+		add("css_control_inline_items", metadata.cssControlInlineItems);
+		add("css_vertical_align_adjustments", metadata.cssVerticalAlignAdjustments);
+		add("css_line_height_clamps", metadata.cssLineHeightClamps);
+		add("css_baseline_iteration_clamps", metadata.cssBaselineIterationClamps);
+		add("css_inline_fragments", metadata.cssInlineFragments);
+		add("css_inline_fragment_clamps", metadata.cssInlineFragmentClamps);
+		add("css_inline_hit_fragments", metadata.cssInlineHitFragments);
+		add("css_descender_safe_lines", metadata.cssDescenderSafeLines);
+		add("css_inline_block_items", metadata.cssInlineBlockItems);
+		add("css_inline_nesting_clamps", metadata.cssInlineNestingClamps);
+		add("css_inline_wrap_scan_clamps", metadata.cssInlineWrapScanClamps);
+		add("css_inline_evidence_records", metadata.cssInlineEvidenceRecordCount);
+		if (!metadata.cssInlineEvidence.empty()) out += "Current Document.css_inline_evidence=" + metadata.cssInlineEvidence;
 	}
 
 	static void appendCssPhase3ABlocks(WebDocument& doc, const NavigatorPageMetadata& metadata)
@@ -4682,6 +4906,704 @@ namespace {
 		if (!block.text.empty()) return block.text;
 		return info.message.empty() ? "[missing image]" : info.message;
 	}
+
+	struct InlineAtom {
+		int itemIndex = -1;
+		int sourceOffset = 0;
+		int sourceLength = 0;
+		int width = 0;
+		int height = 0;
+		int baselineOffset = 0;
+		int lineHeight = 0;
+		int ascent = 0;
+		int descent = 0;
+		uint64_t ownerSerial = 0;
+		InlineItemKind kind = InlineItemKind::TextRun;
+		bool whitespace = false;
+		bool collapsedWhitespace = false;
+		bool forcedBreak = false;
+		bool noWrap = false;
+		int inlineLeft = 0;
+		int inlineRight = 0;
+		int inlineTop = 0;
+		int inlineBottom = 0;
+	};
+
+	struct InlineFontMetrics {
+		int ascent = 1;
+		int descent = 1;
+		int baseline = 1;
+		int glyphHeight = 2;
+		int lineHeight = kLineH;
+	};
+
+	static WhiteSpaceMode inlineWhiteSpace(const WebStyle& style)
+	{
+		return style.whiteSpace == WhiteSpaceMode::Inherit ? WhiteSpaceMode::Normal : style.whiteSpace;
+	}
+
+	static const BitmapFontFace* inlineFontFace(const WebStyle& style)
+	{
+		const int fontSize = cssFontSizeOrDefault(style, 16);
+		const FontSize size = fontSize <= 13 ? FontSize::Small9 : FontSize::Normal12;
+		const FontWeight weight = style.bold ? FontWeight::Bold : FontWeight::Regular;
+		const FontSlant slant = style.italic ? FontSlant::Italic : FontSlant::Normal;
+		return SystemFont::GetFace(size, weight, slant);
+	}
+
+	static InlineFontMetrics inlineFontMetrics(const WebStyle& style)
+	{
+		const BitmapFontFace* face = inlineFontFace(style);
+		InlineFontMetrics metrics;
+		metrics.ascent = std::max(1, SystemFont::MeasureAscent(face));
+		metrics.descent = std::max(1, SystemFont::MeasureDescent(face));
+		metrics.baseline = std::max(1, SystemFont::BaselineOffset(face));
+		metrics.glyphHeight = std::max(1, metrics.ascent + metrics.descent);
+		metrics.lineHeight = std::max(1, SystemFont::MeasureLineHeight(face));
+		const int requested = cssFontSizeOrDefault(style, 16);
+		if (requested > 13) {
+			const int scale = std::max(1, requested * 100 / 12);
+			metrics.ascent = std::max(1, (metrics.ascent * scale + 99) / 100);
+			metrics.descent = std::max(1, (metrics.descent * scale + 99) / 100);
+			metrics.baseline = std::max(1, (metrics.baseline * scale + 99) / 100);
+			metrics.lineHeight = std::max(1, (metrics.lineHeight * scale + 99) / 100);
+			metrics.glyphHeight = metrics.ascent + metrics.descent;
+		}
+		return metrics;
+	}
+
+	static int inlineTextWidth(const WebStyle& style, const std::string& text)
+	{
+		if (text.empty()) return 0;
+		const BitmapFontFace* face = inlineFontFace(style);
+		int width = SystemFont::MeasureWidth(face, text.c_str(), static_cast<int>(text.size()));
+		if (width <= 0) width = static_cast<int>(text.size()) * kCharW;
+		const int requested = cssFontSizeOrDefault(style, 16);
+		if (requested > 13) width = std::max(1, (width * requested + 11) / 12);
+		return std::max(1, std::min(8192, width));
+	}
+
+	static int inlineUsedLineHeight(const WebStyle& style, const InlineFontMetrics& metrics,
+		int& outClamp)
+	{
+		outClamp = 0;
+		const int fontSize = cssFontSizeOrDefault(style, 16);
+		int requested = metrics.lineHeight;
+		switch (style.lineHeightMode) {
+		case LineHeightMode::Unitless:
+			requested = static_cast<int>((static_cast<int64_t>(fontSize) *
+				std::max(0, style.lineHeightValue) + 500) / 1000);
+			break;
+		case LineHeightMode::Percent:
+			requested = (fontSize * std::max(0, style.lineHeightValue) + 50) / 100;
+			break;
+		case LineHeightMode::Px:
+			requested = style.lineHeightValue;
+			break;
+		case LineHeightMode::Normal:
+		default:
+			if (!style.lineHeightNormal && style.lineHeight > 0) requested = style.lineHeight;
+			break;
+		}
+		if (requested < 0) {
+			requested = 0;
+			outClamp = 1;
+		}
+		if (requested > 256) {
+			requested = 256;
+			outClamp = 1;
+		}
+		return std::max(1, requested);
+	}
+
+	static const WebStyle* inlineOwnerStyle(const WebDocument& doc,
+		const WebInlineItem& item,
+		const WebStyle& fallback)
+	{
+		if (const WebStyle* style = computedStyleForSerial(doc, item.ownerSerial)) return style;
+		return &fallback;
+	}
+
+	static void appendInlineAtom(std::vector<InlineAtom>& atoms,
+		const InlineAtom& atom,
+		InlineLayoutSnapshot& snapshot)
+	{
+		constexpr size_t kMaxAtomsPerFlow = 4096;
+		if (atoms.size() >= kMaxAtomsPerFlow) {
+			++snapshot.wrapScanClamps;
+			return;
+		}
+		atoms.push_back(atom);
+	}
+
+	static void appendInlineTextAtoms(const WebDocument& doc,
+		const InlineFlowLayout& flow,
+		const WebInlineItem& item,
+		int itemIndex,
+		std::vector<InlineAtom>& atoms,
+		InlineLayoutSnapshot& snapshot,
+		bool& pendingCollapsedSpace,
+		bool& lineHasContent)
+	{
+		const WebStyle* style = inlineOwnerStyle(doc, item, flow.style);
+		if (!style || style->displayNone || style->visibility == VisibilityMode::Hidden) return;
+		const WhiteSpaceMode whitespaceMode = inlineWhiteSpace(*style);
+		const bool preserve = whitespaceMode == WhiteSpaceMode::Pre ||
+			whitespaceMode == WhiteSpaceMode::PreWrap;
+		const bool preserveNewline = preserve || whitespaceMode == WhiteSpaceMode::PreLine;
+		const bool noWrap = whitespaceMode == WhiteSpaceMode::Nowrap ||
+			whitespaceMode == WhiteSpaceMode::Pre;
+		const InlineFontMetrics metrics = inlineFontMetrics(*style);
+		int lineHeightClamp = 0;
+		const int usedLineHeight = inlineUsedLineHeight(*style, metrics, lineHeightClamp);
+		if (lineHeightClamp) ++snapshot.lineHeightClamps;
+		const std::string& text = item.text;
+		bool countedWhitespaceRun = false;
+		size_t cursor = 0;
+		while (cursor < text.size()) {
+			const char ch = text[cursor];
+			if (ch == '\r' || ch == '\n') {
+				if (ch == '\r' && cursor + 1 < text.size() && text[cursor + 1] == '\n') ++cursor;
+				if (preserveNewline) {
+					if (pendingCollapsedSpace) {
+						pendingCollapsedSpace = false;
+						++snapshot.trailingSpaceSuppressions;
+					}
+					InlineAtom atom;
+					atom.itemIndex = itemIndex;
+					atom.sourceOffset = static_cast<int>(cursor);
+					atom.sourceLength = 1;
+					atom.forcedBreak = true;
+					atom.ownerSerial = item.ownerSerial;
+					appendInlineAtom(atoms, atom, snapshot);
+					lineHasContent = false;
+					++snapshot.forcedBreaks;
+					++cursor;
+					continue;
+				}
+				pendingCollapsedSpace = true;
+				++snapshot.whitespaceCollapses;
+				++cursor;
+				continue;
+			}
+			const bool isSpace = ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v';
+			if (isSpace) {
+				size_t end = cursor + 1;
+				while (end < text.size() && (text[end] == ' ' || text[end] == '\t' ||
+					text[end] == '\f' || text[end] == '\v')) ++end;
+				if (preserve) {
+					InlineAtom atom;
+					atom.itemIndex = itemIndex;
+					atom.sourceOffset = static_cast<int>(cursor);
+					atom.sourceLength = static_cast<int>(end - cursor);
+					atom.whitespace = true;
+					atom.ownerSerial = item.ownerSerial;
+					atom.noWrap = noWrap;
+					atom.width = inlineTextWidth(*style, text.substr(cursor, end - cursor));
+					atom.height = metrics.glyphHeight;
+					atom.baselineOffset = metrics.baseline;
+					atom.ascent = metrics.ascent;
+					atom.descent = metrics.descent;
+					atom.lineHeight = usedLineHeight;
+					appendInlineAtom(atoms, atom, snapshot);
+				} else {
+					pendingCollapsedSpace = true;
+					++snapshot.whitespaceCollapses;
+				}
+				if (!countedWhitespaceRun) {
+					++snapshot.whitespaceRuns;
+					countedWhitespaceRun = true;
+				}
+				cursor = end;
+				continue;
+			}
+			size_t end = cursor + 1;
+			while (end < text.size() && text[end] != '\r' && text[end] != '\n' &&
+				text[end] != ' ' && text[end] != '\t' && text[end] != '\f' && text[end] != '\v') ++end;
+			if (pendingCollapsedSpace) {
+				if (!lineHasContent) {
+					++snapshot.leadingSpaceSuppressions;
+				} else {
+					InlineAtom space;
+					space.itemIndex = itemIndex;
+					space.sourceOffset = static_cast<int>(cursor);
+					space.sourceLength = 0;
+					space.width = inlineTextWidth(*style, " ");
+					space.height = metrics.glyphHeight;
+					space.baselineOffset = metrics.baseline;
+					space.ascent = metrics.ascent;
+					space.descent = metrics.descent;
+					space.lineHeight = usedLineHeight;
+					space.ownerSerial = item.ownerSerial;
+					space.whitespace = true;
+					space.collapsedWhitespace = true;
+					space.noWrap = noWrap;
+					appendInlineAtom(atoms, space, snapshot);
+				}
+				pendingCollapsedSpace = false;
+			}
+			InlineAtom atom;
+			atom.itemIndex = itemIndex;
+			atom.sourceOffset = static_cast<int>(cursor);
+			atom.sourceLength = static_cast<int>(end - cursor);
+			atom.width = inlineTextWidth(*style, text.substr(cursor, end - cursor));
+			atom.height = metrics.glyphHeight;
+			atom.baselineOffset = metrics.baseline + std::max(0, (usedLineHeight - metrics.glyphHeight) / 2);
+			atom.ascent = metrics.ascent;
+			atom.descent = metrics.descent;
+			atom.lineHeight = usedLineHeight;
+			atom.ownerSerial = item.ownerSerial;
+			atom.noWrap = noWrap;
+			appendInlineAtom(atoms, atom, snapshot);
+			lineHasContent = true;
+			cursor = end;
+		}
+		int firstContentAtom = -1;
+		int lastContentAtom = -1;
+		const int inlineLeft = cssPaddingLeftPx(*style, 0) + cssBorderLeftPx(*style);
+		const int inlineRight = cssPaddingRightPx(*style, 0) + cssBorderRightPx(*style);
+		const int inlineTop = cssPaddingTopPx(*style, 0) + cssBorderTopPx(*style);
+		const int inlineBottom = cssPaddingBottomPx(*style, 0) + cssBorderBottomPx(*style);
+		for (int atomIndex = 0; atomIndex < static_cast<int>(atoms.size()); ++atomIndex) {
+			InlineAtom& atom = atoms[static_cast<size_t>(atomIndex)];
+			if (atom.itemIndex != itemIndex || atom.whitespace || atom.forcedBreak) continue;
+			if (firstContentAtom < 0) firstContentAtom = atomIndex;
+			lastContentAtom = atomIndex;
+			atom.height = std::min(256, atom.height + inlineTop + inlineBottom);
+			atom.baselineOffset = std::min(256, atom.baselineOffset + inlineTop);
+			atom.ascent = std::min(256, atom.ascent + inlineTop);
+			atom.descent = std::min(256, atom.descent + inlineBottom);
+			atom.inlineTop = inlineTop;
+			atom.inlineBottom = inlineBottom;
+		}
+		if (firstContentAtom >= 0) {
+			atoms[static_cast<size_t>(firstContentAtom)].width = std::min(8192,
+				atoms[static_cast<size_t>(firstContentAtom)].width + inlineLeft);
+			atoms[static_cast<size_t>(firstContentAtom)].inlineLeft = inlineLeft;
+			atoms[static_cast<size_t>(lastContentAtom)].width = std::min(8192,
+				atoms[static_cast<size_t>(lastContentAtom)].width + inlineRight);
+			atoms[static_cast<size_t>(lastContentAtom)].inlineRight = inlineRight;
+		}
+	}
+
+	static int inlineAtomWidth(const WebDocument& doc, const InlineFlowLayout& flow,
+		const InlineAtom& atom)
+	{
+		if (atom.width > 0) return atom.width;
+		if (atom.itemIndex < 0 || atom.itemIndex >= static_cast<int>(doc.inlineItems.size())) return 0;
+		const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(atom.itemIndex)];
+		if (item.blockIndex < 0 || item.blockIndex >= static_cast<int>(doc.blocks.size())) return kCharW;
+		const DocBlock& block = doc.blocks[static_cast<size_t>(item.blockIndex)];
+		int width = kCharW;
+		if (item.kind == InlineItemKind::ReplacedImage) {
+			int h = 0;
+			imageDisplaySize(block, flow.contentWidth, width, h);
+		} else if (item.kind == InlineItemKind::FormControl) {
+			width = blockFormControlWidth(block, flow.contentWidth);
+			if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio)
+				width = 22;
+		}
+		return std::max(1, std::min(8192, width));
+	}
+
+	static void finalizeInlineLine(InlineFlowLayout& flow,
+		InlineLineLayout& line,
+		InlineLayoutSnapshot& snapshot,
+		const WebDocument& doc)
+	{
+		if (line.fragmentCount <= 0) {
+			const WebStyle* style = &flow.style;
+			const InlineFontMetrics metrics = inlineFontMetrics(*style);
+			int clamp = 0;
+			const int requested = inlineUsedLineHeight(*style, metrics, clamp);
+			line.ascent = metrics.ascent;
+			line.descent = metrics.descent;
+			line.usedLineHeight = std::max(requested, line.ascent + line.descent);
+			if (line.usedLineHeight > 256) {
+				line.usedLineHeight = 256;
+				++snapshot.lineHeightClamps;
+			}
+			if (line.usedLineHeight >= line.ascent + line.descent) ++snapshot.descenderSafeLines;
+			return;
+		}
+		const InlineFontMetrics parentMetrics = inlineFontMetrics(flow.style);
+		int maxAscent = parentMetrics.ascent;
+		int maxDescent = parentMetrics.descent;
+		int requestedLineHeight = parentMetrics.lineHeight;
+		const int start = line.firstFragment;
+		const int end = start + line.fragmentCount;
+		for (int fi = start; fi < end; ++fi) {
+			InlineFragmentLayout& fragment = flow.fragments[static_cast<size_t>(fi)];
+			const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(fragment.itemIndex)];
+			const WebStyle* style = inlineOwnerStyle(doc, item, flow.style);
+			const InlineFontMetrics metrics = inlineFontMetrics(*style);
+			int clamp = 0;
+			requestedLineHeight = std::max(requestedLineHeight, inlineUsedLineHeight(*style, metrics, clamp));
+			if (clamp) ++snapshot.lineHeightClamps;
+			fragment.verticalShift = 0;
+			const VerticalAlignMode mode = style->verticalAlign;
+			if (mode == VerticalAlignMode::Middle) {
+				fragment.verticalShift = -parentMetrics.ascent / 2 - fragment.h / 2 + fragment.baselineOffset;
+			} else if (mode == VerticalAlignMode::TextTop) {
+				fragment.verticalShift = -parentMetrics.ascent + fragment.baselineOffset;
+			} else if (mode == VerticalAlignMode::TextBottom) {
+				fragment.verticalShift = parentMetrics.descent - fragment.h + fragment.baselineOffset;
+			} else if (mode == VerticalAlignMode::Sub) {
+				fragment.verticalShift = std::max(1, parentMetrics.descent / 2);
+			} else if (mode == VerticalAlignMode::Super) {
+				fragment.verticalShift = -std::max(1, parentMetrics.ascent / 2);
+			} else if (mode == VerticalAlignMode::LengthPx) {
+				fragment.verticalShift = -style->verticalAlignValue;
+			} else if (mode == VerticalAlignMode::Percent) {
+				fragment.verticalShift = -(requestedLineHeight * style->verticalAlignValue) / 100;
+			}
+			if (fragment.verticalShift != 0) ++snapshot.verticalAlignAdjustments;
+			const int top = -fragment.baselineOffset + fragment.verticalShift;
+			maxAscent = std::max(maxAscent, -top);
+			maxDescent = std::max(maxDescent, top + fragment.h);
+		}
+		for (int iteration = 0; iteration < 3; ++iteration) {
+			bool changed = false;
+			for (int fi = start; fi < end; ++fi) {
+				InlineFragmentLayout& fragment = flow.fragments[static_cast<size_t>(fi)];
+				const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(fragment.itemIndex)];
+				const WebStyle* style = inlineOwnerStyle(doc, item, flow.style);
+				const int old = fragment.verticalShift;
+				switch (style->verticalAlign) {
+				case VerticalAlignMode::Top:
+					fragment.verticalShift = -maxAscent + fragment.baselineOffset;
+					break;
+				case VerticalAlignMode::Bottom:
+					fragment.verticalShift = maxDescent - fragment.h + fragment.baselineOffset;
+					break;
+				default:
+					break;
+				}
+				changed = changed || old != fragment.verticalShift;
+			}
+			if (!changed) break;
+			if (iteration == 2) ++snapshot.baselineIterationClamps;
+		}
+		line.ascent = std::max(1, maxAscent);
+		line.descent = std::max(1, maxDescent);
+		line.usedLineHeight = std::max(requestedLineHeight, line.ascent + line.descent);
+		if (line.usedLineHeight > 256) {
+			line.usedLineHeight = 256;
+			++snapshot.lineHeightClamps;
+		}
+		if (line.usedLineHeight >= line.ascent + line.descent) ++snapshot.descenderSafeLines;
+		line.baseline = line.ascent;
+		for (int fi = start; fi < end; ++fi) {
+			InlineFragmentLayout& fragment = flow.fragments[static_cast<size_t>(fi)];
+			fragment.y = line.top + line.baseline - fragment.baselineOffset + fragment.verticalShift;
+		}
+	}
+
+	static void buildInlineFlow(const WebDocument& doc,
+		InlineFlowLayout& flow,
+		InlineLayoutSnapshot& snapshot)
+	{
+		if (flow.anchorBlockIndex < 0 || flow.anchorBlockIndex >= static_cast<int>(doc.blocks.size())) return;
+		DocBlock geometryBlock = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
+		geometryBlock.style = flow.style;
+		geometryBlock.inlineFlowSerial = flow.flowSerial;
+		const int availableWidth = blockAvailableWidth(geometryBlock, doc);
+		const int outerWidth = blockOuterWidth(geometryBlock, availableWidth);
+		flow.outerWidth = std::max(1, outerWidth);
+		flow.outerX = blockOuterX(geometryBlock, doc, availableWidth, flow.outerWidth);
+		flow.contentX = flow.outerX + cssBorderLeftPx(flow.style) + cssPaddingLeftPx(flow.style, 0);
+		flow.contentWidth = std::max(1, flow.outerWidth - cssHorizontalBoxEdges(flow.style));
+		if (geometryBlock.type == BlockType::ListItem) {
+			const int inset = blockListTextInsetPx(geometryBlock, blockListOrdinal(doc, flow.anchorBlockIndex));
+			flow.contentX += inset;
+			flow.contentWidth = std::max(1, flow.contentWidth - inset);
+		}
+		std::vector<InlineAtom> atoms;
+		atoms.reserve(64);
+		bool pendingCollapsedSpace = false;
+		bool lineHasContent = false;
+		for (int itemIndex = 0; itemIndex < static_cast<int>(doc.inlineItems.size()); ++itemIndex) {
+			const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(itemIndex)];
+			if (item.flowSerial != flow.flowSerial) continue;
+			if (item.kind == InlineItemKind::TextRun) {
+				++snapshot.textRuns;
+				appendInlineTextAtoms(doc, flow, item, itemIndex, atoms, snapshot,
+					pendingCollapsedSpace, lineHasContent);
+				continue;
+			}
+			if (item.kind == InlineItemKind::ForcedBreak) {
+				if (pendingCollapsedSpace) {
+					pendingCollapsedSpace = false;
+					++snapshot.trailingSpaceSuppressions;
+				}
+				InlineAtom atom;
+				atom.itemIndex = itemIndex;
+				atom.forcedBreak = true;
+				atom.ownerSerial = item.ownerSerial;
+				appendInlineAtom(atoms, atom, snapshot);
+				lineHasContent = false;
+				++snapshot.forcedBreaks;
+				continue;
+			}
+			const WebStyle* atomicStyle = inlineOwnerStyle(doc, item, flow.style);
+			if (!atomicStyle || atomicStyle->displayNone || atomicStyle->visibility == VisibilityMode::Hidden)
+				continue;
+			if (pendingCollapsedSpace) {
+				if (!lineHasContent) {
+					++snapshot.leadingSpaceSuppressions;
+				} else {
+					InlineAtom space;
+					space.itemIndex = itemIndex;
+					space.width = inlineTextWidth(flow.style, " ");
+					space.height = inlineFontMetrics(flow.style).glyphHeight;
+					space.baselineOffset = inlineFontMetrics(flow.style).baseline;
+					space.ascent = inlineFontMetrics(flow.style).ascent;
+					space.descent = inlineFontMetrics(flow.style).descent;
+					space.lineHeight = inlineUsedLineHeight(flow.style, inlineFontMetrics(flow.style), snapshot.lineHeightClamps);
+					space.ownerSerial = item.ownerSerial;
+					space.whitespace = true;
+					space.collapsedWhitespace = true;
+					appendInlineAtom(atoms, space, snapshot);
+				}
+				pendingCollapsedSpace = false;
+			}
+			InlineAtom atom;
+			atom.itemIndex = itemIndex;
+			atom.kind = item.kind;
+			atom.ownerSerial = item.ownerSerial;
+			atom.width = inlineAtomWidth(doc, flow, atom);
+			atom.height = item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())
+				? (item.kind == InlineItemKind::ReplacedImage
+					? 64 : blockFormControlHeight(doc.blocks[static_cast<size_t>(item.blockIndex)])) : kLineH;
+			if (item.kind == InlineItemKind::ReplacedImage) {
+				int imageW = atom.width;
+				imageDisplaySize(doc.blocks[static_cast<size_t>(item.blockIndex)], flow.contentWidth, imageW, atom.height);
+				atom.width = imageW;
+				atom.baselineOffset = atom.height;
+				atom.ascent = atom.height;
+				atom.descent = 0;
+				++snapshot.replacedItems;
+			} else {
+				const WebStyle* style = inlineOwnerStyle(doc, item, flow.style);
+				const InlineFontMetrics metrics = inlineFontMetrics(*style);
+				atom.baselineOffset = std::max(1, atom.height - std::max(1, metrics.descent / 2));
+				atom.ascent = std::max(1, atom.height - (atom.height - atom.baselineOffset));
+				atom.descent = std::max(1, atom.height - atom.ascent);
+				++snapshot.controlItems;
+			}
+			appendInlineAtom(atoms, atom, snapshot);
+			lineHasContent = true;
+		}
+		if (pendingCollapsedSpace) ++snapshot.trailingSpaceSuppressions;
+
+		InlineLineLayout line;
+		line.lineIndex = 0;
+		line.firstFragment = 0;
+		int cursorX = 0;
+		InlineAtom pendingSpace;
+		bool hasPendingSpace = false;
+		auto finishLine = [&]() {
+			if (hasPendingSpace) {
+				hasPendingSpace = false;
+				++snapshot.trailingSpaceSuppressions;
+			}
+			line.fragmentCount = static_cast<int>(flow.fragments.size()) - line.firstFragment;
+			line.horizontalExtent = std::max(0, cursorX);
+			line.top = flow.lines.empty() ? 0 : flow.lines.back().top + flow.lines.back().usedLineHeight;
+			finalizeInlineLine(flow, line, snapshot, doc);
+			flow.lines.push_back(line);
+			line = InlineLineLayout{};
+			line.lineIndex = static_cast<int>(flow.lines.size());
+			line.firstFragment = static_cast<int>(flow.fragments.size());
+			cursorX = 0;
+		};
+		auto placeAtom = [&](const InlineAtom& atom) {
+			InlineFragmentLayout fragment;
+			fragment.itemIndex = atom.itemIndex;
+			fragment.blockIndex = doc.inlineItems[static_cast<size_t>(atom.itemIndex)].blockIndex;
+			fragment.lineIndex = line.lineIndex;
+			fragment.sourceOffset = atom.sourceOffset;
+			fragment.sourceLength = atom.sourceLength;
+			fragment.x = cursorX;
+			fragment.w = std::max(0, atom.width);
+			fragment.h = std::max(1, atom.height);
+			fragment.contentOffsetX = atom.inlineLeft;
+			fragment.baselineOffset = std::max(1, atom.baselineOffset);
+			fragment.ownerSerial = atom.ownerSerial;
+			fragment.hitSerial = fragment.blockIndex >= 0 && fragment.blockIndex < static_cast<int>(doc.blocks.size())
+				? doc.blocks[static_cast<size_t>(fragment.blockIndex)].elementMetadata.serial : atom.ownerSerial;
+			fragment.kind = atom.kind;
+			fragment.whitespace = atom.whitespace;
+			fragment.collapsedWhitespace = atom.collapsedWhitespace;
+			flow.fragments.push_back(fragment);
+			cursorX = std::min(8192, cursorX + fragment.w);
+		};
+		for (const InlineAtom& atom : atoms) {
+			if (atom.forcedBreak) {
+				finishLine();
+				continue;
+			}
+			const bool canWrap = !atom.noWrap && inlineWhiteSpace(flow.style) != WhiteSpaceMode::Nowrap &&
+				inlineWhiteSpace(flow.style) != WhiteSpaceMode::Pre;
+			if (atom.collapsedWhitespace) {
+				pendingSpace = atom;
+				hasPendingSpace = true;
+				continue;
+			}
+			int required = atom.width + (hasPendingSpace ? pendingSpace.width : 0);
+			if (canWrap && cursorX > 0 && cursorX + required > flow.contentWidth) {
+				finishLine();
+				++snapshot.lineWraps;
+				required = atom.width;
+			}
+			if (hasPendingSpace) {
+				if (cursorX == 0) ++snapshot.leadingSpaceSuppressions;
+				else placeAtom(pendingSpace);
+				hasPendingSpace = false;
+			}
+			if (canWrap && cursorX > 0 && cursorX + atom.width > flow.contentWidth && atom.kind == InlineItemKind::TextRun) {
+				const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(atom.itemIndex)];
+				const WebStyle* style = inlineOwnerStyle(doc, item, flow.style);
+				const bool breakWord = style->wordBreak == WordBreakMode::BreakAll ||
+					style->overflowWrap == OverflowWrapMode::BreakWord;
+				if (breakWord) {
+					int offset = 0;
+					while (offset < atom.sourceLength) {
+						int take = atom.sourceLength - offset;
+						while (take > 1 && inlineTextWidth(*style, item.text.substr(static_cast<size_t>(atom.sourceOffset + offset), static_cast<size_t>(take))) > flow.contentWidth - cursorX)
+							--take;
+						if (take <= 0) take = 1;
+						InlineAtom chunk = atom;
+						chunk.sourceOffset += offset;
+						chunk.sourceLength = take;
+						chunk.width = inlineTextWidth(*style, item.text.substr(static_cast<size_t>(chunk.sourceOffset), static_cast<size_t>(take)));
+						if (cursorX > 0 && cursorX + chunk.width > flow.contentWidth) {
+							finishLine();
+							++snapshot.lineWraps;
+						}
+						placeAtom(chunk);
+						offset += take;
+					}
+					continue;
+				}
+			}
+			placeAtom(atom);
+		}
+		const bool currentLineHasFragments = static_cast<int>(flow.fragments.size()) > line.firstFragment;
+		const bool trailingForcedBreak = !atoms.empty() && atoms.back().forcedBreak;
+		if (currentLineHasFragments || flow.lines.empty() || trailingForcedBreak) finishLine();
+		if (flow.lines.empty()) finishLine();
+		int currentTop = 0;
+		for (InlineLineLayout& lineBox : flow.lines) {
+			lineBox.top = currentTop;
+			lineBox.baseline = lineBox.ascent;
+			for (int fi = lineBox.firstFragment; fi < lineBox.firstFragment + lineBox.fragmentCount; ++fi) {
+				InlineFragmentLayout& fragment = flow.fragments[static_cast<size_t>(fi)];
+				fragment.y = lineBox.top + lineBox.baseline - fragment.baselineOffset + fragment.verticalShift;
+			}
+			const int alignShift = flow.style.textAlign == TextAlign::Center
+				? std::max(0, (flow.contentWidth - lineBox.horizontalExtent) / 2)
+				: (flow.style.textAlign == TextAlign::Right ? std::max(0, flow.contentWidth - lineBox.horizontalExtent) : 0);
+			for (int fi = lineBox.firstFragment; fi < lineBox.firstFragment + lineBox.fragmentCount; ++fi)
+				flow.fragments[static_cast<size_t>(fi)].x += alignShift;
+			currentTop += std::max(1, lineBox.usedLineHeight);
+		}
+		const int contentHeight = std::max(1, currentTop);
+		const int verticalEdges = cssVerticalBoxEdges(flow.style);
+		const int fallbackOuter = cssBoundedGeometryAdd(contentHeight, verticalEdges);
+		const int outerHeight = resolveUsedOuterDimension(flow.style,
+			flow.style.heightValue, flow.style.height, flow.style.heightPercent,
+			flow.style.minHeightValue, flow.style.minHeight, flow.style.minHeightPercent,
+			flow.style.maxHeightValue, flow.style.maxHeight, flow.style.maxHeightPercent,
+			flow.style.maxHeightNone, blockContainingContentHeight(geometryBlock, doc), fallbackOuter,
+			verticalEdges, false);
+		flow.contentOffsetY = cssMarginTopPx(flow.style, geometryBlock.type == BlockType::Heading ? 10 : 4) +
+			cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0);
+		flow.totalHeight = cssMarginTopPx(flow.style, geometryBlock.type == BlockType::Heading ? 10 : 4) +
+			std::max(1, outerHeight) + cssMarginBottomPx(flow.style, geometryBlock.type == BlockType::ListItem ? 4 : 8);
+	}
+
+	static void rebuildInlineLayout(const WebDocument& doc, InlineLayoutSnapshot& snapshot)
+	{
+		snapshot = InlineLayoutSnapshot{};
+		snapshot.url = doc.url;
+		snapshot.blockCount = doc.blocks.size();
+		snapshot.itemCount = doc.inlineItems.size();
+		if (doc.inlineItems.empty()) {
+			snapshot.valid = true;
+			return;
+		}
+		constexpr size_t kMaxFlows = 256;
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (item.flowSerial == 0) continue;
+			InlineFlowLayout* flow = nullptr;
+			for (InlineFlowLayout& candidate : snapshot.flows) {
+				if (candidate.flowSerial == item.flowSerial) {
+					flow = &candidate;
+					break;
+				}
+			}
+			if (!flow) {
+				if (snapshot.flows.size() >= kMaxFlows) {
+					++snapshot.nestingClamps;
+					continue;
+				}
+				snapshot.flows.push_back(InlineFlowLayout{});
+				flow = &snapshot.flows.back();
+				flow->flowSerial = item.flowSerial;
+				for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
+					if (doc.blocks[static_cast<size_t>(blockIndex)].inlineFlowSerial == item.flowSerial) {
+						flow->anchorBlockIndex = blockIndex;
+						break;
+					}
+				}
+				if (flow->anchorBlockIndex < 0 && item.blockIndex >= 0) flow->anchorBlockIndex = item.blockIndex;
+				if (flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(doc.blocks.size())) {
+					flow->style = doc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].style;
+					if (const WebStyle* computed = computedStyleForSerial(doc, item.flowSerial)) flow->style = *computed;
+				}
+			}
+		}
+		for (InlineFlowLayout& flow : snapshot.flows) {
+			if (flow.anchorBlockIndex < 0 || flow.style.displayNone || flow.style.visibility == VisibilityMode::Hidden) continue;
+			buildInlineFlow(doc, flow, snapshot);
+		}
+		snapshot.valid = true;
+	}
+
+	static void ensureInlineLayout(const WebDocument& doc)
+	{
+		if (!s_inlineLayoutDirty && s_inlineLayoutSnapshot.valid &&
+			s_inlineLayoutSnapshot.url == doc.url &&
+			s_inlineLayoutSnapshot.blockCount == doc.blocks.size() &&
+			s_inlineLayoutSnapshot.itemCount == doc.inlineItems.size()) return;
+		rebuildInlineLayout(doc, s_inlineLayoutSnapshot);
+		s_inlineLayoutDirty = false;
+	}
+
+	static const InlineFlowLayout* inlineFlowForBlock(const WebDocument& doc, int blockIndex)
+	{
+		if (!s_inlineLayoutSnapshot.valid || s_inlineLayoutSnapshot.url != doc.url ||
+			s_inlineLayoutSnapshot.blockCount != doc.blocks.size() ||
+			s_inlineLayoutSnapshot.itemCount != doc.inlineItems.size() ||
+			blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return nullptr;
+		const uint64_t serial = doc.blocks[static_cast<size_t>(blockIndex)].inlineFlowSerial;
+		if (serial == 0) return nullptr;
+		for (const InlineFlowLayout& flow : s_inlineLayoutSnapshot.flows)
+			if (flow.flowSerial == serial) return &flow;
+		return nullptr;
+	}
+
+	static const InlineFlowLayout* inlineFlowForAnchor(const WebDocument& doc, int blockIndex)
+	{
+		const InlineFlowLayout* flow = inlineFlowForBlock(doc, blockIndex);
+		return flow && flow->anchorBlockIndex == blockIndex ? flow : nullptr;
+	}
+
+	static bool blockUsesInlineFlow(const WebDocument& doc, int blockIndex)
+	{
+		return inlineFlowForBlock(doc, blockIndex) != nullptr;
+	}
 }
 
 uint64_t Navigator::Launch()
@@ -4753,8 +5675,25 @@ bool Navigator::SmokeClickFirstLink()
 		s_scrollOffset = std::max(0, blockLayoutY(i) - 12);
 		clampScrollOffset();
 		Rect r = linkBlockRect(i);
-		const int x = r.x + std::min(std::max(2, r.w / 4), std::max(2, r.w - 2));
-		const int y = r.y + std::min(8, std::max(1, r.h - 1));
+		int x = r.x + std::min(std::max(2, r.w / 4), std::max(2, r.w - 2));
+		int y = r.y + std::min(8, std::max(1, r.h - 1));
+		ensureInlineLayout(s_currentDoc);
+		int hitIndex = -1;
+		Rect inlineFragments;
+		if (inlineFragmentRectForBlock(i, false, inlineFragments)) {
+			bool found = false;
+			for (int py = r.y; py < r.y + r.h && !found; py += 2) {
+				for (int px = r.x; px < r.x + r.w; px += 2) {
+					if (hitTest(px, py, hitIndex) == HitTarget::Link && hitIndex == i) {
+						x = px;
+						y = py;
+						found = true;
+						break;
+					}
+				}
+			}
+			if (!found) return false;
+		}
 		handleMouseInput(x, y, 1, "down");
 		handleMouseInput(x, y, 1, "up");
 		return s_currentDoc.url != before;
@@ -4771,8 +5710,25 @@ bool Navigator::SmokeDragFirstLinkSelectsWithoutNavigation()
 		s_scrollOffset = std::max(0, blockLayoutY(i) - 12);
 		clampScrollOffset();
 		Rect r = linkBlockRect(i);
-		const int x1 = r.x + std::min(std::max(2, r.w / 4), std::max(2, r.w - 2));
-		const int y1 = r.y + std::min(8, std::max(1, r.h - 1));
+		int x1 = r.x + std::min(std::max(2, r.w / 4), std::max(2, r.w - 2));
+		int y1 = r.y + std::min(8, std::max(1, r.h - 1));
+		ensureInlineLayout(s_currentDoc);
+		int hitIndex = -1;
+		Rect inlineFragments;
+		if (inlineFragmentRectForBlock(i, false, inlineFragments)) {
+			bool found = false;
+			for (int py = r.y; py < r.y + r.h && !found; py += 2) {
+				for (int px = r.x; px < r.x + r.w; px += 2) {
+					if (hitTest(px, py, hitIndex) == HitTarget::Link && hitIndex == i) {
+						x1 = px;
+						y1 = py;
+						found = true;
+						break;
+					}
+				}
+			}
+			if (!found) return false;
+		}
 		const int x2 = std::min(r.x + std::max(2, r.w - 2), x1 + std::max(kMouseDragThreshold + 1, kCharW * 3));
 		handleMouseInput(x1, y1, 1, "down");
 		handleMouseInput(x2, y1, 0, "move");
@@ -5624,6 +6580,7 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 
 void Navigator::renderDocument()
 {
+	ensureInlineLayout(s_currentDoc);
 	clampScrollOffset();
 	s_renderCounters = {};
 	s_cssClipDepth = 0;
@@ -5739,12 +6696,159 @@ void Navigator::renderDocument()
 		drawThemeRect(s_windowId, x, y, 1, bottom - y, ring);
 		drawThemeRect(s_windowId, right - 1, y, 1, bottom - y, ring);
 	};
+	auto renderInlineFlow = [&](const InlineFlowLayout& flow, int anchorIndex, const DocBlock& anchor) {
+		if (flow.lines.empty() || flow.style.displayNone || flow.style.visibility == VisibilityMode::Hidden) return;
+		const int drawY = kContentY + blockLayoutY(anchorIndex) - s_scrollOffset;
+		const int marginTop = cssMarginTopPx(flow.style, anchor.type == BlockType::Heading ? 10 : 4);
+		const int marginBottom = cssMarginBottomPx(flow.style, anchor.type == BlockType::ListItem ? 4 : 8);
+		const int boxY = drawY + marginTop;
+		const int boxH = std::max(1, flow.totalHeight - marginTop - marginBottom);
+		const int borderTop = cssBorderTopPx(flow.style);
+		const int paddingTop = cssPaddingTopPx(flow.style, 0);
+		const int baseY = boxY + borderTop + paddingTop;
+		const bool ancestorClipPushed = cssBlockHasOverflowAncestor(s_currentDoc, anchor) &&
+			cssPushPaintClip(cssBlockAncestorClip(s_currentDoc, anchor, s_scrollOffset));
+		s_cssPaintOpacityPercent = std::max(0, std::min(100, flow.style.effectiveOpacityPercent));
+		drawBlockBox(s_windowId, flow.outerX, boxY, flow.outerWidth, boxH, flow.style);
+		const bool blockClipPushed = (flow.style.overflowX != OverflowMode::Visible ||
+			flow.style.overflowY != OverflowMode::Visible) && cssPushPaintClip(
+			cssBlockVisibleClip(s_currentDoc, anchorIndex, anchor, flow.outerX, boxY,
+				flow.outerWidth, boxH, s_scrollOffset));
+		for (const InlineFragmentLayout& fragment : flow.fragments) {
+			if (!fragment.visible || fragment.itemIndex < 0 ||
+				fragment.itemIndex >= static_cast<int>(s_currentDoc.inlineItems.size())) continue;
+			const WebInlineItem& item = s_currentDoc.inlineItems[static_cast<size_t>(fragment.itemIndex)];
+			if (item.blockIndex < 0 || item.blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) continue;
+			const DocBlock& itemBlock = s_currentDoc.blocks[static_cast<size_t>(item.blockIndex)];
+			const WebStyle* ownerStyle = inlineOwnerStyle(s_currentDoc, item, flow.style);
+			if (!ownerStyle || ownerStyle->displayNone || ownerStyle->visibility == VisibilityMode::Hidden) continue;
+			WebStyle paintStyle = *ownerStyle;
+			if (itemBlock.type == BlockType::Link || !itemBlock.url.empty()) {
+				if (!paintStyle.hasColor) {
+					paintStyle.hasColor = true;
+					paintStyle.color = s_visitedUrls.find(itemBlock.url) != s_visitedUrls.end()
+						? 0xFF6B46C1u : 0xFF1E5CB8u;
+				}
+				if (!paintStyle.hasTextDecoration) {
+					paintStyle.hasTextDecoration = true;
+					paintStyle.underline = true;
+				}
+			}
+			s_cssPaintOpacityPercent = std::max(0, std::min(100, paintStyle.effectiveOpacityPercent));
+			const int fragX = flow.contentX + fragment.x;
+			const int fragY = baseY + fragment.y;
+			const int padLeft = cssPaddingLeftPx(paintStyle, 0);
+			const int padRight = cssPaddingRightPx(paintStyle, 0);
+			const int padTop = cssPaddingTopPx(paintStyle, 0);
+			const int padBottom = cssPaddingBottomPx(paintStyle, 0);
+			const int borderLeft = cssBorderLeftPx(paintStyle);
+			const int borderRight = cssBorderRightPx(paintStyle);
+			const int borderTopItem = cssBorderTopPx(paintStyle);
+			const int borderBottomItem = cssBorderBottomPx(paintStyle);
+			if (paintStyle.hasBackgroundColor || borderLeft > 0 || borderRight > 0 ||
+				borderTopItem > 0 || borderBottomItem > 0) {
+				drawBoxDecorations(s_windowId,
+					fragX - padLeft - borderLeft,
+					fragY - padTop - borderTopItem,
+					std::max(1, fragment.w + padLeft + padRight + borderLeft + borderRight),
+					std::max(1, fragment.h + padTop + padBottom + borderTopItem + borderBottomItem),
+					paintStyle);
+			}
+			if (fragment.kind == InlineItemKind::TextRun) {
+				std::string text;
+				if (fragment.collapsedWhitespace && fragment.sourceLength == 0) {
+					text = " ";
+				} else if (fragment.sourceLength > 0 &&
+					static_cast<size_t>(fragment.sourceOffset) < item.text.size()) {
+					const size_t start = static_cast<size_t>(std::max(0, fragment.sourceOffset));
+					text = item.text.substr(start, static_cast<size_t>(std::min<int>(
+						fragment.sourceLength, static_cast<int>(item.text.size() - start))));
+				}
+				if (!text.empty()) {
+					drawTextAtStyled(s_windowId, fragX + fragment.contentOffsetX, fragY, text, paintStyle,
+						contentTextColor, std::max(1, fragment.h));
+				}
+			} else if (fragment.kind == InlineItemKind::ReplacedImage) {
+				const ImageInfo& info = imageInfoForBlock(itemBlock);
+				if (info.ok) {
+					drawImage(s_windowId, fragX, fragY, fragment.w, fragment.h, info.drawPath);
+				} else {
+					drawThemeRect(s_windowId, fragX, fragY, fragment.w, fragment.h, NavigatorContentColor());
+					drawThemeRect(s_windowId, fragX, fragY, fragment.w, 1, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, fragX, fragY + fragment.h - 1, fragment.w, 1, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, fragX, fragY, 1, fragment.h, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, fragX + fragment.w - 1, fragY, 1, fragment.h, NavigatorContentBorderColor());
+					const std::string placeholder = imagePlaceholderText(itemBlock, info);
+					const int maxChars = std::max(1, (fragment.w - 12) / kCharW);
+					std::string clipped = placeholder.substr(0, static_cast<size_t>(maxChars));
+					drawTextAtStyled(s_windowId, fragX + 6,
+						fragY + std::max(1, (fragment.h - kLineH) / 2), clipped,
+						paintStyle, contentTextColor, std::max(1, fragment.h));
+				}
+			} else if (fragment.kind == InlineItemKind::FormControl) {
+				const int controlW = std::max(1, fragment.w);
+				const int controlH = std::max(1, fragment.h);
+				const bool focused = isFocusedFormControl(itemBlock);
+				const bool disabled = runtimeDisabled(itemBlock);
+				const uint32_t border = formBorderColor(itemBlock, focused, disabled);
+				if (itemBlock.type == BlockType::FormCheckbox || itemBlock.type == BlockType::FormRadio) {
+					const int box = std::min(14, controlH);
+					const int boxY = fragY + std::max(0, (controlH - box) / 2);
+					drawThemeRect(s_windowId, fragX, boxY, box, box, formFillColor(itemBlock, focused, disabled));
+					drawThemeRect(s_windowId, fragX, boxY, box, 1, border);
+					drawThemeRect(s_windowId, fragX, boxY + box - 1, box, 1, border);
+					drawThemeRect(s_windowId, fragX, boxY, 1, box, border);
+					drawThemeRect(s_windowId, fragX + box - 1, boxY, 1, box, border);
+					if (runtimeChecked(itemBlock)) {
+						if (itemBlock.type == BlockType::FormRadio)
+							drawThemeRect(s_windowId, fragX + 4, boxY + 4, std::max(1, box - 8), std::max(1, box - 8), disabled ? border : NavigatorAccentColor());
+						else drawThemeText(s_windowId, fragX + 3, boxY - 2, "x", disabled ? border : NavigatorAccentColor());
+					}
+					std::string label = itemBlock.text.empty() ? itemBlock.inputName : itemBlock.text;
+					const int labelMax = std::max(0, (controlW - box - 8) / kCharW);
+					if (static_cast<int>(label.size()) > labelMax) label.resize(static_cast<size_t>(labelMax));
+					if (!label.empty()) drawThemeText(s_windowId, fragX + box + 8,
+						centeredChromeTextY(fragY, controlH), label, formTextColor(itemBlock, disabled, false));
+				} else {
+					drawThemeRect(s_windowId, fragX, fragY, controlW, controlH,
+						itemBlock.type == BlockType::FormSubmit
+							? (disabled ? 0xFFE3E6EAu : NavigatorButtonFillColor(focused, false))
+							: formFillColor(itemBlock, focused, disabled));
+					drawThemeRect(s_windowId, fragX, fragY, controlW, 1, border);
+					drawThemeRect(s_windowId, fragX, fragY + controlH - 1, controlW, 1, border);
+					drawThemeRect(s_windowId, fragX, fragY, 1, controlH, border);
+					drawThemeRect(s_windowId, fragX + controlW - 1, fragY, 1, controlH, border);
+					std::string label = itemBlock.type == BlockType::FormSubmit
+						? (itemBlock.submitLabel.empty() ? "Submit" : itemBlock.submitLabel)
+						: (itemBlock.inputValue.empty() ? itemBlock.placeholder : itemBlock.inputValue);
+					const int labelMax = std::max(1, (controlW - 14) / kCharW);
+					if (static_cast<int>(label.size()) > labelMax) label.resize(static_cast<size_t>(labelMax));
+					if (!label.empty()) drawThemeText(s_windowId, fragX + 8,
+						centeredChromeTextY(fragY, controlH), label,
+						itemBlock.type == BlockType::FormSubmit && !disabled
+							? (itemBlock.style.hasColor ? itemBlock.style.color : NavigatorButtonTextColor(false))
+							: formTextColor(itemBlock, disabled, itemBlock.inputValue.empty()));
+				}
+				drawDefaultFocusRing(item.blockIndex, itemBlock);
+			}
+		}
+		if (blockClipPushed) cssPopPaintClip();
+		if (ancestorClipPushed) cssPopPaintClip();
+		s_cssPaintOpacityPercent = 100;
+	};
 	for (const DocBlock& block : s_currentDoc.blocks) {
 		if (!blockHasVisibleCss(block)) {
 			++blockIndex;
 			continue;
 		}
 		renderFieldsetAt(blockIndex);
+		if (blockUsesInlineFlow(s_currentDoc, blockIndex)) {
+			if (const InlineFlowLayout* flow = inlineFlowForAnchor(s_currentDoc, blockIndex)) {
+				renderInlineFlow(*flow, blockIndex, block);
+			}
+			++blockIndex;
+			continue;
+		}
 		int relY  = blockLayoutY(blockIndex);
 		int drawY = kContentY + relY - s_scrollOffset;
 		const int blockMarginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
@@ -6822,6 +7926,7 @@ void Navigator::recomputeFormControlStyles()
 	++s_currentDoc.cssDiagnostics.checkedRuntimeRecomputations;
 	++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
 	gxos::web::recomputeDocumentStyles(s_currentDoc);
+	s_inlineLayoutDirty = true;
 	// Runtime CSS can hide or disable the focused logical control.  Clear that
 	// state and run one bounded second recomputation so :focus never survives
 	// its own invalidation.
@@ -6835,6 +7940,7 @@ void Navigator::recomputeFormControlStyles()
 		clearDocumentFocus(false, reason);
 		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
 		gxos::web::recomputeDocumentStyles(s_currentDoc);
+		s_inlineLayoutDirty = true;
 	}
 	if (focusWasValid && s_currentDoc.formRuntimeState.focusValid &&
 		ensureFocusedControlStillValid()) {
@@ -6891,6 +7997,7 @@ void Navigator::clearDocumentFocus(bool recomputeStyles, FormFocusCancellationRe
 	if (recomputeStyles) {
 		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
 		gxos::web::recomputeDocumentStyles(s_currentDoc);
+		s_inlineLayoutDirty = true;
 		if (visibleDocumentOwnsInspectedSource())
 			storePageMetadata(s_pageMetadata, s_currentDoc);
 	}
@@ -6927,13 +8034,36 @@ bool Navigator::smokeClickBlock(int blockIndex, bool label)
 	clampScrollOffset();
 	const Rect rect = label ? selectableBlockRect(blockIndex) : formControlRect(blockIndex);
 	if (rect.w <= 0 || rect.h <= 0) return false;
-	const int x = rect.x + rect.w / 2;
-	const int y = rect.y + rect.h / 2;
+	int x = rect.x + rect.w / 2;
+	int y = rect.y + rect.h / 2;
 	int hitIndex = -1;
-	const HitTarget expected = hitTest(x, y, hitIndex);
-	if (hitIndex != blockIndex || (label ? expected != HitTarget::FormLabel :
-		(expected != HitTarget::FormCheckbox && expected != HitTarget::FormRadio &&
-		 expected != HitTarget::FormSubmit))) return false;
+	auto acceptableTarget = [&](HitTarget target, int index) {
+		return index == blockIndex && (label ? target == HitTarget::FormLabel :
+			(target == HitTarget::FormCheckbox || target == HitTarget::FormRadio ||
+			 target == HitTarget::FormSubmit));
+	};
+	HitTarget expected = hitTest(x, y, hitIndex);
+	if (!acceptableTarget(expected, hitIndex)) {
+		const int stepX = std::max(1, rect.w / 32);
+		const int stepY = std::max(1, rect.h / 16);
+		bool found = false;
+		int samples = 0;
+		for (int py = rect.y; py < rect.y + rect.h && !found && samples < 2048; py += stepY) {
+			for (int px = rect.x; px < rect.x + rect.w && samples < 2048; px += stepX) {
+				++samples;
+				int candidateIndex = -1;
+				const HitTarget candidate = hitTest(px, py, candidateIndex);
+				if (!acceptableTarget(candidate, candidateIndex)) continue;
+				x = px;
+				y = py;
+				hitIndex = candidateIndex;
+				expected = candidate;
+				found = true;
+				break;
+			}
+		}
+		if (!found) return false;
+	}
 	handleMouseInput(x, y, 1, "down");
 	handleMouseInput(x, y, 1, "up");
 	return true;
@@ -7352,6 +8482,8 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 	const DocBlock& block = s_currentDoc.blocks[blockIndex];
 	if (!blockHasVisibleCss(block)) return Rect{ 0, 0, 0, 0 };
 	if (!isSelectableBlock(block)) return Rect{ 0, 0, 0, 0 };
+	Rect inlineRect;
+	if (inlineFragmentRectForBlock(blockIndex, false, inlineRect)) return inlineRect;
 	if (isTableCellLikeBlock(block)) {
 		if (!isFirstTableCellInGroup(s_currentDoc, blockIndex)) return Rect{ 0, 0, 0, 0 };
 		const int groupStart = tableGroupStartIndex(s_currentDoc, blockIndex);
@@ -7974,6 +9106,7 @@ void Navigator::submitFormForBlock(int blockIndex)
 		if (!s_currentDoc.url.empty()) s_backStack.push_back(s_currentDoc.url);
 		s_forwardStack.clear();
 		s_currentDoc = std::move(doc);
+		s_inlineLayoutDirty = true;
 		s_documentHeight = computeDocumentHeight();
 		s_lastSubmittedFormStatus = "local POST unsupported";
 		storePageMetadata(metadata, s_currentDoc);
@@ -7993,6 +9126,7 @@ void Navigator::submitFormForBlock(int blockIndex)
 	if (!s_currentDoc.url.empty()) s_backStack.push_back(s_currentDoc.url);
 	s_forwardStack.clear();
 	s_currentDoc = loadHttpResponseDocument(action, response);
+	s_inlineLayoutDirty = true;
 	s_scrollOffset = 0;
 	s_documentHeight = computeDocumentHeight();
 	s_lastSubmittedFormStatus = response.ok() ? "POST submitted" : std::string("POST failed: ") + gxos::web::httpErrorName(response.error);
@@ -8318,7 +9452,11 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 		if (s_currentDoc.blocks[i].type == BlockType::Link) {
-			if (linkBlockRect(i).contains(x, y)) {
+			ensureInlineLayout(s_currentDoc);
+			Rect inlineFragments;
+			const bool hasInlineFragments = inlineFragmentRectForBlock(i, false, inlineFragments);
+			if (inlineFragmentContainsPoint(i, x, y) ||
+				(!hasInlineFragments && linkBlockRect(i).contains(x, y))) {
 				outLinkBlockIndex = i;
 				return HitTarget::Link;
 			}
@@ -8968,6 +10106,11 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS opacity zero boxes", m.cssOpacityZeroBoxes), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS vertical-align applications", m.cssVerticalAlignApplications), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS geometry evidence records", m.cssEvidenceRecordCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS inline items", m.cssInlineItems), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS line boxes", m.cssLineBoxes), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS inline fragments", m.cssInlineFragments), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS inline hit fragments", m.cssInlineHitFragments), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS inline evidence records", m.cssInlineEvidenceRecordCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Downloaded", yesNo(m.downloaded)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download saved path", m.downloadSavedPath), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download byte count", static_cast<int>(m.downloadByteCount)), ""});
@@ -9880,6 +11023,7 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 
 int Navigator::blockLayoutY(int blockIndex)
 {
+	ensureInlineLayout(s_currentDoc);
 	// Returns the Y coordinate of blockIndex relative to kContentY (pre-scroll).
 	const int bodyTop = s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0;
 	int y = kHeadingY + bodyTop;
@@ -9895,10 +11039,81 @@ int Navigator::blockLayoutY(int blockIndex)
 	return y;
 }
 
+bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespace, Rect& out)
+{
+	out = Rect{0, 0, 0, 0};
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (!blockHasVisibleCss(block)) return false;
+	ensureInlineLayout(s_currentDoc);
+	const InlineFlowLayout* flow = inlineFlowForBlock(s_currentDoc, blockIndex);
+	if (!flow || flow->anchorBlockIndex < 0 || flow->anchorBlockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
+	const int drawY = kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset;
+	const int boxY = drawY + cssMarginTopPx(flow->style,
+		s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading ? 10 : 4);
+	const int boxH = std::max(1, flow->totalHeight - cssMarginTopPx(flow->style, 4) -
+		cssMarginBottomPx(flow->style, 8));
+	int left = std::numeric_limits<int>::max();
+	int top = std::numeric_limits<int>::max();
+	int right = 0;
+	int bottom = 0;
+	bool found = false;
+	for (const InlineFragmentLayout& fragment : flow->fragments) {
+		if (!fragment.visible || fragment.blockIndex != blockIndex ||
+			(!includeWhitespace && fragment.whitespace)) continue;
+		const int x = flow->contentX + fragment.x;
+		const int y = drawY + flow->contentOffsetY + fragment.y;
+		left = std::min(left, x);
+		top = std::min(top, y);
+		right = std::max(right, x + std::max(0, fragment.w));
+		bottom = std::max(bottom, y + std::max(0, fragment.h));
+		found = true;
+	}
+	if (!found || right <= left || bottom <= top) return false;
+	const CssPaintRect clipped = cssClipHitTarget(
+		CssPaintRect{left, top, right - left, bottom - top},
+		cssClipRectForHit(s_currentDoc, flow->anchorBlockIndex,
+			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)],
+			flow->outerX, boxY, flow->outerWidth, boxH, s_scrollOffset));
+	out = Rect{clipped.x, clipped.y, clipped.w, clipped.h};
+	return out.w > 0 && out.h > 0;
+}
+
+bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (!blockHasVisibleCss(block)) return false;
+	ensureInlineLayout(s_currentDoc);
+	const InlineFlowLayout* flow = inlineFlowForBlock(s_currentDoc, blockIndex);
+	if (!flow || flow->anchorBlockIndex < 0 ||
+		flow->anchorBlockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
+	const int drawY = kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset;
+	const int boxY = drawY + cssMarginTopPx(flow->style,
+		s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading ? 10 : 4);
+	const int boxH = std::max(1, flow->totalHeight - cssMarginTopPx(flow->style, 4) -
+		cssMarginBottomPx(flow->style, 8));
+	const CssPaintRect clip = cssClipRectForHit(
+		s_currentDoc, flow->anchorBlockIndex,
+		s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)],
+		flow->outerX, boxY, flow->outerWidth, boxH, s_scrollOffset);
+	for (const InlineFragmentLayout& fragment : flow->fragments) {
+		if (!fragment.visible || fragment.whitespace || fragment.blockIndex != blockIndex) continue;
+		const CssPaintRect clipped = cssClipHitTarget(
+			CssPaintRect{flow->contentX + fragment.x,
+				drawY + flow->contentOffsetY + fragment.y,
+				std::max(0, fragment.w), std::max(0, fragment.h)}, clip);
+		if (clipped.w > 0 && clipped.h > 0 &&
+			x >= clipped.x && x < clipped.x + clipped.w &&
+			y >= clipped.y && y < clipped.y + clipped.h) return true;
+	}
+	return false;
+}
+
 Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 {
-	// The entire wrapped link height is clickable.
-	// TODO: per-line hit testing when proportional text measurement is available.
+	Rect inlineRect;
+	if (inlineFragmentRectForBlock(blockIndex, false, inlineRect)) return inlineRect;
 	const DocBlock& block = s_currentDoc.blocks[blockIndex];
 	if (!blockHasVisibleCss(block)) return Rect{0, 0, 0, 0};
 	const int blockMarginTop = cssMarginTopPx(block.style, 4);
@@ -9932,6 +11147,8 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	}
 	const DocBlock& block = s_currentDoc.blocks[blockIndex];
 	if (!blockHasVisibleCss(block)) return Rect{0, 0, 0, 0};
+	Rect inlineRect;
+	if (inlineFragmentRectForBlock(blockIndex, true, inlineRect)) return inlineRect;
 	const int blockMarginTop = cssMarginTopPx(block.style, 4);
 	const int paddingTop = cssPaddingTopPx(block.style, 0);
 	const int availableWidth = blockAvailableWidth(block, s_currentDoc);
@@ -9959,6 +11176,7 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 
 int Navigator::computeDocumentHeight()
 {
+	ensureInlineLayout(s_currentDoc);
 	int h = kHeadingY + (s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0);
 	const int n = static_cast<int>(s_currentDoc.blocks.size());
 	for (int idx = 0; idx < n; ++idx) {

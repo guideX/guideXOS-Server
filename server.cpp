@@ -951,6 +951,53 @@ static std::string navigatorHostedSmokeDiagnostic() {
         "report=\"" + summarizeText(cssPhase3aReport, 260) + "\"" +
         " clip=" + cssPhase3aMetric("Current Document.css_clip_records=", 300));
 
+    bool cssPhase3bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3b.html");
+    std::string cssPhase3bText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3bMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3bReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3bReport.find('\n', pos);
+        return cssPhase3bReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3B inline fixture loads",
+        cssPhase3bLoaded &&
+        contains(cssPhase3bText, "g j p q y descenders") &&
+        contains(cssPhase3bText, "span bold italic code") &&
+        contains(cssPhase3bText, "nowrap text remains one unbroken inline run") &&
+        contains(cssPhase3bText, "pre  formatted") &&
+        contains(cssPhase3bText, "Checkbox") &&
+        contains(cssPhase3bText, "empty line follows break"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3B line boxes, whitespace, replaced items, and controls",
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_items=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_text_runs=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_whitespace_runs=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_line_boxes=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_line_wraps=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_whitespace_collapses=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_replaced_inline_items=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_control_inline_items=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_descender_safe_lines=") &&
+        contains(cssPhase3bReport, "Current Document.css_inline_evidence_records="),
+        "report=\"" + summarizeText(cssPhase3bReport, 420) + "\"" +
+        " metrics=" + cssPhase3bMetric("Current Document.css_inline_items=") + ";" +
+        cssPhase3bMetric("Current Document.css_inline_text_runs=") + ";" +
+        cssPhase3bMetric("Current Document.css_inline_whitespace_runs=") + ";" +
+        cssPhase3bMetric("Current Document.css_line_boxes=") + ";" +
+        cssPhase3bMetric("Current Document.css_line_wraps=") + ";" +
+        cssPhase3bMetric("Current Document.css_whitespace_collapses=") + ";" +
+        cssPhase3bMetric("Current Document.css_replaced_inline_items=") + ";" +
+        cssPhase3bMetric("Current Document.css_control_inline_items=") + ";" +
+        cssPhase3bMetric("Current Document.css_descender_safe_lines=") + ";" +
+        cssPhase3bMetric("Current Document.css_inline_evidence_records=") + ";evidence=" +
+        summarizeText(cssPhase3bMetric("Current Document.css_inline_evidence="), 1200));
+    add("CSS phase 3B vertical alignment and focus geometry",
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_vertical_align_adjustments=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_hit_fragments=") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase3b-button"),
+        "report=\"" + summarizeText(cssPhase3bReport, 320) + "\"");
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();
@@ -1441,7 +1488,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ",reset=" + yesNo(phase2fResetClick) + ",count-before=" + std::to_string(buttonActivationBefore) +
         ",count-after=" + std::to_string(gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-button")) +
         ",url-same=" + yesNo(gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2fUrl) +
-        ",disabled=" + yesNo(phase2fDisabledButton));
+        ",disabled=" + yesNo(phase2fDisabledButton) +
+        ",reset-target=" + yesNo(gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-reset")) +
+        ",inline-controls=" + std::to_string(countValue(cssPhase2fReport, "Current Document.css_control_inline_items=")));
     add("CSS phase 2F hit targets and mouse release safety",
         gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-checkbox") &&
         !gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-hidden") &&

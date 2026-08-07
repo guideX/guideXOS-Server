@@ -253,6 +253,30 @@ struct NavigatorPageMetadata {
 		int         cssEvidenceRecordCount = 0;
 		int         cssOpacityImageApproximation = 0;
 		std::string cssGeometryEvidence;
+		// Phase 3B bounded inline-flow diagnostics/evidence.
+		int         cssInlineItems = 0;
+		int         cssInlineTextRuns = 0;
+		int         cssInlineWhitespaceRuns = 0;
+		int         cssInlineForcedBreaks = 0;
+		int         cssLineBoxes = 0;
+		int         cssLineWraps = 0;
+		int         cssWhitespaceCollapses = 0;
+		int         cssLeadingSpaceSuppressions = 0;
+		int         cssTrailingSpaceSuppressions = 0;
+		int         cssReplacedInlineItems = 0;
+		int         cssControlInlineItems = 0;
+		int         cssVerticalAlignAdjustments = 0;
+		int         cssLineHeightClamps = 0;
+		int         cssBaselineIterationClamps = 0;
+		int         cssInlineFragments = 0;
+		int         cssInlineFragmentClamps = 0;
+		int         cssInlineHitFragments = 0;
+		int         cssDescenderSafeLines = 0;
+		int         cssInlineBlockItems = 0;
+		int         cssInlineNestingClamps = 0;
+		int         cssInlineWrapScanClamps = 0;
+		int         cssInlineEvidenceRecordCount = 0;
+		std::string cssInlineEvidence;
 	bool        downloaded = false;
 	std::string downloadSavedPath;
 	size_t      downloadByteCount = 0;
@@ -661,6 +685,8 @@ private:
 	static Rect      linkBlockRect(int blockIndex); // absolute screen rect
 	static Rect      formControlRect(int blockIndex);
 	static Rect      selectableBlockRect(int blockIndex);
+	static bool      inlineFragmentRectForBlock(int blockIndex, bool includeWhitespace, Rect& out);
+	static bool      inlineFragmentContainsPoint(int blockIndex, int x, int y);
 	static int       computeDocumentHeight();
 	static int       maxScrollOffset();
 	static void      clampScrollOffset();
