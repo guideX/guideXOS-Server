@@ -122,6 +122,8 @@ struct NavigatorPageMetadata {
 		int         cssTableLayoutFallbackCount = 0;
 		int         cssListRenderCount = 0;
 		int         cssClampedValueCount = 0;
+		int         cssLengthValueClampCount = 0;
+		int         cssInvalidLengthValueCount = 0;
 		int         cssLineBreakCount = 0;
 		int         cssTableCaptionCount = 0;
 		int         cssTableHeaderCellCount = 0;

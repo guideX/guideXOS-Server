@@ -202,6 +202,10 @@ namespace {
 		bool heightAuto = false;
 		bool widthPercentageUnresolved = false;
 		bool heightPercentageUnresolved = false;
+		bool minWidthApplied = false;
+		bool maxWidthApplied = false;
+		bool minHeightApplied = false;
+		bool maxHeightApplied = false;
 		bool constraintConflict = false;
 		bool clamped = false;
 	};
@@ -212,6 +216,7 @@ namespace {
 	static int s_cssPaintOpacityPercent = 100;
 	static int s_cssClippedPaintOps = 0;
 	static int s_cssClipIntersections = 0;
+	static int s_cssClipRecordCount = 0;
 	static int s_cssClipDepthClamps = 0;
 	static int s_cssClippedHitTargets = 0;
 	static int s_cssHitTargetsBeforeClipping = 0;
@@ -259,6 +264,7 @@ namespace {
 			return false;
 		}
 		const CssPaintRect combined = cssPaintRectIntersect(cssCurrentPaintClip(), clip);
+		++s_cssClipRecordCount;
 		if (combined.w != clip.w || combined.h != clip.h || combined.x != clip.x || combined.y != clip.y)
 			++s_cssClipIntersections;
 		s_cssClipStack[static_cast<size_t>(s_cssClipDepth++)] = combined;
@@ -1566,6 +1572,7 @@ namespace {
 	static TableGroupLayout buildTableGroupLayout(const WebDocument& doc, int startIndex);
 	static int blockContainingContentHeight(const DocBlock& block, const WebDocument& doc);
 	static CssBlockGeometry cssGeometryForBlock(const WebDocument& doc, int blockIndex);
+	static bool cssBlockHasOverflowAncestor(const WebDocument& doc, const DocBlock& block);
 	static std::string cssNavigatorLengthEvidence(const CssLengthValue& value);
 
 	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc)
@@ -1601,6 +1608,8 @@ namespace {
 		metadata.cssTableLayoutFallbackCount = 0;
 		metadata.cssListRenderCount = 0;
 		metadata.cssClampedValueCount = doc.cssDiagnostics.clampedValueCount;
+		metadata.cssLengthValueClampCount = doc.cssDiagnostics.lengthValueClampCount;
+		metadata.cssInvalidLengthValueCount = doc.cssDiagnostics.invalidLengthValueCount;
 		metadata.cssBorderWidthClamps = doc.cssDiagnostics.borderWidthClampCount;
 		metadata.cssTableBorderSpacingClamps = doc.cssDiagnostics.borderSpacingClampCount;
 		metadata.cssLineBreakCount = doc.cssDiagnostics.lineBreakCount;
@@ -1724,7 +1733,7 @@ namespace {
 		metadata.cssBoxGeometryClamps = 0;
 		metadata.cssLayoutPasses = 1;
 		metadata.cssLayoutRecomputations = 0;
-		metadata.cssClipRecordCount = std::max(0, s_cssClipIntersections);
+		metadata.cssClipRecordCount = 0;
 		metadata.cssHitTargetsBeforeClipping = s_cssHitTargetsBeforeClipping;
 		metadata.cssHitTargetsAfterClipping = s_cssHitTargetsAfterClipping;
 		metadata.cssOpacityImageApproximation = 0;
@@ -1819,6 +1828,10 @@ namespace {
 			metadata.cssMaxWrapperAncestorDepth = std::max(metadata.cssMaxWrapperAncestorDepth, wrapperDepth);
 			const int availableWidth = blockAvailableWidth(block, doc);
 			const CssBlockGeometry geometry = cssGeometryForBlock(doc, static_cast<int>(i));
+			const bool hasOwnOverflowClip = block.style.overflowX != OverflowMode::Visible ||
+				block.style.overflowY != OverflowMode::Visible;
+			if (hasOwnOverflowClip || cssBlockHasOverflowAncestor(doc, block))
+				++metadata.cssClipRecordCount;
 			if (block.style.boxSizing == BoxSizingMode::BorderBox) ++metadata.cssBoxSizingBorderBox;
 			else ++metadata.cssBoxSizingContentBox;
 			if (geometry.widthAuto) ++metadata.cssWidthAutoResolutions;
@@ -1845,15 +1858,12 @@ namespace {
 			if (minHeightSet) ++metadata.cssMinHeightConstraints;
 			if (maxHeightSet) ++metadata.cssMaxHeightConstraints;
 			if (geometry.constraintConflict) ++metadata.cssConstraintConflicts;
-			const bool overflowX = block.style.overflowX != OverflowMode::Visible;
-			const bool overflowY = block.style.overflowY != OverflowMode::Visible;
 			if (block.style.overflowX == OverflowMode::Hidden || block.style.overflowY == OverflowMode::Hidden)
 				++metadata.cssOverflowHiddenBoxes;
 			if (block.style.overflowX == OverflowMode::Auto || block.style.overflowY == OverflowMode::Auto)
 				++metadata.cssOverflowAutoBoxes;
 			if (block.style.overflowX == OverflowMode::Scroll || block.style.overflowY == OverflowMode::Scroll)
 				++metadata.cssOverflowScrollDeferred;
-			if (overflowX || overflowY) ++metadata.cssClipRecordCount;
 			if (block.style.visibility == VisibilityMode::Hidden) ++metadata.cssVisibilityHiddenBoxes;
 			if (block.style.opacityPercent < 100 || block.style.effectiveOpacityPercent < 100) ++metadata.cssOpacityBoxes;
 			if (block.style.effectiveOpacityPercent == 0) ++metadata.cssOpacityZeroBoxes;
@@ -1871,7 +1881,7 @@ namespace {
 				std::string boundedId = block.id.substr(0, std::min<size_t>(64, block.id.size()));
 				for (char& ch : boundedId) if (ch == '\n' || ch == '\r' || ch == ';') ch = '_';
 				std::ostringstream evidence;
-				evidence << "id=" << boundedId
+					evidence << "id=" << boundedId
 					<< ",box-sizing=" << (block.style.boxSizing == BoxSizingMode::BorderBox ? "border-box" : "content-box")
 					<< ",specified-width=" << cssNavigatorLengthEvidence(block.style.widthValue)
 					<< ",specified-height=" << cssNavigatorLengthEvidence(block.style.heightValue)
@@ -1880,6 +1890,10 @@ namespace {
 					<< ",basis-height-definite=" << (blockContainingContentHeight(block, doc) >= 0 ? "yes" : "no")
 					<< ",used-content-width=" << geometry.contentWidth
 					<< ",used-content-height=" << geometry.contentHeight
+					<< ",min-width-applied=" << (geometry.minWidthApplied ? "yes" : "no")
+					<< ",max-width-applied=" << (geometry.maxWidthApplied ? "yes" : "no")
+					<< ",min-height-applied=" << (geometry.minHeightApplied ? "yes" : "no")
+					<< ",max-height-applied=" << (geometry.maxHeightApplied ? "yes" : "no")
 					<< ",padding-box=" << geometry.paddingBox.x << ":" << geometry.paddingBox.y << ":" << geometry.paddingBox.w << ":" << geometry.paddingBox.h
 					<< ",border-box=" << geometry.outerX << ":" << geometry.outerY << ":" << geometry.outerWidth << ":" << geometry.outerHeight
 					<< ",outer-box=" << geometry.outerX << ":" << geometry.outerY << ":" << geometry.outerWidth << ":" << geometry.outerHeight
@@ -2339,12 +2353,15 @@ namespace {
 		bool maxNone, int basis, int fallbackOuter, int boxEdges,
 		bool preformattedDefaults, bool* outAuto = nullptr,
 		bool* outUnresolvedPercentage = nullptr, bool* outConstraintConflict = nullptr,
-		bool* outClamped = nullptr)
+		bool* outClamped = nullptr,
+		bool* outMinApplied = nullptr, bool* outMaxApplied = nullptr)
 	{
 		if (outAuto) *outAuto = false;
 		if (outUnresolvedPercentage) *outUnresolvedPercentage = false;
 		if (outConstraintConflict) *outConstraintConflict = false;
 		if (outClamped) *outClamped = false;
+		if (outMinApplied) *outMinApplied = false;
+		if (outMaxApplied) *outMaxApplied = false;
 		const CssResolvedLength resolved = resolveCssLength(value, legacyPx, legacyPercent, basis);
 		if (resolved.unresolvedPercentage && outUnresolvedPercentage) *outUnresolvedPercentage = true;
 		if (resolved.clamped && outClamped) *outClamped = true;
@@ -2379,8 +2396,14 @@ namespace {
 			maxOuter = minOuter;
 			if (outConstraintConflict) *outConstraintConflict = true;
 		}
-		if (minOuter >= 0 && outer < minOuter) outer = minOuter;
-		if (maxOuter >= 0 && outer > maxOuter) outer = maxOuter;
+		if (minOuter >= 0 && outer < minOuter) {
+			outer = minOuter;
+			if (outMinApplied) *outMinApplied = true;
+		}
+		if (maxOuter >= 0 && outer > maxOuter) {
+			outer = maxOuter;
+			if (outMaxApplied) *outMaxApplied = true;
+		}
 		if (outer > 8192) {
 			outer = 8192;
 			if (outClamped) *outClamped = true;
@@ -3300,29 +3323,256 @@ namespace {
 		return CssPaintRect{kContentX, kToolbarH + 6, kContentW, kContentH};
 	}
 
-	static CssPaintRect cssBlockVisibleClip(const DocBlock& block, int outerX, int boxY, int outerW, int outerH)
+	static int cssBlockLayoutY(const WebDocument& doc, int blockIndex);
+
+	static const gxos::web::HtmlElementRef* cssStructuralElementForSerial(
+		const WebDocument& doc, uint64_t serial)
 	{
-		CssPaintRect clip = cssViewportClipRect();
-		const int borderLeft = cssBorderLeftPx(block.style);
-		const int borderRight = cssBorderRightPx(block.style);
-		const int borderTop = cssBorderTopPx(block.style);
-		const int borderBottom = cssBorderBottomPx(block.style);
+		if (serial == 0) return nullptr;
+		for (const gxos::web::HtmlElementRef& element : doc.structuralElements) {
+			if (element.serial == serial) return &element;
+		}
+		return nullptr;
+	}
+
+	static bool cssBlockContainsSerial(const DocBlock& block, uint64_t serial)
+	{
+		if (serial == 0) return false;
+		if (block.elementMetadata.serial == serial) return true;
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			if (ancestor.serial == serial) return true;
+		}
+		return false;
+	}
+
+	static bool cssDescendantBlockRange(const WebDocument& doc, uint64_t serial,
+		int& outFirst, int& outLast)
+	{
+		outFirst = -1;
+		outLast = -1;
+		const size_t scanLimit = std::min<size_t>(doc.blocks.size(), 2048);
+		for (size_t i = 0; i < scanLimit; ++i) {
+			const DocBlock& block = doc.blocks[i];
+			if (block.style.displayNone || !cssBlockContainsSerial(block, serial)) continue;
+			if (outFirst < 0) outFirst = static_cast<int>(i);
+			outLast = static_cast<int>(i);
+		}
+		return outFirst >= 0 && outLast >= outFirst;
+	}
+
+	static int cssBodyContentWidth(const WebDocument& doc)
+	{
+		const int bodyOuterBasis = std::max(1, kContentW - blockBodyMarginLeft(doc) -
+			blockBodyMarginRight(doc));
+		const int bodyEdges = cssHorizontalBoxEdges(doc.bodyStyle);
+		const int bodyOuter = resolveUsedOuterDimension(doc.bodyStyle,
+			doc.bodyStyle.widthValue, doc.bodyStyle.width, doc.bodyStyle.widthPercent,
+			doc.bodyStyle.minWidthValue, doc.bodyStyle.minWidth, doc.bodyStyle.minWidthPercent,
+			doc.bodyStyle.maxWidthValue, doc.bodyStyle.maxWidth, doc.bodyStyle.maxWidthPercent,
+			doc.bodyStyle.maxWidthNone, bodyOuterBasis, bodyOuterBasis, bodyEdges, false);
+		return std::max(1, usedContentDimensionFromOuter(doc.bodyStyle, bodyOuter, bodyEdges));
+	}
+
+	static int cssContainingContentWidthForSerial(const WebDocument& doc, uint64_t parentSerial)
+	{
+		if (parentSerial == 0) return cssBodyContentWidth(doc);
+		std::array<uint64_t, 12> chain{};
+		size_t count = 0;
+		uint64_t current = parentSerial;
+		while (current != 0) {
+			if (count >= chain.size()) return -1;
+			const gxos::web::HtmlElementRef* element = cssStructuralElementForSerial(doc, current);
+			if (!element) return -1;
+			chain[count++] = current;
+			current = element->parentSerial;
+		}
+		int basis = cssBodyContentWidth(doc);
+		for (size_t reverse = count; reverse > 0; --reverse) {
+			const uint64_t serial = chain[reverse - 1];
+			if (doc.hasBodyElement && serial == doc.bodyElement.serial) continue;
+			const WebStyle* style = computedStyleForSerial(doc, serial);
+			if (!style) continue;
+			const int edges = cssHorizontalBoxEdges(*style);
+			basis = usedContentDimensionFromOuter(*style,
+				resolveUsedOuterDimension(*style,
+					style->widthValue, style->width, style->widthPercent,
+					style->minWidthValue, style->minWidth, style->minWidthPercent,
+					style->maxWidthValue, style->maxWidth, style->maxWidthPercent,
+					style->maxWidthNone, basis, basis, edges, false), edges);
+			basis = std::max(0, basis);
+		}
+		return basis;
+	}
+
+	static int cssDefiniteContentHeightForStyle(const WebStyle& style, int basis)
+	{
+		const int edges = cssVerticalBoxEdges(style);
+		const CssResolvedLength resolved = resolveCssLength(style.heightValue,
+			style.height, style.heightPercent, basis);
+		const CssResolvedLength minResolved = resolveCssLength(style.minHeightValue,
+			style.minHeight, style.minHeightPercent, basis);
+		if (!resolved.definite && !minResolved.definite) return -1;
+		const int fallback = resolved.definite
+			? (style.boxSizing == BoxSizingMode::BorderBox ? resolved.px : cssBoundedGeometryAdd(resolved.px, edges))
+			: 0;
+		const int outer = resolveUsedOuterDimension(style,
+			style.heightValue, style.height, style.heightPercent,
+			style.minHeightValue, style.minHeight, style.minHeightPercent,
+			style.maxHeightValue, style.maxHeight, style.maxHeightPercent,
+			style.maxHeightNone, basis, fallback, edges, false);
+		return usedContentDimensionFromOuter(style, outer, edges);
+	}
+
+	static int cssContainingContentHeightForSerial(const WebDocument& doc, uint64_t parentSerial)
+	{
+		if (parentSerial == 0) return -1;
+		std::array<uint64_t, 12> chain{};
+		size_t count = 0;
+		uint64_t current = parentSerial;
+		while (current != 0) {
+			if (count >= chain.size()) return -1;
+			const gxos::web::HtmlElementRef* element = cssStructuralElementForSerial(doc, current);
+			if (!element) return -1;
+			chain[count++] = current;
+			current = element->parentSerial;
+		}
+		int basis = -1;
+		for (size_t reverse = count; reverse > 0; --reverse) {
+			const uint64_t serial = chain[reverse - 1];
+			const WebStyle* style = nullptr;
+			if (doc.hasBodyElement && serial == doc.bodyElement.serial) style = &doc.bodyStyle;
+			else style = computedStyleForSerial(doc, serial);
+			if (!style) continue;
+			basis = cssDefiniteContentHeightForStyle(*style, basis);
+		}
+		return basis;
+	}
+
+	struct CssAncestorBox {
+		bool valid = false;
+		int x = 0;
+		int y = 0;
+		int w = 0;
+		int h = 0;
+	};
+
+	static CssAncestorBox cssAncestorBoxForBlock(const WebDocument& doc,
+		uint64_t serial, int scrollOffset)
+	{
+		CssAncestorBox box;
+		const gxos::web::HtmlElementRef* element = cssStructuralElementForSerial(doc, serial);
+		const WebStyle* style = computedStyleForSerial(doc, serial);
+		if (!element || !style) return box;
+		int first = -1;
+		int last = -1;
+		if (!cssDescendantBlockRange(doc, serial, first, last)) return box;
+		const DocBlock& firstBlock = doc.blocks[static_cast<size_t>(first)];
+		const DocBlock& lastBlock = doc.blocks[static_cast<size_t>(last)];
+		const int firstMarginTop = cssMarginTopPx(firstBlock.style, firstBlock.type == BlockType::Heading ? 10 : 4);
+		const int firstBoxY = kContentY + cssBlockLayoutY(doc, first) - scrollOffset + firstMarginTop;
+		const int parentTopEdges = cssBorderTopPx(*style) + cssPaddingTopPx(*style, 0);
+		box.y = firstBoxY - firstMarginTop - parentTopEdges;
+		const int parentBasisWidth = cssContainingContentWidthForSerial(doc, element->parentSerial);
+		if (parentBasisWidth < 0) return box;
+		const int horizontalEdges = cssHorizontalBoxEdges(*style);
+		box.w = resolveUsedOuterDimension(*style,
+			style->widthValue, style->width, style->widthPercent,
+			style->minWidthValue, style->minWidth, style->minWidthPercent,
+			style->maxWidthValue, style->maxWidth, style->maxWidthPercent,
+			style->maxWidthNone, parentBasisWidth, parentBasisWidth, horizontalEdges, false);
+		const int baseX = kContentX + blockBodyMarginLeft(doc) + cssMarginLeftPx(*style, 0);
+		if (cssMarginLeftAuto(*style) && cssMarginRightAuto(*style))
+			box.x = baseX + std::max(0, (parentBasisWidth - box.w) / 2);
+		else if (cssMarginLeftAuto(*style))
+			box.x = baseX + std::max(0, parentBasisWidth - box.w - cssMarginRightPx(*style, 0));
+		else
+			box.x = baseX;
+
+		const int lastMarginTop = cssMarginTopPx(lastBlock.style, lastBlock.type == BlockType::Heading ? 10 : 4);
+		const int lastMarginBottom = cssMarginBottomPx(lastBlock.style, lastBlock.type == BlockType::ListItem ? 4 : 8);
+		const int lastBoxY = kContentY + cssBlockLayoutY(doc, last) - scrollOffset + lastMarginTop;
+		const bool nextIsHeading = last + 1 < static_cast<int>(doc.blocks.size()) &&
+			doc.blocks[static_cast<size_t>(last + 1)].type == BlockType::Heading;
+		const int lastTotal = blockTotalHeight(lastBlock, doc, nextIsHeading);
+		const int lastBoxH = std::max(0, lastTotal - lastMarginTop - lastMarginBottom - (nextIsHeading ? 10 : 0));
+		const int fallbackHeight = std::max(0, lastBoxY + lastBoxH + lastMarginBottom - box.y);
+		const int verticalEdges = cssVerticalBoxEdges(*style);
+		const int parentBasisHeight = cssContainingContentHeightForSerial(doc, element->parentSerial);
+		box.h = resolveUsedOuterDimension(*style,
+			style->heightValue, style->height, style->heightPercent,
+			style->minHeightValue, style->minHeight, style->minHeightPercent,
+			style->maxHeightValue, style->maxHeight, style->maxHeightPercent,
+			style->maxHeightNone, parentBasisHeight, fallbackHeight, verticalEdges, false);
+		box.w = std::max(0, std::min(8192, box.w));
+		box.h = std::max(0, std::min(8192, box.h));
+		box.valid = box.w > 0 && box.h > 0;
+		return box;
+	}
+
+	static CssPaintRect cssApplyOverflowClip(const CssPaintRect& base,
+		const WebStyle& style, int outerX, int boxY, int outerW, int outerH)
+	{
+		CssPaintRect clip = base;
+		const int borderLeft = cssBorderLeftPx(style);
+		const int borderRight = cssBorderRightPx(style);
+		const int borderTop = cssBorderTopPx(style);
+		const int borderBottom = cssBorderBottomPx(style);
 		const int paddingBoxX = outerX + borderLeft;
 		const int paddingBoxY = boxY + borderTop;
 		const int paddingBoxW = std::max(0, outerW - borderLeft - borderRight);
 		const int paddingBoxH = std::max(0, outerH - borderTop - borderBottom);
-		if (block.style.overflowX != OverflowMode::Visible) {
+		if (style.overflowX != OverflowMode::Visible) {
 			clip = cssPaintRectIntersect(clip, CssPaintRect{paddingBoxX, clip.y, paddingBoxW, clip.h});
 		}
-		if (block.style.overflowY != OverflowMode::Visible) {
+		if (style.overflowY != OverflowMode::Visible) {
 			clip = cssPaintRectIntersect(clip, CssPaintRect{clip.x, paddingBoxY, clip.w, paddingBoxH});
 		}
 		return clip;
 	}
 
-	static CssPaintRect cssClipRectForHit(const DocBlock& block, int outerX, int boxY, int outerW, int outerH)
+	static CssPaintRect cssBlockAncestorClip(const WebDocument& doc, const DocBlock& block,
+		int scrollOffset)
 	{
-		return cssBlockVisibleClip(block, outerX, boxY, outerW, outerH);
+		CssPaintRect clip = cssViewportClipRect();
+		int clippedAncestorCount = 0;
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			const WebStyle* style = computedStyleForSerial(doc, ancestor.serial);
+			if (!style || (style->overflowX == OverflowMode::Visible && style->overflowY == OverflowMode::Visible))
+				continue;
+			if (++clippedAncestorCount > kCssClipStackDepth) {
+				++s_cssClipDepthClamps;
+				return CssPaintRect{0, 0, 0, 0};
+			}
+			const CssAncestorBox box = cssAncestorBoxForBlock(doc, ancestor.serial, scrollOffset);
+			if (!box.valid) return CssPaintRect{0, 0, 0, 0};
+			clip = cssApplyOverflowClip(clip, *style, box.x, box.y, box.w, box.h);
+			if (clip.w <= 0 || clip.h <= 0) return CssPaintRect{0, 0, 0, 0};
+		}
+		return clip;
+	}
+
+	static bool cssBlockHasOverflowAncestor(const WebDocument& doc, const DocBlock& block)
+	{
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			const WebStyle* style = computedStyleForSerial(doc, ancestor.serial);
+			if (style && (style->overflowX != OverflowMode::Visible ||
+				style->overflowY != OverflowMode::Visible)) return true;
+		}
+		return false;
+	}
+
+	static CssPaintRect cssBlockVisibleClip(const WebDocument& doc, int blockIndex,
+		const DocBlock& block, int outerX, int boxY, int outerW, int outerH, int scrollOffset)
+	{
+		CssPaintRect clip = cssBlockAncestorClip(doc, block, scrollOffset);
+		(void)blockIndex;
+		return cssApplyOverflowClip(clip, block.style, outerX, boxY, outerW, outerH);
+	}
+
+	static CssPaintRect cssClipRectForHit(const WebDocument& doc, int blockIndex,
+		const DocBlock& block, int outerX, int boxY, int outerW, int outerH, int scrollOffset)
+	{
+		return cssBlockVisibleClip(doc, blockIndex, block, outerX, boxY, outerW, outerH, scrollOffset);
 	}
 
 	static CssPaintRect cssClipHitTarget(const CssPaintRect& target, const CssPaintRect& clip)
@@ -3354,8 +3604,7 @@ namespace {
 		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
 		geometry.availableWidth = blockAvailableWidth(block, doc);
 		geometry.outerWidth = blockOuterWidth(block, geometry.availableWidth, &geometry.clamped);
-		geometry.outerX = kContentX + blockIndentForType(block.type) + blockBodyMarginLeft(doc) +
-			cssMarginLeftPx(block.style, 0);
+		geometry.outerX = blockOuterX(block, doc, geometry.availableWidth, geometry.outerWidth);
 		const int marginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
 		const int marginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
 		const bool nextIsHeading = blockIndex + 1 < static_cast<int>(doc.blocks.size()) &&
@@ -3375,8 +3624,8 @@ namespace {
 			geometry.outerY + cssBorderTopPx(block.style),
 			std::max(0, geometry.outerWidth - cssBorderLeftPx(block.style) - cssBorderRightPx(block.style)),
 			std::max(0, geometry.outerHeight - cssBorderTopPx(block.style) - cssBorderBottomPx(block.style))};
-		geometry.clip = cssBlockVisibleClip(block, geometry.outerX, geometry.outerY,
-			geometry.outerWidth, geometry.outerHeight);
+		geometry.clip = cssBlockVisibleClip(doc, blockIndex, block, geometry.outerX, geometry.outerY,
+			geometry.outerWidth, geometry.outerHeight, 0);
 		const CssResolvedLength widthResolved = resolveCssLength(block.style.widthValue,
 			block.style.width, block.style.widthPercent, geometry.availableWidth);
 		geometry.widthAuto = !widthResolved.definite;
@@ -3385,13 +3634,17 @@ namespace {
 		bool ignoredWidthUnresolved = false;
 		bool widthConflict = false;
 		bool widthClamped = false;
+		bool minWidthApplied = false;
+		bool maxWidthApplied = false;
 		(void)resolveUsedOuterDimension(block.style,
 			block.style.widthValue, block.style.width, block.style.widthPercent,
 			block.style.minWidthValue, block.style.minWidth, block.style.minWidthPercent,
 			block.style.maxWidthValue, block.style.maxWidth, block.style.maxWidthPercent,
 			block.style.maxWidthNone, geometry.availableWidth, geometry.outerWidth, horizontalEdges,
 			block.type == BlockType::Preformatted, &ignoredWidthAuto, &ignoredWidthUnresolved,
-			&widthConflict, &widthClamped);
+			&widthConflict, &widthClamped, &minWidthApplied, &maxWidthApplied);
+		geometry.minWidthApplied = minWidthApplied;
+		geometry.maxWidthApplied = maxWidthApplied;
 		geometry.constraintConflict = widthConflict;
 		geometry.clamped = geometry.clamped || widthClamped;
 		const int heightBasis = blockContainingContentHeight(block, doc);
@@ -3403,6 +3656,8 @@ namespace {
 		bool ignoredUnresolved = false;
 		bool heightConflict = false;
 		bool heightClamped = false;
+		bool minHeightApplied = false;
+		bool maxHeightApplied = false;
 		(void)resolveUsedOuterDimension(block.style,
 			block.style.heightValue, block.style.height, block.style.heightPercent,
 			block.style.minHeightValue, block.style.minHeight, block.style.minHeightPercent,
@@ -3410,7 +3665,9 @@ namespace {
 			block.style.maxHeightNone, heightBasis,
 			cssBoundedGeometryAdd(std::max(0, geometry.contentHeight), verticalEdges), verticalEdges,
 			block.type == BlockType::Preformatted, &ignoredAuto, &ignoredUnresolved,
-			&heightConflict, &heightClamped);
+			&heightConflict, &heightClamped, &minHeightApplied, &maxHeightApplied);
+		geometry.minHeightApplied = minHeightApplied;
+		geometry.maxHeightApplied = maxHeightApplied;
 		geometry.constraintConflict = geometry.constraintConflict || heightConflict;
 		geometry.clamped = geometry.clamped || heightClamped;
 		return geometry;
@@ -4105,6 +4362,8 @@ namespace {
 		add("css_opacity_zero_boxes", metadata.cssOpacityZeroBoxes);
 		add("css_vertical_align_applications", metadata.cssVerticalAlignApplications);
 		add("css_box_geometry_clamps", metadata.cssBoxGeometryClamps);
+		add("css_length_value_clamps", metadata.cssLengthValueClampCount);
+		add("css_invalid_length_values", metadata.cssInvalidLengthValueCount);
 		add("css_layout_passes", metadata.cssLayoutPasses);
 		add("css_layout_recomputations", metadata.cssLayoutRecomputations);
 		add("css_clip_records", metadata.cssClipRecordCount);
@@ -4290,8 +4549,6 @@ namespace {
 	{
 		const int horizontalEdges = cssHorizontalBoxEdges(block.style);
 		const int verticalEdges = cssVerticalBoxEdges(block.style);
-		const int contentLimitW = std::max(1, std::min(2048, availableWidth));
-		const int contentLimitH = std::max(1, std::min(2048, kContentH - 20));
 		const ImageInfo& info = imageInfoForBlock(block);
 		int naturalW = info.ok ? info.naturalW : 220;
 		int naturalH = info.ok ? info.naturalH : 64;
@@ -4301,6 +4558,10 @@ namespace {
 			block.style.width, block.style.widthPercent, availableWidth);
 		const CssResolvedLength heightResolved = resolveCssLength(block.style.heightValue,
 			block.style.height, block.style.heightPercent, -1);
+		const int contentLimitW = widthResolved.definite ? 2048 :
+			std::max(1, std::min(2048, availableWidth));
+		const int contentLimitH = heightResolved.definite ? 2048 :
+			std::max(1, std::min(2048, kContentH - 20));
 		const CssResolvedLength minWidthResolved = resolveCssLength(block.style.minWidthValue,
 			block.style.minWidth, block.style.minWidthPercent, availableWidth);
 		const CssResolvedLength maxWidthResolved = resolveCssLength(block.style.maxWidthValue,
@@ -5367,6 +5628,7 @@ void Navigator::renderDocument()
 	s_renderCounters = {};
 	s_cssClipDepth = 0;
 	s_cssClipIntersections = 0;
+	s_cssClipRecordCount = 0;
 	s_cssClipDepthClamps = 0;
 	s_cssClippedPaintOps = 0;
 	s_cssClippedHitTargets = 0;
@@ -5558,10 +5820,13 @@ void Navigator::renderDocument()
 				}
 			}
 			s_cssPaintOpacityPercent = std::max(0, std::min(100, block.style.effectiveOpacityPercent));
+			const bool tableAncestorClipPushed = cssBlockHasOverflowAncestor(s_currentDoc, block) &&
+				cssPushPaintClip(cssBlockAncestorClip(s_currentDoc, block, s_scrollOffset));
 			drawBlockBox(s_windowId, layout.outerX, tableY, layout.outerWidth, tableH, block.style);
 			const bool tableClipPushed = (block.style.overflowX != OverflowMode::Visible ||
 				block.style.overflowY != OverflowMode::Visible) && cssPushPaintClip(
-				cssBlockVisibleClip(block, layout.outerX, tableY, layout.outerWidth, tableH));
+				cssBlockVisibleClip(s_currentDoc, blockIndex, block, layout.outerX, tableY, layout.outerWidth, tableH,
+					s_scrollOffset));
 			const int tableContentX = layout.outerX + layout.borderLeft + layout.paddingLeft;
 			const size_t lastCol = layout.columnWidthsChars.empty() ? 0 : layout.columnWidthsChars.size() - 1;
 			const bool collapseMode = layout.collapseMode;
@@ -5619,6 +5884,7 @@ void Navigator::renderDocument()
 				cellX += cellW + cellSpacingX;
 			}
 			if (tableClipPushed) cssPopPaintClip();
+			if (tableAncestorClipPushed) cssPopPaintClip();
 			s_cssPaintOpacityPercent = 100;
 			++blockIndex;
 			continue;
@@ -5674,11 +5940,13 @@ void Navigator::renderDocument()
 		const int boxY = drawY + blockMarginTop;
 		const int boxH = std::max(1, blockH - blockMarginTop - blockMarginBottom - (nextIsHeading ? 10 : 0));
 		s_cssPaintOpacityPercent = std::max(0, std::min(100, block.style.effectiveOpacityPercent));
+		const bool ancestorClipPushed = cssBlockHasOverflowAncestor(s_currentDoc, block) &&
+			cssPushPaintClip(cssBlockAncestorClip(s_currentDoc, block, s_scrollOffset));
 		drawBlockBox(s_windowId, outerX, boxY, outerWidth, boxH, block.style);
 		const bool pushedBlockClip = block.style.overflowX != OverflowMode::Visible ||
 			block.style.overflowY != OverflowMode::Visible;
 		const bool blockClipPushed = pushedBlockClip && cssPushPaintClip(
-			cssBlockVisibleClip(block, outerX, boxY, outerWidth, boxH));
+			cssBlockVisibleClip(s_currentDoc, blockIndex, block, outerX, boxY, outerWidth, boxH, s_scrollOffset));
 
 		switch (block.type) {
 		case BlockType::Heading:
@@ -5981,6 +6249,7 @@ void Navigator::renderDocument()
 		}
 		drawDefaultFocusRing(blockIndex, block);
 		if (blockClipPushed) cssPopPaintClip();
+		if (ancestorClipPushed) cssPopPaintClip();
 		s_cssPaintOpacityPercent = 100;
 		++blockIndex;
 	}
@@ -7094,7 +7363,8 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 			rowY,
 			std::max(kCharW, layout.outerWidth),
 			std::max(kLineH, layout.totalHeightPx)
-		}, cssClipRectForHit(block, layout.outerX, rowY, layout.outerWidth, layout.totalHeightPx));
+		}, cssClipRectForHit(s_currentDoc, blockIndex, block, layout.outerX, rowY, layout.outerWidth,
+			layout.totalHeightPx, s_scrollOffset));
 		return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 	}
 	const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
@@ -7141,7 +7411,7 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 	const CssPaintRect clipped = cssClipHitTarget(
 		CssPaintRect{textX, drawY + blockMarginTop + cssBorderTopPx(block.style) + paddingTop,
 			std::max(kCharW, textW), std::max(kLineH, textH + blockMarginBottom)},
-		cssClipRectForHit(block, outerX, boxY, outerWidth, boxH));
+		cssClipRectForHit(s_currentDoc, blockIndex, block, outerX, boxY, outerWidth, boxH, s_scrollOffset));
 	return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 }
 
@@ -8671,6 +8941,8 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS table layout fallbacks", m.cssTableLayoutFallbackCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS lists rendered", m.cssListRenderCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS clamped values", m.cssClampedValueCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS length value clamps", m.cssLengthValueClampCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS invalid length values", m.cssInvalidLengthValueCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS figures rendered", m.cssFiguresRendered), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS figcaptions rendered", m.cssFigcaptionsRendered), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS blockquotes rendered", m.cssBlockquotesRendered), ""});
@@ -9649,7 +9921,7 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 			cssMarginBottomPx(block.style, 8));
 	const CssPaintRect clipped = cssClipHitTarget(
 		CssPaintRect{blockContentLeftX(block, outerX), drawY, w, h},
-		cssClipRectForHit(block, outerX, boxY, outerWidth, boxH));
+		cssClipRectForHit(s_currentDoc, blockIndex, block, outerX, boxY, outerWidth, boxH, s_scrollOffset));
 	return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 }
 
@@ -9681,7 +9953,7 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 			cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8));
 	const CssPaintRect clipped = cssClipHitTarget(
 		CssPaintRect{blockContentLeftX(block, outerX), drawY, w, formControlHeight(block)},
-		cssClipRectForHit(block, outerX, boxY, outerWidth, boxH));
+		cssClipRectForHit(s_currentDoc, blockIndex, block, outerX, boxY, outerWidth, boxH, s_scrollOffset));
 	return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 }
 

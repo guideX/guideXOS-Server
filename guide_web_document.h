@@ -444,6 +444,10 @@ struct WebStyle {
 	bool     hasTextDecoration = false;
 	bool     displayNone = false;
 	BoxSizingMode boxSizing = BoxSizingMode::ContentBox;
+	// box-sizing is not inherited.  This provenance bit lets the compact
+	// table renderer project a table's outer sizing model onto its cell-backed
+	// box without overwriting an explicitly styled cell.
+	bool     boxSizingSpecified = false;
 	CssLengthValue widthValue;
 	CssLengthValue heightValue;
 	CssLengthValue minWidthValue;

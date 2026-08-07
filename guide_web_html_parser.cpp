@@ -45,6 +45,7 @@ namespace {
 	constexpr int kCssLiteMaxFontSizePx = 72;
 	constexpr int kCssLiteMaxLineHeightPx = 96;
 	constexpr int kCssLiteMaxWidthPx = 2048;
+	constexpr int kCssLiteMaxPercentage = 1000;
 	constexpr int kCssLiteMaxBorderWidthPx = 12;
 	constexpr size_t kCssLiteMaxStyleBlocks = 32;
 	constexpr size_t kCssLiteMaxRules = 256;
@@ -791,8 +792,8 @@ static bool parseCssBoundedDimension(const std::string& rawValue,
 	if (!parseCssNumber(value, numeric) || numeric < 0.0) return false;
 	if (percent) {
 		int percentValue = roundCssNumber(numeric);
-		if (percentValue > 100) {
-			percentValue = 100;
+		if (percentValue > kCssLiteMaxPercentage) {
+			percentValue = kCssLiteMaxPercentage;
 			out.clamped = true;
 			++diag.clampedValueCount;
 			++diag.lengthValueClampCount;
@@ -2679,10 +2680,12 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		const std::string lower = toLower(val);
 		if (lower == "content-box") {
 			style.boxSizing = BoxSizingMode::ContentBox;
+			style.boxSizingSpecified = true;
 			return accept(CssProperty::BoxSizing);
 		}
 		if (lower == "border-box") {
 			style.boxSizing = BoxSizingMode::BorderBox;
+			style.boxSizingSpecified = true;
 			return accept(CssProperty::BoxSizing);
 		}
 		++diag.unsupportedDeclarationCount;
@@ -3197,7 +3200,10 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 		destination.lineThrough = source.lineThrough;
 		break;
 	case CssProperty::Display: destination.displayNone = source.displayNone; break;
-	case CssProperty::BoxSizing: destination.boxSizing = source.boxSizing; break;
+	case CssProperty::BoxSizing:
+		destination.boxSizing = source.boxSizing;
+		destination.boxSizingSpecified = source.boxSizingSpecified;
+		break;
 	case CssProperty::MinWidth:
 		destination.minWidthValue = source.minWidthValue;
 		destination.minWidth = source.minWidth;
@@ -3428,6 +3434,8 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	merged.displayNone = overrideStyle.displayNone ? true : merged.displayNone;
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::BoxSizing)) != 0)
 		merged.boxSizing = overrideStyle.boxSizing;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::BoxSizing)) != 0)
+		merged.boxSizingSpecified = overrideStyle.boxSizingSpecified;
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::OverflowX)) != 0)
 		merged.overflowX = overrideStyle.overflowX;
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::OverflowY)) != 0)
@@ -4406,6 +4414,9 @@ static void applyDocumentStyles(WebDocument& doc)
 					block.style.maxWidthPercent = ancestorStyle.maxWidthPercent;
 					block.style.maxWidthNone = ancestorStyle.maxWidthNone;
 					block.style.maxWidthValue = ancestorStyle.maxWidthValue;
+				}
+				if (!block.style.boxSizingSpecified) {
+					block.style.boxSizing = ancestorStyle.boxSizing;
 				}
 				if (block.style.marginLeft == -1) block.style.marginLeft = ancestorStyle.marginLeft;
 				if (block.style.marginRight == -1) block.style.marginRight = ancestorStyle.marginRight;

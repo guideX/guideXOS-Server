@@ -910,6 +910,11 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(cssPhase3aText, "50 percent nested child marker.") &&
         contains(cssPhase3aText, "Auto width and content-derived auto height marker.") &&
         contains(cssPhase3aText, "Intrinsic ratio image marker") &&
+        contains(cssPhase3aText, "Explicit content-box marker.") &&
+        contains(cssPhase3aText, "Nested percentage child marker.") &&
+        contains(cssPhase3aText, "Nested clipping text marker") &&
+        contains(cssPhase3aText, "Invalid width preserves valid winner marker.") &&
+        contains(cssPhase3aText, "Percent") &&
         !contains(cssPhase3aText, "Hidden visibility marker must retain space but not paint or extract."),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
     add("CSS phase 3A box and constraint diagnostics",
