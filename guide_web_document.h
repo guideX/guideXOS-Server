@@ -251,6 +251,16 @@ enum class BoxSizingMode : uint8_t {
 	BorderBox = 1,
 };
 
+// The Navigator CSS subset keeps display as an explicit computed value.  The
+// value is intentionally narrow: unsupported layout modes never fall through
+// to inline-block by accident.
+enum class DisplayMode : uint8_t {
+	Block = 0,
+	Inline,
+	InlineBlock,
+	None,
+};
+
 enum class OverflowMode : uint8_t {
 	Inherit = 0,
 	Visible,
@@ -301,6 +311,7 @@ enum class InlineItemKind : uint8_t {
 	ForcedBreak   = 1,
 	ReplacedImage = 2,
 	FormControl   = 3,
+	AtomicBlock   = 4,
 };
 
 struct WebInlineItem {
@@ -308,6 +319,7 @@ struct WebInlineItem {
 	uint64_t flowSerial = 0;       // nearest block/line-flow element
 	uint64_t ownerSerial = 0;      // closest inline/replaced logical element
 	uint64_t parentSerial = 0;
+	uint64_t atomicContainerSerial = 0; // nearest bounded inline-block context
 	int      blockIndex = -1;      // legacy target identity for hit/focus routing
 	std::string text;              // bounded text run; empty for atomic items
 };
@@ -470,6 +482,7 @@ struct WebStyle {
 	bool     lineThrough = false;
 	bool     hasTextDecoration = false;
 	bool     displayNone = false;
+	DisplayMode display = DisplayMode::Block;
 	BoxSizingMode boxSizing = BoxSizingMode::ContentBox;
 	// box-sizing is not inherited.  This provenance bit lets the compact
 	// table renderer project a table's outer sizing model onto its cell-backed
@@ -797,6 +810,9 @@ struct DocBlock {
 	// records into one line-formatting context without changing existing block
 	// consumers.
 	uint64_t    inlineFlowSerial = 0;
+	// Non-zero when the block belongs to an embedded inline-block formatting
+	// context.  This is structural ownership metadata, not a retained DOM link.
+	uint64_t    atomicContainerSerial = 0;
 };
 
 struct WebDocument {

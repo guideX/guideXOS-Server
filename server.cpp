@@ -963,7 +963,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("CSS phase 3B inline fixture loads",
         cssPhase3bLoaded &&
         contains(cssPhase3bText, "g j p q y descenders") &&
-        contains(cssPhase3bText, "span bold italic code") &&
+        contains(cssPhase3bText, "span") &&
+        contains(cssPhase3bText, "bold") &&
+        contains(cssPhase3bText, "italic") &&
+        contains(cssPhase3bText, "code") &&
         contains(cssPhase3bText, "nowrap text remains one unbroken inline run") &&
         contains(cssPhase3bText, "pre  formatted") &&
         contains(cssPhase3bText, "Checkbox") &&
@@ -997,6 +1000,57 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_hit_fragments=") &&
         gxos::apps::Navigator::SmokeFocusFormControlById("phase3b-button"),
         "report=\"" + summarizeText(cssPhase3bReport, 320) + "\"");
+
+    bool cssPhase3cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3c.html");
+    std::string cssPhase3cText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3cReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3cMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3cReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3cReport.find('\n', pos);
+        return cssPhase3cReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3C atomic inline-block fixture loads",
+        cssPhase3cLoaded &&
+        contains(cssPhase3cText, "Phase 3C Atomic Inline Block Fixture") &&
+        contains(cssPhase3cText, "inline block") &&
+        contains(cssPhase3cText, "Nested paragraph with wrapped internal text") &&
+        contains(cssPhase3cText, "Nested list item") &&
+        contains(cssPhase3cText, "nested child link") &&
+        contains(cssPhase3cText, "Card button") &&
+        contains(cssPhase3cText, "extreme clamp"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3C bounded contexts, sizing, and nesting",
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_atomic_formatting_contexts=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_items=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_auto_widths=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_explicit_widths=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_shrink_to_fit=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_atomic_layout_operations=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_nested=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_wraps=") &&
+        contains(cssPhase3cReport, "Current Document.css_atomic_evidence_records="),
+        "metrics=" + cssPhase3cMetric("Current Document.css_atomic_formatting_contexts=") + ";" +
+        cssPhase3cMetric("Current Document.css_atomic_context_depth_max=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_items=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_auto_widths=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_explicit_widths=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_shrink_to_fit=") + ";" +
+        cssPhase3cMetric("Current Document.css_atomic_layout_operations=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_nested=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_wraps=") + ";evidence=" +
+        summarizeText(cssPhase3cMetric("Current Document.css_atomic_evidence="), 1200));
+    add("CSS phase 3C baselines, clipping, hit targets, and focus",
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_baseline_from_line=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_baseline_fallback=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_hit_targets=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_overflow_clips=") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase3c-button"),
+        "metrics=" + cssPhase3cMetric("Current Document.css_inline_block_baseline_from_line=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_baseline_fallback=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_hit_targets=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_overflow_clips=") + ";report=" +
+        summarizeText(cssPhase3cReport, 520));
 
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();

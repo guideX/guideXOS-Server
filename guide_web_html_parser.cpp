@@ -2668,10 +2668,13 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	if (prop == "display") {
 		std::string lower = toLower(val);
 		if (lower == "none") {
+			style.display = DisplayMode::None;
 			style.displayNone = true;
 			return accept(CssProperty::Display);
 		}
 		if (lower == "block" || lower == "inline" || lower == "inline-block") {
+			style.display = lower == "block" ? DisplayMode::Block :
+				lower == "inline" ? DisplayMode::Inline : DisplayMode::InlineBlock;
 			style.displayNone = false;
 			return accept(CssProperty::Display);
 		}
@@ -3247,7 +3250,10 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 		destination.underline = source.underline;
 		destination.lineThrough = source.lineThrough;
 		break;
-	case CssProperty::Display: destination.displayNone = source.displayNone; break;
+	case CssProperty::Display:
+		destination.display = source.display;
+		destination.displayNone = source.display == DisplayMode::None;
+		break;
 	case CssProperty::BoxSizing:
 		destination.boxSizing = source.boxSizing;
 		destination.boxSizingSpecified = source.boxSizingSpecified;
@@ -3481,7 +3487,10 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 		merged.underline = overrideStyle.underline;
 		merged.lineThrough = overrideStyle.lineThrough;
 	}
-	merged.displayNone = overrideStyle.displayNone ? true : merged.displayNone;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Display)) != 0) {
+		merged.display = overrideStyle.display;
+		merged.displayNone = overrideStyle.display == DisplayMode::None;
+	}
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::BoxSizing)) != 0)
 		merged.boxSizing = overrideStyle.boxSizing;
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::BoxSizing)) != 0)
@@ -3604,6 +3613,13 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 static WebStyle defaultStyleForTag(const std::string& tagName)
 {
 	WebStyle style;
+	style.display = DisplayMode::Block;
+	if (tagName == "a" || tagName == "span" || tagName == "strong" || tagName == "b" ||
+		tagName == "em" || tagName == "i" || tagName == "small" || tagName == "kbd" ||
+		tagName == "samp" || tagName == "cite" || tagName == "q" || tagName == "code" ||
+		tagName == "img" || tagName == "input" || tagName == "textarea" || tagName == "select") {
+		style.display = DisplayMode::Inline;
+	}
 	if (tagName == "body") {
 		style.hasColor = true;
 		style.color = 0xFF303846u;
@@ -3856,7 +3872,7 @@ static void markDefaultStyleProperties(WebStyle& style)
 	if (style.bold) style.specifiedProperties |= cssPropertyBit(CssProperty::Bold);
 	if (style.italic) style.specifiedProperties |= cssPropertyBit(CssProperty::Italic);
 	if (style.hasTextDecoration) style.specifiedProperties |= cssPropertyBit(CssProperty::TextDecoration);
-	if (style.displayNone) style.specifiedProperties |= cssPropertyBit(CssProperty::Display);
+	if (style.display == DisplayMode::None) style.specifiedProperties |= cssPropertyBit(CssProperty::Display);
 	if (style.listStyleNone || style.listStyleType != ListStyleType::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::ListStyle);
 	if (style.borderCollapse != TableBorderCollapseMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderCollapse);
 	if (style.borderSpacingHorizontal != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderSpacingHorizontal);
@@ -4388,7 +4404,10 @@ static WebStyle computePathStyle(WebDocument& doc,
 	}
 	style.effectiveOpacityPercent = std::max(0, std::min(100,
 		(parentOpacity * std::max(0, std::min(100, style.opacityPercent)) + 50) / 100));
-	if (hasParent && parent.displayNone) style.displayNone = true;
+	if (hasParent && parent.displayNone) {
+		style.displayNone = true;
+		style.display = DisplayMode::None;
+	}
 	appendComputedStyleEvidence(doc, path.back(), style, winners);
 
 	cache.emplace(key, style);
@@ -4507,6 +4526,78 @@ static void applyDocumentStyles(WebDocument& doc)
 			}
 		}
 	}
+
+	// Normalize the bounded display representation and establish ownership for
+	// inline-block content after cascade has resolved.  The parser emits close
+	// markers in source order; this pass either removes those markers or turns
+	// them into atomic formatting-context entries.  Descendant blocks carry only
+	// the nearest serial, never a retained child tree.
+	std::vector<uint64_t> inlineBlockSerials;
+	inlineBlockSerials.reserve(std::min<size_t>(doc.structuralElements.size(), 256));
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.serial == 0 || inlineBlockSerials.size() >= 256) break;
+		std::vector<HtmlElementRef> path;
+		if (!buildStructuralPath(doc, element.serial, path)) continue;
+		const WebStyle style = computePathStyle(doc, path, cache);
+		if (style.display == DisplayMode::InlineBlock && !style.displayNone)
+			inlineBlockSerials.push_back(element.serial);
+	}
+	auto isInlineBlockSerial = [&](uint64_t serial) {
+		return serial != 0 && std::find(inlineBlockSerials.begin(), inlineBlockSerials.end(), serial) != inlineBlockSerials.end();
+	};
+	auto parentSerialFor = [&](uint64_t serial) {
+		for (const HtmlElementRef& element : doc.structuralElements)
+			if (element.serial == serial) return element.parentSerial;
+		return uint64_t(0);
+	};
+	auto nearestInlineBlock = [&](uint64_t serial, bool includeSelf) {
+		uint64_t current = serial;
+		if (!includeSelf) current = parentSerialFor(current);
+		for (int depth = 0; current != 0 && depth < 16; ++depth) {
+			if (isInlineBlockSerial(current)) return current;
+			current = parentSerialFor(current);
+		}
+		return uint64_t(0);
+	};
+	auto serialWithin = [&](uint64_t serial, uint64_t ancestor) {
+		uint64_t current = serial;
+		for (int depth = 0; current != 0 && depth < 16; ++depth) {
+			if (current == ancestor) return true;
+			current = parentSerialFor(current);
+		}
+		return false;
+	};
+	for (DocBlock& block : doc.blocks) {
+		uint64_t ownerSerial = block.elementMetadata.serial;
+		uint64_t atomicSerial = nearestInlineBlock(ownerSerial, true);
+		if (atomicSerial == 0) {
+			for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+				if (isInlineBlockSerial(it->serial)) {
+					atomicSerial = it->serial;
+					break;
+				}
+			}
+		}
+		block.atomicContainerSerial = atomicSerial;
+	}
+	std::vector<WebInlineItem> normalizedInlineItems;
+	normalizedInlineItems.reserve(doc.inlineItems.size());
+	for (WebInlineItem item : doc.inlineItems) {
+		const bool isMarker = item.kind == InlineItemKind::AtomicBlock;
+		if (isMarker) {
+			if (!isInlineBlockSerial(item.ownerSerial)) continue;
+			item.atomicContainerSerial = nearestInlineBlock(item.ownerSerial, false);
+		} else {
+			item.atomicContainerSerial = nearestInlineBlock(item.ownerSerial, true);
+			if (item.atomicContainerSerial == 0 && item.blockIndex >= 0 &&
+				item.blockIndex < static_cast<int>(doc.blocks.size()))
+				item.atomicContainerSerial = doc.blocks[static_cast<size_t>(item.blockIndex)].atomicContainerSerial;
+		}
+		if (item.atomicContainerSerial != 0 && !serialWithin(item.flowSerial, item.atomicContainerSerial))
+			item.flowSerial = item.atomicContainerSerial;
+		normalizedInlineItems.push_back(std::move(item));
+	}
+	doc.inlineItems = std::move(normalizedInlineItems);
 	// Retain one bounded computed-style record per structural serial so the
 	// Navigator can resolve descendant percentages against ancestor content
 	// boxes without constructing a live DOM tree.
@@ -4886,6 +4977,8 @@ static uint64_t inlineFlowSerial(const ParserState& st)
 	return 0;
 }
 
+static void flushText(ParserState& st);
+
 static void appendInlineItem(ParserState& st,
 	InlineItemKind kind,
 	const std::string& text,
@@ -4910,6 +5003,44 @@ static void appendInlineItem(ParserState& st,
 		item.text = text;
 	}
 	st.doc.inlineItems.push_back(std::move(item));
+}
+
+static uint64_t inlineFlowSerialOutsideElement(const ParserState& st, uint64_t serial)
+{
+	int elementIndex = -1;
+	for (int i = static_cast<int>(st.openElements.size()) - 1; i >= 0; --i) {
+		if (st.openElements[static_cast<size_t>(i)].serial == serial) {
+			elementIndex = i;
+			break;
+		}
+	}
+	if (elementIndex < 0) return inlineFlowSerial(st);
+	for (int i = elementIndex - 1; i >= 0; --i) {
+		if (isInlineFlowBoundaryTag(st.openElements[static_cast<size_t>(i)].tagName))
+			return st.openElements[static_cast<size_t>(i)].serial;
+	}
+	return elementIndex > 0 ? st.openElements[static_cast<size_t>(elementIndex - 1)].serial : 0;
+}
+
+static void appendInlineAtomicMarker(ParserState& st, const std::string& tagName)
+{
+	const std::string wanted = toLower(tagName);
+	if (wanted == "html" || wanted == "head" || wanted == "body" || st.openElements.empty()) return;
+	// Preserve the inline owner before the closing element is popped.  This is
+	// required for text-only inline-blocks: waiting for the enclosing paragraph
+	// would otherwise assign the text to the paragraph's flow and leave the
+	// atomic context empty.
+	if (!st.textBuf.empty()) flushText(st);
+	const HtmlElementRef* element = nullptr;
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (toLower(it->tagName) == wanted) {
+			element = &*it;
+			break;
+		}
+	}
+	if (!element || element->serial == 0) return;
+	appendInlineItem(st, InlineItemKind::AtomicBlock, {}, -1,
+		inlineFlowSerialOutsideElement(st, element->serial), element);
 }
 
 static void markInlineFlowOnNewBlocks(ParserState& st,
@@ -5933,6 +6064,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		name == "button" || name == "textarea" || name == "option" || name == "legend" || name == "label") {
 		const uint64_t closingSerial = st.activeBlockSerial;
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		if (name == "legend") {
 			if (FormContainerMetadata* container = findFormContainer(st, closingSerial)) {
 				container->legendText = st.currentLegendText;
@@ -5974,6 +6106,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	if (name == "a") {
 		if (st.open != OpenTag::TableCell) {
 			flushText(st);
+			appendInlineAtomicMarker(st, name);
 			popElementByName(st, name);
 			st.open = OpenTag::None;
 			st.activeBlockSerial = 0;
@@ -5989,10 +6122,12 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	if (name == "blockquote" || name == "figure" || name == "dl") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		popElementByName(st, name);
 	}
 	if (name == "caption") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		if (!st.currentTableCaptionText.empty()) {
 			DocBlock block = makeTextBlock(BlockType::Paragraph, "caption",
 				st.currentTableCaptionText, "", st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
@@ -6009,6 +6144,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	if (name == "td" || name == "th") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		DocBlock block = makeTextBlock(BlockType::Paragraph, name, st.currentTableCellText, "",
 			st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
 		block.elementMetadata = activeBlockElement(st);
@@ -6106,6 +6242,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	if (name == "form") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		st.inForm = false;
 		st.currentFormIndex = -1;
 		st.currentFormAction.clear();
@@ -6117,10 +6254,12 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	if (name == "fieldset") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		popElementByName(st, name);
 	}
 	if (name == "pre") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		st.open  = OpenTag::None;
 		st.activeBlockSerial = 0;
 		st.inPre = false;
@@ -6136,6 +6275,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		name == "header" || name == "footer" || name == "nav" || name == "main" ||
 		name == "figure" || name == "blockquote" || name == "dl") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		popElementByName(st, name);
 		return;
 	}
@@ -6145,6 +6285,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		name == "span" ||
 		name == "table" || name == "thead" || name == "tbody" || name == "tfoot" ||
 		name == "tr" || name == "ul" || name == "ol" || name == "noscript" || name == "html" || name == "head") {
+		appendInlineAtomicMarker(st, name);
 		popElementByName(st, name);
 	}
 	// </code> inside <pre>: stay in pre context.

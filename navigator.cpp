@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <sstream>
 #include <unordered_map>
@@ -34,6 +35,7 @@ using gxos::web::CssLengthType;
 using gxos::web::CssLengthValue;
 using gxos::web::CssComputedStyleRecord;
 using gxos::web::BoxSizingMode;
+using gxos::web::DisplayMode;
 using gxos::web::OverflowMode;
 using gxos::web::VisibilityMode;
 using gxos::web::VerticalAlignMode;
@@ -224,10 +226,14 @@ namespace {
 		int w = 0;
 		int h = 0;
 		int contentOffsetX = 0;
+		int boxOffsetX = 0;
+		int boxWidth = 0;
+		int boxHeight = 0;
 		int baselineOffset = 0;
 		int verticalShift = 0;
 		uint64_t ownerSerial = 0;
 		uint64_t hitSerial = 0;
+		int atomicResultIndex = -1;
 		InlineItemKind kind = InlineItemKind::TextRun;
 		bool whitespace = false;
 		bool collapsedWhitespace = false;
@@ -248,9 +254,14 @@ namespace {
 
 	struct InlineFlowLayout {
 		uint64_t flowSerial = 0;
+		uint64_t contextSerial = 0;
 		int anchorBlockIndex = -1;
 		int outerX = 0;
+		int localOuterX = 0;
+		int localOuterY = 0;
+		int atomicResultIndex = -1;
 		int outerWidth = 0;
+		int outerHeight = 0;
 		int contentX = 0;
 		int contentWidth = 1;
 		int contentOffsetY = 0;
@@ -258,6 +269,78 @@ namespace {
 		WebStyle style;
 		std::vector<InlineLineLayout> lines;
 		std::vector<InlineFragmentLayout> fragments;
+	};
+
+	// A formatting-context boundary owns only scalar inputs and bounded output
+	// ranges.  Child geometry remains in the snapshot's flat placement array so
+	// nested layout cannot mutate the parent's cursor or output ownership.
+	struct CssAtomicLayoutContext {
+		int containingBlockWidth = 0;
+		int containingBlockHeight = -1;
+		bool containingBlockHeightDefinite = false;
+		int originX = 0;
+		int originY = 0;
+		int availableWidth = 0;
+		int localVerticalCursor = 0;
+		int localMaximumExtent = 0;
+		CssPaintRect clip;
+		uint64_t parentStructuralSerial = 0;
+		uint8_t formattingContextDepth = 0;
+		uint16_t outputBegin = 0;
+		uint16_t outputEnd = 0;
+		uint16_t evidenceBegin = 0;
+		uint16_t hitTargetBegin = 0;
+		uint16_t recursionBudget = 0;
+		uint64_t generation = 0;
+	};
+
+	struct CssAtomicChildPlacement {
+		int blockIndex = -1;
+		int flowIndex = -1;
+		int x = 0;
+		int y = 0;
+		int w = 0;
+		int h = 0;
+		CssPaintRect clip;
+		uint64_t serial = 0;
+		bool visible = true;
+		bool complete = true;
+	};
+
+	struct CssAtomicLayoutResult {
+		uint64_t containerSerial = 0;
+		uint64_t childRenderSerial = 0;
+		uint16_t depth = 0;
+		uint16_t childBegin = 0;
+		uint16_t childCount = 0;
+		uint16_t hitTargetBegin = 0;
+		uint16_t hitTargetCount = 0;
+		int usedContentWidth = 0;
+		int usedContentHeight = 0;
+		int paddingBoxWidth = 0;
+		int paddingBoxHeight = 0;
+		int borderBoxWidth = 0;
+		int borderBoxHeight = 0;
+		int outerWidth = 0;
+		int outerHeight = 0;
+		int baseline = 0;
+		int baselineY = 0;
+		int preferredMinimum = 0;
+		int preferredWidth = 0;
+		int shrinkToFitWidth = 0;
+		int availableWidth = 0;
+		CssPaintRect paintBounds;
+		CssPaintRect clip;
+		int overflowWidth = 0;
+		int overflowHeight = 0;
+		uint64_t childBlockSerial = 0;
+		bool autoWidth = false;
+		bool explicitWidth = false;
+		bool baselineFromLine = false;
+		bool baselineFallback = false;
+		bool overflowClipped = false;
+		bool complete = true;
+		bool clamped = false;
 	};
 
 	struct InlineLayoutSnapshot {
@@ -282,6 +365,25 @@ namespace {
 		int descenderSafeLines = 0;
 		int nestingClamps = 0;
 		int wrapScanClamps = 0;
+		std::vector<CssAtomicLayoutResult> atomicResults;
+		std::vector<CssAtomicChildPlacement> atomicChildren;
+		int atomicContextDepthMax = 0;
+		int atomicContextDepthClamps = 0;
+		int atomicContextsDocument = 0;
+		int atomicContextIncomplete = 0;
+		int atomicLayoutOperations = 0;
+		int atomicLayoutOperationClamps = 0;
+		int inlineBlockAutoWidths = 0;
+		int inlineBlockExplicitWidths = 0;
+		int inlineBlockShrinkToFit = 0;
+		int inlineBlockPreferredMinClamps = 0;
+		int inlineBlockPreferredWidthClamps = 0;
+		int inlineBlockBaselineFromLine = 0;
+		int inlineBlockBaselineFallback = 0;
+		int inlineBlockNested = 0;
+		int inlineBlockWraps = 0;
+		int inlineBlockHitTargets = 0;
+		int inlineBlockOverflowClips = 0;
 	};
 
 	static InlineLayoutSnapshot s_inlineLayoutSnapshot;
@@ -1814,6 +1916,26 @@ namespace {
 		metadata.cssInlineWrapScanClamps = 0;
 		metadata.cssInlineEvidenceRecordCount = 0;
 		metadata.cssInlineEvidence.clear();
+		metadata.cssAtomicEvidenceRecordCount = 0;
+		metadata.cssAtomicEvidence.clear();
+		metadata.cssAtomicFormattingContexts = 0;
+		metadata.cssAtomicContextDepthMax = 0;
+		metadata.cssAtomicContextDepthClamps = 0;
+		metadata.cssAtomicContextsDocument = 0;
+		metadata.cssAtomicLayoutOperations = 0;
+		metadata.cssAtomicLayoutOperationClamps = 0;
+		metadata.cssInlineBlockAutoWidths = 0;
+		metadata.cssInlineBlockExplicitWidths = 0;
+		metadata.cssInlineBlockShrinkToFit = 0;
+		metadata.cssInlineBlockPreferredMinClamps = 0;
+		metadata.cssInlineBlockPreferredWidthClamps = 0;
+		metadata.cssInlineBlockBaselineFromLine = 0;
+		metadata.cssInlineBlockBaselineFallback = 0;
+		metadata.cssInlineBlockNested = 0;
+		metadata.cssInlineBlockWraps = 0;
+		metadata.cssInlineBlockHitTargets = 0;
+		metadata.cssInlineBlockOverflowClips = 0;
+		metadata.cssAtomicContextIncomplete = 0;
 		metadata.cssBoxSizingContentBox = 0;
 		metadata.cssBoxSizingBorderBox = 0;
 		metadata.cssWidthAutoResolutions = 0;
@@ -2205,6 +2327,28 @@ namespace {
 		metadata.cssBaselineIterationClamps = inlineSnapshot.baselineIterationClamps;
 		metadata.cssInlineNestingClamps = inlineSnapshot.nestingClamps;
 		metadata.cssInlineWrapScanClamps = inlineSnapshot.wrapScanClamps;
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (item.kind == InlineItemKind::AtomicBlock) ++metadata.cssInlineBlockItems;
+		}
+		metadata.cssAtomicFormattingContexts = static_cast<int>(std::min<size_t>(
+			std::numeric_limits<int>::max(), inlineSnapshot.atomicResults.size()));
+		metadata.cssAtomicContextsDocument = inlineSnapshot.atomicContextsDocument;
+		metadata.cssAtomicLayoutOperations = inlineSnapshot.atomicLayoutOperations;
+		metadata.cssAtomicLayoutOperationClamps = inlineSnapshot.atomicLayoutOperationClamps;
+		metadata.cssAtomicContextDepthMax = inlineSnapshot.atomicContextDepthMax;
+		metadata.cssAtomicContextDepthClamps = inlineSnapshot.atomicContextDepthClamps;
+		metadata.cssInlineBlockAutoWidths = inlineSnapshot.inlineBlockAutoWidths;
+		metadata.cssInlineBlockExplicitWidths = inlineSnapshot.inlineBlockExplicitWidths;
+		metadata.cssInlineBlockShrinkToFit = inlineSnapshot.inlineBlockShrinkToFit;
+		metadata.cssInlineBlockPreferredMinClamps = inlineSnapshot.inlineBlockPreferredMinClamps;
+		metadata.cssInlineBlockPreferredWidthClamps = inlineSnapshot.inlineBlockPreferredWidthClamps;
+		metadata.cssInlineBlockBaselineFromLine = inlineSnapshot.inlineBlockBaselineFromLine;
+		metadata.cssInlineBlockBaselineFallback = inlineSnapshot.inlineBlockBaselineFallback;
+		metadata.cssInlineBlockNested = inlineSnapshot.inlineBlockNested;
+		metadata.cssInlineBlockWraps = inlineSnapshot.inlineBlockWraps;
+		metadata.cssInlineBlockHitTargets = inlineSnapshot.inlineBlockHitTargets;
+		metadata.cssInlineBlockOverflowClips = inlineSnapshot.inlineBlockOverflowClips;
+		metadata.cssAtomicContextIncomplete = inlineSnapshot.atomicContextIncomplete;
 		for (const InlineFlowLayout& flow : inlineSnapshot.flows) {
 			metadata.cssLineBoxes += static_cast<int>(std::min<size_t>(
 				std::numeric_limits<int>::max() - static_cast<size_t>(std::max(0, metadata.cssLineBoxes)),
@@ -2273,6 +2417,50 @@ namespace {
 					metadata.cssInlineEvidence += lineText;
 					++metadata.cssInlineEvidenceRecordCount;
 				}
+			}
+		}
+		for (const CssAtomicLayoutResult& atomic : inlineSnapshot.atomicResults) {
+			if (metadata.cssAtomicEvidenceRecordCount >= 64 || metadata.cssAtomicEvidence.size() >= 32768) break;
+			std::string evidenceId;
+			for (const gxos::web::HtmlElementRef& element : doc.structuralElements) {
+				if (element.serial == atomic.containerSerial) {
+					evidenceId = element.id;
+					break;
+				}
+			}
+			if (evidenceId.rfind("phase3c-", 0) != 0 && evidenceId.rfind("css3c-", 0) != 0) continue;
+			std::string boundedId = evidenceId.substr(0, std::min<size_t>(64, evidenceId.size()));
+			for (char& ch : boundedId) if (ch == '\n' || ch == '\r' || ch == ';') ch = '_';
+			int childLineCount = 0;
+			for (const InlineFlowLayout& flow : inlineSnapshot.flows)
+				if (flow.atomicResultIndex == static_cast<int>(&atomic - inlineSnapshot.atomicResults.data()))
+					childLineCount += static_cast<int>(flow.lines.size());
+			std::ostringstream evidence;
+			evidence << "id=" << boundedId
+				<< ",formatting-context-depth=" << atomic.depth
+				<< ",available-width=" << atomic.availableWidth
+				<< ",auto-width=" << (atomic.autoWidth ? "yes" : "no")
+				<< ",explicit-width=" << (atomic.explicitWidth ? "yes" : "no")
+				<< ",preferred-min=" << atomic.preferredMinimum
+				<< ",preferred-width=" << atomic.preferredWidth
+				<< ",shrink-to-fit-width=" << atomic.shrinkToFitWidth
+				<< ",content-size=" << atomic.usedContentWidth << ":" << atomic.usedContentHeight
+				<< ",padding-box=" << atomic.paddingBoxWidth << ":" << atomic.paddingBoxHeight
+				<< ",border-box=" << atomic.borderBoxWidth << ":" << atomic.borderBoxHeight
+				<< ",outer-size=" << atomic.outerWidth << ":" << atomic.outerHeight
+				<< ",baseline-source=" << (atomic.baselineFromLine ? "last-line" : "bottom-edge")
+				<< ",baseline-y=" << atomic.baselineY
+				<< ",child-block-count=" << atomic.childCount
+				<< ",child-line-count=" << childLineCount
+				<< ",overflow=" << atomic.overflowWidth << ":" << atomic.overflowHeight
+				<< ",clip=" << atomic.clip.x << ":" << atomic.clip.y << ":" << atomic.clip.w << ":" << atomic.clip.h
+				<< ",hit-target-count=" << atomic.hitTargetCount
+				<< ",complete=" << (atomic.complete ? "yes" : "no")
+				<< ",clamped=" << (atomic.clamped ? "yes" : "no") << "\n";
+			const std::string line = evidence.str();
+			if (metadata.cssAtomicEvidence.size() + line.size() <= 32768) {
+				metadata.cssAtomicEvidence += line;
+				++metadata.cssAtomicEvidenceRecordCount;
 			}
 		}
 		metadata.cssInlineFragmentClamps = inlineSnapshot.inlineFragmentClamps;
@@ -3416,6 +3604,9 @@ namespace {
 	static int blockTotalHeight(const DocBlock& block, const WebDocument& doc, bool nextIsHeading)
 	{
 		if (block.style.displayNone) return 0;
+		// Descendant blocks of an inline-block are laid out by their owning
+		// atomic context.  They must not advance the document-wide cursor.
+		if (block.atomicContainerSerial != 0) return 0;
 		const int blockIndex = static_cast<int>(&block - &doc.blocks.front());
 		if (const InlineFlowLayout* flow = inlineFlowForBlock(doc, blockIndex)) {
 			if (flow->anchorBlockIndex != blockIndex) return 0;
@@ -4599,7 +4790,27 @@ namespace {
 		add("css_inline_nesting_clamps", metadata.cssInlineNestingClamps);
 		add("css_inline_wrap_scan_clamps", metadata.cssInlineWrapScanClamps);
 		add("css_inline_evidence_records", metadata.cssInlineEvidenceRecordCount);
+		add("css_atomic_formatting_contexts", metadata.cssAtomicFormattingContexts);
+		add("css_atomic_evidence_records", metadata.cssAtomicEvidenceRecordCount);
+		add("css_atomic_context_depth_max", metadata.cssAtomicContextDepthMax);
+		add("css_atomic_context_depth_clamps", metadata.cssAtomicContextDepthClamps);
+		add("css_atomic_contexts_document", metadata.cssAtomicContextsDocument);
+		add("css_atomic_layout_operations", metadata.cssAtomicLayoutOperations);
+		add("css_atomic_layout_operation_clamps", metadata.cssAtomicLayoutOperationClamps);
+		add("css_inline_block_auto_widths", metadata.cssInlineBlockAutoWidths);
+		add("css_inline_block_explicit_widths", metadata.cssInlineBlockExplicitWidths);
+		add("css_inline_block_shrink_to_fit", metadata.cssInlineBlockShrinkToFit);
+		add("css_inline_block_preferred_min_clamps", metadata.cssInlineBlockPreferredMinClamps);
+		add("css_inline_block_preferred_width_clamps", metadata.cssInlineBlockPreferredWidthClamps);
+		add("css_inline_block_baseline_from_line", metadata.cssInlineBlockBaselineFromLine);
+		add("css_inline_block_baseline_fallback", metadata.cssInlineBlockBaselineFallback);
+		add("css_inline_block_nested", metadata.cssInlineBlockNested);
+		add("css_inline_block_wraps", metadata.cssInlineBlockWraps);
+		add("css_inline_block_hit_targets", metadata.cssInlineBlockHitTargets);
+		add("css_inline_block_overflow_clips", metadata.cssInlineBlockOverflowClips);
+		add("css_atomic_context_incomplete", metadata.cssAtomicContextIncomplete);
 		if (!metadata.cssInlineEvidence.empty()) out += "Current Document.css_inline_evidence=" + metadata.cssInlineEvidence;
+		if (!metadata.cssAtomicEvidence.empty()) out += "Current Document.css_atomic_evidence=" + metadata.cssAtomicEvidence;
 	}
 
 	static void appendCssPhase3ABlocks(WebDocument& doc, const NavigatorPageMetadata& metadata)
@@ -4927,7 +5138,11 @@ namespace {
 		int inlineRight = 0;
 		int inlineTop = 0;
 		int inlineBottom = 0;
+		int atomicResultIndex = -1;
 	};
+
+	static int buildAtomicLayout(const WebDocument& doc, uint64_t containerSerial,
+		int availableWidth, uint16_t parentDepth, InlineLayoutSnapshot& snapshot);
 
 	struct InlineFontMetrics {
 		int ascent = 1;
@@ -5301,16 +5516,27 @@ namespace {
 
 	static void buildInlineFlow(const WebDocument& doc,
 		InlineFlowLayout& flow,
-		InlineLayoutSnapshot& snapshot)
+		InlineLayoutSnapshot& snapshot,
+		int availableWidthOverride = -1,
+		int containingHeightOverride = -1)
 	{
-		if (flow.anchorBlockIndex < 0 || flow.anchorBlockIndex >= static_cast<int>(doc.blocks.size())) return;
-		DocBlock geometryBlock = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
+		DocBlock geometryBlock;
+		if (flow.anchorBlockIndex >= 0 && flow.anchorBlockIndex < static_cast<int>(doc.blocks.size()))
+			geometryBlock = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
+		else
+			geometryBlock.type = BlockType::Paragraph;
 		geometryBlock.style = flow.style;
 		geometryBlock.inlineFlowSerial = flow.flowSerial;
-		const int availableWidth = blockAvailableWidth(geometryBlock, doc);
+		const int availableWidth = availableWidthOverride >= 0
+			? std::max(1, availableWidthOverride) : blockAvailableWidth(geometryBlock, doc);
 		const int outerWidth = blockOuterWidth(geometryBlock, availableWidth);
 		flow.outerWidth = std::max(1, outerWidth);
-		flow.outerX = blockOuterX(geometryBlock, doc, availableWidth, flow.outerWidth);
+		if (flow.contextSerial == 0) {
+			flow.outerX = blockOuterX(geometryBlock, doc, availableWidth, flow.outerWidth);
+			flow.localOuterX = flow.outerX;
+		} else {
+			flow.outerX = 0;
+		}
 		flow.contentX = flow.outerX + cssBorderLeftPx(flow.style) + cssPaddingLeftPx(flow.style, 0);
 		flow.contentWidth = std::max(1, flow.outerWidth - cssHorizontalBoxEdges(flow.style));
 		if (geometryBlock.type == BlockType::ListItem) {
@@ -5324,7 +5550,7 @@ namespace {
 		bool lineHasContent = false;
 		for (int itemIndex = 0; itemIndex < static_cast<int>(doc.inlineItems.size()); ++itemIndex) {
 			const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(itemIndex)];
-			if (item.flowSerial != flow.flowSerial) continue;
+			if (item.flowSerial != flow.flowSerial || item.atomicContainerSerial != flow.contextSerial) continue;
 			if (item.kind == InlineItemKind::TextRun) {
 				++snapshot.textRuns;
 				appendInlineTextAtoms(doc, flow, item, itemIndex, atoms, snapshot,
@@ -5371,11 +5597,34 @@ namespace {
 			atom.itemIndex = itemIndex;
 			atom.kind = item.kind;
 			atom.ownerSerial = item.ownerSerial;
-			atom.width = inlineAtomWidth(doc, flow, atom);
-			atom.height = item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())
-				? (item.kind == InlineItemKind::ReplacedImage
-					? 64 : blockFormControlHeight(doc.blocks[static_cast<size_t>(item.blockIndex)])) : kLineH;
-			if (item.kind == InlineItemKind::ReplacedImage) {
+			if (item.kind == InlineItemKind::AtomicBlock) {
+				atom.atomicResultIndex = buildAtomicLayout(doc, item.ownerSerial,
+					flow.contentWidth, static_cast<uint16_t>(flow.contextSerial != 0 ? 1 : 0), snapshot);
+				if (atom.atomicResultIndex < 0 || atom.atomicResultIndex >= static_cast<int>(snapshot.atomicResults.size())) {
+					++snapshot.atomicContextIncomplete;
+					continue;
+				}
+				const CssAtomicLayoutResult& atomic = snapshot.atomicResults[static_cast<size_t>(atom.atomicResultIndex)];
+				const WebStyle* atomicOwnerStyle = inlineOwnerStyle(doc, item, flow.style);
+				const int marginLeft = cssMarginLeftPx(*atomicOwnerStyle, 0);
+				const int marginRight = cssMarginRightPx(*atomicOwnerStyle, 0);
+				atom.inlineLeft = marginLeft;
+				atom.inlineRight = marginRight;
+				atom.width = std::max(0, atomic.outerWidth + marginLeft + marginRight);
+				atom.height = std::max(1, atomic.outerHeight);
+				atom.baselineOffset = std::max(1, atomic.baseline);
+				atom.ascent = std::max(1, atom.baselineOffset);
+				atom.descent = std::max(0, atom.height - atom.ascent);
+				atom.lineHeight = atom.height;
+			} else {
+				atom.width = inlineAtomWidth(doc, flow, atom);
+			}
+			if (item.kind == InlineItemKind::AtomicBlock) {
+				// The atomic branch above supplies all box metrics.  Do not replace
+				// them with the legacy control fallback.
+			} else if (item.kind == InlineItemKind::ReplacedImage) {
+				atom.height = item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())
+					? 64 : kLineH;
 				int imageW = atom.width;
 				imageDisplaySize(doc.blocks[static_cast<size_t>(item.blockIndex)], flow.contentWidth, imageW, atom.height);
 				atom.width = imageW;
@@ -5384,6 +5633,8 @@ namespace {
 				atom.descent = 0;
 				++snapshot.replacedItems;
 			} else {
+				atom.height = item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())
+					? blockFormControlHeight(doc.blocks[static_cast<size_t>(item.blockIndex)]) : kLineH;
 				const WebStyle* style = inlineOwnerStyle(doc, item, flow.style);
 				const InlineFontMetrics metrics = inlineFontMetrics(*style);
 				atom.baselineOffset = std::max(1, atom.height - std::max(1, metrics.descent / 2));
@@ -5432,6 +5683,13 @@ namespace {
 			fragment.ownerSerial = atom.ownerSerial;
 			fragment.hitSerial = fragment.blockIndex >= 0 && fragment.blockIndex < static_cast<int>(doc.blocks.size())
 				? doc.blocks[static_cast<size_t>(fragment.blockIndex)].elementMetadata.serial : atom.ownerSerial;
+			fragment.atomicResultIndex = atom.atomicResultIndex;
+			if (atom.atomicResultIndex >= 0 && atom.atomicResultIndex < static_cast<int>(snapshot.atomicResults.size())) {
+				const CssAtomicLayoutResult& atomic = snapshot.atomicResults[static_cast<size_t>(atom.atomicResultIndex)];
+				fragment.boxOffsetX = atom.inlineLeft;
+				fragment.boxWidth = atomic.outerWidth;
+				fragment.boxHeight = atomic.outerHeight;
+			}
 			fragment.kind = atom.kind;
 			fragment.whitespace = atom.whitespace;
 			fragment.collapsedWhitespace = atom.collapsedWhitespace;
@@ -5454,6 +5712,7 @@ namespace {
 			if (canWrap && cursorX > 0 && cursorX + required > flow.contentWidth) {
 				finishLine();
 				++snapshot.lineWraps;
+				if (atom.kind == InlineItemKind::AtomicBlock) ++snapshot.inlineBlockWraps;
 				required = atom.width;
 			}
 			if (hasPendingSpace) {
@@ -5515,12 +5774,349 @@ namespace {
 			flow.style.heightValue, flow.style.height, flow.style.heightPercent,
 			flow.style.minHeightValue, flow.style.minHeight, flow.style.minHeightPercent,
 			flow.style.maxHeightValue, flow.style.maxHeight, flow.style.maxHeightPercent,
-			flow.style.maxHeightNone, blockContainingContentHeight(geometryBlock, doc), fallbackOuter,
+			flow.style.maxHeightNone, containingHeightOverride >= 0 ? containingHeightOverride : blockContainingContentHeight(geometryBlock, doc), fallbackOuter,
 			verticalEdges, false);
 		flow.contentOffsetY = cssMarginTopPx(flow.style, geometryBlock.type == BlockType::Heading ? 10 : 4) +
 			cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0);
 		flow.totalHeight = cssMarginTopPx(flow.style, geometryBlock.type == BlockType::Heading ? 10 : 4) +
 			std::max(1, outerHeight) + cssMarginBottomPx(flow.style, geometryBlock.type == BlockType::ListItem ? 4 : 8);
+		flow.outerHeight = std::max(1, outerHeight);
+	}
+
+	static bool atomicBlockContainsSerial(const DocBlock& block, uint64_t serial)
+	{
+		if (serial == 0) return false;
+		if (block.elementMetadata.serial == serial) return true;
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors)
+			if (ancestor.serial == serial) return true;
+		return false;
+	}
+
+	static bool atomicBlockHasInlineItems(const WebDocument& doc, uint64_t containerSerial,
+		uint64_t flowSerial)
+	{
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (item.atomicContainerSerial == containerSerial && item.flowSerial == flowSerial)
+				return true;
+		}
+		return false;
+	}
+
+	static int atomicIntrinsicTextWidth(const WebDocument& doc, const WebInlineItem& item,
+		bool longestToken)
+	{
+		const WebStyle* style = inlineOwnerStyle(doc, item, doc.bodyStyle);
+		if (!style) style = &doc.bodyStyle;
+		if (!longestToken) return inlineTextWidth(*style, item.text);
+		int maximum = 0;
+		size_t start = 0;
+		while (start <= item.text.size()) {
+			size_t end = item.text.find_first_of(" \t\r\n", start);
+			if (end == std::string::npos) end = item.text.size();
+			maximum = std::max(maximum, inlineTextWidth(*style, item.text.substr(start, end - start)));
+			if (end == item.text.size()) break;
+			start = end + 1;
+		}
+		return maximum;
+	}
+
+	static void atomicPreferredWidths(const WebDocument& doc, uint64_t serial,
+		uint16_t depth, int& outMinimum, int& outPreferred, bool& outComplete)
+	{
+		outMinimum = 0;
+		outPreferred = 0;
+		if (depth > 8) {
+			outComplete = false;
+			return;
+		}
+		int runMinimum = 0;
+		int runPreferred = 0;
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (item.atomicContainerSerial != serial) continue;
+			int minimum = 0;
+			int preferred = 0;
+			switch (item.kind) {
+			case InlineItemKind::TextRun:
+				minimum = atomicIntrinsicTextWidth(doc, item, true);
+				preferred = atomicIntrinsicTextWidth(doc, item, false);
+				break;
+			case InlineItemKind::ReplacedImage:
+			case InlineItemKind::FormControl:
+				if (item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())) {
+					const DocBlock& block = doc.blocks[static_cast<size_t>(item.blockIndex)];
+					if (item.kind == InlineItemKind::ReplacedImage) {
+						int imageW = 0;
+						int imageH = 0;
+						imageDisplaySize(block, 8192, imageW, imageH);
+						minimum = preferred = imageW + cssHorizontalBoxEdges(block.style);
+					} else {
+						minimum = preferred = blockFormControlIntrinsicWidth(block);
+					}
+				}
+				break;
+			case InlineItemKind::AtomicBlock: {
+				bool complete = true;
+				atomicPreferredWidths(doc, item.ownerSerial, static_cast<uint16_t>(depth + 1), minimum, preferred, complete);
+				if (!complete) outComplete = false;
+				break;
+			}
+			case InlineItemKind::ForcedBreak:
+				outMinimum = std::max(outMinimum, runMinimum);
+				outPreferred = std::max(outPreferred, runPreferred);
+				runMinimum = runPreferred = 0;
+				continue;
+			}
+			runMinimum = std::min(8192, runMinimum + std::max(0, minimum));
+			runPreferred = std::min(8192, runPreferred + std::max(0, preferred));
+			outMinimum = std::max(outMinimum, minimum);
+			outPreferred = std::max(outPreferred, preferred);
+		}
+		outMinimum = std::max(outMinimum, runMinimum);
+		outPreferred = std::max(outPreferred, runPreferred);
+		if (outPreferred < outMinimum) outPreferred = outMinimum;
+		outMinimum = std::min(8192, std::max(0, outMinimum));
+		outPreferred = std::min(8192, std::max(0, outPreferred));
+	}
+
+	static int atomicRootBlockIndex(const WebDocument& doc, const DocBlock& block,
+		uint64_t containerSerial)
+	{
+		if (block.atomicContainerSerial != containerSerial) return -1;
+		if (block.elementMetadata.serial == containerSerial) return -1;
+		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+			if (it->serial == containerSerial) break;
+			if (it->parentSerial == containerSerial) return static_cast<int>(it->serial & 0x7FFFFFFF);
+		}
+		if (block.elementMetadata.parentSerial == containerSerial) return static_cast<int>(block.elementMetadata.serial & 0x7FFFFFFF);
+		return 0;
+	}
+
+	static int atomicFindBlockBySerial(const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0) return -1;
+		for (int i = 0; i < static_cast<int>(doc.blocks.size()); ++i)
+			if (doc.blocks[static_cast<size_t>(i)].elementMetadata.serial == serial) return i;
+		return -1;
+	}
+
+	static int buildAtomicLayout(const WebDocument& doc, uint64_t containerSerial,
+		int availableWidth, uint16_t parentDepth, InlineLayoutSnapshot& snapshot)
+	{
+		if (containerSerial == 0 || availableWidth < 0) return -1;
+		for (int i = 0; i < static_cast<int>(snapshot.atomicResults.size()); ++i) {
+			CssAtomicLayoutResult& existing = snapshot.atomicResults[static_cast<size_t>(i)];
+			if (existing.containerSerial != containerSerial || existing.availableWidth != availableWidth) continue;
+			if (!existing.complete) {
+				++snapshot.atomicContextIncomplete;
+				return -1;
+			}
+			return i;
+		}
+		constexpr size_t kMaxAtomicContexts = 256;
+		constexpr size_t kMaxAtomicChildren = 1024;
+		constexpr int kMaxAtomicLayoutOperations = 2048;
+		if (parentDepth >= 8 || snapshot.atomicResults.size() >= kMaxAtomicContexts) {
+			++snapshot.atomicContextDepthClamps;
+			++snapshot.atomicContextIncomplete;
+			return -1;
+		}
+		if (snapshot.atomicChildren.size() >= kMaxAtomicChildren) {
+			++snapshot.atomicContextIncomplete;
+			return -1;
+		}
+		if (snapshot.atomicLayoutOperations >= kMaxAtomicLayoutOperations) {
+			++snapshot.atomicLayoutOperationClamps;
+			++snapshot.atomicContextIncomplete;
+			return -1;
+		}
+		++snapshot.atomicLayoutOperations;
+		CssAtomicLayoutResult result;
+		result.containerSerial = containerSerial;
+		result.availableWidth = std::max(1, std::min(8192, availableWidth));
+		result.depth = parentDepth;
+		result.complete = false;
+		const int resultIndex = static_cast<int>(snapshot.atomicResults.size());
+		snapshot.atomicResults.push_back(result);
+		snapshot.atomicContextDepthMax = std::max(snapshot.atomicContextDepthMax, static_cast<int>(parentDepth) + 1);
+		++snapshot.atomicContextsDocument;
+		if (parentDepth > 0) ++snapshot.inlineBlockNested;
+
+		const WebStyle* style = computedStyleForSerial(doc, containerSerial);
+		if (!style || style->display != DisplayMode::InlineBlock || style->displayNone) {
+			snapshot.atomicResults[static_cast<size_t>(resultIndex)].complete = true;
+			return -1;
+		}
+		CssAtomicLayoutContext context;
+		context.containingBlockWidth = result.availableWidth;
+		context.availableWidth = result.availableWidth;
+		context.parentStructuralSerial = containerSerial;
+		context.formattingContextDepth = static_cast<uint8_t>(parentDepth + 1);
+		context.recursionBudget = 8;
+		context.clip = CssPaintRect{0, 0, 8192, 8192};
+		const int horizontalEdges = cssHorizontalBoxEdges(*style);
+		const int verticalEdges = cssVerticalBoxEdges(*style);
+		int preferredMinimum = 0;
+		int preferredWidth = 0;
+		bool preferredComplete = true;
+		atomicPreferredWidths(doc, containerSerial, parentDepth, preferredMinimum, preferredWidth, preferredComplete);
+		const int preferredMinOuter = cssBoundedGeometryAdd(preferredMinimum, horizontalEdges);
+		const int preferredOuter = cssBoundedGeometryAdd(preferredWidth, horizontalEdges);
+		const CssResolvedLength explicitWidth = resolveCssLength(style->widthValue,
+			style->width, style->widthPercent, result.availableWidth);
+		bool widthAuto = !explicitWidth.definite;
+		int shrinkWidth = std::max(preferredMinOuter,
+			std::min(result.availableWidth, std::max(preferredMinOuter, preferredOuter)));
+		if (preferredOuter > result.availableWidth) ++snapshot.inlineBlockPreferredWidthClamps;
+		if (preferredMinOuter > result.availableWidth) ++snapshot.inlineBlockPreferredMinClamps;
+		bool widthClamped = false;
+		bool widthConflict = false;
+		const int fallbackOuter = widthAuto ? shrinkWidth : result.availableWidth;
+		const int outerWidth = resolveUsedOuterDimension(*style,
+			style->widthValue, style->width, style->widthPercent,
+			style->minWidthValue, style->minWidth, style->minWidthPercent,
+			style->maxWidthValue, style->maxWidth, style->maxWidthPercent,
+			style->maxWidthNone, result.availableWidth, fallbackOuter, horizontalEdges, false,
+			&widthAuto, nullptr, &widthConflict, &widthClamped);
+		const int contentWidth = usedContentDimensionFromOuter(*style, outerWidth, horizontalEdges);
+		if (widthAuto) {
+			++snapshot.inlineBlockAutoWidths;
+			++snapshot.inlineBlockShrinkToFit;
+		} else {
+			++snapshot.inlineBlockExplicitWidths;
+		}
+		int cursor = 0;
+		int lastLineBaseline = -1;
+		std::vector<std::pair<uint64_t, int>> roots;
+		roots.reserve(64);
+		for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+			if (atomicRootBlockIndex(doc, block, containerSerial) < 0 || block.style.displayNone) continue;
+			uint64_t rootSerial = block.elementMetadata.serial;
+			for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+				if (it->serial == containerSerial) break;
+				if (it->parentSerial == containerSerial) {
+					rootSerial = it->serial;
+					break;
+				}
+			}
+			bool seen = false;
+			for (const auto& root : roots) if (root.first == rootSerial) seen = true;
+			if (!seen && roots.size() < 64) roots.push_back({rootSerial, blockIndex});
+		}
+		if (roots.empty()) {
+			for (const WebInlineItem& item : doc.inlineItems) {
+				if (item.atomicContainerSerial == containerSerial && item.flowSerial == containerSerial) {
+					roots.push_back({containerSerial, -1});
+					break;
+				}
+			}
+		}
+		const int contentOriginX = cssBorderLeftPx(*style) + cssPaddingLeftPx(*style, 0);
+		for (const auto& root : roots) {
+			if (snapshot.atomicChildren.size() - result.childBegin >= 1024) {
+				++snapshot.atomicContextIncomplete;
+				break;
+			}
+			int anchorIndex = root.second;
+			uint64_t flowSerial = anchorIndex >= 0 ? doc.blocks[static_cast<size_t>(anchorIndex)].inlineFlowSerial : containerSerial;
+			if (flowSerial == 0) flowSerial = containerSerial;
+			if (!atomicBlockHasInlineItems(doc, containerSerial, flowSerial)) continue;
+			int flowIndex = -1;
+			for (int i = 0; i < static_cast<int>(snapshot.flows.size()); ++i) {
+				if (snapshot.flows[static_cast<size_t>(i)].flowSerial == flowSerial &&
+					snapshot.flows[static_cast<size_t>(i)].contextSerial == containerSerial) {
+					flowIndex = i;
+					break;
+				}
+			}
+			if (flowIndex < 0 && snapshot.flows.size() < 256) {
+				InlineFlowLayout flow;
+				flow.flowSerial = flowSerial;
+				flow.contextSerial = containerSerial;
+				flow.anchorBlockIndex = anchorIndex;
+				flow.style = anchorIndex >= 0 ? doc.blocks[static_cast<size_t>(anchorIndex)].style : *style;
+				if (anchorIndex < 0) flow.style = *style;
+				flow.atomicResultIndex = resultIndex;
+				flow.localOuterX = contentOriginX;
+				flow.localOuterY = cursor + cssMarginTopPx(flow.style, 0);
+				snapshot.flows.push_back(flow);
+				flowIndex = static_cast<int>(snapshot.flows.size() - 1);
+				buildInlineFlow(doc, snapshot.flows[static_cast<size_t>(flowIndex)], snapshot,
+					std::max(1, contentWidth), -1);
+			}
+			if (flowIndex < 0 || flowIndex >= static_cast<int>(snapshot.flows.size())) continue;
+			InlineFlowLayout& flow = snapshot.flows[static_cast<size_t>(flowIndex)];
+			const int marginTop = cssMarginTopPx(flow.style, 0);
+			const int marginBottom = cssMarginBottomPx(flow.style, 0);
+			flow.localOuterX = contentOriginX;
+			flow.localOuterY = cursor + marginTop;
+			const int childY = flow.localOuterY;
+			const int childH = std::max(1, flow.outerHeight);
+			CssAtomicChildPlacement child;
+			child.blockIndex = anchorIndex;
+			child.flowIndex = flowIndex;
+			child.x = contentOriginX;
+			child.y = childY;
+			child.w = std::max(1, flow.outerWidth);
+			child.h = childH;
+			child.serial = anchorIndex >= 0 ? doc.blocks[static_cast<size_t>(anchorIndex)].elementMetadata.serial : containerSerial;
+			child.clip = CssPaintRect{child.x, child.y, child.w, child.h};
+			snapshot.atomicChildren.push_back(child);
+			if (result.childCount == 0) result.childBegin = static_cast<uint16_t>(snapshot.atomicChildren.size() - 1);
+			++result.childCount;
+			cursor = std::min(8192, childY + childH + marginBottom);
+			if (!flow.lines.empty()) {
+				const InlineLineLayout& last = flow.lines.back();
+				lastLineBaseline = childY + cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0) +
+					last.top + last.baseline;
+			}
+		}
+		const int contentHeight = std::max(0, cursor);
+		const int fallbackHeight = cssBoundedGeometryAdd(contentHeight, verticalEdges, &widthClamped);
+		const int outerHeight = resolveUsedOuterDimension(*style,
+			style->heightValue, style->height, style->heightPercent,
+			style->minHeightValue, style->minHeight, style->minHeightPercent,
+			style->maxHeightValue, style->maxHeight, style->maxHeightPercent,
+			style->maxHeightNone, -1, fallbackHeight, verticalEdges, false,
+			nullptr, nullptr, &widthConflict, &widthClamped);
+		CssAtomicLayoutResult& completed = snapshot.atomicResults[static_cast<size_t>(resultIndex)];
+		completed.usedContentWidth = contentWidth;
+		completed.usedContentHeight = usedContentDimensionFromOuter(*style, outerHeight, verticalEdges);
+		completed.paddingBoxWidth = std::max(0, outerWidth - cssBorderLeftPx(*style) - cssBorderRightPx(*style));
+		completed.paddingBoxHeight = std::max(0, outerHeight - cssBorderTopPx(*style) - cssBorderBottomPx(*style));
+		completed.borderBoxWidth = outerWidth;
+		completed.borderBoxHeight = outerHeight;
+		completed.outerWidth = outerWidth;
+		completed.outerHeight = outerHeight;
+		completed.preferredMinimum = preferredMinOuter;
+		completed.preferredWidth = preferredOuter;
+		completed.shrinkToFitWidth = shrinkWidth;
+		completed.autoWidth = widthAuto;
+		completed.explicitWidth = !widthAuto;
+		completed.clamped = widthClamped || widthConflict || !preferredComplete;
+		completed.baseline = lastLineBaseline >= 0 ? lastLineBaseline : std::max(1, outerHeight - cssBorderBottomPx(*style));
+		completed.baselineY = completed.baseline;
+		completed.baselineFromLine = lastLineBaseline >= 0;
+		completed.baselineFallback = lastLineBaseline < 0;
+		if (completed.baselineFromLine) ++snapshot.inlineBlockBaselineFromLine;
+		else ++snapshot.inlineBlockBaselineFallback;
+		completed.paintBounds = CssPaintRect{0, 0, outerWidth, outerHeight};
+		completed.clip = cssApplyOverflowClip(completed.paintBounds, *style, 0, 0, outerWidth, outerHeight);
+		completed.overflowWidth = std::max(outerWidth, contentOriginX + contentWidth);
+		completed.overflowHeight = std::max(outerHeight, cursor + cssPaddingBottomPx(*style, 0));
+		completed.overflowClipped = style->overflowX != OverflowMode::Visible || style->overflowY != OverflowMode::Visible;
+		completed.hitTargetBegin = result.childBegin;
+		completed.hitTargetCount = result.childCount;
+		for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+			if (block.atomicContainerSerial != containerSerial) continue;
+			if (block.type == BlockType::Link || isFormControlBlock(block)) ++completed.hitTargetCount;
+		}
+		snapshot.inlineBlockHitTargets += completed.hitTargetCount;
+		completed.complete = true;
+		if (completed.overflowClipped) ++snapshot.inlineBlockOverflowClips;
+		if (!preferredComplete) ++snapshot.atomicContextIncomplete;
+		return resultIndex;
 	}
 
 	static void rebuildInlineLayout(const WebDocument& doc, InlineLayoutSnapshot& snapshot)
@@ -5529,46 +6125,81 @@ namespace {
 		snapshot.url = doc.url;
 		snapshot.blockCount = doc.blocks.size();
 		snapshot.itemCount = doc.inlineItems.size();
+		snapshot.flows.reserve(256);
+		snapshot.atomicResults.reserve(256);
+		snapshot.atomicChildren.reserve(1024);
 		if (doc.inlineItems.empty()) {
 			snapshot.valid = true;
 			return;
 		}
 		constexpr size_t kMaxFlows = 256;
 		for (const WebInlineItem& item : doc.inlineItems) {
-			if (item.flowSerial == 0) continue;
+			if (item.flowSerial == 0 || item.atomicContainerSerial != 0) continue;
 			InlineFlowLayout* flow = nullptr;
 			for (InlineFlowLayout& candidate : snapshot.flows) {
-				if (candidate.flowSerial == item.flowSerial) {
+				if (candidate.flowSerial == item.flowSerial && candidate.contextSerial == 0) {
 					flow = &candidate;
 					break;
 				}
 			}
-			if (!flow) {
-				if (snapshot.flows.size() >= kMaxFlows) {
-					++snapshot.nestingClamps;
-					continue;
-				}
-				snapshot.flows.push_back(InlineFlowLayout{});
-				flow = &snapshot.flows.back();
-				flow->flowSerial = item.flowSerial;
-				for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
-					if (doc.blocks[static_cast<size_t>(blockIndex)].inlineFlowSerial == item.flowSerial) {
-						flow->anchorBlockIndex = blockIndex;
-						break;
-					}
-				}
-				if (flow->anchorBlockIndex < 0 && item.blockIndex >= 0) flow->anchorBlockIndex = item.blockIndex;
-				if (flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(doc.blocks.size())) {
-					flow->style = doc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].style;
-					if (const WebStyle* computed = computedStyleForSerial(doc, item.flowSerial)) flow->style = *computed;
+			if (flow) continue;
+			if (snapshot.flows.size() >= kMaxFlows) {
+				++snapshot.nestingClamps;
+				continue;
+			}
+			snapshot.flows.push_back(InlineFlowLayout{});
+			flow = &snapshot.flows.back();
+			flow->flowSerial = item.flowSerial;
+			flow->contextSerial = 0;
+			for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
+				if (doc.blocks[static_cast<size_t>(blockIndex)].inlineFlowSerial == item.flowSerial &&
+					doc.blocks[static_cast<size_t>(blockIndex)].atomicContainerSerial == 0) {
+					flow->anchorBlockIndex = blockIndex;
+					break;
 				}
 			}
+			if (flow->anchorBlockIndex < 0 && item.blockIndex >= 0) flow->anchorBlockIndex = item.blockIndex;
+			if (flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(doc.blocks.size()))
+				flow->style = doc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].style;
+			if (const WebStyle* computed = computedStyleForSerial(doc, item.flowSerial)) flow->style = *computed;
 		}
 		for (InlineFlowLayout& flow : snapshot.flows) {
-			if (flow.anchorBlockIndex < 0 || flow.style.displayNone || flow.style.visibility == VisibilityMode::Hidden) continue;
+			if (flow.style.displayNone || flow.style.visibility == VisibilityMode::Hidden) continue;
 			buildInlineFlow(doc, flow, snapshot);
 		}
+		snapshot.atomicContextsDocument = static_cast<int>(std::min<size_t>(
+			std::numeric_limits<int>::max(), snapshot.atomicResults.size()));
 		snapshot.valid = true;
+	}
+
+	static bool atomicResultScreenRect(const WebDocument& doc, const InlineLayoutSnapshot& snapshot,
+		int resultIndex, int scrollOffset, CssPaintRect& out, int depth = 0)
+	{
+		if (resultIndex < 0 || resultIndex >= static_cast<int>(snapshot.atomicResults.size()) || depth > 8) return false;
+		for (const InlineFlowLayout& flow : snapshot.flows) {
+			for (const InlineFragmentLayout& fragment : flow.fragments) {
+				if (!fragment.visible || fragment.atomicResultIndex != resultIndex) continue;
+				int originX = 0;
+				int originY = 0;
+				if (flow.contextSerial == 0) {
+					if (flow.anchorBlockIndex < 0 || flow.anchorBlockIndex >= static_cast<int>(doc.blocks.size())) continue;
+					const DocBlock& anchor = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
+					const int drawY = kContentY + cssBlockLayoutY(doc, flow.anchorBlockIndex) - scrollOffset;
+					const int marginTop = cssMarginTopPx(flow.style, anchor.type == BlockType::Heading ? 10 : 4);
+					originX = flow.contentX;
+					originY = drawY + marginTop + cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0);
+				} else {
+					CssPaintRect parent;
+					if (!atomicResultScreenRect(doc, snapshot, flow.atomicResultIndex, scrollOffset, parent, depth + 1)) continue;
+					originX = parent.x + flow.contentX;
+					originY = parent.y + flow.localOuterY + cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0);
+				}
+				out = CssPaintRect{originX + fragment.x + fragment.boxOffsetX, originY + fragment.y,
+					std::max(0, fragment.boxWidth), std::max(0, fragment.boxHeight)};
+				return out.w > 0 && out.h > 0;
+			}
+		}
+		return false;
 	}
 
 	static void ensureInlineLayout(const WebDocument& doc)
@@ -5590,7 +6221,8 @@ namespace {
 		const uint64_t serial = doc.blocks[static_cast<size_t>(blockIndex)].inlineFlowSerial;
 		if (serial == 0) return nullptr;
 		for (const InlineFlowLayout& flow : s_inlineLayoutSnapshot.flows)
-			if (flow.flowSerial == serial) return &flow;
+			if (flow.flowSerial == serial && flow.contextSerial == doc.blocks[static_cast<size_t>(blockIndex)].atomicContainerSerial)
+				return &flow;
 		return nullptr;
 	}
 
@@ -6696,30 +7328,42 @@ void Navigator::renderDocument()
 		drawThemeRect(s_windowId, x, y, 1, bottom - y, ring);
 		drawThemeRect(s_windowId, right - 1, y, 1, bottom - y, ring);
 	};
-	auto renderInlineFlow = [&](const InlineFlowLayout& flow, int anchorIndex, const DocBlock& anchor) {
-		if (flow.lines.empty() || flow.style.displayNone || flow.style.visibility == VisibilityMode::Hidden) return;
-		const int drawY = kContentY + blockLayoutY(anchorIndex) - s_scrollOffset;
+	std::function<void(const InlineFlowLayout&, int, int)> renderInlineFlowAt;
+	renderInlineFlowAt = [&](const InlineFlowLayout& flow, int parentX, int parentY) {
+		if (flow.style.displayNone || flow.style.visibility == VisibilityMode::Hidden) return;
+		const bool embedded = flow.contextSerial != 0;
+		DocBlock anchor;
+		if (flow.anchorBlockIndex >= 0 && flow.anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
+			anchor = s_currentDoc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
+		const int drawY = embedded ? parentY + flow.localOuterY :
+			kContentY + blockLayoutY(flow.anchorBlockIndex) - s_scrollOffset;
 		const int marginTop = cssMarginTopPx(flow.style, anchor.type == BlockType::Heading ? 10 : 4);
 		const int marginBottom = cssMarginBottomPx(flow.style, anchor.type == BlockType::ListItem ? 4 : 8);
-		const int boxY = drawY + marginTop;
-		const int boxH = std::max(1, flow.totalHeight - marginTop - marginBottom);
+		const int boxY = embedded ? drawY : drawY + marginTop;
+		const int boxH = std::max(1, flow.outerHeight > 0 ? flow.outerHeight : flow.totalHeight - marginTop - marginBottom);
+		const int flowOuterX = embedded ? parentX + flow.localOuterX : flow.outerX;
 		const int borderTop = cssBorderTopPx(flow.style);
 		const int paddingTop = cssPaddingTopPx(flow.style, 0);
 		const int baseY = boxY + borderTop + paddingTop;
-		const bool ancestorClipPushed = cssBlockHasOverflowAncestor(s_currentDoc, anchor) &&
+		const bool ancestorClipPushed = !embedded && cssBlockHasOverflowAncestor(s_currentDoc, anchor) &&
 			cssPushPaintClip(cssBlockAncestorClip(s_currentDoc, anchor, s_scrollOffset));
 		s_cssPaintOpacityPercent = std::max(0, std::min(100, flow.style.effectiveOpacityPercent));
-		drawBlockBox(s_windowId, flow.outerX, boxY, flow.outerWidth, boxH, flow.style);
+		drawBlockBox(s_windowId, flowOuterX, boxY, flow.outerWidth, boxH, flow.style);
 		const bool blockClipPushed = (flow.style.overflowX != OverflowMode::Visible ||
 			flow.style.overflowY != OverflowMode::Visible) && cssPushPaintClip(
-			cssBlockVisibleClip(s_currentDoc, anchorIndex, anchor, flow.outerX, boxY,
+			embedded ? CssPaintRect{flowOuterX + cssBorderLeftPx(flow.style), boxY + cssBorderTopPx(flow.style),
+				std::max(0, flow.outerWidth - cssBorderLeftPx(flow.style) - cssBorderRightPx(flow.style)),
+				std::max(0, boxH - cssBorderTopPx(flow.style) - cssBorderBottomPx(flow.style))} :
+			cssBlockVisibleClip(s_currentDoc, flow.anchorBlockIndex, anchor, flowOuterX, boxY,
 				flow.outerWidth, boxH, s_scrollOffset));
 		for (const InlineFragmentLayout& fragment : flow.fragments) {
 			if (!fragment.visible || fragment.itemIndex < 0 ||
 				fragment.itemIndex >= static_cast<int>(s_currentDoc.inlineItems.size())) continue;
 			const WebInlineItem& item = s_currentDoc.inlineItems[static_cast<size_t>(fragment.itemIndex)];
-			if (item.blockIndex < 0 || item.blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) continue;
-			const DocBlock& itemBlock = s_currentDoc.blocks[static_cast<size_t>(item.blockIndex)];
+			DocBlock itemBlock;
+			if (item.blockIndex >= 0 && item.blockIndex < static_cast<int>(s_currentDoc.blocks.size()))
+				itemBlock = s_currentDoc.blocks[static_cast<size_t>(item.blockIndex)];
+			else if (fragment.kind != InlineItemKind::AtomicBlock) continue;
 			const WebStyle* ownerStyle = inlineOwnerStyle(s_currentDoc, item, flow.style);
 			if (!ownerStyle || ownerStyle->displayNone || ownerStyle->visibility == VisibilityMode::Hidden) continue;
 			WebStyle paintStyle = *ownerStyle;
@@ -6735,8 +7379,28 @@ void Navigator::renderDocument()
 				}
 			}
 			s_cssPaintOpacityPercent = std::max(0, std::min(100, paintStyle.effectiveOpacityPercent));
-			const int fragX = flow.contentX + fragment.x;
+			const int fragX = (embedded ? parentX : 0) + flow.contentX + fragment.x;
 			const int fragY = baseY + fragment.y;
+			if (fragment.kind == InlineItemKind::AtomicBlock &&
+				fragment.atomicResultIndex >= 0 && fragment.atomicResultIndex < static_cast<int>(s_inlineLayoutSnapshot.atomicResults.size())) {
+				const CssAtomicLayoutResult& atomic = s_inlineLayoutSnapshot.atomicResults[static_cast<size_t>(fragment.atomicResultIndex)];
+				const int atomicX = fragX + fragment.boxOffsetX;
+				const int atomicY = fragY;
+				s_cssPaintOpacityPercent = std::max(0, std::min(100, paintStyle.effectiveOpacityPercent));
+				drawBlockBox(s_windowId, atomicX, atomicY, atomic.outerWidth, atomic.outerHeight, paintStyle);
+				const bool atomicClipPushed = atomic.overflowClipped && cssPushPaintClip(
+					CssPaintRect{atomicX + cssBorderLeftPx(paintStyle), atomicY + cssBorderTopPx(paintStyle),
+						std::max(0, atomic.outerWidth - cssBorderLeftPx(paintStyle) - cssBorderRightPx(paintStyle)),
+						std::max(0, atomic.outerHeight - cssBorderTopPx(paintStyle) - cssBorderBottomPx(paintStyle))});
+				for (int child = atomic.childBegin; child < static_cast<int>(atomic.childBegin + atomic.childCount); ++child) {
+					if (child < 0 || child >= static_cast<int>(s_inlineLayoutSnapshot.atomicChildren.size())) continue;
+					const CssAtomicChildPlacement& placement = s_inlineLayoutSnapshot.atomicChildren[static_cast<size_t>(child)];
+					if (placement.flowIndex < 0 || placement.flowIndex >= static_cast<int>(s_inlineLayoutSnapshot.flows.size())) continue;
+					renderInlineFlowAt(s_inlineLayoutSnapshot.flows[static_cast<size_t>(placement.flowIndex)], atomicX, atomicY);
+				}
+				if (atomicClipPushed) cssPopPaintClip();
+				continue;
+			}
 			const int padLeft = cssPaddingLeftPx(paintStyle, 0);
 			const int padRight = cssPaddingRightPx(paintStyle, 0);
 			const int padTop = cssPaddingTopPx(paintStyle, 0);
@@ -6837,6 +7501,10 @@ void Navigator::renderDocument()
 		s_cssPaintOpacityPercent = 100;
 	};
 	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (block.atomicContainerSerial != 0) {
+			++blockIndex;
+			continue;
+		}
 		if (!blockHasVisibleCss(block)) {
 			++blockIndex;
 			continue;
@@ -6844,7 +7512,7 @@ void Navigator::renderDocument()
 		renderFieldsetAt(blockIndex);
 		if (blockUsesInlineFlow(s_currentDoc, blockIndex)) {
 			if (const InlineFlowLayout* flow = inlineFlowForAnchor(s_currentDoc, blockIndex)) {
-				renderInlineFlow(*flow, blockIndex, block);
+				renderInlineFlowAt(*flow, 0, 0);
 			}
 			++blockIndex;
 			continue;
@@ -11047,11 +11715,18 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	if (!blockHasVisibleCss(block)) return false;
 	ensureInlineLayout(s_currentDoc);
 	const InlineFlowLayout* flow = inlineFlowForBlock(s_currentDoc, blockIndex);
-	if (!flow || flow->anchorBlockIndex < 0 || flow->anchorBlockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
-	const int drawY = kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset;
-	const int boxY = drawY + cssMarginTopPx(flow->style,
-		s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading ? 10 : 4);
-	const int boxH = std::max(1, flow->totalHeight - cssMarginTopPx(flow->style, 4) -
+	if (!flow) return false;
+	if (flow->contextSerial != 0 && flow->atomicResultIndex < 0) return false;
+	CssPaintRect parentAtomic;
+	const bool embedded = flow->contextSerial != 0 &&
+		atomicResultScreenRect(s_currentDoc, s_inlineLayoutSnapshot, flow->atomicResultIndex, s_scrollOffset, parentAtomic);
+	if (flow->contextSerial != 0 && !embedded) return false;
+	const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
+		kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset;
+	const int boxY = embedded ? drawY : drawY + cssMarginTopPx(flow->style,
+		(flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
+			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading) ? 10 : 4);
+	const int boxH = std::max(1, flow->outerHeight > 0 ? flow->outerHeight : flow->totalHeight - cssMarginTopPx(flow->style, 4) -
 		cssMarginBottomPx(flow->style, 8));
 	int left = std::numeric_limits<int>::max();
 	int top = std::numeric_limits<int>::max();
@@ -11061,8 +11736,9 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	for (const InlineFragmentLayout& fragment : flow->fragments) {
 		if (!fragment.visible || fragment.blockIndex != blockIndex ||
 			(!includeWhitespace && fragment.whitespace)) continue;
-		const int x = flow->contentX + fragment.x;
-		const int y = drawY + flow->contentOffsetY + fragment.y;
+		const int x = (embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x;
+		const int y = embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y :
+			drawY + flow->contentOffsetY + fragment.y;
 		left = std::min(left, x);
 		top = std::min(top, y);
 		right = std::max(right, x + std::max(0, fragment.w));
@@ -11070,11 +11746,14 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 		found = true;
 	}
 	if (!found || right <= left || bottom <= top) return false;
+	CssPaintRect flowClip = embedded ? parentAtomic : cssClipRectForHit(
+		s_currentDoc, flow->anchorBlockIndex,
+		flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size())
+			? s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)] : block,
+		flow->outerX, boxY, flow->outerWidth, boxH, s_scrollOffset);
 	const CssPaintRect clipped = cssClipHitTarget(
 		CssPaintRect{left, top, right - left, bottom - top},
-		cssClipRectForHit(s_currentDoc, flow->anchorBlockIndex,
-			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)],
-			flow->outerX, boxY, flow->outerWidth, boxH, s_scrollOffset));
+		flowClip);
 	out = Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 	return out.w > 0 && out.h > 0;
 }
@@ -11086,23 +11765,31 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	if (!blockHasVisibleCss(block)) return false;
 	ensureInlineLayout(s_currentDoc);
 	const InlineFlowLayout* flow = inlineFlowForBlock(s_currentDoc, blockIndex);
-	if (!flow || flow->anchorBlockIndex < 0 ||
-		flow->anchorBlockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
-	const int drawY = kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset;
-	const int boxY = drawY + cssMarginTopPx(flow->style,
-		s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading ? 10 : 4);
-	const int boxH = std::max(1, flow->totalHeight - cssMarginTopPx(flow->style, 4) -
+	if (!flow) return false;
+	CssPaintRect parentAtomic;
+	const bool embedded = flow->contextSerial != 0 &&
+		atomicResultScreenRect(s_currentDoc, s_inlineLayoutSnapshot, flow->atomicResultIndex, s_scrollOffset, parentAtomic);
+	if (flow->contextSerial != 0 && !embedded) return false;
+	const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
+		kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset;
+	const int boxY = embedded ? drawY : drawY + cssMarginTopPx(flow->style,
+		(flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
+			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading) ? 10 : 4);
+	const int boxH = std::max(1, flow->outerHeight > 0 ? flow->outerHeight : flow->totalHeight - cssMarginTopPx(flow->style, 4) -
 		cssMarginBottomPx(flow->style, 8));
-	const CssPaintRect clip = cssClipRectForHit(
+	const CssPaintRect clip = embedded ? parentAtomic : cssClipRectForHit(
 		s_currentDoc, flow->anchorBlockIndex,
-		s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)],
+		flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size())
+			? s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)] : block,
 		flow->outerX, boxY, flow->outerWidth, boxH, s_scrollOffset);
 	for (const InlineFragmentLayout& fragment : flow->fragments) {
 		if (!fragment.visible || fragment.whitespace || fragment.blockIndex != blockIndex) continue;
 		const CssPaintRect clipped = cssClipHitTarget(
-			CssPaintRect{flow->contentX + fragment.x,
-				drawY + flow->contentOffsetY + fragment.y,
-				std::max(0, fragment.w), std::max(0, fragment.h)}, clip);
+			CssPaintRect{(embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x,
+				embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y :
+					drawY + flow->contentOffsetY + fragment.y,
+				fragment.kind == InlineItemKind::AtomicBlock ? std::max(0, fragment.boxWidth) : std::max(0, fragment.w),
+				fragment.kind == InlineItemKind::AtomicBlock ? std::max(0, fragment.boxHeight) : std::max(0, fragment.h)}, clip);
 		if (clipped.w > 0 && clipped.h > 0 &&
 			x >= clipped.x && x < clipped.x + clipped.w &&
 			y >= clipped.y && y < clipped.y + clipped.h) return true;
