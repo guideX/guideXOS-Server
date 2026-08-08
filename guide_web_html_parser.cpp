@@ -676,6 +676,16 @@ static int roundCssNumber(double value)
 	return static_cast<int>(value + 0.5);
 }
 
+static int roundCssSignedNumber(double value)
+{
+	if (!std::isfinite(value)) return 0;
+	if (value >= static_cast<double>(std::numeric_limits<int>::max() - 1))
+		return std::numeric_limits<int>::max();
+	if (value <= static_cast<double>(std::numeric_limits<int>::min() + 1))
+		return std::numeric_limits<int>::min();
+	return static_cast<int>(value >= 0.0 ? value + 0.5 : value - 0.5);
+}
+
 static int clampCssValue(CssDiagnostics& diag, int value, int minValue, int maxValue)
 {
 	const int clamped = std::max(minValue, std::min(maxValue, value));
@@ -744,6 +754,68 @@ static bool parseCssLengthValue(const std::string& rawValue,
 	}
 	if (!parseCssNumber(value, numeric)) return false;
 	outPx = roundCssNumber(numeric * scale);
+	return true;
+}
+
+// Margins are the first bounded CSS lengths that must retain their unit until
+// layout.  Unlike padding and dimensions, vertical margins may be negative;
+// percentages resolve against the containing-block width in the Navigator
+// layout pass rather than against a parser-time guess.
+static bool parseCssMarginValue(const std::string& rawValue,
+	CssLengthValue& out,
+	CssDiagnostics& diag)
+{
+	out = CssLengthValue();
+	std::string value = toLower(trim(rawValue));
+	if (value.empty()) return false;
+	if (value == "auto") {
+		out.type = CssLengthType::Auto;
+		out.valid = true;
+		return true;
+	}
+	bool percent = false;
+	double scale = 1.0;
+	if (value.size() >= 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "em") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 16.0;
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "pt") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 96.0 / 72.0;
+	} else if (!value.empty() && value.back() == '%') {
+		value.pop_back();
+		percent = true;
+	}
+	if (!percent && value != "0" && value.find_first_of(".0123456789+-") == std::string::npos)
+		return false;
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric) || !std::isfinite(numeric)) return false;
+	if (percent) {
+		int payload = roundCssSignedNumber(numeric);
+		if (payload < -kCssLiteMaxPercentage || payload > kCssLiteMaxPercentage) {
+			payload = std::max(-kCssLiteMaxPercentage, std::min(kCssLiteMaxPercentage, payload));
+			out.clamped = true;
+			++diag.clampedValueCount;
+			++diag.lengthValueClampCount;
+		}
+		out.type = payload == 0 ? CssLengthType::Zero : CssLengthType::Percent;
+		out.value = payload;
+		out.valid = true;
+		return true;
+	}
+	const double scaled = numeric * scale;
+	if (!std::isfinite(scaled)) return false;
+	int pixels = roundCssSignedNumber(scaled);
+	if (pixels < -kCssLiteMaxSpacingPx || pixels > kCssLiteMaxSpacingPx) {
+		pixels = std::max(-kCssLiteMaxSpacingPx, std::min(kCssLiteMaxSpacingPx, pixels));
+		out.clamped = true;
+		++diag.clampedValueCount;
+		++diag.lengthValueClampCount;
+	}
+	out.type = pixels == 0 ? CssLengthType::Zero : CssLengthType::Px;
+	out.value = pixels;
+	out.valid = true;
 	return true;
 }
 
@@ -1398,6 +1470,32 @@ static bool applyLengthList(WebStyle& style,
 	CssDiagnostics& diag)
 {
 	if (values.empty()) return false;
+	if (property == "margin") {
+		CssLengthValue parsed[4];
+		for (size_t i = 0; i < values.size() && i < 4; ++i) {
+			if (!parseCssMarginValue(values[i], parsed[i], diag)) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+		}
+		auto assign = [&](CssLengthValue& value, int& legacy, const CssLengthValue& parsedValue) {
+			value = parsedValue;
+			legacy = parsedValue.type == CssLengthType::Auto ? -2 :
+				(parsedValue.type == CssLengthType::Px || parsedValue.type == CssLengthType::Zero
+					? parsedValue.value : -1);
+		};
+		const CssLengthValue& top = parsed[0];
+		const CssLengthValue& right = values.size() == 1 ? parsed[0] : parsed[1];
+		const CssLengthValue& bottom = values.size() == 1 ? parsed[0] :
+			(values.size() == 2 ? parsed[0] : parsed[2]);
+		const CssLengthValue& left = values.size() == 1 ? parsed[0] :
+			(values.size() == 2 ? parsed[1] : (values.size() == 3 ? parsed[1] : parsed[3]));
+		assign(style.marginTopValue, style.marginTop, top);
+		assign(style.marginRightValue, style.marginRight, right);
+		assign(style.marginBottomValue, style.marginBottom, bottom);
+		assign(style.marginLeftValue, style.marginLeft, left);
+		return true;
+	}
 	int parsed[4] = { -1, -1, -1, -1 };
 	bool autos[4] = { false, false, false, false };
 	for (size_t i = 0; i < values.size() && i < 4; ++i) {
@@ -1411,30 +1509,6 @@ static bool applyLengthList(WebStyle& style,
 		} else {
 			parsed[i] = clampCssValue(diag, parsed[i], 0, kCssLiteMaxSpacingPx);
 		}
-	}
-	if (property == "margin") {
-		if (values.size() == 1) {
-			style.marginTop = parsed[0];
-			style.marginRight = parsed[0];
-			style.marginBottom = parsed[0];
-			style.marginLeft = parsed[0];
-		} else if (values.size() == 2) {
-			style.marginTop = parsed[0];
-			style.marginBottom = parsed[0];
-			style.marginLeft = parsed[1];
-			style.marginRight = parsed[1];
-		} else if (values.size() == 3) {
-			style.marginTop = parsed[0];
-			style.marginLeft = parsed[1];
-			style.marginRight = parsed[1];
-			style.marginBottom = parsed[2];
-		} else {
-			style.marginTop = parsed[0];
-			style.marginRight = parsed[1];
-			style.marginBottom = parsed[2];
-			style.marginLeft = parsed[3];
-		}
-		return true;
 	}
 	if (property == "padding") {
 		if (values.size() == 1) {
@@ -2761,6 +2835,23 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	}
 	if (prop == "margin-top" || prop == "margin-right" || prop == "margin-bottom" || prop == "margin-left" ||
 		prop == "padding-top" || prop == "padding-right" || prop == "padding-bottom" || prop == "padding-left") {
+		if (prop == "margin-top" || prop == "margin-right" || prop == "margin-bottom" || prop == "margin-left") {
+			CssLengthValue parsed;
+			if (!parseCssMarginValue(val, parsed, diag)) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			const int legacy = parsed.type == CssLengthType::Auto ? -2 :
+				(parsed.type == CssLengthType::Px || parsed.type == CssLengthType::Zero ? parsed.value : -1);
+			if (prop == "margin-top") { style.marginTopValue = parsed; style.marginTop = legacy; }
+			else if (prop == "margin-right") { style.marginRightValue = parsed; style.marginRight = legacy; }
+			else if (prop == "margin-bottom") { style.marginBottomValue = parsed; style.marginBottom = legacy; }
+			else { style.marginLeftValue = parsed; style.marginLeft = legacy; }
+			if (prop == "margin-top") return accept(CssProperty::MarginTop);
+			if (prop == "margin-right") return accept(CssProperty::MarginRight);
+			if (prop == "margin-bottom") return accept(CssProperty::MarginBottom);
+			return accept(CssProperty::MarginLeft);
+		}
 		bool autoValue = false;
 		int px = 0;
 		if (!parseCssLengthValue(val, 320, px, autoValue, true)) {
@@ -3278,10 +3369,10 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 		destination.lineHeightValue = source.lineHeightValue;
 		destination.lineHeight = source.lineHeight;
 		break;
-	case CssProperty::MarginTop: destination.marginTop = source.marginTop; break;
-	case CssProperty::MarginRight: destination.marginRight = source.marginRight; break;
-	case CssProperty::MarginBottom: destination.marginBottom = source.marginBottom; break;
-	case CssProperty::MarginLeft: destination.marginLeft = source.marginLeft; break;
+	case CssProperty::MarginTop: destination.marginTop = source.marginTop; destination.marginTopValue = source.marginTopValue; break;
+	case CssProperty::MarginRight: destination.marginRight = source.marginRight; destination.marginRightValue = source.marginRightValue; break;
+	case CssProperty::MarginBottom: destination.marginBottom = source.marginBottom; destination.marginBottomValue = source.marginBottomValue; break;
+	case CssProperty::MarginLeft: destination.marginLeft = source.marginLeft; destination.marginLeftValue = source.marginLeftValue; break;
 	case CssProperty::PaddingTop: destination.paddingTop = source.paddingTop; break;
 	case CssProperty::PaddingRight: destination.paddingRight = source.paddingRight; break;
 	case CssProperty::PaddingBottom: destination.paddingBottom = source.paddingBottom; break;
@@ -3541,9 +3632,13 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 		merged.lineHeight = overrideStyle.lineHeight;
 	}
 	merged.marginTop = overrideStyle.marginTop != -1 ? overrideStyle.marginTop : merged.marginTop;
+	if (overrideStyle.marginTopValue.valid) merged.marginTopValue = overrideStyle.marginTopValue;
 	merged.marginRight = overrideStyle.marginRight != -1 ? overrideStyle.marginRight : merged.marginRight;
+	if (overrideStyle.marginRightValue.valid) merged.marginRightValue = overrideStyle.marginRightValue;
 	merged.marginBottom = overrideStyle.marginBottom != -1 ? overrideStyle.marginBottom : merged.marginBottom;
+	if (overrideStyle.marginBottomValue.valid) merged.marginBottomValue = overrideStyle.marginBottomValue;
 	merged.marginLeft = overrideStyle.marginLeft != -1 ? overrideStyle.marginLeft : merged.marginLeft;
+	if (overrideStyle.marginLeftValue.valid) merged.marginLeftValue = overrideStyle.marginLeftValue;
 	merged.padding = overrideStyle.padding != -1 ? overrideStyle.padding : merged.padding;
 	merged.paddingTop = overrideStyle.paddingTop != -1 ? overrideStyle.paddingTop : merged.paddingTop;
 	merged.paddingRight = overrideStyle.paddingRight != -1 ? overrideStyle.paddingRight : merged.paddingRight;
@@ -3882,9 +3977,13 @@ static void markDefaultStyleProperties(WebStyle& style)
 	if (style.lineHeightNormal || style.lineHeight > 0 || style.lineHeightValue > 0)
 		style.specifiedProperties |= cssPropertyBit(CssProperty::LineHeight);
 	if (style.marginTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginTop);
+	if (style.marginTopValue.valid) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginTop);
 	if (style.marginRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginRight);
+	if (style.marginRightValue.valid) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginRight);
 	if (style.marginBottom != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginBottom);
+	if (style.marginBottomValue.valid) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginBottom);
 	if (style.marginLeft != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginLeft);
+	if (style.marginLeftValue.valid) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginLeft);
 	if (style.padding != -1) style.specifiedProperties |= cssPropertyMask(CssProperty::PaddingTop, CssProperty::PaddingLeft);
 	if (style.paddingTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingTop);
 	if (style.paddingRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingRight);

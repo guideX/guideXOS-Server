@@ -61,6 +61,7 @@ using gxos::web::FormRuntimeStateTable;
 using gxos::web::kFormRuntimeControlCap;
 using gxos::web::InlineItemKind;
 using gxos::web::WebInlineItem;
+using gxos::web::HtmlElementRef;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -388,6 +389,73 @@ namespace {
 
 	static InlineLayoutSnapshot s_inlineLayoutSnapshot;
 	static bool s_inlineLayoutDirty = true;
+
+	// Phase 3D keeps one bounded used-position snapshot for normal block flow.
+	// The legacy flat block stream remains the storage model; these records add
+	// structural parent/sibling relationships without retaining a DOM tree.
+	struct CssMarginCollapseValue {
+		int largestPositive = 0;
+		int mostNegative = 0;
+		int participantCount = 0;
+		int resolved = 0;
+		bool hasPositive = false;
+		bool hasNegative = false;
+		bool clamped = false;
+	};
+
+	struct CssMarginFlowRecord {
+		uint64_t serial = 0;
+		uint64_t parentSerial = 0;
+		uint64_t previousSerial = 0;
+		int specifiedMarginTop = 0;
+		int specifiedMarginBottom = 0;
+		int usedMarginTop = 0;
+		int usedMarginBottom = 0;
+		int marginEdgeY = 0;
+		int usedY = 0;
+		int outerWidth = 0;
+		int outerHeight = 0;
+		int documentExtentContribution = 0;
+		int borderBoxX = 0;
+		int borderBoxY = 0;
+		int borderBoxW = 0;
+		int borderBoxH = 0;
+		CssMarginCollapseValue collapse;
+		std::string collapseType;
+		std::string blockedReason;
+		std::string bfcReason;
+		int collapseParticipantCount = 0;
+		int collapseMaxPositive = 0;
+		int collapseMostNegative = 0;
+		bool collapsedWithPreviousSibling = false;
+		bool collapsedWithParentTop = false;
+		bool collapsedWithParentBottom = false;
+		bool emptyCollapse = false;
+		bool establishesBfc = false;
+		bool heightDefinite = false;
+		bool minHeightPreventsCollapse = false;
+		bool incomplete = false;
+		bool clamped = false;
+	};
+
+	struct CssMarginLayoutSnapshot {
+		bool valid = false;
+		std::string url;
+		size_t blockCount = 0;
+		uint64_t fingerprint = 0;
+		int documentHeight = 0;
+		int maximumParticipants = 0;
+		int maximumDepth = 0;
+		int operations = 0;
+		int participantClamps = 0;
+		int traversalClamps = 0;
+		std::vector<CssMarginFlowRecord> records;
+		std::string evidence;
+		int evidenceRecords = 0;
+	};
+
+	static CssMarginLayoutSnapshot s_cssMarginLayoutSnapshot;
+	static bool s_cssMarginLayoutBuilding = false;
 
 	constexpr int kCssClipStackDepth = 16;
 	static std::array<CssPaintRect, kCssClipStackDepth> s_cssClipStack{};
@@ -1279,6 +1347,8 @@ namespace {
 	static int blockWrapWidth(const DocBlock& block, int outerWidth);
 	static int blockTextLineHeight(const DocBlock& block);
 	static void ensureInlineLayout(const WebDocument& doc);
+	static const gxos::web::HtmlElementRef* cssStructuralElementForSerial(
+		const WebDocument& doc, uint64_t serial);
 	static void rebuildInlineLayout(const WebDocument& doc, InlineLayoutSnapshot& snapshot);
 	static const WebStyle* inlineOwnerStyle(const WebDocument& doc, const WebInlineItem& item,
 		const WebStyle& fallback);
@@ -1760,9 +1830,11 @@ namespace {
 	static CssBlockGeometry cssGeometryForBlock(const WebDocument& doc, int blockIndex);
 	static bool cssBlockHasOverflowAncestor(const WebDocument& doc, const DocBlock& block);
 	static std::string cssNavigatorLengthEvidence(const CssLengthValue& value);
+	static void ensureCssMarginLayout(const WebDocument& doc);
 
 	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc)
 	{
+		ensureCssMarginLayout(doc);
 		metadata.documentBlockCount = static_cast<int>(doc.blocks.size());
 		metadata.imageBlockCount = 0;
 		metadata.loadedImageCount = 0;
@@ -1936,6 +2008,28 @@ namespace {
 		metadata.cssInlineBlockHitTargets = 0;
 		metadata.cssInlineBlockOverflowClips = 0;
 		metadata.cssAtomicContextIncomplete = 0;
+		metadata.cssMarginCollapseSets = doc.cssDiagnostics.marginCollapseSets;
+		metadata.cssMarginCollapseParticipants = doc.cssDiagnostics.marginCollapseParticipants;
+		metadata.cssMarginCollapseSibling = doc.cssDiagnostics.marginCollapseSibling;
+		metadata.cssMarginCollapseParentTop = doc.cssDiagnostics.marginCollapseParentTop;
+		metadata.cssMarginCollapseParentBottom = doc.cssDiagnostics.marginCollapseParentBottom;
+		metadata.cssMarginCollapseEmpty = doc.cssDiagnostics.marginCollapseEmpty;
+		metadata.cssMarginCollapsePositiveOnly = doc.cssDiagnostics.marginCollapsePositiveOnly;
+		metadata.cssMarginCollapseNegativeOnly = doc.cssDiagnostics.marginCollapseNegativeOnly;
+		metadata.cssMarginCollapseMixed = doc.cssDiagnostics.marginCollapseMixed;
+		metadata.cssMarginCollapseBlockedBorder = doc.cssDiagnostics.marginCollapseBlockedBorder;
+		metadata.cssMarginCollapseBlockedPadding = doc.cssDiagnostics.marginCollapseBlockedPadding;
+		metadata.cssMarginCollapseBlockedBfc = doc.cssDiagnostics.marginCollapseBlockedBfc;
+		metadata.cssMarginCollapseBlockedHeight = doc.cssDiagnostics.marginCollapseBlockedHeight;
+		metadata.cssMarginCollapseBlockedContent = doc.cssDiagnostics.marginCollapseBlockedContent;
+		metadata.cssMarginCollapseDepthClamps = doc.cssDiagnostics.marginCollapseDepthClamps;
+		metadata.cssMarginGeometryClamps = doc.cssDiagnostics.marginGeometryClamps;
+		metadata.cssBfcRoot = doc.cssDiagnostics.bfcRoot;
+		metadata.cssBfcInlineBlock = doc.cssDiagnostics.bfcInlineBlock;
+		metadata.cssBfcOverflow = doc.cssDiagnostics.bfcOverflow;
+		metadata.cssBfcAtomic = doc.cssDiagnostics.bfcAtomic;
+		metadata.cssMarginCollapseEvidenceRecords = doc.cssDiagnostics.marginCollapseEvidenceRecords;
+		metadata.cssMarginCollapseEvidence = doc.cssDiagnostics.marginCollapseEvidence;
 		metadata.cssBoxSizingContentBox = 0;
 		metadata.cssBoxSizingBorderBox = 0;
 		metadata.cssWidthAutoResolutions = 0;
@@ -2563,21 +2657,53 @@ namespace {
 
 	static int cssMarginTopPx(const WebStyle& style, int fallbackValue)
 	{
+		if (style.marginTopValue.valid) {
+			if (style.marginTopValue.type == CssLengthType::Auto) return 0;
+			if (style.marginTopValue.type == CssLengthType::Percent) {
+				const int64_t resolved = static_cast<int64_t>(kContentW) * style.marginTopValue.value / 100;
+				return static_cast<int>(std::max<int64_t>(-8192, std::min<int64_t>(8192, resolved)));
+			}
+			return std::max(-8192, std::min(8192, style.marginTopValue.value));
+		}
 		return style.marginTop != -1 ? (style.marginTop == -2 ? 0 : style.marginTop) : fallbackValue;
 	}
 
 	static int cssMarginBottomPx(const WebStyle& style, int fallbackValue)
 	{
+		if (style.marginBottomValue.valid) {
+			if (style.marginBottomValue.type == CssLengthType::Auto) return 0;
+			if (style.marginBottomValue.type == CssLengthType::Percent) {
+				const int64_t resolved = static_cast<int64_t>(kContentW) * style.marginBottomValue.value / 100;
+				return static_cast<int>(std::max<int64_t>(-8192, std::min<int64_t>(8192, resolved)));
+			}
+			return std::max(-8192, std::min(8192, style.marginBottomValue.value));
+		}
 		return style.marginBottom != -1 ? (style.marginBottom == -2 ? 0 : style.marginBottom) : fallbackValue;
 	}
 
 	static int cssMarginLeftPx(const WebStyle& style, int fallbackValue)
 	{
+		if (style.marginLeftValue.valid) {
+			if (style.marginLeftValue.type == CssLengthType::Auto) return 0;
+			if (style.marginLeftValue.type == CssLengthType::Percent) {
+				const int64_t resolved = static_cast<int64_t>(kContentW) * style.marginLeftValue.value / 100;
+				return static_cast<int>(std::max<int64_t>(-8192, std::min<int64_t>(8192, resolved)));
+			}
+			return std::max(-8192, std::min(8192, style.marginLeftValue.value));
+		}
 		return style.marginLeft != -1 ? (style.marginLeft == -2 ? 0 : style.marginLeft) : fallbackValue;
 	}
 
 	static int cssMarginRightPx(const WebStyle& style, int fallbackValue)
 	{
+		if (style.marginRightValue.valid) {
+			if (style.marginRightValue.type == CssLengthType::Auto) return 0;
+			if (style.marginRightValue.type == CssLengthType::Percent) {
+				const int64_t resolved = static_cast<int64_t>(kContentW) * style.marginRightValue.value / 100;
+				return static_cast<int>(std::max<int64_t>(-8192, std::min<int64_t>(8192, resolved)));
+			}
+			return std::max(-8192, std::min(8192, style.marginRightValue.value));
+		}
 		return style.marginRight != -1 ? (style.marginRight == -2 ? 0 : style.marginRight) : fallbackValue;
 	}
 
@@ -3710,6 +3836,570 @@ namespace {
 		return total;
 	}
 
+	static void ensureInlineLayout(const WebDocument& doc);
+
+	static int cssMarginValueForBasis(const CssLengthValue& value, int legacy,
+		int fallback, int basis, bool* outClamped = nullptr)
+	{
+		if (outClamped) *outClamped = false;
+		if (value.valid) {
+			if (value.type == CssLengthType::Auto) return 0;
+			int64_t resolved = value.value;
+			if (value.type == CssLengthType::Percent) {
+				if (basis < 0) return 0;
+				resolved = static_cast<int64_t>(basis) * value.value / 100;
+			}
+			if (resolved < -8192 || resolved > 8192) {
+				if (outClamped) *outClamped = true;
+				resolved = std::max<int64_t>(-8192, std::min<int64_t>(8192, resolved));
+			}
+			return static_cast<int>(resolved);
+		}
+		if (legacy == -2) return 0;
+		if (legacy != -1) return std::max(-8192, std::min(8192, legacy));
+		return fallback;
+	}
+
+	static int cssFlowMarginTop(const WebStyle& style, int fallback, int basis, bool* outClamped = nullptr)
+	{
+		return cssMarginValueForBasis(style.marginTopValue, style.marginTop, fallback, basis, outClamped);
+	}
+
+	static int cssFlowMarginBottom(const WebStyle& style, int fallback, int basis, bool* outClamped = nullptr)
+	{
+		return cssMarginValueForBasis(style.marginBottomValue, style.marginBottom, fallback, basis, outClamped);
+	}
+
+	static bool cssMarginIsBlockContainerTag(const std::string& rawTag)
+	{
+		const std::string tag = toLowerAscii(rawTag);
+		return tag == "div" || tag == "section" || tag == "article" || tag == "header" ||
+			tag == "footer" || tag == "nav" || tag == "main" || tag == "aside" ||
+			tag == "figure" || tag == "blockquote" || tag == "dl" || tag == "form" ||
+			tag == "fieldset" || tag == "ul" || tag == "ol";
+	}
+
+	static const WebStyle* cssStyleForSerial(const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0) return &doc.bodyStyle;
+		if (doc.hasBodyElement && serial == doc.bodyElement.serial) return &doc.bodyStyle;
+		return computedStyleForSerial(doc, serial);
+	}
+
+	static uint64_t cssBlockParentSerial(const WebDocument& doc, const DocBlock& block)
+	{
+		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+			const std::string tag = toLowerAscii(it->tagName);
+			if (tag == "html" || tag == "head" || tag == "body") continue;
+			const WebStyle* style = cssStyleForSerial(doc, it->serial);
+			if (it->serial != 0 && (cssMarginIsBlockContainerTag(tag) ||
+				(style && style->display != DisplayMode::Inline))) return it->serial;
+		}
+		return 0;
+	}
+
+	static bool cssStyleHasOverflowBfc(const WebStyle& style)
+	{
+		return style.overflowX != OverflowMode::Visible || style.overflowY != OverflowMode::Visible;
+	}
+
+	static std::string cssBfcReasonForBlock(const WebDocument& doc, const DocBlock& block)
+	{
+		if (block.atomicContainerSerial != 0) return "atomic-context";
+		if (block.style.display == DisplayMode::InlineBlock) return "inline-block";
+		if (cssStyleHasOverflowBfc(block.style)) return "overflow";
+		if (isTableCellLikeBlock(block)) return "table";
+		return cssBlockParentSerial(doc, block) == 0 ? "root" : "";
+	}
+
+	static bool cssParentHasDirectInlineContent(const WebDocument& doc, uint64_t serial)
+	{
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (item.blockIndex < 0 && (item.parentSerial == serial || item.flowSerial == serial)) return true;
+		}
+		return false;
+	}
+
+	static bool cssBlockIsDescendantOfSerial(const DocBlock& block, uint64_t serial)
+	{
+		if (serial == 0) return true;
+		if (block.elementMetadata.serial == serial) return true;
+		for (const HtmlElementRef& ancestor : block.ancestors)
+			if (ancestor.serial == serial) return true;
+		return false;
+	}
+
+	static bool cssHasPriorBlockForParent(const WebDocument& doc, int blockIndex, uint64_t parentSerial)
+	{
+		for (int i = 0; i < blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
+			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
+			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0) continue;
+			if (cssBlockParentSerial(doc, candidate) == parentSerial) return true;
+		}
+		return false;
+	}
+
+	static bool cssHasLaterBlockForParent(const WebDocument& doc, int blockIndex, uint64_t parentSerial)
+	{
+		for (int i = blockIndex + 1; i < static_cast<int>(doc.blocks.size()); ++i) {
+			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
+			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0) continue;
+			if (cssBlockParentSerial(doc, candidate) == parentSerial) return true;
+		}
+		return false;
+	}
+
+	static bool cssParentTopCollapseAllowed(const WebDocument& doc, uint64_t serial,
+		std::string& blockedReason)
+	{
+		const WebStyle* style = cssStyleForSerial(doc, serial);
+		if (!style) { blockedReason = "incomplete-structure"; return false; }
+		if (style->display == DisplayMode::InlineBlock) { blockedReason = "bfc"; return false; }
+		if (cssStyleHasOverflowBfc(*style)) { blockedReason = "bfc"; return false; }
+		if (cssBorderTopPx(*style) > 0) { blockedReason = "border"; return false; }
+		if (cssPaddingTopPx(*style, 0) > 0) { blockedReason = "padding"; return false; }
+		const CssResolvedLength definite = resolveCssLength(style->heightValue,
+			style->height, style->heightPercent, -1);
+		const CssResolvedLength minimum = resolveCssLength(style->minHeightValue,
+			style->minHeight, style->minHeightPercent, -1);
+		if (definite.definite || minimum.definite) { blockedReason = "height"; return false; }
+		if (cssParentHasDirectInlineContent(doc, serial)) {
+			blockedReason = "content";
+			return false;
+		}
+		return true;
+	}
+
+	static bool cssParentBottomCollapseAllowed(const WebDocument& doc, uint64_t serial,
+		std::string& blockedReason)
+	{
+		const WebStyle* style = cssStyleForSerial(doc, serial);
+		if (!style) { blockedReason = "incomplete-structure"; return false; }
+		if (style->display == DisplayMode::InlineBlock || cssStyleHasOverflowBfc(*style)) {
+			blockedReason = "bfc";
+			return false;
+		}
+		if (cssBorderBottomPx(*style) > 0) { blockedReason = "border"; return false; }
+		if (cssPaddingBottomPx(*style, 0) > 0) { blockedReason = "padding"; return false; }
+		const CssResolvedLength definite = resolveCssLength(style->heightValue,
+			style->height, style->heightPercent, -1);
+		const CssResolvedLength minimum = resolveCssLength(style->minHeightValue,
+			style->minHeight, style->minHeightPercent, -1);
+		if (definite.definite || minimum.definite) { blockedReason = "height"; return false; }
+		if (cssParentHasDirectInlineContent(doc, serial)) {
+			blockedReason = "content";
+			return false;
+		}
+		return true;
+	}
+
+	static void cssAddMarginParticipant(CssMarginCollapseValue& value, int margin)
+	{
+		margin = std::max(-8192, std::min(8192, margin));
+		if (value.participantCount >= 64) {
+			value.clamped = true;
+			return;
+		}
+		++value.participantCount;
+		if (margin > 0) {
+			value.hasPositive = true;
+			value.largestPositive = std::max(value.largestPositive, margin);
+		} else if (margin < 0) {
+			value.hasNegative = true;
+			value.mostNegative = std::min(value.mostNegative, margin);
+		}
+		const int64_t resolved = static_cast<int64_t>(value.largestPositive) + value.mostNegative;
+		if (resolved < -8192 || resolved > 8192) value.clamped = true;
+		value.resolved = static_cast<int>(std::max<int64_t>(-8192, std::min<int64_t>(8192, resolved)));
+	}
+
+	static uint64_t cssMarginLayoutFingerprint(const WebDocument& doc)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		auto mix = [&](uint64_t value) {
+			hash ^= value;
+			hash *= 1099511628211ull;
+		};
+		const auto mixStyle = [&](const WebStyle& style) {
+			mix(static_cast<uint64_t>(style.marginTop)); mix(static_cast<uint64_t>(style.marginRight));
+			mix(static_cast<uint64_t>(style.marginBottom)); mix(static_cast<uint64_t>(style.marginLeft));
+			mix(static_cast<uint64_t>(style.marginTopValue.type)); mix(static_cast<uint64_t>(style.marginTopValue.value));
+			mix(static_cast<uint64_t>(style.marginBottomValue.type)); mix(static_cast<uint64_t>(style.marginBottomValue.value));
+			mix(static_cast<uint64_t>(style.paddingTop)); mix(static_cast<uint64_t>(style.paddingBottom));
+			mix(static_cast<uint64_t>(style.borderTopWidth)); mix(static_cast<uint64_t>(style.borderBottomWidth));
+			mix(static_cast<uint64_t>(style.display)); mix(static_cast<uint64_t>(style.overflowX));
+			mix(static_cast<uint64_t>(style.overflowY)); mix(static_cast<uint64_t>(style.height));
+			mix(static_cast<uint64_t>(style.minHeight));
+		};
+		mix(static_cast<uint64_t>(doc.blocks.size()));
+		mixStyle(doc.bodyStyle);
+		for (const DocBlock& block : doc.blocks) {
+			mix(block.elementMetadata.serial); mix(block.elementMetadata.parentSerial);
+			mixStyle(block.style);
+		}
+		for (const CssComputedStyleRecord& record : doc.computedStyles) {
+			mix(record.serial);
+			if (record.valid) mixStyle(record.style);
+		}
+		return hash;
+	}
+
+	static int cssBlockBorderBoxHeightForFlow(const WebDocument& doc, int blockIndex)
+	{
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return 0;
+		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+		const int basis = std::max(1, blockAvailableWidth(block, doc) +
+			cssMarginLeftPx(block.style, 0) + cssMarginRightPx(block.style, 0));
+		const int top = cssFlowMarginTop(block.style, block.type == BlockType::Heading ? 10 : 4, basis);
+		const int bottom = cssFlowMarginBottom(block.style, block.type == BlockType::ListItem ? 4 : 8, basis);
+		const int total = blockTotalHeight(block, doc, false);
+		return std::max(0, total - top - bottom);
+	}
+
+	static int cssPreviousVisibleFlowBlock(const WebDocument& doc, int blockIndex)
+	{
+		for (int i = blockIndex - 1; i >= 0; --i) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(i)];
+			if (block.style.displayNone || block.atomicContainerSerial != 0) continue;
+			return i;
+		}
+		return -1;
+	}
+
+	static void buildCssMarginLayout(const WebDocument& doc, CssMarginLayoutSnapshot& snapshot)
+	{
+		snapshot = CssMarginLayoutSnapshot{};
+		snapshot.url = doc.url;
+		snapshot.blockCount = doc.blocks.size();
+		snapshot.fingerprint = cssMarginLayoutFingerprint(doc);
+		snapshot.records.resize(doc.blocks.size());
+		if (s_cssMarginLayoutBuilding) {
+			snapshot.valid = false;
+			return;
+		}
+		s_cssMarginLayoutBuilding = true;
+		gxos::web::CssDiagnostics& diagnostics = const_cast<WebDocument&>(doc).cssDiagnostics;
+		diagnostics.marginCollapseSets = 0;
+		diagnostics.marginCollapseParticipants = 0;
+		diagnostics.marginCollapseSibling = 0;
+		diagnostics.marginCollapseParentTop = 0;
+		diagnostics.marginCollapseParentBottom = 0;
+		diagnostics.marginCollapseEmpty = 0;
+		diagnostics.marginCollapsePositiveOnly = 0;
+		diagnostics.marginCollapseNegativeOnly = 0;
+		diagnostics.marginCollapseMixed = 0;
+		diagnostics.marginCollapseBlockedBorder = 0;
+		diagnostics.marginCollapseBlockedPadding = 0;
+		diagnostics.marginCollapseBlockedBfc = 0;
+		diagnostics.marginCollapseBlockedHeight = 0;
+		diagnostics.marginCollapseBlockedContent = 0;
+		diagnostics.marginCollapseDepthClamps = 0;
+		diagnostics.marginGeometryClamps = 0;
+		diagnostics.bfcRoot = 0;
+		diagnostics.bfcInlineBlock = 0;
+		diagnostics.bfcOverflow = 0;
+		diagnostics.bfcAtomic = 0;
+		diagnostics.marginCollapseEvidenceRecords = 0;
+		diagnostics.marginCollapseEvidence.clear();
+		diagnostics.bfcRoot = doc.blocks.empty() ? 0 : 1;
+		for (const CssComputedStyleRecord& styleRecord : doc.computedStyles) {
+			if (!styleRecord.valid) continue;
+			if (styleRecord.style.display == DisplayMode::InlineBlock) ++diagnostics.bfcInlineBlock;
+			if (cssStyleHasOverflowBfc(styleRecord.style)) ++diagnostics.bfcOverflow;
+		}
+		ensureInlineLayout(doc);
+		CssMarginCollapseValue pending;
+		const int bodyBasis = std::max(1, kContentW - blockBodyMarginLeft(doc) - blockBodyMarginRight(doc));
+		cssAddMarginParticipant(pending, cssFlowMarginTop(doc.bodyStyle, 0, bodyBasis));
+		int cursor = kHeadingY;
+		int previousIndex = -1;
+		int previousRecord = -1;
+		for (int index = 0; index < static_cast<int>(doc.blocks.size()); ++index) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(index)];
+			CssMarginFlowRecord& record = snapshot.records[static_cast<size_t>(index)];
+			record.serial = block.elementMetadata.serial;
+			record.parentSerial = cssBlockParentSerial(doc, block);
+			record.specifiedMarginTop = cssFlowMarginTop(block.style, block.type == BlockType::Heading ? 10 : 4, bodyBasis);
+			record.specifiedMarginBottom = cssFlowMarginBottom(block.style, block.type == BlockType::ListItem ? 4 : 8, bodyBasis);
+			record.bfcReason = cssBfcReasonForBlock(doc, block);
+			record.establishesBfc = !record.bfcReason.empty();
+			const CssResolvedLength definiteHeight = resolveCssLength(
+				block.style.heightValue, block.style.height, block.style.heightPercent, -1);
+			const CssResolvedLength definiteMinHeight = resolveCssLength(
+				block.style.minHeightValue, block.style.minHeight, block.style.minHeightPercent, -1);
+			record.heightDefinite = definiteHeight.definite;
+			record.minHeightPreventsCollapse = definiteMinHeight.definite;
+			if (record.bfcReason == "atomic-context") ++const_cast<WebDocument&>(doc).cssDiagnostics.bfcAtomic;
+			if (block.style.displayNone || block.atomicContainerSerial != 0) {
+				record.incomplete = block.atomicContainerSerial != 0;
+				continue;
+			}
+			const int prior = cssPreviousVisibleFlowBlock(doc, index);
+			const bool firstForParent = record.parentSerial != 0 &&
+				!cssHasPriorBlockForParent(doc, index, record.parentSerial);
+			const bool sameParentSibling = prior >= 0 && previousIndex == prior &&
+				cssBlockParentSerial(doc, doc.blocks[static_cast<size_t>(prior)]) == record.parentSerial;
+			if (sameParentSibling) {
+				record.previousSerial = doc.blocks[static_cast<size_t>(prior)].elementMetadata.serial;
+				record.collapsedWithPreviousSibling = true;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseSibling;
+				if (previousRecord >= 0) {
+					// The adjoining sibling margins are represented once by the
+					// incoming collapse set, never as two used gaps.
+					snapshot.records[static_cast<size_t>(previousRecord)].usedMarginBottom = 0;
+				}
+				if (previousRecord >= 0) record.incomplete = snapshot.records[static_cast<size_t>(previousRecord)].incomplete;
+			}
+			// Empty structural elements between two emitted blocks contribute their
+			// own adjoining top/bottom margins to the same set.
+			const uint64_t priorSerial = prior >= 0 ? doc.blocks[static_cast<size_t>(prior)].elementMetadata.serial : 0;
+			const uint64_t currentSerial = block.elementMetadata.serial;
+			int emptyDepth = 0;
+			for (const HtmlElementRef& element : doc.structuralElements) {
+				if (element.serial == 0 || element.serial <= priorSerial ||
+					(currentSerial != 0 && element.serial >= currentSerial) || emptyDepth >= 16) continue;
+				if (!cssMarginIsBlockContainerTag(element.tagName)) continue;
+				bool hasDescendant = false;
+				for (const DocBlock& candidate : doc.blocks) {
+					if (!candidate.style.displayNone && cssBlockIsDescendantOfSerial(candidate, element.serial)) {
+						hasDescendant = true;
+						break;
+					}
+				}
+				if (hasDescendant) continue;
+				const WebStyle* style = cssStyleForSerial(doc, element.serial);
+				if (!style) continue;
+				const int top = cssFlowMarginTop(*style, 0, bodyBasis);
+				const int bottom = cssFlowMarginBottom(*style, 0, bodyBasis);
+				cssAddMarginParticipant(pending, top);
+				cssAddMarginParticipant(pending, bottom);
+				++emptyDepth;
+				record.emptyCollapse = true;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseEmpty;
+			}
+			if (emptyDepth >= 16) {
+				++snapshot.traversalClamps;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseDepthClamps;
+				record.incomplete = true;
+			}
+			int parentDepthSeen = 0;
+			bool parentTopBoundary = false;
+			int parentTopBoundaryOffset = 0;
+			if (firstForParent) {
+				uint64_t parent = record.parentSerial;
+				int parentDepth = 0;
+				while (parent != 0 && parentDepth++ < 16) {
+					const WebStyle* style = cssStyleForSerial(doc, parent);
+					if (!style) { record.incomplete = true; break; }
+					const int parentTop = cssFlowMarginTop(*style, 0, bodyBasis);
+					cssAddMarginParticipant(pending, parentTop);
+					std::string blocked;
+					const bool allowed = cssParentTopCollapseAllowed(doc, parent, blocked);
+					if (allowed) {
+						record.collapsedWithParentTop = true;
+						++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseParentTop;
+					} else {
+						// The parent's outer margin may still join the incoming
+						// chain, but the child's margin is on the far side of
+						// this boundary.  Keep the boundary offset separate so a
+						// border/padding/BFC/definite-size case cannot collapse
+						// the child margin through the parent.
+						parentTopBoundary = true;
+						parentTopBoundaryOffset = cssBoundedGeometryAdd(parentTopBoundaryOffset,
+							cssBorderTopPx(*style) + cssPaddingTopPx(*style, 0));
+						record.blockedReason = blocked;
+						if (blocked == "border") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedBorder;
+						else if (blocked == "padding") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedPadding;
+						else if (blocked == "bfc") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedBfc;
+						else if (blocked == "height") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedHeight;
+						else if (blocked == "content") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedContent;
+					}
+					const HtmlElementRef* parentElement = cssStructuralElementForSerial(doc, parent);
+					parent = parentElement ? parentElement->parentSerial : 0;
+				}
+				parentDepthSeen = parentDepth;
+				if (parentDepth >= 16) {
+					record.incomplete = true;
+					++snapshot.traversalClamps;
+					++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseDepthClamps;
+				}
+			}
+			if (!parentTopBoundary) cssAddMarginParticipant(pending, record.specifiedMarginTop);
+			const int collapsedTop = pending.resolved;
+			record.collapse = pending;
+			record.collapseParticipantCount = pending.participantCount;
+			record.collapseMaxPositive = pending.largestPositive;
+			record.collapseMostNegative = pending.mostNegative;
+			record.usedMarginTop = parentTopBoundary ? record.specifiedMarginTop : collapsedTop;
+			record.marginEdgeY = cursor;
+			int boxY = cursor + collapsedTop + parentTopBoundaryOffset +
+				(parentTopBoundary ? record.specifiedMarginTop : 0);
+			if (boxY < 0) {
+				boxY = 0;
+				record.clamped = true;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginGeometryClamps;
+			}
+			record.usedY = boxY;
+			record.outerWidth = blockOuterWidth(block, blockAvailableWidth(block, doc));
+			record.outerHeight = cssBlockBorderBoxHeightForFlow(doc, index);
+			record.borderBoxX = blockOuterX(block, doc, blockAvailableWidth(block, doc), record.outerWidth);
+			record.borderBoxY = record.usedY;
+			record.borderBoxW = record.outerWidth;
+			record.borderBoxH = record.outerHeight;
+			const bool emptyBlock = record.outerHeight == 0 && block.text.empty() &&
+				cssBorderTopPx(block.style) == 0 && cssBorderBottomPx(block.style) == 0 &&
+				cssPaddingTopPx(block.style, 0) == 0 && cssPaddingBottomPx(block.style, 0) == 0;
+			if (emptyBlock) {
+				record.emptyCollapse = true;
+				cssAddMarginParticipant(pending, record.specifiedMarginBottom);
+				record.collapse = pending;
+				record.collapseParticipantCount = pending.participantCount;
+				record.collapseMaxPositive = pending.largestPositive;
+				record.collapseMostNegative = pending.mostNegative;
+				record.usedMarginBottom = pending.resolved;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseEmpty;
+			} else {
+				cursor = std::min(8192, boxY + std::max(0, record.outerHeight));
+				pending = CssMarginCollapseValue{};
+				cssAddMarginParticipant(pending, record.specifiedMarginBottom);
+				record.usedMarginBottom = record.specifiedMarginBottom;
+			}
+			// A parent's bottom margin may join the trailing set only after its
+			// final in-flow child.  Border/padding/definite sizing keep it outside.
+			bool parentBottomBoundary = false;
+			int parentBottomBoundaryOffset = 0;
+			CssMarginCollapseValue parentBottomOutside;
+			if (record.parentSerial != 0 && !cssHasLaterBlockForParent(doc, index, record.parentSerial)) {
+				uint64_t parent = record.parentSerial;
+				int parentDepth = 0;
+				while (parent != 0 && parentDepth++ < 16) {
+					const WebStyle* style = cssStyleForSerial(doc, parent);
+					if (!style) { record.incomplete = true; break; }
+					std::string blocked;
+					const bool allowed = cssParentBottomCollapseAllowed(doc, parent, blocked);
+					const int parentBottom = cssFlowMarginBottom(*style, 0, bodyBasis);
+					if (allowed && !parentBottomBoundary) {
+						cssAddMarginParticipant(pending, parentBottom);
+						record.collapsedWithParentBottom = true;
+						++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseParentBottom;
+					} else {
+						// Keep the child's trailing set inside the parent.  The
+						// parent's outer margin resumes after its separating
+						// border/padding/BFC/definite-size boundary and may join
+						// later outer margins there.
+						parentBottomBoundary = true;
+						cssAddMarginParticipant(parentBottomOutside, parentBottom);
+						parentBottomBoundaryOffset = cssBoundedGeometryAdd(parentBottomBoundaryOffset,
+							cssPaddingBottomPx(*style, 0) + cssBorderBottomPx(*style));
+						record.blockedReason = blocked;
+						if (blocked == "border") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedBorder;
+						else if (blocked == "padding") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedPadding;
+						else if (blocked == "bfc") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedBfc;
+						else if (blocked == "height") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedHeight;
+						else if (blocked == "content") ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseBlockedContent;
+					}
+					const HtmlElementRef* parentElement = cssStructuralElementForSerial(doc, parent);
+					parent = parentElement ? parentElement->parentSerial : 0;
+				}
+				if (parentDepth >= 16) {
+					record.incomplete = true;
+					++snapshot.traversalClamps;
+					++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseDepthClamps;
+				}
+			}
+			if (parentBottomBoundary) {
+				const int childBottom = pending.resolved;
+				cursor = std::max(0, std::min(8192, cursor + childBottom + parentBottomBoundaryOffset));
+				record.usedMarginBottom = childBottom;
+				// The top/sibling set was already resolved before the
+				// parent-bottom boundary was discovered.  Preserve its type in
+				// diagnostics even though the outside trailing set now starts
+				// with the parent's margin.
+				if (record.collapse.hasPositive && record.collapse.hasNegative)
+					++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseMixed;
+				pending = parentBottomOutside;
+			}
+			if (pending.participantCount > 1) ++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseSets;
+			const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseParticipants = std::min(1 << 30,
+				const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseParticipants + pending.participantCount);
+			snapshot.maximumParticipants = std::max(snapshot.maximumParticipants, pending.participantCount);
+			snapshot.maximumDepth = std::max(snapshot.maximumDepth, parentDepthSeen);
+			if (pending.hasPositive && pending.hasNegative) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseMixed;
+			} else if (pending.hasPositive) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapsePositiveOnly;
+			} else if (pending.hasNegative) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseNegativeOnly;
+			}
+			if (pending.clamped || record.clamped) {
+				record.clamped = true;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.marginGeometryClamps;
+			}
+			record.collapseType = record.collapsedWithPreviousSibling ? "sibling" :
+				record.collapsedWithParentTop ? "parent-top" :
+				record.collapsedWithParentBottom ? "parent-bottom" :
+				record.emptyCollapse ? "empty" : "normal-flow";
+			record.documentExtentContribution = std::max(0, boxY + record.outerHeight);
+			const bool phase3d = block.id.rfind("phase3d-", 0) == 0 || block.id.rfind("css3d-", 0) == 0 ||
+				doc.url.find("css-phase3d") != std::string::npos;
+			if (phase3d && snapshot.evidenceRecords < 128 && snapshot.evidence.size() < 32768) {
+				std::ostringstream line;
+				line << "id=" << block.id << ",serial=" << record.serial << ",parent-serial=" << record.parentSerial
+					<< ",previous-serial=" << record.previousSerial
+					<< ",specified-margin-top=" << record.specifiedMarginTop
+					<< ",specified-margin-bottom=" << record.specifiedMarginBottom
+					<< ",used-margin-top=" << record.usedMarginTop << ",used-margin-bottom=" << record.usedMarginBottom
+					<< ",collapse-participants=" << record.collapseParticipantCount
+					<< ",max-positive=" << record.collapseMaxPositive << ",most-negative=" << record.collapseMostNegative
+					<< ",collapsed-result=" << record.collapse.resolved << ",collapse-type=" << record.collapseType
+					<< ",collapsed-with-previous-sibling=" << (record.collapsedWithPreviousSibling ? "yes" : "no")
+					<< ",collapsed-with-parent-top=" << (record.collapsedWithParentTop ? "yes" : "no")
+					<< ",collapsed-with-parent-bottom=" << (record.collapsedWithParentBottom ? "yes" : "no")
+					<< ",empty-collapse=" << (record.emptyCollapse ? "yes" : "no")
+					<< ",bfc=" << (record.establishesBfc ? "yes" : "no") << ",bfc-reason=" << record.bfcReason
+					<< ",blocked-reason=" << record.blockedReason << ",height-definite=" << (record.heightDefinite ? "yes" : "no")
+					<< ",min-height-prevents-collapse=" << (record.minHeightPreventsCollapse ? "yes" : "no")
+					<< ",used-y=" << record.usedY << ",used-height=" << record.outerHeight
+					<< ",border-box=" << record.borderBoxX << ":" << record.borderBoxY << ":" << record.borderBoxW << ":" << record.borderBoxH
+					<< ",document-extent-contribution=" << record.documentExtentContribution
+					<< ",clamped=" << (record.clamped ? "yes" : "no") << ",incomplete=" << (record.incomplete ? "yes" : "no") << "\n";
+				const std::string text = line.str();
+				if (snapshot.evidence.size() + text.size() <= 32768) {
+					snapshot.evidence += text;
+					++snapshot.evidenceRecords;
+				}
+			}
+			previousIndex = index;
+			previousRecord = index;
+			++snapshot.operations;
+			if (snapshot.operations >= 4096) {
+				snapshot.traversalClamps++;
+				break;
+			}
+		}
+		const int bodyBottom = cssFlowMarginBottom(doc.bodyStyle, 8, bodyBasis);
+		cssAddMarginParticipant(pending, bodyBottom);
+		if (pending.resolved < 0 && cursor + pending.resolved < kHeadingY) {
+			pending.resolved = kHeadingY - cursor;
+			pending.clamped = true;
+			++const_cast<WebDocument&>(doc).cssDiagnostics.marginGeometryClamps;
+		}
+		snapshot.documentHeight = std::max(kHeadingY, std::min(8192, cursor + std::max(0, pending.resolved)));
+		const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseEvidenceRecords = snapshot.evidenceRecords;
+		const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseEvidence = snapshot.evidence;
+		snapshot.valid = true;
+		s_cssMarginLayoutBuilding = false;
+	}
+
+	static void ensureCssMarginLayout(const WebDocument& doc)
+	{
+		const uint64_t fingerprint = cssMarginLayoutFingerprint(doc);
+		if (s_cssMarginLayoutSnapshot.valid && s_cssMarginLayoutSnapshot.url == doc.url &&
+			s_cssMarginLayoutSnapshot.blockCount == doc.blocks.size() &&
+			s_cssMarginLayoutSnapshot.fingerprint == fingerprint) return;
+		buildCssMarginLayout(doc, s_cssMarginLayoutSnapshot);
+	}
+
 	static CssPaintRect cssViewportClipRect()
 	{
 		return CssPaintRect{kContentX, kToolbarH + 6, kContentW, kContentH};
@@ -3980,6 +4670,14 @@ namespace {
 
 	static int cssBlockLayoutY(const WebDocument& doc, int blockIndex)
 	{
+		ensureCssMarginLayout(doc);
+		if (s_cssMarginLayoutSnapshot.valid && blockIndex >= 0 &&
+			blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())) {
+			const CssMarginFlowRecord& record = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)];
+			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+			const int fallback = block.type == BlockType::Heading ? 10 : 4;
+			return record.usedY - cssMarginTopPx(block.style, fallback);
+		}
 		int y = kHeadingY + (doc.bodyStyle.marginTop >= 0 ? doc.bodyStyle.marginTop : 0);
 		for (int i = 0; i < blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
 			const bool nextIsHeading = i + 1 < static_cast<int>(doc.blocks.size()) &&
@@ -4002,7 +4700,13 @@ namespace {
 		const bool nextIsHeading = blockIndex + 1 < static_cast<int>(doc.blocks.size()) &&
 			doc.blocks[static_cast<size_t>(blockIndex + 1)].type == BlockType::Heading;
 		const int totalHeight = blockTotalHeight(block, doc, nextIsHeading);
-		geometry.outerHeight = std::max(1, totalHeight - marginTop - marginBottom - (nextIsHeading ? 10 : 0));
+		ensureCssMarginLayout(doc);
+		if (blockIndex >= 0 && blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()) &&
+			s_cssMarginLayoutSnapshot.valid) {
+			geometry.outerHeight = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)].outerHeight;
+		} else {
+			geometry.outerHeight = std::max(1, totalHeight - marginTop - marginBottom - (nextIsHeading ? 10 : 0));
+		}
 		geometry.outerY = kContentY + cssBlockLayoutY(doc, blockIndex) + marginTop;
 		const int horizontalEdges = cssHorizontalBoxEdges(block.style, block.type == BlockType::Preformatted);
 		const int verticalEdges = cssVerticalBoxEdges(block.style, block.type == BlockType::Preformatted);
@@ -4768,6 +5472,31 @@ namespace {
 		out += "Current Document.css_visibility_hidden_layout=retained\n";
 		out += "Current Document.css_opacity_zero_hit_testing=eligible_when_visible\n";
 		if (!metadata.cssGeometryEvidence.empty()) out += "Current Document.css_geometry_evidence=" + metadata.cssGeometryEvidence;
+		add("css_margin_collapse_sets", metadata.cssMarginCollapseSets);
+		add("css_margin_collapse_participants", metadata.cssMarginCollapseParticipants);
+		add("css_margin_collapse_sibling", metadata.cssMarginCollapseSibling);
+		add("css_margin_collapse_parent_top", metadata.cssMarginCollapseParentTop);
+		add("css_margin_collapse_parent_bottom", metadata.cssMarginCollapseParentBottom);
+		add("css_margin_collapse_empty", metadata.cssMarginCollapseEmpty);
+		add("css_margin_collapse_positive_only", metadata.cssMarginCollapsePositiveOnly);
+		add("css_margin_collapse_negative_only", metadata.cssMarginCollapseNegativeOnly);
+		add("css_margin_collapse_mixed", metadata.cssMarginCollapseMixed);
+		add("css_margin_collapse_blocked_border", metadata.cssMarginCollapseBlockedBorder);
+		add("css_margin_collapse_blocked_padding", metadata.cssMarginCollapseBlockedPadding);
+		add("css_margin_collapse_blocked_bfc", metadata.cssMarginCollapseBlockedBfc);
+		add("css_margin_collapse_blocked_height", metadata.cssMarginCollapseBlockedHeight);
+		add("css_margin_collapse_blocked_content", metadata.cssMarginCollapseBlockedContent);
+		add("css_margin_collapse_depth_clamps", metadata.cssMarginCollapseDepthClamps);
+		add("css_margin_geometry_clamps", metadata.cssMarginGeometryClamps);
+		add("css_bfc_root", metadata.cssBfcRoot);
+		add("css_bfc_inline_block", metadata.cssBfcInlineBlock);
+		add("css_bfc_overflow", metadata.cssBfcOverflow);
+		add("css_bfc_atomic", metadata.cssBfcAtomic);
+		add("css_margin_collapse_evidence_records", metadata.cssMarginCollapseEvidenceRecords);
+		out += "Current Document.css_margin_vertical_basis=containing-block-width-bounded\n";
+		out += "Current Document.css_margin_collapse_model=largest-positive-plus-most-negative\n";
+		out += "Current Document.css_bfc_boundaries=root-inline-block-overflow-atomic-table\n";
+		if (!metadata.cssMarginCollapseEvidence.empty()) out += "Current Document.css_margin_collapse_evidence=" + metadata.cssMarginCollapseEvidence;
 		add("css_inline_items", metadata.cssInlineItems);
 		add("css_inline_text_runs", metadata.cssInlineTextRuns);
 		add("css_inline_whitespace_runs", metadata.cssInlineWhitespaceRuns);
@@ -11692,6 +12421,13 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 int Navigator::blockLayoutY(int blockIndex)
 {
 	ensureInlineLayout(s_currentDoc);
+	ensureCssMarginLayout(s_currentDoc);
+	if (s_cssMarginLayoutSnapshot.valid && blockIndex >= 0 &&
+		blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())) {
+		const CssMarginFlowRecord& record = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)];
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+		return record.usedY - cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
+	}
 	// Returns the Y coordinate of blockIndex relative to kContentY (pre-scroll).
 	const int bodyTop = s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0;
 	int y = kHeadingY + bodyTop;
@@ -11864,6 +12600,8 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 int Navigator::computeDocumentHeight()
 {
 	ensureInlineLayout(s_currentDoc);
+	ensureCssMarginLayout(s_currentDoc);
+	if (s_cssMarginLayoutSnapshot.valid) return s_cssMarginLayoutSnapshot.documentHeight;
 	int h = kHeadingY + (s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0);
 	const int n = static_cast<int>(s_currentDoc.blocks.size());
 	for (int idx = 0; idx < n; ++idx) {

@@ -1052,6 +1052,65 @@ static std::string navigatorHostedSmokeDiagnostic() {
         cssPhase3cMetric("Current Document.css_inline_block_overflow_clips=") + ";report=" +
         summarizeText(cssPhase3cReport, 520));
 
+    bool cssPhase3dLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3d.html");
+    std::string cssPhase3dText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3dReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3dMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3dReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3dReport.find('\n', pos);
+        return cssPhase3dReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3D margin fixture loads",
+        cssPhase3dLoaded &&
+        contains(cssPhase3dText, "Phase 3D Margin Collapse Fixture") &&
+        contains(cssPhase3dText, "sibling positive ten and twenty") &&
+        contains(cssPhase3dText, "mixed negative margin") &&
+        contains(cssPhase3dText, "parent top and first child top collapse") &&
+        contains(cssPhase3dText, "empty blocks join the margin chain") &&
+        contains(cssPhase3dText, "overflow hidden establishes a bounded BFC") &&
+        contains(cssPhase3dText, "inline block contains internal margins") &&
+        contains(cssPhase3dText, "extreme negative margin remains bounded"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3D collapsed-margin model and bounded chains",
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_sets=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_participants=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_sibling=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_parent_top=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_parent_bottom=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_empty=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_mixed=") &&
+        contains(cssPhase3dReport, "Current Document.css_margin_collapse_model=largest-positive-plus-most-negative") &&
+        contains(cssPhase3dReport, "Current Document.css_margin_collapse_evidence=id=phase3d-") &&
+        contains(cssPhase3dReport, "id=phase3d-title,serial=3,parent-serial=0,previous-serial=0,specified-margin-top=14,specified-margin-bottom=10,used-margin-top=14,used-margin-bottom=10,collapse-participants=2,max-positive=14,most-negative=0,collapsed-result=14,collapse-type=normal-flow,collapsed-with-previous-sibling=no,collapsed-with-parent-top=no,collapsed-with-parent-bottom=no,empty-collapse=no,bfc=yes,bfc-reason=root,blocked-reason=,height-definite=no,min-height-prevents-collapse=no,used-y=38,used-height=37,border-box=42:38:838:37,document-extent-contribution=75,clamped=no,incomplete=no"),
+        "metrics=" + cssPhase3dMetric("Current Document.css_margin_collapse_sets=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_participants=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_sibling=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_parent_top=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_parent_bottom=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_empty=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_mixed=") + ";evidence=" +
+        summarizeText(cssPhase3dMetric("Current Document.css_margin_collapse_evidence="), 1800));
+    add("CSS phase 3D BFC boundaries, barriers, negative geometry, and focus",
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_bfc_overflow=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_bfc_inline_block=") &&
+        (hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_blocked_border=") ||
+         hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_blocked_padding=") ||
+         hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_blocked_bfc=") ||
+         hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_blocked_height=")) &&
+        contains(cssPhase3dReport, "Current Document.css_margin_geometry_clamps=") &&
+        contains(cssPhase3dReport, "Current Document.css_bfc_boundaries=root-inline-block-overflow-atomic-table") &&
+        contains(cssPhase3dReport, "Current Document.css_margin_collapse_evidence_records=") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase3d-control"),
+        "overflow=" + cssPhase3dMetric("Current Document.css_bfc_overflow=") + ";inline-block=" +
+        cssPhase3dMetric("Current Document.css_bfc_inline_block=") + ";blocked-border=" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_blocked_border=") + ";blocked-padding=" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_blocked_padding=") + ";blocked-bfc=" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_blocked_bfc=") + ";blocked-height=" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_blocked_height=") + ";clamps=" +
+        cssPhase3dMetric("Current Document.css_margin_geometry_clamps=") + ";report=" +
+        summarizeText(cssPhase3dReport, 520));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();

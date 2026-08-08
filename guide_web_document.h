@@ -516,6 +516,12 @@ struct WebStyle {
 	int      marginRight = -1;
 	int      marginBottom = -1;
 	int      marginLeft = -1;
+	// Phase 3D keeps authored units until layout.  The legacy integer fields
+	// remain populated for existing callers and default styles.
+	CssLengthValue marginTopValue;
+	CssLengthValue marginRightValue;
+	CssLengthValue marginBottomValue;
+	CssLengthValue marginLeftValue;
 	int      padding = -1;
 	int      paddingTop = -1;
 	int      paddingRight = -1;
@@ -685,6 +691,29 @@ struct CssDiagnostics {
 	int    focusVisiblePseudoMatches = 0;
 	int    checkedRuntimeRecomputations = 0;
 	int    runtimeFocusRecomputations = 0;
+	// Phase 3D bounded block-flow diagnostics.
+	int    marginCollapseSets = 0;
+	int    marginCollapseParticipants = 0;
+	int    marginCollapseSibling = 0;
+	int    marginCollapseParentTop = 0;
+	int    marginCollapseParentBottom = 0;
+	int    marginCollapseEmpty = 0;
+	int    marginCollapsePositiveOnly = 0;
+	int    marginCollapseNegativeOnly = 0;
+	int    marginCollapseMixed = 0;
+	int    marginCollapseBlockedBorder = 0;
+	int    marginCollapseBlockedPadding = 0;
+	int    marginCollapseBlockedBfc = 0;
+	int    marginCollapseBlockedHeight = 0;
+	int    marginCollapseBlockedContent = 0;
+	int    marginCollapseDepthClamps = 0;
+	int    marginGeometryClamps = 0;
+	int    bfcRoot = 0;
+	int    bfcInlineBlock = 0;
+	int    bfcOverflow = 0;
+	int    bfcAtomic = 0;
+	int    marginCollapseEvidenceRecords = 0;
+	std::string marginCollapseEvidence;
 	uint32_t nextSourceOrder = 1;
 	std::string computedStyleEvidence;
 	std::vector<uint64_t> computedStyleEvidenceSerials;
