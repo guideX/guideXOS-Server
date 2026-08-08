@@ -470,6 +470,29 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p id='phase3c-extreme-line' class='fixture-line'><span id='phase3c-extreme' class='ib'>extreme clamp</span><span id='phase3c-fallback' class='ib' style='height:24px;'>baseline fallback</span></p>"
                              b"</body></html>")
             return
+        if path == "/navigator-smoke/css-phase3e.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>CSS Phase 3E Floats and Clear</title><style>"
+                             b"html,body{margin:0;padding:0} body{font-size:14px;line-height:1.25;background:#f8fafc;color:#243447}"
+                             b".left{float:left;width:132px;height:76px;margin:0 14px 8px 0;padding:4px;border:2px solid #2563eb;background:#dbeafe;box-sizing:border-box}"
+                             b".right{float:right;width:118px;height:64px;margin:0 0 8px 14px;padding:4px;border:2px solid #b45309;background:#fef3c7;box-sizing:border-box}"
+                             b".bfc{overflow:hidden;width:260px;margin:8px 0;padding:4px;border:1px solid #0f766e;background:#ecfdf5}"
+                             b".clear-left{clear:left}.clear-right{clear:right}.clear-both{clear:both}"
+                             b".hidden{visibility:hidden}.zero{opacity:0}.invalid{float:inline-start}"
+                             b".cascade{float:left}.cascade{float:right}.cascade-important{float:left !important}.cascade-inline{float:right}"
+                             b"</style></head><body>"
+                             b"<h1 id='phase3e-title'>Phase 3E Float and Clear Fixture</h1>"
+                             b"<p id='phase3e-left-para'><img id='phase3e-left-image' class='left' src='/navigator-smoke/wide.png' alt='left floated image'>Left float text wraps beside the image and returns to the full content width after the float bottom. This sentence is long enough to exercise multiple line intervals beside a margin-box exclusion.</p>"
+                             b"<p id='phase3e-right-para'><img id='phase3e-right-image' class='right' src='/navigator-smoke/tall.png' alt='right floated image'>Right float text wraps from the opposite edge. The center interval remains authoritative while the right margin box is active and returns below it.</p>"
+                             b"<p id='phase3e-mixed'><span id='phase3e-inline-left' class='left'>inline blockified float</span><span id='phase3e-inline-right' class='right'>right box</span>Mixed left and right float text with a narrow center interval and a forced<br>break marker.</p>"
+                             b"<p id='phase3e-clear-left' class='clear-left'>clear left moves below the left float.</p>"
+                             b"<p id='phase3e-clear-right' class='clear-right'>clear right moves below the right float.</p>"
+                             b"<p id='phase3e-clear-both' class='clear-both'>clear both moves below both floats.</p>"
+                             b"<div id='phase3e-bfc' class='bfc'><p id='phase3e-bfc-text'>overflow hidden BFC avoids an active float and keeps its internal flow bounded.</p></div>"
+                             b"<p id='phase3e-hidden' class='left hidden'>hidden float still excludes</p><p id='phase3e-opacity' class='right zero'>opacity zero float still excludes</p>"
+                             b"<p id='phase3e-cascade' class='cascade'>cascade winner</p><p id='phase3e-important' class='cascade-important'>important winner</p><p id='phase3e-inline' class='cascade-inline' style='float:left'>inline winner</p>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-phase3d.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><title>CSS Phase 3D Margin Collapse</title><style>"

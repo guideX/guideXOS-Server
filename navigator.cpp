@@ -36,6 +36,8 @@ using gxos::web::CssLengthValue;
 using gxos::web::CssComputedStyleRecord;
 using gxos::web::BoxSizingMode;
 using gxos::web::DisplayMode;
+using gxos::web::FloatMode;
+using gxos::web::ClearMode;
 using gxos::web::OverflowMode;
 using gxos::web::VisibilityMode;
 using gxos::web::VerticalAlignMode;
@@ -216,6 +218,89 @@ namespace {
 		bool clamped = false;
 	};
 
+	// Traditional floats are represented as bounded exclusion records.  The
+	// record is shared by placement, line layout, paint evidence, and hit-test
+	// geometry; there is no separate overlap implementation.
+	struct CssFloatRecord {
+		uint64_t logicalSerial = 0;
+		uint64_t bfcIdentity = 0;
+		uint64_t flowSerial = 0;
+		uint64_t contextSerial = 0;
+		uint64_t sourceOrder = 0;
+		int blockIndex = -1;
+		FloatMode side = FloatMode::None;
+		InlineItemKind kind = InlineItemKind::TextRun;
+		std::string contentText;
+		int marginBoxX = 0;
+		int marginBoxY = 0;
+		int marginBoxW = 0;
+		int marginBoxH = 0;
+		int borderBoxX = 0;
+		int borderBoxY = 0;
+		int borderBoxW = 0;
+		int borderBoxH = 0;
+		int top = 0;
+		int bottom = 0;
+		int leftExclusion = 0;
+		int rightExclusion = 0;
+		int preferredMinimum = 0;
+		int preferredWidth = 0;
+		int availableWidth = 0;
+		int usedWidth = 0;
+		int usedHeight = 0;
+		int placementAttempts = 0;
+		int intersectedRecords = 0;
+		int clearance = 0;
+		bool blockified = false;
+		bool bfcAvoidance = false;
+		bool movedBelowFloat = false;
+		bool visibilityRetained = true;
+		bool complete = true;
+		bool clamped = false;
+	};
+
+	struct CssFloatExclusionQuery {
+		int availableLeft = 0;
+		int availableRight = 0;
+		int availableWidth = 0;
+		int nextCandidateY = -1;
+		int recordsIntersected = 0;
+		bool hasLeft = false;
+		bool hasRight = false;
+		bool complete = true;
+		bool clamped = false;
+	};
+
+	struct CssFloatLayoutSnapshot {
+		bool valid = false;
+		bool building = false;
+		std::string url;
+		size_t blockCount = 0;
+		uint64_t fingerprint = 0;
+		uint64_t nextSourceOrder = 1;
+		int operations = 0;
+		int placementAttempts = 0;
+		int placementDownshifts = 0;
+		int sideBySide = 0;
+		int widthOverflows = 0;
+		int lineExclusions = 0;
+		int zeroWidthLineAdvances = 0;
+		int bfcAvoidances = 0;
+		int bfcDownshifts = 0;
+		int containmentBoundaries = 0;
+		int scopeSuppressions = 0;
+		int heightContainments = 0;
+		int geometryClamps = 0;
+		int placementAttemptClamps = 0;
+		int exclusionScanClamps = 0;
+		int bfcDepthClamps = 0;
+		int maxActiveRecords = 0;
+		std::vector<CssFloatRecord> records;
+		std::vector<int> blockClearances;
+		int evidenceRecords = 0;
+		std::string evidence;
+	};
+
 	struct InlineFragmentLayout {
 		int itemIndex = -1;
 		int blockIndex = -1;
@@ -251,6 +336,11 @@ namespace {
 		int horizontalExtent = 0;
 		int firstFragment = 0;
 		int fragmentCount = 0;
+		int availableLeft = 0;
+		int availableRight = 0;
+		int availableWidth = 0;
+		int floatRecordsIntersected = 0;
+		bool exclusionComplete = true;
 	};
 
 	struct InlineFlowLayout {
@@ -266,6 +356,7 @@ namespace {
 		int contentX = 0;
 		int contentWidth = 1;
 		int contentOffsetY = 0;
+		int documentContentTop = 0;
 		int totalHeight = 0;
 		WebStyle style;
 		std::vector<InlineLineLayout> lines;
@@ -431,6 +522,8 @@ namespace {
 		bool collapsedWithParentTop = false;
 		bool collapsedWithParentBottom = false;
 		bool emptyCollapse = false;
+		int clearance = 0;
+		bool clearanceApplied = false;
 		bool establishesBfc = false;
 		bool heightDefinite = false;
 		bool minHeightPreventsCollapse = false;
@@ -456,6 +549,7 @@ namespace {
 
 	static CssMarginLayoutSnapshot s_cssMarginLayoutSnapshot;
 	static bool s_cssMarginLayoutBuilding = false;
+	static CssFloatLayoutSnapshot s_cssFloatLayoutSnapshot;
 
 	constexpr int kCssClipStackDepth = 16;
 	static std::array<CssPaintRect, kCssClipStackDepth> s_cssClipStack{};
@@ -1339,6 +1433,8 @@ namespace {
 	static int blockBodyMarginLeft(const WebDocument& doc);
 	static int blockBodyMarginRight(const WebDocument& doc);
 	static int blockAvailableWidth(const DocBlock& block, const WebDocument& doc);
+	static int cssBodyContentWidth(const WebDocument& doc);
+	static bool cssStyleHasOverflowBfc(const WebStyle& style);
 	static bool isFormControlBlock(const DocBlock& block);
 	static int blockFormControlIntrinsicWidth(const DocBlock& block);
 	static int blockFormControlWidth(const DocBlock& block, int availableWidth);
@@ -1347,6 +1443,12 @@ namespace {
 	static int blockWrapWidth(const DocBlock& block, int outerWidth);
 	static int blockTextLineHeight(const DocBlock& block);
 	static void ensureInlineLayout(const WebDocument& doc);
+	static void ensureCssFloatLayout(const WebDocument& doc);
+	static CssFloatExclusionQuery cssFloatExclusionQuery(const WebDocument& doc,
+		uint64_t bfcIdentity, int lineTop, int lineBottom, int containingLeft, int containingRight);
+	static int cssFloatClearance(const WebDocument& doc, uint64_t bfcIdentity,
+		ClearMode clearMode, int blockTop);
+	static int inlineTextWidth(const WebStyle& style, const std::string& text);
 	static const gxos::web::HtmlElementRef* cssStructuralElementForSerial(
 		const WebDocument& doc, uint64_t serial);
 	static void rebuildInlineLayout(const WebDocument& doc, InlineLayoutSnapshot& snapshot);
@@ -2030,6 +2132,31 @@ namespace {
 		metadata.cssBfcAtomic = doc.cssDiagnostics.bfcAtomic;
 		metadata.cssMarginCollapseEvidenceRecords = doc.cssDiagnostics.marginCollapseEvidenceRecords;
 		metadata.cssMarginCollapseEvidence = doc.cssDiagnostics.marginCollapseEvidence;
+		metadata.cssFloatLeft = doc.cssDiagnostics.floatLeft;
+		metadata.cssFloatRight = doc.cssDiagnostics.floatRight;
+		metadata.cssFloatBlockifications = doc.cssDiagnostics.floatBlockifications;
+		metadata.cssFloatRecords = doc.cssDiagnostics.floatRecords;
+		metadata.cssFloatPlacementAttempts = doc.cssDiagnostics.floatPlacementAttempts;
+		metadata.cssFloatPlacementDownshifts = doc.cssDiagnostics.floatPlacementDownshifts;
+		metadata.cssFloatSideBySide = doc.cssDiagnostics.floatSideBySide;
+		metadata.cssFloatWidthOverflows = doc.cssDiagnostics.floatWidthOverflows;
+		metadata.cssFloatLineExclusions = doc.cssDiagnostics.floatLineExclusions;
+		metadata.cssFloatZeroWidthLineAdvances = doc.cssDiagnostics.floatZeroWidthLineAdvances;
+		metadata.cssFloatBfcAvoidances = doc.cssDiagnostics.floatBfcAvoidances;
+		metadata.cssFloatBfcDownshifts = doc.cssDiagnostics.floatBfcDownshifts;
+		metadata.cssClearLeft = doc.cssDiagnostics.clearLeft;
+		metadata.cssClearRight = doc.cssDiagnostics.clearRight;
+		metadata.cssClearBoth = doc.cssDiagnostics.clearBoth;
+		metadata.cssClearanceApplied = doc.cssDiagnostics.clearanceApplied;
+		metadata.cssFloatContainmentBoundaries = doc.cssDiagnostics.floatContainmentBoundaries;
+		metadata.cssFloatScopeSuppressions = doc.cssDiagnostics.floatScopeSuppressions;
+		metadata.cssFloatHeightContainments = doc.cssDiagnostics.floatHeightContainments;
+		metadata.cssFloatGeometryClamps = doc.cssDiagnostics.floatGeometryClamps;
+		metadata.cssFloatPlacementAttemptClamps = doc.cssDiagnostics.floatPlacementAttemptClamps;
+		metadata.cssFloatExclusionScanClamps = doc.cssDiagnostics.floatExclusionScanClamps;
+		metadata.cssFloatBfcDepthClamps = doc.cssDiagnostics.floatBfcDepthClamps;
+		metadata.cssFloatEvidenceRecords = doc.cssDiagnostics.floatEvidenceRecords;
+		metadata.cssFloatEvidence = doc.cssDiagnostics.floatEvidence;
 		metadata.cssBoxSizingContentBox = 0;
 		metadata.cssBoxSizingBorderBox = 0;
 		metadata.cssWidthAutoResolutions = 0;
@@ -2405,7 +2532,34 @@ namespace {
 		}
 
 		InlineLayoutSnapshot inlineSnapshot;
+		ensureCssMarginLayout(doc);
+		ensureCssFloatLayout(doc);
 		rebuildInlineLayout(doc, inlineSnapshot);
+		metadata.cssFloatLeft = doc.cssDiagnostics.floatLeft;
+		metadata.cssFloatRight = doc.cssDiagnostics.floatRight;
+		metadata.cssFloatBlockifications = doc.cssDiagnostics.floatBlockifications;
+		metadata.cssFloatRecords = doc.cssDiagnostics.floatRecords;
+		metadata.cssFloatPlacementAttempts = doc.cssDiagnostics.floatPlacementAttempts;
+		metadata.cssFloatPlacementDownshifts = doc.cssDiagnostics.floatPlacementDownshifts;
+		metadata.cssFloatSideBySide = doc.cssDiagnostics.floatSideBySide;
+		metadata.cssFloatWidthOverflows = doc.cssDiagnostics.floatWidthOverflows;
+		metadata.cssFloatLineExclusions = doc.cssDiagnostics.floatLineExclusions;
+		metadata.cssFloatZeroWidthLineAdvances = doc.cssDiagnostics.floatZeroWidthLineAdvances;
+		metadata.cssFloatBfcAvoidances = doc.cssDiagnostics.floatBfcAvoidances;
+		metadata.cssFloatBfcDownshifts = doc.cssDiagnostics.floatBfcDownshifts;
+		metadata.cssClearLeft = doc.cssDiagnostics.clearLeft;
+		metadata.cssClearRight = doc.cssDiagnostics.clearRight;
+		metadata.cssClearBoth = doc.cssDiagnostics.clearBoth;
+		metadata.cssClearanceApplied = doc.cssDiagnostics.clearanceApplied;
+		metadata.cssFloatContainmentBoundaries = doc.cssDiagnostics.floatContainmentBoundaries;
+		metadata.cssFloatScopeSuppressions = doc.cssDiagnostics.floatScopeSuppressions;
+		metadata.cssFloatHeightContainments = doc.cssDiagnostics.floatHeightContainments;
+		metadata.cssFloatGeometryClamps = doc.cssDiagnostics.floatGeometryClamps;
+		metadata.cssFloatPlacementAttemptClamps = doc.cssDiagnostics.floatPlacementAttemptClamps;
+		metadata.cssFloatExclusionScanClamps = doc.cssDiagnostics.floatExclusionScanClamps;
+		metadata.cssFloatBfcDepthClamps = doc.cssDiagnostics.floatBfcDepthClamps;
+		metadata.cssFloatEvidenceRecords = doc.cssDiagnostics.floatEvidenceRecords;
+		metadata.cssFloatEvidence = doc.cssDiagnostics.floatEvidence;
 		metadata.cssInlineItems = static_cast<int>(std::min<size_t>(std::numeric_limits<int>::max(), inlineSnapshot.itemCount));
 		metadata.cssInlineTextRuns = inlineSnapshot.textRuns;
 		metadata.cssInlineWhitespaceRuns = inlineSnapshot.whitespaceRuns;
@@ -2489,6 +2643,11 @@ namespace {
 				std::ostringstream evidence;
 					evidence << "id=" << boundedId
 					<< ",flow-content-width=" << flow.contentWidth
+					<< ",line-available-left=" << line->availableLeft
+					<< ",line-available-right=" << line->availableRight
+					<< ",line-available-width=" << line->availableWidth
+					<< ",float-records-intersected=" << line->floatRecordsIntersected
+					<< ",float-exclusion-complete=" << (line->exclusionComplete ? "yes" : "no")
 					<< ",line=" << line->lineIndex
 					<< ",line-top=" << line->top
 					<< ",line-bottom=" << (line->top + line->usedLineHeight)
@@ -3544,6 +3703,25 @@ namespace {
 		}
 		basis = std::max(1, basis - blockIndentForType(block.type) - kDocumentRightPad);
 		basis = std::max(1, basis - cssMarginLeftPx(block.style, 0) - cssMarginRightPx(block.style, 0));
+		const int blockIndex = doc.blocks.empty() ? -1 : static_cast<int>(&block - doc.blocks.data());
+		if (blockIndex >= 0 && blockIndex < static_cast<int>(doc.blocks.size()) &&
+			cssStyleHasOverflowBfc(block.style) && s_cssFloatLayoutSnapshot.valid &&
+			block.style.floatMode == FloatMode::None) {
+			int flowTop = blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())
+				? s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)].usedY : 0;
+			const size_t limit = std::min<size_t>(static_cast<size_t>(blockIndex),
+				s_cssFloatLayoutSnapshot.blockClearances.size());
+			for (size_t i = 0; i < limit; ++i) flowTop += s_cssFloatLayoutSnapshot.blockClearances[i];
+			const int bodyLeft = blockBodyMarginLeft(doc);
+			const int bodyWidth = cssBodyContentWidth(doc);
+			const CssFloatExclusionQuery exclusion = cssFloatExclusionQuery(doc, 0, flowTop,
+				flowTop + std::max(1, blockTextLineHeight(block)), bodyLeft, bodyLeft + bodyWidth);
+			if (exclusion.availableWidth < bodyWidth) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.floatBfcAvoidances;
+				basis = std::max(1, std::min(basis, exclusion.availableWidth -
+					blockIndentForType(block.type) - kDocumentRightPad));
+			}
+		}
 		return basis;
 	}
 
@@ -3588,7 +3766,25 @@ namespace {
 
 	static int blockOuterX(const DocBlock& block, const WebDocument& doc, int availableWidth, int outerWidth)
 	{
-		const int baseX = kContentX + blockIndentForType(block.type) + blockBodyMarginLeft(doc);
+		int baseX = kContentX + blockIndentForType(block.type) + blockBodyMarginLeft(doc);
+		const int blockIndex = doc.blocks.empty() ? -1 : static_cast<int>(&block - doc.blocks.data());
+		if (blockIndex >= 0 && blockIndex < static_cast<int>(doc.blocks.size()) &&
+			cssStyleHasOverflowBfc(block.style) && s_cssFloatLayoutSnapshot.valid &&
+			block.style.floatMode == FloatMode::None) {
+			int flowTop = blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())
+				? s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)].usedY : 0;
+			const size_t limit = std::min<size_t>(static_cast<size_t>(blockIndex),
+				s_cssFloatLayoutSnapshot.blockClearances.size());
+			for (size_t i = 0; i < limit; ++i) flowTop += s_cssFloatLayoutSnapshot.blockClearances[i];
+			const int bodyLeft = blockBodyMarginLeft(doc);
+			const int bodyWidth = cssBodyContentWidth(doc);
+			const CssFloatExclusionQuery exclusion = cssFloatExclusionQuery(doc, 0, flowTop,
+				flowTop + std::max(1, blockTextLineHeight(block)), bodyLeft, bodyLeft + bodyWidth);
+			if (exclusion.availableWidth < bodyWidth) {
+				baseX = kContentX + exclusion.availableLeft;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.floatBfcAvoidances;
+			}
+		}
 		const int leftMargin = cssMarginLeftPx(block.style, 0);
 		const int rightMargin = cssMarginRightPx(block.style, 0);
 		const bool autoLeft = cssMarginLeftAuto(block.style);
@@ -4030,6 +4226,9 @@ namespace {
 			mix(static_cast<uint64_t>(style.display)); mix(static_cast<uint64_t>(style.overflowX));
 			mix(static_cast<uint64_t>(style.overflowY)); mix(static_cast<uint64_t>(style.height));
 			mix(static_cast<uint64_t>(style.minHeight));
+			mix(static_cast<uint64_t>(style.floatMode)); mix(static_cast<uint64_t>(style.clearMode));
+			mix(static_cast<uint64_t>(style.width)); mix(static_cast<uint64_t>(style.widthPercent));
+			mix(static_cast<uint64_t>(style.maxWidth)); mix(static_cast<uint64_t>(style.maxWidthPercent));
 		};
 		mix(static_cast<uint64_t>(doc.blocks.size()));
 		mixStyle(doc.bodyStyle);
@@ -4058,9 +4257,10 @@ namespace {
 
 	static int cssPreviousVisibleFlowBlock(const WebDocument& doc, int blockIndex)
 	{
-		for (int i = blockIndex - 1; i >= 0; --i) {
+	for (int i = blockIndex - 1; i >= 0; --i) {
 			const DocBlock& block = doc.blocks[static_cast<size_t>(i)];
-			if (block.style.displayNone || block.atomicContainerSerial != 0) continue;
+			if (block.style.displayNone || block.atomicContainerSerial != 0 ||
+				block.style.floatMode != FloatMode::None) continue;
 			return i;
 		}
 		return -1;
@@ -4132,6 +4332,12 @@ namespace {
 			if (record.bfcReason == "atomic-context") ++const_cast<WebDocument&>(doc).cssDiagnostics.bfcAtomic;
 			if (block.style.displayNone || block.atomicContainerSerial != 0) {
 				record.incomplete = block.atomicContainerSerial != 0;
+				continue;
+			}
+			if (block.style.floatMode != FloatMode::None) {
+				// Block floats are out of normal flow. Their used geometry is
+				// supplied by the float snapshot, so they must not move the
+				// Phase 3D cursor.
 				continue;
 			}
 			const int prior = cssPreviousVisibleFlowBlock(doc, index);
@@ -4388,7 +4594,424 @@ namespace {
 		const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseEvidenceRecords = snapshot.evidenceRecords;
 		const_cast<WebDocument&>(doc).cssDiagnostics.marginCollapseEvidence = snapshot.evidence;
 		snapshot.valid = true;
+		// Float placement is a sibling pass over the completed bounded margin
+		// snapshot.  Rebuilding inline flows once after it exists lets all line
+		// boxes use the same exclusion records without creating a second block
+		// layout engine or a recursive dependency on normal-flow placement.
+		ensureCssFloatLayout(doc);
+		s_inlineLayoutDirty = true;
+		rebuildInlineLayout(doc, s_inlineLayoutSnapshot);
+		s_inlineLayoutDirty = false;
 		s_cssMarginLayoutBuilding = false;
+	}
+
+	static uint64_t cssFloatBfcIdentity(const WebDocument& doc, const InlineFlowLayout& flow)
+	{
+		if (flow.contextSerial != 0) return flow.contextSerial;
+		if (flow.anchorBlockIndex >= 0 && flow.anchorBlockIndex < static_cast<int>(doc.blocks.size())) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
+			for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+				const WebStyle* style = computedStyleForSerial(doc, it->serial);
+				if (style && cssStyleHasOverflowBfc(*style)) return it->serial;
+			}
+		}
+		return 0;
+	}
+
+	static int cssFloatPreferredTextWidth(const WebDocument& doc, const WebInlineItem& item,
+		const WebStyle& style, bool longestToken)
+	{
+		if (item.kind != InlineItemKind::TextRun) return 0;
+		if (!longestToken) return inlineTextWidth(style, item.text);
+		int result = 0;
+		size_t start = 0;
+		while (start <= item.text.size()) {
+			size_t end = item.text.find_first_of(" \\t\\r\\n", start);
+			if (end == std::string::npos) end = item.text.size();
+			result = std::max(result, inlineTextWidth(style, item.text.substr(start, end - start)));
+			if (end == item.text.size()) break;
+			start = end + 1;
+		}
+		(void)doc;
+		return result;
+	}
+
+	static bool cssFloatRecordIntersects(const CssFloatRecord& record, int top, int bottom)
+	{
+		return bottom > record.marginBoxY && top < record.marginBoxY + record.marginBoxH;
+	}
+
+	static CssFloatExclusionQuery cssFloatExclusionQuery(const WebDocument& doc,
+		uint64_t bfcIdentity, int lineTop, int lineBottom, int containingLeft, int containingRight)
+	{
+		CssFloatExclusionQuery result;
+		result.availableLeft = containingLeft;
+		result.availableRight = containingRight;
+		result.availableWidth = std::max(0, containingRight - containingLeft);
+		if (!s_cssFloatLayoutSnapshot.valid) return result;
+		constexpr int kMaxScans = 128;
+		int scans = 0;
+		for (const CssFloatRecord& record : s_cssFloatLayoutSnapshot.records) {
+			if (++scans > kMaxScans) {
+				result.complete = false;
+				result.clamped = true;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.floatExclusionScanClamps;
+				break;
+			}
+			if (record.bfcIdentity != bfcIdentity ||
+				!cssFloatRecordIntersects(record, lineTop, lineBottom)) continue;
+			++result.recordsIntersected;
+			if (record.side == FloatMode::Left) {
+				result.hasLeft = true;
+				result.availableLeft = std::max(result.availableLeft,
+					record.marginBoxX + record.marginBoxW);
+			} else if (record.side == FloatMode::Right) {
+				result.hasRight = true;
+				result.availableRight = std::min(result.availableRight, record.marginBoxX);
+			}
+			result.nextCandidateY = result.nextCandidateY < 0
+				? record.marginBoxY + record.marginBoxH
+				: std::min(result.nextCandidateY, record.marginBoxY + record.marginBoxH);
+		}
+		result.availableLeft = std::max(containingLeft, std::min(containingRight, result.availableLeft));
+		result.availableRight = std::max(result.availableLeft,
+			std::min(containingRight, result.availableRight));
+		result.availableWidth = std::max(0, result.availableRight - result.availableLeft);
+		if (result.recordsIntersected > 0)
+			++const_cast<WebDocument&>(doc).cssDiagnostics.floatLineExclusions;
+		return result;
+	}
+
+	static int cssFloatClearance(const WebDocument& doc, uint64_t bfcIdentity,
+		ClearMode clearMode, int blockTop)
+	{
+		if (clearMode == ClearMode::None || !s_cssFloatLayoutSnapshot.valid) return 0;
+		int bottom = blockTop;
+		for (const CssFloatRecord& record : s_cssFloatLayoutSnapshot.records) {
+			if (record.bfcIdentity != bfcIdentity) continue;
+			const bool relevant = clearMode == ClearMode::Both ||
+				(clearMode == ClearMode::Left && record.side == FloatMode::Left) ||
+				(clearMode == ClearMode::Right && record.side == FloatMode::Right);
+			if (relevant) bottom = std::max(bottom, record.marginBoxY + record.marginBoxH);
+		}
+		const int clearance = std::max(0, bottom - blockTop);
+		if (clearance > 0) ++const_cast<WebDocument&>(doc).cssDiagnostics.clearanceApplied;
+		return clearance;
+	}
+
+	static void buildCssFloatLayout(const WebDocument& doc, CssFloatLayoutSnapshot& snapshot)
+	{
+		snapshot = CssFloatLayoutSnapshot{};
+		snapshot.url = doc.url;
+		snapshot.blockCount = doc.blocks.size();
+		snapshot.fingerprint = cssMarginLayoutFingerprint(doc);
+		snapshot.records.reserve(128);
+		if (s_cssFloatLayoutSnapshot.building) return;
+		s_cssFloatLayoutSnapshot.building = true;
+		WebDocument& mutableDoc = const_cast<WebDocument&>(doc);
+		mutableDoc.cssDiagnostics.floatLeft = 0;
+		mutableDoc.cssDiagnostics.floatRight = 0;
+		mutableDoc.cssDiagnostics.floatBlockifications = 0;
+		mutableDoc.cssDiagnostics.floatRecords = 0;
+		mutableDoc.cssDiagnostics.floatPlacementAttempts = 0;
+		mutableDoc.cssDiagnostics.floatPlacementDownshifts = 0;
+		mutableDoc.cssDiagnostics.floatSideBySide = 0;
+		mutableDoc.cssDiagnostics.floatWidthOverflows = 0;
+		mutableDoc.cssDiagnostics.floatLineExclusions = 0;
+		mutableDoc.cssDiagnostics.floatZeroWidthLineAdvances = 0;
+		mutableDoc.cssDiagnostics.floatBfcAvoidances = 0;
+		mutableDoc.cssDiagnostics.floatBfcDownshifts = 0;
+		mutableDoc.cssDiagnostics.clearLeft = 0;
+		mutableDoc.cssDiagnostics.clearRight = 0;
+		mutableDoc.cssDiagnostics.clearBoth = 0;
+		mutableDoc.cssDiagnostics.clearanceApplied = 0;
+		mutableDoc.cssDiagnostics.floatContainmentBoundaries = 0;
+		mutableDoc.cssDiagnostics.floatScopeSuppressions = 0;
+		mutableDoc.cssDiagnostics.floatHeightContainments = 0;
+		mutableDoc.cssDiagnostics.floatGeometryClamps = 0;
+		mutableDoc.cssDiagnostics.floatPlacementAttemptClamps = 0;
+		mutableDoc.cssDiagnostics.floatExclusionScanClamps = 0;
+		mutableDoc.cssDiagnostics.floatBfcDepthClamps = 0;
+		mutableDoc.cssDiagnostics.floatEvidenceRecords = 0;
+		mutableDoc.cssDiagnostics.floatEvidence.clear();
+
+		uint64_t sourceOrder = 1;
+		std::vector<uint64_t> seenOwners;
+		seenOwners.reserve(128);
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (item.kind == InlineItemKind::ForcedBreak || item.flowSerial == 0) continue;
+			const WebStyle* style = inlineOwnerStyle(doc, item, doc.bodyStyle);
+			if (!style || style->floatMode == FloatMode::None || style->displayNone) continue;
+			if (item.ownerSerial != 0 && std::find(seenOwners.begin(), seenOwners.end(), item.ownerSerial) != seenOwners.end()) {
+				++mutableDoc.cssDiagnostics.floatScopeSuppressions;
+				continue;
+			}
+			if (snapshot.records.size() >= 128) {
+				++mutableDoc.cssDiagnostics.floatGeometryClamps;
+				break;
+			}
+			if (item.ownerSerial != 0) seenOwners.push_back(item.ownerSerial);
+			InlineFlowLayout flow;
+			bool foundFlow = false;
+			for (const InlineFlowLayout& candidate : s_inlineLayoutSnapshot.flows) {
+				if (candidate.flowSerial == item.flowSerial && candidate.contextSerial == item.atomicContainerSerial) {
+					flow = candidate;
+					foundFlow = true;
+					break;
+				}
+			}
+			if (!foundFlow) {
+				++mutableDoc.cssDiagnostics.floatScopeSuppressions;
+				continue;
+			}
+			if (flow.contextSerial == 0 && flow.anchorBlockIndex >= 0 &&
+				flow.anchorBlockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()) &&
+				s_cssMarginLayoutSnapshot.valid) {
+				const CssMarginFlowRecord& marginRecord = s_cssMarginLayoutSnapshot.records[
+					static_cast<size_t>(flow.anchorBlockIndex)];
+				flow.documentContentTop = marginRecord.usedY + cssBorderTopPx(flow.style) +
+					cssPaddingTopPx(flow.style, 0);
+			}
+			const uint64_t bfcIdentity = cssFloatBfcIdentity(doc, flow);
+			if (item.atomicContainerSerial != 0) ++mutableDoc.cssDiagnostics.floatContainmentBoundaries;
+			const int containerLeft = std::max(0, flow.contentX - kContentX);
+			const int containerWidth = std::max(1, flow.contentWidth);
+			const int containerRight = std::min(8192, containerLeft + containerWidth);
+			CssFloatRecord record;
+			record.logicalSerial = item.ownerSerial;
+			record.bfcIdentity = bfcIdentity;
+			record.flowSerial = item.flowSerial;
+			record.contextSerial = item.atomicContainerSerial;
+			record.sourceOrder = sourceOrder++;
+			record.blockIndex = item.blockIndex;
+			record.side = style->floatMode;
+			record.kind = item.kind;
+			record.contentText = item.text;
+			record.blockified = true;
+			record.visibilityRetained = true;
+			record.availableWidth = containerWidth;
+			++mutableDoc.cssDiagnostics.floatBlockifications;
+			if (record.side == FloatMode::Left) ++mutableDoc.cssDiagnostics.floatLeft;
+			else if (record.side == FloatMode::Right) ++mutableDoc.cssDiagnostics.floatRight;
+			int contentW = 0;
+			int contentH = 0;
+			int preferredMin = 0;
+			int preferred = 0;
+			if (item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())) {
+				const DocBlock& block = doc.blocks[static_cast<size_t>(item.blockIndex)];
+				if (item.kind == InlineItemKind::ReplacedImage) {
+					imageDisplaySize(block, containerWidth, contentW, contentH);
+					preferredMin = preferred = contentW;
+				} else if (item.kind == InlineItemKind::FormControl) {
+					contentW = blockFormControlWidth(block, containerWidth);
+					contentH = blockFormControlHeight(block);
+					preferredMin = preferred = contentW;
+				} else if (item.kind == InlineItemKind::AtomicBlock) {
+					preferredMin = preferred = std::max(1, blockOuterWidth(block, containerWidth));
+					contentW = preferred;
+					contentH = std::max(1, blockTotalHeight(block, doc, false));
+				} else {
+					preferredMin = cssFloatPreferredTextWidth(doc, item, *style, true);
+					preferred = cssFloatPreferredTextWidth(doc, item, *style, false);
+					contentW = preferred;
+					const int cols = std::max(1, std::max(preferredMin, std::min(containerWidth, preferred)) / kCharW);
+					contentH = wrappedBlockHeight(block, cols, blockTextLineHeight(block));
+				}
+			} else {
+				preferredMin = cssFloatPreferredTextWidth(doc, item, *style, true);
+				preferred = cssFloatPreferredTextWidth(doc, item, *style, false);
+				contentW = preferred;
+				contentH = kLineH;
+			}
+			const int horizontalEdges = cssHorizontalBoxEdges(*style);
+			const int verticalEdges = cssVerticalBoxEdges(*style);
+			preferredMin = cssBoundedGeometryAdd(preferredMin, horizontalEdges, &record.clamped);
+			preferred = cssBoundedGeometryAdd(preferred, horizontalEdges, &record.clamped);
+			const CssResolvedLength explicitWidth = resolveCssLength(style->widthValue,
+				style->width, style->widthPercent, containerWidth);
+			const bool autoWidth = !explicitWidth.definite;
+			int usedW = autoWidth
+				? std::min(std::max(preferredMin, containerWidth), std::max(preferredMin, preferred))
+				: blockOuterWidth(item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())
+					? doc.blocks[static_cast<size_t>(item.blockIndex)] : DocBlock{}, containerWidth, &record.clamped);
+			usedW = std::max(1, std::min(8192, usedW));
+			const int usedH = std::max(1, std::min(8192,
+				cssBoundedGeometryAdd(contentH, verticalEdges, &record.clamped)));
+			record.preferredMinimum = preferredMin;
+			record.preferredWidth = preferred;
+			record.usedWidth = usedW;
+			record.usedHeight = usedH;
+			const int marginLeft = cssMarginLeftPx(*style, 0);
+			const int marginRight = cssMarginRightPx(*style, 0);
+			const int marginTop = cssMarginTopPx(*style, 0);
+			const int marginBottom = cssMarginBottomPx(*style, 0);
+			const int marginW = cssBoundedGeometryAdd(usedW, marginLeft + marginRight, &record.clamped);
+			const int marginH = cssBoundedGeometryAdd(usedH, marginTop + marginBottom, &record.clamped);
+			int y = std::max(0, flow.documentContentTop + marginTop);
+			const int maxAttempts = 64;
+			for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+				++record.placementAttempts;
+				++snapshot.placementAttempts;
+				++mutableDoc.cssDiagnostics.floatPlacementAttempts;
+				int left = containerLeft;
+				int right = containerRight;
+				int intersected = 0;
+				int nextY = -1;
+				for (const CssFloatRecord& prior : snapshot.records) {
+					if (prior.bfcIdentity != bfcIdentity || !cssFloatRecordIntersects(prior, y, y + marginH)) continue;
+					++intersected;
+					if (prior.side == FloatMode::Left) left = std::max(left, prior.marginBoxX + prior.marginBoxW);
+					else if (prior.side == FloatMode::Right) right = std::min(right, prior.marginBoxX);
+					const int candidateBottom = prior.marginBoxY + prior.marginBoxH;
+					nextY = nextY < 0 ? candidateBottom : std::min(nextY, candidateBottom);
+				}
+				const int width = std::max(0, right - left);
+				const bool fits = marginW <= width;
+				if (fits || intersected == 0 || attempt == maxAttempts - 1) {
+					if (!fits) {
+						++snapshot.widthOverflows;
+						++mutableDoc.cssDiagnostics.floatWidthOverflows;
+						record.clamped = true;
+					}
+					if (record.side == FloatMode::Left) record.marginBoxX = left;
+					else record.marginBoxX = right - marginW;
+					if (record.marginBoxX < containerLeft || record.marginBoxX + marginW > containerRight) {
+						record.clamped = true;
+						++snapshot.geometryClamps;
+						++mutableDoc.cssDiagnostics.floatGeometryClamps;
+					}
+					record.marginBoxX = std::max(-8192, std::min(8192, record.marginBoxX));
+					record.marginBoxY = std::max(0, std::min(8192, y));
+					record.marginBoxW = std::max(1, std::min(8192, marginW));
+					record.marginBoxH = std::max(1, std::min(8192, marginH));
+					record.borderBoxX = record.marginBoxX + marginLeft;
+					record.borderBoxY = record.marginBoxY + marginTop;
+					record.borderBoxW = usedW;
+					record.borderBoxH = usedH;
+					record.top = record.marginBoxY;
+					record.bottom = record.marginBoxY + record.marginBoxH;
+					record.leftExclusion = record.marginBoxX + record.marginBoxW;
+					record.rightExclusion = record.marginBoxX;
+					record.intersectedRecords = intersected;
+					record.movedBelowFloat = attempt > 0;
+					if (record.movedBelowFloat) {
+						++snapshot.placementDownshifts;
+						++mutableDoc.cssDiagnostics.floatPlacementDownshifts;
+					}
+					if (intersected > 0 && attempt == 0) {
+						++snapshot.sideBySide;
+						++mutableDoc.cssDiagnostics.floatSideBySide;
+					}
+					break;
+				}
+				if (nextY <= y || nextY < 0) {
+					record.complete = false;
+					record.clamped = true;
+					break;
+				}
+				y = nextY;
+			}
+			if (record.placementAttempts >= maxAttempts) {
+				record.complete = false;
+				++snapshot.placementAttemptClamps;
+				++mutableDoc.cssDiagnostics.floatPlacementAttemptClamps;
+			}
+			snapshot.maxActiveRecords = std::max(snapshot.maxActiveRecords,
+				static_cast<int>(snapshot.records.size()) + 1);
+			if (item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())) {
+				const DocBlock& block = doc.blocks[static_cast<size_t>(item.blockIndex)];
+				if (block.style.clearMode == ClearMode::Left) ++mutableDoc.cssDiagnostics.clearLeft;
+				else if (block.style.clearMode == ClearMode::Right) ++mutableDoc.cssDiagnostics.clearRight;
+				else if (block.style.clearMode == ClearMode::Both) ++mutableDoc.cssDiagnostics.clearBoth;
+			}
+			if (snapshot.evidenceRecords < 128 && snapshot.evidence.size() < 32768) {
+				std::ostringstream evidence;
+				evidence << "serial=" << record.logicalSerial << ",bfc=" << record.bfcIdentity
+					<< ",source-order=" << record.sourceOrder << ",side="
+					<< (record.side == FloatMode::Left ? "left" : "right")
+					<< ",blockified=yes,preferred-min=" << record.preferredMinimum
+					<< ",preferred-width=" << record.preferredWidth << ",available-width=" << record.availableWidth
+					<< ",used-width=" << record.usedWidth << ",used-height=" << record.usedHeight
+					<< ",margin-box=" << record.marginBoxX << ":" << record.marginBoxY << ":" << record.marginBoxW << ":" << record.marginBoxH
+					<< ",border-box=" << record.borderBoxX << ":" << record.borderBoxY << ":" << record.borderBoxW << ":" << record.borderBoxH
+					<< ",top=" << record.top << ",bottom=" << record.bottom
+					<< ",left-edge=" << record.leftExclusion << ",right-edge=" << record.rightExclusion
+					<< ",placement-attempts=" << record.placementAttempts << ",intersected=" << record.intersectedRecords
+					<< ",clearance=" << record.clearance << ",bfc-avoidance=" << (record.bfcAvoidance ? "yes" : "no")
+					<< ",moved-below-float=" << (record.movedBelowFloat ? "yes" : "no")
+					<< ",visibility=" << (style->visibility == VisibilityMode::Hidden ? "hidden" : "visible")
+					<< ",complete=" << (record.complete ? "yes" : "no") << ",clamped=" << (record.clamped ? "yes" : "no") << "\n";
+				const std::string line = evidence.str();
+				if (snapshot.evidence.size() + line.size() <= 32768) {
+					snapshot.evidence += line;
+					++snapshot.evidenceRecords;
+				}
+			}
+			snapshot.records.push_back(record);
+			++snapshot.operations;
+		}
+		snapshot.blockClearances.assign(doc.blocks.size(), 0);
+		for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+			if (block.style.displayNone || block.style.clearMode == ClearMode::None ||
+				block.style.floatMode != FloatMode::None) continue;
+			int baseY = blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())
+				? s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)].usedY : 0;
+			uint64_t bfc = 0;
+			for (const HtmlElementRef& ancestor : block.ancestors) {
+				const WebStyle* ancestorStyle = computedStyleForSerial(doc, ancestor.serial);
+				if (ancestorStyle && cssStyleHasOverflowBfc(*ancestorStyle)) {
+					bfc = ancestor.serial;
+					break;
+				}
+			}
+			int floatBottom = baseY;
+			for (const CssFloatRecord& prior : snapshot.records) {
+				if (prior.bfcIdentity != bfc) continue;
+				const bool relevant = block.style.clearMode == ClearMode::Both ||
+					(block.style.clearMode == ClearMode::Left && prior.side == FloatMode::Left) ||
+					(block.style.clearMode == ClearMode::Right && prior.side == FloatMode::Right);
+				if (relevant) floatBottom = std::max(floatBottom, prior.marginBoxY + prior.marginBoxH);
+			}
+			const int clearance = std::max(0, floatBottom - baseY);
+			snapshot.blockClearances[static_cast<size_t>(blockIndex)] = clearance;
+			if (clearance > 0) {
+				++mutableDoc.cssDiagnostics.clearanceApplied;
+				if (block.style.clearMode == ClearMode::Left) ++mutableDoc.cssDiagnostics.clearLeft;
+				else if (block.style.clearMode == ClearMode::Right) ++mutableDoc.cssDiagnostics.clearRight;
+				else ++mutableDoc.cssDiagnostics.clearBoth;
+			}
+			if (blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())) {
+				CssMarginFlowRecord& marginRecord = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)];
+				marginRecord.clearance = clearance;
+				marginRecord.clearanceApplied = clearance > 0;
+			}
+		}
+		snapshot.valid = true;
+		s_cssFloatLayoutSnapshot = snapshot;
+		s_cssFloatLayoutSnapshot.building = false;
+		mutableDoc.cssDiagnostics.floatRecords = static_cast<int>(snapshot.records.size());
+		mutableDoc.cssDiagnostics.floatEvidenceRecords = snapshot.evidenceRecords;
+		mutableDoc.cssDiagnostics.floatEvidence = snapshot.evidence;
+	}
+
+	static void ensureCssFloatLayout(const WebDocument& doc)
+	{
+		const uint64_t fingerprint = cssMarginLayoutFingerprint(doc);
+		if (s_cssFloatLayoutSnapshot.valid && s_cssFloatLayoutSnapshot.url == doc.url &&
+			s_cssFloatLayoutSnapshot.blockCount == doc.blocks.size() &&
+			s_cssFloatLayoutSnapshot.fingerprint == fingerprint) return;
+		buildCssFloatLayout(doc, s_cssFloatLayoutSnapshot);
+	}
+
+	static const CssFloatRecord* cssFloatRecordForBlock(const WebDocument& doc, int blockIndex)
+	{
+		if (!s_cssFloatLayoutSnapshot.valid || blockIndex < 0) return nullptr;
+		for (const CssFloatRecord& record : s_cssFloatLayoutSnapshot.records) {
+			if (record.blockIndex == blockIndex && record.contextSerial == 0) return &record;
+		}
+		(void)doc;
+		return nullptr;
 	}
 
 	static void ensureCssMarginLayout(const WebDocument& doc)
@@ -4676,7 +5299,15 @@ namespace {
 			const CssMarginFlowRecord& record = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)];
 			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
 			const int fallback = block.type == BlockType::Heading ? 10 : 4;
-			return record.usedY - cssMarginTopPx(block.style, fallback);
+			int clearanceDisplacement = 0;
+			if (s_cssFloatLayoutSnapshot.valid) {
+				const size_t limit = std::min<size_t>(static_cast<size_t>(blockIndex),
+					s_cssFloatLayoutSnapshot.blockClearances.size());
+				for (size_t i = 0; i < limit; ++i)
+					clearanceDisplacement = cssBoundedGeometryAdd(clearanceDisplacement,
+						s_cssFloatLayoutSnapshot.blockClearances[i]);
+			}
+			return record.usedY + clearanceDisplacement - cssMarginTopPx(block.style, fallback);
 		}
 		int y = kHeadingY + (doc.bodyStyle.marginTop >= 0 ? doc.bodyStyle.marginTop : 0);
 		for (int i = 0; i < blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
@@ -5497,6 +6128,34 @@ namespace {
 		out += "Current Document.css_margin_collapse_model=largest-positive-plus-most-negative\n";
 		out += "Current Document.css_bfc_boundaries=root-inline-block-overflow-atomic-table\n";
 		if (!metadata.cssMarginCollapseEvidence.empty()) out += "Current Document.css_margin_collapse_evidence=" + metadata.cssMarginCollapseEvidence;
+		add("css_float_left", metadata.cssFloatLeft);
+		add("css_float_right", metadata.cssFloatRight);
+		add("css_float_blockifications", metadata.cssFloatBlockifications);
+		add("css_float_records", metadata.cssFloatRecords);
+		add("css_float_placement_attempts", metadata.cssFloatPlacementAttempts);
+		add("css_float_placement_downshifts", metadata.cssFloatPlacementDownshifts);
+		add("css_float_side_by_side", metadata.cssFloatSideBySide);
+		add("css_float_width_overflows", metadata.cssFloatWidthOverflows);
+		add("css_float_line_exclusions", metadata.cssFloatLineExclusions);
+		add("css_float_zero_width_line_advances", metadata.cssFloatZeroWidthLineAdvances);
+		add("css_float_bfc_avoidances", metadata.cssFloatBfcAvoidances);
+		add("css_float_bfc_downshifts", metadata.cssFloatBfcDownshifts);
+		add("css_clear_left", metadata.cssClearLeft);
+		add("css_clear_right", metadata.cssClearRight);
+		add("css_clear_both", metadata.cssClearBoth);
+		add("css_clearance_applied", metadata.cssClearanceApplied);
+		add("css_float_containment_boundaries", metadata.cssFloatContainmentBoundaries);
+		add("css_float_scope_suppressions", metadata.cssFloatScopeSuppressions);
+		add("css_float_height_containments", metadata.cssFloatHeightContainments);
+		add("css_float_geometry_clamps", metadata.cssFloatGeometryClamps);
+		add("css_float_placement_attempt_clamps", metadata.cssFloatPlacementAttemptClamps);
+		add("css_float_exclusion_scan_clamps", metadata.cssFloatExclusionScanClamps);
+		add("css_float_bfc_depth_clamps", metadata.cssFloatBfcDepthClamps);
+		add("css_float_evidence_records", metadata.cssFloatEvidenceRecords);
+		out += "Current Document.css_float_model=bounded-traditional-left-right-margin-box-exclusion\n";
+		out += "Current Document.css_float_blockification=inline-and-inline-block-to-bounded-float\n";
+		out += "Current Document.css_float_line_query=authoritative-y-interval-exclusion\n";
+		if (!metadata.cssFloatEvidence.empty()) out += "Current Document.css_float_evidence=" + metadata.cssFloatEvidence;
 		add("css_inline_items", metadata.cssInlineItems);
 		add("css_inline_text_runs", metadata.cssInlineTextRuns);
 		add("css_inline_whitespace_runs", metadata.cssInlineWhitespaceRuns);
@@ -6268,10 +6927,27 @@ namespace {
 		}
 		flow.contentX = flow.outerX + cssBorderLeftPx(flow.style) + cssPaddingLeftPx(flow.style, 0);
 		flow.contentWidth = std::max(1, flow.outerWidth - cssHorizontalBoxEdges(flow.style));
+			flow.documentContentTop = 0;
+			if (flow.contextSerial == 0 && flow.anchorBlockIndex >= 0 &&
+				flow.anchorBlockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()) &&
+				s_cssMarginLayoutSnapshot.valid) {
+				const CssMarginFlowRecord& marginRecord = s_cssMarginLayoutSnapshot.records[
+					static_cast<size_t>(flow.anchorBlockIndex)];
+				flow.documentContentTop = marginRecord.usedY + cssBorderTopPx(flow.style) +
+					cssPaddingTopPx(flow.style, 0);
+			}
 		if (geometryBlock.type == BlockType::ListItem) {
 			const int inset = blockListTextInsetPx(geometryBlock, blockListOrdinal(doc, flow.anchorBlockIndex));
 			flow.contentX += inset;
 			flow.contentWidth = std::max(1, flow.contentWidth - inset);
+		}
+		const uint64_t flowBfcIdentity = cssFloatBfcIdentity(doc, flow);
+		if (s_cssFloatLayoutSnapshot.valid && flow.contextSerial == 0 &&
+			flow.anchorBlockIndex >= 0 && flow.anchorBlockIndex < static_cast<int>(doc.blocks.size())) {
+			const ClearMode clearMode = geometryBlock.style.clearMode;
+			if (clearMode != ClearMode::None)
+				flow.documentContentTop += cssFloatClearance(doc, flowBfcIdentity, clearMode,
+					flow.documentContentTop);
 		}
 		std::vector<InlineAtom> atoms;
 		atoms.reserve(64);
@@ -6280,6 +6956,13 @@ namespace {
 		for (int itemIndex = 0; itemIndex < static_cast<int>(doc.inlineItems.size()); ++itemIndex) {
 			const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(itemIndex)];
 			if (item.flowSerial != flow.flowSerial || item.atomicContainerSerial != flow.contextSerial) continue;
+			const WebStyle* itemStyle = inlineOwnerStyle(doc, item, flow.style);
+			if (itemStyle && itemStyle->floatMode != FloatMode::None) {
+				// The item is blockified and painted from its final float record.
+				// Removing it here is what prevents the normal-flow cursor and line
+				// fragments from seeing the float twice.
+				continue;
+			}
 			if (item.kind == InlineItemKind::TextRun) {
 				++snapshot.textRuns;
 				appendInlineTextAtoms(doc, flow, item, itemIndex, atoms, snapshot,
@@ -6380,6 +7063,33 @@ namespace {
 		line.lineIndex = 0;
 		line.firstFragment = 0;
 		int cursorX = 0;
+		const int floatContainerLeft = flow.contextSerial != 0
+			? flow.contentX : flow.contentX - kContentX;
+		auto prepareLine = [&](int estimatedHeight) {
+			const int defaultTop = flow.lines.empty() ? 0 :
+				flow.lines.back().top + flow.lines.back().usedLineHeight;
+			line.top = defaultTop;
+			CssFloatExclusionQuery exclusion = cssFloatExclusionQuery(doc, flowBfcIdentity,
+				flow.documentContentTop + line.top,
+				flow.documentContentTop + line.top + std::max(1, estimatedHeight),
+				floatContainerLeft, floatContainerLeft + flow.contentWidth);
+			if (exclusion.availableWidth <= 0 && exclusion.nextCandidateY > flow.documentContentTop + line.top) {
+				line.top = exclusion.nextCandidateY - flow.documentContentTop;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.floatZeroWidthLineAdvances;
+				if (s_cssFloatLayoutSnapshot.valid) ++s_cssFloatLayoutSnapshot.zeroWidthLineAdvances;
+				exclusion = cssFloatExclusionQuery(doc, flowBfcIdentity,
+					flow.documentContentTop + line.top,
+					flow.documentContentTop + line.top + std::max(1, estimatedHeight),
+					floatContainerLeft, floatContainerLeft + flow.contentWidth);
+			}
+			line.availableLeft = std::max(0, exclusion.availableLeft - floatContainerLeft);
+			line.availableRight = std::max(line.availableLeft, exclusion.availableRight - floatContainerLeft);
+			line.availableWidth = std::max(0, exclusion.availableWidth);
+			line.floatRecordsIntersected = exclusion.recordsIntersected;
+			line.exclusionComplete = exclusion.complete;
+			cursorX = line.availableLeft;
+		};
+		prepareLine(kLineH);
 		InlineAtom pendingSpace;
 		bool hasPendingSpace = false;
 		auto finishLine = [&]() {
@@ -6388,14 +7098,13 @@ namespace {
 				++snapshot.trailingSpaceSuppressions;
 			}
 			line.fragmentCount = static_cast<int>(flow.fragments.size()) - line.firstFragment;
-			line.horizontalExtent = std::max(0, cursorX);
-			line.top = flow.lines.empty() ? 0 : flow.lines.back().top + flow.lines.back().usedLineHeight;
+			line.horizontalExtent = std::max(0, cursorX - line.availableLeft);
 			finalizeInlineLine(flow, line, snapshot, doc);
 			flow.lines.push_back(line);
 			line = InlineLineLayout{};
 			line.lineIndex = static_cast<int>(flow.lines.size());
 			line.firstFragment = static_cast<int>(flow.fragments.size());
-			cursorX = 0;
+			prepareLine(kLineH);
 		};
 		auto placeAtom = [&](const InlineAtom& atom) {
 			InlineFragmentLayout fragment;
@@ -6438,18 +7147,18 @@ namespace {
 				continue;
 			}
 			int required = atom.width + (hasPendingSpace ? pendingSpace.width : 0);
-			if (canWrap && cursorX > 0 && cursorX + required > flow.contentWidth) {
+			if (canWrap && cursorX > line.availableLeft && cursorX + required > line.availableRight) {
 				finishLine();
 				++snapshot.lineWraps;
 				if (atom.kind == InlineItemKind::AtomicBlock) ++snapshot.inlineBlockWraps;
 				required = atom.width;
 			}
 			if (hasPendingSpace) {
-				if (cursorX == 0) ++snapshot.leadingSpaceSuppressions;
+				if (cursorX == line.availableLeft) ++snapshot.leadingSpaceSuppressions;
 				else placeAtom(pendingSpace);
 				hasPendingSpace = false;
 			}
-			if (canWrap && cursorX > 0 && cursorX + atom.width > flow.contentWidth && atom.kind == InlineItemKind::TextRun) {
+			if (canWrap && cursorX > line.availableLeft && cursorX + atom.width > line.availableRight && atom.kind == InlineItemKind::TextRun) {
 				const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(atom.itemIndex)];
 				const WebStyle* style = inlineOwnerStyle(doc, item, flow.style);
 				const bool breakWord = style->wordBreak == WordBreakMode::BreakAll ||
@@ -6458,14 +7167,14 @@ namespace {
 					int offset = 0;
 					while (offset < atom.sourceLength) {
 						int take = atom.sourceLength - offset;
-						while (take > 1 && inlineTextWidth(*style, item.text.substr(static_cast<size_t>(atom.sourceOffset + offset), static_cast<size_t>(take))) > flow.contentWidth - cursorX)
+						while (take > 1 && inlineTextWidth(*style, item.text.substr(static_cast<size_t>(atom.sourceOffset + offset), static_cast<size_t>(take))) > line.availableRight - cursorX)
 							--take;
 						if (take <= 0) take = 1;
 						InlineAtom chunk = atom;
 						chunk.sourceOffset += offset;
 						chunk.sourceLength = take;
 						chunk.width = inlineTextWidth(*style, item.text.substr(static_cast<size_t>(chunk.sourceOffset), static_cast<size_t>(take)));
-						if (cursorX > 0 && cursorX + chunk.width > flow.contentWidth) {
+						if (cursorX > line.availableLeft && cursorX + chunk.width > line.availableRight) {
 							finishLine();
 							++snapshot.lineWraps;
 						}
@@ -6481,22 +7190,20 @@ namespace {
 		const bool trailingForcedBreak = !atoms.empty() && atoms.back().forcedBreak;
 		if (currentLineHasFragments || flow.lines.empty() || trailingForcedBreak) finishLine();
 		if (flow.lines.empty()) finishLine();
-		int currentTop = 0;
 		for (InlineLineLayout& lineBox : flow.lines) {
-			lineBox.top = currentTop;
 			lineBox.baseline = lineBox.ascent;
 			for (int fi = lineBox.firstFragment; fi < lineBox.firstFragment + lineBox.fragmentCount; ++fi) {
 				InlineFragmentLayout& fragment = flow.fragments[static_cast<size_t>(fi)];
 				fragment.y = lineBox.top + lineBox.baseline - fragment.baselineOffset + fragment.verticalShift;
 			}
 			const int alignShift = flow.style.textAlign == TextAlign::Center
-				? std::max(0, (flow.contentWidth - lineBox.horizontalExtent) / 2)
-				: (flow.style.textAlign == TextAlign::Right ? std::max(0, flow.contentWidth - lineBox.horizontalExtent) : 0);
+				? std::max(0, (lineBox.availableWidth - lineBox.horizontalExtent) / 2)
+				: (flow.style.textAlign == TextAlign::Right ? std::max(0, lineBox.availableWidth - lineBox.horizontalExtent) : 0);
+			const int alignOrigin = lineBox.availableLeft;
 			for (int fi = lineBox.firstFragment; fi < lineBox.firstFragment + lineBox.fragmentCount; ++fi)
-				flow.fragments[static_cast<size_t>(fi)].x += alignShift;
-			currentTop += std::max(1, lineBox.usedLineHeight);
+				flow.fragments[static_cast<size_t>(fi)].x += alignOrigin + alignShift - lineBox.availableLeft;
 		}
-		const int contentHeight = std::max(1, currentTop);
+		const int contentHeight = std::max(1, flow.lines.back().top + flow.lines.back().usedLineHeight);
 		const int verticalEdges = cssVerticalBoxEdges(flow.style);
 		const int fallbackOuter = cssBoundedGeometryAdd(contentHeight, verticalEdges);
 		const int outerHeight = resolveUsedOuterDimension(flow.style,
@@ -7941,6 +8648,8 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 
 void Navigator::renderDocument()
 {
+	ensureCssMarginLayout(s_currentDoc);
+	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	clampScrollOffset();
 	s_renderCounters = {};
@@ -8229,12 +8938,64 @@ void Navigator::renderDocument()
 		if (ancestorClipPushed) cssPopPaintClip();
 		s_cssPaintOpacityPercent = 100;
 	};
+	// Floats paint from the final exclusion record.  This keeps their visual
+	// location, descendant targets, and line geometry on one authoritative path.
+	for (const CssFloatRecord& floatRecord : s_cssFloatLayoutSnapshot.records) {
+		if (floatRecord.contextSerial != 0 || floatRecord.blockIndex < 0 ||
+			floatRecord.blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) continue;
+		const DocBlock& floatBlock = s_currentDoc.blocks[static_cast<size_t>(floatRecord.blockIndex)];
+		const WebStyle* floatStyle = computedStyleForSerial(s_currentDoc, floatRecord.logicalSerial);
+		if (floatStyle == nullptr) floatStyle = &floatBlock.style;
+		if (floatStyle->visibility == VisibilityMode::Hidden || floatStyle->displayNone) continue;
+		const int x = kContentX + floatRecord.borderBoxX;
+		const int y = kContentY + floatRecord.borderBoxY - s_scrollOffset;
+		const int w = std::max(1, floatRecord.borderBoxW);
+		const int h = std::max(1, floatRecord.borderBoxH);
+		const int opacity = std::max(0, std::min(100, floatStyle->effectiveOpacityPercent));
+		s_cssPaintOpacityPercent = opacity;
+		drawBlockBox(s_windowId, x, y, w, h, *floatStyle);
+		const bool clipPushed = (floatStyle->overflowX != OverflowMode::Visible ||
+			floatStyle->overflowY != OverflowMode::Visible) && cssPushPaintClip(
+			cssApplyOverflowClip(cssViewportClipRect(), *floatStyle, x, y, w, h));
+		const int contentX = x + cssBorderLeftPx(*floatStyle) + cssPaddingLeftPx(*floatStyle, 0);
+		const int contentY = y + cssBorderTopPx(*floatStyle) + cssPaddingTopPx(*floatStyle, 0);
+		if (floatRecord.kind == InlineItemKind::ReplacedImage) {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(floatBlock, std::max(1, w), imageW, imageH);
+			const ImageInfo& info = imageInfoForBlock(floatBlock);
+			if (info.ok) drawImage(s_windowId, contentX, contentY, std::min(imageW, w), std::min(imageH, h), info.drawPath);
+			else drawTextAtStyled(s_windowId, contentX, contentY,
+				imagePlaceholderText(floatBlock, info), *floatStyle, contentTextColor, std::max(1, h));
+		} else if (floatRecord.kind == InlineItemKind::FormControl) {
+			drawThemeRect(s_windowId, contentX, contentY,
+				std::max(1, w - cssHorizontalBoxEdges(*floatStyle)),
+				std::max(1, h - cssVerticalBoxEdges(*floatStyle)), formFillColor(floatBlock, false, runtimeDisabled(floatBlock)));
+		} else if (!floatRecord.contentText.empty()) {
+			const int innerW = std::max(1, w - cssHorizontalBoxEdges(*floatStyle));
+			const std::vector<std::string> lines = wrapText(floatRecord.contentText,
+				std::max(1, innerW / kCharW));
+			int lineY = contentY;
+			for (const std::string& line : lines) {
+				drawTextAtStyled(s_windowId, contentX, lineY, line, *floatStyle, contentTextColor,
+					blockTextLineHeight(floatBlock));
+				lineY += blockTextLineHeight(floatBlock);
+				if (lineY >= y + h) break;
+			}
+		}
+		if (clipPushed) cssPopPaintClip();
+		s_cssPaintOpacityPercent = 100;
+	}
 	for (const DocBlock& block : s_currentDoc.blocks) {
 		if (block.atomicContainerSerial != 0) {
 			++blockIndex;
 			continue;
 		}
 		if (!blockHasVisibleCss(block)) {
+			++blockIndex;
+			continue;
+		}
+		if (block.style.floatMode != FloatMode::None) {
 			++blockIndex;
 			continue;
 		}
@@ -12426,7 +13187,16 @@ int Navigator::blockLayoutY(int blockIndex)
 		blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())) {
 		const CssMarginFlowRecord& record = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)];
 		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
-		return record.usedY - cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
+		int clearanceDisplacement = 0;
+		if (s_cssFloatLayoutSnapshot.valid) {
+			const size_t limit = std::min<size_t>(static_cast<size_t>(blockIndex),
+				s_cssFloatLayoutSnapshot.blockClearances.size());
+			for (size_t i = 0; i < limit; ++i)
+				clearanceDisplacement = cssBoundedGeometryAdd(clearanceDisplacement,
+					s_cssFloatLayoutSnapshot.blockClearances[i]);
+		}
+		return record.usedY + clearanceDisplacement - cssMarginTopPx(block.style,
+			block.type == BlockType::Heading ? 10 : 4);
 	}
 	// Returns the Y coordinate of blockIndex relative to kContentY (pre-scroll).
 	const int bodyTop = s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0;
@@ -12449,7 +13219,17 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
 	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
 	if (!blockHasVisibleCss(block)) return false;
+	ensureCssMarginLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
+	ensureCssFloatLayout(s_currentDoc);
+	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
+		const CssPaintRect target{kContentX + floatRecord->borderBoxX,
+			kContentY + floatRecord->borderBoxY - s_scrollOffset,
+			floatRecord->borderBoxW, floatRecord->borderBoxH};
+		const CssPaintRect clipped = cssClipHitTarget(target, cssViewportClipRect());
+		out = Rect{clipped.x, clipped.y, clipped.w, clipped.h};
+		return out.w > 0 && out.h > 0;
+	}
 	const InlineFlowLayout* flow = inlineFlowForBlock(s_currentDoc, blockIndex);
 	if (!flow) return false;
 	if (flow->contextSerial != 0 && flow->atomicResultIndex < 0) return false;
@@ -12499,7 +13279,17 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
 	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
 	if (!blockHasVisibleCss(block)) return false;
+	ensureCssMarginLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
+	ensureCssFloatLayout(s_currentDoc);
+	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
+		const CssPaintRect target{kContentX + floatRecord->borderBoxX,
+			kContentY + floatRecord->borderBoxY - s_scrollOffset,
+			floatRecord->borderBoxW, floatRecord->borderBoxH};
+		const CssPaintRect clipped = cssClipHitTarget(target, cssViewportClipRect());
+		return clipped.w > 0 && clipped.h > 0 && x >= clipped.x && x < clipped.x + clipped.w &&
+			y >= clipped.y && y < clipped.y + clipped.h;
+	}
 	const InlineFlowLayout* flow = inlineFlowForBlock(s_currentDoc, blockIndex);
 	if (!flow) return false;
 	CssPaintRect parentAtomic;

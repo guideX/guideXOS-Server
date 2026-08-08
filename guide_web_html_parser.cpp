@@ -96,6 +96,8 @@ namespace {
 		Italic,
 		TextDecoration,
 		Display,
+		Float,
+		Clear,
 		BoxSizing,
 		MinWidth,
 		ListStyle,
@@ -2755,6 +2757,31 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		++diag.unsupportedDeclarationCount;
 		return false;
 	}
+	if (prop == "float") {
+		const std::string lower = toLower(val);
+		if (lower == "none") style.floatMode = FloatMode::None;
+		else if (lower == "left") style.floatMode = FloatMode::Left;
+		else if (lower == "right") style.floatMode = FloatMode::Right;
+		else {
+			// Invalid and unsupported values do not win the cascade.  In
+			// particular, inline-start/inline-end are not physical aliases.
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::Float);
+	}
+	if (prop == "clear") {
+		const std::string lower = toLower(val);
+		if (lower == "none") style.clearMode = ClearMode::None;
+		else if (lower == "left") style.clearMode = ClearMode::Left;
+		else if (lower == "right") style.clearMode = ClearMode::Right;
+		else if (lower == "both") style.clearMode = ClearMode::Both;
+		else {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::Clear);
+	}
 	if (prop == "box-sizing") {
 		const std::string lower = toLower(val);
 		if (lower == "content-box") {
@@ -3345,6 +3372,8 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 		destination.display = source.display;
 		destination.displayNone = source.display == DisplayMode::None;
 		break;
+	case CssProperty::Float: destination.floatMode = source.floatMode; break;
+	case CssProperty::Clear: destination.clearMode = source.clearMode; break;
 	case CssProperty::BoxSizing:
 		destination.boxSizing = source.boxSizing;
 		destination.boxSizingSpecified = source.boxSizingSpecified;
@@ -4243,8 +4272,10 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		id.rfind("phase2f-", 0) != 0 && id.rfind("css2f-", 0) != 0 &&
 		id.rfind("phase2g-", 0) != 0 && id.rfind("css2g-", 0) != 0 &&
 		id.rfind("phase2h-", 0) != 0 && id.rfind("css2h-", 0) != 0 &&
-		id.rfind("phase3a-", 0) != 0 && id.rfind("css3a-", 0) != 0) return;
+		id.rfind("phase3a-", 0) != 0 && id.rfind("css3a-", 0) != 0 &&
+		id.rfind("phase3e-", 0) != 0 && id.rfind("css3e-", 0) != 0) return;
 	const bool phase3aEvidence = id.rfind("phase3a-", 0) == 0 || id.rfind("css3a-", 0) == 0;
+	const bool phase3eEvidence = id.rfind("phase3e-", 0) == 0 || id.rfind("css3e-", 0) == 0;
 	const bool phase2gEvidence = id.rfind("phase2g-", 0) == 0 || id.rfind("css2g-", 0) == 0;
 	const bool phase2hEvidence = id.rfind("phase2h-", 0) == 0 || id.rfind("css2h-", 0) == 0;
 	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
@@ -4348,6 +4379,21 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 			<< ",effective-opacity-percent=" << style.effectiveOpacityPercent
 			<< ",vertical-align=" << static_cast<unsigned>(style.verticalAlign)
 			<< ",vertical-align-value=" << style.verticalAlignValue;
+	}
+	if (phase3eEvidence) {
+		const CssCascadeWinner& floatWinner = winners[static_cast<size_t>(CssProperty::Float)];
+		const CssCascadeWinner& clearWinner = winners[static_cast<size_t>(CssProperty::Clear)];
+		oss << ",float=" << (style.floatMode == FloatMode::Left ? "left" :
+			style.floatMode == FloatMode::Right ? "right" : "none")
+			<< ",clear=" << (style.clearMode == ClearMode::Left ? "left" :
+			style.clearMode == ClearMode::Right ? "right" :
+			style.clearMode == ClearMode::Both ? "both" : "none")
+			<< ",float-specificity=" << floatWinner.specificity.idCount << "." << floatWinner.specificity.classCount << "." << floatWinner.specificity.elementCount
+			<< ",float-source-order=" << floatWinner.sourceOrder
+			<< ",float-important=" << (floatWinner.important ? "yes" : "no")
+			<< ",clear-specificity=" << clearWinner.specificity.idCount << "." << clearWinner.specificity.classCount << "." << clearWinner.specificity.elementCount
+			<< ",clear-source-order=" << clearWinner.sourceOrder
+			<< ",clear-important=" << (clearWinner.important ? "yes" : "no");
 	}
 	if (phase2gEvidence || phase2hEvidence) {
 		oss << ",document-generation=" << doc.formRuntimeState.documentGeneration

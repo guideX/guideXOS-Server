@@ -1111,6 +1111,40 @@ static std::string navigatorHostedSmokeDiagnostic() {
         cssPhase3dMetric("Current Document.css_margin_geometry_clamps=") + ";report=" +
         summarizeText(cssPhase3dReport, 520));
 
+    bool cssPhase3eLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3e.html");
+    std::string cssPhase3eText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3eReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3eMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3eReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3eReport.find('\n', pos);
+        return cssPhase3eReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3E float fixture loads",
+        cssPhase3eLoaded &&
+        contains(cssPhase3eText, "Phase 3E Float and Clear Fixture") &&
+        contains(cssPhase3eText, "Left float text wraps") &&
+        contains(cssPhase3eText, "Right float text wraps") &&
+        contains(cssPhase3eText, "clear both moves below both floats"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3E bounded float placement and exclusion",
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_left=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_right=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_blockifications=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_records=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_placement_attempts=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_line_exclusions=") &&
+        contains(cssPhase3eReport, "Current Document.css_float_model=bounded-traditional-left-right-margin-box-exclusion") &&
+        contains(cssPhase3eReport, "Current Document.css_float_evidence_records="),
+        "metrics=" + cssPhase3eMetric("Current Document.css_float_left=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_right=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_records=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_placement_attempts=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_line_exclusions=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_side_by_side=") + ";" +
+        cssPhase3eMetric("Current Document.css_clearance_applied=") + ";evidence=" +
+        summarizeText(cssPhase3eReport, 1200));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();

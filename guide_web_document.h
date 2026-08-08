@@ -261,6 +261,22 @@ enum class DisplayMode : uint8_t {
 	None,
 };
 
+// Phase 3E keeps traditional physical floats deliberately narrow.  Logical
+// float values and other positioning modes remain unsupported and therefore
+// never fall through to a physical side by accident.
+enum class FloatMode : uint8_t {
+	None = 0,
+	Left,
+	Right,
+};
+
+enum class ClearMode : uint8_t {
+	None = 0,
+	Left,
+	Right,
+	Both,
+};
+
 enum class OverflowMode : uint8_t {
 	Inherit = 0,
 	Visible,
@@ -483,6 +499,8 @@ struct WebStyle {
 	bool     hasTextDecoration = false;
 	bool     displayNone = false;
 	DisplayMode display = DisplayMode::Block;
+	FloatMode floatMode = FloatMode::None;
+	ClearMode clearMode = ClearMode::None;
 	BoxSizingMode boxSizing = BoxSizingMode::ContentBox;
 	// box-sizing is not inherited.  This provenance bit lets the compact
 	// table renderer project a table's outer sizing model onto its cell-backed
@@ -712,6 +730,32 @@ struct CssDiagnostics {
 	int    bfcInlineBlock = 0;
 	int    bfcOverflow = 0;
 	int    bfcAtomic = 0;
+	// Phase 3E bounded float/clear diagnostics.
+	int    floatLeft = 0;
+	int    floatRight = 0;
+	int    floatBlockifications = 0;
+	int    floatRecords = 0;
+	int    floatPlacementAttempts = 0;
+	int    floatPlacementDownshifts = 0;
+	int    floatSideBySide = 0;
+	int    floatWidthOverflows = 0;
+	int    floatLineExclusions = 0;
+	int    floatZeroWidthLineAdvances = 0;
+	int    floatBfcAvoidances = 0;
+	int    floatBfcDownshifts = 0;
+	int    clearLeft = 0;
+	int    clearRight = 0;
+	int    clearBoth = 0;
+	int    clearanceApplied = 0;
+	int    floatContainmentBoundaries = 0;
+	int    floatScopeSuppressions = 0;
+	int    floatHeightContainments = 0;
+	int    floatGeometryClamps = 0;
+	int    floatPlacementAttemptClamps = 0;
+	int    floatExclusionScanClamps = 0;
+	int    floatBfcDepthClamps = 0;
+	int    floatEvidenceRecords = 0;
+	std::string floatEvidence;
 	int    marginCollapseEvidenceRecords = 0;
 	std::string marginCollapseEvidence;
 	uint32_t nextSourceOrder = 1;
