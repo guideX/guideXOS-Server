@@ -876,7 +876,8 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] http.case.forms_post_redirect_303.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.forms_post_redirect_307.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.forms_post_redirect_hostname.result=PASS",
-    "[NAVIGATOR-SMOKE] result=PASS"
+    "[NAVIGATOR-SMOKE] result=PASS",
+    "[NAVIGATOR-SMOKE] END"
 )
 
 $manifestBlockedChecks = @(
