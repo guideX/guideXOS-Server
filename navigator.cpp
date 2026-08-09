@@ -259,6 +259,34 @@ namespace {
 		bool clamped = false;
 	};
 
+	// One compact record per formatting-context boundary.  This is deliberately
+	// scalar metadata: descendants continue to live in the existing flat block
+	// and inline snapshots.  The record is the ownership seam that prevents a
+	// nested BFC's floats from being recursively re-added to every ancestor.
+	struct CssBfcContextRecord {
+		uint64_t identity = 0;
+		uint64_t parentIdentity = 0;
+		uint64_t ownerSerial = 0;
+		std::string reason;
+		int ownedFloatCount = 0;
+		int ownedFloatMaximumBottom = 0;
+		int inFlowContentBottom = 0;
+		int autoHeightInputExtent = 0;
+		int usedContentHeight = 0;
+		int originY = 0;
+		int outerX = 0;
+		int outerWidth = 0;
+		int explicitHeight = -1;
+		int minHeight = -1;
+		int maxHeight = -1;
+		int avoidanceAttempts = 0;
+		int movedBelowCount = 0;
+		int scopeSuppressions = 0;
+		bool containedFloat = false;
+		bool complete = true;
+		bool clamped = false;
+	};
+
 	struct CssFloatExclusionQuery {
 		int availableLeft = 0;
 		int availableRight = 0;
@@ -296,6 +324,7 @@ namespace {
 		int bfcDepthClamps = 0;
 		int maxActiveRecords = 0;
 		std::vector<CssFloatRecord> records;
+		std::vector<CssBfcContextRecord> bfcContexts;
 		std::vector<int> blockClearances;
 		int evidenceRecords = 0;
 		std::string evidence;
@@ -1446,6 +1475,10 @@ namespace {
 	static void ensureCssFloatLayout(const WebDocument& doc);
 	static CssFloatExclusionQuery cssFloatExclusionQuery(const WebDocument& doc,
 		uint64_t bfcIdentity, int lineTop, int lineBottom, int containingLeft, int containingRight);
+	static int cssBfcPlacementY(const WebDocument& doc, int blockIndex, int candidateY,
+		int requiredWidth);
+	static uint64_t cssContainingBfcIdentityForBlock(const WebDocument& doc,
+		const DocBlock& block, bool includeSelf);
 	static int cssFloatClearance(const WebDocument& doc, uint64_t bfcIdentity,
 		ClearMode clearMode, int blockTop);
 	static int inlineTextWidth(const WebStyle& style, const std::string& text);
@@ -2151,6 +2184,22 @@ namespace {
 		metadata.cssFloatContainmentBoundaries = doc.cssDiagnostics.floatContainmentBoundaries;
 		metadata.cssFloatScopeSuppressions = doc.cssDiagnostics.floatScopeSuppressions;
 		metadata.cssFloatHeightContainments = doc.cssDiagnostics.floatHeightContainments;
+		metadata.cssBfcFloatContainments = doc.cssDiagnostics.bfcFloatContainments;
+		metadata.cssBfcFloatHeightExtensions = doc.cssDiagnostics.bfcFloatHeightExtensions;
+		metadata.cssBfcFloatHeightNoops = doc.cssDiagnostics.bfcFloatHeightNoops;
+		metadata.cssBfcFloatAvoidanceAttempts = doc.cssDiagnostics.bfcFloatAvoidanceAttempts;
+		metadata.cssBfcFloatAvoidanceFits = doc.cssDiagnostics.bfcFloatAvoidanceFits;
+		metadata.cssBfcFloatAvoidanceDownshifts = doc.cssDiagnostics.bfcFloatAvoidanceDownshifts;
+		metadata.cssBfcFloatTooWide = doc.cssDiagnostics.bfcFloatTooWide;
+		metadata.cssNestedFloatContexts = doc.cssDiagnostics.nestedFloatContexts;
+		metadata.cssNestedFloatDepthClamps = doc.cssDiagnostics.nestedFloatDepthClamps;
+		metadata.cssFloatInsideInlineBlock = doc.cssDiagnostics.floatInsideInlineBlock;
+		metadata.cssFloatInsideFloat = doc.cssDiagnostics.floatInsideFloat;
+		metadata.cssFloatListCases = doc.cssDiagnostics.floatListCases;
+		metadata.cssFloatTableCellCases = doc.cssDiagnostics.floatTableCellCases;
+		metadata.cssFloatTableAvoidanceCases = doc.cssDiagnostics.floatTableAvoidanceCases;
+		metadata.cssFloatedTableUnsupported = doc.cssDiagnostics.floatedTableUnsupported;
+		metadata.cssFloatDocumentExtentExtensions = doc.cssDiagnostics.floatDocumentExtentExtensions;
 		metadata.cssFloatGeometryClamps = doc.cssDiagnostics.floatGeometryClamps;
 		metadata.cssFloatPlacementAttemptClamps = doc.cssDiagnostics.floatPlacementAttemptClamps;
 		metadata.cssFloatExclusionScanClamps = doc.cssDiagnostics.floatExclusionScanClamps;
@@ -2554,6 +2603,22 @@ namespace {
 		metadata.cssFloatContainmentBoundaries = doc.cssDiagnostics.floatContainmentBoundaries;
 		metadata.cssFloatScopeSuppressions = doc.cssDiagnostics.floatScopeSuppressions;
 		metadata.cssFloatHeightContainments = doc.cssDiagnostics.floatHeightContainments;
+		metadata.cssBfcFloatContainments = doc.cssDiagnostics.bfcFloatContainments;
+		metadata.cssBfcFloatHeightExtensions = doc.cssDiagnostics.bfcFloatHeightExtensions;
+		metadata.cssBfcFloatHeightNoops = doc.cssDiagnostics.bfcFloatHeightNoops;
+		metadata.cssBfcFloatAvoidanceAttempts = doc.cssDiagnostics.bfcFloatAvoidanceAttempts;
+		metadata.cssBfcFloatAvoidanceFits = doc.cssDiagnostics.bfcFloatAvoidanceFits;
+		metadata.cssBfcFloatAvoidanceDownshifts = doc.cssDiagnostics.bfcFloatAvoidanceDownshifts;
+		metadata.cssBfcFloatTooWide = doc.cssDiagnostics.bfcFloatTooWide;
+		metadata.cssNestedFloatContexts = doc.cssDiagnostics.nestedFloatContexts;
+		metadata.cssNestedFloatDepthClamps = doc.cssDiagnostics.nestedFloatDepthClamps;
+		metadata.cssFloatInsideInlineBlock = doc.cssDiagnostics.floatInsideInlineBlock;
+		metadata.cssFloatInsideFloat = doc.cssDiagnostics.floatInsideFloat;
+		metadata.cssFloatListCases = doc.cssDiagnostics.floatListCases;
+		metadata.cssFloatTableCellCases = doc.cssDiagnostics.floatTableCellCases;
+		metadata.cssFloatTableAvoidanceCases = doc.cssDiagnostics.floatTableAvoidanceCases;
+		metadata.cssFloatedTableUnsupported = doc.cssDiagnostics.floatedTableUnsupported;
+		metadata.cssFloatDocumentExtentExtensions = doc.cssDiagnostics.floatDocumentExtentExtensions;
 		metadata.cssFloatGeometryClamps = doc.cssDiagnostics.floatGeometryClamps;
 		metadata.cssFloatPlacementAttemptClamps = doc.cssDiagnostics.floatPlacementAttemptClamps;
 		metadata.cssFloatExclusionScanClamps = doc.cssDiagnostics.floatExclusionScanClamps;
@@ -3776,9 +3841,11 @@ namespace {
 			const size_t limit = std::min<size_t>(static_cast<size_t>(blockIndex),
 				s_cssFloatLayoutSnapshot.blockClearances.size());
 			for (size_t i = 0; i < limit; ++i) flowTop += s_cssFloatLayoutSnapshot.blockClearances[i];
+			flowTop = cssBfcPlacementY(doc, blockIndex, flowTop, outerWidth);
 			const int bodyLeft = blockBodyMarginLeft(doc);
 			const int bodyWidth = cssBodyContentWidth(doc);
-			const CssFloatExclusionQuery exclusion = cssFloatExclusionQuery(doc, 0, flowTop,
+			const CssFloatExclusionQuery exclusion = cssFloatExclusionQuery(doc,
+				cssContainingBfcIdentityForBlock(doc, block, false), flowTop,
 				flowTop + std::max(1, blockTextLineHeight(block)), bodyLeft, bodyLeft + bodyWidth);
 			if (exclusion.availableWidth < bodyWidth) {
 				baseX = kContentX + exclusion.availableLeft;
@@ -4105,6 +4172,7 @@ namespace {
 		if (block.style.display == DisplayMode::InlineBlock) return "inline-block";
 		if (cssStyleHasOverflowBfc(block.style)) return "overflow";
 		if (isTableCellLikeBlock(block)) return "table";
+		if (block.style.floatMode != FloatMode::None) return "float";
 		return cssBlockParentSerial(doc, block) == 0 ? "root" : "";
 	}
 
@@ -4605,15 +4673,104 @@ namespace {
 		s_cssMarginLayoutBuilding = false;
 	}
 
+	static bool cssBfcBoundaryTag(const std::string& rawTag)
+	{
+		const std::string tag = toLowerAscii(rawTag);
+		return tag == "td" || tag == "th";
+	}
+
+	static bool cssStyleEstablishesBfc(const WebStyle& style, const std::string& rawTag = "")
+	{
+		return style.display == DisplayMode::InlineBlock || cssStyleHasOverflowBfc(style) ||
+			cssBfcBoundaryTag(rawTag) || style.floatMode != FloatMode::None;
+	}
+
+	static const WebStyle* cssBfcStyleForSerial(const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0) return &doc.bodyStyle;
+		if (doc.hasBodyElement && serial == doc.bodyElement.serial) return &doc.bodyStyle;
+		return computedStyleForSerial(doc, serial);
+	}
+
+	static bool cssBfcBoundaryForSerial(const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0 || (doc.hasBodyElement && serial == doc.bodyElement.serial)) return false;
+		const HtmlElementRef* element = cssStructuralElementForSerial(doc, serial);
+		const WebStyle* style = cssBfcStyleForSerial(doc, serial);
+		return element && style && cssStyleEstablishesBfc(*style, element->tagName);
+	}
+
+	static uint64_t cssBfcParentSerial(const WebDocument& doc, uint64_t serial)
+	{
+		const HtmlElementRef* element = cssStructuralElementForSerial(doc, serial);
+		if (!element) return 0;
+		uint64_t current = element->parentSerial;
+		for (int depth = 0; current != 0 && depth < 16; ++depth) {
+			if (cssBfcBoundaryForSerial(doc, current)) return current;
+			const HtmlElementRef* parent = cssStructuralElementForSerial(doc, current);
+			if (!parent) return 0;
+			current = parent->parentSerial;
+		}
+		return 0;
+	}
+
+	static int cssBfcDepthForSerial(const WebDocument& doc, uint64_t serial)
+	{
+		int depth = 0;
+		uint64_t current = serial;
+		while (current != 0 && depth < 16) {
+			++depth;
+			current = cssBfcParentSerial(doc, current);
+		}
+		return depth;
+	}
+
+	static uint64_t cssContainingBfcIdentityForBlock(const WebDocument& doc,
+		const DocBlock& block, bool includeSelf)
+	{
+		if (includeSelf && block.elementMetadata.serial != 0 &&
+			cssStyleEstablishesBfc(block.style, block.tagName)) {
+			return block.elementMetadata.serial;
+		}
+		auto boundaryForSerial = [&](uint64_t serial) -> uint64_t {
+			if (serial == 0 || (doc.hasBodyElement && serial == doc.bodyElement.serial)) return 0;
+			const HtmlElementRef* element = cssStructuralElementForSerial(doc, serial);
+			const WebStyle* style = cssBfcStyleForSerial(doc, serial);
+			return element && style && cssStyleEstablishesBfc(*style, element->tagName) ? serial : 0;
+		};
+		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+			const uint64_t boundary = boundaryForSerial(it->serial);
+			if (boundary != 0) return boundary;
+		}
+		uint64_t current = block.elementMetadata.parentSerial;
+		for (int depth = 0; current != 0 && depth < 16; ++depth) {
+			const uint64_t boundary = boundaryForSerial(current);
+			if (boundary != 0) return boundary;
+			const HtmlElementRef* element = cssStructuralElementForSerial(doc, current);
+			if (!element) break;
+			current = element->parentSerial;
+		}
+		return 0;
+	}
+
+	static uint64_t cssFloatContainingBfcIdentity(const WebDocument& doc,
+		const InlineFlowLayout& flow)
+	{
+		if (flow.contextSerial != 0) return flow.contextSerial;
+		if (flow.anchorBlockIndex >= 0 && flow.anchorBlockIndex < static_cast<int>(doc.blocks.size())) {
+			const DocBlock& anchor = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
+			return cssContainingBfcIdentityForBlock(doc, anchor,
+				anchor.style.floatMode == FloatMode::None);
+		}
+		return 0;
+	}
+
 	static uint64_t cssFloatBfcIdentity(const WebDocument& doc, const InlineFlowLayout& flow)
 	{
 		if (flow.contextSerial != 0) return flow.contextSerial;
 		if (flow.anchorBlockIndex >= 0 && flow.anchorBlockIndex < static_cast<int>(doc.blocks.size())) {
-			const DocBlock& block = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
-			for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
-				const WebStyle* style = computedStyleForSerial(doc, it->serial);
-				if (style && cssStyleHasOverflowBfc(*style)) return it->serial;
-			}
+			return cssContainingBfcIdentityForBlock(doc,
+				doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)], true);
 		}
 		return 0;
 	}
@@ -4699,6 +4856,189 @@ namespace {
 		return clearance;
 	}
 
+	static int cssBfcPlacementY(const WebDocument& doc, int blockIndex, int candidateY,
+		int requiredWidth)
+	{
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size()) ||
+			!s_cssFloatLayoutSnapshot.valid) return candidateY;
+		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+		if (!cssStyleHasOverflowBfc(block.style) || block.style.floatMode != FloatMode::None)
+			return candidateY;
+		const uint64_t parentBfc = cssContainingBfcIdentityForBlock(doc, block, false);
+		if (parentBfc != 0) return candidateY;
+		const int containingLeft = blockBodyMarginLeft(doc);
+		const int containingRight = containingLeft + cssBodyContentWidth(doc);
+		const int height = blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())
+			? std::max(1, s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)].outerHeight)
+			: std::max(1, blockTextLineHeight(block));
+		int y = std::max(0, candidateY);
+		for (int attempt = 0; attempt < 64; ++attempt) {
+			const CssFloatExclusionQuery exclusion = cssFloatExclusionQuery(doc, parentBfc, y,
+				y + height, containingLeft, containingRight);
+			if (exclusion.recordsIntersected == 0) return y;
+			++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatAvoidanceAttempts;
+			if (requiredWidth <= exclusion.availableWidth) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatAvoidanceFits;
+				return y;
+			}
+			++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatTooWide;
+			if (exclusion.nextCandidateY <= y || exclusion.nextCandidateY < 0) return y;
+			y = std::min(8192, exclusion.nextCandidateY);
+			++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatAvoidanceDownshifts;
+		}
+		++const_cast<WebDocument&>(doc).cssDiagnostics.nestedFloatDepthClamps;
+		return y;
+	}
+
+	static CssBfcContextRecord* cssBfcContextRecordFor(CssFloatLayoutSnapshot& snapshot,
+		uint64_t identity)
+	{
+		for (CssBfcContextRecord& context : snapshot.bfcContexts)
+			if (context.identity == identity) return &context;
+		return nullptr;
+	}
+
+	static const CssBfcContextRecord* cssBfcContextRecordFor(
+		const CssFloatLayoutSnapshot& snapshot, uint64_t identity)
+	{
+		for (const CssBfcContextRecord& context : snapshot.bfcContexts)
+			if (context.identity == identity) return &context;
+		return nullptr;
+	}
+
+	static int cssOwnedFloatMaximumBottom(const CssFloatLayoutSnapshot& snapshot,
+		uint64_t bfcIdentity)
+	{
+		int bottom = 0;
+		for (const CssFloatRecord& record : snapshot.records) {
+			if (record.bfcIdentity != bfcIdentity) continue;
+			bottom = std::max(bottom, record.marginBoxY + record.marginBoxH);
+		}
+		return bottom;
+	}
+
+	static std::string cssBfcReasonForSerial(const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0) return "root";
+		const HtmlElementRef* element = cssStructuralElementForSerial(doc, serial);
+		const WebStyle* style = cssBfcStyleForSerial(doc, serial);
+		if (!element || !style) return "incomplete-structure";
+		if (style->display == DisplayMode::InlineBlock) return "inline-block";
+		if (cssStyleHasOverflowBfc(*style)) return "overflow";
+		if (cssBfcBoundaryTag(element->tagName)) return "table-cell";
+		if (style->floatMode != FloatMode::None) return "float";
+		return "atomic-context";
+	}
+
+	static void buildCssBfcContextSummary(const WebDocument& doc,
+		CssFloatLayoutSnapshot& snapshot)
+	{
+		snapshot.bfcContexts.clear();
+		snapshot.bfcContexts.reserve(64);
+		auto addContext = [&](uint64_t identity) {
+			if (cssBfcContextRecordFor(snapshot, identity)) return;
+			if (snapshot.bfcContexts.size() >= 256) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.nestedFloatDepthClamps;
+				return;
+			}
+			CssBfcContextRecord context;
+			context.identity = identity;
+			context.parentIdentity = identity == 0 ? 0 : cssBfcParentSerial(doc, identity);
+			context.ownerSerial = identity;
+			context.reason = cssBfcReasonForSerial(doc, identity);
+			context.complete = identity == 0 || cssBfcStyleForSerial(doc, identity) != nullptr;
+			if (identity != 0) {
+				const WebStyle* style = cssBfcStyleForSerial(doc, identity);
+				if (style) {
+					const CssResolvedLength height = resolveCssLength(style->heightValue,
+						style->height, style->heightPercent, -1);
+					const CssResolvedLength minimum = resolveCssLength(style->minHeightValue,
+						style->minHeight, style->minHeightPercent, -1);
+					const CssResolvedLength maximum = resolveCssLength(style->maxHeightValue,
+						style->maxHeight, style->maxHeightPercent, -1);
+					context.explicitHeight = height.definite ? height.px : -1;
+					context.minHeight = minimum.definite ? minimum.px : -1;
+					context.maxHeight = maximum.definite ? maximum.px : -1;
+				}
+			}
+			snapshot.bfcContexts.push_back(std::move(context));
+		};
+		addContext(0);
+		for (const HtmlElementRef& element : doc.structuralElements) {
+			if (element.serial != 0 && cssBfcBoundaryForSerial(doc, element.serial))
+				addContext(element.serial);
+		}
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (item.atomicContainerSerial != 0) addContext(item.atomicContainerSerial);
+		}
+		for (const CssFloatRecord& record : snapshot.records) addContext(record.bfcIdentity);
+
+		for (CssBfcContextRecord& context : snapshot.bfcContexts) {
+			context.ownedFloatCount = 0;
+			context.ownedFloatMaximumBottom = cssOwnedFloatMaximumBottom(snapshot, context.identity);
+			context.containedFloat = context.ownedFloatMaximumBottom > 0;
+			if (context.ownedFloatCount == 0) {
+				for (const CssFloatRecord& record : snapshot.records)
+					if (record.bfcIdentity == context.identity) ++context.ownedFloatCount;
+			}
+		}
+
+		for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+			if (block.style.displayNone || block.atomicContainerSerial != 0 ||
+				block.style.floatMode != FloatMode::None) continue;
+			if (blockIndex < 0 || blockIndex >= static_cast<int>(s_cssMarginLayoutSnapshot.records.size())) continue;
+			const CssMarginFlowRecord& record = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)];
+			const uint64_t owner = cssContainingBfcIdentityForBlock(doc, block, false);
+			CssBfcContextRecord* context = cssBfcContextRecordFor(snapshot, owner);
+			if (!context) continue;
+			const int bottom = cssBoundedGeometryAdd(record.usedY, record.outerHeight);
+			context->inFlowContentBottom = std::max(context->inFlowContentBottom,
+				cssBoundedGeometryAdd(bottom, std::max(0, record.usedMarginBottom)));
+		}
+
+		for (CssBfcContextRecord& context : snapshot.bfcContexts) {
+			if (context.identity == 0) {
+				context.originY = 0;
+			} else {
+				const HtmlElementRef* element = cssStructuralElementForSerial(doc, context.identity);
+				const WebStyle* style = cssBfcStyleForSerial(doc, context.identity);
+				int firstY = 8192;
+				for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
+					const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+					if (block.style.displayNone || block.atomicContainerSerial != 0) continue;
+					bool containsContext = block.elementMetadata.serial == context.identity;
+					for (const HtmlElementRef& ancestor : block.ancestors)
+						containsContext = containsContext || ancestor.serial == context.identity;
+					if (!containsContext) continue;
+					const uint64_t owner = cssContainingBfcIdentityForBlock(doc, block, false);
+					if (owner != context.identity) continue;
+					if (blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()))
+						firstY = std::min(firstY, s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)].usedY);
+				}
+				firstY = std::min(firstY, context.ownedFloatMaximumBottom > 0
+					? context.ownedFloatMaximumBottom : 8192);
+				context.originY = firstY == 8192 ? 0 : firstY - (style ? cssBorderTopPx(*style) + cssPaddingTopPx(*style, 0) : 0);
+				(void)element;
+			}
+			context.autoHeightInputExtent = std::max(0,
+				std::max(context.inFlowContentBottom, context.ownedFloatMaximumBottom) - context.originY);
+			const int verticalEdges = context.identity == 0 ? 0 : [&]() {
+				const WebStyle* style = cssBfcStyleForSerial(doc, context.identity);
+				return style ? cssVerticalBoxEdges(*style) : 0;
+			}();
+			context.usedContentHeight = context.autoHeightInputExtent;
+			if (context.ownedFloatMaximumBottom > context.inFlowContentBottom && context.explicitHeight < 0) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.floatHeightContainments;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatContainments;
+				++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatHeightExtensions;
+			} else if (context.ownedFloatCount > 0) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatHeightNoops;
+			}
+			(void)verticalEdges;
+		}
+	}
+
 	static void buildCssFloatLayout(const WebDocument& doc, CssFloatLayoutSnapshot& snapshot)
 	{
 		snapshot = CssFloatLayoutSnapshot{};
@@ -4728,6 +5068,22 @@ namespace {
 		mutableDoc.cssDiagnostics.floatContainmentBoundaries = 0;
 		mutableDoc.cssDiagnostics.floatScopeSuppressions = 0;
 		mutableDoc.cssDiagnostics.floatHeightContainments = 0;
+		mutableDoc.cssDiagnostics.bfcFloatContainments = 0;
+		mutableDoc.cssDiagnostics.bfcFloatHeightExtensions = 0;
+		mutableDoc.cssDiagnostics.bfcFloatHeightNoops = 0;
+		mutableDoc.cssDiagnostics.bfcFloatAvoidanceAttempts = 0;
+		mutableDoc.cssDiagnostics.bfcFloatAvoidanceFits = 0;
+		mutableDoc.cssDiagnostics.bfcFloatAvoidanceDownshifts = 0;
+		mutableDoc.cssDiagnostics.bfcFloatTooWide = 0;
+		mutableDoc.cssDiagnostics.nestedFloatContexts = 0;
+		mutableDoc.cssDiagnostics.nestedFloatDepthClamps = 0;
+		mutableDoc.cssDiagnostics.floatInsideInlineBlock = 0;
+		mutableDoc.cssDiagnostics.floatInsideFloat = 0;
+		mutableDoc.cssDiagnostics.floatListCases = 0;
+		mutableDoc.cssDiagnostics.floatTableCellCases = 0;
+		mutableDoc.cssDiagnostics.floatTableAvoidanceCases = 0;
+		mutableDoc.cssDiagnostics.floatedTableUnsupported = 0;
+		mutableDoc.cssDiagnostics.floatDocumentExtentExtensions = 0;
 		mutableDoc.cssDiagnostics.floatGeometryClamps = 0;
 		mutableDoc.cssDiagnostics.floatPlacementAttemptClamps = 0;
 		mutableDoc.cssDiagnostics.floatExclusionScanClamps = 0;
@@ -4772,8 +5128,16 @@ namespace {
 				flow.documentContentTop = marginRecord.usedY + cssBorderTopPx(flow.style) +
 					cssPaddingTopPx(flow.style, 0);
 			}
-			const uint64_t bfcIdentity = cssFloatBfcIdentity(doc, flow);
-			if (item.atomicContainerSerial != 0) ++mutableDoc.cssDiagnostics.floatContainmentBoundaries;
+			const uint64_t bfcIdentity = cssFloatContainingBfcIdentity(doc, flow);
+			const int bfcDepth = cssBfcDepthForSerial(doc, bfcIdentity);
+			if (item.atomicContainerSerial != 0) {
+				++mutableDoc.cssDiagnostics.floatContainmentBoundaries;
+				++mutableDoc.cssDiagnostics.floatInsideInlineBlock;
+			}
+			if (bfcDepth > 0) {
+				++mutableDoc.cssDiagnostics.nestedFloatContexts;
+				if (bfcDepth >= 16) ++mutableDoc.cssDiagnostics.nestedFloatDepthClamps;
+			}
 			const int containerLeft = std::max(0, flow.contentX - kContentX);
 			const int containerWidth = std::max(1, flow.contentWidth);
 			const int containerRight = std::min(8192, containerLeft + containerWidth);
@@ -4790,6 +5154,52 @@ namespace {
 			record.blockified = true;
 			record.visibilityRetained = true;
 			record.availableWidth = containerWidth;
+			if (item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())) {
+				const DocBlock& sourceBlock = doc.blocks[static_cast<size_t>(item.blockIndex)];
+				const std::string tag = toLowerAscii(sourceBlock.tagName);
+				bool listOrTableContext = false;
+				for (const HtmlElementRef& ancestor : sourceBlock.ancestors) {
+					const std::string ancestorTag = toLowerAscii(ancestor.tagName);
+					if (ancestorTag == "ul" || ancestorTag == "ol" || ancestorTag == "li") {
+						++mutableDoc.cssDiagnostics.floatListCases;
+						listOrTableContext = true;
+						break;
+					}
+					if (ancestorTag == "td" || ancestorTag == "th") {
+						++mutableDoc.cssDiagnostics.floatTableCellCases;
+						listOrTableContext = true;
+						break;
+					}
+					const WebStyle* ancestorStyle = cssBfcStyleForSerial(doc, ancestor.serial);
+					if (ancestorStyle && ancestorStyle->floatMode != FloatMode::None) {
+						++mutableDoc.cssDiagnostics.floatInsideFloat;
+						listOrTableContext = true;
+						break;
+					}
+				}
+				uint64_t parentSerial = sourceBlock.elementMetadata.parentSerial;
+				for (int depth = 0; !listOrTableContext && parentSerial != 0 && depth < 16; ++depth) {
+					const HtmlElementRef* parent = cssStructuralElementForSerial(doc, parentSerial);
+					if (!parent) break;
+					const std::string parentTag = toLowerAscii(parent->tagName);
+					if (parentTag == "ul" || parentTag == "ol" || parentTag == "li") {
+						++mutableDoc.cssDiagnostics.floatListCases;
+						listOrTableContext = true;
+					} else if (parentTag == "td" || parentTag == "th") {
+						++mutableDoc.cssDiagnostics.floatTableCellCases;
+						listOrTableContext = true;
+					} else {
+						const WebStyle* parentStyle = cssBfcStyleForSerial(doc, parentSerial);
+						if (parentStyle && parentStyle->floatMode != FloatMode::None) {
+							++mutableDoc.cssDiagnostics.floatInsideFloat;
+							listOrTableContext = true;
+						}
+					}
+					parentSerial = parent->parentSerial;
+				}
+				if (tag == "table") ++mutableDoc.cssDiagnostics.floatedTableUnsupported;
+				if (tag == "li") ++mutableDoc.cssDiagnostics.floatListCases;
+			}
 			++mutableDoc.cssDiagnostics.floatBlockifications;
 			if (record.side == FloatMode::Left) ++mutableDoc.cssDiagnostics.floatLeft;
 			else if (record.side == FloatMode::Right) ++mutableDoc.cssDiagnostics.floatRight;
@@ -4835,8 +5245,13 @@ namespace {
 				: blockOuterWidth(item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())
 					? doc.blocks[static_cast<size_t>(item.blockIndex)] : DocBlock{}, containerWidth, &record.clamped);
 			usedW = std::max(1, std::min(8192, usedW));
-			const int usedH = std::max(1, std::min(8192,
-				cssBoundedGeometryAdd(contentH, verticalEdges, &record.clamped)));
+			const int fallbackOuterHeight = cssBoundedGeometryAdd(contentH, verticalEdges, &record.clamped);
+			const int usedH = std::max(1, std::min(8192, resolveUsedOuterDimension(*style,
+				style->heightValue, style->height, style->heightPercent,
+				style->minHeightValue, style->minHeight, style->minHeightPercent,
+				style->maxHeightValue, style->maxHeight, style->maxHeightPercent,
+				style->maxHeightNone, -1, fallbackOuterHeight, verticalEdges, false,
+				nullptr, nullptr, nullptr, &record.clamped)));
 			record.preferredMinimum = preferredMin;
 			record.preferredWidth = preferred;
 			record.usedWidth = usedW;
@@ -4927,6 +5342,10 @@ namespace {
 			if (snapshot.evidenceRecords < 128 && snapshot.evidence.size() < 32768) {
 				std::ostringstream evidence;
 				evidence << "serial=" << record.logicalSerial << ",bfc=" << record.bfcIdentity
+					<< ",owner-bfc=" << record.bfcIdentity
+					<< ",parent-bfc=" << cssBfcParentSerial(doc, record.bfcIdentity)
+					<< ",nested-depth=" << cssBfcDepthForSerial(doc, record.bfcIdentity)
+					<< ",contained-locally=yes"
 					<< ",source-order=" << record.sourceOrder << ",side="
 					<< (record.side == FloatMode::Left ? "left" : "right")
 					<< ",blockified=yes,preferred-min=" << record.preferredMinimum
@@ -4949,6 +5368,35 @@ namespace {
 			}
 			snapshot.records.push_back(record);
 			++snapshot.operations;
+		}
+		buildCssBfcContextSummary(doc, snapshot);
+		if (s_cssMarginLayoutSnapshot.valid) {
+			const int rootFloatBottom = cssOwnedFloatMaximumBottom(snapshot, 0);
+			if (rootFloatBottom > s_cssMarginLayoutSnapshot.documentHeight) {
+				s_cssMarginLayoutSnapshot.documentHeight = std::min(8192, rootFloatBottom);
+				++mutableDoc.cssDiagnostics.floatDocumentExtentExtensions;
+			}
+		}
+		for (const CssBfcContextRecord& context : snapshot.bfcContexts) {
+			if (snapshot.evidenceRecords >= 128 || snapshot.evidence.size() >= 32768) break;
+			std::ostringstream evidence;
+			evidence << "bfc-id=" << context.identity << ",owner-serial=" << context.ownerSerial
+				<< ",parent-bfc=" << context.parentIdentity << ",reason=" << context.reason
+				<< ",owned-floats=" << context.ownedFloatCount
+				<< ",owned-float-max-bottom=" << context.ownedFloatMaximumBottom
+				<< ",in-flow-content-bottom=" << context.inFlowContentBottom
+				<< ",auto-height-input-extent=" << context.autoHeightInputExtent
+				<< ",used-content-height=" << context.usedContentHeight
+				<< ",explicit-height=" << context.explicitHeight
+				<< ",min-height=" << context.minHeight << ",max-height=" << context.maxHeight
+				<< ",contained-float=" << (context.containedFloat ? "yes" : "no")
+				<< ",complete=" << (context.complete ? "yes" : "no")
+				<< ",clamped=" << (context.clamped ? "yes" : "no") << "\n";
+			const std::string line = evidence.str();
+			if (snapshot.evidence.size() + line.size() <= 32768) {
+				snapshot.evidence += line;
+				++snapshot.evidenceRecords;
+			}
 		}
 		snapshot.blockClearances.assign(doc.blocks.size(), 0);
 		for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
@@ -5008,7 +5456,7 @@ namespace {
 	{
 		if (!s_cssFloatLayoutSnapshot.valid || blockIndex < 0) return nullptr;
 		for (const CssFloatRecord& record : s_cssFloatLayoutSnapshot.records) {
-			if (record.blockIndex == blockIndex && record.contextSerial == 0) return &record;
+			if (record.blockIndex == blockIndex) return &record;
 		}
 		(void)doc;
 		return nullptr;
@@ -5200,7 +5648,14 @@ namespace {
 			doc.blocks[static_cast<size_t>(last + 1)].type == BlockType::Heading;
 		const int lastTotal = blockTotalHeight(lastBlock, doc, nextIsHeading);
 		const int lastBoxH = std::max(0, lastTotal - lastMarginTop - lastMarginBottom - (nextIsHeading ? 10 : 0));
-		const int fallbackHeight = std::max(0, lastBoxY + lastBoxH + lastMarginBottom - box.y);
+		int fallbackHeight = std::max(0, lastBoxY + lastBoxH + lastMarginBottom - box.y);
+		if (s_cssFloatLayoutSnapshot.valid && cssBfcBoundaryForSerial(doc, serial)) {
+			const int ownedBottom = cssOwnedFloatMaximumBottom(s_cssFloatLayoutSnapshot, serial);
+			if (ownedBottom > 0) {
+				const int floatBottom = kContentY + ownedBottom - scrollOffset;
+				fallbackHeight = std::max(fallbackHeight, floatBottom - box.y);
+			}
+		}
 		const int verticalEdges = cssVerticalBoxEdges(*style);
 		const int parentBasisHeight = cssContainingContentHeightForSerial(doc, element->parentSerial);
 		box.h = resolveUsedOuterDimension(*style,
@@ -5307,7 +5762,12 @@ namespace {
 					clearanceDisplacement = cssBoundedGeometryAdd(clearanceDisplacement,
 						s_cssFloatLayoutSnapshot.blockClearances[i]);
 			}
-			return record.usedY + clearanceDisplacement - cssMarginTopPx(block.style, fallback);
+			int usedY = record.usedY + clearanceDisplacement;
+			if (cssStyleHasOverflowBfc(block.style) && block.style.floatMode == FloatMode::None) {
+				const int requiredWidth = blockOuterWidth(block, blockAvailableWidth(block, doc));
+				usedY = cssBfcPlacementY(doc, blockIndex, usedY, requiredWidth);
+			}
+			return usedY - cssMarginTopPx(block.style, fallback);
 		}
 		int y = kHeadingY + (doc.bodyStyle.marginTop >= 0 ? doc.bodyStyle.marginTop : 0);
 		for (int i = 0; i < blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
@@ -6147,6 +6607,22 @@ namespace {
 		add("css_float_containment_boundaries", metadata.cssFloatContainmentBoundaries);
 		add("css_float_scope_suppressions", metadata.cssFloatScopeSuppressions);
 		add("css_float_height_containments", metadata.cssFloatHeightContainments);
+		add("css_bfc_float_containments", metadata.cssBfcFloatContainments);
+		add("css_bfc_float_height_extensions", metadata.cssBfcFloatHeightExtensions);
+		add("css_bfc_float_height_noops", metadata.cssBfcFloatHeightNoops);
+		add("css_bfc_float_avoidance_attempts", metadata.cssBfcFloatAvoidanceAttempts);
+		add("css_bfc_float_avoidance_fits", metadata.cssBfcFloatAvoidanceFits);
+		add("css_bfc_float_avoidance_downshifts", metadata.cssBfcFloatAvoidanceDownshifts);
+		add("css_bfc_float_too_wide", metadata.cssBfcFloatTooWide);
+		add("css_nested_float_contexts", metadata.cssNestedFloatContexts);
+		add("css_nested_float_depth_clamps", metadata.cssNestedFloatDepthClamps);
+		add("css_float_inside_inline_block", metadata.cssFloatInsideInlineBlock);
+		add("css_float_inside_float", metadata.cssFloatInsideFloat);
+		add("css_float_list_cases", metadata.cssFloatListCases);
+		add("css_float_table_cell_cases", metadata.cssFloatTableCellCases);
+		add("css_float_table_avoidance_cases", metadata.cssFloatTableAvoidanceCases);
+		add("css_floated_table_unsupported", metadata.cssFloatedTableUnsupported);
+		add("css_float_document_extent_extensions", metadata.cssFloatDocumentExtentExtensions);
 		add("css_float_geometry_clamps", metadata.cssFloatGeometryClamps);
 		add("css_float_placement_attempt_clamps", metadata.cssFloatPlacementAttemptClamps);
 		add("css_float_exclusion_scan_clamps", metadata.cssFloatExclusionScanClamps);
@@ -7203,7 +7679,29 @@ namespace {
 			for (int fi = lineBox.firstFragment; fi < lineBox.firstFragment + lineBox.fragmentCount; ++fi)
 				flow.fragments[static_cast<size_t>(fi)].x += alignOrigin + alignShift - lineBox.availableLeft;
 		}
-		const int contentHeight = std::max(1, flow.lines.back().top + flow.lines.back().usedLineHeight);
+		int contentHeight = std::max(1, flow.lines.back().top + flow.lines.back().usedLineHeight);
+		const bool flowOwnsBfc = flow.contextSerial != 0 ||
+			(flow.anchorBlockIndex >= 0 && flow.anchorBlockIndex < static_cast<int>(doc.blocks.size()) &&
+				cssStyleEstablishesBfc(doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)].style,
+					doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)].tagName));
+		if (flowOwnsBfc && s_cssFloatLayoutSnapshot.valid) {
+			const int ownedBottom = cssOwnedFloatMaximumBottom(s_cssFloatLayoutSnapshot, flowBfcIdentity);
+			const int localFloatBottom = std::max(0, ownedBottom - flow.documentContentTop);
+			const CssResolvedLength specifiedHeight = resolveCssLength(flow.style.heightValue,
+				flow.style.height, flow.style.heightPercent, -1);
+			if (localFloatBottom > contentHeight) {
+				if (!specifiedHeight.definite) {
+					contentHeight = localFloatBottom;
+					++const_cast<WebDocument&>(doc).cssDiagnostics.floatHeightContainments;
+					++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatContainments;
+					++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatHeightExtensions;
+				} else {
+					++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatHeightNoops;
+				}
+			} else if (ownedBottom > 0) {
+				++const_cast<WebDocument&>(doc).cssDiagnostics.bfcFloatHeightNoops;
+			}
+		}
 		const int verticalEdges = cssVerticalBoxEdges(flow.style);
 		const int fallbackOuter = cssBoundedGeometryAdd(contentHeight, verticalEdges);
 		const int outerHeight = resolveUsedOuterDimension(flow.style,
@@ -8794,6 +9292,41 @@ void Navigator::renderDocument()
 				std::max(0, boxH - cssBorderTopPx(flow.style) - cssBorderBottomPx(flow.style))} :
 			cssBlockVisibleClip(s_currentDoc, flow.anchorBlockIndex, anchor, flowOuterX, boxY,
 				flow.outerWidth, boxH, s_scrollOffset));
+		// Floats in an atomic/embedded BFC use the same flat record model, but
+		// their coordinates are local to that context.  Paint them while the
+		// containing atomic clip is active so nested targets cannot escape.
+		if (embedded && s_cssFloatLayoutSnapshot.valid) {
+			for (const CssFloatRecord& nestedFloat : s_cssFloatLayoutSnapshot.records) {
+				if (nestedFloat.contextSerial != flow.contextSerial ||
+					nestedFloat.bfcIdentity != flow.contextSerial ||
+					nestedFloat.blockIndex < 0 ||
+					nestedFloat.blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) continue;
+				const DocBlock& nestedBlock = s_currentDoc.blocks[static_cast<size_t>(nestedFloat.blockIndex)];
+				const WebStyle* nestedStyle = computedStyleForSerial(s_currentDoc, nestedFloat.logicalSerial);
+				if (!nestedStyle) nestedStyle = &nestedBlock.style;
+				if (nestedStyle->displayNone || nestedStyle->visibility == VisibilityMode::Hidden) continue;
+				const int nestedX = parentX + flow.contentX + nestedFloat.borderBoxX;
+				const int nestedY = baseY + nestedFloat.borderBoxY;
+				s_cssPaintOpacityPercent = std::max(0, std::min(100, nestedStyle->effectiveOpacityPercent));
+				drawBlockBox(s_windowId, nestedX, nestedY, nestedFloat.borderBoxW, nestedFloat.borderBoxH, *nestedStyle);
+				if (nestedFloat.kind == InlineItemKind::ReplacedImage) {
+					int imageW = 0;
+					int imageH = 0;
+					imageDisplaySize(nestedBlock, nestedFloat.borderBoxW, imageW, imageH);
+					const ImageInfo& info = imageInfoForBlock(nestedBlock);
+					if (info.ok) drawImage(s_windowId,
+						 nestedX + cssBorderLeftPx(*nestedStyle) + cssPaddingLeftPx(*nestedStyle, 0),
+						 nestedY + cssBorderTopPx(*nestedStyle) + cssPaddingTopPx(*nestedStyle, 0),
+						 std::min(imageW, nestedFloat.borderBoxW), std::min(imageH, nestedFloat.borderBoxH), info.drawPath);
+				} else if (!nestedFloat.contentText.empty()) {
+					drawTextAtStyled(s_windowId,
+						nestedX + cssBorderLeftPx(*nestedStyle) + cssPaddingLeftPx(*nestedStyle, 0),
+						nestedY + cssBorderTopPx(*nestedStyle) + cssPaddingTopPx(*nestedStyle, 0),
+						nestedFloat.contentText, *nestedStyle, contentTextColor,
+						std::max(1, nestedFloat.borderBoxH));
+				}
+			}
+		}
 		for (const InlineFragmentLayout& fragment : flow.fragments) {
 			if (!fragment.visible || fragment.itemIndex < 0 ||
 				fragment.itemIndex >= static_cast<int>(s_currentDoc.inlineItems.size())) continue;
@@ -8954,9 +9487,19 @@ void Navigator::renderDocument()
 		const int opacity = std::max(0, std::min(100, floatStyle->effectiveOpacityPercent));
 		s_cssPaintOpacityPercent = opacity;
 		drawBlockBox(s_windowId, x, y, w, h, *floatStyle);
+		CssPaintRect floatClip = cssViewportClipRect();
+		if (floatRecord.bfcIdentity != 0) {
+			const CssAncestorBox ownerBox = cssAncestorBoxForBlock(s_currentDoc,
+				floatRecord.bfcIdentity, s_scrollOffset);
+			const WebStyle* ownerStyle = cssBfcStyleForSerial(s_currentDoc, floatRecord.bfcIdentity);
+			if (ownerBox.valid && ownerStyle) {
+				floatClip = cssApplyOverflowClip(floatClip, *ownerStyle,
+					ownerBox.x, ownerBox.y, ownerBox.w, ownerBox.h);
+			}
+		}
 		const bool clipPushed = (floatStyle->overflowX != OverflowMode::Visible ||
-			floatStyle->overflowY != OverflowMode::Visible) && cssPushPaintClip(
-			cssApplyOverflowClip(cssViewportClipRect(), *floatStyle, x, y, w, h));
+			floatStyle->overflowY != OverflowMode::Visible || floatRecord.bfcIdentity != 0) &&
+			cssPushPaintClip(cssApplyOverflowClip(floatClip, *floatStyle, x, y, w, h));
 		const int contentX = x + cssBorderLeftPx(*floatStyle) + cssPaddingLeftPx(*floatStyle, 0);
 		const int contentY = y + cssBorderTopPx(*floatStyle) + cssPaddingTopPx(*floatStyle, 0);
 		if (floatRecord.kind == InlineItemKind::ReplacedImage) {
@@ -13195,7 +13738,12 @@ int Navigator::blockLayoutY(int blockIndex)
 				clearanceDisplacement = cssBoundedGeometryAdd(clearanceDisplacement,
 					s_cssFloatLayoutSnapshot.blockClearances[i]);
 		}
-		return record.usedY + clearanceDisplacement - cssMarginTopPx(block.style,
+		int usedY = record.usedY + clearanceDisplacement;
+		if (cssStyleHasOverflowBfc(block.style) && block.style.floatMode == FloatMode::None) {
+			const int requiredWidth = blockOuterWidth(block, blockAvailableWidth(block, s_currentDoc));
+			usedY = cssBfcPlacementY(s_currentDoc, blockIndex, usedY, requiredWidth);
+		}
+		return usedY - cssMarginTopPx(block.style,
 			block.type == BlockType::Heading ? 10 : 4);
 	}
 	// Returns the Y coordinate of blockIndex relative to kContentY (pre-scroll).
@@ -13223,9 +13771,22 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	ensureInlineLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
-		const CssPaintRect target{kContentX + floatRecord->borderBoxX,
+		CssPaintRect target{kContentX + floatRecord->borderBoxX,
 			kContentY + floatRecord->borderBoxY - s_scrollOffset,
 			floatRecord->borderBoxW, floatRecord->borderBoxH};
+		if (floatRecord->contextSerial != 0) {
+			for (const InlineFlowLayout& contextFlow : s_inlineLayoutSnapshot.flows) {
+				if (contextFlow.contextSerial != floatRecord->contextSerial) continue;
+				CssPaintRect parentAtomic;
+				if (!atomicResultScreenRect(s_currentDoc, s_inlineLayoutSnapshot,
+					contextFlow.atomicResultIndex, s_scrollOffset, parentAtomic)) continue;
+				target = CssPaintRect{parentAtomic.x + contextFlow.contentX + floatRecord->borderBoxX,
+					parentAtomic.y + contextFlow.localOuterY + cssBorderTopPx(contextFlow.style) +
+						cssPaddingTopPx(contextFlow.style, 0) + floatRecord->borderBoxY,
+					floatRecord->borderBoxW, floatRecord->borderBoxH};
+				break;
+			}
+		}
 		const CssPaintRect clipped = cssClipHitTarget(target, cssViewportClipRect());
 		out = Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 		return out.w > 0 && out.h > 0;
@@ -13283,9 +13844,22 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	ensureInlineLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
-		const CssPaintRect target{kContentX + floatRecord->borderBoxX,
+		CssPaintRect target{kContentX + floatRecord->borderBoxX,
 			kContentY + floatRecord->borderBoxY - s_scrollOffset,
 			floatRecord->borderBoxW, floatRecord->borderBoxH};
+		if (floatRecord->contextSerial != 0) {
+			for (const InlineFlowLayout& contextFlow : s_inlineLayoutSnapshot.flows) {
+				if (contextFlow.contextSerial != floatRecord->contextSerial) continue;
+				CssPaintRect parentAtomic;
+				if (!atomicResultScreenRect(s_currentDoc, s_inlineLayoutSnapshot,
+					contextFlow.atomicResultIndex, s_scrollOffset, parentAtomic)) continue;
+				target = CssPaintRect{parentAtomic.x + contextFlow.contentX + floatRecord->borderBoxX,
+					parentAtomic.y + contextFlow.localOuterY + cssBorderTopPx(contextFlow.style) +
+						cssPaddingTopPx(contextFlow.style, 0) + floatRecord->borderBoxY,
+					floatRecord->borderBoxW, floatRecord->borderBoxH};
+				break;
+			}
+		}
 		const CssPaintRect clipped = cssClipHitTarget(target, cssViewportClipRect());
 		return clipped.w > 0 && clipped.h > 0 && x >= clipped.x && x < clipped.x + clipped.w &&
 			y >= clipped.y && y < clipped.y + clipped.h;

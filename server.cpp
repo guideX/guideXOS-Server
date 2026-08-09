@@ -1145,6 +1145,48 @@ static std::string navigatorHostedSmokeDiagnostic() {
         cssPhase3eMetric("Current Document.css_clearance_applied=") + ";evidence=" +
         summarizeText(cssPhase3eReport, 1200));
 
+    bool cssPhase3fLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3f.html");
+    std::string cssPhase3fText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3fReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3fMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3fReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3fReport.find('\n', pos);
+        return cssPhase3fReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3F containment fixture loads",
+        cssPhase3fLoaded &&
+        contains(cssPhase3fText, "Phase 3F Float Containment Fixture") &&
+        contains(cssPhase3fText, "only left float") &&
+        contains(cssPhase3fText, "fixed height clips this float") &&
+        contains(cssPhase3fText, "inline-block internal text wraps") &&
+        contains(cssPhase3fText, "list text wraps beside a floated image") &&
+        contains(cssPhase3fText, "cell text beside float") &&
+        contains(cssPhase3fText, "tail content remains reachable"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3F owned BFC containment and bounded avoidance",
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_containments=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_height_extensions=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_height_noops=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_avoidance_attempts=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_avoidance_downshifts=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_float_document_extent_extensions=") &&
+        contains(cssPhase3fReport, "Current Document.css_float_inside_inline_block=") &&
+        contains(cssPhase3fReport, "Current Document.css_float_list_cases=") &&
+        contains(cssPhase3fReport, "Current Document.css_float_table_cell_cases=") &&
+        contains(cssPhase3fReport, "owner-bfc=") &&
+        contains(cssPhase3fReport, "bfc-id="),
+        "metrics=" + cssPhase3fMetric("Current Document.css_bfc_float_containments=") + ";" +
+        cssPhase3fMetric("Current Document.css_bfc_float_height_extensions=") + ";" +
+        cssPhase3fMetric("Current Document.css_bfc_float_height_noops=") + ";" +
+        cssPhase3fMetric("Current Document.css_bfc_float_avoidance_attempts=") + ";" +
+        cssPhase3fMetric("Current Document.css_bfc_float_avoidance_downshifts=") + ";" +
+        cssPhase3fMetric("Current Document.css_float_document_extent_extensions=") + ";nested=" +
+        cssPhase3fMetric("Current Document.css_nested_float_contexts=") + ";list=" +
+        cssPhase3fMetric("Current Document.css_float_list_cases=") + ";table-cell=" +
+        cssPhase3fMetric("Current Document.css_float_table_cell_cases=") + ";evidence=" +
+        summarizeText(cssPhase3fMetric("Current Document.css_float_evidence="), 1800));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -470,6 +470,41 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p id='phase3c-extreme-line' class='fixture-line'><span id='phase3c-extreme' class='ib'>extreme clamp</span><span id='phase3c-fallback' class='ib' style='height:24px;'>baseline fallback</span></p>"
                              b"</body></html>")
             return
+        if path == "/navigator-smoke/css-phase3f.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>CSS Phase 3F Float Containment</title><style>"
+                             b"html,body{margin:0;padding:0} body{font-size:14px;line-height:1.25;background:#f8fafc;color:#243447}"
+                             b".case{width:300px;margin:8px 0;padding:4px;border:1px solid #64748b;background:#f1f5f9}"
+                             b".left{float:left;width:118px;height:82px;margin:0 12px 8px 0;padding:3px;border:2px solid #2563eb;background:#dbeafe;box-sizing:border-box}"
+                             b".right{float:right;width:108px;height:72px;margin:0 0 8px 12px;padding:3px;border:2px solid #b45309;background:#fef3c7;box-sizing:border-box}"
+                             b".only{overflow:hidden}.auto{overflow:auto}.scroll{overflow:scroll}.fixed{overflow:hidden;height:34px}.minimum{overflow:hidden;min-height:120px}.maximum{overflow:hidden;max-height:46px}"
+                             b".short{height:86px}.tall{height:168px}.fit{overflow:hidden;width:160px}.wide{overflow:hidden;width:270px}.percent{overflow:hidden;width:55%}.minwidth{overflow:hidden;width:80px;min-width:240px}"
+                             b".outer-left{float:left;width:132px;height:96px;margin-right:12px;background:#bfdbfe}.outer-right{float:right;width:122px;height:86px;margin-left:12px;background:#fde68a}.document-float{height:8192px}"
+                             b".atomic{display:inline-block;width:238px;padding:4px;border:2px solid #be123c;vertical-align:top;background:#fff1f2}.atomic .inner{overflow:hidden;padding:3px;border:1px solid #be123c}.atomic .innerfloat{float:left;width:86px;height:74px;margin-right:8px;background:#fecdd3}"
+                             b".listcase{overflow:hidden;width:300px;border:1px solid #15803d;padding:4px}.tablecase{overflow:hidden;width:300px;border:1px solid #7c3aed;padding:4px}.tablecase table{width:280px;border:1px solid #7c3aed}.tablecase td{border:1px solid #a78bfa;padding:4px}.cellfloat{float:left;width:56px;height:44px;margin-right:6px;background:#ddd6fe}.clear{clear:both}.clip{overflow:hidden;height:28px}.opacity{opacity:0}"
+                             b"</style></head><body>"
+                             b"<h1 id='phase3f-title'>Phase 3F Float Containment Fixture</h1>"
+                             b"<p id='phase3f-only-left' class='case only'><img class='left' src='/navigator-smoke/wide.png' alt='only left float'>left float is contained by this BFC.</p>"
+                             b"<p id='phase3f-only-right' class='case only'><img class='right' src='/navigator-smoke/tall.png' alt='only right float'>right float is contained by this BFC.</p>"
+                             b"<p id='phase3f-auto' class='case auto'><img class='left' src='/navigator-smoke/wide.png' alt='auto float'>auto-height BFC uses its owned float extent.</p>"
+                             b"<p id='phase3f-scroll' class='case scroll'><img class='right' src='/navigator-smoke/tall.png' alt='scroll float'>scroll BFC remains a bounded formatting context.</p>"
+                             b"<p id='phase3f-short' class='case only short'><img class='left' src='/navigator-smoke/wide.png' alt='float taller than normal box'>short normal content.</p>"
+                             b"<p id='phase3f-tall' class='case only tall'><img class='right' src='/navigator-smoke/tall.png' alt='normal box taller than float'>tall normal content continues below the float and supplies the larger extent.</p>"
+                             b"<p id='phase3f-fixed' class='case fixed'><img class='left' src='/navigator-smoke/wide.png' alt='fixed height clips this float'></p>"
+                             b"<p id='phase3f-minimum' class='case minimum'><img class='right' src='/navigator-smoke/tall.png' alt='minimum height remains authoritative'></p>"
+                             b"<p id='phase3f-maximum' class='case maximum'><img class='left' src='/navigator-smoke/wide.png' alt='maximum height constrains this BFC'></p>"
+                             b"<p class='outer-left'>external left</p><p id='phase3f-fit' class='case fit'>BFC fits beside the active outer float.</p>"
+                             b"<p class='outer-left'>external left</p><p id='phase3f-wide' class='case wide'>explicit BFC too wide moves below the active float.</p>"
+                             b"<p class='outer-right'>external right</p><p id='phase3f-percent' class='case percent'>percentage width BFC avoidance remains bounded.</p>"
+                             b"<p class='outer-left'>min width downshift</p><p id='phase3f-minwidth' class='case minwidth'>min width forces a bounded move below.</p>"
+                             b"<div id='phase3f-nested' class='case only'><div class='case only'><p><img class='left' src='/navigator-smoke/wide.png' alt='inner owned float'>inner BFC content</p></div><p>outer sibling remains outside inner float scope.</p></div>"
+                             b"<div id='phase3f-atomic' class='atomic'><div class='inner'><p><img class='innerfloat' src='/navigator-smoke/wide.png' alt='atomic float'>inline-block internal text wraps beside its float.</p><div class='clear'>atomic clear</div></div></div><span>outer line after atomic context</span>"
+                             b"<ul id='phase3f-list' class='listcase'><li><img class='left' src='/navigator-smoke/wide.png' alt='list floated image'>list text wraps beside a floated image and keeps its marker.</li><li>second list item follows the contained float.</li></ul>"
+                             b"<div id='phase3f-table' class='tablecase'><table><tr><td><img class='cellfloat' src='/navigator-smoke/wide.png' alt='cell floated image'>cell text beside float</td><td>second cell</td></tr></table></div>"
+                             b"<p id='phase3f-clip' class='case clip'><img class='left opacity' src='/navigator-smoke/wide.png' alt='hidden layout float'></p>"
+                             b"<p id='phase3f-document-float' class='left document-float'>top-level document float remains paint-extending</p><p id='phase3f-tail'>tail content remains reachable after the visible top-level float.</p>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-phase3e.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><title>CSS Phase 3E Floats and Clear</title><style>"
