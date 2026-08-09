@@ -36,6 +36,7 @@ using gxos::web::CssLengthValue;
 using gxos::web::CssComputedStyleRecord;
 using gxos::web::BoxSizingMode;
 using gxos::web::DisplayMode;
+using gxos::web::PositionMode;
 using gxos::web::FloatMode;
 using gxos::web::ClearMode;
 using gxos::web::OverflowMode;
@@ -579,6 +580,91 @@ namespace {
 	static CssMarginLayoutSnapshot s_cssMarginLayoutSnapshot;
 	static bool s_cssMarginLayoutBuilding = false;
 	static CssFloatLayoutSnapshot s_cssFloatLayoutSnapshot;
+
+	constexpr size_t kCssPositionedBoxCap = 256;
+	constexpr size_t kCssPositionedAncestryCap = 16;
+	constexpr int kCssPositionedGeometryCap = 8192;
+
+	struct CssPositionBox {
+		CssPaintRect content;
+		CssPaintRect padding;
+		CssPaintRect border;
+		bool widthDefinite = false;
+		bool heightDefinite = false;
+		bool complete = true;
+	};
+
+	struct CssPositionedRecord {
+		int blockIndex = -1;
+		uint64_t logicalSerial = 0;
+		uint64_t parentSerial = 0;
+		uint64_t containingBlockSerial = 0;
+		std::string containingBlockType;
+		CssPositionBox containingBlock;
+		PositionMode mode = PositionMode::Static;
+		CssLengthValue top;
+		CssLengthValue right;
+		CssLengthValue bottom;
+		CssLengthValue left;
+		int resolvedTop = 0;
+		int resolvedRight = 0;
+		int resolvedBottom = 0;
+		int resolvedLeft = 0;
+		bool topResolved = false;
+		bool rightResolved = false;
+		bool bottomResolved = false;
+		bool leftResolved = false;
+		int staticX = 0;
+		int staticY = 0;
+		int normalX = 0;
+		int normalY = 0;
+		int finalX = 0;
+		int finalY = 0;
+		int usedWidth = 0;
+		int usedHeight = 0;
+		int marginLeft = 0;
+		int marginRight = 0;
+		int marginTop = 0;
+		int marginBottom = 0;
+		int relativeShiftX = 0;
+		int relativeShiftY = 0;
+		bool flowParticipation = true;
+		bool parentHeightContribution = true;
+		int documentExtentContribution = 0;
+		bool zIndexAuto = true;
+		int zIndex = 0;
+		int sourceOrder = 0;
+		int paintTier = 1;
+		CssPaintRect clip;
+		bool paintVisible = false;
+		bool hitVisible = false;
+		bool staticPositionUsed = false;
+		bool blockified = false;
+		bool complete = true;
+		bool clamped = false;
+		std::string incompleteReason;
+	};
+
+	struct CssPositionLayoutSnapshot {
+		bool valid = false;
+		std::string url;
+		size_t blockCount = 0;
+		uint64_t fingerprint = 0;
+		uint64_t generation = 0;
+		int documentExtent = 0;
+		int ancestryLookups = 0;
+		int maximumAncestryDepth = 0;
+		int absoluteLayoutOperations = 0;
+		int overlapScans = 0;
+		int geometryClamps = 0;
+		int ancestryClamps = 0;
+		int evidenceRecords = 0;
+		std::vector<int> blockRecordIndices;
+		std::vector<CssPositionedRecord> records;
+		std::string evidence;
+	};
+
+	static CssPositionLayoutSnapshot s_cssPositionLayoutSnapshot;
 
 	constexpr int kCssClipStackDepth = 16;
 	static std::array<CssPaintRect, kCssClipStackDepth> s_cssClipStack{};
@@ -1490,6 +1576,11 @@ namespace {
 	static const InlineFlowLayout* inlineFlowForBlock(const WebDocument& doc, int blockIndex);
 	static const InlineFlowLayout* inlineFlowForAnchor(const WebDocument& doc, int blockIndex);
 	static bool blockUsesInlineFlow(const WebDocument& doc, int blockIndex);
+	static void ensureCssPositionLayout(const WebDocument& doc);
+	static const CssPositionedRecord* cssPositionedRecordForBlock(const WebDocument& doc, int blockIndex);
+	static const CssPositionedRecord* cssPositionedRecordForSerial(const WebDocument& doc, uint64_t serial);
+	static CssPaintRect cssPositionedClipForBlock(const WebDocument& doc, int blockIndex,
+		int outerX, int outerY, int outerW, int outerH, int scrollOffset);
 	static int blockTextX(const DocBlock& block, int outerX, int innerWidth, int lineWidth);
 	static void drawBlockBox(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style);
 	static bool blockHasVisibleCss(const DocBlock& block);
@@ -2206,6 +2297,31 @@ namespace {
 		metadata.cssFloatBfcDepthClamps = doc.cssDiagnostics.floatBfcDepthClamps;
 		metadata.cssFloatEvidenceRecords = doc.cssDiagnostics.floatEvidenceRecords;
 		metadata.cssFloatEvidence = doc.cssDiagnostics.floatEvidence;
+		metadata.cssPositionStatic = doc.cssDiagnostics.positionStatic;
+		metadata.cssPositionRelative = doc.cssDiagnostics.positionRelative;
+		metadata.cssPositionAbsolute = doc.cssDiagnostics.positionAbsolute;
+		metadata.cssPositionUnsupportedFixed = doc.cssDiagnostics.positionUnsupportedFixed;
+		metadata.cssPositionUnsupportedSticky = doc.cssDiagnostics.positionUnsupportedSticky;
+		metadata.cssRelativeOffsets = doc.cssDiagnostics.relativeOffsets;
+		metadata.cssRelativePercentageOffsets = doc.cssDiagnostics.relativePercentageOffsets;
+		metadata.cssAbsoluteBoxes = doc.cssDiagnostics.absoluteBoxes;
+		metadata.cssAbsoluteBlockifications = doc.cssDiagnostics.absoluteBlockifications;
+		metadata.cssPositionedContainingBlocks = doc.cssDiagnostics.positionedContainingBlocks;
+		metadata.cssPositionRootFallbacks = doc.cssDiagnostics.positionRootFallbacks;
+		metadata.cssPositionAncestryClamps = doc.cssDiagnostics.positionAncestryClamps;
+		metadata.cssAbsoluteStaticPositionUses = doc.cssDiagnostics.absoluteStaticPositionUses;
+		metadata.cssAbsoluteShrinkToFit = doc.cssDiagnostics.absoluteShrinkToFit;
+		metadata.cssAbsoluteOutOfFlow = doc.cssDiagnostics.absoluteOutOfFlow;
+		metadata.cssPositionDocumentExtentExtensions = doc.cssDiagnostics.positionDocumentExtentExtensions;
+		metadata.cssZIndexAuto = doc.cssDiagnostics.zIndexAuto;
+		metadata.cssZIndexNegative = doc.cssDiagnostics.zIndexNegative;
+		metadata.cssZIndexZero = doc.cssDiagnostics.zIndexZero;
+		metadata.cssZIndexPositive = doc.cssDiagnostics.zIndexPositive;
+		metadata.cssPositionHitOcclusions = doc.cssDiagnostics.positionHitOcclusions;
+		metadata.cssPositionGeometryClamps = doc.cssDiagnostics.positionGeometryClamps;
+		metadata.cssPositionUnsupportedTable = doc.cssDiagnostics.positionUnsupportedTable;
+		metadata.cssPositionedEvidenceRecords = doc.cssDiagnostics.positionedEvidenceRecords;
+		metadata.cssPositionedEvidence = doc.cssDiagnostics.positionedEvidence;
 		metadata.cssBoxSizingContentBox = 0;
 		metadata.cssBoxSizingBorderBox = 0;
 		metadata.cssWidthAutoResolutions = 0;
@@ -2625,6 +2741,31 @@ namespace {
 		metadata.cssFloatBfcDepthClamps = doc.cssDiagnostics.floatBfcDepthClamps;
 		metadata.cssFloatEvidenceRecords = doc.cssDiagnostics.floatEvidenceRecords;
 		metadata.cssFloatEvidence = doc.cssDiagnostics.floatEvidence;
+		metadata.cssPositionStatic = doc.cssDiagnostics.positionStatic;
+		metadata.cssPositionRelative = doc.cssDiagnostics.positionRelative;
+		metadata.cssPositionAbsolute = doc.cssDiagnostics.positionAbsolute;
+		metadata.cssPositionUnsupportedFixed = doc.cssDiagnostics.positionUnsupportedFixed;
+		metadata.cssPositionUnsupportedSticky = doc.cssDiagnostics.positionUnsupportedSticky;
+		metadata.cssRelativeOffsets = doc.cssDiagnostics.relativeOffsets;
+		metadata.cssRelativePercentageOffsets = doc.cssDiagnostics.relativePercentageOffsets;
+		metadata.cssAbsoluteBoxes = doc.cssDiagnostics.absoluteBoxes;
+		metadata.cssAbsoluteBlockifications = doc.cssDiagnostics.absoluteBlockifications;
+		metadata.cssPositionedContainingBlocks = doc.cssDiagnostics.positionedContainingBlocks;
+		metadata.cssPositionRootFallbacks = doc.cssDiagnostics.positionRootFallbacks;
+		metadata.cssPositionAncestryClamps = doc.cssDiagnostics.positionAncestryClamps;
+		metadata.cssAbsoluteStaticPositionUses = doc.cssDiagnostics.absoluteStaticPositionUses;
+		metadata.cssAbsoluteShrinkToFit = doc.cssDiagnostics.absoluteShrinkToFit;
+		metadata.cssAbsoluteOutOfFlow = doc.cssDiagnostics.absoluteOutOfFlow;
+		metadata.cssPositionDocumentExtentExtensions = doc.cssDiagnostics.positionDocumentExtentExtensions;
+		metadata.cssZIndexAuto = doc.cssDiagnostics.zIndexAuto;
+		metadata.cssZIndexNegative = doc.cssDiagnostics.zIndexNegative;
+		metadata.cssZIndexZero = doc.cssDiagnostics.zIndexZero;
+		metadata.cssZIndexPositive = doc.cssDiagnostics.zIndexPositive;
+		metadata.cssPositionHitOcclusions = doc.cssDiagnostics.positionHitOcclusions;
+		metadata.cssPositionGeometryClamps = doc.cssDiagnostics.positionGeometryClamps;
+		metadata.cssPositionUnsupportedTable = doc.cssDiagnostics.positionUnsupportedTable;
+		metadata.cssPositionedEvidenceRecords = doc.cssDiagnostics.positionedEvidenceRecords;
+		metadata.cssPositionedEvidence = doc.cssDiagnostics.positionedEvidence;
 		metadata.cssInlineItems = static_cast<int>(std::min<size_t>(std::numeric_limits<int>::max(), inlineSnapshot.itemCount));
 		metadata.cssInlineTextRuns = inlineSnapshot.textRuns;
 		metadata.cssInlineWhitespaceRuns = inlineSnapshot.whitespaceRuns;
@@ -4197,7 +4338,8 @@ namespace {
 	{
 		for (int i = 0; i < blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
 			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
-			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0) continue;
+			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0 ||
+				candidate.style.position == PositionMode::Absolute) continue;
 			if (cssBlockParentSerial(doc, candidate) == parentSerial) return true;
 		}
 		return false;
@@ -4207,7 +4349,8 @@ namespace {
 	{
 		for (int i = blockIndex + 1; i < static_cast<int>(doc.blocks.size()); ++i) {
 			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
-			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0) continue;
+			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0 ||
+				candidate.style.position == PositionMode::Absolute) continue;
 			if (cssBlockParentSerial(doc, candidate) == parentSerial) return true;
 		}
 		return false;
@@ -4297,6 +4440,12 @@ namespace {
 			mix(static_cast<uint64_t>(style.floatMode)); mix(static_cast<uint64_t>(style.clearMode));
 			mix(static_cast<uint64_t>(style.width)); mix(static_cast<uint64_t>(style.widthPercent));
 			mix(static_cast<uint64_t>(style.maxWidth)); mix(static_cast<uint64_t>(style.maxWidthPercent));
+			mix(static_cast<uint64_t>(style.position));
+			mix(static_cast<uint64_t>(style.topValue.type)); mix(static_cast<uint64_t>(style.topValue.value));
+			mix(static_cast<uint64_t>(style.rightValue.type)); mix(static_cast<uint64_t>(style.rightValue.value));
+			mix(static_cast<uint64_t>(style.bottomValue.type)); mix(static_cast<uint64_t>(style.bottomValue.value));
+			mix(static_cast<uint64_t>(style.leftValue.type)); mix(static_cast<uint64_t>(style.leftValue.value));
+			mix(static_cast<uint64_t>(style.zIndexAuto)); mix(static_cast<uint64_t>(style.zIndex));
 		};
 		mix(static_cast<uint64_t>(doc.blocks.size()));
 		mixStyle(doc.bodyStyle);
@@ -4328,7 +4477,8 @@ namespace {
 	for (int i = blockIndex - 1; i >= 0; --i) {
 			const DocBlock& block = doc.blocks[static_cast<size_t>(i)];
 			if (block.style.displayNone || block.atomicContainerSerial != 0 ||
-				block.style.floatMode != FloatMode::None) continue;
+				block.style.floatMode != FloatMode::None ||
+				block.style.position == PositionMode::Absolute) continue;
 			return i;
 		}
 		return -1;
@@ -4398,7 +4548,8 @@ namespace {
 			record.heightDefinite = definiteHeight.definite;
 			record.minHeightPreventsCollapse = definiteMinHeight.definite;
 			if (record.bfcReason == "atomic-context") ++const_cast<WebDocument&>(doc).cssDiagnostics.bfcAtomic;
-			if (block.style.displayNone || block.atomicContainerSerial != 0) {
+			if (block.style.displayNone || block.atomicContainerSerial != 0 ||
+				block.style.position == PositionMode::Absolute) {
 				record.incomplete = block.atomicContainerSerial != 0;
 				continue;
 			}
@@ -5097,7 +5248,8 @@ namespace {
 		for (const WebInlineItem& item : doc.inlineItems) {
 			if (item.kind == InlineItemKind::ForcedBreak || item.flowSerial == 0) continue;
 			const WebStyle* style = inlineOwnerStyle(doc, item, doc.bodyStyle);
-			if (!style || style->floatMode == FloatMode::None || style->displayNone) continue;
+			if (!style || style->floatMode == FloatMode::None || style->displayNone ||
+				style->position == PositionMode::Absolute) continue;
 			if (item.ownerSerial != 0 && std::find(seenOwners.begin(), seenOwners.end(), item.ownerSerial) != seenOwners.end()) {
 				++mutableDoc.cssDiagnostics.floatScopeSuppressions;
 				continue;
@@ -5732,7 +5884,8 @@ namespace {
 	static CssPaintRect cssClipRectForHit(const WebDocument& doc, int blockIndex,
 		const DocBlock& block, int outerX, int boxY, int outerW, int outerH, int scrollOffset)
 	{
-		return cssBlockVisibleClip(doc, blockIndex, block, outerX, boxY, outerW, outerH, scrollOffset);
+		(void)block;
+		return cssPositionedClipForBlock(doc, blockIndex, outerX, boxY, outerW, outerH, scrollOffset);
 	}
 
 	static CssPaintRect cssClipHitTarget(const CssPaintRect& target, const CssPaintRect& clip)
@@ -5858,6 +6011,651 @@ namespace {
 		geometry.constraintConflict = geometry.constraintConflict || heightConflict;
 		geometry.clamped = geometry.clamped || heightClamped;
 		return geometry;
+	}
+
+	static CssPositionBox cssPositionRootBox()
+	{
+		CssPositionBox box;
+		box.border = CssPaintRect{kContentX, kContentY, kContentW, kContentH};
+		box.padding = box.border;
+		box.content = box.border;
+		box.widthDefinite = true;
+		box.heightDefinite = true;
+		return box;
+	}
+
+	static CssPositionBox cssPositionBoxFromBorder(const CssPaintRect& border,
+		const WebStyle& style, bool widthDefinite, bool heightDefinite)
+	{
+		CssPositionBox box;
+		box.border = border;
+		const int borderLeft = cssBorderLeftPx(style);
+		const int borderRight = cssBorderRightPx(style);
+		const int borderTop = cssBorderTopPx(style);
+		const int borderBottom = cssBorderBottomPx(style);
+		box.padding = CssPaintRect{border.x + borderLeft, border.y + borderTop,
+			std::max(0, border.w - borderLeft - borderRight),
+			std::max(0, border.h - borderTop - borderBottom)};
+		box.content = CssPaintRect{box.padding.x + cssPaddingLeftPx(style, 0),
+			box.padding.y + cssPaddingTopPx(style, 0),
+			std::max(0, box.padding.w - cssPaddingLeftPx(style, 0) - cssPaddingRightPx(style, 0)),
+			std::max(0, box.padding.h - cssPaddingTopPx(style, 0) - cssPaddingBottomPx(style, 0))};
+		box.widthDefinite = widthDefinite;
+		box.heightDefinite = heightDefinite;
+		return box;
+	}
+
+	static int cssPositionResolveLength(const CssLengthValue& value, int basis,
+		bool basisDefinite, bool& unresolved, bool& clamped)
+	{
+		unresolved = false;
+		clamped = false;
+		if (!value.valid || value.type == CssLengthType::Unset || value.type == CssLengthType::Auto)
+			return 0;
+		int64_t result = value.value;
+		if (value.type == CssLengthType::Percent) {
+			if (!basisDefinite || basis < 0) {
+				unresolved = true;
+				return 0;
+			}
+			result = static_cast<int64_t>(basis) * value.value / 100;
+		}
+		if (result < -kCssPositionedGeometryCap || result > kCssPositionedGeometryCap) {
+			result = std::max<int64_t>(-kCssPositionedGeometryCap,
+				std::min<int64_t>(kCssPositionedGeometryCap, result));
+			clamped = true;
+		}
+		return static_cast<int>(result);
+	}
+
+	static const CssPositionedRecord* cssPositionedRecordForSerial(
+		const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0 ||
+			s_cssPositionLayoutSnapshot.url != doc.url ||
+			s_cssPositionLayoutSnapshot.blockCount != doc.blocks.size()) return nullptr;
+		for (const CssPositionedRecord& record : s_cssPositionLayoutSnapshot.records)
+			if (record.logicalSerial == serial) return &record;
+		return nullptr;
+	}
+
+	static const CssPositionedRecord* cssPositionedRecordForBlock(
+		const WebDocument& doc, int blockIndex)
+	{
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size()) ||
+			s_cssPositionLayoutSnapshot.url != doc.url ||
+			s_cssPositionLayoutSnapshot.blockCount != doc.blocks.size() ||
+			blockIndex >= static_cast<int>(s_cssPositionLayoutSnapshot.blockRecordIndices.size())) return nullptr;
+		const int index = s_cssPositionLayoutSnapshot.blockRecordIndices[static_cast<size_t>(blockIndex)];
+		if (index < 0 || index >= static_cast<int>(s_cssPositionLayoutSnapshot.records.size())) return nullptr;
+		return &s_cssPositionLayoutSnapshot.records[static_cast<size_t>(index)];
+	}
+
+	static CssPositionBox cssPositionBoxForSerial(const WebDocument& doc, uint64_t serial,
+		uint64_t* outOwnerSerial = nullptr)
+	{
+		if (outOwnerSerial) *outOwnerSerial = serial;
+		if (serial == 0) return cssPositionRootBox();
+		if (const CssPositionedRecord* positioned = cssPositionedRecordForSerial(doc, serial)) {
+			const WebStyle* style = cssStyleForSerial(doc, serial);
+			if (style) return cssPositionBoxFromBorder(
+				CssPaintRect{positioned->finalX, positioned->finalY,
+					positioned->usedWidth, positioned->usedHeight}, *style,
+				positioned->usedWidth > 0, positioned->usedHeight > 0);
+		}
+		for (int index = 0; index < static_cast<int>(doc.blocks.size()); ++index) {
+			const DocBlock& candidate = doc.blocks[static_cast<size_t>(index)];
+			if (!cssBlockContainsSerial(candidate, serial)) continue;
+			const CssAncestorBox ancestor = cssAncestorBoxForBlock(doc, serial, 0);
+			if (!ancestor.valid) break;
+			const WebStyle* style = cssStyleForSerial(doc, serial);
+			if (!style) break;
+			const bool definiteWidth = style->widthValue.type == CssLengthType::Px ||
+				style->widthValue.type == CssLengthType::Zero || style->width >= 0;
+			const bool definiteHeight = style->heightValue.type == CssLengthType::Px ||
+				style->heightValue.type == CssLengthType::Zero || style->height >= 0;
+			CssPaintRect border{ancestor.x, ancestor.y, ancestor.w, ancestor.h};
+			if (style->position == PositionMode::Relative) {
+				bool unresolved = false;
+				bool clamped = false;
+				const int dx = style->leftValue.valid && style->leftValue.type != CssLengthType::Auto
+					? cssPositionResolveLength(style->leftValue, ancestor.w, true, unresolved, clamped)
+					: (style->rightValue.valid && style->rightValue.type != CssLengthType::Auto
+						? -cssPositionResolveLength(style->rightValue, ancestor.w, true, unresolved, clamped) : 0);
+				const int dy = style->topValue.valid && style->topValue.type != CssLengthType::Auto
+					? cssPositionResolveLength(style->topValue, ancestor.h, definiteHeight, unresolved, clamped)
+					: (style->bottomValue.valid && style->bottomValue.type != CssLengthType::Auto
+						? -cssPositionResolveLength(style->bottomValue, ancestor.h, definiteHeight, unresolved, clamped) : 0);
+				border.x = cssBoundedGeometryAdd(border.x, dx);
+				border.y = cssBoundedGeometryAdd(border.y, dy);
+			}
+			return cssPositionBoxFromBorder(border, *style, definiteWidth, definiteHeight);
+		}
+		if (outOwnerSerial) *outOwnerSerial = 0;
+		return cssPositionRootBox();
+	}
+
+	static int cssPositionRelativeAncestorDelta(const WebDocument& doc, int blockIndex,
+		int* outX = nullptr, int* outY = nullptr)
+	{
+		int deltaX = 0;
+		int deltaY = 0;
+		if (blockIndex >= 0 && blockIndex < static_cast<int>(doc.blocks.size())) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+			int depth = 0;
+			for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+				if (++depth > static_cast<int>(kCssPositionedAncestryCap)) break;
+				const CssPositionedRecord* record = cssPositionedRecordForSerial(doc, it->serial);
+				if (record && record->mode == PositionMode::Relative) {
+					deltaX = cssBoundedGeometryAdd(deltaX, record->finalX - record->normalX);
+					deltaY = cssBoundedGeometryAdd(deltaY, record->finalY - record->normalY);
+					continue;
+				}
+				const WebStyle* style = cssStyleForSerial(doc, it->serial);
+				if (!style || style->position != PositionMode::Relative) continue;
+				for (const DocBlock& candidate : doc.blocks) {
+					if (!cssBlockContainsSerial(candidate, it->serial)) continue;
+					const CssAncestorBox base = cssAncestorBoxForBlock(doc, it->serial, 0);
+					const CssPositionBox shifted = cssPositionBoxForSerial(doc, it->serial);
+					if (base.valid) {
+						deltaX = cssBoundedGeometryAdd(deltaX, shifted.border.x - base.x);
+						deltaY = cssBoundedGeometryAdd(deltaY, shifted.border.y - base.y);
+					}
+					break;
+				}
+			}
+		}
+		if (outX) *outX = deltaX;
+		if (outY) *outY = deltaY;
+		return std::max(std::abs(deltaX), std::abs(deltaY));
+	}
+
+	static int cssPositionPreferredOuterWidth(const DocBlock& block, const WebDocument& doc,
+		int containingWidth)
+	{
+		const int edges = cssHorizontalBoxEdges(block.style,
+			block.type == BlockType::Preformatted);
+		if (block.type == BlockType::Image) {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(block, std::max(1, containingWidth), imageW, imageH);
+			return std::max(1, std::min(kCssPositionedGeometryCap,
+				cssBoundedGeometryAdd(imageW, edges)));
+		}
+		if (isFormControlBlock(block))
+			return std::max(1, std::min(kCssPositionedGeometryCap,
+				blockFormControlIntrinsicWidth(block) + edges));
+		int longest = 0;
+		size_t start = 0;
+		while (start <= block.text.size()) {
+			size_t end = block.text.find_first_of(" \t\r\n", start);
+			if (end == std::string::npos) end = block.text.size();
+			longest = std::max(longest, static_cast<int>(end - start));
+			if (end == block.text.size()) break;
+			start = end + 1;
+		}
+		const int preferredContent = std::max(kCharW, longest * kCharW);
+		return std::max(1, std::min(kCssPositionedGeometryCap,
+			cssBoundedGeometryAdd(preferredContent, edges)));
+	}
+
+	static int cssPositionAutoContentHeight(const DocBlock& block, const WebDocument& doc,
+		int outerWidth)
+	{
+		const int paddingTop = cssPaddingTopPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingRight = cssPaddingRightPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingBottom = cssPaddingBottomPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int borders = cssVerticalBoxEdges(block.style, block.type == BlockType::Preformatted) - paddingTop - paddingBottom;
+		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight - borders);
+		const int lineHeight = blockTextLineHeight(block);
+		int contentHeight = lineHeight;
+		switch (block.type) {
+		case BlockType::Heading:
+			contentHeight = std::max(lineHeight + 4,
+				cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : 20) + 2);
+			break;
+		case BlockType::Paragraph:
+		case BlockType::Link:
+		case BlockType::ListItem:
+		case BlockType::Preformatted:
+		case BlockType::FormLabel:
+			contentHeight = wrappedBlockHeight(block,
+				std::max(1, innerWidth / kCharW), lineHeight);
+			break;
+		case BlockType::Image: {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(block, std::max(1, innerWidth), imageW, imageH);
+			contentHeight = imageH;
+			break;
+		}
+		case BlockType::FormTextInput:
+		case BlockType::FormCheckbox:
+		case BlockType::FormRadio:
+		case BlockType::FormTextarea:
+		case BlockType::FormSelect:
+		case BlockType::FormSubmit:
+			contentHeight = blockFormControlHeight(block);
+			break;
+		}
+		(void)doc;
+		return std::max(1, contentHeight);
+	}
+
+	static int cssPositionStaticY(const WebDocument& doc, int blockIndex, const DocBlock& block);
+
+	static void buildCssPositionLayout(const WebDocument& doc,
+		CssPositionLayoutSnapshot& snapshot)
+	{
+		snapshot = CssPositionLayoutSnapshot{};
+		snapshot.url = doc.url;
+		snapshot.blockCount = doc.blocks.size();
+		snapshot.fingerprint = cssMarginLayoutFingerprint(doc);
+		snapshot.generation = doc.formRuntimeState.documentGeneration;
+		snapshot.documentExtent = s_cssMarginLayoutSnapshot.documentHeight;
+		snapshot.blockRecordIndices.assign(doc.blocks.size(), -1);
+		gxos::web::CssDiagnostics& diagnostics = const_cast<WebDocument&>(doc).cssDiagnostics;
+		diagnostics.positionStatic = diagnostics.positionRelative = diagnostics.positionAbsolute = 0;
+		diagnostics.relativeOffsets = diagnostics.relativePercentageOffsets = 0;
+		diagnostics.absoluteBoxes = diagnostics.absoluteBlockifications = 0;
+		diagnostics.positionedContainingBlocks = diagnostics.positionRootFallbacks = 0;
+		diagnostics.positionAncestryClamps = diagnostics.absoluteStaticPositionUses = 0;
+		diagnostics.absoluteShrinkToFit = diagnostics.absoluteOutOfFlow = 0;
+		diagnostics.positionDocumentExtentExtensions = diagnostics.zIndexAuto = 0;
+		diagnostics.zIndexNegative = diagnostics.zIndexZero = diagnostics.zIndexPositive = 0;
+		diagnostics.positionHitOcclusions = diagnostics.positionGeometryClamps = 0;
+		diagnostics.positionUnsupportedTable = 0;
+		diagnostics.positionedEvidenceRecords = 0;
+		diagnostics.positionedEvidence.clear();
+		std::unordered_set<uint64_t> countedPositionSerials;
+		countedPositionSerials.reserve(std::min<size_t>(doc.computedStyles.size(), 256));
+		for (const CssComputedStyleRecord& computed : doc.computedStyles) {
+			if (!computed.valid || computed.serial == 0 || !countedPositionSerials.insert(computed.serial).second) continue;
+			if (computed.style.position == PositionMode::Static) ++diagnostics.positionStatic;
+			else if (computed.style.position == PositionMode::Relative) ++diagnostics.positionRelative;
+			else ++diagnostics.positionAbsolute;
+		}
+		for (const DocBlock& block : doc.blocks) {
+			if (block.elementMetadata.serial != 0 && countedPositionSerials.count(block.elementMetadata.serial) != 0) continue;
+			if (block.style.position == PositionMode::Static) ++diagnostics.positionStatic;
+			else if (block.style.position == PositionMode::Relative) ++diagnostics.positionRelative;
+			else ++diagnostics.positionAbsolute;
+		}
+		std::unordered_set<uint64_t> positionedBlockSerials;
+		positionedBlockSerials.reserve(std::min<size_t>(doc.blocks.size(), 256));
+		for (const DocBlock& block : doc.blocks)
+			if (block.elementMetadata.serial != 0) positionedBlockSerials.insert(block.elementMetadata.serial);
+		for (const CssComputedStyleRecord& computed : doc.computedStyles) {
+			if (!computed.valid || computed.style.position != PositionMode::Relative ||
+				positionedBlockSerials.count(computed.serial) != 0) continue;
+			if ((computed.style.leftValue.valid && computed.style.leftValue.type == CssLengthType::Percent) ||
+				(computed.style.rightValue.valid && computed.style.rightValue.type == CssLengthType::Percent) ||
+				(computed.style.topValue.valid && computed.style.topValue.type == CssLengthType::Percent) ||
+				(computed.style.bottomValue.valid && computed.style.bottomValue.type == CssLengthType::Percent))
+				++diagnostics.relativePercentageOffsets;
+		}
+		for (int index = 0; index < static_cast<int>(doc.blocks.size()); ++index) {
+			if (snapshot.records.size() >= kCssPositionedBoxCap) {
+				++snapshot.ancestryClamps;
+				++diagnostics.positionAncestryClamps;
+				break;
+			}
+			const DocBlock& block = doc.blocks[static_cast<size_t>(index)];
+			if (block.style.displayNone || block.style.position == PositionMode::Static) continue;
+			CssPositionedRecord record;
+			record.blockIndex = index;
+			record.logicalSerial = block.elementMetadata.serial;
+			record.parentSerial = cssBlockParentSerial(doc, block);
+			record.mode = block.style.position;
+			record.top = block.style.topValue;
+			record.right = block.style.rightValue;
+			record.bottom = block.style.bottomValue;
+			record.left = block.style.leftValue;
+			record.zIndexAuto = block.style.zIndexAuto;
+			record.zIndex = std::max(-32767, std::min(32767, block.style.zIndex));
+			record.sourceOrder = index;
+			record.marginLeft = cssMarginLeftPx(block.style, 0);
+			record.marginRight = cssMarginRightPx(block.style, 0);
+			record.marginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
+			record.marginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
+			const bool inlinePositionedTag = block.tagName == "a" || block.tagName == "span" ||
+				block.tagName == "strong" || block.tagName == "b" || block.tagName == "em" ||
+				block.tagName == "i" || block.tagName == "code" || block.tagName == "small" ||
+				block.tagName == "kbd" || block.tagName == "samp";
+			if (record.mode == PositionMode::Absolute &&
+				(block.style.display == DisplayMode::Inline || inlinePositionedTag)) {
+				record.blockified = true;
+				++diagnostics.absoluteBlockifications;
+			}
+			if (record.mode == PositionMode::Absolute &&
+				(block.tagName == "table" || block.tagName == "tr" || block.tagName == "td" || block.tagName == "th")) {
+				record.complete = false;
+				record.incompleteReason = "positioned-table-unsupported";
+				++diagnostics.positionUnsupportedTable;
+			}
+			const int availableWidth = blockAvailableWidth(block, doc);
+			const int normalWidth = blockOuterWidth(block, availableWidth, &record.clamped);
+			record.normalX = blockOuterX(block, doc, availableWidth, normalWidth);
+			record.normalY = kContentY + cssPositionStaticY(doc, index, block);
+			record.staticX = record.normalX;
+			record.staticY = record.normalY;
+			record.usedWidth = normalWidth;
+			record.usedHeight = std::max(1, blockTotalHeight(block, doc, false) -
+				record.marginTop - record.marginBottom);
+			if (record.usedHeight <= 0) record.usedHeight = std::max(1, cssPositionAutoContentHeight(block, doc, normalWidth) +
+				cssVerticalBoxEdges(block.style, block.type == BlockType::Preformatted));
+			if (record.mode == PositionMode::Relative) {
+				const CssBlockGeometry normalGeometry = cssGeometryForBlock(doc, index);
+				record.normalX = normalGeometry.outerX;
+				record.normalY = normalGeometry.outerY;
+				record.staticX = record.normalX;
+				record.staticY = record.normalY;
+				record.usedWidth = std::max(1, normalGeometry.outerWidth);
+				record.usedHeight = std::max(1, normalGeometry.outerHeight);
+			}
+			record.flowParticipation = record.mode == PositionMode::Relative;
+			record.parentHeightContribution = record.mode == PositionMode::Relative;
+			uint64_t containingSerial = 0;
+			CssPositionBox containing = cssPositionRootBox();
+			bool containingFallback = true;
+			if (record.mode == PositionMode::Absolute) {
+				int depth = 0;
+				for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+					if (++depth > static_cast<int>(kCssPositionedAncestryCap)) {
+						record.complete = false;
+						record.incompleteReason = "ancestry-depth-clamp";
+						++snapshot.ancestryClamps;
+						++diagnostics.positionAncestryClamps;
+						break;
+					}
+					const WebStyle* ancestorStyle = cssStyleForSerial(doc, it->serial);
+					if (!ancestorStyle || ancestorStyle->position == PositionMode::Static) continue;
+					if (ancestorStyle->display == DisplayMode::Inline) {
+						record.complete = false;
+						record.incompleteReason = "inline-containing-block-unsupported";
+						break;
+					}
+					containingSerial = it->serial;
+					if (const CssPositionedRecord* positioned = cssPositionedRecordForSerial(doc, it->serial)) {
+						const CssPaintRect border{positioned->finalX, positioned->finalY,
+							positioned->usedWidth, positioned->usedHeight};
+						containing = cssPositionBoxFromBorder(border, *ancestorStyle,
+							positioned->usedWidth > 0, positioned->usedHeight > 0);
+					} else {
+						containing = cssPositionBoxForSerial(doc, it->serial);
+					}
+					containingFallback = false;
+					break;
+				}
+				if (depth >= static_cast<int>(kCssPositionedAncestryCap) && containingFallback)
+					++diagnostics.positionAncestryClamps;
+			} else {
+				containingSerial = record.parentSerial;
+				if (containingSerial != 0) {
+					const WebStyle* parentStyle = cssStyleForSerial(doc, containingSerial);
+					if (parentStyle && parentStyle->display != DisplayMode::Inline) {
+						containing = cssPositionBoxForSerial(doc, containingSerial);
+						containingFallback = false;
+					}
+				}
+			}
+			record.containingBlockSerial = containingSerial;
+			record.containingBlockType = containingFallback ? "root-fallback" :
+				(record.mode == PositionMode::Absolute ? "positioned-ancestor" : "parent-block");
+			record.containingBlock = containing;
+			if (containingFallback) {
+				++diagnostics.positionRootFallbacks;
+			} else {
+				++diagnostics.positionedContainingBlocks;
+			}
+			snapshot.ancestryLookups++;
+			snapshot.maximumAncestryDepth = std::max(snapshot.maximumAncestryDepth,
+				static_cast<int>(block.ancestors.size()));
+			const int xBasis = std::max(0, containing.padding.w);
+			const int yBasis = std::max(0, containing.padding.h);
+			bool unresolved = false;
+			bool offsetClamped = false;
+			record.leftResolved = record.left.valid && record.left.type != CssLengthType::Auto;
+			record.rightResolved = record.right.valid && record.right.type != CssLengthType::Auto;
+			record.topResolved = record.top.valid && record.top.type != CssLengthType::Auto;
+			record.bottomResolved = record.bottom.valid && record.bottom.type != CssLengthType::Auto;
+			if (record.leftResolved) record.resolvedLeft = cssPositionResolveLength(record.left, xBasis,
+				containing.widthDefinite, unresolved, offsetClamped);
+			if (record.left.type == CssLengthType::Percent && record.leftResolved) {
+				if (unresolved) ++diagnostics.positionGeometryClamps;
+				else ++diagnostics.relativePercentageOffsets;
+			}
+			if (record.rightResolved) record.resolvedRight = cssPositionResolveLength(record.right, xBasis,
+				containing.widthDefinite, unresolved, offsetClamped);
+			if (record.right.type == CssLengthType::Percent && record.rightResolved) {
+				if (unresolved) ++diagnostics.positionGeometryClamps;
+				else ++diagnostics.relativePercentageOffsets;
+			}
+			if (record.topResolved) record.resolvedTop = cssPositionResolveLength(record.top, yBasis,
+				containing.heightDefinite, unresolved, offsetClamped);
+			if (record.top.type == CssLengthType::Percent && record.topResolved && unresolved)
+				record.topResolved = false;
+			if (record.top.type == CssLengthType::Percent && record.top.valid && !containing.heightDefinite)
+				++diagnostics.positionGeometryClamps;
+			if (record.bottomResolved) record.resolvedBottom = cssPositionResolveLength(record.bottom, yBasis,
+				containing.heightDefinite, unresolved, offsetClamped);
+			if (record.bottom.type == CssLengthType::Percent && record.bottomResolved && unresolved)
+				record.bottomResolved = false;
+			if (record.bottom.type == CssLengthType::Percent && record.bottom.valid && !containing.heightDefinite)
+				++diagnostics.positionGeometryClamps;
+			if (offsetClamped || record.top.clamped || record.right.clamped || record.bottom.clamped || record.left.clamped) {
+				record.clamped = true;
+				++snapshot.geometryClamps;
+				++diagnostics.positionGeometryClamps;
+			}
+			int ancestorDeltaX = 0;
+			int ancestorDeltaY = 0;
+			cssPositionRelativeAncestorDelta(doc, index, &ancestorDeltaX, &ancestorDeltaY);
+			if (record.mode == PositionMode::Relative) {
+				record.relativeShiftX = record.leftResolved ? record.resolvedLeft :
+					(record.rightResolved ? -record.resolvedRight : 0);
+				record.relativeShiftY = record.topResolved ? record.resolvedTop :
+					(record.bottomResolved ? -record.resolvedBottom : 0);
+				if (record.leftResolved || record.rightResolved || record.topResolved || record.bottomResolved) {
+					++diagnostics.relativeOffsets;
+				}
+				record.finalX = std::max(-kCssPositionedGeometryCap,
+					std::min(kCssPositionedGeometryCap, record.normalX + ancestorDeltaX + record.relativeShiftX));
+				record.finalY = std::max(-kCssPositionedGeometryCap,
+					std::min(kCssPositionedGeometryCap, record.normalY + ancestorDeltaY + record.relativeShiftY));
+			} else {
+				record.flowParticipation = false;
+				record.parentHeightContribution = false;
+				const bool widthSpecified = block.style.widthValue.valid &&
+					block.style.widthValue.type != CssLengthType::Auto;
+				const int edges = cssHorizontalBoxEdges(block.style, block.type == BlockType::Preformatted);
+				const int availableForFill = std::max(0, xBasis -
+					(record.leftResolved ? record.resolvedLeft : 0) -
+					(record.rightResolved ? record.resolvedRight : 0) - record.marginLeft - record.marginRight);
+				int preferredWidth = cssPositionPreferredOuterWidth(block, doc, xBasis);
+				if (!widthSpecified && record.leftResolved && record.rightResolved)
+					preferredWidth = availableForFill;
+				bool autoWidth = false;
+				bool unresolvedWidth = false;
+				bool widthConflict = false;
+				bool widthClamped = false;
+				const int usedWidth = resolveUsedOuterDimension(block.style,
+					block.style.widthValue, block.style.width, block.style.widthPercent,
+					block.style.minWidthValue, block.style.minWidth, block.style.minWidthPercent,
+					block.style.maxWidthValue, block.style.maxWidth, block.style.maxWidthPercent,
+					block.style.maxWidthNone, xBasis, preferredWidth, edges,
+					block.type == BlockType::Preformatted, &autoWidth, &unresolvedWidth,
+					&widthConflict, &widthClamped);
+				record.usedWidth = std::max(1, std::min(kCssPositionedGeometryCap, usedWidth));
+				if (autoWidth && !(record.leftResolved && record.rightResolved))
+					++diagnostics.absoluteShrinkToFit;
+				if (widthClamped || unresolvedWidth) record.clamped = true;
+				if (record.leftResolved) record.finalX = containing.padding.x + record.resolvedLeft + record.marginLeft;
+				else if (record.rightResolved) record.finalX = containing.padding.x + containing.padding.w - record.resolvedRight -
+					record.usedWidth - record.marginRight;
+				else {
+					record.finalX = record.staticX;
+					record.staticPositionUsed = true;
+					++diagnostics.absoluteStaticPositionUses;
+				}
+				const int heightEdges = cssVerticalBoxEdges(block.style, block.type == BlockType::Preformatted);
+				const int autoContentHeight = cssPositionAutoContentHeight(block, doc, record.usedWidth);
+				const int fallbackHeight = cssBoundedGeometryAdd(autoContentHeight, heightEdges);
+				bool autoHeight = false;
+				bool unresolvedHeight = false;
+				bool heightConflict = false;
+				bool heightClamped = false;
+				record.usedHeight = std::max(1, std::min(kCssPositionedGeometryCap,
+					resolveUsedOuterDimension(block.style,
+						block.style.heightValue, block.style.height, block.style.heightPercent,
+						block.style.minHeightValue, block.style.minHeight, block.style.minHeightPercent,
+						block.style.maxHeightValue, block.style.maxHeight, block.style.maxHeightPercent,
+						block.style.maxHeightNone, containing.padding.h, fallbackHeight, heightEdges,
+						block.type == BlockType::Preformatted, &autoHeight, &unresolvedHeight,
+						&heightConflict, &heightClamped)));
+				if (record.topResolved) record.finalY = containing.padding.y + record.resolvedTop + record.marginTop;
+				else if (record.bottomResolved) record.finalY = containing.padding.y + containing.padding.h - record.resolvedBottom -
+					record.usedHeight - record.marginBottom;
+				else {
+					record.finalY = record.staticY;
+					record.staticPositionUsed = true;
+					++diagnostics.absoluteStaticPositionUses;
+				}
+				if (widthClamped || heightClamped || unresolvedHeight) {
+					record.clamped = true;
+					++snapshot.geometryClamps;
+					++diagnostics.positionGeometryClamps;
+				}
+				++diagnostics.absoluteBoxes;
+				++diagnostics.absoluteOutOfFlow;
+			}
+			if (record.zIndexAuto) {
+				++diagnostics.zIndexAuto;
+				record.paintTier = 1;
+			} else if (record.zIndex < 0) {
+				++diagnostics.zIndexNegative;
+				record.paintTier = 0;
+			} else if (record.zIndex > 0) {
+				++diagnostics.zIndexPositive;
+				record.paintTier = 2;
+			} else {
+				++diagnostics.zIndexZero;
+				record.paintTier = 1;
+			}
+			record.documentExtentContribution = std::max(0, record.finalY - kContentY + record.usedHeight);
+		const bool visible = !block.style.displayNone && block.style.visibility != VisibilityMode::Hidden &&
+			block.style.effectiveOpacityPercent >= 0;
+			record.paintVisible = visible && record.usedWidth > 0 && record.usedHeight > 0;
+			record.hitVisible = record.paintVisible;
+			record.clip = cssPositionedClipForBlock(doc, index, record.finalX,
+			record.finalY, record.usedWidth, record.usedHeight, 0);
+			if (record.documentExtentContribution > snapshot.documentExtent && record.paintVisible) {
+				snapshot.documentExtent = std::min(kCssPositionedGeometryCap,
+					record.documentExtentContribution);
+				++diagnostics.positionDocumentExtentExtensions;
+			}
+			if (record.logicalSerial != 0 && snapshot.evidenceRecords < 32 && snapshot.evidence.size() < 32768 &&
+				(block.id.rfind("phase3g-", 0) == 0 || block.id.rfind("css3g-", 0) == 0)) {
+				std::ostringstream line;
+				line << "id=" << block.id << ",logical-serial=" << record.logicalSerial
+					<< ",parent-serial=" << record.parentSerial << ",position="
+					<< (record.mode == PositionMode::Relative ? "relative" : "absolute")
+					<< ",containing-block-serial=" << record.containingBlockSerial
+					<< ",containing-block-type=" << record.containingBlockType
+					<< ",containing-block=" << record.containingBlock.padding.x << ":" << record.containingBlock.padding.y << ":"
+					<< record.containingBlock.padding.w << ":" << record.containingBlock.padding.h
+					<< ",width-basis-definite=" << (record.containingBlock.widthDefinite ? "yes" : "no")
+					<< ",height-basis-definite=" << (record.containingBlock.heightDefinite ? "yes" : "no")
+					<< ",specified-offsets=" << cssNavigatorLengthEvidence(record.top) << ":"
+					<< cssNavigatorLengthEvidence(record.right) << ":"
+					<< cssNavigatorLengthEvidence(record.bottom) << ":"
+					<< cssNavigatorLengthEvidence(record.left)
+					<< ",resolved-offsets=" << (record.topResolved ? std::to_string(record.resolvedTop) : "auto") << ":"
+					<< (record.rightResolved ? std::to_string(record.resolvedRight) : "auto") << ":"
+					<< (record.bottomResolved ? std::to_string(record.resolvedBottom) : "auto") << ":"
+					<< (record.leftResolved ? std::to_string(record.resolvedLeft) : "auto")
+					<< ",static-position=" << record.staticX << ":" << record.staticY
+					<< ",normal-flow=" << record.normalX << ":" << record.normalY
+					<< ",final=" << record.finalX << ":" << record.finalY
+					<< ",used-size=" << record.usedWidth << ":" << record.usedHeight
+					<< ",flow-participation=" << (record.flowParticipation ? "yes" : "no")
+					<< ",parent-height-contribution=" << (record.parentHeightContribution ? "yes" : "no")
+					<< ",document-extent-contribution=" << record.documentExtentContribution
+					<< ",static-position-used=" << (record.staticPositionUsed ? "yes" : "no")
+					<< ",z-index=" << (record.zIndexAuto ? "auto" : std::to_string(record.zIndex))
+					<< ",source-order=" << record.sourceOrder << ",paint-tier=" << record.paintTier << ",blockified="
+					<< (record.blockified ? "yes" : "no") << ",clip=" << record.clip.x << ":" << record.clip.y << ":"
+					<< record.clip.w << ":" << record.clip.h << ",visible=" << (record.paintVisible ? "yes" : "no")
+					<< ",hit-visible=" << (record.hitVisible ? "yes" : "no")
+					<< ",incomplete-reason=" << record.incompleteReason << ",clamped=" << (record.clamped ? "yes" : "no") << "\n";
+				snapshot.evidence += line.str();
+				++snapshot.evidenceRecords;
+			}
+			const int recordIndex = static_cast<int>(snapshot.records.size());
+			snapshot.records.push_back(std::move(record));
+			snapshot.blockRecordIndices[static_cast<size_t>(index)] = recordIndex;
+		}
+		diagnostics.positionedEvidenceRecords = snapshot.evidenceRecords;
+		diagnostics.positionedEvidence = snapshot.evidence;
+		snapshot.valid = true;
+	}
+
+	static int cssPositionStaticY(const WebDocument& doc, int blockIndex, const DocBlock& block)
+	{
+		const int fallbackMargin = block.type == BlockType::Heading ? 10 : 4;
+		const int marginTop = cssMarginTopPx(block.style, fallbackMargin);
+		const int previous = cssPreviousVisibleFlowBlock(doc, blockIndex);
+		if (previous >= 0 && previous < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())) {
+			const CssMarginFlowRecord& prior = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(previous)];
+			return prior.usedY + prior.outerHeight + std::max(0, prior.usedMarginBottom) + marginTop;
+		}
+		return kHeadingY + std::max(0, doc.bodyStyle.marginTop) + marginTop;
+	}
+
+	static CssPaintRect cssPositionedClipForBlock(const WebDocument& doc, int blockIndex,
+		int outerX, int outerY, int outerW, int outerH, int scrollOffset)
+	{
+		CssPaintRect clip = cssViewportClipRect();
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return clip;
+		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+		int depth = 0;
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			const WebStyle* style = cssStyleForSerial(doc, ancestor.serial);
+			if (!style || (style->overflowX == OverflowMode::Visible && style->overflowY == OverflowMode::Visible)) continue;
+			if (++depth > static_cast<int>(kCssPositionedAncestryCap)) return CssPaintRect{0, 0, 0, 0};
+			CssPaintRect owner;
+			if (const CssPositionedRecord* positioned = cssPositionedRecordForSerial(doc, ancestor.serial)) {
+				owner = CssPaintRect{positioned->finalX, positioned->finalY,
+					positioned->usedWidth, positioned->usedHeight};
+				owner.y -= scrollOffset;
+			} else {
+				const CssAncestorBox box = cssAncestorBoxForBlock(doc, ancestor.serial, scrollOffset);
+				if (!box.valid) return CssPaintRect{0, 0, 0, 0};
+				owner = CssPaintRect{box.x, box.y, box.w, box.h};
+			}
+			clip = cssApplyOverflowClip(clip, *style, owner.x, owner.y, owner.w, owner.h);
+			if (clip.w <= 0 || clip.h <= 0) return clip;
+		}
+		return cssApplyOverflowClip(clip, block.style, outerX, outerY - scrollOffset, outerW, outerH);
+	}
+
+	static void ensureCssPositionLayout(const WebDocument& doc)
+	{
+		const uint64_t fingerprint = cssMarginLayoutFingerprint(doc);
+		if (s_cssPositionLayoutSnapshot.valid && s_cssPositionLayoutSnapshot.url == doc.url &&
+			s_cssPositionLayoutSnapshot.blockCount == doc.blocks.size() &&
+			s_cssPositionLayoutSnapshot.fingerprint == fingerprint &&
+			s_cssPositionLayoutSnapshot.generation == doc.formRuntimeState.documentGeneration) return;
+		buildCssPositionLayout(doc, s_cssPositionLayoutSnapshot);
+	}
+
+	static int cssPositionPaintRank(const WebDocument& doc, int blockIndex)
+	{
+		if (const CssPositionedRecord* record = cssPositionedRecordForBlock(doc, blockIndex))
+			return (record->paintTier == 0 ? 100000 : record->paintTier == 1 ? 250000 : 350000) + record->sourceOrder;
+		// Normal flow sits between negative and auto/positive positioned tiers.
+		return 150000 + blockIndex;
 	}
 
 	static void drawBlockBox(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style)
@@ -6632,6 +7430,37 @@ namespace {
 		out += "Current Document.css_float_blockification=inline-and-inline-block-to-bounded-float\n";
 		out += "Current Document.css_float_line_query=authoritative-y-interval-exclusion\n";
 		if (!metadata.cssFloatEvidence.empty()) out += "Current Document.css_float_evidence=" + metadata.cssFloatEvidence;
+		add("css_position_static", metadata.cssPositionStatic);
+		add("css_position_relative", metadata.cssPositionRelative);
+		add("css_position_absolute", metadata.cssPositionAbsolute);
+		add("css_position_unsupported_fixed", metadata.cssPositionUnsupportedFixed);
+		add("css_position_unsupported_sticky", metadata.cssPositionUnsupportedSticky);
+		add("css_relative_offsets", metadata.cssRelativeOffsets);
+		add("css_relative_percentage_offsets", metadata.cssRelativePercentageOffsets);
+		add("css_absolute_boxes", metadata.cssAbsoluteBoxes);
+		add("css_absolute_blockifications", metadata.cssAbsoluteBlockifications);
+		add("css_positioned_containing_blocks", metadata.cssPositionedContainingBlocks);
+		add("css_position_root_fallbacks", metadata.cssPositionRootFallbacks);
+		add("css_position_ancestry_clamps", metadata.cssPositionAncestryClamps);
+		add("css_absolute_static_position_uses", metadata.cssAbsoluteStaticPositionUses);
+		add("css_absolute_shrink_to_fit", metadata.cssAbsoluteShrinkToFit);
+		add("css_absolute_out_of_flow", metadata.cssAbsoluteOutOfFlow);
+		add("css_position_document_extent_extensions", metadata.cssPositionDocumentExtentExtensions);
+		add("css_z_index_auto", metadata.cssZIndexAuto);
+		add("css_z_index_negative", metadata.cssZIndexNegative);
+		add("css_z_index_zero", metadata.cssZIndexZero);
+		add("css_z_index_positive", metadata.cssZIndexPositive);
+		add("css_position_hit_occlusions", metadata.cssPositionHitOcclusions);
+		add("css_position_geometry_clamps", metadata.cssPositionGeometryClamps);
+		add("css_position_unsupported_table", metadata.cssPositionUnsupportedTable);
+		add("css_positioned_evidence_records", metadata.cssPositionedEvidenceRecords);
+		out += "Current Document.css_position_model=bounded-static-relative-absolute\n";
+		out += "Current Document.css_position_fixed_sticky=unsupported-diagnostic-not-aliased\n";
+		out += "Current Document.css_position_relative_flow=unshifted-normal-flow-with-final-visual-offset\n";
+		out += "Current Document.css_position_absolute_flow=out-of-flow-no-parent-height-contribution\n";
+		out += "Current Document.css_position_initial_containing_block=document-content-viewport\n";
+		out += "Current Document.css_z_index_model=positioned-only-negative-auto-zero-positive-source-order\n";
+		if (!metadata.cssPositionedEvidence.empty()) out += "Current Document.css_positioned_evidence=" + metadata.cssPositionedEvidence;
 		add("css_inline_items", metadata.cssInlineItems);
 		add("css_inline_text_runs", metadata.cssInlineTextRuns);
 		add("css_inline_whitespace_runs", metadata.cssInlineWhitespaceRuns);
@@ -9149,6 +9978,7 @@ void Navigator::renderDocument()
 	ensureCssMarginLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
+	ensureCssPositionLayout(s_currentDoc);
 	clampScrollOffset();
 	s_renderCounters = {};
 	s_cssClipDepth = 0;
@@ -9271,27 +10101,41 @@ void Navigator::renderDocument()
 		DocBlock anchor;
 		if (flow.anchorBlockIndex >= 0 && flow.anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 			anchor = s_currentDoc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
-		const int drawY = embedded ? parentY + flow.localOuterY :
-			kContentY + blockLayoutY(flow.anchorBlockIndex) - s_scrollOffset;
 		const int marginTop = cssMarginTopPx(flow.style, anchor.type == BlockType::Heading ? 10 : 4);
 		const int marginBottom = cssMarginBottomPx(flow.style, anchor.type == BlockType::ListItem ? 4 : 8);
+		const CssPositionedRecord* positionedAnchor = !embedded
+			? cssPositionedRecordForBlock(s_currentDoc, flow.anchorBlockIndex) : nullptr;
+		int drawY = embedded ? parentY + flow.localOuterY :
+			kContentY + blockLayoutY(flow.anchorBlockIndex) - s_scrollOffset;
+		int flowOuterX = embedded ? parentX + flow.localOuterX : flow.outerX;
+		int flowOuterWidth = flow.outerWidth;
+		int flowBoxHeight = std::max(1, flow.outerHeight > 0 ? flow.outerHeight : flow.totalHeight - marginTop - marginBottom);
+		if (positionedAnchor) {
+			drawY = positionedAnchor->finalY - s_scrollOffset - marginTop;
+			flowOuterX = positionedAnchor->finalX;
+			flowOuterWidth = std::max(1, positionedAnchor->usedWidth);
+			flowBoxHeight = std::max(1, positionedAnchor->usedHeight);
+		} else if (!embedded) {
+			int ancestorDeltaX = 0;
+			int ancestorDeltaY = 0;
+			cssPositionRelativeAncestorDelta(s_currentDoc, flow.anchorBlockIndex, &ancestorDeltaX, &ancestorDeltaY);
+			flowOuterX = cssBoundedGeometryAdd(flowOuterX, ancestorDeltaX);
+			drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+		}
 		const int boxY = embedded ? drawY : drawY + marginTop;
-		const int boxH = std::max(1, flow.outerHeight > 0 ? flow.outerHeight : flow.totalHeight - marginTop - marginBottom);
-		const int flowOuterX = embedded ? parentX + flow.localOuterX : flow.outerX;
+		const int boxH = flowBoxHeight;
 		const int borderTop = cssBorderTopPx(flow.style);
 		const int paddingTop = cssPaddingTopPx(flow.style, 0);
 		const int baseY = boxY + borderTop + paddingTop;
-		const bool ancestorClipPushed = !embedded && cssBlockHasOverflowAncestor(s_currentDoc, anchor) &&
-			cssPushPaintClip(cssBlockAncestorClip(s_currentDoc, anchor, s_scrollOffset));
+		const bool ancestorClipPushed = false;
 		s_cssPaintOpacityPercent = std::max(0, std::min(100, flow.style.effectiveOpacityPercent));
-		drawBlockBox(s_windowId, flowOuterX, boxY, flow.outerWidth, boxH, flow.style);
-		const bool blockClipPushed = (flow.style.overflowX != OverflowMode::Visible ||
-			flow.style.overflowY != OverflowMode::Visible) && cssPushPaintClip(
+		drawBlockBox(s_windowId, flowOuterX, boxY, flowOuterWidth, boxH, flow.style);
+		const bool blockClipPushed = cssPushPaintClip(
 			embedded ? CssPaintRect{flowOuterX + cssBorderLeftPx(flow.style), boxY + cssBorderTopPx(flow.style),
-				std::max(0, flow.outerWidth - cssBorderLeftPx(flow.style) - cssBorderRightPx(flow.style)),
+				std::max(0, flowOuterWidth - cssBorderLeftPx(flow.style) - cssBorderRightPx(flow.style)),
 				std::max(0, boxH - cssBorderTopPx(flow.style) - cssBorderBottomPx(flow.style))} :
-			cssBlockVisibleClip(s_currentDoc, flow.anchorBlockIndex, anchor, flowOuterX, boxY,
-				flow.outerWidth, boxH, s_scrollOffset));
+			cssPositionedClipForBlock(s_currentDoc, flow.anchorBlockIndex, flowOuterX, boxY,
+				flowOuterWidth, boxH, s_scrollOffset));
 		// Floats in an atomic/embedded BFC use the same flat record model, but
 		// their coordinates are local to that context.  Paint them while the
 		// containing atomic clip is active so nested targets cannot escape.
@@ -9350,8 +10194,14 @@ void Navigator::renderDocument()
 				}
 			}
 			s_cssPaintOpacityPercent = std::max(0, std::min(100, paintStyle.effectiveOpacityPercent));
-			const int fragX = (embedded ? parentX : 0) + flow.contentX + fragment.x;
-			const int fragY = baseY + fragment.y;
+			int fragX = (embedded ? parentX : 0) + flow.contentX + fragment.x;
+			int fragY = baseY + fragment.y;
+			const CssPositionedRecord* ownerPosition = cssPositionedRecordForSerial(s_currentDoc, item.ownerSerial);
+			const uint64_t anchorSerial = anchor.elementMetadata.serial;
+			if (ownerPosition && ownerPosition->logicalSerial != anchorSerial) {
+				fragX = cssBoundedGeometryAdd(fragX, ownerPosition->finalX - ownerPosition->normalX);
+				fragY = cssBoundedGeometryAdd(fragY, ownerPosition->finalY - ownerPosition->normalY);
+			}
 			if (fragment.kind == InlineItemKind::AtomicBlock &&
 				fragment.atomicResultIndex >= 0 && fragment.atomicResultIndex < static_cast<int>(s_inlineLayoutSnapshot.atomicResults.size())) {
 				const CssAtomicLayoutResult& atomic = s_inlineLayoutSnapshot.atomicResults[static_cast<size_t>(fragment.atomicResultIndex)];
@@ -9480,8 +10330,12 @@ void Navigator::renderDocument()
 		const WebStyle* floatStyle = computedStyleForSerial(s_currentDoc, floatRecord.logicalSerial);
 		if (floatStyle == nullptr) floatStyle = &floatBlock.style;
 		if (floatStyle->visibility == VisibilityMode::Hidden || floatStyle->displayNone) continue;
-		const int x = kContentX + floatRecord.borderBoxX;
-		const int y = kContentY + floatRecord.borderBoxY - s_scrollOffset;
+		int x = kContentX + floatRecord.borderBoxX;
+		int y = kContentY + floatRecord.borderBoxY - s_scrollOffset;
+		if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, floatRecord.blockIndex)) {
+			x = cssBoundedGeometryAdd(x, positioned->finalX - positioned->normalX);
+			y = cssBoundedGeometryAdd(y, positioned->finalY - positioned->normalY);
+		}
 		const int w = std::max(1, floatRecord.borderBoxW);
 		const int h = std::max(1, floatRecord.borderBoxH);
 		const int opacity = std::max(0, std::min(100, floatStyle->effectiveOpacityPercent));
@@ -9529,7 +10383,34 @@ void Navigator::renderDocument()
 		if (clipPushed) cssPopPaintClip();
 		s_cssPaintOpacityPercent = 100;
 	}
-	for (const DocBlock& block : s_currentDoc.blocks) {
+	// Positioning is painted in bounded tiers.  Normal source-order content is
+	// retained as one flat pass; supported positioned records are then inserted
+	// by negative/auto-zero/positive tier while preserving source order.
+	std::vector<int> normalRenderOrder;
+	std::vector<int> negativePositionedOrder;
+	std::vector<int> autoPositionedOrder;
+	std::vector<int> positivePositionedOrder;
+	for (int candidateIndex = 0; candidateIndex < static_cast<int>(s_currentDoc.blocks.size()); ++candidateIndex) {
+		const DocBlock& candidate = s_currentDoc.blocks[static_cast<size_t>(candidateIndex)];
+		const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, candidateIndex);
+		if (!positioned || candidate.style.floatMode != FloatMode::None) {
+			normalRenderOrder.push_back(candidateIndex);
+			continue;
+		}
+		if (positioned->paintTier == 0) negativePositionedOrder.push_back(candidateIndex);
+		else if (positioned->paintTier == 2) positivePositionedOrder.push_back(candidateIndex);
+		else autoPositionedOrder.push_back(candidateIndex);
+	}
+	std::vector<int> renderOrder;
+	renderOrder.reserve(normalRenderOrder.size() + negativePositionedOrder.size() +
+		autoPositionedOrder.size() + positivePositionedOrder.size());
+	renderOrder.insert(renderOrder.end(), negativePositionedOrder.begin(), negativePositionedOrder.end());
+	renderOrder.insert(renderOrder.end(), normalRenderOrder.begin(), normalRenderOrder.end());
+	renderOrder.insert(renderOrder.end(), autoPositionedOrder.begin(), autoPositionedOrder.end());
+	renderOrder.insert(renderOrder.end(), positivePositionedOrder.begin(), positivePositionedOrder.end());
+	for (int renderIndex : renderOrder) {
+		blockIndex = renderIndex;
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(renderIndex)];
 		if (block.atomicContainerSerial != 0) {
 			++blockIndex;
 			continue;
@@ -9564,8 +10445,19 @@ void Navigator::renderDocument()
 		const int borderLeft = cssBorderLeftPx(block.style);
 		const int lineHeight = blockTextLineHeight(block);
 		const int availableWidth = blockAvailableWidth(block, s_currentDoc);
-		const int outerWidth = blockOuterWidth(block, availableWidth);
-		const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+		int outerWidth = blockOuterWidth(block, availableWidth);
+		int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+		if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
+			outerWidth = std::max(1, positioned->usedWidth);
+			outerX = positioned->finalX;
+			drawY = positioned->finalY - s_scrollOffset - blockMarginTop;
+		} else {
+			int ancestorDeltaX = 0;
+			int ancestorDeltaY = 0;
+			cssPositionRelativeAncestorDelta(s_currentDoc, blockIndex, &ancestorDeltaX, &ancestorDeltaY);
+			outerX = cssBoundedGeometryAdd(outerX, ancestorDeltaX);
+			drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+		}
 		const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 		const uint64_t listOrdinal = block.type == BlockType::ListItem ? blockListOrdinal(s_currentDoc, blockIndex) : 1;
 		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block, listOrdinal) : 0;
@@ -9714,6 +10606,10 @@ void Navigator::renderDocument()
 		bool nextIsHeading = (blockIndex + 1 < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[blockIndex + 1].type == BlockType::Heading);
 		int blockH = blockTotalHeight(block, s_currentDoc, nextIsHeading);
+		if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
+			blockH = blockMarginTop + positioned->usedHeight + blockMarginBottom +
+				(nextIsHeading ? 10 : 0);
+		}
 		if (drawY + blockH < kContentY || drawY > kContentY + kContentH) {
 			++blockIndex;
 			continue;
@@ -9745,13 +10641,10 @@ void Navigator::renderDocument()
 		const int boxY = drawY + blockMarginTop;
 		const int boxH = std::max(1, blockH - blockMarginTop - blockMarginBottom - (nextIsHeading ? 10 : 0));
 		s_cssPaintOpacityPercent = std::max(0, std::min(100, block.style.effectiveOpacityPercent));
-		const bool ancestorClipPushed = cssBlockHasOverflowAncestor(s_currentDoc, block) &&
-			cssPushPaintClip(cssBlockAncestorClip(s_currentDoc, block, s_scrollOffset));
+		const bool ancestorClipPushed = false;
 		drawBlockBox(s_windowId, outerX, boxY, outerWidth, boxH, block.style);
-		const bool pushedBlockClip = block.style.overflowX != OverflowMode::Visible ||
-			block.style.overflowY != OverflowMode::Visible;
-		const bool blockClipPushed = pushedBlockClip && cssPushPaintClip(
-			cssBlockVisibleClip(s_currentDoc, blockIndex, block, outerX, boxY, outerWidth, boxH, s_scrollOffset));
+		const bool blockClipPushed = cssPushPaintClip(
+			cssPositionedClipForBlock(s_currentDoc, blockIndex, outerX, boxY, outerWidth, boxH, s_scrollOffset));
 
 		switch (block.type) {
 		case BlockType::Heading:
@@ -11200,7 +12093,7 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 			layout.totalHeightPx, s_scrollOffset));
 		return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 	}
-	const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
+	int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
 	const int blockMarginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
 	const int blockMarginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
 	const int paddingTop = cssPaddingTopPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
@@ -11209,10 +12102,20 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 	const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
 	const int availableWidth = blockAvailableWidth(block, s_currentDoc);
 	const int outerWidth = blockOuterWidth(block, availableWidth);
-	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+	int resolvedOuterX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
+		resolvedOuterX = positioned->finalX;
+		drawY = positioned->finalY - s_scrollOffset - blockMarginTop;
+	} else {
+		int ancestorDeltaX = 0;
+		int ancestorDeltaY = 0;
+		cssPositionRelativeAncestorDelta(s_currentDoc, blockIndex, &ancestorDeltaX, &ancestorDeltaY);
+		resolvedOuterX = cssBoundedGeometryAdd(resolvedOuterX, ancestorDeltaX);
+		drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+	}
 	const int borderLeft = cssBorderLeftPx(block.style);
 	const int borderRight = cssBorderRightPx(block.style);
-	const int textX = blockContentLeftX(block, outerX);
+	const int textX = blockContentLeftX(block, resolvedOuterX);
 	int textW = 0;
 	int textH = 0;
 	switch (block.type) {
@@ -11244,7 +12147,7 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 	const CssPaintRect clipped = cssClipHitTarget(
 		CssPaintRect{textX, drawY + blockMarginTop + cssBorderTopPx(block.style) + paddingTop,
 			std::max(kCharW, textW), std::max(kLineH, textH + blockMarginBottom)},
-		cssClipRectForHit(s_currentDoc, blockIndex, block, outerX, boxY, outerWidth, boxH, s_scrollOffset));
+		cssClipRectForHit(s_currentDoc, blockIndex, block, resolvedOuterX, boxY, outerWidth, boxH, s_scrollOffset));
 	return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 }
 
@@ -12083,6 +12986,10 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 {
 	outLinkBlockIndex = -1;
+	ensureCssMarginLayout(s_currentDoc);
+	ensureCssFloatLayout(s_currentDoc);
+	ensureInlineLayout(s_currentDoc);
+	ensureCssPositionLayout(s_currentDoc);
 
 	if (toolbarButtonRect(kWidgetIdBack).contains(x, y))    return HitTarget::Back;
 	if (toolbarButtonRect(kWidgetIdForward).contains(x, y)) return HitTarget::Forward;
@@ -12104,6 +13011,7 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	int bestControlIndex = -1;
 	HitTarget bestControlTarget = HitTarget::None;
 	int bestControlDistance = std::numeric_limits<int>::max();
+	int bestControlPaintRank = -1;
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 		Rect controlRect{0, 0, 0, 0};
 		HitTarget controlTarget = HitTarget::None;
@@ -12128,8 +13036,10 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 			const int dx = x - (controlRect.x + controlRect.w / 2);
 			const int dy = y - (controlRect.y + controlRect.h / 2);
 			const int distance = dx * dx + dy * dy;
-			if (distance < bestControlDistance) {
+			const int paintRank = cssPositionPaintRank(s_currentDoc, i);
+			if (paintRank > bestControlPaintRank || (paintRank == bestControlPaintRank && distance < bestControlDistance)) {
 				bestControlDistance = distance;
+				bestControlPaintRank = paintRank;
 				bestControlIndex = i;
 				bestControlTarget = controlTarget;
 			}
@@ -12151,6 +13061,8 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 		}
 	}
 
+	int bestLinkIndex = -1;
+	int bestLinkPaintRank = -1;
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 		if (s_currentDoc.blocks[i].type == BlockType::Link) {
 			ensureInlineLayout(s_currentDoc);
@@ -12158,10 +13070,18 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 			const bool hasInlineFragments = inlineFragmentRectForBlock(i, false, inlineFragments);
 			if (inlineFragmentContainsPoint(i, x, y) ||
 				(!hasInlineFragments && linkBlockRect(i).contains(x, y))) {
-				outLinkBlockIndex = i;
-				return HitTarget::Link;
+				const int paintRank = cssPositionPaintRank(s_currentDoc, i);
+				if (paintRank >= bestLinkPaintRank) {
+					bestLinkPaintRank = paintRank;
+					bestLinkIndex = i;
+				}
 			}
 		}
+	}
+	if (bestLinkIndex >= 0) {
+		outLinkBlockIndex = bestLinkIndex;
+		if (bestLinkPaintRank >= 250000) ++s_currentDoc.cssDiagnostics.positionHitOcclusions;
+		return HitTarget::Link;
 	}
 	return HitTarget::None;
 }
@@ -13770,6 +14690,7 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	ensureCssMarginLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
+	ensureCssPositionLayout(s_currentDoc);
 	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
 		CssPaintRect target{kContentX + floatRecord->borderBoxX,
 			kContentY + floatRecord->borderBoxY - s_scrollOffset,
@@ -13798,8 +14719,17 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	const bool embedded = flow->contextSerial != 0 &&
 		atomicResultScreenRect(s_currentDoc, s_inlineLayoutSnapshot, flow->atomicResultIndex, s_scrollOffset, parentAtomic);
 	if (flow->contextSerial != 0 && !embedded) return false;
-	const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
-		kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset;
+		int flowDeltaX = 0;
+		int flowDeltaY = 0;
+		const CssPositionedRecord* flowPosition = cssPositionedRecordForBlock(s_currentDoc, flow->anchorBlockIndex);
+		if (flowPosition) {
+			flowDeltaX = flowPosition->finalX - flowPosition->normalX;
+			flowDeltaY = flowPosition->finalY - flowPosition->normalY;
+		} else if (!embedded) {
+			cssPositionRelativeAncestorDelta(s_currentDoc, flow->anchorBlockIndex, &flowDeltaX, &flowDeltaY);
+		}
+		const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
+			kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY;
 	const int boxY = embedded ? drawY : drawY + cssMarginTopPx(flow->style,
 		(flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading) ? 10 : 4);
@@ -13816,10 +14746,10 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 		const int x = (embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x;
 		const int y = embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y :
 			drawY + flow->contentOffsetY + fragment.y;
-		left = std::min(left, x);
-		top = std::min(top, y);
-		right = std::max(right, x + std::max(0, fragment.w));
-		bottom = std::max(bottom, y + std::max(0, fragment.h));
+			left = std::min(left, x + flowDeltaX);
+			top = std::min(top, y);
+			right = std::max(right, x + flowDeltaX + std::max(0, fragment.w));
+			bottom = std::max(bottom, y + std::max(0, fragment.h));
 		found = true;
 	}
 	if (!found || right <= left || bottom <= top) return false;
@@ -13843,6 +14773,7 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	ensureCssMarginLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
+	ensureCssPositionLayout(s_currentDoc);
 	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
 		CssPaintRect target{kContentX + floatRecord->borderBoxX,
 			kContentY + floatRecord->borderBoxY - s_scrollOffset,
@@ -13870,8 +14801,17 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	const bool embedded = flow->contextSerial != 0 &&
 		atomicResultScreenRect(s_currentDoc, s_inlineLayoutSnapshot, flow->atomicResultIndex, s_scrollOffset, parentAtomic);
 	if (flow->contextSerial != 0 && !embedded) return false;
+	int flowDeltaX = 0;
+	int flowDeltaY = 0;
+	const CssPositionedRecord* flowPosition = cssPositionedRecordForBlock(s_currentDoc, flow->anchorBlockIndex);
+	if (flowPosition) {
+		flowDeltaX = flowPosition->finalX - flowPosition->normalX;
+		flowDeltaY = flowPosition->finalY - flowPosition->normalY;
+	} else if (!embedded) {
+		cssPositionRelativeAncestorDelta(s_currentDoc, flow->anchorBlockIndex, &flowDeltaX, &flowDeltaY);
+	}
 	const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
-		kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset;
+		kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY;
 	const int boxY = embedded ? drawY : drawY + cssMarginTopPx(flow->style,
 		(flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading) ? 10 : 4);
@@ -13885,7 +14825,7 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	for (const InlineFragmentLayout& fragment : flow->fragments) {
 		if (!fragment.visible || fragment.whitespace || fragment.blockIndex != blockIndex) continue;
 		const CssPaintRect clipped = cssClipHitTarget(
-			CssPaintRect{(embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x,
+			CssPaintRect{(embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x + flowDeltaX,
 				embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y :
 					drawY + flow->contentOffsetY + fragment.y,
 				fragment.kind == InlineItemKind::AtomicBlock ? std::max(0, fragment.boxWidth) : std::max(0, fragment.w),
@@ -13908,12 +14848,22 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 	const int paddingRight = cssPaddingRightPx(block.style, 0);
 	const int availableWidth = blockAvailableWidth(block, s_currentDoc);
 	const int outerWidth = blockOuterWidth(block, availableWidth);
-	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	const int borderLeft = cssBorderLeftPx(block.style);
 	const int borderRight = cssBorderRightPx(block.style);
 	const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 	int relY  = blockLayoutY(blockIndex);
 	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
+	int resolvedX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
+		resolvedX = positioned->finalX + cssBorderLeftPx(block.style) + cssPaddingLeftPx(block.style, 0);
+		drawY = positioned->finalY - s_scrollOffset + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
+	} else {
+		int ancestorDeltaX = 0;
+		int ancestorDeltaY = 0;
+		cssPositionRelativeAncestorDelta(s_currentDoc, blockIndex, &ancestorDeltaX, &ancestorDeltaY);
+		resolvedX = cssBoundedGeometryAdd(resolvedX, ancestorDeltaX);
+		drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+	}
 	int h     = wrappedBlockHeight(block, std::max(1, innerWidth / kCharW), blockTextLineHeight(block));
 	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth);
 	const int boxY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset + blockMarginTop;
@@ -13922,8 +14872,8 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 			s_currentDoc.blocks[blockIndex + 1].type == BlockType::Heading) - blockMarginTop -
 			cssMarginBottomPx(block.style, 8));
 	const CssPaintRect clipped = cssClipHitTarget(
-		CssPaintRect{blockContentLeftX(block, outerX), drawY, w, h},
-		cssClipRectForHit(s_currentDoc, blockIndex, block, outerX, boxY, outerWidth, boxH, s_scrollOffset));
+		CssPaintRect{resolvedX, drawY, w, h},
+		cssClipRectForHit(s_currentDoc, blockIndex, block, resolvedX, boxY, outerWidth, boxH, s_scrollOffset));
 	return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 }
 
@@ -13940,9 +14890,19 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	const int paddingTop = cssPaddingTopPx(block.style, 0);
 	const int availableWidth = blockAvailableWidth(block, s_currentDoc);
 	const int outerWidth = blockOuterWidth(block, availableWidth);
-	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+	int resolvedX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	const int relY = blockLayoutY(blockIndex);
-	const int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + paddingTop;
+	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + paddingTop;
+	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
+		resolvedX = positioned->finalX + cssBorderLeftPx(block.style) + cssPaddingLeftPx(block.style, 0);
+		drawY = positioned->finalY - s_scrollOffset + cssBorderTopPx(block.style) + paddingTop;
+	} else {
+		int ancestorDeltaX = 0;
+		int ancestorDeltaY = 0;
+		cssPositionRelativeAncestorDelta(s_currentDoc, blockIndex, &ancestorDeltaX, &ancestorDeltaY);
+		resolvedX = cssBoundedGeometryAdd(resolvedX, ancestorDeltaX);
+		drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+	}
 	int w = blockFormControlWidth(block, availableWidth);
 	if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) {
 		// Keep the logical control hit box on the indicator.  Label text gets a
@@ -13956,8 +14916,8 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 			s_currentDoc.blocks[blockIndex + 1].type == BlockType::Heading) - blockMarginTop -
 			cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8));
 	const CssPaintRect clipped = cssClipHitTarget(
-		CssPaintRect{blockContentLeftX(block, outerX), drawY, w, formControlHeight(block)},
-		cssClipRectForHit(s_currentDoc, blockIndex, block, outerX, boxY, outerWidth, boxH, s_scrollOffset));
+		CssPaintRect{resolvedX, drawY, w, formControlHeight(block)},
+		cssClipRectForHit(s_currentDoc, blockIndex, block, resolvedX, boxY, outerWidth, boxH, s_scrollOffset));
 	return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 }
 
@@ -13965,6 +14925,9 @@ int Navigator::computeDocumentHeight()
 {
 	ensureInlineLayout(s_currentDoc);
 	ensureCssMarginLayout(s_currentDoc);
+	ensureCssPositionLayout(s_currentDoc);
+	if (s_cssPositionLayoutSnapshot.valid)
+		return std::max(s_cssMarginLayoutSnapshot.documentHeight, s_cssPositionLayoutSnapshot.documentExtent);
 	if (s_cssMarginLayoutSnapshot.valid) return s_cssMarginLayoutSnapshot.documentHeight;
 	int h = kHeadingY + (s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0);
 	const int n = static_cast<int>(s_currentDoc.blocks.size());

@@ -1187,6 +1187,52 @@ static std::string navigatorHostedSmokeDiagnostic() {
         cssPhase3fMetric("Current Document.css_float_table_cell_cases=") + ";evidence=" +
         summarizeText(cssPhase3fMetric("Current Document.css_float_evidence="), 1800));
 
+    bool cssPhase3gLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3g.html");
+    std::string cssPhase3gText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3gReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3gMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3gReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3gReport.find('\n', pos);
+        return cssPhase3gReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3G positioning fixture loads",
+        cssPhase3gLoaded &&
+        contains(cssPhase3gText, "Phase 3G Positioning Fixture") &&
+        contains(cssPhase3gText, "absolute left top link") &&
+        contains(cssPhase3gText, "absolute right control") &&
+        contains(cssPhase3gText, "absolute inline text is blockified") &&
+        contains(cssPhase3gText, "Following normal flow remains unaffected"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3G parser and containing-block diagnostics",
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_relative=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_absolute=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_relative_offsets=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_relative_percentage_offsets=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_boxes=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_blockifications=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_positioned_containing_blocks=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_root_fallbacks=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_out_of_flow=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_shrink_to_fit=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_document_extent_extensions=") &&
+        contains(cssPhase3gReport, "Current Document.css_position_fixed_sticky=unsupported-diagnostic-not-aliased") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_unsupported_fixed=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_unsupported_sticky=") &&
+        contains(cssPhase3gReport, "Current Document.css_positioned_evidence=id=phase3g-"),
+        "metrics=" + cssPhase3gMetric("Current Document.css_position_relative=") + ";" +
+        cssPhase3gMetric("Current Document.css_position_absolute=") + ";" +
+        cssPhase3gMetric("Current Document.css_relative_offsets=") + ";" +
+        cssPhase3gMetric("Current Document.css_relative_percentage_offsets=") + ";" +
+        cssPhase3gMetric("Current Document.css_absolute_boxes=") + ";" +
+        cssPhase3gMetric("Current Document.css_absolute_blockifications=") + ";" +
+        cssPhase3gMetric("Current Document.css_positioned_containing_blocks=") + ";" +
+        cssPhase3gMetric("Current Document.css_position_root_fallbacks=") + ";" +
+        cssPhase3gMetric("Current Document.css_absolute_out_of_flow=") + ";" +
+        cssPhase3gMetric("Current Document.css_absolute_shrink_to_fit=") + ";" +
+        cssPhase3gMetric("Current Document.css_position_document_extent_extensions=") + ";evidence=" +
+        summarizeText(cssPhase3gMetric("Current Document.css_positioned_evidence="), 2400));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();

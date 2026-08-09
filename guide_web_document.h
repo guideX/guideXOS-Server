@@ -261,6 +261,15 @@ enum class DisplayMode : uint8_t {
 	None,
 };
 
+// Phase 3G deliberately keeps positioning to the traditional, layout-local
+// subset.  Fixed and sticky are parser-diagnostic cases, never aliases for
+// absolute positioning.
+enum class PositionMode : uint8_t {
+	Static = 0,
+	Relative,
+	Absolute,
+};
+
 // Phase 3E keeps traditional physical floats deliberately narrow.  Logical
 // float values and other positioning modes remain unsupported and therefore
 // never fall through to a physical side by accident.
@@ -499,6 +508,13 @@ struct WebStyle {
 	bool     hasTextDecoration = false;
 	bool     displayNone = false;
 	DisplayMode display = DisplayMode::Block;
+	PositionMode position = PositionMode::Static;
+	CssLengthValue topValue;
+	CssLengthValue rightValue;
+	CssLengthValue bottomValue;
+	CssLengthValue leftValue;
+	bool     zIndexAuto = true;
+	int      zIndex = 0;
 	FloatMode floatMode = FloatMode::None;
 	ClearMode clearMode = ClearMode::None;
 	BoxSizingMode boxSizing = BoxSizingMode::ContentBox;
@@ -772,6 +788,33 @@ struct CssDiagnostics {
 	int    floatBfcDepthClamps = 0;
 	int    floatEvidenceRecords = 0;
 	std::string floatEvidence;
+	// Phase 3G bounded positioning diagnostics.  Geometry/evidence records are
+	// retained by Navigator; these counters stay compact and document-local.
+	int    positionStatic = 0;
+	int    positionRelative = 0;
+	int    positionAbsolute = 0;
+	int    positionUnsupportedFixed = 0;
+	int    positionUnsupportedSticky = 0;
+	int    relativeOffsets = 0;
+	int    relativePercentageOffsets = 0;
+	int    absoluteBoxes = 0;
+	int    absoluteBlockifications = 0;
+	int    positionedContainingBlocks = 0;
+	int    positionRootFallbacks = 0;
+	int    positionAncestryClamps = 0;
+	int    absoluteStaticPositionUses = 0;
+	int    absoluteShrinkToFit = 0;
+	int    absoluteOutOfFlow = 0;
+	int    positionDocumentExtentExtensions = 0;
+	int    zIndexAuto = 0;
+	int    zIndexNegative = 0;
+	int    zIndexZero = 0;
+	int    zIndexPositive = 0;
+	int    positionHitOcclusions = 0;
+	int    positionGeometryClamps = 0;
+	int    positionUnsupportedTable = 0;
+	int    positionedEvidenceRecords = 0;
+	std::string positionedEvidence;
 	int    marginCollapseEvidenceRecords = 0;
 	std::string marginCollapseEvidence;
 	uint32_t nextSourceOrder = 1;

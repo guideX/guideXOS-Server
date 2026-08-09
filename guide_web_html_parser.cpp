@@ -45,6 +45,8 @@ namespace {
 	constexpr int kCssLiteMaxFontSizePx = 72;
 	constexpr int kCssLiteMaxLineHeightPx = 96;
 	constexpr int kCssLiteMaxWidthPx = 2048;
+	constexpr int kCssLiteMaxPositionOffsetPx = 8192;
+	constexpr int kCssLiteMaxZIndex = 32767;
 	constexpr int kCssLiteMaxPercentage = 1000;
 	constexpr int kCssLiteMaxBorderWidthPx = 12;
 	constexpr size_t kCssLiteMaxStyleBlocks = 32;
@@ -96,6 +98,12 @@ namespace {
 		Italic,
 		TextDecoration,
 		Display,
+		Position,
+		Top,
+		Right,
+		Bottom,
+		Left,
+		ZIndex,
 		Float,
 		Clear,
 		BoxSizing,
@@ -818,6 +826,76 @@ static bool parseCssMarginValue(const std::string& rawValue,
 	out.type = pixels == 0 ? CssLengthType::Zero : CssLengthType::Px;
 	out.value = pixels;
 	out.valid = true;
+	return true;
+}
+
+// Position offsets retain their authored unit until Navigator has a definite
+// containing-block basis.  Unlike dimensions, signed px/percentage values are
+// valid; unsupported units and calc() remain invalid rather than becoming 0.
+static bool parseCssPositionOffset(const std::string& rawValue,
+	CssLengthValue& out, CssDiagnostics& diag)
+{
+	out = CssLengthValue();
+	std::string value = toLower(trim(rawValue));
+	if (value.empty()) return false;
+	if (value == "auto") {
+		out.type = CssLengthType::Auto;
+		out.valid = true;
+		return true;
+	}
+	bool percent = false;
+	double scale = 1.0;
+	if (value.size() >= 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "em") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 16.0;
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "pt") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 96.0 / 72.0;
+	} else if (!value.empty() && value.back() == '%') {
+		value.pop_back();
+		percent = true;
+	} else if (value != "0") {
+		return false;
+	}
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric)) return false;
+	const double scaled = numeric * scale;
+	if (!std::isfinite(scaled)) return false;
+	int payload = roundCssSignedNumber(scaled);
+	const int limit = percent ? kCssLiteMaxPercentage : kCssLiteMaxPositionOffsetPx;
+	if (payload < -limit || payload > limit) {
+		payload = std::max(-limit, std::min(limit, payload));
+		out.clamped = true;
+		++diag.clampedValueCount;
+		++diag.lengthValueClampCount;
+	}
+	out.type = payload == 0 ? CssLengthType::Zero :
+		(percent ? CssLengthType::Percent : CssLengthType::Px);
+	out.value = payload;
+	out.valid = true;
+	return true;
+}
+
+static bool parseCssZIndexValue(const std::string& rawValue,
+	bool& outAuto, int& outValue, CssDiagnostics& diag)
+{
+	const std::string value = toLower(trim(rawValue));
+	if (value == "auto") {
+		outAuto = true;
+		outValue = 0;
+		return true;
+	}
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric) || std::floor(numeric) != numeric) return false;
+	int parsed = roundCssSignedNumber(numeric);
+	if (parsed < -kCssLiteMaxZIndex || parsed > kCssLiteMaxZIndex) {
+		parsed = std::max(-kCssLiteMaxZIndex, std::min(kCssLiteMaxZIndex, parsed));
+		++diag.clampedValueCount;
+	}
+	outAuto = false;
+	outValue = parsed;
 	return true;
 }
 
@@ -2757,6 +2835,39 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		++diag.unsupportedDeclarationCount;
 		return false;
 	}
+	if (prop == "position") {
+		const std::string lower = toLower(val);
+		if (lower == "static") style.position = PositionMode::Static;
+		else if (lower == "relative") style.position = PositionMode::Relative;
+		else if (lower == "absolute") style.position = PositionMode::Absolute;
+		else {
+			if (lower == "fixed") ++diag.positionUnsupportedFixed;
+			else if (lower == "sticky") ++diag.positionUnsupportedSticky;
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::Position);
+	}
+	if (prop == "top" || prop == "right" || prop == "bottom" || prop == "left") {
+		CssLengthValue parsed;
+		if (!parseCssPositionOffset(val, parsed, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		if (prop == "top") style.topValue = parsed;
+		else if (prop == "right") style.rightValue = parsed;
+		else if (prop == "bottom") style.bottomValue = parsed;
+		else style.leftValue = parsed;
+		return accept(prop == "top" ? CssProperty::Top : prop == "right" ? CssProperty::Right :
+			prop == "bottom" ? CssProperty::Bottom : CssProperty::Left);
+	}
+	if (prop == "z-index") {
+		if (!parseCssZIndexValue(val, style.zIndexAuto, style.zIndex, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::ZIndex);
+	}
 	if (prop == "float") {
 		const std::string lower = toLower(val);
 		if (lower == "none") style.floatMode = FloatMode::None;
@@ -3372,6 +3483,15 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 		destination.display = source.display;
 		destination.displayNone = source.display == DisplayMode::None;
 		break;
+	case CssProperty::Position: destination.position = source.position; break;
+	case CssProperty::Top: destination.topValue = source.topValue; break;
+	case CssProperty::Right: destination.rightValue = source.rightValue; break;
+	case CssProperty::Bottom: destination.bottomValue = source.bottomValue; break;
+	case CssProperty::Left: destination.leftValue = source.leftValue; break;
+	case CssProperty::ZIndex:
+		destination.zIndexAuto = source.zIndexAuto;
+		destination.zIndex = source.zIndex;
+		break;
 	case CssProperty::Float: destination.floatMode = source.floatMode; break;
 	case CssProperty::Clear: destination.clearMode = source.clearMode; break;
 	case CssProperty::BoxSizing:
@@ -3610,6 +3730,20 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Display)) != 0) {
 		merged.display = overrideStyle.display;
 		merged.displayNone = overrideStyle.display == DisplayMode::None;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Position)) != 0)
+		merged.position = overrideStyle.position;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Top)) != 0)
+		merged.topValue = overrideStyle.topValue;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Right)) != 0)
+		merged.rightValue = overrideStyle.rightValue;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Bottom)) != 0)
+		merged.bottomValue = overrideStyle.bottomValue;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Left)) != 0)
+		merged.leftValue = overrideStyle.leftValue;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::ZIndex)) != 0) {
+		merged.zIndexAuto = overrideStyle.zIndexAuto;
+		merged.zIndex = overrideStyle.zIndex;
 	}
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::BoxSizing)) != 0)
 		merged.boxSizing = overrideStyle.boxSizing;
@@ -4273,9 +4407,11 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		id.rfind("phase2g-", 0) != 0 && id.rfind("css2g-", 0) != 0 &&
 		id.rfind("phase2h-", 0) != 0 && id.rfind("css2h-", 0) != 0 &&
 		id.rfind("phase3a-", 0) != 0 && id.rfind("css3a-", 0) != 0 &&
-		id.rfind("phase3e-", 0) != 0 && id.rfind("css3e-", 0) != 0) return;
+		id.rfind("phase3e-", 0) != 0 && id.rfind("css3e-", 0) != 0 &&
+		id.rfind("phase3g-", 0) != 0 && id.rfind("css3g-", 0) != 0) return;
 	const bool phase3aEvidence = id.rfind("phase3a-", 0) == 0 || id.rfind("css3a-", 0) == 0;
 	const bool phase3eEvidence = id.rfind("phase3e-", 0) == 0 || id.rfind("css3e-", 0) == 0;
+	const bool phase3gEvidence = id.rfind("phase3g-", 0) == 0 || id.rfind("css3g-", 0) == 0;
 	const bool phase2gEvidence = id.rfind("phase2g-", 0) == 0 || id.rfind("css2g-", 0) == 0;
 	const bool phase2hEvidence = id.rfind("phase2h-", 0) == 0 || id.rfind("css2h-", 0) == 0;
 	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
@@ -4394,6 +4530,27 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 			<< ",clear-specificity=" << clearWinner.specificity.idCount << "." << clearWinner.specificity.classCount << "." << clearWinner.specificity.elementCount
 			<< ",clear-source-order=" << clearWinner.sourceOrder
 			<< ",clear-important=" << (clearWinner.important ? "yes" : "no");
+	}
+	if (phase3gEvidence) {
+		const CssCascadeWinner& positionWinner = winners[static_cast<size_t>(CssProperty::Position)];
+		const CssCascadeWinner& topWinner = winners[static_cast<size_t>(CssProperty::Top)];
+		const CssCascadeWinner& leftWinner = winners[static_cast<size_t>(CssProperty::Left)];
+		const CssCascadeWinner& zIndexWinner = winners[static_cast<size_t>(CssProperty::ZIndex)];
+		auto positionName = [](PositionMode mode) {
+			return mode == PositionMode::Relative ? "relative" :
+				mode == PositionMode::Absolute ? "absolute" : "static";
+		};
+		oss << ",position=" << positionName(style.position)
+			<< ",top-specified=" << cssLengthEvidence(style.topValue)
+			<< ",right-specified=" << cssLengthEvidence(style.rightValue)
+			<< ",bottom-specified=" << cssLengthEvidence(style.bottomValue)
+			<< ",left-specified=" << cssLengthEvidence(style.leftValue)
+			<< ",z-index=" << (style.zIndexAuto ? "auto" : std::to_string(style.zIndex))
+			<< ",position-source-order=" << positionWinner.sourceOrder
+			<< ",position-important=" << (positionWinner.important ? "yes" : "no")
+			<< ",top-source-order=" << topWinner.sourceOrder
+			<< ",left-source-order=" << leftWinner.sourceOrder
+			<< ",z-index-source-order=" << zIndexWinner.sourceOrder;
 	}
 	if (phase2gEvidence || phase2hEvidence) {
 		oss << ",document-generation=" << doc.formRuntimeState.documentGeneration
@@ -4712,6 +4869,61 @@ static void applyDocumentStyles(WebDocument& doc)
 		}
 		return false;
 	};
+	// Absolutely positioned inline-level owners are promoted into the bounded
+	// block stream.  Their inline items are removed from the surrounding line
+	// flow so the out-of-flow box cannot leave a phantom gap or paint as a
+	// free-floating glyph run.
+	std::vector<uint64_t> positionedInlineAbsoluteSerials;
+	positionedInlineAbsoluteSerials.reserve(32);
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.serial == 0 || positionedInlineAbsoluteSerials.size() >= 256) break;
+		std::vector<HtmlElementRef> path;
+		if (!buildStructuralPath(doc, element.serial, path)) continue;
+		const WebStyle style = computePathStyle(doc, path, cache);
+		if (style.position == PositionMode::Absolute && style.display == DisplayMode::Inline && !style.displayNone)
+			positionedInlineAbsoluteSerials.push_back(element.serial);
+	}
+	for (uint64_t serial : positionedInlineAbsoluteSerials) {
+		const HtmlElementRef* element = nullptr;
+		for (const HtmlElementRef& candidate : doc.structuralElements)
+			if (candidate.serial == serial) { element = &candidate; break; }
+		if (!element) continue;
+		std::vector<HtmlElementRef> path;
+		if (!buildStructuralPath(doc, serial, path)) continue;
+		const WebStyle style = computePathStyle(doc, path, cache);
+		std::string text;
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (!serialWithin(item.ownerSerial, serial)) continue;
+			if (item.kind == InlineItemKind::TextRun) text += item.text;
+			else if (item.kind == InlineItemKind::ForcedBreak) text.push_back('\n');
+			if (text.size() >= kCssLiteMaxInlineTextBytes) {
+				text.resize(kCssLiteMaxInlineTextBytes);
+				break;
+			}
+		}
+		DocBlock* existing = nullptr;
+		for (DocBlock& block : doc.blocks) {
+			if (block.elementMetadata.serial == serial) { existing = &block; break; }
+		}
+		if (!existing) {
+			DocBlock promoted;
+			promoted.type = BlockType::Paragraph;
+			promoted.tagName = element->tagName;
+			promoted.text = text;
+			promoted.className = element->className;
+			promoted.id = element->id;
+			promoted.inlineStyle = element->inlineStyle;
+			promoted.elementMetadata = *element;
+			if (path.size() > 1) promoted.ancestors.assign(path.begin(), path.end() - 1);
+			promoted.style = style;
+			promoted.style.display = DisplayMode::Block;
+			promoted.inlineFlowSerial = 0;
+			doc.blocks.push_back(std::move(promoted));
+		} else {
+			existing->style.display = DisplayMode::Block;
+			existing->inlineFlowSerial = 0;
+		}
+	}
 	for (DocBlock& block : doc.blocks) {
 		uint64_t ownerSerial = block.elementMetadata.serial;
 		uint64_t atomicSerial = nearestInlineBlock(ownerSerial, true);
@@ -4728,6 +4940,14 @@ static void applyDocumentStyles(WebDocument& doc)
 	std::vector<WebInlineItem> normalizedInlineItems;
 	normalizedInlineItems.reserve(doc.inlineItems.size());
 	for (WebInlineItem item : doc.inlineItems) {
+		bool positionedInlineItem = false;
+		for (uint64_t serial : positionedInlineAbsoluteSerials) {
+			if (serialWithin(item.ownerSerial, serial)) {
+				positionedInlineItem = true;
+				break;
+			}
+		}
+		if (positionedInlineItem) continue;
 		const bool isMarker = item.kind == InlineItemKind::AtomicBlock;
 		if (isMarker) {
 			if (!isInlineBlockSerial(item.ownerSerial)) continue;
