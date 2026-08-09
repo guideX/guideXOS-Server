@@ -813,6 +813,24 @@ struct CssDiagnostics {
 	int    positionHitOcclusions = 0;
 	int    positionGeometryClamps = 0;
 	int    positionUnsupportedTable = 0;
+	// Phase 3H keeps stacking ownership bounded to positioning-created owners.
+	// These counters are evidence for the supported subset, not a general CSS
+	// stacking-context implementation.
+	int    positionStackingOwners = 0;
+	int    positionStackingDepthMax = 0;
+	int    positionStackingDepthClamps = 0;
+	int    positionNestedZRecords = 0;
+	int    positionNegativeZRecords = 0;
+	int    positionPositiveZRecords = 0;
+	int    positionEqualZSourceOrders = 0;
+	int    positionInlineFragmentOwners = 0;
+	int    positionInlineFragmentsShifted = 0;
+	int    positionInlineAncestryClamps = 0;
+	int    positionInlineContainingBlocks = 0;
+	int    positionInlineContainingBlockIncomplete = 0;
+	int    positionStaticSnapshots = 0;
+	int    positionStaticSnapshotFallbacks = 0;
+	int    positionLifecycleResets = 0;
 	int    positionedEvidenceRecords = 0;
 	std::string positionedEvidence;
 	int    marginCollapseEvidenceRecords = 0;

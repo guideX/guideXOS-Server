@@ -1233,6 +1233,58 @@ static std::string navigatorHostedSmokeDiagnostic() {
         cssPhase3gMetric("Current Document.css_position_document_extent_extensions=") + ";evidence=" +
         summarizeText(cssPhase3gMetric("Current Document.css_positioned_evidence="), 2400));
 
+    bool cssPhase3hLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3h.html");
+    std::string cssPhase3hText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3hReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3hMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3hReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3hReport.find('\n', pos);
+        return cssPhase3hReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3H deterministic fixture loads",
+        cssPhase3hLoaded &&
+        contains(cssPhase3hText, "Phase 3H Traditional Positioning Completion Fixture") &&
+        contains(cssPhase3hText, "nested child z 999 stays inside parent z 1") &&
+        contains(cssPhase3hText, "wrapped relative inline owner moves every fragment") &&
+        contains(cssPhase3hText, "wrapped relative inline containing block") &&
+        contains(cssPhase3hText, "relative float exclusion uses normal-flow geometry") &&
+        contains(cssPhase3hText, "opacity alpha only; no opacity stacking owner") &&
+        contains(cssPhase3hText, "relative list item with absolute child") &&
+        contains(cssPhase3hText, "relative table and cell classified safely") &&
+        contains(cssPhase3hText, "recomputation reload history generated page error page stale positioned hit blocked"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3H bounded stacking ownership and shared ordering",
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_stacking_owners=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_stacking_depth_max=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_nested_z_records=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_negative_z_records=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_positive_z_records=") &&
+        contains(cssPhase3hReport, "Current Document.css_position_stacking_contract=positioning-created-bounded-stacking-support") &&
+        contains(cssPhase3hReport, "Current Document.css_position_stacking_context_creators=positioned-non-auto-z-index-only") &&
+        contains(cssPhase3hReport, "Current Document.css_position_stacking_depth_cap=16") &&
+        contains(cssPhase3hReport, "Current Document.css_position_stacking_owner_cap=256") &&
+        contains(cssPhase3hReport, "stacking-owner-serial=") &&
+        contains(cssPhase3hReport, "paint-order-rank="),
+        "owners=" + cssPhase3hMetric("Current Document.css_position_stacking_owners=") + ";depth=" +
+        cssPhase3hMetric("Current Document.css_position_stacking_depth_max=") + ";nested=" +
+        cssPhase3hMetric("Current Document.css_position_nested_z_records=") + ";equal-z=" +
+        cssPhase3hMetric("Current Document.css_position_equal_z_source_orders=") + ";evidence=" +
+        summarizeText(cssPhase3hMetric("Current Document.css_positioned_evidence="), 2600));
+    add("CSS phase 3H inline fragments and containing blocks",
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_inline_fragment_owners=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_inline_fragments_shifted=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_inline_containing_blocks=") &&
+        contains(cssPhase3hReport, "Current Document.css_position_inline_containing_block=bounded-ltr-first-last-fragment-geometry") &&
+        contains(cssPhase3hReport, "Current Document.css_position_static_snapshots=") &&
+        contains(cssPhase3hReport, "Current Document.css_position_lifecycle_resets=") &&
+        contains(cssPhase3hReport, "Current Document.css_position_opacity_stacking=unsupported-lightweight-alpha-only"),
+        "inline-owners=" + cssPhase3hMetric("Current Document.css_position_inline_fragment_owners=") + ";shifted=" +
+        cssPhase3hMetric("Current Document.css_position_inline_fragments_shifted=") + ";inline-cb=" +
+        cssPhase3hMetric("Current Document.css_position_inline_containing_blocks=") + ";snapshots=" +
+        cssPhase3hMetric("Current Document.css_position_static_snapshots=") + ";lifecycle=" +
+        cssPhase3hMetric("Current Document.css_position_lifecycle_resets="));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();
