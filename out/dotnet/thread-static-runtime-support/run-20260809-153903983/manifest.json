@@ -1,0 +1,181 @@
+{
+    "startingHead":  "febf2c71ceb37a77a02c3d6c87f5434e25e2f40d",
+    "startingDirtyState":  [
+                               " M kernel/Makefile",
+                               " M kernel/core/include/kernel/nativeaot_pal_qemu_test.h",
+                               " M kernel/core/main.cpp",
+                               " M kernel/core/nativeaot_pal_qemu_test.cpp",
+                               " M samples/managed/HostLogProof/HostLogProof.csproj",
+                               " M samples/managed/HostLogProof/Program.cs",
+                               " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                               " M tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_managed_host_shims.cpp",
+                               "?? out/dotnet/thread-static-compile-check-2/",
+                               "?? out/dotnet/thread-static-compile-check/",
+                               "?? out/dotnet/thread-static-proof-build/",
+                               "?? out/dotnet/thread-static-runtime-support/",
+                               "?? scripts/smoke-nativeaot-thread-static-runtime-support-qemu.ps1",
+                               "?? tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_thread_static_diagnostics.h"
+                           ],
+    "proofMode":  "ThreadStaticReference",
+    "outcome":  "A",
+    "results":  [
+                    {
+                        "name":  "first-run",
+                        "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\run-20260809-153903983\\first-run\\serial.log",
+                        "serialSha256":  "D9C91F1A70869B2D814F84407DB7363D0189E61AAB34D19B1DF198EAD6D323FC",
+                        "result":  "PASS",
+                        "primitiveExpected":  false,
+                        "referenceExpected":  true,
+                        "fields":  {
+                                       "primitiveInitial":  "0x00000000",
+                                       "primitiveAssigned":  "0x00000000",
+                                       "primitiveReadback":  "0x00000000",
+                                       "referenceAssigned":  "0x0000000100A01FC0",
+                                       "referenceReadback":  "0x0000000100A01FC0",
+                                       "identityMatch":  "0x00000001",
+                                       "objectValid":  "0x00000001",
+                                       "runtimeThread":  "0x000000000392AC00",
+                                       "tlsBlock":  "0x000000000392ABD0",
+                                       "flsIdentity":  "0x000000000392AC00",
+                                       "threadStaticStorage":  "0x000000000392AC90",
+                                       "storageBase":  "0x0000000100A01F38",
+                                       "storageInitRequests":  "0x00000001",
+                                       "storageInitEntries":  "0x00000001",
+                                       "storageInitCompletions":  "0x00000001",
+                                       "storageAllocations":  "0x00000001",
+                                       "repeatedLookups":  "0x00000000",
+                                       "registeredThreads":  "0x00000001",
+                                       "finalMarker":  "0x7A510004"
+                                   }
+                    },
+                    {
+                        "name":  "repeat-1",
+                        "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\run-20260809-153903983\\repeat-1\\serial.log",
+                        "serialSha256":  "575EF6BFBCB32578A16DB7BA19D47BE0204EF7EC3D5BEB33F6D9300D0A27174E",
+                        "result":  "PASS",
+                        "primitiveExpected":  false,
+                        "referenceExpected":  true,
+                        "fields":  {
+                                       "primitiveInitial":  "0x00000000",
+                                       "primitiveAssigned":  "0x00000000",
+                                       "primitiveReadback":  "0x00000000",
+                                       "referenceAssigned":  "0x0000000100A01FC0",
+                                       "referenceReadback":  "0x0000000100A01FC0",
+                                       "identityMatch":  "0x00000001",
+                                       "objectValid":  "0x00000001",
+                                       "runtimeThread":  "0x000000000392AC00",
+                                       "tlsBlock":  "0x000000000392ABD0",
+                                       "flsIdentity":  "0x000000000392AC00",
+                                       "threadStaticStorage":  "0x000000000392AC90",
+                                       "storageBase":  "0x0000000100A01F38",
+                                       "storageInitRequests":  "0x00000001",
+                                       "storageInitEntries":  "0x00000001",
+                                       "storageInitCompletions":  "0x00000001",
+                                       "storageAllocations":  "0x00000001",
+                                       "repeatedLookups":  "0x00000000",
+                                       "registeredThreads":  "0x00000001",
+                                       "finalMarker":  "0x7A510004"
+                                   }
+                    },
+                    {
+                        "name":  "repeat-2",
+                        "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\run-20260809-153903983\\repeat-2\\serial.log",
+                        "serialSha256":  "4DFE5720C3CAD34A1B2BC9C11262ABB2952FC576B61CCFC640CD24EC187C1E76",
+                        "result":  "PASS",
+                        "primitiveExpected":  false,
+                        "referenceExpected":  true,
+                        "fields":  {
+                                       "primitiveInitial":  "0x00000000",
+                                       "primitiveAssigned":  "0x00000000",
+                                       "primitiveReadback":  "0x00000000",
+                                       "referenceAssigned":  "0x0000000100A01FC0",
+                                       "referenceReadback":  "0x0000000100A01FC0",
+                                       "identityMatch":  "0x00000001",
+                                       "objectValid":  "0x00000001",
+                                       "runtimeThread":  "0x000000000392AC00",
+                                       "tlsBlock":  "0x000000000392ABD0",
+                                       "flsIdentity":  "0x000000000392AC00",
+                                       "threadStaticStorage":  "0x000000000392AC90",
+                                       "storageBase":  "0x0000000100A01F38",
+                                       "storageInitRequests":  "0x00000001",
+                                       "storageInitEntries":  "0x00000001",
+                                       "storageInitCompletions":  "0x00000001",
+                                       "storageAllocations":  "0x00000001",
+                                       "repeatedLookups":  "0x00000000",
+                                       "registeredThreads":  "0x00000001",
+                                       "finalMarker":  "0x7A510004"
+                                   }
+                    }
+                ],
+    "proofKernelSha256":  "20C04BB817A6DF62147B126EC232BE8C22739627A674140114910F6862FD1485",
+    "qemuVersion":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "lockedNativeAot":  {
+                            "version":  "9.0.0",
+                            "architecture":  "AMD64",
+                            "gc":  "Workstation",
+                            "gcInterface":  "5.3",
+                            "ee":  "2",
+                            "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+                        },
+    "previousFault":  {
+                          "rip":  "0x1008E2BE",
+                          "cr2":  "0xFFFB5FF9",
+                          "bytes":  "48 8B 52 10",
+                          "instruction":  "mov rdx,QWORD PTR [rdx+0x10]",
+                          "effectiveAddress":  "0x00000000FFFB5FE9 + 0x10 = 0x00000000FFFB5FF9"
+                      },
+    "sourceMapping":  {
+                          "generatedMethod":  "S_P_CoreLib_Internal_Runtime_ThreadStatics__GetInlinedThreadStaticBaseSlow",
+                          "mapAddress":  "000000001008ae70",
+                          "source":  "Common/src/Internal/Runtime/ThreadStatics.cs:GetInlinedThreadStaticBaseSlow",
+                          "helpers":  [
+                                          "RhpGetModuleSection (managed RhGetModuleSection import)",
+                                          "RhGetThreadStaticStorage",
+                                          "RhRegisterInlinedThreadStaticRoot",
+                                          "RhpCheckedAssignRef"
+                                      ],
+                          "storage":  "Thread::GetThreadStaticStorage / RuntimeThreadLocals::m_pThreadLocalStatics plus InlinedThreadStaticRoot"
+                      },
+    "startingDiffStat":  " kernel/Makefile                                    |   2 +-\n .../core/include/kernel/nativeaot_pal_qemu_test.h  |   2 +-\n kernel/core/main.cpp                               |  36 ++-\n kernel/core/nativeaot_pal_qemu_test.cpp            | 170 +++++++++++++--\n samples/managed/HostLogProof/HostLogProof.csproj   |  12 +\n samples/managed/HostLogProof/Program.cs            | 108 ++++++++-\n .../src/platform/guidexos_nativeaot_platform.cpp   | 242 ++++++++++++++++++++-\n .../guidexos_nativeaot_managed_host_shims.cpp      |  21 ++\n 8 files changed, 566 insertions(+), 27 deletions(-)",
+    "proofMarkers":  [
+                         "7A510001",
+                         "7A510002",
+                         "7A510003",
+                         "7A510004"
+                     ],
+    "artifacts":  {
+                      "pe":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\build\\artifact\\NativeAotThreadStatic.exe",
+                      "elf":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\build\\artifact\\NativeAotThreadStatic.elf",
+                      "map":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\build\\artifact\\NativeAotThreadStatic.map",
+                      "exportHeader":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\build\\artifact\\guidexos_nativeaot_thread_static_exports.h",
+                      "kernel":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\kernel\\build\\amd64\\bin\\kernel.elf",
+                      "runRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\run-20260809-153903983"
+                  },
+    "documentation":  "docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md",
+    "reportedRegressions":  "See report; this focused script records the three fresh no-GC QEMU runs.",
+    "ordinaryKernelSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "ordinaryEspSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "ordinaryExpectedSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "ordinaryRestored":  true,
+    "endingHead":  "febf2c71ceb37a77a02c3d6c87f5434e25e2f40d",
+    "endingDirtyState":  [
+                             " M kernel/Makefile",
+                             " M kernel/core/include/kernel/nativeaot_pal_qemu_test.h",
+                             " M kernel/core/main.cpp",
+                             " M kernel/core/nativeaot_pal_qemu_test.cpp",
+                             " M samples/managed/HostLogProof/HostLogProof.csproj",
+                             " M samples/managed/HostLogProof/Program.cs",
+                             " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                             " M tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_managed_host_shims.cpp",
+                             "?? out/dotnet/thread-static-compile-check-2/",
+                             "?? out/dotnet/thread-static-compile-check/",
+                             "?? out/dotnet/thread-static-proof-build/",
+                             "?? out/dotnet/thread-static-runtime-support/",
+                             "?? scripts/smoke-nativeaot-thread-static-runtime-support-qemu.ps1",
+                             "?? tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_thread_static_diagnostics.h"
+                         ],
+    "reportPaths":  [
+                        "docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md",
+                        "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\run-20260809-153903983\\manifest.json"
+                    ]
+}

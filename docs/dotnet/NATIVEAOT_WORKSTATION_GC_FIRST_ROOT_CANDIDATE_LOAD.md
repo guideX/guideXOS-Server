@@ -222,3 +222,9 @@ The next managed-proof attempt is recorded separately in
 reached Outcome E in the normal NativeAOT `[ThreadStatic]` initialization path
 before the managed sentinel assignment and before any candidate value load;
 the `C011EC05` evidence above remains the historical candidate-load checkpoint.
+
+The standalone normal `[ThreadStatic]` runtime correction and primitive/reference
+proof are documented in
+[NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md](NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md).
+That report preserves this `C011EC05` frontier and does not claim callback,
+promotion, marking, restart, or managed-resume support.

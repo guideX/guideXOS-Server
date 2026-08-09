@@ -1,0 +1,49 @@
+{
+    "startingHead":  "febf2c71ceb37a77a02c3d6c87f5434e25e2f40d",
+    "startingDirtyState":  [
+                               " M kernel/Makefile",
+                               " M kernel/core/include/kernel/nativeaot_pal_qemu_test.h",
+                               " M kernel/core/main.cpp",
+                               " M kernel/core/nativeaot_pal_qemu_test.cpp",
+                               " M samples/managed/HostLogProof/HostLogProof.csproj",
+                               " M samples/managed/HostLogProof/Program.cs",
+                               " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                               " M tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_managed_host_shims.cpp",
+                               "?? out/dotnet/thread-static-compile-check-2/",
+                               "?? out/dotnet/thread-static-compile-check/",
+                               "?? out/dotnet/thread-static-proof-build/",
+                               "?? out/dotnet/thread-static-runtime-support/",
+                               "?? scripts/smoke-nativeaot-thread-static-runtime-support-qemu.ps1",
+                               "?? tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_thread_static_diagnostics.h"
+                           ],
+    "proofMode":  "ThreadStaticPrimitive",
+    "outcome":  "FAILURE_DURING_HARNESS",
+    "error":  "Command failed with exit code 1: \"cmd.exe\" /d /c call \"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\build\\build-thread-static-runtime.bat\"",
+    "proofKernelSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "restoreCleanError":  "In file included from core/app_launch_target_resolver.cpp:4:",
+    "ordinaryKernelSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "ordinaryEspSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "ordinaryExpectedSha256":  "D68791B66BF268425B6E646F3EA94CE7B3777B97D9CCED6682C10A9E1389066C",
+    "ordinaryRestored":  true,
+    "endingHead":  "febf2c71ceb37a77a02c3d6c87f5434e25e2f40d",
+    "endingDirtyState":  [
+                             " M kernel/Makefile",
+                             " M kernel/core/include/kernel/nativeaot_pal_qemu_test.h",
+                             " M kernel/core/main.cpp",
+                             " M kernel/core/nativeaot_pal_qemu_test.cpp",
+                             " M samples/managed/HostLogProof/HostLogProof.csproj",
+                             " M samples/managed/HostLogProof/Program.cs",
+                             " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                             " M tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_managed_host_shims.cpp",
+                             "?? out/dotnet/thread-static-compile-check-2/",
+                             "?? out/dotnet/thread-static-compile-check/",
+                             "?? out/dotnet/thread-static-proof-build/",
+                             "?? out/dotnet/thread-static-runtime-support/",
+                             "?? scripts/smoke-nativeaot-thread-static-runtime-support-qemu.ps1",
+                             "?? tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_thread_static_diagnostics.h"
+                         ],
+    "reportPaths":  [
+                        "docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md",
+                        "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\thread-static-runtime-support\\run-20260809-152728157\\manifest.json"
+                    ]
+}

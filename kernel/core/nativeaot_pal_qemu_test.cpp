@@ -10,7 +10,7 @@
 
 #include "include/kernel/nativeaot_pal_qemu_test.h"
 
-#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 
 #include "include/kernel/address_space.h"
 #include "include/kernel/arch.h"
@@ -19,12 +19,15 @@
 #include "include/kernel/pit.h"
 
 #include "runtime/local_storage/guidexos_local_storage.h"
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 #include "runtime/memory/guidexos_virtual_memory_region.h"
 #include "runtime/synchronization/guidexos_event.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_gc_startup_platform_contract.h"
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h"
+#endif
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_thread_static_diagnostics.h"
 #endif
 #endif
 #include "runtime/thread/guidexos_native_thread.h"
@@ -36,7 +39,7 @@
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_end[];
 #endif
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
 #endif
@@ -48,7 +51,7 @@ namespace {
 constexpr uintptr_t kPageSize = 0x1000u;
 constexpr uint32_t kPtLoad = 1u;
 constexpr uint16_t kElfExec = 2u;
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 // The startup artifact contains a bounded 4 MiB native metadata arena in its
 // writable image.  Keep staging bounded while allowing that known image size.
 constexpr uint32_t kMaxMappedPages = 8192u;
@@ -134,7 +137,7 @@ uint64_t g_lastWorkerThreadId = 0;
 uintptr_t g_lastWorkerStackLow = 0;
 uintptr_t g_lastWorkerStackHigh = 0;
 uintptr_t g_lastWorkerStackCurrent = 0;
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 uintptr_t g_firstAllocationDiagnosticsAddress = 0;
 
 // The NativeAOT image uses the Win64 TLS vector contract directly:
@@ -435,7 +438,9 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeYield() {
 
 [[noreturn]] void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeFailFast(
     uint32_t reason, uintptr_t detail) {
-#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+    serial::puts("[nativeaot-thread-static] BEGIN\n");
+#elif defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
     serial::puts("[nativeaot-gc-single-thread-suspend-ee] ");
 #elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     if (g_firstAllocationDiagnosticsAddress != 0) {
@@ -520,7 +525,7 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeYield() {
     serial::puts(" detail=");
     serial::put_hex64(detail);
     serial::putc('\n');
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     if (g_firstAllocationDiagnosticsAddress != 0) {
         const guidexos_nativeaot_allocation_diagnostics* diagnostics =
             reinterpret_cast<const guidexos_nativeaot_allocation_diagnostics*>(
@@ -774,7 +779,7 @@ void runOne(const uint8_t* artifact, size_t artifactSize,
            g_activeCallbacks == 0 && g_mappedPageCount == 0, allPassed);
 }
 
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 
 constexpr uint32_t kMaxGcEventSlots = 16u;
 constexpr uint32_t kMaxGcVmSlots = 16u;
@@ -1209,7 +1214,7 @@ void runStartupImpl(const uint8_t* artifact, size_t artifactSize,
         : "[nativeaot-gc-startup-qemu-test] ALL_FAIL\n");
 }
 
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 
 struct FirstRealAllocationContext {
     uint32_t size;
@@ -1219,7 +1224,9 @@ struct FirstRealAllocationContext {
 };
 
 void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
-#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+    serial::puts("[nativeaot-thread-static] ");
+#elif defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
     serial::puts("[nativeaot-gc-single-thread-suspend-ee] ");
 #elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-collection-boundary] ");
@@ -1238,7 +1245,9 @@ void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
 }
 
 void printFirstAllocationPointer(const char* name, uintptr_t value) {
-#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+    serial::puts("[nativeaot-thread-static] ");
+#elif defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
     serial::puts("[nativeaot-gc-single-thread-suspend-ee] ");
 #elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-collection-boundary] ");
@@ -1892,7 +1901,9 @@ void runFirstRealAllocationImpl(
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
     uint64_t generation, uintptr_t beginExperimentAddress) {
     bool allPassed = true;
-#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+    serial::puts("[nativeaot-thread-static] BEGIN\n");
+#elif defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
     serial::puts("[nativeaot-gc-single-thread-suspend-ee] BEGIN\n");
 #elif defined(GXOS_NATIVEAOT_GC_FIRST_COLLECTION_BOUNDARY_QEMU_TEST)
     serial::puts("[nativeaot-gc-first-collection-boundary] BEGIN\n");
@@ -1927,7 +1938,7 @@ void runFirstRealAllocationImpl(
         return;
     }
     resetBridgeState(base, size, generation);
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     g_firstAllocationDiagnosticsAddress = getDiagnosticsAddress;
 #endif
 
@@ -1969,7 +1980,13 @@ void runFirstRealAllocationImpl(
     const uint32_t startupAllocationCount = reinterpret_cast<State>(getAllocationCountAddress)();
     const uint32_t startupLastAllocationSize = reinterpret_cast<State>(getLastAllocationSizeAddress)();
     const uint32_t diagnosticStage = reinterpret_cast<State>(getDiagnosticStageAddress)();
-    serial::puts("[nativeaot-gc-first-allocation] RhInitialize return=");
+    serial::puts(
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+        "[nativeaot-thread-static] RhInitialize return="
+#else
+        "[nativeaot-gc-first-allocation] RhInitialize return="
+#endif
+    );
     serial::put_hex32(static_cast<uint32_t>(startupResult));
     serial::puts(" state=");
     serial::put_hex32(palState);
@@ -1990,7 +2007,13 @@ void runFirstRealAllocationImpl(
 
     const bool tlsInstalled = installNativeAotCurrentThreadTls();
     firstAllocationStatus("NativeAOT current-thread TLS vector", tlsInstalled, allPassed);
-    serial::puts("[nativeaot-gc-first-allocation] tlsGsBase=");
+    serial::puts(
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+        "[nativeaot-thread-static] tlsGsBase="
+#else
+        "[nativeaot-gc-first-allocation] tlsGsBase="
+#endif
+    );
     serial::put_hex64(reinterpret_cast<uintptr_t>(&g_nativeAotTlsGsArea));
     serial::puts(" tlsVector=");
     serial::put_hex64(reinterpret_cast<uintptr_t>(g_nativeAotTlsVector));
@@ -2009,7 +2032,132 @@ void runFirstRealAllocationImpl(
     }
 
     // RhInitialize has already published the parked finalizer-worker state.
-#if defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+    FirstRealAllocationContext context{};
+    context.size = sizeof(context);
+    context.apiVersion = 0u;
+    using GetThreadStaticDiagnostics = const guidexos_nativeaot_thread_static_diagnostics*
+        (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+    serial::puts("[nativeaot-thread-static] entering ManagedMain once\n");
+    const int32_t managedResult = reinterpret_cast<ManagedMain>(managedMainAddress)(&context);
+    const guidexos_nativeaot_thread_static_diagnostics* diagnostics =
+        reinterpret_cast<GetThreadStaticDiagnostics>(getDiagnosticsAddress)();
+    const bool primitivePass = diagnostics != nullptr &&
+        (diagnostics->primitiveStartCount == 0u ||
+        (diagnostics->primitiveStartCount == 1u &&
+        diagnostics->primitiveSuccessCount == 1u &&
+        diagnostics->primitiveInitialValue == 0u &&
+        diagnostics->primitiveAssignedValue == 0x13572468u &&
+        diagnostics->primitiveReadbackValue == 0x13572468u &&
+        diagnostics->primitiveMismatchCount == 0u));
+    const bool referencePass = diagnostics != nullptr &&
+        diagnostics->referenceStartCount <= 1u &&
+        diagnostics->referenceSuccessCount <= 1u &&
+        (diagnostics->referenceSuccessCount == 0u ||
+         (diagnostics->referenceAssigned != 0u &&
+          diagnostics->referenceAssigned == diagnostics->referenceReadback &&
+          diagnostics->referenceIdentityMatch == 1u &&
+          diagnostics->referenceObjectValid == 1u));
+    const bool noGc = diagnostics != nullptr &&
+        diagnostics->unexpectedGcRequests == 0u &&
+        diagnostics->collectionEntries == 0u &&
+        diagnostics->suspensionRequests == 0u;
+    const bool oneThread = diagnostics != nullptr &&
+        diagnostics->runtimeThread != 0u &&
+        diagnostics->registeredThreadCount == 1u &&
+        diagnostics->tlsBlock != 0u &&
+        diagnostics->flsRuntimeIdentity != 0u &&
+        diagnostics->inlinedRootList != 0u &&
+        diagnostics->inlinedStorageBase != 0u &&
+        diagnostics->duplicateStorageCount == 0u;
+    const bool managedPass = managedResult == 0x7A510002 || managedResult == 0x7A510004;
+    firstAllocationStatus("Managed thread-static entry", managedPass, allPassed);
+    firstAllocationStatus("Primitive thread-static proof", primitivePass, allPassed);
+    firstAllocationStatus("Reference thread-static proof", referencePass, allPassed);
+    firstAllocationStatus("Single-thread storage ownership", oneThread, allPassed);
+    firstAllocationStatus("No collection during proof", noGc, allPassed);
+    // Keep the bounded diagnostics record contiguous. The PIT diagnostic IRQ
+    // is unrelated to the managed proof and can otherwise interleave between
+    // a field name and its hexadecimal value on the serial stream.
+    arch::disable_interrupts();
+    if (diagnostics != nullptr) {
+        serial::puts("[nativeaot-thread-static] managedResult=");
+        serial::put_hex32(static_cast<uint32_t>(managedResult));
+        serial::puts(" primitiveStart=");
+        serial::put_hex32(diagnostics->primitiveStartCount);
+        serial::puts(" primitiveSuccess=");
+        serial::put_hex32(diagnostics->primitiveSuccessCount);
+        serial::puts(" referenceStart=");
+        serial::put_hex32(diagnostics->referenceStartCount);
+        serial::puts(" referenceSuccess=");
+        serial::put_hex32(diagnostics->referenceSuccessCount);
+        serial::puts(" primitiveInitial=");
+        serial::put_hex32(diagnostics->primitiveInitialValue);
+        serial::puts(" primitiveAssigned=");
+        serial::put_hex32(diagnostics->primitiveAssignedValue);
+        serial::puts(" primitiveReadback=");
+        serial::put_hex32(diagnostics->primitiveReadbackValue);
+        serial::puts(" referenceAssigned=");
+        serial::put_hex64(diagnostics->referenceAssigned);
+        serial::puts(" referenceReadback=");
+        serial::put_hex64(diagnostics->referenceReadback);
+        serial::puts(" identityMatch=");
+        serial::put_hex32(diagnostics->referenceIdentityMatch);
+        serial::puts(" objectValid=");
+        serial::put_hex32(diagnostics->referenceObjectValid);
+        serial::puts(" runtimeThread=");
+        serial::put_hex64(diagnostics->runtimeThread);
+        serial::puts(" nativeThreadId=");
+        serial::put_hex64(diagnostics->nativeThreadId);
+        serial::puts(" tlsBlock=");
+        serial::put_hex64(diagnostics->tlsBlock);
+        serial::puts(" flsIdentity=");
+        serial::put_hex64(diagnostics->flsRuntimeIdentity);
+        serial::puts(" threadStaticStorage=");
+        serial::put_hex64(diagnostics->threadStaticStorage);
+        serial::puts(" inlinedRoot=");
+        serial::put_hex64(diagnostics->inlinedRootList);
+        serial::puts(" storageBase=");
+        serial::put_hex64(diagnostics->inlinedStorageBase);
+        serial::puts(" storageSize=");
+        serial::put_hex32(diagnostics->inlinedStorageSize);
+        serial::puts(" inlinedTypeManager=");
+        serial::put_hex64(diagnostics->inlinedTypeManager);
+        serial::puts(" storageInitRequests=");
+        serial::put_hex32(diagnostics->storageInitializationRequests);
+        serial::puts(" storageInitEntries=");
+        serial::put_hex32(diagnostics->storageInitializationEntries);
+        serial::puts(" storageInitCompletions=");
+        serial::put_hex32(diagnostics->storageInitializationCompletions);
+        serial::puts(" storageAllocations=");
+        serial::put_hex32(diagnostics->storageAllocationCount);
+        serial::puts(" repeatedLookups=");
+        serial::put_hex32(diagnostics->repeatedLookupCount);
+        serial::puts(" registeredThreads=");
+        serial::put_hex32(diagnostics->registeredThreadCount);
+        serial::puts(" unexpectedGcRequests=");
+        serial::put_hex32(diagnostics->unexpectedGcRequests);
+        serial::puts(" collectionEntries=");
+        serial::put_hex32(diagnostics->collectionEntries);
+        serial::puts(" suspensionRequests=");
+        serial::put_hex32(diagnostics->suspensionRequests);
+        serial::puts(" writeBarrierRequests=");
+        serial::put_hex32(diagnostics->writeBarrierRequests);
+        serial::puts(" moduleInitRequests=");
+        serial::put_hex32(diagnostics->moduleInitializationRequests);
+        serial::puts(" moduleInitEntries=");
+        serial::put_hex32(diagnostics->moduleInitializationEntries);
+        serial::puts(" moduleInitCompletions=");
+        serial::put_hex32(diagnostics->moduleInitializationCompletions);
+        serial::puts(" finalMarker=");
+        serial::put_hex32(diagnostics->finalMarker);
+        serial::puts("\n");
+    }
+    serial::puts(allPassed
+        ? "[nativeaot-thread-static] ALL_PASS\n"
+        : "[nativeaot-thread-static] ALL_FAIL\n");
+    return;
+#elif defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
     runSegmentBoundaryManagedBoundary(
         managedMainAddress, finalizeAddress, getDiagnosticsAddress,
         palState, allPassed);
@@ -2197,7 +2345,7 @@ void run(const uint8_t* artifact, size_t artifactSize,
         : "[nativeaot-pal-qemu-test] ALL_FAIL\n");
 }
 
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 void runStartup(const uint8_t* artifact, size_t artifactSize,
                 uintptr_t installPalAddress, uintptr_t installTableAddress,
                 uintptr_t installPlatformAddress, uintptr_t mainAddress,
@@ -2211,7 +2359,7 @@ void runStartup(const uint8_t* artifact, size_t artifactSize,
                    generation);
 }
 
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 void runFirstRealAllocation(
     const uint8_t* artifact, size_t artifactSize,
     uintptr_t installPalAddress, uintptr_t installTableAddress,

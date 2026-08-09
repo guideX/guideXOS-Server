@@ -279,3 +279,8 @@ The subsequent one-load boundary is documented in
 `NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md`. It reads the first
 real slot once, observes a null raw value, and stops before candidate
 interpretation; it does not claim complete root enumeration or GC support.
+
+The independent managed `[ThreadStatic]` runtime milestone is documented in
+[NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md](NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md).
+It proves the real NativeAOT storage path for primitive and reference fields,
+but intentionally leaves non-null GC callbacks for the next milestone.

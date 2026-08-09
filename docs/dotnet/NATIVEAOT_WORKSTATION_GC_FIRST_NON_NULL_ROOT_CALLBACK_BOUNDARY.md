@@ -84,6 +84,12 @@ The generated candidate source is retained at
 It contains the one explicit pointer-width load, but no candidate request was
 observed because the managed field access failed first.
 
+The inherited fault is now characterized and corrected through the real
+NativeAOT module-startup contract. See
+[NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md](NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md).
+This historical Outcome E remains unchanged: the managed assignment did not
+complete and `C011EC06` was not reached.
+
 ## Fresh QEMU evidence
 
 The final evidence root is
@@ -162,4 +168,3 @@ runtime-correct initialization fix. That work must preserve normal
 `[ThreadStatic]` semantics and rerun this exact proof. Until it reaches the
 managed assignment/readback hooks and then a real provider load, no non-null
 root, callback ABI, promotion, marking, restart, or resume claim is allowed.
-

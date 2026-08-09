@@ -1,5 +1,8 @@
 #include <intrin.h>
 #include "guidexos_nativeaot_allocation_diagnostics.h"
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#include "guidexos_nativeaot_thread_static_diagnostics.h"
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
 // This proof uses the locked runtime's actual ThreadStore. The startup-only
 // guideXOS threadstore adapter below the runtime-pack boundary remains opaque
@@ -15,6 +18,21 @@ typedef void* LPVOID;
 #include "threadstore.h"
 #include "threadstore.inl"
 #include "thread.inl"
+#include "MethodTable.h"
+#include "ObjectLayout.h"
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) && !defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
+#include "common.h"
+#include "CommonTypes.h"
+#if !defined(FEATURE_EVENT_TRACE)
+typedef void* LPVOID;
+#endif
+#include "thread.h"
+#include "threadstore.h"
+#include "threadstore.inl"
+#include "thread.inl"
+#include "MethodTable.h"
+#include "ObjectLayout.h"
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
 #include "guidexos_nativeaot_virtual_memory_adapter.h"
@@ -51,16 +69,6 @@ extern "C" guidexos_nativeaot_allocation_diagnostics
 #if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
 extern "C" void __cdecl guideXosNativeAotAllocationContextFixupRequest();
 #endif
-#endif
-
-#if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-constexpr gx_uint32 kReadyToRunDehydratedDataSection = 0xCFu;
-constexpr gx_uint32 kReadyToRunHeaderSectionCountOffset = 0x0Cu;
-constexpr gx_uint32 kReadyToRunHeaderSectionsOffset = 0x10u;
-constexpr gx_uint32 kReadyToRunSectionEntrySize = 0x18u;
-constexpr gx_uint32 kReadyToRunSectionTypeOffset = 0x00u;
-constexpr gx_uint32 kReadyToRunSectionStartOffset = 0x08u;
-constexpr gx_uint32 kReadyToRunSectionEndOffset = 0x10u;
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
@@ -2765,10 +2773,31 @@ extern "C" gx_uint32 g_flsIndex = kGuideXosFlsIndex;
 volatile gx_uint32 g_guideXosRuntimeStartupState = 0;
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-extern "C" void __cdecl S_P_CoreLib_Internal_Runtime_CompilerHelpers_StartupCodeHelpers__RehydrateData(void* dehydratedData, gx_uint32 size);
-extern "C" unsigned char __dehydrated_data[];
-extern "C" unsigned char __ReadyToRunHeader[];
-volatile gx_uint32 g_guideXosGeneratedMetadataHydrated = 0;
+// The stock NativeAOT bootstrapper invokes this generated entry point after
+// RhInitialize and before managed entry.  The guideXOS disposable ELF launch
+// enters ManagedMain directly, so the runtime-pack must preserve that same
+// production startup contract here.
+extern "C" void InitializeModules(
+    void* osModule, void** pModuleHeaders, int count,
+    void** pClasslibFunctions, int nClasslibFunctions);
+extern "C" void* __modules_a[];
+extern "C" void* __modules_z[];
+extern "C" void* PalGetModuleHandleFromPointer(void* pointer);
+extern "C" void GetRuntimeException();
+extern "C" void RuntimeFailFast();
+extern "C" void AppendExceptionStackFrame();
+extern "C" void GetSystemArrayEEType();
+extern "C" void OnFirstChanceException();
+extern "C" void OnUnhandledException();
+extern "C" void IDynamicCastableIsInterfaceImplemented();
+extern "C" void IDynamicCastableGetInterfaceImplementation();
+bool g_guideXosNativeAotModulesInitialized = false;
+void* g_guideXosNativeAotClasslibFunctions[16] = {};
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+extern "C" volatile guidexos_nativeaot_thread_static_diagnostics
+    g_guideXosThreadStaticDiagnostics = { 1u };
 #endif
 
 [[noreturn]] void guideXosFailFast(gx_uint32 reason) {
@@ -2803,39 +2832,55 @@ unsigned char* runtimeCell(unsigned char* block) {
 }
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-void hydrateGeneratedMetadata() {
-    if (g_guideXosGeneratedMetadataHydrated != 0u) {
+void initializeNativeAotModules() {
+    if (g_guideXosNativeAotModulesInitialized) {
         return;
     }
 
-    const unsigned char* header = __ReadyToRunHeader;
-    const gx_uint32 sectionCount = *reinterpret_cast<const gx_uint16*>(header + kReadyToRunHeaderSectionCountOffset);
-    if (sectionCount > 0x1000u) {
-        guideXosFailFast(9u);
+    // Keep the classlib table identical to the locked NativeAOT bootstrapper.
+    // The bootstrapper's table has internal linkage, so the runtime-pack
+    // bridge carries the same process-lifetime table rather than inventing a
+    // module descriptor or a thread-static storage location.
+    g_guideXosNativeAotClasslibFunctions[0] =
+        reinterpret_cast<void*>(reinterpret_cast<void (*)()>(GetRuntimeException));
+    g_guideXosNativeAotClasslibFunctions[1] =
+        reinterpret_cast<void*>(reinterpret_cast<void (*)()>(RuntimeFailFast));
+    g_guideXosNativeAotClasslibFunctions[3] =
+        reinterpret_cast<void*>(reinterpret_cast<void (*)()>(AppendExceptionStackFrame));
+    g_guideXosNativeAotClasslibFunctions[5] =
+        reinterpret_cast<void*>(reinterpret_cast<void (*)()>(GetSystemArrayEEType));
+    g_guideXosNativeAotClasslibFunctions[6] =
+        reinterpret_cast<void*>(reinterpret_cast<void (*)()>(OnFirstChanceException));
+    g_guideXosNativeAotClasslibFunctions[7] =
+        reinterpret_cast<void*>(reinterpret_cast<void (*)()>(OnUnhandledException));
+    g_guideXosNativeAotClasslibFunctions[8] =
+        reinterpret_cast<void*>(reinterpret_cast<void (*)()>(IDynamicCastableIsInterfaceImplemented));
+    g_guideXosNativeAotClasslibFunctions[9] =
+        reinterpret_cast<void*>(reinterpret_cast<void (*)()>(IDynamicCastableGetInterfaceImplementation));
+
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+    ++g_guideXosThreadStaticDiagnostics.moduleInitializationRequests;
+#endif
+    void* osModule = PalGetModuleHandleFromPointer(
+        reinterpret_cast<void*>(&InitializeModules));
+    if (osModule == nullptr || __modules_a == nullptr || __modules_z == nullptr ||
+        __modules_z < __modules_a) {
+        guideXosFailFast(10u);
     }
 
-    for (gx_uint32 i = 0; i < sectionCount; ++i) {
-        const unsigned char* section = header + kReadyToRunHeaderSectionsOffset +
-            (static_cast<gx_size>(i) * kReadyToRunSectionEntrySize);
-        const gx_uint32 sectionType = *reinterpret_cast<const gx_uint32*>(section + kReadyToRunSectionTypeOffset);
-        if (sectionType != kReadyToRunDehydratedDataSection) {
-            continue;
-        }
-
-        const gx_uintptr sectionStart = *reinterpret_cast<const gx_uintptr*>(section + kReadyToRunSectionStartOffset);
-        const gx_uintptr sectionEnd = *reinterpret_cast<const gx_uintptr*>(section + kReadyToRunSectionEndOffset);
-        const gx_uintptr expectedStart = reinterpret_cast<gx_uintptr>(__dehydrated_data);
-        if (sectionStart != expectedStart || sectionEnd <= sectionStart || sectionEnd - sectionStart > 0xFFFFFFFFu) {
-            guideXosFailFast(9u);
-        }
-
-        S_P_CoreLib_Internal_Runtime_CompilerHelpers_StartupCodeHelpers__RehydrateData(
-            reinterpret_cast<void*>(sectionStart), static_cast<gx_uint32>(sectionEnd - sectionStart));
-        g_guideXosGeneratedMetadataHydrated = 1u;
-        return;
-    }
-
-    guideXosFailFast(9u);
+    g_guideXosNativeAotModulesInitialized = true;
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+    ++g_guideXosThreadStaticDiagnostics.moduleInitializationEntries;
+#endif
+    InitializeModules(
+        osModule,
+        __modules_a,
+        static_cast<int>(__modules_z - __modules_a),
+        g_guideXosNativeAotClasslibFunctions,
+        16);
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+    ++g_guideXosThreadStaticDiagnostics.moduleInitializationCompletions;
+#endif
 }
 #endif
 
@@ -2985,7 +3030,20 @@ void initializeRuntimeState(unsigned char* block) {
     }
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-    hydrateGeneratedMetadata();
+    // This is the real NativeAOT startup contract.  InitializeModules owns
+    // metadata rehydration, TypeManager/module publication, GC static-base
+    // initialization, and eager constructors; do not pre- or post-populate a
+    // substitute descriptor here.
+    initializeNativeAotModules();
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+    // The disposable direct ELF launcher constructs the current NativeAOT
+    // Thread but, unlike the stock bootstrapper's managed-thread entry path,
+    // does not link it into the real ThreadStore.  Publish that same current
+    // Thread before the proof observes ownership; this does not allocate or
+    // synthesize a second managed thread.
+    registerCurrentThreadInThreadStoreBeforeLock(
+        ThreadStore::GetCurrentThreadIfAvailable());
 #endif
 }
 
@@ -2995,6 +3053,13 @@ void initializeRuntimeState(unsigned char* block) {
 // HostLogProof's generated NativeAOT P/Invoke slot is intentionally bound by
 // the application-scoped runtime pack. The ELF loader does not run the Windows
 // module resolver that would normally populate this slot.
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedThreadStaticProofRecord__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosManagedThreadStaticProofRecord(
+    uint32_t marker, uint32_t kind, uintptr_t assigned, uintptr_t readback,
+    uint32_t expected, uint32_t actual, uint32_t identityMatch,
+    uint32_t objectValid);
+#endif
 #if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi;
 #endif
@@ -3017,6 +3082,129 @@ extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedThre
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedThreadStaticProofReadback__Ansi;
 #endif
 #endif
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+namespace {
+
+void captureThreadStaticIdentity() {
+    volatile guidexos_nativeaot_thread_static_diagnostics& diagnostics =
+        g_guideXosThreadStaticDiagnostics;
+    Thread* thread = ThreadStore::GetCurrentThreadIfAvailable();
+    diagnostics.runtimeThread = reinterpret_cast<uintptr_t>(thread);
+    diagnostics.nativeThreadId = thread == nullptr ? 0u : thread->GetPalThreadIdForLogging();
+
+    unsigned char* block = currentTlsBlock();
+    diagnostics.tlsBlock = reinterpret_cast<uintptr_t>(block);
+    void** fls = flsCell(block, kGuideXosFlsIndex);
+    diagnostics.flsRuntimeIdentity =
+        (fls == nullptr || *fls == nullptr) ? 0u : reinterpret_cast<uintptr_t>(*fls);
+
+    if (thread == nullptr) {
+        diagnostics.threadStaticStorage = 0u;
+        diagnostics.inlinedRootList = 0u;
+        diagnostics.inlinedStorageBase = 0u;
+        diagnostics.inlinedTypeManager = 0u;
+        diagnostics.registeredThreadCount = 0u;
+        return;
+    }
+
+    diagnostics.threadStaticStorage =
+        reinterpret_cast<uintptr_t>(thread->GetThreadStaticStorage());
+    InlinedThreadStaticRoot* root = thread->GetInlinedThreadStaticList();
+    diagnostics.inlinedRootList = reinterpret_cast<uintptr_t>(root);
+    diagnostics.inlinedStorageBase = root == nullptr
+        ? 0u : reinterpret_cast<uintptr_t>(root->m_threadStaticsBase);
+    diagnostics.inlinedTypeManager = root == nullptr
+        ? 0u : reinterpret_cast<uintptr_t>(root->m_typeManager);
+    diagnostics.inlinedStorageSize = 0u;
+    if (root != nullptr && root->m_threadStaticsBase != nullptr) {
+        MethodTable* methodTable = root->m_threadStaticsBase->GetMethodTable();
+        diagnostics.inlinedStorageSize = methodTable == nullptr
+            ? 0u : methodTable->GetBaseSize();
+    }
+
+    uint32_t threadCount = 0u;
+    uint32_t rootCount = 0u;
+    uintptr_t previousRoot = 0u;
+    for (InlinedThreadStaticRoot* current = root;
+         current != nullptr && rootCount < 64u;
+         current = current->m_next) {
+        previousRoot = reinterpret_cast<uintptr_t>(current);
+        ++rootCount;
+    }
+    (void)previousRoot;
+    ThreadStore::Iterator iterator;
+    while (iterator.GetNext() != nullptr && threadCount < 64u) {
+        ++threadCount;
+    }
+    diagnostics.registeredThreadCount = threadCount;
+    diagnostics.duplicateStorageCount = rootCount > 1u ? rootCount - 1u : 0u;
+}
+
+} // namespace
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosManagedThreadStaticProofRecord(
+    uint32_t marker, uint32_t kind, uintptr_t assigned, uintptr_t readback,
+    uint32_t expected, uint32_t actual, uint32_t identityMatch,
+    uint32_t objectValid) {
+    volatile guidexos_nativeaot_thread_static_diagnostics& diagnostics =
+        g_guideXosThreadStaticDiagnostics;
+    const uintptr_t previousRoot = diagnostics.inlinedRootList;
+    captureThreadStaticIdentity();
+
+#if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
+    diagnostics.unexpectedGcRequests =
+        g_guideXosAllocationDiagnostics.collectionRequestCount;
+    diagnostics.collectionEntries =
+        g_guideXosAllocationDiagnostics.collectionEntryCount;
+    diagnostics.suspensionRequests =
+        g_guideXosAllocationDiagnostics.suspensionRequestCount;
+#endif
+
+    if (diagnostics.inlinedRootList != 0u && previousRoot == 0u) {
+        ++diagnostics.storageInitializationRequests;
+        ++diagnostics.storageInitializationEntries;
+        ++diagnostics.storageInitializationCompletions;
+        ++diagnostics.storageAllocationCount;
+    } else if (diagnostics.inlinedRootList != 0u) {
+        ++diagnostics.repeatedLookupCount;
+    }
+
+    diagnostics.finalMarker = marker;
+    if (kind == 1u) {
+        if (marker == 0x7A510001u) {
+            ++diagnostics.primitiveStartCount;
+        } else if (marker == 0x7A510002u) {
+            ++diagnostics.primitiveSuccessCount;
+        }
+        diagnostics.primitiveInitialValue = expected;
+        diagnostics.primitiveAssignedValue = actual;
+        diagnostics.primitiveReadbackValue = static_cast<uint32_t>(readback);
+        if (expected != 0u || actual != static_cast<uint32_t>(readback)) {
+            ++diagnostics.primitiveMismatchCount;
+        }
+    } else if (kind == 2u) {
+        if (marker == 0x7A510003u) {
+            ++diagnostics.referenceStartCount;
+        } else if (marker == 0x7A510004u) {
+            ++diagnostics.referenceSuccessCount;
+        }
+        diagnostics.referenceAssigned = assigned;
+        diagnostics.referenceReadback = readback;
+        diagnostics.referenceIdentityMatch = identityMatch;
+        diagnostics.referenceObjectValid = objectValid;
+    }
+    return 0;
+}
+
+extern "C" __declspec(dllexport) const
+guidexos_nativeaot_thread_static_diagnostics*
+guideXosManagedThreadStaticProofGetDiagnostics() {
+    return const_cast<const guidexos_nativeaot_thread_static_diagnostics*>(
+        &g_guideXosThreadStaticDiagnostics);
+}
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
@@ -4275,6 +4463,14 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     // Bind the one experimental __Internal P/Invoke slot after the reverse
     // transition has established the current thread state. This is not a
     // general P/Invoke resolver; it is the app-scoped allocation proof hook.
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+    using GuideXosManagedThreadStaticProofRecordFn = int (__cdecl*)(
+        uint32_t, uint32_t, uintptr_t, uintptr_t, uint32_t, uint32_t,
+        uint32_t, uint32_t);
+    __pinvoke_HostLogProof__Module____Internal__guideXosManagedThreadStaticProofRecord__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosManagedThreadStaticProofRecordFn>(
+            guideXosManagedThreadStaticProofRecord));
+#endif
 #if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     using GuideXosManagedArrayHostLogFn = int (__cdecl*)(void*, void*);
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedArrayHostLogFn>(guideXosManagedArrayHostLog));

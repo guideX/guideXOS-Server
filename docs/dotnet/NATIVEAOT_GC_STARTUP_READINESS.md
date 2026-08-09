@@ -19,6 +19,12 @@ Evidence: `out/dotnet/pal-win64-qemu-bridge/` and
 The shutdown decision and candidate audit are in
 [NATIVEAOT_RUNTIME_GC_SHUTDOWN_BOUNDARY.md](NATIVEAOT_RUNTIME_GC_SHUTDOWN_BOUNDARY.md).
 
+The normal NativeAOT module-startup contract required for managed
+`[ThreadStatic]` access is documented separately in
+[NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md](NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md).
+Its Outcome A is a managed storage milestone only; it does not promote GC-root
+or collection readiness.
+
 | Required readiness item | Current status |
 | --- | --- |
 | Active PAL archive replacement | PASS |

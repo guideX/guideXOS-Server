@@ -42,7 +42,12 @@
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_pal_qemu_artifact_end[];
 #endif
-#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+#include "include/kernel/nativeaot_pal_qemu_test.h"
+#include "guidexos_nativeaot_thread_static_exports.h"
+extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
+extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
+#elif defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
 #include "include/kernel/nativeaot_pal_qemu_test.h"
 #include "guidexos_nativeaot_gc_single_thread_suspend_ee_exports.h"
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
@@ -314,7 +319,34 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     }
 #endif
 
-#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+    kernel::interrupts::init();
+    kernel::pit::init(100);
+    kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+    kernel::serial::puts("[nativeaot-thread-static] timer services ready\n");
+    kernel::nativeaot_pal_qemu_test::runFirstRealAllocation(
+        guidexos_nativeaot_gc_startup_artifact_start,
+        static_cast<size_t>(guidexos_nativeaot_gc_startup_artifact_end -
+                            guidexos_nativeaot_gc_startup_artifact_start),
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_INSTALL_PAL_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_INSTALL_TABLE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_INSTALL_PLATFORM_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_STARTUP_MAIN_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_GET_STATE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_GET_PRE_GC_STATE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_GET_ALLOCATION_COUNT_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_GET_LAST_ALLOCATION_SIZE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_GET_DIAGNOSTIC_STAGE_ADDRESS,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_MANAGED_MAIN_ADDRESS,
+        0u,
+        GUIDEXOS_NATIVEAOT_THREAD_STATIC_GET_DIAGNOSTICS_ADDRESS,
+        1u,
+        0u);
+    while (1) {
+        kernel::arch::disable_interrupts();
+        kernel::arch::halt();
+    }
+#elif defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
     kernel::interrupts::init();
     kernel::pit::init(100);
     kernel::interrupts::register_irq(0, kernel::pit::irq_handler);

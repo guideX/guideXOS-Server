@@ -5,6 +5,29 @@ namespace HostLogProof;
 
 public static unsafe class Program
 {
+#if HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
+    [ThreadStatic]
+    private static int s_threadStaticInt;
+#endif
+
+#if HOSTLOGPROOF_THREAD_STATIC_REFERENCE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
+    [ThreadStatic]
+    private static byte[]? s_threadStaticRef;
+#endif
+
+#if HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE || HOSTLOGPROOF_THREAD_STATIC_REFERENCE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
+    [DllImport("__Internal", EntryPoint = "guideXosManagedThreadStaticProofRecord")]
+    private static extern int GuideXosManagedThreadStaticProofRecord(
+        uint marker,
+        uint kind,
+        nint assigned,
+        nint readback,
+        uint expected,
+        uint actual,
+        uint identityMatch,
+        uint objectValid);
+#endif
+
 #if HOSTLOGPROOF_FIRST_NON_NULL_ROOT
     [ThreadStatic]
     private static byte[]? s_gcProofThreadRoot;
@@ -63,7 +86,7 @@ public static unsafe class Program
 #endif
 #endif
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE && !HOSTLOGPROOF_THREAD_STATIC_REFERENCE && !HOSTLOGPROOF_THREAD_STATIC_COMBINED
     [DllImport("__Internal", EntryPoint = "guideXosManagedArrayHostLog")]
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
 #endif
@@ -90,14 +113,93 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION
+#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE && !HOSTLOGPROOF_THREAD_STATIC_REFERENCE && !HOSTLOGPROOF_THREAD_STATIC_COMBINED
         if (ctx->host == null || ctx->host->log == null)
         {
             return GxAbi.ErrorInvalidArgument;
         }
 #endif
 
-#if HOSTLOGPROOF_FIRST_REAL_ALLOCATION
+#if HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE || HOSTLOGPROOF_THREAD_STATIC_REFERENCE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
+#if HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
+        int primitiveInitial = s_threadStaticInt;
+        if (GuideXosManagedThreadStaticProofRecord(
+                0x7A510001u, 1u, 0, 0,
+                unchecked((uint)primitiveInitial), 0u, 0u, 0u) != 0 ||
+            primitiveInitial != 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        const int primitiveAssigned = 0x13572468;
+        s_threadStaticInt = primitiveAssigned;
+        int primitiveReadback = s_threadStaticInt;
+        if (GuideXosManagedThreadStaticProofRecord(
+                0x7A510002u, 1u, 0,
+                primitiveReadback,
+                unchecked((uint)primitiveInitial),
+                unchecked((uint)primitiveAssigned),
+                primitiveReadback == primitiveAssigned ? 1u : 0u,
+                1u) != 0 || primitiveReadback != primitiveAssigned)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+#endif
+
+#if HOSTLOGPROOF_THREAD_STATIC_REFERENCE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
+        if (GuideXosManagedThreadStaticProofRecord(
+                0x7A510003u, 2u, 0, 0, 0u, 0u, 0u, 0u) != 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        byte[]? initialReference = s_threadStaticRef;
+        if (initialReference != null)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        byte[] assignedReference = new byte[16];
+        for (int i = 0; i < assignedReference.Length; i++)
+        {
+            assignedReference[i] = (byte)(0xA0 + i);
+        }
+        s_threadStaticRef = assignedReference;
+        byte[]? readbackReference = s_threadStaticRef;
+        nint assignedAddress = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(
+            ref assignedReference);
+        nint readbackAddress = readbackReference == null
+            ? 0
+            : System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(
+                ref readbackReference);
+        bool objectValid = readbackReference != null;
+        if (objectValid)
+        {
+            for (int i = 0; i < readbackReference!.Length; i++)
+            {
+                if (readbackReference[i] != (byte)(0xA0 + i))
+                {
+                    objectValid = false;
+                    break;
+                }
+            }
+        }
+        if (GuideXosManagedThreadStaticProofRecord(
+                0x7A510004u, 2u, assignedAddress, readbackAddress,
+                0u, 0u, assignedAddress == readbackAddress ? 1u : 0u,
+                objectValid ? 1u : 0u) != 0 ||
+            assignedAddress == 0 || assignedAddress != readbackAddress || !objectValid)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        GC.KeepAlive(assignedReference);
+        GC.KeepAlive(readbackReference);
+        return 0x7A510004;
+#else
+        return 0x7A510002;
+#endif
+#elif HOSTLOGPROOF_FIRST_REAL_ALLOCATION
         // This is the complete managed body for the first real-GC experiment.
         // It intentionally contains one object allocation and no managed
         // diagnostics, strings, delegates, exceptions, or additional objects.

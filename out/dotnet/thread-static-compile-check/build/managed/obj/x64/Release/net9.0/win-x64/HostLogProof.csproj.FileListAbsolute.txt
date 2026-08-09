@@ -1,0 +1,3 @@
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\thread-static-compile-check\build\managed\obj\x64\Release\net9.0\win-x64\HostLogProof.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\thread-static-compile-check\build\managed\obj\x64\Release\net9.0\win-x64\HostLogProof.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\thread-static-compile-check\build\managed\obj\x64\Release\net9.0\win-x64\HostLogProof.sourcelink.json

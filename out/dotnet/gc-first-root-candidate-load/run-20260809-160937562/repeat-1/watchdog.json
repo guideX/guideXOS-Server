@@ -1,0 +1,11 @@
+{
+    "run":  "repeat-1",
+    "timeoutSeconds":  90,
+    "safeStopObserved":  true,
+    "earlyFailure":  null,
+    "harnessTerminated":  true,
+    "processId":  22380,
+    "serialPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-candidate-load\\run-20260809-160937562\\repeat-1\\serial.log",
+    "monitorPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-candidate-load\\run-20260809-160937562\\repeat-1\\watchdog-monitor.txt",
+    "qemuDebugPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-candidate-load\\run-20260809-160937562\\repeat-1\\qemu-debug.log"
+}

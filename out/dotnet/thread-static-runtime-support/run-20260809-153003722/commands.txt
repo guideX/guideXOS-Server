@@ -1,0 +1,3 @@
+"cmd.exe" /d /c call "D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\thread-static-runtime-support\build\build-thread-static-runtime.bat"
+"C:\Users\guideX\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\tools\dotnet\pe_to_elf_v2_fixed_base.py D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\thread-static-runtime-support\build\artifact\NativeAotThreadStatic.exe D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\thread-static-runtime-support\build\artifact\NativeAotThreadStatic.elf --map D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\thread-static-runtime-support\build\artifact\NativeAotThreadStatic.map --symbol ManagedMain
+"C:\mingw64\bin\mingw32-make.exe" -C kernel ARCH=amd64 clean
