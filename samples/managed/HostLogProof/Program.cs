@@ -5,6 +5,11 @@ namespace HostLogProof;
 
 public static unsafe class Program
 {
+#if HOSTLOGPROOF_FIRST_NON_NULL_ROOT
+    [ThreadStatic]
+    private static byte[]? s_gcProofThreadRoot;
+#endif
+
 #if HOSTLOGPROOF_REPEATED_ALLOCATION
     [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationCanFit")]
     private static extern int GuideXosManagedAllocationCanFit(uint length);
@@ -45,6 +50,16 @@ public static unsafe class Program
     [DllImport("__Internal", EntryPoint = "guideXosManagedAllocationRecordSentinelValidation")]
     private static extern int GuideXosManagedAllocationRecordSentinelValidation(
         uint checkedCount, uint failureCount);
+
+#if HOSTLOGPROOF_FIRST_NON_NULL_ROOT
+    [DllImport("__Internal", EntryPoint = "guideXosManagedThreadStaticProofAssigned")]
+    private static extern int GuideXosManagedThreadStaticProofAssigned(
+        nint arrayObject, uint sentinelOrdinal, uint objectSize, uint patternValid);
+
+    [DllImport("__Internal", EntryPoint = "guideXosManagedThreadStaticProofReadback")]
+    private static extern int GuideXosManagedThreadStaticProofReadback(
+        nint arrayObject, uint sentinelOrdinal, uint exactMatch);
+#endif
 #endif
 #endif
 
@@ -158,6 +173,92 @@ public static unsafe class Program
             {
                 return GxAbi.ErrorInvalidArgument;
             }
+        }
+
+        return GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_FIRST_NON_NULL_ROOT
+        // This is the non-null thread-static root proof. It deliberately uses
+        // the same four retained sentinels and allocation boundary as the
+        // established first-collection workload. The selected first sentinel
+        // is assigned once through ordinary managed [ThreadStatic] semantics;
+        // the native hooks record only the managed assignment and one managed
+        // readback immediately before the next allocation triggers GC.
+        const int arrayLength = 4096;
+        byte[] sentinel0 = null;
+        byte[] sentinel1 = null;
+        byte[] sentinel2 = null;
+        byte[] sentinel3 = null;
+        byte[] current = null;
+        uint hardLimit = GuideXosManagedAllocationGetHardLimit();
+        if (hardLimit < 8u || hardLimit > 1024u)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        for (uint iteration = 0u; iteration < hardLimit; iteration++)
+        {
+            bool sentinelsValid = ValidateSample(sentinel0, 0u) &&
+                ValidateSample(sentinel1, 1u) &&
+                ValidateSample(sentinel2, 2u) &&
+                ValidateSample(sentinel3, 3u);
+            GuideXosManagedAllocationRecordSentinelValidation(
+                iteration == 0u ? 0u : 4u, sentinelsValid ? 0u : 1u);
+            if (!sentinelsValid)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+
+            // The established workload reaches GC on the request following
+            // the 40th completed object. Read the real field once at that
+            // exact managed boundary, before issuing the triggering allocation.
+            if (iteration == 40u)
+            {
+                nint readback = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(
+                    ref s_gcProofThreadRoot);
+                int readbackResult = GuideXosManagedThreadStaticProofReadback(
+                    readback, 0u, readback ==
+                        System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(ref sentinel0)
+                        ? 1u : 0u);
+                if (readbackResult != 0)
+                {
+                    return GxAbi.ErrorInvalidArgument;
+                }
+            }
+
+            current = new byte[arrayLength];
+            uint zeroByteCount = CountZeroBytes(current);
+            WriteIdentifyingPattern(current, iteration);
+            bool patternValid = HasIdentifyingPattern(current, iteration);
+            nint objectReference = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(ref current);
+            int validationResult = GuideXosManagedAllocationValidateObject(
+                objectReference, arrayLength, iteration, zeroByteCount,
+                patternValid ? 1u : 0u);
+            if (validationResult != 0)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+
+            if (iteration == 0u)
+            {
+                sentinel0 = current;
+                s_gcProofThreadRoot = sentinel0;
+                nint assigned = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(
+                    ref s_gcProofThreadRoot);
+                int assignmentResult = GuideXosManagedThreadStaticProofAssigned(
+                    assigned, 0u, (uint)arrayLength, patternValid ? 1u : 0u);
+                if (assignmentResult != 0)
+                {
+                    return GxAbi.ErrorInvalidArgument;
+                }
+            }
+            else if (iteration == 1u) sentinel1 = current;
+            else if (iteration == 2u) sentinel2 = current;
+            else if (iteration == 3u) sentinel3 = current;
+            GC.KeepAlive(sentinel0);
+            GC.KeepAlive(sentinel1);
+            GC.KeepAlive(sentinel2);
+            GC.KeepAlive(sentinel3);
+            GC.KeepAlive(current);
         }
 
         return GxAbi.ErrorInvalidArgument;

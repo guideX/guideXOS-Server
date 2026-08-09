@@ -227,3 +227,8 @@ the first slot/value load. For the selected thread-static path, that means
 proving the actual slot/descriptor contract without calling `EnumGcRef`; it
 does not authorize fake roots, stack walking, frame traversal, marking, or
 continuing collection.
+
+The subsequent one-load boundary is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md`. It reads the first
+real slot once and stops before candidate interpretation or callback delivery;
+the earlier C011EC04 result remains the pre-load checkpoint.

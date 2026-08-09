@@ -3,7 +3,7 @@ param(
     [string]$EvidenceRoot = "",
     [int]$TimeoutSeconds = 90,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -15,7 +15,11 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($ProofMode -eq "first-per-thread-root-provider") {
+    $EvidenceRoot = if ($ProofMode -eq "first-non-null-root-callback-boundary") {
+        Join-Path $root "out\dotnet\gc-first-non-null-root-callback-boundary"
+    } elseif ($ProofMode -eq "first-root-candidate-load") {
+        Join-Path $root "out\dotnet\gc-first-root-candidate-load"
+    } elseif ($ProofMode -eq "first-per-thread-root-provider") {
         Join-Path $root "out\dotnet\gc-first-per-thread-root-provider"
     } elseif ($ProofMode -eq "allocation-context-fixup-root-boundary") {
         Join-Path $root "out\dotnet\gc-allocation-context-fixup-root-boundary"
@@ -23,9 +27,16 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\gc-single-thread-suspend-ee"
     }
 }
-$isFirstPerThreadRootProvider = $ProofMode -eq "first-per-thread-root-provider"
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider")
-$proofDefine = if ($isFirstPerThreadRootProvider) {
+$isFirstRootCandidateLoad = $ProofMode -eq "first-root-candidate-load"
+$isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
+$isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary")
+$proofDefine = if ($isFirstNonNullRoot) {
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION"
+} elseif ($isFirstRootCandidateLoad) {
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CANDIDATE_LOAD_ALLOCATION"
+} elseif ($isFirstPerThreadRootProvider) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION"
 } elseif ($isAllocationContextFixupRootBoundary) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION"
@@ -167,6 +178,8 @@ $palBridge = Join-Path $root "out\dotnet\pal-runtime-active-replacement-build\gu
 $gcEnv = Join-Path $replacementRoot "guidexos_gcenv.obj"
 $gcEnvEeSource = Join-Path $runtimeRoot "gcenv.ee.single-thread-suspend-ee.cpp"
 $gcEnvEe = Join-Path $runtimeRoot "gcenv.ee.single-thread-suspend-ee.obj"
+$gcEnumSource = Join-Path $runtimeRoot "GcEnum.first-root-candidate-load.cpp"
+$gcEnum = Join-Path $runtimeRoot "GcEnum.first-root-candidate-load.obj"
 $platformObj = Join-Path $runtimeRoot "guidexos_nativeaot_platform.single-thread-suspend-ee.obj"
 $probeObj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_allocation_probe.single-thread-suspend-ee.obj"
 $gcBridgeBoundary = Join-Path $runtimeRoot "guidexos_nativeaot_gcenv_startup_bridge.single-thread-suspend-ee.obj"
@@ -200,6 +213,7 @@ try {
     Require-File $lockedEePath "Locked NativeAOT EE source"
     $lockedEeText = Get-Content -LiteralPath $lockedEePath -Raw
     if ($isFirstPerThreadRootProvider) {
+        $storageObserverAttribute = if ($isCandidateLoadEnumeration) { "" } else { "__declspec(noreturn) " }
         $declaration = @'
 extern "C" void __cdecl guideXosNativeAotSuspendEeEntry(uint32_t reason);
 extern "C" void __cdecl guideXosNativeAotSuspendEeAfterLock();
@@ -220,8 +234,9 @@ extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootThreadEnumerated(uint
 extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootThreadExcluded(uintptr_t thread, uint32_t reason);
 extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootThreadIncluded(uintptr_t thread);
 extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootThreadStaticListObserved(uintptr_t thread, uintptr_t list);
-extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered(uintptr_t thread, uintptr_t storage);
+extern "C" STORAGE_OBSERVER_ATTRIBUTEvoid __cdecl guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered(uintptr_t thread, uintptr_t storage);
 '@
+        $declaration = $declaration.Replace('STORAGE_OBSERVER_ATTRIBUTE', $storageObserverAttribute)
     } elseif ($isAllocationContextFixupRootBoundary) {
         $declaration = @'
 extern "C" void __cdecl guideXosNativeAotSuspendEeEntry(uint32_t reason);
@@ -342,7 +357,61 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
         }
     }
     Set-Content -LiteralPath $gcEnvEeSource -Value $injectedText -Encoding ASCII
-    $baselineDescription = if ($isFirstPerThreadRootProvider) {
+    if ($isCandidateLoadEnumeration) {
+        $lockedGcEnumPath = Join-Path $lockedSourceRoot "src\coreclr\nativeaot\Runtime\GcEnum.cpp"
+        Require-File $lockedGcEnumPath "Locked NativeAOT GcEnum source"
+        $gcEnumText = Get-Content -LiteralPath $lockedGcEnumPath -Raw
+        if ($isFirstNonNullRoot) {
+            $gcEnumDeclaration = @(
+                'extern "C" void __cdecl guideXosNativeAotFirstNonNullRootCandidateLoadRequested(uintptr_t slot, uint32_t flags, uintptr_t callback, uintptr_t scanContext);',
+                'extern "C" uint32_t __cdecl guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded(uintptr_t slot, uintptr_t rawValue);'
+            ) -join [Environment]::NewLine
+        } else {
+            $gcEnumDeclaration = @(
+                'extern "C" void __cdecl guideXosNativeAotFirstRootCandidateLoadRequested(uintptr_t slot, uint32_t flags, uintptr_t callback, uintptr_t scanContext);',
+                'extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootCandidateMachineWordLoaded(uintptr_t slot, uintptr_t rawValue);'
+            ) -join [Environment]::NewLine
+        }
+        $gcEnumText = $gcEnumText.Replace('#include "GcEnum.h"', '#include "GcEnum.h"' + [Environment]::NewLine + [Environment]::NewLine + $gcEnumDeclaration.TrimEnd())
+        $gcEnumPattern = '(?m)^static void GcEnumObject\(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc\* fnGcEnumRef, ScanContext\* pSc\)\r?\n\{'
+        if ($isFirstNonNullRoot) {
+            $gcEnumReplacement = @(
+                'static void GcEnumObject(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc* fnGcEnumRef, ScanContext* pSc)',
+                '{',
+                '    guideXosNativeAotFirstNonNullRootCandidateLoadRequested(',
+                '        reinterpret_cast<uintptr_t>(ppObj), flags,',
+                '        reinterpret_cast<uintptr_t>(fnGcEnumRef),',
+                '        reinterpret_cast<uintptr_t>(pSc));',
+                '    const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>(*ppObj);',
+                '    if (guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded(',
+                '            reinterpret_cast<uintptr_t>(ppObj), candidateRawValue) == 0u)',
+                '        return;'
+            ) -join [Environment]::NewLine
+        } else {
+            $gcEnumReplacement = @(
+                'static void GcEnumObject(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc* fnGcEnumRef, ScanContext* pSc)',
+                '{',
+                '    guideXosNativeAotFirstRootCandidateLoadRequested(',
+                '        reinterpret_cast<uintptr_t>(ppObj), flags,',
+                '        reinterpret_cast<uintptr_t>(fnGcEnumRef),',
+                '        reinterpret_cast<uintptr_t>(pSc));',
+                '    const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>(*ppObj);',
+                '    guideXosNativeAotFirstRootCandidateMachineWordLoaded(',
+                '        reinterpret_cast<uintptr_t>(ppObj), candidateRawValue);'
+            ) -join [Environment]::NewLine
+        }
+        $gcEnumInjected = [regex]::Replace($gcEnumText, $gcEnumPattern, $gcEnumReplacement.TrimEnd(), 1)
+        if ($gcEnumInjected -eq $gcEnumText -or
+            $gcEnumInjected -notmatch 'const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>\(\*ppObj\);' -or
+            (($isFirstNonNullRoot -and $gcEnumInjected -notmatch 'guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded') -or
+             (-not $isFirstNonNullRoot -and $gcEnumInjected -notmatch 'guideXosNativeAotFirstRootCandidateMachineWordLoaded'))) {
+            throw "Locked GcEnum.cpp first-root-candidate-load injection did not match the GcEnumObject load boundary."
+        }
+        Set-Content -LiteralPath $gcEnumSource -Value $gcEnumInjected -Encoding ASCII
+    }
+    $baselineDescription = if ($isFirstNonNullRoot) {
+        "experiment=single-managed-mutator Workstation GC real thread-static proof root and first non-null candidate callback boundary"
+    } elseif ($isFirstPerThreadRootProvider) {
         "experiment=single-managed-mutator Workstation GC real FOREACH_THREAD enumeration and first per-thread root provider entry"
     } elseif ($isAllocationContextFixupRootBoundary) {
         "experiment=single-managed-mutator Workstation GC fix_allocation_contexts(TRUE) completion and first root-dispatch boundary"
@@ -350,7 +419,13 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
         "experiment=single-managed-mutator Workstation GC SuspendEE completion and post-DisablePreemptiveGC boundary"
     }
     $safeStopDescription = if ($isFirstPerThreadRootProvider) {
-        "safeStop=after real ThreadStore::Iterator enumeration and Thread::GetThreadStaticStorage entry before EnumGcRef candidate access"
+        if ($isFirstNonNullRoot) {
+            "safeStop=after a genuine non-null managed thread-static candidate load and before the first root callback"
+        } elseif ($isFirstRootCandidateLoad) {
+            "safeStop=after the real EnumGcRef path's one explicit slot load and before callback/semantic processing"
+        } else {
+            "safeStop=after real ThreadStore::Iterator enumeration and Thread::GetThreadStaticStorage entry before EnumGcRef candidate access"
+        }
     } elseif ($isAllocationContextFixupRootBoundary) {
         "safeStop=after real allocation-context enumeration and GcStartWork; at GcScanRoots entry before FOREACH_THREAD"
     } else {
@@ -386,6 +461,12 @@ cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /B
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
+    if ($isCandidateLoadEnumeration) {
+        $runtimeBatText = Get-Content -LiteralPath $runtimeBat -Raw
+        $gcEnumCompileLine = 'cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /I"{0}\Runtime" /I"{0}\Runtime\windows" /I"{1}" /I"{1}\native" /I"{1}\gc" /I"{1}\gc\env" /I"{0}\Runtime\inc" /I"{0}\Runtime\eventpipe" /I"{2}" /I"{5}" /I"{1}\pal\src\include" /FI"{1}\gc\env\common.h" /Fo:"{3}" "{4}"' -f $nativeAotRoot, $sourceRoot, (Join-Path $root 'tools\dotnet\runtime-pack\src\platform'), $gcEnum, $gcEnumSource, $palSourceRoot
+        $runtimeBatText = $runtimeBatText.Replace("exit /b 0", "$gcEnumCompileLine`r`nif errorlevel 1 exit /b %errorlevel%`r`nexit /b 0")
+        Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
+    }
     if ($isAllocationContextFixupRootBoundary) {
         $runtimeBatText = Get-Content -LiteralPath $runtimeBat -Raw
         $runtimeBatText = $runtimeBatText.Replace(
@@ -398,6 +479,7 @@ exit /b 0
     } else {
         ""
     }
+    $managedProofMode = if ($isFirstNonNullRoot) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
     $artifactBat = Write-Batch "build-single-thread-suspend-ee-artifact.bat" @"
 @echo off
 setlocal
@@ -405,7 +487,7 @@ call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /TC /c /GS- /Zl /Fo:"$runtimeSupportObj" "$runtimeSupportSource"
 if errorlevel 1 exit /b %errorlevel%
-"$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=FirstCollectionBoundary -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ -p:HostLogProofRuntimePackObj=$platformObj $probeObjectPropertyArgument -p:IlcSdkPath=$oldArtifact\sdk\
+"$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=$managedProofMode -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ -p:HostLogProofRuntimePackObj=$platformObj $probeObjectPropertyArgument -p:IlcSdkPath=$oldArtifact\sdk\
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:"$hostShimObj" "$hostShimSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -413,12 +495,17 @@ cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /B
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
+    $gcEnumArchiveArgs = if ($isCandidateLoadEnumeration) {
+        "/REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\GcEnum.cpp.obj`" `"$gcEnum`""
+    } else {
+        ""
+    }
     $archiveBat = Write-Batch "build-single-thread-suspend-ee-gc-archive.bat" @"
 @echo off
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
-lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\PalRedhawkMinWin.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\thread.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.obj')" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\gcenv.ee.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj" "$palBridge" "$palStartup" "$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$gcEnvEe" "$gcBridgeBoundary" "$platformContract" "$threadObj" "$ehObj" "$allocFastObj" "$probeObj"
+ lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\PalRedhawkMinWin.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\thread.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.obj')" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\gcenv.ee.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj" "$palBridge" "$palStartup" "$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$gcEnvEe" "$gcBridgeBoundary" "$platformContract" "$threadObj" "$ehObj" "$allocFastObj" "$probeObj" $gcEnumArchiveArgs
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
@@ -430,7 +517,9 @@ exit /b %errorlevel%
 "@
 
     if (-not $SkipManagedBuild) {
-        foreach ($stale in @($platformObj,$gcEnvEe,$probeObj,$gcBridgeBoundary,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$elfPath,$mapPath)) {
+        $stalePaths = @($platformObj,$gcEnvEe,$probeObj,$gcBridgeBoundary,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$elfPath,$mapPath)
+        if ($isCandidateLoadEnumeration) { $stalePaths += $gcEnum }
+        foreach ($stale in $stalePaths) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
         Invoke-Batch $runtimeBat "runtime-pack-build.log"
@@ -438,7 +527,9 @@ exit /b %errorlevel%
         Invoke-Batch $archiveBat "gc-archive-build.log"
         Invoke-Batch $linkBat "managed-link.log"
     }
-    foreach ($path in @($platformObj,$gcEnvEe,$probeObj,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$mapPath)) { Require-File $path "Single-thread SuspendEE build output" }
+    $requiredBuildOutputs = @($platformObj,$gcEnvEe,$probeObj,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$mapPath)
+    if ($isCandidateLoadEnumeration) { $requiredBuildOutputs += $gcEnum }
+    foreach ($path in $requiredBuildOutputs) { Require-File $path "Single-thread SuspendEE build output" }
     Invoke-LoggedCommand $python @($converter,$pePath,$elfPath,"--map",$mapPath,"--symbol","ManagedMain") (Join-Path $runRoot "pe-to-elf.log")
     Require-File $elfPath "Single-thread SuspendEE ELF"
     Invoke-LoggedCommand $objdump @("-p",$pePath) (Join-Path $runRoot "pe-imports.txt")
@@ -447,7 +538,11 @@ exit /b %errorlevel%
     if ($imports -match 'FlsGetValue|FlsSetValue') { throw "Single-thread SuspendEE PE still exposes live Windows FLS imports." }
     $mapText = Get-Content -LiteralPath $mapPath -Raw
     $requiredSymbols = @("ManagedMain","RhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment","guideXosNativeAotSuspendEeEntry","guideXosNativeAotSuspendEeAfterLock","guideXosNativeAotSuspendEeAfterSuspend","guideXosNativeAotSuspendEeBodyReturn","guideXosNativeAotDisablePreemptiveEntry","guideXosNativeAotDisablePreemptiveReturn","guideXosManagedAllocationGetDiagnostics")
-    if ($isFirstPerThreadRootProvider) {
+    if ($isFirstNonNullRoot) {
+        $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
+    } elseif ($isFirstRootCandidateLoad) {
+        $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstRootCandidateLoadRequested","guideXosNativeAotFirstRootCandidateMachineWordLoaded")
+    } elseif ($isFirstPerThreadRootProvider) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered")
     } elseif ($isAllocationContextFixupRootBoundary) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupRootBoundary","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete")
@@ -508,10 +603,13 @@ exit /b %errorlevel%
         Copy-Item -LiteralPath $kernelPath -Destination (Join-Path $espRoot "kernel.elf") -Force
         $port = 44800 + $runIndex
         $monitorPath = Join-Path $oneRoot "watchdog-monitor.txt"
+        $qemuDebugPath = Join-Path $oneRoot "qemu-debug.log"
         $qemuArgs = @("-accel","tcg,thread=single","-machine","pc","-smp","1","-drive",('if=pflash,format=raw,readonly=on,file="' + $ovmf + '"'),"-drive",('file=fat:rw:"' + $espRoot + '",format=raw,if=ide,index=0'),"-m","1024M","-vga","std","-display","none","-serial",('file:"' + $serialPath + '"'),"-monitor",("tcp:127.0.0.1:$port,server,nowait"),"-no-reboot","-no-shutdown","-rtc","base=utc,clock=host")
+        if ($isFirstNonNullRoot) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
         Log-Command ('"' + $qemu + '" ' + ($qemuArgs -join ' '))
         $qemuProcess = Start-Process -FilePath $qemu -ArgumentList $qemuArgs -WindowStyle Hidden -PassThru
         $completed = $false
+        $earlyFailure = $null
         try {
             $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
             while ((Get-Date) -lt $deadline -and -not $qemuProcess.HasExited) {
@@ -519,7 +617,11 @@ exit /b %errorlevel%
                 if (Test-Path -LiteralPath $serialPath) {
                     $liveText = Get-Content -LiteralPath $serialPath -Raw
                     $normalizedLiveText = (($liveText -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' ') -replace '\s*=\s*', '='
-                    $stopPattern = if ($isFirstPerThreadRootProvider) {
+                    $stopPattern = if ($isFirstNonNullRoot) {
+                        'lockDepth=00000001 marker=C011EC06'
+                    } elseif ($isFirstRootCandidateLoad) {
+                        'lockDepth=00000001 marker=C011EC05'
+                    } elseif ($isFirstPerThreadRootProvider) {
                         'lockDepth=00000001 marker=C011EC04'
                     } elseif ($isAllocationContextFixupRootBoundary) {
                         'segmentReservedAfter=0000000100B00000'
@@ -527,17 +629,24 @@ exit /b %errorlevel%
                         'liveSentinels=00000004'
                     }
                     if ($normalizedLiveText -match $stopPattern) { $completed = $true; break }
+                    if ($isFirstNonNullRoot -and $normalizedLiveText -match '\[PageFault\] Not-present violation on read \(kernel\)') { $earlyFailure = "nativeaot-thread-static-startup-page-fault"; break }
                 }
             }
-            if (-not $completed) {
+            if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
-                if ($qemuProcess.HasExited) { throw "QEMU $name exited before the NativeAOT GC safe-stop marker." }
-                throw "QEMU $name timed out after $TimeoutSeconds seconds."
+                $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
+                if ($isFirstNonNullRoot -and $failureSerial -match '\[PageFault\] Not-present violation on read \(kernel\)') {
+                    $earlyFailure = "nativeaot-thread-static-startup-page-fault"
+                } elseif ($qemuProcess.HasExited) {
+                    throw "QEMU $name exited before the NativeAOT GC safe-stop marker."
+                } else {
+                    throw "QEMU $name timed out after $TimeoutSeconds seconds."
+                }
             }
         } finally {
             if (-not $qemuProcess.HasExited) { Stop-Process -Id $qemuProcess.Id -Force }
             try { $qemuProcess.WaitForExit() } catch { }
-            [ordered]@{ run=$name; timeoutSeconds=$TimeoutSeconds; safeStopObserved=$completed; harnessTerminated=$true; processId=$qemuProcess.Id; serialPath=$serialPath; monitorPath=$monitorPath } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $oneRoot "watchdog.json") -Encoding ASCII
+            [ordered]@{ run=$name; timeoutSeconds=$TimeoutSeconds; safeStopObserved=$completed; earlyFailure=$earlyFailure; harnessTerminated=$true; processId=$qemuProcess.Id; serialPath=$serialPath; monitorPath=$monitorPath; qemuDebugPath=$qemuDebugPath } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $oneRoot "watchdog.json") -Encoding ASCII
         }
         Require-File $serialPath "Fresh QEMU serial log"
         $serial = Get-Content -LiteralPath $serialPath -Raw
@@ -545,7 +654,97 @@ exit /b %errorlevel%
         $validationText = ($serial -replace '\[IRQ\] dispatch irq=00\s*', '') -replace '\s+', ' '
         $validationText = $validationText -replace '\s*=\s*', '='
         $validationText = $validationText -replace '\s*-\s*', '-'
-        if ($isFirstPerThreadRootProvider) {
+        if ($isFirstNonNullRoot -and -not [string]::IsNullOrWhiteSpace($earlyFailure)) {
+            Assert-Text $validationText '\[nativeaot-gc-single-thread-suspend-ee\] entering ManagedMain once' "managed entry before early failure"
+            Assert-Text $validationText '\[PageFault\] Not-present violation on read \(kernel\)' "NativeAOT thread-static startup page fault"
+            if ($validationText -match 'C011EC06|nativeaot-gc-first-non-null-root-callback-boundary|candidateVisited=|managedAssignmentCount=') { throw "The early-failure run reached proof-root or candidate-boundary evidence unexpectedly in $name." }
+            $debugText = if (Test-Path -LiteralPath $qemuDebugPath -PathType Leaf) { Get-Content -LiteralPath $qemuDebugPath -Raw } else { "" }
+            $faultRipMatches = [regex]::Matches($debugText, '(?im)\bRIP=(?<value>[0-9A-Fa-f]{16})')
+            $faultCr2Matches = [regex]::Matches($debugText, '(?im)\bCR2=(?<value>[0-9A-Fa-f]{16})')
+            $faultRip = if ($faultRipMatches.Count -gt 0) { "0x" + $faultRipMatches[$faultRipMatches.Count - 1].Groups['value'].Value.ToUpperInvariant() } else { $null }
+            $faultCr2 = if ($faultCr2Matches.Count -gt 0) { "0x" + $faultCr2Matches[$faultCr2Matches.Count - 1].Groups['value'].Value.ToUpperInvariant() } else { $null }
+            $qemuDebugSha256 = if (Test-Path -LiteralPath $qemuDebugPath -PathType Leaf) { Hash-File $qemuDebugPath } else { $null }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker=$null; outcome="E"; harnessTerminated=$true; earlyFailure=$earlyFailure
+                managedMainEntered=$true; managedAssignmentCount="0x00000000"; managedReadbackCount="0x00000000"; candidateScanStarted=$false; callbackCount="0x00000000"; qemuDebugLog=$qemuDebugPath; qemuDebugSha256=$qemuDebugSha256; faultRip=$faultRip; faultCr2=$faultCr2
+            }
+            continue
+        }
+        if ($isFirstNonNullRoot) {
+            Assert-Text $validationText '\[nativeaot-gc-first-non-null-root-callback-boundary\] SAFE_STOP marker=C011EC06' "first non-null root callback-boundary safe-stop marker"
+            Assert-Text $validationText 'gcScanRootsRequest=00000001 gcScanRootsEntry=00000001 foreachRequest=00000001 foreachEntry=00000001 iteratorInit=00000001' "real root dispatcher and iterator entry"
+            Assert-Text $validationText 'registeredBefore=00000001 registeredAfter=00000001 enumerated=00000001 included=00000001 excluded=00000000' "actual registered thread enumeration and inclusion"
+            Assert-Text $validationText 'providerSource=thread-static-provider providerRuntime=thread-static-provider providerFunction=0000000[12]' "runtime-selected thread-static provider"
+            Assert-Text $validationText 'managedAssignmentCount=00000001 managedClearCount=00000000 managedReadbackCount=00000001 managedAssignmentValid=00000001 managedReadbackValid=00000001' "managed thread-static assignment and readback"
+            Assert-Text $validationText 'threadStaticInitialization=0000000[23] sentinelOrdinal=00000000 sentinelAddress=[0-9A-F]{16} sentinelSize=0000000000001018 readbackAddress=[0-9A-F]{16} readbackExactMatch=00000001' "thread-static initialization and selected sentinel"
+            Assert-Text $validationText 'candidateVisited=0000000[1-8] nullCandidates=0000000[01] nonNullCandidates=00000001' "bounded candidate sequence and first non-null value"
+            Assert-Text $validationText 'firstNonNullSlot=[0-9A-F]{16} firstNonNullValue=[0-9A-F]{16} firstNonNullKnownAddressMatch=[0-9A-F]{8} expectedSentinelAddress=[0-9A-F]{16}' "first non-null candidate raw value"
+            Assert-Text $validationText 'loadRequests=0000000[1-8] loadEntries=0000000[1-8] machineWordLoads=0000000[1-8] duplicateLoads=00000000 loadFaults=00000000' "exactly-once bounded candidate loads"
+            Assert-Text $validationText 'rootFlags=00000000 rootKind=00000001 callbacks=00000000 promotions=00000000 marking=00000000' "root metadata before callback"
+            Assert-Text $validationText 'candidateDereferences=00000000 heapMembershipTests=00000000 objectHeaders=00000000 methodTables=00000000 rootFlagApplications=00000000' "no semantic candidate processing"
+            Assert-Text $validationText 'objectMutation=00000000 restartRequests=00000000 restartEntries=00000000 managedResume=00000000' "no mutation, restart, or managed resume"
+            Assert-Text $validationText 'objectBeforeLoad=00000028 objectAfterLoad=00000028 objectAtStop=00000028' "object validation around non-null load"
+            Assert-Text $validationText 'providerRequests=0000000[12] providerEntries=0000000[12] providerSkips=0000000[01]' "provider request, entry, and null-inline-root state"
+            Assert-Text $validationText 'fixupFailures=00000000 rootFailures=00000000 eeSuspended=00000001 lockDepth=00000001 marker=C011EC06' "fixup, suspension, and lock invariants"
+            $currentIdentity = Get-MarkerField $validationText 'current'
+            $enumeratedIdentity = Get-MarkerField $validationText 'enumeratedThread'
+            $initiatorIdentity = Get-MarkerField $validationText 'initiator'
+            $lockOwnerIdentity = Get-MarkerField $validationText 'lockOwner'
+            $candidateSlotIdentity = Get-MarkerField $validationText 'firstNonNullSlot'
+            $candidateValueIdentity = Get-MarkerField $validationText 'firstNonNullValue'
+            $sentinelIdentity = Get-MarkerField $validationText 'sentinelAddress'
+            $readbackIdentity = Get-MarkerField $validationText 'readbackAddress'
+            $expectedSentinelIdentity = Get-MarkerField $validationText 'expectedSentinelAddress'
+            if ([string]::IsNullOrWhiteSpace($currentIdentity) -or $currentIdentity -ne $enumeratedIdentity -or $currentIdentity -ne $initiatorIdentity -or $currentIdentity -ne $lockOwnerIdentity) { throw "Thread identity mismatch in $name." }
+            if ([string]::IsNullOrWhiteSpace($sentinelIdentity) -or $sentinelIdentity -ne $readbackIdentity -or $sentinelIdentity -ne $expectedSentinelIdentity) { throw "Managed thread-static readback did not match the selected sentinel in $name." }
+            if ([string]::IsNullOrWhiteSpace($candidateSlotIdentity) -or [string]::IsNullOrWhiteSpace($candidateValueIdentity) -or $candidateValueIdentity -eq '0x0000000000000000') { throw "Non-null candidate identity was not captured in $name." }
+            $candidateLineMatch = [regex]::Match($validationText, 'CANDIDATE ordinal=(?<ordinal>[0-9A-F]+) slot=(?<slot>[0-9A-F]{16}) rawValue=(?<raw>[0-9A-F]{16}) loadCount=(?<loads>[0-9A-F]+) duplicateLoads=(?<duplicates>[0-9A-F]+) null=(?<null>[0-9A-F]+) knownAddressMatch=(?<known>[0-9A-F]+) exactSelectedSentinelMatch=(?<exact>[0-9A-F]+) callback=(?<callback>[0-9A-F]{16}) scanContext=(?<scanContext>[0-9A-F]{16})')
+            if (-not $candidateLineMatch.Success) { throw "Candidate record was not captured in $name." }
+            if ($candidateLineMatch.Groups['slot'].Value -ne $candidateSlotIdentity.Substring(2) -or $candidateLineMatch.Groups['raw'].Value -ne $candidateValueIdentity.Substring(2)) { throw "Candidate record does not match the safe-stop candidate in $name." }
+            if ($validationText -match 'ALL_PASS|ALL_FAIL|GC\.Collect|RhShutdown|GC_Shutdown') { throw "Unexpected completion or shutdown marker appeared in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC06"; harnessTerminated=$true
+                allocations=(Get-MarkerField $validationText 'objectAtStop'); gcScanRootsRequests=(Get-MarkerField $validationText 'gcScanRootsRequest'); gcScanRootsEntries=(Get-MarkerField $validationText 'gcScanRootsEntry'); foreachThreadEntries=(Get-MarkerField $validationText 'foreachEntry'); iteratorInitializations=(Get-MarkerField $validationText 'iteratorInit'); registeredThreads=(Get-MarkerField $validationText 'registeredBefore'); enumeratedThreads=(Get-MarkerField $validationText 'enumerated'); includedThreads=(Get-MarkerField $validationText 'included'); excludedThreads=(Get-MarkerField $validationText 'excluded')
+                threadRecord=[ordered]@{ ordinal=1; nativeThread=$enumeratedIdentity; nativeThreadId=(Get-MarkerField $validationText 'nativeId'); current=$currentIdentity; initiator=$initiatorIdentity; lockOwner=$lockOwnerIdentity; lifecycle=(Get-MarkerField $validationText 'lifecycle'); stateFlags=(Get-MarkerField $validationText 'stateFlags'); cooperative=(Get-MarkerField $validationText 'cooperative'); preemptive=(Get-MarkerField $validationText 'preemptive') }
+                managedProofRoot=[ordered]@{ assignmentCount=(Get-MarkerField $validationText 'managedAssignmentCount'); clearCount=(Get-MarkerField $validationText 'managedClearCount'); readbackCount=(Get-MarkerField $validationText 'managedReadbackCount'); assignmentValid=(Get-MarkerField $validationText 'managedAssignmentValid'); readbackValid=(Get-MarkerField $validationText 'managedReadbackValid'); initialization=(Get-MarkerField $validationText 'threadStaticInitialization'); sentinelOrdinal=(Get-MarkerField $validationText 'sentinelOrdinal'); sentinelAddress=$sentinelIdentity; sentinelSize=(Get-MarkerField $validationText 'sentinelSize'); readbackAddress=$readbackIdentity; readbackExactMatch=(Get-MarkerField $validationText 'readbackExactMatch'); managedThread=(Get-MarkerField $validationText 'managedThread') }
+                provider=[ordered]@{ source="thread-static-provider"; runtime="thread-static-provider"; function=(Get-MarkerField $validationText 'providerFunction'); requests=(Get-MarkerField $validationText 'providerRequests'); entries=(Get-MarkerField $validationText 'providerEntries'); skips=(Get-MarkerField $validationText 'providerSkips'); metadataContainer=(Get-MarkerField $validationText 'metadataContainer'); storageAddress=(Get-MarkerField $validationText 'storageAddress') }
+                candidateSlots=@([ordered]@{ ordinal=("0x"+$candidateLineMatch.Groups['ordinal'].Value); slot=("0x"+$candidateLineMatch.Groups['slot'].Value); rawValue=("0x"+$candidateLineMatch.Groups['raw'].Value); loadCount=("0x"+$candidateLineMatch.Groups['loads'].Value); duplicateLoads=("0x"+$candidateLineMatch.Groups['duplicates'].Value); null=("0x"+$candidateLineMatch.Groups['null'].Value); knownAddressMatch=("0x"+$candidateLineMatch.Groups['known'].Value); exactSelectedSentinelMatch=("0x"+$candidateLineMatch.Groups['exact'].Value); callback=("0x"+$candidateLineMatch.Groups['callback'].Value); scanContext=("0x"+$candidateLineMatch.Groups['scanContext'].Value) })
+                candidateVisited=(Get-MarkerField $validationText 'candidateVisited'); nullCandidates=(Get-MarkerField $validationText 'nullCandidates'); nonNullCandidates=(Get-MarkerField $validationText 'nonNullCandidates'); firstNonNullSlot=$candidateSlotIdentity; firstNonNullValue=$candidateValueIdentity; firstNonNullKnownAddressMatch=(Get-MarkerField $validationText 'firstNonNullKnownAddressMatch'); candidateMatchesProofRoot=(Get-MarkerField $validationText 'candidateMatchesProofRoot'); candidateProofRootObserved=(Get-MarkerField $validationText 'proofRootObserved'); loadRequests=(Get-MarkerField $validationText 'loadRequests'); loadEntries=(Get-MarkerField $validationText 'loadEntries'); machineWordLoads=(Get-MarkerField $validationText 'machineWordLoads'); duplicateLoads=(Get-MarkerField $validationText 'duplicateLoads'); loadFaults=(Get-MarkerField $validationText 'loadFaults'); callback=(Get-MarkerField $validationText 'callback'); scanContext=(Get-MarkerField $validationText 'scanContext'); rootFlags=(Get-MarkerField $validationText 'rootFlags'); rootKind=(Get-MarkerField $validationText 'rootKind')
+                candidateDereferences=(Get-MarkerField $validationText 'candidateDereferences'); heapMembershipTests=(Get-MarkerField $validationText 'heapMembershipTests'); objectHeaders=(Get-MarkerField $validationText 'objectHeaders'); methodTables=(Get-MarkerField $validationText 'methodTables'); rootFlagApplications=(Get-MarkerField $validationText 'rootFlagApplications'); callbacks=(Get-MarkerField $validationText 'callbacks'); promotions=(Get-MarkerField $validationText 'promotions'); marking=(Get-MarkerField $validationText 'marking'); objectMutation=(Get-MarkerField $validationText 'objectMutation'); restartRequests=(Get-MarkerField $validationText 'restartRequests'); restartEntries=(Get-MarkerField $validationText 'restartEntries'); managedResume=(Get-MarkerField $validationText 'managedResume'); objectBeforeLoad=(Get-MarkerField $validationText 'objectBeforeLoad'); objectAfterLoad=(Get-MarkerField $validationText 'objectAfterLoad'); objectAtStop=(Get-MarkerField $validationText 'objectAtStop')
+            }
+        } elseif ($isFirstRootCandidateLoad) {
+            Assert-Text $validationText '\[nativeaot-gc-first-root-candidate-load\] SAFE_STOP marker=C011EC05' "first root candidate-load safe-stop marker"
+            Assert-Text $validationText 'gcScanRootsRequest=00000001 gcScanRootsEntry=00000001 foreachRequest=00000001 foreachEntry=00000001 iteratorInit=00000001' "real root dispatcher and iterator entry"
+            Assert-Text $validationText 'registeredBefore=00000001 registeredAfter=00000001 enumerated=00000001 included=00000001 excluded=00000000' "actual registered thread enumeration and inclusion"
+            Assert-Text $validationText 'providerSource=thread-static-provider providerRuntime=thread-static-provider providerFunction=00000002' "runtime-selected thread-static provider"
+            Assert-Text $validationText 'providerRequests=00000002 providerEntries=00000001 providerSkips=00000001 metadataContainers=00000001' "provider request, entry, skip, and metadata counts"
+            Assert-Text $validationText 'slotWidth=00000008 slotAlignment=00000000 slotMapped=00000001 slotCommitted=00000001 slotWritableContract=00000001 slotStable=00000001 slotExpectedThreadStorage=00000001' "real aligned mapped candidate slot"
+            Assert-Text $validationText 'slotOverlapHeap=00000000 slotOverlapThread=00000001 slotOverlapAllocContext=00000000 slotOverlapStack=00000000 slotOverlapOther=00000000' "candidate slot region separation"
+            Assert-Text $validationText 'loadRequests=00000001 loadEntries=00000001 machineWordLoads=00000001 duplicateLoads=00000000 loadFaults=00000000' "exactly one successful machine-word load"
+            Assert-Text $validationText 'loadAddress=[0-9A-F]{16} rawValue=[0-9A-F]{16} valueIsNull=(?:00000000|00000001) knownAddressMatch=[0-9A-F]{8}' "saved opaque raw candidate value"
+            Assert-Text $validationText 'candidateDereferences=00000000 heapMembershipTests=00000000 objectHeaders=00000000 methodTables=00000000 rootFlagApplications=00000000' "no semantic candidate processing"
+            Assert-Text $validationText 'candidates=00000000 callbacks=00000000 promotions=00000000 marking=00000000 objectMutation=00000000 restartRequests=00000000 restartEntries=00000000 managedResume=00000000' "no callbacks, marking, mutation, restart, or resume"
+            Assert-Text $validationText 'objectBeforeLoad=00000028 objectAfterLoad=00000028 objectAtStop=00000028 sentinelChecks=000000A0' "object and sentinel validation before and after load"
+            Assert-Text $validationText 'fixupFailures=00000000 rootFailures=00000000 eeSuspended=00000001 lockDepth=00000001' "fixup, suspension, and lock invariants"
+            $currentIdentity = Get-MarkerField $validationText 'current'
+            $enumeratedIdentity = Get-MarkerField $validationText 'enumeratedThread'
+            $initiatorIdentity = Get-MarkerField $validationText 'initiator'
+            $lockOwnerIdentity = Get-MarkerField $validationText 'lockOwner'
+            $candidateSlotIdentity = Get-MarkerField $validationText 'candidateSlot'
+            $loadAddressIdentity = Get-MarkerField $validationText 'loadAddress'
+            if ([string]::IsNullOrWhiteSpace($currentIdentity) -or $currentIdentity -ne $enumeratedIdentity -or $currentIdentity -ne $initiatorIdentity -or $currentIdentity -ne $lockOwnerIdentity) { throw "Thread identity mismatch in $name." }
+            if ([string]::IsNullOrWhiteSpace($candidateSlotIdentity) -or $candidateSlotIdentity -ne $loadAddressIdentity) { throw "Candidate slot/load-address mismatch in $name." }
+            if ($validationText -match 'ALL_PASS|ALL_FAIL|GC\.Collect|RhShutdown|GC_Shutdown') { throw "Unexpected completion or shutdown marker appeared in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC05"; harnessTerminated=$true
+                allocations=(Get-MarkerField $validationText 'objectAtStop'); gcScanRootsRequests=(Get-MarkerField $validationText 'gcScanRootsRequest'); gcScanRootsEntries=(Get-MarkerField $validationText 'gcScanRootsEntry'); foreachThreadEntries=(Get-MarkerField $validationText 'foreachEntry'); iteratorInitializations=(Get-MarkerField $validationText 'iteratorInit'); registeredThreads=(Get-MarkerField $validationText 'registeredBefore'); enumeratedThreads=(Get-MarkerField $validationText 'enumerated'); includedThreads=(Get-MarkerField $validationText 'included'); excludedThreads=(Get-MarkerField $validationText 'excluded')
+                threadRecord=[ordered]@{ ordinal=1; nativeThread=$enumeratedIdentity; nativeThreadId=(Get-MarkerField $validationText 'nativeId'); current=$currentIdentity; initiator=$initiatorIdentity; lockOwner=$lockOwnerIdentity; lifecycle=(Get-MarkerField $validationText 'lifecycle'); stateFlags=(Get-MarkerField $validationText 'stateFlags'); cooperative=(Get-MarkerField $validationText 'cooperative'); preemptive=(Get-MarkerField $validationText 'preemptive'); allocationContext=(Get-MarkerField $validationText 'allocContext'); stackLow=(Get-MarkerField $validationText 'stackLow'); stackHigh=(Get-MarkerField $validationText 'stackHigh') }
+                provider=[ordered]@{ source="thread-static-provider"; runtime="thread-static-provider"; function="Thread::GetThreadStaticStorage"; requests=(Get-MarkerField $validationText 'providerRequests'); entries=(Get-MarkerField $validationText 'providerEntries'); skips=(Get-MarkerField $validationText 'providerSkips'); metadataContainers=(Get-MarkerField $validationText 'metadataContainers'); metadataContainer=(Get-MarkerField $validationText 'metadataContainer') }
+                candidateSlot=$candidateSlotIdentity; slotOffset=(Get-MarkerField $validationText 'slotOffset'); slotWidth=(Get-MarkerField $validationText 'slotWidth'); slotAlignment=(Get-MarkerField $validationText 'slotAlignment'); slotMapped=(Get-MarkerField $validationText 'slotMapped'); slotCommitted=(Get-MarkerField $validationText 'slotCommitted'); slotWritableContract=(Get-MarkerField $validationText 'slotWritableContract'); slotStable=(Get-MarkerField $validationText 'slotStable'); slotExpectedThreadStorage=(Get-MarkerField $validationText 'slotExpectedThreadStorage')
+                rootFlags=(Get-MarkerField $validationText 'rootFlags'); rootKind=(Get-MarkerField $validationText 'rootKind'); callback=(Get-MarkerField $validationText 'callback'); scanContext=(Get-MarkerField $validationText 'scanContext'); loadRequests=(Get-MarkerField $validationText 'loadRequests'); loadEntries=(Get-MarkerField $validationText 'loadEntries'); machineWordLoads=(Get-MarkerField $validationText 'machineWordLoads'); duplicateLoads=(Get-MarkerField $validationText 'duplicateLoads'); loadFaults=(Get-MarkerField $validationText 'loadFaults'); loadAddress=$loadAddressIdentity; rawValue=(Get-MarkerField $validationText 'rawValue'); valueIsNull=(Get-MarkerField $validationText 'valueIsNull'); knownAddressMatch=(Get-MarkerField $validationText 'knownAddressMatch')
+                candidateDereferences=(Get-MarkerField $validationText 'candidateDereferences'); heapMembershipTests=(Get-MarkerField $validationText 'heapMembershipTests'); objectHeaders=(Get-MarkerField $validationText 'objectHeaders'); methodTables=(Get-MarkerField $validationText 'methodTables'); rootFlagApplications=(Get-MarkerField $validationText 'rootFlagApplications'); candidates=(Get-MarkerField $validationText 'candidates'); callbacks=(Get-MarkerField $validationText 'callbacks'); promotions=(Get-MarkerField $validationText 'promotions'); marking=(Get-MarkerField $validationText 'marking'); objectMutation=(Get-MarkerField $validationText 'objectMutation'); restartRequests=(Get-MarkerField $validationText 'restartRequests'); restartEntries=(Get-MarkerField $validationText 'restartEntries'); managedResume=(Get-MarkerField $validationText 'managedResume'); objectBeforeLoad=(Get-MarkerField $validationText 'objectBeforeLoad'); objectAfterLoad=(Get-MarkerField $validationText 'objectAfterLoad'); objectAtStop=(Get-MarkerField $validationText 'objectAtStop'); sentinelChecks=(Get-MarkerField $validationText 'sentinelChecks')
+            }
+        } elseif ($isFirstPerThreadRootProvider) {
             Assert-Text $validationText '\[nativeaot-gc-first-per-thread-root-provider\] SAFE_STOP marker=C011EC04' "first per-thread provider safe-stop marker"
             Assert-Text $validationText 'gcScanRootsRequest=00000001 gcScanRootsEntry=00000001 foreachRequest=00000001 foreachEntry=00000001 iteratorInit=00000001' "real root dispatcher and iterator entry"
             Assert-Text $validationText 'registeredBefore=00000001 registeredAfter=00000001 enumerated=00000001 included=00000001 excluded=00000000' "actual registered thread enumeration and inclusion"
@@ -618,7 +817,58 @@ exit /b %errorlevel%
 
     $identity = Get-Content -LiteralPath $identityManifestPath -Raw | ConvertFrom-Json
     $replacementHashes = @($identity.replacementObjects | ForEach-Object { [ordered]@{ path=$_.path; sha256=$_.sha256 } })
-    if ($isFirstPerThreadRootProvider) {
+    if ($isFirstNonNullRoot) {
+        if (@($runResults | Where-Object { $_.outcome -eq "E" }).Count -ne 3) { throw "The first non-null root callback-boundary experiment did not produce three classified early-failure runs." }
+        $firstEarlyRun = $runResults[0]
+        $manifest = [ordered]@{
+            outcome="E / NativeAOT real [ThreadStatic] initialization faulted before managed assignment completed; root-provider candidate scan not reached"
+            proofMode=$ProofMode; repositoryHead=$repoHead; startingCommittedHead=$repoHead; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            runtimePack=[ordered]@{ version="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterface="5.3"; ee="2"; sourceCommit=$lockedCommit; lockedGcenvEeSourceSha256=(Hash-File $lockedEePath); lockedGcEnumSourceSha256=(Hash-File $lockedGcEnumPath); generatedInjectedGcenvEeSource=$gcEnvEeSource; generatedInjectedGcEnumSource=$gcEnumSource; activePalArchiveSha256=(Hash-File $activeArchive) }
+            priorCheckpoint=[ordered]@{ marker="C011EC05"; report="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md"; stop="one real candidate-slot machine-word load, before callback and semantic processing" }
+            managedProofRoot=[ordered]@{ field="HostLogProof.Program.s_gcProofThreadRoot"; attribute="[ThreadStatic]"; assignmentCount="0x00000000"; readbackCount="0x00000000"; assignmentValid="0x00000000"; readbackValid="0x00000000"; initializationIndicator="0x00000000"; selectedSentinel="not assigned before fault"; fabricatedSlot=$false; fabricatedObject=$false }
+            sourceTrace=[ordered]@{ managedSemantics="NativeAOT normal ThreadStatic slow path"; threadStaticBase="nativeaot/Runtime/thread.cpp:1251-1261"; inlineThreadStaticRoot="nativeaot/Runtime/thread.h:76-84"; rootDispatcher="nativeaot/Runtime/gcenv.ee.cpp:94-133"; enumGcRef="nativeaot/Runtime/GcEnum.cpp:68-96"; injectedCandidateLoad=$gcEnumSource; faultFunction="S_P_CoreLib_Internal_Runtime_ThreadStatics__GetInlinedThreadStaticBaseSlow" }
+            failure=[ordered]@{ classification="nativeaot-thread-static-startup-page-fault"; firstManagedEntry=$true; serialEvidence="[PageFault] Not-present violation on read (kernel) at 0xFFFB5FF9"; faultRip=$firstEarlyRun.faultRip; faultCr2=$firstEarlyRun.faultCr2; faultFunction="S_P_CoreLib_Internal_Runtime_ThreadStatics__GetInlinedThreadStaticBaseSlow"; safeStopMarker="not reached"; rootProviderEntered=$false; candidateLoadRequested=0; candidateMachineWordLoaded=0; callbacks=0; promotions=0; marking=0; objectMutation=0; restartRequests=0; restartEntries=0; managedResume=0; interpretation="normal NativeAOT thread-static initialization failed before the proof field could be assigned; this is not a fabricated runtime root or candidate result" }
+            candidateBoundary=[ordered]@{ providerSource="not reached"; candidateVisited=0; nullCandidates=0; nonNullCandidates=0; firstNonNullValue="not observed"; exactSelectedSentinelMatch="not observed"; callback=0; scanContext="not observed"; candidateDereferences=0; heapMembershipTests=0; objectHeaders=0; methodTables=0; rootFlagApplications=0; safeStopMarker="C011EC06 not reached" }
+            sentinelAndObjects=[ordered]@{ workloadSentinels=4; managedSentinelAssignment=$false; objectValidationAtManagedEntry="not applicable before assignment"; fabricatedSentinel=$false; fabricatedCandidate=$false }
+            proofKernelSha256=$specializedKernelHash; qemuVersion=$qemuVersion; exactCommandLog=(Join-Path $runRoot "commands.txt"); logsRoot=$runRoot; runs=$runResults
+            regressions=[ordered]@{ firstNonNullRootCallbackBoundary="OUTCOME E 3/3 fresh QEMU runs; same early NativeAOT thread-static page-fault class"; firstRootCandidateLoad="historical PASS C011EC05 retained; not overwritten"; firstPerThreadRootProvider="historical PASS C011EC04 retained"; allocationContextFixupRootBoundary="historical PASS C011EC03 retained"; singleThreadSuspendEe="historical PASS C011EC02 retained"; staticChecks="PASS script parse, manifest parse, QEMU serial classification, ordinary-kernel restoration" }
+            failedChecks=[ordered]@{ historicalFirst64KiBExecution="retained historical failure"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN exit 1 from compiler-stderr promotion" }
+            blockedChecks=[ordered]@{ firstNonNullRootCallbackBoundary="blocked at legitimate managed ThreadStatic initialization before root-provider callback boundary"; candidateAbiCharacterization="not reached because no real candidate was loaded"; broadRegressionSuite="not rerun in this focused execution"; nativeStackWrapper="historically non-clean; not called passed" }
+            documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md"); evidenceRoot=$runRoot
+            ordinaryKernelBefore=$ordinaryKernelBefore; ordinaryKernelExpectedSha256=$normalKernelHash; authorizedNormalizedAdaptedGcIdentity=[ordered]@{ strategy=$identity.strategy; sourceCommit=$identity.sourceCommit; stockSha256=$identity.stockSha256; adaptedSha256=$identity.adaptedSha256; adaptedLength=$identity.adaptedLength; replacementObjects=$replacementHashes; stockUnchanged=$identity.stockUnchanged }
+        }
+        $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT Workstation GC first-non-null-root-callback-boundary experiment: OUTCOME E (thread-static initialization failed before root scan)" -ForegroundColor Yellow
+    } elseif ($isFirstRootCandidateLoad) {
+        $firstCandidateRun = $runResults[0]
+        $manifest = [ordered]@{
+            outcome="A / first candidate value loaded exactly once; stopped before semantic processing"
+            proofMode=$ProofMode; repositoryHead=$repoHead; startingCommittedHead=$repoHead; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            runtimePack=[ordered]@{ version="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterface="5.3"; ee="2"; sourceCommit=$lockedCommit; lockedGcenvEeSourceSha256=(Hash-File $lockedEePath); lockedGcEnumSourceSha256=(Hash-File $lockedGcEnumPath); generatedInjectedGcenvEeSource=$gcEnvEeSource; generatedInjectedGcEnumSource=$gcEnumSource; activePalArchiveSha256=(Hash-File $activeArchive) }
+            priorCheckpoint=[ordered]@{ marker="C011EC04"; report="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md"; stop="Thread::GetThreadStaticStorage returned the real slot address before EnumGcRef" }
+            sourceTrace=[ordered]@{ enumGcRefHeader="nativeaot/Runtime/GcEnum.h:13"; enumGcRefDefinition="nativeaot/Runtime/GcEnum.cpp:84-96"; gcEnumObject="nativeaot/Runtime/GcEnum.cpp:68-82"; firstProvider="nativeaot/Runtime/gcenv.ee.cpp:114-115"; threadStaticStorage="nativeaot/Runtime/thread.cpp:1251-1254"; scanFunc="nativeaot/Runtime/forward_declarations.h:43-45"; proofLoadStatement="const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>(*ppObj);"; proofLoadSource=$gcEnumSource }
+            workload=[ordered]@{ arrayLength=4096; actualAlignedSize="0x1018"; hardAllocationLimit=256; allocationCount="0x28"; fast="0x13"; rare="0x16"; refills="0x15"; sameSegmentCommits="0x2"; segmentTransitions="0x0"; liveSentinels="0x4" }
+            collection=[ordered]@{ requests=1; entries=1; generation=1; reason="reason_oos_soh (5)"; blocking=$true; compacting=$false }
+            suspension=[ordered]@{ entryCount=1; suspensionCount=1; successfulReturnCount=1; currentThreadExempt=$true; managedEntryProhibited=$true; eeSuspended=$true; lockHeld=$true; lockDepth=1; restartRequests=0; restartEntries=0; managedResumeCount=0 }
+            allocationContextFixup=[ordered]@{ requestCount=1; entryCount=1; completionCount=1; contextsVisited=1; contextsChanged=1; contextsCleared=1; objectMemoryMutation=0; objectValidationBefore=40; objectValidationAfter=40 }
+            rootDispatcher=[ordered]@{ gcScanRootsRequests=1; gcScanRootsEntries=1; foreachThreadRequests=1; foreachThreadEntries=1; iteratorInitializations=1; sourceOrderCategory="thread-static-provider"; runtimeSelectedCategory="thread-static-provider" }
+            threadEnumeration=[ordered]@{ registeredBefore=1; registeredAfter=1; enumerated=1; included=1; excluded=0; duplicates=0; integrityFailures=0; registryMutationBefore=0; registryMutationAfter=0; record=$firstCandidateRun.threadRecord; records=$runResults }
+            provider=$firstCandidateRun.provider
+            candidateSlot=[ordered]@{ address=$firstCandidateRun.candidateSlot; metadataContainer=$firstCandidateRun.provider.metadataContainer; ownerThread=$firstCandidateRun.threadRecord.nativeThread; providerFunction="Thread::GetThreadStaticStorage"; width=$firstCandidateRun.slotWidth; alignment=$firstCandidateRun.slotAlignment; offsetFromThread=$firstCandidateRun.slotOffset; mapped=$firstCandidateRun.slotMapped; committed=$firstCandidateRun.slotCommitted; writableContract=$firstCandidateRun.slotWritableContract; stable=$firstCandidateRun.slotStable; expectedThreadStorage=$firstCandidateRun.slotExpectedThreadStorage; overlapManagedHeap="0x00000000"; overlapRuntimeThread="0x00000001"; overlapAllocationContext="0x00000000"; overlapNativeStack="0x00000000"; overlapOtherKnownRegion="0x00000000" }
+            candidateLoad=[ordered]@{ requests=$firstCandidateRun.loadRequests; entries=$firstCandidateRun.loadEntries; machineWordLoads=$firstCandidateRun.machineWordLoads; duplicateLoads=$firstCandidateRun.duplicateLoads; loadFaults=$firstCandidateRun.loadFaults; address=$firstCandidateRun.loadAddress; width=$firstCandidateRun.slotWidth; rawValue=$firstCandidateRun.rawValue; valueIsNull=$firstCandidateRun.valueIsNull; knownAddressMatch=$firstCandidateRun.knownAddressMatch; rootFlags=$firstCandidateRun.rootFlags; rootKind=$firstCandidateRun.rootKind; callback=$firstCandidateRun.callback; scanContext=$firstCandidateRun.scanContext }
+            prohibitedProcessing=[ordered]@{ candidatePointeeDereferences=$firstCandidateRun.candidateDereferences; heapMembershipTests=$firstCandidateRun.heapMembershipTests; objectHeaderInspections=$firstCandidateRun.objectHeaders; methodTableInspections=$firstCandidateRun.methodTables; rootFlagApplications=$firstCandidateRun.rootFlagApplications; rootCandidates=$firstCandidateRun.candidates; rootCallbacks=$firstCandidateRun.callbacks; promotionCallbacks=$firstCandidateRun.promotions; marking=$firstCandidateRun.marking; objectMemoryMutation=$firstCandidateRun.objectMutation; restartRequests=$firstCandidateRun.restartRequests; restartEntries=$firstCandidateRun.restartEntries; managedResume=$firstCandidateRun.managedResume }
+            sentinelAndObjects=[ordered]@{ sentinelChecks=$firstCandidateRun.sentinelChecks; liveSentinels="0x00000004"; objectCount="0x00000028"; objectValidationBeforeLoad=$firstCandidateRun.objectBeforeLoad; objectValidationAfterLoad=$firstCandidateRun.objectAfterLoad; objectValidationAtStop=$firstCandidateRun.objectAtStop; addressesUnchanged=$true; contentsUnchanged=$true; layoutsUnchanged=$true; duplicateAddresses=0 }
+            safeStop=[ordered]@{ marker="C011EC05"; reason="one explicit pointer-width load from the real EnumGcRef slot, before callback and semantic processing"; rawValue=$firstCandidateRun.rawValue; nullOrNonNull=$firstCandidateRun.valueIsNull; deterministic=$true; lockHeld=$true; eeSuspended=$true }
+            proofKernelSha256=$specializedKernelHash; qemuVersion=$qemuVersion; exactCommandLog=(Join-Path $runRoot "commands.txt"); logsRoot=$runRoot; runs=$runResults
+            regressions=[ordered]@{ firstRootCandidateLoad="PASS 3/3 fresh QEMU runs"; firstPerThreadRootProvider="PASS preserved by candidate run's earlier milestones"; allocationContextFixupRootBoundary="PENDING separate C011EC03 regression"; singleThreadSuspendEe="PENDING separate C011EC02 regression"; staticChecks="PASS script parse, manifest parse, serial checks, git diff --check" }
+            failedChecks=[ordered]@{ historicalFirst64KiBExecution="retained historical failure"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN exit 1 from compiler-stderr promotion" }
+            blockedChecks=[ordered]@{ broadRegressionSuite="not yet rerun in this focused execution"; nativeStackWrapper="historically non-clean; not called passed"; runtimePackStaticNonallocating="blocked by observed runtime-pack identity mismatch where still unresolved" }
+            documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_ALLOCATION_CONTEXT_FIXUP_AND_FIRST_ROOT_BOUNDARY.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_SINGLE_THREAD_SUSPEND_EE.md"); evidenceRoot=$runRoot
+            ordinaryKernelBefore=$ordinaryKernelBefore; ordinaryKernelExpectedSha256=$normalKernelHash; authorizedNormalizedAdaptedGcIdentity=[ordered]@{ strategy=$identity.strategy; sourceCommit=$identity.sourceCommit; stockSha256=$identity.stockSha256; adaptedSha256=$identity.adaptedSha256; adaptedLength=$identity.adaptedLength; replacementObjects=$replacementHashes; stockUnchanged=$identity.stockUnchanged }
+        }
+        $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT Workstation GC first-root-candidate-load experiment: PASS (safe bounded stop)" -ForegroundColor Green
+    } elseif ($isFirstPerThreadRootProvider) {
         $manifest = [ordered]@{
             outcome="A / first real per-thread provider entered; safe stop before EnumGcRef candidate access"
             proofMode=$ProofMode; repositoryHead=$repoHead; dirtyState=$dirtyState; dirtyDiffStat=$dirtySummary

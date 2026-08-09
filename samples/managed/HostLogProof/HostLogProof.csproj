@@ -45,6 +45,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstNonNullRoot'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_FIRST_NON_NULL_ROOT</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Repeated'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING;HOSTLOGPROOF_REPEATED_ALLOCATION</DefineConstants>
   </PropertyGroup>

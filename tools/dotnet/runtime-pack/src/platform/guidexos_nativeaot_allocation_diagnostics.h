@@ -52,6 +52,7 @@ enum {
     GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS = 8u,
     GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY = 64u,
     GUIDEXOS_NATIVEAOT_MAX_ROOT_THREAD_RECORDS = 32u,
+    GUIDEXOS_NATIVEAOT_MAX_CANDIDATE_SLOTS = 8u,
 };
 
 typedef struct guidexos_nativeaot_allocation_context_snapshot {
@@ -121,6 +122,21 @@ typedef struct guidexos_nativeaot_root_thread_record {
     uintptr_t allocationContext;
     uintptr_t nextThread;
 } guidexos_nativeaot_root_thread_record;
+
+typedef struct guidexos_nativeaot_candidate_slot_record {
+    uint32_t ordinal;
+    uint32_t loadCount;
+    uint32_t duplicateLoadCount;
+    uint32_t rawRootFlags;
+    uint32_t rootKind;
+    uint32_t valueIsNull;
+    uint32_t knownAddressMatch;
+    uint32_t exactSelectedSentinelMatch;
+    uintptr_t slotAddress;
+    uintptr_t rawValue;
+    uintptr_t callbackIdentity;
+    uintptr_t scanContextIdentity;
+} guidexos_nativeaot_candidate_slot_record;
 
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
@@ -586,6 +602,92 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_root_thread_record rootThreadRecords[
         GUIDEXOS_NATIVEAOT_MAX_ROOT_THREAD_RECORDS];
 
+    /*
+     * Bounded first-root-candidate-load proof fields.  The candidate is an
+     * opaque pointer-width value loaded once from the real slot passed through
+     * EnumGcRef.  These fields deliberately distinguish the slot load from
+     * any later candidate-pointee dereference or GC interpretation.
+     */
+    uint32_t candidateLoadRequestCount;
+    uint32_t candidateLoadEntryCount;
+    uint32_t candidateMachineWordLoadCount;
+    uint32_t candidateDuplicateLoadCount;
+    uint32_t candidateLoadFaultCount;
+    uint32_t candidateLoadSuccess;
+    uint32_t candidateSlotWidth;
+    uint32_t candidateSlotAlignment;
+    uint32_t candidateSlotMapped;
+    uint32_t candidateSlotCommitted;
+    uint32_t candidateSlotWritableContract;
+    uint32_t candidateSlotStable;
+    uint32_t candidateSlotExpectedThreadStorage;
+    uint32_t candidateSlotOverlapsManagedHeap;
+    uint32_t candidateSlotOverlapsRuntimeThread;
+    uint32_t candidateSlotOverlapsAllocationContext;
+    uint32_t candidateSlotOverlapsNativeStack;
+    uint32_t candidateSlotOverlapsOtherKnownRegion;
+    uint32_t candidateValueIsNull;
+    uint32_t candidateKnownAddressMatch;
+    uint32_t candidatePointeeDereferenceCount;
+    uint32_t candidateHeapMembershipTestCount;
+    uint32_t candidateObjectHeaderInspectionCount;
+    uint32_t candidateMethodTableInspectionCount;
+    uint32_t candidateRootFlagApplicationCount;
+    uint32_t candidateRootCandidateDiscoveryCount;
+    uint32_t candidateRootCallbacksDelivered;
+    uint32_t candidatePromotionCallbacksDelivered;
+    uint32_t candidateObjectValidationBeforeLoadCount;
+    uint32_t candidateObjectValidationAfterLoadCount;
+    uint32_t candidateObjectValidationAtStopCount;
+    uint32_t candidateSafeStopObserved;
+    uint32_t candidateStopReason;
+    uint32_t candidateRawRootFlags;
+    uint32_t candidateRootKind;
+    uint32_t candidateProviderFunctionCode;
+    uint32_t reservedFirstRootCandidateLoad[3];
+
+    uintptr_t candidateSlotAddress;
+    uintptr_t candidateSlotOffsetFromThread;
+    uintptr_t candidateRawValue;
+    uintptr_t candidateCallbackIdentity;
+    uintptr_t candidateScanContextIdentity;
+    uintptr_t candidateProviderThreadIdentity;
+    uintptr_t candidateOwnerThreadIdentity;
+    uintptr_t candidateMetadataContainerIdentity;
+    uintptr_t candidateLoadAddress;
+
+    /* Managed proof-root evidence. */
+    uint32_t threadStaticProofAssignmentCount;
+    uint32_t threadStaticProofClearCount;
+    uint32_t threadStaticProofReadbackCount;
+    uint32_t threadStaticProofManagedAssignmentValid;
+    uint32_t threadStaticProofManagedReadbackValid;
+    uint32_t threadStaticProofInitializationIndicator;
+    uint32_t threadStaticProofSentinelOrdinal;
+    uint32_t threadStaticProofReadbackExactMatch;
+    uintptr_t threadStaticProofSentinelAddress;
+    uintptr_t threadStaticProofSentinelSize;
+    uintptr_t threadStaticProofManagedReadbackAddress;
+    uintptr_t threadStaticProofManagedThread;
+    uintptr_t threadStaticProofStorageAddress;
+
+    /* Bounded non-null-root candidate sequence. */
+    uint32_t candidateSlotVisitCount;
+    uint32_t candidateNullCount;
+    uint32_t candidateNonNullCount;
+    uint32_t candidateProofRootObserved;
+    uint32_t candidateMatchesProofRoot;
+    uint32_t candidateUnexpectedNonNull;
+    uint32_t candidateBoundReached;
+    uint32_t candidateProviderTerminated;
+    uint32_t candidateFirstNonNullKnownAddressMatch;
+    uint32_t reservedNonNullRootProof[3];
+    uintptr_t candidateFirstNonNullValue;
+    uintptr_t candidateFirstNonNullSlot;
+    uintptr_t candidateExpectedSentinelAddress;
+    guidexos_nativeaot_candidate_slot_record candidateSlotRecords[
+        GUIDEXOS_NATIVEAOT_MAX_CANDIDATE_SLOTS];
+
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
         GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupAfter[
@@ -639,6 +741,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F21_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP = 0xF21u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F22_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP = 0xF22u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F23_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP = 0xF23u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F24_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY_SAFE_STOP = 0xF24u,
 };
 
 enum {
@@ -650,6 +753,8 @@ enum {
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_SAFE_STOP_MARKER = 0xC011EC02u,
     GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC03u,
     GUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP_MARKER = 0xC011EC04u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_CANDIDATE_LOAD_SAFE_STOP_MARKER = 0xC011EC05u,
+    GUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC06u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

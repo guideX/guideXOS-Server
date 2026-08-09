@@ -287,3 +287,8 @@ The subsequent root-dispatch experiment is documented in
 `NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md`. It preserves the
 single-mutator lock and suspension invariants while entering the first
 thread-static provider and stopping before candidate access.
+
+The next bounded result is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md`; it loads one real
+candidate machine word and stops before dereference, callback, marking, or
+resume.

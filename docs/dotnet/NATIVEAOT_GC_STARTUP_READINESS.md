@@ -228,6 +228,10 @@ or managed resume occurred. This is **Outcome A for collection request and
 entry**, not completed GC support. The earlier segment-transition result
 remains **Outcome B** and is not rewritten.
 
+The later candidate-load boundary is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md`; it is proof-only and
+does not alter ordinary startup-readiness claims.
+
 The next bounded root-dispatch milestone is recorded in
 `NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md`: real thread-list
 enumeration and first provider entry are proven, with the stop still before

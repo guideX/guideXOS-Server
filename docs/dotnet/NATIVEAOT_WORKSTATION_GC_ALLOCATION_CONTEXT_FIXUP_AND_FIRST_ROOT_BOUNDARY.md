@@ -191,3 +191,7 @@ The next bounded result is documented in
 managed thread, enters the runtime-selected thread-static provider, and stops
 before any candidate value is read. This report remains the historical
 pre-`FOREACH_THREAD` checkpoint.
+
+The follow-on candidate-load boundary is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md`; it preserves this
+report's C011EC03 and stops before root semantics.

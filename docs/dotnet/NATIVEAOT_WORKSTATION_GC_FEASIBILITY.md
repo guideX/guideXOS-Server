@@ -274,3 +274,8 @@ The next bounded result is documented in
 registered thread is enumerated and the first runtime-selected per-thread
 provider is entered, but candidate reads, callbacks, marking, restart, and
 managed resumption remain unproven.
+
+The subsequent one-load boundary is documented in
+`NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md`. It reads the first
+real slot once, observes a null raw value, and stops before candidate
+interpretation; it does not claim complete root enumeration or GC support.

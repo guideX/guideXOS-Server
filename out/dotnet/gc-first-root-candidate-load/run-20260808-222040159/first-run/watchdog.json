@@ -1,0 +1,9 @@
+{
+    "run":  "first-run",
+    "timeoutSeconds":  90,
+    "safeStopObserved":  true,
+    "harnessTerminated":  true,
+    "processId":  29448,
+    "serialPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-candidate-load\\run-20260808-222040159\\first-run\\serial.log",
+    "monitorPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-candidate-load\\run-20260808-222040159\\first-run\\watchdog-monitor.txt"
+}
