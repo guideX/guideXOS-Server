@@ -376,7 +376,7 @@ std::wstring powerShellPath() {
 
 std::wstring environmentBlock(const std::string& toolchainRoot) {
     std::wstring block;
-    const char* names[] = {"SystemRoot", "WINDIR", "TEMP", "TMP"};
+    const char* names[] = {"SystemRoot", "WINDIR", "TEMP", "TMP", "PATHEXT"};
     for (const char* name : names) {
         const char* value = std::getenv(name);
         if (!value || !*value) continue;

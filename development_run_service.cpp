@@ -568,7 +568,10 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         Slot* slot = findOwnedLocked(handle, owner.runtimeId);
-        if (!slot) return GX_ERROR_FAILED;
+        if (!slot) {
+            Logger::write(LogLevel::Warn, "[DevelopmentRun] start rejected stale-or-owner-mismatched handle=" + std::to_string(handle) + " ownerRuntimeId=" + std::to_string(owner.runtimeId));
+            return GX_ERROR_FAILED;
+        }
         if (slot->deployment.state != GX_DEVELOPMENT_RUN_REGISTERED) return GX_ERROR_FAILED;
         slot->deployment.state = GX_DEVELOPMENT_RUN_LAUNCHING;
         appId = slot->deployment.applicationId;
@@ -578,6 +581,7 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
     std::string error;
     uint64_t processId = 0;
     if (!gui::DesktopService::LaunchDevelopmentApp(appId, owner.runtimeId, generation, error, processId)) {
+        Logger::write(LogLevel::Warn, "[DevelopmentRun] launch failed appId=" + appId + " reason=" + error);
         std::lock_guard<std::mutex> lock(g_mutex);
         Slot* slot = findOwnedLocked(handle, owner.runtimeId);
         if (slot) {
@@ -592,7 +596,10 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
 
     std::lock_guard<std::mutex> lock(g_mutex);
     Slot* slot = findOwnedLocked(handle, owner.runtimeId);
-    if (!slot) return GX_ERROR_FAILED;
+    if (!slot) {
+        Logger::write(LogLevel::Warn, "[DevelopmentRun] start lost deployment handle=" + std::to_string(handle) + " ownerRuntimeId=" + std::to_string(owner.runtimeId));
+        return GX_ERROR_FAILED;
+    }
     slot->deployment.processId = processId;
     if (slot->deployment.closeRequested) closeOwnedWindows(processId);
     return GX_OK;
