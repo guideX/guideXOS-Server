@@ -1308,7 +1308,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_items=") &&
         hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_base_size_queries=") &&
         hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_intrinsic_queries=") &&
-        contains(cssPhase4aReport, "Current Document.css_flex_model=bounded-single-line-no-wrap-flexbox") &&
+        contains(cssPhase4aReport, "Current Document.css_flex_model=bounded-multiline-flexbox") &&
         contains(cssPhase4aReport, "Current Document.css_flex_order_semantics=stable-order-then-source-order") &&
         contains(cssPhase4aReport, "id=phase4a-row-a,") &&
         contains(cssPhase4aReport, "id=phase4a-grow-a,") &&
@@ -1322,10 +1322,41 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_wrap_unsupported=") &&
         hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_absolute_excluded=") &&
         hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_display_none_excluded=") &&
-        contains(cssPhase4aReport, "Current Document.css_flex_wrap_semantics=wrap-and-wrap-reverse-recognized-unsupported-readable-fallback"),
+        contains(cssPhase4aReport, "Current Document.css_flex_wrap_semantics=nowrap-preserved-wrap-supported-wrap-reverse-unsupported-readable-fallback"),
         "wrap=" + cssPhase4aMetric("Current Document.css_flex_wrap_unsupported=") + ";absolute=" +
         cssPhase4aMetric("Current Document.css_flex_absolute_excluded=") + ";none=" +
         cssPhase4aMetric("Current Document.css_flex_display_none_excluded="));
+
+    bool cssPhase4bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase4b.html");
+    std::string cssPhase4bText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase4bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase4bMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase4bReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase4bReport.find('\n', pos);
+        return cssPhase4bReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 4B deterministic multiline fixture loads",
+        cssPhase4bLoaded &&
+        contains(cssPhase4bText, "CSS Phase 4B Multiline Flexbox") &&
+        contains(cssPhase4bText, "nowrap A") &&
+        contains(cssPhase4bText, "line one B tall") &&
+        contains(cssPhase4bText, "oversized item") &&
+        contains(cssPhase4bText, "Following content is below the complete wrapped container extent."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 4B wraps ordered items into stable per-line geometry",
+        hasPositiveCount(cssPhase4bReport, "Current Document.css_flex_lines=") &&
+        hasPositiveCount(cssPhase4bReport, "Current Document.css_flex_wrapped_containers=") &&
+        contains(cssPhase4bReport, "Current Document.css_flex_wrap_unsupported=0") &&
+        contains(cssPhase4bReport, "id=phase4b-wrap,serial=") &&
+        contains(cssPhase4bReport, ",wrap=wrap") &&
+        contains(cssPhase4bReport, "item-id=phase4b-wrap-a,") &&
+        contains(cssPhase4bReport, "item-id=phase4b-wrap-d,") &&
+        contains(cssPhase4bReport, ",line=1,") &&
+        contains(cssPhase4bReport, "id=phase4b-after,"),
+        "lines=" + cssPhase4bMetric("Current Document.css_flex_lines=") + ";wrapped=" +
+        cssPhase4bMetric("Current Document.css_flex_wrapped_containers=") + ";evidence=" +
+        summarizeText(cssPhase4bMetric("Current Document.css_flex_evidence="), 2600));
 
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();

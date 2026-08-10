@@ -297,12 +297,14 @@ struct NavigatorPageMetadata {
 		std::string cssInlineEvidence;
 		int         cssAtomicEvidenceRecordCount = 0;
 		std::string cssAtomicEvidence;
-		// Phase 4A bounded single-line Flexbox diagnostics and fixture evidence.
+		// Bounded Flexbox diagnostics and fixture evidence.
 		int         cssFlexContainers = 0;
 		int         cssInlineFlexContainers = 0;
 		int         cssFlexItems = 0;
 		int         cssFlexAnonymousItems = 0;
 		int         cssFlexNestedContainers = 0;
+		int         cssFlexLines = 0;
+		int         cssFlexWrappedContainers = 0;
 		int         cssFlexWrapUnsupported = 0;
 		int         cssFlexAbsoluteExcluded = 0;
 		int         cssFlexDisplayNoneExcluded = 0;

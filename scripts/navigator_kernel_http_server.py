@@ -592,6 +592,26 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p id='phase4a-regression'>Phase 4A coverage includes row, row-reverse, column, grow, shrink, basis, order, justify, align, baseline, auto margins, gap, nested flex, anonymous text, intrinsic replaced/control items, display none, absolute exclusion, and readable wrap fallback.</p>"
                              b"</body></html>")
             return
+        if path == "/navigator-smoke/css-phase4b.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>CSS Phase 4B Multiline Flexbox</title><style>"
+                             b"html,body{margin:0;padding:0} body{font-size:14px;line-height:1.25;background:#f8fafc;color:#243447}"
+                             b".fixture{margin:8px 0;padding:6px;border:1px solid #94a3b8;background:#fff}"
+                             b".nowrap{display:flex;flex-wrap:nowrap;width:248px;height:54px;gap:8px;justify-content:space-between;align-items:center;box-sizing:border-box;background:#eff6ff}"
+                             b".nowrap>div{flex:0 0 100px;height:24px;box-sizing:border-box;background:#bfdbfe;border:1px solid #2563eb}"
+                             b".wrap{display:flex;flex-wrap:wrap;width:248px;padding:8px;border:2px solid #0f766e;column-gap:8px;row-gap:7px;justify-content:space-between;align-items:flex-start;box-sizing:border-box;background:#ecfeff}"
+                             b".wrap>div{flex:0 0 108px;box-sizing:border-box;background:#a7f3d0;border:1px solid #047857;padding:3px}"
+                             b".wrap-a{height:24px}.wrap-b{height:42px}.wrap-c{height:30px}.wrap-wide{flex-basis:236px;height:22px;background:#fde68a!important;border-color:#b45309!important}"
+                             b".center{display:flex;flex-wrap:wrap;width:248px;padding:8px;border:2px solid #7c3aed;column-gap:8px;row-gap:6px;justify-content:center;box-sizing:border-box;background:#f5f3ff}"
+                             b".center>div{flex:0 0 100px;height:22px;box-sizing:border-box;background:#ddd6fe;border:1px solid #6d28d9}"
+                             b"</style></head><body>"
+                             b"<h1 id='phase4b-title'>CSS Phase 4B Multiline Flexbox</h1>"
+                             b"<div id='phase4b-nowrap' class='fixture nowrap'><div id='phase4b-nowrap-a'>nowrap A</div><div id='phase4b-nowrap-b'>nowrap B</div><div id='phase4b-nowrap-c'>nowrap C</div></div>"
+                             b"<div id='phase4b-wrap' class='fixture wrap'><div id='phase4b-wrap-a' class='wrap-a'>line one A</div><div id='phase4b-wrap-b' class='wrap-b'>line one B tall</div><div id='phase4b-wrap-c' class='wrap-c'>line two C</div><div id='phase4b-wrap-d' class='wrap-wide'>oversized item</div><div id='phase4b-wrap-e' class='wrap-a'>last line</div></div>"
+                             b"<div id='phase4b-center' class='fixture center'><div id='phase4b-center-a'>center A</div><div id='phase4b-center-b'>center B</div><div id='phase4b-center-c'>center C</div></div>"
+                             b"<p id='phase4b-after'>Following content is below the complete wrapped container extent.</p>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-phase3h.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><title>CSS Phase 3H Traditional Positioning Completion</title><style>"

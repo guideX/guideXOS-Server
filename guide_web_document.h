@@ -744,14 +744,15 @@ struct CssDiagnostics {
 	int    importantDeclarationsApplied = 0;
 	int    ruleCapCount = 0;
 	int    declarationCapCount = 0;
-	// Phase 4A bounded single-line Flexbox diagnostics.  These counters describe
-	// the compact layout snapshot; they do not imply a retained DOM or scene
-	// graph.
+	// Bounded Flexbox diagnostics. These counters describe the compact layout
+	// snapshot; they do not imply a retained DOM or scene graph.
 	int    flexContainers = 0;
 	int    inlineFlexContainers = 0;
 	int    flexItems = 0;
 	int    flexAnonymousItems = 0;
 	int    flexNestedContainers = 0;
+	int    flexLines = 0;
+	int    flexWrappedContainers = 0;
 	int    flexWrapUnsupported = 0;
 	int    flexAbsoluteExcluded = 0;
 	int    flexDisplayNoneExcluded = 0;
