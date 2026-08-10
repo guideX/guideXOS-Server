@@ -4569,6 +4569,9 @@ using namespace gxos;
 
     std::string line; help();
     while (std::getline(std::cin, line)){
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
+            line.pop_back();
+        }
         if (line=="quit"||line=="exit") break;
         std::istringstream iss(line); std::string cmd; iss>>cmd;
         if (cmd=="gui.save"){

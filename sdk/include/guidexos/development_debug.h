@@ -14,7 +14,8 @@ typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION = 2,
     GX_DEVELOPMENT_DEBUG_POLL = 3,
     GX_DEVELOPMENT_DEBUG_RESTORE_ALL = 4,
-    GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION = 5
+    GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION = 5,
+    GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT = 6
 } gx_development_debug_command;
 
 typedef enum gx_development_debug_status {
@@ -23,14 +24,24 @@ typedef enum gx_development_debug_status {
     GX_DEVELOPMENT_DEBUG_STATUS_BOUND = 2,
     GX_DEVELOPMENT_DEBUG_STATUS_TRAP = 3,
     GX_DEVELOPMENT_DEBUG_STATUS_RESTORED = 4,
-    GX_DEVELOPMENT_DEBUG_STATUS_REJECTED = 5
+    GX_DEVELOPMENT_DEBUG_STATUS_REJECTED = 5,
+    GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING = 6
 } gx_development_debug_status;
+
+#define GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT 1u
+
+typedef enum gx_development_debug_architecture {
+    GX_DEVELOPMENT_DEBUG_ARCHITECTURE_UNKNOWN = 0,
+    GX_DEVELOPMENT_DEBUG_ARCHITECTURE_AMD64 = 1,
+    GX_DEVELOPMENT_DEBUG_ARCHITECTURE_ARM64 = 2,
+    GX_DEVELOPMENT_DEBUG_ARCHITECTURE_RISCV64 = 3
+} gx_development_debug_architecture;
 
 typedef struct gx_development_debug_request {
     uint32_t size;
     uint32_t version;
     uint32_t command;
-    uint32_t reserved;
+    uint32_t flags;
     uint64_t handle;
     uint64_t sessionGeneration;
     uint64_t processId;
@@ -38,7 +49,37 @@ typedef struct gx_development_debug_request {
     uint64_t breakpointId;
     uint64_t targetAddress;
     const char* artifactSha256;
+    uint64_t threadId;
+    uint64_t stopGeneration;
 } gx_development_debug_request;
+
+typedef struct gx_development_debug_register_context {
+    uint32_t architecture;
+    uint32_t valid;
+    uint64_t processId;
+    uint64_t nativeRuntimeId;
+    uint64_t threadId;
+    uint64_t sessionGeneration;
+    uint64_t stopGeneration;
+    uint64_t rip;
+    uint64_t rflags;
+    uint64_t rsp;
+    uint64_t rbp;
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsi;
+    uint64_t rdi;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
+} gx_development_debug_register_context;
 
 typedef struct gx_development_debug_snapshot {
     uint32_t size;
@@ -57,6 +98,10 @@ typedef struct gx_development_debug_snapshot {
     uint8_t bindingInstalled;
     uint32_t bindingCount;
     char errorMessage[GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES];
+    gx_development_debug_register_context context;
+    uint64_t rflagsBeforeStep;
+    uint64_t rflagsWithTrapFlag;
+    uint64_t rflagsAfterTrapFlagClear;
 } gx_development_debug_snapshot;
 
 enum {

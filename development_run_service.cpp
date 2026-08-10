@@ -466,9 +466,11 @@ void closeOwnedWindows(uint64_t processId) {
     }
 }
 
-uint64_t findNativeRuntimeId(uint64_t processId, const std::string& appId) {
-    for (const NativeAppProcessInfo& process : NativeAppProcessTable::List()) {
-        if (process.processId == processId || (process.processId == 0 && process.appId == appId)) return process.runtimeId;
+uint64_t findNativeRuntimeId(uint64_t processId) {
+    if (processId == 0) return 0;
+    const std::vector<NativeAppProcessInfo> processes = NativeAppProcessTable::List();
+    for (const NativeAppProcessInfo& process : processes) {
+        if (process.processId == processId) return process.runtimeId;
     }
     return 0;
 }
@@ -562,6 +564,7 @@ gx_result Prepare(NativeAppRuntimeContext& owner, const gx_development_run_reque
     candidate.appModelRegistered = true;
     slot.deployment = candidate;
     slot.used = true;
+    *outHandle = candidate.handle;
     setSnapshotFromDeployment(slot.deployment, outSnapshot);
     Logger::write(LogLevel::Info, "[DevelopmentRun] deployment prepared appId=" + candidate.applicationId + " handle=" + std::to_string(candidate.handle));
     return GX_OK;
@@ -577,7 +580,11 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
             Logger::write(LogLevel::Warn, "[DevelopmentRun] start rejected stale-or-owner-mismatched handle=" + std::to_string(handle) + " ownerRuntimeId=" + std::to_string(owner.runtimeId));
             return GX_ERROR_FAILED;
         }
-        if (slot->deployment.state != GX_DEVELOPMENT_RUN_REGISTERED) return GX_ERROR_FAILED;
+        if (slot->deployment.state != GX_DEVELOPMENT_RUN_REGISTERED) {
+            Logger::write(LogLevel::Warn, "[DevelopmentRun] start rejected state=" + std::to_string(static_cast<uint32_t>(slot->deployment.state)) +
+                " handle=" + std::to_string(handle) + " ownerRuntimeId=" + std::to_string(owner.runtimeId));
+            return GX_ERROR_FAILED;
+        }
         slot->deployment.state = GX_DEVELOPMENT_RUN_LAUNCHING;
         appId = slot->deployment.applicationId;
         generation = slot->deployment.generation;
@@ -590,6 +597,8 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
         std::lock_guard<std::mutex> lock(g_mutex);
         Slot* slot = findOwnedLocked(handle, owner.runtimeId);
         if (slot) debugControlled = slot->deployment.debugControlled;
+        else Logger::write(LogLevel::Warn, "[DevelopmentRun] start lost deployment before launch handle=" + std::to_string(handle) +
+            " ownerRuntimeId=" + std::to_string(owner.runtimeId));
     }
     if (!gui::DesktopService::LaunchDevelopmentApp(appId, owner.runtimeId, generation, debugControlled, error, processId)) {
         Logger::write(LogLevel::Warn, "[DevelopmentRun] launch failed appId=" + appId + " reason=" + error);
@@ -626,7 +635,7 @@ gx_result Debug(NativeAppRuntimeContext& owner, const gx_development_debug_reque
         if (!slot) return GX_ERROR_FAILED;
         if (!slot->deployment.debugControlled) return GX_ERROR_UNSUPPORTED;
         if (slot->deployment.processId != request.processId ||
-            (slot->deployment.nativeRuntimeId != 0 && slot->deployment.nativeRuntimeId != request.nativeRuntimeId)) return GX_ERROR_FAILED;
+            slot->deployment.nativeRuntimeId == 0 || slot->deployment.nativeRuntimeId != request.nativeRuntimeId) return GX_ERROR_FAILED;
         expectedArtifact = slot->deployment.artifactSha256;
     }
     const gx_result result = NativeAppDebugger::Command(request, expectedArtifact, outSnapshot);
@@ -642,7 +651,6 @@ gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle,
     if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
     clearSnapshot(outSnapshot);
     uint64_t processId = 0;
-    std::string appId;
     bool closeRequested = false;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -656,7 +664,6 @@ gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle,
             return GX_OK;
         }
         processId = slot->deployment.processId;
-        appId = slot->deployment.applicationId;
         closeRequested = slot->deployment.closeRequested;
     }
 
@@ -673,7 +680,13 @@ gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle,
         return GX_ERROR_FAILED;
     }
     refreshWindowCounts(slot->deployment);
-    slot->deployment.nativeRuntimeId = findNativeRuntimeId(processId, appId);
+    const uint64_t previousNativeRuntimeId = slot->deployment.nativeRuntimeId;
+    slot->deployment.nativeRuntimeId = findNativeRuntimeId(processId);
+    if (previousNativeRuntimeId == 0 && slot->deployment.nativeRuntimeId != 0) {
+        Logger::write(LogLevel::Info, "[DevelopmentRun] target-created appId=" + slot->deployment.applicationId +
+            " handle=" + std::to_string(slot->deployment.handle) + " processId=" + std::to_string(processId) +
+            " nativeRuntimeId=" + std::to_string(slot->deployment.nativeRuntimeId) + " gate=closed");
+    }
     if (!running) {
         slot->deployment.exitCode = exitCode;
         slot->deployment.state = GX_DEVELOPMENT_RUN_CLEANING_UP;

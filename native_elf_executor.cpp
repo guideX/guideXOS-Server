@@ -325,6 +325,11 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     addDiagnostic(result, "Actual mapped base: " + pointerToString(mapping.base));
     addDiagnostic(result, std::string("Preferred-base mapping: ") + (result.preferredBaseMappingSucceeded ? "success" : "failure"));
     addDiagnostic(result, "Entry host address resolved: " + pointerToString(entryAddress));
+    Logger::write(LogLevel::Info, "[NativeElfExecutor] image mapped preferredBase=0x" + [&image]() { std::ostringstream value; value << std::hex << image.preferredBaseAddress; return value.str(); }() +
+        " minVirtualAddress=0x" + [&minVirtualAddress]() { std::ostringstream value; value << std::hex << minVirtualAddress; return value.str(); }() +
+        " entryVirtualAddress=0x" + [&image]() { std::ostringstream value; value << std::hex << image.entryPointVirtualAddress; return value.str(); }() +
+        " entryHostAddress=0x" + [&entryAddress]() { std::ostringstream value; value << std::hex << reinterpret_cast<uint64_t>(entryAddress); return value.str(); }() +
+        " mappingBase=0x" + [&mapping]() { std::ostringstream value; value << std::hex << reinterpret_cast<uint64_t>(mapping.base); return value.str(); }());
 
 #ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
     NativeGxAppContext appContext;

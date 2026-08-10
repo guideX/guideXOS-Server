@@ -286,7 +286,15 @@ namespace gxos {
 
     bool ProcessTable::getStatus(uint64_t pid, bool& runningOut, int& exitCodeOut){
         std::lock_guard<std::mutex> _g(g_lock);
-        auto it = g_proc.find(pid); if (it==g_proc.end()) return false; runningOut = it->second->running.load(std::memory_order_acquire); exitCodeOut = it->second->exitCode; return true;
+        auto it = g_proc.find(pid); if (it==g_proc.end()) return false;
+        // A spawned process can be visible in the table before its worker
+        // thread reaches the running flag. Keep that launch window alive until
+        // the completion flag is published, otherwise hosted run polling can
+        // finalize a debug deployment before its native runtime is registered.
+        runningOut = it->second->running.load(std::memory_order_acquire) ||
+            !it->second->finished.load(std::memory_order_acquire);
+        exitCodeOut = it->second->exitCode;
+        return true;
     }
 
     bool ProcessTable::cpuTelemetry(uint64_t pid, ProcessCpuTelemetry& out){
