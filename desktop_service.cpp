@@ -1316,11 +1316,11 @@ namespace gxos {
             return oss.str();
         }
 
-        static uint64_t launchNativeElfProcess(const apps::RegisteredApp& registryApp, const apps::LaunchDecision& launchDecision) {
+        static uint64_t launchNativeElfProcess(const apps::RegisteredApp& registryApp, const apps::LaunchDecision& launchDecision, bool debugControlled = false) {
             ProcessSpec spec;
             spec.name = std::string("nativeelf:") + (registryApp.manifest.id.empty() ? registryApp.manifest.displayName : registryApp.manifest.id);
             spec.appId = registryApp.manifest.id;
-            spec.entry = [registryApp, launchDecision](int, char**) -> int {
+            spec.entry = [registryApp, launchDecision, debugControlled](int, char**) -> int {
                 apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(registryApp, launchDecision);
                 if (!nativeElfResult.success) {
                     std::string message = std::string("Native app launch failed: ") + (nativeElfResult.validationErrors.empty() ? nativeElfResult.message : joinMessages(nativeElfResult.validationErrors));
@@ -1344,6 +1344,7 @@ namespace gxos {
                     NotificationManager::Add(message, NotificationLevel::Error);
                     return apps::GX_ERROR_FAILED;
                 }
+                runtimeContext.debugLaunchGate = debugControlled;
 
                 std::string executorReason;
                 if (!apps::NativeElfExecutor::CanExecute(nativeElfResult, nativeElfImage, runtimeContext, &executorReason)) {
@@ -5918,7 +5919,7 @@ namespace gxos {
             return true;
         }
 
-        bool DesktopService::LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, std::string& error, uint64_t& outProcessId) {
+        bool DesktopService::LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, bool debugControlled, std::string& error, uint64_t& outProcessId) {
             error.clear();
             outProcessId = 0;
             ensureDefaultAppsRegistered();
@@ -5957,7 +5958,7 @@ namespace gxos {
                 return false;
             }
 
-            outProcessId = launchNativeElfProcess(*registryApp, launchDecision);
+            outProcessId = launchNativeElfProcess(*registryApp, launchDecision, debugControlled);
             if (outProcessId == 0) {
                 error = "LAUNCH_FAILED";
                 return false;

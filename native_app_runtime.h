@@ -4,6 +4,7 @@
 #include "native_elf_image_loader.h"
 #include "sdk/include/guidexos/build.h"
 #include "sdk/include/guidexos/development_run.h"
+#include "sdk/include/guidexos/development_debug.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -137,6 +138,7 @@ struct NativeHostCallTable {
     gx_result (*development_run_poll)(NativeGxAppContext* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) = nullptr;
     gx_result (*development_run_request_close)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
     gx_result (*development_run_release)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
+    gx_result (*development_debug)(NativeGxAppContext* ctx, const gx_development_debug_request* request, gx_development_debug_snapshot* outSnapshot) = nullptr;
 };
 
 static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
@@ -162,7 +164,8 @@ static_assert(offsetof(NativeHostCallTable, development_run_start) == 200, "nati
 static_assert(offsetof(NativeHostCallTable, development_run_poll) == 208, "native ABI development run poll slot changed");
 static_assert(offsetof(NativeHostCallTable, development_run_request_close) == 216, "native ABI development run close slot changed");
 static_assert(offsetof(NativeHostCallTable, development_run_release) == 224, "native ABI development run release slot changed");
-static_assert(sizeof(NativeHostCallTable) == 232, "native ABI host call table size changed");
+static_assert(offsetof(NativeHostCallTable, development_debug) == 232, "native ABI development debug slot changed");
+static_assert(sizeof(NativeHostCallTable) == 240, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,
@@ -198,6 +201,7 @@ struct NativeAppRuntimeContext {
     std::chrono::steady_clock::time_point endTime;
     std::vector<std::string> diagnostics;
     bool cleanupAttempted = false;
+    bool debugLaunchGate = false;
     uint32_t cleanedWindowCount = 0;
     uint32_t hostLogCallCount = 0;
     std::string lastHostLogMessage;

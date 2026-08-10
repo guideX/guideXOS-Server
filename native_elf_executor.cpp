@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "native_app_debug_log.h"
 #include "native_app_process_table.h"
+#include "native_app_debugger.h"
 #include "process.h"
 #include "native_elf_trampoline_win64.h"
 
@@ -333,7 +334,24 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     appContext.userData = nullptr;
     gx_entry_fn entry = reinterpret_cast<gx_entry_fn>(entryAddress);
     runtimeContext.activeGxContext = &appContext;
+    runtimeContext.processId = Allocator::currentPid();
+    std::string debuggerError;
+    if (runtimeContext.debugLaunchGate && !NativeAppDebugger::RegisterRuntime(runtimeContext, mapping, image, true, debuggerError)) {
+        addDiagnostic(result, "Hosted debugger registration failed: " + debuggerError);
+        runtimeContext.activeGxContext = nullptr;
+        ExecutableMemory::Free(mapping);
+        LogDecision(result.appId, result.architecture, false, result.message, "failure");
+        return result;
+    }
     NativeAppProcessTable::RegisterPrepared(runtimeContext, true, hostArchitecture());
+    if (runtimeContext.debugLaunchGate && !NativeAppDebugger::WaitForExecutionGate(runtimeContext.runtimeId)) {
+        NativeAppDebugger::UnregisterRuntime(runtimeContext.runtimeId);
+        addDiagnostic(result, "Hosted debugger launch gate was cancelled before execution");
+        runtimeContext.activeGxContext = nullptr;
+        ExecutableMemory::Free(mapping);
+        LogDecision(result.appId, result.architecture, false, result.message, "failure");
+        return result;
+    }
     NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
     NativeAppProcessTable::MarkRunning(runtimeContext.runtimeId);
     bool executionFailed = false;
@@ -380,6 +398,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     if (smokeTestCloseThread.joinable()) smokeTestCloseThread.join();
     NativeAppRuntime::EndHostCallDispatch(runtimeContext);
     runtimeContext.activeGxContext = nullptr;
+    if (runtimeContext.debugLaunchGate) NativeAppDebugger::UnregisterRuntime(runtimeContext.runtimeId);
     if (runtimeContext.lastWaitResult == GX_ERROR_TIMEOUT && result.exitCode == GX_OK) addDiagnostic(result, "wait_for_close timed out; cleaning up remaining owned windows");
     NativeAppRuntime::Cleanup(runtimeContext, (executionFailed || result.exitCode != GX_OK) ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited, result.exitCode, failureReason);
     const gxos::ProcessTombstoneRecord tombstone = makeNativeTombstoneRecord(runtimeContext, executionFailed, failureReason);
