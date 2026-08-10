@@ -3,7 +3,7 @@ param(
     [string]$EvidenceRoot = "",
     [int]$TimeoutSeconds = 90,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -15,7 +15,9 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($ProofMode -eq "first-non-null-root-callback-boundary") {
+    $EvidenceRoot = if ($ProofMode -eq "first-root-callback-entry") {
+        Join-Path $root "out\dotnet\gc-first-root-callback-entry"
+    } elseif ($ProofMode -eq "first-non-null-root-callback-boundary") {
         Join-Path $root "out\dotnet\gc-first-non-null-root-callback-boundary"
     } elseif ($ProofMode -eq "first-root-candidate-load") {
         Join-Path $root "out\dotnet\gc-first-root-candidate-load"
@@ -28,11 +30,14 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     }
 }
 $isFirstRootCandidateLoad = $ProofMode -eq "first-root-candidate-load"
+$isFirstRootCallbackEntry = $ProofMode -eq "first-root-callback-entry"
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
-$isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary")
-$proofDefine = if ($isFirstNonNullRoot) {
+$isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry")
+$proofDefine = if ($isFirstRootCallbackEntry) {
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION"
+} elseif ($isFirstNonNullRoot) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION"
 } elseif ($isFirstRootCandidateLoad) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CANDIDATE_LOAD_ALLOCATION"
@@ -154,6 +159,13 @@ function Get-MarkerField([string]$Text, [string]$Name) {
 $startingCommittedHead = (& git -C $root rev-parse HEAD).Trim()
 $startingBranch = (& git -C $root branch --show-current).Trim()
 $startingWorktreeStatus = @(& git -C $root status --short)
+$taskStartCheckpoint = [ordered]@{
+    head="51b303a39ad28d8fedcc020e4bb43113060ed712"
+    branch="v1.1_DOTNET_SUPPORT"
+    dirtyState="clean"
+    ordinaryKernelSha256="161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+    ordinaryEspSha256="161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+}
 
 New-Item -ItemType Directory -Force -Path $runRoot, $buildRoot, $artifactRoot, $runtimeRoot | Out-Null
 $ordinaryBuildBefore = if (Test-Path -LiteralPath $kernelPath -PathType Leaf) { Hash-File $kernelPath } else { $null }
@@ -186,8 +198,10 @@ $palBridge = Join-Path $root "out\dotnet\pal-runtime-active-replacement-build\gu
 $gcEnv = Join-Path $replacementRoot "guidexos_gcenv.obj"
 $gcEnvEeSource = Join-Path $runtimeRoot "gcenv.ee.single-thread-suspend-ee.cpp"
 $gcEnvEe = Join-Path $runtimeRoot "gcenv.ee.single-thread-suspend-ee.obj"
-$gcEnumSource = Join-Path $runtimeRoot "GcEnum.first-root-candidate-load.cpp"
-$gcEnum = Join-Path $runtimeRoot "GcEnum.first-root-candidate-load.obj"
+$gcEnumSource = Join-Path $runtimeRoot $(if ($isFirstRootCallbackEntry) { "GcEnum.first-root-callback-entry.cpp" } else { "GcEnum.first-root-candidate-load.cpp" })
+$gcEnum = Join-Path $runtimeRoot $(if ($isFirstRootCallbackEntry) { "GcEnum.first-root-callback-entry.obj" } else { "GcEnum.first-root-candidate-load.obj" })
+$gcWksSource = Join-Path $runtimeRoot "gcwks.first-root-callback-entry.cpp"
+$gcWks = Join-Path $runtimeRoot "gcwks.first-root-callback-entry.obj"
 $platformObj = Join-Path $runtimeRoot "guidexos_nativeaot_platform.single-thread-suspend-ee.obj"
 $probeObj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_allocation_probe.single-thread-suspend-ee.obj"
 $gcBridgeBoundary = Join-Path $runtimeRoot "guidexos_nativeaot_gcenv_startup_bridge.single-thread-suspend-ee.obj"
@@ -365,11 +379,69 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
         }
     }
     Set-Content -LiteralPath $gcEnvEeSource -Value $injectedText -Encoding ASCII
+    if ($isFirstRootCallbackEntry) {
+        $lockedGcwksPath = Join-Path $lockedSourceRoot "src\coreclr\gc\gcwks.cpp"
+        $lockedGcCppPath = Join-Path $lockedSourceRoot "src\coreclr\gc\gc.cpp"
+        Require-File $lockedGcwksPath "Locked NativeAOT gcwks.cpp source"
+        Require-File $lockedGcCppPath "Locked Workstation GC gc.cpp source"
+        $gcWksText = Get-Content -LiteralPath $lockedGcwksPath -Raw
+        $gcCppText = Get-Content -LiteralPath $lockedGcCppPath -Raw
+        $gcWksText = '#include <intrin.h>' + [Environment]::NewLine + $gcWksText
+        $gcWksText = $gcWksText.Replace('namespace WKS {', '#define _DEBUG 1' + [Environment]::NewLine + 'namespace WKS {')
+        $callbackDeclaration = @'
+extern "C" void __cdecl guideXosNativeAotFirstRootCallbackEntered(
+    uintptr_t rawArg1, uintptr_t rawArg2, uintptr_t rawArg3,
+    uintptr_t callbackAddress, uintptr_t returnAddress,
+    uintptr_t stackPointer);
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootCallbackCandidateLoaded(uintptr_t rawValue);
+'@
+        $callbackPattern = '(?m)^void GCHeap::Promote\(Object\*\* ppObject, ScanContext\* sc, uint32_t flags\)\r?\n\{'
+        $callbackReplacement = @"
+$callbackDeclaration
+void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
+{
+    guideXosNativeAotFirstRootCallbackEntered(
+        reinterpret_cast<uintptr_t>(ppObject),
+        reinterpret_cast<uintptr_t>(sc),
+        static_cast<uintptr_t>(flags),
+        reinterpret_cast<uintptr_t>(&GCHeap::Promote),
+        *reinterpret_cast<uintptr_t*>(_AddressOfReturnAddress()),
+        reinterpret_cast<uintptr_t>(_AddressOfReturnAddress()));
+"@
+        $gcWksInjected = [regex]::Replace($gcCppText, $callbackPattern, $callbackReplacement.TrimEnd(), 1)
+        $promoteSignature = 'void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)'
+        $promoteOffset = $gcWksInjected.IndexOf($promoteSignature, [System.StringComparison]::Ordinal)
+        if ($promoteOffset -lt 0) { throw "Generated Workstation GC source did not contain the injected GCHeap::Promote body." }
+        $promotePrefix = $gcWksInjected.Substring(0, $promoteOffset)
+        $promoteBody = $gcWksInjected.Substring($promoteOffset)
+        $promoteBody = $promoteBody.Replace(
+            '    uint8_t* o = (uint8_t*)*ppObject;',
+            '    uint8_t* o = (uint8_t*)*ppObject;' + [Environment]::NewLine + '    guideXosNativeAotFirstRootCallbackCandidateLoaded(reinterpret_cast<uintptr_t>(o));')
+        $gcWksInjected = $promotePrefix + $promoteBody
+        if ($gcWksInjected -eq $gcCppText -or
+            $gcWksInjected -notmatch 'guideXosNativeAotFirstRootCallbackEntered' -or
+            $gcWksInjected -notmatch 'guideXosNativeAotFirstRootCallbackCandidateLoaded' -or
+            $gcWksInjected -notmatch 'reinterpret_cast<uintptr_t>\(o\)' -or
+            ([regex]::Matches($gcWksInjected, 'guideXosNativeAotFirstRootCallbackCandidateLoaded\(reinterpret_cast<uintptr_t>\(o\)\)').Count -ne 1)) {
+            throw "Locked gc.cpp callback-entry injection did not match GCHeap::Promote and its first candidate load."
+        }
+        $gcWksInjected = $gcWksText.Replace('#include "gc.cpp"', $gcWksInjected)
+        if ($gcWksInjected -eq $gcWksText -or $gcWksInjected -notmatch 'namespace WKS') {
+            throw "Locked gcwks.cpp did not expose the Workstation GC source include for callback-entry replacement."
+        }
+        Set-Content -LiteralPath $gcWksSource -Value $gcWksInjected -Encoding ASCII
+    }
     if ($isCandidateLoadEnumeration) {
         $lockedGcEnumPath = Join-Path $lockedSourceRoot "src\coreclr\nativeaot\Runtime\GcEnum.cpp"
         Require-File $lockedGcEnumPath "Locked NativeAOT GcEnum source"
         $gcEnumText = Get-Content -LiteralPath $lockedGcEnumPath -Raw
-        if ($isFirstNonNullRoot) {
+        if ($isFirstRootCallbackEntry) {
+            $gcEnumDeclaration = @(
+                'extern "C" void __cdecl guideXosNativeAotFirstNonNullRootCandidateLoadRequested(uintptr_t slot, uint32_t flags, uintptr_t callback, uintptr_t scanContext);',
+                'extern "C" uint32_t __cdecl guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded(uintptr_t slot, uintptr_t rawValue);',
+                'extern "C" void __cdecl guideXosNativeAotFirstRootCallbackCallSiteEntered(uintptr_t slot, uintptr_t rawValue, uint32_t flags, uintptr_t callback, uintptr_t scanContext);'
+            ) -join [Environment]::NewLine
+        } elseif ($isFirstNonNullRoot) {
             $gcEnumDeclaration = @(
                 'extern "C" void __cdecl guideXosNativeAotFirstNonNullRootCandidateLoadRequested(uintptr_t slot, uint32_t flags, uintptr_t callback, uintptr_t scanContext);',
                 'extern "C" uint32_t __cdecl guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded(uintptr_t slot, uintptr_t rawValue);'
@@ -382,7 +454,7 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
         }
         $gcEnumText = $gcEnumText.Replace('#include "GcEnum.h"', '#include "GcEnum.h"' + [Environment]::NewLine + [Environment]::NewLine + $gcEnumDeclaration.TrimEnd())
         $gcEnumPattern = '(?m)^static void GcEnumObject\(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc\* fnGcEnumRef, ScanContext\* pSc\)\r?\n\{'
-        if ($isFirstNonNullRoot) {
+        if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) {
             $gcEnumReplacement = @(
                 'static void GcEnumObject(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc* fnGcEnumRef, ScanContext* pSc)',
                 '{',
@@ -395,6 +467,14 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
                 '            reinterpret_cast<uintptr_t>(ppObj), candidateRawValue) == 0u)',
                 '        return;'
             ) -join [Environment]::NewLine
+            if ($isFirstRootCallbackEntry) {
+                $gcEnumReplacement += [Environment]::NewLine + ((@(
+                    '    guideXosNativeAotFirstRootCallbackCallSiteEntered(',
+                    '        reinterpret_cast<uintptr_t>(ppObj), candidateRawValue, flags,',
+                    '        reinterpret_cast<uintptr_t>(fnGcEnumRef),',
+                    '        reinterpret_cast<uintptr_t>(pSc));'
+                ) -join [Environment]::NewLine))
+            }
         } else {
             $gcEnumReplacement = @(
                 'static void GcEnumObject(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc* fnGcEnumRef, ScanContext* pSc)',
@@ -409,15 +489,24 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
             ) -join [Environment]::NewLine
         }
         $gcEnumInjected = [regex]::Replace($gcEnumText, $gcEnumPattern, $gcEnumReplacement.TrimEnd(), 1)
-        if ($gcEnumInjected -eq $gcEnumText -or
-            $gcEnumInjected -notmatch 'const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>\(\*ppObj\);' -or
-            (($isFirstNonNullRoot -and $gcEnumInjected -notmatch 'guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded') -or
-             (-not $isFirstNonNullRoot -and $gcEnumInjected -notmatch 'guideXosNativeAotFirstRootCandidateMachineWordLoaded'))) {
+        $gcEnumInjectionValid =
+            $gcEnumInjected -ne $gcEnumText -and
+            $gcEnumInjected -match 'const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>\(\*ppObj\);'
+        if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) {
+            $gcEnumInjectionValid = $gcEnumInjectionValid -and
+                $gcEnumInjected -match 'guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded'
+        } else {
+            $gcEnumInjectionValid = $gcEnumInjectionValid -and
+                $gcEnumInjected -match 'guideXosNativeAotFirstRootCandidateMachineWordLoaded'
+        }
+        if (-not $gcEnumInjectionValid) {
             throw "Locked GcEnum.cpp first-root-candidate-load injection did not match the GcEnumObject load boundary."
         }
         Set-Content -LiteralPath $gcEnumSource -Value $gcEnumInjected -Encoding ASCII
     }
-    $baselineDescription = if ($isFirstNonNullRoot) {
+    $baselineDescription = if ($isFirstRootCallbackEntry) {
+        "experiment=single-managed-mutator Workstation GC real thread-static storage root and first GCHeap::Promote callback entry"
+    } elseif ($isFirstNonNullRoot) {
         "experiment=single-managed-mutator Workstation GC real thread-static proof root and first non-null candidate callback boundary"
     } elseif ($isFirstPerThreadRootProvider) {
         "experiment=single-managed-mutator Workstation GC real FOREACH_THREAD enumeration and first per-thread root provider entry"
@@ -426,7 +515,9 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
     } else {
         "experiment=single-managed-mutator Workstation GC SuspendEE completion and post-DisablePreemptiveGC boundary"
     }
-    $safeStopDescription = if ($isFirstPerThreadRootProvider) {
+    $safeStopDescription = if ($isFirstRootCallbackEntry) {
+        "safeStop=after the real GCHeap::Promote callback entered with live ABI arguments and after its required *ppObject load, immediately before gc_heap::is_in_find_object_range"
+    } elseif ($isFirstPerThreadRootProvider) {
         if ($isFirstNonNullRoot) {
             "safeStop=after a genuine non-null managed thread-static candidate load and before the first root callback"
         } elseif ($isFirstRootCandidateLoad) {
@@ -475,6 +566,12 @@ exit /b 0
         $runtimeBatText = $runtimeBatText.Replace("exit /b 0", "$gcEnumCompileLine`r`nif errorlevel 1 exit /b %errorlevel%`r`nexit /b 0")
         Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
     }
+    if ($isFirstRootCallbackEntry) {
+        $runtimeBatText = Get-Content -LiteralPath $runtimeBat -Raw
+        $gcWksCompileLine = 'cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /I"{0}" /I"{1}" /I"{1}\Runtime" /I"{1}\Runtime\windows" /I"{2}" /I"{2}\native" /I"{2}\gc" /I"{2}\gc\env" /I"{1}\Runtime\inc" /I"{1}\Runtime\eventpipe" /I"{3}" /I"{4}" /I"{2}\pal\src\include" /FI"{2}\gc\env\common.h" /Fo:"{5}" "{6}"' -f $nativeAotRoot, $sourceRoot, $sourceRoot, (Join-Path $root 'tools\dotnet\runtime-pack\src\platform'), $palSourceRoot, $gcWks, $gcWksSource
+        $runtimeBatText = $runtimeBatText.Replace("exit /b 0", "$gcWksCompileLine`r`nif errorlevel 1 exit /b %errorlevel%`r`nexit /b 0")
+        Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
+    }
     if ($isAllocationContextFixupRootBoundary) {
         $runtimeBatText = Get-Content -LiteralPath $runtimeBat -Raw
         $runtimeBatText = $runtimeBatText.Replace(
@@ -487,7 +584,7 @@ exit /b 0
     } else {
         ""
     }
-    $managedProofMode = if ($isFirstNonNullRoot) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
+    $managedProofMode = if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
     $artifactBat = Write-Batch "build-single-thread-suspend-ee-artifact.bat" @"
 @echo off
 setlocal
@@ -508,12 +605,17 @@ exit /b 0
     } else {
         ""
     }
+    $gcWksArchiveArgs = if ($isFirstRootCallbackEntry) {
+        "/REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\gcwks.cpp.obj`" `"$gcWks`""
+    } else {
+        ""
+    }
     $archiveBat = Write-Batch "build-single-thread-suspend-ee-gc-archive.bat" @"
 @echo off
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
- lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\PalRedhawkMinWin.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\thread.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.obj')" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\gcenv.ee.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj" "$palBridge" "$palStartup" "$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$gcEnvEe" "$gcBridgeBoundary" "$platformContract" "$threadObj" "$ehObj" "$allocFastObj" "$probeObj" $gcEnumArchiveArgs
+ lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\PalRedhawkMinWin.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\thread.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.obj')" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\gcenv.ee.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj" "$palBridge" "$palStartup" "$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$gcEnvEe" "$gcBridgeBoundary" "$platformContract" "$threadObj" "$ehObj" "$allocFastObj" "$probeObj" $gcWksArchiveArgs $gcEnumArchiveArgs
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
@@ -527,6 +629,7 @@ exit /b %errorlevel%
     if (-not $SkipManagedBuild) {
         $stalePaths = @($platformObj,$gcEnvEe,$probeObj,$gcBridgeBoundary,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$elfPath,$mapPath)
         if ($isCandidateLoadEnumeration) { $stalePaths += $gcEnum }
+        if ($isFirstRootCallbackEntry) { $stalePaths += $gcWks }
         foreach ($stale in $stalePaths) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
@@ -537,6 +640,7 @@ exit /b %errorlevel%
     }
     $requiredBuildOutputs = @($platformObj,$gcEnvEe,$probeObj,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$mapPath)
     if ($isCandidateLoadEnumeration) { $requiredBuildOutputs += $gcEnum }
+    if ($isFirstRootCallbackEntry) { $requiredBuildOutputs += $gcWks }
     foreach ($path in $requiredBuildOutputs) { Require-File $path "Single-thread SuspendEE build output" }
     Invoke-LoggedCommand $python @($converter,$pePath,$elfPath,"--map",$mapPath,"--symbol","ManagedMain") (Join-Path $runRoot "pe-to-elf.log")
     Require-File $elfPath "Single-thread SuspendEE ELF"
@@ -545,8 +649,22 @@ exit /b %errorlevel%
     $imports = Get-Content -LiteralPath (Join-Path $runRoot "pe-imports.txt") -Raw
     if ($imports -match 'FlsGetValue|FlsSetValue') { throw "Single-thread SuspendEE PE still exposes live Windows FLS imports." }
     $mapText = Get-Content -LiteralPath $mapPath -Raw
+    $callbackSymbolName = '?Promote@GCHeap@WKS@@SAXPEAPEAVObject@@PEAUScanContext@@I@Z'
+    $callbackAddressText = if ($isFirstRootCallbackEntry) { Extract-MapAddress $mapText $callbackSymbolName } else { $null }
+    if ($isFirstRootCallbackEntry) {
+        Invoke-LoggedCommand $objdump @('-d','-Mintel',$pePath) (Join-Path $runRoot 'artifact-disassembly.txt')
+        Set-Content -LiteralPath (Join-Path $runRoot 'callback-symbol.txt') -Value @(
+            "symbol=$callbackSymbolName",
+            "callbackAddress=0x$callbackAddressText",
+            "source=locked src/coreclr/gc/gc.cpp:49474-49544, included by src/coreclr/gc/gcwks.cpp",
+            "typedef=promote_func(Object**, ScanContext*, uint32_t)",
+            "callingConvention=Microsoft x64 AMD64 (RCX, RDX, R8; RAX return unused; 32-byte shadow space)"
+        ) -Encoding ASCII
+    }
     $requiredSymbols = @("ManagedMain","RhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment","guideXosNativeAotSuspendEeEntry","guideXosNativeAotSuspendEeAfterLock","guideXosNativeAotSuspendEeAfterSuspend","guideXosNativeAotSuspendEeBodyReturn","guideXosNativeAotDisablePreemptiveEntry","guideXosNativeAotDisablePreemptiveReturn","guideXosManagedAllocationGetDiagnostics")
-    if ($isFirstNonNullRoot) {
+    if ($isFirstRootCallbackEntry) {
+        $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootCallbackCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
+    } elseif ($isFirstNonNullRoot) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
     } elseif ($isFirstRootCandidateLoad) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstRootCandidateLoadRequested","guideXosNativeAotFirstRootCandidateMachineWordLoaded")
@@ -613,7 +731,7 @@ exit /b %errorlevel%
         $monitorPath = Join-Path $oneRoot "watchdog-monitor.txt"
         $qemuDebugPath = Join-Path $oneRoot "qemu-debug.log"
         $qemuArgs = @("-accel","tcg,thread=single","-machine","pc","-smp","1","-drive",('if=pflash,format=raw,readonly=on,file="' + $ovmf + '"'),"-drive",('file=fat:rw:"' + $espRoot + '",format=raw,if=ide,index=0'),"-m","1024M","-vga","std","-display","none","-serial",('file:"' + $serialPath + '"'),"-monitor",("tcp:127.0.0.1:$port,server,nowait"),"-no-reboot","-no-shutdown","-rtc","base=utc,clock=host")
-        if ($isFirstNonNullRoot) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
+        if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
         Log-Command ('"' + $qemu + '" ' + ($qemuArgs -join ' '))
         $qemuProcess = Start-Process -FilePath $qemu -ArgumentList $qemuArgs -WindowStyle Hidden -PassThru
         $completed = $false
@@ -627,7 +745,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isFirstNonNullRoot) {
+                    $stopPattern = if ($isFirstRootCallbackEntry) {
+                        'marker=C011EC07'
+                    } elseif ($isFirstNonNullRoot) {
                         'lockDepth=00000001 marker=C011EC06'
                     } elseif ($isFirstRootCandidateLoad) {
                         'lockDepth=00000001 marker=C011EC05'
@@ -639,13 +759,13 @@ exit /b %errorlevel%
                         'liveSentinels=00000004'
                     }
                     if ($normalizedLiveText -match $stopPattern) { $completed = $true; break }
-                    if ($isFirstNonNullRoot -and $normalizedLiveText -match '\[PageFault\] Not-present violation on read \(kernel\)') { $earlyFailure = "nativeaot-thread-static-startup-page-fault"; break }
+                    if (($isFirstNonNullRoot -or $isFirstRootCallbackEntry) -and $normalizedLiveText -match '\[PageFault\] Not-present violation on read \(kernel\)') { $earlyFailure = "nativeaot-thread-static-startup-page-fault"; break }
                 }
             }
             if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
-                if ($isFirstNonNullRoot -and $failureSerial -match '\[PageFault\] Not-present violation on read \(kernel\)') {
+                if (($isFirstNonNullRoot -or $isFirstRootCallbackEntry) -and $failureSerial -match '\[PageFault\] Not-present violation on read \(kernel\)') {
                     $earlyFailure = "nativeaot-thread-static-startup-page-fault"
                 } elseif ($qemuProcess.HasExited) {
                     throw "QEMU $name exited before the NativeAOT GC safe-stop marker."
@@ -681,7 +801,67 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isFirstNonNullRoot) {
+        if ($isFirstRootCallbackEntry) {
+            Assert-Text $validationText '\[nativeaot-gc-first-root-callback-entry\] SAFE_STOP marker=C011EC07' "first real callback-entry safe-stop marker"
+            Assert-Text $validationText 'requestCount=00000001 callSiteCount=00000001 invocationCount=00000001 entryCount=00000001 returnCount=00000000 duplicateInvocations=00000000' "exactly one callback request, call-site entry, invocation, and callback entry"
+            Assert-Text $validationText 'callbackRootLoads=00000001 callbackLoadedRaw=[0-9A-F]{16} nullTests=00000000 nullNonNull=00000000' "one locked callback-side root load and no null test"
+            Assert-Text $validationText 'contextFieldReads=00000006 context=[0-9A-F]{16} contextThread=[0-9A-F]{16} contextStackLimit=[0-9A-F]{16} contextThreadNumber=[0-9A-F]{16} contextThreadCount=[0-9A-F]{16} contextPromotion=00000001 contextConcurrent=00000000' "ScanContext fields read without mutation"
+            Assert-Text $validationText 'entryArgsMatch=00000001 slotMatch=00000001 rawMatchesStorage=00000001 contextMatch=00000001 flagsMatch=00000001' "live callback ABI argument validation"
+            Assert-Text $validationText 'candidateClassification=00000000 heapMembership=00000000 segmentLookup=00000000 objectHeaders=00000000 methodTables=00000000' "stop before candidate classification and metadata access"
+            Assert-Text $validationText 'promotionStart=00000000 promotions=00000000 markingStart=00000000 graphTraversal=00000000 markWrites=00000000 promotionWrites=00000000 objectMutation=00000000 gcMetadataMutation=00000000 segmentMetadataMutation=00000000' "zero promotion, marking, graph traversal, and mutation"
+            Assert-Text $validationText 'managedAssignmentCount=00000001 managedClearCount=00000000 managedReadbackCount=00000001 managedAssignmentValid=00000001 managedReadbackValid=00000001' "managed ThreadStatic assignment and readback"
+            Assert-Text $validationText 'threadStaticInitialization=0000000[23] sentinelOrdinal=00000000 sentinelAddress=[0-9A-F]{16} sentinelSize=0000000000001000 readbackAddress=[0-9A-F]{16} readbackExactMatch=00000001' "selected sentinel validation"
+            Assert-Text $validationText 'firstNonNullSlot=[0-9A-F]{16} firstNonNullValue=[0-9A-F]{16} expectedStorageObject=[0-9A-F]{16} expectedSentinel=[0-9A-F]{16}' "real storage root identity"
+            Assert-Text $validationText 'storageObject=[0-9A-F]{16} inlinedRoot=[0-9A-F]{16} objectBefore=00000025 objectAfter=00000025 objectAtStop=00000025 sentinelChecks=00000094 objectHistoryOverflow=00000000' "object and runtime ThreadStatic storage validation"
+            Assert-Text $validationText 'lockHeld=00000001 eeSuspended=00000001 managedEntryProhibited=00000001' "thread-store lock and suspended EE invariant"
+            Assert-Text $validationText 'restartRequests=00000000 restartEntries=00000000 managedResume=00000000 fixupFailures=00000000 rootFailures=00000000' "zero restart, resume, fixup, and root failures"
+            $callbackSiteSlot = Get-MarkerField $validationText 'callbackSiteSlot'
+            $callbackSiteRaw = Get-MarkerField $validationText 'callbackSiteRaw'
+            $callbackSiteContext = Get-MarkerField $validationText 'callbackSiteContext'
+            $callbackSiteCallback = Get-MarkerField $validationText 'callbackSiteCallback'
+            $callbackEntryAddress = Get-MarkerField $validationText 'callbackEntryAddress'
+            $callbackArg1 = Get-MarkerField $validationText 'arg1'
+            $callbackArg2 = Get-MarkerField $validationText 'arg2'
+            $callbackArg3 = Get-MarkerField $validationText 'arg3'
+            $callbackRawRcx = Get-MarkerField $validationText 'rawRcx'
+            $callbackRawRdx = Get-MarkerField $validationText 'rawRdx'
+            $callbackRawR8 = Get-MarkerField $validationText 'rawR8'
+            $firstNonNullSlot = Get-MarkerField $validationText 'firstNonNullSlot'
+            $firstNonNullValue = Get-MarkerField $validationText 'firstNonNullValue'
+            $expectedStorage = Get-MarkerField $validationText 'expectedStorageObject'
+            $callbackLoadedRaw = Get-MarkerField $validationText 'callbackLoadedRaw'
+            $context = Get-MarkerField $validationText 'context'
+            $expectedFlags = Get-MarkerField $validationText 'expectedFlags'
+            $actualFlags = Get-MarkerField $validationText 'actualFlags'
+            $managedThread = Get-MarkerField $validationText 'managedThread'
+            $currentThread = Get-MarkerField $validationText 'currentThread'
+            $lockOwner = Get-MarkerField $validationText 'lockOwner'
+            $callbackArg3Value = [Convert]::ToUInt64($callbackArg3.Substring(2), 16)
+            $expectedFlagsValue = [Convert]::ToUInt64($expectedFlags.Substring(2), 16)
+            $actualFlagsValue = [Convert]::ToUInt64($actualFlags.Substring(2), 16)
+            if ($callbackArg1 -ne $callbackRawRcx -or $callbackArg2 -ne $callbackRawRdx -or $callbackArg3 -ne $callbackRawR8) { throw "Raw AMD64 callback registers did not normalize identically in $name." }
+            if ($callbackArg1 -ne $callbackSiteSlot -or $callbackArg1 -ne $firstNonNullSlot) { throw "Callback argument 1 did not equal the real inline root slot in $name." }
+            if ($callbackLoadedRaw -ne $callbackSiteRaw -or $callbackLoadedRaw -ne $firstNonNullValue -or $callbackLoadedRaw -ne $expectedStorage) { throw "Callback-side root load did not equal the real NativeAOT storage object in $name." }
+            if ($callbackArg2 -ne $callbackSiteContext -or $callbackArg2 -ne $context) { throw "Callback argument 2 did not equal the live ScanContext in $name." }
+            if ($callbackArg3Value -ne $expectedFlagsValue -or $callbackArg3Value -ne $actualFlagsValue) { throw "Callback argument 3 did not equal the expected root metadata flags in $name." }
+            if ($callbackSiteCallback -ne $callbackEntryAddress) { throw "Callback call-site identity did not equal the actual GCHeap::Promote entry address in $name." }
+            if ($managedThread -ne $currentThread -or $managedThread -ne $lockOwner) { throw "Managed/current/lock-owner thread identities diverged at callback entry in $name." }
+            if ($validationText -match 'ALL_PASS|ALL_FAIL|GC\.Collect|RhShutdown|GC_Shutdown') { throw "Unexpected completion or shutdown marker appeared in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC07"; outcome="A"; harnessTerminated=$true
+                callbackRequestCount=(Get-MarkerField $validationText 'requestCount'); callbackCallSiteCount=(Get-MarkerField $validationText 'callSiteCount'); callbackInvocationCount=(Get-MarkerField $validationText 'invocationCount'); callbackEntryCount=(Get-MarkerField $validationText 'entryCount'); callbackReturnCount=(Get-MarkerField $validationText 'returnCount'); duplicateCallbackInvocations=(Get-MarkerField $validationText 'duplicateInvocations')
+                callbackSite=[ordered]@{ slot=$callbackSiteSlot; rawValue=$callbackSiteRaw; scanContext=$callbackSiteContext; callback=$callbackSiteCallback; returnAddress=(Get-MarkerField $validationText 'callbackSiteReturn') }
+                callbackEntry=[ordered]@{ address=$callbackEntryAddress; returnAddress=(Get-MarkerField $validationText 'callbackEntryReturn'); stackPointer=(Get-MarkerField $validationText 'callbackEntryRsp'); rawRcx=$callbackRawRcx; rawRdx=$callbackRawRdx; rawR8=$callbackRawR8; arg1=$callbackArg1; arg2=$callbackArg2; arg3=$callbackArg3 }
+                root=[ordered]@{ slot=(Get-MarkerField $validationText 'rootSlot'); rawValue=(Get-MarkerField $validationText 'rootRaw'); callbackSideLoadCount=(Get-MarkerField $validationText 'callbackRootLoads'); loadedValue=$callbackLoadedRaw; firstNonNullSlot=$firstNonNullSlot; firstNonNullValue=$firstNonNullValue; expectedStorageObject=$expectedStorage; expectedSentinel=(Get-MarkerField $validationText 'expectedSentinel') }
+                scanContext=[ordered]@{ address=$context; threadUnderCrawl=(Get-MarkerField $validationText 'contextThread'); stackLimit=(Get-MarkerField $validationText 'contextStackLimit'); threadNumber=(Get-MarkerField $validationText 'contextThreadNumber'); threadCount=(Get-MarkerField $validationText 'contextThreadCount'); promotion=(Get-MarkerField $validationText 'contextPromotion'); concurrent=(Get-MarkerField $validationText 'contextConcurrent'); fieldReads=(Get-MarkerField $validationText 'contextFieldReads') }
+                flags=[ordered]@{ expected=$expectedFlags; actual=$actualFlags; match=(Get-MarkerField $validationText 'flagsMatch') }
+                semanticBoundary=[ordered]@{ firstOperation=(Get-MarkerField $validationText 'firstSemanticOperation'); candidateClassification=(Get-MarkerField $validationText 'candidateClassification'); heapMembership=(Get-MarkerField $validationText 'heapMembership'); segmentLookup=(Get-MarkerField $validationText 'segmentLookup'); objectHeaders=(Get-MarkerField $validationText 'objectHeaders'); methodTables=(Get-MarkerField $validationText 'methodTables'); promotionStart=(Get-MarkerField $validationText 'promotionStart'); promotions=(Get-MarkerField $validationText 'promotions'); markingStart=(Get-MarkerField $validationText 'markingStart'); graphTraversal=(Get-MarkerField $validationText 'graphTraversal') }
+                mutation=[ordered]@{ markWrites=(Get-MarkerField $validationText 'markWrites'); promotionWrites=(Get-MarkerField $validationText 'promotionWrites'); objectMemory=(Get-MarkerField $validationText 'objectMutation'); gcMetadata=(Get-MarkerField $validationText 'gcMetadataMutation'); segmentMetadata=(Get-MarkerField $validationText 'segmentMetadataMutation') }
+                managedProofRoot=[ordered]@{ assignmentCount=(Get-MarkerField $validationText 'managedAssignmentCount'); clearCount=(Get-MarkerField $validationText 'managedClearCount'); readbackCount=(Get-MarkerField $validationText 'managedReadbackCount'); assignmentValid=(Get-MarkerField $validationText 'managedAssignmentValid'); readbackValid=(Get-MarkerField $validationText 'managedReadbackValid'); sentinelOrdinal=(Get-MarkerField $validationText 'sentinelOrdinal'); sentinelAddress=(Get-MarkerField $validationText 'sentinelAddress'); sentinelSize=(Get-MarkerField $validationText 'sentinelSize'); readbackAddress=(Get-MarkerField $validationText 'readbackAddress'); readbackExactMatch=(Get-MarkerField $validationText 'readbackExactMatch'); storageObject=(Get-MarkerField $validationText 'storageObject'); inlinedRoot=(Get-MarkerField $validationText 'inlinedRoot'); objectBefore=(Get-MarkerField $validationText 'objectBefore'); objectAfter=(Get-MarkerField $validationText 'objectAfter'); objectAtStop=(Get-MarkerField $validationText 'objectAtStop'); sentinelChecks=(Get-MarkerField $validationText 'sentinelChecks'); objectHistoryOverflow=(Get-MarkerField $validationText 'objectHistoryOverflow') }
+                threadStore=[ordered]@{ managedThread=$managedThread; currentThread=$currentThread; lockOwner=$lockOwner; lockHeld=(Get-MarkerField $validationText 'lockHeld'); eeSuspended=(Get-MarkerField $validationText 'eeSuspended'); managedEntryProhibited=(Get-MarkerField $validationText 'managedEntryProhibited') }
+                restartRequests=(Get-MarkerField $validationText 'restartRequests'); restartEntries=(Get-MarkerField $validationText 'restartEntries'); managedResume=(Get-MarkerField $validationText 'managedResume')
+            }
+        } elseif ($isFirstNonNullRoot) {
             Assert-Text $validationText '\[nativeaot-gc-first-non-null-root-callback-boundary\] SAFE_STOP marker=C011EC06' "first non-null root callback-boundary safe-stop marker"
             Assert-Text $validationText 'gcScanRootsRequest=00000001 gcScanRootsEntry=00000001 foreachRequest=00000001 foreachEntry=00000001 iteratorInit=00000001' "real root dispatcher and iterator entry"
             Assert-Text $validationText 'registeredBefore=00000001 registeredAfter=0000000[01] enumerated=00000001 included=00000001 excluded=00000000' "actual registered thread enumeration and inclusion"
@@ -836,7 +1016,46 @@ exit /b %errorlevel%
 
     $identity = Get-Content -LiteralPath $identityManifestPath -Raw | ConvertFrom-Json
     $replacementHashes = @($identity.replacementObjects | ForEach-Object { [ordered]@{ path=$_.path; sha256=$_.sha256 } })
-    if ($isFirstNonNullRoot) {
+    if ($isFirstRootCallbackEntry) {
+        $nonC011EC07Runs = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC07" })
+        if (@($runResults).Count -ne 3 -or $nonC011EC07Runs.Count -ne 0) { throw "The first real root callback-entry experiment did not produce three C011EC07 runs." }
+        $firstCallbackRun = $runResults[0]
+        $manifest = [ordered]@{
+            outcome="A / real GCHeap::Promote callback entered exactly once with the genuine NativeAOT thread-static storage root and stopped before heap classification"
+            proofMode=$ProofMode; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            taskStartCheckpoint=$taskStartCheckpoint
+            productionStartup=[ordered]@{ initializeModules="production runtime path invoked before ManagedMain"; status="working" }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryBuildBefore; startingEspSha256=$ordinaryEspBefore; expectedSha256=$normalKernelHash }
+            runtimePack=[ordered]@{ version="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterface="5.3"; ee="2"; sourceCommit=$lockedCommit; lockedGcenvEeSourceSha256=(Hash-File $lockedEePath); lockedGcEnumSourceSha256=(Hash-File $lockedGcEnumPath); lockedGcCppSourceSha256=(Hash-File $lockedGcCppPath); lockedGcwksSourceSha256=(Hash-File $lockedGcwksPath); activePalArchiveSha256=(Hash-File $activeArchive); callbackSymbol=$callbackSymbolName; callbackAddress="0x$callbackAddressText" }
+            priorCheckpoint=[ordered]@{ marker="C011EC06"; report="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md"; stop="one genuine non-null NativeAOT thread-static storage root discovered before callback invocation" }
+            managedProofRoot=$firstCallbackRun.managedProofRoot
+            threadStaticRuntime=[ordered]@{ storageObjectAddress=$firstCallbackRun.managedProofRoot.storageObject; inlinedRootAddress=$firstCallbackRun.managedProofRoot.inlinedRoot; normalManagedSemantics=$true; fabricatedSlot=$false; fabricatedObject=$false }
+            sourceTrace=[ordered]@{ callbackTypedef="promote_func(Object**, ScanContext*, uint32_t)"; callbackFunction="GCHeap::Promote"; callbackSource="locked src/coreclr/gc/gc.cpp:49474-49544, included by src/coreclr/gc/gcwks.cpp"; callbackGeneration="locked src/coreclr/gc/gc.cpp:29899-29901: GCScan::GcScanRoots(GCHeap::Promote, ...)"; rootProvider="locked src/coreclr/nativeaot/Runtime/gcenv.ee.cpp:114-115"; enumGcRef="locked src/coreclr/nativeaot/Runtime/GcEnum.cpp:68-96"; callbackCallSite="locked GcEnum.cpp:81: fnGcEnumRef(ppObj, pSc, flags)"; firstSourceStatement="locked gc.cpp:49476 THREAD_NUMBER_FROM_CONTEXT"; firstCandidateLoad="locked gc.cpp:49481: uint8_t* o = (uint8_t*)*ppObject"; firstHeapClassification="locked gc.cpp:49483: gc_heap::is_in_find_object_range(o)"; firstMetadataAccess="locked gc.cpp:49496: gc_heap::heap_of(o) and subsequent generation/range checks"; firstPromotionMutation="locked gc.cpp:49533 pin_object / gc_heap::mark_object_simple at :49541"; generatedGcwks=$gcWksSource; generatedGcEnum=$gcEnumSource }
+            abi=[ordered]@{ architecture="AMD64"; callingConvention="Microsoft x64"; argumentRegisters=@("RCX=Object** root slot", "RDX=ScanContext*", "R8D/R8=root flags uint32_t"); returnRegister="RAX unused for void"; shadowSpace="32 bytes required by caller"; callSiteDisassembly=(Join-Path $runRoot "artifact-disassembly.txt"); callbackEntryDisassembly=(Join-Path $runRoot "artifact-disassembly.txt"); callbackSymbolFile=(Join-Path $runRoot "callback-symbol.txt") }
+            callbackCallSite=$firstCallbackRun.callbackSite
+            callbackEntry=$firstCallbackRun.callbackEntry
+            rootArgument=$firstCallbackRun.root
+            scanContext=$firstCallbackRun.scanContext
+            flags=$firstCallbackRun.flags
+            expectedArgumentMatches=[ordered]@{ argument1EqualsRealInlineRootSlot=($firstCallbackRun.callbackEntry.arg1 -eq $firstCallbackRun.root.firstNonNullSlot); argument1SlotLoadEqualsStorageObject=($firstCallbackRun.root.loadedValue -eq $firstCallbackRun.root.expectedStorageObject); argument2EqualsLiveProviderScanContext=($firstCallbackRun.callbackEntry.arg2 -eq $firstCallbackRun.callbackSite.scanContext); historicalKnownScanContext="0x0000000004E694E0 (prior checkpoint absolute; stack address is run-specific)"; argument3MatchesExpectedRootFlags=([Convert]::ToUInt64($firstCallbackRun.callbackEntry.arg3.Substring(2),16) -eq [Convert]::ToUInt64($firstCallbackRun.flags.expected.Substring(2),16)); callbackPointerMatchesLockedMap=("0x" + $callbackAddressText.ToUpperInvariant() -eq $firstCallbackRun.callbackSite.callback) }
+            callbackCounts=[ordered]@{ requests=$firstCallbackRun.callbackRequestCount; callSiteEntries=$firstCallbackRun.callbackCallSiteCount; invocations=$firstCallbackRun.callbackInvocationCount; entries=$firstCallbackRun.callbackEntryCount; returns=$firstCallbackRun.callbackReturnCount; duplicates=$firstCallbackRun.duplicateCallbackInvocations }
+            callbackSideRootLoad=[ordered]@{ count=$firstCallbackRun.root.callbackSideLoadCount; value=$firstCallbackRun.root.loadedValue; nullTests=(Get-MarkerField (Get-Content -LiteralPath $firstCallbackRun.serial -Raw) 'nullTests'); result="non-null storage object; one locked callback-side load" }
+            semanticBoundary=$firstCallbackRun.semanticBoundary
+            mutation=$firstCallbackRun.mutation
+            objectAndSentinelValidation=$firstCallbackRun.managedProofRoot
+            threadStore=$firstCallbackRun.threadStore
+            safeStop=[ordered]@{ marker="C011EC07"; reason="real GCHeap::Promote entered with validated live ABI arguments, performed its source-required *ppObject load, then stopped immediately before gc_heap::is_in_find_object_range"; firstProhibitedOperation="candidate heap-membership classification at locked gc.cpp:49483"; promotionAllowed=$false; markingAllowed=$false; graphTraversalAllowed=$false; callbackReturnAllowed=$false }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=3; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot "commands.txt"); runs=$runResults }
+            regressions=[ordered]@{ firstRootCallbackEntry="PASS 3/3 fresh QEMU runs"; firstNonNullRootCallbackBoundary="C011EC06 prerequisite retained"; firstRootCandidateLoad="C011EC05 prerequisite retained"; threadStaticPrimitive="historical proof retained"; threadStaticReference="historical proof retained"; threadStaticCombined="historical proof retained"; firstPerThreadRootProvider="C011EC04 prerequisite retained"; allocationContextFixupRootBoundary="C011EC03 prerequisite retained"; singleThreadSuspendEe="C011EC02 prerequisite retained"; staticChecks="PASS script parse, manifest parse, serial classification, ordinary-kernel restoration, git diff --check" }
+            failedChecks=[ordered]@{ historicalFirst64KiBExecution="retained historical failure"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN exit 1 from compiler-stderr promotion" }
+            blockedChecks=[ordered]@{ broadRegressionSuite="not rerun in this focused execution"; nativeStackWrapper="historically non-clean; not called passed"; callbackPromotionCompletion="intentionally out of scope; proof stops before classification/promotion" }
+            documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CALLBACK_ENTRY.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md","docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md","docs/dotnet/NATIVEAOT_GC_STARTUP_READINESS.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FEASIBILITY.md"); evidenceRoot=$runRoot
+            ordinaryRestoration=[ordered]@{ buildSha256=$normalKernelHash; espSha256=$normalKernelHash; expectedSha256=$normalKernelHash }
+            authorizedNormalizedAdaptedGcIdentity=[ordered]@{ strategy=$identity.strategy; sourceCommit=$identity.sourceCommit; stockSha256=$identity.stockSha256; adaptedSha256=$identity.adaptedSha256; adaptedLength=$identity.adaptedLength; replacementObjects=$replacementHashes; stockUnchanged=$identity.stockUnchanged }
+        }
+        $manifest | ConvertTo-Json -Depth 24 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT Workstation GC first-root-callback-entry experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isFirstNonNullRoot) {
         $nonC011EC06Runs = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC06" })
         if (@($runResults).Count -ne 3 -or $nonC011EC06Runs.Count -ne 0) { throw "The first non-null root callback-boundary experiment did not produce three C011EC06 runs." }
         $firstEarlyRun = $runResults[0]

@@ -701,6 +701,86 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_candidate_slot_record candidateSlotRecords[
         GUIDEXOS_NATIVEAOT_MAX_CANDIDATE_SLOTS];
 
+    /*
+     * Proof-only first real root-callback entry evidence.  The call-site
+     * values are recorded before the indirect call in GcEnumObject.  The
+     * entry values are recorded by the real GCHeap::Promote body before its
+     * locked source loads *ppObject.  No callback return is permitted in
+     * this bounded proof.
+     */
+    uint32_t callbackRequestCount;
+    uint32_t callbackCallSiteEntryCount;
+    uint32_t callbackInvocationCount;
+    uint32_t callbackEntryCount;
+    uint32_t callbackReturnCount;
+    uint32_t duplicateCallbackInvocationCount;
+    uint32_t callbackRootSlotLoadCount;
+    uint32_t callbackNullTestCount;
+    uint32_t callbackNullTestNonNullCount;
+    uint32_t callbackContextFieldReadCount;
+    uint32_t callbackCandidateClassificationStartCount;
+    uint32_t callbackHeapMembershipTestCount;
+    uint32_t callbackSegmentLookupCount;
+    uint32_t callbackObjectHeaderReadCount;
+    uint32_t callbackMethodTableReadCount;
+    uint32_t callbackPromotionStartCount;
+    uint32_t callbackPromotionCount;
+    uint32_t callbackMarkingStartCount;
+    uint32_t callbackGraphTraversalCount;
+    uint32_t callbackMarkStateWriteCount;
+    uint32_t callbackPromotionStateWriteCount;
+    uint32_t callbackObjectMemoryMutationCount;
+    uint32_t callbackGcMetadataMutationCount;
+    uint32_t callbackSegmentMetadataMutationCount;
+    uint32_t callbackSafeStopObserved;
+    uint32_t callbackSafeStopReason;
+    uint32_t callbackFirstSemanticOperation;
+    uint32_t callbackEntryCurrentGeneration;
+    uint32_t callbackEntryCondemnedGeneration;
+    uint32_t callbackEntryPromotion;
+    uint32_t callbackEntryConcurrent;
+    uint32_t callbackEntryThreadStoreLockHeld;
+    uint32_t callbackEntryEeSuspended;
+    uint32_t callbackEntryManagedEntryProhibited;
+    uint32_t callbackExpectedRootFlags;
+    uint32_t callbackActualRootFlags;
+    uint32_t callbackEntryArgumentsMatch;
+    uint32_t callbackRootSlotMatchesExpected;
+    uint32_t callbackRawRootMatchesStorage;
+    uint32_t callbackScanContextMatchesExpected;
+    uint32_t callbackFlagsMatchExpected;
+    uint32_t reservedFirstRootCallbackEntry[3];
+
+    uintptr_t callbackSiteRootSlot;
+    uintptr_t callbackSiteRawRootValue;
+    uintptr_t callbackSiteScanContext;
+    uintptr_t callbackSiteCallbackIdentity;
+    uintptr_t callbackSiteReturnAddress;
+    uintptr_t callbackEntryAddress;
+    uintptr_t callbackEntryReturnAddress;
+    uintptr_t callbackEntryStackPointer;
+    uintptr_t callbackRawArgument1Rcx;
+    uintptr_t callbackRawArgument2Rdx;
+    uintptr_t callbackRawArgument3R8;
+    uintptr_t callbackNormalizedArgument1;
+    uintptr_t callbackNormalizedArgument2;
+    uintptr_t callbackNormalizedArgument3;
+    uintptr_t callbackRootSlot;
+    uintptr_t callbackRootRawValue;
+    uintptr_t callbackRootSlotLoadedValue;
+    uintptr_t callbackContextAddress;
+    uintptr_t callbackContextThreadUnderCrawl;
+    uintptr_t callbackContextStackLimit;
+    uintptr_t callbackEntryManagedThread;
+    uintptr_t callbackEntryLockOwner;
+    uintptr_t callbackEntryCurrentThread;
+    uintptr_t callbackEntryScanContextFieldThreadNumberAddress;
+    uintptr_t callbackEntryScanContextFieldThreadNumberValue;
+    uintptr_t callbackEntryScanContextFieldThreadCountAddress;
+    uintptr_t callbackEntryScanContextFieldThreadCountValue;
+    uintptr_t callbackEntryScanContextFieldPromotionAddress;
+    uintptr_t callbackEntryScanContextFieldConcurrentAddress;
+
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
         GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupAfter[
@@ -755,6 +835,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F22_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_SAFE_STOP = 0xF22u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F23_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP = 0xF23u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F24_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY_SAFE_STOP = 0xF24u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F25_FIRST_ROOT_CALLBACK_ENTRY_SAFE_STOP = 0xF25u,
 };
 
 enum {
@@ -768,6 +849,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP_MARKER = 0xC011EC04u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_CANDIDATE_LOAD_SAFE_STOP_MARKER = 0xC011EC05u,
     GUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC06u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_SAFE_STOP_MARKER = 0xC011EC07u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

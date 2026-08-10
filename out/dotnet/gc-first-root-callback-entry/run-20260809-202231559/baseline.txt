@@ -1,0 +1,10 @@
+experiment=single-managed-mutator Workstation GC real thread-static storage root and first GCHeap::Promote callback entry
+arrayLength=4096
+hardAllocationLimit=256
+heapReserveCommit=locked adapted Workstation GC configuration
+nativeAotSourceCommit=9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3
+runtimePack=9.0.0 AMD64 Workstation GC interface=5.3 EE=2
+collectionPath=soh_try_fit->a_fit_segment_end_p->a_state_trigger_ephemeral_gc->trigger_ephemeral_gc->GCHeap::GarbageCollectGeneration->GCToEEInterface::SuspendEE->GCHeap::GarbageCollect before fix_allocation_contexts
+safeStop=after the real GCHeap::Promote callback entered with live ABI arguments and after its required *ppObject load, immediately before gc_heap::is_in_find_object_range
+activePalArchiveSha256=C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F
+normalKernelSha256=161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550

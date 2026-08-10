@@ -1,0 +1,668 @@
+{
+    "outcome":  "A / real GCHeap::Promote callback entered exactly once with the genuine NativeAOT thread-static storage root and stopped before heap classification",
+    "proofMode":  "first-root-callback-entry",
+    "repositoryHead":  "51b303a39ad28d8fedcc020e4bb43113060ed712",
+    "startingCommittedHead":  "51b303a39ad28d8fedcc020e4bb43113060ed712",
+    "startingBranch":  "v1.1_DOTNET_SUPPORT",
+    "startingWorktreeStatus":  [
+                                   " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                                   " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                                   " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                                   "?? out/dotnet/gc-first-root-callback-entry/"
+                               ],
+    "startingDirtyState":  [
+                               " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                               " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                               " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                               "?? out/dotnet/gc-first-root-callback-entry/"
+                           ],
+    "endingDirtyState":  [
+                             " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                             " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                             " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                             "?? out/dotnet/gc-first-root-callback-entry/"
+                         ],
+    "taskStartCheckpoint":  {
+                                "head":  "51b303a39ad28d8fedcc020e4bb43113060ed712",
+                                "branch":  "v1.1_DOTNET_SUPPORT",
+                                "dirtyState":  "clean",
+                                "ordinaryKernelSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "ordinaryEspSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                            },
+    "productionStartup":  {
+                              "initializeModules":  "production runtime path invoked before ManagedMain",
+                              "status":  "working"
+                          },
+    "ordinaryBaseline":  {
+                             "startingBuildSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                             "startingEspSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                             "expectedSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                         },
+    "runtimePack":  {
+                        "version":  "9.0.0",
+                        "architecture":  "AMD64",
+                        "gc":  "Workstation",
+                        "gcInterface":  "5.3",
+                        "ee":  "2",
+                        "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                        "lockedGcenvEeSourceSha256":  "EA603651D418F45F6847B7F3EC57C23BEB0A153ECCF94C2107EB5EB40B6C9A6B",
+                        "lockedGcEnumSourceSha256":  "65BA356294C47F55105104D3800224C0311411042FA95AAFA83E3BAE91DEBFE6",
+                        "lockedGcCppSourceSha256":  "5BD029B77A973145B12C142E870A549C527DAC19AEB527012F7CC6F99D362FF9",
+                        "lockedGcwksSourceSha256":  "5C7C4C0E755332F4D6DBED8E832617F2B559028CC74D2B8478CB069FD4616021",
+                        "activePalArchiveSha256":  "C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F",
+                        "callbackSymbol":  "?Promote@GCHeap@WKS@@SAXPEAPEAVObject@@PEAUScanContext@@I@Z",
+                        "callbackAddress":  "0x0000000010022560"
+                    },
+    "priorCheckpoint":  {
+                            "marker":  "C011EC06",
+                            "report":  "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md",
+                            "stop":  "one genuine non-null NativeAOT thread-static storage root discovered before callback invocation"
+                        },
+    "managedProofRoot":  {
+                             "assignmentCount":  "0x00000001",
+                             "clearCount":  "0x00000000",
+                             "readbackCount":  "0x00000001",
+                             "assignmentValid":  "0x00000001",
+                             "readbackValid":  "0x00000001",
+                             "sentinelOrdinal":  "0x00000000",
+                             "sentinelAddress":  "0x0000000100A01F38",
+                             "sentinelSize":  "0x0000000000001000",
+                             "readbackAddress":  "0x0000000100A01F38",
+                             "readbackExactMatch":  "0x00000001",
+                             "storageObject":  "0x0000000100A02F50",
+                             "inlinedRoot":  "0x000000000393FBE0",
+                             "objectBefore":  "0x00000025",
+                             "objectAfter":  "0x00000025",
+                             "objectAtStop":  "0x00000025",
+                             "sentinelChecks":  "0x00000094",
+                             "objectHistoryOverflow":  "0x00000000"
+                         },
+    "threadStaticRuntime":  {
+                                "storageObjectAddress":  "0x0000000100A02F50",
+                                "inlinedRootAddress":  "0x000000000393FBE0",
+                                "normalManagedSemantics":  true,
+                                "fabricatedSlot":  false,
+                                "fabricatedObject":  false
+                            },
+    "sourceTrace":  {
+                        "callbackTypedef":  "promote_func(Object**, ScanContext*, uint32_t)",
+                        "callbackFunction":  "GCHeap::Promote",
+                        "callbackSource":  "locked src/coreclr/gc/gc.cpp:49474-49544, included by src/coreclr/gc/gcwks.cpp",
+                        "callbackGeneration":  "locked src/coreclr/gc/gc.cpp:29899-29901: GCScan::GcScanRoots(GCHeap::Promote, ...)",
+                        "rootProvider":  "locked src/coreclr/nativeaot/Runtime/gcenv.ee.cpp:114-115",
+                        "enumGcRef":  "locked src/coreclr/nativeaot/Runtime/GcEnum.cpp:68-96",
+                        "callbackCallSite":  "locked GcEnum.cpp:81: fnGcEnumRef(ppObj, pSc, flags)",
+                        "firstSourceStatement":  "locked gc.cpp:49476 THREAD_NUMBER_FROM_CONTEXT",
+                        "firstCandidateLoad":  "locked gc.cpp:49481: uint8_t* o = (uint8_t*)*ppObject",
+                        "firstHeapClassification":  "locked gc.cpp:49483: gc_heap::is_in_find_object_range(o)",
+                        "firstMetadataAccess":  "locked gc.cpp:49496: gc_heap::heap_of(o) and subsequent generation/range checks",
+                        "firstPromotionMutation":  "locked gc.cpp:49533 pin_object / gc_heap::mark_object_simple at :49541",
+                        "generatedGcwks":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\build\\runtime-pack\\gcwks.first-root-callback-entry.cpp",
+                        "generatedGcEnum":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\build\\runtime-pack\\GcEnum.first-root-callback-entry.cpp"
+                    },
+    "abi":  {
+                "architecture":  "AMD64",
+                "callingConvention":  "Microsoft x64",
+                "argumentRegisters":  [
+                                          "RCX=Object** root slot",
+                                          "RDX=ScanContext*",
+                                          "R8D/R8=root flags uint32_t"
+                                      ],
+                "returnRegister":  "RAX unused for void",
+                "shadowSpace":  "32 bytes required by caller",
+                "callSiteDisassembly":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\run-20260809-203719803\\artifact-disassembly.txt",
+                "callbackEntryDisassembly":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\run-20260809-203719803\\artifact-disassembly.txt",
+                "callbackSymbolFile":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\run-20260809-203719803\\callback-symbol.txt"
+            },
+    "callbackCallSite":  {
+                             "slot":  "0x000000000393FBE0",
+                             "rawValue":  "0x0000000100A02F50",
+                             "scanContext":  "0x0000000004E7B440",
+                             "callback":  "0x0000000010022560",
+                             "returnAddress":  "0x0000000010016B83"
+                         },
+    "callbackEntry":  {
+                          "address":  "0x0000000010022560",
+                          "returnAddress":  "0x0000000010016BCB",
+                          "stackPointer":  "0x0000000004E7B368",
+                          "rawRcx":  "0x000000000393FBE0",
+                          "rawRdx":  "0x0000000004E7B440",
+                          "rawR8":  "0x0000000000000000",
+                          "arg1":  "0x000000000393FBE0",
+                          "arg2":  "0x0000000004E7B440",
+                          "arg3":  "0x0000000000000000"
+                      },
+    "rootArgument":  {
+                         "slot":  "0x000000000393FBE0",
+                         "rawValue":  "0x0000000100A02F50",
+                         "callbackSideLoadCount":  "0x00000001",
+                         "loadedValue":  "0x0000000100A02F50",
+                         "firstNonNullSlot":  "0x000000000393FBE0",
+                         "firstNonNullValue":  "0x0000000100A02F50",
+                         "expectedStorageObject":  "0x0000000100A02F50",
+                         "expectedSentinel":  "0x0000000100A01F38"
+                     },
+    "scanContext":  {
+                        "address":  "0x0000000004E7B440",
+                        "threadUnderCrawl":  "0x0000000000000000",
+                        "stackLimit":  "0x0000000000000000",
+                        "threadNumber":  "0x0000000000000000",
+                        "threadCount":  "0x0000000000000001",
+                        "promotion":  "0x00000001",
+                        "concurrent":  "0x00000000",
+                        "fieldReads":  "0x00000006"
+                    },
+    "flags":  {
+                  "expected":  "0x00000000",
+                  "actual":  "0x00000000",
+                  "match":  "0x00000001"
+              },
+    "expectedArgumentMatches":  {
+                                    "argument1EqualsRealInlineRootSlot":  true,
+                                    "argument1SlotLoadEqualsStorageObject":  true,
+                                    "argument2EqualsLiveProviderScanContext":  true,
+                                    "historicalKnownScanContext":  "0x0000000004E694E0 (prior checkpoint absolute; stack address is run-specific)",
+                                    "argument3MatchesExpectedRootFlags":  true,
+                                    "callbackPointerMatchesLockedMap":  true
+                                },
+    "callbackCounts":  {
+                           "requests":  "0x00000001",
+                           "callSiteEntries":  "0x00000001",
+                           "invocations":  "0x00000001",
+                           "entries":  "0x00000001",
+                           "returns":  "0x00000000",
+                           "duplicates":  "0x00000000"
+                       },
+    "callbackSideRootLoad":  {
+                                 "count":  "0x00000001",
+                                 "value":  "0x0000000100A02F50",
+                                 "nullTests":  "0x00000000",
+                                 "result":  "non-null storage object; one locked callback-side load"
+                             },
+    "semanticBoundary":  {
+                             "firstOperation":  "0x00000001",
+                             "candidateClassification":  "0x00000000",
+                             "heapMembership":  "0x00000000",
+                             "segmentLookup":  "0x00000000",
+                             "objectHeaders":  "0x00000000",
+                             "methodTables":  "0x00000000",
+                             "promotionStart":  "0x00000000",
+                             "promotions":  "0x00000000",
+                             "markingStart":  "0x00000000",
+                             "graphTraversal":  "0x00000000"
+                         },
+    "mutation":  {
+                     "markWrites":  "0x00000000",
+                     "promotionWrites":  "0x00000000",
+                     "objectMemory":  "0x00000000",
+                     "gcMetadata":  "0x00000000",
+                     "segmentMetadata":  "0x00000000"
+                 },
+    "objectAndSentinelValidation":  {
+                                        "assignmentCount":  "0x00000001",
+                                        "clearCount":  "0x00000000",
+                                        "readbackCount":  "0x00000001",
+                                        "assignmentValid":  "0x00000001",
+                                        "readbackValid":  "0x00000001",
+                                        "sentinelOrdinal":  "0x00000000",
+                                        "sentinelAddress":  "0x0000000100A01F38",
+                                        "sentinelSize":  "0x0000000000001000",
+                                        "readbackAddress":  "0x0000000100A01F38",
+                                        "readbackExactMatch":  "0x00000001",
+                                        "storageObject":  "0x0000000100A02F50",
+                                        "inlinedRoot":  "0x000000000393FBE0",
+                                        "objectBefore":  "0x00000025",
+                                        "objectAfter":  "0x00000025",
+                                        "objectAtStop":  "0x00000025",
+                                        "sentinelChecks":  "0x00000094",
+                                        "objectHistoryOverflow":  "0x00000000"
+                                    },
+    "threadStore":  {
+                        "managedThread":  "0x000000000393FC00",
+                        "currentThread":  "0x000000000393FC00",
+                        "lockOwner":  "0x000000000393FC00",
+                        "lockHeld":  "0x00000001",
+                        "eeSuspended":  "0x00000001",
+                        "managedEntryProhibited":  "0x00000001"
+                    },
+    "safeStop":  {
+                     "marker":  "C011EC07",
+                     "reason":  "real GCHeap::Promote entered with validated live ABI arguments, performed its source-required *ppObject load, then stopped immediately before gc_heap::is_in_find_object_range",
+                     "firstProhibitedOperation":  "candidate heap-membership classification at locked gc.cpp:49483",
+                     "promotionAllowed":  false,
+                     "markingAllowed":  false,
+                     "graphTraversalAllowed":  false,
+                     "callbackReturnAllowed":  false
+                 },
+    "qemu":  {
+                 "version":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+                 "runCount":  3,
+                 "proofKernelSha256":  "D27A953C2DA764AC77F1D8B7AC09693849DB910E9E9DB77181C6B28C4CFB0FD7",
+                 "serialSha256":  [
+                                      "005A1FFF894F53AACCE16FC9B0022E028FFA5F9ECFEE6C362387D026F8F56612",
+                                      "9DA53482736EE22AA30964B4B8E4F4B8A681FC8AB4ECB7096307E1E29F9509B5",
+                                      "52DF0873484EC7AFEA600AF9BBDAB33E0239270A57C23F557097B21F73F18639"
+                                  ],
+                 "exactCommandLog":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\run-20260809-203719803\\commands.txt",
+                 "runs":  [
+                              {
+                                  "name":  "first-run",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\run-20260809-203719803\\first-run\\serial.log",
+                                  "serialSha256":  "005A1FFF894F53AACCE16FC9B0022E028FFA5F9ECFEE6C362387D026F8F56612",
+                                  "safeStopMarker":  "C011EC07",
+                                  "outcome":  "A",
+                                  "harnessTerminated":  true,
+                                  "callbackRequestCount":  "0x00000001",
+                                  "callbackCallSiteCount":  "0x00000001",
+                                  "callbackInvocationCount":  "0x00000001",
+                                  "callbackEntryCount":  "0x00000001",
+                                  "callbackReturnCount":  "0x00000000",
+                                  "duplicateCallbackInvocations":  "0x00000000",
+                                  "callbackSite":  {
+                                                       "slot":  "0x000000000393FBE0",
+                                                       "rawValue":  "0x0000000100A02F50",
+                                                       "scanContext":  "0x0000000004E7B440",
+                                                       "callback":  "0x0000000010022560",
+                                                       "returnAddress":  "0x0000000010016B83"
+                                                   },
+                                  "callbackEntry":  {
+                                                        "address":  "0x0000000010022560",
+                                                        "returnAddress":  "0x0000000010016BCB",
+                                                        "stackPointer":  "0x0000000004E7B368",
+                                                        "rawRcx":  "0x000000000393FBE0",
+                                                        "rawRdx":  "0x0000000004E7B440",
+                                                        "rawR8":  "0x0000000000000000",
+                                                        "arg1":  "0x000000000393FBE0",
+                                                        "arg2":  "0x0000000004E7B440",
+                                                        "arg3":  "0x0000000000000000"
+                                                    },
+                                  "root":  {
+                                               "slot":  "0x000000000393FBE0",
+                                               "rawValue":  "0x0000000100A02F50",
+                                               "callbackSideLoadCount":  "0x00000001",
+                                               "loadedValue":  "0x0000000100A02F50",
+                                               "firstNonNullSlot":  "0x000000000393FBE0",
+                                               "firstNonNullValue":  "0x0000000100A02F50",
+                                               "expectedStorageObject":  "0x0000000100A02F50",
+                                               "expectedSentinel":  "0x0000000100A01F38"
+                                           },
+                                  "scanContext":  {
+                                                      "address":  "0x0000000004E7B440",
+                                                      "threadUnderCrawl":  "0x0000000000000000",
+                                                      "stackLimit":  "0x0000000000000000",
+                                                      "threadNumber":  "0x0000000000000000",
+                                                      "threadCount":  "0x0000000000000001",
+                                                      "promotion":  "0x00000001",
+                                                      "concurrent":  "0x00000000",
+                                                      "fieldReads":  "0x00000006"
+                                                  },
+                                  "flags":  {
+                                                "expected":  "0x00000000",
+                                                "actual":  "0x00000000",
+                                                "match":  "0x00000001"
+                                            },
+                                  "semanticBoundary":  {
+                                                           "firstOperation":  "0x00000001",
+                                                           "candidateClassification":  "0x00000000",
+                                                           "heapMembership":  "0x00000000",
+                                                           "segmentLookup":  "0x00000000",
+                                                           "objectHeaders":  "0x00000000",
+                                                           "methodTables":  "0x00000000",
+                                                           "promotionStart":  "0x00000000",
+                                                           "promotions":  "0x00000000",
+                                                           "markingStart":  "0x00000000",
+                                                           "graphTraversal":  "0x00000000"
+                                                       },
+                                  "mutation":  {
+                                                   "markWrites":  "0x00000000",
+                                                   "promotionWrites":  "0x00000000",
+                                                   "objectMemory":  "0x00000000",
+                                                   "gcMetadata":  "0x00000000",
+                                                   "segmentMetadata":  "0x00000000"
+                                               },
+                                  "managedProofRoot":  {
+                                                           "assignmentCount":  "0x00000001",
+                                                           "clearCount":  "0x00000000",
+                                                           "readbackCount":  "0x00000001",
+                                                           "assignmentValid":  "0x00000001",
+                                                           "readbackValid":  "0x00000001",
+                                                           "sentinelOrdinal":  "0x00000000",
+                                                           "sentinelAddress":  "0x0000000100A01F38",
+                                                           "sentinelSize":  "0x0000000000001000",
+                                                           "readbackAddress":  "0x0000000100A01F38",
+                                                           "readbackExactMatch":  "0x00000001",
+                                                           "storageObject":  "0x0000000100A02F50",
+                                                           "inlinedRoot":  "0x000000000393FBE0",
+                                                           "objectBefore":  "0x00000025",
+                                                           "objectAfter":  "0x00000025",
+                                                           "objectAtStop":  "0x00000025",
+                                                           "sentinelChecks":  "0x00000094",
+                                                           "objectHistoryOverflow":  "0x00000000"
+                                                       },
+                                  "threadStore":  {
+                                                      "managedThread":  "0x000000000393FC00",
+                                                      "currentThread":  "0x000000000393FC00",
+                                                      "lockOwner":  "0x000000000393FC00",
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001"
+                                                  },
+                                  "restartRequests":  "0x00000000",
+                                  "restartEntries":  "0x00000000",
+                                  "managedResume":  "0x00000000"
+                              },
+                              {
+                                  "name":  "repeat-1",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\run-20260809-203719803\\repeat-1\\serial.log",
+                                  "serialSha256":  "9DA53482736EE22AA30964B4B8E4F4B8A681FC8AB4ECB7096307E1E29F9509B5",
+                                  "safeStopMarker":  "C011EC07",
+                                  "outcome":  "A",
+                                  "harnessTerminated":  true,
+                                  "callbackRequestCount":  "0x00000001",
+                                  "callbackCallSiteCount":  "0x00000001",
+                                  "callbackInvocationCount":  "0x00000001",
+                                  "callbackEntryCount":  "0x00000001",
+                                  "callbackReturnCount":  "0x00000000",
+                                  "duplicateCallbackInvocations":  "0x00000000",
+                                  "callbackSite":  {
+                                                       "slot":  "0x000000000393FBE0",
+                                                       "rawValue":  "0x0000000100A02F50",
+                                                       "scanContext":  "0x0000000004E7B440",
+                                                       "callback":  "0x0000000010022560",
+                                                       "returnAddress":  "0x0000000010016B83"
+                                                   },
+                                  "callbackEntry":  {
+                                                        "address":  "0x0000000010022560",
+                                                        "returnAddress":  "0x0000000010016BCB",
+                                                        "stackPointer":  "0x0000000004E7B368",
+                                                        "rawRcx":  "0x000000000393FBE0",
+                                                        "rawRdx":  "0x0000000004E7B440",
+                                                        "rawR8":  "0x0000000000000000",
+                                                        "arg1":  "0x000000000393FBE0",
+                                                        "arg2":  "0x0000000004E7B440",
+                                                        "arg3":  "0x0000000000000000"
+                                                    },
+                                  "root":  {
+                                               "slot":  "0x000000000393FBE0",
+                                               "rawValue":  "0x0000000100A02F50",
+                                               "callbackSideLoadCount":  "0x00000001",
+                                               "loadedValue":  "0x0000000100A02F50",
+                                               "firstNonNullSlot":  "0x000000000393FBE0",
+                                               "firstNonNullValue":  "0x0000000100A02F50",
+                                               "expectedStorageObject":  "0x0000000100A02F50",
+                                               "expectedSentinel":  "0x0000000100A01F38"
+                                           },
+                                  "scanContext":  {
+                                                      "address":  "0x0000000004E7B440",
+                                                      "threadUnderCrawl":  "0x0000000000000000",
+                                                      "stackLimit":  "0x0000000000000000",
+                                                      "threadNumber":  "0x0000000000000000",
+                                                      "threadCount":  "0x0000000000000001",
+                                                      "promotion":  "0x00000001",
+                                                      "concurrent":  "0x00000000",
+                                                      "fieldReads":  "0x00000006"
+                                                  },
+                                  "flags":  {
+                                                "expected":  "0x00000000",
+                                                "actual":  "0x00000000",
+                                                "match":  "0x00000001"
+                                            },
+                                  "semanticBoundary":  {
+                                                           "firstOperation":  "0x00000001",
+                                                           "candidateClassification":  "0x00000000",
+                                                           "heapMembership":  "0x00000000",
+                                                           "segmentLookup":  "0x00000000",
+                                                           "objectHeaders":  "0x00000000",
+                                                           "methodTables":  "0x00000000",
+                                                           "promotionStart":  "0x00000000",
+                                                           "promotions":  "0x00000000",
+                                                           "markingStart":  "0x00000000",
+                                                           "graphTraversal":  "0x00000000"
+                                                       },
+                                  "mutation":  {
+                                                   "markWrites":  "0x00000000",
+                                                   "promotionWrites":  "0x00000000",
+                                                   "objectMemory":  "0x00000000",
+                                                   "gcMetadata":  "0x00000000",
+                                                   "segmentMetadata":  "0x00000000"
+                                               },
+                                  "managedProofRoot":  {
+                                                           "assignmentCount":  "0x00000001",
+                                                           "clearCount":  "0x00000000",
+                                                           "readbackCount":  "0x00000001",
+                                                           "assignmentValid":  "0x00000001",
+                                                           "readbackValid":  "0x00000001",
+                                                           "sentinelOrdinal":  "0x00000000",
+                                                           "sentinelAddress":  "0x0000000100A01F38",
+                                                           "sentinelSize":  "0x0000000000001000",
+                                                           "readbackAddress":  "0x0000000100A01F38",
+                                                           "readbackExactMatch":  "0x00000001",
+                                                           "storageObject":  "0x0000000100A02F50",
+                                                           "inlinedRoot":  "0x000000000393FBE0",
+                                                           "objectBefore":  "0x00000025",
+                                                           "objectAfter":  "0x00000025",
+                                                           "objectAtStop":  "0x00000025",
+                                                           "sentinelChecks":  "0x00000094",
+                                                           "objectHistoryOverflow":  "0x00000000"
+                                                       },
+                                  "threadStore":  {
+                                                      "managedThread":  "0x000000000393FC00",
+                                                      "currentThread":  "0x000000000393FC00",
+                                                      "lockOwner":  "0x000000000393FC00",
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001"
+                                                  },
+                                  "restartRequests":  "0x00000000",
+                                  "restartEntries":  "0x00000000",
+                                  "managedResume":  "0x00000000"
+                              },
+                              {
+                                  "name":  "repeat-2",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\run-20260809-203719803\\repeat-2\\serial.log",
+                                  "serialSha256":  "52DF0873484EC7AFEA600AF9BBDAB33E0239270A57C23F557097B21F73F18639",
+                                  "safeStopMarker":  "C011EC07",
+                                  "outcome":  "A",
+                                  "harnessTerminated":  true,
+                                  "callbackRequestCount":  "0x00000001",
+                                  "callbackCallSiteCount":  "0x00000001",
+                                  "callbackInvocationCount":  "0x00000001",
+                                  "callbackEntryCount":  "0x00000001",
+                                  "callbackReturnCount":  "0x00000000",
+                                  "duplicateCallbackInvocations":  "0x00000000",
+                                  "callbackSite":  {
+                                                       "slot":  "0x000000000393FBE0",
+                                                       "rawValue":  "0x0000000100A02F50",
+                                                       "scanContext":  "0x0000000004E7B440",
+                                                       "callback":  "0x0000000010022560",
+                                                       "returnAddress":  "0x0000000010016B83"
+                                                   },
+                                  "callbackEntry":  {
+                                                        "address":  "0x0000000010022560",
+                                                        "returnAddress":  "0x0000000010016BCB",
+                                                        "stackPointer":  "0x0000000004E7B368",
+                                                        "rawRcx":  "0x000000000393FBE0",
+                                                        "rawRdx":  "0x0000000004E7B440",
+                                                        "rawR8":  "0x0000000000000000",
+                                                        "arg1":  "0x000000000393FBE0",
+                                                        "arg2":  "0x0000000004E7B440",
+                                                        "arg3":  "0x0000000000000000"
+                                                    },
+                                  "root":  {
+                                               "slot":  "0x000000000393FBE0",
+                                               "rawValue":  "0x0000000100A02F50",
+                                               "callbackSideLoadCount":  "0x00000001",
+                                               "loadedValue":  "0x0000000100A02F50",
+                                               "firstNonNullSlot":  "0x000000000393FBE0",
+                                               "firstNonNullValue":  "0x0000000100A02F50",
+                                               "expectedStorageObject":  "0x0000000100A02F50",
+                                               "expectedSentinel":  "0x0000000100A01F38"
+                                           },
+                                  "scanContext":  {
+                                                      "address":  "0x0000000004E7B440",
+                                                      "threadUnderCrawl":  "0x0000000000000000",
+                                                      "stackLimit":  "0x0000000000000000",
+                                                      "threadNumber":  "0x0000000000000000",
+                                                      "threadCount":  "0x0000000000000001",
+                                                      "promotion":  "0x00000001",
+                                                      "concurrent":  "0x00000000",
+                                                      "fieldReads":  "0x00000006"
+                                                  },
+                                  "flags":  {
+                                                "expected":  "0x00000000",
+                                                "actual":  "0x00000000",
+                                                "match":  "0x00000001"
+                                            },
+                                  "semanticBoundary":  {
+                                                           "firstOperation":  "0x00000001",
+                                                           "candidateClassification":  "0x00000000",
+                                                           "heapMembership":  "0x00000000",
+                                                           "segmentLookup":  "0x00000000",
+                                                           "objectHeaders":  "0x00000000",
+                                                           "methodTables":  "0x00000000",
+                                                           "promotionStart":  "0x00000000",
+                                                           "promotions":  "0x00000000",
+                                                           "markingStart":  "0x00000000",
+                                                           "graphTraversal":  "0x00000000"
+                                                       },
+                                  "mutation":  {
+                                                   "markWrites":  "0x00000000",
+                                                   "promotionWrites":  "0x00000000",
+                                                   "objectMemory":  "0x00000000",
+                                                   "gcMetadata":  "0x00000000",
+                                                   "segmentMetadata":  "0x00000000"
+                                               },
+                                  "managedProofRoot":  {
+                                                           "assignmentCount":  "0x00000001",
+                                                           "clearCount":  "0x00000000",
+                                                           "readbackCount":  "0x00000001",
+                                                           "assignmentValid":  "0x00000001",
+                                                           "readbackValid":  "0x00000001",
+                                                           "sentinelOrdinal":  "0x00000000",
+                                                           "sentinelAddress":  "0x0000000100A01F38",
+                                                           "sentinelSize":  "0x0000000000001000",
+                                                           "readbackAddress":  "0x0000000100A01F38",
+                                                           "readbackExactMatch":  "0x00000001",
+                                                           "storageObject":  "0x0000000100A02F50",
+                                                           "inlinedRoot":  "0x000000000393FBE0",
+                                                           "objectBefore":  "0x00000025",
+                                                           "objectAfter":  "0x00000025",
+                                                           "objectAtStop":  "0x00000025",
+                                                           "sentinelChecks":  "0x00000094",
+                                                           "objectHistoryOverflow":  "0x00000000"
+                                                       },
+                                  "threadStore":  {
+                                                      "managedThread":  "0x000000000393FC00",
+                                                      "currentThread":  "0x000000000393FC00",
+                                                      "lockOwner":  "0x000000000393FC00",
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001"
+                                                  },
+                                  "restartRequests":  "0x00000000",
+                                  "restartEntries":  "0x00000000",
+                                  "managedResume":  "0x00000000"
+                              }
+                          ]
+             },
+    "regressions":  {
+                        "firstRootCallbackEntry":  "PASS 3/3 fresh QEMU runs",
+                        "firstNonNullRootCallbackBoundary":  "PASS 3/3 fresh current-worktree QEMU runs; evidence root out/dotnet/gc-first-non-null-root-callback-boundary",
+                        "firstRootCandidateLoad":  "PASS 3/3 fresh current-worktree QEMU runs; evidence root out/dotnet/gc-first-root-candidate-load",
+                        "threadStaticPrimitive":  "historical proof retained",
+                        "threadStaticReference":  "historical proof retained",
+                        "threadStaticCombined":  "historical proof retained",
+                        "firstPerThreadRootProvider":  "NON-CLEAN: C011EC04 reached; historical validator rejected current objectBefore/objectAfter=0x25 and sentinelChecks=0x94 versus 0x28/0xA0",
+                        "allocationContextFixupRootBoundary":  "NON-CLEAN: C011EC03 reached; historical validator rejected current objectBefore/objectAfter=0x25 versus 0x28",
+                        "singleThreadSuspendEe":  "NON-CLEAN: C011EC02 reached; historical allocation-count validator rejected current count",
+                        "staticChecks":  "PASS script parse, final manifest parse, serial classification, ordinary-kernel restoration, git diff --check"
+                    },
+    "failedChecks":  {
+                         "historicalFirst64KiBExecution":  "retained historical failure",
+                         "staleCacheAttempts":  "retained historical attempts",
+                         "initialRuntimePackIdentityMismatch":  "retained historical mismatch",
+                         "nativeStackPowerShellWrapper":  "retained NON-CLEAN exit 1 from compiler-stderr promotion"
+                     },
+    "blockedChecks":  {
+                          "broadRegressionSuite":  "not rerun in this focused execution",
+                          "nativeStackWrapper":  "historically non-clean; not called passed",
+                          "callbackPromotionCompletion":  "intentionally out of scope; proof stops before classification/promotion"
+                      },
+    "documentation":  [
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CALLBACK_ENTRY.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md",
+                          "docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_PER_THREAD_ROOT_PROVIDER.md",
+                          "docs/dotnet/NATIVEAOT_GC_STARTUP_READINESS.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FEASIBILITY.md"
+                      ],
+    "evidenceRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-callback-entry\\run-20260809-203719803",
+    "ordinaryRestoration":  {
+                                "buildSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "espSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "expectedSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                            },
+    "authorizedNormalizedAdaptedGcIdentity":  {
+                                                  "strategy":  "A-complete-gcenv-object",
+                                                  "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                                                  "stockSha256":  "0E6A134AD4150CD604317A47860DAE82EB30AAE4D9CDB14144E06454E7BB1948",
+                                                  "adaptedSha256":  "3220504AF0D2D71FA66AAB0AF789788F2AE83EA00470EB30BAEE49D06A71973B",
+                                                  "adaptedLength":  5937120,
+                                                  "replacementObjects":  [
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_gcenv.obj",
+                                                                                 "sha256":  "5C01020E9E81077A51703903EECF929F7CC27F39D1EA844BC8713B15B6C706D6"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_mutex.obj",
+                                                                                 "sha256":  "D630A1D3CEFF6C191CF98D1278473C060861682010F078539478D6C1055B68C1"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_event.obj",
+                                                                                 "sha256":  "EE74472760E8384739EC133EC451068F70F5449F956CB1898DB87F14CB507AF5"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_critical_section_adapter.obj",
+                                                                                 "sha256":  "D38007ACDA613520AB276F3A9A1F6C6451E526929D003691E2D7D060A32A098C"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_virtual_memory_adapter.obj",
+                                                                                 "sha256":  "3CB12F7DF624F53D469C485D2AB230F86846BF9AC5D93206E80DBAAADABC76A7"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_event_adapter.obj",
+                                                                                 "sha256":  "22BD28A6017692D265276DE014A3972AEFF022DDA50D2B009A3BF101BCAB3DDA"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_fls_adapter.obj",
+                                                                                 "sha256":  "A66952D40DABC7848470E849BB170A2578565BA120F8946C86EDF39F1704DBEF"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_nativeaot_thread_adapter.obj",
+                                                                                 "sha256":  "7E393B188832231AC189A64128BA752520F6659EE0D444CDDD04B6F15C32EB73"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_native_thread.obj",
+                                                                                 "sha256":  "4ADC494189FA5AC6F572A4D7C83668CC1C37EB52A3ED6BF5D5534CC56FD6C2C8"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_virtual_memory_region.obj",
+                                                                                 "sha256":  "3068B95E35570150E80634789CC68E13A80138566E33A37CEB1C88976464F185"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_local_storage.obj",
+                                                                                 "sha256":  "ED7E36941EB925C24AE51F6793248343006C32563AB717088A43F0908689DB4C"
+                                                                             },
+                                                                             {
+                                                                                 "path":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-real-allocation\\identity\\build1\\rebuilt\\guidexos_gc_platform_services.obj",
+                                                                                 "sha256":  "545CCAE753B90094F973C32C19CE4590C8A3DC3B97E736C3C1212AD9B241BE45"
+                                                                             }
+                                                                         ],
+                                                  "stockUnchanged":  true
+                                              },
+    "ordinaryKernelAfter":  {
+                                "build":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "esp":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                            }
+}
