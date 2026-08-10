@@ -51,6 +51,16 @@ gx_development_debug_request makeRequest(uint32_t command, uint64_t breakpointId
     return request;
 }
 
+bool pollForTrap(uint32_t expectedKind, gx_development_debug_snapshot& snapshot) {
+    for (uint32_t i = 0; i < 1000000; ++i) {
+        gx_development_debug_request poll = makeRequest(GX_DEVELOPMENT_DEBUG_POLL, 0, 0);
+        if (NativeAppDebugger::Command(poll, "native-debugger-runtime-proof", &snapshot) != gxos::apps::GX_OK) return false;
+        if (snapshot.status == GX_DEVELOPMENT_DEBUG_STATUS_TRAP && snapshot.trapKind == expectedKind) return true;
+        std::this_thread::yield();
+    }
+    return false;
+}
+
 bool expect(bool condition, const char* message) {
     if (condition) return true;
     std::cerr << "Native debugger runtime test FAIL: " << message << "\n";
@@ -73,6 +83,7 @@ int main() {
     bool registered = false;
     std::atomic<bool> waiting{false};
     std::atomic<bool> completed{false};
+    volatile uint32_t* counter = nullptr;
     std::thread targetThread;
     auto cleanup = [&]() {
         if (targetThread.joinable()) {
@@ -84,12 +95,27 @@ int main() {
             targetThread.join();
         }
         if (registered) NativeAppDebugger::UnregisterRuntime(77);
+        if (counter) { delete counter; counter = nullptr; }
         ExecutableMemory::Free(mapping);
     };
 
-    const uint64_t targetAddress = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(mapping.base));
-    const uint8_t originalByte = 0xC3;
-    *static_cast<uint8_t*>(mapping.base) = originalByte;
+    const uint64_t imageBase = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(mapping.base));
+    const uint64_t targetAddress = imageBase + 10;
+    // MOV RAX, counter; INC dword ptr [RAX]; RET. The breakpoint is placed on
+    // the two-byte INC instruction so its observable counter effect is tied
+    // directly to the restored instruction.
+    uint8_t* code = static_cast<uint8_t*>(mapping.base);
+    counter = new volatile uint32_t(0);
+    *counter = 0;
+    code[0] = 0x48;
+    code[1] = 0xB8;
+    const uint64_t counterAddress = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(counter));
+    std::memcpy(code + 2, &counterAddress, sizeof(counterAddress));
+    code[10] = 0xFF;
+    code[11] = 0x00;
+    code[12] = 0xC3;
+    volatile uint8_t* breakpointByte = code + 10;
+    const uint8_t originalByte = code[10];
     if (!expect(ExecutableMemory::Protect(mapping, 0, 1, ExecutableMemoryProtection::ReadExecute, error),
                 "initial executable protection")) {
         cleanup();
@@ -100,10 +126,10 @@ int main() {
     context.runtimeId = 77;
     context.processId = 42;
     NativeElfImage image{};
-    image.preferredBaseAddress = targetAddress;
+    image.preferredBaseAddress = imageBase;
     image.imageSize = mapping.size;
     NativeElfSegment segment{};
-    segment.virtualAddress = targetAddress;
+    segment.virtualAddress = imageBase;
     segment.memorySize = mapping.size;
     segment.flags = 1;
     image.loadedSegments.push_back(segment);
@@ -150,7 +176,7 @@ int main() {
         cleanup();
         return 1;
     }
-    if (!expect(*static_cast<volatile uint8_t*>(mapping.base) == 0xCC, "patched memory contains INT3")) {
+    if (!expect(*breakpointByte == 0xCC, "patched memory contains INT3")) {
         cleanup();
         return 1;
     }
@@ -158,9 +184,11 @@ int main() {
     targetThread = std::thread([&]() {
         gxos::Allocator::setCurrentPid(42);
         waiting.store(true, std::memory_order_release);
-        if (!NativeAppDebugger::WaitForExecutionGate(77)) return;
         typedef void (*TargetFunction)();
-        reinterpret_cast<TargetFunction>(mapping.base)();
+        for (uint32_t invocation = 0; invocation < 2; ++invocation) {
+            if (!NativeAppDebugger::WaitForExecutionGate(77)) return;
+            reinterpret_cast<TargetFunction>(mapping.base)();
+        }
         completed.store(true, std::memory_order_release);
         gxos::Allocator::setCurrentPid(0);
     });
@@ -178,17 +206,14 @@ int main() {
         return 1;
     }
     gx_development_debug_snapshot trapSnapshot{};
-    bool trapObserved = false;
-    for (uint32_t i = 0; i < 1000000 && !trapObserved; ++i) {
-        gx_development_debug_request poll = makeRequest(GX_DEVELOPMENT_DEBUG_POLL, 0, 0);
-        if (NativeAppDebugger::Command(poll, "native-debugger-runtime-proof", &trapSnapshot) != gxos::apps::GX_OK) break;
-        trapObserved = trapSnapshot.status == GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
-        if (!trapObserved) std::this_thread::yield();
-    }
+    const bool trapObserved = pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, trapSnapshot);
     if (!(trapObserved && trapSnapshot.trapKind == GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT &&
                 trapSnapshot.processId == 42 && trapSnapshot.nativeRuntimeId == 77 && trapSnapshot.threadId != 0 &&
-                trapSnapshot.targetAddress == targetAddress && trapSnapshot.instructionPointer == targetAddress &&
-                trapSnapshot.bindingId == bindSnapshot.bindingId)) {
+                trapSnapshot.targetAddress == targetAddress &&
+                (trapSnapshot.instructionPointer == targetAddress || trapSnapshot.instructionPointer == targetAddress + 1) &&
+                trapSnapshot.bindingId == bindSnapshot.bindingId && trapSnapshot.context.valid != 0 &&
+                trapSnapshot.context.stopGeneration != 0 &&
+                trapSnapshot.context.threadId == trapSnapshot.threadId)) {
         std::cerr << "Trap snapshot status=" << trapSnapshot.status
                   << " kind=" << trapSnapshot.trapKind
                   << " process=" << trapSnapshot.processId
@@ -208,28 +233,114 @@ int main() {
         return 1;
     }
 
-    gx_development_debug_snapshot restoreSnapshot{};
-    gx_development_debug_request restore = makeRequest(GX_DEVELOPMENT_DEBUG_RESTORE_ALL, 0, 0);
-    if (!expect(NativeAppDebugger::Command(restore, "native-debugger-runtime-proof", &restoreSnapshot) == gxos::apps::GX_OK &&
-                restoreSnapshot.status == GX_DEVELOPMENT_DEBUG_STATUS_RESTORED,
-                "breakpoint restoration")) {
+    std::cout << "Breakpoint address: 0x" << std::hex << targetAddress
+              << " original byte: 0x" << static_cast<uint32_t>(originalByte)
+              << " INT3 byte: 0xCC raw breakpoint RIP: 0x" << trapSnapshot.instructionPointer
+              << " normalized RIP: 0x" << trapSnapshot.targetAddress
+              << " delta=" << std::dec << (static_cast<int64_t>(trapSnapshot.instructionPointer) -
+                                             static_cast<int64_t>(trapSnapshot.targetAddress))
+              << " RFLAGS=0x" << std::hex << trapSnapshot.context.rflags
+              << " RSP=0x" << trapSnapshot.context.rsp
+              << " RBP=0x" << trapSnapshot.context.rbp << std::dec << "\n";
+
+    auto continueBreakpoint = [&](const gx_development_debug_snapshot& stop,
+                                  uint64_t breakpointId) {
+        gx_development_debug_request request = makeRequest(GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT,
+                                                            breakpointId, targetAddress);
+        request.flags = GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT;
+        request.threadId = stop.threadId;
+        request.stopGeneration = stop.context.stopGeneration;
+        gx_development_debug_snapshot result{};
+        const bool accepted = NativeAppDebugger::Command(request, "native-debugger-runtime-proof", &result) == gxos::apps::GX_OK &&
+            result.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING &&
+            *breakpointByte == originalByte;
+        if (!accepted) {
+            std::cerr << "Continue status=" << result.status << " error=" << result.errorMessage << "\n";
+        }
+        return accepted;
+    };
+
+    gx_development_debug_snapshot singleStepSnapshot{};
+    if (!expect(continueBreakpoint(trapSnapshot, 900), "restore byte, rewind RIP, and enable internal single-step")) {
         cleanup();
         return 1;
     }
-    if (!expect(*static_cast<volatile uint8_t*>(mapping.base) == originalByte, "restored byte matches original")) {
+    if (!expect(pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP, singleStepSnapshot),
+                "real EXCEPTION_SINGLE_STEP observed")) {
+        cleanup();
+        return 1;
+    }
+    if (!expect(singleStepSnapshot.context.valid != 0 && singleStepSnapshot.threadId == trapSnapshot.threadId &&
+                singleStepSnapshot.context.rip == targetAddress + 2 &&
+                singleStepSnapshot.rflagsWithTrapFlag == (singleStepSnapshot.rflagsBeforeStep | 0x100u) &&
+                singleStepSnapshot.rflagsAfterTrapFlagClear == singleStepSnapshot.rflagsBeforeStep &&
+                *breakpointByte == 0xCC && *counter == 1,
+                "original instruction executes once and breakpoint is rebound")) {
+        std::cerr << "single-step rip=0x" << std::hex << singleStepSnapshot.context.rip
+                  << " expected=0x" << (targetAddress + 2)
+                  << " flags=0x" << singleStepSnapshot.context.rflags
+                  << " flagsBefore=0x" << singleStepSnapshot.rflagsBeforeStep
+                  << " flagsWithTF=0x" << singleStepSnapshot.rflagsWithTrapFlag
+                  << " flagsAfter=0x" << singleStepSnapshot.rflagsAfterTrapFlagClear
+                  << " byte=0x" << static_cast<uint32_t>(*breakpointByte)
+                  << " counter=" << std::dec << *counter << "\n";
+        cleanup();
+        return 1;
+    }
+    std::cout << "RFLAGS before=0x" << std::hex << singleStepSnapshot.rflagsBeforeStep
+              << " with TF=0x" << singleStepSnapshot.rflagsWithTrapFlag
+              << " after clear=0x" << singleStepSnapshot.rflagsAfterTrapFlagClear
+              << " single-step RIP=0x" << singleStepSnapshot.context.rip << std::dec << "\n";
+
+    gx_development_debug_snapshot secondTrap{};
+    if (!expect(pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, secondTrap),
+                "same breakpoint traps again after continuation")) {
+        cleanup();
+        return 1;
+    }
+    if (!expect(secondTrap.context.stopGeneration > trapSnapshot.context.stopGeneration &&
+                secondTrap.threadId == trapSnapshot.threadId && secondTrap.bindingId == trapSnapshot.bindingId,
+                "second stop has a new generation and the same target thread/binding")) {
+        cleanup();
+        return 1;
+    }
+
+    gx_development_debug_snapshot secondSingleStep{};
+    if (!expect(continueBreakpoint(secondTrap, 900), "second breakpoint continuation accepted")) {
+        cleanup();
+        return 1;
+    }
+    if (!expect(pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP, secondSingleStep),
+                "second real EXCEPTION_SINGLE_STEP observed")) {
         cleanup();
         return 1;
     }
     targetThread.join();
-    if (!expect(completed.load(std::memory_order_acquire), "target resumed and returned after restoration")) {
+    if (!expect(completed.load(std::memory_order_acquire) && *counter == 2,
+                "target resumed normally after the repeated-hit proof")) {
+        cleanup();
+        return 1;
+    }
+    if (!expect(*breakpointByte == 0xCC,
+                "breakpoint remains physically installed after the second step")) {
         cleanup();
         return 1;
     }
     NativeAppDebugger::UnregisterRuntime(77);
     registered = false;
+    if (!expect(*breakpointByte == originalByte,
+                "teardown restores the original instruction byte")) {
+        ExecutableMemory::Free(mapping);
+        return 1;
+    }
+    const uint32_t finalCounter = *counter;
+    delete counter;
+    counter = nullptr;
     ExecutableMemory::Free(mapping);
     std::cout << "Native debugger runtime test PASS: target=" << targetAddress
-              << " original=0xC3 patched=0xCC restored=0xC3 trap=EXCEPTION_BREAKPOINT\n";
+              << " original=0x" << std::hex << static_cast<uint32_t>(originalByte)
+              << " patched=0xCC single-step=EXCEPTION_SINGLE_STEP counter=" << std::dec << finalCounter
+              << " rebound=0xCC restored-on-teardown=0x" << std::hex << static_cast<uint32_t>(originalByte) << "\n";
     return 0;
 #endif
 }

@@ -1,6 +1,7 @@
 #include "native_app_process_table.h"
 
 #include "native_app_debug_log.h"
+#include "logger.h"
 
 #include <algorithm>
 #include <atomic>
@@ -98,6 +99,8 @@ void NativeAppProcessTable::RegisterPrepared(const NativeAppRuntimeContext& cont
         process.hostArchitecture = hostArchitecture;
         applyRuntimeState(process, context);
         g_processes.push_back(process);
+        Logger::write(LogLevel::Info, "[NativeAppProcessTable] runtime prepared runtimeId=" + std::to_string(context.runtimeId) +
+            " processId=" + std::to_string(context.processId));
         NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", "runtime prepared");
         return;
     }
@@ -108,6 +111,8 @@ void NativeAppProcessTable::RegisterPrepared(const NativeAppRuntimeContext& cont
     existing->experimentalExecutionEnabled = experimentalExecutionEnabled;
     existing->hostArchitecture = hostArchitecture;
     applyRuntimeState(*existing, context);
+    Logger::write(LogLevel::Info, "[NativeAppProcessTable] runtime refreshed runtimeId=" + std::to_string(context.runtimeId) +
+        " processId=" + std::to_string(context.processId));
     NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", "runtime prepared");
 #else
     (void)context;

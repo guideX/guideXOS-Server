@@ -27,7 +27,12 @@ namespace apps {
 namespace {
 
 NativeAppLifecycleState g_hostLifecycleState = NativeAppLifecycleState::Created;
-NativeAppRuntimeContext* g_activeRuntimeContext = nullptr;
+// Native ELF applications execute on independent ProcessTable worker threads.
+// Host callbacks must resolve against the context belonging to the calling
+// worker; a process-wide pointer lets a newly launched debug target steal the
+// Developer Studio context and makes the Studio event loop fail on its next
+// callback.
+thread_local NativeAppRuntimeContext* g_activeRuntimeContext = nullptr;
 std::atomic<uint64_t> g_nextRuntimeId{ 1 };
 
 constexpr int kMinWindowWidth = 64;
@@ -909,6 +914,7 @@ gx_result hostDevelopmentRunPrepare(NativeGxAppContext* ctx, const gx_developmen
     copied.manifestPath = manifestPath.c_str();
     copied.artifactPath = artifactPath.c_str();
     copied.artifactSha256 = artifactSha256.c_str();
+    copied.flags = request->flags;
     const gx_result result = DevelopmentRunService::Prepare(*context, copied, outHandle, outSnapshot);
     NativeAppProcessTable::UpdateFromRuntime(*context);
     return result;
