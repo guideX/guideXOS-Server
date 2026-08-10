@@ -1,0 +1,2 @@
+"cmd.exe" /d /c "call \"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-membership-classification\build\build-single-thread-suspend-ee-runtime-pack.bat\""
+"cmd.exe" /d /c "call \"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-membership-classification\build\build-single-thread-suspend-ee-artifact.bat\""

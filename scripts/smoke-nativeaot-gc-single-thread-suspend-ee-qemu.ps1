@@ -3,7 +3,7 @@ param(
     [string]$EvidenceRoot = "",
     [int]$TimeoutSeconds = 90,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -15,7 +15,9 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($ProofMode -eq "first-root-callback-entry") {
+    $EvidenceRoot = if ($ProofMode -eq "first-root-membership-classification") {
+        Join-Path $root "out\dotnet\gc-first-root-membership-classification"
+    } elseif ($ProofMode -eq "first-root-callback-entry") {
         Join-Path $root "out\dotnet\gc-first-root-callback-entry"
     } elseif ($ProofMode -eq "first-non-null-root-callback-boundary") {
         Join-Path $root "out\dotnet\gc-first-non-null-root-callback-boundary"
@@ -30,12 +32,15 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     }
 }
 $isFirstRootCandidateLoad = $ProofMode -eq "first-root-candidate-load"
-$isFirstRootCallbackEntry = $ProofMode -eq "first-root-callback-entry"
+$isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
+$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry")
-$proofDefine = if ($isFirstRootCallbackEntry) {
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification")
+$proofDefine = if ($isFirstRootMembershipClassification) {
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION"
+} elseif ($isFirstRootCallbackEntry) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION"
 } elseif ($isFirstNonNullRoot) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION"
@@ -160,9 +165,9 @@ $startingCommittedHead = (& git -C $root rev-parse HEAD).Trim()
 $startingBranch = (& git -C $root branch --show-current).Trim()
 $startingWorktreeStatus = @(& git -C $root status --short)
 $taskStartCheckpoint = [ordered]@{
-    head="51b303a39ad28d8fedcc020e4bb43113060ed712"
-    branch="v1.1_DOTNET_SUPPORT"
-    dirtyState="clean"
+    head=$startingCommittedHead
+    branch=$startingBranch
+    dirtyState=if ($startingWorktreeStatus.Count -eq 0) { "clean" } else { "dirty" }
     ordinaryKernelSha256="161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
     ordinaryEspSha256="161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
 }
@@ -384,17 +389,31 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
         $lockedGcCppPath = Join-Path $lockedSourceRoot "src\coreclr\gc\gc.cpp"
         Require-File $lockedGcwksPath "Locked NativeAOT gcwks.cpp source"
         Require-File $lockedGcCppPath "Locked Workstation GC gc.cpp source"
-        $gcWksText = Get-Content -LiteralPath $lockedGcwksPath -Raw
-        $gcCppText = Get-Content -LiteralPath $lockedGcCppPath -Raw
+        $gcWksText = (Get-Content -LiteralPath $lockedGcwksPath -Raw).Replace([string]([char]13) + [string]([char]10), [string][char]10)
+        $gcCppText = (Get-Content -LiteralPath $lockedGcCppPath -Raw).Replace([string]([char]13) + [string]([char]10), [string][char]10)
         $gcWksText = '#include <intrin.h>' + [Environment]::NewLine + $gcWksText
         $gcWksText = $gcWksText.Replace('namespace WKS {', '#define _DEBUG 1' + [Environment]::NewLine + 'namespace WKS {')
+        if ($isFirstRootMembershipClassification) {
+            $membershipDeclaration = @'
+extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCheckRequested(uintptr_t object);
+extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCheckEntered(uintptr_t object);
+extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCheckCompleted(uintptr_t object, uintptr_t lowerBound, uintptr_t upperBound, uint32_t lowerEvaluated, uint32_t upperEvaluated, uint32_t lowerResult, uint32_t upperResult, uint32_t result);
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootMembershipResultBoundary(uint32_t result);
+'@
+            $gcWksText = '#include <intrin.h>' + [Environment]::NewLine + $membershipDeclaration.TrimEnd() + [Environment]::NewLine + $gcWksText
+        }
+        $candidateLoadedDeclaration = if ($isFirstRootMembershipClassification) {
+            'extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCandidateLoaded(uintptr_t rawValue);'
+        } else {
+            'extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootCallbackCandidateLoaded(uintptr_t rawValue);'
+        }
         $callbackDeclaration = @'
 extern "C" void __cdecl guideXosNativeAotFirstRootCallbackEntered(
     uintptr_t rawArg1, uintptr_t rawArg2, uintptr_t rawArg3,
     uintptr_t callbackAddress, uintptr_t returnAddress,
     uintptr_t stackPointer);
-extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootCallbackCandidateLoaded(uintptr_t rawValue);
 '@
+        $callbackDeclaration = $callbackDeclaration.TrimEnd() + [Environment]::NewLine + $candidateLoadedDeclaration
         $callbackPattern = '(?m)^void GCHeap::Promote\(Object\*\* ppObject, ScanContext\* sc, uint32_t flags\)\r?\n\{'
         $callbackReplacement = @"
 $callbackDeclaration
@@ -414,15 +433,97 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
         if ($promoteOffset -lt 0) { throw "Generated Workstation GC source did not contain the injected GCHeap::Promote body." }
         $promotePrefix = $gcWksInjected.Substring(0, $promoteOffset)
         $promoteBody = $gcWksInjected.Substring($promoteOffset)
+        $candidateLoadedFunction = if ($isFirstRootMembershipClassification) {
+            'guideXosNativeAotFirstRootMembershipCandidateLoaded'
+        } else {
+            'guideXosNativeAotFirstRootCallbackCandidateLoaded'
+        }
         $promoteBody = $promoteBody.Replace(
             '    uint8_t* o = (uint8_t*)*ppObject;',
-            '    uint8_t* o = (uint8_t*)*ppObject;' + [Environment]::NewLine + '    guideXosNativeAotFirstRootCallbackCandidateLoaded(reinterpret_cast<uintptr_t>(o));')
+            '    uint8_t* o = (uint8_t*)*ppObject;' + [Environment]::NewLine + '    ' + $candidateLoadedFunction + '(reinterpret_cast<uintptr_t>(o));')
+        if ($isFirstRootMembershipClassification) {
+            $membershipBoundarySource = @'
+    if (!gc_heap::is_in_find_object_range (o))
+    {
+        guideXosNativeAotFirstRootMembershipResultBoundary(0u);
+        return;
+    }
+    guideXosNativeAotFirstRootMembershipResultBoundary(1u);
+'@
+            $promoteBody = $promoteBody.Replace(
+                @'
+    if (!gc_heap::is_in_find_object_range (o))
+    {
+        return;
+    }
+'@,
+                $membershipBoundarySource)
+        }
         $gcWksInjected = $promotePrefix + $promoteBody
+        if ($isFirstRootMembershipClassification) {
+            $helperOffset = $gcWksInjected.IndexOf('bool gc_heap::is_in_find_object_range (uint8_t* o)', [System.StringComparison]::Ordinal)
+            if ($helperOffset -lt 0) { throw "Locked gc.cpp membership helper definition was not found." }
+            $helperEnd = $gcWksInjected.IndexOf("`n}", $helperOffset, [System.StringComparison]::Ordinal)
+            if ($helperEnd -lt 0) { throw "Locked gc.cpp membership helper closing brace was not found." }
+            $helperEnd += 2
+            $helperText = $gcWksInjected.Substring($helperOffset, $helperEnd - $helperOffset)
+            $helperText = $helperText.Replace(
+                @'
+    if (o == nullptr)
+    {
+        return false;
+    }
+'@,
+                @'
+    if (o == nullptr)
+    {
+        return false;
+    }
+    guideXosNativeAotFirstRootMembershipCheckRequested(reinterpret_cast<uintptr_t>(o));
+    guideXosNativeAotFirstRootMembershipCheckEntered(reinterpret_cast<uintptr_t>(o));
+'@)
+            $helperText = $helperText.Replace(
+                '    return ((o >= g_gc_lowest_address) && (o < bookkeeping_covered_committed));',
+                @'
+    uint8_t* guideXosMembershipLowerBound = g_gc_lowest_address;
+    const uint32_t guideXosMembershipLowerResult =
+        o >= guideXosMembershipLowerBound ? 1u : 0u;
+    uint8_t* guideXosMembershipUpperBound = nullptr;
+    uint32_t guideXosMembershipUpperEvaluated = 0u;
+    uint32_t guideXosMembershipUpperResult = 0u;
+    if (guideXosMembershipLowerResult != 0u)
+    {
+        guideXosMembershipUpperBound = bookkeeping_covered_committed;
+        guideXosMembershipUpperEvaluated = 1u;
+        guideXosMembershipUpperResult =
+            o < guideXosMembershipUpperBound ? 1u : 0u;
+    }
+    const uint32_t guideXosMembershipResult =
+        guideXosMembershipLowerResult != 0u &&
+        guideXosMembershipUpperResult != 0u ? 1u : 0u;
+    guideXosNativeAotFirstRootMembershipCheckCompleted(
+        reinterpret_cast<uintptr_t>(o),
+        reinterpret_cast<uintptr_t>(guideXosMembershipLowerBound),
+        reinterpret_cast<uintptr_t>(guideXosMembershipUpperBound),
+        1u, guideXosMembershipUpperEvaluated,
+        guideXosMembershipLowerResult, guideXosMembershipUpperResult,
+        guideXosMembershipResult);
+    return guideXosMembershipResult != 0u;
+'@)
+            if ($helperText -notmatch 'guideXosNativeAotFirstRootMembershipCheckRequested' -or
+                $helperText -notmatch 'guideXosNativeAotFirstRootMembershipCheckCompleted' -or
+                $helperText -notmatch 'guideXosMembershipLowerBound' -or
+                $helperText -notmatch 'bookkeeping_covered_committed') {
+                throw "Locked gc.cpp membership helper injection did not preserve the active USE_REGIONS/FEATURE_CONSERVATIVE_GC path."
+            }
+            $gcWksInjected = $gcWksInjected.Substring(0, $helperOffset) + $helperText + $gcWksInjected.Substring($helperEnd)
+        }
         if ($gcWksInjected -eq $gcCppText -or
             $gcWksInjected -notmatch 'guideXosNativeAotFirstRootCallbackEntered' -or
-            $gcWksInjected -notmatch 'guideXosNativeAotFirstRootCallbackCandidateLoaded' -or
+            $gcWksInjected -notmatch [regex]::Escape($candidateLoadedFunction) -or
             $gcWksInjected -notmatch 'reinterpret_cast<uintptr_t>\(o\)' -or
-            ([regex]::Matches($gcWksInjected, 'guideXosNativeAotFirstRootCallbackCandidateLoaded\(reinterpret_cast<uintptr_t>\(o\)\)').Count -ne 1)) {
+            ([regex]::Matches($gcWksInjected, ([regex]::Escape($candidateLoadedFunction) + '\(reinterpret_cast<uintptr_t>\(o\)\)')).Count -ne 1) -or
+            ($isFirstRootMembershipClassification -and $gcWksInjected -notmatch 'guideXosNativeAotFirstRootMembershipResultBoundary\(1u\)')) {
             throw "Locked gc.cpp callback-entry injection did not match GCHeap::Promote and its first candidate load."
         }
         $gcWksInjected = $gcWksText.Replace('#include "gc.cpp"', $gcWksInjected)
@@ -504,7 +605,9 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
         }
         Set-Content -LiteralPath $gcEnumSource -Value $gcEnumInjected -Encoding ASCII
     }
-    $baselineDescription = if ($isFirstRootCallbackEntry) {
+    $baselineDescription = if ($isFirstRootMembershipClassification) {
+        "experiment=single-managed-mutator Workstation GC real thread-static storage root and exactly one managed-range membership classification"
+    } elseif ($isFirstRootCallbackEntry) {
         "experiment=single-managed-mutator Workstation GC real thread-static storage root and first GCHeap::Promote callback entry"
     } elseif ($isFirstNonNullRoot) {
         "experiment=single-managed-mutator Workstation GC real thread-static proof root and first non-null candidate callback boundary"
@@ -515,7 +618,9 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
     } else {
         "experiment=single-managed-mutator Workstation GC SuspendEE completion and post-DisablePreemptiveGC boundary"
     }
-    $safeStopDescription = if ($isFirstRootCallbackEntry) {
+    $safeStopDescription = if ($isFirstRootMembershipClassification) {
+        "safeStop=after exactly one real gc_heap::is_in_find_object_range boolean result returned to GCHeap::Promote and immediately before HEAP_FROM_THREAD at locked gc.cpp:49494"
+    } elseif ($isFirstRootCallbackEntry) {
         "safeStop=after the real GCHeap::Promote callback entered with live ABI arguments and after its required *ppObject load, immediately before gc_heap::is_in_find_object_range"
     } elseif ($isFirstPerThreadRootProvider) {
         if ($isFirstNonNullRoot) {
@@ -569,6 +674,11 @@ exit /b 0
     if ($isFirstRootCallbackEntry) {
         $runtimeBatText = Get-Content -LiteralPath $runtimeBat -Raw
         $gcWksCompileLine = 'cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /I"{0}" /I"{1}" /I"{1}\Runtime" /I"{1}\Runtime\windows" /I"{2}" /I"{2}\native" /I"{2}\gc" /I"{2}\gc\env" /I"{1}\Runtime\inc" /I"{1}\Runtime\eventpipe" /I"{3}" /I"{4}" /I"{2}\pal\src\include" /FI"{2}\gc\env\common.h" /Fo:"{5}" "{6}"' -f $nativeAotRoot, $sourceRoot, $sourceRoot, (Join-Path $root 'tools\dotnet\runtime-pack\src\platform'), $palSourceRoot, $gcWks, $gcWksSource
+        if ($isFirstRootMembershipClassification) {
+            $gcWksCompileLine = $gcWksCompileLine.Replace(
+                '/DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION ',
+                '/DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION ')
+        }
         $runtimeBatText = $runtimeBatText.Replace("exit /b 0", "$gcWksCompileLine`r`nif errorlevel 1 exit /b %errorlevel%`r`nexit /b 0")
         Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
     }
@@ -662,7 +772,9 @@ exit /b %errorlevel%
         ) -Encoding ASCII
     }
     $requiredSymbols = @("ManagedMain","RhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment","guideXosNativeAotSuspendEeEntry","guideXosNativeAotSuspendEeAfterLock","guideXosNativeAotSuspendEeAfterSuspend","guideXosNativeAotSuspendEeBodyReturn","guideXosNativeAotDisablePreemptiveEntry","guideXosNativeAotDisablePreemptiveReturn","guideXosManagedAllocationGetDiagnostics")
-    if ($isFirstRootCallbackEntry) {
+    if ($isFirstRootMembershipClassification) {
+        $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootMembershipCandidateLoaded","guideXosNativeAotFirstRootMembershipCheckRequested","guideXosNativeAotFirstRootMembershipCheckEntered","guideXosNativeAotFirstRootMembershipCheckCompleted","guideXosNativeAotFirstRootMembershipResultBoundary","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
+    } elseif ($isFirstRootCallbackEntry) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootCallbackCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
     } elseif ($isFirstNonNullRoot) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
@@ -745,7 +857,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isFirstRootCallbackEntry) {
+                    $stopPattern = if ($isFirstRootMembershipClassification) {
+                        'marker=C011EC08'
+                    } elseif ($isFirstRootCallbackEntry) {
                         'marker=C011EC07'
                     } elseif ($isFirstNonNullRoot) {
                         'lockDepth=00000001 marker=C011EC06'
@@ -801,7 +915,42 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isFirstRootCallbackEntry) {
+        if ($isFirstRootMembershipClassification) {
+            Assert-Text $validationText '\[nativeaot-gc-first-root-membership-classification\] SAFE_STOP marker=C011EC08' "first real root membership safe-stop marker"
+            Assert-Text $validationText 'callbackRequestCount=00000001'; Assert-Text $validationText 'callbackCallSiteCount=00000001'; Assert-Text $validationText 'callbackInvocationCount=00000001'; Assert-Text $validationText 'callbackEntryCount=00000001'; Assert-Text $validationText 'callbackReturnCount=00000000'; Assert-Text $validationText 'secondCallbackAttempts=00000000' "exactly one real callback"
+            Assert-Text $validationText 'membershipRequests=00000001'; Assert-Text $validationText 'membershipEntries=00000001'; Assert-Text $validationText 'membershipCompletions=00000001'; Assert-Text $validationText 'membershipReturns=00000001'; Assert-Text $validationText 'duplicateChecks=00000000'; Assert-Text $validationText 'objectDereferences=00000000' "exactly one real membership check"
+            Assert-Text $validationText 'lowerEvaluated=00000001'; Assert-Text $validationText 'upperEvaluated=00000001'; Assert-Text $validationText 'lowerResult=00000001'; Assert-Text $validationText 'upperResult=00000001'; Assert-Text $validationText 'inFindObjectRange=00000001'; Assert-Text $validationText 'sourceBranch=00000001' "true range comparisons and result"
+            Assert-Text $validationText 'heapIdentity=0000000000000000'; Assert-Text $validationText 'heapFieldReads=00000001'; Assert-Text $validationText 'segmentIdentity=0000000000000000'; Assert-Text $validationText 'segmentLookupCount=00000000'; Assert-Text $validationText 'segmentLookupSucceeded=00000000' "one consulted per-heap boundary field and no segment lookup"
+            Assert-Text $validationText 'candidateClassification=00000000'; Assert-Text $validationText 'generationClassificationStart=00000000'; Assert-Text $validationText 'generationQueryStart=00000000'; Assert-Text $validationText 'condemnedGenerationComparisons=00000000' "stopped before generation classification"
+            Assert-Text $validationText 'postMembershipSegmentLookup=00000000'; Assert-Text $validationText 'objectHeaders=00000000'; Assert-Text $validationText 'methodTables=00000000'; Assert-Text $validationText 'promotionStart=00000000'; Assert-Text $validationText 'promotions=00000000'; Assert-Text $validationText 'markingStart=00000000'; Assert-Text $validationText 'graphTraversal=00000000' "zero post-membership processing"
+            Assert-Text $validationText 'markWrites=00000000'; Assert-Text $validationText 'promotionWrites=00000000'; Assert-Text $validationText 'objectMutation=00000000'; Assert-Text $validationText 'gcMetadataMutation=00000000'; Assert-Text $validationText 'segmentMetadataMutation=00000000' "zero mutation"
+            Assert-Text $validationText 'managedAssignmentCount=00000001'; Assert-Text $validationText 'managedClearCount=00000000'; Assert-Text $validationText 'managedReadbackCount=00000001'; Assert-Text $validationText 'managedAssignmentValid=00000001'; Assert-Text $validationText 'managedReadbackValid=00000001' "managed ThreadStatic proof"
+            Assert-Text $validationText 'sentinelAddress=[0-9A-F]{16}'; Assert-Text $validationText 'sentinelReadback=[0-9A-F]{16}' "sentinel validation"
+            Assert-Text $validationText 'sentinelChecks=[0-9A-F]{8}'; Assert-Text $validationText 'objectBefore=[0-9A-F]{8}'; Assert-Text $validationText 'objectAfter=[0-9A-F]{8}'; Assert-Text $validationText 'objectAtStop=[0-9A-F]{8}'; Assert-Text $validationText 'objectHistoryOverflow=00000000' "object validation"
+            Assert-Text $validationText 'context=[0-9A-F]{16}'; Assert-Text $validationText 'contextFieldReads=00000006'; Assert-Text $validationText 'contextThread=[0-9A-F]{16}'; Assert-Text $validationText 'contextStackLimit=[0-9A-F]{16}'; Assert-Text $validationText 'contextThreadNumber=[0-9A-F]{16}'; Assert-Text $validationText 'contextThreadCount=[0-9A-F]{16}'; Assert-Text $validationText 'contextPromotion=00000001'; Assert-Text $validationText 'contextConcurrent=00000000' "live ScanContext"
+            Assert-Text $validationText 'lockHeld=00000001'; Assert-Text $validationText 'eeSuspended=00000001'; Assert-Text $validationText 'managedEntryProhibited=00000001' "suspension invariant"
+            Assert-Text $validationText 'restartRequests=00000000'; Assert-Text $validationText 'restartEntries=00000000'; Assert-Text $validationText 'managedResume=00000000' "zero restart and resume"
+            $callbackSiteSlot=Get-MarkerField $validationText 'callbackSiteSlot'; $callbackSiteRaw=Get-MarkerField $validationText 'callbackSiteRaw'; $callbackSiteContext=Get-MarkerField $validationText 'callbackSiteContext'; $callbackSiteCallback=Get-MarkerField $validationText 'callbackSiteCallback'; $callbackEntryAddress=Get-MarkerField $validationText 'callbackEntryAddress'
+            $callbackArg1=Get-MarkerField $validationText 'arg1'; $callbackArg2=Get-MarkerField $validationText 'arg2'; $callbackArg3=Get-MarkerField $validationText 'arg3'; $callbackRawRcx=Get-MarkerField $validationText 'rawRcx'; $callbackRawRdx=Get-MarkerField $validationText 'rawRdx'; $callbackRawR8=Get-MarkerField $validationText 'rawR8'; $rootSlot=Get-MarkerField $validationText 'rootSlot'; $callbackLoadedRoot=Get-MarkerField $validationText 'callbackLoadedRoot'; $membershipObject=Get-MarkerField $validationText 'membershipObject'; $storageObject=Get-MarkerField $validationText 'storageObject'; $membershipLower=Get-MarkerField $validationText 'lowerBound'; $membershipUpper=Get-MarkerField $validationText 'upperBound'
+            $objectValue=[Convert]::ToUInt64($membershipObject.Substring(2),16); $lowerValue=[Convert]::ToUInt64($membershipLower.Substring(2),16); $upperValue=[Convert]::ToUInt64($membershipUpper.Substring(2),16)
+            if ($callbackArg1 -ne $callbackRawRcx -or $callbackArg2 -ne $callbackRawRdx -or $callbackArg3 -ne $callbackRawR8 -or $callbackArg1 -ne $callbackSiteSlot -or $callbackArg1 -ne $rootSlot) { throw "Membership callback ABI/root slot mismatch in $name." }
+            if ($callbackLoadedRoot -ne $callbackSiteRaw -or $callbackLoadedRoot -ne $storageObject -or $membershipObject -ne $callbackLoadedRoot -or (Get-MarkerField $validationText 'objectMatchesCallbackRoot') -ne '0x00000001') { throw "Membership input did not equal callback-loaded storage object in $name." }
+            if ($callbackArg2 -ne $callbackSiteContext -or $callbackSiteCallback -ne $callbackEntryAddress -or $lowerValue -gt $objectValue -or $objectValue -ge $upperValue) { throw "Membership callback/range identity mismatch in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC08"; outcome="A"; harnessTerminated=$true
+                callbackRequestCount=(Get-MarkerField $validationText 'callbackRequestCount'); callbackCallSiteCount=(Get-MarkerField $validationText 'callbackCallSiteCount'); callbackInvocationCount=(Get-MarkerField $validationText 'callbackInvocationCount'); callbackEntryCount=(Get-MarkerField $validationText 'callbackEntryCount'); callbackReturnCount=(Get-MarkerField $validationText 'callbackReturnCount'); duplicateCallbackInvocations=(Get-MarkerField $validationText 'secondCallbackAttempts')
+                callbackSite=[ordered]@{slot=$callbackSiteSlot;rawValue=$callbackSiteRaw;scanContext=$callbackSiteContext;callback=$callbackSiteCallback}
+                callbackEntry=[ordered]@{address=$callbackEntryAddress;returnAddress=(Get-MarkerField $validationText 'callbackEntryReturn');rawRcx=$callbackRawRcx;rawRdx=$callbackRawRdx;rawR8=$callbackRawR8;arg1=$callbackArg1;arg2=$callbackArg2;arg3=$callbackArg3}
+                root=[ordered]@{slot=$rootSlot;rawValue=$callbackLoadedRoot;loadedValue=$callbackLoadedRoot;storageObject=$storageObject;sentinel=(Get-MarkerField $validationText 'sentinelAddress')}
+                scanContext=[ordered]@{address=(Get-MarkerField $validationText 'callbackContext');threadUnderCrawl=(Get-MarkerField $validationText 'contextThread');stackLimit=(Get-MarkerField $validationText 'contextStackLimit');threadNumber=(Get-MarkerField $validationText 'contextThreadNumber');threadCount=(Get-MarkerField $validationText 'contextThreadCount');promotion=(Get-MarkerField $validationText 'contextPromotion');concurrent=(Get-MarkerField $validationText 'contextConcurrent')}
+                membership=[ordered]@{requests=(Get-MarkerField $validationText 'membershipRequests');entries=(Get-MarkerField $validationText 'membershipEntries');completions=(Get-MarkerField $validationText 'membershipCompletions');returns=(Get-MarkerField $validationText 'membershipReturns');duplicates=(Get-MarkerField $validationText 'duplicateChecks');object=$membershipObject;lowerBound=$membershipLower;upperBound=$membershipUpper;lowerEvaluated=(Get-MarkerField $validationText 'lowerEvaluated');upperEvaluated=(Get-MarkerField $validationText 'upperEvaluated');lowerResult=(Get-MarkerField $validationText 'lowerResult');upperResult=(Get-MarkerField $validationText 'upperResult');result=(Get-MarkerField $validationText 'inFindObjectRange');sourceBranch=(Get-MarkerField $validationText 'sourceBranch');completionReturnAddress=(Get-MarkerField $validationText 'membershipCompletionReturnAddress');postCheckReturnAddress=(Get-MarkerField $validationText 'membershipPostCheckReturnAddress')}
+                prohibited=[ordered]@{generationClassificationStart=(Get-MarkerField $validationText 'generationClassificationStart');generationQueryStart=(Get-MarkerField $validationText 'generationQueryStart');condemnedGenerationComparisons=(Get-MarkerField $validationText 'condemnedGenerationComparisons');postMembershipSegmentLookup=(Get-MarkerField $validationText 'postMembershipSegmentLookup');objectDereferences=(Get-MarkerField $validationText 'objectDereferences');objectHeaders=(Get-MarkerField $validationText 'objectHeaders');methodTables=(Get-MarkerField $validationText 'methodTables');promotionStart=(Get-MarkerField $validationText 'promotionStart');promotions=(Get-MarkerField $validationText 'promotions');markingStart=(Get-MarkerField $validationText 'markingStart');graphTraversal=(Get-MarkerField $validationText 'graphTraversal')}
+                mutation=[ordered]@{markWrites=(Get-MarkerField $validationText 'markWrites');promotionWrites=(Get-MarkerField $validationText 'promotionWrites');objectMemory=(Get-MarkerField $validationText 'objectMutation');gcMetadata=(Get-MarkerField $validationText 'gcMetadataMutation');segmentMetadata=(Get-MarkerField $validationText 'segmentMetadataMutation')}
+                managedProofRoot=[ordered]@{assignmentCount=(Get-MarkerField $validationText 'managedAssignmentCount');clearCount=(Get-MarkerField $validationText 'managedClearCount');readbackCount=(Get-MarkerField $validationText 'managedReadbackCount');assignmentValid=(Get-MarkerField $validationText 'managedAssignmentValid');readbackValid=(Get-MarkerField $validationText 'managedReadbackValid');sentinelAddress=(Get-MarkerField $validationText 'sentinelAddress');sentinelReadback=(Get-MarkerField $validationText 'sentinelReadback');storageObject=$storageObject;objectBefore=(Get-MarkerField $validationText 'objectBefore');objectAfter=(Get-MarkerField $validationText 'objectAfter');objectAtStop=(Get-MarkerField $validationText 'objectAtStop');sentinelChecks=(Get-MarkerField $validationText 'sentinelChecks');objectHistoryOverflow=(Get-MarkerField $validationText 'objectHistoryOverflow')}
+                threadStore=[ordered]@{managedThread=(Get-MarkerField $validationText 'managedThread');currentThread=(Get-MarkerField $validationText 'currentThread');lockOwner=(Get-MarkerField $validationText 'lockOwner');lockHeld=(Get-MarkerField $validationText 'lockHeld');eeSuspended=(Get-MarkerField $validationText 'eeSuspended');managedEntryProhibited=(Get-MarkerField $validationText 'managedEntryProhibited')}
+                restartRequests=(Get-MarkerField $validationText 'restartRequests');restartEntries=(Get-MarkerField $validationText 'restartEntries');managedResume=(Get-MarkerField $validationText 'managedResume')
+            }
+        } elseif ($isFirstRootCallbackEntry) {
             Assert-Text $validationText '\[nativeaot-gc-first-root-callback-entry\] SAFE_STOP marker=C011EC07' "first real callback-entry safe-stop marker"
             Assert-Text $validationText 'requestCount=00000001 callSiteCount=00000001 invocationCount=00000001 entryCount=00000001 returnCount=00000000 duplicateInvocations=00000000' "exactly one callback request, call-site entry, invocation, and callback entry"
             Assert-Text $validationText 'callbackRootLoads=00000001 callbackLoadedRaw=[0-9A-F]{16} nullTests=00000000 nullNonNull=00000000' "one locked callback-side root load and no null test"
@@ -1016,7 +1165,44 @@ exit /b %errorlevel%
 
     $identity = Get-Content -LiteralPath $identityManifestPath -Raw | ConvertFrom-Json
     $replacementHashes = @($identity.replacementObjects | ForEach-Object { [ordered]@{ path=$_.path; sha256=$_.sha256 } })
-    if ($isFirstRootCallbackEntry) {
+    if ($isFirstRootMembershipClassification) {
+        $nonC011EC08Runs = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC08" })
+        if (@($runResults).Count -ne 3 -or $nonC011EC08Runs.Count -ne 0) { throw "The first real root membership experiment did not produce three C011EC08 runs." }
+        $firstMembershipRun = $runResults[0]
+        $manifest = [ordered]@{
+            outcome="A / the genuine NativeAOT thread-static storage root completed exactly one Workstation GC managed-range membership check with a true result and stopped before generation classification"
+            proofMode=$ProofMode; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            taskStartCheckpoint=$taskStartCheckpoint
+            productionStartup=[ordered]@{ initializeModules="production runtime path invoked before ManagedMain"; status="working" }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryBuildBefore; startingEspSha256=$ordinaryEspBefore; expectedSha256=$normalKernelHash }
+            runtimePack=[ordered]@{ version="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterface="5.3"; ee="2"; sourceCommit=$lockedCommit; lockedGcenvEeSourceSha256=(Hash-File $lockedEePath); lockedGcEnumSourceSha256=(Hash-File $lockedGcEnumPath); lockedGcCppSourceSha256=(Hash-File $lockedGcCppPath); lockedGcwksSourceSha256=(Hash-File $lockedGcwksPath); activePalArchiveSha256=(Hash-File $activeArchive); callbackSymbol=$callbackSymbolName; callbackAddress="0x$callbackAddressText"; membershipHelper="gc_heap::is_in_find_object_range"; membershipHelperAddress="inline; no out-of-line helper symbol in the final map" }
+            priorCheckpoint=[ordered]@{ marker="C011EC07"; report="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CALLBACK_ENTRY.md"; stop="real GCHeap::Promote entered, loaded the genuine storage-object root, and stopped before is_in_find_object_range" }
+            managedProofRoot=$firstMembershipRun.managedProofRoot
+            threadStaticRuntime=[ordered]@{ storageObjectAddress=$firstMembershipRun.managedProofRoot.storageObject; inlinedRootAddress=(Get-MarkerField (Get-Content -LiteralPath $firstMembershipRun.serial -Raw) 'inlinedRoot'); normalManagedSemantics=$true; fabricatedSlot=$false; fabricatedObject=$false }
+            sourceTrace=[ordered]@{ callbackTypedef="promote_func(Object**, ScanContext*, uint32_t)"; callbackFunction="WKS::GCHeap::Promote"; callbackSource="locked src/coreclr/gc/gc.cpp:49474-49544, included by src/coreclr/gc/gcwks.cpp"; membershipDeclaration="locked src/coreclr/gc/gcpriv.h:3049"; membershipDefinition="locked src/coreclr/gc/gc.cpp:8363-8387"; activeConfiguration="USE_REGIONS from gcpriv.h:147-149 and FEATURE_CONSERVATIVE_GC"; activeExpression="gc.cpp:8373: (o >= g_gc_lowest_address) && (o < bookkeeping_covered_committed), after gc.cpp:8368-8371 null guard"; rangeFields=@("g_gc_lowest_address", "gc_heap::bookkeeping_covered_committed"); heapIdentity="none; helper reads no heap identity"; segmentLookup="none"; objectDereference="none"; callbackGeneration="locked gc.cpp:29899-29901: GCScan::GcScanRoots(GCHeap::Promote, ...)"; rootProvider="locked src/coreclr/nativeaot/Runtime/gcenv.ee.cpp:114-115"; enumGcRef="locked src/coreclr/nativeaot/Runtime/GcEnum.cpp:68-96"; callbackCallSite="locked GcEnum.cpp:81: fnGcEnumRef(ppObj, pSc, flags)"; firstCandidateLoad="locked gc.cpp:49481: uint8_t* o = (uint8_t*)*ppObject"; trueNextSourceOperation="locked gc.cpp:49494: HEAP_FROM_THREAD, after the DEBUG_DestroyedHandleValue block is compiled out"; falseNextSourceOperation="locked gc.cpp:49485: return; (the proof boundary executes before that return and does not skip the root)"; postMembershipGenerationStart="locked gc.cpp:49496 heap_of(o) and gc.cpp:49499-49505 condemned-generation/range logic"; firstMetadataAccess="locked gc.cpp:49521 CObjectHeader::IsFree in conservative branch or gc.cpp:49528 Validate in debug"; firstPromotionMutation="locked gc.cpp:49533 pin_object / gc.cpp:49541 mark_object_simple"; generatedGcwks=$gcWksSource; generatedGcEnum=$gcEnumSource }
+            machineCode=[ordered]@{ architecture="AMD64"; callingConvention="Microsoft x64"; callbackAddress="0x$callbackAddressText"; callbackEntry="map symbol ?Promote@GCHeap@WKS@@SAXPEAPEAVObject@@PEAUScanContext@@I@Z"; membershipHelper="inline; no out-of-line address"; membershipHelperSource="gc.cpp:8363-8387"; membershipSequence="final artifact disassembly around GCHeap::Promote shows the two range loads/comparisons and the completion observer call"; membershipLowerComparison="0x1002461D cmp rbx,rdx after 0x10024613 load of g_gc_lowest_address; 0x10024631 setae r10b"; membershipUpperComparison="0x1002462D load of bookkeeping_covered_committed; 0x10024635 setb al"; membershipResultBranch="0x1002467C test dil; 0x10024684 je false boundary; 0x1002468B true boundary call"; completionObserverReturnAddress=$firstMembershipRun.membership.completionReturnAddress; postMembershipBoundaryReturnAddress=$firstMembershipRun.membership.postCheckReturnAddress; disassembly=(Join-Path $runRoot "artifact-disassembly.txt"); callbackSymbolFile=(Join-Path $runRoot "callback-symbol.txt") }
+            callbackCallSite=$firstMembershipRun.callbackSite
+            callbackEntry=$firstMembershipRun.callbackEntry
+            rootArgument=$firstMembershipRun.root
+            scanContext=$firstMembershipRun.scanContext
+            membershipCheck=$firstMembershipRun.membership
+            heapRange=[ordered]@{ heapIdentity=(Get-MarkerField (Get-Content -LiteralPath $firstMembershipRun.serial -Raw) 'heapIdentity'); heapFieldReads=(Get-MarkerField (Get-Content -LiteralPath $firstMembershipRun.serial -Raw) 'heapFieldReads'); lowerBound=$firstMembershipRun.membership.lowerBound; upperBound=$firstMembershipRun.membership.upperBound; lowerComparison=$firstMembershipRun.membership.lowerResult; upperComparison=$firstMembershipRun.membership.upperResult; finalResult=$firstMembershipRun.membership.result; sourceBranch=$firstMembershipRun.membership.sourceBranch; sourceRequiredSegmentLookupCount=(Get-MarkerField (Get-Content -LiteralPath $firstMembershipRun.serial -Raw) 'segmentLookupCount'); sourceRequiredSegmentLookupSucceeded=(Get-MarkerField (Get-Content -LiteralPath $firstMembershipRun.serial -Raw) 'segmentLookupSucceeded') }
+            prohibitedOperations=$firstMembershipRun.prohibited
+            mutation=$firstMembershipRun.mutation
+            objectAndSentinelValidation=$firstMembershipRun.managedProofRoot
+            threadStore=$firstMembershipRun.threadStore
+            safeStop=[ordered]@{ marker="C011EC08"; reason="the real first root completed exactly one is_in_find_object_range check with true result; stopped before HEAP_FROM_THREAD/generation classification"; firstPostMembershipOperation="gc.cpp:49494 HEAP_FROM_THREAD"; promotionAllowed=$false; markingAllowed=$false; graphTraversalAllowed=$false; callbackReturnAllowed=$false; managedResumeAllowed=$false }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=3; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot "commands.txt"); runs=$runResults }
+            regressions=[ordered]@{ firstRootMembershipClassification="PASS 3/3 fresh QEMU runs"; firstRootCallbackEntry="C011EC07 regression retained; new run also entered the same callback"; firstNonNullRootCallbackBoundary="C011EC06 prerequisite retained"; firstRootCandidateLoad="C011EC05 prerequisite retained"; threadStaticPrimitive="historical proof retained"; threadStaticReference="historical proof retained"; threadStaticCombined="historical proof retained"; firstPerThreadRootProvider="C011EC04 prerequisite retained"; allocationContextFixupRootBoundary="C011EC03 prerequisite retained"; singleThreadSuspendEe="C011EC02 prerequisite retained"; staticChecks="PASS script parse, manifest parse, serial classification, ordinary-kernel restoration, git diff --check" }
+            failedChecks=[ordered]@{ historicalFirst64KiBExecution="retained historical failure"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN exit 1 from compiler-stderr promotion" }
+            blockedChecks=[ordered]@{ broadRegressionSuite="not rerun in this focused execution; historical manifests retained without relabeling"; nativeStackWrapper="historically non-clean; not called passed"; promotionCompletion="intentionally out of scope; proof stops before generation classification/promotion" }
+            documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CALLBACK_ENTRY.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md","docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CANDIDATE_LOAD.md","docs/dotnet/NATIVEAOT_GC_STARTUP_READINESS.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FEASIBILITY.md"); evidenceRoot=$runRoot; reportPath="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION.md"
+            ordinaryRestoration=[ordered]@{ buildSha256=$normalKernelHash; espSha256=$normalKernelHash; expectedSha256=$normalKernelHash }
+            authorizedNormalizedAdaptedGcIdentity=[ordered]@{ strategy=$identity.strategy; sourceCommit=$identity.sourceCommit; stockSha256=$identity.stockSha256; adaptedSha256=$identity.adaptedSha256; adaptedLength=$identity.adaptedLength; replacementObjects=$replacementHashes; stockUnchanged=$identity.stockUnchanged }
+        }
+        $manifest | ConvertTo-Json -Depth 28 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT Workstation GC first-root-membership-classification experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isFirstRootCallbackEntry) {
         $nonC011EC07Runs = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC07" })
         if (@($runResults).Count -ne 3 -or $nonC011EC07Runs.Count -ne 0) { throw "The first real root callback-entry experiment did not produce three C011EC07 runs." }
         $firstCallbackRun = $runResults[0]

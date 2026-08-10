@@ -1,0 +1,24 @@
+Final artifact: artifact-disassembly.txt
+Architecture: AMD64, Microsoft x64
+Callback symbol: ?Promote@GCHeap@WKS@@SAXPEAPEAVObject@@PEAUScanContext@@I@Z
+Callback address: 0x100245C0
+Membership helper: inline gc_heap::is_in_find_object_range; no out-of-line helper symbol
+Source helper: locked gc.cpp:8363-8387; active expression at gc.cpp:8373
+Source callback: locked gc.cpp:49474-49544; membership expression at gc.cpp:49483
+
+0x100245EA  mov rbx,QWORD PTR [rbx]       ; o = *ppObject, genuine storage object
+0x10024613  mov rdx,QWORD PTR [rip+...]   ; load g_gc_lowest_address
+0x1002461D  cmp rbx,rdx                   ; o >= lower bound
+0x10024631  setae r10b                    ; lower result
+0x10024632  jb  0x1002464f               ; false lower comparison path
+0x1002462D  mov r8,QWORD PTR [rip+...]    ; load bookkeeping_covered_committed
+0x10024635  cmp rbx,r8                    ; o < upper bound
+0x10024636  setb al                       ; upper result
+0x1002467C  test dil,dil                  ; final membership result
+0x10024684  je  0x10024691               ; false C011EC08 boundary
+0x1002468B  call 0x1000be10              ; true C011EC08 boundary
+
+Completion observer return address: 0x1002467C
+Post-membership boundary return address: 0x10024690
+Source next operation not reached: HEAP_FROM_THREAD at gc.cpp:49494
+Range result: 0x100000000 <= 0x100A02F50 < 0x102600000, true

@@ -719,6 +719,9 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t callbackNullTestNonNullCount;
     uint32_t callbackContextFieldReadCount;
     uint32_t callbackCandidateClassificationStartCount;
+    uint32_t callbackGenerationClassificationStartCount;
+    uint32_t callbackGenerationQueryStartCount;
+    uint32_t callbackCondemnedGenerationComparisonCount;
     uint32_t callbackHeapMembershipTestCount;
     uint32_t callbackSegmentLookupCount;
     uint32_t callbackObjectHeaderReadCount;
@@ -781,6 +784,37 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t callbackEntryScanContextFieldPromotionAddress;
     uintptr_t callbackEntryScanContextFieldConcurrentAddress;
 
+    /* Proof-only first real-root managed-range membership classification. */
+    uint32_t membershipRequestCount;
+    uint32_t membershipEntryCount;
+    uint32_t membershipCompletionCount;
+    uint32_t membershipReturnCount;
+    uint32_t membershipDuplicateCheckCount;
+    uint32_t membershipObjectDereferenceCount;
+    uint32_t membershipLowerComparisonEvaluated;
+    uint32_t membershipUpperComparisonEvaluated;
+    uint32_t membershipLowerComparisonResult;
+    uint32_t membershipUpperComparisonResult;
+    uint32_t membershipResult;
+    uint32_t membershipSourceBranch;
+    uint32_t membershipObjectMatchesCallbackRoot;
+    uint32_t membershipPostCheckBoundaryCount;
+    uint32_t membershipSafeStopObserved;
+    uint32_t membershipSafeStopReason;
+    uint32_t membershipHeapFieldReadCount;
+    uint32_t membershipSegmentLookupCount;
+    uint32_t membershipSegmentLookupSucceeded;
+    uint32_t reservedFirstRootMembershipClassification[1];
+
+    uintptr_t membershipObjectInput;
+    uintptr_t membershipCallbackLoadedRoot;
+    uintptr_t membershipLowerBound;
+    uintptr_t membershipUpperBound;
+    uintptr_t membershipHeapIdentity;
+    uintptr_t membershipSegmentIdentity;
+    uintptr_t membershipCompletionReturnAddress;
+    uintptr_t membershipPostCheckReturnAddress;
+
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
         GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupAfter[
@@ -836,6 +870,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F23_FIRST_PER_THREAD_ROOT_PROVIDER_SAFE_STOP = 0xF23u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F24_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY_SAFE_STOP = 0xF24u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F25_FIRST_ROOT_CALLBACK_ENTRY_SAFE_STOP = 0xF25u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F26_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_SAFE_STOP = 0xF26u,
 };
 
 enum {
@@ -850,6 +885,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_CANDIDATE_LOAD_SAFE_STOP_MARKER = 0xC011EC05u,
     GUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC06u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_SAFE_STOP_MARKER = 0xC011EC07u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_SAFE_STOP_MARKER = 0xC011EC08u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };
