@@ -670,6 +670,12 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t threadStaticProofManagedReadbackAddress;
     uintptr_t threadStaticProofManagedThread;
     uintptr_t threadStaticProofStorageAddress;
+    uint32_t runtimeThreadStaticStorageAllocationCount;
+    uint32_t runtimeThreadStaticStoragePublicationCount;
+    uint32_t runtimeThreadStaticStorageObjectValid;
+    uint32_t reservedThreadStaticRuntime[1];
+    uintptr_t runtimeThreadStaticStorageObjectAddress;
+    uintptr_t runtimeThreadStaticInlinedRootAddress;
 
     /* Bounded non-null-root candidate sequence. */
     uint32_t candidateSlotVisitCount;
@@ -681,10 +687,17 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t candidateBoundReached;
     uint32_t candidateProviderTerminated;
     uint32_t candidateFirstNonNullKnownAddressMatch;
+    uint32_t candidateMatchesStorageObject;
     uint32_t reservedNonNullRootProof[3];
     uintptr_t candidateFirstNonNullValue;
     uintptr_t candidateFirstNonNullSlot;
     uintptr_t candidateExpectedSentinelAddress;
+    uintptr_t candidateExpectedStorageObjectAddress;
+    uint32_t rootCondemnedGeneration;
+    uint32_t rootMaximumGeneration;
+    uint32_t rootScanContextPromotion;
+    uint32_t rootScanContextConcurrent;
+    uintptr_t rootScanContextIdentity;
     guidexos_nativeaot_candidate_slot_record candidateSlotRecords[
         GUIDEXOS_NATIVEAOT_MAX_CANDIDATE_SLOTS];
 

@@ -37,7 +37,7 @@ extern "C" void __cdecl guideXosNativeAotAllocationRootPhaseRequested();
 extern "C" void __cdecl guideXosNativeAotAllocationContextFixupEnumerationEntry();
 extern "C" void __cdecl guideXosNativeAotAllocationContextFixupContextVisited(uintptr_t context);
 extern "C" void __cdecl guideXosNativeAotAllocationContextFixupEnumerationComplete();
-extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootGcScanRootsEntered();
+extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootGcScanRootsEntered(int condemned, int max_gen, uintptr_t scanContext);
 extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootForeachThreadEntered();
 extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootIteratorInitialized();
 extern "C" void __cdecl guideXosNativeAotFirstPerThreadRootIteratorCompletion();
@@ -120,7 +120,7 @@ void GCToEEInterface::BeforeGcScanRoots(int condemned, bool is_bgc, bool is_conc
 
 void GCToEEInterface::GcScanRoots(ScanFunc* fn, int condemned, int max_gen, ScanContext* sc)
 {
-    guideXosNativeAotFirstPerThreadRootGcScanRootsEntered();
+    guideXosNativeAotFirstPerThreadRootGcScanRootsEntered(condemned, max_gen, reinterpret_cast<uintptr_t>(sc));
     // STRESS_LOG1(LF_GCROOTS, LL_INFO10, "GCScan: Phase = %s\n", sc->promotion ? "promote" : "relocate");
 
     guideXosNativeAotFirstPerThreadRootForeachThreadEntered();

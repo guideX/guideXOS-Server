@@ -47,6 +47,20 @@ using gx_uint32 = unsigned long;
 using gx_uint16 = unsigned short;
 using gx_size = unsigned __int64;
 
+// The locked gcinterface.h defines ScanContext as:
+// Thread*, int, int, uintptr_t, bool promotion, bool concurrent, ... .
+// The runtime-pack translation unit sees only its forward declaration, so
+// keep this proof-only prefix view local and read no fields beyond the two
+// flags required for ABI characterization.
+struct GuideXosScanContextPrefix {
+    void* threadUnderCrawl;
+    int threadNumber;
+    int threadCount;
+    uintptr_t stackLimit;
+    bool promotion;
+    bool concurrent;
+};
+
 // Keep this object independent of Windows headers. The numeric reason is the
 // FAST_FAIL_FATAL_APP_EXIT value used by the stock helper; only the fail-fast
 // instruction is part of this hosted pack's contract.
@@ -1285,7 +1299,8 @@ void recordFirstPerThreadRootThread(SuspendEeThread* thread) {
 }
 
 extern "C" void __cdecl
-guideXosNativeAotFirstPerThreadRootGcScanRootsEntered() {
+guideXosNativeAotFirstPerThreadRootGcScanRootsEntered(
+    int condemned, int maxGeneration, uintptr_t scanContext) {
     guidexos_nativeaot_allocation_diagnostics& diagnostics =
         g_guideXosAllocationDiagnostics;
     ++diagnostics.gcScanRootsRequestCount;
@@ -1298,6 +1313,15 @@ guideXosNativeAotFirstPerThreadRootGcScanRootsEntered() {
     diagnostics.rootCollectionInitiatorIdentity =
         diagnostics.suspendEeInitiatingRuntimeThread;
     diagnostics.rootLockOwnerIdentity = diagnostics.threadStoreLockOwner;
+    diagnostics.rootCondemnedGeneration = static_cast<uint32_t>(condemned);
+    diagnostics.rootMaximumGeneration = static_cast<uint32_t>(maxGeneration);
+    diagnostics.rootScanContextIdentity = scanContext;
+    if (scanContext != 0u) {
+        const GuideXosScanContextPrefix* context =
+            reinterpret_cast<const GuideXosScanContextPrefix*>(scanContext);
+        diagnostics.rootScanContextPromotion = context->promotion ? 1u : 0u;
+        diagnostics.rootScanContextConcurrent = context->concurrent ? 1u : 0u;
+    }
     snapshotFirstPerThreadRootList(true);
     if (diagnostics.gcScanRootsEntryCount != 1u ||
         diagnostics.suspendEeEntryCount != 1u ||
@@ -1626,6 +1650,14 @@ void emitFirstRootCandidateLoadSafeStop() {
     suspendEeSerialPutHex32(diagnostics.includedThreadCount);
     suspendEeSerialPutString(" excluded=");
     suspendEeSerialPutHex32(diagnostics.excludedThreadCount);
+    suspendEeSerialPutString(" listIntegrityFailures=");
+    suspendEeSerialPutHex32(diagnostics.threadListIntegrityFailures);
+    suspendEeSerialPutString(" duplicates=");
+    suspendEeSerialPutHex32(diagnostics.duplicateThreadCount);
+    suspendEeSerialPutString(" registryMutationBefore=");
+    suspendEeSerialPutHex32(diagnostics.rootThreadRegistryGenerationBefore);
+    suspendEeSerialPutString(" registryMutationAfter=");
+    suspendEeSerialPutHex32(diagnostics.rootThreadRegistryGenerationAfter);
     suspendEeSerialPutString(" current=");
     suspendEeSerialPutHex64(diagnostics.rootCurrentThreadIdentity);
     suspendEeSerialPutString(" enumeratedThread=");
@@ -1744,6 +1776,44 @@ void emitFirstRootCandidateLoadSafeStop() {
     suspendEeSerialPutHex32(diagnostics.restartEntryCount);
     suspendEeSerialPutString(" managedResume=");
     suspendEeSerialPutHex32(diagnostics.managedResumeCount);
+    suspendEeSerialPutString(" userAllocations=");
+    suspendEeSerialPutHex32(diagnostics.allocationCount);
+    suspendEeSerialPutString(" userAllocationRequests=");
+    suspendEeSerialPutHex32(diagnostics.allocationRequestCount);
+    suspendEeSerialPutString(" userFast=");
+    suspendEeSerialPutHex32(diagnostics.fastAllocationCount);
+    suspendEeSerialPutString(" userRare=");
+    suspendEeSerialPutHex32(diagnostics.rarePathCount);
+    suspendEeSerialPutString(" userRefills=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextRefillCount);
+    suspendEeSerialPutString(" userSameSegmentCommits=");
+    suspendEeSerialPutHex32(diagnostics.heapCommitEventCount);
+    suspendEeSerialPutString(" userSegmentTransitions=");
+    suspendEeSerialPutHex32(diagnostics.segmentTransitionCount);
+    suspendEeSerialPutString(" collectionAllocationOrdinal=");
+    suspendEeSerialPutHex32(diagnostics.collectionRequestAllocationOrdinal);
+    suspendEeSerialPutString(" runtimeThreadStaticStorageAllocations=");
+    suspendEeSerialPutHex32(diagnostics.runtimeThreadStaticStorageAllocationCount);
+    suspendEeSerialPutString(" runtimeThreadStaticStoragePublications=");
+    suspendEeSerialPutHex32(diagnostics.runtimeThreadStaticStoragePublicationCount);
+    suspendEeSerialPutString(" runtimeThreadStaticStorageObject=");
+    suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticStorageObjectAddress);
+    suspendEeSerialPutString(" runtimeThreadStaticInlinedRoot=");
+    suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticInlinedRootAddress);
+    suspendEeSerialPutString(" totalAllocationRequestsObserved=");
+    suspendEeSerialPutHex32(
+        diagnostics.allocationRequestCount +
+        diagnostics.runtimeThreadStaticStorageAllocationCount);
+    suspendEeSerialPutString(" condemnedGeneration=");
+    suspendEeSerialPutHex32(diagnostics.rootCondemnedGeneration);
+    suspendEeSerialPutString(" maxGeneration=");
+    suspendEeSerialPutHex32(diagnostics.rootMaximumGeneration);
+    suspendEeSerialPutString(" scanContextPromotion=");
+    suspendEeSerialPutHex32(diagnostics.rootScanContextPromotion);
+    suspendEeSerialPutString(" scanContextConcurrent=");
+    suspendEeSerialPutHex32(diagnostics.rootScanContextConcurrent);
+    suspendEeSerialPutString(" scanContextIdentity=");
+    suspendEeSerialPutHex64(diagnostics.rootScanContextIdentity);
     suspendEeSerialPutString(" objectBeforeLoad=");
     suspendEeSerialPutHex32(diagnostics.candidateObjectValidationBeforeLoadCount);
     suspendEeSerialPutString(" objectAfterLoad=");
@@ -1853,6 +1923,7 @@ uint32_t classifyFirstNonNullRootKnownAddress(uintptr_t rawValue) {
     const guidexos_nativeaot_allocation_diagnostics& diagnostics =
         g_guideXosAllocationDiagnostics;
     if (rawValue == 0u) return 1u;
+    if (rawValue == diagnostics.runtimeThreadStaticStorageObjectAddress) return 8u;
     if (rawValue == diagnostics.threadStaticProofSentinelAddress) return 6u;
     if (rawValue == diagnostics.rootEnumeratedThreadIdentity) return 2u;
     if (rawValue == diagnostics.candidateMetadataContainerIdentity) return 3u;
@@ -1973,6 +2044,8 @@ guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded(
     diagnostics.candidateKnownAddressMatch = record.knownAddressMatch;
     diagnostics.candidateExpectedSentinelAddress =
         diagnostics.threadStaticProofSentinelAddress;
+    diagnostics.candidateExpectedStorageObjectAddress =
+        diagnostics.runtimeThreadStaticStorageObjectAddress;
     if (rawValue == 0u) {
         ++diagnostics.candidateNullCount;
         return 0u;
@@ -1986,6 +2059,9 @@ guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded(
         record.exactSelectedSentinelMatch != 0u ? 1u : 0u;
     diagnostics.candidateMatchesProofRoot =
         record.exactSelectedSentinelMatch != 0u ? 1u : 0u;
+    diagnostics.candidateMatchesStorageObject =
+        rawValue != 0u &&
+        rawValue == diagnostics.runtimeThreadStaticStorageObjectAddress ? 1u : 0u;
     diagnostics.candidateUnexpectedNonNull =
         record.exactSelectedSentinelMatch != 0u ? 0u : 1u;
     diagnostics.candidateProviderTerminated = 1u;
@@ -2069,6 +2145,14 @@ void emitFirstNonNullRootCallbackBoundarySafeStop() {
     suspendEeSerialPutHex64(diagnostics.threadStaticProofManagedThread);
     suspendEeSerialPutString(" storageAddress=");
     suspendEeSerialPutHex64(diagnostics.threadStaticProofStorageAddress);
+    suspendEeSerialPutString(" listIntegrityFailures=");
+    suspendEeSerialPutHex32(diagnostics.threadListIntegrityFailures);
+    suspendEeSerialPutString(" duplicates=");
+    suspendEeSerialPutHex32(diagnostics.duplicateThreadCount);
+    suspendEeSerialPutString(" registryMutationBefore=");
+    suspendEeSerialPutHex32(diagnostics.rootThreadRegistryGenerationBefore);
+    suspendEeSerialPutString(" registryMutationAfter=");
+    suspendEeSerialPutHex32(diagnostics.rootThreadRegistryGenerationAfter);
     suspendEeSerialPutString(" providerSource=thread-static-provider providerRuntime=thread-static-provider providerFunction=");
     suspendEeSerialPutHex32(diagnostics.rootProviderFunctionCode);
     suspendEeSerialPutString(" providerThread=");
@@ -2095,6 +2179,8 @@ void emitFirstNonNullRootCallbackBoundarySafeStop() {
     suspendEeSerialPutHex32(diagnostics.candidateProofRootObserved);
     suspendEeSerialPutString(" candidateMatchesProofRoot=");
     suspendEeSerialPutHex32(diagnostics.candidateMatchesProofRoot);
+    suspendEeSerialPutString(" candidateMatchesStorageObject=");
+    suspendEeSerialPutHex32(diagnostics.candidateMatchesStorageObject);
     suspendEeSerialPutString(" unexpectedNonNull=");
     suspendEeSerialPutHex32(diagnostics.candidateUnexpectedNonNull);
     suspendEeSerialPutString(" boundReached=");
@@ -2107,6 +2193,8 @@ void emitFirstNonNullRootCallbackBoundarySafeStop() {
     suspendEeSerialPutHex32(diagnostics.candidateFirstNonNullKnownAddressMatch);
     suspendEeSerialPutString(" expectedSentinelAddress=");
     suspendEeSerialPutHex64(diagnostics.candidateExpectedSentinelAddress);
+    suspendEeSerialPutString(" expectedStorageObjectAddress=");
+    suspendEeSerialPutHex64(diagnostics.candidateExpectedStorageObjectAddress);
     suspendEeSerialPutString(" loadRequests=");
     suspendEeSerialPutHex32(diagnostics.candidateLoadRequestCount);
     suspendEeSerialPutString(" loadEntries=");
@@ -2136,12 +2224,54 @@ void emitFirstNonNullRootCallbackBoundarySafeStop() {
     suspendEeSerialPutHex32(diagnostics.restartEntryCount);
     suspendEeSerialPutString(" managedResume=");
     suspendEeSerialPutHex32(diagnostics.managedResumeCount);
+    suspendEeSerialPutString(" userAllocations=");
+    suspendEeSerialPutHex32(diagnostics.allocationCount);
+    suspendEeSerialPutString(" userAllocationRequests=");
+    suspendEeSerialPutHex32(diagnostics.allocationRequestCount);
+    suspendEeSerialPutString(" userFast=");
+    suspendEeSerialPutHex32(diagnostics.fastAllocationCount);
+    suspendEeSerialPutString(" userRare=");
+    suspendEeSerialPutHex32(diagnostics.rarePathCount);
+    suspendEeSerialPutString(" userRefills=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextRefillCount);
+    suspendEeSerialPutString(" userSameSegmentCommits=");
+    suspendEeSerialPutHex32(diagnostics.heapCommitEventCount);
+    suspendEeSerialPutString(" userSegmentTransitions=");
+    suspendEeSerialPutHex32(diagnostics.segmentTransitionCount);
+    suspendEeSerialPutString(" collectionAllocationOrdinal=");
+    suspendEeSerialPutHex32(diagnostics.collectionRequestAllocationOrdinal);
+    suspendEeSerialPutString(" runtimeThreadStaticStorageAllocations=");
+    suspendEeSerialPutHex32(diagnostics.runtimeThreadStaticStorageAllocationCount);
+    suspendEeSerialPutString(" runtimeThreadStaticStoragePublications=");
+    suspendEeSerialPutHex32(diagnostics.runtimeThreadStaticStoragePublicationCount);
+    suspendEeSerialPutString(" runtimeThreadStaticStorageObject=");
+    suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticStorageObjectAddress);
+    suspendEeSerialPutString(" runtimeThreadStaticInlinedRoot=");
+    suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticInlinedRootAddress);
+    suspendEeSerialPutString(" totalAllocationRequestsObserved=");
+    suspendEeSerialPutHex32(
+        diagnostics.allocationRequestCount +
+        diagnostics.runtimeThreadStaticStorageAllocationCount);
+    suspendEeSerialPutString(" condemnedGeneration=");
+    suspendEeSerialPutHex32(diagnostics.rootCondemnedGeneration);
+    suspendEeSerialPutString(" maxGeneration=");
+    suspendEeSerialPutHex32(diagnostics.rootMaximumGeneration);
+    suspendEeSerialPutString(" scanContextPromotion=");
+    suspendEeSerialPutHex32(diagnostics.rootScanContextPromotion);
+    suspendEeSerialPutString(" scanContextConcurrent=");
+    suspendEeSerialPutHex32(diagnostics.rootScanContextConcurrent);
+    suspendEeSerialPutString(" scanContextIdentity=");
+    suspendEeSerialPutHex64(diagnostics.rootScanContextIdentity);
     suspendEeSerialPutString(" objectBeforeLoad=");
     suspendEeSerialPutHex32(diagnostics.candidateObjectValidationBeforeLoadCount);
     suspendEeSerialPutString(" objectAfterLoad=");
     suspendEeSerialPutHex32(diagnostics.candidateObjectValidationAfterLoadCount);
     suspendEeSerialPutString(" objectAtStop=");
     suspendEeSerialPutHex32(diagnostics.candidateObjectValidationAtStopCount);
+    suspendEeSerialPutString(" sentinelChecks=");
+    suspendEeSerialPutHex32(diagnostics.sentinelValidationCount);
+    suspendEeSerialPutString(" objectHistoryOverflow=");
+    suspendEeSerialPutHex32(diagnostics.objectHistoryOverflow);
     suspendEeSerialPutString(" providerRequests=");
     suspendEeSerialPutHex32(diagnostics.rootProviderRequestCount);
     suspendEeSerialPutString(" providerEntries=");
@@ -2196,6 +2326,23 @@ void emitFirstNonNullRootCallbackBoundarySafeStop() {
     diagnostics.candidateObjectValidationAtStopCount =
         diagnostics.objectHistoryCount;
 
+    /* The real storage object consumes part of the same allocation context as
+       the 4 KiB workload.  The collection request can therefore move before
+       the historical 40th completed array.  Require complete coverage of the
+       bounded records that did complete, with one four-sentinel validation
+       pass per record, rather than fabricating the historical ordinal. */
+    const bool objectValidationCoverage =
+        diagnostics.candidateObjectValidationBeforeLoadCount ==
+            diagnostics.objectHistoryCount &&
+        diagnostics.candidateObjectValidationAfterLoadCount ==
+            diagnostics.objectHistoryCount &&
+        diagnostics.candidateObjectValidationAtStopCount ==
+            diagnostics.objectHistoryCount &&
+        diagnostics.objectHistoryCount >= 32u &&
+        diagnostics.sentinelValidationCount ==
+            diagnostics.objectHistoryCount * 4u &&
+        diagnostics.objectHistoryOverflow == 0u;
+
     const bool valid =
         diagnostics.candidateSafeStopObserved == 1u &&
         diagnostics.threadStaticProofAssignmentCount == 1u &&
@@ -2203,6 +2350,10 @@ void emitFirstNonNullRootCallbackBoundarySafeStop() {
         diagnostics.threadStaticProofReadbackCount == 1u &&
         diagnostics.threadStaticProofManagedAssignmentValid == 1u &&
         diagnostics.threadStaticProofManagedReadbackValid == 1u &&
+        diagnostics.runtimeThreadStaticStorageAllocationCount == 1u &&
+        diagnostics.runtimeThreadStaticStoragePublicationCount == 1u &&
+        diagnostics.runtimeThreadStaticStorageObjectValid == 1u &&
+        diagnostics.runtimeThreadStaticStorageObjectAddress != 0u &&
         diagnostics.candidateSlotVisitCount >= 1u &&
         diagnostics.candidateSlotVisitCount <= GUIDEXOS_NATIVEAOT_MAX_CANDIDATE_SLOTS &&
         diagnostics.candidateLoadRequestCount == diagnostics.candidateSlotVisitCount &&
@@ -2219,9 +2370,7 @@ void emitFirstNonNullRootCallbackBoundarySafeStop() {
         diagnostics.restartRequestCount == 0u &&
         diagnostics.restartEntryCount == 0u &&
         diagnostics.managedResumeCount == 0u &&
-        diagnostics.candidateObjectValidationBeforeLoadCount == 40u &&
-        diagnostics.candidateObjectValidationAfterLoadCount == 40u &&
-        diagnostics.candidateObjectValidationAtStopCount == 40u &&
+        objectValidationCoverage &&
         diagnostics.rootProviderInvariantFailures == 0u &&
         diagnostics.allocationContextFixupInvariantFailures == 0u &&
         diagnostics.threadStoreLockRecursionDepth == 1u &&
@@ -4116,6 +4265,19 @@ guideXosManagedThreadStaticProofAssigned(
     diagnostics.threadStaticProofSentinelSize = objectSize;
     diagnostics.threadStaticProofManagedThread = reinterpret_cast<gx_uintptr>(
         suspendEeCurrentThread());
+    SuspendEeThread* thread = suspendEeCurrentThread();
+    InlinedThreadStaticRoot* root = thread == nullptr
+        ? nullptr : thread->GetInlinedThreadStaticList();
+    diagnostics.runtimeThreadStaticInlinedRootAddress =
+        reinterpret_cast<gx_uintptr>(root);
+    diagnostics.runtimeThreadStaticStorageObjectAddress = root == nullptr
+        ? 0u : reinterpret_cast<gx_uintptr>(root->m_threadStaticsBase);
+    diagnostics.runtimeThreadStaticStorageObjectValid =
+        diagnostics.runtimeThreadStaticStorageObjectAddress != 0u ? 1u : 0u;
+    diagnostics.runtimeThreadStaticStorageAllocationCount =
+        diagnostics.runtimeThreadStaticStorageObjectValid;
+    diagnostics.runtimeThreadStaticStoragePublicationCount =
+        diagnostics.runtimeThreadStaticStorageObjectValid;
 
     bool valid = diagnostics.threadStaticProofAssignmentCount == 1u &&
         sentinelOrdinal < diagnostics.objectHistoryCount &&
@@ -4123,8 +4285,7 @@ guideXosManagedThreadStaticProofAssigned(
         diagnostics.objectHistory[sentinelOrdinal].sentinel != 0u &&
         diagnostics.objectHistory[sentinelOrdinal].address ==
             diagnostics.threadStaticProofSentinelAddress &&
-        diagnostics.objectHistory[sentinelOrdinal].end -
-            diagnostics.objectHistory[sentinelOrdinal].address == objectSize &&
+        diagnostics.objectHistory[sentinelOrdinal].length == objectSize &&
         patternValid != 0u;
     diagnostics.threadStaticProofManagedAssignmentValid = valid ? 1u : 0u;
     diagnostics.threadStaticProofInitializationIndicator = valid ? 1u : 0u;

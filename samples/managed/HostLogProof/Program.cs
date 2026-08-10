@@ -310,23 +310,6 @@ public static unsafe class Program
                 return GxAbi.ErrorInvalidArgument;
             }
 
-            // The established workload reaches GC on the request following
-            // the 40th completed object. Read the real field once at that
-            // exact managed boundary, before issuing the triggering allocation.
-            if (iteration == 40u)
-            {
-                nint readback = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(
-                    ref s_gcProofThreadRoot);
-                int readbackResult = GuideXosManagedThreadStaticProofReadback(
-                    readback, 0u, readback ==
-                        System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(ref sentinel0)
-                        ? 1u : 0u);
-                if (readbackResult != 0)
-                {
-                    return GxAbi.ErrorInvalidArgument;
-                }
-            }
-
             current = new byte[arrayLength];
             uint zeroByteCount = CountZeroBytes(current);
             WriteIdentifyingPattern(current, iteration);
@@ -349,6 +332,20 @@ public static unsafe class Program
                 int assignmentResult = GuideXosManagedThreadStaticProofAssigned(
                     assigned, 0u, (uint)arrayLength, patternValid ? 1u : 0u);
                 if (assignmentResult != 0)
+                {
+                    return GxAbi.ErrorInvalidArgument;
+                }
+                // Read the genuine field back immediately after the normal
+                // managed assignment, before allocation pressure can move
+                // the collection request earlier because of the runtime's
+                // real thread-static storage allocation.
+                nint readback = System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(
+                    ref s_gcProofThreadRoot);
+                int readbackResult = GuideXosManagedThreadStaticProofReadback(
+                    readback, 0u, readback ==
+                        System.Runtime.CompilerServices.Unsafe.As<byte[], nint>(ref sentinel0)
+                        ? 1u : 0u);
+                if (readbackResult != 0)
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
