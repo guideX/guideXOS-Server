@@ -39,6 +39,7 @@ constexpr char kProjectKind[] = "native-gui-application";
 constexpr char kTargetProfile[] = "guidexos.amd64.hosted.native";
 constexpr char kBuildScript[] = "build.ps1";
 constexpr char kConfiguration[] = "Debug";
+constexpr char kDebugSymbolsConfiguration[] = "DebugSymbols";
 
 struct CapturedLine {
     uint32_t stream = 0;
@@ -235,7 +236,9 @@ bool validateProjectAndManifest(const NativeBuildRequest& request, const std::fi
         return false;
     }
     if (request.projectKind != kProjectKind || request.targetProfile != kTargetProfile || request.buildSystem != kBuildSystem ||
-        request.buildScript != kBuildScript || request.configuration != kConfiguration || !isSafeRelativePath(request.expectedArtifact, 160)) {
+        request.buildScript != kBuildScript ||
+        (request.configuration != kConfiguration && request.configuration != kDebugSymbolsConfiguration) ||
+        !isSafeRelativePath(request.expectedArtifact, 160)) {
         error = GX_BUILD_ERROR_INVALID_REQUEST;
         return false;
     }
