@@ -297,6 +297,33 @@ struct NavigatorPageMetadata {
 		std::string cssInlineEvidence;
 		int         cssAtomicEvidenceRecordCount = 0;
 		std::string cssAtomicEvidence;
+		// Phase 4A bounded single-line Flexbox diagnostics and fixture evidence.
+		int         cssFlexContainers = 0;
+		int         cssInlineFlexContainers = 0;
+		int         cssFlexItems = 0;
+		int         cssFlexAnonymousItems = 0;
+		int         cssFlexNestedContainers = 0;
+		int         cssFlexWrapUnsupported = 0;
+		int         cssFlexAbsoluteExcluded = 0;
+		int         cssFlexDisplayNoneExcluded = 0;
+		int         cssFlexOrderSortItems = 0;
+		int         cssFlexBaseSizeQueries = 0;
+		int         cssFlexIntrinsicQueries = 0;
+		int         cssFlexAutomaticMinimumApplied = 0;
+		int         cssFlexAutomaticMinimumZero = 0;
+		int         cssFlexGrowIterations = 0;
+		int         cssFlexShrinkIterations = 0;
+		int         cssFlexFreezeIterations = 0;
+		int         cssFlexCrossSizePasses = 0;
+		int         cssFlexBaselineItems = 0;
+		int         cssFlexAutoMarginAbsorptions = 0;
+		int         cssFlexGapClamps = 0;
+		int         cssFlexGeometryClamps = 0;
+		int         cssFlexDepthClamps = 0;
+		int         cssFlexOperationClamps = 0;
+		int         cssFlexUnsupportedDeclarations = 0;
+		int         cssFlexEvidenceRecords = 0;
+		std::string cssFlexEvidence;
 		// Phase 3D bounded margin-collapse/BFC diagnostics and fixture evidence.
 		int         cssMarginCollapseSets = 0;
 		int         cssMarginCollapseParticipants = 0;

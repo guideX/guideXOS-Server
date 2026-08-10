@@ -550,6 +550,48 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p id='phase3g-after'>Following normal flow remains unaffected and reachable.</p>"
                              b"</body></html>")
             return
+        if path == "/navigator-smoke/css-phase4a.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>CSS Phase 4A Bounded Single-Line Flexbox</title><style>"
+                             b"html,body{margin:0;padding:0} body{font-size:14px;line-height:1.25;background:#f8fafc;color:#243447}"
+                             b".fixture{margin:8px 0;padding:6px;border:1px solid #94a3b8;background:#fff}"
+                             b".row{display:flex;flex-direction:row;flex-wrap:nowrap;width:720px;height:64px;gap:12px;align-items:center;justify-content:space-between;box-sizing:border-box}"
+                             b".row>div{width:96px;height:24px;padding:3px;border:1px solid #2563eb;box-sizing:border-box;background:#dbeafe}"
+                             b".grow{display:flex;width:600px;height:52px;flex-direction:row;justify-content:flex-start;align-items:stretch;box-sizing:border-box}"
+                             b".grow-a{flex:1 1 0;min-width:0;background:#bfdbfe}.grow-b{flex:2 1 0;min-width:0;background:#c7d2fe}.grow-c{flex:0 0 120px;background:#ddd6fe}"
+                             b".shrink{display:flex;width:300px;height:42px;flex-direction:row;flex-shrink:1;gap:4px;box-sizing:border-box}.shrink>div{flex:0 1 180px;min-width:0;background:#fee2e2}"
+                             b".column{display:flex;flex-direction:column;width:160px;height:126px;gap:5px;align-items:center;justify-content:space-around;box-sizing:border-box}.column>div{width:80px;height:20px;background:#dcfce7}"
+                             b".reverse{display:flex;flex-direction:row-reverse;width:280px;height:36px;justify-content:flex-start;gap:6px}.reverse>div{width:48px;height:20px;background:#fef3c7}"
+                             b".order{display:flex;width:280px;height:36px;gap:5px}.order>div{width:48px;height:20px;background:#fce7f3}.order-b{order:-1}.order-c{order:2}"
+                             b".auto{display:flex;width:360px;height:36px;gap:4px}.auto-a{width:64px;height:20px;background:#e0e7ff}.auto-b{width:64px;height:20px;margin-left:auto;margin-right:auto;background:#e0f2fe}"
+                             b".align{display:flex;width:320px;height:72px;align-items:baseline;gap:8px}.align>div{width:60px;background:#ede9fe}.align-a{height:18px}.align-b{height:34px}.align-c{height:24px;align-self:flex-end}"
+                             b".nested{display:flex;width:600px;height:54px;gap:8px;align-items:stretch}.nested-inner{display:flex;flex:1 1 0;min-width:0;gap:6px;align-items:center;background:#ecfccb;padding:4px}.nested-inner>div{flex:1 1 0;min-width:0;height:20px;background:#d9f99d}.nested-fixed{flex:0 0 120px;height:28px;background:#fef08a}"
+                             b".anonymous{display:flex;width:360px;height:40px;gap:8px;align-items:center}.anonymous>span{width:90px;height:20px;background:#f1f5f9}.anonymous-text{color:#0f172a}"
+                             b".intrinsic{display:flex;width:440px;height:42px;gap:8px;align-items:center}.intrinsic img{width:48px;height:24px}.intrinsic input{width:120px;height:24px}.intrinsic button{width:88px;height:24px}"
+                             b".excluded{display:flex;position:relative;width:360px;height:44px;gap:6px}.excluded-none{display:none}.excluded-abs{position:absolute;left:10px;top:5px;width:40px;height:20px;background:#fecaca}.excluded-flow{width:80px;height:20px;background:#bbf7d0}"
+                             b".wrap-unsupported{display:flex;flex-wrap:wrap-reverse;width:220px;height:36px;gap:4px;background:#f1f5f9}.wrap-unsupported>div{width:100px;height:18px;background:#cbd5e1}"
+                             b".percent-gap{display:flex;width:400px;height:38px;gap:5%;align-items:center}.percent-gap>div{flex:1 1 0;min-width:0;height:20px;background:#e0f2fe}"
+                             b".content-basis{display:flex;width:320px;height:40px}.content-basis>div{flex:0 0 content;width:80px;height:20px;background:#f5d0fe}"
+                             b"</style></head><body>"
+                             b"<h1 id='phase4a-title'>CSS Phase 4A Bounded Single-Line Flexbox</h1>"
+                             b"<div id='phase4a-row' class='fixture row'><div id='phase4a-row-a'>row A</div><div id='phase4a-row-b'>row B</div><div id='phase4a-row-c'>row C</div></div>"
+                             b"<div id='phase4a-grow' class='fixture grow'><div id='phase4a-grow-a' class='grow-a'>grow 1</div><div id='phase4a-grow-b' class='grow-b'>grow 2</div><div id='phase4a-grow-c' class='grow-c'>basis 120</div></div>"
+                             b"<div id='phase4a-shrink' class='fixture shrink'><div id='phase4a-shrink-a'>shrink A</div><div id='phase4a-shrink-b'>shrink B</div></div>"
+                             b"<div id='phase4a-column' class='fixture column'><div id='phase4a-column-a'>column A</div><div id='phase4a-column-b'>column B</div><div id='phase4a-column-c'>column C</div></div>"
+                             b"<div id='phase4a-reverse' class='fixture reverse'><div id='phase4a-reverse-a'>one</div><div id='phase4a-reverse-b'>two</div><div id='phase4a-reverse-c'>three</div></div>"
+                             b"<div id='phase4a-order' class='fixture order'><div id='phase4a-order-a'>source A</div><div id='phase4a-order-b' class='order-b'>order -1</div><div id='phase4a-order-c' class='order-c'>order 2</div></div>"
+                             b"<div id='phase4a-auto' class='fixture auto'><div id='phase4a-auto-a' class='auto-a'>left</div><div id='phase4a-auto-b' class='auto-b'>auto margins</div></div>"
+                             b"<div id='phase4a-align' class='fixture align'><div id='phase4a-align-a' class='align-a'>base</div><div id='phase4a-align-b' class='align-b'>baseline</div><div id='phase4a-align-c' class='align-c'>end</div></div>"
+                             b"<div id='phase4a-nested' class='fixture nested'><div id='phase4a-nested-inner' class='nested-inner'><div id='phase4a-nested-a'>nested A</div><div id='phase4a-nested-b'>nested B</div></div><div id='phase4a-nested-fixed' class='nested-fixed'>fixed</div></div>"
+                             b"<div id='phase4a-anonymous' class='fixture anonymous'><span id='phase4a-anon-a'>A</span> anonymous text item <span id='phase4a-anon-b'>B</span></div>"
+                             b"<div id='phase4a-intrinsic' class='fixture intrinsic'><img id='phase4a-image' src='/navigator-smoke/wide.png' alt='intrinsic image'><input id='phase4a-control' type='text' value='control'><button id='phase4a-button' type='button'>control</button></div>"
+                             b"<div id='phase4a-excluded' class='fixture excluded'><div id='phase4a-flow' class='excluded-flow'>flow</div><div id='phase4a-none' class='excluded-none'>none</div><div id='phase4a-absolute' class='excluded-abs'>absolute</div></div>"
+                             b"<div id='phase4a-wrap' class='fixture wrap-unsupported'><div id='phase4a-wrap-a'>wrap A</div><div id='phase4a-wrap-b'>wrap B</div></div>"
+                             b"<div id='phase4a-percent-gap' class='fixture percent-gap'><div id='phase4a-gap-a'>gap A</div><div id='phase4a-gap-b'>gap B</div></div>"
+                             b"<div id='phase4a-content-basis' class='fixture content-basis'><div id='phase4a-content-item'>content basis</div></div>"
+                             b"<p id='phase4a-regression'>Phase 4A coverage includes row, row-reverse, column, grow, shrink, basis, order, justify, align, baseline, auto margins, gap, nested flex, anonymous text, intrinsic replaced/control items, display none, absolute exclusion, and readable wrap fallback.</p>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-phase3h.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><title>CSS Phase 3H Traditional Positioning Completion</title><style>"

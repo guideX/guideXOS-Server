@@ -149,6 +149,15 @@ namespace {
 		BorderLeftWidth,
 		BorderLeftStyle,
 		BorderLeftColor,
+		// The final seven mask slots intentionally group related Flexbox
+		// longhands so the existing compact cascade remains 64-bit.
+		FlexAxes,          // flex-direction + flex-wrap
+		JustifyContent,
+		AlignItems,
+		FlexGaps,          // gap + row-gap + column-gap
+		FlexFactors,       // flex-grow + flex-shrink
+		FlexBasis,
+		FlexItemPlacement, // order + align-self
 		Count,
 	};
 
@@ -970,6 +979,42 @@ static bool parseCssBoundedDimension(const std::string& rawValue,
 	out.type = pixels == 0 ? CssLengthType::Zero : CssLengthType::Px;
 	out.value = pixels;
 	out.valid = true;
+	return true;
+}
+
+static bool parseCssFlexBasisValue(const std::string& rawValue,
+	CssLengthValue& out, CssDiagnostics& diag)
+{
+	const std::string value = toLower(trim(rawValue));
+	if (value == "content") {
+		out = CssLengthValue{};
+		out.type = CssLengthType::Content;
+		out.valid = true;
+		return true;
+	}
+	return parseCssBoundedDimension(value, out, diag, true, false, true);
+}
+
+static bool parseCssNonNegativeFactor(const std::string& rawValue,
+	int& out1000, CssDiagnostics& diag)
+{
+	double numeric = 0.0;
+	if (!parseCssNumber(rawValue, numeric) || !std::isfinite(numeric) || numeric < 0.0)
+		return false;
+	int scaled = roundCssNumber(numeric * 1000.0);
+	const int bounded = clampCssValue(diag, scaled, 0, 64000);
+	out1000 = bounded;
+	return true;
+}
+
+static bool parseCssSignedInteger(const std::string& rawValue,
+	int& out, CssDiagnostics& diag)
+{
+	double numeric = 0.0;
+	if (!parseCssNumber(rawValue, numeric) || !std::isfinite(numeric) || std::floor(numeric) != numeric)
+		return false;
+	int parsed = roundCssSignedNumber(numeric);
+	out = clampCssValue(diag, parsed, -32767, 32767);
 	return true;
 }
 
@@ -2826,14 +2871,225 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			style.displayNone = true;
 			return accept(CssProperty::Display);
 		}
-		if (lower == "block" || lower == "inline" || lower == "inline-block") {
+		if (lower == "block" || lower == "inline" || lower == "inline-block" ||
+			lower == "flex" || lower == "inline-flex") {
 			style.display = lower == "block" ? DisplayMode::Block :
-				lower == "inline" ? DisplayMode::Inline : DisplayMode::InlineBlock;
+				lower == "inline" ? DisplayMode::Inline :
+				lower == "inline-block" ? DisplayMode::InlineBlock :
+				lower == "flex" ? DisplayMode::Flex : DisplayMode::InlineFlex;
 			style.displayNone = false;
 			return accept(CssProperty::Display);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
+	}
+	if (prop == "flex-direction" || prop == "flex-wrap") {
+		const std::string lower = toLower(val);
+		if (prop == "flex-direction") {
+			if (lower == "row") style.flexDirection = FlexDirectionMode::Row;
+			else if (lower == "row-reverse") style.flexDirection = FlexDirectionMode::RowReverse;
+			else if (lower == "column") style.flexDirection = FlexDirectionMode::Column;
+			else if (lower == "column-reverse") style.flexDirection = FlexDirectionMode::ColumnReverse;
+			else {
+				++diag.unsupportedDeclarationCount;
+				++diag.flexUnsupportedDeclarations;
+				return false;
+			}
+			style.flexDirectionSpecified = true;
+		} else {
+			if (lower == "nowrap") style.flexWrap = FlexWrapMode::NoWrap;
+			else if (lower == "wrap") style.flexWrap = FlexWrapMode::Wrap;
+			else if (lower == "wrap-reverse") style.flexWrap = FlexWrapMode::WrapReverse;
+			else {
+				++diag.unsupportedDeclarationCount;
+				++diag.flexUnsupportedDeclarations;
+				return false;
+			}
+			style.flexWrapSpecified = true;
+		}
+		return accept(CssProperty::FlexAxes);
+	}
+	if (prop == "justify-content") {
+		const std::string lower = toLower(val);
+		if (lower == "flex-start" || lower == "start") style.justifyContent = JustifyContentMode::FlexStart;
+		else if (lower == "flex-end" || lower == "end") style.justifyContent = JustifyContentMode::FlexEnd;
+		else if (lower == "center") style.justifyContent = JustifyContentMode::Center;
+		else if (lower == "space-between") style.justifyContent = JustifyContentMode::SpaceBetween;
+		else if (lower == "space-around") style.justifyContent = JustifyContentMode::SpaceAround;
+		else if (lower == "space-evenly") style.justifyContent = JustifyContentMode::SpaceEvenly;
+		else {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.justifyContentSpecified = true;
+		return accept(CssProperty::JustifyContent);
+	}
+	if (prop == "align-items") {
+		const std::string lower = toLower(val);
+		if (lower == "stretch") style.alignItems = AlignItemsMode::Stretch;
+		else if (lower == "flex-start" || lower == "start") style.alignItems = AlignItemsMode::FlexStart;
+		else if (lower == "flex-end" || lower == "end") style.alignItems = AlignItemsMode::FlexEnd;
+		else if (lower == "center") style.alignItems = AlignItemsMode::Center;
+		else if (lower == "baseline") style.alignItems = AlignItemsMode::Baseline;
+		else {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.alignItemsSpecified = true;
+		return accept(CssProperty::AlignItems);
+	}
+	if (prop == "align-self") {
+		const std::string lower = toLower(val);
+		if (lower == "auto") style.alignSelf = AlignSelfMode::Auto;
+		else if (lower == "stretch") style.alignSelf = AlignSelfMode::Stretch;
+		else if (lower == "flex-start" || lower == "start") style.alignSelf = AlignSelfMode::FlexStart;
+		else if (lower == "flex-end" || lower == "end") style.alignSelf = AlignSelfMode::FlexEnd;
+		else if (lower == "center") style.alignSelf = AlignSelfMode::Center;
+		else if (lower == "baseline") style.alignSelf = AlignSelfMode::Baseline;
+		else {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.alignSelfSpecified = true;
+		return accept(CssProperty::FlexItemPlacement);
+	}
+	if (prop == "order") {
+		if (!parseCssSignedInteger(val, style.order, diag)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.orderSpecified = true;
+		return accept(CssProperty::FlexItemPlacement);
+	}
+	if (prop == "flex-grow" || prop == "flex-shrink") {
+		int factor = 0;
+		if (!parseCssNonNegativeFactor(val, factor, diag)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		if (prop == "flex-grow") {
+			style.flexGrow1000 = factor;
+			style.flexGrowSpecified = true;
+		} else {
+			style.flexShrink1000 = factor;
+			style.flexShrinkSpecified = true;
+		}
+		return accept(CssProperty::FlexFactors);
+	}
+	if (prop == "flex-basis") {
+		if (!parseCssFlexBasisValue(val, style.flexBasisValue, diag)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.flexBasisSpecified = true;
+		return accept(CssProperty::FlexBasis);
+	}
+	if (prop == "gap" || prop == "row-gap" || prop == "column-gap") {
+		std::vector<std::string> tokens = splitCssTokens(toLower(val));
+		if (prop != "gap") tokens = { tokens.empty() ? std::string() : tokens.front() };
+		if (tokens.empty() || tokens.size() > 2) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		CssLengthValue first;
+		if (!parseCssBoundedDimension(tokens[0], first, diag, false, false, true)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		CssLengthValue second = first;
+		if (tokens.size() == 2 && !parseCssBoundedDimension(tokens[1], second, diag, false, false, true)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		if (prop == "gap") {
+			style.gapValue = first;
+			style.rowGapValue = first;
+			style.columnGapValue = tokens.size() == 2 ? second : first;
+			style.gapSpecified = style.rowGapSpecified = style.columnGapSpecified = true;
+		} else if (prop == "row-gap") {
+			style.rowGapValue = first;
+			style.rowGapSpecified = true;
+		} else {
+			style.columnGapValue = first;
+			style.columnGapSpecified = true;
+		}
+		return accept(CssProperty::FlexGaps);
+	}
+	if (prop == "flex") {
+		const std::string lower = toLower(trim(val));
+		if (lower == "none") {
+			style.flexGrow1000 = 0; style.flexShrink1000 = 0;
+			style.flexBasisValue = CssLengthValue{};
+			style.flexBasisValue.type = CssLengthType::Auto;
+			style.flexBasisValue.valid = true;
+			style.flexGrowSpecified = style.flexShrinkSpecified = style.flexBasisSpecified = true;
+			return acceptMask(cssPropertyBit(CssProperty::FlexFactors) | cssPropertyBit(CssProperty::FlexBasis));
+		}
+		if (lower == "auto") {
+			style.flexGrow1000 = 1000; style.flexShrink1000 = 1000;
+			style.flexBasisValue = CssLengthValue{};
+			style.flexBasisValue.type = CssLengthType::Auto;
+			style.flexBasisValue.valid = true;
+			style.flexGrowSpecified = style.flexShrinkSpecified = style.flexBasisSpecified = true;
+			return acceptMask(cssPropertyBit(CssProperty::FlexFactors) | cssPropertyBit(CssProperty::FlexBasis));
+		}
+		if (lower == "initial") {
+			style.flexGrow1000 = 0; style.flexShrink1000 = 1000;
+			style.flexBasisValue = CssLengthValue{};
+			style.flexBasisValue.type = CssLengthType::Auto;
+			style.flexBasisValue.valid = true;
+			style.flexGrowSpecified = style.flexShrinkSpecified = style.flexBasisSpecified = true;
+			return acceptMask(cssPropertyBit(CssProperty::FlexFactors) | cssPropertyBit(CssProperty::FlexBasis));
+		}
+		const std::vector<std::string> tokens = splitCssTokens(lower);
+		if (tokens.empty() || tokens.size() > 3) {
+			++diag.unsupportedDeclarationCount; ++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		int firstFactor = 0;
+		if (!parseCssNonNegativeFactor(tokens[0], firstFactor, diag)) {
+			++diag.unsupportedDeclarationCount; ++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.flexGrow1000 = firstFactor;
+		style.flexGrowSpecified = true;
+		style.flexShrinkSpecified = false;
+		style.flexBasisSpecified = false;
+		if (tokens.size() == 1) {
+			style.flexShrink1000 = 1000;
+			style.flexBasisValue = CssLengthValue{};
+			style.flexBasisValue.type = CssLengthType::Zero;
+			style.flexBasisValue.valid = true;
+			style.flexShrinkSpecified = style.flexBasisSpecified = true;
+		} else {
+			int secondFactor = 0;
+			if (parseCssNonNegativeFactor(tokens[1], secondFactor, diag)) {
+				style.flexShrink1000 = secondFactor;
+				style.flexShrinkSpecified = true;
+				if (tokens.size() == 3 && !parseCssFlexBasisValue(tokens[2], style.flexBasisValue, diag)) {
+					++diag.unsupportedDeclarationCount; ++diag.flexUnsupportedDeclarations;
+					return false;
+				}
+				if (tokens.size() == 3) style.flexBasisSpecified = true;
+			} else if (tokens.size() == 2 && parseCssFlexBasisValue(tokens[1], style.flexBasisValue, diag)) {
+				style.flexShrink1000 = 1000;
+				style.flexShrinkSpecified = true;
+				style.flexBasisSpecified = true;
+			} else {
+				++diag.unsupportedDeclarationCount; ++diag.flexUnsupportedDeclarations;
+				return false;
+			}
+		}
+		return acceptMask(cssPropertyBit(CssProperty::FlexFactors) | cssPropertyBit(CssProperty::FlexBasis));
 	}
 	if (prop == "position") {
 		const std::string lower = toLower(val);
@@ -3463,6 +3719,9 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		return accept(propertyId);
 	}
+	if (prop.rfind("flex-", 0) == 0 || prop == "align-content" || prop == "place-content" ||
+		prop == "place-items" || prop == "place-self")
+		++diag.flexUnsupportedDeclarations;
 	++diag.unsupportedDeclarationCount;
 	return false;
 }
@@ -3482,6 +3741,62 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 	case CssProperty::Display:
 		destination.display = source.display;
 		destination.displayNone = source.display == DisplayMode::None;
+		break;
+	case CssProperty::FlexAxes:
+		if (source.flexDirectionSpecified) {
+			destination.flexDirection = source.flexDirection;
+			destination.flexDirectionSpecified = true;
+		}
+		if (source.flexWrapSpecified) {
+			destination.flexWrap = source.flexWrap;
+			destination.flexWrapSpecified = true;
+		}
+		break;
+	case CssProperty::JustifyContent:
+		destination.justifyContent = source.justifyContent;
+		destination.justifyContentSpecified = source.justifyContentSpecified;
+		break;
+	case CssProperty::AlignItems:
+		destination.alignItems = source.alignItems;
+		destination.alignItemsSpecified = source.alignItemsSpecified;
+		break;
+	case CssProperty::FlexGaps:
+		if (source.gapSpecified) {
+			destination.gapValue = source.gapValue;
+			destination.gapSpecified = true;
+		}
+		if (source.rowGapSpecified) {
+			destination.rowGapValue = source.rowGapValue;
+			destination.rowGapSpecified = true;
+		}
+		if (source.columnGapSpecified) {
+			destination.columnGapValue = source.columnGapValue;
+			destination.columnGapSpecified = true;
+		}
+		break;
+	case CssProperty::FlexFactors:
+		if (source.flexGrowSpecified) {
+			destination.flexGrow1000 = source.flexGrow1000;
+			destination.flexGrowSpecified = true;
+		}
+		if (source.flexShrinkSpecified) {
+			destination.flexShrink1000 = source.flexShrink1000;
+			destination.flexShrinkSpecified = true;
+		}
+		break;
+	case CssProperty::FlexBasis:
+		destination.flexBasisValue = source.flexBasisValue;
+		destination.flexBasisSpecified = source.flexBasisSpecified;
+		break;
+	case CssProperty::FlexItemPlacement:
+		if (source.orderSpecified) {
+			destination.order = source.order;
+			destination.orderSpecified = true;
+		}
+		if (source.alignSelfSpecified) {
+			destination.alignSelf = source.alignSelf;
+			destination.alignSelfSpecified = true;
+		}
 		break;
 	case CssProperty::Position: destination.position = source.position; break;
 	case CssProperty::Top: destination.topValue = source.topValue; break;
@@ -3730,6 +4045,62 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Display)) != 0) {
 		merged.display = overrideStyle.display;
 		merged.displayNone = overrideStyle.display == DisplayMode::None;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexAxes)) != 0) {
+		if (overrideStyle.flexDirectionSpecified) {
+			merged.flexDirection = overrideStyle.flexDirection;
+			merged.flexDirectionSpecified = true;
+		}
+		if (overrideStyle.flexWrapSpecified) {
+			merged.flexWrap = overrideStyle.flexWrap;
+			merged.flexWrapSpecified = true;
+		}
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::JustifyContent)) != 0) {
+		merged.justifyContent = overrideStyle.justifyContent;
+		merged.justifyContentSpecified = overrideStyle.justifyContentSpecified;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::AlignItems)) != 0) {
+		merged.alignItems = overrideStyle.alignItems;
+		merged.alignItemsSpecified = overrideStyle.alignItemsSpecified;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexGaps)) != 0) {
+		if (overrideStyle.gapSpecified) {
+			merged.gapValue = overrideStyle.gapValue;
+			merged.gapSpecified = true;
+		}
+		if (overrideStyle.rowGapSpecified) {
+			merged.rowGapValue = overrideStyle.rowGapValue;
+			merged.rowGapSpecified = true;
+		}
+		if (overrideStyle.columnGapSpecified) {
+			merged.columnGapValue = overrideStyle.columnGapValue;
+			merged.columnGapSpecified = true;
+		}
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexFactors)) != 0) {
+		if (overrideStyle.flexGrowSpecified) {
+			merged.flexGrow1000 = overrideStyle.flexGrow1000;
+			merged.flexGrowSpecified = true;
+		}
+		if (overrideStyle.flexShrinkSpecified) {
+			merged.flexShrink1000 = overrideStyle.flexShrink1000;
+			merged.flexShrinkSpecified = true;
+		}
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexBasis)) != 0) {
+		merged.flexBasisValue = overrideStyle.flexBasisValue;
+		merged.flexBasisSpecified = overrideStyle.flexBasisSpecified;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexItemPlacement)) != 0) {
+		if (overrideStyle.orderSpecified) {
+			merged.order = overrideStyle.order;
+			merged.orderSpecified = true;
+		}
+		if (overrideStyle.alignSelfSpecified) {
+			merged.alignSelf = overrideStyle.alignSelf;
+			merged.alignSelfSpecified = true;
+		}
 	}
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Position)) != 0)
 		merged.position = overrideStyle.position;
@@ -4366,6 +4737,7 @@ static const char* cssLengthTypeName(CssLengthType type)
 	case CssLengthType::Percent: return "percent";
 	case CssLengthType::Zero: return "zero";
 	case CssLengthType::None: return "none";
+	case CssLengthType::Content: return "content";
 	default: return "unset";
 	}
 }

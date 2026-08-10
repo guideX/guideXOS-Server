@@ -237,6 +237,7 @@ enum class CssLengthType : uint8_t {
 	Percent,
 	Zero,
 	None,
+	Content,
 };
 
 struct CssLengthValue {
@@ -258,7 +259,48 @@ enum class DisplayMode : uint8_t {
 	Block = 0,
 	Inline,
 	InlineBlock,
+	Flex,
+	InlineFlex,
 	None,
+};
+
+enum class FlexDirectionMode : uint8_t {
+	Row = 0,
+	RowReverse,
+	Column,
+	ColumnReverse,
+};
+
+enum class FlexWrapMode : uint8_t {
+	NoWrap = 0,
+	Wrap,
+	WrapReverse,
+};
+
+enum class JustifyContentMode : uint8_t {
+	FlexStart = 0,
+	FlexEnd,
+	Center,
+	SpaceBetween,
+	SpaceAround,
+	SpaceEvenly,
+};
+
+enum class AlignItemsMode : uint8_t {
+	Stretch = 0,
+	FlexStart,
+	FlexEnd,
+	Center,
+	Baseline,
+};
+
+enum class AlignSelfMode : uint8_t {
+	Auto = 0,
+	Stretch,
+	FlexStart,
+	FlexEnd,
+	Center,
+	Baseline,
 };
 
 // Phase 3G deliberately keeps positioning to the traditional, layout-local
@@ -508,6 +550,30 @@ struct WebStyle {
 	bool     hasTextDecoration = false;
 	bool     displayNone = false;
 	DisplayMode display = DisplayMode::Block;
+	FlexDirectionMode flexDirection = FlexDirectionMode::Row;
+	FlexWrapMode flexWrap = FlexWrapMode::NoWrap;
+	JustifyContentMode justifyContent = JustifyContentMode::FlexStart;
+	AlignItemsMode alignItems = AlignItemsMode::Stretch;
+	AlignSelfMode alignSelf = AlignSelfMode::Auto;
+	bool     flexDirectionSpecified = false;
+	bool     flexWrapSpecified = false;
+	bool     justifyContentSpecified = false;
+	bool     alignItemsSpecified = false;
+	bool     alignSelfSpecified = false;
+	int      flexGrow1000 = 0;
+	int      flexShrink1000 = 1000;
+	int      order = 0;
+	bool     flexGrowSpecified = false;
+	bool     flexShrinkSpecified = false;
+	bool     orderSpecified = false;
+	CssLengthValue flexBasisValue;
+	CssLengthValue gapValue;
+	CssLengthValue rowGapValue;
+	CssLengthValue columnGapValue;
+	bool     flexBasisSpecified = false;
+	bool     gapSpecified = false;
+	bool     rowGapSpecified = false;
+	bool     columnGapSpecified = false;
 	PositionMode position = PositionMode::Static;
 	CssLengthValue topValue;
 	CssLengthValue rightValue;
@@ -678,6 +744,35 @@ struct CssDiagnostics {
 	int    importantDeclarationsApplied = 0;
 	int    ruleCapCount = 0;
 	int    declarationCapCount = 0;
+	// Phase 4A bounded single-line Flexbox diagnostics.  These counters describe
+	// the compact layout snapshot; they do not imply a retained DOM or scene
+	// graph.
+	int    flexContainers = 0;
+	int    inlineFlexContainers = 0;
+	int    flexItems = 0;
+	int    flexAnonymousItems = 0;
+	int    flexNestedContainers = 0;
+	int    flexWrapUnsupported = 0;
+	int    flexAbsoluteExcluded = 0;
+	int    flexDisplayNoneExcluded = 0;
+	int    flexOrderSortItems = 0;
+	int    flexBaseSizeQueries = 0;
+	int    flexIntrinsicQueries = 0;
+	int    flexAutomaticMinimumApplied = 0;
+	int    flexAutomaticMinimumZero = 0;
+	int    flexGrowIterations = 0;
+	int    flexShrinkIterations = 0;
+	int    flexFreezeIterations = 0;
+	int    flexCrossSizePasses = 0;
+	int    flexBaselineItems = 0;
+	int    flexAutoMarginAbsorptions = 0;
+	int    flexGapClamps = 0;
+	int    flexGeometryClamps = 0;
+	int    flexDepthClamps = 0;
+	int    flexOperationClamps = 0;
+	int    flexUnsupportedDeclarations = 0;
+	int    flexEvidenceRecords = 0;
+	std::string flexEvidence;
 	int    declarationsProcessed = 0;
 	int    inheritanceDepthClamps = 0;
 	int    pseudoClassesParsed = 0;

@@ -36,6 +36,11 @@ using gxos::web::CssLengthValue;
 using gxos::web::CssComputedStyleRecord;
 using gxos::web::BoxSizingMode;
 using gxos::web::DisplayMode;
+using gxos::web::FlexDirectionMode;
+using gxos::web::FlexWrapMode;
+using gxos::web::JustifyContentMode;
+using gxos::web::AlignItemsMode;
+using gxos::web::AlignSelfMode;
 using gxos::web::PositionMode;
 using gxos::web::FloatMode;
 using gxos::web::ClearMode;
@@ -587,6 +592,137 @@ namespace {
 	static CssMarginLayoutSnapshot s_cssMarginLayoutSnapshot;
 	static bool s_cssMarginLayoutBuilding = false;
 	static CssFloatLayoutSnapshot s_cssFloatLayoutSnapshot;
+
+	// Phase 4A is intentionally a single-line flex snapshot.  It records the
+	// used geometry and allocation evidence needed by paint/hit paths while
+	// leaving the parser's flat block/inline storage intact.
+	constexpr size_t kCssFlexContainerCap = 128;
+	constexpr size_t kCssFlexItemCap = 256;
+	constexpr int kCssFlexDepthCap = 8;
+	constexpr int kCssFlexOperationCap = 8192;
+
+	struct CssFlexBlockOverride {
+		int x = 0;
+		int y = 0;
+		int w = 0;
+		int h = 0;
+		int itemIndex = -1;
+		uint64_t containerSerial = 0;
+		bool directItem = false;
+		bool complete = true;
+	};
+
+	struct CssFlexItemRecord {
+		uint64_t containerSerial = 0;
+		uint64_t itemSerial = 0;
+		uint64_t parentSerial = 0;
+		int blockIndex = -1;
+		int sourceOrder = 0;
+		int visualOrder = 0;
+		int x = 0;
+		int y = 0;
+		int w = 0;
+		int h = 0;
+		int baseMain = 0;
+		int hypotheticalMain = 0;
+		int targetMain = 0;
+		int minMain = 0;
+		int maxMain = 8192;
+		int crossBase = 0;
+		int marginLeft = 0;
+		int marginRight = 0;
+		int marginTop = 0;
+		int marginBottom = 0;
+		int usedMarginLeft = 0;
+		int usedMarginRight = 0;
+		int usedMarginTop = 0;
+		int usedMarginBottom = 0;
+		int flexGrow1000 = 0;
+		int flexShrink1000 = 1000;
+		int scaledShrink = 0;
+		int baseline = 0;
+		int autoMainMargins = 0;
+		int autoCrossMargins = 0;
+		std::string text;
+		WebStyle style;
+		bool anonymous = false;
+		bool nested = false;
+		bool frozen = false;
+		bool autoMinimumApplied = false;
+		bool autoMinimumZero = false;
+		bool complete = true;
+	};
+
+	struct CssFlexCandidate {
+		uint64_t serial = 0;
+		uint64_t parentSerial = 0;
+		int blockIndex = -1;
+		int sourceOrder = 0;
+		std::string text;
+		WebStyle style;
+		bool anonymous = false;
+	};
+
+	struct CssFlexContainerRecord {
+		uint64_t serial = 0;
+		uint64_t parentSerial = 0;
+		int x = 0;
+		int y = 0;
+		int w = 0;
+		int h = 0;
+		int contentX = 0;
+		int contentY = 0;
+		int contentW = 0;
+		int contentH = 0;
+		int depth = 0;
+		int itemBegin = 0;
+		int itemCount = 0;
+		int sourceOrder = 0;
+		bool inlineParticipation = false;
+		bool wrapUnsupported = false;
+		bool complete = true;
+	};
+
+	struct CssFlexLayoutSnapshot {
+		bool valid = false;
+		bool building = false;
+		std::string url;
+		size_t blockCount = 0;
+		uint64_t fingerprint = 0;
+		int operations = 0;
+		int documentExtent = 0;
+		int flexContainers = 0;
+		int inlineFlexContainers = 0;
+		int flexItems = 0;
+		int anonymousItems = 0;
+		int nestedContainers = 0;
+		int wrapUnsupported = 0;
+		int absoluteExcluded = 0;
+		int displayNoneExcluded = 0;
+		int orderSortItems = 0;
+		int baseSizeQueries = 0;
+		int intrinsicQueries = 0;
+		int automaticMinimumApplied = 0;
+		int automaticMinimumZero = 0;
+		int growIterations = 0;
+		int shrinkIterations = 0;
+		int freezeIterations = 0;
+		int crossSizePasses = 0;
+		int baselineItems = 0;
+		int autoMarginAbsorptions = 0;
+		int gapClamps = 0;
+		int geometryClamps = 0;
+		int depthClamps = 0;
+		int operationClamps = 0;
+		std::vector<CssFlexContainerRecord> containers;
+		std::vector<CssFlexItemRecord> items;
+		std::vector<CssFlexBlockOverride> blockOverrides;
+		int evidenceRecords = 0;
+		std::string evidence;
+	};
+
+	static CssFlexLayoutSnapshot s_cssFlexLayoutSnapshot;
+	static bool s_cssFlexLayoutBuilding = false;
 
 	constexpr size_t kCssPositionedBoxCap = 256;
 	constexpr size_t kCssPositionedAncestryCap = 16;
@@ -1588,6 +1724,8 @@ namespace {
 	static int blockTextLineHeight(const DocBlock& block);
 	static void ensureInlineLayout(const WebDocument& doc);
 	static void ensureCssFloatLayout(const WebDocument& doc);
+	static void ensureCssFlexLayout(const WebDocument& doc);
+	static const CssFlexBlockOverride* cssFlexBlockOverrideForBlock(const WebDocument& doc, int blockIndex);
 	static CssFloatExclusionQuery cssFloatExclusionQuery(const WebDocument& doc,
 		uint64_t bfcIdentity, int lineTop, int lineBottom, int containingLeft, int containingRight);
 	static int cssBfcPlacementY(const WebDocument& doc, int blockIndex, int candidateY,
@@ -2092,6 +2230,7 @@ namespace {
 	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc)
 	{
 		ensureCssMarginLayout(doc);
+		ensureCssFlexLayout(doc);
 		metadata.documentBlockCount = static_cast<int>(doc.blocks.size());
 		metadata.imageBlockCount = 0;
 		metadata.loadedImageCount = 0;
@@ -2265,6 +2404,32 @@ namespace {
 		metadata.cssInlineBlockHitTargets = 0;
 		metadata.cssInlineBlockOverflowClips = 0;
 		metadata.cssAtomicContextIncomplete = 0;
+		metadata.cssFlexContainers = doc.cssDiagnostics.flexContainers;
+		metadata.cssInlineFlexContainers = doc.cssDiagnostics.inlineFlexContainers;
+		metadata.cssFlexItems = doc.cssDiagnostics.flexItems;
+		metadata.cssFlexAnonymousItems = doc.cssDiagnostics.flexAnonymousItems;
+		metadata.cssFlexNestedContainers = doc.cssDiagnostics.flexNestedContainers;
+		metadata.cssFlexWrapUnsupported = doc.cssDiagnostics.flexWrapUnsupported;
+		metadata.cssFlexAbsoluteExcluded = doc.cssDiagnostics.flexAbsoluteExcluded;
+		metadata.cssFlexDisplayNoneExcluded = doc.cssDiagnostics.flexDisplayNoneExcluded;
+		metadata.cssFlexOrderSortItems = doc.cssDiagnostics.flexOrderSortItems;
+		metadata.cssFlexBaseSizeQueries = doc.cssDiagnostics.flexBaseSizeQueries;
+		metadata.cssFlexIntrinsicQueries = doc.cssDiagnostics.flexIntrinsicQueries;
+		metadata.cssFlexAutomaticMinimumApplied = doc.cssDiagnostics.flexAutomaticMinimumApplied;
+		metadata.cssFlexAutomaticMinimumZero = doc.cssDiagnostics.flexAutomaticMinimumZero;
+		metadata.cssFlexGrowIterations = doc.cssDiagnostics.flexGrowIterations;
+		metadata.cssFlexShrinkIterations = doc.cssDiagnostics.flexShrinkIterations;
+		metadata.cssFlexFreezeIterations = doc.cssDiagnostics.flexFreezeIterations;
+		metadata.cssFlexCrossSizePasses = doc.cssDiagnostics.flexCrossSizePasses;
+		metadata.cssFlexBaselineItems = doc.cssDiagnostics.flexBaselineItems;
+		metadata.cssFlexAutoMarginAbsorptions = doc.cssDiagnostics.flexAutoMarginAbsorptions;
+		metadata.cssFlexGapClamps = doc.cssDiagnostics.flexGapClamps;
+		metadata.cssFlexGeometryClamps = doc.cssDiagnostics.flexGeometryClamps;
+		metadata.cssFlexDepthClamps = doc.cssDiagnostics.flexDepthClamps;
+		metadata.cssFlexOperationClamps = doc.cssDiagnostics.flexOperationClamps;
+		metadata.cssFlexUnsupportedDeclarations = doc.cssDiagnostics.flexUnsupportedDeclarations;
+		metadata.cssFlexEvidenceRecords = doc.cssDiagnostics.flexEvidenceRecords;
+		metadata.cssFlexEvidence = doc.cssDiagnostics.flexEvidence;
 		metadata.cssMarginCollapseSets = doc.cssDiagnostics.marginCollapseSets;
 		metadata.cssMarginCollapseParticipants = doc.cssDiagnostics.marginCollapseParticipants;
 		metadata.cssMarginCollapseSibling = doc.cssDiagnostics.marginCollapseSibling;
@@ -2534,7 +2699,8 @@ namespace {
 			if (geometry.clamped) ++metadata.cssBoxGeometryClamps;
 			++metadata.cssLayoutRecomputations;
 			const bool phase3aId = block.id.rfind("phase3a-", 0) == 0 || block.id.rfind("css3a-", 0) == 0;
-			if (phase3aId && metadata.cssEvidenceRecordCount < 32 && metadata.cssGeometryEvidence.size() < 32768) {
+			const bool phase4aId = block.id.rfind("phase4a-", 0) == 0 || block.id.rfind("css4a-", 0) == 0;
+			if ((phase3aId || phase4aId) && metadata.cssEvidenceRecordCount < 64 && metadata.cssGeometryEvidence.size() < 32768) {
 				std::string reason = geometry.widthAuto || geometry.heightAuto ? "auto" : "definite";
 				if (geometry.widthPercentageUnresolved || geometry.heightPercentageUnresolved) reason += ",indefinite-basis";
 				if (geometry.constraintConflict) reason += ",constraint-conflict";
@@ -2546,6 +2712,9 @@ namespace {
 					<< ",box-sizing=" << (block.style.boxSizing == BoxSizingMode::BorderBox ? "border-box" : "content-box")
 					<< ",specified-width=" << cssNavigatorLengthEvidence(block.style.widthValue)
 					<< ",specified-height=" << cssNavigatorLengthEvidence(block.style.heightValue)
+					<< ",flex-direction=" << static_cast<unsigned>(block.style.flexDirection)
+					<< ",flex-order=" << block.style.order
+					<< ",flex-basis=" << cssNavigatorLengthEvidence(block.style.flexBasisValue)
 					<< ",basis-width=" << availableWidth << ",basis-width-definite=yes"
 					<< ",basis-height=" << blockContainingContentHeight(block, doc)
 					<< ",basis-height-definite=" << (blockContainingContentHeight(block, doc) >= 0 ? "yes" : "no")
@@ -3198,6 +3367,7 @@ namespace {
 		case CssLengthType::Percent: return "percent";
 		case CssLengthType::Zero: return "zero";
 		case CssLengthType::None: return "none";
+		case CssLengthType::Content: return "content";
 		default: return "unset";
 		}
 	}
@@ -4033,8 +4203,10 @@ namespace {
 
 	static int blockOuterX(const DocBlock& block, const WebDocument& doc, int availableWidth, int outerWidth)
 	{
-		int baseX = kContentX + blockIndentForType(block.type) + blockBodyMarginLeft(doc);
 		const int blockIndex = doc.blocks.empty() ? -1 : static_cast<int>(&block - doc.blocks.data());
+		if (const CssFlexBlockOverride* flexOverride = cssFlexBlockOverrideForBlock(doc, blockIndex))
+			return flexOverride->x;
+		int baseX = kContentX + blockIndentForType(block.type) + blockBodyMarginLeft(doc);
 		if (blockIndex >= 0 && blockIndex < static_cast<int>(doc.blocks.size()) &&
 			cssStyleHasOverflowBfc(block.style) && s_cssFloatLayoutSnapshot.valid &&
 			block.style.floatMode == FloatMode::None) {
@@ -4199,6 +4371,11 @@ namespace {
 		// atomic context.  They must not advance the document-wide cursor.
 		if (block.atomicContainerSerial != 0) return 0;
 		const int blockIndex = static_cast<int>(&block - &doc.blocks.front());
+		if (const CssFlexBlockOverride* flexOverride = cssFlexBlockOverrideForBlock(doc, blockIndex)) {
+			const int marginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
+			const int marginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
+			return marginTop + flexOverride->h + marginBottom;
+		}
 		if (const InlineFlowLayout* flow = inlineFlowForBlock(doc, blockIndex)) {
 			if (flow->anchorBlockIndex != blockIndex) return 0;
 			return flow->totalHeight + (nextIsHeading ? 10 : 0);
@@ -4502,6 +4679,15 @@ namespace {
 			mix(static_cast<uint64_t>(style.width)); mix(static_cast<uint64_t>(style.widthPercent));
 			mix(static_cast<uint64_t>(style.maxWidth)); mix(static_cast<uint64_t>(style.maxWidthPercent));
 			mix(static_cast<uint64_t>(style.position));
+			mix(static_cast<uint64_t>(style.flexDirection)); mix(static_cast<uint64_t>(style.flexWrap));
+			mix(static_cast<uint64_t>(style.justifyContent)); mix(static_cast<uint64_t>(style.alignItems));
+			mix(static_cast<uint64_t>(style.alignSelf));
+			mix(static_cast<uint64_t>(style.flexGrow1000)); mix(static_cast<uint64_t>(style.flexShrink1000));
+			mix(static_cast<uint64_t>(style.order));
+			mix(static_cast<uint64_t>(style.flexBasisValue.type)); mix(static_cast<uint64_t>(style.flexBasisValue.value));
+			mix(static_cast<uint64_t>(style.gapValue.type)); mix(static_cast<uint64_t>(style.gapValue.value));
+			mix(static_cast<uint64_t>(style.rowGapValue.type)); mix(static_cast<uint64_t>(style.rowGapValue.value));
+			mix(static_cast<uint64_t>(style.columnGapValue.type)); mix(static_cast<uint64_t>(style.columnGapValue.value));
 			mix(static_cast<uint64_t>(style.topValue.type)); mix(static_cast<uint64_t>(style.topValue.value));
 			mix(static_cast<uint64_t>(style.rightValue.type)); mix(static_cast<uint64_t>(style.rightValue.value));
 			mix(static_cast<uint64_t>(style.bottomValue.type)); mix(static_cast<uint64_t>(style.bottomValue.value));
@@ -5684,6 +5870,867 @@ namespace {
 		buildCssMarginLayout(doc, s_cssMarginLayoutSnapshot);
 	}
 
+	static bool cssFlexContainerStyle(const WebStyle& style)
+	{
+		return style.display == DisplayMode::Flex || style.display == DisplayMode::InlineFlex;
+	}
+
+	static int cssFlexFindBlockForSerial(const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0) return -1;
+		const size_t limit = std::min<size_t>(doc.blocks.size(), 2048);
+		for (size_t i = 0; i < limit; ++i) {
+			if (doc.blocks[i].elementMetadata.serial == serial) return static_cast<int>(i);
+		}
+		return -1;
+	}
+
+	static uint64_t cssFlexParentSerial(const WebDocument& doc, uint64_t serial)
+	{
+		const HtmlElementRef* element = cssStructuralElementForSerial(doc, serial);
+		return element ? element->parentSerial : 0;
+	}
+
+	static bool cssFlexSerialDescendsFrom(const WebDocument& doc, uint64_t serial, uint64_t ancestor)
+	{
+		if (serial == 0 || ancestor == 0) return false;
+		uint64_t current = serial;
+		for (int depth = 0; current != 0 && depth < kCssFlexDepthCap * 2; ++depth) {
+			if (current == ancestor) return true;
+			current = cssFlexParentSerial(doc, current);
+		}
+		return false;
+	}
+
+	static bool cssFlexBlockContainsSerialBounded(const DocBlock& block, uint64_t serial)
+	{
+		if (serial == 0) return false;
+		if (block.elementMetadata.serial == serial) return true;
+		for (const HtmlElementRef& ancestor : block.ancestors) {
+			if (ancestor.serial == serial) return true;
+		}
+		return false;
+	}
+
+	static std::vector<CssFlexCandidate> cssFlexDirectCandidates(const WebDocument& doc,
+		uint64_t containerSerial, CssFlexLayoutSnapshot& snapshot)
+	{
+		std::vector<CssFlexCandidate> candidates;
+		candidates.reserve(32);
+		const size_t elementLimit = std::min<size_t>(doc.structuralElements.size(), 512);
+		for (size_t i = 0; i < elementLimit; ++i) {
+			const HtmlElementRef& element = doc.structuralElements[i];
+			if (element.serial == 0 || element.parentSerial != containerSerial) continue;
+			const WebStyle* style = cssStyleForSerial(doc, element.serial);
+			if (!style) continue;
+			CssFlexCandidate candidate;
+			candidate.serial = element.serial;
+			candidate.parentSerial = containerSerial;
+			candidate.blockIndex = cssFlexFindBlockForSerial(doc, element.serial);
+			candidate.sourceOrder = static_cast<int>(i);
+			candidate.style = *style;
+			candidates.push_back(std::move(candidate));
+		}
+		const size_t blockLimit = std::min<size_t>(doc.blocks.size(), 2048);
+		for (size_t i = 0; i < blockLimit; ++i) {
+			const DocBlock& block = doc.blocks[i];
+			if (block.elementMetadata.serial != 0 || block.style.displayNone) continue;
+			if (cssBlockParentSerial(doc, block) != containerSerial) continue;
+			CssFlexCandidate candidate;
+			candidate.parentSerial = containerSerial;
+			candidate.blockIndex = static_cast<int>(i);
+			candidate.sourceOrder = 10000 + static_cast<int>(i);
+			candidate.style = block.style;
+			candidate.anonymous = true;
+			candidate.text = block.text;
+			candidates.push_back(std::move(candidate));
+		}
+		const size_t inlineLimit = std::min<size_t>(doc.inlineItems.size(), 4096);
+		for (size_t i = 0; i < inlineLimit; ++i) {
+			const WebInlineItem& inlineItem = doc.inlineItems[i];
+			if (inlineItem.kind != InlineItemKind::TextRun || inlineItem.blockIndex >= 0 || inlineItem.text.empty()) continue;
+			if (inlineItem.ownerSerial != 0 && inlineItem.ownerSerial != containerSerial) continue;
+			if (inlineItem.ownerSerial == 0 && inlineItem.parentSerial != containerSerial &&
+				inlineItem.flowSerial != containerSerial) continue;
+			CssFlexCandidate candidate;
+			candidate.parentSerial = containerSerial;
+			candidate.sourceOrder = 20000 + static_cast<int>(i);
+			candidate.anonymous = true;
+			candidate.text = inlineItem.text;
+			candidate.style = inlineOwnerStyle(doc, inlineItem, doc.bodyStyle)
+				? *inlineOwnerStyle(doc, inlineItem, doc.bodyStyle) : doc.bodyStyle;
+			candidates.push_back(std::move(candidate));
+		}
+		std::stable_sort(candidates.begin(), candidates.end(), [](const CssFlexCandidate& a, const CssFlexCandidate& b) {
+			if (a.sourceOrder != b.sourceOrder) return a.sourceOrder < b.sourceOrder;
+			if (a.serial != b.serial) return a.serial < b.serial;
+			return a.blockIndex < b.blockIndex;
+		});
+		if (candidates.size() > kCssFlexItemCap) {
+			candidates.resize(kCssFlexItemCap);
+			snapshot.operationClamps++;
+		}
+		return candidates;
+	}
+
+	static int cssFlexResolveLength(const CssLengthValue& value, int basis, int fallback,
+		bool* outDefinite = nullptr, bool* outClamped = nullptr)
+	{
+		if (outDefinite) *outDefinite = false;
+		if (outClamped) *outClamped = false;
+		if (!value.valid || value.type == CssLengthType::Unset || value.type == CssLengthType::Auto ||
+			value.type == CssLengthType::Content || value.type == CssLengthType::None) return fallback;
+		int64_t resolved = value.value;
+		if (value.type == CssLengthType::Percent) {
+			if (basis < 0) return fallback;
+			resolved = static_cast<int64_t>(basis) * value.value / 100;
+		}
+		if (resolved < 0 || resolved > 8192) {
+			if (outClamped) *outClamped = true;
+			resolved = std::max<int64_t>(0, std::min<int64_t>(8192, resolved));
+		}
+		if (outDefinite) *outDefinite = true;
+		return static_cast<int>(resolved);
+	}
+
+	static bool cssFlexMarginAuto(const CssLengthValue& value, int legacy)
+	{
+		return (value.valid && value.type == CssLengthType::Auto) || legacy == -2;
+	}
+
+	static int cssFlexCandidateWidth(const WebDocument& doc, const CssFlexCandidate& candidate,
+		int availableWidth, int depth);
+	static int cssFlexCandidateHeight(const WebDocument& doc, const CssFlexCandidate& candidate,
+		int availableWidth, int depth);
+
+	static void cssFlexIntrinsicForSerial(const WebDocument& doc, uint64_t serial,
+		int availableWidth, int depth, int& outWidth, int& outHeight)
+	{
+		outWidth = 1;
+		outHeight = blockTextLineHeight(DocBlock{});
+		if (depth >= kCssFlexDepthCap) {
+			return;
+		}
+		const WebStyle* style = cssStyleForSerial(doc, serial);
+		if (!style) return;
+		CssFlexLayoutSnapshot scratch = s_cssFlexLayoutSnapshot;
+		std::vector<CssFlexCandidate> candidates = cssFlexDirectCandidates(doc, serial, scratch);
+		if (cssFlexContainerStyle(*style)) {
+			int main = 0;
+			int cross = 0;
+			const bool row = style->flexDirection == FlexDirectionMode::Row ||
+				style->flexDirection == FlexDirectionMode::RowReverse;
+			for (const CssFlexCandidate& candidate : candidates) {
+				if (candidate.style.displayNone || candidate.style.display == DisplayMode::None) continue;
+				if (candidate.style.position == PositionMode::Absolute) continue;
+				const int childW = cssFlexCandidateWidth(doc, candidate, availableWidth, depth + 1);
+				const int childH = cssFlexCandidateHeight(doc, candidate, availableWidth, depth + 1);
+				if (row) {
+					main = std::min(8192, main + childW);
+					cross = std::max(cross, childH);
+				} else {
+					main = std::min(8192, main + childH);
+					cross = std::max(cross, childW);
+				}
+			}
+			const int edgesW = cssHorizontalBoxEdges(*style);
+			const int edgesH = cssVerticalBoxEdges(*style);
+			if (row) {
+				outWidth = std::min(8192, main + edgesW);
+				outHeight = std::min(8192, cross + edgesH);
+			} else {
+				outWidth = std::min(8192, cross + edgesW);
+				outHeight = std::min(8192, main + edgesH);
+			}
+			return;
+		}
+		int width = 0;
+		int height = 0;
+		for (const CssFlexCandidate& candidate : candidates) {
+			if (candidate.style.displayNone || candidate.style.display == DisplayMode::None) continue;
+			if (candidate.blockIndex >= 0) {
+				width = std::max(width, cssFlexCandidateWidth(doc, candidate, availableWidth, depth + 1));
+				height = std::min(8192, height + cssFlexCandidateHeight(doc, candidate, availableWidth, depth + 1));
+			}
+		}
+		if (width == 0) {
+			for (const WebInlineItem& item : doc.inlineItems) {
+				if (item.kind != InlineItemKind::TextRun || item.text.empty()) continue;
+				if (item.ownerSerial == serial || item.parentSerial == serial || item.flowSerial == serial) {
+					const WebStyle* textStyle = inlineOwnerStyle(doc, item, *style);
+					width = std::max(width, inlineTextWidth(textStyle ? *textStyle : *style, item.text));
+					height = std::max(height, textStyle ? cssLineHeightOrDefault(*textStyle, defaultTextFontHeightPx() + 4) : defaultTextFontHeightPx() + 4);
+				}
+			}
+		}
+		outWidth = std::max(1, std::min(8192, width + cssHorizontalBoxEdges(*style)));
+		outHeight = std::max(1, std::min(8192, height + cssVerticalBoxEdges(*style)));
+	}
+
+	static int cssFlexCandidateWidth(const WebDocument& doc, const CssFlexCandidate& candidate,
+		int availableWidth, int depth)
+	{
+		if (candidate.blockIndex >= 0 && candidate.blockIndex < static_cast<int>(doc.blocks.size()) &&
+			!cssFlexContainerStyle(candidate.style)) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(candidate.blockIndex)];
+			return std::max(1, blockOuterWidth(block, std::max(1, availableWidth)));
+		}
+		if (candidate.serial != 0) {
+			int width = 1;
+			int height = 1;
+			cssFlexIntrinsicForSerial(doc, candidate.serial, availableWidth, depth, width, height);
+			return width;
+		}
+		return std::max(1, inlineTextWidth(candidate.style, candidate.text));
+	}
+
+	static int cssFlexCandidateHeight(const WebDocument& doc, const CssFlexCandidate& candidate,
+		int availableWidth, int depth)
+	{
+		if (candidate.blockIndex >= 0 && candidate.blockIndex < static_cast<int>(doc.blocks.size()) &&
+			!cssFlexContainerStyle(candidate.style)) {
+			return std::max(1, cssBlockBorderBoxHeightForFlow(doc, candidate.blockIndex));
+		}
+		if (candidate.serial != 0) {
+			int width = 1;
+			int height = 1;
+			cssFlexIntrinsicForSerial(doc, candidate.serial, availableWidth, depth, width, height);
+			return height;
+		}
+		return std::max(1, cssLineHeightOrDefault(candidate.style, defaultTextFontHeightPx() + 4));
+	}
+
+	static int cssFlexRootY(const WebDocument& doc, uint64_t serial)
+	{
+		const int ownBlock = cssFlexFindBlockForSerial(doc, serial);
+		if (ownBlock >= 0 && ownBlock < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()))
+			return s_cssMarginLayoutSnapshot.records[static_cast<size_t>(ownBlock)].borderBoxY;
+		for (int i = 0; i < static_cast<int>(doc.blocks.size()); ++i) {
+			if (!cssFlexBlockContainsSerialBounded(doc.blocks[static_cast<size_t>(i)], serial)) continue;
+			if (i < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()) &&
+				s_cssMarginLayoutSnapshot.records[static_cast<size_t>(i)].outerHeight > 0)
+				return s_cssMarginLayoutSnapshot.records[static_cast<size_t>(i)].borderBoxY;
+		}
+		return kHeadingY;
+	}
+
+	static int cssFlexRootX(const WebDocument& doc, uint64_t serial)
+	{
+		const int ownBlock = cssFlexFindBlockForSerial(doc, serial);
+		if (ownBlock >= 0 && ownBlock < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()))
+			return s_cssMarginLayoutSnapshot.records[static_cast<size_t>(ownBlock)].borderBoxX;
+		const WebStyle* style = cssStyleForSerial(doc, serial);
+		return kContentX + blockBodyMarginLeft(doc) + (style ? cssMarginLeftPx(*style, 0) : 0);
+	}
+
+	static void cssFlexTranslateDescendants(const WebDocument& doc, uint64_t serial,
+		int targetX, int targetY, int targetW, int targetH, uint64_t containerSerial,
+		CssFlexLayoutSnapshot& snapshot)
+	{
+		int originX = 0;
+		int originY = 0;
+		bool originFound = false;
+		const size_t blockLimit = std::min<size_t>(doc.blocks.size(), snapshot.blockOverrides.size());
+		for (size_t i = 0; i < blockLimit; ++i) {
+			const DocBlock& block = doc.blocks[i];
+			if (!cssFlexBlockContainsSerialBounded(block, serial)) continue;
+			if (block.elementMetadata.serial == serial) continue;
+			if (i < s_cssMarginLayoutSnapshot.records.size() &&
+				s_cssMarginLayoutSnapshot.records[i].outerHeight > 0) {
+				originX = s_cssMarginLayoutSnapshot.records[i].borderBoxX;
+				originY = s_cssMarginLayoutSnapshot.records[i].borderBoxY;
+				originFound = true;
+				break;
+			}
+		}
+		if (!originFound) return;
+		for (size_t i = 0; i < blockLimit; ++i) {
+			const DocBlock& block = doc.blocks[i];
+			if (!cssFlexBlockContainsSerialBounded(block, serial) || block.style.displayNone) continue;
+			CssFlexBlockOverride& overrideRecord = snapshot.blockOverrides[i];
+			if (overrideRecord.directItem) continue;
+			if (i >= s_cssMarginLayoutSnapshot.records.size()) continue;
+			const CssMarginFlowRecord& normal = s_cssMarginLayoutSnapshot.records[i];
+			if (normal.outerHeight <= 0) continue;
+			overrideRecord.x = cssBoundedGeometryAdd(targetX, normal.borderBoxX - originX);
+			overrideRecord.y = cssBoundedGeometryAdd(targetY, normal.borderBoxY - originY);
+			overrideRecord.w = std::max(1, std::min(8192, std::min(targetW, normal.borderBoxW)));
+			overrideRecord.h = std::max(1, std::min(8192, std::min(targetH, normal.borderBoxH)));
+			overrideRecord.itemIndex = -1;
+			overrideRecord.containerSerial = containerSerial;
+			overrideRecord.complete = true;
+		}
+	}
+
+	static int cssFlexGapPx(const CssLengthValue& preferred, const CssLengthValue& fallback,
+		int basis, CssFlexLayoutSnapshot& snapshot, gxos::web::CssDiagnostics& diagnostics)
+	{
+		CssLengthValue value = preferred.valid ? preferred : fallback;
+		bool clamped = false;
+		const int result = std::max(0, cssFlexResolveLength(value, basis, 0, nullptr, &clamped));
+		if (clamped) {
+			++snapshot.gapClamps;
+			++diagnostics.flexGapClamps;
+		}
+		return result;
+	}
+
+	static void buildCssFlexLayout(const WebDocument& doc, CssFlexLayoutSnapshot& snapshot)
+	{
+		snapshot = CssFlexLayoutSnapshot{};
+		snapshot.url = doc.url;
+		snapshot.blockCount = doc.blocks.size();
+		snapshot.fingerprint = cssMarginLayoutFingerprint(doc);
+		snapshot.blockOverrides.resize(doc.blocks.size());
+		if (s_cssFlexLayoutBuilding) return;
+		s_cssFlexLayoutBuilding = true;
+		snapshot.building = true;
+		gxos::web::CssDiagnostics& diagnostics = const_cast<WebDocument&>(doc).cssDiagnostics;
+		diagnostics.flexContainers = diagnostics.flexItems = diagnostics.flexAnonymousItems = 0;
+		diagnostics.inlineFlexContainers = diagnostics.flexNestedContainers = 0;
+		diagnostics.flexWrapUnsupported = diagnostics.flexAbsoluteExcluded = 0;
+		diagnostics.flexDisplayNoneExcluded = diagnostics.flexOrderSortItems = 0;
+		diagnostics.flexBaseSizeQueries = diagnostics.flexIntrinsicQueries = 0;
+		diagnostics.flexAutomaticMinimumApplied = diagnostics.flexAutomaticMinimumZero = 0;
+		diagnostics.flexGrowIterations = diagnostics.flexShrinkIterations = 0;
+		diagnostics.flexFreezeIterations = diagnostics.flexCrossSizePasses = 0;
+		diagnostics.flexBaselineItems = diagnostics.flexAutoMarginAbsorptions = 0;
+		diagnostics.flexGapClamps = diagnostics.flexGeometryClamps = 0;
+		diagnostics.flexDepthClamps = diagnostics.flexOperationClamps = 0;
+		diagnostics.flexEvidenceRecords = 0;
+		diagnostics.flexEvidence.clear();
+
+		std::vector<uint64_t> roots;
+		const uint64_t bodySerial = doc.hasBodyElement ? doc.bodyElement.serial : 0;
+		if (cssFlexContainerStyle(doc.bodyStyle)) roots.push_back(bodySerial);
+		const size_t elementLimit = std::min<size_t>(doc.structuralElements.size(), kCssFlexContainerCap * 4);
+		for (size_t i = 0; i < elementLimit; ++i) {
+			const HtmlElementRef& element = doc.structuralElements[i];
+			if (element.serial == 0) continue;
+			const WebStyle* style = cssStyleForSerial(doc, element.serial);
+			if (!style || !cssFlexContainerStyle(*style)) continue;
+			bool nested = false;
+			uint64_t parent = element.parentSerial;
+			for (int depth = 0; parent != 0 && depth < kCssFlexDepthCap; ++depth) {
+				const WebStyle* parentStyle = cssStyleForSerial(doc, parent);
+				if (parentStyle && cssFlexContainerStyle(*parentStyle)) {
+					nested = true;
+					break;
+				}
+				parent = cssFlexParentSerial(doc, parent);
+			}
+			if (!nested && std::find(roots.begin(), roots.end(), element.serial) == roots.end())
+				roots.push_back(element.serial);
+		}
+		if (roots.size() > kCssFlexContainerCap) {
+			roots.resize(kCssFlexContainerCap);
+			snapshot.operationClamps++;
+		}
+
+		std::function<void(uint64_t, int, int, int, int, int, bool)> layoutContainer;
+		layoutContainer = [&](uint64_t serial, int x, int y, int assignedW, int assignedH,
+			int depth, bool nestedCall) {
+			if (snapshot.operations >= kCssFlexOperationCap) {
+				++snapshot.operationClamps;
+				return;
+			}
+			if (depth >= kCssFlexDepthCap) {
+				++snapshot.depthClamps;
+				return;
+			}
+			const WebStyle* stylePtr = cssStyleForSerial(doc, serial);
+			if (!stylePtr || !cssFlexContainerStyle(*stylePtr)) return;
+			const WebStyle& style = *stylePtr;
+			std::vector<CssFlexCandidate> candidates = cssFlexDirectCandidates(doc, serial, snapshot);
+			std::vector<CssFlexItemRecord> localItems;
+			localItems.reserve(candidates.size());
+			const bool row = style.flexDirection == FlexDirectionMode::Row ||
+				style.flexDirection == FlexDirectionMode::RowReverse;
+			const bool reverse = style.flexDirection == FlexDirectionMode::RowReverse ||
+				style.flexDirection == FlexDirectionMode::ColumnReverse;
+			if (style.flexWrap != FlexWrapMode::NoWrap) {
+				++snapshot.wrapUnsupported;
+				++diagnostics.flexWrapUnsupported;
+			}
+			int intrinsicW = 1;
+			int intrinsicH = 1;
+			for (const CssFlexCandidate& candidate : candidates) {
+				if (candidate.style.displayNone || candidate.style.display == DisplayMode::None) continue;
+				if (candidate.style.position == PositionMode::Absolute) continue;
+				intrinsicW = std::max(intrinsicW, cssFlexCandidateWidth(doc, candidate,
+					std::max(1, assignedW > 0 ? assignedW : cssBodyContentWidth(doc)), depth + 1));
+				intrinsicH = std::max(intrinsicH, cssFlexCandidateHeight(doc, candidate,
+					std::max(1, assignedW > 0 ? assignedW : cssBodyContentWidth(doc)), depth + 1));
+				++snapshot.intrinsicQueries;
+				++diagnostics.flexIntrinsicQueries;
+			}
+			const int horizontalEdges = cssHorizontalBoxEdges(style);
+			const int verticalEdges = cssVerticalBoxEdges(style);
+			bool widthDefinite = assignedW > 0;
+			bool heightDefinite = assignedH > 0;
+			int outerW = assignedW > 0 ? assignedW : 0;
+			int outerH = assignedH > 0 ? assignedH : 0;
+			if (!widthDefinite) {
+				bool definite = false;
+				outerW = cssFlexResolveLength(style.widthValue, std::max(1, cssBodyContentWidth(doc)),
+					style.display == DisplayMode::InlineFlex ? intrinsicW : std::max(1, cssBodyContentWidth(doc)), &definite);
+				widthDefinite = definite || style.width >= 0 || style.widthPercent >= 0;
+				if (!widthDefinite) outerW = style.display == DisplayMode::InlineFlex ? intrinsicW : cssBodyContentWidth(doc);
+				if (style.boxSizing == BoxSizingMode::ContentBox && definite) outerW = cssBoundedGeometryAdd(outerW, horizontalEdges);
+			}
+			if (!heightDefinite) {
+				bool definite = false;
+				outerH = cssFlexResolveLength(style.heightValue, -1, 0, &definite);
+				heightDefinite = definite || style.height >= 0 || style.heightPercent >= 0;
+				if (heightDefinite && style.boxSizing == BoxSizingMode::ContentBox) outerH = cssBoundedGeometryAdd(outerH, verticalEdges);
+			}
+			outerW = std::max(1, std::min(8192, outerW));
+			int provisionalContentW = std::max(1, outerW - horizontalEdges);
+			int provisionalMain = row ? provisionalContentW : (outerH > 0 ? std::max(1, outerH - verticalEdges) : intrinsicH);
+			const int mainBasis = std::max(1, provisionalMain);
+			for (const CssFlexCandidate& candidate : candidates) {
+				if (candidate.style.displayNone || candidate.style.display == DisplayMode::None) {
+					++snapshot.displayNoneExcluded;
+					++diagnostics.flexDisplayNoneExcluded;
+					continue;
+				}
+				if (candidate.style.position == PositionMode::Absolute) {
+					++snapshot.absoluteExcluded;
+					++diagnostics.flexAbsoluteExcluded;
+					continue;
+				}
+				CssFlexItemRecord item;
+				item.containerSerial = serial;
+				item.itemSerial = candidate.serial;
+				item.parentSerial = candidate.parentSerial;
+				item.blockIndex = candidate.blockIndex;
+				item.sourceOrder = candidate.sourceOrder;
+				item.style = candidate.style;
+				item.anonymous = candidate.anonymous;
+				item.text = candidate.text;
+				item.nested = cssFlexContainerStyle(candidate.style);
+				if (item.nested) ++snapshot.nestedContainers;
+				if (item.anonymous) ++snapshot.anonymousItems;
+				int intrinsicMain = row ? cssFlexCandidateWidth(doc, candidate, provisionalContentW, depth + 1)
+					: cssFlexCandidateHeight(doc, candidate, provisionalContentW, depth + 1);
+				int intrinsicCross = row ? cssFlexCandidateHeight(doc, candidate, provisionalContentW, depth + 1)
+					: cssFlexCandidateWidth(doc, candidate, provisionalContentW, depth + 1);
+				int mainEdges = row ? cssHorizontalBoxEdges(candidate.style) : cssVerticalBoxEdges(candidate.style);
+				int basisMain = intrinsicMain;
+				if (candidate.style.flexBasisSpecified) {
+					bool definite = false;
+					const int contentBasis = cssFlexResolveLength(candidate.style.flexBasisValue, mainBasis, intrinsicMain, &definite);
+					if (definite) {
+						basisMain = candidate.style.boxSizing == BoxSizingMode::BorderBox
+							? contentBasis : cssBoundedGeometryAdd(contentBasis, mainEdges);
+					}
+				}
+				if (!candidate.style.flexBasisSpecified || !basisMain)
+					basisMain = intrinsicMain;
+				const CssLengthValue& crossValue = row ? candidate.style.heightValue : candidate.style.widthValue;
+				const int crossLegacy = row ? candidate.style.height : candidate.style.width;
+				const int crossPercent = row ? candidate.style.heightPercent : candidate.style.widthPercent;
+				bool crossDefinite = false;
+				const int resolvedCross = cssFlexResolveLength(crossValue, row ? -1 : provisionalContentW,
+					intrinsicCross, &crossDefinite);
+				if (crossDefinite) {
+					const int crossEdges = row ? cssVerticalBoxEdges(candidate.style) : cssHorizontalBoxEdges(candidate.style);
+					intrinsicCross = candidate.style.boxSizing == BoxSizingMode::BorderBox
+						? resolvedCross : cssBoundedGeometryAdd(resolvedCross, crossEdges);
+				} else if (crossLegacy >= 0 || crossPercent >= 0) {
+					intrinsicCross = std::max(1, crossLegacy >= 0 ? crossLegacy : intrinsicCross);
+				}
+				item.baseMain = std::max(0, std::min(8192, basisMain));
+				item.hypotheticalMain = item.baseMain;
+				item.targetMain = item.baseMain;
+				item.crossBase = std::max(1, std::min(8192, intrinsicCross));
+				item.marginLeft = cssMarginLeftPx(candidate.style, 0);
+				item.marginRight = cssMarginRightPx(candidate.style, 0);
+				item.marginTop = cssMarginTopPx(candidate.style, 0);
+				item.marginBottom = cssMarginBottomPx(candidate.style, 0);
+				item.usedMarginLeft = item.marginLeft;
+				item.usedMarginRight = item.marginRight;
+				item.usedMarginTop = item.marginTop;
+				item.usedMarginBottom = item.marginBottom;
+				item.flexGrow1000 = std::max(0, candidate.style.flexGrow1000);
+				item.flexShrink1000 = std::max(0, candidate.style.flexShrink1000);
+				item.scaledShrink = std::min(64000000, item.flexShrink1000 * std::max(1, item.baseMain));
+				item.autoMinimumZero = row
+					? (candidate.style.overflowX != OverflowMode::Visible)
+					: (candidate.style.overflowY != OverflowMode::Visible);
+				const int automaticMinimum = item.autoMinimumZero ? 0 : std::max(0, std::min(8192, intrinsicMain));
+				CssResolvedLength minResolved = resolveCssLength(row ? candidate.style.minWidthValue : candidate.style.minHeightValue,
+					row ? candidate.style.minWidth : candidate.style.minHeight,
+					row ? candidate.style.minWidthPercent : candidate.style.minHeightPercent, mainBasis);
+				item.minMain = minResolved.definite ? std::max(0, minResolved.px) : automaticMinimum;
+				item.autoMinimumApplied = !minResolved.definite && !item.autoMinimumZero;
+				if (item.autoMinimumApplied) {
+					++snapshot.automaticMinimumApplied;
+					++diagnostics.flexAutomaticMinimumApplied;
+				}
+				if (item.autoMinimumZero) {
+					++snapshot.automaticMinimumZero;
+					++diagnostics.flexAutomaticMinimumZero;
+				}
+				CssResolvedLength maxResolved = resolveCssLength(row ? candidate.style.maxWidthValue : candidate.style.maxHeightValue,
+					row ? candidate.style.maxWidth : candidate.style.maxHeight,
+					row ? candidate.style.maxWidthPercent : candidate.style.maxHeightPercent, mainBasis);
+				item.maxMain = maxResolved.definite ? std::max(0, maxResolved.px) : 8192;
+				if (item.maxMain < item.minMain) item.maxMain = item.minMain;
+				item.hypotheticalMain = std::max(item.minMain, std::min(item.maxMain, item.hypotheticalMain));
+				item.baseMain = std::max(0, std::min(8192, item.baseMain));
+				localItems.push_back(std::move(item));
+				++snapshot.baseSizeQueries;
+				++diagnostics.flexBaseSizeQueries;
+			}
+			std::stable_sort(localItems.begin(), localItems.end(), [](const CssFlexItemRecord& a, const CssFlexItemRecord& b) {
+				if (a.style.order != b.style.order) return a.style.order < b.style.order;
+				return a.sourceOrder < b.sourceOrder;
+			});
+			for (size_t i = 0; i < localItems.size(); ++i) {
+				localItems[i].visualOrder = static_cast<int>(i);
+				if (localItems[i].style.order != 0) {
+					++snapshot.orderSortItems;
+					++diagnostics.flexOrderSortItems;
+				}
+			}
+			const int gap = row
+				? cssFlexGapPx(style.columnGapValue, style.gapValue, mainBasis, snapshot, diagnostics)
+				: cssFlexGapPx(style.rowGapValue, style.gapValue, mainBasis, snapshot, diagnostics);
+			int naturalMain = 0;
+			int naturalCross = 0;
+			for (const CssFlexItemRecord& item : localItems) {
+				const int before = row ? item.marginLeft + item.marginRight : item.marginTop + item.marginBottom;
+				naturalMain = std::min(8192, naturalMain + item.hypotheticalMain + before);
+				naturalCross = std::max(naturalCross, item.crossBase +
+					(row ? item.marginTop + item.marginBottom : item.marginLeft + item.marginRight));
+			}
+			if (localItems.size() > 1) naturalMain = std::min(8192,
+				naturalMain + gap * static_cast<int>(localItems.size() - 1));
+			if (!heightDefinite && !row) {
+				outerH = std::max(1, naturalMain + verticalEdges);
+				heightDefinite = false;
+			}
+			if (!widthDefinite && !row) outerW = std::max(1, naturalCross + horizontalEdges);
+			if (!heightDefinite && row) outerH = std::max(1, naturalCross + verticalEdges);
+			if (!widthDefinite && row) outerW = std::max(1, outerW);
+			outerW = std::max(1, std::min(8192, outerW));
+			outerH = std::max(1, std::min(8192, outerH > 0 ? outerH : naturalCross + verticalEdges));
+			const int contentX = x + cssBorderLeftPx(style) + cssPaddingLeftPx(style, 0);
+			const int contentY = y + cssBorderTopPx(style) + cssPaddingTopPx(style, 0);
+			const int contentW = std::max(1, outerW - horizontalEdges);
+			const int contentH = std::max(1, outerH - verticalEdges);
+			const int mainSize = row ? contentW : contentH;
+			const int crossSize = row ? contentH : contentW;
+			++snapshot.crossSizePasses;
+			++diagnostics.flexCrossSizePasses;
+			CssFlexContainerRecord container;
+			container.serial = serial;
+			container.parentSerial = cssFlexParentSerial(doc, serial);
+			container.x = x; container.y = y; container.w = outerW; container.h = outerH;
+			container.contentX = contentX; container.contentY = contentY;
+			container.contentW = contentW; container.contentH = contentH;
+			container.depth = depth;
+			container.itemBegin = static_cast<int>(snapshot.items.size());
+			container.inlineParticipation = style.display == DisplayMode::InlineFlex;
+			container.wrapUnsupported = style.flexWrap != FlexWrapMode::NoWrap;
+			container.sourceOrder = static_cast<int>(snapshot.containers.size());
+			const int containerIndex = static_cast<int>(snapshot.containers.size());
+			if (snapshot.containers.size() < kCssFlexContainerCap) snapshot.containers.push_back(container);
+			else { ++snapshot.operationClamps; return; }
+
+			int occupied = naturalMain;
+			int freeSpace = mainSize - occupied;
+			for (int iteration = 0; iteration < 16 && !localItems.empty(); ++iteration) {
+				int used = 0;
+				int factor = 0;
+				for (const CssFlexItemRecord& item : localItems) {
+					used += item.targetMain + (row ? item.marginLeft + item.marginRight : item.marginTop + item.marginBottom);
+					if (!item.frozen) factor += freeSpace >= 0 ? item.flexGrow1000 : item.scaledShrink;
+				}
+				if (localItems.size() > 1) used += gap * static_cast<int>(localItems.size() - 1);
+				const int remaining = mainSize - used;
+				if (remaining == 0 || factor <= 0) break;
+				bool froze = false;
+				for (CssFlexItemRecord& item : localItems) {
+					if (item.frozen) continue;
+					const int share = static_cast<int>(static_cast<int64_t>(remaining) *
+						(freeSpace >= 0 ? item.flexGrow1000 : item.scaledShrink) / factor);
+					const int proposed = item.targetMain + share;
+					const int clamped = std::max(item.minMain, std::min(item.maxMain, proposed));
+					if (clamped != proposed) {
+						item.frozen = true;
+						froze = true;
+					}
+					item.targetMain = std::max(0, std::min(8192, clamped));
+				}
+				if (freeSpace >= 0) ++snapshot.growIterations;
+				else ++snapshot.shrinkIterations;
+				if (froze) ++snapshot.freezeIterations;
+				++diagnostics.flexFreezeIterations;
+				if (!froze) break;
+			}
+			if (snapshot.growIterations > 0) ++diagnostics.flexGrowIterations;
+			if (snapshot.shrinkIterations > 0) ++diagnostics.flexShrinkIterations;
+			int usedWithoutAuto = 0;
+			int autoMargins = 0;
+			for (CssFlexItemRecord& item : localItems) {
+				if (row) {
+					item.usedMarginLeft = cssFlexMarginAuto(item.style.marginLeftValue, item.style.marginLeft) ? 0 : item.marginLeft;
+					item.usedMarginRight = cssFlexMarginAuto(item.style.marginRightValue, item.style.marginRight) ? 0 : item.marginRight;
+					if (cssFlexMarginAuto(item.style.marginLeftValue, item.style.marginLeft)) ++autoMargins;
+					if (cssFlexMarginAuto(item.style.marginRightValue, item.style.marginRight)) ++autoMargins;
+					usedWithoutAuto += item.targetMain + item.usedMarginLeft + item.usedMarginRight;
+				} else {
+					item.usedMarginTop = cssFlexMarginAuto(item.style.marginTopValue, item.style.marginTop) ? 0 : item.marginTop;
+					item.usedMarginBottom = cssFlexMarginAuto(item.style.marginBottomValue, item.style.marginBottom) ? 0 : item.marginBottom;
+					if (cssFlexMarginAuto(item.style.marginTopValue, item.style.marginTop)) ++autoMargins;
+					if (cssFlexMarginAuto(item.style.marginBottomValue, item.style.marginBottom)) ++autoMargins;
+					usedWithoutAuto += item.targetMain + item.usedMarginTop + item.usedMarginBottom;
+				}
+			}
+			if (localItems.size() > 1) usedWithoutAuto += gap * static_cast<int>(localItems.size() - 1);
+			int justifyFree = std::max(0, mainSize - usedWithoutAuto);
+			if (autoMargins > 0 && justifyFree > 0) {
+				const int each = justifyFree / autoMargins;
+				int remainder = justifyFree % autoMargins;
+				for (CssFlexItemRecord& item : localItems) {
+					if (row) {
+						if (cssFlexMarginAuto(item.style.marginLeftValue, item.style.marginLeft)) { item.usedMarginLeft = each + (remainder-- > 0 ? 1 : 0); ++item.autoMainMargins; }
+						if (cssFlexMarginAuto(item.style.marginRightValue, item.style.marginRight)) { item.usedMarginRight = each + (remainder-- > 0 ? 1 : 0); ++item.autoMainMargins; }
+					} else {
+						if (cssFlexMarginAuto(item.style.marginTopValue, item.style.marginTop)) { item.usedMarginTop = each + (remainder-- > 0 ? 1 : 0); ++item.autoMainMargins; }
+						if (cssFlexMarginAuto(item.style.marginBottomValue, item.style.marginBottom)) { item.usedMarginBottom = each + (remainder-- > 0 ? 1 : 0); ++item.autoMainMargins; }
+					}
+				}
+				justifyFree = 0;
+				++snapshot.autoMarginAbsorptions;
+				++diagnostics.flexAutoMarginAbsorptions;
+			}
+			int leading = 0;
+			int between = gap;
+			const JustifyContentMode justify = style.justifyContent;
+			if (justifyFree > 0) {
+				switch (justify) {
+				case JustifyContentMode::FlexEnd: leading = justifyFree; break;
+				case JustifyContentMode::Center: leading = justifyFree / 2; break;
+				case JustifyContentMode::SpaceBetween:
+					if (localItems.size() > 1) between += justifyFree / static_cast<int>(localItems.size() - 1);
+					else leading = justifyFree / 2;
+					break;
+				case JustifyContentMode::SpaceAround:
+					between += justifyFree / static_cast<int>(std::max<size_t>(1, localItems.size()));
+					leading = between / 2;
+					break;
+				case JustifyContentMode::SpaceEvenly:
+					between += justifyFree / static_cast<int>(localItems.size() + 1);
+					leading = between;
+					break;
+				default: break;
+				}
+			}
+			int cursor = reverse ? (row ? contentX + mainSize - leading : contentY + mainSize - leading)
+				: (row ? contentX + leading : contentY + leading);
+			for (size_t i = 0; i < localItems.size(); ++i) {
+				CssFlexItemRecord& item = localItems[i];
+				const int beforeMain = row ? item.usedMarginLeft : item.usedMarginTop;
+				const int afterMain = row ? item.usedMarginRight : item.usedMarginBottom;
+				const int crossBefore = row ? item.usedMarginTop : item.usedMarginLeft;
+				const int crossAfter = row ? item.usedMarginBottom : item.usedMarginRight;
+				int cross = item.crossBase;
+				AlignSelfMode align = item.style.alignSelf;
+				if (!item.style.alignSelfSpecified || align == AlignSelfMode::Auto) align = static_cast<AlignSelfMode>(style.alignItems);
+				const bool crossAutoBefore = row
+					? cssFlexMarginAuto(item.style.marginTopValue, item.style.marginTop)
+					: cssFlexMarginAuto(item.style.marginLeftValue, item.style.marginLeft);
+				const bool crossAutoAfter = row
+					? cssFlexMarginAuto(item.style.marginBottomValue, item.style.marginBottom)
+					: cssFlexMarginAuto(item.style.marginRightValue, item.style.marginRight);
+				int crossFree = std::max(0, crossSize - cross - crossBefore - crossAfter);
+				if (align == AlignSelfMode::Stretch && !crossAutoBefore && !crossAutoAfter) cross = std::max(0, crossSize - crossBefore - crossAfter);
+				int crossOffset = crossBefore;
+				if (crossAutoBefore || crossAutoAfter) {
+					const int count = static_cast<int>(crossAutoBefore) + static_cast<int>(crossAutoAfter);
+					const int each = count > 0 ? crossFree / count : 0;
+					crossOffset = crossAutoBefore ? each : 0;
+					if (crossAutoBefore || crossAutoAfter) ++item.autoCrossMargins;
+				} else if (align == AlignSelfMode::FlexEnd) crossOffset += crossFree;
+				else if (align == AlignSelfMode::Center) crossOffset += crossFree / 2;
+				else if (align == AlignSelfMode::Baseline) {
+					crossOffset += std::max(0, crossFree - std::max(1, blockTextLineHeight(
+						item.blockIndex >= 0 ? doc.blocks[static_cast<size_t>(item.blockIndex)] : DocBlock{}))) ;
+					item.baseline = crossOffset + cross;
+					++snapshot.baselineItems;
+					++diagnostics.flexBaselineItems;
+				}
+				if (!reverse) {
+					const int mainPos = cursor + beforeMain;
+					if (row) { item.x = mainPos; item.y = contentY + crossOffset; item.w = item.targetMain; item.h = std::max(1, cross); }
+					else { item.x = contentX + crossOffset; item.y = mainPos; item.w = std::max(1, cross); item.h = item.targetMain; }
+					cursor = mainPos + item.targetMain + afterMain + between;
+				} else {
+					cursor -= beforeMain + item.targetMain;
+					const int mainPos = cursor;
+					if (row) { item.x = mainPos; item.y = contentY + crossOffset; item.w = item.targetMain; item.h = std::max(1, cross); }
+					else { item.x = contentX + crossOffset; item.y = mainPos; item.w = std::max(1, cross); item.h = item.targetMain; }
+					cursor -= afterMain + between;
+				}
+				item.x = std::max(kContentX - 8192, std::min(kContentX + kContentW + 8192, item.x));
+				item.y = std::max(0, std::min(8192, item.y));
+				item.w = std::max(1, std::min(8192, item.w));
+				item.h = std::max(1, std::min(8192, item.h));
+				const int itemIndex = static_cast<int>(snapshot.items.size());
+				snapshot.items.push_back(item);
+				if (item.blockIndex >= 0 && item.blockIndex < static_cast<int>(snapshot.blockOverrides.size())) {
+					CssFlexBlockOverride& overrideRecord = snapshot.blockOverrides[static_cast<size_t>(item.blockIndex)];
+					overrideRecord.x = item.x; overrideRecord.y = item.y;
+					overrideRecord.w = item.w; overrideRecord.h = item.h;
+					overrideRecord.itemIndex = itemIndex; overrideRecord.containerSerial = serial;
+					overrideRecord.directItem = true;
+				}
+				if (item.itemSerial != 0 && item.blockIndex < 0) {
+					cssFlexTranslateDescendants(doc, item.itemSerial, item.x, item.y, item.w, item.h, serial, snapshot);
+				}
+				if (item.nested && item.itemSerial != 0) {
+					layoutContainer(item.itemSerial, item.x, item.y, item.w, item.h, depth + 1, true);
+				}
+				++snapshot.operations;
+			}
+			if (containerIndex < static_cast<int>(snapshot.containers.size())) {
+				snapshot.containers[static_cast<size_t>(containerIndex)].itemCount =
+					static_cast<int>(snapshot.items.size()) - snapshot.containers[static_cast<size_t>(containerIndex)].itemBegin;
+			}
+			if (nestedCall) ++diagnostics.flexNestedContainers;
+		};
+
+		for (uint64_t root : roots) {
+			const WebStyle* style = cssStyleForSerial(doc, root);
+			if (!style || !cssFlexContainerStyle(*style)) continue;
+			const int rootX = cssFlexRootX(doc, root);
+			const int rootY = cssFlexRootY(doc, root);
+			layoutContainer(root, rootX, rootY, -1, -1, 0, false);
+		}
+		snapshot.flexContainers = static_cast<int>(snapshot.containers.size());
+		snapshot.flexItems = static_cast<int>(snapshot.items.size());
+		for (const CssFlexContainerRecord& container : snapshot.containers) {
+			snapshot.documentExtent = std::max(snapshot.documentExtent, container.y + container.h);
+			if (container.inlineParticipation) ++snapshot.inlineFlexContainers;
+		}
+		if (snapshot.documentExtent <= 0) snapshot.documentExtent = s_cssMarginLayoutSnapshot.documentHeight;
+		snapshot.documentExtent = std::max(snapshot.documentExtent, s_cssMarginLayoutSnapshot.documentHeight);
+		for (const CssFlexContainerRecord& container : snapshot.containers) {
+			if (snapshot.evidenceRecords >= 128 || snapshot.evidence.size() >= 32768) break;
+			std::string containerId;
+			for (const HtmlElementRef& element : doc.structuralElements) {
+				if (element.serial == container.serial) {
+					containerId = element.id;
+					break;
+				}
+			}
+			std::ostringstream line;
+			line << "id=" << containerId << ",serial=" << container.serial << ",parent=" << container.parentSerial
+				<< ",x=" << container.x << ",y=" << container.y << ",w=" << container.w << ",h=" << container.h
+				<< ",items=" << container.itemCount << ",depth=" << container.depth
+				<< ",wrap=" << (container.wrapUnsupported ? "unsupported" : "nowrap") << "\n";
+			const std::string text = line.str();
+			if (snapshot.evidence.size() + text.size() <= 32768) {
+				snapshot.evidence += text;
+				++snapshot.evidenceRecords;
+			}
+		}
+		for (const CssFlexItemRecord& item : snapshot.items) {
+			if (snapshot.evidenceRecords >= 128 || snapshot.evidence.size() >= 32768) break;
+			std::string itemId = item.blockIndex >= 0 && item.blockIndex < static_cast<int>(doc.blocks.size())
+				? doc.blocks[static_cast<size_t>(item.blockIndex)].id : "";
+			if (itemId.empty() && item.itemSerial != 0) {
+				for (const HtmlElementRef& element : doc.structuralElements) {
+					if (element.serial == item.itemSerial) {
+						itemId = element.id;
+						break;
+					}
+				}
+			}
+			std::ostringstream line;
+			line << "item-id=" << itemId << ",item-serial=" << item.itemSerial << ",container=" << item.containerSerial
+				<< ",block-index=" << item.blockIndex << ",anonymous=" << (item.anonymous ? "yes" : "no")
+				<< ",source-order=" << item.sourceOrder << ",visual-order=" << item.visualOrder
+				<< ",base-main=" << item.baseMain << ",target-main=" << item.targetMain
+				<< ",box=" << item.x << ":" << item.y << ":" << item.w << ":" << item.h
+				<< ",grow=" << item.flexGrow1000 << ",shrink=" << item.flexShrink1000
+				<< ",nested=" << (item.nested ? "yes" : "no") << "\n";
+			const std::string text = line.str();
+			if (snapshot.evidence.size() + text.size() <= 32768) {
+				snapshot.evidence += text;
+				++snapshot.evidenceRecords;
+			}
+		}
+		snapshot.valid = true;
+		snapshot.building = false;
+		diagnostics.flexContainers = snapshot.flexContainers;
+		diagnostics.inlineFlexContainers = snapshot.inlineFlexContainers;
+		diagnostics.flexItems = snapshot.flexItems;
+		diagnostics.flexAnonymousItems = snapshot.anonymousItems;
+		diagnostics.flexNestedContainers = snapshot.nestedContainers;
+		diagnostics.flexWrapUnsupported = snapshot.wrapUnsupported;
+		diagnostics.flexAbsoluteExcluded = snapshot.absoluteExcluded;
+		diagnostics.flexDisplayNoneExcluded = snapshot.displayNoneExcluded;
+		diagnostics.flexOrderSortItems = snapshot.orderSortItems;
+		diagnostics.flexBaseSizeQueries = snapshot.baseSizeQueries;
+		diagnostics.flexIntrinsicQueries = snapshot.intrinsicQueries;
+		diagnostics.flexAutomaticMinimumApplied = snapshot.automaticMinimumApplied;
+		diagnostics.flexAutomaticMinimumZero = snapshot.automaticMinimumZero;
+		diagnostics.flexGrowIterations = snapshot.growIterations;
+		diagnostics.flexShrinkIterations = snapshot.shrinkIterations;
+		diagnostics.flexFreezeIterations = snapshot.freezeIterations;
+		diagnostics.flexCrossSizePasses = snapshot.crossSizePasses;
+		diagnostics.flexBaselineItems = snapshot.baselineItems;
+		diagnostics.flexAutoMarginAbsorptions = snapshot.autoMarginAbsorptions;
+		diagnostics.flexGapClamps = snapshot.gapClamps;
+		diagnostics.flexGeometryClamps = snapshot.geometryClamps;
+		diagnostics.flexDepthClamps = snapshot.depthClamps;
+		diagnostics.flexOperationClamps = snapshot.operationClamps;
+		diagnostics.flexEvidenceRecords = snapshot.evidenceRecords;
+		diagnostics.flexEvidence = snapshot.evidence;
+		s_cssFlexLayoutBuilding = false;
+	}
+
+	static void ensureCssFlexLayout(const WebDocument& doc)
+	{
+		const uint64_t fingerprint = cssMarginLayoutFingerprint(doc);
+		if (s_cssFlexLayoutSnapshot.valid && s_cssFlexLayoutSnapshot.url == doc.url &&
+			s_cssFlexLayoutSnapshot.blockCount == doc.blocks.size() &&
+			s_cssFlexLayoutSnapshot.fingerprint == fingerprint) return;
+		bool hasFlexContainer = cssFlexContainerStyle(doc.bodyStyle);
+		if (!hasFlexContainer) {
+			const size_t elementLimit = std::min<size_t>(doc.structuralElements.size(), kCssFlexContainerCap * 4);
+			for (size_t i = 0; i < elementLimit && !hasFlexContainer; ++i) {
+				const HtmlElementRef& element = doc.structuralElements[i];
+				const WebStyle* style = cssStyleForSerial(doc, element.serial);
+				hasFlexContainer = style && cssFlexContainerStyle(*style);
+			}
+		}
+		if (!hasFlexContainer) {
+			s_cssFlexLayoutSnapshot = CssFlexLayoutSnapshot{};
+			s_cssFlexLayoutSnapshot.url = doc.url;
+			s_cssFlexLayoutSnapshot.blockCount = doc.blocks.size();
+			s_cssFlexLayoutSnapshot.fingerprint = fingerprint;
+			s_cssFlexLayoutSnapshot.blockOverrides.resize(doc.blocks.size());
+			s_cssFlexLayoutSnapshot.valid = true;
+			return;
+		}
+		ensureCssMarginLayout(doc);
+		buildCssFlexLayout(doc, s_cssFlexLayoutSnapshot);
+	}
+
+	static const CssFlexBlockOverride* cssFlexBlockOverrideForBlock(const WebDocument& doc, int blockIndex)
+	{
+		if (!s_cssFlexLayoutSnapshot.valid || s_cssFlexLayoutBuilding || blockIndex < 0 ||
+			blockIndex >= static_cast<int>(s_cssFlexLayoutSnapshot.blockOverrides.size()) ||
+			blockIndex >= static_cast<int>(doc.blocks.size())) return nullptr;
+		const CssFlexBlockOverride& record = s_cssFlexLayoutSnapshot.blockOverrides[static_cast<size_t>(blockIndex)];
+		return record.w > 0 && record.h > 0 ? &record : nullptr;
+	}
+
 	static CssPaintRect cssViewportClipRect()
 	{
 		return CssPaintRect{kContentX, kToolbarH + 6, kContentW, kContentH};
@@ -5963,6 +7010,11 @@ namespace {
 	static int cssBlockLayoutY(const WebDocument& doc, int blockIndex)
 	{
 		ensureCssMarginLayout(doc);
+		if (const CssFlexBlockOverride* flexOverride = cssFlexBlockOverrideForBlock(doc, blockIndex)) {
+			const DocBlock& flexBlock = doc.blocks[static_cast<size_t>(blockIndex)];
+			return flexOverride->y - cssMarginTopPx(flexBlock.style,
+				flexBlock.type == BlockType::Heading ? 10 : 4);
+		}
 		if (s_cssMarginLayoutSnapshot.valid && blockIndex >= 0 &&
 			blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())) {
 			const CssMarginFlowRecord& record = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)];
@@ -6000,19 +7052,27 @@ namespace {
 		geometry.availableWidth = blockAvailableWidth(block, doc);
 		geometry.outerWidth = blockOuterWidth(block, geometry.availableWidth, &geometry.clamped);
 		geometry.outerX = blockOuterX(block, doc, geometry.availableWidth, geometry.outerWidth);
+		const CssFlexBlockOverride* flexOverride = cssFlexBlockOverrideForBlock(doc, blockIndex);
+		if (flexOverride) {
+			geometry.outerWidth = flexOverride->w;
+			geometry.outerX = flexOverride->x;
+		}
 		const int marginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
 		const int marginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
 		const bool nextIsHeading = blockIndex + 1 < static_cast<int>(doc.blocks.size()) &&
 			doc.blocks[static_cast<size_t>(blockIndex + 1)].type == BlockType::Heading;
 		const int totalHeight = blockTotalHeight(block, doc, nextIsHeading);
 		ensureCssMarginLayout(doc);
-		if (blockIndex >= 0 && blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()) &&
+		if (flexOverride) {
+			geometry.outerHeight = flexOverride->h;
+		} else if (blockIndex >= 0 && blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size()) &&
 			s_cssMarginLayoutSnapshot.valid) {
 			geometry.outerHeight = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)].outerHeight;
 		} else {
 			geometry.outerHeight = std::max(1, totalHeight - marginTop - marginBottom - (nextIsHeading ? 10 : 0));
 		}
-		geometry.outerY = kContentY + cssBlockLayoutY(doc, blockIndex) + marginTop;
+		geometry.outerY = flexOverride ? kContentY + flexOverride->y :
+			kContentY + cssBlockLayoutY(doc, blockIndex) + marginTop;
 		const int horizontalEdges = cssHorizontalBoxEdges(block.style, block.type == BlockType::Preformatted);
 		const int verticalEdges = cssVerticalBoxEdges(block.style, block.type == BlockType::Preformatted);
 		const int rawContentWidth = geometry.outerWidth - horizontalEdges;
@@ -7661,6 +8721,37 @@ namespace {
 		out += "Current Document.css_visibility_hidden_layout=retained\n";
 		out += "Current Document.css_opacity_zero_hit_testing=eligible_when_visible\n";
 		if (!metadata.cssGeometryEvidence.empty()) out += "Current Document.css_geometry_evidence=" + metadata.cssGeometryEvidence;
+		add("css_flex_containers", metadata.cssFlexContainers);
+		add("css_inline_flex_containers", metadata.cssInlineFlexContainers);
+		add("css_flex_items", metadata.cssFlexItems);
+		add("css_flex_anonymous_items", metadata.cssFlexAnonymousItems);
+		add("css_flex_nested_containers", metadata.cssFlexNestedContainers);
+		add("css_flex_wrap_unsupported", metadata.cssFlexWrapUnsupported);
+		add("css_flex_absolute_excluded", metadata.cssFlexAbsoluteExcluded);
+		add("css_flex_display_none_excluded", metadata.cssFlexDisplayNoneExcluded);
+		add("css_flex_order_sort_items", metadata.cssFlexOrderSortItems);
+		add("css_flex_base_size_queries", metadata.cssFlexBaseSizeQueries);
+		add("css_flex_intrinsic_queries", metadata.cssFlexIntrinsicQueries);
+		add("css_flex_automatic_minimum_applied", metadata.cssFlexAutomaticMinimumApplied);
+		add("css_flex_automatic_minimum_zero", metadata.cssFlexAutomaticMinimumZero);
+		add("css_flex_grow_iterations", metadata.cssFlexGrowIterations);
+		add("css_flex_shrink_iterations", metadata.cssFlexShrinkIterations);
+		add("css_flex_freeze_iterations", metadata.cssFlexFreezeIterations);
+		add("css_flex_cross_size_passes", metadata.cssFlexCrossSizePasses);
+		add("css_flex_baseline_items", metadata.cssFlexBaselineItems);
+		add("css_flex_auto_margin_absorptions", metadata.cssFlexAutoMarginAbsorptions);
+		add("css_flex_gap_clamps", metadata.cssFlexGapClamps);
+		add("css_flex_geometry_clamps", metadata.cssFlexGeometryClamps);
+		add("css_flex_depth_clamps", metadata.cssFlexDepthClamps);
+		add("css_flex_operation_clamps", metadata.cssFlexOperationClamps);
+		add("css_flex_unsupported_declarations", metadata.cssFlexUnsupportedDeclarations);
+		add("css_flex_evidence_records", metadata.cssFlexEvidenceRecords);
+		out += "Current Document.css_flex_model=bounded-single-line-no-wrap-flexbox\n";
+		out += "Current Document.css_flex_wrap_semantics=wrap-and-wrap-reverse-recognized-unsupported-readable-fallback\n";
+		out += "Current Document.css_flex_order_semantics=stable-order-then-source-order\n";
+		out += "Current Document.css_flex_automatic_minimum=visible-overflow-min-content-hidden-overflow-zero\n";
+		out += "Current Document.css_flex_containing_block=bounded-padding-border-content-box\n";
+		if (!metadata.cssFlexEvidence.empty()) out += "Current Document.css_flex_evidence=" + metadata.cssFlexEvidence;
 		add("css_margin_collapse_sets", metadata.cssMarginCollapseSets);
 		add("css_margin_collapse_participants", metadata.cssMarginCollapseParticipants);
 		add("css_margin_collapse_sibling", metadata.cssMarginCollapseSibling);
@@ -10394,6 +11485,7 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 void Navigator::renderDocument()
 {
 	ensureCssMarginLayout(s_currentDoc);
+	ensureCssFlexLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
@@ -10747,6 +11839,7 @@ void Navigator::renderDocument()
 	for (const CssFloatRecord& floatRecord : s_cssFloatLayoutSnapshot.records) {
 		if (floatRecord.contextSerial != 0 || floatRecord.blockIndex < 0 ||
 			floatRecord.blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) continue;
+		if (cssFlexBlockOverrideForBlock(s_currentDoc, floatRecord.blockIndex)) continue;
 		const DocBlock& floatBlock = s_currentDoc.blocks[static_cast<size_t>(floatRecord.blockIndex)];
 		const WebStyle* floatStyle = computedStyleForSerial(s_currentDoc, floatRecord.logicalSerial);
 		if (floatStyle == nullptr) floatStyle = &floatBlock.style;
@@ -10817,7 +11910,8 @@ void Navigator::renderDocument()
 			++blockIndex;
 			continue;
 		}
-		if (block.style.floatMode != FloatMode::None) {
+		if (block.style.floatMode != FloatMode::None &&
+			!cssFlexBlockOverrideForBlock(s_currentDoc, renderIndex)) {
 			++blockIndex;
 			continue;
 		}
@@ -10845,6 +11939,10 @@ void Navigator::renderDocument()
 		const int availableWidth = blockAvailableWidth(block, s_currentDoc);
 		int outerWidth = blockOuterWidth(block, availableWidth);
 		int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+		if (const CssFlexBlockOverride* flexOverride = cssFlexBlockOverrideForBlock(s_currentDoc, blockIndex)) {
+			outerWidth = flexOverride->w;
+			outerX = flexOverride->x;
+		}
 		if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
 			outerWidth = std::max(1, positioned->usedWidth);
 			outerX = positioned->finalX;
@@ -15073,6 +16171,11 @@ int Navigator::blockLayoutY(int blockIndex)
 {
 	ensureInlineLayout(s_currentDoc);
 	ensureCssMarginLayout(s_currentDoc);
+	if (const CssFlexBlockOverride* flexOverride = cssFlexBlockOverrideForBlock(s_currentDoc, blockIndex)) {
+		const DocBlock& flexBlock = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+		return flexOverride->y - cssMarginTopPx(flexBlock.style,
+			flexBlock.type == BlockType::Heading ? 10 : 4);
+	}
 	if (s_cssMarginLayoutSnapshot.valid && blockIndex >= 0 &&
 		blockIndex < static_cast<int>(s_cssMarginLayoutSnapshot.records.size())) {
 		const CssMarginFlowRecord& record = s_cssMarginLayoutSnapshot.records[static_cast<size_t>(blockIndex)];
@@ -15352,10 +16455,13 @@ int Navigator::computeDocumentHeight()
 {
 	ensureInlineLayout(s_currentDoc);
 	ensureCssMarginLayout(s_currentDoc);
+	ensureCssFlexLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
 	if (s_cssPositionLayoutSnapshot.valid)
-		return std::max(s_cssMarginLayoutSnapshot.documentHeight, s_cssPositionLayoutSnapshot.documentExtent);
-	if (s_cssMarginLayoutSnapshot.valid) return s_cssMarginLayoutSnapshot.documentHeight;
+		return std::max(std::max(s_cssMarginLayoutSnapshot.documentHeight, s_cssPositionLayoutSnapshot.documentExtent),
+			s_cssFlexLayoutSnapshot.documentExtent);
+	if (s_cssMarginLayoutSnapshot.valid)
+		return std::max(s_cssMarginLayoutSnapshot.documentHeight, s_cssFlexLayoutSnapshot.documentExtent);
 	int h = kHeadingY + (s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0);
 	const int n = static_cast<int>(s_currentDoc.blocks.size());
 	for (int idx = 0; idx < n; ++idx) {
