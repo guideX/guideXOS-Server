@@ -3,6 +3,7 @@
 #include "types.h"
 #include "build.h"
 #include "development_run.h"
+#include "development_debug.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -134,6 +135,9 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *development_run_poll)(gx_app_context* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot);
     gx_result (GX_CALL *development_run_request_close)(gx_app_context* ctx, gx_development_run_handle handle);
     gx_result (GX_CALL *development_run_release)(gx_app_context* ctx, gx_development_run_handle handle);
+    /* Hosted-development software breakpoint operations. This is appended to
+     * preserve every existing host-call slot and is not a bare-metal ABI. */
+    gx_result (GX_CALL *development_debug)(gx_app_context* ctx, const gx_development_debug_request* request, gx_development_debug_snapshot* outSnapshot);
 } gx_host_calls;
 
 #ifdef __cplusplus

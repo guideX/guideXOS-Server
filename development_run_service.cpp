@@ -7,6 +7,7 @@
 #include "ipc.h"
 #include "logger.h"
 #include "native_app_process_table.h"
+#include "native_app_debugger.h"
 #include "process.h"
 
 #include <algorithm>
@@ -60,6 +61,8 @@ struct Deployment {
     bool closeRequested = false;
     bool cleanupComplete = false;
     bool appModelRegistered = false;
+    bool debugControlled = false;
+    bool debugExecutionReleased = false;
 };
 
 struct Slot {
@@ -491,13 +494,15 @@ gx_result Prepare(NativeAppRuntimeContext& owner, const gx_development_run_reque
                   gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot) {
     if (outHandle) *outHandle = 0;
     clearSnapshot(outSnapshot);
-    if (!outHandle || !outSnapshot || request.size < sizeof(gx_development_run_request) || request.version != GX_DEVELOPMENT_RUN_API_VERSION || owner.runtimeId == 0 || owner.appId != kOwnerAppId) {
+    const size_t requiredRequestBytes = offsetof(gx_development_run_request, artifactSha256) + sizeof(const char*);
+    if (!outHandle || !outSnapshot || request.size < requiredRequestBytes || request.version != GX_DEVELOPMENT_RUN_API_VERSION || owner.runtimeId == 0 || owner.appId != kOwnerAppId) {
         setFailure(outSnapshot, owner.appId == kOwnerAppId ? GX_DEVELOPMENT_RUN_ERROR_INVALID_REQUEST : GX_DEVELOPMENT_RUN_ERROR_OWNER_NOT_ALLOWED, "development Run is hosted-only and owner-bound");
         return GX_OK;
     }
 
     Deployment candidate;
     candidate.ownerRuntimeId = owner.runtimeId;
+    candidate.debugControlled = request.size >= sizeof(gx_development_run_request) && (request.flags & GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED) != 0;
     candidate.projectId = request.projectId ? request.projectId : std::string();
     candidate.applicationId = candidate.projectId;
     gx_development_run_error_code error = GX_DEVELOPMENT_RUN_ERROR_NONE;
@@ -580,7 +585,13 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
 
     std::string error;
     uint64_t processId = 0;
-    if (!gui::DesktopService::LaunchDevelopmentApp(appId, owner.runtimeId, generation, error, processId)) {
+    bool debugControlled = false;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        Slot* slot = findOwnedLocked(handle, owner.runtimeId);
+        if (slot) debugControlled = slot->deployment.debugControlled;
+    }
+    if (!gui::DesktopService::LaunchDevelopmentApp(appId, owner.runtimeId, generation, debugControlled, error, processId)) {
         Logger::write(LogLevel::Warn, "[DevelopmentRun] launch failed appId=" + appId + " reason=" + error);
         std::lock_guard<std::mutex> lock(g_mutex);
         Slot* slot = findOwnedLocked(handle, owner.runtimeId);
@@ -603,6 +614,28 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
     slot->deployment.processId = processId;
     if (slot->deployment.closeRequested) closeOwnedWindows(processId);
     return GX_OK;
+}
+
+gx_result Debug(NativeAppRuntimeContext& owner, const gx_development_debug_request& request,
+                gx_development_debug_snapshot* outSnapshot) {
+    if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
+    std::string expectedArtifact;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        Slot* slot = findOwnedLocked(request.handle, owner.runtimeId);
+        if (!slot) return GX_ERROR_FAILED;
+        if (!slot->deployment.debugControlled) return GX_ERROR_UNSUPPORTED;
+        if (slot->deployment.processId != request.processId ||
+            (slot->deployment.nativeRuntimeId != 0 && slot->deployment.nativeRuntimeId != request.nativeRuntimeId)) return GX_ERROR_FAILED;
+        expectedArtifact = slot->deployment.artifactSha256;
+    }
+    const gx_result result = NativeAppDebugger::Command(request, expectedArtifact, outSnapshot);
+    if (result == GX_OK && request.command == GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION) {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        Slot* slot = findOwnedLocked(request.handle, owner.runtimeId);
+        if (slot) slot->deployment.debugExecutionReleased = true;
+    }
+    return result;
 }
 
 gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) {
@@ -650,7 +683,9 @@ gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle,
         slot->deployment.errorMessage = exitCode == GX_OK ? std::string() : "native application exited with failure";
         slot->deployment.state = exitCode == GX_OK ? GX_DEVELOPMENT_RUN_COMPLETED : GX_DEVELOPMENT_RUN_FAILED;
         Logger::write(LogLevel::Info, "[DevelopmentRun] application exited appId=" + slot->deployment.applicationId + " exitCode=" + std::to_string(exitCode) + " cleanup=PASS");
-    } else if (slot->deployment.windowCount > 0) {
+    } else if (slot->deployment.windowCount > 0 || (slot->deployment.debugControlled &&
+                                                        slot->deployment.debugExecutionReleased &&
+                                                        slot->deployment.nativeRuntimeId != 0)) {
         slot->deployment.state = GX_DEVELOPMENT_RUN_RUNNING;
     } else {
         slot->deployment.state = GX_DEVELOPMENT_RUN_LAUNCHING;
@@ -670,6 +705,7 @@ gx_result RequestClose(NativeAppRuntimeContext& owner, gx_development_run_handle
         processId = slot->deployment.processId;
     }
     closeOwnedWindows(processId);
+    NativeAppDebugger::CancelProcess(processId);
     return GX_OK;
 }
 
@@ -692,6 +728,7 @@ void ReleaseOwner(uint64_t ownerRuntimeId) {
     for (Slot& slot : g_slots) {
         if (!slot.used || slot.deployment.ownerRuntimeId != ownerRuntimeId) continue;
         closeOwnedWindows(slot.deployment.processId);
+        NativeAppDebugger::CancelProcess(slot.deployment.processId);
         unregisterDeployment(slot.deployment);
         slot.used = false;
         slot.deployment = Deployment();
@@ -705,6 +742,7 @@ void Shutdown() {
     for (Slot& slot : g_slots) {
         if (!slot.used) continue;
         closeOwnedWindows(slot.deployment.processId);
+        NativeAppDebugger::CancelProcess(slot.deployment.processId);
         unregisterDeployment(slot.deployment);
         slot.used = false;
         slot.deployment = Deployment();

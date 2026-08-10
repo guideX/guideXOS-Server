@@ -14,6 +14,7 @@ extern "C" {
 #define GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES 96u
 #define GX_DEVELOPMENT_RUN_MAX_DISPLAY_NAME_BYTES 96u
 #define GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES 128u
+#define GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED 1u
 
 typedef uint64_t gx_development_run_handle;
 
@@ -71,6 +72,8 @@ typedef struct gx_development_run_request {
     const char* manifestPath;
     const char* artifactPath;
     const char* artifactSha256;
+    uint32_t flags;
+    uint32_t reserved;
 } gx_development_run_request;
 
 typedef struct gx_development_run_snapshot {

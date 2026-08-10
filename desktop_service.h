@@ -135,7 +135,7 @@ namespace gxos { namespace apps { struct RegisteredApp; } namespace gui {
         // Semantic hosted-development launch. The caller must have already
         // registered a DevelopmentTemporary AppRegistry entry; this method
         // still uses the normal resolver, Native ELF pipeline, and runtime.
-        static bool LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, std::string& error, uint64_t& outProcessId);
+        static bool LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, bool debugControlled, std::string& error, uint64_t& outProcessId);
         static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent = true);
         static bool IsSetAsDesktopBackgroundEligible(const std::string& path, bool isDirectory, bool isTrashItem = false);
         static bool DispatchSetAsDesktopBackground(const std::string& path, const std::string& sourceSurface, std::string& error);
