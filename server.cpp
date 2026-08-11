@@ -1318,11 +1318,11 @@ static std::string navigatorHostedSmokeDiagnostic() {
         cssPhase4aMetric("Current Document.css_flex_items=") + ";base=" +
         cssPhase4aMetric("Current Document.css_flex_base_size_queries=") + ";evidence=" +
         summarizeText(cssPhase4aMetric("Current Document.css_flex_evidence="), 2600));
-    add("CSS phase 4A unsupported wrap fallback and exclusions",
-        hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_wrap_unsupported=") &&
+    add("CSS phase 4A wrap support and exclusions",
+        contains(cssPhase4aReport, "Current Document.css_flex_wrap_unsupported=0") &&
         hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_absolute_excluded=") &&
         hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_display_none_excluded=") &&
-        contains(cssPhase4aReport, "Current Document.css_flex_wrap_semantics=nowrap-preserved-wrap-supported-wrap-reverse-unsupported-readable-fallback"),
+        contains(cssPhase4aReport, "Current Document.css_flex_wrap_semantics=nowrap-preserved-wrap-supported-wrap-reverse-cross-axis-only"),
         "wrap=" + cssPhase4aMetric("Current Document.css_flex_wrap_unsupported=") + ";absolute=" +
         cssPhase4aMetric("Current Document.css_flex_absolute_excluded=") + ";none=" +
         cssPhase4aMetric("Current Document.css_flex_display_none_excluded="));
@@ -1357,6 +1357,49 @@ static std::string navigatorHostedSmokeDiagnostic() {
         "lines=" + cssPhase4bMetric("Current Document.css_flex_lines=") + ";wrapped=" +
         cssPhase4bMetric("Current Document.css_flex_wrapped_containers=") + ";evidence=" +
         summarizeText(cssPhase4bMetric("Current Document.css_flex_evidence="), 2600));
+
+    bool cssPhase4cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase4c.html");
+    std::string cssPhase4cText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase4cReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase4cMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase4cReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase4cReport.find('\n', pos);
+        return cssPhase4cReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 4C cross-axis fixture loads",
+        cssPhase4cLoaded &&
+        contains(cssPhase4cText, "CSS Phase 4C Flexbox Cross-Axis Completion") &&
+        contains(cssPhase4cText, "ordinary wrap baseline") &&
+        contains(cssPhase4cText, "wrap-reverse + center") &&
+        contains(cssPhase4cText, "column wrap") &&
+        contains(cssPhase4cText, "nested inner line two") &&
+        contains(cssPhase4cText, "Following block content remains below the flex containers."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    const bool phase4cWrapReverseCounter = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_wrap_reverse_containers=");
+    const bool phase4cAlignContentCounter = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_align_content_containers=");
+    const bool phase4cStretchCounter = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_stretched_lines=");
+    const bool phase4cWrapReverseEvidence = contains(cssPhase4cReport, "id=phase4c-reverse-center,serial=") &&
+        contains(cssPhase4cReport, ",wrap=wrap-reverse") && contains(cssPhase4cReport, ",align-content=applied");
+    const bool phase4cStretchEvidence = contains(cssPhase4cReport, "id=phase4c-stretch,serial=") && contains(cssPhase4cReport, ",align-content=applied");
+    const bool phase4cColumnEvidence = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_column_wrapped_containers=");
+    const bool phase4cNestedEvidence = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_nested_multiline_containers=") &&
+        contains(cssPhase4cReport, "item-id=phase4c-inner-b,");
+    const bool phase4cFollowingFlowEvidence = contains(cssPhase4cText, "Following block content remains below the flex containers.");
+    add("CSS phase 4C line distribution and wrap-reverse evidence",
+        phase4cWrapReverseCounter && phase4cAlignContentCounter && phase4cStretchCounter &&
+        contains(cssPhase4cReport, "Current Document.css_flex_wrap_unsupported=0") &&
+        contains(cssPhase4cReport, "Current Document.css_flex_align_content=flex-start-flex-end-center-space-between-space-around-stretch-normal-as-stretch") &&
+        contains(cssPhase4cReport, "Current Document.css_flex_cross_axis=logical-row-vertical-column-horizontal-padding-border-gap-preserved") &&
+        phase4cWrapReverseEvidence && phase4cStretchEvidence && phase4cColumnEvidence && phase4cNestedEvidence && phase4cFollowingFlowEvidence,
+        "wrap-reverse=" + cssPhase4cMetric("Current Document.css_flex_wrap_reverse_containers=") + ";align-content=" +
+        cssPhase4cMetric("Current Document.css_flex_align_content_containers=") + ";stretched=" +
+        cssPhase4cMetric("Current Document.css_flex_stretched_lines=") + ";reverseEvidence=" + yesNo(phase4cWrapReverseEvidence) +
+        ";stretchEvidence=" + yesNo(phase4cStretchEvidence) + ";columnEvidence=" + yesNo(phase4cColumnEvidence) +
+        ";nestedEvidence=" + yesNo(phase4cNestedEvidence) +
+        ";followingFlow=" + yesNo(phase4cFollowingFlowEvidence) + ";reportHasInner=" +
+        yesNo(contains(cssPhase4cReport, "id=phase4c-inner")) + ";nestedCount=" +
+        cssPhase4cMetric("Current Document.css_flex_nested_multiline_containers="));
 
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();

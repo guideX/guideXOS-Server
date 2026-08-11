@@ -38,6 +38,7 @@ using gxos::web::BoxSizingMode;
 using gxos::web::DisplayMode;
 using gxos::web::FlexDirectionMode;
 using gxos::web::FlexWrapMode;
+using gxos::web::AlignContentMode;
 using gxos::web::JustifyContentMode;
 using gxos::web::AlignItemsMode;
 using gxos::web::AlignSelfMode;
@@ -682,6 +683,9 @@ namespace {
 		int sourceOrder = 0;
 		bool inlineParticipation = false;
 		bool wrapping = false;
+		bool wrapReverse = false;
+		bool alignContentApplied = false;
+		bool stretched = false;
 		bool wrapUnsupported = false;
 		int lineCount = 0;
 		bool complete = true;
@@ -700,8 +704,13 @@ namespace {
 		int flexItems = 0;
 		int anonymousItems = 0;
 		int nestedContainers = 0;
+		int nestedMultilineContainers = 0;
+		int columnWrappedContainers = 0;
 		int lines = 0;
 		int wrappedContainers = 0;
+		int wrapReverseContainers = 0;
+		int alignContentContainers = 0;
+		int stretchedLines = 0;
 		int wrapUnsupported = 0;
 		int absoluteExcluded = 0;
 		int displayNoneExcluded = 0;
@@ -2415,8 +2424,13 @@ namespace {
 		metadata.cssFlexItems = doc.cssDiagnostics.flexItems;
 		metadata.cssFlexAnonymousItems = doc.cssDiagnostics.flexAnonymousItems;
 		metadata.cssFlexNestedContainers = doc.cssDiagnostics.flexNestedContainers;
+		metadata.cssFlexNestedMultilineContainers = doc.cssDiagnostics.flexNestedMultilineContainers;
+		metadata.cssFlexColumnWrappedContainers = doc.cssDiagnostics.flexColumnWrappedContainers;
 		metadata.cssFlexLines = doc.cssDiagnostics.flexLines;
 		metadata.cssFlexWrappedContainers = doc.cssDiagnostics.flexWrappedContainers;
+		metadata.cssFlexWrapReverseContainers = doc.cssDiagnostics.flexWrapReverseContainers;
+		metadata.cssFlexAlignContentContainers = doc.cssDiagnostics.flexAlignContentContainers;
+		metadata.cssFlexStretchedLines = doc.cssDiagnostics.flexStretchedLines;
 		metadata.cssFlexWrapUnsupported = doc.cssDiagnostics.flexWrapUnsupported;
 		metadata.cssFlexAbsoluteExcluded = doc.cssDiagnostics.flexAbsoluteExcluded;
 		metadata.cssFlexDisplayNoneExcluded = doc.cssDiagnostics.flexDisplayNoneExcluded;
@@ -2709,7 +2723,8 @@ namespace {
 			const bool phase3aId = block.id.rfind("phase3a-", 0) == 0 || block.id.rfind("css3a-", 0) == 0;
 			const bool phase4aId = block.id.rfind("phase4a-", 0) == 0 || block.id.rfind("css4a-", 0) == 0;
 			const bool phase4bId = block.id.rfind("phase4b-", 0) == 0 || block.id.rfind("css4b-", 0) == 0;
-			if ((phase3aId || phase4aId || phase4bId) && metadata.cssEvidenceRecordCount < 64 && metadata.cssGeometryEvidence.size() < 32768) {
+			const bool phase4cId = block.id.rfind("phase4c-", 0) == 0 || block.id.rfind("css4c-", 0) == 0;
+			if ((phase3aId || phase4aId || phase4bId || phase4cId) && metadata.cssEvidenceRecordCount < 64 && metadata.cssGeometryEvidence.size() < 32768) {
 				std::string reason = geometry.widthAuto || geometry.heightAuto ? "auto" : "definite";
 				if (geometry.widthPercentageUnresolved || geometry.heightPercentageUnresolved) reason += ",indefinite-basis";
 				if (geometry.constraintConflict) reason += ",constraint-conflict";
@@ -4689,6 +4704,7 @@ namespace {
 			mix(static_cast<uint64_t>(style.maxWidth)); mix(static_cast<uint64_t>(style.maxWidthPercent));
 			mix(static_cast<uint64_t>(style.position));
 			mix(static_cast<uint64_t>(style.flexDirection)); mix(static_cast<uint64_t>(style.flexWrap));
+			mix(static_cast<uint64_t>(style.alignContent));
 			mix(static_cast<uint64_t>(style.justifyContent)); mix(static_cast<uint64_t>(style.alignItems));
 			mix(static_cast<uint64_t>(style.alignSelf));
 			mix(static_cast<uint64_t>(style.flexGrow1000)); mix(static_cast<uint64_t>(style.flexShrink1000));
@@ -6200,6 +6216,8 @@ namespace {
 		diagnostics.flexContainers = diagnostics.flexItems = diagnostics.flexAnonymousItems = 0;
 		diagnostics.inlineFlexContainers = diagnostics.flexNestedContainers = 0;
 		diagnostics.flexLines = diagnostics.flexWrappedContainers = 0;
+		diagnostics.flexWrapReverseContainers = diagnostics.flexAlignContentContainers = 0;
+		diagnostics.flexStretchedLines = 0;
 		diagnostics.flexWrapUnsupported = diagnostics.flexAbsoluteExcluded = 0;
 		diagnostics.flexDisplayNoneExcluded = diagnostics.flexOrderSortItems = 0;
 		diagnostics.flexBaseSizeQueries = diagnostics.flexIntrinsicQueries = 0;
@@ -6260,10 +6278,7 @@ namespace {
 				style.flexDirection == FlexDirectionMode::RowReverse;
 			const bool reverse = style.flexDirection == FlexDirectionMode::RowReverse ||
 				style.flexDirection == FlexDirectionMode::ColumnReverse;
-			if (style.flexWrap == FlexWrapMode::WrapReverse) {
-				++snapshot.wrapUnsupported;
-				++diagnostics.flexWrapUnsupported;
-			}
+			const bool wrapReverse = style.flexWrap == FlexWrapMode::WrapReverse;
 			int intrinsicW = 1;
 			int intrinsicH = 1;
 			for (const CssFlexCandidate& candidate : candidates) {
@@ -6416,7 +6431,7 @@ namespace {
 			std::vector<int> lineCrossSizes;
 			lines.reserve(localItems.empty() ? 0 : localItems.size());
 			lineCrossSizes.reserve(localItems.empty() ? 0 : localItems.size());
-			const bool wrap = style.flexWrap == FlexWrapMode::Wrap;
+			const bool wrap = style.flexWrap != FlexWrapMode::NoWrap;
 			const int wrapMainSize = row ? std::max(1, provisionalContentW) :
 				(outerH > 0 ? std::max(1, outerH - verticalEdges) : 0);
 			std::vector<size_t> currentLine;
@@ -6498,7 +6513,7 @@ namespace {
 			container.itemBegin = static_cast<int>(snapshot.items.size());
 			container.inlineParticipation = style.display == DisplayMode::InlineFlex;
 			container.wrapping = wrap;
-			container.wrapUnsupported = style.flexWrap == FlexWrapMode::WrapReverse;
+			container.wrapReverse = wrapReverse;
 			container.lineCount = static_cast<int>(lines.size());
 			container.sourceOrder = static_cast<int>(snapshot.containers.size());
 			const int containerIndex = static_cast<int>(snapshot.containers.size());
@@ -6515,12 +6530,92 @@ namespace {
 				ownOverride.complete = true;
 			}
 
+			// Cross-axis line distribution is expressed in logical cross-start
+			// coordinates.  The explicit gap remains part of the base line group;
+			// align-content only consumes positive space left after that gap.
+			std::vector<int> effectiveLineCrossSizes = lineCrossSizes;
+			std::vector<int> distributedBefore(lines.size(), 0);
+			int crossLeading = 0;
+			bool alignContentApplied = false;
+			bool stretchedLines = false;
+			int64_t naturalLineCrossTotal = 0;
+			for (int size : lineCrossSizes)
+				naturalLineCrossTotal += std::max(0, size);
+			const int64_t crossGapTotal = lines.size() > 1
+				? static_cast<int64_t>(crossGap) * static_cast<int64_t>(lines.size() - 1) : 0;
+			const int64_t boundedCrossSize = std::max<int64_t>(0, std::min<int64_t>(8192, crossSize));
+			const int64_t remainingCross64 = boundedCrossSize - naturalLineCrossTotal - crossGapTotal;
+			const int remainingCross = remainingCross64 > 0
+				? static_cast<int>(std::min<int64_t>(8192, remainingCross64)) : 0;
+			if (wrap && lines.size() > 1 && remainingCross > 0) {
+				alignContentApplied = true;
+				switch (style.alignContent) {
+				case AlignContentMode::FlexEnd:
+					crossLeading = remainingCross;
+					break;
+				case AlignContentMode::Center:
+					crossLeading = remainingCross / 2;
+					break;
+				case AlignContentMode::SpaceBetween:
+					for (size_t i = 0; i < lines.size(); ++i) {
+						distributedBefore[i] = static_cast<int>(static_cast<int64_t>(remainingCross) *
+							static_cast<int64_t>(i) / static_cast<int64_t>(lines.size() - 1));
+					}
+					break;
+				case AlignContentMode::SpaceAround:
+					for (size_t i = 0; i < lines.size(); ++i) {
+						distributedBefore[i] = static_cast<int>(static_cast<int64_t>(remainingCross) *
+							static_cast<int64_t>(2 * i + 1) /
+							(static_cast<int64_t>(2) * static_cast<int64_t>(lines.size())));
+					}
+					break;
+				case AlignContentMode::Stretch: {
+					int64_t allocated = 0;
+					for (size_t i = 0; i < effectiveLineCrossSizes.size(); ++i) {
+						const int64_t end = static_cast<int64_t>(remainingCross) *
+							static_cast<int64_t>(i + 1) / static_cast<int64_t>(effectiveLineCrossSizes.size());
+						const int extra = static_cast<int>(std::max<int64_t>(0, end - allocated));
+						effectiveLineCrossSizes[i] = std::max(0, std::min(8192,
+							effectiveLineCrossSizes[i] + extra));
+						allocated = end;
+						if (extra > 0) stretchedLines = true;
+					}
+					break;
+				}
+				case AlignContentMode::FlexStart:
+				default:
+					break;
+				}
+			}
+			if (alignContentApplied) {
+				++snapshot.alignContentContainers;
+				++diagnostics.flexAlignContentContainers;
+			}
+			if (wrapReverse) {
+				++snapshot.wrapReverseContainers;
+				++diagnostics.flexWrapReverseContainers;
+			}
+			if (stretchedLines) {
+				++snapshot.stretchedLines;
+				++diagnostics.flexStretchedLines;
+			}
+			if (containerIndex < static_cast<int>(snapshot.containers.size())) {
+				snapshot.containers[static_cast<size_t>(containerIndex)].alignContentApplied = alignContentApplied;
+				snapshot.containers[static_cast<size_t>(containerIndex)].wrapReverse = wrapReverse;
+				snapshot.containers[static_cast<size_t>(containerIndex)].stretched = stretchedLines;
+			}
+
 			int lineCrossCursor = 0;
 			for (size_t lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
 				const std::vector<size_t>& line = lines[lineIndex];
 				if (line.empty()) continue;
-				const int lineCrossSize = lineCrossSizes[lineIndex];
-				const int lineCrossOrigin = (row ? contentY : contentX) + lineCrossCursor;
+				const int lineCrossSize = effectiveLineCrossSizes[lineIndex];
+				const int logicalCrossOffset = lineCrossCursor + distributedBefore[lineIndex];
+				const int lineCrossOrigin = wrapReverse
+					? (row ? contentY + crossSize - crossLeading - logicalCrossOffset - lineCrossSize
+						: contentX + crossSize - crossLeading - logicalCrossOffset - lineCrossSize)
+					: (row ? contentY + crossLeading + logicalCrossOffset
+						: contentX + crossLeading + logicalCrossOffset);
 				int lineNaturalMain = 0;
 				for (size_t itemIndex : line) {
 					if (itemIndex >= localItems.size()) continue;
@@ -6668,16 +6763,18 @@ namespace {
 					++snapshot.baselineItems;
 					++diagnostics.flexBaselineItems;
 				}
+				const int physicalCrossOffset = wrapReverse
+					? lineCrossSize - crossOffset - cross : crossOffset;
 				if (!reverse) {
 					const int mainPos = cursor + beforeMain;
-					if (row) { item.x = mainPos; item.y = lineCrossOrigin + crossOffset; item.w = item.targetMain; item.h = std::max(1, cross); }
-					else { item.x = lineCrossOrigin + crossOffset; item.y = mainPos; item.w = std::max(1, cross); item.h = item.targetMain; }
+					if (row) { item.x = mainPos; item.y = lineCrossOrigin + physicalCrossOffset; item.w = item.targetMain; item.h = std::max(1, cross); }
+					else { item.x = lineCrossOrigin + physicalCrossOffset; item.y = mainPos; item.w = std::max(1, cross); item.h = item.targetMain; }
 					cursor = mainPos + item.targetMain + afterMain + between;
 				} else {
 					cursor -= beforeMain + item.targetMain;
 					const int mainPos = cursor;
-					if (row) { item.x = mainPos; item.y = lineCrossOrigin + crossOffset; item.w = item.targetMain; item.h = std::max(1, cross); }
-					else { item.x = lineCrossOrigin + crossOffset; item.y = mainPos; item.w = std::max(1, cross); item.h = item.targetMain; }
+					if (row) { item.x = mainPos; item.y = lineCrossOrigin + physicalCrossOffset; item.w = item.targetMain; item.h = std::max(1, cross); }
+					else { item.x = lineCrossOrigin + physicalCrossOffset; item.y = mainPos; item.w = std::max(1, cross); item.h = item.targetMain; }
 					cursor -= afterMain + between;
 				}
 				item.x = std::max(kContentX - 8192, std::min(kContentX + kContentW + 8192, item.x));
@@ -6713,6 +6810,8 @@ namespace {
 				snapshot.containers[static_cast<size_t>(containerIndex)].lineCount = static_cast<int>(lines.size());
 			}
 			snapshot.lines = std::min(8192, snapshot.lines + static_cast<int>(lines.size()));
+			if (nestedCall && lines.size() > 1) ++snapshot.nestedMultilineContainers;
+			if (!row && wrap && lines.size() > 1) ++snapshot.columnWrappedContainers;
 			if (wrap && lines.size() > 1) ++snapshot.wrappedContainers;
 			if (nestedCall) ++diagnostics.flexNestedContainers;
 		};
@@ -6756,7 +6855,10 @@ namespace {
 				<< ",x=" << container.x << ",y=" << container.y << ",w=" << container.w << ",h=" << container.h
 				<< ",items=" << container.itemCount << ",depth=" << container.depth
 				<< ",lines=" << container.lineCount
-				<< ",wrap=" << (container.wrapUnsupported ? "unsupported" : (container.wrapping ? "wrap" : "nowrap")) << "\n";
+				<< ",wrap=" << (container.wrapUnsupported ? "unsupported" :
+					(container.wrapReverse ? "wrap-reverse" : (container.wrapping ? "wrap" : "nowrap")))
+				<< ",align-content=" << (container.alignContentApplied ? "applied" : "natural")
+				<< ",stretched=" << (container.stretched ? "yes" : "no") << "\n";
 			const std::string text = line.str();
 			if (snapshot.evidence.size() + text.size() <= 32768) {
 				snapshot.evidence += text;
@@ -6797,8 +6899,13 @@ namespace {
 		diagnostics.flexItems = snapshot.flexItems;
 		diagnostics.flexAnonymousItems = snapshot.anonymousItems;
 		diagnostics.flexNestedContainers = snapshot.nestedContainers;
+		diagnostics.flexNestedMultilineContainers = snapshot.nestedMultilineContainers;
+		diagnostics.flexColumnWrappedContainers = snapshot.columnWrappedContainers;
 		diagnostics.flexLines = snapshot.lines;
 		diagnostics.flexWrappedContainers = snapshot.wrappedContainers;
+		diagnostics.flexWrapReverseContainers = snapshot.wrapReverseContainers;
+		diagnostics.flexAlignContentContainers = snapshot.alignContentContainers;
+		diagnostics.flexStretchedLines = snapshot.stretchedLines;
 		diagnostics.flexWrapUnsupported = snapshot.wrapUnsupported;
 		diagnostics.flexAbsoluteExcluded = snapshot.absoluteExcluded;
 		diagnostics.flexDisplayNoneExcluded = snapshot.displayNoneExcluded;
@@ -8879,8 +8986,13 @@ namespace {
 		add("css_flex_items", metadata.cssFlexItems);
 		add("css_flex_anonymous_items", metadata.cssFlexAnonymousItems);
 		add("css_flex_nested_containers", metadata.cssFlexNestedContainers);
+		add("css_flex_nested_multiline_containers", metadata.cssFlexNestedMultilineContainers);
+		add("css_flex_column_wrapped_containers", metadata.cssFlexColumnWrappedContainers);
 		add("css_flex_lines", metadata.cssFlexLines);
 		add("css_flex_wrapped_containers", metadata.cssFlexWrappedContainers);
+		add("css_flex_wrap_reverse_containers", metadata.cssFlexWrapReverseContainers);
+		add("css_flex_align_content_containers", metadata.cssFlexAlignContentContainers);
+		add("css_flex_stretched_lines", metadata.cssFlexStretchedLines);
 		add("css_flex_wrap_unsupported", metadata.cssFlexWrapUnsupported);
 		add("css_flex_absolute_excluded", metadata.cssFlexAbsoluteExcluded);
 		add("css_flex_display_none_excluded", metadata.cssFlexDisplayNoneExcluded);
@@ -8902,7 +9014,9 @@ namespace {
 		add("css_flex_unsupported_declarations", metadata.cssFlexUnsupportedDeclarations);
 		add("css_flex_evidence_records", metadata.cssFlexEvidenceRecords);
 		out += "Current Document.css_flex_model=bounded-multiline-flexbox\n";
-		out += "Current Document.css_flex_wrap_semantics=nowrap-preserved-wrap-supported-wrap-reverse-unsupported-readable-fallback\n";
+		out += "Current Document.css_flex_wrap_semantics=nowrap-preserved-wrap-supported-wrap-reverse-cross-axis-only\n";
+		out += "Current Document.css_flex_align_content=flex-start-flex-end-center-space-between-space-around-stretch-normal-as-stretch\n";
+		out += "Current Document.css_flex_cross_axis=logical-row-vertical-column-horizontal-padding-border-gap-preserved\n";
 		out += "Current Document.css_flex_order_semantics=stable-order-then-source-order\n";
 		out += "Current Document.css_flex_automatic_minimum=visible-overflow-min-content-hidden-overflow-zero\n";
 		out += "Current Document.css_flex_containing_block=bounded-padding-border-content-box\n";

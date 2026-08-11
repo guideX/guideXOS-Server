@@ -277,6 +277,15 @@ enum class FlexWrapMode : uint8_t {
 	WrapReverse,
 };
 
+enum class AlignContentMode : uint8_t {
+	Stretch = 0,
+	FlexStart,
+	FlexEnd,
+	Center,
+	SpaceBetween,
+	SpaceAround,
+};
+
 enum class JustifyContentMode : uint8_t {
 	FlexStart = 0,
 	FlexEnd,
@@ -552,11 +561,13 @@ struct WebStyle {
 	DisplayMode display = DisplayMode::Block;
 	FlexDirectionMode flexDirection = FlexDirectionMode::Row;
 	FlexWrapMode flexWrap = FlexWrapMode::NoWrap;
+	AlignContentMode alignContent = AlignContentMode::Stretch;
 	JustifyContentMode justifyContent = JustifyContentMode::FlexStart;
 	AlignItemsMode alignItems = AlignItemsMode::Stretch;
 	AlignSelfMode alignSelf = AlignSelfMode::Auto;
 	bool     flexDirectionSpecified = false;
 	bool     flexWrapSpecified = false;
+	bool     alignContentSpecified = false;
 	bool     justifyContentSpecified = false;
 	bool     alignItemsSpecified = false;
 	bool     alignSelfSpecified = false;
@@ -751,8 +762,13 @@ struct CssDiagnostics {
 	int    flexItems = 0;
 	int    flexAnonymousItems = 0;
 	int    flexNestedContainers = 0;
+	int    flexNestedMultilineContainers = 0;
+	int    flexColumnWrappedContainers = 0;
 	int    flexLines = 0;
 	int    flexWrappedContainers = 0;
+	int    flexWrapReverseContainers = 0;
+	int    flexAlignContentContainers = 0;
+	int    flexStretchedLines = 0;
 	int    flexWrapUnsupported = 0;
 	int    flexAbsoluteExcluded = 0;
 	int    flexDisplayNoneExcluded = 0;

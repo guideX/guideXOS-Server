@@ -151,7 +151,7 @@ namespace {
 		BorderLeftColor,
 		// The final seven mask slots intentionally group related Flexbox
 		// longhands so the existing compact cascade remains 64-bit.
-		FlexAxes,          // flex-direction + flex-wrap
+		FlexAxes,          // flex-direction + flex-wrap + align-content
 		JustifyContent,
 		AlignItems,
 		FlexGaps,          // gap + row-gap + column-gap
@@ -2925,6 +2925,22 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		style.justifyContentSpecified = true;
 		return accept(CssProperty::JustifyContent);
 	}
+	if (prop == "align-content") {
+		const std::string lower = toLower(val);
+		if (lower == "normal" || lower == "stretch") style.alignContent = AlignContentMode::Stretch;
+		else if (lower == "flex-start" || lower == "start") style.alignContent = AlignContentMode::FlexStart;
+		else if (lower == "flex-end" || lower == "end") style.alignContent = AlignContentMode::FlexEnd;
+		else if (lower == "center") style.alignContent = AlignContentMode::Center;
+		else if (lower == "space-between") style.alignContent = AlignContentMode::SpaceBetween;
+		else if (lower == "space-around") style.alignContent = AlignContentMode::SpaceAround;
+		else {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.alignContentSpecified = true;
+		return accept(CssProperty::FlexAxes);
+	}
 	if (prop == "align-items") {
 		const std::string lower = toLower(val);
 		if (lower == "stretch") style.alignItems = AlignItemsMode::Stretch;
@@ -3751,6 +3767,10 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 			destination.flexWrap = source.flexWrap;
 			destination.flexWrapSpecified = true;
 		}
+		if (source.alignContentSpecified) {
+			destination.alignContent = source.alignContent;
+			destination.alignContentSpecified = true;
+		}
 		break;
 	case CssProperty::JustifyContent:
 		destination.justifyContent = source.justifyContent;
@@ -4054,6 +4074,10 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 		if (overrideStyle.flexWrapSpecified) {
 			merged.flexWrap = overrideStyle.flexWrap;
 			merged.flexWrapSpecified = true;
+		}
+		if (overrideStyle.alignContentSpecified) {
+			merged.alignContent = overrideStyle.alignContent;
+			merged.alignContentSpecified = true;
 		}
 	}
 	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::JustifyContent)) != 0) {

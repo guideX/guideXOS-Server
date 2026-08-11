@@ -612,6 +612,44 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p id='phase4b-after'>Following content is below the complete wrapped container extent.</p>"
                              b"</body></html>")
             return
+        if path == "/navigator-smoke/css-phase4c.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>CSS Phase 4C Flexbox Cross-Axis Completion</title><style>"
+                             b"html,body{margin:0;padding:0} body{font-size:14px;line-height:1.25;background:#f8fafc;color:#243447}"
+                             b".fixture{margin:8px 0;padding:6px;border:2px solid #64748b;background:#fff;box-sizing:border-box}"
+                             b".cross{display:flex;flex-direction:row;flex-wrap:wrap;width:300px;height:112px;gap:7px 8px;align-items:flex-start;box-sizing:border-box}"
+                             b".cross>div{flex:0 0 132px;box-sizing:border-box;padding:3px;border:1px solid #2563eb;background:#dbeafe}"
+                             b".cross-a{height:20px}.cross-b{height:34px}.cross-c{height:24px}.cross-d{height:28px}"
+                             b".baseline{height:auto;align-content:flex-start;border-color:#0f766e;background:#ecfeff}"
+                             b".end{align-content:flex-end;border-color:#c2410c;background:#fff7ed}"
+                             b".center{align-content:center;border-color:#7c3aed;background:#f5f3ff}"
+                             b".between{align-content:space-between;border-color:#be123c;background:#fff1f2}"
+                             b".around{align-content:space-around;border-color:#0369a1;background:#f0f9ff}"
+                             b".stretch{align-content:stretch;border-color:#15803d;background:#f0fdf4}"
+                             b".reverse-center{flex-wrap:wrap-reverse;align-content:center;border-color:#9333ea;background:#faf5ff}"
+                             b".reverse-center>div{background:#e9d5ff;border-color:#7e22ce}"
+                             b".column{display:flex;flex-direction:column;flex-wrap:wrap;width:126px;height:170px;gap:7px 9px;align-content:space-around;border-color:#0369a1;background:#eff6ff}"
+                             b".column>div{flex:0 0 70px;width:38px;height:70px;box-sizing:border-box;padding:2px;border:1px solid #1d4ed8;background:#bfdbfe}"
+                             b".column>div:nth-child(2){width:50px;height:70px}.column>div:nth-child(4){width:42px;height:70px}"
+                             b".nested-outer{display:flex;flex-direction:row;flex-wrap:wrap;width:322px;height:180px;gap:8px;align-content:flex-start;align-items:flex-start;border-color:#92400e;background:#fffbeb}"
+                             b".nested-outer>div{flex:0 0 132px;box-sizing:border-box;border:1px solid #b45309;background:#fef3c7}"
+                             b".nested-fixed{height:42px;padding:4px}.nested-inner{display:flex;flex-direction:row;flex-wrap:wrap;width:132px;height:94px;padding:4px;gap:5px;align-content:space-between;align-items:flex-start;border-color:#166534;background:#dcfce7}"
+                             b".nested-inner>div{flex:0 0 40px;box-sizing:border-box;border:1px solid #15803d;background:#bbf7d0;padding:2px}.inner-a{height:24px}.inner-b{height:36px}.inner-c{height:18px}.inner-d{height:30px}"
+                             b"</style></head><body>"
+                             b"<h1 id='phase4c-title'>CSS Phase 4C Flexbox Cross-Axis Completion</h1>"
+                             b"<div id='phase4c-wrap' class='fixture cross baseline'><div id='phase4c-wrap-a' class='cross-a'>ordinary wrap baseline A</div><div id='phase4c-wrap-b' class='cross-b'>ordinary wrap baseline B</div><div id='phase4c-wrap-c' class='cross-c'>ordinary wrap baseline C</div><div id='phase4c-wrap-d' class='cross-d'>ordinary wrap baseline D</div></div>"
+                             b"<div id='phase4c-start' class='fixture cross baseline'><div id='phase4c-start-a' class='cross-a'>align-content flex-start</div><div id='phase4c-start-b' class='cross-b'>line two flex-start</div><div id='phase4c-start-c' class='cross-c'>explicit cross gap</div></div>"
+                             b"<div id='phase4c-end' class='fixture cross end'><div id='phase4c-end-a' class='cross-a'>align-content flex-end</div><div id='phase4c-end-b' class='cross-b'>different line size</div><div id='phase4c-end-c' class='cross-c'>flex-end line two</div></div>"
+                             b"<div id='phase4c-center' class='fixture cross center'><div id='phase4c-center-a' class='cross-a'>align-content center</div><div id='phase4c-center-b' class='cross-b'>center line two</div><div id='phase4c-center-c' class='cross-c'>center gap</div></div>"
+                             b"<div id='phase4c-between' class='fixture cross between'><div id='phase4c-between-a' class='cross-a'>align-content space-between</div><div id='phase4c-between-b' class='cross-b'>between line two</div><div id='phase4c-between-c' class='cross-c'>between explicit gap</div></div>"
+                             b"<div id='phase4c-around' class='fixture cross around'><div id='phase4c-around-a' class='cross-a'>align-content space-around</div><div id='phase4c-around-b' class='cross-b'>around line two</div><div id='phase4c-around-c' class='cross-c'>around edge spacing</div></div>"
+                             b"<div id='phase4c-stretch' class='fixture cross stretch'><div id='phase4c-stretch-a' class='cross-a'>align-content stretch</div><div id='phase4c-stretch-b' class='cross-b'>stretched line two</div><div id='phase4c-stretch-c' class='cross-c'>stretch keeps item alignment</div></div>"
+                             b"<div id='phase4c-reverse-center' class='fixture cross reverse-center'><div id='phase4c-reverse-center-a' class='cross-a'>wrap-reverse + center</div><div id='phase4c-reverse-center-b' class='cross-b'>cross-start is reversed</div><div id='phase4c-reverse-center-c' class='cross-c'>item order stays stable</div></div>"
+                             b"<div id='phase4c-column' class='fixture column'><div id='phase4c-column-a'>column wrap A</div><div id='phase4c-column-b'>column wrap B</div><div id='phase4c-column-c'>column wrap C</div><div id='phase4c-column-d'>column wrap D</div></div>"
+                             b"<div id='phase4c-nested-outer' class='fixture nested-outer'><div id='phase4c-inner' class='nested-inner'><div id='phase4c-inner-a' class='inner-a'>nested inner line one</div><div id='phase4c-inner-b' class='inner-b'>nested inner line two</div><div id='phase4c-inner-c' class='inner-c'>nested inner line three</div><div id='phase4c-inner-d' class='inner-d'>nested inner line four</div></div><div id='phase4c-nested-fixed' class='nested-fixed'>outer second-line item</div><div id='phase4c-nested-tail' class='nested-fixed'>outer wrapped tail</div></div>"
+                             b"<p id='phase4c-after'>Following block content remains below the flex containers.</p>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/css-phase3h.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><title>CSS Phase 3H Traditional Positioning Completion</title><style>"

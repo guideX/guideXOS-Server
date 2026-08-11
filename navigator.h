@@ -303,8 +303,13 @@ struct NavigatorPageMetadata {
 		int         cssFlexItems = 0;
 		int         cssFlexAnonymousItems = 0;
 		int         cssFlexNestedContainers = 0;
+		int         cssFlexNestedMultilineContainers = 0;
+		int         cssFlexColumnWrappedContainers = 0;
 		int         cssFlexLines = 0;
 		int         cssFlexWrappedContainers = 0;
+		int         cssFlexWrapReverseContainers = 0;
+		int         cssFlexAlignContentContainers = 0;
+		int         cssFlexStretchedLines = 0;
 		int         cssFlexWrapUnsupported = 0;
 		int         cssFlexAbsoluteExcluded = 0;
 		int         cssFlexDisplayNoneExcluded = 0;
