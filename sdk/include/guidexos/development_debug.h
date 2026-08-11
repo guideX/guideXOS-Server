@@ -17,7 +17,12 @@ typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION = 5,
     GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT = 6,
     GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION = 7,
-    GX_DEVELOPMENT_DEBUG_RESUME_STEP = 8
+    GX_DEVELOPMENT_DEBUG_RESUME_STEP = 8,
+    GX_DEVELOPMENT_DEBUG_READ_MEMORY = 9,
+    GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER = 10,
+    GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL = 11,
+    GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP = 12,
+    GX_DEVELOPMENT_DEBUG_STEP_INTERNAL_TRAP = 13
 } gx_development_debug_command;
 
 typedef enum gx_development_debug_status {
@@ -53,6 +58,9 @@ typedef struct gx_development_debug_request {
     const char* artifactSha256;
     uint64_t threadId;
     uint64_t stopGeneration;
+    uint64_t auxiliaryAddress;
+    uint32_t readByteCount;
+    uint32_t reserved;
 } gx_development_debug_request;
 
 typedef struct gx_development_debug_register_context {
@@ -105,6 +113,11 @@ typedef struct gx_development_debug_snapshot {
     uint64_t rflagsWithTrapFlag;
     uint64_t rflagsAfterTrapFlagClear;
     uint32_t singleStepKind;
+    uint8_t internalBreakpointTrap;
+    uint8_t reserved2[3];
+    uint64_t internalBreakpointId;
+    uint32_t byteCount;
+    uint8_t bytes[16];
 } gx_development_debug_snapshot;
 
 enum {

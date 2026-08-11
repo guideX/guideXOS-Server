@@ -36,24 +36,33 @@ bool waitFor(const std::atomic<bool>& value) {
 }
 
 gx_development_debug_request makeRequest(uint32_t command, uint64_t breakpointId,
-                                         uint64_t targetAddress) {
+                                          uint64_t targetAddress, uint64_t processId = 42,
+                                          uint64_t runtimeId = 77) {
     gx_development_debug_request request{};
     request.size = sizeof(request);
     request.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     request.command = command;
     request.handle = 1;
     request.sessionGeneration = 9;
-    request.processId = 42;
-    request.nativeRuntimeId = 77;
+    request.processId = processId;
+    request.nativeRuntimeId = runtimeId;
     request.breakpointId = breakpointId;
     request.targetAddress = targetAddress;
     request.artifactSha256 = "native-debugger-runtime-proof";
     return request;
 }
 
+bool pollForTrapFor(uint32_t expectedKind, gx_development_debug_snapshot& snapshot,
+                    uint64_t processId, uint64_t runtimeId);
+
 bool pollForTrap(uint32_t expectedKind, gx_development_debug_snapshot& snapshot) {
+    return pollForTrapFor(expectedKind, snapshot, 42, 77);
+}
+
+bool pollForTrapFor(uint32_t expectedKind, gx_development_debug_snapshot& snapshot,
+                    uint64_t processId, uint64_t runtimeId) {
     for (uint32_t i = 0; i < 1000000; ++i) {
-        gx_development_debug_request poll = makeRequest(GX_DEVELOPMENT_DEBUG_POLL, 0, 0);
+        gx_development_debug_request poll = makeRequest(GX_DEVELOPMENT_DEBUG_POLL, 0, 0, processId, runtimeId);
         if (NativeAppDebugger::Command(poll, "native-debugger-runtime-proof", &snapshot) != gxos::apps::GX_OK) return false;
         if (snapshot.status == GX_DEVELOPMENT_DEBUG_STATUS_TRAP && snapshot.trapKind == expectedKind) return true;
         std::this_thread::yield();
@@ -378,6 +387,160 @@ int main() {
         ExecutableMemory::Free(mapping);
         return 1;
     }
+
+    // Phase 6 machine-level proof: a real CALL executes its callee at full
+    // speed and traps only at the temporary return address. The user
+    // breakpoint at the call site is shared/rebound rather than replaced.
+    ExecutableMemoryBlock stepOverMapping;
+    if (!expect(ExecutableMemory::Allocate(4096, stepOverMapping, error),
+                "Step Over executable memory allocation")) return 1;
+    volatile uint32_t* stepOverCounter = new volatile uint32_t(0);
+    uint8_t* stepOverCode = static_cast<uint8_t*>(stepOverMapping.base);
+    const uint64_t stepOverBase = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(stepOverMapping.base));
+    const uint64_t stepOverCall = stepOverBase;
+    const uint64_t stepOverReturn = stepOverBase + 5;
+    const uint64_t stepOverCallee = stepOverBase + 32;
+    stepOverCode[0] = 0xE8;
+    const int64_t relative = static_cast<int64_t>(stepOverCallee) - static_cast<int64_t>(stepOverCall + 5);
+    const int32_t relative32 = static_cast<int32_t>(relative);
+    std::memcpy(stepOverCode + 1, &relative32, sizeof(relative32));
+    stepOverCode[5] = 0xC3;
+    stepOverCode[32] = 0x48;
+    stepOverCode[33] = 0xB8;
+    const uint64_t stepOverCounterAddress = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(stepOverCounter));
+    std::memcpy(stepOverCode + 34, &stepOverCounterAddress, sizeof(stepOverCounterAddress));
+    stepOverCode[42] = 0xFF;
+    stepOverCode[43] = 0x00;
+    stepOverCode[44] = 0xC3;
+    const uint8_t returnOriginalByte = stepOverCode[5];
+    if (!expect(ExecutableMemory::Protect(stepOverMapping, 0, 1,
+                                          ExecutableMemoryProtection::ReadExecute, error),
+                "Step Over executable protection")) {
+        delete stepOverCounter;
+        ExecutableMemory::Free(stepOverMapping);
+        return 1;
+    }
+    NativeAppRuntimeContext stepOverContext{};
+    stepOverContext.runtimeId = 78;
+    stepOverContext.processId = 43;
+    NativeElfImage stepOverImage{};
+    stepOverImage.preferredBaseAddress = stepOverBase;
+    stepOverImage.imageSize = stepOverMapping.size;
+    NativeElfSegment stepOverSegment{};
+    stepOverSegment.virtualAddress = stepOverBase;
+    stepOverSegment.memorySize = stepOverMapping.size;
+    stepOverSegment.flags = 1;
+    stepOverImage.loadedSegments.push_back(stepOverSegment);
+    if (!expect(NativeAppDebugger::RegisterRuntime(stepOverContext, stepOverMapping, stepOverImage, true, error),
+                "Step Over runtime registration")) {
+        delete stepOverCounter;
+        ExecutableMemory::Free(stepOverMapping);
+        return 1;
+    }
+    std::atomic<bool> stepOverCompleted{false};
+    std::atomic<bool> stepOverWaiting{false};
+    std::thread stepOverThread([&]() {
+        gxos::Allocator::setCurrentPid(43);
+        stepOverWaiting.store(true, std::memory_order_release);
+        typedef void (*StepOverFunction)();
+        if (NativeAppDebugger::WaitForExecutionGate(78))
+            reinterpret_cast<StepOverFunction>(stepOverMapping.base)();
+        stepOverCompleted.store(true, std::memory_order_release);
+        gxos::Allocator::setCurrentPid(0);
+    });
+    if (!expect(waitFor(stepOverWaiting), "Step Over target reached the closed execution gate")) {
+        gx_development_debug_snapshot cancel{};
+        NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION, 0, 0, 43, 78),
+                                   "native-debugger-runtime-proof", &cancel);
+        stepOverThread.join();
+        NativeAppDebugger::UnregisterRuntime(78);
+        delete stepOverCounter;
+        ExecutableMemory::Free(stepOverMapping);
+        return 1;
+    }
+    gx_development_debug_snapshot stepOverUserBind{};
+    gx_development_debug_request stepOverUserBindRequest = makeRequest(
+        GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT, 910, stepOverCall, 43, 78);
+    if (!expect(NativeAppDebugger::Command(stepOverUserBindRequest,
+                                           "native-debugger-runtime-proof", &stepOverUserBind) == gxos::apps::GX_OK &&
+                stepOverUserBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND && stepOverCode[0] == 0xCC,
+                "Step Over call-site user breakpoint bind")) {
+        gx_development_debug_snapshot cancel{};
+        NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION, 0, 0, 43, 78),
+                                    "native-debugger-runtime-proof", &cancel);
+        stepOverThread.join();
+        NativeAppDebugger::UnregisterRuntime(78);
+        delete stepOverCounter;
+        ExecutableMemory::Free(stepOverMapping);
+        return 1;
+    }
+    gx_development_debug_snapshot stepOverTempBind{};
+    const uint64_t stepOverOwner = 0x8000000000000091ull;
+    gx_development_debug_request stepOverTempBindRequest = makeRequest(
+        GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT, stepOverOwner, stepOverReturn, 43, 78);
+    if (!expect(NativeAppDebugger::Command(stepOverTempBindRequest,
+                                           "native-debugger-runtime-proof", &stepOverTempBind) == gxos::apps::GX_OK &&
+                stepOverTempBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND &&
+                stepOverTempBind.bindingId != stepOverUserBind.bindingId && stepOverTempBind.bindingCount == 1,
+                "Step Over return breakpoint uses the shared physical binding manager")) {
+        gx_development_debug_snapshot cancel{};
+        NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION, 0, 0, 43, 78),
+                                    "native-debugger-runtime-proof", &cancel);
+        stepOverThread.join();
+        NativeAppDebugger::UnregisterRuntime(78);
+        delete stepOverCounter;
+        ExecutableMemory::Free(stepOverMapping);
+        return 1;
+    }
+    gx_development_debug_snapshot stepOverRelease{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION, 0, 0, 43, 78),
+                                           "native-debugger-runtime-proof", &stepOverRelease) == gxos::apps::GX_OK,
+                "Step Over execution release")) return 1;
+    gx_development_debug_snapshot stepOverCallTrap{};
+    if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, stepOverCallTrap, 43, 78) &&
+                stepOverCallTrap.targetAddress == stepOverCall && stepOverCallTrap.context.valid != 0,
+                "real user breakpoint trap at the Step Over call site")) return 1;
+    gx_development_debug_request stepOverCallRequest = makeRequest(
+        GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL, stepOverOwner, stepOverCall, 43, 78);
+    stepOverCallRequest.auxiliaryAddress = stepOverReturn;
+    stepOverCallRequest.threadId = stepOverCallTrap.threadId;
+    stepOverCallRequest.stopGeneration = stepOverCallTrap.context.stopGeneration;
+    gx_development_debug_snapshot stepOverCallResult{};
+    if (!expect(NativeAppDebugger::Command(stepOverCallRequest,
+                                           "native-debugger-runtime-proof", &stepOverCallResult) == gxos::apps::GX_OK &&
+                stepOverCallResult.status == GX_DEVELOPMENT_DEBUG_STATUS_READY &&
+                stepOverCode[0] == 0xE8,
+                "Step Over resumes the call with the original CALL byte and no TF")) return 1;
+    gx_development_debug_snapshot stepOverReturnTrap{};
+    if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, stepOverReturnTrap, 43, 78) &&
+                stepOverReturnTrap.internalBreakpointTrap != 0 &&
+                stepOverReturnTrap.internalBreakpointId == stepOverOwner &&
+                stepOverReturnTrap.targetAddress == stepOverReturn && *stepOverCounter == 1 &&
+                stepOverCode[5] == 0xCC,
+                "callee executes exactly once and the real return INT3 traps")) return 1;
+    gx_development_debug_request removeStepOver = makeRequest(
+        GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER, stepOverOwner, stepOverReturn, 43, 78);
+    gx_development_debug_snapshot removeStepOverResult{};
+    if (!expect(NativeAppDebugger::Command(removeStepOver, "native-debugger-runtime-proof",
+                                           &removeStepOverResult) == gxos::apps::GX_OK &&
+                stepOverCode[5] == returnOriginalByte && stepOverCode[0] == 0xCC,
+                "temporary owner removed, return byte restored, user call breakpoint rebound")) return 1;
+    gx_development_debug_request resumeInternal = makeRequest(
+        GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP, 0, stepOverReturn, 43, 78);
+    resumeInternal.threadId = stepOverReturnTrap.threadId;
+    resumeInternal.stopGeneration = stepOverReturnTrap.context.stopGeneration;
+    gx_development_debug_snapshot resumeInternalResult{};
+    if (!expect(NativeAppDebugger::Command(resumeInternal, "native-debugger-runtime-proof",
+                                           &resumeInternalResult) == gxos::apps::GX_OK,
+                "resume after internal Step Over stop")) return 1;
+    stepOverThread.join();
+    if (!expect(stepOverCompleted.load(std::memory_order_acquire) && *stepOverCounter == 1,
+                "Step Over target exits after one callee execution")) return 1;
+    NativeAppDebugger::UnregisterRuntime(78);
+    if (!expect(stepOverCode[0] == 0xE8 && stepOverCode[5] == returnOriginalByte,
+                "Step Over teardown restores both original call-site bytes")) return 1;
+    delete stepOverCounter;
+    ExecutableMemory::Free(stepOverMapping);
     const uint32_t finalCounter = *counter;
     delete counter;
     counter = nullptr;

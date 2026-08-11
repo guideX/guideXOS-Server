@@ -59,11 +59,13 @@ static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "developme
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
 static_assert(offsetof(gx_development_run_request, flags) == 64, "development run request flags offset changed");
 static_assert(offsetof(gx_development_run_request, reserved) == 68, "development run request reserved offset changed");
-static_assert(sizeof(gx_development_debug_request) == 88, "development debug request size changed");
+static_assert(sizeof(gx_development_debug_request) == 104, "development debug request size changed");
 static_assert(offsetof(gx_development_debug_request, threadId) == 72, "development debug thread id offset changed");
 static_assert(offsetof(gx_development_debug_request, stopGeneration) == 80, "development debug stop generation offset changed");
+static_assert(offsetof(gx_development_debug_request, auxiliaryAddress) == 88, "development debug auxiliary address offset changed");
+static_assert(offsetof(gx_development_debug_request, readByteCount) == 96, "development debug read byte count offset changed");
 static_assert(sizeof(gx_development_debug_register_context) == 192, "development debug register context size changed");
-static_assert(sizeof(gx_development_debug_snapshot) == 424, "development debug snapshot size changed");
+static_assert(sizeof(gx_development_debug_snapshot) == 456, "development debug snapshot size changed");
 static_assert(sizeof(gx_development_run_snapshot) == 448, "development run snapshot size changed");
 static_assert(offsetof(gx_development_run_snapshot, processId) == 24, "development run process id offset changed");
 static_assert(offsetof(gx_development_run_snapshot, applicationId) == 56, "development run application id offset changed");
