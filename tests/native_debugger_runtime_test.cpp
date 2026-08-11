@@ -305,13 +305,58 @@ int main() {
         return 1;
     }
 
-    gx_development_debug_snapshot secondSingleStep{};
-    if (!expect(continueBreakpoint(secondTrap, 900), "second breakpoint continuation accepted")) {
+    gx_development_debug_request sourceStep = makeRequest(GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION, 900, targetAddress);
+    sourceStep.flags = GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT;
+    sourceStep.threadId = secondTrap.threadId;
+    sourceStep.stopGeneration = secondTrap.context.stopGeneration;
+    gx_development_debug_snapshot sourceStepPending{};
+    if (!expect(NativeAppDebugger::Command(sourceStep, "native-debugger-runtime-proof", &sourceStepPending) == gxos::apps::GX_OK &&
+                sourceStepPending.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING &&
+                sourceStepPending.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE &&
+                *breakpointByte == originalByte,
+                "user source-step from a breakpoint restores the original byte")) {
         cleanup();
         return 1;
     }
-    if (!expect(pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP, secondSingleStep),
-                "second real EXCEPTION_SINGLE_STEP observed")) {
+    gx_development_debug_snapshot userStepOne{};
+    if (!expect(pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP, userStepOne) &&
+                userStepOne.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE &&
+                userStepOne.context.rip == targetAddress + 2 && *breakpointByte == 0xCC && *counter == 2,
+                "user source-step observes a real instruction and rebinds the breakpoint")) {
+        cleanup();
+        return 1;
+    }
+    std::cout << "User step #1 RIP=0x" << std::hex << userStepOne.context.rip
+              << " RFLAGS=0x" << userStepOne.context.rflags << std::dec << "\n";
+
+    gx_development_debug_request sourceStepTwo = makeRequest(GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION, 0, 0);
+    sourceStepTwo.threadId = userStepOne.threadId;
+    sourceStepTwo.stopGeneration = userStepOne.context.stopGeneration;
+    gx_development_debug_snapshot sourceStepTwoPending{};
+    if (!expect(NativeAppDebugger::Command(sourceStepTwo, "native-debugger-runtime-proof", &sourceStepTwoPending) == gxos::apps::GX_OK &&
+                sourceStepTwoPending.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING &&
+                sourceStepTwoPending.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE,
+                "repeated user source-step request is accepted on the same stopped thread")) {
+        cleanup();
+        return 1;
+    }
+    gx_development_debug_snapshot userStepTwo{};
+    if (!expect(pollForTrap(GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP, userStepTwo) &&
+                userStepTwo.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE &&
+                userStepTwo.context.threadId == userStepOne.context.threadId,
+                "second user source-step observes a real EXCEPTION_SINGLE_STEP")) {
+        cleanup();
+        return 1;
+    }
+    std::cout << "User step #2 RIP=0x" << std::hex << userStepTwo.context.rip
+              << " RFLAGS=0x" << userStepTwo.context.rflags << std::dec << "\n";
+    gx_development_debug_request resumeStep = makeRequest(GX_DEVELOPMENT_DEBUG_RESUME_STEP, 0, 0);
+    resumeStep.threadId = userStepTwo.threadId;
+    resumeStep.stopGeneration = userStepTwo.context.stopGeneration;
+    gx_development_debug_snapshot resumeStepResult{};
+    if (!expect(NativeAppDebugger::Command(resumeStep, "native-debugger-runtime-proof", &resumeStepResult) == gxos::apps::GX_OK &&
+                resumeStepResult.status == GX_DEVELOPMENT_DEBUG_STATUS_READY,
+                "source-step resume releases the stopped target")) {
         cleanup();
         return 1;
     }

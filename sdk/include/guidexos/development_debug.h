@@ -15,7 +15,9 @@ typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_POLL = 3,
     GX_DEVELOPMENT_DEBUG_RESTORE_ALL = 4,
     GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION = 5,
-    GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT = 6
+    GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT = 6,
+    GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION = 7,
+    GX_DEVELOPMENT_DEBUG_RESUME_STEP = 8
 } gx_development_debug_command;
 
 typedef enum gx_development_debug_status {
@@ -102,12 +104,19 @@ typedef struct gx_development_debug_snapshot {
     uint64_t rflagsBeforeStep;
     uint64_t rflagsWithTrapFlag;
     uint64_t rflagsAfterTrapFlagClear;
+    uint32_t singleStepKind;
 } gx_development_debug_snapshot;
 
 enum {
     GX_DEVELOPMENT_DEBUG_TRAP_NONE = 0,
     GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT = 1,
     GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP = 2
+};
+
+enum {
+    GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_SINGLE_STEP_INTERNAL_BREAKPOINT = 1,
+    GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE = 2
 };
 
 #ifdef __cplusplus
