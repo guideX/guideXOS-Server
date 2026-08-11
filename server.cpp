@@ -1401,6 +1401,89 @@ static std::string navigatorHostedSmokeDiagnostic() {
         yesNo(contains(cssPhase4cReport, "id=phase4c-inner")) + ";nestedCount=" +
         cssPhase4cMetric("Current Document.css_flex_nested_multiline_containers="));
 
+    bool cssPhase5aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase5a.html");
+    std::string cssPhase5aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase5aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase5aMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase5aReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase5aReport.find('\n', pos);
+        return cssPhase5aReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    const bool phase5aBothInsetEvidence = contains(cssPhase5aReport, "id=phase5a-relative-both,") &&
+        contains(cssPhase5aReport, "id=phase5a-relative-both,logical-serial=") &&
+        contains(cssPhase5aReport, ",position=relative,") &&
+        contains(cssPhase5aReport, ",specified-offsets=px:7:px:60:px:40:px:14") &&
+        contains(cssPhase5aReport, ",resolved-offsets=7:60:40:14");
+    const bool phase5aContainingBlockEvidence = contains(cssPhase5aReport, "id=phase5a-cb-link,") &&
+        contains(cssPhase5aReport, ",containing-block-type=positioned-ancestor,") &&
+        contains(cssPhase5aReport, "id=phase5a-flex-abs,") &&
+        contains(cssPhase5aReport, ",containing-block-type=positioned-ancestor,");
+    const bool phase5aStructuralChildEvidence = contains(cssPhase5aReport, "id=phase5a-abs-child,") &&
+        contains(cssPhase5aReport, "id=phase5a-abs-child,logical-serial=") &&
+        contains(cssPhase5aReport, ",position=static,") &&
+        contains(cssPhase5aReport, ",containing-block-type=positioned-ancestor,") &&
+        contains(cssPhase5aReport, ",flow-participation=no,") &&
+        contains(cssPhase5aReport, ",parent-height-contribution=no,");
+    const bool phase5aEqualOrderEvidence = contains(cssPhase5aReport, "id=phase5a-equal-a,") &&
+        contains(cssPhase5aReport, "id=phase5a-equal-b,") &&
+        cssPhase5aReport.find("id=phase5a-equal-a,") < cssPhase5aReport.find("id=phase5a-equal-b,");
+    add("CSS phase 5A positioned-layout fixture loads",
+        cssPhase5aLoaded &&
+        contains(cssPhase5aText, "CSS Phase 5A Positioned Layout Foundation") &&
+        contains(cssPhase5aText, "Relative left plus top reserves its original flow space") &&
+        contains(cssPhase5aText, "Both relative insets use left and top precedence") &&
+        contains(cssPhase5aText, "Static ignores physical insets and stays in normal flow") &&
+        contains(cssPhase5aText, "absolute child link uses relative parent") &&
+        contains(cssPhase5aText, "ABS between siblings") &&
+        contains(cssPhase5aText, "left plus right bounded size") &&
+        contains(cssPhase5aText, "top plus bottom bounded fallback") &&
+        contains(cssPhase5aText, "relative flex item") &&
+        contains(cssPhase5aText, "direct flex absolute excluded") &&
+        contains(cssPhase5aText, "higher z-index") &&
+        contains(cssPhase5aText, "equal z later paints on top") &&
+        contains(cssPhase5aText, "Absolute container content includes a normal block child") &&
+        contains(cssPhase5aText, "Ordinary following content remains in normal flow"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 5A positioning, containing blocks, out-of-flow flow, and stacking",
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_relative=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_absolute=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_relative_offsets=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_absolute_boxes=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_absolute_out_of_flow=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_positioned_containing_blocks=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_document_extent_extensions=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_stacking_owners=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_positive_z_records=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_equal_z_source_orders=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_flex_absolute_excluded=") &&
+        phase5aBothInsetEvidence && phase5aContainingBlockEvidence && phase5aStructuralChildEvidence && phase5aEqualOrderEvidence &&
+        contains(cssPhase5aReport, "Current Document.css_position_fixed_sticky=unsupported-diagnostic-not-aliased") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_unsupported_fixed=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_unsupported_sticky=") &&
+        contains(cssPhase5aReport, "Current Document.css_positioned_evidence=id=phase5a-"),
+        "relative=" + cssPhase5aMetric("Current Document.css_position_relative=") + ";absolute=" +
+        cssPhase5aMetric("Current Document.css_position_absolute=") + ";containing=" +
+        cssPhase5aMetric("Current Document.css_positioned_containing_blocks=") + ";out-of-flow=" +
+        cssPhase5aMetric("Current Document.css_absolute_out_of_flow=") + ";flex-absolute=" +
+        cssPhase5aMetric("Current Document.css_flex_absolute_excluded=") + ";stacking=" +
+        cssPhase5aMetric("Current Document.css_position_stacking_owners=") + ";equal-z=" +
+        cssPhase5aMetric("Current Document.css_position_equal_z_source_orders=") + ";structural-child=" +
+        yesNo(phase5aStructuralChildEvidence) + ";both-insets=" + yesNo(phase5aBothInsetEvidence) +
+        ";containing-evidence=" + yesNo(phase5aContainingBlockEvidence) +
+        ";equal-order=" + yesNo(phase5aEqualOrderEvidence) + ";evidence=" +
+        summarizeText(cssPhase5aMetric("Current Document.css_positioned_evidence="), 2800));
+
+    const bool phase5aPositionedLinkHit = gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string phase5aClickedUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    const bool phase5aRestored = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase5a.html");
+    add("CSS phase 5A positioned hyperlink uses final hit rectangle",
+        phase5aPositionedLinkHit &&
+        phase5aClickedUrl == "http://127.0.0.1:8080/navigator-smoke/basic.html" &&
+        phase5aRestored,
+        std::string("clicked=") + yesNo(phase5aPositionedLinkHit) + ";url=" + phase5aClickedUrl +
+        ";restored=" + yesNo(phase5aRestored));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();

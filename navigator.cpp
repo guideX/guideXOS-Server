@@ -806,6 +806,8 @@ namespace {
 		bool hitVisible = false;
 		bool staticPositionUsed = false;
 		bool blockified = false;
+		bool structuralOwner = false;
+		bool generatedOutOfFlowDescendant = false;
 		bool complete = true;
 		bool clamped = false;
 		std::string incompleteReason;
@@ -1741,6 +1743,8 @@ namespace {
 	static void ensureCssFloatLayout(const WebDocument& doc);
 	static void ensureCssFlexLayout(const WebDocument& doc);
 	static const CssFlexBlockOverride* cssFlexBlockOverrideForBlock(const WebDocument& doc, int blockIndex);
+	static uint64_t cssNearestAbsoluteStructuralAncestorForBlock(const WebDocument& doc,
+		const DocBlock& block);
 	static CssFloatExclusionQuery cssFloatExclusionQuery(const WebDocument& doc,
 		uint64_t bfcIdentity, int lineTop, int lineBottom, int containingLeft, int containingRight);
 	static int cssBfcPlacementY(const WebDocument& doc, int blockIndex, int candidateY,
@@ -4601,7 +4605,8 @@ namespace {
 		for (int i = 0; i < blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
 			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
 			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0 ||
-				candidate.style.position == PositionMode::Absolute) continue;
+				candidate.style.position == PositionMode::Absolute ||
+				cssNearestAbsoluteStructuralAncestorForBlock(doc, candidate) != 0) continue;
 			if (cssBlockParentSerial(doc, candidate) == parentSerial) return true;
 		}
 		return false;
@@ -4612,7 +4617,8 @@ namespace {
 		for (int i = blockIndex + 1; i < static_cast<int>(doc.blocks.size()); ++i) {
 			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
 			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0 ||
-				candidate.style.position == PositionMode::Absolute) continue;
+				candidate.style.position == PositionMode::Absolute ||
+				cssNearestAbsoluteStructuralAncestorForBlock(doc, candidate) != 0) continue;
 			if (cssBlockParentSerial(doc, candidate) == parentSerial) return true;
 		}
 		return false;
@@ -4750,7 +4756,8 @@ namespace {
 			const DocBlock& block = doc.blocks[static_cast<size_t>(i)];
 			if (block.style.displayNone || block.atomicContainerSerial != 0 ||
 				block.style.floatMode != FloatMode::None ||
-				block.style.position == PositionMode::Absolute) continue;
+				block.style.position == PositionMode::Absolute ||
+				cssNearestAbsoluteStructuralAncestorForBlock(doc, block) != 0) continue;
 			return i;
 		}
 		return -1;
@@ -4821,7 +4828,8 @@ namespace {
 			record.minHeightPreventsCollapse = definiteMinHeight.definite;
 			if (record.bfcReason == "atomic-context") ++const_cast<WebDocument&>(doc).cssDiagnostics.bfcAtomic;
 			if (block.style.displayNone || block.atomicContainerSerial != 0 ||
-				block.style.position == PositionMode::Absolute) {
+				block.style.position == PositionMode::Absolute ||
+				cssNearestAbsoluteStructuralAncestorForBlock(doc, block) != 0) {
 				record.incomplete = block.atomicContainerSerial != 0;
 				continue;
 			}
@@ -7017,6 +7025,45 @@ namespace {
 		return false;
 	}
 
+	static uint64_t cssNearestAbsoluteStructuralAncestorForBlock(const WebDocument& doc,
+		const DocBlock& block)
+	{
+		int depth = 0;
+		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend() &&
+			depth++ < static_cast<int>(kCssPositionedAncestryCap); ++it) {
+			const WebStyle* style = cssStyleForSerial(doc, it->serial);
+			if (style && style->position == PositionMode::Absolute)
+				return it->serial;
+		}
+		return 0;
+	}
+
+	static bool cssStructuralHasBlockRecord(const WebDocument& doc, uint64_t serial)
+	{
+		for (const DocBlock& block : doc.blocks)
+			if (block.elementMetadata.serial == serial) return true;
+		return false;
+	}
+
+	static int cssFirstDescendantBlock(const WebDocument& doc, uint64_t serial)
+	{
+		for (int index = 0; index < static_cast<int>(doc.blocks.size()); ++index)
+			if (cssBlockContainsSerial(doc.blocks[static_cast<size_t>(index)], serial)) return index;
+		return -1;
+	}
+
+	static bool cssIsFirstAbsoluteStructuralDescendant(const WebDocument& doc,
+		int blockIndex, uint64_t ownerSerial)
+	{
+		if (blockIndex < 0 || ownerSerial == 0) return false;
+		for (int index = 0; index < blockIndex && index < static_cast<int>(doc.blocks.size()); ++index) {
+			const DocBlock& prior = doc.blocks[static_cast<size_t>(index)];
+			if (prior.style.displayNone) continue;
+			if (cssNearestAbsoluteStructuralAncestorForBlock(doc, prior) == ownerSerial) return false;
+		}
+		return true;
+	}
+
 	static bool cssDescendantBlockRange(const WebDocument& doc, uint64_t serial,
 		int& outFirst, int& outLast)
 	{
@@ -7449,6 +7496,29 @@ namespace {
 		return static_cast<int>(result);
 	}
 
+	// Phase 5A deliberately resolves physical opposing insets with one shared
+	// rule.  The primary physical edge wins when both are concrete: left over
+	// right on the horizontal axis and top over bottom on the vertical axis.
+	// This keeps block, inline, containing-block fallback, paint, and hit-test
+	// geometry from selecting different offsets.
+	static int cssPositionAxisOffset(const CssLengthValue& primary,
+		const CssLengthValue& opposing, int basis, bool basisDefinite,
+		bool& primaryResolved, bool& opposingResolved, bool& unresolved, bool& clamped)
+	{
+		primaryResolved = primary.valid && primary.type != CssLengthType::Auto;
+		opposingResolved = opposing.valid && opposing.type != CssLengthType::Auto;
+		unresolved = false;
+		clamped = false;
+		if (primaryResolved) {
+			return cssPositionResolveLength(primary, basis, basisDefinite, unresolved, clamped);
+		}
+		if (opposingResolved) {
+			const int value = cssPositionResolveLength(opposing, basis, basisDefinite, unresolved, clamped);
+			return value == 0 ? 0 : -value;
+		}
+		return 0;
+	}
+
 	static const CssPositionedRecord* cssPositionedRecordForSerial(
 		const WebDocument& doc, uint64_t serial)
 	{
@@ -7499,14 +7569,12 @@ namespace {
 			if (style->position == PositionMode::Relative) {
 				bool unresolved = false;
 				bool clamped = false;
-				const int dx = style->leftValue.valid && style->leftValue.type != CssLengthType::Auto
-					? cssPositionResolveLength(style->leftValue, ancestor.w, true, unresolved, clamped)
-					: (style->rightValue.valid && style->rightValue.type != CssLengthType::Auto
-						? -cssPositionResolveLength(style->rightValue, ancestor.w, true, unresolved, clamped) : 0);
-				const int dy = style->topValue.valid && style->topValue.type != CssLengthType::Auto
-					? cssPositionResolveLength(style->topValue, ancestor.h, definiteHeight, unresolved, clamped)
-					: (style->bottomValue.valid && style->bottomValue.type != CssLengthType::Auto
-						? -cssPositionResolveLength(style->bottomValue, ancestor.h, definiteHeight, unresolved, clamped) : 0);
+				bool primaryResolved = false;
+				bool opposingResolved = false;
+				const int dx = cssPositionAxisOffset(style->leftValue, style->rightValue,
+					ancestor.w, true, primaryResolved, opposingResolved, unresolved, clamped);
+				const int dy = cssPositionAxisOffset(style->topValue, style->bottomValue,
+					ancestor.h, definiteHeight, primaryResolved, opposingResolved, unresolved, clamped);
 				border.x = cssBoundedGeometryAdd(border.x, dx);
 				border.y = cssBoundedGeometryAdd(border.y, dy);
 			}
@@ -7693,6 +7761,176 @@ namespace {
 				(computed.style.bottomValue.valid && computed.style.bottomValue.type == CssLengthType::Percent))
 				++diagnostics.relativePercentageOffsets;
 		}
+		// Structural containers such as div/section are retained by guideWeb as
+		// serial-addressed metadata rather than legacy DocBlocks.  Give a
+		// positioned structural container one cached geometry record so its
+		// descendants use the same containing-block, paint, and hit-test path as
+		// positioned blocks.  This is deliberately bounded and does not create a
+		// second renderer or a retained DOM tree.
+		for (size_t structuralIndex = 0; structuralIndex < doc.structuralElements.size(); ++structuralIndex) {
+			if (snapshot.records.size() >= kCssPositionedBoxCap) {
+				++snapshot.ancestryClamps;
+				++diagnostics.positionAncestryClamps;
+				break;
+			}
+			const HtmlElementRef& element = doc.structuralElements[structuralIndex];
+			const WebStyle* style = cssStyleForSerial(doc, element.serial);
+			if (!style || style->displayNone || style->position == PositionMode::Static ||
+				cssStructuralHasBlockRecord(doc, element.serial)) continue;
+			CssPositionedRecord record;
+			record.structuralOwner = true;
+			record.logicalSerial = element.serial;
+			record.parentSerial = element.parentSerial;
+			record.mode = style->position;
+			record.top = style->topValue;
+			record.right = style->rightValue;
+			record.bottom = style->bottomValue;
+			record.left = style->leftValue;
+			record.zIndexAuto = style->zIndexAuto;
+			record.zIndex = std::max(-32767, std::min(32767, style->zIndex));
+			const int firstDescendant = cssFirstDescendantBlock(doc, element.serial);
+			record.sourceOrder = firstDescendant >= 0 ? firstDescendant :
+				static_cast<int>(doc.blocks.size() + structuralIndex);
+			record.marginLeft = cssMarginLeftPx(*style, 0);
+			record.marginRight = cssMarginRightPx(*style, 0);
+			record.marginTop = cssMarginTopPx(*style, 4);
+			record.marginBottom = cssMarginBottomPx(*style, 8);
+			record.staticPositionKind = "structural-wrapper";
+			record.staticPositionGeneration = snapshot.generation;
+
+			CssPositionBox containing = cssPositionRootBox();
+			uint64_t containingSerial = 0;
+			bool containingFallback = true;
+			int ancestorDepth = 0;
+			for (uint64_t ancestorSerial = element.parentSerial; ancestorSerial != 0 &&
+				ancestorDepth++ < static_cast<int>(kCssPositionedAncestryCap);) {
+				const WebStyle* ancestorStyle = cssStyleForSerial(doc, ancestorSerial);
+				if (ancestorStyle && ancestorStyle->position != PositionMode::Static) {
+					containingSerial = ancestorSerial;
+					if (const CssPositionedRecord* positioned = cssPositionedRecordForSerial(doc, ancestorSerial)) {
+						containing = cssPositionBoxFromBorder(
+							CssPaintRect{positioned->finalX, positioned->finalY,
+								positioned->usedWidth, positioned->usedHeight}, *ancestorStyle,
+							positioned->usedWidth > 0, positioned->usedHeight > 0);
+					} else {
+						containing = cssPositionBoxForSerial(doc, ancestorSerial);
+					}
+					containingFallback = false;
+					break;
+				}
+				const HtmlElementRef* ancestor = cssStructuralElementForSerial(doc, ancestorSerial);
+				if (!ancestor || ancestor->parentSerial == ancestorSerial) break;
+				ancestorSerial = ancestor->parentSerial;
+			}
+			if (ancestorDepth >= static_cast<int>(kCssPositionedAncestryCap) && containingFallback) {
+				record.complete = false;
+				record.incompleteReason = "ancestry-depth-clamp";
+				++snapshot.ancestryClamps;
+				++diagnostics.positionAncestryClamps;
+			}
+			record.containingBlockSerial = containingSerial;
+			record.containingBlockType = containingFallback ? "root-fallback" : "positioned-ancestor";
+			record.containingBlock = containing;
+			if (containingFallback) ++diagnostics.positionRootFallbacks;
+			else ++diagnostics.positionedContainingBlocks;
+			++snapshot.ancestryLookups;
+
+			CssAncestorBox normalBox;
+			if (firstDescendant >= 0)
+				normalBox = cssAncestorBoxForBlock(doc, element.serial, 0);
+			record.normalX = normalBox.valid ? normalBox.x : containing.padding.x;
+			record.normalY = normalBox.valid ? normalBox.y : containing.padding.y;
+			record.staticX = record.normalX;
+			record.staticY = record.normalY;
+			const int parentBasisWidth = std::max(1, containing.padding.w);
+			const int horizontalEdges = cssHorizontalBoxEdges(*style);
+			const int preferredWidth = parentBasisWidth;
+			record.usedWidth = std::max(1, std::min(kCssPositionedGeometryCap,
+				resolveUsedOuterDimension(*style,
+					style->widthValue, style->width, style->widthPercent,
+					style->minWidthValue, style->minWidth, style->minWidthPercent,
+					style->maxWidthValue, style->maxWidth, style->maxWidthPercent,
+					style->maxWidthNone, parentBasisWidth, preferredWidth, horizontalEdges, false)));
+			int childContentHeight = 1;
+			for (const DocBlock& child : doc.blocks) {
+				if (!cssBlockContainsSerial(child, element.serial) ||
+					cssBlockParentSerial(doc, child) != element.serial) continue;
+				childContentHeight = std::min(kCssPositionedGeometryCap,
+					cssBoundedGeometryAdd(childContentHeight,
+						blockTotalHeight(child, doc, false)));
+			}
+			const int verticalEdges = cssVerticalBoxEdges(*style);
+			const int heightBasis = containing.heightDefinite ? containing.padding.h : -1;
+			record.usedHeight = std::max(1, std::min(kCssPositionedGeometryCap,
+				resolveUsedOuterDimension(*style,
+					style->heightValue, style->height, style->heightPercent,
+					style->minHeightValue, style->minHeight, style->minHeightPercent,
+					style->maxHeightValue, style->maxHeight, style->maxHeightPercent,
+					style->maxHeightNone, heightBasis,
+					cssBoundedGeometryAdd(childContentHeight, verticalEdges), verticalEdges, false)));
+			record.staticSnapshotComplete = element.serial != 0;
+			const int xBasis = std::max(0, containing.padding.w);
+			const int yBasis = std::max(0, containing.padding.h);
+			bool unresolved = false;
+			bool offsetClamped = false;
+			record.leftResolved = record.left.valid && record.left.type != CssLengthType::Auto;
+			record.rightResolved = record.right.valid && record.right.type != CssLengthType::Auto;
+			record.topResolved = record.top.valid && record.top.type != CssLengthType::Auto;
+			record.bottomResolved = record.bottom.valid && record.bottom.type != CssLengthType::Auto;
+			if (record.leftResolved) record.resolvedLeft = cssPositionResolveLength(record.left, xBasis,
+				containing.widthDefinite, unresolved, offsetClamped);
+			if (record.rightResolved) record.resolvedRight = cssPositionResolveLength(record.right, xBasis,
+				containing.widthDefinite, unresolved, offsetClamped);
+			if (record.topResolved) record.resolvedTop = cssPositionResolveLength(record.top, yBasis,
+				containing.heightDefinite, unresolved, offsetClamped);
+			if (record.bottomResolved) record.resolvedBottom = cssPositionResolveLength(record.bottom, yBasis,
+				containing.heightDefinite, unresolved, offsetClamped);
+			if (record.mode == PositionMode::Relative) {
+				bool primaryResolved = false;
+				bool opposingResolved = false;
+				record.relativeShiftX = cssPositionAxisOffset(record.left, record.right, xBasis,
+					containing.widthDefinite, primaryResolved, opposingResolved, unresolved, offsetClamped);
+				record.relativeShiftY = cssPositionAxisOffset(record.top, record.bottom, yBasis,
+					containing.heightDefinite, primaryResolved, opposingResolved, unresolved, offsetClamped);
+				record.finalX = cssBoundedGeometryAdd(record.normalX, record.relativeShiftX);
+				record.finalY = cssBoundedGeometryAdd(record.normalY, record.relativeShiftY);
+				record.flowParticipation = true;
+				record.parentHeightContribution = true;
+			} else {
+				record.flowParticipation = false;
+				record.parentHeightContribution = false;
+				if (record.leftResolved) record.finalX = containing.padding.x + record.resolvedLeft + record.marginLeft;
+				else if (record.rightResolved) record.finalX = containing.padding.x + containing.padding.w - record.resolvedRight -
+					record.usedWidth - record.marginRight;
+				else { record.finalX = record.staticX; record.staticPositionUsed = true; }
+				if (record.topResolved) record.finalY = containing.padding.y + record.resolvedTop + record.marginTop;
+				else if (record.bottomResolved) record.finalY = containing.padding.y + containing.padding.h - record.resolvedBottom -
+					record.usedHeight - record.marginBottom;
+				else { record.finalY = record.staticY; record.staticPositionUsed = true; }
+			}
+			if (offsetClamped) { record.clamped = true; ++snapshot.geometryClamps; ++diagnostics.positionGeometryClamps; }
+			if (record.mode == PositionMode::Absolute) {
+				++diagnostics.absoluteBoxes;
+				++diagnostics.absoluteOutOfFlow;
+			}
+			if (record.zIndexAuto) { ++diagnostics.zIndexAuto; record.paintTier = 1; }
+			else if (record.zIndex < 0) { ++diagnostics.zIndexNegative; ++diagnostics.positionNegativeZRecords; record.paintTier = 0; }
+			else if (record.zIndex > 0) { ++diagnostics.zIndexPositive; ++diagnostics.positionPositiveZRecords; record.paintTier = 2; }
+			else { ++diagnostics.zIndexZero; record.paintTier = 1; }
+			record.documentExtentContribution = std::max(0, record.finalY - kContentY + record.usedHeight);
+			record.paintVisible = style->visibility != VisibilityMode::Hidden && style->effectiveOpacityPercent >= 0 &&
+				record.usedWidth > 0 && record.usedHeight > 0;
+			record.hitVisible = record.paintVisible;
+			record.clip = cssPositionedClipForBlock(doc, -1, record.finalX, record.finalY,
+				record.usedWidth, record.usedHeight, 0);
+			if (record.documentExtentContribution > snapshot.documentExtent && record.paintVisible) {
+				snapshot.documentExtent = std::min(kCssPositionedGeometryCap, record.documentExtentContribution);
+				++diagnostics.positionDocumentExtentExtensions;
+			}
+			snapshot.records.push_back(std::move(record));
+		}
+		std::unordered_map<uint64_t, int> structuralChildCursors;
+		structuralChildCursors.reserve(32);
 		for (int index = 0; index < static_cast<int>(doc.blocks.size()); ++index) {
 			if (snapshot.records.size() >= kCssPositionedBoxCap) {
 				++snapshot.ancestryClamps;
@@ -7700,7 +7938,10 @@ namespace {
 				break;
 			}
 			const DocBlock& block = doc.blocks[static_cast<size_t>(index)];
-			if (block.style.displayNone || block.style.position == PositionMode::Static) continue;
+			const uint64_t structuralOutOfFlowOwner =
+				cssNearestAbsoluteStructuralAncestorForBlock(doc, block);
+			if (block.style.displayNone ||
+				(block.style.position == PositionMode::Static && structuralOutOfFlowOwner == 0)) continue;
 			CssPositionedRecord record;
 			record.blockIndex = index;
 			record.logicalSerial = block.elementMetadata.serial;
@@ -7713,6 +7954,8 @@ namespace {
 			record.zIndexAuto = block.style.zIndexAuto;
 			record.zIndex = std::max(-32767, std::min(32767, block.style.zIndex));
 			record.sourceOrder = index;
+			record.generatedOutOfFlowDescendant = structuralOutOfFlowOwner != 0 &&
+				block.style.position == PositionMode::Static;
 			record.marginLeft = cssMarginLeftPx(block.style, 0);
 			record.marginRight = cssMarginRightPx(block.style, 0);
 			record.marginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
@@ -7752,6 +7995,49 @@ namespace {
 				record.usedWidth = std::max(1, normalGeometry.outerWidth);
 				record.usedHeight = std::max(1, normalGeometry.outerHeight);
 			}
+			if (structuralOutOfFlowOwner != 0) {
+				const CssPositionedRecord* owner = cssPositionedRecordForSerial(doc, structuralOutOfFlowOwner);
+				if (owner) {
+					const WebStyle* ownerStyle = cssStyleForSerial(doc, structuralOutOfFlowOwner);
+					const CssPositionBox ownerBox = ownerStyle
+						? cssPositionBoxFromBorder(CssPaintRect{owner->finalX, owner->finalY,
+							owner->usedWidth, owner->usedHeight}, *ownerStyle,
+							owner->usedWidth > 0, owner->usedHeight > 0)
+						: cssPositionRootBox();
+					const int cursor = structuralChildCursors[structuralOutOfFlowOwner];
+					record.normalX = cssBoundedGeometryAdd(ownerBox.content.x, record.marginLeft);
+					record.normalY = cssBoundedGeometryAdd(ownerBox.content.y,
+						cssBoundedGeometryAdd(cursor, record.marginTop));
+					record.staticX = record.normalX;
+					record.staticY = record.normalY;
+					const int ownerWidth = std::max(1, ownerBox.content.w);
+					const int childEdges = cssHorizontalBoxEdges(block.style,
+						block.type == BlockType::Preformatted);
+					bool childAuto = false;
+					bool childUnresolved = false;
+					bool childConflict = false;
+					bool childClamped = false;
+					record.usedWidth = std::max(1, std::min(kCssPositionedGeometryCap,
+						resolveUsedOuterDimension(block.style,
+							block.style.widthValue, block.style.width, block.style.widthPercent,
+							block.style.minWidthValue, block.style.minWidth, block.style.minWidthPercent,
+							block.style.maxWidthValue, block.style.maxWidth, block.style.maxWidthPercent,
+							block.style.maxWidthNone, ownerWidth, ownerWidth, childEdges,
+							block.type == BlockType::Preformatted, &childAuto, &childUnresolved,
+							&childConflict, &childClamped)));
+					const int childHeightEdges = cssVerticalBoxEdges(block.style,
+						block.type == BlockType::Preformatted);
+					record.usedHeight = std::max(1, std::min(kCssPositionedGeometryCap,
+						cssBoundedGeometryAdd(cssPositionAutoContentHeight(block, doc, record.usedWidth),
+							childHeightEdges)));
+					record.clamped = record.clamped || childClamped || childUnresolved;
+					if (block.style.position != PositionMode::Absolute)
+						structuralChildCursors[structuralOutOfFlowOwner] = std::min(
+							kCssPositionedGeometryCap, cssBoundedGeometryAdd(cursor,
+								cssBoundedGeometryAdd(record.marginTop,
+									cssBoundedGeometryAdd(record.usedHeight, record.marginBottom))));
+				}
+			}
 			record.staticPositionGeneration = snapshot.generation;
 			record.staticPositionKind = block.inlineFlowSerial != 0 ? "inline-flow" : "block-flow";
 			record.staticSnapshotComplete = record.logicalSerial != 0 && record.normalY >= -kCssPositionedGeometryCap;
@@ -7769,7 +8055,21 @@ namespace {
 			CssPositionBox containing = cssPositionRootBox();
 			bool containingFallback = true;
 			bool inlineContainingBlockUsed = false;
-			if (record.mode == PositionMode::Absolute) {
+			if (structuralOutOfFlowOwner != 0) {
+				containingSerial = structuralOutOfFlowOwner;
+				const WebStyle* ownerStyle = cssStyleForSerial(doc, structuralOutOfFlowOwner);
+				if (ownerStyle) {
+					if (const CssPositionedRecord* owner = cssPositionedRecordForSerial(doc,
+						structuralOutOfFlowOwner)) {
+						containing = cssPositionBoxFromBorder(CssPaintRect{owner->finalX, owner->finalY,
+							owner->usedWidth, owner->usedHeight}, *ownerStyle,
+							owner->usedWidth > 0, owner->usedHeight > 0);
+					} else {
+						containing = cssPositionBoxForSerial(doc, structuralOutOfFlowOwner);
+					}
+					containingFallback = false;
+				}
+			} else if (record.mode == PositionMode::Absolute) {
 				int depth = 0;
 				for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
 					if (++depth > static_cast<int>(kCssPositionedAncestryCap)) {
@@ -7872,10 +8172,18 @@ namespace {
 			int ancestorDeltaY = 0;
 			cssPositionRelativeAncestorDelta(doc, index, &ancestorDeltaX, &ancestorDeltaY);
 			if (record.mode == PositionMode::Relative) {
-				record.relativeShiftX = record.leftResolved ? record.resolvedLeft :
-					(record.rightResolved ? -record.resolvedRight : 0);
-				record.relativeShiftY = record.topResolved ? record.resolvedTop :
-					(record.bottomResolved ? -record.resolvedBottom : 0);
+				bool axisUnresolved = false;
+				bool axisClamped = false;
+				bool primaryResolved = false;
+				bool opposingResolved = false;
+				record.relativeShiftX = cssPositionAxisOffset(record.left, record.right, xBasis,
+					containing.widthDefinite, primaryResolved, opposingResolved, axisUnresolved, axisClamped);
+				if (record.leftResolved) record.relativeShiftX = record.resolvedLeft;
+				else if (record.rightResolved) record.relativeShiftX = -record.resolvedRight;
+				record.relativeShiftY = cssPositionAxisOffset(record.top, record.bottom, yBasis,
+					containing.heightDefinite, primaryResolved, opposingResolved, axisUnresolved, axisClamped);
+				if (record.topResolved) record.relativeShiftY = record.resolvedTop;
+				else if (record.bottomResolved) record.relativeShiftY = -record.resolvedBottom;
 				if (record.leftResolved || record.rightResolved || record.topResolved || record.bottomResolved) {
 					++diagnostics.relativeOffsets;
 				}
@@ -7883,7 +8191,7 @@ namespace {
 					std::min(kCssPositionedGeometryCap, record.normalX + ancestorDeltaX + record.relativeShiftX));
 				record.finalY = std::max(-kCssPositionedGeometryCap,
 					std::min(kCssPositionedGeometryCap, record.normalY + ancestorDeltaY + record.relativeShiftY));
-			} else {
+			} else if (record.mode == PositionMode::Absolute) {
 				record.flowParticipation = false;
 				record.parentHeightContribution = false;
 				const bool widthSpecified = block.style.widthValue.valid &&
@@ -7948,6 +8256,14 @@ namespace {
 				}
 				++diagnostics.absoluteBoxes;
 				++diagnostics.absoluteOutOfFlow;
+			} else {
+				// A static block emitted under a structural absolute owner is
+				// out of document flow, but remains ordinary content inside the
+				// owner's padding box.
+				record.flowParticipation = false;
+				record.parentHeightContribution = false;
+				record.finalX = record.normalX;
+				record.finalY = record.normalY;
 			}
 			if (record.zIndexAuto) {
 				++diagnostics.zIndexAuto;
@@ -8060,7 +8376,8 @@ namespace {
 		for (std::vector<int>& group : children) std::stable_sort(group.begin(), group.end(), recordLess);
 		std::stable_sort(roots.begin(), roots.end(), recordLess);
 		const auto emitSubtree = [&](auto&& self, int recordIndex) -> void {
-			snapshot.paintOrder.push_back(snapshot.records[static_cast<size_t>(recordIndex)].blockIndex);
+			const int blockIndex = snapshot.records[static_cast<size_t>(recordIndex)].blockIndex;
+			if (blockIndex >= 0) snapshot.paintOrder.push_back(blockIndex);
 			for (int child : children[static_cast<size_t>(recordIndex)]) self(self, child);
 		};
 		for (int recordIndex : roots)
@@ -8089,12 +8406,14 @@ namespace {
 				continue;
 			const DocBlock& block = doc.blocks[static_cast<size_t>(record.blockIndex)];
 			if (block.id.rfind("phase3g-", 0) != 0 && block.id.rfind("css3g-", 0) != 0 &&
-				block.id.rfind("phase3h-", 0) != 0 && block.id.rfind("css3h-", 0) != 0)
+				block.id.rfind("phase3h-", 0) != 0 && block.id.rfind("css3h-", 0) != 0 &&
+				block.id.rfind("phase5a-", 0) != 0 && block.id.rfind("css5a-", 0) != 0)
 				continue;
 			std::ostringstream line;
 			line << "id=" << block.id << ",logical-serial=" << record.logicalSerial
 				<< ",parent-serial=" << record.parentSerial << ",position="
-				<< (record.mode == PositionMode::Relative ? "relative" : "absolute")
+				<< (record.mode == PositionMode::Relative ? "relative" :
+					record.mode == PositionMode::Absolute ? "absolute" : "static")
 				<< ",stacking-owner-serial=" << record.stackingOwnerSerial
 				<< ",stacking-owner-index=" << record.stackingOwnerIndex
 				<< ",stacking-depth=" << record.stackingDepth
@@ -9132,8 +9451,12 @@ namespace {
 		out += "Current Document.css_position_model=bounded-static-relative-absolute\n";
 		out += "Current Document.css_position_fixed_sticky=unsupported-diagnostic-not-aliased\n";
 		out += "Current Document.css_position_relative_flow=unshifted-normal-flow-with-final-visual-offset\n";
+		out += "Current Document.css_position_relative_inset_precedence=left-over-right-top-over-bottom\n";
 		out += "Current Document.css_position_absolute_flow=out-of-flow-no-parent-height-contribution\n";
 		out += "Current Document.css_position_initial_containing_block=document-content-viewport\n";
+		out += "Current Document.css_position_containing_block=nearest-positioned-ancestor-padding-box-root-document-content-viewport\n";
+		out += "Current Document.css_position_paint_hit_order=shared-stable-positioned-paint-order\n";
+		out += "Current Document.css_position_opposing_size_fallback=auto-size-bounded-preferred-width-and-content-height\n";
 		out += "Current Document.css_z_index_model=positioning-created-bounded-owner-negative-auto-zero-positive-source-order\n";
 		out += "Current Document.css_position_stacking_contract=positioning-created-bounded-stacking-support\n";
 		out += "Current Document.css_position_stacking_context_creators=positioned-non-auto-z-index-only\n";
@@ -12183,6 +12506,18 @@ void Navigator::renderDocument()
 			!cssFlexBlockOverrideForBlock(s_currentDoc, renderIndex)) {
 			++blockIndex;
 			continue;
+		}
+		const uint64_t structuralOwnerSerial =
+			cssNearestAbsoluteStructuralAncestorForBlock(s_currentDoc, block);
+		if (structuralOwnerSerial != 0 &&
+			cssIsFirstAbsoluteStructuralDescendant(s_currentDoc, blockIndex, structuralOwnerSerial)) {
+			const CssPositionedRecord* owner = cssPositionedRecordForSerial(s_currentDoc, structuralOwnerSerial);
+			const WebStyle* ownerStyle = cssStyleForSerial(s_currentDoc, structuralOwnerSerial);
+			if (owner && ownerStyle && owner->paintVisible) {
+				s_cssPaintOpacityPercent = std::max(0, std::min(100, ownerStyle->effectiveOpacityPercent));
+				drawBlockBox(s_windowId, owner->finalX, owner->finalY - s_scrollOffset,
+					owner->usedWidth, owner->usedHeight, *ownerStyle);
+			}
 		}
 		renderFieldsetAt(blockIndex);
 		if (blockUsesInlineFlow(s_currentDoc, blockIndex)) {
