@@ -27,6 +27,7 @@ constexpr uint32_t kPfW = 2;
 constexpr uint32_t kResumeModeRelease = 1;
 constexpr uint32_t kResumeModeCancel = 2;
 constexpr uint32_t kResumeModeInternalSingleStep = 3;
+constexpr uint32_t kResumeModeUserSingleStep = 4;
 constexpr uint64_t kAmd64TrapFlag = 0x100ull;
 
 struct DebugSegment {
@@ -71,15 +72,18 @@ struct DebugRuntime {
     std::atomic<bool> singleStepObserved{false};
     std::atomic<bool> singleStepFailed{false};
     std::atomic<bool> singleStepPending{false};
+    std::atomic<bool> userStepStopPending{false};
     std::atomic<uint64_t> pendingSessionGeneration{0};
     std::atomic<uint64_t> pendingThreadId{0};
     std::atomic<uint64_t> pendingStopGeneration{0};
     std::atomic<uint64_t> pendingBindingId{0};
     std::atomic<uint64_t> pendingAddress{0};
     std::atomic<uint32_t> pendingReinstall{0};
+    std::atomic<uint32_t> pendingStepKind{GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE};
     std::atomic<uint64_t> pendingRflagsBeforeStep{0};
     std::atomic<uint64_t> pendingRflagsWithTrapFlag{0};
     std::atomic<uint64_t> singleStepRflagsAfterClear{0};
+    std::atomic<uint32_t> singleStepKind{GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE};
     gx_development_debug_register_context trapContext{};
     gx_development_debug_register_context singleStepContext{};
 #ifdef _WIN32
@@ -297,6 +301,7 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
         const uint64_t stopGeneration = runtime->pendingStopGeneration.load(std::memory_order_acquire);
         const uint64_t bindingId = runtime->pendingBindingId.load(std::memory_order_acquire);
         const uint64_t address = runtime->pendingAddress.load(std::memory_order_acquire);
+        const uint32_t stepKind = runtime->pendingStepKind.load(std::memory_order_acquire);
         captureWindowsContext(*pointers->ContextRecord, processId, runtime->runtimeId, threadId,
                               runtime->pendingSessionGeneration.load(std::memory_order_acquire), stopGeneration,
                               runtime->singleStepContext);
@@ -304,7 +309,8 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
         pointers->ContextRecord->EFlags = static_cast<DWORD>(rflagsBeforeClear & ~kAmd64TrapFlag);
         runtime->singleStepRflagsAfterClear.store(static_cast<uint64_t>(pointers->ContextRecord->EFlags), std::memory_order_release);
 
-        bool rebound = false;
+        bool rebound = stepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE &&
+            runtime->pendingReinstall.load(std::memory_order_acquire) == 0;
         if (runtime->cancelRequested.load(std::memory_order_acquire)) {
             for (PhysicalBinding& binding : runtime->bindings) {
                 if (binding.used && binding.bindingId == bindingId && binding.address == address) {
@@ -321,7 +327,7 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
                 if (!rebound) Logger::write(LogLevel::Warn, "[NativeAppDebugger] breakpoint reinstall failed: " + error);
                 break;
             }
-        } else {
+        } else if (stepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_INTERNAL_BREAKPOINT) {
             for (PhysicalBinding& binding : runtime->bindings) {
                 if (binding.used && binding.bindingId == bindingId && binding.address == address) {
                     binding.used = false;
@@ -337,7 +343,10 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
         runtime->trapObserved.store(false, std::memory_order_release);
         runtime->singleStepPending.store(false, std::memory_order_release);
         runtime->resumeMode.store(0, std::memory_order_release);
+        runtime->singleStepKind.store(stepKind, std::memory_order_release);
         runtime->singleStepObserved.store(true, std::memory_order_release);
+        if (stepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE)
+            runtime->userStepStopPending.store(true, std::memory_order_release);
         if (runtime->trapEvent) SetEvent(runtime->trapEvent);
         Logger::write(LogLevel::Info, "[NativeAppDebugger] EXCEPTION_SINGLE_STEP runtimeId=" +
             std::to_string(runtime->runtimeId) + " threadId=" + std::to_string(threadId) +
@@ -346,6 +355,23 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
             " rflagsWithTF=0x" + [&runtime]() { std::ostringstream value; value << std::hex << runtime->pendingRflagsWithTrapFlag.load(std::memory_order_acquire); return value.str(); }() +
             " rflagsAfterClear=0x" + [&runtime]() { std::ostringstream value; value << std::hex << runtime->singleStepRflagsAfterClear.load(std::memory_order_acquire); return value.str(); }() +
             " rebound=" + (rebound ? "true" : "false"));
+        if (stepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE) {
+#ifdef _WIN32
+            WaitForSingleObject(runtime->resumeEvent, INFINITE);
+            const uint32_t resumeMode = runtime->resumeMode.load(std::memory_order_acquire);
+            runtime->userStepStopPending.store(false, std::memory_order_release);
+            runtime->resumeMode.store(0, std::memory_order_release);
+            ResetEvent(runtime->resumeEvent);
+            if (resumeMode == kResumeModeUserSingleStep) {
+                pointers->ContextRecord->EFlags = static_cast<DWORD>(
+                    static_cast<uint64_t>(pointers->ContextRecord->EFlags) | kAmd64TrapFlag);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+            if (resumeMode == kResumeModeRelease || resumeMode == kResumeModeCancel)
+                return EXCEPTION_CONTINUE_EXECUTION;
+            return EXCEPTION_CONTINUE_SEARCH;
+#endif
+        }
         return EXCEPTION_CONTINUE_EXECUTION;
     }
     if (pointers->ExceptionRecord->ExceptionCode != EXCEPTION_BREAKPOINT) return EXCEPTION_CONTINUE_SEARCH;
@@ -373,7 +399,7 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
         SetEvent(runtime->trapEvent);
         WaitForSingleObject(runtime->resumeEvent, INFINITE);
         const uint32_t resumeMode = runtime->resumeMode.load(std::memory_order_acquire);
-        if (resumeMode == kResumeModeInternalSingleStep) {
+        if (resumeMode == kResumeModeInternalSingleStep || resumeMode == kResumeModeUserSingleStep) {
             if (runtime->pendingThreadId.load(std::memory_order_acquire) != threadId ||
                 runtime->pendingBindingId.load(std::memory_order_acquire) != binding.bindingId ||
                 runtime->pendingAddress.load(std::memory_order_acquire) != binding.address) {
@@ -444,15 +470,18 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.singleStepObserved.store(false, std::memory_order_release);
         runtime.singleStepFailed.store(false, std::memory_order_release);
         runtime.singleStepPending.store(false, std::memory_order_release);
+        runtime.userStepStopPending.store(false, std::memory_order_release);
         runtime.pendingSessionGeneration.store(0, std::memory_order_release);
         runtime.pendingThreadId.store(0, std::memory_order_release);
         runtime.pendingStopGeneration.store(0, std::memory_order_release);
         runtime.pendingBindingId.store(0, std::memory_order_release);
         runtime.pendingAddress.store(0, std::memory_order_release);
         runtime.pendingReinstall.store(0, std::memory_order_release);
+        runtime.pendingStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE, std::memory_order_release);
         runtime.pendingRflagsBeforeStep.store(0, std::memory_order_release);
         runtime.pendingRflagsWithTrapFlag.store(0, std::memory_order_release);
         runtime.singleStepRflagsAfterClear.store(0, std::memory_order_release);
+        runtime.singleStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE, std::memory_order_release);
         runtime.trapContext = gx_development_debug_register_context{};
         runtime.singleStepContext = gx_development_debug_register_context{};
         runtime.runtimeId = context.runtimeId;
@@ -632,6 +661,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         } else if (runtime->singleStepObserved.exchange(false, std::memory_order_acq_rel)) {
             snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
             snapshot->trapKind = GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP;
+            snapshot->singleStepKind = runtime->singleStepKind.load(std::memory_order_acquire);
             snapshot->threadId = runtime->singleStepContext.threadId;
             snapshot->instructionPointer = runtime->singleStepContext.rip;
             snapshot->targetAddress = runtime->pendingAddress.load(std::memory_order_acquire);
@@ -640,13 +670,24 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             snapshot->rflagsBeforeStep = runtime->pendingRflagsBeforeStep.load(std::memory_order_acquire);
             snapshot->rflagsWithTrapFlag = runtime->pendingRflagsWithTrapFlag.load(std::memory_order_acquire);
             snapshot->rflagsAfterTrapFlagClear = runtime->singleStepRflagsAfterClear.load(std::memory_order_acquire);
-            Logger::write(LogLevel::Info, "[NativeAppDebugger] internal single-step observed runtimeId=" +
+            const bool userSourceStep = snapshot->singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+            Logger::write(LogLevel::Info, std::string("[NativeAppDebugger] ") +
+                (userSourceStep ? "user source-step observed runtimeId=" : "internal single-step observed runtimeId=") +
                 std::to_string(runtime->runtimeId) + " bindingId=" + std::to_string(snapshot->bindingId));
         } else if (runtime->singleStepPending.load(std::memory_order_acquire)) {
             snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
+            snapshot->singleStepKind = runtime->pendingStepKind.load(std::memory_order_acquire);
             snapshot->threadId = runtime->pendingThreadId.load(std::memory_order_acquire);
             snapshot->targetAddress = runtime->pendingAddress.load(std::memory_order_acquire);
             snapshot->bindingId = runtime->pendingBindingId.load(std::memory_order_acquire);
+        } else if (runtime->userStepStopPending.load(std::memory_order_acquire)) {
+            snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
+            snapshot->singleStepKind = GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+            snapshot->threadId = runtime->singleStepContext.threadId;
+            snapshot->instructionPointer = runtime->singleStepContext.rip;
+            snapshot->targetAddress = runtime->pendingAddress.load(std::memory_order_acquire);
+            snapshot->bindingId = runtime->pendingBindingId.load(std::memory_order_acquire);
+            snapshot->context = runtime->singleStepContext;
         } else if (runtime->trapObserved.load(std::memory_order_acquire)) {
             snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
             snapshot->trapKind = GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT;
@@ -702,6 +743,8 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         runtime->pendingAddress.store(request.targetAddress, std::memory_order_release);
         runtime->pendingReinstall.store((request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0 ? 1u : 0u,
                                         std::memory_order_release);
+        runtime->pendingStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_INTERNAL_BREAKPOINT, std::memory_order_release);
+        runtime->userStepStopPending.store(false, std::memory_order_release);
         const uint64_t rflagsBeforeStep = runtime->trapContext.rflags;
         runtime->pendingRflagsBeforeStep.store(rflagsBeforeStep, std::memory_order_release);
         runtime->pendingRflagsWithTrapFlag.store(rflagsBeforeStep | kAmd64TrapFlag, std::memory_order_release);
@@ -718,6 +761,103 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             std::to_string(runtime->runtimeId) + " bindingId=" + std::to_string(bindingId) +
             " stopGeneration=" + std::to_string(request.stopGeneration) +
             " reinstall=" + ((request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) ? "true" : "false"));
+        return GX_OK;
+        }
+    case GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION:
+        {
+        if (request.threadId == 0 || request.stopGeneration == 0) {
+            setError(snapshot, "source-step thread identity is incomplete");
+            return GX_ERROR_INVALID_ARGUMENT;
+        }
+        const bool fromBreakpoint = request.breakpointId != 0 || request.targetAddress != 0;
+        PhysicalBinding* binding = nullptr;
+        uint64_t bindingId = 0;
+        uint64_t address = 0;
+        uint64_t rflagsBeforeStep = 0;
+        if (fromBreakpoint) {
+            if (request.breakpointId == 0 || request.targetAddress == 0 ||
+                !runtime->trapObserved.load(std::memory_order_acquire) ||
+                runtime->singleStepPending.load(std::memory_order_acquire) ||
+                runtime->userStepStopPending.load(std::memory_order_acquire) ||
+                runtime->trapThreadId.load(std::memory_order_acquire) != request.threadId ||
+                runtime->trapStopGeneration.load(std::memory_order_acquire) != request.stopGeneration ||
+                runtime->trapAddress.load(std::memory_order_acquire) != request.targetAddress) {
+                setError(snapshot, "stale or mismatched breakpoint source-step context");
+                return GX_ERROR_FAILED;
+            }
+            bindingId = runtime->trapBindingId.load(std::memory_order_acquire);
+            address = request.targetAddress;
+            for (PhysicalBinding& candidate : runtime->bindings) {
+                if (!candidate.used || !candidate.installed || candidate.bindingId != bindingId ||
+                    candidate.sessionGeneration != request.sessionGeneration || candidate.address != address) continue;
+                for (uint32_t owner = 0; owner < candidate.ownerCount; ++owner)
+                    if (candidate.owners[owner] == request.breakpointId) { binding = &candidate; break; }
+                if (binding) break;
+            }
+            if (!binding) {
+                setError(snapshot, "stopped breakpoint is not owned by this session");
+                return GX_ERROR_FAILED;
+            }
+            std::string restoreError;
+            if (!restoreForInternalSingleStep(*runtime, *binding, restoreError)) {
+                setError(snapshot, restoreError.empty() ? "original breakpoint byte restoration failed" : restoreError.c_str());
+                return GX_ERROR_FAILED;
+            }
+            rflagsBeforeStep = runtime->trapContext.rflags;
+            runtime->trapObserved.store(false, std::memory_order_release);
+        } else {
+            if (!runtime->userStepStopPending.load(std::memory_order_acquire) ||
+                runtime->singleStepPending.load(std::memory_order_acquire) ||
+                runtime->singleStepContext.threadId != request.threadId ||
+                runtime->singleStepContext.stopGeneration != request.stopGeneration) {
+                setError(snapshot, "stale or mismatched source-step context");
+                return GX_ERROR_FAILED;
+            }
+            rflagsBeforeStep = runtime->singleStepContext.rflags;
+            runtime->userStepStopPending.store(false, std::memory_order_release);
+        }
+        runtime->singleStepObserved.store(false, std::memory_order_release);
+        runtime->singleStepFailed.store(false, std::memory_order_release);
+        runtime->pendingSessionGeneration.store(request.sessionGeneration, std::memory_order_release);
+        runtime->pendingThreadId.store(request.threadId, std::memory_order_release);
+        runtime->pendingStopGeneration.store(request.stopGeneration, std::memory_order_release);
+        runtime->pendingBindingId.store(bindingId, std::memory_order_release);
+        runtime->pendingAddress.store(address, std::memory_order_release);
+        runtime->pendingReinstall.store(fromBreakpoint && (request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0 ? 1u : 0u,
+                                        std::memory_order_release);
+        runtime->pendingStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE, std::memory_order_release);
+        runtime->pendingRflagsBeforeStep.store(rflagsBeforeStep, std::memory_order_release);
+        runtime->pendingRflagsWithTrapFlag.store(rflagsBeforeStep | kAmd64TrapFlag, std::memory_order_release);
+        runtime->singleStepPending.store(true, std::memory_order_release);
+        runtime->resumeMode.store(kResumeModeUserSingleStep, std::memory_order_release);
+#ifdef _WIN32
+        SetEvent(runtime->resumeEvent);
+#endif
+        snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
+        snapshot->singleStepKind = GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+        snapshot->bindingId = bindingId;
+        snapshot->targetAddress = address;
+        snapshot->threadId = request.threadId;
+        Logger::write(LogLevel::Info, "[NativeAppDebugger] user source-step accepted runtimeId=" +
+            std::to_string(runtime->runtimeId) + " threadId=" + std::to_string(request.threadId) +
+            " stopGeneration=" + std::to_string(request.stopGeneration) +
+            " fromBreakpoint=" + (fromBreakpoint ? "true" : "false"));
+        return GX_OK;
+        }
+    case GX_DEVELOPMENT_DEBUG_RESUME_STEP:
+        {
+        if (!runtime->userStepStopPending.load(std::memory_order_acquire) || request.threadId == 0 ||
+            request.stopGeneration == 0 || runtime->singleStepContext.threadId != request.threadId ||
+            runtime->singleStepContext.stopGeneration != request.stopGeneration) {
+            setError(snapshot, "stale or mismatched source-step resume context");
+            return GX_ERROR_FAILED;
+        }
+        runtime->userStepStopPending.store(false, std::memory_order_release);
+        runtime->resumeMode.store(kResumeModeRelease, std::memory_order_release);
+#ifdef _WIN32
+        SetEvent(runtime->resumeEvent);
+#endif
+        snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
         return GX_OK;
         }
     case GX_DEVELOPMENT_DEBUG_RESTORE_ALL:
@@ -742,6 +882,8 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         runtime->cancelRequested.store(true, std::memory_order_release);
         runtime->gateOpen.store(true, std::memory_order_release);
         runtime->pendingReinstall.store(0, std::memory_order_release);
+        runtime->userStepStopPending.store(false, std::memory_order_release);
+        runtime->pendingStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE, std::memory_order_release);
         runtime->resumeMode.store(kResumeModeCancel, std::memory_order_release);
 #ifdef _WIN32
         SetEvent(runtime->gateEvent);
@@ -771,6 +913,8 @@ void NativeAppDebugger::CancelProcess(uint64_t processId) {
     runtime->cancelRequested.store(true, std::memory_order_release);
     runtime->gateOpen.store(true, std::memory_order_release);
     runtime->pendingReinstall.store(0, std::memory_order_release);
+    runtime->userStepStopPending.store(false, std::memory_order_release);
+    runtime->pendingStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE, std::memory_order_release);
     runtime->resumeMode.store(kResumeModeCancel, std::memory_order_release);
 #ifdef _WIN32
     SetEvent(runtime->gateEvent);

@@ -334,6 +334,7 @@
     <ClInclude Include="module_manager.h" />
     <ClInclude Include="native_app_process_table.h" />
     <ClInclude Include="native_app_runtime.h" />
+    <ClInclude Include="native_app_debugger.h" />
     <ClInclude Include="native_build_service.h" />
     <ClInclude Include="development_run_service.h" />
     <ClInclude Include="native_elf_executor.h" />
@@ -580,6 +581,7 @@
     <ClCompile Include="module_manager.cpp" />
     <ClCompile Include="native_app_process_table.cpp" />
     <ClCompile Include="native_app_runtime.cpp" />
+    <ClCompile Include="native_app_debugger.cpp" />
     <ClCompile Include="native_build_service.cpp" />
     <ClCompile Include="development_run_service.cpp" />
     <ClCompile Include="native_elf_executor.cpp" />
