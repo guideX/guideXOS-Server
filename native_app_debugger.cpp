@@ -73,6 +73,7 @@ struct DebugRuntime {
     std::atomic<uint64_t> trapStopGeneration{0};
     std::atomic<bool> trapInternalBreakpoint{false};
     std::atomic<uint64_t> trapInternalBreakpointId{0};
+    std::atomic<uint32_t> trapInternalBreakpointPurpose{GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE};
     std::atomic<uint64_t> stopGenerationCounter{0};
     std::atomic<bool> singleStepObserved{false};
     std::atomic<bool> singleStepFailed{false};
@@ -97,6 +98,10 @@ struct DebugRuntime {
     std::atomic<uint64_t> stepOverReturnAddress{0};
     std::atomic<uint64_t> stepOverCallBindingId{0};
     std::atomic<uint64_t> stepOverCallAddress{0};
+    std::atomic<bool> stepOutActive{false};
+    std::atomic<uint64_t> stepOutInternalOwnerId{0};
+    std::atomic<uint64_t> stepOutReturnBindingId{0};
+    std::atomic<uint64_t> stepOutReturnAddress{0};
 #ifdef _WIN32
     HANDLE gateEvent = nullptr;
     HANDLE trapEvent = nullptr;
@@ -320,6 +325,13 @@ void clearStepOverRuntime(DebugRuntime& runtime) {
     runtime.stepOverReturnAddress.store(0, std::memory_order_release);
 }
 
+void clearStepOutRuntime(DebugRuntime& runtime) {
+    runtime.stepOutActive.store(false, std::memory_order_release);
+    runtime.stepOutInternalOwnerId.store(0, std::memory_order_release);
+    runtime.stepOutReturnBindingId.store(0, std::memory_order_release);
+    runtime.stepOutReturnAddress.store(0, std::memory_order_release);
+}
+
 #ifdef _WIN32
 void captureWindowsContext(const CONTEXT& source, uint64_t processId, uint64_t runtimeId,
                            uint64_t threadId, uint64_t sessionGeneration, uint64_t stopGeneration,
@@ -411,6 +423,8 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
         runtime->trapObserved.store(false, std::memory_order_release);
         runtime->trapInternalBreakpoint.store(false, std::memory_order_release);
         runtime->trapInternalBreakpointId.store(0, std::memory_order_release);
+        runtime->trapInternalBreakpointPurpose.store(GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE, std::memory_order_release);
+        runtime->trapInternalBreakpointPurpose.store(GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE, std::memory_order_release);
         runtime->singleStepPending.store(false, std::memory_order_release);
         runtime->resumeMode.store(0, std::memory_order_release);
         runtime->singleStepKind.store(stepKind, std::memory_order_release);
@@ -463,12 +477,22 @@ LONG CALLBACK debugVectoredHandler(EXCEPTION_POINTERS* pointers) {
         runtime->trapAddress.store(binding.address, std::memory_order_release);
         runtime->trapBindingId.store(binding.bindingId, std::memory_order_release);
         runtime->trapStopGeneration.store(stopGeneration, std::memory_order_release);
-        const bool internalBreakpoint = runtime->stepOverActive.load(std::memory_order_acquire) &&
+        const bool stepOutBreakpoint = runtime->stepOutActive.load(std::memory_order_acquire) &&
+            runtime->stepOutReturnBindingId.load(std::memory_order_acquire) == binding.bindingId &&
+            runtime->stepOutReturnAddress.load(std::memory_order_acquire) == binding.address;
+        const bool stepOverBreakpoint = runtime->stepOverActive.load(std::memory_order_acquire) &&
             runtime->stepOverReturnBindingId.load(std::memory_order_acquire) == binding.bindingId &&
             runtime->stepOverReturnAddress.load(std::memory_order_acquire) == binding.address;
+        const bool internalBreakpoint = stepOutBreakpoint || stepOverBreakpoint;
         runtime->trapInternalBreakpoint.store(internalBreakpoint, std::memory_order_release);
-        runtime->trapInternalBreakpointId.store(internalBreakpoint ?
-            runtime->stepOverInternalOwnerId.load(std::memory_order_acquire) : 0, std::memory_order_release);
+        runtime->trapInternalBreakpointId.store(stepOutBreakpoint ?
+            runtime->stepOutInternalOwnerId.load(std::memory_order_acquire) :
+            (stepOverBreakpoint ? runtime->stepOverInternalOwnerId.load(std::memory_order_acquire) : 0),
+            std::memory_order_release);
+        runtime->trapInternalBreakpointPurpose.store(stepOutBreakpoint ?
+            GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OUT :
+            (stepOverBreakpoint ? GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OVER :
+             GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE), std::memory_order_release);
         captureWindowsContext(*pointers->ContextRecord, processId, runtime->runtimeId, threadId,
                               binding.sessionGeneration, stopGeneration, runtime->trapContext);
         runtime->trapObserved.store(true, std::memory_order_release);
@@ -529,6 +553,7 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.trapObserved.store(false, std::memory_order_release);
         runtime.trapInternalBreakpoint.store(false, std::memory_order_release);
         runtime.trapInternalBreakpointId.store(0, std::memory_order_release);
+        runtime.trapInternalBreakpointPurpose.store(GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE, std::memory_order_release);
         runtime.resumeMode.store(0, std::memory_order_release);
         runtime.runtimeId = 0;
         runtime.processId = 0;
@@ -565,6 +590,7 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.trapContext = gx_development_debug_register_context{};
         runtime.singleStepContext = gx_development_debug_register_context{};
         clearStepOverRuntime(runtime);
+        clearStepOutRuntime(runtime);
         runtime.stepOverCallBindingId.store(0, std::memory_order_release);
         runtime.stepOverCallAddress.store(0, std::memory_order_release);
         runtime.runtimeId = context.runtimeId;
@@ -843,6 +869,9 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             }
             clearStepOverRuntime(*runtime);
         }
+        const bool stepOutOwner = runtime->stepOutActive.load(std::memory_order_acquire) &&
+            runtime->stepOutInternalOwnerId.load(std::memory_order_acquire) == request.breakpointId;
+        if (stepOutOwner) clearStepOutRuntime(*runtime);
         snapshot->bindingId = bindingId;
         snapshot->targetAddress = request.targetAddress;
         snapshot->bindingInstalled = binding->used && binding->installed ? 1 : 0;
@@ -913,6 +942,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             runtime->trapObserved.store(false, std::memory_order_release);
             runtime->trapInternalBreakpoint.store(false, std::memory_order_release);
             runtime->trapInternalBreakpointId.store(0, std::memory_order_release);
+            runtime->trapInternalBreakpointPurpose.store(GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE, std::memory_order_release);
         }
         runtime->resumeMode.store(kResumeModeRelease, std::memory_order_release);
 #ifdef _WIN32
@@ -928,6 +958,99 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
                 std::ostringstream value; value << std::hex << request.auxiliaryAddress; return value.str(); }());
         return GX_OK;
     }
+    case GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN: {
+        if (request.breakpointId == 0 || request.targetAddress == 0 ||
+            request.auxiliaryAddress == 0 || request.threadId == 0 || request.stopGeneration == 0) {
+            setError(snapshot, "Step Out return identity is incomplete");
+            return GX_ERROR_INVALID_ARGUMENT;
+        }
+        PhysicalBinding* returnBinding = findBinding(*runtime, request.sessionGeneration,
+                                                       request.auxiliaryAddress, 0);
+        if (!returnBinding || !bindingHasOwner(*returnBinding, request.breakpointId)) {
+            setError(snapshot, "Step Out return breakpoint is not bound");
+            return GX_ERROR_FAILED;
+        }
+        const bool fromInternalTrap = runtime->trapObserved.load(std::memory_order_acquire) &&
+            runtime->trapInternalBreakpoint.load(std::memory_order_acquire) &&
+            runtime->trapThreadId.load(std::memory_order_acquire) == request.threadId &&
+            runtime->trapStopGeneration.load(std::memory_order_acquire) == request.stopGeneration &&
+            runtime->trapAddress.load(std::memory_order_acquire) == request.targetAddress;
+        const bool fromBreakpoint = runtime->trapObserved.load(std::memory_order_acquire) &&
+            !fromInternalTrap &&
+            runtime->trapThreadId.load(std::memory_order_acquire) == request.threadId &&
+            runtime->trapStopGeneration.load(std::memory_order_acquire) == request.stopGeneration &&
+            runtime->trapAddress.load(std::memory_order_acquire) == request.targetAddress;
+        const bool fromUserStep = runtime->userStepStopPending.load(std::memory_order_acquire) &&
+            runtime->singleStepContext.threadId == request.threadId &&
+            runtime->singleStepContext.stopGeneration == request.stopGeneration &&
+            runtime->singleStepContext.rip == request.targetAddress;
+        if (!fromBreakpoint && !fromUserStep && !fromInternalTrap) {
+            setError(snapshot, "stale or mismatched Step Out stop context");
+            return GX_ERROR_FAILED;
+        }
+
+        runtime->stepOutActive.store(true, std::memory_order_release);
+        runtime->stepOutInternalOwnerId.store(request.breakpointId, std::memory_order_release);
+        runtime->stepOutReturnBindingId.store(returnBinding->bindingId, std::memory_order_release);
+        runtime->stepOutReturnAddress.store(request.auxiliaryAddress, std::memory_order_release);
+        if (fromBreakpoint) {
+            const uint64_t currentBindingId = runtime->trapBindingId.load(std::memory_order_acquire);
+            PhysicalBinding* currentBinding = nullptr;
+            for (PhysicalBinding& candidate : runtime->bindings) {
+                if (!candidate.used || !candidate.installed || candidate.bindingId != currentBindingId ||
+                    candidate.sessionGeneration != request.sessionGeneration || candidate.address != request.targetAddress) continue;
+                currentBinding = &candidate;
+                break;
+            }
+            if (!currentBinding) {
+                clearStepOutRuntime(*runtime);
+                setError(snapshot, "current breakpoint binding is unavailable for Step Out");
+                return GX_ERROR_FAILED;
+            }
+            std::string restoreError;
+            if (!restoreForInternalSingleStep(*runtime, *currentBinding, restoreError)) {
+                clearStepOutRuntime(*runtime);
+                setError(snapshot, restoreError.c_str());
+                return GX_ERROR_FAILED;
+            }
+            runtime->trapObserved.store(false, std::memory_order_release);
+            runtime->trapInternalBreakpoint.store(false, std::memory_order_release);
+            runtime->trapInternalBreakpointId.store(0, std::memory_order_release);
+            runtime->trapInternalBreakpointPurpose.store(GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE, std::memory_order_release);
+            runtime->singleStepObserved.store(false, std::memory_order_release);
+            runtime->singleStepFailed.store(false, std::memory_order_release);
+            runtime->pendingSessionGeneration.store(request.sessionGeneration, std::memory_order_release);
+            runtime->pendingThreadId.store(request.threadId, std::memory_order_release);
+            runtime->pendingStopGeneration.store(request.stopGeneration, std::memory_order_release);
+            runtime->pendingBindingId.store(currentBinding->bindingId, std::memory_order_release);
+            runtime->pendingAddress.store(request.targetAddress, std::memory_order_release);
+            runtime->pendingReinstall.store((request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0 ? 1u : 0u,
+                                            std::memory_order_release);
+            runtime->pendingStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_INTERNAL_BREAKPOINT, std::memory_order_release);
+            runtime->userStepStopPending.store(false, std::memory_order_release);
+            const uint64_t rflagsBeforeStep = runtime->trapContext.rflags;
+            runtime->pendingRflagsBeforeStep.store(rflagsBeforeStep, std::memory_order_release);
+            runtime->pendingRflagsWithTrapFlag.store(rflagsBeforeStep | kAmd64TrapFlag, std::memory_order_release);
+            runtime->singleStepPending.store(true, std::memory_order_release);
+            runtime->resumeMode.store(kResumeModeInternalSingleStep, std::memory_order_release);
+        } else {
+            if (fromUserStep) runtime->userStepStopPending.store(false, std::memory_order_release);
+            if (fromInternalTrap) {
+                runtime->trapObserved.store(false, std::memory_order_release);
+                runtime->trapInternalBreakpoint.store(false, std::memory_order_release);
+                runtime->trapInternalBreakpointId.store(0, std::memory_order_release);
+                runtime->trapInternalBreakpointPurpose.store(GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE, std::memory_order_release);
+            }
+            runtime->resumeMode.store(kResumeModeRelease, std::memory_order_release);
+        }
+#ifdef _WIN32
+        SetEvent(runtime->resumeEvent);
+#endif
+        snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
+        snapshot->bindingId = returnBinding->bindingId;
+        snapshot->targetAddress = request.auxiliaryAddress;
+        return GX_OK;
+    }
     case GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP: {
         if (!runtime->trapObserved.load(std::memory_order_acquire) || request.threadId == 0 ||
             request.stopGeneration == 0 || runtime->trapThreadId.load(std::memory_order_acquire) != request.threadId ||
@@ -938,6 +1061,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         runtime->trapObserved.store(false, std::memory_order_release);
         runtime->trapInternalBreakpoint.store(false, std::memory_order_release);
         runtime->trapInternalBreakpointId.store(0, std::memory_order_release);
+        runtime->trapInternalBreakpointPurpose.store(GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE, std::memory_order_release);
         runtime->resumeMode.store(kResumeModeRelease, std::memory_order_release);
 #ifdef _WIN32
         SetEvent(runtime->resumeEvent);
@@ -958,6 +1082,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         runtime->trapObserved.store(false, std::memory_order_release);
         runtime->trapInternalBreakpoint.store(false, std::memory_order_release);
         runtime->trapInternalBreakpointId.store(0, std::memory_order_release);
+        runtime->trapInternalBreakpointPurpose.store(GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE, std::memory_order_release);
         runtime->singleStepObserved.store(false, std::memory_order_release);
         runtime->singleStepFailed.store(false, std::memory_order_release);
         runtime->pendingSessionGeneration.store(request.sessionGeneration, std::memory_order_release);
@@ -1028,6 +1153,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             snapshot->trapKind = GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT;
             snapshot->internalBreakpointTrap = runtime->trapInternalBreakpoint.load(std::memory_order_acquire) ? 1 : 0;
             snapshot->internalBreakpointId = runtime->trapInternalBreakpointId.load(std::memory_order_acquire);
+            snapshot->internalBreakpointPurpose = runtime->trapInternalBreakpointPurpose.load(std::memory_order_acquire);
             snapshot->threadId = runtime->trapThreadId.load(std::memory_order_acquire);
             snapshot->instructionPointer = runtime->trapInstructionPointer.load(std::memory_order_acquire);
             snapshot->targetAddress = runtime->trapAddress.load(std::memory_order_acquire);
@@ -1202,6 +1328,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         std::string restoreError;
         const bool restored = restoreAllLocked(*runtime, restoreError);
         clearStepOverRuntime(*runtime);
+        clearStepOutRuntime(*runtime);
         runtime->resumeMode.store(kResumeModeRelease, std::memory_order_release);
 #ifdef _WIN32
         SetEvent(runtime->resumeEvent);
@@ -1218,6 +1345,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         std::string restoreError;
         const bool restored = restoreAllLocked(*runtime, restoreError);
         clearStepOverRuntime(*runtime);
+        clearStepOutRuntime(*runtime);
         runtime->cancelRequested.store(true, std::memory_order_release);
         runtime->gateOpen.store(true, std::memory_order_release);
         runtime->pendingReinstall.store(0, std::memory_order_release);
@@ -1250,6 +1378,7 @@ void NativeAppDebugger::CancelProcess(uint64_t processId) {
     if (!restoreAllLocked(*runtime, restoreError))
         Logger::write(LogLevel::Warn, "[NativeAppDebugger] process cancellation restore failed: " + restoreError);
     runtime->cancelRequested.store(true, std::memory_order_release);
+    clearStepOutRuntime(*runtime);
     runtime->gateOpen.store(true, std::memory_order_release);
     runtime->pendingReinstall.store(0, std::memory_order_release);
     runtime->userStepStopPending.store(false, std::memory_order_release);

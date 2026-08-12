@@ -583,6 +583,226 @@ int main() {
                 "Step Over teardown restores both original call-site bytes")) return 1;
     delete stepOverCounter;
     ExecutableMemory::Free(stepOverMapping);
+
+    // Phase 8 machine-level proof: the current target frame saves a caller
+    // return address inside the same Native ELF image. Step Out reads that
+    // raw address from the stopped RBP frame, arms a temporary owner there,
+    // resumes the current function normally, and observes the real RET trap.
+    ExecutableMemoryBlock stepOutMapping;
+    if (!expect(ExecutableMemory::Allocate(4096, stepOutMapping, error),
+                "Step Out executable memory allocation")) return 1;
+    volatile uint32_t* stepOutCounter = new volatile uint32_t(0);
+    uint8_t* stepOutCode = static_cast<uint8_t*>(stepOutMapping.base);
+    const uint64_t stepOutBase = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(stepOutMapping.base));
+    const uint64_t stepOutFunction = stepOutBase;
+    const uint64_t stepOutCallee = stepOutBase + 32;
+    const uint64_t stepOutCaller = stepOutBase + 64;
+    const uint64_t stepOutBody = stepOutBase + 17;
+    const uint64_t stepOutReturn = stepOutCaller + 5;
+    stepOutCode[0] = 0x55;                         // push rbp
+    stepOutCode[1] = 0x48; stepOutCode[2] = 0x89; stepOutCode[3] = 0xE5; // mov rbp,rsp
+    stepOutCode[4] = 0x48; stepOutCode[5] = 0x83; stepOutCode[6] = 0xEC; stepOutCode[7] = 0x08;
+    stepOutCode[8] = 0xE8;                        // call callee
+    const int64_t calleeRelative = static_cast<int64_t>(stepOutCallee) - static_cast<int64_t>(stepOutFunction + 13);
+    const int32_t calleeRelative32 = static_cast<int32_t>(calleeRelative);
+    std::memcpy(stepOutCode + 9, &calleeRelative32, sizeof(calleeRelative32));
+    stepOutCode[13] = 0x48; stepOutCode[14] = 0x83; stepOutCode[15] = 0xC4; stepOutCode[16] = 0x08;
+    stepOutCode[17] = 0x90;                       // deterministic Step Out stop
+    stepOutCode[18] = 0x5D;                       // pop rbp
+    stepOutCode[19] = 0xC3;                       // ret
+    stepOutCode[32] = 0xC3;                       // nested callee ret
+    stepOutCode[64] = 0xE8;                       // caller calls current function
+    const int64_t functionRelative = static_cast<int64_t>(stepOutFunction) - static_cast<int64_t>(stepOutCaller + 5);
+    const int32_t functionRelative32 = static_cast<int32_t>(functionRelative);
+    std::memcpy(stepOutCode + 65, &functionRelative32, sizeof(functionRelative32));
+    stepOutCode[69] = 0x48; stepOutCode[70] = 0xB8;
+    const uint64_t stepOutCounterAddress = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(stepOutCounter));
+    std::memcpy(stepOutCode + 71, &stepOutCounterAddress, sizeof(stepOutCounterAddress));
+    stepOutCode[79] = 0xFF; stepOutCode[80] = 0x00;     // inc dword ptr [rax]
+    stepOutCode[81] = 0xC3;
+    const uint8_t stepOutBodyOriginalByte = stepOutCode[17];
+    const uint8_t stepOutReturnOriginalByte = stepOutCode[69];
+    if (!expect(ExecutableMemory::Protect(stepOutMapping, 0, 1,
+                                          ExecutableMemoryProtection::ReadExecute, error),
+                "Step Out executable protection")) {
+        delete stepOutCounter;
+        ExecutableMemory::Free(stepOutMapping);
+        return 1;
+    }
+    NativeAppRuntimeContext stepOutContext{};
+    stepOutContext.runtimeId = 79;
+    stepOutContext.processId = 44;
+    stepOutContext.nativeStackBaseAddress = 0x1000;
+    stepOutContext.nativeStackEndAddress = 0x0000800000000000ull;
+    NativeElfImage stepOutImage{};
+    stepOutImage.preferredBaseAddress = stepOutBase;
+    stepOutImage.imageSize = stepOutMapping.size;
+    NativeElfSegment stepOutSegment{};
+    stepOutSegment.virtualAddress = stepOutBase;
+    stepOutSegment.memorySize = stepOutMapping.size;
+    stepOutSegment.flags = 1;
+    stepOutImage.loadedSegments.push_back(stepOutSegment);
+    if (!expect(NativeAppDebugger::RegisterRuntime(stepOutContext, stepOutMapping, stepOutImage, true, error),
+                "Step Out runtime registration")) {
+        delete stepOutCounter;
+        ExecutableMemory::Free(stepOutMapping);
+        return 1;
+    }
+    std::atomic<bool> stepOutWaiting{false};
+    std::atomic<bool> stepOutCompleted{false};
+    std::thread stepOutThread([&]() {
+        gxos::Allocator::setCurrentPid(44);
+        stepOutWaiting.store(true, std::memory_order_release);
+        typedef void (*StepOutFunction)();
+        if (NativeAppDebugger::WaitForExecutionGate(79))
+            reinterpret_cast<StepOutFunction>(stepOutCaller)();
+        stepOutCompleted.store(true, std::memory_order_release);
+        gxos::Allocator::setCurrentPid(0);
+    });
+    auto cleanupStepOut = [&]() {
+        if (stepOutThread.joinable()) {
+            if (!stepOutCompleted.load(std::memory_order_acquire)) {
+                gx_development_debug_snapshot cancel{};
+                NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION, 0, 0, 44, 79),
+                                           "native-debugger-runtime-proof", &cancel);
+            }
+            stepOutThread.join();
+        }
+        NativeAppDebugger::UnregisterRuntime(79);
+        delete stepOutCounter;
+        ExecutableMemory::Free(stepOutMapping);
+    };
+    if (!expect(waitFor(stepOutWaiting), "Step Out target reached the closed execution gate")) {
+        cleanupStepOut();
+        return 1;
+    }
+    const uint64_t stepOutUserOwner = 0x8000000000000092ull;
+    gx_development_debug_snapshot stepOutUserBind{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT,
+                                                       stepOutUserOwner, stepOutBody, 44, 79),
+                                           "native-debugger-runtime-proof", &stepOutUserBind) == gxos::apps::GX_OK &&
+                stepOutUserBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND && stepOutCode[17] == 0xCC,
+                "Step Out current-function breakpoint bind")) {
+        cleanupStepOut();
+        return 1;
+    }
+    gx_development_debug_snapshot stepOutRelease{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION, 0, 0, 44, 79),
+                                           "native-debugger-runtime-proof", &stepOutRelease) == gxos::apps::GX_OK,
+                "Step Out execution release")) {
+        cleanupStepOut();
+        return 1;
+    }
+    gx_development_debug_snapshot stepOutCurrentTrap{};
+    if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, stepOutCurrentTrap, 44, 79) &&
+                stepOutCurrentTrap.targetAddress == stepOutBody && stepOutCurrentTrap.context.valid != 0,
+                "real current-function breakpoint trap before Step Out")) {
+        cleanupStepOut();
+        return 1;
+    }
+    const uint64_t savedReturnSlot = stepOutCurrentTrap.context.rbp + 8;
+    gx_development_debug_request savedReturnRead = makeRequest(
+        GX_DEVELOPMENT_DEBUG_READ_MEMORY, 0, savedReturnSlot, 44, 79);
+    savedReturnRead.threadId = stepOutCurrentTrap.threadId;
+    savedReturnRead.stopGeneration = stepOutCurrentTrap.context.stopGeneration;
+    savedReturnRead.readByteCount = 8;
+    gx_development_debug_snapshot savedReturnSnapshot{};
+    if (!expect(NativeAppDebugger::Command(savedReturnRead, "native-debugger-runtime-proof",
+                                           &savedReturnSnapshot) == gxos::apps::GX_OK &&
+                savedReturnSnapshot.status == GX_DEVELOPMENT_DEBUG_STATUS_READY &&
+                savedReturnSnapshot.byteCount == 8,
+                "Step Out raw saved return-address read")) {
+        cleanupStepOut();
+        return 1;
+    }
+    uint64_t savedReturnAddress = 0;
+    for (uint32_t i = 0; i < 8; ++i)
+        savedReturnAddress |= static_cast<uint64_t>(savedReturnSnapshot.bytes[i]) << (i * 8);
+    if (!expect(savedReturnAddress == stepOutReturn,
+                "Step Out saved return address equals the target caller return address")) {
+        cleanupStepOut();
+        return 1;
+    }
+    const uint64_t stepOutOwner = 0x8000000000000093ull;
+    gx_development_debug_snapshot stepOutTempBind{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT,
+                                                       stepOutOwner, savedReturnAddress, 44, 79),
+                                           "native-debugger-runtime-proof", &stepOutTempBind) == gxos::apps::GX_OK &&
+                stepOutTempBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND &&
+                stepOutTempBind.bindingCount == 1 && stepOutCode[69] == 0xCC,
+                "Step Out temporary return breakpoint bind")) {
+        cleanupStepOut();
+        return 1;
+    }
+    gx_development_debug_request stepOutRequest = makeRequest(
+        GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN, stepOutOwner, stepOutBody, 44, 79);
+    stepOutRequest.auxiliaryAddress = savedReturnAddress;
+    stepOutRequest.threadId = stepOutCurrentTrap.threadId;
+    stepOutRequest.stopGeneration = stepOutCurrentTrap.context.stopGeneration;
+    stepOutRequest.flags = GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT;
+    gx_development_debug_snapshot stepOutStart{};
+    if (!expect(NativeAppDebugger::Command(stepOutRequest, "native-debugger-runtime-proof", &stepOutStart) == gxos::apps::GX_OK &&
+                stepOutStart.status == GX_DEVELOPMENT_DEBUG_STATUS_READY &&
+                stepOutCode[17] == stepOutBodyOriginalByte,
+                "Step Out restores the current breakpoint and resumes its original instruction")) {
+        cleanupStepOut();
+        return 1;
+    }
+    gx_development_debug_snapshot stepOutReturnTrap{};
+    if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, stepOutReturnTrap, 44, 79) &&
+                stepOutReturnTrap.internalBreakpointTrap != 0 &&
+                stepOutReturnTrap.internalBreakpointPurpose == GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OUT &&
+                stepOutReturnTrap.internalBreakpointId == stepOutOwner &&
+                stepOutReturnTrap.targetAddress == savedReturnAddress &&
+                stepOutReturnTrap.threadId == stepOutCurrentTrap.threadId && *stepOutCounter == 0 &&
+                stepOutCode[69] == 0xCC,
+                "real Step Out return INT3 trap in the immediate caller")) {
+        cleanupStepOut();
+        return 1;
+    }
+    gx_development_debug_snapshot stepOutRemove{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER,
+                                                       stepOutOwner, savedReturnAddress, 44, 79),
+                                           "native-debugger-runtime-proof", &stepOutRemove) == gxos::apps::GX_OK &&
+                stepOutCode[69] == stepOutReturnOriginalByte && stepOutCode[17] == 0xCC,
+                "Step Out temporary owner removal restores only the return byte")) {
+        cleanupStepOut();
+        return 1;
+    }
+    gx_development_debug_request stepOutResume = makeRequest(
+        GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP, 0, savedReturnAddress, 44, 79);
+    stepOutResume.threadId = stepOutReturnTrap.threadId;
+    stepOutResume.stopGeneration = stepOutReturnTrap.context.stopGeneration;
+    gx_development_debug_snapshot stepOutResumeResult{};
+    if (!expect(NativeAppDebugger::Command(stepOutResume, "native-debugger-runtime-proof",
+                                           &stepOutResumeResult) == gxos::apps::GX_OK,
+                "Step Out caller resume after the return trap")) {
+        cleanupStepOut();
+        return 1;
+    }
+    stepOutThread.join();
+    if (!expect(stepOutCompleted.load(std::memory_order_acquire) && *stepOutCounter == 1,
+                "Step Out caller executes after the real return trap")) {
+        cleanupStepOut();
+        return 1;
+    }
+    NativeAppDebugger::UnregisterRuntime(79);
+    if (!expect(stepOutCode[17] == stepOutBodyOriginalByte && stepOutCode[69] == stepOutReturnOriginalByte,
+                "Step Out teardown restores current and return bytes")) {
+        delete stepOutCounter;
+        ExecutableMemory::Free(stepOutMapping);
+        return 1;
+    }
+    std::cout << "Step Out runtime PASS: current=0x" << std::hex << stepOutBody
+              << " rbp=0x" << stepOutCurrentTrap.context.rbp
+              << " raw-return=0x" << savedReturnAddress
+              << " lookup=0x" << (savedReturnAddress - 1)
+              << " original=0x" << static_cast<uint32_t>(stepOutReturnOriginalByte)
+              << " patched=0xCC trap=0x" << stepOutReturnTrap.targetAddress
+              << " restored=0x" << static_cast<uint32_t>(stepOutReturnOriginalByte)
+              << std::dec << " counter=" << *stepOutCounter << "\n";
+    delete stepOutCounter;
+    ExecutableMemory::Free(stepOutMapping);
     const uint32_t finalCounter = *counter;
     delete counter;
     counter = nullptr;

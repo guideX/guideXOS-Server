@@ -22,7 +22,8 @@ typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER = 10,
     GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL = 11,
     GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP = 12,
-    GX_DEVELOPMENT_DEBUG_STEP_INTERNAL_TRAP = 13
+    GX_DEVELOPMENT_DEBUG_STEP_INTERNAL_TRAP = 13,
+    GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN = 14
 } gx_development_debug_command;
 
 typedef enum gx_development_debug_status {
@@ -116,6 +117,7 @@ typedef struct gx_development_debug_snapshot {
     uint8_t internalBreakpointTrap;
     uint8_t reserved2[3];
     uint64_t internalBreakpointId;
+    uint32_t internalBreakpointPurpose;
     uint32_t byteCount;
     uint8_t bytes[16];
     /* Appended in Phase 7. These are validated bounds for the stopped
@@ -134,6 +136,12 @@ enum {
     GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE = 0,
     GX_DEVELOPMENT_DEBUG_SINGLE_STEP_INTERNAL_BREAKPOINT = 1,
     GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE = 2
+};
+
+enum {
+    GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OVER = 1,
+    GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OUT = 2
 };
 
 #ifdef __cplusplus
