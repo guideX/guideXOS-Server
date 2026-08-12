@@ -244,6 +244,41 @@ root, record the resulting heap identity, and stop before condemned-generation
 logic or any object metadata read. No promotion or marking should be enabled
 in that pass.
 
+## Continuation verification on 2026-08-11
+
+This report was already present at the start of the continuation. The actual
+continuation checkpoint was HEAD
+`94753af9bcfe1f9540930b8714e0e638924afafa` on branch
+`v1.1_DOTNET_SUPPORT`, with a clean worktree. C011EC07 was already committed
+(and the current HEAD also contains the committed C011EC08 Outcome A pass).
+Both ordinary kernel and ESP hashes at entry were
+`161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550`.
+
+The focused harness was rerun from that clean checkpoint. The fresh
+C011EC08 evidence is retained in
+`out/dotnet/gc-first-root-membership-classification/run-20260811-083505150/`.
+It again produced three C011EC08 boots with the same storage object
+`0x100A02F50`, slot `0x3943BE0`, bounds `0x100000000` and `0x102600000`,
+true/true comparisons, and final `true` result. Each run recorded one
+request, entry, completion, and result boundary, zero duplicates, zero object
+dereferences, zero generation-classification starts, zero condemned-generation
+comparisons, zero promotion/marking/mutation, and zero restart/resume.
+
+The fresh membership artifact's inline sequence is recorded in
+`artifact-disassembly.txt`: callback `0x100245C0`; root load `0x100245EA`;
+lower-bound load/compare `0x10024613`/`0x1002461D` with `setae` at
+`0x10024620`; upper-bound load/compare `0x10024626`/`0x1002462F` with `setb`
+at `0x10024632`; result test `0x10024635`; false branch
+`0x10024684`; true boundary call `0x1002468B`; and the next source operation
+remaining `HEAP_FROM_THREAD@gc.cpp:49494`.
+
+The explicit C011EC07 regression was also rerun 3/3 in
+`out/dotnet/gc-first-root-callback-entry/run-20260811-083939919/` and passed.
+QEMU was `11.0.0 (v11.0.0-12122-ga4bb4b10c9)`. Both runs restored the ordinary
+kernel and ESP to the expected hash. This continuation did not relabel the
+historical broad regression artifacts as fresh passes; their retained
+non-clean and blocked statuses remain as described above.
+
 Cross-references:
 
 - [first callback entry](NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CALLBACK_ENTRY.md)

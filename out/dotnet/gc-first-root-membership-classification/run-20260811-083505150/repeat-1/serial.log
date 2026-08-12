@@ -1,0 +1,186 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+guideXOS UEFI Bootloader
+ACPI RSDP found at 0x000000003F77E000, rev 0
+ELF: vaddr range 0x100000 - 0x6684770 (size 0x6584770)
+ELF: Allocated 25989 pages at 0x355e7000
+ELF: Loading seg 0: vaddr=0x100000 -> phys=0x355e7000 (filesz=0x1a6018)
+ELF: Loading seg 1: vaddr=0x2a7000 -> phys=0x3578e000 (filesz=0x134048)
+ELF: Entry point in segment 0 (vaddr 0x100000)
+ELF: Entry vaddr=0x100000, offset=0x0, physEntry=0x355e7000
+Kernel entry phys: 0x00000000355E7000 virt: 0x0000000000100000
+Kernel loaded at: 0x00000000355E7000 - 0x000000003BB6B770
+Could not open file: ramdisk.img
+Warning: Failed to load ramdisk
+Stack allocated at 0x0000000000200000, top at 0x0000000000210000 (below kernel)
+
+=== PCI Enumeration ===
+Found 1 network controller(s)
+  [%02x:%02x.0] Vendor=%04x Device=%04x Class=%02x/%02x IRQ=3
+    BAR0: Phys=%016lx Size=81040000 ()
+    ** Supported Intel E1000 NIC **
+
+*** Using NIC at [%02x:%02x.0] ***
+    Vendor: %04x  Device: %04x
+    MMIO Phys: %016lx  Size: 81040000
+    PCI bus mastering enabled
+=========================
+
+Runtime frame pool: 0x000000003CDF3000 pages=4096
+Mapping stack: 0x0000000000200000 size 65536
+Mapping framebuffer: 0x0000000080000000 size 4096000
+Mapping ACPI RSDP region: 0x000000003F77E000
+Mapping bootloader: 0x000000003DE33000 size 73728
+Mapping allocator region: 0x4000000 size 64MB
+Mapping low memory stack region: 0x100000 size 2MB
+Mapping NIC MMIO: %016lx size 81040000
+NIC MMIO mapped: Phys=%016lx Virt=%016lx
+Building identity page tables with 13 ranges...
+Page tables built at PML4: 0x000000003DE50000
+Pre-EBS marker drawn (green square top-left)
+Exiting boot services...
+
+
+=== GuideXOS Boot (Post-ExitBootServices) ===
+
+=== CPU State Check ===
+CR0 = 0x0000000080010033
+CR3 = 0x000000003F801000
+CR4 = 0x0000000000000668
+EFER = 0x0000000000000D00
+  [OK] CR0.PG (Paging) enabled
+  [OK] CR0.PE (Protected Mode) enabled
+  [OK] CR4.PAE enabled
+  [OK] EFER.LME (Long Mode Enable) set
+  [OK] EFER.LMA (Long Mode Active) set
+
+=== BootInfo ===
+Magic: 0x49425847
+Framebuffer: 0x0000000080000000 (0x00000500x0x00000320)
+
+=== Kernel Entry Validation ===
+Entry point: 0x00000000355E7000
+First 16 bytes at entry:
+  FA 66 31 C0 8E D8 8E C0 8E E0 8E E8 8E D0 48 BC 
+  [INFO] Unknown prologue pattern
+
+=== Jumping to Kernel (Trampoline) ===
+
+========================================
+=== PRE-HANDOFF VALIDATION ===
+========================================
+
+--- Parameters ---
+Kernel Entry: 0x00000000355E7000
+BootInfo:     0x000000003DF47000
+Stack Top:    0x0000000000210000
+PML4 Phys:    0x000000003DE50000
+
+--- Validating Mappings ---
+
+[1] Kernel Entry:
+Checking mapping for: 0x00000000355E7000
+  PML4[0x00000000] = 0x000000003DE4F003
+  PDPT[0x00000000] = 0x000000003DE4E003
+  PD[0x000001AA] = 0x000000003DE4C003
+  PT[0x000001E7] = 0x00000000355E7003
+  [OK] Maps to physical: 0x00000000355E7000
+
+[2] BootInfo:
+Checking mapping for: 0x000000003DF47000
+  PML4[0x00000000] = 0x000000003DE4F003
+  PDPT[0x00000000] = 0x000000003DE4E003
+  PD[0x000001EF] = 0x000000003CDC5003
+  PT[0x00000147] = 0x000000003DF47003
+  [OK] Maps to physical: 0x000000003DF47000
+
+[3] Stack (top - 0x1000):
+Checking mapping for: 0x000000000020F000
+  PML4[0x00000000] = 0x000000003DE4F003
+  PDPT[0x00000000] = 0x000000003DE4E003
+  PD[0x00000001] = 0x000000003CDC6003
+  PT[0x0000000F] = 0x00000000356F6003
+  [OK] Maps to physical: 0x00000000356F6000
+
+[4] PML4 self-mapping:
+Checking mapping for: 0x000000003DE50000
+  PML4[0x00000000] = 0x000000003DE4F003
+  PDPT[0x00000000] = 0x000000003DE4E003
+  PD[0x000001EF] = 0x000000003CDC5003
+  PT[0x00000050] = 0x000000003DE50003
+  [OK] Maps to physical: 0x000000003DE50000
+
+[5] Framebuffer:
+Checking mapping for: 0x0000000080000000
+  PML4[0x00000000] = 0x000000003DE4F003
+  PDPT[0x00000002] = 0x000000003CDBB003
+  PD[0x00000000] = 0x000000003CDBA003
+  PT[0x00000000] = 0x0000000080000003
+  [OK] Maps to physical: 0x0000000080000000
+
+========================================
+=== VALIDATION COMPLETE ===
+========================================
+
+
+[BOOT] Validating VIRTUAL kernel entry mapping:
+Checking mapping for: 0x0000000000100000
+  PML4[0x00000000] = 0x000000003DE4F003
+  PDPT[0x00000000] = 0x000000003DE4E003
+  PD[0x00000000] = 0x000000003DE4D003
+  PT[0x00000100] = 0x00000000355E7003
+  [OK] Maps to physical: 0x00000000355E7000
+[BOOT] About to handoff via trampoline...
+[BOOT] Trampoline at: 0x000000003DE51000
+[BOOT] Kernel entry: 0x00000000355E7000
+[BOOT] BootInfo at: 0x000000003DF47000
+[BOOT] Stack top: 0x0000000000210000
+[BOOT] PML4: 0x000000003DE50000
+
+[BOOT] Validating trampoline mapping:
+Checking mapping for: 0x000000003DE51000
+  PML4[0x00000000] = 0x000000003DE4F003
+  PDPT[0x00000000] = 0x000000003DE4E003
+  PD[0x000001EF] = 0x000000003CDC5003
+  PT[0x00000051] = 0x000000003DE51003
+  [OK] Maps to physical: 0x000000003DE51000
+
+[BOOT] === CALLING TRAMPOLINE NOW ===
+[KERNEL] guideXOS kernel_main entered
+[KERNEL] Boot method: UEFI BootInfo
+[KERNEL] Generic address-space frame pool initialized
+[GDT] GDT loaded with 3 entries, segments reloaded
+[IRQ] IDT loaded, PIC remapped, interrupts enabled
+[IRQ] Master PIC mask: 0xFF Slave PIC mask: 0xFF
+[PIT] Timer configured at ~00000064 Hz (divisor=0x00002E9B)
+[IRQ] register_irq called for IRQ 00
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 00 Master mask: 0xFE Slave mask: 0xFF
+[nativeaot-gc-single-thread-suspend-ee] timer services ready
+[nativeaot-gc-single-thread-suspend-ee] BEGIN
+[nativeaot-gc-single-thread-suspend-ee] Runtime foundation initialization: PASS
+[nativeaot-gc-single-thread-suspend-ee] Artifact staged: PASS
+[nativeaot-gc-single-thread-suspend-ee] Win64 PAL legacy installation: PASS
+[nativeaot-gc-single-thread-suspend-ee] Win64 PAL v1 installation: PASS
+[nativeaot-gc-single-thread-suspend-ee] GC platform installation: PASS
+[IRQ] dispatch irq=00
+[nativeaot-gc-first-allocation] RhInitialize return=00000000 state=02000012 preGcState=0000270F diagnosticStage=00000070 startupNativeAllocations=00000027 lastSize=00000020
+[nativeaot-gc-single-thread-suspend-ee] RhInitialize: PASS
+[nativeaot-gc-single-thread-suspend-ee] NativeAOT current-thread TLS vector: PASS
+[nativeaot-gc-first-allocation] tlsGsBase=0000000003943CE0 tlsVector=0000000003943BC0 tlsBlock=0000000003943BD0 tlsIndexAs[IRQ] dispatch irq=00
+sumed=0
+[nativeaot-gc-single-thread-suspend-ee] VM trace experiment baseline captured: PASS
+[nativeaot-gc-single-thread-suspend-ee] entering ManagedMain once
+[IRQ] dispatch irq=00
+[nativeaot-gc-single-thread-suspend-ee] SuspendEE entry
+[nativeaot-gc-single-thread-suspend-ee] ThreadStore adapter registered current mutator
+[nativeaot-gc-single-thread-suspend-ee] ThreadStore lock acquired
+[nativeaot-gc-single-thread-suspend-ee] ThreadStore registry count complete
+[nativeaot-gc-single-thread-suspend-ee] SuspendAllThreads returned
+[nativeaot-gc-single-thread-suspend-ee] SuspendEE observer complete
+[nativeaot-gc-single-thread-suspend-ee] SuspendEE body complete
+[nativeaot-gc-single-thread-suspend-ee] DisablePreemptiveGC entry
+[IRQ] dispatch irq=00
+[nativeaot-gc-first-root-membership-classification] SAFE_STOP marker=C011EC08 callbackRequestCount=00000001 callbackCallSiteCount=00000001 callbackInvocationCount=00000001 callbackEntryCount=00000001 callbackReturnCount=00000000 secondCallbackAttempts=00000000 callbackSiteSlot=0000000003943BE0 callbackSiteRaw=0000000100A02F50 callbackSiteContext=0000000004E7F440 callbackSiteCallback=00000000100245C0 callbackEntryAddress=00000000100245C0 callbackEntryReturn=0000000010018BAB rawRcx=0000000003943BE0 rawRdx=0000000004E7F440 rawR8=0000000000000000 arg1=0000000003943BE0 arg2=0000000004E7F440 arg3=0000000000000000 managedThread=0000000003943C00 currentThread=0000000003943C00 lockOwner=0000000003943C00 rootSlot=0000000003943BE0 callbackLoadedRoot=0000000100A02F50 membershipObject=0000000100A02F50 objectMatchesCallbackRoot=00000001 storageObject=0000000100A02F50 inlinedRoot=0000000003943BE0 sentinelAddress=0000000100A01F38 sentinelReadback=0000000100A01F38 membershipRequests=00000001 membershipEntries=[IRQ] dispatch irq=00
+00000001 membershipCompletions=00000001 membershipReturns=00000001 duplicateChecks=00000000 objectDereferences=00000000 lowerBound=0000000100000000 upperBound=0000000102600000 lowerEvaluated=00000001 upperEvaluated=00000001 lowerResult=00000001 upperResult=00000001 inFindObjectRange=00000001 sourceBranch=00000001 membershipCompletionReturnAddress=000000001002467C membershipPostCheckReturnAddress=0000000010024690 heapIdentity=0000000000000000 heapFieldReads=00000001 segmentIdentity=0000000000000000 segmentLookupCount=00000000 segmentLookupSucceeded=00000000 callbackContext=0000000004E7F440 contextFieldReads=00000006 contextThread=0000000000000000 contextStackLimit=0000000000000000 contextThreadNumber=0000000000000000 contextThreadCount=0000000000000001 contextPromotion=00000001 contextConcurrent=00000000 candidateClassification=00000000 generationClassificationStart=00000000 generationQueryStart=00000000 condemnedGenerationComparisons=00000000 generationClassification=00000001 condemnedGeneration=00000000 postMembershipSegmentLookup=00000000 objectHeaders=00000000 methodTables=00000000 promotionStart=00000000 promotions=00000000 markingStart=00000000 graphTraversal=00000000 markWrites=00000000 promotionWrites=00000000 objectMutation=00000000 gcMetadataMutation=00000000 segmentMetadataMutation=00000000 managedAssignmentCount=00000001 managedClearCount=00000000 managedReadbackCount=00000001 managedAssignmentValid=00000001 managedReadbackValid=00000001 sentinelChecks=00000094 objectBefore=00000025 objectAfter=00000025 objectAtStop=00000025 objectHistoryOverflow=00000000 lockHeld=00000001 eeSuspended=00000001 managedEntryProhibited=00000001 restartRequests=00000000 restartEntries=00000000 managedResume=00000000 nextSourceOperation=HEAP_FROM_THREAD@gc.cpp:49494 marker=C011EC08
+[IRQ] dispatch irq=00
