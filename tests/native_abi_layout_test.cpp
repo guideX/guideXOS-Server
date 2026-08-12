@@ -65,7 +65,9 @@ static_assert(offsetof(gx_development_debug_request, stopGeneration) == 80, "dev
 static_assert(offsetof(gx_development_debug_request, auxiliaryAddress) == 88, "development debug auxiliary address offset changed");
 static_assert(offsetof(gx_development_debug_request, readByteCount) == 96, "development debug read byte count offset changed");
 static_assert(sizeof(gx_development_debug_register_context) == 192, "development debug register context size changed");
-static_assert(sizeof(gx_development_debug_snapshot) == 456, "development debug snapshot size changed");
+static_assert(offsetof(gx_development_debug_snapshot, stackLow) == 456, "development debug stack low offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, stackHigh) == 464, "development debug stack high offset changed");
+static_assert(sizeof(gx_development_debug_snapshot) == 472, "development debug snapshot size changed");
 static_assert(sizeof(gx_development_run_snapshot) == 448, "development run snapshot size changed");
 static_assert(offsetof(gx_development_run_snapshot, processId) == 24, "development run process id offset changed");
 static_assert(offsetof(gx_development_run_snapshot, applicationId) == 56, "development run application id offset changed");
