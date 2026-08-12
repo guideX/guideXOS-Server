@@ -134,6 +134,11 @@ int main() {
     NativeAppRuntimeContext context{};
     context.runtimeId = 77;
     context.processId = 42;
+    // The direct VEH harness does not run through BeginHostCallDispatch, so
+    // provide the same owned-range contract with a broad test-only range.
+    // The production runtime narrows this to the active target thread stack.
+    context.nativeStackBaseAddress = 0x1000;
+    context.nativeStackEndAddress = 0x0000800000000000ull;
     NativeElfImage image{};
     image.preferredBaseAddress = imageBase;
     image.imageSize = mapping.size;
@@ -238,6 +243,41 @@ int main() {
         return 1;
     }
     if (!expect(!completed.load(std::memory_order_acquire), "faulting target thread remains stopped")) {
+        cleanup();
+        return 1;
+    }
+
+    gx_development_debug_request stackRead = makeRequest(GX_DEVELOPMENT_DEBUG_READ_MEMORY, 0,
+                                                          trapSnapshot.context.rbp);
+    stackRead.threadId = trapSnapshot.threadId;
+    stackRead.stopGeneration = trapSnapshot.context.stopGeneration;
+    stackRead.readByteCount = 16;
+    gx_development_debug_snapshot stackReadSnapshot{};
+    if (!expect(NativeAppDebugger::Command(stackRead, "native-debugger-runtime-proof",
+                                           &stackReadSnapshot) == gxos::apps::GX_OK &&
+                stackReadSnapshot.status == GX_DEVELOPMENT_DEBUG_STATUS_READY &&
+                stackReadSnapshot.byteCount == 16,
+                "stopped target stack read returns exactly one frame link")) {
+        cleanup();
+        return 1;
+    }
+    gx_development_debug_request staleStackRead = stackRead;
+    staleStackRead.stopGeneration++;
+    gx_development_debug_snapshot staleStackSnapshot{};
+    if (!expect(NativeAppDebugger::Command(staleStackRead, "native-debugger-runtime-proof",
+                                           &staleStackSnapshot) == gxos::apps::GX_ERROR_FAILED &&
+                staleStackSnapshot.status == GX_DEVELOPMENT_DEBUG_STATUS_REJECTED,
+                "stale stopped stack read is rejected")) {
+        cleanup();
+        return 1;
+    }
+    gx_development_debug_request outsideStackRead = stackRead;
+    outsideStackRead.targetAddress = 0x0000800000000000ull - 8;
+    gx_development_debug_snapshot outsideStackSnapshot{};
+    if (!expect(NativeAppDebugger::Command(outsideStackRead, "native-debugger-runtime-proof",
+                                           &outsideStackSnapshot) == gxos::apps::GX_ERROR_FAILED &&
+                outsideStackSnapshot.status == GX_DEVELOPMENT_DEBUG_STATUS_REJECTED,
+                "stopped target stack read outside the owned range is rejected")) {
         cleanup();
         return 1;
     }
@@ -423,6 +463,8 @@ int main() {
     NativeAppRuntimeContext stepOverContext{};
     stepOverContext.runtimeId = 78;
     stepOverContext.processId = 43;
+    stepOverContext.nativeStackBaseAddress = 0x1000;
+    stepOverContext.nativeStackEndAddress = 0x0000800000000000ull;
     NativeElfImage stepOverImage{};
     stepOverImage.preferredBaseAddress = stepOverBase;
     stepOverImage.imageSize = stepOverMapping.size;

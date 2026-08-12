@@ -29,6 +29,7 @@ constexpr uint32_t kResumeModeCancel = 2;
 constexpr uint32_t kResumeModeInternalSingleStep = 3;
 constexpr uint32_t kResumeModeUserSingleStep = 4;
 constexpr uint64_t kAmd64TrapFlag = 0x100ull;
+constexpr uint64_t kMaxDebugStackBytes = 8ull * 1024ull * 1024ull;
 
 struct DebugSegment {
     uint64_t start = 0;
@@ -58,6 +59,8 @@ struct DebugRuntime {
     uint64_t processId = 0;
     uint64_t imageBase = 0;
     uint64_t imageEnd = 0;
+    uint64_t stackLow = 0;
+    uint64_t stackHigh = 0;
     ExecutableMemoryBlock mapping;
     DebugSegment segments[16] = {};
     uint32_t segmentCount = 0;
@@ -154,6 +157,11 @@ bool executableAddress(const DebugRuntime& runtime, uint64_t address, DebugSegme
         return true;
     }
     return false;
+}
+
+bool stackAddressRangeContains(const DebugRuntime& runtime, uint64_t address, uint64_t bytes) {
+    return runtime.stackHigh > runtime.stackLow && address >= runtime.stackLow &&
+        address < runtime.stackHigh && bytes <= runtime.stackHigh - address;
 }
 
 bool flushInstruction(void* address) {
@@ -526,6 +534,8 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.processId = 0;
         runtime.imageBase = 0;
         runtime.imageEnd = 0;
+        runtime.stackLow = 0;
+        runtime.stackHigh = 0;
         runtime.mapping = ExecutableMemoryBlock();
         runtime.segmentCount = 0;
         runtime.nextBindingId = 1;
@@ -566,6 +576,24 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         }
         runtime.imageBase = image.preferredBaseAddress;
         runtime.imageEnd = image.preferredBaseAddress + image.imageSize;
+        if (context.nativeStackBaseAddress == 0 || context.nativeStackEndAddress <= context.nativeStackBaseAddress) {
+            // Registration runs on the target Native ELF thread, before the
+            // entry point and before BeginHostCallDispatch. Capture that
+            // thread's stack here so the gated runtime can accept stack reads
+            // immediately after its first trap.
+            volatile uint8_t stackMarker = 0;
+            const uint64_t stackAddress = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&stackMarker));
+            context.nativeStackBaseAddress = stackAddress > kMaxDebugStackBytes ?
+                stackAddress - kMaxDebugStackBytes : 0;
+            context.nativeStackEndAddress = stackAddress <= std::numeric_limits<uint64_t>::max() - kMaxDebugStackBytes ?
+                stackAddress + kMaxDebugStackBytes : std::numeric_limits<uint64_t>::max();
+        }
+        runtime.stackLow = context.nativeStackBaseAddress;
+        runtime.stackHigh = context.nativeStackEndAddress;
+        if (runtime.stackLow == 0 || runtime.stackHigh <= runtime.stackLow) {
+            error = "Native ELF thread stack bounds are unavailable";
+            return false;
+        }
         runtime.mapping = mapping;
         for (const NativeElfSegment& segment : image.loadedSegments) {
             if ((segment.flags & kPfX) == 0) continue;
@@ -664,6 +692,8 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
     if (!runtime) { setError(snapshot, "target runtime is not registered"); return GX_ERROR_FAILED; }
     snapshot->processId = runtime->processId;
     snapshot->nativeRuntimeId = runtime->runtimeId;
+    snapshot->stackLow = runtime->stackLow;
+    snapshot->stackHigh = runtime->stackHigh;
     switch (request.command) {
     case GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT: {
         if (request.targetAddress == 0 || request.breakpointId == 0) { setError(snapshot, "breakpoint identity is incomplete"); return GX_ERROR_INVALID_ARGUMENT; }
@@ -722,8 +752,38 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
     case GX_DEVELOPMENT_DEBUG_READ_MEMORY: {
         if (request.targetAddress == 0 || request.readByteCount == 0 || request.readByteCount > 16 ||
             request.targetAddress > std::numeric_limits<uint64_t>::max() - request.readByteCount) {
-            setError(snapshot, "bounded instruction read request is invalid");
+            setError(snapshot, "bounded target read request is invalid");
             return GX_ERROR_INVALID_ARGUMENT;
+        }
+        const bool stackRead = request.threadId != 0 || request.stopGeneration != 0;
+        if (stackRead) {
+            if (request.threadId == 0 || request.stopGeneration == 0) {
+                setError(snapshot, "stopped stack read identity is incomplete");
+                return GX_ERROR_INVALID_ARGUMENT;
+            }
+            uint64_t stoppedThread = 0;
+            uint64_t stoppedGeneration = 0;
+            if (runtime->trapObserved.load(std::memory_order_acquire)) {
+                stoppedThread = runtime->trapThreadId.load(std::memory_order_acquire);
+                stoppedGeneration = runtime->trapStopGeneration.load(std::memory_order_acquire);
+            } else if (runtime->userStepStopPending.load(std::memory_order_acquire)) {
+                stoppedThread = runtime->singleStepContext.threadId;
+                stoppedGeneration = runtime->singleStepContext.stopGeneration;
+            }
+            if (stoppedThread != request.threadId || stoppedGeneration != request.stopGeneration) {
+                setError(snapshot, "stale or mismatched stopped stack context");
+                return GX_ERROR_FAILED;
+            }
+            if (!stackAddressRangeContains(*runtime, request.targetAddress, request.readByteCount)) {
+                setError(snapshot, "target stack read is outside the owned stopped stack");
+                return GX_ERROR_FAILED;
+            }
+            volatile const uint8_t* source = reinterpret_cast<volatile const uint8_t*>(
+                static_cast<uintptr_t>(request.targetAddress));
+            for (uint32_t i = 0; i < request.readByteCount; ++i) snapshot->bytes[i] = source[i];
+            snapshot->byteCount = request.readByteCount;
+            snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
+            return GX_OK;
         }
         DebugSegment* firstSegment = nullptr;
         if (!executableAddress(*runtime, request.targetAddress, &firstSegment) || !firstSegment) {

@@ -118,6 +118,10 @@ typedef struct gx_development_debug_snapshot {
     uint64_t internalBreakpointId;
     uint32_t byteCount;
     uint8_t bytes[16];
+    /* Appended in Phase 7. These are validated bounds for the stopped
+       Native ELF thread stack; they are not host-process memory bounds. */
+    uint64_t stackLow;
+    uint64_t stackHigh;
 } gx_development_debug_snapshot;
 
 enum {
