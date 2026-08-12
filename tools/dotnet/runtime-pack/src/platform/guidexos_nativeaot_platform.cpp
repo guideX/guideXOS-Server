@@ -1979,6 +1979,8 @@ void emitFirstRootMembershipClassificationSafeStop() {
     suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticStorageObjectAddress);
     suspendEeSerialPutString(" inlinedRoot=");
     suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticInlinedRootAddress);
+    suspendEeSerialPutString(" inlinedRoot=");
+    suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticInlinedRootAddress);
     suspendEeSerialPutString(" sentinelAddress=");
     suspendEeSerialPutHex64(diagnostics.threadStaticProofSentinelAddress);
     suspendEeSerialPutString(" sentinelReadback=");
@@ -2097,12 +2099,30 @@ void emitFirstRootMembershipClassificationSafeStop() {
     suspendEeSerialPutHex32(diagnostics.candidateObjectValidationAtStopCount);
     suspendEeSerialPutString(" objectHistoryOverflow=");
     suspendEeSerialPutHex32(diagnostics.objectHistoryOverflow);
+    suspendEeSerialPutString(" duplicateObjectAddresses=");
+    suspendEeSerialPutHex32(diagnostics.duplicateObjectAddressFailures);
+    suspendEeSerialPutString(" managedThread=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryManagedThread);
+    suspendEeSerialPutString(" currentThread=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryCurrentThread);
+    suspendEeSerialPutString(" lockOwner=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryLockOwner);
     suspendEeSerialPutString(" lockHeld=");
     suspendEeSerialPutHex32(diagnostics.callbackEntryThreadStoreLockHeld);
     suspendEeSerialPutString(" eeSuspended=");
     suspendEeSerialPutHex32(diagnostics.callbackEntryEeSuspended);
     suspendEeSerialPutString(" managedEntryProhibited=");
     suspendEeSerialPutHex32(diagnostics.callbackEntryManagedEntryProhibited);
+    suspendEeSerialPutString(" callbackContext=");
+    suspendEeSerialPutHex64(diagnostics.callbackContextAddress);
+    suspendEeSerialPutString(" contextThreadNumber=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryScanContextFieldThreadNumberValue);
+    suspendEeSerialPutString(" contextThreadCount=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryScanContextFieldThreadCountValue);
+    suspendEeSerialPutString(" contextPromotion=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryPromotion);
+    suspendEeSerialPutString(" contextConcurrent=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryConcurrent);
     suspendEeSerialPutString(" restartRequests=");
     suspendEeSerialPutHex32(diagnostics.restartRequestCount);
     suspendEeSerialPutString(" restartEntries=");
@@ -2167,6 +2187,245 @@ guideXosNativeAotFirstRootMembershipCandidateLoaded(uintptr_t rawValue) {
         guideXosFailFast(9u);
     }
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION)
+
+void emitFirstRootHeapResolutionSafeStop() {
+    const guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-first-root-heap-resolution] SAFE_STOP marker=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionSafeStopReason);
+    suspendEeSerialPutString(" callbackRequestCount=");
+    suspendEeSerialPutHex32(diagnostics.callbackRequestCount);
+    suspendEeSerialPutString(" callbackCallSiteCount=");
+    suspendEeSerialPutHex32(diagnostics.callbackCallSiteEntryCount);
+    suspendEeSerialPutString(" callbackInvocationCount=");
+    suspendEeSerialPutHex32(diagnostics.callbackInvocationCount);
+    suspendEeSerialPutString(" callbackEntryCount=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryCount);
+    suspendEeSerialPutString(" callbackReturnCount=");
+    suspendEeSerialPutHex32(diagnostics.callbackReturnCount);
+    suspendEeSerialPutString(" secondCallbackAttempts=");
+    suspendEeSerialPutHex32(diagnostics.duplicateCallbackInvocationCount);
+    suspendEeSerialPutString(" rootSlot=");
+    suspendEeSerialPutHex64(diagnostics.callbackRootSlot);
+    suspendEeSerialPutString(" callbackLoadedRoot=");
+    suspendEeSerialPutHex64(diagnostics.callbackRootSlotLoadedValue);
+    suspendEeSerialPutString(" membershipObject=");
+    suspendEeSerialPutHex64(diagnostics.membershipObjectInput);
+    suspendEeSerialPutString(" heapResolutionObject=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionObjectInput);
+    suspendEeSerialPutString(" objectMatchesCallbackRoot=");
+    suspendEeSerialPutHex32(diagnostics.membershipObjectMatchesCallbackRoot);
+    suspendEeSerialPutString(" objectMatchesMembershipObject=");
+    suspendEeSerialPutHex32(
+        diagnostics.heapResolutionObjectInput == diagnostics.membershipObjectInput ? 1u : 0u);
+    suspendEeSerialPutString(" storageObject=");
+    suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticStorageObjectAddress);
+    suspendEeSerialPutString(" sentinelAddress=");
+    suspendEeSerialPutHex64(diagnostics.threadStaticProofSentinelAddress);
+    suspendEeSerialPutString(" sentinelReadback=");
+    suspendEeSerialPutHex64(diagnostics.threadStaticProofManagedReadbackAddress);
+    suspendEeSerialPutString(" membershipRequests=");
+    suspendEeSerialPutHex32(diagnostics.membershipRequestCount);
+    suspendEeSerialPutString(" membershipEntries=");
+    suspendEeSerialPutHex32(diagnostics.membershipEntryCount);
+    suspendEeSerialPutString(" membershipCompletions=");
+    suspendEeSerialPutHex32(diagnostics.membershipCompletionCount);
+    suspendEeSerialPutString(" membershipReturns=");
+    suspendEeSerialPutHex32(diagnostics.membershipReturnCount);
+    suspendEeSerialPutString(" membershipObjectDereferences=");
+    suspendEeSerialPutHex32(diagnostics.membershipObjectDereferenceCount);
+    suspendEeSerialPutString(" lowerBound=");
+    suspendEeSerialPutHex64(diagnostics.membershipLowerBound);
+    suspendEeSerialPutString(" upperBound=");
+    suspendEeSerialPutHex64(diagnostics.membershipUpperBound);
+    suspendEeSerialPutString(" lowerResult=");
+    suspendEeSerialPutHex32(diagnostics.membershipLowerComparisonResult);
+    suspendEeSerialPutString(" upperResult=");
+    suspendEeSerialPutHex32(diagnostics.membershipUpperComparisonResult);
+    suspendEeSerialPutString(" inFindObjectRange=");
+    suspendEeSerialPutHex32(diagnostics.membershipResult);
+    suspendEeSerialPutString(" heapResolutionRequests=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionRequestCount);
+    suspendEeSerialPutString(" heapResolutionEntries=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionEntryCount);
+    suspendEeSerialPutString(" heapResolutionCompletions=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionCompletionCount);
+    suspendEeSerialPutString(" heapResolutionDuplicates=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionDuplicateCount);
+    suspendEeSerialPutString(" heapResolutionFailures=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionFailureCount);
+    suspendEeSerialPutString(" heapResolutionSucceeded=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionSucceeded);
+    suspendEeSerialPutString(" heapResolutionThreadHeap=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionThreadHeap);
+    suspendEeSerialPutString(" resolvedHeap=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionHeapIdentity);
+    suspendEeSerialPutString(" heapNumber=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionHeapNumber);
+    suspendEeSerialPutString(" totalHeapCount=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionTotalHeapCount);
+    suspendEeSerialPutString(" threadNumber=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionThreadNumber);
+    suspendEeSerialPutString(" objectAddressConsulted=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionObjectAddressConsulted);
+    suspendEeSerialPutString(" threadStateConsulted=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionThreadStateConsulted);
+    suspendEeSerialPutString(" heapTableReads=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionHeapTableReadCount);
+    suspendEeSerialPutString(" heapTableIdentity=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionHeapTableIdentity);
+    suspendEeSerialPutString(" heapTableSlot=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionHeapTableSlot);
+    suspendEeSerialPutString(" segmentMapReads=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionSegmentMapReadCount);
+    suspendEeSerialPutString(" segmentIdentity=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionSegmentIdentity);
+    suspendEeSerialPutString(" brickCardReads=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionBrickCardReadCount);
+    suspendEeSerialPutString(" rangeReads=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionRangeReadCount);
+    suspendEeSerialPutString(" allocationContextHeap=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionAllocationContextHeap);
+    suspendEeSerialPutString(" failureReason=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionFailureReason);
+    suspendEeSerialPutString(" heapResolutionCompletionReturnAddress=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionCompletionReturnAddress);
+    suspendEeSerialPutString(" candidateClassification=");
+    suspendEeSerialPutHex32(diagnostics.callbackCandidateClassificationStartCount);
+    suspendEeSerialPutString(" generationClassificationStart=");
+    suspendEeSerialPutHex32(diagnostics.callbackGenerationClassificationStartCount);
+    suspendEeSerialPutString(" generationQueryStart=");
+    suspendEeSerialPutHex32(diagnostics.callbackGenerationQueryStartCount);
+    suspendEeSerialPutString(" condemnedGenerationComparisons=");
+    suspendEeSerialPutHex32(diagnostics.callbackCondemnedGenerationComparisonCount);
+    suspendEeSerialPutString(" ephemeralGenerationComparisons=00000000");
+    suspendEeSerialPutString(" postResolutionSegmentLookup=");
+    suspendEeSerialPutHex32(diagnostics.callbackSegmentLookupCount);
+    suspendEeSerialPutString(" objectHeaders=");
+    suspendEeSerialPutHex32(diagnostics.callbackObjectHeaderReadCount);
+    suspendEeSerialPutString(" methodTables=");
+    suspendEeSerialPutHex32(diagnostics.callbackMethodTableReadCount);
+    suspendEeSerialPutString(" childReferenceReads=00000000 promotionStart=");
+    suspendEeSerialPutHex32(diagnostics.callbackPromotionStartCount);
+    suspendEeSerialPutString(" promotions=");
+    suspendEeSerialPutHex32(diagnostics.callbackPromotionCount);
+    suspendEeSerialPutString(" markingStart=");
+    suspendEeSerialPutHex32(diagnostics.callbackMarkingStartCount);
+    suspendEeSerialPutString(" graphTraversal=");
+    suspendEeSerialPutHex32(diagnostics.callbackGraphTraversalCount);
+    suspendEeSerialPutString(" markWrites=");
+    suspendEeSerialPutHex32(diagnostics.callbackMarkStateWriteCount);
+    suspendEeSerialPutString(" promotionWrites=");
+    suspendEeSerialPutHex32(diagnostics.callbackPromotionStateWriteCount);
+    suspendEeSerialPutString(" objectMutation=");
+    suspendEeSerialPutHex32(diagnostics.callbackObjectMemoryMutationCount);
+    suspendEeSerialPutString(" gcMetadataMutation=");
+    suspendEeSerialPutHex32(diagnostics.callbackGcMetadataMutationCount);
+    suspendEeSerialPutString(" segmentMetadataMutation=");
+    suspendEeSerialPutHex32(diagnostics.callbackSegmentMetadataMutationCount);
+    suspendEeSerialPutString(" managedAssignmentCount=");
+    suspendEeSerialPutHex32(diagnostics.threadStaticProofAssignmentCount);
+    suspendEeSerialPutString(" managedClearCount=");
+    suspendEeSerialPutHex32(diagnostics.threadStaticProofClearCount);
+    suspendEeSerialPutString(" managedReadbackCount=");
+    suspendEeSerialPutHex32(diagnostics.threadStaticProofReadbackCount);
+    suspendEeSerialPutString(" managedAssignmentValid=");
+    suspendEeSerialPutHex32(diagnostics.threadStaticProofManagedAssignmentValid);
+    suspendEeSerialPutString(" managedReadbackValid=");
+    suspendEeSerialPutHex32(diagnostics.threadStaticProofManagedReadbackValid);
+    suspendEeSerialPutString(" sentinelChecks=");
+    suspendEeSerialPutHex32(diagnostics.sentinelValidationCount);
+    suspendEeSerialPutString(" objectBefore=");
+    suspendEeSerialPutHex32(diagnostics.candidateObjectValidationBeforeLoadCount);
+    suspendEeSerialPutString(" objectAfter=");
+    suspendEeSerialPutHex32(diagnostics.candidateObjectValidationAfterLoadCount);
+    suspendEeSerialPutString(" objectAtStop=");
+    suspendEeSerialPutHex32(diagnostics.candidateObjectValidationAtStopCount);
+    suspendEeSerialPutString(" objectHistoryOverflow=");
+    suspendEeSerialPutHex32(diagnostics.objectHistoryOverflow);
+    suspendEeSerialPutString(" duplicateObjectAddresses=");
+    suspendEeSerialPutHex32(diagnostics.duplicateObjectAddressFailures);
+    suspendEeSerialPutString(" managedThread=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryManagedThread);
+    suspendEeSerialPutString(" currentThread=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryCurrentThread);
+    suspendEeSerialPutString(" lockOwner=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryLockOwner);
+    suspendEeSerialPutString(" lockHeld=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryThreadStoreLockHeld);
+    suspendEeSerialPutString(" eeSuspended=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryEeSuspended);
+    suspendEeSerialPutString(" managedEntryProhibited=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryManagedEntryProhibited);
+    suspendEeSerialPutString(" callbackContext=");
+    suspendEeSerialPutHex64(diagnostics.callbackContextAddress);
+    suspendEeSerialPutString(" contextFieldReads=");
+    suspendEeSerialPutHex32(diagnostics.callbackContextFieldReadCount);
+    suspendEeSerialPutString(" contextThread=");
+    suspendEeSerialPutHex64(diagnostics.callbackContextThreadUnderCrawl);
+    suspendEeSerialPutString(" contextStackLimit=");
+    suspendEeSerialPutHex64(diagnostics.callbackContextStackLimit);
+    suspendEeSerialPutString(" contextThreadNumber=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryScanContextFieldThreadNumberValue);
+    suspendEeSerialPutString(" contextThreadCount=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryScanContextFieldThreadCountValue);
+    suspendEeSerialPutString(" contextPromotion=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryPromotion);
+    suspendEeSerialPutString(" contextConcurrent=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryConcurrent);
+    suspendEeSerialPutString(" callbackReturns=");
+    suspendEeSerialPutHex32(diagnostics.callbackReturnCount);
+    suspendEeSerialPutString(" secondCallbacks=");
+    suspendEeSerialPutHex32(diagnostics.duplicateCallbackInvocationCount);
+    suspendEeSerialPutString(" restartRequests=");
+    suspendEeSerialPutHex32(diagnostics.restartRequestCount);
+    suspendEeSerialPutString(" restartEntries=");
+    suspendEeSerialPutHex32(diagnostics.restartEntryCount);
+    suspendEeSerialPutString(" managedResume=");
+    suspendEeSerialPutHex32(diagnostics.managedResumeCount);
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION)
+    suspendEeSerialPutString(" lockDepth=");
+    suspendEeSerialPutHex32(diagnostics.threadStoreLockRecursionDepth);
+    suspendEeSerialPutString(" registeredManagedThreads=");
+    suspendEeSerialPutHex32(diagnostics.registeredManagedThreadCount);
+    suspendEeSerialPutString(" currentThreadRegistered=");
+    suspendEeSerialPutHex32(diagnostics.currentThreadRegistered);
+    suspendEeSerialPutString(" currentThreadIsInitiator=");
+    suspendEeSerialPutHex32(diagnostics.currentThreadIsInitiator);
+    suspendEeSerialPutString(" currentAndInitiatorMatch=");
+    suspendEeSerialPutHex32(diagnostics.currentAndInitiatorMatch);
+    suspendEeSerialPutString(" registeredThreadCountBeforeRoot=");
+    suspendEeSerialPutHex32(diagnostics.registeredThreadCountBeforeRoot);
+    suspendEeSerialPutString(" registeredThreadCountAfterRoot=");
+    suspendEeSerialPutHex32(diagnostics.registeredThreadCountAfterRoot);
+    suspendEeSerialPutString(" enumeratedThreads=");
+    suspendEeSerialPutHex32(diagnostics.enumeratedThreadCount);
+    suspendEeSerialPutString(" includedThreads=");
+    suspendEeSerialPutHex32(diagnostics.includedThreadCount);
+    suspendEeSerialPutString(" excludedThreads=");
+    suspendEeSerialPutHex32(diagnostics.excludedThreadCount);
+    suspendEeSerialPutString(" duplicateThreads=");
+    suspendEeSerialPutHex32(diagnostics.duplicateThreadCount);
+    suspendEeSerialPutString(" registryMutationBefore=");
+    suspendEeSerialPutHex32(diagnostics.threadRegistryMutationCountBeforeRoot);
+    suspendEeSerialPutString(" registryMutationAfter=");
+    suspendEeSerialPutHex32(diagnostics.threadRegistryMutationCountAfterRoot);
+    suspendEeSerialPutString(" allocationContextsVisited=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsVisited);
+    suspendEeSerialPutString(" allocationContextsChanged=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsChanged);
+    suspendEeSerialPutString(" allocationContextsCleared=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsCleared);
+#endif
+    suspendEeSerialPutString(
+        " nextSourceOperation=gc_heap::is_in_condemned_gc(o)@gc.cpp:49499");
+    suspendEeSerialPutString(" marker=C011EC09\n");
+}
+
+#endif
 
 extern "C" void __cdecl
 guideXosNativeAotFirstRootMembershipCheckRequested(uintptr_t object) {
@@ -2278,6 +2537,109 @@ guideXosNativeAotFirstRootMembershipResultBoundary(uint32_t result) {
     for (;;) {
     }
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION)
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootHeapResolutionRequested(uintptr_t object) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.heapResolutionRequestCount;
+    diagnostics.heapResolutionObjectInput = object;
+    diagnostics.heapResolutionMembershipPassed =
+        diagnostics.membershipResult == 1u ? 1u : 0u;
+    if (diagnostics.heapResolutionRequestCount != 1u ||
+        diagnostics.heapResolutionMembershipPassed == 0u ||
+        object != diagnostics.callbackRootSlotLoadedValue ||
+        object != diagnostics.membershipObjectInput) {
+        ++diagnostics.heapResolutionDuplicateCount;
+        diagnostics.heapResolutionFailureReason = 0xE009u;
+        diagnostics.heapResolutionSafeStopReason = 0xE009u;
+        emitFirstRootHeapResolutionSafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootHeapResolutionEntered(
+    uintptr_t object, uintptr_t threadHeap, uint32_t threadNumber) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.heapResolutionEntryCount;
+    diagnostics.heapResolutionObjectInput = object;
+    diagnostics.heapResolutionThreadHeap = threadHeap;
+    diagnostics.heapResolutionThreadNumber = threadNumber;
+    if (diagnostics.heapResolutionEntryCount != 1u ||
+        diagnostics.heapResolutionRequestCount != 1u ||
+        object != diagnostics.membershipObjectInput ||
+        object != diagnostics.callbackRootSlotLoadedValue) {
+        ++diagnostics.heapResolutionDuplicateCount;
+        diagnostics.heapResolutionFailureReason = 0xE00Au;
+        diagnostics.heapResolutionSafeStopReason = 0xE00Au;
+        emitFirstRootHeapResolutionSafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" [[noreturn]] void __cdecl
+guideXosNativeAotFirstRootHeapResolutionCompleted(
+    uintptr_t object, uintptr_t threadHeap, uintptr_t heap,
+    uint32_t heapNumber, uint32_t totalHeapCount) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.heapResolutionCompletionCount;
+    diagnostics.heapResolutionObjectInput = object;
+    diagnostics.heapResolutionThreadHeap = threadHeap;
+    diagnostics.heapResolutionHeapIdentity = heap;
+    diagnostics.heapResolutionHeapNumber = heapNumber;
+    diagnostics.heapResolutionTotalHeapCount = totalHeapCount;
+    diagnostics.heapResolutionObjectAddressConsulted = 0u;
+    diagnostics.heapResolutionThreadStateConsulted = 0u;
+    diagnostics.heapResolutionHeapTableReadCount = 0u;
+    diagnostics.heapResolutionSegmentMapReadCount = 0u;
+    diagnostics.heapResolutionBrickCardReadCount = 0u;
+    diagnostics.heapResolutionRangeReadCount = 0u;
+    diagnostics.heapResolutionHeapTableIdentity = 0u;
+    diagnostics.heapResolutionHeapTableSlot = 0u;
+    diagnostics.heapResolutionSegmentIdentity = 0u;
+    diagnostics.heapResolutionAllocationContextHeap = 0u;
+    diagnostics.heapResolutionCompletionReturnAddress =
+        reinterpret_cast<gx_uintptr>(_ReturnAddress());
+    snapshotFirstPerThreadRootList(false);
+    if (diagnostics.heapResolutionCompletionCount != 1u ||
+        diagnostics.heapResolutionRequestCount != 1u ||
+        diagnostics.heapResolutionEntryCount != 1u ||
+        diagnostics.heapResolutionMembershipPassed != 1u ||
+        object != diagnostics.callbackRootSlotLoadedValue ||
+        object != diagnostics.membershipObjectInput) {
+        ++diagnostics.heapResolutionDuplicateCount;
+        diagnostics.heapResolutionFailureReason = 0xE00Bu;
+    } else if (heap == 0u) {
+        ++diagnostics.heapResolutionFailureCount;
+        diagnostics.heapResolutionFailureReason = 0xB001u;
+        diagnostics.heapResolutionSucceeded = 0u;
+    } else {
+        diagnostics.heapResolutionSucceeded = 1u;
+        diagnostics.heapResolutionFailureReason = 0u;
+    }
+    validateAllocationContextFixupObjects(true);
+    diagnostics.candidateObjectValidationAtStopCount =
+        diagnostics.objectHistoryCount;
+    diagnostics.heapResolutionSafeStopReason =
+        GUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP_MARKER;
+    diagnostics.heapResolutionSafeStopObserved = 1u;
+    diagnostics.safeStopObserved = 1u;
+    diagnostics.stopReason = diagnostics.heapResolutionSafeStopReason;
+    diagnostics.stage =
+        GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F27_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP;
+    diagnostics.rootBoundaryFunction = reinterpret_cast<gx_uintptr>(
+        &guideXosNativeAotFirstRootHeapResolutionCompleted);
+    emitFirstRootHeapResolutionSafeStop();
+    for (;;) {
+    }
+}
+
+#endif
 
 #endif
 

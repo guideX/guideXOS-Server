@@ -815,6 +815,35 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t membershipCompletionReturnAddress;
     uintptr_t membershipPostCheckReturnAddress;
 
+    /* Proof-only first real-root Workstation heap-resolution evidence. */
+    uint32_t heapResolutionRequestCount;
+    uint32_t heapResolutionEntryCount;
+    uint32_t heapResolutionCompletionCount;
+    uint32_t heapResolutionDuplicateCount;
+    uint32_t heapResolutionFailureCount;
+    uint32_t heapResolutionSucceeded;
+    uint32_t heapResolutionMembershipPassed;
+    uint32_t heapResolutionThreadNumber;
+    uint32_t heapResolutionHeapNumber;
+    uint32_t heapResolutionTotalHeapCount;
+    uint32_t heapResolutionObjectAddressConsulted;
+    uint32_t heapResolutionThreadStateConsulted;
+    uint32_t heapResolutionHeapTableReadCount;
+    uint32_t heapResolutionSegmentMapReadCount;
+    uint32_t heapResolutionBrickCardReadCount;
+    uint32_t heapResolutionRangeReadCount;
+    uint32_t heapResolutionFailureReason;
+    uint32_t heapResolutionSafeStopObserved;
+    uint32_t heapResolutionSafeStopReason;
+    uintptr_t heapResolutionObjectInput;
+    uintptr_t heapResolutionThreadHeap;
+    uintptr_t heapResolutionHeapIdentity;
+    uintptr_t heapResolutionHeapTableIdentity;
+    uintptr_t heapResolutionHeapTableSlot;
+    uintptr_t heapResolutionSegmentIdentity;
+    uintptr_t heapResolutionAllocationContextHeap;
+    uintptr_t heapResolutionCompletionReturnAddress;
+
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
         GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupAfter[
@@ -871,6 +900,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F24_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY_SAFE_STOP = 0xF24u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F25_FIRST_ROOT_CALLBACK_ENTRY_SAFE_STOP = 0xF25u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F26_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_SAFE_STOP = 0xF26u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F27_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP = 0xF27u,
 };
 
 enum {
@@ -886,6 +916,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC06u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_SAFE_STOP_MARKER = 0xC011EC07u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_SAFE_STOP_MARKER = 0xC011EC08u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP_MARKER = 0xC011EC09u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

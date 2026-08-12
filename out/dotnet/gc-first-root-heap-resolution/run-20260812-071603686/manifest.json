@@ -1,0 +1,530 @@
+{
+    "outcome":  "B / first genuine NativeAOT root passed managed-range membership and completed exactly one real HEAP_FROM_THREAD/heap_of(o) resolution; stopped before generation logic",
+    "proofMode":  "first-root-heap-resolution",
+    "repositoryHead":  "ad51ac169600ef1ce56649a58b56275abd311cdc",
+    "startingCommittedHead":  "ad51ac169600ef1ce56649a58b56275abd311cdc",
+    "startingBranch":  "v1.1_DOTNET_SUPPORT",
+    "startingWorktreeStatus":  [
+                                   " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                                   " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                                   " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                                   "?? out/dotnet/gc-first-root-heap-resolution/"
+                               ],
+    "startingDirtyState":  [
+                               " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                               " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                               " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                               "?? out/dotnet/gc-first-root-heap-resolution/"
+                           ],
+    "endingDirtyState":  [
+                             " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                             " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                             " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                             "?? out/dotnet/gc-first-root-heap-resolution/"
+                         ],
+    "taskStartCheckpoint":  {
+                                 "head":  "ad51ac169600ef1ce56649a58b56275abd311cdc",
+                                 "branch":  "v1.1_DOTNET_SUPPORT",
+                                 "dirtyState":  "clean",
+                                 "c011ec08AlreadyCommitted":  true,
+                                "ordinaryKernelSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "ordinaryEspSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                            },
+    "productionStartup":  {
+                              "initializeModules":  "production runtime path invoked before ManagedMain",
+                              "threadStatic":  "real NativeAOT [ThreadStatic] provider",
+                              "status":  "working"
+                          },
+    "ordinaryBaseline":  {
+                             "startingBuildSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                             "startingEspSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                             "expectedSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                         },
+    "runtimePack":  {
+                        "version":  "9.0.0",
+                        "architecture":  "AMD64",
+                        "gc":  "Workstation",
+                        "gcInterface":  "5.3",
+                        "ee":  "2",
+                        "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                        "lockedGcenvEeSourceSha256":  "EA603651D418F45F6847B7F3EC57C23BEB0A153ECCF94C2107EB5EB40B6C9A6B",
+                        "lockedGcEnumSourceSha256":  "65BA356294C47F55105104D3800224C0311411042FA95AAFA83E3BAE91DEBFE6",
+                        "lockedGcCppSourceSha256":  "5BD029B77A973145B12C142E870A549C527DAC19AEB527012F7CC6F99D362FF9",
+                        "lockedGcwksSourceSha256":  "5C7C4C0E755332F4D6DBED8E832617F2B559028CC74D2B8478CB069FD4616021",
+                        "activePalArchiveSha256":  "C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F",
+                        "callbackSymbol":  "?Promote@GCHeap@WKS@@SAXPEAPEAVObject@@PEAUScanContext@@I@Z",
+                        "callbackAddress":  "0x00000000100269e0"
+                    },
+    "prerequisite":  {
+                         "marker":  "C011EC08",
+                         "report":  "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION.md",
+                         "result":  "membership true for the genuine storage-object root; stopped before HEAP_FROM_THREAD"
+                     },
+    "managedProofRoot":  {
+                             "field":  "[ThreadStatic] byte[]? s_gcProofThreadRoot",
+                             "sentinel":  "0x0000000100A01F38",
+                             "storageObject":  "0x0000000100A02F50",
+                             "inlinedRoot":  null,
+                             "assignmentCount":  "0x00000001",
+                             "clearCount":  "0x00000000",
+                             "readbackCount":  "0x00000001",
+                             "assignmentValid":  "0x00000001",
+                             "readbackValid":  "0x00000001",
+                             "objectBefore":  "0x00000025",
+                             "objectAfter":  "0x00000025",
+                             "objectAtStop":  "0x00000025",
+                             "duplicateObjectAddresses":  "0x00000000",
+                             "objectHistoryOverflow":  "0x00000000"
+                         },
+    "rootArgument":  {
+                         "slot":  "0x0000000003945BE0",
+                         "rawRoot":  "0x0000000100A02F50",
+                         "callbackLoadedRoot":  "0x0000000100A02F50",
+                         "membershipObject":  "0x0000000100A02F50",
+                         "heapResolutionInput":  "0x0000000100A02F50",
+                         "expectedStorageObject":  "0x0000000100A02F50",
+                         "identitiesEqual":  true
+                     },
+    "membership":  {
+                       "requests":  "0x00000001",
+                       "entries":  "0x00000001",
+                       "completions":  "0x00000001",
+                       "object":  "0x0000000100A02F50",
+                       "lowerBound":  "0x0000000100000000",
+                       "upperBound":  "0x0000000102600000",
+                       "lowerResult":  "0x00000001",
+                       "upperResult":  "0x00000001",
+                       "result":  "0x00000001",
+                       "objectDereferences":  "0x00000000",
+                       "segmentLookup":  "not part of membership helper"
+                   },
+    "sourceTrace":  {
+                        "callbackFunction":  "WKS::GCHeap::Promote",
+                        "callbackSource":  "locked src/coreclr/gc/gc.cpp:49474-49544",
+                        "heapFromThread":  "locked src/coreclr/gc/gcpriv.h:315-326; Workstation branch at :326: gc_heap* hpt = 0",
+                        "heapOfDeclaration":  "locked src/coreclr/gc/gcpriv.h:2620",
+                        "heapOfDefinition":  "locked src/coreclr/gc/gc.cpp:26693-26707",
+                        "heapOfWorkstation":  "UNREFERENCED_PARAMETER(o); return __this;",
+                        "thisMacro":  "locked src/coreclr/gc/gcpriv.h:1540-1548; Workstation __this is (gc_heap*)0",
+                        "multipleHeaps":  "absent in Workstation; Server branch uses g_heaps[thread] and seg_mapping_table_heap_of(o)",
+                        "sourceFieldsConsulted":  [
+                                                      "no object-address lookup",
+                                                      "no thread-state lookup",
+                                                      "no g_heaps table",
+                                                      "no segment map",
+                                                      "no brick/card bookkeeping",
+                                                      "no range fields"
+                                                  ],
+                        "sourceRequiredSegmentLookup":  0,
+                        "sourceRequiredObjectDereference":  0,
+                        "nextSemanticOperation":  "locked gc.cpp:49498-49505; active USE_REGIONS operation gc_heap::is_in_condemned_gc(o) at :49499",
+                        "laterNonRegionsOperation":  "locked gc.cpp:49501 object-range comparison hp-\u003egc_low/gc_high",
+                        "generatedGcwks":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\build\\runtime-pack\\gcwks.first-root-callback-entry.cpp",
+                        "generatedGcEnum":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\build\\runtime-pack\\GcEnum.first-root-callback-entry.cpp"
+                    },
+    "heapResolution":  {
+                           "requests":  "0x00000001",
+                           "entries":  "0x00000001",
+                           "completions":  "0x00000001",
+                           "duplicates":  "0x00000000",
+                           "failures":  "0x00000001",
+                           "succeeded":  "0x00000000",
+                           "input":  "0x0000000100A02F50",
+                           "pointer":  "0x0000000000000000",
+                           "heapNumber":  "0x00000000",
+                           "totalHeapCount":  "0x00000001",
+                           "threadHeap":  "0x0000000000000000",
+                           "heapTableReads":  "0x00000000",
+                           "heapTableIdentity":  "0x0000000000000000",
+                           "heapTableSlot":  "0x0000000000000000",
+                           "segmentMapReads":  "0x00000000",
+                           "segment":  "0x0000000000000000",
+                           "failureReason":  "0x0000B001",
+                           "completionReturnAddress":  "0x0000000010026ADB"
+                       },
+    "heapRelationship":  {
+                             "workstationLogicalHeapCount":  "0x00000001",
+                             "returnedHeap":  "0x0000000000000000",
+                             "returnedHeapNumber":  "0x00000000",
+                             "threadHeap":  "0x0000000000000000",
+                             "heapTable":  "not applicable in Workstation",
+                             "segment":  "not consulted; segment identification is out of scope",
+                             "matchesSohOwner":  "not evaluated because source heap_of has no segment lookup and returned null"
+                         },
+    "machineCode":  {
+                        "architecture":  "AMD64",
+                        "callingConvention":  "Microsoft x64; RCX/RDX/R8",
+                        "callbackAddress":  "0x00000000100269e0",
+                        "disassembly":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\run-20260812-071603686\\artifact-disassembly.txt",
+                        "callbackSymbolFile":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\run-20260812-071603686\\callback-symbol.txt",
+                        "membershipBranch":  "range true test at 0x10026A9C; true fallthrough to 0x10026AA6",
+                        "heapFromThread":  "first generated hpt instruction 0x10026AB1 xor edx,edx; thread number zero at 0x10026AAE",
+                        "heapOfCallSite":  "0x10026ABE",
+                        "heapOfFunction":  "0x1000E880: xor eax,eax; ret",
+                        "objectInputRegister":  "RCX",
+                        "heapResultRegister":  "RAX then R8 at 0x10026AC3",
+                        "completionCallSite":  "0x10026AD6",
+                        "completionReturnAddress":  "0x10026ADB",
+                        "heapOf":  "out-of-line Workstation function; source result passed to completion observer",
+                        "nextGenerationInstruction":  "not executed; source next is gc_heap::is_in_condemned_gc(o) at locked gc.cpp:49499"
+                    },
+    "prohibitedOperations":  {
+                                 "generationClassificationStart":  "0x00000000",
+                                 "generationQueryStart":  "0x00000000",
+                                 "condemnedGenerationComparisons":  "0x00000000",
+                                 "ephemeralGenerationComparisons":  "0x00000000",
+                                 "segmentLookup":  "0x00000000",
+                                 "objectHeaders":  "0x00000000",
+                                 "methodTables":  "0x00000000",
+                                 "childReferences":  "0x00000000",
+                                 "promotionStart":  "0x00000000",
+                                 "promotion":  "0x00000000",
+                                 "markingStart":  "0x00000000",
+                                 "graphTraversal":  "0x00000000"
+                             },
+    "mutation":  {
+                     "mark":  "0x00000000",
+                     "promotion":  "0x00000000",
+                     "object":  "0x00000000",
+                     "gcMetadata":  "0x00000000",
+                     "segment":  "0x00000000"
+                 },
+    "scanContext":  {
+                        "address":  "0x0000000004E81440",
+                        "fieldReads":  "0x00000006",
+                        "thread":  "0x0000000000000000",
+                        "stackLimit":  "0x0000000000000000",
+                        "promotion":  "0x00000001",
+                        "concurrent":  "0x00000000",
+                        "threadCount":  "0x0000000000000001",
+                        "threadNumber":  "0x0000000000000000"
+                    },
+    "threadStore":  {
+                        "managedThread":  "0x0000000003945C00",
+                        "currentThread":  "0x0000000003945C00",
+                        "lockOwner":  "0x0000000003945C00",
+                        "lockHeld":  "0x00000001",
+                        "eeSuspended":  "0x00000001",
+                        "managedEntryProhibited":  "0x00000001"
+                    },
+    "execution":  {
+                      "callbackReturns":  "0x00000000",
+                      "secondCallbacks":  "0x00000000",
+                      "restartRequests":  "0x00000000",
+                      "restartEntries":  "0x00000000",
+                      "managedResume":  "0x00000000"
+                  },
+    "safeStop":  {
+                     "marker":  "C011EC09",
+                     "reason":  "the genuine first root passed true managed-range membership and exactly one real HEAP_FROM_THREAD/heap_of(o) transition; stopped before gc_heap::is_in_condemned_gc(o)",
+                     "nextSourceOperation":  "gc.cpp:49499",
+                     "outcome":  "B"
+                 },
+    "qemu":  {
+                 "version":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+                 "runCount":  3,
+                 "proofKernelSha256":  "7512DFC56B8BB1B70E99E8AA7E267279EEEB0B4E2A003D39BADE5512C7AB020E",
+                 "serialSha256":  [
+                                      "0B472A62830009AB9B96146A8429DC5410BE82798C8336798E3CF9E460DF7CF1",
+                                      "AED2306CB8172825E21F62499DDABC1288CC7B87EA1C951DDBEB92E60C4F73ED",
+                                      "63CFF60FA467716AD72DF947ED9E12DA5BA93A1922EEE4A09FB233D96C895F0B"
+                                  ],
+                 "exactCommandLog":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\run-20260812-071603686\\commands.txt",
+                 "runs":  [
+                              {
+                                  "name":  "first-run",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\run-20260812-071603686\\first-run\\serial.log",
+                                  "serialSha256":  "0B472A62830009AB9B96146A8429DC5410BE82798C8336798E3CF9E460DF7CF1",
+                                  "safeStopMarker":  "C011EC09",
+                                  "outcome":  "B",
+                                  "harnessTerminated":  true,
+                                  "callbackRequestCount":  "0x00000001",
+                                  "callbackEntryCount":  "0x00000001",
+                                  "callbackReturnCount":  "0x00000000",
+                                  "duplicateCallbacks":  "0x00000000",
+                                  "root":  {
+                                               "slot":  "0x0000000003945BE0",
+                                               "loaded":  "0x0000000100A02F50",
+                                               "storage":  "0x0000000100A02F50",
+                                               "sentinel":  "0x0000000100A01F38"
+                                           },
+                                  "membership":  {
+                                                     "object":  "0x0000000100A02F50",
+                                                     "lowerBound":  "0x0000000100000000",
+                                                     "upperBound":  "0x0000000102600000",
+                                                     "result":  "0x00000001",
+                                                     "requests":  "0x00000001",
+                                                     "entries":  "0x00000001",
+                                                     "completions":  "0x00000001"
+                                                 },
+                                  "heapResolution":  {
+                                                         "requests":  "0x00000001",
+                                                         "entries":  "0x00000001",
+                                                         "completions":  "0x00000001",
+                                                         "duplicates":  "0x00000000",
+                                                         "failures":  "0x00000001",
+                                                         "succeeded":  "0x00000000",
+                                                         "input":  "0x0000000100A02F50",
+                                                         "pointer":  "0x0000000000000000",
+                                                         "heapNumber":  "0x00000000",
+                                                         "totalHeapCount":  "0x00000001",
+                                                         "threadHeap":  "0x0000000000000000",
+                                                         "heapTableReads":  "0x00000000",
+                                                         "heapTableIdentity":  "0x0000000000000000",
+                                                         "heapTableSlot":  "0x0000000000000000",
+                                                         "segmentMapReads":  "0x00000000",
+                                                         "segment":  "0x0000000000000000",
+                                                         "failureReason":  "0x0000B001",
+                                                         "completionReturnAddress":  "0x0000000010026ADB"
+                                                     },
+                                  "counters":  {
+                                                   "generationClassification":  "0x00000000",
+                                                   "generationQuery":  "0x00000000",
+                                                   "condemned":  "0x00000000",
+                                                   "ephemeral":  "0x00000000",
+                                                   "segmentLookup":  "0x00000000",
+                                                   "headers":  "0x00000000",
+                                                   "methodTables":  "0x00000000",
+                                                   "promotion":  "0x00000000",
+                                                   "marking":  "0x00000000",
+                                                   "graph":  "0x00000000"
+                                               },
+                                  "mutation":  {
+                                                   "mark":  "0x00000000",
+                                                   "promotion":  "0x00000000",
+                                                   "object":  "0x00000000",
+                                                   "gc":  "0x00000000",
+                                                   "segment":  "0x00000000"
+                                               },
+                                  "threadStore":  {
+                                                      "managedThread":  "0x0000000003945C00",
+                                                      "currentThread":  "0x0000000003945C00",
+                                                      "lockOwner":  "0x0000000003945C00",
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001"
+                                                  },
+                                  "scanContext":  {
+                                                      "address":  "0x0000000004E81440",
+                                                      "fieldReads":  "0x00000006",
+                                                      "thread":  "0x0000000000000000",
+                                                      "stackLimit":  "0x0000000000000000",
+                                                      "promotion":  "0x00000001",
+                                                      "concurrent":  "0x00000000",
+                                                      "threadCount":  "0x0000000000000001",
+                                                      "threadNumber":  "0x0000000000000000"
+                                                  }
+                              },
+                              {
+                                  "name":  "repeat-1",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\run-20260812-071603686\\repeat-1\\serial.log",
+                                  "serialSha256":  "AED2306CB8172825E21F62499DDABC1288CC7B87EA1C951DDBEB92E60C4F73ED",
+                                  "safeStopMarker":  "C011EC09",
+                                  "outcome":  "B",
+                                  "harnessTerminated":  true,
+                                  "callbackRequestCount":  "0x00000001",
+                                  "callbackEntryCount":  "0x00000001",
+                                  "callbackReturnCount":  "0x00000000",
+                                  "duplicateCallbacks":  "0x00000000",
+                                  "root":  {
+                                               "slot":  "0x0000000003945BE0",
+                                               "loaded":  "0x0000000100A02F50",
+                                               "storage":  "0x0000000100A02F50",
+                                               "sentinel":  "0x0000000100A01F38"
+                                           },
+                                  "membership":  {
+                                                     "object":  "0x0000000100A02F50",
+                                                     "lowerBound":  "0x0000000100000000",
+                                                     "upperBound":  "0x0000000102600000",
+                                                     "result":  "0x00000001",
+                                                     "requests":  "0x00000001",
+                                                     "entries":  "0x00000001",
+                                                     "completions":  "0x00000001"
+                                                 },
+                                  "heapResolution":  {
+                                                         "requests":  "0x00000001",
+                                                         "entries":  "0x00000001",
+                                                         "completions":  "0x00000001",
+                                                         "duplicates":  "0x00000000",
+                                                         "failures":  "0x00000001",
+                                                         "succeeded":  "0x00000000",
+                                                         "input":  "0x0000000100A02F50",
+                                                         "pointer":  "0x0000000000000000",
+                                                         "heapNumber":  "0x00000000",
+                                                         "totalHeapCount":  "0x00000001",
+                                                         "threadHeap":  "0x0000000000000000",
+                                                         "heapTableReads":  "0x00000000",
+                                                         "heapTableIdentity":  "0x0000000000000000",
+                                                         "heapTableSlot":  "0x0000000000000000",
+                                                         "segmentMapReads":  "0x00000000",
+                                                         "segment":  "0x0000000000000000",
+                                                         "failureReason":  "0x0000B001",
+                                                         "completionReturnAddress":  "0x0000000010026ADB"
+                                                     },
+                                  "counters":  {
+                                                   "generationClassification":  "0x00000000",
+                                                   "generationQuery":  "0x00000000",
+                                                   "condemned":  "0x00000000",
+                                                   "ephemeral":  "0x00000000",
+                                                   "segmentLookup":  "0x00000000",
+                                                   "headers":  "0x00000000",
+                                                   "methodTables":  "0x00000000",
+                                                   "promotion":  "0x00000000",
+                                                   "marking":  "0x00000000",
+                                                   "graph":  "0x00000000"
+                                               },
+                                  "mutation":  {
+                                                   "mark":  "0x00000000",
+                                                   "promotion":  "0x00000000",
+                                                   "object":  "0x00000000",
+                                                   "gc":  "0x00000000",
+                                                   "segment":  "0x00000000"
+                                               },
+                                  "threadStore":  {
+                                                      "managedThread":  "0x0000000003945C00",
+                                                      "currentThread":  "0x0000000003945C00",
+                                                      "lockOwner":  "0x0000000003945C00",
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001"
+                                                  },
+                                  "scanContext":  {
+                                                      "address":  "0x0000000004E81440",
+                                                      "fieldReads":  "0x00000006",
+                                                      "thread":  "0x0000000000000000",
+                                                      "stackLimit":  "0x0000000000000000",
+                                                      "promotion":  "0x00000001",
+                                                      "concurrent":  "0x00000000",
+                                                      "threadCount":  "0x0000000000000001",
+                                                      "threadNumber":  "0x0000000000000000"
+                                                  }
+                              },
+                              {
+                                  "name":  "repeat-2",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\run-20260812-071603686\\repeat-2\\serial.log",
+                                  "serialSha256":  "63CFF60FA467716AD72DF947ED9E12DA5BA93A1922EEE4A09FB233D96C895F0B",
+                                  "safeStopMarker":  "C011EC09",
+                                  "outcome":  "B",
+                                  "harnessTerminated":  true,
+                                  "callbackRequestCount":  "0x00000001",
+                                  "callbackEntryCount":  "0x00000001",
+                                  "callbackReturnCount":  "0x00000000",
+                                  "duplicateCallbacks":  "0x00000000",
+                                  "root":  {
+                                               "slot":  "0x0000000003945BE0",
+                                               "loaded":  "0x0000000100A02F50",
+                                               "storage":  "0x0000000100A02F50",
+                                               "sentinel":  "0x0000000100A01F38"
+                                           },
+                                  "membership":  {
+                                                     "object":  "0x0000000100A02F50",
+                                                     "lowerBound":  "0x0000000100000000",
+                                                     "upperBound":  "0x0000000102600000",
+                                                     "result":  "0x00000001",
+                                                     "requests":  "0x00000001",
+                                                     "entries":  "0x00000001",
+                                                     "completions":  "0x00000001"
+                                                 },
+                                  "heapResolution":  {
+                                                         "requests":  "0x00000001",
+                                                         "entries":  "0x00000001",
+                                                         "completions":  "0x00000001",
+                                                         "duplicates":  "0x00000000",
+                                                         "failures":  "0x00000001",
+                                                         "succeeded":  "0x00000000",
+                                                         "input":  "0x0000000100A02F50",
+                                                         "pointer":  "0x0000000000000000",
+                                                         "heapNumber":  "0x00000000",
+                                                         "totalHeapCount":  "0x00000001",
+                                                         "threadHeap":  "0x0000000000000000",
+                                                         "heapTableReads":  "0x00000000",
+                                                         "heapTableIdentity":  "0x0000000000000000",
+                                                         "heapTableSlot":  "0x0000000000000000",
+                                                         "segmentMapReads":  "0x00000000",
+                                                         "segment":  "0x0000000000000000",
+                                                         "failureReason":  "0x0000B001",
+                                                         "completionReturnAddress":  "0x0000000010026ADB"
+                                                     },
+                                  "counters":  {
+                                                   "generationClassification":  "0x00000000",
+                                                   "generationQuery":  "0x00000000",
+                                                   "condemned":  "0x00000000",
+                                                   "ephemeral":  "0x00000000",
+                                                   "segmentLookup":  "0x00000000",
+                                                   "headers":  "0x00000000",
+                                                   "methodTables":  "0x00000000",
+                                                   "promotion":  "0x00000000",
+                                                   "marking":  "0x00000000",
+                                                   "graph":  "0x00000000"
+                                               },
+                                  "mutation":  {
+                                                   "mark":  "0x00000000",
+                                                   "promotion":  "0x00000000",
+                                                   "object":  "0x00000000",
+                                                   "gc":  "0x00000000",
+                                                   "segment":  "0x00000000"
+                                               },
+                                  "threadStore":  {
+                                                      "managedThread":  "0x0000000003945C00",
+                                                      "currentThread":  "0x0000000003945C00",
+                                                      "lockOwner":  "0x0000000003945C00",
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001"
+                                                  },
+                                  "scanContext":  {
+                                                      "address":  "0x0000000004E81440",
+                                                      "fieldReads":  "0x00000006",
+                                                      "thread":  "0x0000000000000000",
+                                                      "stackLimit":  "0x0000000000000000",
+                                                      "promotion":  "0x00000001",
+                                                      "concurrent":  "0x00000000",
+                                                      "threadCount":  "0x0000000000000001",
+                                                      "threadNumber":  "0x0000000000000000"
+                                                  }
+                              }
+                          ]
+             },
+    "regressions":  {
+                        "c011ec08":  "PASS 3/3 fresh QEMU regression run-20260812-072127212",
+                        "c011ec07":  "PASS 3/3 fresh QEMU regression run-20260812-072636808; one earlier IRQ-interleaving validator non-clean attempt retained",
+                        "c011ec06":  "PASS 3/3 fresh QEMU regression run-20260812-073003997",
+                        "c011ec05":  "PASS 3/3 fresh QEMU regression run-20260812-073235316",
+                        "c011ec04":  "NON-CLEAN validator result retained: provider boundary sentinel count differed from historical expected value",
+                        "primitiveThreadStatic":  "historical PASS retained",
+                        "referenceThreadStatic":  "historical PASS retained",
+                        "combinedThreadStatic":  "historical PASS retained",
+                        "c011ec03":  "NON-CLEAN validator result retained: bounded object-history assertion did not match emitted evidence",
+                        "c011ec02":  "NON-CLEAN validator result retained: preserved allocation-count assertion did not match emitted evidence",
+                        "c011ec01":  "historical validator-usable result retained",
+                        "broadRegressionSuite":  "not rerun in this focused pass; listed checks remain blocked/non-clean unless historical evidence is explicitly cited",
+                        "staticChecks":  "script parsing, manifest parsing, serial evidence, ordinary restoration, git diff --check"
+                    },
+    "retainedFailures":  {
+                             "historicalFirst64KiBExecution":  "retained historical failure",
+                             "staleCacheAttempts":  "retained historical attempts",
+                             "initialRuntimePackIdentityMismatch":  "retained historical mismatch",
+                             "nativeStackPowerShellWrapper":  "retained NON-CLEAN exit 1; not relabeled PASS"
+                         },
+    "blockedNonClean":  {
+                            "broadRegressionSuite":  "blocked/not rerun in focused pass",
+                            "nativeStackWrapper":  "historically non-clean",
+                            "heapOwnerSegmentEquality":  "not evaluated because heap_of returned Workstation null sentinel and segment lookup is out of scope"
+                        },
+    "documentation":  [
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_HEAP_RESOLUTION.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CALLBACK_ENTRY.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md",
+                          "docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md",
+                          "docs/dotnet/NATIVEAOT_GC_STARTUP_READINESS.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FEASIBILITY.md"
+                      ],
+    "evidenceRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\run-20260812-071603686",
+    "reportPath":  "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_HEAP_RESOLUTION.md",
+    "manifestPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-heap-resolution\\run-20260812-071603686\\manifest.json",
+    "ordinaryKernelAfter":  {
+                                "build":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "esp":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                            }
+}
