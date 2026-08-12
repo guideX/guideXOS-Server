@@ -3112,9 +3112,9 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		if (lower == "static") style.position = PositionMode::Static;
 		else if (lower == "relative") style.position = PositionMode::Relative;
 		else if (lower == "absolute") style.position = PositionMode::Absolute;
+		else if (lower == "fixed") style.position = PositionMode::Fixed;
 		else {
-			if (lower == "fixed") ++diag.positionUnsupportedFixed;
-			else if (lower == "sticky") ++diag.positionUnsupportedSticky;
+			if (lower == "sticky") ++diag.positionUnsupportedSticky;
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
@@ -4934,7 +4934,8 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		const CssCascadeWinner& zIndexWinner = winners[static_cast<size_t>(CssProperty::ZIndex)];
 		auto positionName = [](PositionMode mode) {
 			return mode == PositionMode::Relative ? "relative" :
-				mode == PositionMode::Absolute ? "absolute" : "static";
+				mode == PositionMode::Absolute ? "absolute" :
+				mode == PositionMode::Fixed ? "fixed" : "static";
 		};
 		oss << ",position=" << positionName(style.position)
 			<< ",top-specified=" << cssLengthEvidence(style.topValue)
@@ -5265,21 +5266,22 @@ static void applyDocumentStyles(WebDocument& doc)
 		}
 		return false;
 	};
-	// Absolutely positioned inline-level owners are promoted into the bounded
+	// Absolutely or fixed-positioned inline-level owners are promoted into the bounded
 	// block stream.  Their inline items are removed from the surrounding line
 	// flow so the out-of-flow box cannot leave a phantom gap or paint as a
-	// free-floating glyph run.
-	std::vector<uint64_t> positionedInlineAbsoluteSerials;
-	positionedInlineAbsoluteSerials.reserve(32);
+	// free-floating glyph run. Fixed remains viewport-positioned after promotion.
+	std::vector<uint64_t> positionedInlineOutOfFlowSerials;
+	positionedInlineOutOfFlowSerials.reserve(32);
 	for (const HtmlElementRef& element : doc.structuralElements) {
-		if (element.serial == 0 || positionedInlineAbsoluteSerials.size() >= 256) break;
+		if (element.serial == 0 || positionedInlineOutOfFlowSerials.size() >= 256) break;
 		std::vector<HtmlElementRef> path;
 		if (!buildStructuralPath(doc, element.serial, path)) continue;
 		const WebStyle style = computePathStyle(doc, path, cache);
-		if (style.position == PositionMode::Absolute && style.display == DisplayMode::Inline && !style.displayNone)
-			positionedInlineAbsoluteSerials.push_back(element.serial);
+		if ((style.position == PositionMode::Absolute || style.position == PositionMode::Fixed) &&
+			style.display == DisplayMode::Inline && !style.displayNone)
+			positionedInlineOutOfFlowSerials.push_back(element.serial);
 	}
-	for (uint64_t serial : positionedInlineAbsoluteSerials) {
+	for (uint64_t serial : positionedInlineOutOfFlowSerials) {
 		const HtmlElementRef* element = nullptr;
 		for (const HtmlElementRef& candidate : doc.structuralElements)
 			if (candidate.serial == serial) { element = &candidate; break; }
@@ -5337,7 +5339,7 @@ static void applyDocumentStyles(WebDocument& doc)
 	normalizedInlineItems.reserve(doc.inlineItems.size());
 	for (WebInlineItem item : doc.inlineItems) {
 		bool positionedInlineItem = false;
-		for (uint64_t serial : positionedInlineAbsoluteSerials) {
+		for (uint64_t serial : positionedInlineOutOfFlowSerials) {
 			if (serialWithin(item.ownerSerial, serial)) {
 				positionedInlineItem = true;
 				break;

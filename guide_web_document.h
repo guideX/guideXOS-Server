@@ -312,13 +312,14 @@ enum class AlignSelfMode : uint8_t {
 	Baseline,
 };
 
-// Phase 3G deliberately keeps positioning to the traditional, layout-local
-// subset.  Fixed and sticky are parser-diagnostic cases, never aliases for
-// absolute positioning.
+// Navigator keeps positioning to a bounded, layout-local subset. Fixed is a
+// typed viewport-layer mode; sticky remains an explicit unsupported value and
+// is never aliased to absolute positioning.
 enum class PositionMode : uint8_t {
 	Static = 0,
 	Relative,
 	Absolute,
+	Fixed,
 };
 
 // Phase 3E keeps traditional physical floats deliberately narrow.  Logical
@@ -905,6 +906,7 @@ struct CssDiagnostics {
 	int    positionStatic = 0;
 	int    positionRelative = 0;
 	int    positionAbsolute = 0;
+	int    positionFixed = 0;
 	int    positionUnsupportedFixed = 0;
 	int    positionUnsupportedSticky = 0;
 	int    relativeOffsets = 0;
@@ -917,6 +919,12 @@ struct CssDiagnostics {
 	int    absoluteStaticPositionUses = 0;
 	int    absoluteShrinkToFit = 0;
 	int    absoluteOutOfFlow = 0;
+	int    fixedViewportRecords = 0;
+	int    fixedAbsoluteDescendants = 0;
+	int    fixedFlexExclusions = 0;
+	int    fixedHitTestRecords = 0;
+	int    fixedStackingRecords = 0;
+	int    fixedExtentExclusions = 0;
 	int    positionDocumentExtentExtensions = 0;
 	int    zIndexAuto = 0;
 	int    zIndexNegative = 0;

@@ -1216,8 +1216,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_out_of_flow=") &&
         hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_shrink_to_fit=") &&
         hasPositiveCount(cssPhase3gReport, "Current Document.css_position_document_extent_extensions=") &&
-        contains(cssPhase3gReport, "Current Document.css_position_fixed_sticky=unsupported-diagnostic-not-aliased") &&
-        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_unsupported_fixed=") &&
+        contains(cssPhase3gReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported-diagnostic") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_fixed=") &&
         hasPositiveCount(cssPhase3gReport, "Current Document.css_position_unsupported_sticky=") &&
         contains(cssPhase3gReport, "Current Document.css_positioned_evidence=id=phase3g-"),
         "metrics=" + cssPhase3gMetric("Current Document.css_position_relative=") + ";" +
@@ -1458,8 +1458,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase5aReport, "Current Document.css_position_equal_z_source_orders=") &&
         hasPositiveCount(cssPhase5aReport, "Current Document.css_flex_absolute_excluded=") &&
         phase5aBothInsetEvidence && phase5aContainingBlockEvidence && phase5aStructuralChildEvidence && phase5aEqualOrderEvidence &&
-        contains(cssPhase5aReport, "Current Document.css_position_fixed_sticky=unsupported-diagnostic-not-aliased") &&
-        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_unsupported_fixed=") &&
+        contains(cssPhase5aReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported-diagnostic") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_fixed=") &&
         hasPositiveCount(cssPhase5aReport, "Current Document.css_position_unsupported_sticky=") &&
         contains(cssPhase5aReport, "Current Document.css_positioned_evidence=id=phase5a-"),
         "relative=" + cssPhase5aMetric("Current Document.css_position_relative=") + ";absolute=" +
@@ -1483,6 +1483,88 @@ static std::string navigatorHostedSmokeDiagnostic() {
         phase5aRestored,
         std::string("clicked=") + yesNo(phase5aPositionedLinkHit) + ";url=" + phase5aClickedUrl +
         ";restored=" + yesNo(phase5aRestored));
+
+    bool cssPhase5bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase5b.html");
+    auto phase5bEvidenceLine = [](const std::string& report, const std::string& id) {
+        const std::string prefix = "id=" + id + ",";
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return std::string();
+        const std::size_t end = report.find('\n', pos);
+        return report.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    const std::string cssPhase5bInitialReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase5bInitialHit = gxos::apps::Navigator::SmokeHitLinkById("phase5b-fixed-link");
+    const int phase5bInitialOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    gxos::apps::Navigator::SmokeSetScrollOffset(240);
+    const int phase5bModerateOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const std::string cssPhase5bModerateReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase5bModerateHit = gxos::apps::Navigator::SmokeHitLinkById("phase5b-fixed-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+    const int phase5bMaximumOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const std::string cssPhase5bMaximumReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase5bMaximumHit = gxos::apps::Navigator::SmokeHitLinkById("phase5b-fixed-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const bool phase5bScrollInvariance =
+        !phase5bEvidenceLine(cssPhase5bInitialReport, "phase5b-fixed-link").empty() &&
+        phase5bEvidenceLine(cssPhase5bInitialReport, "phase5b-fixed-link") ==
+            phase5bEvidenceLine(cssPhase5bModerateReport, "phase5b-fixed-link") &&
+        phase5bEvidenceLine(cssPhase5bInitialReport, "phase5b-fixed-link") ==
+            phase5bEvidenceLine(cssPhase5bMaximumReport, "phase5b-fixed-link");
+    const bool phase5bMultipleScrollPositions = phase5bInitialOffset == 0 &&
+        phase5bModerateOffset > 0 && phase5bMaximumOffset >= phase5bModerateOffset;
+    auto cssPhase5bMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase5bInitialReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase5bInitialReport.find('\n', pos);
+        return cssPhase5bInitialReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 5B fixed viewport fixture loads",
+        cssPhase5bLoaded &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "CSS Phase 5B Fixed Positioning and Viewport Layer") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed top-left link") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed top-right panel") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "content-sized fixed bottom-left status") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed bottom-right action") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "direct fixed flex child") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "nested fixed viewport") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "partially offscreen fixed") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Following document content proves fixed positioning does not add document extent"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 5B typed fixed records and viewport containing block",
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_position_fixed=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_viewport_records=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_absolute_descendants=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_stacking_records=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_hit_test_records=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_extent_exclusions=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_flex_exclusions=") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_model=bounded-static-relative-absolute-fixed") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported-diagnostic") &&
+		contains(cssPhase5bInitialReport, "Current Document.css_position_viewport_rect=24:70:872:528") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_fixed_coordinate_space=explicit-viewport-final-rect-no-scroll-translation") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_unsupported_fixed=0") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_position_unsupported_sticky=") &&
+        contains(cssPhase5bInitialReport, "id=phase5b-fixed-link,") &&
+        contains(cssPhase5bInitialReport, ",position=fixed,") &&
+        contains(cssPhase5bInitialReport, ",coordinate-space=viewport,") &&
+        contains(cssPhase5bInitialReport, ",containing-block-type=viewport,") &&
+        contains(cssPhase5bInitialReport, ",flow-participation=no,") &&
+        contains(cssPhase5bInitialReport, ",parent-height-contribution=no,"),
+        "fixed=" + cssPhase5bMetric("Current Document.css_position_fixed=") + ";viewport=" +
+        cssPhase5bMetric("Current Document.css_fixed_viewport_records=") + ";abs-desc=" +
+        cssPhase5bMetric("Current Document.css_fixed_absolute_descendants=") + ";flex-exclusions=" +
+        cssPhase5bMetric("Current Document.css_fixed_flex_exclusions=") + ";extent-exclusions=" +
+        cssPhase5bMetric("Current Document.css_fixed_extent_exclusions=") + ";evidence=" +
+        summarizeText(cssPhase5bMetric("Current Document.css_positioned_evidence="), 3200));
+    add("CSS phase 5B fixed scroll invariance and hit testing",
+        phase5bMultipleScrollPositions && phase5bScrollInvariance &&
+        phase5bInitialHit && phase5bModerateHit && phase5bMaximumHit &&
+        contains(cssPhase5bModerateReport, "coordinate-space=viewport") &&
+        contains(cssPhase5bMaximumReport, "coordinate-space=viewport"),
+        "initialOffset=" + std::to_string(phase5bInitialOffset) + ";moderateOffset=" +
+        std::to_string(phase5bModerateOffset) + ";maximumOffset=" + std::to_string(phase5bMaximumOffset) +
+        ";invariance=" + yesNo(phase5bScrollInvariance) + ";hitInitial=" + yesNo(phase5bInitialHit) +
+        ";hitModerate=" + yesNo(phase5bModerateHit) + ";hitMaximum=" + yesNo(phase5bMaximumHit));
 
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();

@@ -400,6 +400,7 @@ struct NavigatorPageMetadata {
 		int         cssPositionStatic = 0;
 		int         cssPositionRelative = 0;
 		int         cssPositionAbsolute = 0;
+		int         cssPositionFixed = 0;
 		int         cssPositionUnsupportedFixed = 0;
 		int         cssPositionUnsupportedSticky = 0;
 		int         cssRelativeOffsets = 0;
@@ -412,6 +413,12 @@ struct NavigatorPageMetadata {
 		int         cssAbsoluteStaticPositionUses = 0;
 		int         cssAbsoluteShrinkToFit = 0;
 		int         cssAbsoluteOutOfFlow = 0;
+		int         cssFixedViewportRecords = 0;
+		int         cssFixedAbsoluteDescendants = 0;
+		int         cssFixedFlexExclusions = 0;
+		int         cssFixedHitTestRecords = 0;
+		int         cssFixedStackingRecords = 0;
+		int         cssFixedExtentExclusions = 0;
 		int         cssPositionDocumentExtentExtensions = 0;
 		int         cssZIndexAuto = 0;
 		int         cssZIndexNegative = 0;
@@ -596,6 +603,9 @@ public:
 	static bool SmokeSubmitFirstForm(const std::string& value);
 	static int SmokeFindInPage(const std::string& query);
 	static bool SmokeClickFirstLink();
+	static bool SmokeHitLinkById(const std::string& id);
+	static void SmokeSetScrollOffset(int offset);
+	static int SmokeScrollOffset();
 	static bool SmokeDragFirstLinkSelectsWithoutNavigation();
 	static std::string SmokeRuntimeReport();
 	static std::string SmokeLifecycleReport();

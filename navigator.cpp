@@ -752,6 +752,16 @@ namespace {
 		bool complete = true;
 	};
 
+	// Positioned records retain logical tree ownership, but their final
+	// rectangle is explicitly tagged with the coordinate space in which it is
+	// already resolved. Document-space records are translated by scrolling at
+	// paint/hit time; viewport-space records are never translated by document
+	// scrolling.
+	enum class CssPositionCoordinateSpace : uint8_t {
+		Document = 0,
+		Viewport,
+	};
+
 	struct CssPositionedRecord {
 		int blockIndex = -1;
 		uint64_t logicalSerial = 0;
@@ -760,6 +770,7 @@ namespace {
 		std::string containingBlockType;
 		CssPositionBox containingBlock;
 		PositionMode mode = PositionMode::Static;
+		CssPositionCoordinateSpace coordinateSpace = CssPositionCoordinateSpace::Document;
 		CssLengthValue top;
 		CssLengthValue right;
 		CssLengthValue bottom;
@@ -951,6 +962,11 @@ namespace {
 	constexpr int kTextareaMinRows = 3;
 	constexpr int kTextareaMaxRows = 8;
 	constexpr int kMouseDragThreshold = 4;
+
+	static bool cssPositionOutOfFlow(PositionMode mode)
+	{
+		return mode == PositionMode::Absolute || mode == PositionMode::Fixed;
+	}
 
 	constexpr int kWidgetIdBack = 1;
 	constexpr int kWidgetIdForward = 2;
@@ -1743,7 +1759,7 @@ namespace {
 	static void ensureCssFloatLayout(const WebDocument& doc);
 	static void ensureCssFlexLayout(const WebDocument& doc);
 	static const CssFlexBlockOverride* cssFlexBlockOverrideForBlock(const WebDocument& doc, int blockIndex);
-	static uint64_t cssNearestAbsoluteStructuralAncestorForBlock(const WebDocument& doc,
+	static uint64_t cssNearestOutOfFlowStructuralAncestorForBlock(const WebDocument& doc,
 		const DocBlock& block);
 	static CssFloatExclusionQuery cssFloatExclusionQuery(const WebDocument& doc,
 		uint64_t bfcIdentity, int lineTop, int lineBottom, int containingLeft, int containingRight);
@@ -2522,6 +2538,7 @@ namespace {
 		metadata.cssPositionStatic = doc.cssDiagnostics.positionStatic;
 		metadata.cssPositionRelative = doc.cssDiagnostics.positionRelative;
 		metadata.cssPositionAbsolute = doc.cssDiagnostics.positionAbsolute;
+		metadata.cssPositionFixed = doc.cssDiagnostics.positionFixed;
 		metadata.cssPositionUnsupportedFixed = doc.cssDiagnostics.positionUnsupportedFixed;
 		metadata.cssPositionUnsupportedSticky = doc.cssDiagnostics.positionUnsupportedSticky;
 		metadata.cssRelativeOffsets = doc.cssDiagnostics.relativeOffsets;
@@ -2534,6 +2551,12 @@ namespace {
 		metadata.cssAbsoluteStaticPositionUses = doc.cssDiagnostics.absoluteStaticPositionUses;
 		metadata.cssAbsoluteShrinkToFit = doc.cssDiagnostics.absoluteShrinkToFit;
 		metadata.cssAbsoluteOutOfFlow = doc.cssDiagnostics.absoluteOutOfFlow;
+		metadata.cssFixedViewportRecords = doc.cssDiagnostics.fixedViewportRecords;
+		metadata.cssFixedAbsoluteDescendants = doc.cssDiagnostics.fixedAbsoluteDescendants;
+		metadata.cssFixedFlexExclusions = doc.cssDiagnostics.fixedFlexExclusions;
+		metadata.cssFixedHitTestRecords = doc.cssDiagnostics.fixedHitTestRecords;
+		metadata.cssFixedStackingRecords = doc.cssDiagnostics.fixedStackingRecords;
+		metadata.cssFixedExtentExclusions = doc.cssDiagnostics.fixedExtentExclusions;
 		metadata.cssPositionDocumentExtentExtensions = doc.cssDiagnostics.positionDocumentExtentExtensions;
 		metadata.cssZIndexAuto = doc.cssDiagnostics.zIndexAuto;
 		metadata.cssZIndexNegative = doc.cssDiagnostics.zIndexNegative;
@@ -2987,6 +3010,7 @@ namespace {
 		metadata.cssPositionStatic = doc.cssDiagnostics.positionStatic;
 		metadata.cssPositionRelative = doc.cssDiagnostics.positionRelative;
 		metadata.cssPositionAbsolute = doc.cssDiagnostics.positionAbsolute;
+		metadata.cssPositionFixed = doc.cssDiagnostics.positionFixed;
 		metadata.cssPositionUnsupportedFixed = doc.cssDiagnostics.positionUnsupportedFixed;
 		metadata.cssPositionUnsupportedSticky = doc.cssDiagnostics.positionUnsupportedSticky;
 		metadata.cssRelativeOffsets = doc.cssDiagnostics.relativeOffsets;
@@ -2999,6 +3023,12 @@ namespace {
 		metadata.cssAbsoluteStaticPositionUses = doc.cssDiagnostics.absoluteStaticPositionUses;
 		metadata.cssAbsoluteShrinkToFit = doc.cssDiagnostics.absoluteShrinkToFit;
 		metadata.cssAbsoluteOutOfFlow = doc.cssDiagnostics.absoluteOutOfFlow;
+		metadata.cssFixedViewportRecords = doc.cssDiagnostics.fixedViewportRecords;
+		metadata.cssFixedAbsoluteDescendants = doc.cssDiagnostics.fixedAbsoluteDescendants;
+		metadata.cssFixedFlexExclusions = doc.cssDiagnostics.fixedFlexExclusions;
+		metadata.cssFixedHitTestRecords = doc.cssDiagnostics.fixedHitTestRecords;
+		metadata.cssFixedStackingRecords = doc.cssDiagnostics.fixedStackingRecords;
+		metadata.cssFixedExtentExclusions = doc.cssDiagnostics.fixedExtentExclusions;
 		metadata.cssPositionDocumentExtentExtensions = doc.cssDiagnostics.positionDocumentExtentExtensions;
 		metadata.cssZIndexAuto = doc.cssDiagnostics.zIndexAuto;
 		metadata.cssZIndexNegative = doc.cssDiagnostics.zIndexNegative;
@@ -4605,8 +4635,8 @@ namespace {
 		for (int i = 0; i < blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
 			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
 			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0 ||
-				candidate.style.position == PositionMode::Absolute ||
-				cssNearestAbsoluteStructuralAncestorForBlock(doc, candidate) != 0) continue;
+				cssPositionOutOfFlow(candidate.style.position) ||
+				cssNearestOutOfFlowStructuralAncestorForBlock(doc, candidate) != 0) continue;
 			if (cssBlockParentSerial(doc, candidate) == parentSerial) return true;
 		}
 		return false;
@@ -4617,8 +4647,8 @@ namespace {
 		for (int i = blockIndex + 1; i < static_cast<int>(doc.blocks.size()); ++i) {
 			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
 			if (candidate.style.displayNone || candidate.atomicContainerSerial != 0 ||
-				candidate.style.position == PositionMode::Absolute ||
-				cssNearestAbsoluteStructuralAncestorForBlock(doc, candidate) != 0) continue;
+				cssPositionOutOfFlow(candidate.style.position) ||
+				cssNearestOutOfFlowStructuralAncestorForBlock(doc, candidate) != 0) continue;
 			if (cssBlockParentSerial(doc, candidate) == parentSerial) return true;
 		}
 		return false;
@@ -4756,8 +4786,8 @@ namespace {
 			const DocBlock& block = doc.blocks[static_cast<size_t>(i)];
 			if (block.style.displayNone || block.atomicContainerSerial != 0 ||
 				block.style.floatMode != FloatMode::None ||
-				block.style.position == PositionMode::Absolute ||
-				cssNearestAbsoluteStructuralAncestorForBlock(doc, block) != 0) continue;
+				cssPositionOutOfFlow(block.style.position) ||
+				cssNearestOutOfFlowStructuralAncestorForBlock(doc, block) != 0) continue;
 			return i;
 		}
 		return -1;
@@ -4828,8 +4858,8 @@ namespace {
 			record.minHeightPreventsCollapse = definiteMinHeight.definite;
 			if (record.bfcReason == "atomic-context") ++const_cast<WebDocument&>(doc).cssDiagnostics.bfcAtomic;
 			if (block.style.displayNone || block.atomicContainerSerial != 0 ||
-				block.style.position == PositionMode::Absolute ||
-				cssNearestAbsoluteStructuralAncestorForBlock(doc, block) != 0) {
+				cssPositionOutOfFlow(block.style.position) ||
+				cssNearestOutOfFlowStructuralAncestorForBlock(doc, block) != 0) {
 				record.incomplete = block.atomicContainerSerial != 0;
 				continue;
 			}
@@ -5529,7 +5559,7 @@ namespace {
 			if (item.kind == InlineItemKind::ForcedBreak || item.flowSerial == 0) continue;
 			const WebStyle* style = inlineOwnerStyle(doc, item, doc.bodyStyle);
 			if (!style || style->floatMode == FloatMode::None || style->displayNone ||
-				style->position == PositionMode::Absolute) continue;
+				cssPositionOutOfFlow(style->position)) continue;
 			if (item.ownerSerial != 0 && std::find(seenOwners.begin(), seenOwners.end(), item.ownerSerial) != seenOwners.end()) {
 				++mutableDoc.cssDiagnostics.floatScopeSuppressions;
 				continue;
@@ -6056,7 +6086,7 @@ namespace {
 				style->flexDirection == FlexDirectionMode::RowReverse;
 			for (const CssFlexCandidate& candidate : candidates) {
 				if (candidate.style.displayNone || candidate.style.display == DisplayMode::None) continue;
-				if (candidate.style.position == PositionMode::Absolute) continue;
+				if (cssPositionOutOfFlow(candidate.style.position)) continue;
 				const int childW = cssFlexCandidateWidth(doc, candidate, availableWidth, depth + 1);
 				const int childH = cssFlexCandidateHeight(doc, candidate, availableWidth, depth + 1);
 				if (row) {
@@ -6227,6 +6257,7 @@ namespace {
 		diagnostics.flexWrapReverseContainers = diagnostics.flexAlignContentContainers = 0;
 		diagnostics.flexStretchedLines = 0;
 		diagnostics.flexWrapUnsupported = diagnostics.flexAbsoluteExcluded = 0;
+		diagnostics.fixedFlexExclusions = 0;
 		diagnostics.flexDisplayNoneExcluded = diagnostics.flexOrderSortItems = 0;
 		diagnostics.flexBaseSizeQueries = diagnostics.flexIntrinsicQueries = 0;
 		diagnostics.flexAutomaticMinimumApplied = diagnostics.flexAutomaticMinimumZero = 0;
@@ -6291,7 +6322,7 @@ namespace {
 			int intrinsicH = 1;
 			for (const CssFlexCandidate& candidate : candidates) {
 				if (candidate.style.displayNone || candidate.style.display == DisplayMode::None) continue;
-				if (candidate.style.position == PositionMode::Absolute) continue;
+				if (cssPositionOutOfFlow(candidate.style.position)) continue;
 				intrinsicW = std::max(intrinsicW, cssFlexCandidateWidth(doc, candidate,
 					std::max(1, assignedW > 0 ? assignedW : cssBodyContentWidth(doc)), depth + 1));
 				intrinsicH = std::max(intrinsicH, cssFlexCandidateHeight(doc, candidate,
@@ -6329,9 +6360,11 @@ namespace {
 					++diagnostics.flexDisplayNoneExcluded;
 					continue;
 				}
-				if (candidate.style.position == PositionMode::Absolute) {
+				if (cssPositionOutOfFlow(candidate.style.position)) {
 					++snapshot.absoluteExcluded;
 					++diagnostics.flexAbsoluteExcluded;
+					if (candidate.style.position == PositionMode::Fixed)
+						++diagnostics.fixedFlexExclusions;
 					continue;
 				}
 				CssFlexItemRecord item;
@@ -6998,9 +7031,39 @@ namespace {
 		return static_cast<int>(displacement);
 	}
 
-	static CssPaintRect cssViewportClipRect()
+	// Single authoritative Navigator document viewport. It excludes the
+	// toolbar/address chrome above it and the status bar below it. Fixed inset
+	// resolution, paint clipping, and hit testing all use this same rectangle.
+	static CssPaintRect cssNavigatorDocumentViewportRect()
 	{
 		return CssPaintRect{kContentX, kToolbarH + 6, kContentW, kContentH};
+	}
+
+	static CssPaintRect cssViewportClipRect()
+	{
+		return cssNavigatorDocumentViewportRect();
+	}
+
+	static CssPositionBox cssViewportPositionBox()
+	{
+		CssPositionBox box;
+		box.border = cssNavigatorDocumentViewportRect();
+		box.padding = box.border;
+		box.content = box.border;
+		box.widthDefinite = true;
+		box.heightDefinite = true;
+		return box;
+	}
+
+	static int cssPositionedScreenY(const CssPositionedRecord& record, int scrollOffset)
+	{
+		return record.coordinateSpace == CssPositionCoordinateSpace::Viewport
+			? record.finalY : cssBoundedGeometryAdd(record.finalY, -scrollOffset);
+	}
+
+	static int cssPositionedScreenX(const CssPositionedRecord& record)
+	{
+		return record.finalX;
 	}
 
 	static int cssBlockLayoutY(const WebDocument& doc, int blockIndex);
@@ -7025,14 +7088,14 @@ namespace {
 		return false;
 	}
 
-	static uint64_t cssNearestAbsoluteStructuralAncestorForBlock(const WebDocument& doc,
+	static uint64_t cssNearestOutOfFlowStructuralAncestorForBlock(const WebDocument& doc,
 		const DocBlock& block)
 	{
 		int depth = 0;
 		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend() &&
 			depth++ < static_cast<int>(kCssPositionedAncestryCap); ++it) {
 			const WebStyle* style = cssStyleForSerial(doc, it->serial);
-			if (style && style->position == PositionMode::Absolute)
+			if (style && cssPositionOutOfFlow(style->position))
 				return it->serial;
 		}
 		return 0;
@@ -7052,14 +7115,14 @@ namespace {
 		return -1;
 	}
 
-	static bool cssIsFirstAbsoluteStructuralDescendant(const WebDocument& doc,
+	static bool cssIsFirstOutOfFlowStructuralDescendant(const WebDocument& doc,
 		int blockIndex, uint64_t ownerSerial)
 	{
 		if (blockIndex < 0 || ownerSerial == 0) return false;
 		for (int index = 0; index < blockIndex && index < static_cast<int>(doc.blocks.size()); ++index) {
 			const DocBlock& prior = doc.blocks[static_cast<size_t>(index)];
 			if (prior.style.displayNone) continue;
-			if (cssNearestAbsoluteStructuralAncestorForBlock(doc, prior) == ownerSerial) return false;
+			if (cssNearestOutOfFlowStructuralAncestorForBlock(doc, prior) == ownerSerial) return false;
 		}
 		return true;
 	}
@@ -7710,12 +7773,15 @@ namespace {
 		snapshot.documentExtent = s_cssMarginLayoutSnapshot.documentHeight;
 		snapshot.blockRecordIndices.assign(doc.blocks.size(), -1);
 		gxos::web::CssDiagnostics& diagnostics = const_cast<WebDocument&>(doc).cssDiagnostics;
-		diagnostics.positionStatic = diagnostics.positionRelative = diagnostics.positionAbsolute = 0;
+		diagnostics.positionStatic = diagnostics.positionRelative = diagnostics.positionAbsolute = diagnostics.positionFixed = 0;
 		diagnostics.relativeOffsets = diagnostics.relativePercentageOffsets = 0;
 		diagnostics.absoluteBoxes = diagnostics.absoluteBlockifications = 0;
 		diagnostics.positionedContainingBlocks = diagnostics.positionRootFallbacks = 0;
 		diagnostics.positionAncestryClamps = diagnostics.absoluteStaticPositionUses = 0;
 		diagnostics.absoluteShrinkToFit = diagnostics.absoluteOutOfFlow = 0;
+		diagnostics.fixedViewportRecords = diagnostics.fixedAbsoluteDescendants = 0;
+		diagnostics.fixedHitTestRecords = 0;
+		diagnostics.fixedStackingRecords = diagnostics.fixedExtentExclusions = 0;
 		diagnostics.positionDocumentExtentExtensions = diagnostics.zIndexAuto = 0;
 		diagnostics.zIndexNegative = diagnostics.zIndexZero = diagnostics.zIndexPositive = 0;
 		diagnostics.positionHitOcclusions = diagnostics.positionGeometryClamps = 0;
@@ -7740,12 +7806,14 @@ namespace {
 			if (!computed.valid || computed.serial == 0 || !countedPositionSerials.insert(computed.serial).second) continue;
 			if (computed.style.position == PositionMode::Static) ++diagnostics.positionStatic;
 			else if (computed.style.position == PositionMode::Relative) ++diagnostics.positionRelative;
+			else if (computed.style.position == PositionMode::Fixed) ++diagnostics.positionFixed;
 			else ++diagnostics.positionAbsolute;
 		}
 		for (const DocBlock& block : doc.blocks) {
 			if (block.elementMetadata.serial != 0 && countedPositionSerials.count(block.elementMetadata.serial) != 0) continue;
 			if (block.style.position == PositionMode::Static) ++diagnostics.positionStatic;
 			else if (block.style.position == PositionMode::Relative) ++diagnostics.positionRelative;
+			else if (block.style.position == PositionMode::Fixed) ++diagnostics.positionFixed;
 			else ++diagnostics.positionAbsolute;
 		}
 		std::unordered_set<uint64_t> positionedBlockSerials;
@@ -7782,6 +7850,8 @@ namespace {
 			record.logicalSerial = element.serial;
 			record.parentSerial = element.parentSerial;
 			record.mode = style->position;
+			record.coordinateSpace = style->position == PositionMode::Fixed
+				? CssPositionCoordinateSpace::Viewport : CssPositionCoordinateSpace::Document;
 			record.top = style->topValue;
 			record.right = style->rightValue;
 			record.bottom = style->bottomValue;
@@ -7801,12 +7871,17 @@ namespace {
 			CssPositionBox containing = cssPositionRootBox();
 			uint64_t containingSerial = 0;
 			bool containingFallback = true;
+			bool fixedContainingBlock = false;
 			int ancestorDepth = 0;
-			for (uint64_t ancestorSerial = element.parentSerial; ancestorSerial != 0 &&
+			if (style->position == PositionMode::Fixed) {
+				containing = cssViewportPositionBox();
+				containingFallback = false;
+			} else for (uint64_t ancestorSerial = element.parentSerial; ancestorSerial != 0 &&
 				ancestorDepth++ < static_cast<int>(kCssPositionedAncestryCap);) {
 				const WebStyle* ancestorStyle = cssStyleForSerial(doc, ancestorSerial);
 				if (ancestorStyle && ancestorStyle->position != PositionMode::Static) {
 					containingSerial = ancestorSerial;
+					fixedContainingBlock = ancestorStyle->position == PositionMode::Fixed;
 					if (const CssPositionedRecord* positioned = cssPositionedRecordForSerial(doc, ancestorSerial)) {
 						containing = cssPositionBoxFromBorder(
 							CssPaintRect{positioned->finalX, positioned->finalY,
@@ -7829,17 +7904,27 @@ namespace {
 				++diagnostics.positionAncestryClamps;
 			}
 			record.containingBlockSerial = containingSerial;
-			record.containingBlockType = containingFallback ? "root-fallback" : "positioned-ancestor";
+			if (fixedContainingBlock)
+				record.coordinateSpace = CssPositionCoordinateSpace::Viewport;
+			record.containingBlockType = style->position == PositionMode::Fixed ? "viewport" :
+				(containingFallback ? "root-fallback" : "positioned-ancestor");
 			record.containingBlock = containing;
-			if (containingFallback) ++diagnostics.positionRootFallbacks;
-			else ++diagnostics.positionedContainingBlocks;
+			if (style->position != PositionMode::Fixed) {
+				if (containingFallback) ++diagnostics.positionRootFallbacks;
+				else ++diagnostics.positionedContainingBlocks;
+			}
 			++snapshot.ancestryLookups;
 
 			CssAncestorBox normalBox;
 			if (firstDescendant >= 0)
 				normalBox = cssAncestorBoxForBlock(doc, element.serial, 0);
-			record.normalX = normalBox.valid ? normalBox.x : containing.padding.x;
-			record.normalY = normalBox.valid ? normalBox.y : containing.padding.y;
+			if (style->position == PositionMode::Fixed || fixedContainingBlock) {
+				record.normalX = cssBoundedGeometryAdd(containing.padding.x, record.marginLeft);
+				record.normalY = cssBoundedGeometryAdd(containing.padding.y, record.marginTop);
+			} else {
+				record.normalX = normalBox.valid ? normalBox.x : containing.padding.x;
+				record.normalY = normalBox.valid ? normalBox.y : containing.padding.y;
+			}
 			record.staticX = record.normalX;
 			record.staticY = record.normalY;
 			const int parentBasisWidth = std::max(1, containing.padding.w);
@@ -7912,12 +7997,19 @@ namespace {
 			if (record.mode == PositionMode::Absolute) {
 				++diagnostics.absoluteBoxes;
 				++diagnostics.absoluteOutOfFlow;
+			} else if (record.mode == PositionMode::Fixed) {
+				++diagnostics.fixedViewportRecords;
 			}
 			if (record.zIndexAuto) { ++diagnostics.zIndexAuto; record.paintTier = 1; }
 			else if (record.zIndex < 0) { ++diagnostics.zIndexNegative; ++diagnostics.positionNegativeZRecords; record.paintTier = 0; }
 			else if (record.zIndex > 0) { ++diagnostics.zIndexPositive; ++diagnostics.positionPositiveZRecords; record.paintTier = 2; }
 			else { ++diagnostics.zIndexZero; record.paintTier = 1; }
-			record.documentExtentContribution = std::max(0, record.finalY - kContentY + record.usedHeight);
+			if (record.coordinateSpace == CssPositionCoordinateSpace::Viewport) {
+				record.documentExtentContribution = 0;
+				++diagnostics.fixedExtentExclusions;
+			} else {
+				record.documentExtentContribution = std::max(0, record.finalY - kContentY + record.usedHeight);
+			}
 			record.paintVisible = style->visibility != VisibilityMode::Hidden && style->effectiveOpacityPercent >= 0 &&
 				record.usedWidth > 0 && record.usedHeight > 0;
 			record.hitVisible = record.paintVisible;
@@ -7939,7 +8031,7 @@ namespace {
 			}
 			const DocBlock& block = doc.blocks[static_cast<size_t>(index)];
 			const uint64_t structuralOutOfFlowOwner =
-				cssNearestAbsoluteStructuralAncestorForBlock(doc, block);
+				cssNearestOutOfFlowStructuralAncestorForBlock(doc, block);
 			if (block.style.displayNone ||
 				(block.style.position == PositionMode::Static && structuralOutOfFlowOwner == 0)) continue;
 			CssPositionedRecord record;
@@ -7947,6 +8039,11 @@ namespace {
 			record.logicalSerial = block.elementMetadata.serial;
 			record.parentSerial = cssBlockParentSerial(doc, block);
 			record.mode = block.style.position;
+			const CssPositionedRecord* structuralOwnerRecord = structuralOutOfFlowOwner != 0
+				? cssPositionedRecordForSerial(doc, structuralOutOfFlowOwner) : nullptr;
+			record.coordinateSpace = block.style.position == PositionMode::Fixed ||
+				(structuralOwnerRecord && structuralOwnerRecord->coordinateSpace == CssPositionCoordinateSpace::Viewport)
+				? CssPositionCoordinateSpace::Viewport : CssPositionCoordinateSpace::Document;
 			record.top = block.style.topValue;
 			record.right = block.style.rightValue;
 			record.bottom = block.style.bottomValue;
@@ -7956,6 +8053,11 @@ namespace {
 			record.sourceOrder = index;
 			record.generatedOutOfFlowDescendant = structuralOutOfFlowOwner != 0 &&
 				block.style.position == PositionMode::Static;
+			const WebStyle* structuralOwnerStyle = structuralOutOfFlowOwner != 0
+				? cssStyleForSerial(doc, structuralOutOfFlowOwner) : nullptr;
+			if (record.mode == PositionMode::Absolute && structuralOwnerStyle &&
+				structuralOwnerStyle->position == PositionMode::Fixed)
+				++diagnostics.fixedAbsoluteDescendants;
 			record.marginLeft = cssMarginLeftPx(block.style, 0);
 			record.marginRight = cssMarginRightPx(block.style, 0);
 			record.marginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
@@ -7964,12 +8066,12 @@ namespace {
 				block.tagName == "strong" || block.tagName == "b" || block.tagName == "em" ||
 				block.tagName == "i" || block.tagName == "code" || block.tagName == "small" ||
 				block.tagName == "kbd" || block.tagName == "samp";
-			if (record.mode == PositionMode::Absolute &&
+			if (cssPositionOutOfFlow(record.mode) &&
 				(block.style.display == DisplayMode::Inline || inlinePositionedTag)) {
 				record.blockified = true;
 				++diagnostics.absoluteBlockifications;
 			}
-			if (record.mode == PositionMode::Absolute &&
+			if (cssPositionOutOfFlow(record.mode) &&
 				(block.tagName == "table" || block.tagName == "tr" || block.tagName == "td" || block.tagName == "th")) {
 				record.complete = false;
 				record.incompleteReason = "positioned-table-unsupported";
@@ -8031,7 +8133,7 @@ namespace {
 						cssBoundedGeometryAdd(cssPositionAutoContentHeight(block, doc, record.usedWidth),
 							childHeightEdges)));
 					record.clamped = record.clamped || childClamped || childUnresolved;
-					if (block.style.position != PositionMode::Absolute)
+					if (!cssPositionOutOfFlow(block.style.position))
 						structuralChildCursors[structuralOutOfFlowOwner] = std::min(
 							kCssPositionedGeometryCap, cssBoundedGeometryAdd(cursor,
 								cssBoundedGeometryAdd(record.marginTop,
@@ -8049,13 +8151,17 @@ namespace {
 					++diagnostics.positionStaticSnapshotFallbacks;
 				}
 			}
-			record.flowParticipation = record.mode == PositionMode::Relative;
-			record.parentHeightContribution = record.mode == PositionMode::Relative;
+			record.flowParticipation = record.mode == PositionMode::Relative && structuralOutOfFlowOwner == 0;
+			record.parentHeightContribution = record.mode == PositionMode::Relative && structuralOutOfFlowOwner == 0;
 			uint64_t containingSerial = 0;
 			CssPositionBox containing = cssPositionRootBox();
 			bool containingFallback = true;
 			bool inlineContainingBlockUsed = false;
-			if (structuralOutOfFlowOwner != 0) {
+			if (record.mode == PositionMode::Fixed) {
+				containing = cssViewportPositionBox();
+				containingSerial = 0;
+				containingFallback = false;
+			} else if (structuralOutOfFlowOwner != 0) {
 				containingSerial = structuralOutOfFlowOwner;
 				const WebStyle* ownerStyle = cssStyleForSerial(doc, structuralOutOfFlowOwner);
 				if (ownerStyle) {
@@ -8119,11 +8225,15 @@ namespace {
 				}
 			}
 			record.containingBlockSerial = containingSerial;
-			record.containingBlockType = containingFallback ? "root-fallback" :
+			record.containingBlockType = record.mode == PositionMode::Fixed ? "viewport" :
+			(containingFallback ? "root-fallback" :
 				(inlineContainingBlockUsed ? "positioned-inline-fragments" :
-				(record.mode == PositionMode::Absolute ? "positioned-ancestor" : "parent-block"));
+				(record.mode == PositionMode::Absolute ? "positioned-ancestor" : "parent-block")));
 			record.containingBlock = containing;
-			if (containingFallback) {
+			if (record.mode == PositionMode::Fixed) {
+				// Fixed placement is viewport-relative even when the logical DOM
+				// parent is deeply nested in ordinary document content.
+			} else if (containingFallback) {
 				++diagnostics.positionRootFallbacks;
 			} else {
 				++diagnostics.positionedContainingBlocks;
@@ -8191,7 +8301,7 @@ namespace {
 					std::min(kCssPositionedGeometryCap, record.normalX + ancestorDeltaX + record.relativeShiftX));
 				record.finalY = std::max(-kCssPositionedGeometryCap,
 					std::min(kCssPositionedGeometryCap, record.normalY + ancestorDeltaY + record.relativeShiftY));
-			} else if (record.mode == PositionMode::Absolute) {
+			} else if (record.mode == PositionMode::Absolute || record.mode == PositionMode::Fixed) {
 				record.flowParticipation = false;
 				record.parentHeightContribution = false;
 				const bool widthSpecified = block.style.widthValue.valid &&
@@ -8254,10 +8364,14 @@ namespace {
 					++snapshot.geometryClamps;
 					++diagnostics.positionGeometryClamps;
 				}
-				++diagnostics.absoluteBoxes;
-				++diagnostics.absoluteOutOfFlow;
+				if (record.mode == PositionMode::Absolute) {
+					++diagnostics.absoluteBoxes;
+					++diagnostics.absoluteOutOfFlow;
+				} else {
+					++diagnostics.fixedViewportRecords;
+				}
 			} else {
-				// A static block emitted under a structural absolute owner is
+				// A static block emitted under a structural out-of-flow owner is
 				// out of document flow, but remains ordinary content inside the
 				// owner's padding box.
 				record.flowParticipation = false;
@@ -8280,7 +8394,12 @@ namespace {
 				++diagnostics.zIndexZero;
 				record.paintTier = 1;
 			}
-			record.documentExtentContribution = std::max(0, record.finalY - kContentY + record.usedHeight);
+			if (record.coordinateSpace == CssPositionCoordinateSpace::Viewport) {
+				record.documentExtentContribution = 0;
+				++diagnostics.fixedExtentExclusions;
+			} else {
+				record.documentExtentContribution = std::max(0, record.finalY - kContentY + record.usedHeight);
+			}
 		const bool visible = !block.style.displayNone && block.style.visibility != VisibilityMode::Hidden &&
 			block.style.effectiveOpacityPercent >= 0;
 			record.paintVisible = visible && record.usedWidth > 0 && record.usedHeight > 0;
@@ -8301,6 +8420,9 @@ namespace {
 		// positioned descendants; no general CSS stacking tree is retained.
 		for (int i = 0; i < static_cast<int>(snapshot.records.size()); ++i) {
 			CssPositionedRecord& record = snapshot.records[static_cast<size_t>(i)];
+			if (record.mode == PositionMode::Fixed) ++diagnostics.fixedStackingRecords;
+			if (record.coordinateSpace == CssPositionCoordinateSpace::Viewport && record.hitVisible)
+				++diagnostics.fixedHitTestRecords;
 			record.establishesStackingOwner = !record.zIndexAuto;
 			int ownerIndex = -1;
 			if (record.blockIndex >= 0 && record.blockIndex < static_cast<int>(doc.blocks.size())) {
@@ -8407,13 +8529,18 @@ namespace {
 			const DocBlock& block = doc.blocks[static_cast<size_t>(record.blockIndex)];
 			if (block.id.rfind("phase3g-", 0) != 0 && block.id.rfind("css3g-", 0) != 0 &&
 				block.id.rfind("phase3h-", 0) != 0 && block.id.rfind("css3h-", 0) != 0 &&
-				block.id.rfind("phase5a-", 0) != 0 && block.id.rfind("css5a-", 0) != 0)
+				block.id.rfind("phase5a-", 0) != 0 && block.id.rfind("css5a-", 0) != 0 &&
+				block.id.rfind("phase5b-", 0) != 0 && block.id.rfind("css5b-", 0) != 0)
 				continue;
 			std::ostringstream line;
 			line << "id=" << block.id << ",logical-serial=" << record.logicalSerial
 				<< ",parent-serial=" << record.parentSerial << ",position="
 				<< (record.mode == PositionMode::Relative ? "relative" :
-					record.mode == PositionMode::Absolute ? "absolute" : "static")
+					record.mode == PositionMode::Absolute ? "absolute" :
+					record.mode == PositionMode::Fixed ? "fixed" : "static")
+				<< ",coordinate-space=" << (record.coordinateSpace == CssPositionCoordinateSpace::Viewport ? "viewport" : "document")
+				<< ",viewport-rect=" << cssNavigatorDocumentViewportRect().x << ":" << cssNavigatorDocumentViewportRect().y << ":"
+				<< cssNavigatorDocumentViewportRect().w << ":" << cssNavigatorDocumentViewportRect().h
 				<< ",stacking-owner-serial=" << record.stackingOwnerSerial
 				<< ",stacking-owner-index=" << record.stackingOwnerIndex
 				<< ",stacking-depth=" << record.stackingDepth
@@ -8476,16 +8603,21 @@ namespace {
 		CssPaintRect clip = cssViewportClipRect();
 		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return clip;
 		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+		const CssPositionedRecord* selfPosition = cssPositionedRecordForBlock(doc, blockIndex);
+		const bool viewportLayer = selfPosition &&
+			selfPosition->coordinateSpace == CssPositionCoordinateSpace::Viewport;
 		int depth = 0;
 		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
 			const WebStyle* style = cssStyleForSerial(doc, ancestor.serial);
 			if (!style || (style->overflowX == OverflowMode::Visible && style->overflowY == OverflowMode::Visible)) continue;
+			if (viewportLayer && cssPositionedRecordForSerial(doc, ancestor.serial) == nullptr)
+				continue;
 			if (++depth > static_cast<int>(kCssPositionedAncestryCap)) return CssPaintRect{0, 0, 0, 0};
 			CssPaintRect owner;
 			if (const CssPositionedRecord* positioned = cssPositionedRecordForSerial(doc, ancestor.serial)) {
 				owner = CssPaintRect{positioned->finalX, positioned->finalY,
 					positioned->usedWidth, positioned->usedHeight};
-				owner.y -= scrollOffset;
+				owner.y = cssPositionedScreenY(*positioned, scrollOffset);
 			} else {
 				const CssAncestorBox box = cssAncestorBoxForBlock(doc, ancestor.serial, scrollOffset);
 				if (!box.valid) return CssPaintRect{0, 0, 0, 0};
@@ -8494,7 +8626,10 @@ namespace {
 			clip = cssApplyOverflowClip(clip, *style, owner.x, owner.y, owner.w, owner.h);
 			if (clip.w <= 0 || clip.h <= 0) return clip;
 		}
-		return cssApplyOverflowClip(clip, block.style, outerX, outerY - scrollOffset, outerW, outerH);
+		const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, blockIndex);
+		const int screenY = positioned ? cssPositionedScreenY(*positioned, scrollOffset) :
+			cssBoundedGeometryAdd(outerY, -scrollOffset);
+		return cssApplyOverflowClip(clip, block.style, outerX, screenY, outerW, outerH);
 	}
 
 	static bool cssSerialWithinBounded(const WebDocument& doc, uint64_t serial, uint64_t ancestor)
@@ -8586,7 +8721,7 @@ namespace {
 				blockIndex >= static_cast<int>(doc.blocks.size())) continue;
 			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
 			if (block.style.displayNone || block.style.visibility == VisibilityMode::Hidden) continue;
-			const CssPaintRect target{record->finalX, record->finalY - scrollOffset,
+			const CssPaintRect target{cssPositionedScreenX(*record), cssPositionedScreenY(*record, scrollOffset),
 				record->usedWidth, record->usedHeight};
 			const CssPaintRect clip = cssPositionedClipForBlock(doc, blockIndex, record->finalX,
 				record->finalY, record->usedWidth, record->usedHeight, scrollOffset);
@@ -9412,6 +9547,7 @@ namespace {
 		add("css_position_static", metadata.cssPositionStatic);
 		add("css_position_relative", metadata.cssPositionRelative);
 		add("css_position_absolute", metadata.cssPositionAbsolute);
+		add("css_position_fixed", metadata.cssPositionFixed);
 		add("css_position_unsupported_fixed", metadata.cssPositionUnsupportedFixed);
 		add("css_position_unsupported_sticky", metadata.cssPositionUnsupportedSticky);
 		add("css_relative_offsets", metadata.cssRelativeOffsets);
@@ -9424,6 +9560,12 @@ namespace {
 		add("css_absolute_static_position_uses", metadata.cssAbsoluteStaticPositionUses);
 		add("css_absolute_shrink_to_fit", metadata.cssAbsoluteShrinkToFit);
 		add("css_absolute_out_of_flow", metadata.cssAbsoluteOutOfFlow);
+		add("css_fixed_viewport_records", metadata.cssFixedViewportRecords);
+		add("css_fixed_absolute_descendants", metadata.cssFixedAbsoluteDescendants);
+		add("css_fixed_flex_exclusions", metadata.cssFixedFlexExclusions);
+		add("css_fixed_hit_test_records", metadata.cssFixedHitTestRecords);
+		add("css_fixed_stacking_records", metadata.cssFixedStackingRecords);
+		add("css_fixed_extent_exclusions", metadata.cssFixedExtentExclusions);
 		add("css_position_document_extent_extensions", metadata.cssPositionDocumentExtentExtensions);
 		add("css_z_index_auto", metadata.cssZIndexAuto);
 		add("css_z_index_negative", metadata.cssZIndexNegative);
@@ -9448,8 +9590,8 @@ namespace {
 		add("css_position_static_snapshot_fallbacks", metadata.cssPositionStaticSnapshotFallbacks);
 		add("css_position_lifecycle_resets", metadata.cssPositionLifecycleResets);
 		add("css_positioned_evidence_records", metadata.cssPositionedEvidenceRecords);
-		out += "Current Document.css_position_model=bounded-static-relative-absolute\n";
-		out += "Current Document.css_position_fixed_sticky=unsupported-diagnostic-not-aliased\n";
+		out += "Current Document.css_position_model=bounded-static-relative-absolute-fixed\n";
+		out += "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported-diagnostic\n";
 		out += "Current Document.css_position_relative_flow=unshifted-normal-flow-with-final-visual-offset\n";
 		out += "Current Document.css_position_relative_inset_precedence=left-over-right-top-over-bottom\n";
 		out += "Current Document.css_position_absolute_flow=out-of-flow-no-parent-height-contribution\n";
@@ -9463,7 +9605,12 @@ namespace {
 		out += "Current Document.css_position_stacking_depth_cap=16\n";
 		out += "Current Document.css_position_stacking_owner_cap=256\n";
 		out += "Current Document.css_position_opacity_stacking=unsupported-lightweight-alpha-only\n";
-		out += "Current Document.css_position_fixed_sticky=unsupported\n";
+		out += "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported\n";
+		const CssPaintRect viewport = cssNavigatorDocumentViewportRect();
+		out += "Current Document.css_position_viewport_rect=" + std::to_string(viewport.x) + ":" +
+			std::to_string(viewport.y) + ":" + std::to_string(viewport.w) + ":" +
+			std::to_string(viewport.h) + "\n";
+		out += "Current Document.css_position_fixed_coordinate_space=explicit-viewport-final-rect-no-scroll-translation\n";
 		out += "Current Document.css_position_inline_containing_block=bounded-ltr-first-last-fragment-geometry\n";
 		if (!metadata.cssPositionedEvidence.empty()) out += "Current Document.css_positioned_evidence=" + metadata.cssPositionedEvidence;
 		add("css_inline_items", metadata.cssInlineItems);
@@ -11047,7 +11194,10 @@ namespace {
 				if (flow.contextSerial == 0) {
 					if (flow.anchorBlockIndex < 0 || flow.anchorBlockIndex >= static_cast<int>(doc.blocks.size())) continue;
 					const DocBlock& anchor = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
-					const int drawY = kContentY + cssBlockLayoutY(doc, flow.anchorBlockIndex) - scrollOffset;
+					const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, flow.anchorBlockIndex);
+					const int drawY = positioned
+						? cssPositionedScreenY(*positioned, scrollOffset) - cssMarginTopPx(flow.style, 4)
+						: kContentY + cssBlockLayoutY(doc, flow.anchorBlockIndex) - scrollOffset;
 					const int marginTop = cssMarginTopPx(flow.style, anchor.type == BlockType::Heading ? 10 : 4);
 					originX = flow.contentX;
 					originY = drawY + marginTop + cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0);
@@ -11195,6 +11345,61 @@ bool Navigator::SmokeClickFirstLink()
 		return s_currentDoc.url != before;
 	}
 	return false;
+}
+
+bool Navigator::SmokeHitLinkById(const std::string& id)
+{
+	if (s_windowId == 0) return false;
+	int blockIndex = -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[static_cast<size_t>(i)].id == id &&
+			s_currentDoc.blocks[static_cast<size_t>(i)].type == BlockType::Link) {
+			blockIndex = i;
+			break;
+		}
+	}
+	if (blockIndex < 0) return false;
+	ensureCssPositionLayout(s_currentDoc);
+	Rect rect = linkBlockRect(blockIndex);
+	// Positioned links may retain an inline-flow text fragment for painting, but
+	// the positioned record is the authoritative visible box for hit sampling.
+	// Use it as a bounded fallback so the smoke assertion samples the same
+	// viewport-space geometry used by the shared positioned hit-test pass.
+	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
+		const CssPaintRect target{
+			cssPositionedScreenX(*positioned),
+			cssPositionedScreenY(*positioned, s_scrollOffset),
+			positioned->usedWidth,
+			positioned->usedHeight};
+		const CssPaintRect clip = cssPositionedClipForBlock(s_currentDoc, blockIndex,
+			positioned->finalX, positioned->finalY, positioned->usedWidth,
+			positioned->usedHeight, s_scrollOffset);
+		const CssPaintRect clipped = cssPaintRectIntersect(target, clip);
+		if (clipped.w > 0 && clipped.h > 0)
+			rect = Rect{clipped.x, clipped.y, clipped.w, clipped.h};
+	}
+	if (rect.w <= 0 || rect.h <= 0) return false;
+	const int stepX = std::max(1, rect.w / 16);
+	const int stepY = std::max(1, rect.h / 8);
+	for (int y = rect.y; y < rect.y + rect.h; y += stepY) {
+		for (int x = rect.x; x < rect.x + rect.w; x += stepX) {
+			int hitIndex = -1;
+			if (hitTest(x, y, hitIndex) == HitTarget::Link && hitIndex == blockIndex) return true;
+		}
+	}
+	return false;
+}
+
+void Navigator::SmokeSetScrollOffset(int offset)
+{
+	s_scrollOffset = std::max(0, offset);
+	clampScrollOffset();
+	if (s_windowId != 0) updateDisplay();
+}
+
+int Navigator::SmokeScrollOffset()
+{
+	return s_scrollOffset;
 }
 
 bool Navigator::SmokeDragFirstLinkSelectsWithoutNavigation()
@@ -12213,7 +12418,7 @@ void Navigator::renderDocument()
 		int flowOuterWidth = flow.outerWidth;
 		int flowBoxHeight = std::max(1, flow.outerHeight > 0 ? flow.outerHeight : flow.totalHeight - marginTop - marginBottom);
 		if (positionedAnchor) {
-			drawY = positionedAnchor->finalY - s_scrollOffset - marginTop;
+			drawY = cssPositionedScreenY(*positionedAnchor, s_scrollOffset) - marginTop;
 			flowOuterX = positionedAnchor->finalX;
 			flowOuterWidth = std::max(1, positionedAnchor->usedWidth);
 			flowBoxHeight = std::max(1, positionedAnchor->usedHeight);
@@ -12508,14 +12713,14 @@ void Navigator::renderDocument()
 			continue;
 		}
 		const uint64_t structuralOwnerSerial =
-			cssNearestAbsoluteStructuralAncestorForBlock(s_currentDoc, block);
+			cssNearestOutOfFlowStructuralAncestorForBlock(s_currentDoc, block);
 		if (structuralOwnerSerial != 0 &&
-			cssIsFirstAbsoluteStructuralDescendant(s_currentDoc, blockIndex, structuralOwnerSerial)) {
+			cssIsFirstOutOfFlowStructuralDescendant(s_currentDoc, blockIndex, structuralOwnerSerial)) {
 			const CssPositionedRecord* owner = cssPositionedRecordForSerial(s_currentDoc, structuralOwnerSerial);
 			const WebStyle* ownerStyle = cssStyleForSerial(s_currentDoc, structuralOwnerSerial);
 			if (owner && ownerStyle && owner->paintVisible) {
 				s_cssPaintOpacityPercent = std::max(0, std::min(100, ownerStyle->effectiveOpacityPercent));
-				drawBlockBox(s_windowId, owner->finalX, owner->finalY - s_scrollOffset,
+				drawBlockBox(s_windowId, cssPositionedScreenX(*owner), cssPositionedScreenY(*owner, s_scrollOffset),
 					owner->usedWidth, owner->usedHeight, *ownerStyle);
 			}
 		}
@@ -12550,7 +12755,7 @@ void Navigator::renderDocument()
 		if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
 			outerWidth = std::max(1, positioned->usedWidth);
 			outerX = positioned->finalX;
-			drawY = positioned->finalY - s_scrollOffset - blockMarginTop;
+			drawY = cssPositionedScreenY(*positioned, s_scrollOffset) - blockMarginTop;
 		} else {
 			int ancestorDeltaX = 0;
 			int ancestorDeltaY = 0;
@@ -14205,7 +14410,7 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 	int resolvedOuterX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
 		resolvedOuterX = positioned->finalX;
-		drawY = positioned->finalY - s_scrollOffset - blockMarginTop;
+		drawY = cssPositionedScreenY(*positioned, s_scrollOffset) - blockMarginTop;
 	} else {
 		int ancestorDeltaX = 0;
 		int ancestorDeltaY = 0;
@@ -16864,7 +17069,9 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 			cssPositionRelativeAncestorDelta(s_currentDoc, flow->anchorBlockIndex, &flowDeltaX, &flowDeltaY);
 		}
 		const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
-			kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY;
+			(flowPosition
+				? cssPositionedScreenY(*flowPosition, s_scrollOffset) - cssMarginTopPx(flow->style, 4)
+				: kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY);
 	const int boxY = embedded ? drawY : drawY + cssMarginTopPx(flow->style,
 		(flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading) ? 10 : 4);
@@ -16945,8 +17152,10 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	} else if (!embedded) {
 		cssPositionRelativeAncestorDelta(s_currentDoc, flow->anchorBlockIndex, &flowDeltaX, &flowDeltaY);
 	}
-	const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
-		kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY;
+		const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
+			(flowPosition
+				? cssPositionedScreenY(*flowPosition, s_scrollOffset) - cssMarginTopPx(flow->style, 4)
+				: kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY);
 	const int boxY = embedded ? drawY : drawY + cssMarginTopPx(flow->style,
 		(flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading) ? 10 : 4);
@@ -16991,7 +17200,7 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 	int resolvedX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
 		resolvedX = positioned->finalX + cssBorderLeftPx(block.style) + cssPaddingLeftPx(block.style, 0);
-		drawY = positioned->finalY - s_scrollOffset + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
+		drawY = cssPositionedScreenY(*positioned, s_scrollOffset) + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
 	} else {
 		int ancestorDeltaX = 0;
 		int ancestorDeltaY = 0;
@@ -17030,7 +17239,7 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + paddingTop;
 	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
 		resolvedX = positioned->finalX + cssBorderLeftPx(block.style) + cssPaddingLeftPx(block.style, 0);
-		drawY = positioned->finalY - s_scrollOffset + cssBorderTopPx(block.style) + paddingTop;
+		drawY = cssPositionedScreenY(*positioned, s_scrollOffset) + cssBorderTopPx(block.style) + paddingTop;
 	} else {
 		int ancestorDeltaX = 0;
 		int ancestorDeltaY = 0;
