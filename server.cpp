@@ -1566,6 +1566,90 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ";invariance=" + yesNo(phase5bScrollInvariance) + ";hitInitial=" + yesNo(phase5bInitialHit) +
         ";hitModerate=" + yesNo(phase5bModerateHit) + ";hitMaximum=" + yesNo(phase5bMaximumHit));
 
+    bool cssPhase6aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase6a.html");
+    const std::string cssPhase6aInitialReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    // The compact Navigator layout intentionally keeps this fixture as one
+    // normal-flow document.  Move the document viewport over the bounded
+    // cases before sampling links; this does not alter element-local offsets.
+    gxos::apps::Navigator::SmokeSetScrollOffset(800);
+    const int phase6aDocumentOffsetForLinks = gxos::apps::Navigator::SmokeScrollOffset();
+    const bool phase6aHiddenHit = gxos::apps::Navigator::SmokeHitLinkById("phase6a-hidden-link");
+    const bool phase6aRevealedBefore = gxos::apps::Navigator::SmokeHitLinkById("phase6a-revealed-link");
+    const int phase6aInitialOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6a-auto-overflow");
+    const int phase6aMaxOffset = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase6a-auto-overflow");
+    const bool phase6aSetScroll = gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase6a-auto-overflow", 0, 100000);
+    const int phase6aScrolledOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6a-auto-overflow");
+    const bool phase6aRevealedAfter = gxos::apps::Navigator::SmokeHitLinkById("phase6a-revealed-link");
+    const bool phase6aClamp = phase6aSetScroll && phase6aMaxOffset >= 0 &&
+        phase6aScrolledOffset == phase6aMaxOffset;
+    const std::string cssPhase6aScrolledReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    // Keep the nested probe inside the outer viewport while both local
+    // containers contribute nonzero scroll translations.
+    gxos::apps::Navigator::SmokeSetScrollOffset(1200);
+    const bool phase6aNestedOuterSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase6a-nested-outer", 0, 20);
+    const bool phase6aNestedInnerSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase6a-nested-inner", 0, 100000);
+    const int phase6aNestedOuterOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6a-nested-outer");
+    const int phase6aNestedInnerOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6a-nested-inner");
+    const bool phase6aNestedHit = gxos::apps::Navigator::SmokeHitLinkById("phase6a-nested-link");
+    const std::string cssPhase6aHitReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6aFixedHitBefore = gxos::apps::Navigator::SmokeHitLinkById("phase6a-fixed-link");
+    const std::string phase6aFixedEvidenceBefore = phase5bEvidenceLine(cssPhase6aInitialReport, "phase6a-fixed-link");
+    const std::string phase6aFixedEvidenceAfter = phase5bEvidenceLine(cssPhase6aScrolledReport, "phase6a-fixed-link");
+    const bool phase6aFixedInvariant = !phase6aFixedEvidenceBefore.empty() &&
+        phase6aFixedEvidenceBefore == phase6aFixedEvidenceAfter && phase6aFixedHitBefore;
+    auto cssPhase6aMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase6aInitialReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase6aInitialReport.find('\n', pos);
+        return cssPhase6aInitialReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 6A overflow fixture loads",
+        cssPhase6aLoaded &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "CSS Phase 6A Overflow, Clipping and Scroll Containers") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "overflow: visible") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "overflow: hidden") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "nested revealed link") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed inside scrolled DOM ancestor"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 6A typed overflow and scroll-container diagnostics",
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_overflow_visible_boxes=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_overflow_hidden_boxes=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_overflow_auto_boxes=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_overflow_scroll_boxes=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_active_scroll_containers=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_scroll_content_extent_records=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_nested_scroll_containers=") &&
+        contains(cssPhase6aInitialReport, "css_overflow_visible_semantics=paint-overflow-no-local-scroll-container") &&
+        contains(cssPhase6aInitialReport, "css_overflow_hidden_semantics=padding-box-descendant-clip-no-user-scroll") &&
+        contains(cssPhase6aInitialReport, "css_overflow_auto_container_semantics=axis-local-auto-scroll-when-content-exceeds") &&
+        contains(cssPhase6aInitialReport, "css_overflow_scroll_container_semantics=axis-local-always-scrollable-record") &&
+        contains(cssPhase6aInitialReport, "css_scrollbar_ui=deferred"),
+        "visible=" + cssPhase6aMetric("Current Document.css_overflow_visible_boxes=") + ";hidden=" +
+        cssPhase6aMetric("Current Document.css_overflow_hidden_boxes=") + ";auto=" +
+        cssPhase6aMetric("Current Document.css_overflow_auto_boxes=") + ";scroll=" +
+        cssPhase6aMetric("Current Document.css_overflow_scroll_boxes=") + ";active=" +
+        cssPhase6aMetric("Current Document.css_active_scroll_containers=") + ";nested=" +
+        cssPhase6aMetric("Current Document.css_nested_scroll_containers="));
+    add("CSS phase 6A clipping and local hyperlink hit testing",
+        !phase6aHiddenHit && !phase6aRevealedBefore && phase6aInitialOffset == 0 &&
+        phase6aRevealedAfter && phase6aClamp,
+        std::string("hiddenHit=") + yesNo(phase6aHiddenHit) + ";before=" + yesNo(phase6aRevealedBefore) +
+        ";after=" + yesNo(phase6aRevealedAfter) + ";initialOffset=" + std::to_string(phase6aInitialOffset) +
+        ";max=" + std::to_string(phase6aMaxOffset) + ";scrolled=" + std::to_string(phase6aScrolledOffset) +
+        ";docOffset=" + std::to_string(phase6aDocumentOffsetForLinks) +
+        ";evidence=" + summarizeText(cssPhase6aHitReport.find("Current Document.css_scroll_evidence=") == std::string::npos
+            ? std::string("missing") : cssPhase6aHitReport.substr(cssPhase6aHitReport.find("Current Document.css_scroll_evidence="), 2400), 2400));
+    add("CSS phase 6A nested scrolling and fixed descendant invariance",
+        phase6aNestedOuterSet && phase6aNestedInnerSet && phase6aNestedOuterOffset >= 0 &&
+        phase6aNestedInnerOffset >= 0 && phase6aNestedHit && phase6aFixedInvariant,
+        "outer=" + std::to_string(phase6aNestedOuterOffset) + ";inner=" + std::to_string(phase6aNestedInnerOffset) +
+        ";nestedHit=" + yesNo(phase6aNestedHit) + ";fixedInvariant=" + yesNo(phase6aFixedInvariant) +
+        ";evidence=" + summarizeText(cssPhase6aHitReport.find("Current Document.css_scroll_evidence=") == std::string::npos
+            ? std::string("missing") : cssPhase6aHitReport.substr(cssPhase6aHitReport.find("Current Document.css_scroll_evidence="), 2400), 2400));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();

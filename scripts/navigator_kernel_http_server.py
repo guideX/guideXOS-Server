@@ -744,6 +744,39 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p>Long document filler 21. Long document filler 22. Long document filler 23. Long document filler 24. Long document filler 25.</p>"
                              b"</div></body></html>")
             return
+        if path == "/navigator-smoke/css-phase6a.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>CSS Phase 6A Overflow and Scroll Containers</title><style>"
+                             b"html,body{margin:0;padding:0} body{font-size:14px;line-height:1.2;background:#f8fafc;color:#1e293b}"
+                             b"h1{font-size:22px;margin:8px 0;padding:6px;background:#dbeafe;border:2px solid #2563eb}"
+                             b".case{width:300px;height:62px;margin:8px 0;padding:6px;border:3px solid #475569;background:#fff;box-sizing:border-box}"
+                             b".case p{margin:2px 0}.marker{padding:3px;border:2px solid #0f766e;background:#ccfbf1}"
+                             b".visible{overflow:visible;border-color:#16a34a}.visible-wide{width:420px;height:44px;background:#dcfce7}"
+                             b".hidden{position:relative;overflow:hidden;border-color:#dc2626}.hidden-tall{height:120px;background:#fee2e2}.hidden-tall a{position:absolute;left:8px;top:86px;padding:4px;background:#fecaca}"
+                             b".fit{overflow:auto;height:62px;border-color:#ca8a04;background:#fef9c3}.fit p{margin:0}"
+                             b".auto-overflow{position:relative;overflow:auto;height:58px;border-color:#2563eb;background:#dbeafe}.auto-overflow .tall{height:190px;padding:4px;background:#bfdbfe}.auto-overflow a{position:absolute;left:8px;top:205px;padding:4px;background:#93c5fd}"
+                             b".scroll-always{overflow:scroll;height:54px;border-color:#7c3aed;background:#ede9fe}.scroll-always .tall{height:90px;padding:4px;background:#ddd6fe}"
+                             b".horizontal{overflow-x:scroll;overflow-y:hidden;width:220px;height:48px;white-space:nowrap;border-color:#0891b2;background:#cffafe}.wide-line{display:inline-block;width:620px;padding:5px;background:#a5f3fc}"
+                             b".relative-clip{position:relative;overflow:hidden;height:58px;border-color:#be123c}.relative-shift{position:relative;left:10px;top:18px;padding:5px;background:#fbcfe8}.relative-clip a{display:block;margin-top:42px;background:#fda4af;padding:4px}"
+                             b".absolute-clip{position:relative;overflow:hidden;height:58px;border-color:#c2410c}.absolute-high{position:absolute;left:230px;top:38px;width:150px;height:50px;padding:4px;background:#fed7aa;border:3px solid #ea580c;z-index:90}"
+                             b".flex-host{display:flex;width:430px;height:94px;gap:8px;padding:6px;border:3px solid #0369a1;background:#e0f2fe;box-sizing:border-box}.flex-item-scroll{flex:1 1 0;min-width:0;height:70px;overflow:auto;padding:4px;border:2px solid #0284c7;background:#bae6fd}.flex-item-scroll .tall{height:140px;background:#7dd3fc}.flex-scroll{overflow:auto;width:310px;height:76px;border-color:#0369a1}.wrapped{display:flex;flex-wrap:wrap;width:450px;height:145px;gap:4px;background:#dbeafe}.wrapped i{display:block;width:130px;height:42px;padding:4px;background:#93c5fd;border:2px solid #1d4ed8;box-sizing:border-box}"
+                             b".fixed-host{overflow:auto;height:58px;border-color:#0f766e}.fixed-inside{position:fixed;left:620px;top:210px;width:150px;height:26px;padding:4px;background:#99f6e4;border:2px solid #0f766e;z-index:30}"
+                             b".nested-outer{overflow:auto;height:86px;border-color:#9333ea;background:#f3e8ff}.nested-inner{position:relative;overflow:auto;height:58px;margin:4px;padding:4px;border:2px solid #7e22ce;background:#e9d5ff}.nested-inner .tall{height:150px;background:#d8b4fe}.nested-inner>a{position:absolute;left:8px;top:0;width:160px;height:25px;padding:4px;background:#c4b5fd}.following{height:42px;background:#dcfce7;border-color:#16a34a}"
+                             b"</style></head><body><h1 id='phase6a-title'>CSS Phase 6A Overflow, Clipping and Scroll Containers</h1>"
+                             b"<div id='phase6a-visible' class='case visible'><b>overflow: visible</b><p class='visible-wide'>Visible descendant paints beyond its box.</p></div>"
+                             b"<div id='phase6a-hidden' class='case hidden' style='position:relative'><b>overflow: hidden</b><div class='hidden-tall'>Clipped box<a id='phase6a-hidden-link' style='position:absolute;left:8px;top:86px;width:192px;height:25px;padding:4px' href='/navigator-smoke/basic.html'>hidden link must not hit</a></div></div>"
+                             b"<div id='phase6a-fit' class='case fit'><b>overflow: auto fitting</b><p>Content fits; no active range.</p></div>"
+                             b"<div id='phase6a-auto-overflow' class='case auto-overflow' style='position:relative'><b>overflow: auto overflowing</b><div class='tall'>Scrollable content<a id='phase6a-revealed-link' style='position:absolute;left:8px;top:205px;width:216px;height:25px;padding:4px' href='/navigator-smoke/basic.html'>revealed after local scroll</a></div></div>"
+                             b"<div id='phase6a-scroll' class='case scroll-always'><b>overflow: scroll</b><div class='tall'>Always-recorded scroll container.</div></div>"
+                             b"<div id='phase6a-horizontal' class='case horizontal'><b>overflow-x scroll</b><span class='wide-line'>Horizontal content extends beyond the local viewport.</span></div>"
+                             b"<div id='phase6a-relative' class='case relative-clip'><b>relative descendant</b><span class='relative-shift'>relative visual offset</span><a id='phase6a-relative-link' href='/navigator-smoke/basic.html'>partially clipped relative link</a></div>"
+                             b"<div id='phase6a-absolute' class='case absolute-clip'><b>absolute high-z child is still clipped</b><span class='absolute-high'>outside portion stays clipped</span></div>"
+                             b"<div id='phase6a-flex-host' class='flex-host'><div id='phase6a-flex-item' class='flex-item-scroll'><b>flex item overflow</b><div class='tall'>flex item internal overflow</div></div><div id='phase6a-flex-scroll' class='flex-scroll'><div class='wrapped'><i>wrap A</i><i>wrap B</i><i>wrap C</i><i>wrap D</i><i>wrap E</i><i>wrap F</i></div></div></div>"
+                             b"<div id='phase6a-fixed-host' class='case fixed-host'><b>local scroller owns content</b><div class='tall'>fixed descendant remains viewport-relative</div><a id='phase6a-fixed-link' class='fixed-inside' href='/navigator-smoke/basic.html'>fixed inside scrolled DOM ancestor</a></div>"
+                             b"<div id='phase6a-nested-outer' class='case nested-outer'><b>outer scroll container</b><div id='phase6a-nested-inner' class='nested-inner' style='position:relative'><b>inner scroll container</b><div class='tall'>nested content</div><a id='phase6a-nested-link' style='position:absolute;left:8px;top:200px;width:160px;height:25px;padding:4px;background:#c4b5fd' href='/navigator-smoke/basic.html'>nested revealed link</a></div></div>"
+                             b"<div id='phase6a-following' class='case following'>Following normal-flow content proves sibling placement uses the container box.</div>"
+                             b"<div style='height:300px'></div></body></html>")
+            return
         if path == "/navigator-smoke/css-phase3h.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><title>CSS Phase 3H Traditional Positioning Completion</title><style>"

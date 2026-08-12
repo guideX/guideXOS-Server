@@ -859,6 +859,58 @@ namespace {
 
 	static CssPositionLayoutSnapshot s_cssPositionLayoutSnapshot;
 
+	// Phase 6A keeps element-local scrolling as a layout-owned snapshot keyed by
+	// stable structural serials.  The flat block stream remains authoritative
+	// for layout; these records only add the viewport/content extent seam used by
+	// final paint and hit testing.
+	constexpr size_t kCssScrollContainerCap = 128;
+	constexpr int kCssScrollAncestryCap = 16;
+	constexpr int kCssScrollGeometryCap = 8192;
+
+	struct CssScrollContainerRecord {
+		uint64_t serial = 0;
+		uint64_t parentSerial = 0;
+		int representativeBlockIndex = -1;
+		int depth = 0;
+		CssPaintRect borderBox;
+		CssPaintRect paddingBox;
+		int contentWidth = 0;
+		int contentHeight = 0;
+		int maxScrollX = 0;
+		int maxScrollY = 0;
+		int scrollX = 0;
+		int scrollY = 0;
+		OverflowMode overflowX = OverflowMode::Visible;
+		OverflowMode overflowY = OverflowMode::Visible;
+		bool activeX = false;
+		bool activeY = false;
+		bool nested = false;
+		bool clamped = false;
+		bool complete = true;
+	};
+
+	struct CssScrollLayoutSnapshot {
+		bool valid = false;
+		bool building = false;
+		std::string url;
+		size_t blockCount = 0;
+		uint64_t fingerprint = 0;
+		uint64_t generation = 0;
+		int activeScrollContainers = 0;
+		int clippedDescendants = 0;
+		int localScrollOperations = 0;
+		int localScrollWheelOperations = 0;
+		int nestedScrollContainers = 0;
+		int scrollClamps = 0;
+		int contentExtentRecords = 0;
+		int localScrollHitTestEvidence = 0;
+		std::string evidence;
+		std::vector<CssScrollContainerRecord> records;
+	};
+
+	static CssScrollLayoutSnapshot s_cssScrollLayoutSnapshot;
+	static std::unordered_map<uint64_t, std::pair<int, int>> s_cssScrollState;
+
 	constexpr int kCssClipStackDepth = 16;
 	static std::array<CssPaintRect, kCssClipStackDepth> s_cssClipStack{};
 	static int s_cssClipDepth = 0;
@@ -1781,8 +1833,21 @@ namespace {
 	static void ensureCssPositionLayout(const WebDocument& doc);
 	static const CssPositionedRecord* cssPositionedRecordForBlock(const WebDocument& doc, int blockIndex);
 	static const CssPositionedRecord* cssPositionedRecordForSerial(const WebDocument& doc, uint64_t serial);
+	static void ensureCssScrollLayout(const WebDocument& doc);
+	static const CssScrollContainerRecord* cssScrollContainerForSerial(const WebDocument& doc, uint64_t serial);
+	static int cssLocalScrollOffsetForSerial(const WebDocument& doc, uint64_t serial, bool horizontal);
+	static int cssLocalScrollOffsetForBlock(const WebDocument& doc, int blockIndex, bool horizontal);
+	static int cssOwnScrollOffsetForBlock(const WebDocument& doc, int blockIndex, bool horizontal);
+	static int cssLocalScrollOffsetForPositioned(const WebDocument& doc,
+		const CssPositionedRecord& record, bool horizontal);
+	static int cssPositionedScreenXForDocument(const WebDocument& doc,
+		const CssPositionedRecord& record);
+	static int cssPositionedScreenYForDocument(const WebDocument& doc,
+		const CssPositionedRecord& record, int scrollOffset);
 	static CssPaintRect cssPositionedClipForBlock(const WebDocument& doc, int blockIndex,
 		int outerX, int outerY, int outerW, int outerH, int scrollOffset);
+	static CssPaintRect cssPositionedClipForScreenBlock(const WebDocument& doc, int blockIndex,
+		int screenX, int screenY, int outerW, int outerH, int scrollOffset);
 	static bool cssInlineContainingBlockForSerial(const WebDocument& doc, uint64_t serial,
 		CssPositionBox& out);
 	static int blockTextX(const DocBlock& block, int outerX, int innerWidth, int lineWidth);
@@ -2261,11 +2326,16 @@ namespace {
 	static bool cssBlockHasOverflowAncestor(const WebDocument& doc, const DocBlock& block);
 	static std::string cssNavigatorLengthEvidence(const CssLengthValue& value);
 	static void ensureCssMarginLayout(const WebDocument& doc);
+	static const WebStyle* computedStyleForSerial(const WebDocument& doc, uint64_t serial);
 
 	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc)
 	{
 		ensureCssMarginLayout(doc);
 		ensureCssFlexLayout(doc);
+		ensureCssFloatLayout(doc);
+		ensureInlineLayout(doc);
+		ensureCssPositionLayout(doc);
+		ensureCssScrollLayout(doc);
 		metadata.documentBlockCount = static_cast<int>(doc.blocks.size());
 		metadata.imageBlockCount = 0;
 		metadata.loadedImageCount = 0;
@@ -2595,9 +2665,20 @@ namespace {
 		metadata.cssMinHeightConstraints = 0;
 		metadata.cssMaxHeightConstraints = 0;
 		metadata.cssConstraintConflicts = 0;
+		metadata.cssOverflowVisibleBoxes = 0;
 		metadata.cssOverflowHiddenBoxes = 0;
 		metadata.cssOverflowAutoBoxes = 0;
+		metadata.cssOverflowScrollBoxes = 0;
 		metadata.cssOverflowScrollDeferred = 0;
+		metadata.cssActiveScrollContainers = s_cssScrollLayoutSnapshot.activeScrollContainers;
+		metadata.cssClippedDescendants = s_cssScrollLayoutSnapshot.clippedDescendants;
+		metadata.cssLocalScrollOperations = s_cssScrollLayoutSnapshot.localScrollOperations;
+		metadata.cssLocalScrollWheelOperations = s_cssScrollLayoutSnapshot.localScrollWheelOperations;
+		metadata.cssNestedScrollContainers = s_cssScrollLayoutSnapshot.nestedScrollContainers;
+		metadata.cssScrollClamps = s_cssScrollLayoutSnapshot.scrollClamps;
+		metadata.cssScrollContentExtentRecords = s_cssScrollLayoutSnapshot.contentExtentRecords;
+		metadata.cssLocalScrollHitTestEvidence = s_cssScrollLayoutSnapshot.localScrollHitTestEvidence;
+		metadata.cssScrollEvidence = s_cssScrollLayoutSnapshot.evidence;
 		metadata.cssClipIntersections = s_cssClipIntersections;
 		metadata.cssClipDepthClamps = s_cssClipDepthClamps;
 		metadata.cssClippedHitTargets = s_cssClippedHitTargets;
@@ -2688,8 +2769,10 @@ namespace {
 			}
 			return false;
 		};
+		std::unordered_set<uint64_t> overflowStyleSerials;
 		for (size_t i = 0; i < doc.blocks.size(); ++i) {
 			const DocBlock& block = doc.blocks[i];
+			if (block.elementMetadata.serial != 0) overflowStyleSerials.insert(block.elementMetadata.serial);
 			if (block.style.displayNone) {
 				++metadata.cssDisplayNoneBlockCount;
 				continue;
@@ -2733,10 +2816,14 @@ namespace {
 			if (minHeightSet) ++metadata.cssMinHeightConstraints;
 			if (maxHeightSet) ++metadata.cssMaxHeightConstraints;
 			if (geometry.constraintConflict) ++metadata.cssConstraintConflicts;
+			if (block.style.overflowX == OverflowMode::Visible && block.style.overflowY == OverflowMode::Visible)
+				++metadata.cssOverflowVisibleBoxes;
 			if (block.style.overflowX == OverflowMode::Hidden || block.style.overflowY == OverflowMode::Hidden)
 				++metadata.cssOverflowHiddenBoxes;
 			if (block.style.overflowX == OverflowMode::Auto || block.style.overflowY == OverflowMode::Auto)
 				++metadata.cssOverflowAutoBoxes;
+			if (block.style.overflowX == OverflowMode::Scroll || block.style.overflowY == OverflowMode::Scroll)
+				++metadata.cssOverflowScrollBoxes;
 			if (block.style.overflowX == OverflowMode::Scroll || block.style.overflowY == OverflowMode::Scroll)
 				++metadata.cssOverflowScrollDeferred;
 			if (block.style.visibility == VisibilityMode::Hidden) ++metadata.cssVisibilityHiddenBoxes;
@@ -2959,6 +3046,25 @@ namespace {
 			}
 			if (imageSizeClamped) {
 				++metadata.cssImageSizeClamps;
+			}
+		}
+		// Structural containers such as a div wrapping text may not have their
+		// own legacy block record.  Count their typed computed overflow once so
+		// diagnostics describe the actual style-bearing nodes without duplicating
+		// records already represented by a block.
+		for (const HtmlElementRef& element : doc.structuralElements) {
+			if (element.serial == 0 || overflowStyleSerials.find(element.serial) != overflowStyleSerials.end()) continue;
+			const WebStyle* style = computedStyleForSerial(doc, element.serial);
+			if (!style) continue;
+			if (style->overflowX == OverflowMode::Visible && style->overflowY == OverflowMode::Visible)
+				++metadata.cssOverflowVisibleBoxes;
+			if (style->overflowX == OverflowMode::Hidden || style->overflowY == OverflowMode::Hidden)
+				++metadata.cssOverflowHiddenBoxes;
+			if (style->overflowX == OverflowMode::Auto || style->overflowY == OverflowMode::Auto)
+				++metadata.cssOverflowAutoBoxes;
+			if (style->overflowX == OverflowMode::Scroll || style->overflowY == OverflowMode::Scroll) {
+				++metadata.cssOverflowScrollBoxes;
+				++metadata.cssOverflowScrollDeferred;
 			}
 		}
 
@@ -3509,6 +3615,12 @@ namespace {
 			return 8192;
 		}
 		return static_cast<int>(sum);
+	}
+
+	static int cssBoundedCoordinateAdd(int value, int addition)
+	{
+		const int64_t sum = static_cast<int64_t>(value) + static_cast<int64_t>(addition);
+		return static_cast<int>(std::max<int64_t>(-8192, std::min<int64_t>(8192, sum)));
 	}
 
 	static int resolveUsedOuterDimension(const WebStyle& style,
@@ -7334,7 +7446,12 @@ namespace {
 			}
 			const CssAncestorBox box = cssAncestorBoxForBlock(doc, ancestor.serial, scrollOffset);
 			if (!box.valid) return CssPaintRect{0, 0, 0, 0};
-			clip = cssApplyOverflowClip(clip, *style, box.x, box.y, box.w, box.h);
+			const int screenX = cssBoundedCoordinateAdd(box.x,
+				cssLocalScrollOffsetForSerial(doc, ancestor.serial, true));
+			const int screenY = cssBoundedCoordinateAdd(box.y,
+				cssBoundedCoordinateAdd(-scrollOffset,
+					cssLocalScrollOffsetForSerial(doc, ancestor.serial, false)));
+			clip = cssApplyOverflowClip(clip, *style, screenX, screenY, box.w, box.h);
 			if (clip.w <= 0 || clip.h <= 0) return CssPaintRect{0, 0, 0, 0};
 		}
 		return clip;
@@ -7362,7 +7479,7 @@ namespace {
 		const DocBlock& block, int outerX, int boxY, int outerW, int outerH, int scrollOffset)
 	{
 		(void)block;
-		return cssPositionedClipForBlock(doc, blockIndex, outerX, boxY, outerW, outerH, scrollOffset);
+		return cssPositionedClipForScreenBlock(doc, blockIndex, outerX, boxY, outerW, outerH, scrollOffset);
 	}
 
 	static CssPaintRect cssClipHitTarget(const CssPaintRect& target, const CssPaintRect& clip)
@@ -8530,7 +8647,8 @@ namespace {
 			if (block.id.rfind("phase3g-", 0) != 0 && block.id.rfind("css3g-", 0) != 0 &&
 				block.id.rfind("phase3h-", 0) != 0 && block.id.rfind("css3h-", 0) != 0 &&
 				block.id.rfind("phase5a-", 0) != 0 && block.id.rfind("css5a-", 0) != 0 &&
-				block.id.rfind("phase5b-", 0) != 0 && block.id.rfind("css5b-", 0) != 0)
+				block.id.rfind("phase5b-", 0) != 0 && block.id.rfind("css5b-", 0) != 0 &&
+				block.id.rfind("phase6a-", 0) != 0 && block.id.rfind("css6a-", 0) != 0)
 				continue;
 			std::ostringstream line;
 			line << "id=" << block.id << ",logical-serial=" << record.logicalSerial
@@ -8617,19 +8735,508 @@ namespace {
 			if (const CssPositionedRecord* positioned = cssPositionedRecordForSerial(doc, ancestor.serial)) {
 				owner = CssPaintRect{positioned->finalX, positioned->finalY,
 					positioned->usedWidth, positioned->usedHeight};
-				owner.y = cssPositionedScreenY(*positioned, scrollOffset);
+				owner.x = cssPositionedScreenXForDocument(doc, *positioned);
+				owner.y = cssPositionedScreenYForDocument(doc, *positioned, scrollOffset);
 			} else {
 				const CssAncestorBox box = cssAncestorBoxForBlock(doc, ancestor.serial, scrollOffset);
 				if (!box.valid) return CssPaintRect{0, 0, 0, 0};
 				owner = CssPaintRect{box.x, box.y, box.w, box.h};
+				owner.x = cssBoundedCoordinateAdd(owner.x,
+					-cssLocalScrollOffsetForSerial(doc, ancestor.serial, true));
+				owner.y = cssBoundedCoordinateAdd(owner.y,
+					-cssLocalScrollOffsetForSerial(doc, ancestor.serial, false));
 			}
 			clip = cssApplyOverflowClip(clip, *style, owner.x, owner.y, owner.w, owner.h);
 			if (clip.w <= 0 || clip.h <= 0) return clip;
 		}
 		const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, blockIndex);
-		const int screenY = positioned ? cssPositionedScreenY(*positioned, scrollOffset) :
+		const int screenY = positioned ? cssPositionedScreenYForDocument(doc, *positioned, scrollOffset) :
 			cssBoundedGeometryAdd(outerY, -scrollOffset);
 		return cssApplyOverflowClip(clip, block.style, outerX, screenY, outerW, outerH);
+	}
+
+	static const CssScrollContainerRecord* cssScrollContainerForSerial(
+		const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0 || !s_cssScrollLayoutSnapshot.valid ||
+			s_cssScrollLayoutSnapshot.url != doc.url ||
+			s_cssScrollLayoutSnapshot.blockCount != doc.blocks.size()) return nullptr;
+		for (const CssScrollContainerRecord& record : s_cssScrollLayoutSnapshot.records)
+			if (record.serial == serial) return &record;
+		return nullptr;
+	}
+
+	static CssScrollContainerRecord* cssMutableScrollContainerForSerial(
+		const WebDocument& doc, uint64_t serial)
+	{
+		if (serial == 0 || !s_cssScrollLayoutSnapshot.valid ||
+			s_cssScrollLayoutSnapshot.url != doc.url ||
+			s_cssScrollLayoutSnapshot.blockCount != doc.blocks.size()) return nullptr;
+		for (CssScrollContainerRecord& record : s_cssScrollLayoutSnapshot.records)
+			if (record.serial == serial) return &record;
+		return nullptr;
+	}
+
+	static int cssLocalScrollOffsetForSerial(const WebDocument& doc, uint64_t serial,
+		bool horizontal)
+	{
+		int total = 0;
+		uint64_t current = serial;
+		for (int depth = 0; current != 0 && depth < kCssScrollAncestryCap; ++depth) {
+			const HtmlElementRef* element = cssStructuralElementForSerial(doc, current);
+			if (!element) break;
+			current = element->parentSerial;
+			const CssScrollContainerRecord* record = cssScrollContainerForSerial(doc, current);
+			if (!record) continue;
+			const int value = horizontal ? record->scrollX : record->scrollY;
+			total = cssBoundedCoordinateAdd(total, -value);
+		}
+		return total;
+	}
+
+	static int cssLocalScrollOffsetForBlock(const WebDocument& doc, int blockIndex,
+		bool horizontal)
+	{
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return 0;
+		const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, blockIndex);
+		if (positioned && positioned->coordinateSpace == CssPositionCoordinateSpace::Viewport)
+			return 0;
+		const uint64_t serial = doc.blocks[static_cast<size_t>(blockIndex)].elementMetadata.serial;
+		if (serial != 0) return cssLocalScrollOffsetForSerial(doc, serial, horizontal);
+		int total = 0;
+		int depth = 0;
+		for (const HtmlElementRef& ancestor : doc.blocks[static_cast<size_t>(blockIndex)].ancestors) {
+			if (++depth > kCssScrollAncestryCap) break;
+			const CssScrollContainerRecord* record = cssScrollContainerForSerial(doc, ancestor.serial);
+			if (!record) continue;
+			total = cssBoundedCoordinateAdd(total, -(horizontal ? record->scrollX : record->scrollY));
+		}
+		return total;
+	}
+
+	static int cssOwnScrollOffsetForBlock(const WebDocument& doc, int blockIndex,
+		bool horizontal)
+	{
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return 0;
+		const CssScrollContainerRecord* record = cssScrollContainerForSerial(doc,
+			doc.blocks[static_cast<size_t>(blockIndex)].elementMetadata.serial);
+		if (!record) return 0;
+		return -(horizontal ? record->scrollX : record->scrollY);
+	}
+
+	static int cssLocalScrollOffsetForPositioned(const WebDocument& doc,
+		const CssPositionedRecord& record, bool horizontal)
+	{
+		if (record.coordinateSpace == CssPositionCoordinateSpace::Viewport) return 0;
+		return cssLocalScrollOffsetForSerial(doc, record.logicalSerial, horizontal);
+	}
+
+	static bool cssBlockHasScrollAncestor(const WebDocument& doc, int blockIndex)
+	{
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return false;
+		const uint64_t serial = doc.blocks[static_cast<size_t>(blockIndex)].elementMetadata.serial;
+		if (serial != 0) {
+			uint64_t current = serial;
+			for (int depth = 0; current != 0 && depth < kCssScrollAncestryCap; ++depth) {
+				const HtmlElementRef* element = cssStructuralElementForSerial(doc, current);
+				if (!element) break;
+				current = element->parentSerial;
+				if (cssScrollContainerForSerial(doc, current)) return true;
+			}
+			return false;
+		}
+		int depth = 0;
+		for (const HtmlElementRef& ancestor : doc.blocks[static_cast<size_t>(blockIndex)].ancestors) {
+			if (++depth > kCssScrollAncestryCap) break;
+			if (cssScrollContainerForSerial(doc, ancestor.serial)) return true;
+		}
+		return false;
+	}
+
+	static CssPaintRect cssScrollContainerScreenViewport(const WebDocument& doc,
+		const CssScrollContainerRecord& record, int scrollOffset)
+	{
+		return CssPaintRect{
+			cssBoundedCoordinateAdd(record.paddingBox.x,
+				cssLocalScrollOffsetForSerial(doc, record.serial, true)),
+			cssBoundedCoordinateAdd(record.paddingBox.y,
+				cssBoundedCoordinateAdd(-scrollOffset,
+					cssLocalScrollOffsetForSerial(doc, record.serial, false))),
+			record.paddingBox.w, record.paddingBox.h};
+	}
+
+	static CssPaintRect cssScrollContainerVisibleViewport(const WebDocument& doc,
+		const CssScrollContainerRecord& record, int scrollOffset)
+	{
+		CssPaintRect clip = cssScrollContainerScreenViewport(doc, record, scrollOffset);
+		uint64_t parent = record.parentSerial;
+		for (int depth = 0; parent != 0 && depth < kCssScrollAncestryCap; ++depth) {
+			const CssScrollContainerRecord* parentRecord = cssScrollContainerForSerial(doc, parent);
+			if (parentRecord) clip = cssPaintRectIntersect(clip,
+				cssScrollContainerScreenViewport(doc, *parentRecord, scrollOffset));
+			const HtmlElementRef* parentElement = cssStructuralElementForSerial(doc, parent);
+			if (!parentElement || parentElement->parentSerial == parent) break;
+			parent = parentElement->parentSerial;
+			if (clip.w <= 0 || clip.h <= 0) break;
+		}
+		return clip;
+	}
+
+	static int cssPositionedScreenXForDocument(const WebDocument& doc,
+		const CssPositionedRecord& record)
+	{
+		return cssBoundedCoordinateAdd(record.finalX,
+			cssLocalScrollOffsetForPositioned(doc, record, true));
+	}
+
+	static int cssPositionedScreenYForDocument(const WebDocument& doc,
+		const CssPositionedRecord& record, int scrollOffset)
+	{
+		if (record.coordinateSpace == CssPositionCoordinateSpace::Viewport) return record.finalY;
+		return cssBoundedCoordinateAdd(record.finalY,
+			cssBoundedCoordinateAdd(-scrollOffset,
+				cssLocalScrollOffsetForPositioned(doc, record, false)));
+	}
+
+	static CssPaintRect cssPositionedClipForScreenBlock(const WebDocument& doc, int blockIndex,
+		int screenX, int screenY, int outerW, int outerH, int scrollOffset)
+	{
+		CssPaintRect clip = cssViewportClipRect();
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return clip;
+		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+		const CssPositionedRecord* selfPosition = cssPositionedRecordForBlock(doc, blockIndex);
+		const bool viewportLayer = selfPosition &&
+			selfPosition->coordinateSpace == CssPositionCoordinateSpace::Viewport;
+		std::array<uint64_t, kCssPositionedAncestryCap> serialChain{};
+		size_t chainCount = 0;
+		uint64_t currentSerial = block.elementMetadata.serial;
+		while (currentSerial != 0 && chainCount < serialChain.size()) {
+			serialChain[chainCount++] = currentSerial;
+			const HtmlElementRef* element = cssStructuralElementForSerial(doc, currentSerial);
+			if (!element || element->parentSerial == currentSerial) break;
+			currentSerial = element->parentSerial;
+		}
+		int depth = 0;
+		for (size_t chainIndex = chainCount; chainIndex > 0; --chainIndex) {
+			const HtmlElementRef* ancestor = cssStructuralElementForSerial(doc, serialChain[chainIndex - 1]);
+			if (!ancestor) continue;
+			const WebStyle* style = cssStyleForSerial(doc, ancestor->serial);
+			if (!style || (style->overflowX == OverflowMode::Visible && style->overflowY == OverflowMode::Visible)) continue;
+			if (viewportLayer && cssPositionedRecordForSerial(doc, ancestor->serial) == nullptr) continue;
+			if (++depth > static_cast<int>(kCssPositionedAncestryCap)) return CssPaintRect{0, 0, 0, 0};
+			CssPaintRect owner;
+			if (const CssScrollContainerRecord* scroll =
+				cssScrollContainerForSerial(doc, ancestor->serial)) {
+				// The scroll snapshot is the authoritative box for an element-local
+				// clip.  Do not reconstruct it from a descendant's legacy block
+				// geometry or let a relative-position record replace it; compact
+				// inline/block streams may have no representative block at the
+				// structural element's own position.
+				owner = CssPaintRect{
+					cssBoundedCoordinateAdd(scroll->borderBox.x,
+						cssLocalScrollOffsetForSerial(doc, scroll->serial, true)),
+					cssBoundedCoordinateAdd(scroll->borderBox.y,
+						cssBoundedCoordinateAdd(-scrollOffset,
+						cssLocalScrollOffsetForSerial(doc, scroll->serial, false))),
+					scroll->borderBox.w, scroll->borderBox.h};
+			} else if (const CssPositionedRecord* positioned = cssPositionedRecordForSerial(doc, ancestor->serial)) {
+				owner = CssPaintRect{cssPositionedScreenXForDocument(doc, *positioned),
+					cssPositionedScreenYForDocument(doc, *positioned, scrollOffset),
+					positioned->usedWidth, positioned->usedHeight};
+			} else {
+				const CssAncestorBox box = cssAncestorBoxForBlock(doc, ancestor->serial, 0);
+				if (!box.valid) return CssPaintRect{0, 0, 0, 0};
+				owner = CssPaintRect{
+					cssBoundedCoordinateAdd(box.x, cssLocalScrollOffsetForSerial(doc, ancestor->serial, true)),
+					cssBoundedCoordinateAdd(box.y, cssBoundedCoordinateAdd(-scrollOffset,
+						cssLocalScrollOffsetForSerial(doc, ancestor->serial, false))),
+					box.w, box.h};
+			}
+			clip = cssApplyOverflowClip(clip, *style, owner.x, owner.y, owner.w, owner.h);
+			if (clip.w <= 0 || clip.h <= 0) return clip;
+		}
+		return cssApplyOverflowClip(clip, block.style, screenX, screenY, outerW, outerH);
+	}
+
+	static bool cssScrollSerialDescendantOf(const WebDocument& doc, uint64_t serial,
+		uint64_t ancestor)
+	{
+		if (serial == 0 || ancestor == 0) return false;
+		uint64_t current = serial;
+		for (int depth = 0; current != 0 && depth < kCssScrollAncestryCap; ++depth) {
+			if (current == ancestor) return true;
+			const HtmlElementRef* element = cssStructuralElementForSerial(doc, current);
+			if (!element || element->parentSerial == current) break;
+			current = element->parentSerial;
+		}
+		return false;
+	}
+
+	static bool cssDocumentBorderBoxForScroll(const WebDocument& doc, int blockIndex,
+		CssPaintRect& out)
+	{
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return false;
+		const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, blockIndex);
+		if (positioned) {
+			if (positioned->coordinateSpace == CssPositionCoordinateSpace::Viewport) return false;
+			out = CssPaintRect{positioned->finalX, positioned->finalY,
+				positioned->usedWidth, positioned->usedHeight};
+			return out.w > 0 && out.h > 0;
+		}
+		const CssBlockGeometry geometry = cssGeometryForBlock(doc, blockIndex);
+		if (geometry.outerWidth <= 0 || geometry.outerHeight <= 0) return false;
+		out = CssPaintRect{geometry.outerX, geometry.outerY,
+			geometry.outerWidth, geometry.outerHeight};
+		int relativeX = 0;
+		int relativeY = 0;
+		cssPositionRelativeAncestorDelta(doc, blockIndex, &relativeX, &relativeY);
+		out.x = cssBoundedGeometryAdd(out.x, relativeX);
+		out.y = cssBoundedGeometryAdd(out.y, relativeY);
+		return true;
+	}
+
+	static uint64_t cssScrollLayoutFingerprint(const WebDocument& doc)
+	{
+		uint64_t hash = cssMarginLayoutFingerprint(doc);
+		auto mix = [&](uint64_t value) {
+			hash ^= value;
+			hash *= 1099511628211ull;
+		};
+		for (const DocBlock& block : doc.blocks) {
+			mix(block.elementMetadata.serial);
+			mix(static_cast<uint64_t>(block.text.size()));
+			mix(static_cast<uint64_t>(block.inputValue.size()));
+		}
+		for (const WebInlineItem& item : doc.inlineItems) mix(static_cast<uint64_t>(item.text.size()));
+		return hash;
+	}
+
+	static void buildCssScrollLayout(const WebDocument& doc, CssScrollLayoutSnapshot& snapshot)
+	{
+		snapshot = CssScrollLayoutSnapshot{};
+		snapshot.url = doc.url;
+		snapshot.blockCount = doc.blocks.size();
+		snapshot.fingerprint = cssScrollLayoutFingerprint(doc);
+		snapshot.generation = doc.formRuntimeState.documentGeneration;
+		snapshot.evidence = "records=";
+		if (snapshot.building) return;
+		snapshot.building = true;
+		snapshot.records.reserve(std::min<size_t>(doc.structuralElements.size(), kCssScrollContainerCap));
+
+		for (const HtmlElementRef& element : doc.structuralElements) {
+			if (snapshot.records.size() >= kCssScrollContainerCap) break;
+			if (element.serial == 0 || (doc.hasBodyElement && element.serial == doc.bodyElement.serial)) continue;
+			const WebStyle* style = cssStyleForSerial(doc, element.serial);
+			if (!style || (style->overflowX == OverflowMode::Visible &&
+				style->overflowY == OverflowMode::Visible)) continue;
+			int first = -1;
+			int last = -1;
+			cssDescendantBlockRange(doc, element.serial, first, last);
+			CssAncestorBox ancestorBox;
+			if (first >= 0) ancestorBox = cssAncestorBoxForBlock(doc, element.serial, 0);
+			if (!ancestorBox.valid) {
+				// Empty structural boxes have no block record in the legacy stream.
+				// Keep a bounded record when an explicit size still gives us a safe
+				// viewport; otherwise the empty element has no paintable geometry.
+				const int parentBasis = std::max(1, cssContainingContentWidthForSerial(doc, element.parentSerial));
+				const int horizontalEdges = cssHorizontalBoxEdges(*style);
+				const int verticalEdges = cssVerticalBoxEdges(*style);
+				const int width = resolveUsedOuterDimension(*style,
+					style->widthValue, style->width, style->widthPercent,
+					style->minWidthValue, style->minWidth, style->minWidthPercent,
+					style->maxWidthValue, style->maxWidth, style->maxWidthPercent,
+					style->maxWidthNone, parentBasis, parentBasis, horizontalEdges, false);
+				const int height = cssDefiniteContentHeightForStyle(*style, -1);
+				if (width <= 0 || height <= 0) continue;
+				ancestorBox.valid = true;
+				ancestorBox.x = kContentX + blockBodyMarginLeft(doc) + cssMarginLeftPx(*style, 0);
+				ancestorBox.y = kContentY + kHeadingY;
+				ancestorBox.w = std::min(kCssScrollGeometryCap, width);
+				ancestorBox.h = std::min(kCssScrollGeometryCap, height + verticalEdges);
+			}
+
+			CssScrollContainerRecord record;
+			record.serial = element.serial;
+			record.parentSerial = element.parentSerial;
+			record.representativeBlockIndex = first;
+			record.overflowX = style->overflowX;
+			record.overflowY = style->overflowY;
+			record.borderBox = CssPaintRect{ancestorBox.x, ancestorBox.y, ancestorBox.w, ancestorBox.h};
+			record.paddingBox = CssPaintRect{
+				cssBoundedGeometryAdd(ancestorBox.x, cssBorderLeftPx(*style)),
+				cssBoundedGeometryAdd(ancestorBox.y, cssBorderTopPx(*style)),
+				std::max(0, ancestorBox.w - cssBorderLeftPx(*style) - cssBorderRightPx(*style)),
+				std::max(0, ancestorBox.h - cssBorderTopPx(*style) - cssBorderBottomPx(*style))};
+			record.contentWidth = record.paddingBox.w;
+			record.contentHeight = record.paddingBox.h;
+			uint64_t parent = element.parentSerial;
+			for (int depth = 0; parent != 0 && depth < kCssScrollAncestryCap; ++depth) {
+				const WebStyle* parentStyle = cssStyleForSerial(doc, parent);
+				if (parentStyle && (parentStyle->overflowX != OverflowMode::Visible ||
+					parentStyle->overflowY != OverflowMode::Visible)) {
+					record.nested = true;
+					++snapshot.nestedScrollContainers;
+					break;
+				}
+				const HtmlElementRef* parentElement = cssStructuralElementForSerial(doc, parent);
+				if (!parentElement || parentElement->parentSerial == parent) break;
+				parent = parentElement->parentSerial;
+			}
+
+			auto addExtent = [&](const CssPaintRect& rect) {
+				const int64_t right = static_cast<int64_t>(rect.x) + std::max(0, rect.w) - record.paddingBox.x;
+				const int64_t bottom = static_cast<int64_t>(rect.y) + std::max(0, rect.h) - record.paddingBox.y;
+				record.contentWidth = std::max(record.contentWidth,
+					static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(kCssScrollGeometryCap, right))));
+				record.contentHeight = std::max(record.contentHeight,
+					static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(kCssScrollGeometryCap, bottom))));
+			};
+			for (int index = 0; index < static_cast<int>(doc.blocks.size()); ++index) {
+				const DocBlock& block = doc.blocks[static_cast<size_t>(index)];
+				if (block.style.displayNone || !cssBlockContainsSerial(block, element.serial)) continue;
+				CssPaintRect rect;
+				if (cssDocumentBorderBoxForScroll(doc, index, rect)) addExtent(rect);
+				if (block.elementMetadata.serial == element.serial && first == index) {
+					const int intrinsic = cssBoundedGeometryAdd(
+						cssPositionAutoContentHeight(block, doc,
+							std::max(1, record.paddingBox.w)), cssVerticalBoxEdges(block.style));
+					record.contentHeight = std::max(record.contentHeight,
+						std::min(kCssScrollGeometryCap, intrinsic));
+				}
+			}
+			// Compact parsing intentionally does not emit a legacy block for every
+			// structural div/span.  Explicit descendant dimensions still contribute
+			// to the local scroll extent; use the bounded parent-relative estimate
+			// when no block geometry exists for that node.
+			for (const HtmlElementRef& descendant : doc.structuralElements) {
+				if (descendant.serial == element.serial ||
+					!cssScrollSerialDescendantOf(doc, descendant.serial, element.serial)) continue;
+				const WebStyle* descendantStyle = cssStyleForSerial(doc, descendant.serial);
+				if (!descendantStyle || descendantStyle->displayNone) continue;
+				const int height = cssDefiniteContentHeightForStyle(*descendantStyle, -1);
+				if (height >= 0) {
+					const int verticalEdges = cssVerticalBoxEdges(*descendantStyle);
+					const int marginTop = cssMarginTopPx(*descendantStyle, 0);
+					const int marginBottom = cssMarginBottomPx(*descendantStyle, 0);
+					const int64_t candidate = static_cast<int64_t>(record.paddingBox.h) + height +
+						verticalEdges + marginTop + marginBottom;
+					record.contentHeight = std::max(record.contentHeight,
+						static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(kCssScrollGeometryCap, candidate))));
+				}
+				const int parentBasis = std::max(1, record.paddingBox.w);
+				const int width = resolveUsedOuterDimension(*descendantStyle,
+					descendantStyle->widthValue, descendantStyle->width, descendantStyle->widthPercent,
+					descendantStyle->minWidthValue, descendantStyle->minWidth, descendantStyle->minWidthPercent,
+					descendantStyle->maxWidthValue, descendantStyle->maxWidth, descendantStyle->maxWidthPercent,
+					descendantStyle->maxWidthNone, parentBasis, parentBasis,
+					cssHorizontalBoxEdges(*descendantStyle), false);
+				if (width > 0)
+					record.contentWidth = std::max(record.contentWidth,
+						std::min(kCssScrollGeometryCap, record.paddingBox.w + width));
+			}
+			for (const CssPositionedRecord& positioned : s_cssPositionLayoutSnapshot.records) {
+				if (positioned.logicalSerial == 0 || positioned.coordinateSpace == CssPositionCoordinateSpace::Viewport ||
+					!cssScrollSerialDescendantOf(doc, positioned.logicalSerial, element.serial)) continue;
+				addExtent(CssPaintRect{positioned.finalX, positioned.finalY,
+					positioned.usedWidth, positioned.usedHeight});
+			}
+			for (const InlineFlowLayout& flow : s_inlineLayoutSnapshot.flows) {
+				if (flow.anchorBlockIndex < 0 || flow.anchorBlockIndex >= static_cast<int>(doc.blocks.size()) ||
+					!cssBlockContainsSerial(doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)], element.serial)) continue;
+				const int flowY = cssBoundedGeometryAdd(kContentY + cssBlockLayoutY(doc, flow.anchorBlockIndex),
+					flow.totalHeight);
+				addExtent(CssPaintRect{flow.outerX, flowY, flow.outerWidth, flow.totalHeight});
+			}
+
+			record.contentWidth = std::max(record.paddingBox.w,
+				std::min(kCssScrollGeometryCap, record.contentWidth));
+			record.contentHeight = std::max(record.paddingBox.h,
+				std::min(kCssScrollGeometryCap, record.contentHeight));
+			record.maxScrollX = (record.overflowX == OverflowMode::Visible || record.overflowX == OverflowMode::Hidden)
+				? 0 : std::max(0, record.contentWidth - record.paddingBox.w);
+			record.maxScrollY = (record.overflowY == OverflowMode::Visible || record.overflowY == OverflowMode::Hidden)
+				? 0 : std::max(0, record.contentHeight - record.paddingBox.h);
+			record.activeX = record.overflowX == OverflowMode::Scroll ||
+				(record.overflowX == OverflowMode::Auto && record.maxScrollX > 0);
+			record.activeY = record.overflowY == OverflowMode::Scroll ||
+				(record.overflowY == OverflowMode::Auto && record.maxScrollY > 0);
+			record.depth = 1;
+			parent = element.parentSerial;
+			for (int depth = 0; parent != 0 && depth < kCssScrollAncestryCap; ++depth) {
+				++record.depth;
+				const HtmlElementRef* parentElement = cssStructuralElementForSerial(doc, parent);
+				if (!parentElement || parentElement->parentSerial == parent) break;
+				parent = parentElement->parentSerial;
+			}
+			auto state = s_cssScrollState.find(record.serial);
+			if (state != s_cssScrollState.end()) {
+				record.scrollX = state->second.first;
+				record.scrollY = state->second.second;
+			}
+			const int requestedX = record.scrollX;
+			const int requestedY = record.scrollY;
+			record.scrollX = std::max(0, std::min(record.scrollX, record.maxScrollX));
+			record.scrollY = std::max(0, std::min(record.scrollY, record.maxScrollY));
+			if (record.scrollX != requestedX || record.scrollY != requestedY) {
+				record.clamped = true;
+				++snapshot.scrollClamps;
+			}
+			s_cssScrollState[record.serial] = {record.scrollX, record.scrollY};
+			if (snapshot.evidence.size() < 8192) {
+				std::ostringstream evidence;
+				evidence << "id=" << element.id << ",serial=" << record.serial
+					<< ",box=" << record.borderBox.x << ":" << record.borderBox.y << ":"
+					<< record.borderBox.w << ":" << record.borderBox.h
+					<< ",padding=" << record.paddingBox.x << ":" << record.paddingBox.y << ":"
+					<< record.paddingBox.w << ":" << record.paddingBox.h
+					<< ",content=" << record.contentWidth << ":" << record.contentHeight
+					<< ",max=" << record.maxScrollX << ":" << record.maxScrollY
+					<< ",scroll=" << record.scrollX << ":" << record.scrollY
+					<< ",overflow=" << static_cast<int>(record.overflowX) << ":"
+					<< static_cast<int>(record.overflowY)
+					<< ",first=" << record.representativeBlockIndex << ";";
+				snapshot.evidence += evidence.str();
+			}
+			if (record.activeX || record.activeY) ++snapshot.activeScrollContainers;
+			if (record.contentWidth > record.paddingBox.w || record.contentHeight > record.paddingBox.h) {
+				++snapshot.clippedDescendants;
+			}
+			++snapshot.contentExtentRecords;
+			snapshot.records.push_back(record);
+		}
+		snapshot.building = false;
+		snapshot.valid = true;
+	}
+
+	static void ensureCssScrollLayout(const WebDocument& doc)
+	{
+		bool hasNonVisibleOverflow = false;
+		for (const HtmlElementRef& element : doc.structuralElements) {
+			const WebStyle* style = cssStyleForSerial(doc, element.serial);
+			if (style && (style->overflowX != OverflowMode::Visible ||
+				style->overflowY != OverflowMode::Visible)) {
+				hasNonVisibleOverflow = true;
+				break;
+			}
+		}
+		if (!hasNonVisibleOverflow) {
+			if (!s_cssScrollLayoutSnapshot.valid || s_cssScrollLayoutSnapshot.url != doc.url ||
+				s_cssScrollLayoutSnapshot.blockCount != doc.blocks.size() ||
+				s_cssScrollLayoutSnapshot.generation != doc.formRuntimeState.documentGeneration) {
+				s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
+				s_cssScrollLayoutSnapshot.url = doc.url;
+				s_cssScrollLayoutSnapshot.blockCount = doc.blocks.size();
+				s_cssScrollLayoutSnapshot.generation = doc.formRuntimeState.documentGeneration;
+				s_cssScrollLayoutSnapshot.valid = true;
+			}
+			return;
+		}
+		const uint64_t fingerprint = cssScrollLayoutFingerprint(doc);
+		if (s_cssScrollLayoutSnapshot.valid && s_cssScrollLayoutSnapshot.url == doc.url &&
+			s_cssScrollLayoutSnapshot.blockCount == doc.blocks.size() &&
+			s_cssScrollLayoutSnapshot.fingerprint == fingerprint &&
+			s_cssScrollLayoutSnapshot.generation == doc.formRuntimeState.documentGeneration) return;
+		buildCssScrollLayout(doc, s_cssScrollLayoutSnapshot);
 	}
 
 	static bool cssSerialWithinBounded(const WebDocument& doc, uint64_t serial, uint64_t ancestor)
@@ -8721,10 +9328,12 @@ namespace {
 				blockIndex >= static_cast<int>(doc.blocks.size())) continue;
 			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
 			if (block.style.displayNone || block.style.visibility == VisibilityMode::Hidden) continue;
-			const CssPaintRect target{cssPositionedScreenX(*record), cssPositionedScreenY(*record, scrollOffset),
+			const CssPaintRect target{cssPositionedScreenXForDocument(doc, *record), cssPositionedScreenYForDocument(doc, *record, scrollOffset),
 				record->usedWidth, record->usedHeight};
-			const CssPaintRect clip = cssPositionedClipForBlock(doc, blockIndex, record->finalX,
-				record->finalY, record->usedWidth, record->usedHeight, scrollOffset);
+			const CssPaintRect clip = cssPositionedClipForScreenBlock(doc, blockIndex,
+				cssPositionedScreenXForDocument(doc, *record),
+				cssPositionedScreenYForDocument(doc, *record, scrollOffset),
+				record->usedWidth, record->usedHeight, scrollOffset);
 			const CssPaintRect clipped = cssPaintRectIntersect(target, clip);
 			if (clipped.w > 0 && clipped.h > 0 && x >= clipped.x && x < clipped.x + clipped.w &&
 				y >= clipped.y && y < clipped.y + clipped.h) return blockIndex;
@@ -9410,9 +10019,22 @@ namespace {
 		add("css_min_height_constraints", metadata.cssMinHeightConstraints);
 		add("css_max_height_constraints", metadata.cssMaxHeightConstraints);
 		add("css_constraint_conflicts", metadata.cssConstraintConflicts);
+		add("css_overflow_visible_boxes", metadata.cssOverflowVisibleBoxes);
 		add("css_overflow_hidden_boxes", metadata.cssOverflowHiddenBoxes);
 		add("css_overflow_auto_boxes", metadata.cssOverflowAutoBoxes);
+		add("css_overflow_scroll_boxes", metadata.cssOverflowScrollBoxes);
 		add("css_overflow_scroll_deferred", metadata.cssOverflowScrollDeferred);
+		add("css_active_scroll_containers", metadata.cssActiveScrollContainers);
+		add("css_clipped_descendants", metadata.cssClippedDescendants);
+		add("css_local_scroll_operations", metadata.cssLocalScrollOperations);
+		add("css_local_scroll_wheel_operations", metadata.cssLocalScrollWheelOperations);
+		add("css_nested_scroll_containers", metadata.cssNestedScrollContainers);
+		add("css_scroll_clamps", metadata.cssScrollClamps);
+		add("css_scroll_content_extent_records", metadata.cssScrollContentExtentRecords);
+		add("css_local_scroll_hit_test_evidence", metadata.cssLocalScrollHitTestEvidence);
+		if (!metadata.cssScrollEvidence.empty()) {
+			out += "Current Document.css_scroll_evidence=" + metadata.cssScrollEvidence + "\n";
+		}
 		add("css_clip_intersections", metadata.cssClipIntersections);
 		add("css_clip_depth_clamps", metadata.cssClipDepthClamps);
 		add("css_clipped_hit_targets", metadata.cssClippedHitTargets);
@@ -9432,6 +10054,14 @@ namespace {
 		add("css_opacity_image_approximation", metadata.cssOpacityImageApproximation);
 		out += "Current Document.css_overflow_auto_semantics=bounded_clipped_noninteractive\n";
 		out += "Current Document.css_overflow_scroll_semantics=bounded_clipped_noninteractive_deferred\n";
+		out += "Current Document.css_overflow_visible_semantics=paint-overflow-no-local-scroll-container\n";
+		out += "Current Document.css_overflow_hidden_semantics=padding-box-descendant-clip-no-user-scroll\n";
+		out += "Current Document.css_overflow_auto_container_semantics=axis-local-auto-scroll-when-content-exceeds\n";
+		out += "Current Document.css_overflow_scroll_container_semantics=axis-local-always-scrollable-record\n";
+		out += "Current Document.css_scroll_coordinate_model=layout-document-minus-ancestor-local-scroll-minus-document-scroll-fixed-viewport\n";
+		out += "Current Document.css_scroll_state_lifetime=serial-keyed-state-reset-on-navigation\n";
+		out += "Current Document.css_scrollbar_ui=deferred\n";
+		out += "Current Document.css_wheel_routing=innermost-capable-container-then-ancestor-then-document\n";
 		out += "Current Document.css_visibility_hidden_layout=retained\n";
 		out += "Current Document.css_opacity_zero_hit_testing=eligible_when_visible\n";
 		if (!metadata.cssGeometryEvidence.empty()) out += "Current Document.css_geometry_evidence=" + metadata.cssGeometryEvidence;
@@ -11196,19 +11826,23 @@ namespace {
 					const DocBlock& anchor = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)];
 					const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, flow.anchorBlockIndex);
 					const int drawY = positioned
-						? cssPositionedScreenY(*positioned, scrollOffset) - cssMarginTopPx(flow.style, 4)
+						? cssPositionedScreenYForDocument(doc, *positioned, scrollOffset) - cssMarginTopPx(flow.style, 4)
 						: kContentY + cssBlockLayoutY(doc, flow.anchorBlockIndex) - scrollOffset;
 					const int marginTop = cssMarginTopPx(flow.style, anchor.type == BlockType::Heading ? 10 : 4);
-					originX = flow.contentX;
-					originY = drawY + marginTop + cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0);
+					originX = cssBoundedCoordinateAdd(flow.contentX,
+						cssLocalScrollOffsetForBlock(doc, flow.anchorBlockIndex, true));
+					originY = cssBoundedCoordinateAdd(drawY + marginTop + cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0),
+						cssLocalScrollOffsetForBlock(doc, flow.anchorBlockIndex, false));
 				} else {
 					CssPaintRect parent;
 					if (!atomicResultScreenRect(doc, snapshot, flow.atomicResultIndex, scrollOffset, parent, depth + 1)) continue;
 					originX = parent.x + flow.contentX;
 					originY = parent.y + flow.localOuterY + cssBorderTopPx(flow.style) + cssPaddingTopPx(flow.style, 0);
 				}
-				out = CssPaintRect{originX + fragment.x + fragment.boxOffsetX + fragment.positionedOffsetX,
-					originY + fragment.y + fragment.positionedOffsetY,
+				out = CssPaintRect{originX + fragment.x + fragment.boxOffsetX + fragment.positionedOffsetX +
+					cssOwnScrollOffsetForBlock(doc, flow.anchorBlockIndex, true),
+					originY + fragment.y + fragment.positionedOffsetY +
+					cssOwnScrollOffsetForBlock(doc, flow.anchorBlockIndex, false),
 					std::max(0, fragment.boxWidth), std::max(0, fragment.boxHeight)};
 				return out.w > 0 && out.h > 0;
 			}
@@ -11358,22 +11992,93 @@ bool Navigator::SmokeHitLinkById(const std::string& id)
 			break;
 		}
 	}
-	if (blockIndex < 0) return false;
+	if (blockIndex < 0) {
+		if (id == "phase6a-nested-link") {
+			ensureCssScrollLayout(s_currentDoc);
+			int sameIdCount = 0;
+			int linkCount = 0;
+			for (const DocBlock& candidate : s_currentDoc.blocks) {
+				if (candidate.id == id) ++sameIdCount;
+				if (candidate.type == BlockType::Link) ++linkCount;
+			}
+			if (s_cssScrollLayoutSnapshot.evidence.size() < 12000) {
+				s_cssScrollLayoutSnapshot.evidence += "missing-hit-id=" + id +
+					",same-id=" + std::to_string(sameIdCount) +
+					",link-blocks=" + std::to_string(linkCount) +
+					",blocks=" + std::to_string(s_currentDoc.blocks.size()) + ";";
+			}
+		}
+		return false;
+	}
 	ensureCssPositionLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc);
 	Rect rect = linkBlockRect(blockIndex);
+	if (id.rfind("phase6a-", 0) == 0 &&
+		(id == "phase6a-nested-link" || s_cssScrollLayoutSnapshot.evidence.size() < 12000)) {
+		const uint64_t blockSerial = s_currentDoc.blocks[static_cast<size_t>(blockIndex)].elementMetadata.serial;
+		const HtmlElementRef* blockElement = cssStructuralElementForSerial(s_currentDoc, blockSerial);
+		const CssBlockGeometry debugGeometry = cssGeometryForBlock(s_currentDoc, blockIndex);
+		const InlineFlowLayout* debugFlow = inlineFlowForBlock(s_currentDoc, blockIndex);
+		int debugFragmentMatches = 0;
+		std::string debugFirstFragment = "none";
+		if (debugFlow) {
+			for (const InlineFragmentLayout& fragment : debugFlow->fragments) {
+				if (fragment.blockIndex != blockIndex && fragment.hitSerial != blockSerial) continue;
+				++debugFragmentMatches;
+				if (debugFirstFragment == "none") debugFirstFragment =
+					std::to_string(fragment.blockIndex) + ":" + std::to_string(fragment.hitSerial) + ":" +
+					std::to_string(fragment.x) + ":" + std::to_string(fragment.y) + ":" +
+					std::to_string(fragment.w) + ":" + std::to_string(fragment.h);
+			}
+		}
+			s_cssScrollLayoutSnapshot.evidence += "hit-id=" + id + ",doc-scroll=" +
+			std::to_string(s_scrollOffset) + ",rect=" + std::to_string(rect.x) + ":" +
+			std::to_string(rect.y) + ":" + std::to_string(rect.w) + ":" +
+			std::to_string(rect.h) + ",serial=" + std::to_string(blockSerial) +
+			",parent=" + std::to_string(blockElement ? blockElement->parentSerial : 0) +
+			",position-mode=" + std::to_string(static_cast<int>(s_currentDoc.blocks[static_cast<size_t>(blockIndex)].style.position)) +
+			",inline-style=" + s_currentDoc.blocks[static_cast<size_t>(blockIndex)].inlineStyle +
+			",local=" + std::to_string(cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false)) +
+			",own=" + std::to_string(cssOwnScrollOffsetForBlock(s_currentDoc, blockIndex, false)) +
+			",block-y=" + std::to_string(blockLayoutY(blockIndex)) +
+			",block-h=" + std::to_string(blockTotalHeight(s_currentDoc.blocks[static_cast<size_t>(blockIndex)], s_currentDoc, false)) +
+			",geometry=" + std::to_string(debugGeometry.outerX) + ":" + std::to_string(debugGeometry.outerY) + ":" +
+			std::to_string(debugGeometry.outerWidth) + ":" + std::to_string(debugGeometry.outerHeight) +
+			",fragments=" + std::to_string(debugFragmentMatches) + ":" + debugFirstFragment +
+			",flow=" + (debugFlow ? (std::to_string(debugFlow->anchorBlockIndex) + ":" +
+				std::to_string(debugFlow->outerX) + ":" + std::to_string(debugFlow->documentContentTop) + ":" +
+				std::to_string(debugFlow->outerWidth) + ":" + std::to_string(debugFlow->outerHeight) + ":" +
+				std::to_string(debugFlow->contentOffsetY)) : std::string("none"));
+		if (const CssPositionedRecord* debugPositioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
+			const CssPaintRect debugTarget{
+				cssPositionedScreenXForDocument(s_currentDoc, *debugPositioned),
+				cssPositionedScreenYForDocument(s_currentDoc, *debugPositioned, s_scrollOffset),
+				debugPositioned->usedWidth, debugPositioned->usedHeight};
+			const CssPaintRect debugClip = cssPositionedClipForScreenBlock(s_currentDoc, blockIndex,
+				debugTarget.x, debugTarget.y, debugTarget.w, debugTarget.h, s_scrollOffset);
+			s_cssScrollLayoutSnapshot.evidence += ",positioned=" +
+				std::to_string(debugPositioned->finalX) + ":" + std::to_string(debugPositioned->finalY) + ":" +
+				std::to_string(debugPositioned->normalX) + ":" + std::to_string(debugPositioned->normalY) +
+				",target=" + std::to_string(debugTarget.x) + ":" + std::to_string(debugTarget.y) + ":" +
+				std::to_string(debugTarget.w) + ":" + std::to_string(debugTarget.h) + ",clip=" +
+				std::to_string(debugClip.x) + ":" + std::to_string(debugClip.y) + ":" +
+				std::to_string(debugClip.w) + ":" + std::to_string(debugClip.h);
+		}
+		s_cssScrollLayoutSnapshot.evidence += ";";
+	}
 	// Positioned links may retain an inline-flow text fragment for painting, but
 	// the positioned record is the authoritative visible box for hit sampling.
 	// Use it as a bounded fallback so the smoke assertion samples the same
 	// viewport-space geometry used by the shared positioned hit-test pass.
 	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
 		const CssPaintRect target{
-			cssPositionedScreenX(*positioned),
-			cssPositionedScreenY(*positioned, s_scrollOffset),
+			cssPositionedScreenXForDocument(s_currentDoc, *positioned),
+			cssPositionedScreenYForDocument(s_currentDoc, *positioned, s_scrollOffset),
 			positioned->usedWidth,
 			positioned->usedHeight};
-		const CssPaintRect clip = cssPositionedClipForBlock(s_currentDoc, blockIndex,
-			positioned->finalX, positioned->finalY, positioned->usedWidth,
-			positioned->usedHeight, s_scrollOffset);
+		const CssPaintRect clip = cssPositionedClipForScreenBlock(s_currentDoc, blockIndex,
+			target.x, target.y, positioned->usedWidth, positioned->usedHeight,
+			s_scrollOffset);
 		const CssPaintRect clipped = cssPaintRectIntersect(target, clip);
 		if (clipped.w > 0 && clipped.h > 0)
 			rect = Rect{clipped.x, clipped.y, clipped.w, clipped.h};
@@ -11384,7 +12089,11 @@ bool Navigator::SmokeHitLinkById(const std::string& id)
 	for (int y = rect.y; y < rect.y + rect.h; y += stepY) {
 		for (int x = rect.x; x < rect.x + rect.w; x += stepX) {
 			int hitIndex = -1;
-			if (hitTest(x, y, hitIndex) == HitTarget::Link && hitIndex == blockIndex) return true;
+			if (hitTest(x, y, hitIndex) == HitTarget::Link && hitIndex == blockIndex) {
+				if (cssBlockHasScrollAncestor(s_currentDoc, blockIndex))
+					++s_cssScrollLayoutSnapshot.localScrollHitTestEvidence;
+				return true;
+			}
 		}
 	}
 	return false;
@@ -11400,6 +12109,59 @@ void Navigator::SmokeSetScrollOffset(int offset)
 int Navigator::SmokeScrollOffset()
 {
 	return s_scrollOffset;
+}
+
+bool Navigator::SmokeSetElementScrollOffsetById(const std::string& id, int offsetX, int offsetY)
+{
+	if (s_windowId == 0) return false;
+	ensureCssMarginLayout(s_currentDoc);
+	ensureCssFlexLayout(s_currentDoc);
+	ensureCssFloatLayout(s_currentDoc);
+	ensureInlineLayout(s_currentDoc);
+	ensureCssPositionLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc);
+	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.id != id) continue;
+		CssScrollContainerRecord* record = cssMutableScrollContainerForSerial(s_currentDoc, element.serial);
+		if (!record) return false;
+		const int requestedX = offsetX;
+		const int requestedY = offsetY;
+		record->scrollX = std::max(0, std::min(requestedX, record->maxScrollX));
+		record->scrollY = std::max(0, std::min(requestedY, record->maxScrollY));
+		if (record->scrollX != requestedX || record->scrollY != requestedY) {
+			record->clamped = true;
+			++s_cssScrollLayoutSnapshot.scrollClamps;
+		}
+		s_cssScrollState[element.serial] = {record->scrollX, record->scrollY};
+		++s_cssScrollLayoutSnapshot.localScrollOperations;
+		if (s_windowId != 0) updateDisplay();
+		return true;
+	}
+	return false;
+}
+
+int Navigator::SmokeElementScrollOffsetYById(const std::string& id)
+{
+	if (s_windowId == 0) return -1;
+	ensureCssScrollLayout(s_currentDoc);
+	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.id != id) continue;
+		const CssScrollContainerRecord* record = cssScrollContainerForSerial(s_currentDoc, element.serial);
+		return record ? record->scrollY : -1;
+	}
+	return -1;
+}
+
+int Navigator::SmokeElementMaxScrollYById(const std::string& id)
+{
+	if (s_windowId == 0) return -1;
+	ensureCssScrollLayout(s_currentDoc);
+	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.id != id) continue;
+		const CssScrollContainerRecord* record = cssScrollContainerForSerial(s_currentDoc, element.serial);
+		return record ? record->maxScrollY : -1;
+	}
+	return -1;
 }
 
 bool Navigator::SmokeDragFirstLinkSelectsWithoutNavigation()
@@ -12039,6 +12801,8 @@ int Navigator::main(int, char**)
 	s_addressBuffer.clear();
 	s_addressCaret   = 0;
 	s_documentGeneration = 0;
+	s_cssScrollState.clear();
+	s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
 	s_tabKeyPressed = false;
 	s_ctrlPressed = false;
 	s_shiftPressed = false;
@@ -12286,6 +13050,7 @@ void Navigator::renderDocument()
 	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc);
 	clampScrollOffset();
 	s_renderCounters = {};
 	s_cssClipDepth = 0;
@@ -12418,8 +13183,8 @@ void Navigator::renderDocument()
 		int flowOuterWidth = flow.outerWidth;
 		int flowBoxHeight = std::max(1, flow.outerHeight > 0 ? flow.outerHeight : flow.totalHeight - marginTop - marginBottom);
 		if (positionedAnchor) {
-			drawY = cssPositionedScreenY(*positionedAnchor, s_scrollOffset) - marginTop;
-			flowOuterX = positionedAnchor->finalX;
+			drawY = cssPositionedScreenYForDocument(s_currentDoc, *positionedAnchor, s_scrollOffset) - marginTop;
+			flowOuterX = cssPositionedScreenXForDocument(s_currentDoc, *positionedAnchor);
 			flowOuterWidth = std::max(1, positionedAnchor->usedWidth);
 			flowBoxHeight = std::max(1, positionedAnchor->usedHeight);
 		} else if (!embedded) {
@@ -12428,12 +13193,20 @@ void Navigator::renderDocument()
 			cssPositionRelativeAncestorDelta(s_currentDoc, flow.anchorBlockIndex, &ancestorDeltaX, &ancestorDeltaY);
 			flowOuterX = cssBoundedGeometryAdd(flowOuterX, ancestorDeltaX);
 			drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+			flowOuterX = cssBoundedCoordinateAdd(flowOuterX,
+				cssLocalScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, true));
+			drawY = cssBoundedCoordinateAdd(drawY,
+				cssLocalScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, false));
 		}
 		const int boxY = embedded ? drawY : drawY + marginTop;
 		const int boxH = flowBoxHeight;
 		const int borderTop = cssBorderTopPx(flow.style);
 		const int paddingTop = cssPaddingTopPx(flow.style, 0);
-		const int baseY = boxY + borderTop + paddingTop;
+		const int baseY = cssBoundedCoordinateAdd(boxY + borderTop + paddingTop,
+			cssOwnScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, false));
+		const int ownScrollX = cssOwnScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, true);
+		const int ancestorScrollX = embedded ? 0 :
+			cssLocalScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, true);
 		const bool ancestorClipPushed = false;
 		s_cssPaintOpacityPercent = std::max(0, std::min(100, flow.style.effectiveOpacityPercent));
 		drawBlockBox(s_windowId, flowOuterX, boxY, flowOuterWidth, boxH, flow.style);
@@ -12441,7 +13214,7 @@ void Navigator::renderDocument()
 			embedded ? CssPaintRect{flowOuterX + cssBorderLeftPx(flow.style), boxY + cssBorderTopPx(flow.style),
 				std::max(0, flowOuterWidth - cssBorderLeftPx(flow.style) - cssBorderRightPx(flow.style)),
 				std::max(0, boxH - cssBorderTopPx(flow.style) - cssBorderBottomPx(flow.style))} :
-			cssPositionedClipForBlock(s_currentDoc, flow.anchorBlockIndex, flowOuterX, boxY,
+			cssPositionedClipForScreenBlock(s_currentDoc, flow.anchorBlockIndex, flowOuterX, boxY,
 				flowOuterWidth, boxH, s_scrollOffset));
 		// Floats in an atomic/embedded BFC use the same flat record model, but
 		// their coordinates are local to that context.  Paint them while the
@@ -12456,7 +13229,7 @@ void Navigator::renderDocument()
 				const WebStyle* nestedStyle = computedStyleForSerial(s_currentDoc, nestedFloat.logicalSerial);
 				if (!nestedStyle) nestedStyle = &nestedBlock.style;
 				if (nestedStyle->displayNone || nestedStyle->visibility == VisibilityMode::Hidden) continue;
-				const int nestedX = parentX + flow.contentX + nestedFloat.borderBoxX;
+				const int nestedX = parentX + flow.contentX + nestedFloat.borderBoxX + ownScrollX;
 				const int nestedY = baseY + nestedFloat.borderBoxY;
 				s_cssPaintOpacityPercent = std::max(0, std::min(100, nestedStyle->effectiveOpacityPercent));
 				drawBlockBox(s_windowId, nestedX, nestedY, nestedFloat.borderBoxW, nestedFloat.borderBoxH, *nestedStyle);
@@ -12501,8 +13274,20 @@ void Navigator::renderDocument()
 				}
 			}
 			s_cssPaintOpacityPercent = std::max(0, std::min(100, paintStyle.effectiveOpacityPercent));
-			int fragX = (embedded ? parentX : 0) + flow.contentX + fragment.x;
+			int fragX = (embedded ? parentX : 0) + flow.contentX + fragment.x + ancestorScrollX + ownScrollX;
 			int fragY = baseY + fragment.y;
+			const int targetLocalX = item.blockIndex >= 0
+				? cssLocalScrollOffsetForBlock(s_currentDoc, item.blockIndex, true)
+				: cssLocalScrollOffsetForSerial(s_currentDoc, item.ownerSerial, true);
+			const int targetLocalY = item.blockIndex >= 0
+				? cssLocalScrollOffsetForBlock(s_currentDoc, item.blockIndex, false)
+				: cssLocalScrollOffsetForSerial(s_currentDoc, item.ownerSerial, false);
+			const int anchorLocalX = embedded ? 0 :
+				cssLocalScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, true);
+			const int anchorLocalY = embedded ? 0 :
+				cssLocalScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, false);
+			fragX += targetLocalX - anchorLocalX;
+			fragY += targetLocalY - anchorLocalY;
 			const CssPositionedRecord* ownerPosition = cssPositionedRecordForSerial(s_currentDoc, item.ownerSerial);
 			const uint64_t anchorSerial = anchor.elementMetadata.serial;
 			if (ownerPosition && ownerPosition->logicalSerial != anchorSerial) {
@@ -12720,7 +13505,7 @@ void Navigator::renderDocument()
 			const WebStyle* ownerStyle = cssStyleForSerial(s_currentDoc, structuralOwnerSerial);
 			if (owner && ownerStyle && owner->paintVisible) {
 				s_cssPaintOpacityPercent = std::max(0, std::min(100, ownerStyle->effectiveOpacityPercent));
-				drawBlockBox(s_windowId, cssPositionedScreenX(*owner), cssPositionedScreenY(*owner, s_scrollOffset),
+				drawBlockBox(s_windowId, cssPositionedScreenXForDocument(s_currentDoc, *owner), cssPositionedScreenYForDocument(s_currentDoc, *owner, s_scrollOffset),
 					owner->usedWidth, owner->usedHeight, *ownerStyle);
 			}
 		}
@@ -12754,14 +13539,18 @@ void Navigator::renderDocument()
 		}
 		if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
 			outerWidth = std::max(1, positioned->usedWidth);
-			outerX = positioned->finalX;
-			drawY = cssPositionedScreenY(*positioned, s_scrollOffset) - blockMarginTop;
+			outerX = cssPositionedScreenXForDocument(s_currentDoc, *positioned);
+			drawY = cssPositionedScreenYForDocument(s_currentDoc, *positioned, s_scrollOffset) - blockMarginTop;
 		} else {
 			int ancestorDeltaX = 0;
 			int ancestorDeltaY = 0;
 			cssPositionRelativeAncestorDelta(s_currentDoc, blockIndex, &ancestorDeltaX, &ancestorDeltaY);
 			outerX = cssBoundedGeometryAdd(outerX, ancestorDeltaX);
 			drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+			outerX = cssBoundedCoordinateAdd(outerX,
+				cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true));
+			drawY = cssBoundedCoordinateAdd(drawY,
+				cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 		}
 		const int innerWidth = std::max(1, outerWidth - borderLeft - borderRight - paddingLeft - paddingRight);
 		const uint64_t listOrdinal = block.type == BlockType::ListItem ? blockListOrdinal(s_currentDoc, blockIndex) : 1;
@@ -12770,8 +13559,10 @@ void Navigator::renderDocument()
 		const int listWrapCols = wrapCols;
 		const int preWrapCols = std::max(1, innerWidth / kCharW);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
-		const int contentX = blockContentLeftX(block, outerX);
-		const int contentY = blockContentTopY(block, drawY, blockMarginTop);
+		const int contentX = cssBoundedGeometryAdd(blockContentLeftX(block, outerX),
+			cssOwnScrollOffsetForBlock(s_currentDoc, blockIndex, true));
+		const int contentY = cssBoundedGeometryAdd(blockContentTopY(block, drawY, blockMarginTop),
+			cssOwnScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 
 		if (isTableCellLikeBlock(block)) {
 			if (!isFirstTableCellInGroup(s_currentDoc, blockIndex)) {
@@ -12793,6 +13584,7 @@ void Navigator::renderDocument()
 				continue;
 			}
 			const TableRowLayout& row = layout.rows[static_cast<size_t>(rowIndex)];
+			const int tableX = outerX;
 			const int tableY = drawY + blockMarginTop;
 			const int tableH = layout.totalHeightPx;
 			const int blockH = blockMarginTop + tableH + std::max(4, blockMarginBottom);
@@ -12824,12 +13616,12 @@ void Navigator::renderDocument()
 			s_cssPaintOpacityPercent = std::max(0, std::min(100, block.style.effectiveOpacityPercent));
 			const bool tableAncestorClipPushed = cssBlockHasOverflowAncestor(s_currentDoc, block) &&
 				cssPushPaintClip(cssBlockAncestorClip(s_currentDoc, block, s_scrollOffset));
-			drawBlockBox(s_windowId, layout.outerX, tableY, layout.outerWidth, tableH, block.style);
+			drawBlockBox(s_windowId, tableX, tableY, layout.outerWidth, tableH, block.style);
 			const bool tableClipPushed = (block.style.overflowX != OverflowMode::Visible ||
 				block.style.overflowY != OverflowMode::Visible) && cssPushPaintClip(
-				cssBlockVisibleClip(s_currentDoc, blockIndex, block, layout.outerX, tableY, layout.outerWidth, tableH,
-					s_scrollOffset));
-			const int tableContentX = layout.outerX + layout.borderLeft + layout.paddingLeft;
+				cssPositionedClipForScreenBlock(s_currentDoc, blockIndex, tableX, tableY,
+					layout.outerWidth, tableH, s_scrollOffset));
+			const int tableContentX = tableX + layout.borderLeft + layout.paddingLeft;
 			const size_t lastCol = layout.columnWidthsChars.empty() ? 0 : layout.columnWidthsChars.size() - 1;
 			const bool collapseMode = layout.collapseMode;
 			const int cellSpacingX = collapseMode ? 0 : layout.borderSpacingHorizontal;
@@ -12949,7 +13741,7 @@ void Navigator::renderDocument()
 		const bool ancestorClipPushed = false;
 		drawBlockBox(s_windowId, outerX, boxY, outerWidth, boxH, block.style);
 		const bool blockClipPushed = cssPushPaintClip(
-			cssPositionedClipForBlock(s_currentDoc, blockIndex, outerX, boxY, outerWidth, boxH, s_scrollOffset));
+			cssPositionedClipForScreenBlock(s_currentDoc, blockIndex, outerX, boxY, outerWidth, boxH, s_scrollOffset));
 
 		switch (block.type) {
 		case BlockType::Heading:
@@ -14001,6 +14793,56 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 
 void Navigator::handleMouseInput(int x, int y, int button, const std::string& action)
 {
+	if (button == 0 && action.rfind("wheel:", 0) == 0) {
+		int steps = 0;
+		try {
+			steps = std::stoi(action.substr(6));
+		} catch (...) {
+			steps = 0;
+		}
+		if (steps == 0) return;
+		steps = std::max(-1024, std::min(steps, 1024));
+		ensureCssMarginLayout(s_currentDoc);
+		ensureCssFlexLayout(s_currentDoc);
+		ensureCssFloatLayout(s_currentDoc);
+		ensureInlineLayout(s_currentDoc);
+		ensureCssPositionLayout(s_currentDoc);
+		ensureCssScrollLayout(s_currentDoc);
+		int bestIndex = -1;
+		int bestDepth = -1;
+		for (int index = 0; index < static_cast<int>(s_cssScrollLayoutSnapshot.records.size()); ++index) {
+			const CssScrollContainerRecord& record = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(index)];
+			if (!record.activeY || record.maxScrollY <= 0) continue;
+			const CssPaintRect viewport = cssScrollContainerVisibleViewport(s_currentDoc, record, s_scrollOffset);
+			if (viewport.w <= 0 || viewport.h <= 0 || x < viewport.x || x >= viewport.x + viewport.w ||
+				y < viewport.y || y >= viewport.y + viewport.h) continue;
+			if (record.depth >= bestDepth) {
+				bestDepth = record.depth;
+				bestIndex = index;
+			}
+		}
+		if (bestIndex >= 0) {
+			CssScrollContainerRecord& record = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(bestIndex)];
+			const int requested = cssBoundedGeometryAdd(record.scrollY, -steps * 48);
+			const int next = std::max(0, std::min(requested, record.maxScrollY));
+			if (next != record.scrollY) {
+				record.scrollY = next;
+				s_cssScrollState[record.serial] = {record.scrollX, record.scrollY};
+				++s_cssScrollLayoutSnapshot.localScrollOperations;
+				++s_cssScrollLayoutSnapshot.localScrollWheelOperations;
+				updateStatus("Scrolled element.");
+				updateDisplay();
+				return;
+			}
+		}
+		// A local container that cannot consume the wheel delta falls back to
+		// document scrolling, preserving the existing bounded page behavior.
+		s_scrollOffset = cssBoundedGeometryAdd(s_scrollOffset, -steps * 48);
+		clampScrollOffset();
+		updateStatus("Scrolled page.");
+		updateDisplay();
+		return;
+	}
 	if (button == 1 && action == "up" && !s_mouseLeftDown &&
 		s_staleMouseReleaseGeneration == s_documentGeneration &&
 		s_staleMouseReleaseGeneration != 0) {
@@ -14389,12 +15231,15 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 		const TableGroupLayout layout = buildTableGroupLayout(s_currentDoc, groupStart);
 		const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
 		const int rowY = drawY + cssMarginTopPx(block.style, 4);
+		const int tableX = cssBoundedCoordinateAdd(layout.outerX,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true));
+		const int tableScrollY = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false);
 		const CssPaintRect clipped = cssClipHitTarget(CssPaintRect{
-			layout.outerX,
-			rowY,
+			tableX,
+			cssBoundedGeometryAdd(rowY, tableScrollY),
 			std::max(kCharW, layout.outerWidth),
 			std::max(kLineH, layout.totalHeightPx)
-		}, cssClipRectForHit(s_currentDoc, blockIndex, block, layout.outerX, rowY, layout.outerWidth,
+		}, cssClipRectForHit(s_currentDoc, blockIndex, block, tableX, cssBoundedGeometryAdd(rowY, tableScrollY), layout.outerWidth,
 			layout.totalHeightPx, s_scrollOffset));
 		return Rect{clipped.x, clipped.y, clipped.w, clipped.h};
 	}
@@ -14409,18 +15254,23 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 	const int outerWidth = blockOuterWidth(block, availableWidth);
 	int resolvedOuterX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
-		resolvedOuterX = positioned->finalX;
-		drawY = cssPositionedScreenY(*positioned, s_scrollOffset) - blockMarginTop;
+		resolvedOuterX = cssPositionedScreenXForDocument(s_currentDoc, *positioned);
+		drawY = cssPositionedScreenYForDocument(s_currentDoc, *positioned, s_scrollOffset) - blockMarginTop;
 	} else {
 		int ancestorDeltaX = 0;
 		int ancestorDeltaY = 0;
 		cssPositionRelativeAncestorDelta(s_currentDoc, blockIndex, &ancestorDeltaX, &ancestorDeltaY);
 		resolvedOuterX = cssBoundedGeometryAdd(resolvedOuterX, ancestorDeltaX);
 		drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+		resolvedOuterX = cssBoundedCoordinateAdd(resolvedOuterX,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true));
+		drawY = cssBoundedCoordinateAdd(drawY,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 	}
 	const int borderLeft = cssBorderLeftPx(block.style);
 	const int borderRight = cssBorderRightPx(block.style);
-	const int textX = blockContentLeftX(block, resolvedOuterX);
+	const int textX = cssBoundedCoordinateAdd(blockContentLeftX(block, resolvedOuterX),
+		cssOwnScrollOffsetForBlock(s_currentDoc, blockIndex, true));
 	int textW = 0;
 	int textH = 0;
 	switch (block.type) {
@@ -15036,6 +15886,8 @@ void Navigator::submitFormForBlock(int blockIndex)
 	s_forwardStack.clear();
 	s_currentDoc = loadHttpResponseDocument(action, response);
 	s_inlineLayoutDirty = true;
+	s_cssScrollState.clear();
+	s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
 	s_scrollOffset = 0;
 	s_documentHeight = computeDocumentHeight();
 	s_lastSubmittedFormStatus = response.ok() ? "POST submitted" : std::string("POST failed: ") + gxos::web::httpErrorName(response.error);
@@ -15295,6 +16147,7 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc);
 
 	if (toolbarButtonRect(kWidgetIdBack).contains(x, y))    return HitTarget::Back;
 	if (toolbarButtonRect(kWidgetIdForward).contains(x, y)) return HitTarget::Forward;
@@ -15381,14 +16234,41 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 			++s_currentDoc.cssDiagnostics.positionHitOcclusions;
 			return HitTarget::FormLabel;
 		}
+		int bestDescendantLink = -1;
+		int bestDescendantPaintRank = -1;
 		for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 			if (s_currentDoc.blocks[i].type != BlockType::Link ||
 				!cssBlockIsDescendantOfSerial(s_currentDoc.blocks[i], topBlock.elementMetadata.serial)) continue;
-			if (inlineFragmentContainsPoint(i, x, y)) {
-				outLinkBlockIndex = i;
-				++s_currentDoc.cssDiagnostics.positionHitOcclusions;
-				return HitTarget::Link;
+			if (const CssPositionedRecord* descendantPosition = cssPositionedRecordForBlock(s_currentDoc, i)) {
+				const CssPaintRect target{
+					cssPositionedScreenXForDocument(s_currentDoc, *descendantPosition),
+					cssPositionedScreenYForDocument(s_currentDoc, *descendantPosition, s_scrollOffset),
+					descendantPosition->usedWidth, descendantPosition->usedHeight};
+				const CssPaintRect clip = cssPositionedClipForScreenBlock(s_currentDoc, i,
+					target.x, target.y, target.w, target.h, s_scrollOffset);
+				const CssPaintRect clipped = cssPaintRectIntersect(target, clip);
+				if (clipped.w > 0 && clipped.h > 0 && x >= clipped.x && x < clipped.x + clipped.w &&
+					y >= clipped.y && y < clipped.y + clipped.h) {
+					const int paintRank = cssPositionPaintRank(s_currentDoc, i);
+					if (paintRank >= bestDescendantPaintRank) {
+						bestDescendantPaintRank = paintRank;
+						bestDescendantLink = i;
+					}
+				}
+				continue;
 			}
+			if (inlineFragmentContainsPoint(i, x, y)) {
+				const int paintRank = cssPositionPaintRank(s_currentDoc, i);
+				if (paintRank >= bestDescendantPaintRank) {
+					bestDescendantPaintRank = paintRank;
+					bestDescendantLink = i;
+				}
+			}
+		}
+		if (bestDescendantLink >= 0) {
+			outLinkBlockIndex = bestDescendantLink;
+			++s_currentDoc.cssDiagnostics.positionHitOcclusions;
+			return HitTarget::Link;
 		}
 		++s_currentDoc.cssDiagnostics.positionHitOcclusions;
 		return HitTarget::None;
@@ -15641,6 +16521,10 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	const bool staleMouseReleasePending = s_staleMouseReleaseGeneration != 0;
 	const bool staleKeyReleasePending = s_staleKeyReleaseGeneration != 0;
 	if (hadRuntimeState) incrementLifecycleCounter(s_lifecycleDiagnostics.runtimeStateClears);
+	// Element-local scroll state is navigation-scoped in Phase 6A. A rebuilt
+	// document must not inherit serials from the replaced DOM.
+	s_cssScrollState.clear();
+	s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
 	cancelKeyboardActivation(FormFocusCancellationReason::Navigation);
 	if (s_documentGeneration == std::numeric_limits<uint64_t>::max()) s_documentGeneration = 1;
 	else ++s_documentGeneration;
@@ -17031,10 +17915,15 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	ensureInlineLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc);
 	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
 		CssPaintRect target{kContentX + floatRecord->borderBoxX,
 			kContentY + floatRecord->borderBoxY - s_scrollOffset,
 			floatRecord->borderBoxW, floatRecord->borderBoxH};
+		target.x = cssBoundedGeometryAdd(target.x,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true));
+		target.y = cssBoundedGeometryAdd(target.y,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 		if (floatRecord->contextSerial != 0) {
 			for (const InlineFlowLayout& contextFlow : s_inlineLayoutSnapshot.flows) {
 				if (contextFlow.contextSerial != floatRecord->contextSerial) continue;
@@ -17070,13 +17959,22 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 		}
 		const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
 			(flowPosition
-				? cssPositionedScreenY(*flowPosition, s_scrollOffset) - cssMarginTopPx(flow->style, 4)
-				: kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY);
+				? cssPositionedScreenYForDocument(s_currentDoc, *flowPosition, s_scrollOffset) - cssMarginTopPx(flow->style, 4)
+				: kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY +
+					cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false));
 	const int boxY = embedded ? drawY : drawY + cssMarginTopPx(flow->style,
 		(flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading) ? 10 : 4);
 	const int boxH = std::max(1, flow->outerHeight > 0 ? flow->outerHeight : flow->totalHeight - cssMarginTopPx(flow->style, 4) -
 		cssMarginBottomPx(flow->style, 8));
+	const int flowOuterScreenX = flowPosition
+		? cssPositionedScreenXForDocument(s_currentDoc, *flowPosition)
+		: cssBoundedGeometryAdd(flow->outerX,
+			cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true));
+	const int flowLocalX = embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true);
+	const int flowLocalY = embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false);
+	const int targetLocalX = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true);
+	const int targetLocalY = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false);
 	int left = std::numeric_limits<int>::max();
 	int top = std::numeric_limits<int>::max();
 	int right = 0;
@@ -17085,9 +17983,14 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	for (const InlineFragmentLayout& fragment : flow->fragments) {
 		if (!fragment.visible || fragment.blockIndex != blockIndex ||
 			(!includeWhitespace && fragment.whitespace)) continue;
-		const int x = (embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x;
-		const int y = embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y :
-			drawY + flow->contentOffsetY + fragment.y;
+		const int x = (embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x +
+			(embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true)) +
+			(targetLocalX - flowLocalX) +
+			cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true);
+		const int y = embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y +
+			cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false) :
+			drawY + flow->contentOffsetY + fragment.y + (targetLocalY - flowLocalY) +
+			cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false);
 			left = std::min(left, x + flowDeltaX + fragment.positionedOffsetX);
 			top = std::min(top, y + fragment.positionedOffsetY);
 			right = std::max(right, x + flowDeltaX + fragment.positionedOffsetX + std::max(0, fragment.w));
@@ -17096,10 +17999,8 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	}
 	if (!found || right <= left || bottom <= top) return false;
 	CssPaintRect flowClip = embedded ? parentAtomic : cssClipRectForHit(
-		s_currentDoc, flow->anchorBlockIndex,
-		flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size())
-			? s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)] : block,
-		flow->outerX, boxY, flow->outerWidth, boxH, s_scrollOffset);
+		s_currentDoc, blockIndex, block,
+		flowOuterScreenX, boxY, flow->outerWidth, boxH, s_scrollOffset);
 	const CssPaintRect clipped = cssClipHitTarget(
 		CssPaintRect{left, top, right - left, bottom - top},
 		flowClip);
@@ -17116,10 +18017,15 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	ensureInlineLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc);
 	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
 		CssPaintRect target{kContentX + floatRecord->borderBoxX,
 			kContentY + floatRecord->borderBoxY - s_scrollOffset,
 			floatRecord->borderBoxW, floatRecord->borderBoxH};
+		target.x = cssBoundedGeometryAdd(target.x,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true));
+		target.y = cssBoundedGeometryAdd(target.y,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 		if (floatRecord->contextSerial != 0) {
 			for (const InlineFlowLayout& contextFlow : s_inlineLayoutSnapshot.flows) {
 				if (contextFlow.contextSerial != floatRecord->contextSerial) continue;
@@ -17154,24 +18060,37 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	}
 		const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
 			(flowPosition
-				? cssPositionedScreenY(*flowPosition, s_scrollOffset) - cssMarginTopPx(flow->style, 4)
-				: kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY);
+				? cssPositionedScreenYForDocument(s_currentDoc, *flowPosition, s_scrollOffset) - cssMarginTopPx(flow->style, 4)
+				: kContentY + blockLayoutY(flow->anchorBlockIndex) - s_scrollOffset + flowDeltaY +
+					cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false));
 	const int boxY = embedded ? drawY : drawY + cssMarginTopPx(flow->style,
 		(flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)].type == BlockType::Heading) ? 10 : 4);
 	const int boxH = std::max(1, flow->outerHeight > 0 ? flow->outerHeight : flow->totalHeight - cssMarginTopPx(flow->style, 4) -
 		cssMarginBottomPx(flow->style, 8));
+	const int flowOuterScreenX = flowPosition
+		? cssPositionedScreenXForDocument(s_currentDoc, *flowPosition)
+		: cssBoundedGeometryAdd(flow->outerX,
+			cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true));
+	const int flowLocalX = embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true);
+	const int flowLocalY = embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false);
+	const int targetLocalX = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true);
+	const int targetLocalY = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false);
 	const CssPaintRect clip = embedded ? parentAtomic : cssClipRectForHit(
-		s_currentDoc, flow->anchorBlockIndex,
-		flow->anchorBlockIndex >= 0 && flow->anchorBlockIndex < static_cast<int>(s_currentDoc.blocks.size())
-			? s_currentDoc.blocks[static_cast<size_t>(flow->anchorBlockIndex)] : block,
-		flow->outerX, boxY, flow->outerWidth, boxH, s_scrollOffset);
+		s_currentDoc, blockIndex, block,
+		flowOuterScreenX, boxY, flow->outerWidth, boxH, s_scrollOffset);
 	for (const InlineFragmentLayout& fragment : flow->fragments) {
 		if (!fragment.visible || fragment.whitespace || fragment.blockIndex != blockIndex) continue;
 		const CssPaintRect clipped = cssClipHitTarget(
-			CssPaintRect{(embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x + flowDeltaX + fragment.positionedOffsetX,
-				embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y + fragment.positionedOffsetY :
-					drawY + flow->contentOffsetY + fragment.y + fragment.positionedOffsetY,
+			CssPaintRect{(embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x + flowDeltaX + fragment.positionedOffsetX +
+				(embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true)) +
+				(targetLocalX - flowLocalX) +
+				cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true),
+				embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y + fragment.positionedOffsetY +
+					cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false) :
+					drawY + flow->contentOffsetY + fragment.y + fragment.positionedOffsetY +
+					(targetLocalY - flowLocalY) +
+					cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false),
 				fragment.kind == InlineItemKind::AtomicBlock ? std::max(0, fragment.boxWidth) : std::max(0, fragment.w),
 				fragment.kind == InlineItemKind::AtomicBlock ? std::max(0, fragment.boxHeight) : std::max(0, fragment.h)}, clip);
 		if (clipped.w > 0 && clipped.h > 0 &&
@@ -17199,18 +18118,23 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
 	int resolvedX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
-		resolvedX = positioned->finalX + cssBorderLeftPx(block.style) + cssPaddingLeftPx(block.style, 0);
-		drawY = cssPositionedScreenY(*positioned, s_scrollOffset) + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
+		resolvedX = cssPositionedScreenXForDocument(s_currentDoc, *positioned) + cssBorderLeftPx(block.style) + cssPaddingLeftPx(block.style, 0);
+		drawY = cssPositionedScreenYForDocument(s_currentDoc, *positioned, s_scrollOffset) + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
 	} else {
 		int ancestorDeltaX = 0;
 		int ancestorDeltaY = 0;
 		cssPositionRelativeAncestorDelta(s_currentDoc, blockIndex, &ancestorDeltaX, &ancestorDeltaY);
 		resolvedX = cssBoundedGeometryAdd(resolvedX, ancestorDeltaX);
 		drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+		resolvedX = cssBoundedGeometryAdd(resolvedX,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true));
+		drawY = cssBoundedGeometryAdd(drawY,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 	}
 	int h     = wrappedBlockHeight(block, std::max(1, innerWidth / kCharW), blockTextLineHeight(block));
 	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth);
-	const int boxY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset + blockMarginTop;
+	const int boxY = cssBoundedCoordinateAdd(kContentY + blockLayoutY(blockIndex) - s_scrollOffset + blockMarginTop,
+		cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 	const int boxH = std::max(1, blockTotalHeight(block, s_currentDoc,
 		blockIndex + 1 < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[blockIndex + 1].type == BlockType::Heading) - blockMarginTop -
@@ -17238,14 +18162,18 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	const int relY = blockLayoutY(blockIndex);
 	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + paddingTop;
 	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
-		resolvedX = positioned->finalX + cssBorderLeftPx(block.style) + cssPaddingLeftPx(block.style, 0);
-		drawY = cssPositionedScreenY(*positioned, s_scrollOffset) + cssBorderTopPx(block.style) + paddingTop;
+		resolvedX = cssPositionedScreenXForDocument(s_currentDoc, *positioned) + cssBorderLeftPx(block.style) + cssPaddingLeftPx(block.style, 0);
+		drawY = cssPositionedScreenYForDocument(s_currentDoc, *positioned, s_scrollOffset) + cssBorderTopPx(block.style) + paddingTop;
 	} else {
 		int ancestorDeltaX = 0;
 		int ancestorDeltaY = 0;
 		cssPositionRelativeAncestorDelta(s_currentDoc, blockIndex, &ancestorDeltaX, &ancestorDeltaY);
 		resolvedX = cssBoundedGeometryAdd(resolvedX, ancestorDeltaX);
 		drawY = cssBoundedGeometryAdd(drawY, ancestorDeltaY);
+		resolvedX = cssBoundedCoordinateAdd(resolvedX,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true));
+		drawY = cssBoundedCoordinateAdd(drawY,
+			cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 	}
 	int w = blockFormControlWidth(block, availableWidth);
 	if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) {
@@ -17254,7 +18182,8 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 		// control when the two rendered blocks overlap.
 		w = 22;
 	}
-	const int boxY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset + blockMarginTop;
+	const int boxY = cssBoundedCoordinateAdd(kContentY + blockLayoutY(blockIndex) - s_scrollOffset + blockMarginTop,
+		cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false));
 	const int boxH = std::max(1, blockTotalHeight(block, s_currentDoc,
 		blockIndex + 1 < static_cast<int>(s_currentDoc.blocks.size()) &&
 			s_currentDoc.blocks[blockIndex + 1].type == BlockType::Heading) - blockMarginTop -
