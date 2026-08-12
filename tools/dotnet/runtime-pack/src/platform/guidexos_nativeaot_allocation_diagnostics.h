@@ -844,6 +844,46 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t heapResolutionAllocationContextHeap;
     uintptr_t heapResolutionCompletionReturnAddress;
 
+    /* Proof-only first real-root condemned-generation membership decision. */
+    uint32_t workstationMultipleHeapsEnabled;
+    uint32_t workstationSingleHeapSentinelValid;
+    uint32_t condemnedCheckRequestCount;
+    uint32_t condemnedCheckEntryCount;
+    uint32_t condemnedCheckCompletionCount;
+    uint32_t condemnedCheckReturnCount;
+    uint32_t condemnedCheckDuplicateCount;
+    uint32_t condemnedCheckObjectDereferenceCount;
+    uint32_t condemnedCheckGenerationQueryStartCount;
+    uint32_t condemnedCheckGenerationQueryCompletionCount;
+    uint32_t condemnedCheckGenerationTableReadCount;
+    uint32_t condemnedCheckSegmentLookupCount;
+    uint32_t condemnedCheckObjectHeaderReadCount;
+    uint32_t condemnedCheckMethodTableReadCount;
+    uint32_t condemnedCheckResult;
+    uint32_t condemnedCheckSourceBranch;
+    uint32_t condemnedCheckSafeStopObserved;
+    uint32_t condemnedCheckSafeStopReason;
+    uint32_t condemnedCheckHeapResolutionInputMatch;
+    uint32_t condemnedCheckCallbackRootInputMatch;
+    uint32_t condemnedCheckMembershipInputMatch;
+    uint32_t condemnedCheckStorageObjectInputMatch;
+    uint32_t condemnedCheckGenerationInputValid;
+    uint32_t condemnedCheckGenerationTableEntry;
+    uint32_t condemnedCheckGeneration;
+    uint32_t condemnedCheckCondemnedGeneration;
+    uint32_t condemnedCheckMaximumGeneration;
+    uint32_t condemnedCheckMinimumSegmentSizeShift;
+    uint32_t reservedFirstRootCondemnedDecision[2];
+
+    uintptr_t condemnedCheckObjectInput;
+    uintptr_t condemnedCheckLowerBound;
+    uintptr_t condemnedCheckUpperBound;
+    uintptr_t condemnedCheckGenerationTableIdentity;
+    uintptr_t condemnedCheckGenerationTableIndex;
+    uintptr_t condemnedCheckSegmentIdentity;
+    uintptr_t condemnedCheckCompletionReturnAddress;
+    uintptr_t condemnedCheckSafeStopReturnAddress;
+
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
         GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupAfter[
@@ -901,6 +941,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F25_FIRST_ROOT_CALLBACK_ENTRY_SAFE_STOP = 0xF25u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F26_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_SAFE_STOP = 0xF26u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F27_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP = 0xF27u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F28_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_SAFE_STOP = 0xF28u,
 };
 
 enum {
@@ -917,6 +958,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_SAFE_STOP_MARKER = 0xC011EC07u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_SAFE_STOP_MARKER = 0xC011EC08u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP_MARKER = 0xC011EC09u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_SAFE_STOP_MARKER = 0xC011EC10u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

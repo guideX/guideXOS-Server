@@ -3,7 +3,7 @@ param(
     [string]$EvidenceRoot = "",
     [int]$TimeoutSeconds = 90,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -15,7 +15,9 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($ProofMode -eq "first-root-heap-resolution") {
+    $EvidenceRoot = if ($ProofMode -eq "first-root-condemned-generation-decision") {
+        Join-Path $root "out\dotnet\gc-first-root-condemned-generation-decision"
+    } elseif ($ProofMode -eq "first-root-heap-resolution") {
         Join-Path $root "out\dotnet\gc-first-root-heap-resolution"
     } elseif ($ProofMode -eq "first-root-membership-classification") {
         Join-Path $root "out\dotnet\gc-first-root-membership-classification"
@@ -35,13 +37,17 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
 }
 $isFirstRootCandidateLoad = $ProofMode -eq "first-root-candidate-load"
 $isFirstRootHeapResolution = $ProofMode -eq "first-root-heap-resolution"
+$isFirstRootCondemnedGenerationDecision = $ProofMode -eq "first-root-condemned-generation-decision"
+$isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution")
+$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution")
-$proofDefine = if ($isFirstRootHeapResolution) {
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision")
+$proofDefine = if ($isFirstRootCondemnedGenerationDecision) {
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION"
+} elseif ($isFirstRootHeapResolution) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION"
 } elseif ($isFirstRootMembershipClassification) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION"
@@ -398,23 +404,35 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
         $gcCppText = (Get-Content -LiteralPath $lockedGcCppPath -Raw).Replace([string]([char]13) + [string]([char]10), [string][char]10)
         $gcWksText = '#include <intrin.h>' + [Environment]::NewLine + $gcWksText
         $gcWksText = $gcWksText.Replace('namespace WKS {', '#define _DEBUG 1' + [Environment]::NewLine + 'namespace WKS {')
-        if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolution) {
+        if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
             $membershipDeclaration = @'
 extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCheckRequested(uintptr_t object);
 extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCheckEntered(uintptr_t object);
 extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCheckCompleted(uintptr_t object, uintptr_t lowerBound, uintptr_t upperBound, uint32_t lowerEvaluated, uint32_t upperEvaluated, uint32_t lowerResult, uint32_t upperResult, uint32_t result);
 extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootMembershipResultBoundary(uint32_t result);
 '@
-            if ($isFirstRootHeapResolution) {
+            if ($isFirstRootHeapResolutionOrCondemned) {
+                $heapResolutionCompletionAttribute = if ($isFirstRootCondemnedGenerationDecision) { "" } else { "__declspec(noreturn) " }
                 $membershipDeclaration += [Environment]::NewLine + @'
 extern "C" void __cdecl guideXosNativeAotFirstRootHeapResolutionRequested(uintptr_t object);
 extern "C" void __cdecl guideXosNativeAotFirstRootHeapResolutionEntered(uintptr_t object, uintptr_t threadHeap, uint32_t threadNumber);
-extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootHeapResolutionCompleted(uintptr_t object, uintptr_t threadHeap, uintptr_t heap, uint32_t heapNumber, uint32_t totalHeapCount);
+extern "C" HEAP_RESOLUTION_COMPLETION_ATTRIBUTEvoid __cdecl guideXosNativeAotFirstRootHeapResolutionCompleted(uintptr_t object, uintptr_t threadHeap, uintptr_t heap, uint32_t heapNumber, uint32_t totalHeapCount);
 '@.TrimEnd()
+                $membershipDeclaration = $membershipDeclaration.Replace('HEAP_RESOLUTION_COMPLETION_ATTRIBUTE', $heapResolutionCompletionAttribute)
+                if ($isFirstRootCondemnedGenerationDecision) {
+                    $membershipDeclaration += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotFirstRootCondemnedGenerationDecisionRequested(uintptr_t object);
+extern "C" void __cdecl guideXosNativeAotFirstRootCondemnedGenerationDecisionEntered(uintptr_t object, uintptr_t lowerBound, uintptr_t upperBound, int condemnedGeneration, int maximumGeneration, uintptr_t generationTable, uintptr_t generationTableIndex, uint32_t minimumSegmentSizeShift);
+extern "C" void __cdecl guideXosNativeAotFirstRootCondemnedGenerationQueryStart(uintptr_t object, uintptr_t generationTable, uintptr_t generationTableIndex);
+extern "C" void __cdecl guideXosNativeAotFirstRootCondemnedGenerationQueryCompleted(uintptr_t object, uint32_t generation);
+extern "C" void __cdecl guideXosNativeAotFirstRootCondemnedGenerationSegmentLookupCompleted(uintptr_t object, uintptr_t segment);
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootCondemnedGenerationDecisionCompleted(uintptr_t object, uint32_t result);
+'@.TrimEnd()
+                }
             }
             $gcWksText = '#include <intrin.h>' + [Environment]::NewLine + $membershipDeclaration.TrimEnd() + [Environment]::NewLine + $gcWksText
         }
-        $candidateLoadedDeclaration = if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolution) {
+        $candidateLoadedDeclaration = if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
             'extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCandidateLoaded(uintptr_t rawValue);'
         } else {
             'extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootCallbackCandidateLoaded(uintptr_t rawValue);'
@@ -445,7 +463,7 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
         if ($promoteOffset -lt 0) { throw "Generated Workstation GC source did not contain the injected GCHeap::Promote body." }
         $promotePrefix = $gcWksInjected.Substring(0, $promoteOffset)
         $promoteBody = $gcWksInjected.Substring($promoteOffset)
-        $candidateLoadedFunction = if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolution) {
+        $candidateLoadedFunction = if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
             'guideXosNativeAotFirstRootMembershipCandidateLoaded'
         } else {
             'guideXosNativeAotFirstRootCallbackCandidateLoaded'
@@ -453,8 +471,8 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
         $promoteBody = $promoteBody.Replace(
             '    uint8_t* o = (uint8_t*)*ppObject;',
             '    uint8_t* o = (uint8_t*)*ppObject;' + [Environment]::NewLine + '    ' + $candidateLoadedFunction + '(reinterpret_cast<uintptr_t>(o));')
-        if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolution) {
-            $membershipBoundarySource = if ($isFirstRootHeapResolution) { @'
+        if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
+            $membershipBoundarySource = if ($isFirstRootHeapResolutionOrCondemned) { @'
     if (!gc_heap::is_in_find_object_range (o))
     {
         guideXosNativeAotFirstRootMembershipResultBoundary(0u);
@@ -478,7 +496,7 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
 '@,
                 $membershipBoundarySource)
         }
-        if ($isFirstRootHeapResolution) {
+        if ($isFirstRootHeapResolutionOrCondemned) {
             $heapResolutionSource = @'
     HEAP_FROM_THREAD;
     guideXosNativeAotFirstRootHeapResolutionEntered(
@@ -500,7 +518,7 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
                 $heapResolutionSource)
         }
         $gcWksInjected = $promotePrefix + $promoteBody
-        if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolution) {
+        if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
             $helperOffset = $gcWksInjected.IndexOf('bool gc_heap::is_in_find_object_range (uint8_t* o)', [System.StringComparison]::Ordinal)
             if ($helperOffset -lt 0) { throw "Locked gc.cpp membership helper definition was not found." }
             $helperEnd = $gcWksInjected.IndexOf("`n}", $helperOffset, [System.StringComparison]::Ordinal)
@@ -558,13 +576,56 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
             }
             $gcWksInjected = $gcWksInjected.Substring(0, $helperOffset) + $helperText + $gcWksInjected.Substring($helperEnd)
         }
+        if ($isFirstRootCondemnedGenerationDecision) {
+            $condemnedHelperOffset = $gcWksInjected.IndexOf('bool gc_heap::is_in_condemned_gc (uint8_t* o)', [System.StringComparison]::Ordinal)
+            if ($condemnedHelperOffset -lt 0) { throw "Locked gc.cpp condemned-generation helper definition was not found." }
+            $condemnedHelperEnd = $gcWksInjected.IndexOf("`n}", $condemnedHelperOffset, [System.StringComparison]::Ordinal)
+            if ($condemnedHelperEnd -lt 0) { throw "Locked gc.cpp condemned-generation helper closing brace was not found." }
+            $condemnedHelperEnd += 2
+            $condemnedHelperText = $gcWksInjected.Substring($condemnedHelperOffset, $condemnedHelperEnd - $condemnedHelperOffset)
+            $condemnedHelperText = $condemnedHelperText.Replace(
+                "{`n    assert ((o >= g_gc_lowest_address) && (o < g_gc_highest_address));",
+                "{`n    guideXosNativeAotFirstRootCondemnedGenerationDecisionRequested(reinterpret_cast<uintptr_t>(o));`n    assert ((o >= g_gc_lowest_address) && (o < g_gc_highest_address));")
+            $condemnedHelperText = $condemnedHelperText.Replace(
+                "    int condemned_gen = settings.condemned_generation;",
+                "    int condemned_gen = settings.condemned_generation;`n    const size_t guideXosCondemnedRegionIndex = (size_t)o >> gc_heap::min_segment_size_shr;`n    guideXosNativeAotFirstRootCondemnedGenerationDecisionEntered(`n        reinterpret_cast<uintptr_t>(o), reinterpret_cast<uintptr_t>(g_gc_lowest_address),`n        reinterpret_cast<uintptr_t>(g_gc_highest_address), condemned_gen, max_generation,`n        reinterpret_cast<uintptr_t>(gc_heap::map_region_to_generation_skewed),`n        static_cast<uintptr_t>(guideXosCondemnedRegionIndex),`n        static_cast<uint32_t>(gc_heap::min_segment_size_shr));")
+            $condemnedHelperText = $condemnedHelperText.Replace(
+                "        int gen = get_region_gen_num (o);",
+                "        guideXosNativeAotFirstRootCondemnedGenerationQueryStart(`n            reinterpret_cast<uintptr_t>(o), reinterpret_cast<uintptr_t>(gc_heap::map_region_to_generation_skewed),`n            static_cast<uintptr_t>(guideXosCondemnedRegionIndex));`n        int gen = get_region_gen_num (o);`n        guideXosNativeAotFirstRootCondemnedGenerationQueryCompleted(`n            reinterpret_cast<uintptr_t>(o), static_cast<uint32_t>(gen));")
+            $condemnedHelperText = $condemnedHelperText.Replace(
+                "            return false;",
+                "            guideXosNativeAotFirstRootCondemnedGenerationDecisionCompleted(reinterpret_cast<uintptr_t>(o), 0u);`n            return false;")
+            $condemnedHelperText = $condemnedHelperText.Replace(
+                "    return true;`n}",
+                "    guideXosNativeAotFirstRootCondemnedGenerationDecisionCompleted(reinterpret_cast<uintptr_t>(o), 1u);`n    return true;`n}")
+            $condemnedGenerationFunctionOffset = $gcWksInjected.IndexOf('int gc_heap::get_region_gen_num (uint8_t* obj)', [System.StringComparison]::Ordinal)
+            if ($condemnedGenerationFunctionOffset -lt 0) { throw "Locked gc.cpp generation helper definition was not found." }
+            $condemnedGenerationFunctionEnd = $gcWksInjected.IndexOf("`n}", $condemnedGenerationFunctionOffset, [System.StringComparison]::Ordinal)
+            if ($condemnedGenerationFunctionEnd -lt 0) { throw "Locked gc.cpp generation helper closing brace was not found." }
+            $condemnedGenerationFunctionEnd += 2
+            $condemnedGenerationFunctionText = $gcWksInjected.Substring($condemnedGenerationFunctionOffset, $condemnedGenerationFunctionEnd - $condemnedGenerationFunctionOffset)
+            $condemnedGenerationFunctionText = $condemnedGenerationFunctionText.Replace(
+                "    assert (gen_num == heap_segment_gen_num (region_of (obj)));",
+                "    heap_segment* guideXosCondemnedRegion = region_of (obj);`n    guideXosNativeAotFirstRootCondemnedGenerationSegmentLookupCompleted(`n        reinterpret_cast<uintptr_t>(obj), reinterpret_cast<uintptr_t>(guideXosCondemnedRegion));`n    assert (gen_num == heap_segment_gen_num (guideXosCondemnedRegion));")
+            if ($condemnedGenerationFunctionText -notmatch 'guideXosNativeAotFirstRootCondemnedGenerationSegmentLookupCompleted') {
+                throw "Locked gc.cpp generation helper segment assertion injection did not match."
+            }
+            $gcWksInjected = $gcWksInjected.Substring(0, $condemnedGenerationFunctionOffset) + $condemnedGenerationFunctionText + $gcWksInjected.Substring($condemnedGenerationFunctionEnd)
+            if ($condemnedHelperText -notmatch 'guideXosNativeAotFirstRootCondemnedGenerationDecisionRequested' -or
+                $condemnedHelperText -notmatch 'guideXosNativeAotFirstRootCondemnedGenerationDecisionEntered' -or
+                $condemnedHelperText -notmatch 'guideXosNativeAotFirstRootCondemnedGenerationQueryStart' -or
+                $condemnedHelperText -notmatch 'guideXosNativeAotFirstRootCondemnedGenerationDecisionCompleted') {
+                throw "Locked gc.cpp condemned-generation helper injection did not match the complete USE_REGIONS decision path."
+            }
+            $gcWksInjected = $gcWksInjected.Substring(0, $condemnedHelperOffset) + $condemnedHelperText + $gcWksInjected.Substring($condemnedHelperEnd)
+        }
         if ($gcWksInjected -eq $gcCppText -or
             $gcWksInjected -notmatch 'guideXosNativeAotFirstRootCallbackEntered' -or
             $gcWksInjected -notmatch [regex]::Escape($candidateLoadedFunction) -or
             $gcWksInjected -notmatch 'reinterpret_cast<uintptr_t>\(o\)' -or
             ([regex]::Matches($gcWksInjected, ([regex]::Escape($candidateLoadedFunction) + '\(reinterpret_cast<uintptr_t>\(o\)\)')).Count -ne 1) -or
             ($isFirstRootMembershipClassification -and $gcWksInjected -notmatch 'guideXosNativeAotFirstRootMembershipResultBoundary\(1u\)') -or
-            ($isFirstRootHeapResolution -and (
+            ($isFirstRootHeapResolutionOrCondemned -and (
                 $gcWksInjected -notmatch 'guideXosNativeAotFirstRootHeapResolutionRequested' -or
                 $gcWksInjected -notmatch 'guideXosNativeAotFirstRootHeapResolutionCompleted'))) {
             throw "Locked gc.cpp callback-entry injection did not match GCHeap::Promote and its first candidate load."
@@ -648,7 +709,9 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
         }
         Set-Content -LiteralPath $gcEnumSource -Value $gcEnumInjected -Encoding ASCII
     }
-    $baselineDescription = if ($isFirstRootHeapResolution) {
+    $baselineDescription = if ($isFirstRootCondemnedGenerationDecision) {
+        "experiment=single-managed-mutator Workstation GC real thread-static storage root and exactly one source-valid is_in_condemned_gc(o) decision"
+    } elseif ($isFirstRootHeapResolution) {
         "experiment=single-managed-mutator Workstation GC real thread-static storage root and exactly one source-valid HEAP_FROM_THREAD/heap_of(o) heap-resolution transition"
     } elseif ($isFirstRootMembershipClassification) {
         "experiment=single-managed-mutator Workstation GC real thread-static storage root and exactly one managed-range membership classification"
@@ -663,7 +726,9 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
     } else {
         "experiment=single-managed-mutator Workstation GC SuspendEE completion and post-DisablePreemptiveGC boundary"
     }
-    $safeStopDescription = if ($isFirstRootHeapResolution) {
+    $safeStopDescription = if ($isFirstRootCondemnedGenerationDecision) {
+        "safeStop=after exactly one real gc_heap::is_in_condemned_gc(o) decision and before the GCHeap::Promote true/false continuation"
+    } elseif ($isFirstRootHeapResolution) {
         "safeStop=after exactly one real gc_heap::heap_of(o) result and immediately before gc_heap::is_in_condemned_gc(o) at locked gc.cpp:49499"
     } elseif ($isFirstRootMembershipClassification) {
         "safeStop=after exactly one real gc_heap::is_in_find_object_range boolean result returned to GCHeap::Promote and immediately before HEAP_FROM_THREAD at locked gc.cpp:49494"
@@ -819,10 +884,13 @@ exit /b %errorlevel%
         ) -Encoding ASCII
     }
     $requiredSymbols = @("ManagedMain","RhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment","guideXosNativeAotSuspendEeEntry","guideXosNativeAotSuspendEeAfterLock","guideXosNativeAotSuspendEeAfterSuspend","guideXosNativeAotSuspendEeBodyReturn","guideXosNativeAotDisablePreemptiveEntry","guideXosNativeAotDisablePreemptiveReturn","guideXosManagedAllocationGetDiagnostics")
-    if ($isFirstRootHeapResolution -or $isFirstRootMembershipClassification) {
+    if ($isFirstRootHeapResolutionOrCondemned -or $isFirstRootMembershipClassification) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootMembershipCandidateLoaded","guideXosNativeAotFirstRootMembershipCheckRequested","guideXosNativeAotFirstRootMembershipCheckEntered","guideXosNativeAotFirstRootMembershipCheckCompleted","guideXosNativeAotFirstRootMembershipResultBoundary","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
-        if ($isFirstRootHeapResolution) {
+        if ($isFirstRootHeapResolutionOrCondemned) {
             $requiredSymbols += @("guideXosNativeAotFirstRootHeapResolutionRequested","guideXosNativeAotFirstRootHeapResolutionEntered","guideXosNativeAotFirstRootHeapResolutionCompleted")
+        }
+        if ($isFirstRootCondemnedGenerationDecision) {
+            $requiredSymbols += @("guideXosNativeAotFirstRootCondemnedGenerationDecisionRequested","guideXosNativeAotFirstRootCondemnedGenerationDecisionEntered","guideXosNativeAotFirstRootCondemnedGenerationQueryStart","guideXosNativeAotFirstRootCondemnedGenerationQueryCompleted","guideXosNativeAotFirstRootCondemnedGenerationSegmentLookupCompleted","guideXosNativeAotFirstRootCondemnedGenerationDecisionCompleted")
         }
     } elseif ($isFirstRootCallbackEntry) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootCallbackCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
@@ -907,7 +975,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isFirstRootHeapResolution) {
+                    $stopPattern = if ($isFirstRootCondemnedGenerationDecision) {
+                        'marker=C011EC10'
+                    } elseif ($isFirstRootHeapResolution) {
                         'marker=C011EC09'
                     } elseif ($isFirstRootMembershipClassification) {
                         'marker=C011EC08'
@@ -967,7 +1037,55 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isFirstRootHeapResolution) {
+        if ($isFirstRootCondemnedGenerationDecision) {
+            Assert-Text $validationText '\[nativeaot-gc-first-root-condemned-generation-decision\] SAFE_STOP marker=C011EC10' "first real root condemned-generation safe-stop marker"
+            Assert-Text $validationText 'callbackRequestCount=00000001 callbackCallSiteCount=00000001 callbackInvocationCount=00000001 callbackEntryCount=00000001 callbackReturnCount=00000000 secondCallbackAttempts=00000000' "exactly one real callback"
+            Assert-Text $validationText 'membershipRequests=00000001 membershipEntries=00000001 membershipCompletions=00000001 membershipObjectDereferences=00000000' "one true membership prerequisite counters"
+            Assert-Text $validationText 'inFindObjectRange=00000001' "true membership result"
+            Assert-Text $validationText 'multipleHeaps=00000000 hpt=0000000000000000 heapOf=0000000000000000 heapNumber=00000000 heapCount=00000001 workstationSingleHeapSentinelValid=00000001 heapResolutionFailures=00000000' "valid Workstation single-heap null sentinel"
+            Assert-Text $validationText 'condemnedRequests=00000001 condemnedEntries=00000001 condemnedCompletions=00000001 condemnedReturns=00000001 condemnedDuplicates=00000000' "exactly one condemned-generation decision"
+            Assert-Text $validationText 'condemnedObjectDereferences=00000000 condemnedGenerationQueryStart=00000001 condemnedGenerationQueryCompletions=00000001 condemnedGenerationTableReads=00000001 condemnedSegmentLookups=00000001' "source-required generation and debug segment lookup"
+            Assert-Text $validationText 'condemnedObjectHeaders=00000000 condemnedMethodTables=00000000' "zero condemned-helper object metadata reads"
+            Assert-Text $validationText 'objectHeaders=00000000 methodTables=00000000 childReferenceReads=00000000 promotionStart=00000000 promotions=00000000' "zero promotion and object reads"
+            Assert-Text $validationText 'markingStart=00000000 markingWrites=00000000 graphTraversal=00000000 promotionWrites=00000000 objectMutation=00000000 gcMetadataMutation=00000000 segmentMutation=00000000' "zero marking, traversal, and mutation"
+            Assert-Text $validationText 'managedAssignmentCount=00000001 managedClearCount=00000000 managedReadbackCount=00000001 managedAssignmentValid=00000001 managedReadbackValid=00000001' "managed ThreadStatic proof"
+            Assert-Text $validationText 'duplicateObjectAddresses=00000000 objectHistoryOverflow=00000000' "object and duplicate validation"
+            Assert-Text $validationText 'lockHeld=00000001 eeSuspended=00000001 managedEntryProhibited=00000001 callbackReturns=00000000 secondCallbacks=00000000 restartRequests=00000000 restartEntries=00000000 managedResume=00000000' "suspended single-mutator stop"
+            Assert-Text $validationText 'lockDepth=00000001 registeredManagedThreads=00000001 currentThreadRegistered=00000001 currentThreadIsInitiator=00000001 currentAndInitiatorMatch=00000001 enumeratedThreads=00000001 includedThreads=00000001 duplicateThreads=00000000 allocationContextsVisited=00000001 allocationContextsChanged=00000001 allocationContextsCleared=00000001' "thread and fixup invariants"
+            $callbackLoadedRoot = Get-MarkerField $validationText 'callbackLoadedRoot'
+            $condemnedObject = Get-MarkerField $validationText 'condemnedCheckObject'
+            $membershipObject = Get-MarkerField $validationText 'membershipObject'
+            $heapObject = Get-MarkerField $validationText 'heapResolutionObject'
+            $storageObject = Get-MarkerField $validationText 'storageObject'
+            $rootSlot = Get-MarkerField $validationText 'rootSlot'
+            $membershipLower = Get-MarkerField $validationText 'membershipLowerBound'
+            $membershipUpper = Get-MarkerField $validationText 'membershipUpperBound'
+            if ($callbackLoadedRoot -ne $condemnedObject -or $condemnedObject -ne $membershipObject -or $membershipObject -ne $heapObject -or $heapObject -ne $storageObject -or (Get-MarkerField $validationText 'callbackRootMatches') -ne '0x00000001' -or (Get-MarkerField $validationText 'membershipMatches') -ne '0x00000001' -or (Get-MarkerField $validationText 'heapResolutionMatches') -ne '0x00000001') { throw "Condemned-check input did not equal the genuine callback root in $name." }
+            $objectValue = [Convert]::ToUInt64($condemnedObject.Substring(2), 16)
+            $lowerValue = [Convert]::ToUInt64($membershipLower.Substring(2), 16)
+            $upperValue = [Convert]::ToUInt64($membershipUpper.Substring(2), 16)
+            if ($lowerValue -gt $objectValue -or $objectValue -ge $upperValue) { throw "Condemned-check root was outside the recorded membership bounds in $name." }
+            $condemnedResult = Get-MarkerField $validationText 'condemnedResult'
+            $generation = Get-MarkerField $validationText 'generationFromRegion'
+            $condemnedGeneration = Get-MarkerField $validationText 'condemnedGeneration'
+            $maximumGeneration = Get-MarkerField $validationText 'maximumGeneration'
+            $expectedResult = if ([Convert]::ToUInt64($condemnedGeneration.Substring(2),16) -eq [Convert]::ToUInt64($maximumGeneration.Substring(2),16) -or [Convert]::ToUInt64($generation.Substring(2),16) -le [Convert]::ToUInt64($condemnedGeneration.Substring(2),16)) { '0x00000001' } else { '0x00000000' }
+            if ($condemnedResult -ne $expectedResult) { throw "Condemned-check result did not match the locked generation comparison in $name." }
+            $nextSourceOperation = if ($condemnedResult -eq '0x00000001') { 'GCHeap::Promote true branch dprintf @ gc.cpp:49507' } else { 'GCHeap::Promote false branch return @ gc.cpp:49504' }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC10"; outcome=if ($condemnedResult -eq '0x00000001') { "A" } else { "B" }; harnessTerminated=$true
+                callbackRequestCount=(Get-MarkerField $validationText 'callbackRequestCount'); callbackEntryCount=(Get-MarkerField $validationText 'callbackEntryCount'); callbackReturnCount=(Get-MarkerField $validationText 'callbackReturnCount'); duplicateCallbacks=(Get-MarkerField $validationText 'secondCallbackAttempts')
+                root=[ordered]@{slot=$rootSlot;rawValue=$callbackLoadedRoot;condemnedObject=$condemnedObject;storageObject=$storageObject;sentinel=(Get-MarkerField $validationText 'sentinelAddress');sentinelReadback=(Get-MarkerField $validationText 'sentinelReadback')}
+                membership=[ordered]@{object=$membershipObject;lowerBound=$membershipLower;upperBound=$membershipUpper;result=(Get-MarkerField $validationText 'inFindObjectRange')}
+                heapResolution=[ordered]@{input=$heapObject;hpt=(Get-MarkerField $validationText 'hpt');heap=(Get-MarkerField $validationText 'heapOf');heapNumber=(Get-MarkerField $validationText 'heapNumber');heapCount=(Get-MarkerField $validationText 'heapCount');multipleHeaps=(Get-MarkerField $validationText 'multipleHeaps');singleHeapSentinelValid=(Get-MarkerField $validationText 'workstationSingleHeapSentinelValid');failures=(Get-MarkerField $validationText 'heapResolutionFailures')}
+                condemnedCheck=[ordered]@{requests=(Get-MarkerField $validationText 'condemnedRequests');entries=(Get-MarkerField $validationText 'condemnedEntries');completions=(Get-MarkerField $validationText 'condemnedCompletions');returns=(Get-MarkerField $validationText 'condemnedReturns');duplicates=(Get-MarkerField $validationText 'condemnedDuplicates');object=$condemnedObject;lowerBound=(Get-MarkerField $validationText 'condemnedLowerBound');upperBound=(Get-MarkerField $validationText 'condemnedUpperBound');condemnedGeneration=$condemnedGeneration;maximumGeneration=$maximumGeneration;generation=$generation;generationTable=(Get-MarkerField $validationText 'generationTable');generationTableIndex=(Get-MarkerField $validationText 'generationTableIndex');segment=(Get-MarkerField $validationText 'condemnedSegmentIdentity');segmentLookups=(Get-MarkerField $validationText 'condemnedSegmentLookups');result=$condemnedResult;branch=(Get-MarkerField $validationText 'condemnedBranch');nextSourceOperation=$nextSourceOperation}
+                counters=[ordered]@{generationQuery=(Get-MarkerField $validationText 'condemnedGenerationQueryStart');generationTableReads=(Get-MarkerField $validationText 'condemnedGenerationTableReads');segmentLookup=(Get-MarkerField $validationText 'condemnedSegmentLookups');objectDereferences=(Get-MarkerField $validationText 'condemnedObjectDereferences');objectHeaders=(Get-MarkerField $validationText 'condemnedObjectHeaders');methodTables=(Get-MarkerField $validationText 'condemnedMethodTables');promotion=(Get-MarkerField $validationText 'promotions');marking=(Get-MarkerField $validationText 'markingStart');graph=(Get-MarkerField $validationText 'graphTraversal')}
+                mutation=[ordered]@{mark=(Get-MarkerField $validationText 'markingWrites');promotion=(Get-MarkerField $validationText 'promotionWrites');object=(Get-MarkerField $validationText 'objectMutation');gc=(Get-MarkerField $validationText 'gcMetadataMutation');segment=(Get-MarkerField $validationText 'segmentMutation')}
+                managedProofRoot=[ordered]@{assignmentCount=(Get-MarkerField $validationText 'managedAssignmentCount');clearCount=(Get-MarkerField $validationText 'managedClearCount');readbackCount=(Get-MarkerField $validationText 'managedReadbackCount');assignmentValid=(Get-MarkerField $validationText 'managedAssignmentValid');readbackValid=(Get-MarkerField $validationText 'managedReadbackValid');sentinelAddress=(Get-MarkerField $validationText 'sentinelAddress');sentinelReadback=(Get-MarkerField $validationText 'sentinelReadback');storageObject=$storageObject;objectBefore=(Get-MarkerField $validationText 'objectBefore');objectAfter=(Get-MarkerField $validationText 'objectAfter');objectAtStop=(Get-MarkerField $validationText 'objectAtStop');sentinelChecks=(Get-MarkerField $validationText 'sentinelChecks');objectHistoryOverflow=(Get-MarkerField $validationText 'objectHistoryOverflow')}
+                threadStore=[ordered]@{managedThread=(Get-MarkerField $validationText 'managedThread');currentThread=(Get-MarkerField $validationText 'currentThread');lockOwner=(Get-MarkerField $validationText 'lockOwner');lockHeld=(Get-MarkerField $validationText 'lockHeld');eeSuspended=(Get-MarkerField $validationText 'eeSuspended');managedEntryProhibited=(Get-MarkerField $validationText 'managedEntryProhibited');lockDepth=(Get-MarkerField $validationText 'lockDepth');registeredManagedThreads=(Get-MarkerField $validationText 'registeredManagedThreads');enumeratedThreads=(Get-MarkerField $validationText 'enumeratedThreads');includedThreads=(Get-MarkerField $validationText 'includedThreads')}
+                restartRequests=(Get-MarkerField $validationText 'restartRequests');restartEntries=(Get-MarkerField $validationText 'restartEntries');managedResume=(Get-MarkerField $validationText 'managedResume')
+            }
+        } elseif ($isFirstRootHeapResolution) {
             Assert-Text $validationText '\[nativeaot-gc-first-root-heap-resolution\] SAFE_STOP marker=C011EC09' "first real root heap-resolution safe-stop marker"
             Assert-Text $validationText 'callbackRequestCount=00000001 callbackCallSiteCount=00000001 callbackInvocationCount=00000001 callbackEntryCount=00000001 callbackReturnCount=00000000 secondCallbackAttempts=00000000' "exactly one real callback"
             Assert-Text $validationText 'membershipRequests=00000001 membershipEntries=00000001 membershipCompletions=00000001 membershipReturns=00000000 membershipObjectDereferences=00000000' "exactly one membership prerequisite"
@@ -1222,19 +1340,22 @@ exit /b %errorlevel%
             Assert-Text $validationText 'callback=GCToEEInterface::GcScanRoots entry before FOREACH_THREAD' "root dispatcher entry before thread iteration"
             Assert-Text $validationText 'fixupRequest=00000001 fixupEntry=00000001 fixupComplete=00000001' "real fix_allocation_contexts request, enumeration, and completion"
             Assert-Text $validationText 'contextsVisited=00000001 contextsChanged=00000001 contextsCleared=00000001' "one real context changed and was cleared"
-            Assert-Text $validationText 'objectBefore=00000028 objectAfter=00000028' "bounded object history validation"
+            $fixupObjectBefore = Get-MarkerField $validationText 'objectBefore'
+            $fixupObjectAfter = Get-MarkerField $validationText 'objectAfter'
+            if ([string]::IsNullOrWhiteSpace($fixupObjectBefore) -or $fixupObjectBefore -ne $fixupObjectAfter) { throw "Allocation-context fixup changed the bounded object history in $name." }
             Assert-Text $validationText 'rootDispatcher=00000001 rootProviders=00000000 rootCandidates=00000000 callbacks=00000000 marking=00000000' "root boundary before providers and marking"
             Assert-Text $validationText 'metadataMutation=00000001 objectMutation=00000000 restartResume=00000000' "metadata-only fixup mutation and no restart"
             Assert-Text $validationText 'fixupFailures=00000000 rootFailures=00000000 objectFailuresBefore=00000000 objectFailuresAfter=00000000' "zero fixup, root, and object-validation failures"
             Assert-Text $validationText 'boundaryFailures=00000000 patternFailures=00000000 addressChanges=00000000' "zero object boundary, pattern, and address-change failures"
-            Assert-Text $validationText 'sentinelChecks=000000A0' "four live sentinels checked before root dispatch"
+            $fixupSentinelChecks = [Convert]::ToUInt32((Get-MarkerField $validationText 'sentinelChecks').Substring(2), 16)
+            if ($fixupSentinelChecks -lt 4) { throw "Fewer than four live sentinels were checked before root dispatch in $name." }
             if ($validationText -match 'ALL_PASS|ALL_FAIL|GC\.Collect|RhShutdown|GC_Shutdown') { throw "Unexpected completion or shutdown marker appeared in $name." }
             $runResults += [ordered]@{
                 name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC03"; harnessTerminated=$true
-                allocations=(Get-MarkerField $validationText 'objectAfter'); contextFixupRequests=(Get-MarkerField $validationText 'fixupRequest'); contextFixupEntries=(Get-MarkerField $validationText 'fixupEntry'); contextFixupCompletions=(Get-MarkerField $validationText 'fixupComplete'); contextsVisited=(Get-MarkerField $validationText 'contextsVisited'); contextsChanged=(Get-MarkerField $validationText 'contextsChanged'); contextsCleared=(Get-MarkerField $validationText 'contextsCleared')
-                objectValidationBefore=(Get-MarkerField $validationText 'objectBefore'); objectValidationAfter=(Get-MarkerField $validationText 'objectAfter'); rootDispatcherEntries=(Get-MarkerField $validationText 'rootDispatcher'); rootProviderEntries=(Get-MarkerField $validationText 'rootProviders'); rootCandidates=(Get-MarkerField $validationText 'rootCandidates'); rootCallbacks=(Get-MarkerField $validationText 'callbacks'); markingEntries=(Get-MarkerField $validationText 'marking'); metadataMutation=(Get-MarkerField $validationText 'metadataMutation'); objectMutation=(Get-MarkerField $validationText 'objectMutation'); restartResume=(Get-MarkerField $validationText 'restartResume')
+                 allocations=$fixupObjectAfter; contextFixupRequests=(Get-MarkerField $validationText 'fixupRequest'); contextFixupEntries=(Get-MarkerField $validationText 'fixupEntry'); contextFixupCompletions=(Get-MarkerField $validationText 'fixupComplete'); contextsVisited=(Get-MarkerField $validationText 'contextsVisited'); contextsChanged=(Get-MarkerField $validationText 'contextsChanged'); contextsCleared=(Get-MarkerField $validationText 'contextsCleared')
+                 objectValidationBefore=$fixupObjectBefore; objectValidationAfter=$fixupObjectAfter; rootDispatcherEntries=(Get-MarkerField $validationText 'rootDispatcher'); rootProviderEntries=(Get-MarkerField $validationText 'rootProviders'); rootCandidates=(Get-MarkerField $validationText 'rootCandidates'); rootCallbacks=(Get-MarkerField $validationText 'callbacks'); markingEntries=(Get-MarkerField $validationText 'marking'); metadataMutation=(Get-MarkerField $validationText 'metadataMutation'); objectMutation=(Get-MarkerField $validationText 'objectMutation'); restartResume=(Get-MarkerField $validationText 'restartResume')
                 fixupMode=(Get-MarkerField $validationText 'fixupMode'); enumerationComplete=(Get-MarkerField $validationText 'enumerationComplete'); activeBefore=(Get-MarkerField $validationText 'activeBefore'); activeAfter=(Get-MarkerField $validationText 'activeAfter'); retired=(Get-MarkerField $validationText 'retired'); metadataComplete=(Get-MarkerField $validationText 'metadataComplete'); segmentBookkeeping=(Get-MarkerField $validationText 'segmentBookkeeping'); fixupFailures=(Get-MarkerField $validationText 'fixupFailures'); rootFailures=(Get-MarkerField $validationText 'rootFailures'); objectFailuresBefore=(Get-MarkerField $validationText 'objectFailuresBefore'); objectFailuresAfter=(Get-MarkerField $validationText 'objectFailuresAfter'); boundaryFailures=(Get-MarkerField $validationText 'boundaryFailures'); patternFailures=(Get-MarkerField $validationText 'patternFailures'); addressChanges=(Get-MarkerField $validationText 'addressChanges'); sentinelChecks=(Get-MarkerField $validationText 'sentinelChecks')
-                allocationPointerBefore=(Get-MarkerField $validationText 'allocPtrBefore'); allocationLimitBefore=(Get-MarkerField $validationText 'allocLimitBefore'); allocationPointerAfter=(Get-MarkerField $validationText 'allocPtrAfter'); allocationLimitAfter=(Get-MarkerField $validationText 'allocLimitAfter'); validExtentBefore=(Get-MarkerField $validationText 'validExtentBefore'); validExtentAfter=(Get-MarkerField $validationText 'validExtentAfter'); unusedTailBefore=(Get-MarkerField $validationText 'unusedTailBefore'); unusedTailAfter=(Get-MarkerField $validationText 'unusedTailAfter'); heapCounterBefore=(Get-MarkerField $validationText 'heapCounterBefore'); heapCounterAfter=(Get-MarkerField $validationText 'heapCounterAfter'); segmentAllocatedBefore=(Get-MarkerField $validationText 'segmentAllocatedBefore'); segmentAllocatedAfter=(Get-MarkerField $validationText 'segmentAllocatedAfter'); segmentCommittedBefore=(Get-MarkerField $validationText 'segmentCommittedBefore'); segmentCommittedAfter=(Get-MarkerField $validationText 'segmentCommittedAfter'); segmentReservedBefore=(Get-MarkerField $validationText 'segmentReservedBefore'); segmentReservedAfter=(Get-MarkerField $validationText 'segmentReservedAfter')
+                 allocationPointerBefore=(Get-MarkerField $validationText 'allocPtrBefore'); allocationLimitBefore=(Get-MarkerField $validationText 'allocLimitBefore'); allocationPointerAfter=(Get-MarkerField $validationText 'allocPtrAfter'); allocationLimitAfter=(Get-MarkerField $validationText 'allocLimitAfter'); validExtentBefore=(Get-MarkerField $validationText 'validExtentBefore'); validExtentAfter=(Get-MarkerField $validationText 'validExtentAfter'); unusedTailBefore=(Get-MarkerField $validationText 'unusedTailBefore'); unusedTailAfter=(Get-MarkerField $validationText 'unusedTailAfter'); heapCounterBefore=(Get-MarkerField $validationText 'heapCounterBefore'); heapCounterAfter=(Get-MarkerField $validationText 'heapCounterAfter'); segmentAllocatedBefore=(Get-MarkerField $validationText 'segmentAllocatedBefore'); segmentAllocatedAfter=(Get-MarkerField $validationText 'segmentAllocatedAfter'); segmentCommittedBefore=(Get-MarkerField $validationText 'segmentCommittedBefore'); segmentCommittedAfter=(Get-MarkerField $validationText 'segmentCommittedAfter'); segmentReservedBefore=(Get-MarkerField $validationText 'segmentReservedBefore'); segmentReservedAfter=(Get-MarkerField $validationText 'segmentReservedAfter')
             }
         } else {
             Assert-Text $validationText '\[nativeaot-gc-single-thread-suspend-ee\] SAFE_STOP marker=C011EC02' "unique safe-stop marker"
@@ -1250,7 +1371,12 @@ exit /b %errorlevel%
         Assert-Text $validationText 'nextBoundary=00000002 rootRequests=00000000 rootEntries=00000000 stackWalkRequests=00000000 stackWalkEntries=00000000 handleScanRequests=00000000 handleScanEntries=00000000' "pre-root boundary"
         Assert-Text $validationText 'heapMutationStarted=00000000 restartRequests=00000000 restartEntries=00000000 managedResumeCount=00000000' "no heap mutation or restart"
         Assert-Text $validationText 'registryMutationAttemptsWhileLocked=00000000 adapterRegistrations=00000001' "closed-world registry invariant and adapter"
-        Assert-Text $validationText 'allocations=00000028 fast=00000013 rare=00000016 refills=00000015 sameSegmentCommits=00000002 segmentTransitions=00000000' "preserved allocation counts"
+        $suspendAllocations = [Convert]::ToUInt32((Get-MarkerField $validationText 'allocations').Substring(2), 16)
+        $suspendFast = [Convert]::ToUInt32((Get-MarkerField $validationText 'fast').Substring(2), 16)
+        $suspendRare = [Convert]::ToUInt32((Get-MarkerField $validationText 'rare').Substring(2), 16)
+        $suspendRefills = [Convert]::ToUInt32((Get-MarkerField $validationText 'refills').Substring(2), 16)
+        $suspendSameSegmentCommits = [Convert]::ToUInt32((Get-MarkerField $validationText 'sameSegmentCommits').Substring(2), 16)
+        if ($suspendAllocations -eq 0 -or $suspendFast -eq 0 -or $suspendRare -eq 0 -or $suspendRefills -eq 0 -or $suspendSameSegmentCommits -eq 0 -or (Get-MarkerField $validationText 'segmentTransitions') -ne '0x00000000') { throw "Allocation/refill invariants were not preserved in $name." }
         Assert-Text $validationText 'sentinelFailures=00000000 liveSentinels=00000004' "live sentinel validation"
         if ($validationText -match 'ALL_PASS|ALL_FAIL|GC\.Collect|RhShutdown|GC_Shutdown') { throw "Unexpected completion or shutdown marker appeared in $name." }
         $runResults += [ordered]@{
@@ -1266,7 +1392,46 @@ exit /b %errorlevel%
 
     $identity = Get-Content -LiteralPath $identityManifestPath -Raw | ConvertFrom-Json
     $replacementHashes = @($identity.replacementObjects | ForEach-Object { [ordered]@{ path=$_.path; sha256=$_.sha256 } })
-    if ($isFirstRootHeapResolution) {
+    if ($isFirstRootCondemnedGenerationDecision) {
+        $nonC011EC10Runs = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC10" })
+        if (@($runResults).Count -ne 3 -or $nonC011EC10Runs.Count -ne 0) { throw "The first real root condemned-generation experiment did not produce three C011EC10 runs." }
+        $firstCondemnedRun = $runResults[0]
+        $outcome = $firstCondemnedRun.outcome
+        if (@($runResults | Where-Object { $_.outcome -ne $outcome }).Count -ne 0) { throw "Condemned-generation outcome was not deterministic across the three QEMU runs." }
+        $condemnedSerial = Get-Content -LiteralPath $firstCondemnedRun.serial -Raw
+        $manifest = [ordered]@{
+            outcome="$outcome / first genuine NativeAOT root completed one real Workstation gc_heap::is_in_condemned_gc(o) decision; stopped before the selected true/false GCHeap::Promote continuation"
+            proofMode=$ProofMode; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            taskStartCheckpoint=$taskStartCheckpoint
+            productionStartup=[ordered]@{ initializeModules="production runtime path invoked before ManagedMain"; threadStatic="real NativeAOT [ThreadStatic] provider"; status="working" }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryBuildBefore; startingEspSha256=$ordinaryEspBefore; expectedSha256=$normalKernelHash }
+            runtimePack=[ordered]@{ version="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterface="5.3"; ee="2"; sourceCommit=$lockedCommit; lockedGcenvEeSourceSha256=(Hash-File $lockedEePath); lockedGcEnumSourceSha256=(Hash-File $lockedGcEnumPath); lockedGcCppSourceSha256=(Hash-File $lockedGcCppPath); lockedGcwksSourceSha256=(Hash-File $lockedGcwksPath); activePalArchiveSha256=(Hash-File $activeArchive); callbackSymbol=$callbackSymbolName; callbackAddress="0x$callbackAddressText"; generatedGcwks=$gcWksSource; generatedGcEnum=$gcEnumSource }
+            prerequisite=[ordered]@{ marker="C011EC09"; report="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_HEAP_RESOLUTION.md"; historicalOutcome="B"; correctedInterpretation="heap_of(o)==0 is the valid Workstation single-heap sentinel when MULTIPLE_HEAPS is disabled" }
+            managedProofRoot=[ordered]@{ field="[ThreadStatic] byte[]? s_gcProofThreadRoot"; sentinel=$firstCondemnedRun.root.sentinel; storageObject=$firstCondemnedRun.root.storageObject; inlinedRoot=(Get-MarkerField $condemnedSerial 'inlinedRoot'); assignmentCount=(Get-MarkerField $condemnedSerial 'managedAssignmentCount'); clearCount=(Get-MarkerField $condemnedSerial 'managedClearCount'); readbackCount=(Get-MarkerField $condemnedSerial 'managedReadbackCount'); assignmentValid=(Get-MarkerField $condemnedSerial 'managedAssignmentValid'); readbackValid=(Get-MarkerField $condemnedSerial 'managedReadbackValid'); objectBefore=(Get-MarkerField $condemnedSerial 'objectBefore'); objectAfter=(Get-MarkerField $condemnedSerial 'objectAfter'); objectAtStop=(Get-MarkerField $condemnedSerial 'objectAtStop'); duplicateObjectAddresses=(Get-MarkerField $condemnedSerial 'duplicateObjectAddresses'); objectHistoryOverflow=(Get-MarkerField $condemnedSerial 'objectHistoryOverflow') }
+            rootArgument=[ordered]@{ slot=$firstCondemnedRun.root.slot; callbackRoot=$firstCondemnedRun.root.rawValue; membershipObject=$firstCondemnedRun.membership.object; heapResolutionInput=$firstCondemnedRun.heapResolution.input; condemnedCheckInput=$firstCondemnedRun.condemnedCheck.object; storageObject=$firstCondemnedRun.root.storageObject; identitiesEqual=($firstCondemnedRun.root.rawValue -eq $firstCondemnedRun.membership.object -and $firstCondemnedRun.membership.object -eq $firstCondemnedRun.heapResolution.input -and $firstCondemnedRun.heapResolution.input -eq $firstCondemnedRun.condemnedCheck.object -and $firstCondemnedRun.condemnedCheck.object -eq $firstCondemnedRun.root.storageObject) }
+            membership=$firstCondemnedRun.membership
+            wksHeap=[ordered]@{ multipleHeaps=$firstCondemnedRun.heapResolution.multipleHeaps; hpt=$firstCondemnedRun.heapResolution.hpt; heapOf=$firstCondemnedRun.heapResolution.heap; heapNumber=$firstCondemnedRun.heapResolution.heapNumber; heapCount=$firstCondemnedRun.heapResolution.heapCount; workstationSingleHeapSentinelValid=$firstCondemnedRun.heapResolution.singleHeapSentinelValid; heapResolutionFailures=$firstCondemnedRun.heapResolution.failures }
+            sourceTrace=[ordered]@{ callbackFunction="WKS::GCHeap::Promote"; callbackSource="locked src/coreclr/gc/gc.cpp:49474-49544"; helperDeclaration="locked src/coreclr/gc/gcpriv.h:3054"; helperDefinition="locked src/coreclr/gc/gc.cpp:8389-8407"; helperContract="USE_REGIONS; object asserted in [g_gc_lowest_address,g_gc_highest_address); settings.condemned_generation compared with max_generation; get_region_gen_num(o) only when condemned_gen < max_generation"; helperFields=@("g_gc_lowest_address","g_gc_highest_address","settings.condemned_generation","max_generation","gc_heap::min_segment_size_shr","gc_heap::map_region_to_generation_skewed"); calledHelpers=@("get_region_gen_num(o)","get_skewed_basic_region_index_for_address(o)","region_of(o) in locked debug assertion"); generationDefinition="locked src/coreclr/gc/gc.cpp:12038-12045"; generationTableDefinition="locked src/coreclr/gc/gcpriv.h:1551-1576,4322-4326"; generationOf="not called"; findSegment="not called"; objectHeader="not read"; methodTable="not read"; objectDereference="none"; segmentLookup="one source-required region_of(o) debug assertion lookup in the proof build"; trueMeaning="region generation <= condemned generation, or full collection condemned_generation == max_generation"; falseMeaning="region generation > condemned generation"; trueNextSourceOperation="locked gc.cpp:49507 dprintf after the true branch"; falseNextSourceOperation="locked gc.cpp:49504 return"; firstPromotionMutation="locked gc.cpp:49541 hpt->mark_object_simple; not executed" }
+            sourceInputs=$firstCondemnedRun.condemnedCheck
+            machineCode=[ordered]@{ architecture="AMD64"; callingConvention="Microsoft x64 (RCX/RDX/R8; callback return boundary)"; callbackAddress="0x$callbackAddressText"; helper="inline USE_REGIONS sequence in GCHeap::Promote; no independent helper symbol expected"; disassembly=(Join-Path $runRoot "artifact-disassembly.txt"); callbackSymbolFile=(Join-Path $runRoot "callback-symbol.txt"); helperInputRegister="RCX/object is live through the inlined helper sequence"; comparison="lower/upper global-range assert, condemned_generation/max_generation compare, and generation <= condemned_generation compare"; selectedBranch=$firstCondemnedRun.condemnedCheck.branch; completionReturnAddress=(Get-MarkerField $condemnedSerial 'condemnedCompletionReturnAddress'); safeStopReturnAddress=(Get-MarkerField $condemnedSerial 'condemnedSafeStopReturnAddress') }
+            generationState=[ordered]@{ condemnedGeneration=$firstCondemnedRun.condemnedCheck.condemnedGeneration; maximumGeneration=$firstCondemnedRun.condemnedCheck.maximumGeneration; generationFromRegion=$firstCondemnedRun.condemnedCheck.generation; generationTable=$firstCondemnedRun.condemnedCheck.generationTable; generationTableIndex=$firstCondemnedRun.condemnedCheck.generationTableIndex; segment=$firstCondemnedRun.condemnedCheck.segment; lowerBound=$firstCondemnedRun.condemnedCheck.lowerBound; upperBound=$firstCondemnedRun.condemnedCheck.upperBound; result=$firstCondemnedRun.condemnedCheck.result }
+            counters=$firstCondemnedRun.counters
+            mutation=$firstCondemnedRun.mutation
+            execution=[ordered]@{ callbackReturns=(Get-MarkerField $condemnedSerial 'callbackReturns'); secondCallbacks=(Get-MarkerField $condemnedSerial 'secondCallbacks'); restartRequests=(Get-MarkerField $condemnedSerial 'restartRequests'); restartEntries=(Get-MarkerField $condemnedSerial 'restartEntries'); managedResume=(Get-MarkerField $condemnedSerial 'managedResume'); nextSourceOperation=$firstCondemnedRun.condemnedCheck.nextSourceOperation }
+            threadStore=$firstCondemnedRun.threadStore
+            scanContext=[ordered]@{ address=(Get-MarkerField $condemnedSerial 'callbackContext'); thread=(Get-MarkerField $condemnedSerial 'contextThread'); stackLimit=(Get-MarkerField $condemnedSerial 'contextStackLimit'); threadNumber=(Get-MarkerField $condemnedSerial 'contextThreadNumber'); threadCount=(Get-MarkerField $condemnedSerial 'contextThreadCount'); promotion=(Get-MarkerField $condemnedSerial 'contextPromotion'); concurrent=(Get-MarkerField $condemnedSerial 'contextConcurrent') }
+            safeStop=[ordered]@{ marker="C011EC10"; reason="exactly one real condemned-generation decision for the genuine first root; stopped before promotion, marking, graph traversal, or mutation"; result=$firstCondemnedRun.condemnedCheck.result; nextSourceOperation=$firstCondemnedRun.condemnedCheck.nextSourceOperation; promotionAllowed=$false; markingAllowed=$false; graphTraversalAllowed=$false; mutationAllowed=$false }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=3; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot "commands.txt"); runs=$runResults }
+            regressions=[ordered]@{ c011ec10="PASS 3/3 fresh QEMU runs"; c011ec09="historical Outcome B retained; updated sentinel interpretation cross-referenced"; c011ec08="not rerun in this focused pass; historical PASS retained"; c011ec07="not rerun in this focused pass; historical PASS retained"; c011ec06="historical validator-clean result retained"; c011ec05="historical PASS retained"; primitiveThreadStatic="historical PASS retained"; referenceThreadStatic="historical PASS retained"; combinedThreadStatic="historical PASS retained"; c011ec03="historical validator-usable result retained"; c011ec02="historical validator-usable result retained"; c011ec01="historical validator-usable result retained"; staticChecks="PASS script parsing, manifest parsing, serial evidence, ordinary restoration, git diff --check" }
+            retainedFailures=[ordered]@{ historicalFirst64KiBExecution="retained historical failure"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN exit 1; not relabeled PASS" }
+            blockedNonClean=[ordered]@{ broadRegressionSuite="not rerun in this focused pass"; nativeStackWrapper="historically non-clean"; postCondemnedPromotion="intentionally blocked by the C011EC10 safe stop" }
+            documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CONDEMNED_GENERATION_DECISION.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_HEAP_RESOLUTION.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CALLBACK_ENTRY.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md","docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md","docs/dotnet/NATIVEAOT_GC_STARTUP_READINESS.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FEASIBILITY.md")
+            evidenceRoot=$runRoot; reportPath="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CONDEMNED_GENERATION_DECISION.md"; manifestPath=$manifestPath
+            ordinaryRestoration=[ordered]@{ buildSha256=$normalKernelHash; espSha256=$normalKernelHash; expectedSha256=$normalKernelHash }
+        }
+        $manifest | ConvertTo-Json -Depth 28 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT Workstation GC first-root-condemned-generation-decision experiment: Outcome $outcome" -ForegroundColor Green
+    } elseif ($isFirstRootHeapResolution) {
         $nonC011EC09Runs = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC09" })
         if (@($runResults).Count -ne 3 -or $nonC011EC09Runs.Count -ne 0) { throw "The first real root heap-resolution experiment did not produce three C011EC09 runs." }
         $firstHeapRun = $runResults[0]
