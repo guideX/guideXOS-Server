@@ -919,7 +919,28 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t preMarkStressPinningBranchCompiled;
     uint32_t preMarkMarkStateReadCount;
     uint32_t preMarkMarkStateReadResult;
-    uint32_t reservedFirstRootPreMark[4];
+    uint32_t firstMarkHelperDuplicateEntryCount;
+    uint32_t firstMarkWorklistMetadataReadCount;
+    uint32_t firstMarkMutationAttemptCount;
+    uint32_t firstMarkMutationExecutionCount;
+    uint32_t secondMarkMutationAttemptCount;
+    uint32_t secondMarkMutationExecutionCount;
+    uint32_t firstMarkWorklistSlotWriteCount;
+    uint32_t firstMarkWorklistCursorWriteCount;
+    uint32_t firstMarkMarkBitWriteCount;
+    uint32_t firstMarkObjectHeaderWriteCount;
+    uint32_t firstMarkGcMetadataWriteCount;
+    uint32_t firstMarkSegmentWriteCount;
+    uint32_t firstMarkGraphTraversalStartCount;
+    uint32_t firstMarkChildReferenceReadCount;
+    uint32_t firstMarkChildObjectDiscoveredCount;
+    uint32_t firstMarkSecondObjectMarkAttemptCount;
+    uint32_t firstMarkLogicalMarkComplete;
+    uint32_t firstMarkTraversalScheduled;
+    uint32_t firstMarkSafeStopObserved;
+    uint32_t firstMarkSafeStopReason;
+    uint32_t firstMarkHelperReturnCount;
+    uint32_t reservedFirstRootPreMark[2];
 
     uintptr_t preMarkObjectInput;
     uintptr_t preMarkHeapSentinel;
@@ -930,6 +951,20 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t preMarkDebugValidationObject;
     uintptr_t preMarkFirstObjectMetadataReadAddress;
     uintptr_t preMarkMethodTableIdentity;
+    uintptr_t firstMarkHelperPo;
+    uintptr_t firstMarkHelperObject;
+    uintptr_t firstMarkWorklistTarget;
+    uintptr_t firstMarkWorklistOldValue;
+    uintptr_t firstMarkWorklistNewValue;
+    uintptr_t firstMarkWorklistQueueBase;
+    uintptr_t firstMarkWorklistSlotIndexBefore;
+    uintptr_t firstMarkWorklistCursorBefore;
+    uintptr_t firstMarkWorklistSlotIndexAfter;
+    uintptr_t firstMarkWorklistCursorAfter;
+    uintptr_t firstMarkWorklistCapacity;
+    uintptr_t firstMarkInstructionAddress;
+    uintptr_t firstMarkNextMutationInstructionAddress;
+    uintptr_t firstMarkSafeStopReturnAddress;
 
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
         GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
@@ -990,6 +1025,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F27_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP = 0xF27u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F28_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_SAFE_STOP = 0xF28u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F29_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP = 0xF29u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F30_FIRST_ROOT_FIRST_MARK_MUTATION_SAFE_STOP = 0xF30u,
 };
 
 enum {
@@ -1008,6 +1044,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP_MARKER = 0xC011EC09u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_SAFE_STOP_MARKER = 0xC011EC10u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC11u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_MARK_MUTATION_SAFE_STOP_MARKER = 0xC011EC12u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

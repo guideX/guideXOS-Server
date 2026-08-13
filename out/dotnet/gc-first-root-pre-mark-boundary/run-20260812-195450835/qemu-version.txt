@@ -1,0 +1,1 @@
+QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)
