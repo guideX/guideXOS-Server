@@ -884,6 +884,53 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t condemnedCheckCompletionReturnAddress;
     uintptr_t condemnedCheckSafeStopReturnAddress;
 
+    /* Proof-only first genuine-root condemned=true pre-mark boundary. */
+    uint32_t preMarkTrueBranchRequestCount;
+    uint32_t preMarkTrueBranchEntryCount;
+    uint32_t preMarkTrueBranchDuplicateCount;
+    uint32_t preMarkDprintfCompiled;
+    uint32_t preMarkDprintfRequestCount;
+    uint32_t preMarkDprintfEntryCount;
+    uint32_t preMarkDprintfReturnCount;
+    uint32_t preMarkRootFlagTestCount;
+    uint32_t preMarkInteriorFlagResult;
+    uint32_t preMarkPinnedFlagResult;
+    uint32_t preMarkConservativeCheckCount;
+    uint32_t preMarkConservativeGcEnabled;
+    uint32_t preMarkObjectIsFree;
+    uint32_t preMarkDebugValidationEntryCount;
+    uint32_t preMarkDebugValidationCompletionCount;
+    uint32_t preMarkDebugNoRangeChecks;
+    uint32_t preMarkDebugVerifyHeapGc;
+    uint32_t preMarkSmallHeapPointerResult;
+    uint32_t preMarkLargeHeapPointerResult;
+    uint32_t preMarkSegmentLookupCount;
+    uint32_t preMarkGcMetadataReadCount;
+    uint32_t preMarkObjectHeaderReadCount;
+    uint32_t preMarkMethodTableReadCount;
+    uint32_t preMarkBoundaryReached;
+    uint32_t preMarkMarkHelperCallAttemptCount;
+    uint32_t preMarkMarkHelperCallCount;
+    uint32_t preMarkSafeStopObserved;
+    uint32_t preMarkSafeStopReason;
+    uint32_t preMarkRootFlags;
+    uint32_t preMarkSourceDebugBranchCompiled;
+    uint32_t preMarkConservativeBranchCompiled;
+    uint32_t preMarkStressPinningBranchCompiled;
+    uint32_t preMarkMarkStateReadCount;
+    uint32_t preMarkMarkStateReadResult;
+    uint32_t reservedFirstRootPreMark[4];
+
+    uintptr_t preMarkObjectInput;
+    uintptr_t preMarkHeapSentinel;
+    uintptr_t preMarkMarkHelperAddress;
+    uintptr_t preMarkBoundaryReturnAddress;
+    uintptr_t preMarkMutationCallSiteAddress;
+    uintptr_t preMarkFirstMutationInstructionAddress;
+    uintptr_t preMarkDebugValidationObject;
+    uintptr_t preMarkFirstObjectMetadataReadAddress;
+    uintptr_t preMarkMethodTableIdentity;
+
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupBefore[
         GUIDEXOS_NATIVEAOT_MAX_ALLOCATION_CONTEXT_SNAPSHOTS];
     guidexos_nativeaot_allocation_context_snapshot allocationContextFixupAfter[
@@ -942,6 +989,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F26_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_SAFE_STOP = 0xF26u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F27_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP = 0xF27u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F28_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_SAFE_STOP = 0xF28u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F29_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP = 0xF29u,
 };
 
 enum {
@@ -959,6 +1007,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_SAFE_STOP_MARKER = 0xC011EC08u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_SAFE_STOP_MARKER = 0xC011EC09u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_SAFE_STOP_MARKER = 0xC011EC10u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC11u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

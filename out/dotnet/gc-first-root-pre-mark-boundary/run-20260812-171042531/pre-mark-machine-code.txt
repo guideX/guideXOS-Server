@@ -1,0 +1,6 @@
+markHelperSymbol=?mark_object_simple@gc_heap@WKS@@CAXPEAPEAE@Z
+markHelperAddress=0x0000000010049b60
+markCallSite=0x000000001002BB9A
+firstMutationInstruction=0x0000000010049B7D
+source=locked gc.cpp:27308-27335 queue_mark; MARK_PHASE_PREFETCH slot_table[slot_index]=o precedes marked(old_o)
+promoteSource=locked gc.cpp:49474-49544; boundary before gc.cpp:49541 mark_object_simple invocation

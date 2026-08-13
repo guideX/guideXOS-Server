@@ -3086,7 +3086,11 @@ guideXosNativeAotFirstRootCondemnedGenerationSegmentLookupCompleted(
     }
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION)
+extern "C" void __cdecl
+#else
 extern "C" [[noreturn]] void __cdecl
+#endif
 guideXosNativeAotFirstRootCondemnedGenerationDecisionCompleted(
     uintptr_t object, uint32_t result) {
     guidexos_nativeaot_allocation_diagnostics& diagnostics =
@@ -3118,8 +3122,444 @@ guideXosNativeAotFirstRootCondemnedGenerationDecisionCompleted(
         emitFirstRootCondemnedGenerationDecisionSafeStop();
         guideXosFailFast(9u);
     }
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION)
+    return;
+#else
     firstRootCondemnedGenerationDecisionSafeStop();
+#endif
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION)
+
+void emitFirstRootPreMarkBoundarySafeStop() {
+    const guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-first-root-pre-mark-boundary] SAFE_STOP marker=");
+    suspendEeSerialPutHex32(diagnostics.preMarkSafeStopReason);
+    suspendEeSerialPutString(" rootSlot=");
+    suspendEeSerialPutHex64(diagnostics.callbackRootSlot);
+    suspendEeSerialPutString(" rawRoot=");
+    suspendEeSerialPutHex64(diagnostics.callbackRootSlotLoadedValue);
+    suspendEeSerialPutString(" storageObject=");
+    suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticStorageObjectAddress);
+    suspendEeSerialPutString(" sentinel=");
+    suspendEeSerialPutHex64(diagnostics.threadStaticProofSentinelAddress);
+    suspendEeSerialPutString(" membership=");
+    suspendEeSerialPutHex32(diagnostics.membershipResult);
+    suspendEeSerialPutString(" wksMultipleHeaps=");
+    suspendEeSerialPutHex32(diagnostics.workstationMultipleHeapsEnabled);
+    suspendEeSerialPutString(" hpt=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionThreadHeap);
+    suspendEeSerialPutString(" heapOf=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionHeapIdentity);
+    suspendEeSerialPutString(" heapNumber=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionHeapNumber);
+    suspendEeSerialPutString(" heapCount=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionTotalHeapCount);
+    suspendEeSerialPutString(" wksNullHeapValid=");
+    suspendEeSerialPutHex32(diagnostics.workstationSingleHeapSentinelValid);
+    suspendEeSerialPutString(" condemned=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckResult);
+    suspendEeSerialPutString(" condemnedGeneration=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckCondemnedGeneration);
+    suspendEeSerialPutString(" maximumGeneration=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckMaximumGeneration);
+    suspendEeSerialPutString(" generationFromRegion=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckGeneration);
+    suspendEeSerialPutString(" generationTableReads=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckGenerationTableReadCount);
+    suspendEeSerialPutString(" generationSegmentLookups=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckSegmentLookupCount);
+    suspendEeSerialPutString(" callbackContext=");
+    suspendEeSerialPutHex64(diagnostics.callbackContextAddress);
+    suspendEeSerialPutString(" contextFieldReads=");
+    suspendEeSerialPutHex32(diagnostics.callbackContextFieldReadCount);
+    suspendEeSerialPutString(" contextThread=");
+    suspendEeSerialPutHex64(diagnostics.callbackContextThreadUnderCrawl);
+    suspendEeSerialPutString(" contextStackLimit=");
+    suspendEeSerialPutHex64(diagnostics.callbackContextStackLimit);
+    suspendEeSerialPutString(" contextThreadNumber=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryScanContextFieldThreadNumberValue);
+    suspendEeSerialPutString(" contextThreadCount=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryScanContextFieldThreadCountValue);
+    suspendEeSerialPutString(" contextPromotion=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryPromotion);
+    suspendEeSerialPutString(" contextConcurrent=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryConcurrent);
+    suspendEeSerialPutString(" trueBranchRequests=");
+    suspendEeSerialPutHex32(diagnostics.preMarkTrueBranchRequestCount);
+    suspendEeSerialPutString(" trueBranchEntries=");
+    suspendEeSerialPutHex32(diagnostics.preMarkTrueBranchEntryCount);
+    suspendEeSerialPutString(" trueBranchDuplicates=");
+    suspendEeSerialPutHex32(diagnostics.preMarkTrueBranchDuplicateCount);
+    suspendEeSerialPutString(" dprintfCompiled=");
+    suspendEeSerialPutHex32(diagnostics.preMarkDprintfCompiled);
+    suspendEeSerialPutString(" dprintfRequests=");
+    suspendEeSerialPutHex32(diagnostics.preMarkDprintfRequestCount);
+    suspendEeSerialPutString(" dprintfEntries=");
+    suspendEeSerialPutHex32(diagnostics.preMarkDprintfEntryCount);
+    suspendEeSerialPutString(" dprintfReturns=");
+    suspendEeSerialPutHex32(diagnostics.preMarkDprintfReturnCount);
+    suspendEeSerialPutString(" rawFlags=");
+    suspendEeSerialPutHex32(diagnostics.preMarkRootFlags);
+    suspendEeSerialPutString(" flagTests=");
+    suspendEeSerialPutHex32(diagnostics.preMarkRootFlagTestCount);
+    suspendEeSerialPutString(" interiorFlag=");
+    suspendEeSerialPutHex32(diagnostics.preMarkInteriorFlagResult);
+    suspendEeSerialPutString(" pinnedFlag=");
+    suspendEeSerialPutHex32(diagnostics.preMarkPinnedFlagResult);
+    suspendEeSerialPutString(" conservativeChecks=");
+    suspendEeSerialPutHex32(diagnostics.preMarkConservativeCheckCount);
+    suspendEeSerialPutString(" conservativeGc=");
+    suspendEeSerialPutHex32(diagnostics.preMarkConservativeGcEnabled);
+    suspendEeSerialPutString(" objectIsFree=");
+    suspendEeSerialPutHex32(diagnostics.preMarkObjectIsFree);
+    suspendEeSerialPutString(" debugValidationEntries=");
+    suspendEeSerialPutHex32(diagnostics.preMarkDebugValidationEntryCount);
+    suspendEeSerialPutString(" debugValidationCompletions=");
+    suspendEeSerialPutHex32(diagnostics.preMarkDebugValidationCompletionCount);
+    suspendEeSerialPutString(" debugNoRangeChecks=");
+    suspendEeSerialPutHex32(diagnostics.preMarkDebugNoRangeChecks);
+    suspendEeSerialPutString(" debugVerifyHeapGc=");
+    suspendEeSerialPutHex32(diagnostics.preMarkDebugVerifyHeapGc);
+    suspendEeSerialPutString(" smallHeapPointer=");
+    suspendEeSerialPutHex32(diagnostics.preMarkSmallHeapPointerResult);
+    suspendEeSerialPutString(" largeHeapPointer=");
+    suspendEeSerialPutHex32(diagnostics.preMarkLargeHeapPointerResult);
+    suspendEeSerialPutString(" objectHeaders=");
+    suspendEeSerialPutHex32(diagnostics.preMarkObjectHeaderReadCount);
+    suspendEeSerialPutString(" methodTables=");
+    suspendEeSerialPutHex32(diagnostics.preMarkMethodTableReadCount);
+    suspendEeSerialPutString(" segmentReads=");
+    suspendEeSerialPutHex32(diagnostics.preMarkSegmentLookupCount);
+    suspendEeSerialPutString(" gcMetadataReads=");
+    suspendEeSerialPutHex32(diagnostics.preMarkGcMetadataReadCount);
+    suspendEeSerialPutString(" firstMetadataReadAddress=");
+    suspendEeSerialPutHex64(diagnostics.preMarkFirstObjectMetadataReadAddress);
+    suspendEeSerialPutString(" methodTable=");
+    suspendEeSerialPutHex64(diagnostics.preMarkMethodTableIdentity);
+    suspendEeSerialPutString(" markStateReads=");
+    suspendEeSerialPutHex32(diagnostics.preMarkMarkStateReadCount);
+    suspendEeSerialPutString(" markStateResult=");
+    suspendEeSerialPutHex32(diagnostics.preMarkMarkStateReadResult);
+    suspendEeSerialPutString(" markHelper=");
+    suspendEeSerialPutHex64(diagnostics.preMarkMarkHelperAddress);
+    suspendEeSerialPutString(" mutationCallSite=");
+    suspendEeSerialPutHex64(diagnostics.preMarkMutationCallSiteAddress);
+    suspendEeSerialPutString(" firstMutationInstruction=");
+    suspendEeSerialPutHex64(diagnostics.preMarkFirstMutationInstructionAddress);
+    suspendEeSerialPutString(" boundaryReturn=");
+    suspendEeSerialPutHex64(diagnostics.preMarkBoundaryReturnAddress);
+    suspendEeSerialPutString(" markCallAttempts=");
+    suspendEeSerialPutHex32(diagnostics.preMarkMarkHelperCallAttemptCount);
+    suspendEeSerialPutString(" markCalls=");
+    suspendEeSerialPutHex32(diagnostics.preMarkMarkHelperCallCount);
+    suspendEeSerialPutString(" promotionStart=");
+    suspendEeSerialPutHex32(diagnostics.callbackPromotionStartCount);
+    suspendEeSerialPutString(" promotions=");
+    suspendEeSerialPutHex32(diagnostics.callbackPromotionCount);
+    suspendEeSerialPutString(" promotionWrites=");
+    suspendEeSerialPutHex32(diagnostics.callbackPromotionStateWriteCount);
+    suspendEeSerialPutString(" markWrites=");
+    suspendEeSerialPutHex32(diagnostics.callbackMarkStateWriteCount);
+    suspendEeSerialPutString(" worklistWrites=00000000 graphTraversal=");
+    suspendEeSerialPutHex32(diagnostics.callbackGraphTraversalCount);
+    suspendEeSerialPutString(" childReferenceReads=00000000 objectMutation=");
+    suspendEeSerialPutHex32(diagnostics.callbackObjectMemoryMutationCount);
+    suspendEeSerialPutString(" objectHeaderWrites=00000000 gcMetadataMutation=");
+    suspendEeSerialPutHex32(diagnostics.callbackGcMetadataMutationCount);
+    suspendEeSerialPutString(" segmentMutation=");
+    suspendEeSerialPutHex32(diagnostics.callbackSegmentMetadataMutationCount);
+    suspendEeSerialPutString(" relocationWrites=00000000 callbackReturns=");
+    suspendEeSerialPutHex32(diagnostics.callbackReturnCount);
+    suspendEeSerialPutString(" secondCallbacks=");
+    suspendEeSerialPutHex32(diagnostics.duplicateCallbackInvocationCount);
+    suspendEeSerialPutString(" restart=");
+    suspendEeSerialPutHex32(diagnostics.restartRequestCount + diagnostics.restartEntryCount);
+    suspendEeSerialPutString(" resume=");
+    suspendEeSerialPutHex32(diagnostics.managedResumeCount);
+    suspendEeSerialPutString(" managedThread=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryManagedThread);
+    suspendEeSerialPutString(" currentThread=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryCurrentThread);
+    suspendEeSerialPutString(" enumeratedThread=");
+    suspendEeSerialPutHex64(diagnostics.rootEnumeratedThreadIdentity);
+    suspendEeSerialPutString(" lockOwner=");
+    suspendEeSerialPutHex64(diagnostics.callbackEntryLockOwner);
+    suspendEeSerialPutString(" lockHeld=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryThreadStoreLockHeld);
+    suspendEeSerialPutString(" eeSuspended=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryEeSuspended);
+    suspendEeSerialPutString(" managedEntryProhibited=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryManagedEntryProhibited);
+    suspendEeSerialPutString(" registeredThreads=");
+    suspendEeSerialPutHex32(diagnostics.registeredManagedThreadCount);
+    suspendEeSerialPutString(" enumeratedThreads=");
+    suspendEeSerialPutHex32(diagnostics.enumeratedThreadCount);
+    suspendEeSerialPutString(" includedThreads=");
+    suspendEeSerialPutHex32(diagnostics.includedThreadCount);
+    suspendEeSerialPutString(" registryMutation=");
+    suspendEeSerialPutHex32(diagnostics.threadRegistryMutationCountAfterRoot);
+    suspendEeSerialPutString(" allocationContextsCleared=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsCleared);
+    suspendEeSerialPutString(" sentinelChecks=");
+    suspendEeSerialPutHex32(diagnostics.sentinelValidationCount);
+    suspendEeSerialPutString(" objectHistoryOverflow=");
+    suspendEeSerialPutHex32(diagnostics.objectHistoryOverflow);
+    suspendEeSerialPutString(" marker=C011EC11\n");
+}
+
+[[noreturn]] void firstRootPreMarkBoundarySafeStop(uintptr_t object,
+                                                   uintptr_t heapSentinel,
+                                                   uint32_t flags,
+                                                   uintptr_t markHelper,
+                                                   uintptr_t boundaryReturn) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkSafeStopObserved;
+    diagnostics.preMarkSafeStopReason =
+        GUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP_MARKER;
+    diagnostics.safeStopObserved = 1u;
+    diagnostics.stopReason = diagnostics.preMarkSafeStopReason;
+    diagnostics.stage =
+        GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F29_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP;
+    diagnostics.rootBoundaryFunction = reinterpret_cast<gx_uintptr>(
+        &firstRootPreMarkBoundarySafeStop);
+    diagnostics.preMarkObjectInput = object;
+    diagnostics.preMarkHeapSentinel = heapSentinel;
+    diagnostics.preMarkRootFlags = flags;
+    diagnostics.preMarkMarkHelperAddress = markHelper;
+    const uintptr_t actualBoundaryReturn = boundaryReturn;
+    diagnostics.preMarkBoundaryReturnAddress = actualBoundaryReturn;
+    /* The observer is emitted immediately before the retained out-of-line
+       mark_object_simple call.  In the locked AMD64 proof layout its call is
+       0x08 bytes after the observer's return address.  The script correlates
+       and verifies this exact address against the linked disassembly. */
+    diagnostics.preMarkMutationCallSiteAddress = actualBoundaryReturn + 0x08u;
+    /* MARK_PHASE_PREFETCH is active in this build: queue_mark first writes
+       slot_table[slot_index] before it performs its mark-state read. */
+    diagnostics.preMarkFirstMutationInstructionAddress = markHelper + 0x1Du;
+    validateAllocationContextFixupObjects(true);
+    diagnostics.candidateObjectValidationAtStopCount = diagnostics.objectHistoryCount;
+    const bool valid =
+        diagnostics.preMarkSafeStopObserved == 1u &&
+        diagnostics.preMarkTrueBranchRequestCount == 1u &&
+        diagnostics.preMarkTrueBranchEntryCount == 1u &&
+        diagnostics.preMarkTrueBranchDuplicateCount == 0u &&
+        diagnostics.membershipResult == 1u &&
+        diagnostics.workstationSingleHeapSentinelValid == 1u &&
+        diagnostics.condemnedCheckResult == 1u &&
+        diagnostics.preMarkRootFlags == 0u &&
+        diagnostics.preMarkRootFlagTestCount == 2u &&
+        diagnostics.preMarkInteriorFlagResult == 0u &&
+        diagnostics.preMarkPinnedFlagResult == 0u &&
+        diagnostics.preMarkConservativeCheckCount == 1u &&
+        diagnostics.preMarkObjectIsFree == 0u &&
+        diagnostics.preMarkDebugValidationEntryCount == 1u &&
+        diagnostics.preMarkDebugValidationCompletionCount == 1u &&
+        diagnostics.preMarkBoundaryReached == 1u &&
+        diagnostics.preMarkMarkHelperCallAttemptCount == 0u &&
+        diagnostics.preMarkMarkHelperCallCount == 0u &&
+        diagnostics.preMarkMarkStateReadCount == 0u &&
+        diagnostics.callbackPromotionStartCount == 0u &&
+        diagnostics.callbackPromotionCount == 0u &&
+        diagnostics.callbackMarkingStartCount == 0u &&
+        diagnostics.callbackMarkStateWriteCount == 0u &&
+        diagnostics.callbackPromotionStateWriteCount == 0u &&
+        diagnostics.callbackGraphTraversalCount == 0u &&
+        diagnostics.callbackObjectMemoryMutationCount == 0u &&
+        diagnostics.callbackGcMetadataMutationCount == 0u &&
+        diagnostics.callbackSegmentMetadataMutationCount == 0u &&
+        diagnostics.callbackReturnCount == 0u &&
+        diagnostics.duplicateCallbackInvocationCount == 0u &&
+        diagnostics.restartRequestCount == 0u &&
+        diagnostics.restartEntryCount == 0u &&
+        diagnostics.managedResumeCount == 0u &&
+        diagnostics.callbackContextFieldReadCount == 6u &&
+        diagnostics.callbackEntryThreadStoreLockHeld == 1u &&
+        diagnostics.callbackEntryEeSuspended == 1u &&
+        diagnostics.callbackEntryManagedEntryProhibited == 1u &&
+        diagnostics.objectHistoryOverflow == 0u;
+    if (!valid) {
+        diagnostics.preMarkSafeStopReason = 0xE100u;
+        emitFirstRootPreMarkBoundarySafeStop();
+        guideXosFailFast(9u);
+    }
+    emitFirstRootPreMarkBoundarySafeStop();
+    for (;;) {
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPreMarkTrueBranchEntered(
+    uintptr_t object, uintptr_t heapSentinel, uint32_t flags) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkTrueBranchRequestCount;
+    ++diagnostics.preMarkTrueBranchEntryCount;
+    if (diagnostics.preMarkTrueBranchEntryCount != 1u) {
+        ++diagnostics.preMarkTrueBranchDuplicateCount;
+    }
+    diagnostics.preMarkObjectInput = object;
+    diagnostics.preMarkHeapSentinel = heapSentinel;
+    diagnostics.preMarkRootFlags = flags;
+    diagnostics.preMarkDprintfCompiled = 0u;
+    diagnostics.preMarkSourceDebugBranchCompiled = 1u;
+    diagnostics.preMarkConservativeBranchCompiled = 1u;
+    diagnostics.preMarkStressPinningBranchCompiled = 0u;
+    if (object != diagnostics.callbackRootSlotLoadedValue ||
+        object != diagnostics.membershipObjectInput ||
+        object != diagnostics.heapResolutionObjectInput ||
+        diagnostics.condemnedCheckResult != 1u ||
+        diagnostics.workstationSingleHeapSentinelValid == 0u) {
+        diagnostics.preMarkSafeStopReason = 0xE101u;
+        emitFirstRootPreMarkBoundarySafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPreMarkRootFlagTest(uint32_t flags,
+                                              uint32_t bit,
+                                              uint32_t result) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkRootFlagTestCount;
+    if (bit == 0x1u) {
+        diagnostics.preMarkInteriorFlagResult = result;
+    } else if (bit == 0x2u) {
+        diagnostics.preMarkPinnedFlagResult = result;
+    }
+    if (flags != diagnostics.preMarkRootFlags ||
+        (bit != 0x1u && bit != 0x2u) ||
+        (result != 0u && (flags & bit) == 0u)) {
+        diagnostics.preMarkSafeStopReason = 0xE102u;
+        emitFirstRootPreMarkBoundarySafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPreMarkConservativeCheck(uintptr_t object,
+                                                   uint32_t enabled,
+                                                   uint32_t isFree) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkConservativeCheckCount;
+    diagnostics.preMarkConservativeGcEnabled = enabled;
+    diagnostics.preMarkObjectIsFree = isFree;
+    if (enabled != 0u) {
+        ++diagnostics.preMarkObjectHeaderReadCount;
+        ++diagnostics.preMarkMethodTableReadCount;
+        ++diagnostics.preMarkGcMetadataReadCount;
+        diagnostics.preMarkFirstObjectMetadataReadAddress = object;
+        ++diagnostics.callbackObjectHeaderReadCount;
+        ++diagnostics.callbackMethodTableReadCount;
+    }
+    validateAllocationContextFixupObjects(true);
+    if (object != diagnostics.preMarkObjectInput ||
+        diagnostics.preMarkConservativeCheckCount != 1u) {
+        diagnostics.preMarkSafeStopReason = 0xE103u;
+        emitFirstRootPreMarkBoundarySafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPreMarkDebugValidationEntered(uintptr_t object) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkDebugValidationEntryCount;
+    diagnostics.preMarkDebugValidationObject = object;
+    if (object != diagnostics.preMarkObjectInput ||
+        diagnostics.preMarkDebugValidationEntryCount != 1u) {
+        diagnostics.preMarkSafeStopReason = 0xE104u;
+        emitFirstRootPreMarkBoundarySafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPreMarkDebugValidationMethodTableRead(
+    uintptr_t object, uintptr_t methodTable) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkObjectHeaderReadCount;
+    ++diagnostics.preMarkMethodTableReadCount;
+    diagnostics.preMarkFirstObjectMetadataReadAddress =
+        diagnostics.preMarkFirstObjectMetadataReadAddress == 0u
+            ? object
+            : diagnostics.preMarkFirstObjectMetadataReadAddress;
+    diagnostics.preMarkMethodTableIdentity = methodTable;
+    ++diagnostics.callbackObjectHeaderReadCount;
+    ++diagnostics.callbackMethodTableReadCount;
+    validateAllocationContextFixupObjects(true);
+    if (object != diagnostics.preMarkObjectInput || methodTable == 0u) {
+        diagnostics.preMarkSafeStopReason = 0xE105u;
+        emitFirstRootPreMarkBoundarySafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPreMarkDebugValidationHeapPointer(
+    uintptr_t object, uint32_t smallOnly, uint32_t result) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkSegmentLookupCount;
+    ++diagnostics.preMarkGcMetadataReadCount;
+    if (smallOnly != 0u) {
+        diagnostics.preMarkSmallHeapPointerResult = result;
+    } else {
+        diagnostics.preMarkLargeHeapPointerResult = result;
+    }
+    validateAllocationContextFixupObjects(true);
+    if (object != diagnostics.preMarkObjectInput ||
+        diagnostics.preMarkSegmentLookupCount > 2u) {
+        diagnostics.preMarkSafeStopReason = 0xE106u;
+        emitFirstRootPreMarkBoundarySafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPreMarkDebugValidationCompleted(
+    uintptr_t object, uint32_t noRangeChecks, uint32_t verifyHeapGc,
+    uint32_t smallHeapPointer, uint32_t largeHeapPointer) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkDebugValidationCompletionCount;
+    diagnostics.preMarkDebugNoRangeChecks = noRangeChecks;
+    diagnostics.preMarkDebugVerifyHeapGc = verifyHeapGc;
+    diagnostics.preMarkSmallHeapPointerResult = smallHeapPointer;
+    diagnostics.preMarkLargeHeapPointerResult = largeHeapPointer;
+    validateAllocationContextFixupObjects(true);
+    if (object != diagnostics.preMarkObjectInput ||
+        diagnostics.preMarkDebugValidationCompletionCount != 1u) {
+        diagnostics.preMarkSafeStopReason = 0xE107u;
+        emitFirstRootPreMarkBoundarySafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPreMarkBoundaryReached(
+    uintptr_t object, uintptr_t heapSentinel, uint32_t flags,
+    uintptr_t markHelper) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.preMarkBoundaryReached;
+    diagnostics.preMarkObjectInput = object;
+    diagnostics.preMarkHeapSentinel = heapSentinel;
+    diagnostics.preMarkRootFlags = flags;
+    diagnostics.preMarkMarkHelperAddress = markHelper;
+    const uintptr_t boundaryReturn = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    firstRootPreMarkBoundarySafeStop(object, heapSentinel, flags, markHelper,
+                                     boundaryReturn);
+}
+
+#endif
 
 #endif
 
