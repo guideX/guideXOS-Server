@@ -3113,8 +3113,8 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		else if (lower == "relative") style.position = PositionMode::Relative;
 		else if (lower == "absolute") style.position = PositionMode::Absolute;
 		else if (lower == "fixed") style.position = PositionMode::Fixed;
+		else if (lower == "sticky") style.position = PositionMode::Sticky;
 		else {
-			if (lower == "sticky") ++diag.positionUnsupportedSticky;
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
@@ -4935,7 +4935,8 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		auto positionName = [](PositionMode mode) {
 			return mode == PositionMode::Relative ? "relative" :
 				mode == PositionMode::Absolute ? "absolute" :
-				mode == PositionMode::Fixed ? "fixed" : "static";
+				mode == PositionMode::Fixed ? "fixed" :
+				mode == PositionMode::Sticky ? "sticky" : "static";
 		};
 		oss << ",position=" << positionName(style.position)
 			<< ",top-specified=" << cssLengthEvidence(style.topValue)

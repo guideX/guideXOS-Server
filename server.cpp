@@ -1216,9 +1216,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_out_of_flow=") &&
         hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_shrink_to_fit=") &&
         hasPositiveCount(cssPhase3gReport, "Current Document.css_position_document_extent_extensions=") &&
-        contains(cssPhase3gReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported-diagnostic") &&
+        contains(cssPhase3gReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-supported-diagnostic") &&
         hasPositiveCount(cssPhase3gReport, "Current Document.css_position_fixed=") &&
-        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_unsupported_sticky=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_sticky=") &&
         contains(cssPhase3gReport, "Current Document.css_positioned_evidence=id=phase3g-"),
         "metrics=" + cssPhase3gMetric("Current Document.css_position_relative=") + ";" +
         cssPhase3gMetric("Current Document.css_position_absolute=") + ";" +
@@ -1458,9 +1458,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase5aReport, "Current Document.css_position_equal_z_source_orders=") &&
         hasPositiveCount(cssPhase5aReport, "Current Document.css_flex_absolute_excluded=") &&
         phase5aBothInsetEvidence && phase5aContainingBlockEvidence && phase5aStructuralChildEvidence && phase5aEqualOrderEvidence &&
-        contains(cssPhase5aReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported-diagnostic") &&
+        contains(cssPhase5aReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-supported-diagnostic") &&
         hasPositiveCount(cssPhase5aReport, "Current Document.css_position_fixed=") &&
-        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_unsupported_sticky=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_sticky=") &&
         contains(cssPhase5aReport, "Current Document.css_positioned_evidence=id=phase5a-"),
         "relative=" + cssPhase5aMetric("Current Document.css_position_relative=") + ";absolute=" +
         cssPhase5aMetric("Current Document.css_position_absolute=") + ";containing=" +
@@ -1538,12 +1538,13 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_hit_test_records=") &&
         hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_extent_exclusions=") &&
         hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_flex_exclusions=") &&
-        contains(cssPhase5bInitialReport, "Current Document.css_position_model=bounded-static-relative-absolute-fixed") &&
-        contains(cssPhase5bInitialReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported-diagnostic") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_model=bounded-static-relative-absolute-fixed-sticky") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-supported-diagnostic") &&
 		contains(cssPhase5bInitialReport, "Current Document.css_position_viewport_rect=24:70:872:528") &&
         contains(cssPhase5bInitialReport, "Current Document.css_position_fixed_coordinate_space=explicit-viewport-final-rect-no-scroll-translation") &&
         contains(cssPhase5bInitialReport, "Current Document.css_position_unsupported_fixed=0") &&
-        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_position_unsupported_sticky=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_position_sticky=") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_unsupported_sticky=0") &&
         contains(cssPhase5bInitialReport, "id=phase5b-fixed-link,") &&
         contains(cssPhase5bInitialReport, ",position=fixed,") &&
         contains(cssPhase5bInitialReport, ",coordinate-space=viewport,") &&
@@ -1649,6 +1650,110 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ";nestedHit=" + yesNo(phase6aNestedHit) + ";fixedInvariant=" + yesNo(phase6aFixedInvariant) +
         ";evidence=" + summarizeText(cssPhase6aHitReport.find("Current Document.css_scroll_evidence=") == std::string::npos
             ? std::string("missing") : cssPhase6aHitReport.substr(cssPhase6aHitReport.find("Current Document.css_scroll_evidence="), 2400), 2400));
+
+    bool cssPhase6bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase6b.html");
+    const std::string cssPhase6bInitialReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase6bEvidenceLine = [](const std::string& report, const std::string& id) {
+        const std::string prefix = "id=" + id + ",";
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return std::string();
+        const std::size_t end = report.find(';', pos);
+        return report.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    const int phase6bInitialOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const bool phase6bInitialHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(220);
+    const int phase6bThresholdOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const std::string cssPhase6bThresholdReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6bThresholdHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(420);
+    const bool phase6bAdditionalHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+    const int phase6bEndOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const std::string cssPhase6bEndReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6bEndHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(80);
+    const bool phase6bBackScrollHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const std::string cssPhase6bReleaseReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6bReleaseHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    const std::string phase6bInitialEvidence = cssPhase6bEvidenceLine(cssPhase6bInitialReport, "phase6b-doc-sticky");
+    const std::string phase6bThresholdEvidence = cssPhase6bEvidenceLine(cssPhase6bThresholdReport, "phase6b-doc-sticky");
+    const std::string phase6bEndEvidence = cssPhase6bEvidenceLine(cssPhase6bEndReport, "phase6b-doc-sticky");
+    const std::string phase6bReleaseEvidence = cssPhase6bEvidenceLine(cssPhase6bReleaseReport, "phase6b-doc-sticky");
+    const bool phase6bAutoSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6b-auto", 0, 100000);
+    const int phase6bAutoOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6b-auto");
+    const int phase6bAutoMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase6b-auto");
+    const std::string cssPhase6bLocalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6bNestedOuterSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6b-nested-outer", 0, 24);
+    const bool phase6bNestedInnerSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6b-nested-inner", 0, 100000);
+    const std::string cssPhase6bNestedReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const std::string phase6bFixedInitial = phase5bEvidenceLine(cssPhase6bInitialReport, "phase6b-fixed-descendant");
+    const std::string phase6bFixedEnd = phase5bEvidenceLine(cssPhase6bEndReport, "phase6b-fixed-descendant");
+    const bool phase6bFixedInvariant = !phase6bFixedInitial.empty() && phase6bFixedInitial == phase6bFixedEnd;
+    auto cssPhase6bMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase6bInitialReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase6bInitialReport.find('\n', pos);
+        return cssPhase6bInitialReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 6B sticky fixture loads",
+        cssPhase6bLoaded &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "CSS Phase 6B Sticky Positioning") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "document sticky top") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "sticky inside overflow:auto") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "nearest nested scrollport sticky") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "sticky flex item") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed descendant stays viewport-fixed"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 6B typed sticky diagnostics and geometry evidence",
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_position_sticky=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_element_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_root_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_local_scroll_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_horizontal_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_flex_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_positioned_descendant_count=") &&
+        contains(cssPhase6bInitialReport, "css_position_unsupported_sticky=0") &&
+        contains(cssPhase6bInitialReport, "css_position_sticky_model=normal-flow-base-rectangle-scrollport-inset-containing-end-constraint") &&
+        contains(cssPhase6bInitialReport, "id=phase6b-doc-sticky,position=sticky") &&
+        contains(cssPhase6bInitialReport, "normalY=") && contains(cssPhase6bInitialReport, "scrollportTop=") &&
+        contains(cssPhase6bInitialReport, "finalY=") && contains(cssPhase6bInitialReport, "containerEnd="),
+        "sticky=" + cssPhase6bMetric("Current Document.css_position_sticky=") + ";root=" +
+        cssPhase6bMetric("Current Document.css_sticky_root_count=") + ";local=" +
+        cssPhase6bMetric("Current Document.css_sticky_local_scroll_count=") + ";flex=" +
+        cssPhase6bMetric("Current Document.css_sticky_flex_count=") + ";evidence=" +
+        summarizeText(cssPhase6bMetric("Current Document.css_sticky_evidence="), 3200));
+    add("CSS phase 6B document sticky threshold, release, and hit testing",
+        phase6bInitialOffset == 0 && phase6bThresholdOffset > phase6bInitialOffset &&
+        phase6bEndOffset >= phase6bThresholdOffset && phase6bInitialHit && phase6bThresholdHit &&
+        phase6bAdditionalHit && !phase6bEndHit && phase6bBackScrollHit && phase6bReleaseHit &&
+        contains(phase6bInitialEvidence, "id=phase6b-doc-sticky,position=sticky") &&
+        contains(phase6bThresholdEvidence, ",stuck=yes") &&
+        contains(phase6bThresholdEvidence, ",final-screen-y=76,") &&
+        contains(phase6bEndEvidence, ",end-clamp=yes,") &&
+        contains(phase6bReleaseEvidence, ",stuck=no"),
+        std::string("hits=") + yesNo(phase6bInitialHit) + "/" + yesNo(phase6bThresholdHit) + "/" +
+        yesNo(phase6bAdditionalHit) + "/" + yesNo(phase6bEndHit) + "/" +
+        yesNo(phase6bBackScrollHit) + "/" + yesNo(phase6bReleaseHit) +
+        ";initial=" + phase6bInitialEvidence +
+        ";threshold=" + phase6bThresholdEvidence +
+        ";end=" + phase6bEndEvidence +
+        ";release=" + phase6bReleaseEvidence);
+    add("CSS phase 6B local and nested sticky scrollports",
+        phase6bAutoSet && phase6bAutoMax > 0 && phase6bAutoOffset == phase6bAutoMax &&
+        phase6bNestedOuterSet && phase6bNestedInnerSet &&
+        contains(cssPhase6bLocalReport, "id=phase6b-auto-sticky,position=sticky,scrollport=local") &&
+        contains(cssPhase6bNestedReport, "id=phase6b-nested-sticky,position=sticky,scrollport=local") &&
+        contains(cssPhase6bNestedReport, "css_nested_scroll_containers="),
+        "auto=" + std::to_string(phase6bAutoOffset) + "/" + std::to_string(phase6bAutoMax) +
+        ";nestedOuter=" + std::to_string(gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6b-nested-outer")) +
+        ";nestedInner=" + std::to_string(gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6b-nested-inner")) +
+        ";evidence=" + summarizeText(cssPhase6bMetric("Current Document.css_sticky_evidence="), 2600));
+    add("CSS phase 6B fixed descendant remains viewport invariant",
+        phase6bFixedInvariant && contains(cssPhase6bInitialReport, "id=phase6b-fixed-descendant,") &&
+        contains(cssPhase6bEndReport, "coordinate-space=viewport"),
+        "fixedInitial=" + phase6bFixedInitial + ";fixedEnd=" + phase6bFixedEnd);
 
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();

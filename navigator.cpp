@@ -789,6 +789,11 @@ namespace {
 		int normalY = 0;
 		int finalX = 0;
 		int finalY = 0;
+		// layoutFinal is the stable post-layout position before any scroll-aware
+		// sticky adjustment or sticky-ancestor translation.  It is never reused
+		// as the next sticky base rectangle.
+		int layoutFinalX = 0;
+		int layoutFinalY = 0;
 		int usedWidth = 0;
 		int usedHeight = 0;
 		int marginLeft = 0;
@@ -819,6 +824,17 @@ namespace {
 		bool blockified = false;
 		bool structuralOwner = false;
 		bool generatedOutOfFlowDescendant = false;
+		uint64_t stickyVerticalScrollContainerSerial = 0;
+		uint64_t stickyHorizontalScrollContainerSerial = 0;
+		int stickyVisualShiftX = 0;
+		int stickyVisualShiftY = 0;
+		int stickyScrollportX = 0;
+		int stickyScrollportY = 0;
+		int stickyScrollportW = 0;
+		int stickyScrollportH = 0;
+		int stickyContainerEnd = 0;
+		bool stickyConstrained = false;
+		bool stickyEndClamped = false;
 		bool complete = true;
 		bool clamped = false;
 		std::string incompleteReason;
@@ -1831,9 +1847,10 @@ namespace {
 	static const InlineFlowLayout* inlineFlowForAnchor(const WebDocument& doc, int blockIndex);
 	static bool blockUsesInlineFlow(const WebDocument& doc, int blockIndex);
 	static void ensureCssPositionLayout(const WebDocument& doc);
+	static void resolveCssStickyLayout(const WebDocument& doc, int scrollOffset);
 	static const CssPositionedRecord* cssPositionedRecordForBlock(const WebDocument& doc, int blockIndex);
 	static const CssPositionedRecord* cssPositionedRecordForSerial(const WebDocument& doc, uint64_t serial);
-	static void ensureCssScrollLayout(const WebDocument& doc);
+	static void ensureCssScrollLayout(const WebDocument& doc, int scrollOffset);
 	static const CssScrollContainerRecord* cssScrollContainerForSerial(const WebDocument& doc, uint64_t serial);
 	static int cssLocalScrollOffsetForSerial(const WebDocument& doc, uint64_t serial, bool horizontal);
 	static int cssLocalScrollOffsetForBlock(const WebDocument& doc, int blockIndex, bool horizontal);
@@ -2328,14 +2345,15 @@ namespace {
 	static void ensureCssMarginLayout(const WebDocument& doc);
 	static const WebStyle* computedStyleForSerial(const WebDocument& doc, uint64_t serial);
 
-	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc)
+	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc,
+		int scrollOffset)
 	{
 		ensureCssMarginLayout(doc);
 		ensureCssFlexLayout(doc);
 		ensureCssFloatLayout(doc);
 		ensureInlineLayout(doc);
 		ensureCssPositionLayout(doc);
-		ensureCssScrollLayout(doc);
+		ensureCssScrollLayout(doc, scrollOffset);
 		metadata.documentBlockCount = static_cast<int>(doc.blocks.size());
 		metadata.imageBlockCount = 0;
 		metadata.loadedImageCount = 0;
@@ -2609,8 +2627,19 @@ namespace {
 		metadata.cssPositionRelative = doc.cssDiagnostics.positionRelative;
 		metadata.cssPositionAbsolute = doc.cssDiagnostics.positionAbsolute;
 		metadata.cssPositionFixed = doc.cssDiagnostics.positionFixed;
+		metadata.cssPositionSticky = doc.cssDiagnostics.positionSticky;
 		metadata.cssPositionUnsupportedFixed = doc.cssDiagnostics.positionUnsupportedFixed;
 		metadata.cssPositionUnsupportedSticky = doc.cssDiagnostics.positionUnsupportedSticky;
+		metadata.cssStickyElementCount = doc.cssDiagnostics.stickyElementCount;
+		metadata.cssStickyRootCount = doc.cssDiagnostics.stickyRootCount;
+		metadata.cssStickyLocalScrollCount = doc.cssDiagnostics.stickyLocalScrollCount;
+		metadata.cssStickyConstrainedCount = doc.cssDiagnostics.stickyConstrainedCount;
+		metadata.cssStickyReleaseCount = doc.cssDiagnostics.stickyReleaseCount;
+		metadata.cssStickyHorizontalCount = doc.cssDiagnostics.stickyHorizontalCount;
+		metadata.cssStickyFlexCount = doc.cssDiagnostics.stickyFlexCount;
+		metadata.cssStickyPositionedDescendantCount = doc.cssDiagnostics.stickyPositionedDescendantCount;
+		metadata.cssStickyHyperlinkHitTestEvidence = doc.cssDiagnostics.stickyHyperlinkHitTestEvidence;
+		metadata.cssStickyEvidence = doc.cssDiagnostics.stickyEvidence;
 		metadata.cssRelativeOffsets = doc.cssDiagnostics.relativeOffsets;
 		metadata.cssRelativePercentageOffsets = doc.cssDiagnostics.relativePercentageOffsets;
 		metadata.cssAbsoluteBoxes = doc.cssDiagnostics.absoluteBoxes;
@@ -3160,6 +3189,17 @@ namespace {
 		metadata.cssPositionLifecycleResets = doc.cssDiagnostics.positionLifecycleResets;
 		metadata.cssPositionedEvidenceRecords = doc.cssDiagnostics.positionedEvidenceRecords;
 		metadata.cssPositionedEvidence = doc.cssDiagnostics.positionedEvidence;
+		metadata.cssPositionSticky = doc.cssDiagnostics.positionSticky;
+		metadata.cssStickyElementCount = doc.cssDiagnostics.stickyElementCount;
+		metadata.cssStickyRootCount = doc.cssDiagnostics.stickyRootCount;
+		metadata.cssStickyLocalScrollCount = doc.cssDiagnostics.stickyLocalScrollCount;
+		metadata.cssStickyConstrainedCount = doc.cssDiagnostics.stickyConstrainedCount;
+		metadata.cssStickyReleaseCount = doc.cssDiagnostics.stickyReleaseCount;
+		metadata.cssStickyHorizontalCount = doc.cssDiagnostics.stickyHorizontalCount;
+		metadata.cssStickyFlexCount = doc.cssDiagnostics.stickyFlexCount;
+		metadata.cssStickyPositionedDescendantCount = doc.cssDiagnostics.stickyPositionedDescendantCount;
+		metadata.cssStickyHyperlinkHitTestEvidence = doc.cssDiagnostics.stickyHyperlinkHitTestEvidence;
+		metadata.cssStickyEvidence = doc.cssDiagnostics.stickyEvidence;
 		metadata.cssInlineItems = static_cast<int>(std::min<size_t>(std::numeric_limits<int>::max(), inlineSnapshot.itemCount));
 		metadata.cssInlineTextRuns = inlineSnapshot.textRuns;
 		metadata.cssInlineWhitespaceRuns = inlineSnapshot.whitespaceRuns;
@@ -7780,6 +7820,11 @@ namespace {
 					deltaY = cssBoundedGeometryAdd(deltaY, record->finalY - record->normalY);
 					continue;
 				}
+				if (record && record->mode == PositionMode::Sticky) {
+					deltaX = cssBoundedCoordinateAdd(deltaX, record->stickyVisualShiftX);
+					deltaY = cssBoundedCoordinateAdd(deltaY, record->stickyVisualShiftY);
+					continue;
+				}
 				const WebStyle* style = cssStyleForSerial(doc, it->serial);
 				if (!style || style->position != PositionMode::Relative) continue;
 				for (const DocBlock& candidate : doc.blocks) {
@@ -7890,7 +7935,8 @@ namespace {
 		snapshot.documentExtent = s_cssMarginLayoutSnapshot.documentHeight;
 		snapshot.blockRecordIndices.assign(doc.blocks.size(), -1);
 		gxos::web::CssDiagnostics& diagnostics = const_cast<WebDocument&>(doc).cssDiagnostics;
-		diagnostics.positionStatic = diagnostics.positionRelative = diagnostics.positionAbsolute = diagnostics.positionFixed = 0;
+		diagnostics.positionStatic = diagnostics.positionRelative = diagnostics.positionAbsolute = diagnostics.positionFixed =
+			diagnostics.positionSticky = 0;
 		diagnostics.relativeOffsets = diagnostics.relativePercentageOffsets = 0;
 		diagnostics.absoluteBoxes = diagnostics.absoluteBlockifications = 0;
 		diagnostics.positionedContainingBlocks = diagnostics.positionRootFallbacks = 0;
@@ -7923,15 +7969,17 @@ namespace {
 			if (!computed.valid || computed.serial == 0 || !countedPositionSerials.insert(computed.serial).second) continue;
 			if (computed.style.position == PositionMode::Static) ++diagnostics.positionStatic;
 			else if (computed.style.position == PositionMode::Relative) ++diagnostics.positionRelative;
+			else if (computed.style.position == PositionMode::Absolute) ++diagnostics.positionAbsolute;
 			else if (computed.style.position == PositionMode::Fixed) ++diagnostics.positionFixed;
-			else ++diagnostics.positionAbsolute;
+			else if (computed.style.position == PositionMode::Sticky) ++diagnostics.positionSticky;
 		}
 		for (const DocBlock& block : doc.blocks) {
 			if (block.elementMetadata.serial != 0 && countedPositionSerials.count(block.elementMetadata.serial) != 0) continue;
 			if (block.style.position == PositionMode::Static) ++diagnostics.positionStatic;
 			else if (block.style.position == PositionMode::Relative) ++diagnostics.positionRelative;
+			else if (block.style.position == PositionMode::Absolute) ++diagnostics.positionAbsolute;
 			else if (block.style.position == PositionMode::Fixed) ++diagnostics.positionFixed;
-			else ++diagnostics.positionAbsolute;
+			else if (block.style.position == PositionMode::Sticky) ++diagnostics.positionSticky;
 		}
 		std::unordered_set<uint64_t> positionedBlockSerials;
 		positionedBlockSerials.reserve(std::min<size_t>(doc.blocks.size(), 256));
@@ -8087,13 +8135,15 @@ namespace {
 				containing.heightDefinite, unresolved, offsetClamped);
 			if (record.bottomResolved) record.resolvedBottom = cssPositionResolveLength(record.bottom, yBasis,
 				containing.heightDefinite, unresolved, offsetClamped);
-			if (record.mode == PositionMode::Relative) {
+			if (record.mode == PositionMode::Relative || record.mode == PositionMode::Sticky) {
 				bool primaryResolved = false;
 				bool opposingResolved = false;
-				record.relativeShiftX = cssPositionAxisOffset(record.left, record.right, xBasis,
-					containing.widthDefinite, primaryResolved, opposingResolved, unresolved, offsetClamped);
-				record.relativeShiftY = cssPositionAxisOffset(record.top, record.bottom, yBasis,
-					containing.heightDefinite, primaryResolved, opposingResolved, unresolved, offsetClamped);
+				if (record.mode == PositionMode::Relative) {
+					record.relativeShiftX = cssPositionAxisOffset(record.left, record.right, xBasis,
+						containing.widthDefinite, primaryResolved, opposingResolved, unresolved, offsetClamped);
+					record.relativeShiftY = cssPositionAxisOffset(record.top, record.bottom, yBasis,
+						containing.heightDefinite, primaryResolved, opposingResolved, unresolved, offsetClamped);
+				}
 				record.finalX = cssBoundedGeometryAdd(record.normalX, record.relativeShiftX);
 				record.finalY = cssBoundedGeometryAdd(record.normalY, record.relativeShiftY);
 				record.flowParticipation = true;
@@ -8117,6 +8167,8 @@ namespace {
 			} else if (record.mode == PositionMode::Fixed) {
 				++diagnostics.fixedViewportRecords;
 			}
+			record.layoutFinalX = record.finalX;
+			record.layoutFinalY = record.finalY;
 			if (record.zIndexAuto) { ++diagnostics.zIndexAuto; record.paintTier = 1; }
 			else if (record.zIndex < 0) { ++diagnostics.zIndexNegative; ++diagnostics.positionNegativeZRecords; record.paintTier = 0; }
 			else if (record.zIndex > 0) { ++diagnostics.zIndexPositive; ++diagnostics.positionPositiveZRecords; record.paintTier = 2; }
@@ -8205,7 +8257,7 @@ namespace {
 				record.marginTop - record.marginBottom);
 			if (record.usedHeight <= 0) record.usedHeight = std::max(1, cssPositionAutoContentHeight(block, doc, normalWidth) +
 				cssVerticalBoxEdges(block.style, block.type == BlockType::Preformatted));
-			if (record.mode == PositionMode::Relative) {
+			if (record.mode == PositionMode::Relative || record.mode == PositionMode::Sticky) {
 				const CssBlockGeometry normalGeometry = cssGeometryForBlock(doc, index);
 				record.normalX = normalGeometry.outerX;
 				record.normalY = normalGeometry.outerY;
@@ -8268,8 +8320,10 @@ namespace {
 					++diagnostics.positionStaticSnapshotFallbacks;
 				}
 			}
-			record.flowParticipation = record.mode == PositionMode::Relative && structuralOutOfFlowOwner == 0;
-			record.parentHeightContribution = record.mode == PositionMode::Relative && structuralOutOfFlowOwner == 0;
+			record.flowParticipation = (record.mode == PositionMode::Relative || record.mode == PositionMode::Sticky) &&
+				structuralOutOfFlowOwner == 0;
+			record.parentHeightContribution = (record.mode == PositionMode::Relative || record.mode == PositionMode::Sticky) &&
+				structuralOutOfFlowOwner == 0;
 			uint64_t containingSerial = 0;
 			CssPositionBox containing = cssPositionRootBox();
 			bool containingFallback = true;
@@ -8418,6 +8472,11 @@ namespace {
 					std::min(kCssPositionedGeometryCap, record.normalX + ancestorDeltaX + record.relativeShiftX));
 				record.finalY = std::max(-kCssPositionedGeometryCap,
 					std::min(kCssPositionedGeometryCap, record.normalY + ancestorDeltaY + record.relativeShiftY));
+			} else if (record.mode == PositionMode::Sticky) {
+				record.finalX = cssBoundedGeometryAdd(record.normalX, ancestorDeltaX);
+				record.finalY = cssBoundedGeometryAdd(record.normalY, ancestorDeltaY);
+				record.flowParticipation = structuralOutOfFlowOwner == 0;
+				record.parentHeightContribution = structuralOutOfFlowOwner == 0;
 			} else if (record.mode == PositionMode::Absolute || record.mode == PositionMode::Fixed) {
 				record.flowParticipation = false;
 				record.parentHeightContribution = false;
@@ -8496,6 +8555,8 @@ namespace {
 				record.finalX = record.normalX;
 				record.finalY = record.normalY;
 			}
+			record.layoutFinalX = record.finalX;
+			record.layoutFinalY = record.finalY;
 			if (record.zIndexAuto) {
 				++diagnostics.zIndexAuto;
 				record.paintTier = 1;
@@ -8640,22 +8701,27 @@ namespace {
 		snapshot.evidence.clear();
 		snapshot.evidenceRecords = 0;
 		for (const CssPositionedRecord& record : snapshot.records) {
-			if (record.blockIndex < 0 || record.blockIndex >= static_cast<int>(doc.blocks.size()) ||
-				record.logicalSerial == 0 || snapshot.evidenceRecords >= 32 || snapshot.evidence.size() >= 32768)
+			if (record.logicalSerial == 0 || snapshot.evidenceRecords >= 32 || snapshot.evidence.size() >= 32768)
 				continue;
-			const DocBlock& block = doc.blocks[static_cast<size_t>(record.blockIndex)];
-			if (block.id.rfind("phase3g-", 0) != 0 && block.id.rfind("css3g-", 0) != 0 &&
-				block.id.rfind("phase3h-", 0) != 0 && block.id.rfind("css3h-", 0) != 0 &&
-				block.id.rfind("phase5a-", 0) != 0 && block.id.rfind("css5a-", 0) != 0 &&
-				block.id.rfind("phase5b-", 0) != 0 && block.id.rfind("css5b-", 0) != 0 &&
-				block.id.rfind("phase6a-", 0) != 0 && block.id.rfind("css6a-", 0) != 0)
+			std::string evidenceId;
+			if (record.blockIndex >= 0 && record.blockIndex < static_cast<int>(doc.blocks.size()))
+				evidenceId = doc.blocks[static_cast<size_t>(record.blockIndex)].id;
+			if (evidenceId.empty()) for (const HtmlElementRef& element : doc.structuralElements)
+				if (element.serial == record.logicalSerial) { evidenceId = element.id; break; }
+			if (evidenceId.rfind("phase3g-", 0) != 0 && evidenceId.rfind("css3g-", 0) != 0 &&
+				evidenceId.rfind("phase3h-", 0) != 0 && evidenceId.rfind("css3h-", 0) != 0 &&
+				evidenceId.rfind("phase5a-", 0) != 0 && evidenceId.rfind("css5a-", 0) != 0 &&
+				evidenceId.rfind("phase5b-", 0) != 0 && evidenceId.rfind("css5b-", 0) != 0 &&
+				evidenceId.rfind("phase6a-", 0) != 0 && evidenceId.rfind("css6a-", 0) != 0 &&
+				evidenceId.rfind("phase6b-", 0) != 0 && evidenceId.rfind("css6b-", 0) != 0)
 				continue;
 			std::ostringstream line;
-			line << "id=" << block.id << ",logical-serial=" << record.logicalSerial
+			line << "id=" << evidenceId << ",logical-serial=" << record.logicalSerial
 				<< ",parent-serial=" << record.parentSerial << ",position="
 				<< (record.mode == PositionMode::Relative ? "relative" :
 					record.mode == PositionMode::Absolute ? "absolute" :
-					record.mode == PositionMode::Fixed ? "fixed" : "static")
+					record.mode == PositionMode::Fixed ? "fixed" :
+					record.mode == PositionMode::Sticky ? "sticky" : "static")
 				<< ",coordinate-space=" << (record.coordinateSpace == CssPositionCoordinateSpace::Viewport ? "viewport" : "document")
 				<< ",viewport-rect=" << cssNavigatorDocumentViewportRect().x << ":" << cssNavigatorDocumentViewportRect().y << ":"
 				<< cssNavigatorDocumentViewportRect().w << ":" << cssNavigatorDocumentViewportRect().h
@@ -8979,7 +9045,7 @@ namespace {
 		const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, blockIndex);
 		if (positioned) {
 			if (positioned->coordinateSpace == CssPositionCoordinateSpace::Viewport) return false;
-			out = CssPaintRect{positioned->finalX, positioned->finalY,
+			out = CssPaintRect{positioned->layoutFinalX, positioned->layoutFinalY,
 				positioned->usedWidth, positioned->usedHeight};
 			return out.w > 0 && out.h > 0;
 		}
@@ -9137,7 +9203,7 @@ namespace {
 			for (const CssPositionedRecord& positioned : s_cssPositionLayoutSnapshot.records) {
 				if (positioned.logicalSerial == 0 || positioned.coordinateSpace == CssPositionCoordinateSpace::Viewport ||
 					!cssScrollSerialDescendantOf(doc, positioned.logicalSerial, element.serial)) continue;
-				addExtent(CssPaintRect{positioned.finalX, positioned.finalY,
+				addExtent(CssPaintRect{positioned.layoutFinalX, positioned.layoutFinalY,
 					positioned.usedWidth, positioned.usedHeight});
 			}
 			for (const InlineFlowLayout& flow : s_inlineLayoutSnapshot.flows) {
@@ -9208,7 +9274,7 @@ namespace {
 		snapshot.valid = true;
 	}
 
-	static void ensureCssScrollLayout(const WebDocument& doc)
+	static void ensureCssScrollLayout(const WebDocument& doc, int scrollOffset)
 	{
 		bool hasNonVisibleOverflow = false;
 		for (const HtmlElementRef& element : doc.structuralElements) {
@@ -9229,14 +9295,350 @@ namespace {
 				s_cssScrollLayoutSnapshot.generation = doc.formRuntimeState.documentGeneration;
 				s_cssScrollLayoutSnapshot.valid = true;
 			}
+			resolveCssStickyLayout(doc, scrollOffset);
 			return;
 		}
 		const uint64_t fingerprint = cssScrollLayoutFingerprint(doc);
 		if (s_cssScrollLayoutSnapshot.valid && s_cssScrollLayoutSnapshot.url == doc.url &&
 			s_cssScrollLayoutSnapshot.blockCount == doc.blocks.size() &&
 			s_cssScrollLayoutSnapshot.fingerprint == fingerprint &&
-			s_cssScrollLayoutSnapshot.generation == doc.formRuntimeState.documentGeneration) return;
+			s_cssScrollLayoutSnapshot.generation == doc.formRuntimeState.documentGeneration) {
+			resolveCssStickyLayout(doc, scrollOffset);
+			return;
+		}
 		buildCssScrollLayout(doc, s_cssScrollLayoutSnapshot);
+		resolveCssStickyLayout(doc, scrollOffset);
+	}
+
+	static void cssStickyAncestorVisualDeltaForSerial(const WebDocument& doc,
+		uint64_t serial, int* outX = nullptr, int* outY = nullptr)
+	{
+		int deltaX = 0;
+		int deltaY = 0;
+		uint64_t current = serial;
+		for (int depth = 0; current != 0 && depth < kCssPositionedAncestryCap; ++depth) {
+			const HtmlElementRef* element = cssStructuralElementForSerial(doc, current);
+			if (!element || element->parentSerial == current) break;
+			current = element->parentSerial;
+			const CssPositionedRecord* ancestor = cssPositionedRecordForSerial(doc, current);
+			if (!ancestor) continue;
+			if (ancestor->mode == PositionMode::Relative) {
+				deltaX = cssBoundedCoordinateAdd(deltaX, ancestor->relativeShiftX);
+				deltaY = cssBoundedCoordinateAdd(deltaY, ancestor->relativeShiftY);
+			} else if (ancestor->mode == PositionMode::Sticky) {
+				deltaX = cssBoundedCoordinateAdd(deltaX, ancestor->stickyVisualShiftX);
+				deltaY = cssBoundedCoordinateAdd(deltaY, ancestor->stickyVisualShiftY);
+			}
+		}
+		if (outX) *outX = deltaX;
+		if (outY) *outY = deltaY;
+	}
+
+	static uint64_t cssStickyScrollContainerSerial(const WebDocument& doc,
+		const CssPositionedRecord& record, bool horizontal)
+	{
+		uint64_t current = record.logicalSerial;
+		for (int depth = 0; current != 0 && depth < kCssScrollAncestryCap; ++depth) {
+			const HtmlElementRef* element = cssStructuralElementForSerial(doc, current);
+			if (!element || element->parentSerial == current) break;
+			current = element->parentSerial;
+			const CssScrollContainerRecord* scroll = cssScrollContainerForSerial(doc, current);
+			if (!scroll) continue;
+			if (horizontal ? scroll->activeX : scroll->activeY) return scroll->serial;
+		}
+		if (record.blockIndex >= 0 && record.blockIndex < static_cast<int>(doc.blocks.size())) {
+			int depth = 0;
+			for (auto it = doc.blocks[static_cast<size_t>(record.blockIndex)].ancestors.rbegin();
+				it != doc.blocks[static_cast<size_t>(record.blockIndex)].ancestors.rend() &&
+				depth++ < kCssScrollAncestryCap; ++it) {
+				const CssScrollContainerRecord* scroll = cssScrollContainerForSerial(doc, it->serial);
+				if (scroll && (horizontal ? scroll->activeX : scroll->activeY)) return scroll->serial;
+			}
+		}
+		return 0;
+	}
+
+	static CssPaintRect cssStickyScrollportScreen(const WebDocument& doc,
+		uint64_t scrollSerial, int scrollOffset)
+	{
+		if (scrollSerial == 0) return cssNavigatorDocumentViewportRect();
+		const CssScrollContainerRecord* scroll = cssScrollContainerForSerial(doc, scrollSerial);
+		if (!scroll) return cssNavigatorDocumentViewportRect();
+		CssPaintRect viewport = cssScrollContainerScreenViewport(doc, *scroll, scrollOffset);
+		int ancestorX = 0;
+		int ancestorY = 0;
+		cssStickyAncestorVisualDeltaForSerial(doc, scrollSerial, &ancestorX, &ancestorY);
+		viewport.x = cssBoundedCoordinateAdd(viewport.x, ancestorX);
+		viewport.y = cssBoundedCoordinateAdd(viewport.y, ancestorY);
+		return viewport;
+	}
+
+	static void cssStickyContainingScreenBounds(const WebDocument& doc,
+		const CssPositionedRecord& record, uint64_t scrollSerial, int scrollOffset,
+		int& outLeft, int& outTop, int& outRight, int& outBottom, int& outEndDocument)
+	{
+		const int localX = cssLocalScrollOffsetForPositioned(doc, record, true);
+		const int localY = cssLocalScrollOffsetForPositioned(doc, record, false);
+		int deltaX = 0;
+		int deltaY = 0;
+		if (record.containingBlockSerial != 0)
+			cssStickyAncestorVisualDeltaForSerial(doc, record.containingBlockSerial, &deltaX, &deltaY);
+		if (record.containingBlockSerial != 0 && record.containingBlockSerial == scrollSerial) {
+			const CssScrollContainerRecord* scroll = cssScrollContainerForSerial(doc, scrollSerial);
+			if (scroll) {
+				const int parentLocalX = cssLocalScrollOffsetForSerial(doc, scroll->serial, true);
+				const int parentLocalY = cssLocalScrollOffsetForSerial(doc, scroll->serial, false);
+				outLeft = cssBoundedCoordinateAdd(scroll->paddingBox.x, parentLocalX + deltaX);
+				outTop = cssBoundedCoordinateAdd(scroll->paddingBox.y,
+					cssBoundedCoordinateAdd(-scrollOffset, parentLocalY + deltaY));
+				outRight = cssBoundedCoordinateAdd(outLeft, std::max(0, scroll->contentWidth));
+				outBottom = cssBoundedCoordinateAdd(outTop, std::max(0, scroll->contentHeight));
+				outEndDocument = cssBoundedCoordinateAdd(scroll->paddingBox.y, std::max(0, scroll->contentHeight));
+				return;
+			}
+		}
+		if (record.containingBlockSerial != 0) {
+			outLeft = cssBoundedCoordinateAdd(record.containingBlock.padding.x, localX + deltaX);
+			outTop = cssBoundedCoordinateAdd(record.containingBlock.padding.y,
+				-scrollOffset + localY + deltaY);
+			outRight = cssBoundedCoordinateAdd(outLeft, std::max(0, record.containingBlock.padding.w));
+			outBottom = cssBoundedCoordinateAdd(outTop, std::max(0, record.containingBlock.padding.h));
+			outEndDocument = cssBoundedGeometryAdd(record.containingBlock.padding.y,
+				std::max(0, record.containingBlock.padding.h));
+			return;
+		}
+		const CssPaintRect viewport = cssNavigatorDocumentViewportRect();
+		const int documentHeight = std::max(kContentH, std::max(s_cssMarginLayoutSnapshot.documentHeight,
+			s_cssPositionLayoutSnapshot.documentExtent));
+		outLeft = viewport.x;
+		outTop = cssBoundedCoordinateAdd(viewport.y, -scrollOffset);
+		outRight = cssBoundedCoordinateAdd(viewport.x, viewport.w);
+		outBottom = cssBoundedCoordinateAdd(kContentY, documentHeight - scrollOffset);
+		outEndDocument = cssBoundedCoordinateAdd(kContentY, documentHeight);
+	}
+
+	static void resolveCssStickyLayout(const WebDocument& doc, int scrollOffset)
+	{
+		if (!s_cssPositionLayoutSnapshot.valid || s_cssPositionLayoutSnapshot.url != doc.url ||
+			s_cssPositionLayoutSnapshot.blockCount != doc.blocks.size()) return;
+
+		gxos::web::CssDiagnostics& diagnostics = const_cast<WebDocument&>(doc).cssDiagnostics;
+		diagnostics.stickyElementCount = 0;
+		diagnostics.stickyRootCount = 0;
+		diagnostics.stickyLocalScrollCount = 0;
+		diagnostics.stickyConstrainedCount = 0;
+		diagnostics.stickyReleaseCount = 0;
+		diagnostics.stickyHorizontalCount = 0;
+		diagnostics.stickyFlexCount = 0;
+		diagnostics.stickyPositionedDescendantCount = 0;
+		diagnostics.stickyEvidence.clear();
+
+		for (CssPositionedRecord& record : s_cssPositionLayoutSnapshot.records) {
+			record.finalX = record.layoutFinalX;
+			record.finalY = record.layoutFinalY;
+			record.stickyVerticalScrollContainerSerial = 0;
+			record.stickyHorizontalScrollContainerSerial = 0;
+			record.stickyVisualShiftX = 0;
+			record.stickyVisualShiftY = 0;
+			record.stickyScrollportX = 0;
+			record.stickyScrollportY = 0;
+			record.stickyScrollportW = 0;
+			record.stickyScrollportH = 0;
+			record.stickyContainerEnd = 0;
+			record.stickyConstrained = false;
+			record.stickyEndClamped = false;
+	}
+
+		for (CssPositionedRecord& record : s_cssPositionLayoutSnapshot.records) {
+			if (record.mode != PositionMode::Sticky) {
+				if (record.coordinateSpace != CssPositionCoordinateSpace::Viewport && record.logicalSerial != 0) {
+					int stickyAncestorX = 0;
+					int stickyAncestorY = 0;
+					cssStickyAncestorVisualDeltaForSerial(doc, record.logicalSerial, &stickyAncestorX, &stickyAncestorY);
+					record.finalX = cssBoundedGeometryAdd(record.layoutFinalX, stickyAncestorX);
+					record.finalY = cssBoundedGeometryAdd(record.layoutFinalY, stickyAncestorY);
+				}
+				continue;
+			}
+
+			++diagnostics.stickyElementCount;
+			int ancestorX = 0;
+			int ancestorY = 0;
+			cssStickyAncestorVisualDeltaForSerial(doc, record.logicalSerial, &ancestorX, &ancestorY);
+			const int baseX = cssBoundedCoordinateAdd(record.normalX, ancestorX);
+			const int baseY = cssBoundedCoordinateAdd(record.normalY, ancestorY);
+			record.finalX = baseX;
+			record.finalY = baseY;
+
+			const bool hasTop = record.topResolved;
+			const bool hasBottom = !hasTop && record.bottomResolved;
+			const bool hasLeft = record.leftResolved;
+			const bool hasRight = !hasLeft && record.rightResolved;
+			record.stickyVerticalScrollContainerSerial = hasTop || hasBottom
+				? cssStickyScrollContainerSerial(doc, record, false) : 0;
+			record.stickyHorizontalScrollContainerSerial = hasLeft || hasRight
+				? cssStickyScrollContainerSerial(doc, record, true) : 0;
+			if (record.stickyVerticalScrollContainerSerial == 0 && record.stickyHorizontalScrollContainerSerial == 0)
+				++diagnostics.stickyRootCount;
+			else
+				++diagnostics.stickyLocalScrollCount;
+			if (hasLeft || hasRight) ++diagnostics.stickyHorizontalCount;
+
+			bool stickyFlexCounted = false;
+			if (record.blockIndex >= 0 && record.blockIndex < static_cast<int>(doc.blocks.size())) {
+				const DocBlock& block = doc.blocks[static_cast<size_t>(record.blockIndex)];
+				if (cssFlexBlockOverrideForBlock(doc, record.blockIndex) != nullptr) {
+					++diagnostics.stickyFlexCount;
+					stickyFlexCounted = true;
+				} else for (const HtmlElementRef& ancestor : block.ancestors) {
+					const WebStyle* style = cssStyleForSerial(doc, ancestor.serial);
+					if (style && cssFlexContainerStyle(*style)) {
+						++diagnostics.stickyFlexCount;
+						stickyFlexCounted = true;
+						break;
+					}
+				}
+			}
+			if (!stickyFlexCounted) {
+				uint64_t ancestorSerial = record.parentSerial;
+				for (int depth = 0; ancestorSerial != 0 && depth < kCssPositionedAncestryCap; ++depth) {
+					const WebStyle* style = cssStyleForSerial(doc, ancestorSerial);
+					if (style && cssFlexContainerStyle(*style)) {
+						++diagnostics.stickyFlexCount;
+						stickyFlexCounted = true;
+						break;
+					}
+					const HtmlElementRef* ancestor = cssStructuralElementForSerial(doc, ancestorSerial);
+					if (!ancestor || ancestor->parentSerial == ancestorSerial) break;
+					ancestorSerial = ancestor->parentSerial;
+				}
+			}
+
+			if (hasTop || hasBottom) {
+				const CssPaintRect scrollport = cssStickyScrollportScreen(doc,
+					record.stickyVerticalScrollContainerSerial, scrollOffset);
+				record.stickyScrollportX = scrollport.x;
+				record.stickyScrollportY = scrollport.y;
+				record.stickyScrollportW = scrollport.w;
+				record.stickyScrollportH = scrollport.h;
+				int containingLeft = 0;
+				int containingTop = 0;
+				int containingRight = 0;
+				int containingBottom = 0;
+				int containingEndDocument = 0;
+				cssStickyContainingScreenBounds(doc, record,
+					record.stickyVerticalScrollContainerSerial, scrollOffset,
+					containingLeft, containingTop, containingRight, containingBottom, containingEndDocument);
+				record.stickyContainerEnd = containingEndDocument;
+				if (scrollport.w > 0 && scrollport.h > 0) {
+					const int localY = cssLocalScrollOffsetForPositioned(doc, record, false);
+					const int normalScreenY = cssBoundedCoordinateAdd(baseY,
+						cssBoundedCoordinateAdd(-scrollOffset, localY));
+					const int threshold = hasTop
+						? cssBoundedGeometryAdd(scrollport.y, record.resolvedTop)
+						: cssBoundedGeometryAdd(scrollport.y, scrollport.h - record.resolvedBottom - record.usedHeight);
+					int targetScreenY = hasTop ? std::max(normalScreenY, threshold) : std::min(normalScreenY, threshold);
+					const int boundedBottom = std::max(containingTop, containingBottom - record.usedHeight);
+					if (hasTop) {
+						const int beforeEnd = targetScreenY;
+						targetScreenY = std::min(targetScreenY, boundedBottom);
+						if (targetScreenY != beforeEnd) record.stickyEndClamped = true;
+					} else {
+						const int beforeStart = targetScreenY;
+						targetScreenY = std::max(targetScreenY, containingTop);
+						if (targetScreenY != beforeStart) record.stickyEndClamped = true;
+						targetScreenY = std::min(targetScreenY, boundedBottom);
+					}
+					record.finalY = cssBoundedCoordinateAdd(targetScreenY,
+						cssBoundedCoordinateAdd(scrollOffset, -localY));
+				}
+			}
+
+			if (hasLeft || hasRight) {
+					const CssPaintRect scrollport = cssStickyScrollportScreen(doc,
+						record.stickyHorizontalScrollContainerSerial, scrollOffset);
+					record.stickyScrollportX = scrollport.x;
+					record.stickyScrollportY = scrollport.y;
+					record.stickyScrollportW = scrollport.w;
+					record.stickyScrollportH = scrollport.h;
+				if (scrollport.w > 0 && scrollport.h > 0) {
+					int containingLeft = 0;
+					int containingTop = 0;
+					int containingRight = 0;
+					int containingBottom = 0;
+					int containingEndDocument = 0;
+					cssStickyContainingScreenBounds(doc, record,
+						record.stickyHorizontalScrollContainerSerial, scrollOffset,
+						containingLeft, containingTop, containingRight, containingBottom, containingEndDocument);
+					const int localX = cssLocalScrollOffsetForPositioned(doc, record, true);
+					const int normalScreenX = cssBoundedCoordinateAdd(baseX, localX);
+					const int threshold = hasLeft
+						? cssBoundedGeometryAdd(scrollport.x, record.resolvedLeft)
+						: cssBoundedGeometryAdd(scrollport.x, scrollport.w - record.resolvedRight - record.usedWidth);
+					int targetScreenX = hasLeft ? std::max(normalScreenX, threshold) : std::min(normalScreenX, threshold);
+					const int boundedRight = std::max(containingLeft, containingRight - record.usedWidth);
+					if (hasLeft) {
+						const int beforeEnd = targetScreenX;
+						targetScreenX = std::min(targetScreenX, boundedRight);
+						if (targetScreenX != beforeEnd) record.stickyEndClamped = true;
+					} else {
+						const int beforeStart = targetScreenX;
+						targetScreenX = std::max(targetScreenX, containingLeft);
+						if (targetScreenX != beforeStart) record.stickyEndClamped = true;
+						targetScreenX = std::min(targetScreenX, boundedRight);
+					}
+					record.finalX = cssBoundedGeometryAdd(targetScreenX, -localX);
+				}
+			}
+
+			record.stickyVisualShiftX = record.finalX - baseX;
+			record.stickyVisualShiftY = record.finalY - baseY;
+			record.stickyConstrained = record.stickyVisualShiftX != 0 || record.stickyVisualShiftY != 0;
+			if (record.stickyConstrained) ++diagnostics.stickyConstrainedCount;
+			if (record.stickyEndClamped) ++diagnostics.stickyReleaseCount;
+
+			if (diagnostics.stickyEvidence.size() < 30000) {
+				std::string id;
+				if (record.blockIndex >= 0 && record.blockIndex < static_cast<int>(doc.blocks.size()))
+					id = doc.blocks[static_cast<size_t>(record.blockIndex)].id;
+				if (id.empty()) for (const HtmlElementRef& element : doc.structuralElements)
+					if (element.serial == record.logicalSerial) { id = element.id; break; }
+				if (id.rfind("phase6b-", 0) == 0 || id.rfind("css6b-", 0) == 0) {
+					std::ostringstream line;
+					const int localY = cssLocalScrollOffsetForPositioned(doc, record, false);
+					line << "id=" << id << ",position=sticky,scrollport="
+						<< (record.stickyVerticalScrollContainerSerial || record.stickyHorizontalScrollContainerSerial ? "local" : "document")
+						<< ",scrollport-rect=" << record.stickyScrollportX << ":" << record.stickyScrollportY << ":"
+						<< record.stickyScrollportW << ":" << record.stickyScrollportH
+						<< ",normalY=" << baseY << ",normal-screen-y="
+						<< cssBoundedGeometryAdd(baseY, cssBoundedGeometryAdd(-scrollOffset, localY))
+						<< ",scrollportTop=" << record.stickyScrollportY
+						<< ",topInset=" << (hasTop ? std::to_string(record.resolvedTop) : "auto")
+						<< ",finalY=" << record.finalY << ",final-screen-y="
+						<< cssPositionedScreenYForDocument(doc, record, scrollOffset)
+						<< ",containerEnd=" << record.stickyContainerEnd
+						<< ",stuck=" << (record.stickyConstrained ? "yes" : "no")
+						<< ",end-clamp=" << (record.stickyEndClamped ? "yes" : "no")
+						<< ",scroll=";
+						if (record.stickyVerticalScrollContainerSerial) {
+							const CssScrollContainerRecord* scroll = cssScrollContainerForSerial(doc, record.stickyVerticalScrollContainerSerial);
+							line << (scroll ? scroll->scrollY : 0);
+						} else line << scrollOffset;
+						line << ",finalX=" << record.finalX << ",normalX=" << baseX << ";";
+					diagnostics.stickyEvidence += line.str();
+				}
+			}
+		}
+
+		for (const CssPositionedRecord& sticky : s_cssPositionLayoutSnapshot.records) {
+			if (sticky.mode != PositionMode::Sticky || sticky.logicalSerial == 0) continue;
+			for (const CssPositionedRecord& positioned : s_cssPositionLayoutSnapshot.records) {
+				if ((positioned.mode == PositionMode::Absolute || positioned.mode == PositionMode::Fixed) &&
+					positioned.logicalSerial != sticky.logicalSerial &&
+					cssScrollSerialDescendantOf(doc, positioned.logicalSerial, sticky.logicalSerial))
+					++diagnostics.stickyPositionedDescendantCount;
+			}
+		}
 	}
 
 	static bool cssSerialWithinBounded(const WebDocument& doc, uint64_t serial, uint64_t ancestor)
@@ -10178,8 +10580,19 @@ namespace {
 		add("css_position_relative", metadata.cssPositionRelative);
 		add("css_position_absolute", metadata.cssPositionAbsolute);
 		add("css_position_fixed", metadata.cssPositionFixed);
+		add("css_position_sticky", metadata.cssPositionSticky);
 		add("css_position_unsupported_fixed", metadata.cssPositionUnsupportedFixed);
 		add("css_position_unsupported_sticky", metadata.cssPositionUnsupportedSticky);
+		add("css_sticky_element_count", metadata.cssStickyElementCount);
+		add("css_sticky_root_count", metadata.cssStickyRootCount);
+		add("css_sticky_local_scroll_count", metadata.cssStickyLocalScrollCount);
+		add("css_sticky_constrained_count", metadata.cssStickyConstrainedCount);
+		add("css_sticky_release_count", metadata.cssStickyReleaseCount);
+		add("css_sticky_horizontal_count", metadata.cssStickyHorizontalCount);
+		add("css_sticky_flex_count", metadata.cssStickyFlexCount);
+		add("css_sticky_positioned_descendant_count", metadata.cssStickyPositionedDescendantCount);
+		add("css_sticky_hyperlink_hit_test_evidence", metadata.cssStickyHyperlinkHitTestEvidence);
+		if (!metadata.cssStickyEvidence.empty()) out += "Current Document.css_sticky_evidence=" + metadata.cssStickyEvidence + "\n";
 		add("css_relative_offsets", metadata.cssRelativeOffsets);
 		add("css_relative_percentage_offsets", metadata.cssRelativePercentageOffsets);
 		add("css_absolute_boxes", metadata.cssAbsoluteBoxes);
@@ -10220,8 +10633,8 @@ namespace {
 		add("css_position_static_snapshot_fallbacks", metadata.cssPositionStaticSnapshotFallbacks);
 		add("css_position_lifecycle_resets", metadata.cssPositionLifecycleResets);
 		add("css_positioned_evidence_records", metadata.cssPositionedEvidenceRecords);
-		out += "Current Document.css_position_model=bounded-static-relative-absolute-fixed\n";
-		out += "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported-diagnostic\n";
+		out += "Current Document.css_position_model=bounded-static-relative-absolute-fixed-sticky\n";
+		out += "Current Document.css_position_fixed_sticky=fixed-supported-sticky-supported-diagnostic\n";
 		out += "Current Document.css_position_relative_flow=unshifted-normal-flow-with-final-visual-offset\n";
 		out += "Current Document.css_position_relative_inset_precedence=left-over-right-top-over-bottom\n";
 		out += "Current Document.css_position_absolute_flow=out-of-flow-no-parent-height-contribution\n";
@@ -10235,7 +10648,10 @@ namespace {
 		out += "Current Document.css_position_stacking_depth_cap=16\n";
 		out += "Current Document.css_position_stacking_owner_cap=256\n";
 		out += "Current Document.css_position_opacity_stacking=unsupported-lightweight-alpha-only\n";
-		out += "Current Document.css_position_fixed_sticky=fixed-supported-sticky-unsupported\n";
+		out += "Current Document.css_position_fixed_sticky=fixed-supported-sticky-supported\n";
+		out += "Current Document.css_position_sticky_model=normal-flow-base-rectangle-scrollport-inset-containing-end-constraint\n";
+		out += "Current Document.css_position_sticky_inset_precedence=top-over-bottom-left-over-right\n";
+		out += "Current Document.css_position_sticky_overflow_hidden=clip-only-no-local-scroll-selection\n";
 		const CssPaintRect viewport = cssNavigatorDocumentViewportRect();
 		out += "Current Document.css_position_viewport_rect=" + std::to_string(viewport.x) + ":" +
 			std::to_string(viewport.y) + ":" + std::to_string(viewport.w) + ":" +
@@ -11994,7 +12410,7 @@ bool Navigator::SmokeHitLinkById(const std::string& id)
 	}
 	if (blockIndex < 0) {
 		if (id == "phase6a-nested-link") {
-			ensureCssScrollLayout(s_currentDoc);
+			ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 			int sameIdCount = 0;
 			int linkCount = 0;
 			for (const DocBlock& candidate : s_currentDoc.blocks) {
@@ -12011,7 +12427,7 @@ bool Navigator::SmokeHitLinkById(const std::string& id)
 		return false;
 	}
 	ensureCssPositionLayout(s_currentDoc);
-	ensureCssScrollLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 	Rect rect = linkBlockRect(blockIndex);
 	if (id.rfind("phase6a-", 0) == 0 &&
 		(id == "phase6a-nested-link" || s_cssScrollLayoutSnapshot.evidence.size() < 12000)) {
@@ -12092,6 +12508,9 @@ bool Navigator::SmokeHitLinkById(const std::string& id)
 			if (hitTest(x, y, hitIndex) == HitTarget::Link && hitIndex == blockIndex) {
 				if (cssBlockHasScrollAncestor(s_currentDoc, blockIndex))
 					++s_cssScrollLayoutSnapshot.localScrollHitTestEvidence;
+				if (const CssPositionedRecord* hitPosition = cssPositionedRecordForBlock(s_currentDoc, blockIndex))
+					if (hitPosition->mode == PositionMode::Sticky)
+						++s_currentDoc.cssDiagnostics.stickyHyperlinkHitTestEvidence;
 				return true;
 			}
 		}
@@ -12119,7 +12538,7 @@ bool Navigator::SmokeSetElementScrollOffsetById(const std::string& id, int offse
 	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
-	ensureCssScrollLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
 		if (element.id != id) continue;
 		CssScrollContainerRecord* record = cssMutableScrollContainerForSerial(s_currentDoc, element.serial);
@@ -12143,7 +12562,7 @@ bool Navigator::SmokeSetElementScrollOffsetById(const std::string& id, int offse
 int Navigator::SmokeElementScrollOffsetYById(const std::string& id)
 {
 	if (s_windowId == 0) return -1;
-	ensureCssScrollLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
 		if (element.id != id) continue;
 		const CssScrollContainerRecord* record = cssScrollContainerForSerial(s_currentDoc, element.serial);
@@ -12155,7 +12574,7 @@ int Navigator::SmokeElementScrollOffsetYById(const std::string& id)
 int Navigator::SmokeElementMaxScrollYById(const std::string& id)
 {
 	if (s_windowId == 0) return -1;
-	ensureCssScrollLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
 		if (element.id != id) continue;
 		const CssScrollContainerRecord* record = cssScrollContainerForSerial(s_currentDoc, element.serial);
@@ -13050,7 +13469,7 @@ void Navigator::renderDocument()
 	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
-	ensureCssScrollLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 	clampScrollOffset();
 	s_renderCounters = {};
 	s_cssClipDepth = 0;
@@ -14807,7 +15226,7 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 		ensureCssFloatLayout(s_currentDoc);
 		ensureInlineLayout(s_currentDoc);
 		ensureCssPositionLayout(s_currentDoc);
-		ensureCssScrollLayout(s_currentDoc);
+		ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 		int bestIndex = -1;
 		int bestDepth = -1;
 		for (int index = 0; index < static_cast<int>(s_cssScrollLayoutSnapshot.records.size()); ++index) {
@@ -16147,7 +16566,7 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
-	ensureCssScrollLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 
 	if (toolbarButtonRect(kWidgetIdBack).contains(x, y))    return HitTarget::Back;
 	if (toolbarButtonRect(kWidgetIdForward).contains(x, y)) return HitTarget::Forward;
@@ -16775,7 +17194,7 @@ void Navigator::storePageMetadata(NavigatorPageMetadata metadata, const WebDocum
 {
 	if (metadata.finalUrl.empty()) metadata.finalUrl = doc.url;
 	if (metadata.requestedUrl.empty()) metadata.requestedUrl = metadata.finalUrl;
-	fillDocumentCounts(metadata, doc);
+	fillDocumentCounts(metadata, doc, s_scrollOffset);
 	metadata.lastSubmittedFormUrl = s_lastSubmittedFormUrl;
 	metadata.lastSubmittedFormAction = s_lastSubmittedFormAction;
 	metadata.lastSubmittedFormMethod = s_lastSubmittedFormMethod;
@@ -17915,7 +18334,7 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	ensureInlineLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
-	ensureCssScrollLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
 		CssPaintRect target{kContentX + floatRecord->borderBoxX,
 			kContentY + floatRecord->borderBoxY - s_scrollOffset,
@@ -18017,7 +18436,7 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	ensureInlineLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	ensureCssPositionLayout(s_currentDoc);
-	ensureCssScrollLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 	if (const CssFloatRecord* floatRecord = cssFloatRecordForBlock(s_currentDoc, blockIndex)) {
 		CssPaintRect target{kContentX + floatRecord->borderBoxX,
 			kContentY + floatRecord->borderBoxY - s_scrollOffset,

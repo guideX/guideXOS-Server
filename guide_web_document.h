@@ -313,13 +313,14 @@ enum class AlignSelfMode : uint8_t {
 };
 
 // Navigator keeps positioning to a bounded, layout-local subset. Fixed is a
-// typed viewport-layer mode; sticky remains an explicit unsupported value and
-// is never aliased to absolute positioning.
+// typed viewport-layer mode and sticky is a typed normal-flow scroll-aware
+// mode; neither mode is aliased to absolute positioning.
 enum class PositionMode : uint8_t {
 	Static = 0,
 	Relative,
 	Absolute,
 	Fixed,
+	Sticky,
 };
 
 // Phase 3E keeps traditional physical floats deliberately narrow.  Logical
@@ -907,8 +908,19 @@ struct CssDiagnostics {
 	int    positionRelative = 0;
 	int    positionAbsolute = 0;
 	int    positionFixed = 0;
+	int    positionSticky = 0;
 	int    positionUnsupportedFixed = 0;
 	int    positionUnsupportedSticky = 0;
+	int    stickyElementCount = 0;
+	int    stickyRootCount = 0;
+	int    stickyLocalScrollCount = 0;
+	int    stickyConstrainedCount = 0;
+	int    stickyReleaseCount = 0;
+	int    stickyHorizontalCount = 0;
+	int    stickyFlexCount = 0;
+	int    stickyPositionedDescendantCount = 0;
+	int    stickyHyperlinkHitTestEvidence = 0;
+	std::string stickyEvidence;
 	int    relativeOffsets = 0;
 	int    relativePercentageOffsets = 0;
 	int    absoluteBoxes = 0;

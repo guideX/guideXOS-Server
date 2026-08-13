@@ -1,0 +1,15 @@
+{
+    "schema_version":  "guidexos.navigator.ca-bundle-manifest.v0.1",
+    "bundle_type":  "user-dev",
+    "source":  "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE",
+    "generated_utc":  "2026-08-12T16:56:10.5693327Z",
+    "root_count":  1,
+    "pem_bytes":  1166,
+    "sha256":  "028c679d134e640c21cb739b617034e996d48a535b97499ffa667e832711e606",
+    "subject_summary":  "CN=guideXOS Navigator Validated Root CA",
+    "not_before_min":  "2025-01-01T00:00:00.0000000Z",
+    "not_after_max":  "2035-01-01T00:00:00.0000000Z",
+    "production_ready":  "no",
+    "test_only":  "no",
+    "rotation_id":  "sha256:c28c679d134e640c21cb739b617034e996d48a535b97499ffa667e832711e606"
+}
