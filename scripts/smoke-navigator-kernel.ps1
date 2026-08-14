@@ -44,8 +44,14 @@ function Invoke-KernelBuildForSmoke {
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "main.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
-    & (Join-Path $Root "build-kernel.bat")
-    $buildCode = $LASTEXITCODE
+    $kernelBuildStdout = Join-Path $LogDir "navigator-kernel-build.stdout.log"
+    $kernelBuildStderr = Join-Path $LogDir "navigator-kernel-build.stderr.log"
+    $kernelBuildProcess = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList @("/c", (Join-Path $Root "build-kernel.bat")) `
+        -WorkingDirectory $Root -PassThru -Wait -WindowStyle Hidden `
+        -RedirectStandardOutput $kernelBuildStdout -RedirectStandardError $kernelBuildStderr
+    Get-Content $kernelBuildStdout, $kernelBuildStderr -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+    $buildCode = $kernelBuildProcess.ExitCode
     if ($null -ne $oldExtra) {
         $env:EXTRA_CFLAGS = $oldExtra
     } else {

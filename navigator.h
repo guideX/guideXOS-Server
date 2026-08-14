@@ -248,6 +248,18 @@ struct NavigatorPageMetadata {
 		int         cssScrollContentExtentRecords = 0;
 		int         cssLocalScrollHitTestEvidence = 0;
 		std::string cssScrollEvidence;
+		int         cssScrollbarVerticalVisibleCount = 0;
+		int         cssScrollbarHorizontalVisibleCount = 0;
+		int         cssScrollbarAutoHiddenCount = 0;
+		int         cssScrollbarScrollModeZeroRangeCount = 0;
+		int         cssScrollbarThumbDragOperations = 0;
+		int         cssScrollbarTrackClickOperations = 0;
+		int         cssScrollbarNestedOperations = 0;
+		int         cssScrollbarHitTestInterceptions = 0;
+		int         cssScrollbarExtentNeutralRecords = 0;
+		int         cssScrollbarVisibilityIterations = 0;
+		int         cssScrollbarVisibilityIterationClamps = 0;
+		std::string cssScrollbarEvidence;
 		int         cssClipIntersections = 0;
 		int         cssClipDepthClamps = 0;
 		int         cssClippedHitTargets = 0;
@@ -631,6 +643,11 @@ public:
 	static bool SmokeSetElementScrollOffsetById(const std::string& id, int offsetX, int offsetY);
 	static int SmokeElementScrollOffsetYById(const std::string& id);
 	static int SmokeElementMaxScrollYById(const std::string& id);
+	static bool SmokeElementScrollbarGeometryById(const std::string& id, bool horizontal,
+		bool thumb, int& outX, int& outY, int& outW, int& outH);
+	static int SmokeElementScrollOffsetXById(const std::string& id);
+	static int SmokeElementMaxScrollXById(const std::string& id);
+	static bool SmokePointerInput(int x, int y, int button, const std::string& action);
 	static bool SmokeDragFirstLinkSelectsWithoutNavigation();
 	static std::string SmokeRuntimeReport();
 	static std::string SmokeLifecycleReport();
@@ -718,6 +735,7 @@ private:
 		FormSelect,
 		FormSubmit,
 		FormLabel,
+		ElementScrollbar,
 	};
 
 	enum class MouseMode : uint8_t {
@@ -728,6 +746,13 @@ private:
 		FormInputInteraction,
 		AddressBarInteraction,
 		ToolbarInteraction,
+		ElementScrollbarInteraction,
+	};
+
+	enum class ScrollbarAxis : uint8_t {
+		None = 0,
+		Vertical,
+		Horizontal,
 	};
 
 	// -------------------------------------------------------------------------
@@ -885,6 +910,7 @@ private:
 	static int       computeDocumentHeight();
 	static int       maxScrollOffset();
 	static void      clampScrollOffset();
+	static void      clearScrollbarDragState();
 
 	// -------------------------------------------------------------------------
 	// State
@@ -944,6 +970,12 @@ private:
 	static int         s_mouseCurrentX;
 	static int         s_mouseCurrentY;
 	static bool        s_mouseDragThresholdExceeded;
+	static uint64_t    s_scrollbarDragSerial;
+	static ScrollbarAxis s_scrollbarDragAxis;
+	static int         s_scrollbarDragGrabOffset;
+	static uint64_t    s_hitScrollbarSerial;
+	static ScrollbarAxis s_hitScrollbarAxis;
+	static bool        s_hitScrollbarThumb;
 	static bool        s_selectionBegan;
 	static bool        s_selectionActive;
 	static bool        s_selectionPending;

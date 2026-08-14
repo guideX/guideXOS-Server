@@ -125,6 +125,12 @@ int         Navigator::s_mouseDownY = 0;
 int         Navigator::s_mouseCurrentX = 0;
 int         Navigator::s_mouseCurrentY = 0;
 bool        Navigator::s_mouseDragThresholdExceeded = false;
+uint64_t    Navigator::s_scrollbarDragSerial = 0;
+Navigator::ScrollbarAxis Navigator::s_scrollbarDragAxis = Navigator::ScrollbarAxis::None;
+int         Navigator::s_scrollbarDragGrabOffset = 0;
+uint64_t    Navigator::s_hitScrollbarSerial = 0;
+Navigator::ScrollbarAxis Navigator::s_hitScrollbarAxis = Navigator::ScrollbarAxis::None;
+bool        Navigator::s_hitScrollbarThumb = false;
 bool        Navigator::s_selectionBegan = false;
 bool        Navigator::s_selectionActive = false;
 bool        Navigator::s_selectionPending = false;
@@ -882,6 +888,10 @@ namespace {
 	constexpr size_t kCssScrollContainerCap = 128;
 	constexpr int kCssScrollAncestryCap = 16;
 	constexpr int kCssScrollGeometryCap = 8192;
+	constexpr int kCssScrollbarThickness = 10;
+	constexpr int kCssScrollbarMinimumThumb = 12;
+	constexpr int kCssScrollbarMinimumTrack = 4;
+	constexpr int kCssScrollbarVisibilityIterationCap = 2;
 
 	struct CssScrollContainerRecord {
 		uint64_t serial = 0;
@@ -900,6 +910,19 @@ namespace {
 		OverflowMode overflowY = OverflowMode::Visible;
 		bool activeX = false;
 		bool activeY = false;
+		// Phase 6C overlay chrome. These rectangles are local to paddingBox;
+		// screen coordinates are derived from the current ancestor/document
+		// scroll state so wheel scrolling never leaves stale UI geometry.
+		CssPaintRect verticalTrackLocal;
+		CssPaintRect horizontalTrackLocal;
+		int verticalThumbLength = 0;
+		int horizontalThumbLength = 0;
+		int verticalThumbTravel = 0;
+		int horizontalThumbTravel = 0;
+		bool verticalScrollbarVisible = false;
+		bool horizontalScrollbarVisible = false;
+		int scrollbarVisibilityIterations = 0;
+		bool scrollbarVisibilityStable = true;
 		bool nested = false;
 		bool clamped = false;
 		bool complete = true;
@@ -920,6 +943,18 @@ namespace {
 		int scrollClamps = 0;
 		int contentExtentRecords = 0;
 		int localScrollHitTestEvidence = 0;
+		int scrollbarVerticalVisibleCount = 0;
+		int scrollbarHorizontalVisibleCount = 0;
+		int scrollbarAutoHiddenCount = 0;
+		int scrollbarScrollModeZeroRangeCount = 0;
+		int scrollbarThumbDragOperations = 0;
+		int scrollbarTrackClickOperations = 0;
+		int scrollbarNestedOperations = 0;
+		int scrollbarHitTestInterceptions = 0;
+		int scrollbarExtentNeutralRecords = 0;
+		int scrollbarVisibilityIterations = 0;
+		int scrollbarVisibilityIterationClamps = 0;
+		std::string scrollbarEvidence;
 		std::string evidence;
 		std::vector<CssScrollContainerRecord> records;
 	};
@@ -2708,6 +2743,18 @@ namespace {
 		metadata.cssScrollContentExtentRecords = s_cssScrollLayoutSnapshot.contentExtentRecords;
 		metadata.cssLocalScrollHitTestEvidence = s_cssScrollLayoutSnapshot.localScrollHitTestEvidence;
 		metadata.cssScrollEvidence = s_cssScrollLayoutSnapshot.evidence;
+		metadata.cssScrollbarVerticalVisibleCount = s_cssScrollLayoutSnapshot.scrollbarVerticalVisibleCount;
+		metadata.cssScrollbarHorizontalVisibleCount = s_cssScrollLayoutSnapshot.scrollbarHorizontalVisibleCount;
+		metadata.cssScrollbarAutoHiddenCount = s_cssScrollLayoutSnapshot.scrollbarAutoHiddenCount;
+		metadata.cssScrollbarScrollModeZeroRangeCount = s_cssScrollLayoutSnapshot.scrollbarScrollModeZeroRangeCount;
+		metadata.cssScrollbarThumbDragOperations = s_cssScrollLayoutSnapshot.scrollbarThumbDragOperations;
+		metadata.cssScrollbarTrackClickOperations = s_cssScrollLayoutSnapshot.scrollbarTrackClickOperations;
+		metadata.cssScrollbarNestedOperations = s_cssScrollLayoutSnapshot.scrollbarNestedOperations;
+		metadata.cssScrollbarHitTestInterceptions = s_cssScrollLayoutSnapshot.scrollbarHitTestInterceptions;
+		metadata.cssScrollbarExtentNeutralRecords = s_cssScrollLayoutSnapshot.scrollbarExtentNeutralRecords;
+		metadata.cssScrollbarVisibilityIterations = s_cssScrollLayoutSnapshot.scrollbarVisibilityIterations;
+		metadata.cssScrollbarVisibilityIterationClamps = s_cssScrollLayoutSnapshot.scrollbarVisibilityIterationClamps;
+		metadata.cssScrollbarEvidence = s_cssScrollLayoutSnapshot.scrollbarEvidence;
 		metadata.cssClipIntersections = s_cssClipIntersections;
 		metadata.cssClipDepthClamps = s_cssClipDepthClamps;
 		metadata.cssClippedHitTargets = s_cssClippedHitTargets;
@@ -8948,6 +8995,187 @@ namespace {
 		return clip;
 	}
 
+	static int cssScrollbarThumbLength(int viewportLength, int contentLength, int trackLength,
+		int maxScroll)
+	{
+		viewportLength = std::max(0, viewportLength);
+		contentLength = std::max(viewportLength, contentLength);
+		trackLength = std::max(0, trackLength);
+		if (trackLength <= 0) return 0;
+		if (maxScroll <= 0 || contentLength <= viewportLength) return trackLength;
+		const int64_t numerator = static_cast<int64_t>(trackLength) * viewportLength;
+		const int proportional = static_cast<int>(std::max<int64_t>(0,
+			std::min<int64_t>(trackLength, numerator / contentLength)));
+		return std::max(1, std::min(trackLength,
+			std::max(kCssScrollbarMinimumThumb, proportional)));
+	}
+
+	static void cssResolveScrollbarGeometry(CssScrollContainerRecord& record,
+		CssScrollLayoutSnapshot& snapshot)
+	{
+		// Phase 6C deliberately uses overlay chrome. The content viewport is not
+		// mutated by scrollbar visibility, so this bounded loop resolves drawable
+		// axis visibility without feeding a scrollbar/content feedback loop.
+		const int viewportW = std::max(0, record.paddingBox.w);
+		const int viewportH = std::max(0, record.paddingBox.h);
+		bool visibleY = record.activeY;
+		bool visibleX = record.activeX;
+		bool stable = false;
+		int iterations = 0;
+		for (int pass = 0; pass < kCssScrollbarVisibilityIterationCap; ++pass) {
+			++iterations;
+			const int trackW = std::max(0, viewportW - (visibleY ? kCssScrollbarThickness : 0));
+			const int trackH = std::max(0, viewportH - (visibleX ? kCssScrollbarThickness : 0));
+			const bool nextY = record.activeY && viewportW >= kCssScrollbarThickness &&
+				trackH >= kCssScrollbarMinimumTrack;
+			const bool nextX = record.activeX && viewportH >= kCssScrollbarThickness &&
+				trackW >= kCssScrollbarMinimumTrack;
+			if (nextY == visibleY && nextX == visibleX) {
+				stable = true;
+				break;
+			}
+			visibleY = nextY;
+			visibleX = nextX;
+		}
+		if (!stable && iterations >= kCssScrollbarVisibilityIterationCap)
+			++snapshot.scrollbarVisibilityIterationClamps;
+		record.scrollbarVisibilityIterations = iterations;
+		record.scrollbarVisibilityStable = stable;
+		snapshot.scrollbarVisibilityIterations += iterations;
+		record.verticalScrollbarVisible = visibleY;
+		record.horizontalScrollbarVisible = visibleX;
+		if (visibleY) ++snapshot.scrollbarVerticalVisibleCount;
+		if (visibleX) ++snapshot.scrollbarHorizontalVisibleCount;
+		if (record.overflowY == OverflowMode::Auto && !record.activeY) ++snapshot.scrollbarAutoHiddenCount;
+		if (record.overflowX == OverflowMode::Auto && !record.activeX) ++snapshot.scrollbarAutoHiddenCount;
+		if (record.overflowY == OverflowMode::Scroll && record.maxScrollY == 0) ++snapshot.scrollbarScrollModeZeroRangeCount;
+		if (record.overflowX == OverflowMode::Scroll && record.maxScrollX == 0) ++snapshot.scrollbarScrollModeZeroRangeCount;
+
+		record.verticalTrackLocal = CssPaintRect{
+			std::max(0, viewportW - kCssScrollbarThickness), 0,
+			std::min(kCssScrollbarThickness, viewportW),
+			std::max(0, viewportH - (visibleX ? kCssScrollbarThickness : 0))};
+		record.horizontalTrackLocal = CssPaintRect{
+			0, std::max(0, viewportH - kCssScrollbarThickness),
+			std::max(0, viewportW - (visibleY ? kCssScrollbarThickness : 0)),
+			std::min(kCssScrollbarThickness, viewportH)};
+		record.verticalThumbLength = visibleY
+		? cssScrollbarThumbLength(viewportH, record.contentHeight,
+			record.verticalTrackLocal.h, record.maxScrollY) : 0;
+	record.horizontalThumbLength = visibleX
+		? cssScrollbarThumbLength(viewportW, record.contentWidth,
+			record.horizontalTrackLocal.w, record.maxScrollX) : 0;
+	record.verticalThumbTravel = std::max(0,
+		record.verticalTrackLocal.h - record.verticalThumbLength);
+	record.horizontalThumbTravel = std::max(0,
+		record.horizontalTrackLocal.w - record.horizontalThumbLength);
+	++snapshot.scrollbarExtentNeutralRecords;
+	}
+
+	static CssPaintRect cssScrollbarThumbLocalRect(const CssScrollContainerRecord& record,
+		bool horizontal)
+	{
+		const CssPaintRect track = horizontal ? record.horizontalTrackLocal : record.verticalTrackLocal;
+		const int thumbLength = horizontal ? record.horizontalThumbLength : record.verticalThumbLength;
+		const int travel = horizontal ? record.horizontalThumbTravel : record.verticalThumbTravel;
+		const int maxScroll = horizontal ? record.maxScrollX : record.maxScrollY;
+		const int scroll = horizontal ? record.scrollX : record.scrollY;
+		int offset = 0;
+		if (travel > 0 && maxScroll > 0) {
+			const int64_t scaled = static_cast<int64_t>(travel) * std::max(0, scroll);
+			offset = static_cast<int>(std::max<int64_t>(0,
+				std::min<int64_t>(travel, scaled / maxScroll)));
+		}
+		if (horizontal) return CssPaintRect{track.x + offset, track.y,
+			std::max(0, std::min(track.w, thumbLength)), track.h};
+		return CssPaintRect{track.x, track.y + offset, track.w,
+			std::max(0, std::min(track.h, thumbLength))};
+	}
+
+	static CssPaintRect cssScrollbarScreenRect(const WebDocument& doc,
+		const CssScrollContainerRecord& record, const CssPaintRect& local, int scrollOffset)
+	{
+		const CssPaintRect viewport = cssScrollContainerScreenViewport(doc, record, scrollOffset);
+		return CssPaintRect{cssBoundedCoordinateAdd(viewport.x, local.x),
+			cssBoundedCoordinateAdd(viewport.y, local.y), local.w, local.h};
+	}
+
+	static CssPaintRect cssScrollbarVisibleClip(const WebDocument& doc,
+		const CssScrollContainerRecord& record, int scrollOffset)
+	{
+		return cssPaintRectIntersect(cssScrollContainerVisibleViewport(doc, record, scrollOffset),
+			cssViewportClipRect());
+	}
+
+	static bool cssScrollbarPointInRect(const WebDocument& doc,
+		const CssScrollContainerRecord& record, bool horizontal, bool thumb,
+		int x, int y, int scrollOffset)
+	{
+		if (horizontal ? !record.horizontalScrollbarVisible : !record.verticalScrollbarVisible) return false;
+		const CssPaintRect local = thumb ? cssScrollbarThumbLocalRect(record, horizontal)
+			: (horizontal ? record.horizontalTrackLocal : record.verticalTrackLocal);
+		const CssPaintRect screen = cssScrollbarScreenRect(doc, record, local, scrollOffset);
+		const CssPaintRect clipped = cssPaintRectIntersect(screen,
+			cssScrollbarVisibleClip(doc, record, scrollOffset));
+		return clipped.w > 0 && clipped.h > 0 && x >= clipped.x && x < clipped.x + clipped.w &&
+			y >= clipped.y && y < clipped.y + clipped.h;
+	}
+
+	static bool cssSetScrollContainerOffset(CssScrollContainerRecord& record,
+		int requestedX, int requestedY)
+	{
+		const int nextX = std::max(0, std::min(requestedX, std::max(0, record.maxScrollX)));
+		const int nextY = std::max(0, std::min(requestedY, std::max(0, record.maxScrollY)));
+		if (nextX != requestedX || nextY != requestedY) record.clamped = true;
+		const bool changed = nextX != record.scrollX || nextY != record.scrollY;
+		if (changed) ++s_cssScrollLayoutSnapshot.localScrollOperations;
+		record.scrollX = nextX;
+		record.scrollY = nextY;
+		s_cssScrollState[record.serial] = {record.scrollX, record.scrollY};
+		return changed;
+	}
+
+	static void drawCssScrollbarUi(const WebDocument& doc, int scrollOffset,
+		uint64_t windowId, uint64_t draggingSerial, int draggingAxis)
+	{
+		std::vector<int> order;
+		order.reserve(s_cssScrollLayoutSnapshot.records.size());
+		for (int index = 0; index < static_cast<int>(s_cssScrollLayoutSnapshot.records.size()); ++index)
+			order.push_back(index);
+		// Descendant chrome is scrolled content of its owner. Paint it first so
+		// the shallower owner-level scrollbar remains the final visible UI where
+		// nested tracks meet; hit testing uses the same priority rule.
+		std::sort(order.begin(), order.end(), [&](int left, int right) {
+			const CssScrollContainerRecord& a = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(left)];
+			const CssScrollContainerRecord& b = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(right)];
+			if (a.depth != b.depth) return a.depth > b.depth;
+			return left < right;
+		});
+		for (int index : order) {
+			const CssScrollContainerRecord& record = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(index)];
+			const CssPaintRect clip = cssScrollbarVisibleClip(doc, record, scrollOffset);
+			if (clip.w <= 0 || clip.h <= 0) continue;
+			auto drawPart = [&](const CssPaintRect& local, uint32_t color) {
+				const CssPaintRect screen = cssScrollbarScreenRect(doc, record, local, scrollOffset);
+				const CssPaintRect clipped = cssPaintRectIntersect(screen, clip);
+				if (clipped.w > 0 && clipped.h > 0)
+					drawThemeRect(windowId, clipped.x, clipped.y, clipped.w, clipped.h, color);
+			};
+			if (record.verticalScrollbarVisible) {
+				drawPart(record.verticalTrackLocal, NavigatorScrollTrackColor());
+				drawPart(cssScrollbarThumbLocalRect(record, false),
+					record.serial == draggingSerial && draggingAxis == 1
+						? NavigatorAccentColor() : NavigatorScrollThumbColor());
+			}
+			if (record.horizontalScrollbarVisible) {
+				drawPart(record.horizontalTrackLocal, NavigatorScrollTrackColor());
+				drawPart(cssScrollbarThumbLocalRect(record, true),
+					record.serial == draggingSerial && draggingAxis == 2
+						? NavigatorAccentColor() : NavigatorScrollThumbColor());
+			}
+		}
+	}
+
 	static int cssPositionedScreenXForDocument(const WebDocument& doc,
 		const CssPositionedRecord& record)
 	{
@@ -9079,11 +9307,23 @@ namespace {
 
 	static void buildCssScrollLayout(const WebDocument& doc, CssScrollLayoutSnapshot& snapshot)
 	{
+		const bool preserveInteractionDiagnostics = snapshot.valid && snapshot.url == doc.url &&
+			snapshot.generation == doc.formRuntimeState.documentGeneration;
+		const int priorThumbDragOperations = snapshot.scrollbarThumbDragOperations;
+		const int priorTrackClickOperations = snapshot.scrollbarTrackClickOperations;
+		const int priorNestedOperations = snapshot.scrollbarNestedOperations;
+		const int priorHitTestInterceptions = snapshot.scrollbarHitTestInterceptions;
 		snapshot = CssScrollLayoutSnapshot{};
 		snapshot.url = doc.url;
 		snapshot.blockCount = doc.blocks.size();
 		snapshot.fingerprint = cssScrollLayoutFingerprint(doc);
 		snapshot.generation = doc.formRuntimeState.documentGeneration;
+		if (preserveInteractionDiagnostics) {
+			snapshot.scrollbarThumbDragOperations = priorThumbDragOperations;
+			snapshot.scrollbarTrackClickOperations = priorTrackClickOperations;
+			snapshot.scrollbarNestedOperations = priorNestedOperations;
+			snapshot.scrollbarHitTestInterceptions = priorHitTestInterceptions;
+		}
 		snapshot.evidence = "records=";
 		if (snapshot.building) return;
 		snapshot.building = true;
@@ -9160,8 +9400,6 @@ namespace {
 			for (int index = 0; index < static_cast<int>(doc.blocks.size()); ++index) {
 				const DocBlock& block = doc.blocks[static_cast<size_t>(index)];
 				if (block.style.displayNone || !cssBlockContainsSerial(block, element.serial)) continue;
-				CssPaintRect rect;
-				if (cssDocumentBorderBoxForScroll(doc, index, rect)) addExtent(rect);
 				if (block.elementMetadata.serial == element.serial && first == index) {
 					const int intrinsic = cssBoundedGeometryAdd(
 						cssPositionAutoContentHeight(block, doc,
@@ -9180,7 +9418,7 @@ namespace {
 				const WebStyle* descendantStyle = cssStyleForSerial(doc, descendant.serial);
 				if (!descendantStyle || descendantStyle->displayNone) continue;
 				const int height = cssDefiniteContentHeightForStyle(*descendantStyle, -1);
-				if (height >= 0) {
+				if (height > 0) {
 					const int verticalEdges = cssVerticalBoxEdges(*descendantStyle);
 					const int marginTop = cssMarginTopPx(*descendantStyle, 0);
 					const int marginBottom = cssMarginBottomPx(*descendantStyle, 0);
@@ -9189,16 +9427,21 @@ namespace {
 					record.contentHeight = std::max(record.contentHeight,
 						static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(kCssScrollGeometryCap, candidate))));
 				}
-				const int parentBasis = std::max(1, record.paddingBox.w);
-				const int width = resolveUsedOuterDimension(*descendantStyle,
-					descendantStyle->widthValue, descendantStyle->width, descendantStyle->widthPercent,
-					descendantStyle->minWidthValue, descendantStyle->minWidth, descendantStyle->minWidthPercent,
-					descendantStyle->maxWidthValue, descendantStyle->maxWidth, descendantStyle->maxWidthPercent,
-					descendantStyle->maxWidthNone, parentBasis, parentBasis,
-					cssHorizontalBoxEdges(*descendantStyle), false);
-				if (width > 0)
-					record.contentWidth = std::max(record.contentWidth,
-						std::min(kCssScrollGeometryCap, record.paddingBox.w + width));
+				const bool widthSpecified = (descendantStyle->widthValue.valid &&
+					descendantStyle->widthValue.type != CssLengthType::Auto) ||
+					descendantStyle->width >= 0 || descendantStyle->widthPercent >= 0;
+				if (widthSpecified) {
+					const int parentBasis = std::max(1, record.paddingBox.w);
+					const int width = resolveUsedOuterDimension(*descendantStyle,
+						descendantStyle->widthValue, descendantStyle->width, descendantStyle->widthPercent,
+						descendantStyle->minWidthValue, descendantStyle->minWidth, descendantStyle->minWidthPercent,
+						descendantStyle->maxWidthValue, descendantStyle->maxWidth, descendantStyle->maxWidthPercent,
+						descendantStyle->maxWidthNone, parentBasis, parentBasis,
+						cssHorizontalBoxEdges(*descendantStyle), false);
+					if (width > 0)
+						record.contentWidth = std::max(record.contentWidth,
+							std::min(kCssScrollGeometryCap, record.paddingBox.w + width));
+				}
 			}
 			for (const CssPositionedRecord& positioned : s_cssPositionLayoutSnapshot.records) {
 				if (positioned.logicalSerial == 0 || positioned.coordinateSpace == CssPositionCoordinateSpace::Viewport ||
@@ -9208,7 +9451,7 @@ namespace {
 			}
 			for (const InlineFlowLayout& flow : s_inlineLayoutSnapshot.flows) {
 				if (flow.anchorBlockIndex < 0 || flow.anchorBlockIndex >= static_cast<int>(doc.blocks.size()) ||
-					!cssBlockContainsSerial(doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)], element.serial)) continue;
+					doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)].elementMetadata.serial != element.serial) continue;
 				const int flowY = cssBoundedGeometryAdd(kContentY + cssBlockLayoutY(doc, flow.anchorBlockIndex),
 					flow.totalHeight);
 				addExtent(CssPaintRect{flow.outerX, flowY, flow.outerWidth, flow.totalHeight});
@@ -9222,10 +9465,22 @@ namespace {
 				? 0 : std::max(0, record.contentWidth - record.paddingBox.w);
 			record.maxScrollY = (record.overflowY == OverflowMode::Visible || record.overflowY == OverflowMode::Hidden)
 				? 0 : std::max(0, record.contentHeight - record.paddingBox.h);
+			// The compact flat layout can leave a bounded 1-3px text/margin
+			// remainder for an otherwise fitting auto box. Treat that quantization
+			// remainder as fitting so auto does not expose a phantom scrollbar.
+			if (record.overflowX == OverflowMode::Auto && record.maxScrollX <= 3) {
+				record.contentWidth = record.paddingBox.w;
+				record.maxScrollX = 0;
+			}
+			if (record.overflowY == OverflowMode::Auto && record.maxScrollY <= 3) {
+				record.contentHeight = record.paddingBox.h;
+				record.maxScrollY = 0;
+			}
 			record.activeX = record.overflowX == OverflowMode::Scroll ||
 				(record.overflowX == OverflowMode::Auto && record.maxScrollX > 0);
 			record.activeY = record.overflowY == OverflowMode::Scroll ||
 				(record.overflowY == OverflowMode::Auto && record.maxScrollY > 0);
+			cssResolveScrollbarGeometry(record, snapshot);
 			record.depth = 1;
 			parent = element.parentSerial;
 			for (int depth = 0; parent != 0 && depth < kCssScrollAncestryCap; ++depth) {
@@ -9262,6 +9517,24 @@ namespace {
 					<< static_cast<int>(record.overflowY)
 					<< ",first=" << record.representativeBlockIndex << ";";
 				snapshot.evidence += evidence.str();
+			}
+			if (snapshot.scrollbarEvidence.size() < 12000) {
+				std::ostringstream scrollbarEvidence;
+				scrollbarEvidence << "id=" << element.id << ",serial=" << record.serial
+					<< ",vertical=" << (record.verticalScrollbarVisible ? "visible" : "hidden")
+					<< ",horizontal=" << (record.horizontalScrollbarVisible ? "visible" : "hidden")
+					<< ",vertical-track=" << record.verticalTrackLocal.w << ":" << record.verticalTrackLocal.h
+					<< ",horizontal-track=" << record.horizontalTrackLocal.w << ":" << record.horizontalTrackLocal.h
+					<< ",box=" << record.paddingBox.x << ":" << record.paddingBox.y
+					<< ",thumb=" << record.verticalThumbLength << ":" << record.horizontalThumbLength
+					<< ",travel=" << record.verticalThumbTravel << ":" << record.horizontalThumbTravel
+					<< ",padding=" << record.paddingBox.w << ":" << record.paddingBox.h
+					<< ",active=" << (record.activeX ? "x" : "") << (record.activeY ? "y" : "")
+					<< ",max=" << record.maxScrollX << ":" << record.maxScrollY
+					<< ",scroll=" << record.scrollX << ":" << record.scrollY
+					<< ",iterations=" << record.scrollbarVisibilityIterations
+					<< ",stable=" << (record.scrollbarVisibilityStable ? "yes" : "no") << ";";
+				snapshot.scrollbarEvidence += scrollbarEvidence.str();
 			}
 			if (record.activeX || record.activeY) ++snapshot.activeScrollContainers;
 			if (record.contentWidth > record.paddingBox.w || record.contentHeight > record.paddingBox.h) {
@@ -9603,7 +9876,8 @@ namespace {
 					id = doc.blocks[static_cast<size_t>(record.blockIndex)].id;
 				if (id.empty()) for (const HtmlElementRef& element : doc.structuralElements)
 					if (element.serial == record.logicalSerial) { id = element.id; break; }
-				if (id.rfind("phase6b-", 0) == 0 || id.rfind("css6b-", 0) == 0) {
+				if (id.rfind("phase6b-", 0) == 0 || id.rfind("css6b-", 0) == 0 ||
+					id.rfind("phase6c-", 0) == 0 || id.rfind("css6c-", 0) == 0) {
 					std::ostringstream line;
 					const int localY = cssLocalScrollOffsetForPositioned(doc, record, false);
 					line << "id=" << id << ",position=sticky,scrollport="
@@ -10437,6 +10711,19 @@ namespace {
 		if (!metadata.cssScrollEvidence.empty()) {
 			out += "Current Document.css_scroll_evidence=" + metadata.cssScrollEvidence + "\n";
 		}
+		add("css_scrollbar_vertical_visible_count", metadata.cssScrollbarVerticalVisibleCount);
+		add("css_scrollbar_horizontal_visible_count", metadata.cssScrollbarHorizontalVisibleCount);
+		add("css_scrollbar_auto_hidden_count", metadata.cssScrollbarAutoHiddenCount);
+		add("css_scrollbar_scroll_mode_zero_range_count", metadata.cssScrollbarScrollModeZeroRangeCount);
+		add("css_scrollbar_thumb_drag_operations", metadata.cssScrollbarThumbDragOperations);
+		add("css_scrollbar_track_click_operations", metadata.cssScrollbarTrackClickOperations);
+		add("css_scrollbar_nested_operations", metadata.cssScrollbarNestedOperations);
+		add("css_scrollbar_hit_test_interceptions", metadata.cssScrollbarHitTestInterceptions);
+		add("css_scrollbar_extent_neutral_records", metadata.cssScrollbarExtentNeutralRecords);
+		add("css_scrollbar_visibility_iterations", metadata.cssScrollbarVisibilityIterations);
+		add("css_scrollbar_visibility_iteration_clamps", metadata.cssScrollbarVisibilityIterationClamps);
+		if (!metadata.cssScrollbarEvidence.empty())
+			out += "Current Document.css_scrollbar_evidence=" + metadata.cssScrollbarEvidence + "\n";
 		add("css_clip_intersections", metadata.cssClipIntersections);
 		add("css_clip_depth_clamps", metadata.cssClipDepthClamps);
 		add("css_clipped_hit_targets", metadata.cssClippedHitTargets);
@@ -10462,7 +10749,9 @@ namespace {
 		out += "Current Document.css_overflow_scroll_container_semantics=axis-local-always-scrollable-record\n";
 		out += "Current Document.css_scroll_coordinate_model=layout-document-minus-ancestor-local-scroll-minus-document-scroll-fixed-viewport\n";
 		out += "Current Document.css_scroll_state_lifetime=serial-keyed-state-reset-on-navigation\n";
-		out += "Current Document.css_scrollbar_ui=deferred\n";
+		out += "Current Document.css_scrollbar_ui=bounded-element-overlay-owner-level-after-content\n";
+		out += "Current Document.css_scrollbar_reservation_model=overlay-no-content-viewport-mutation\n";
+		out += "Current Document.css_scrollbar_visibility_convergence=bounded-two-pass-overlay-stable\n";
 		out += "Current Document.css_wheel_routing=innermost-capable-container-then-ancestor-then-document\n";
 		out += "Current Document.css_visibility_hidden_layout=retained\n";
 		out += "Current Document.css_opacity_zero_hit_testing=eligible_when_visible\n";
@@ -12543,16 +12832,9 @@ bool Navigator::SmokeSetElementScrollOffsetById(const std::string& id, int offse
 		if (element.id != id) continue;
 		CssScrollContainerRecord* record = cssMutableScrollContainerForSerial(s_currentDoc, element.serial);
 		if (!record) return false;
-		const int requestedX = offsetX;
-		const int requestedY = offsetY;
-		record->scrollX = std::max(0, std::min(requestedX, record->maxScrollX));
-		record->scrollY = std::max(0, std::min(requestedY, record->maxScrollY));
-		if (record->scrollX != requestedX || record->scrollY != requestedY) {
-			record->clamped = true;
+		cssSetScrollContainerOffset(*record, offsetX, offsetY);
+		if (record->scrollX != offsetX || record->scrollY != offsetY)
 			++s_cssScrollLayoutSnapshot.scrollClamps;
-		}
-		s_cssScrollState[element.serial] = {record->scrollX, record->scrollY};
-		++s_cssScrollLayoutSnapshot.localScrollOperations;
 		if (s_windowId != 0) updateDisplay();
 		return true;
 	}
@@ -12579,6 +12861,68 @@ int Navigator::SmokeElementMaxScrollYById(const std::string& id)
 		if (element.id != id) continue;
 		const CssScrollContainerRecord* record = cssScrollContainerForSerial(s_currentDoc, element.serial);
 		return record ? record->maxScrollY : -1;
+	}
+	return -1;
+}
+
+bool Navigator::SmokeElementScrollbarGeometryById(const std::string& id, bool horizontal,
+	bool thumb, int& outX, int& outY, int& outW, int& outH)
+{
+	outX = outY = outW = outH = 0;
+	if (s_windowId == 0) return false;
+	ensureCssMarginLayout(s_currentDoc);
+	ensureCssFlexLayout(s_currentDoc);
+	ensureCssFloatLayout(s_currentDoc);
+	ensureInlineLayout(s_currentDoc);
+	ensureCssPositionLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
+	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.id != id) continue;
+		const CssScrollContainerRecord* record = cssScrollContainerForSerial(s_currentDoc, element.serial);
+		if (!record || (horizontal ? !record->horizontalScrollbarVisible : !record->verticalScrollbarVisible)) return false;
+		const CssPaintRect local = horizontal
+			? (thumb ? cssScrollbarThumbLocalRect(*record, true) : record->horizontalTrackLocal)
+			: (thumb ? cssScrollbarThumbLocalRect(*record, false) : record->verticalTrackLocal);
+		const CssPaintRect screen = cssScrollbarScreenRect(s_currentDoc, *record, local, s_scrollOffset);
+		const CssPaintRect clipped = cssPaintRectIntersect(screen,
+			cssScrollbarVisibleClip(s_currentDoc, *record, s_scrollOffset));
+		if (clipped.w <= 0 || clipped.h <= 0) return false;
+		outX = clipped.x;
+		outY = clipped.y;
+		outW = clipped.w;
+		outH = clipped.h;
+		return true;
+	}
+	return false;
+}
+
+bool Navigator::SmokePointerInput(int x, int y, int button, const std::string& action)
+{
+	if (s_windowId == 0) return false;
+	handleMouseInput(x, y, button, action);
+	return true;
+}
+
+int Navigator::SmokeElementScrollOffsetXById(const std::string& id)
+{
+	if (s_windowId == 0) return -1;
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
+	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.id != id) continue;
+		const CssScrollContainerRecord* record = cssScrollContainerForSerial(s_currentDoc, element.serial);
+		return record ? record->scrollX : -1;
+	}
+	return -1;
+}
+
+int Navigator::SmokeElementMaxScrollXById(const std::string& id)
+{
+	if (s_windowId == 0) return -1;
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
+	for (const HtmlElementRef& element : s_currentDoc.structuralElements) {
+		if (element.id != id) continue;
+		const CssScrollContainerRecord* record = cssScrollContainerForSerial(s_currentDoc, element.serial);
+		return record ? record->maxScrollX : -1;
 	}
 	return -1;
 }
@@ -14468,6 +14812,11 @@ void Navigator::renderDocument()
 		++blockIndex;
 	}
 
+	// Element scrollbars are owner-level chrome: they paint after all clipped
+	// scrolling content and before the pre-existing document scrollbar.
+	drawCssScrollbarUi(s_currentDoc, s_scrollOffset, s_windowId,
+		s_scrollbarDragSerial, static_cast<int>(s_scrollbarDragAxis));
+
 	// Scroll thumb
 	int maxScroll = maxScrollOffset();
 	if (maxScroll > 0) {
@@ -14544,6 +14893,7 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 	case HitTarget::FormLabel:   next = "Activate associated choice"; break;
 	case HitTarget::FormSelect:  next = "Cycle select option"; break;
 	case HitTarget::FormSubmit:  next = "Activate inert button"; break;
+	case HitTarget::ElementScrollbar: next = "Element scrollbar"; break;
 	case HitTarget::Link:
 		if (linkBlockIndex >= 0 &&
 			linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
@@ -15121,6 +15471,14 @@ void Navigator::clearMousePressState()
 	s_mouseDownLinkBlockIndex = -1;
 	s_mouseDownLinkUrl.clear();
 	s_mouseDragThresholdExceeded = false;
+	clearScrollbarDragState();
+}
+
+void Navigator::clearScrollbarDragState()
+{
+	s_scrollbarDragSerial = 0;
+	s_scrollbarDragAxis = ScrollbarAxis::None;
+	s_scrollbarDragGrabOffset = 0;
 }
 
 bool Navigator::activateLabelBlock(int blockIndex)
@@ -15229,13 +15587,24 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 		ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 		int bestIndex = -1;
 		int bestDepth = -1;
+		// A wheel over owner-level chrome still belongs to the same local
+		// container. Prefer that direct owner before the ordinary viewport scan.
+		for (int index = 0; index < static_cast<int>(s_cssScrollLayoutSnapshot.records.size()); ++index) {
+			const CssScrollContainerRecord& record = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(index)];
+			if (!record.activeY || record.maxScrollY <= 0 ||
+				!cssScrollbarPointInRect(s_currentDoc, record, false, false, x, y, s_scrollOffset)) continue;
+			if (record.depth >= bestDepth) {
+				bestDepth = record.depth;
+				bestIndex = index;
+			}
+		}
 		for (int index = 0; index < static_cast<int>(s_cssScrollLayoutSnapshot.records.size()); ++index) {
 			const CssScrollContainerRecord& record = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(index)];
 			if (!record.activeY || record.maxScrollY <= 0) continue;
 			const CssPaintRect viewport = cssScrollContainerVisibleViewport(s_currentDoc, record, s_scrollOffset);
 			if (viewport.w <= 0 || viewport.h <= 0 || x < viewport.x || x >= viewport.x + viewport.w ||
 				y < viewport.y || y >= viewport.y + viewport.h) continue;
-			if (record.depth >= bestDepth) {
+			if (bestIndex < 0 && record.depth >= bestDepth) {
 				bestDepth = record.depth;
 				bestIndex = index;
 			}
@@ -15243,12 +15612,9 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 		if (bestIndex >= 0) {
 			CssScrollContainerRecord& record = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(bestIndex)];
 			const int requested = cssBoundedGeometryAdd(record.scrollY, -steps * 48);
-			const int next = std::max(0, std::min(requested, record.maxScrollY));
-			if (next != record.scrollY) {
-				record.scrollY = next;
-				s_cssScrollState[record.serial] = {record.scrollX, record.scrollY};
-				++s_cssScrollLayoutSnapshot.localScrollOperations;
+			if (cssSetScrollContainerOffset(record, record.scrollX, requested)) {
 				++s_cssScrollLayoutSnapshot.localScrollWheelOperations;
+				if (record.nested) ++s_cssScrollLayoutSnapshot.scrollbarNestedOperations;
 				updateStatus("Scrolled element.");
 				updateDisplay();
 				return;
@@ -15275,6 +15641,35 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 	if (button == 0 && action == "move") {
 		s_mouseCurrentX = x;
 		s_mouseCurrentY = y;
+
+		if (s_mouseLeftDown && s_scrollbarDragSerial != 0 &&
+			s_scrollbarDragAxis != ScrollbarAxis::None) {
+			CssScrollContainerRecord* record = cssMutableScrollContainerForSerial(
+				s_currentDoc, s_scrollbarDragSerial);
+			if (!record) {
+				clearScrollbarDragState();
+				s_mouseMode = MouseMode::None;
+				return;
+			}
+			const bool horizontal = s_scrollbarDragAxis == ScrollbarAxis::Horizontal;
+			const CssPaintRect trackLocal = horizontal ? record->horizontalTrackLocal : record->verticalTrackLocal;
+			const CssPaintRect trackScreen = cssScrollbarScreenRect(s_currentDoc, *record,
+				trackLocal, s_scrollOffset);
+			const int trackStart = horizontal ? trackScreen.x : trackScreen.y;
+			const int travel = horizontal ? record->horizontalThumbTravel : record->verticalThumbTravel;
+			const int pointer = horizontal ? x : y;
+			const int desired = pointer - s_scrollbarDragGrabOffset - trackStart;
+			const int thumbOffset = std::max(0, std::min(desired, std::max(0, travel)));
+			const int maxScroll = horizontal ? record->maxScrollX : record->maxScrollY;
+			const int requested = (travel > 0 && maxScroll > 0)
+				? static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(maxScroll,
+					(static_cast<int64_t>(thumbOffset) * maxScroll) / travel))) : 0;
+			const int requestedX = horizontal ? requested : record->scrollX;
+			const int requestedY = horizontal ? record->scrollY : requested;
+			cssSetScrollContainerOffset(*record, requestedX, requestedY);
+			updateDisplay();
+			return;
+		}
 
 		if (s_mouseLeftDown) {
 			const int dx = std::abs(x - s_mouseDownX);
@@ -15354,6 +15749,50 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 
 		if (s_addressFocused) blurAddressBar();
 
+		if (target == HitTarget::ElementScrollbar) {
+			s_mouseMode = MouseMode::ElementScrollbarInteraction;
+			clearSelection();
+			clearDocumentFocus();
+			CssScrollContainerRecord* record = cssMutableScrollContainerForSerial(
+				s_currentDoc, s_hitScrollbarSerial);
+			if (!record || s_hitScrollbarAxis == ScrollbarAxis::None) {
+				clearScrollbarDragState();
+				updateDisplay();
+				return;
+			}
+			const bool horizontal = s_hitScrollbarAxis == ScrollbarAxis::Horizontal;
+			if (s_hitScrollbarThumb) {
+				const CssPaintRect thumbLocal = cssScrollbarThumbLocalRect(*record, horizontal);
+				const CssPaintRect thumbScreen = cssScrollbarScreenRect(s_currentDoc, *record,
+					thumbLocal, s_scrollOffset);
+				s_scrollbarDragSerial = record->serial;
+				s_scrollbarDragAxis = s_hitScrollbarAxis;
+				s_scrollbarDragGrabOffset = (horizontal ? x : y) -
+					(horizontal ? thumbScreen.x : thumbScreen.y);
+				++s_cssScrollLayoutSnapshot.scrollbarThumbDragOperations;
+				if (record->nested) ++s_cssScrollLayoutSnapshot.scrollbarNestedOperations;
+				updateStatus("Dragging element scrollbar.");
+			} else {
+				const CssPaintRect thumbLocal = cssScrollbarThumbLocalRect(*record, horizontal);
+				const CssPaintRect thumbScreen = cssScrollbarScreenRect(s_currentDoc, *record,
+					thumbLocal, s_scrollOffset);
+				const int pointer = horizontal ? x : y;
+				const int thumbStart = horizontal ? thumbScreen.x : thumbScreen.y;
+				const int page = std::max(1, horizontal ? record->paddingBox.w : record->paddingBox.h);
+				const int requested = pointer < thumbStart
+					? (horizontal ? record->scrollX - page : record->scrollY - page)
+					: (horizontal ? record->scrollX + page : record->scrollY + page);
+				const int requestedX = horizontal ? requested : record->scrollX;
+				const int requestedY = horizontal ? record->scrollY : requested;
+				cssSetScrollContainerOffset(*record, requestedX, requestedY);
+				++s_cssScrollLayoutSnapshot.scrollbarTrackClickOperations;
+				if (record->nested) ++s_cssScrollLayoutSnapshot.scrollbarNestedOperations;
+				updateStatus("Paged element scrollbar.");
+			}
+			updateDisplay();
+			return;
+		}
+
 		if (target == HitTarget::FormInput || target == HitTarget::FormTextarea) {
 			s_mouseMode = MouseMode::FormInputInteraction;
 			clearSelection();
@@ -15426,6 +15865,19 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 		const int downLinkIdx = s_mouseDownLinkBlockIndex;
 
 		s_mouseLeftDown = false;
+
+		if (mode == MouseMode::ElementScrollbarInteraction) {
+			clearScrollbarDragState();
+			s_mouseMode = MouseMode::None;
+			s_mouseDownHitTarget = HitTarget::None;
+			s_mouseDownLinkBlockIndex = -1;
+			s_mouseDownLinkUrl.clear();
+			s_selectionPending = false;
+			s_mouseDragThresholdExceeded = false;
+			s_selectionBegan = false;
+			updateDisplay();
+			return;
+		}
 
 		if (mode == MouseMode::SelectingText || s_selectionDragging) {
 			finalizeSelection(x, y);
@@ -16562,6 +17014,9 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 {
 	outLinkBlockIndex = -1;
+	s_hitScrollbarSerial = 0;
+	s_hitScrollbarAxis = ScrollbarAxis::None;
+	s_hitScrollbarThumb = false;
 	ensureCssMarginLayout(s_currentDoc);
 	ensureCssFloatLayout(s_currentDoc);
 	ensureInlineLayout(s_currentDoc);
@@ -16580,6 +17035,42 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	{
 		Rect addrRect{ kAddressX, kAddressY, kAddressW, kAddressH };
 		if (addrRect.contains(x, y)) return HitTarget::AddressBar;
+	}
+
+	// Element scrollbar chrome is owner-level UI and wins before controls,
+	// positioned content, or links at the same visible location. Shallower
+	// owners paint last when nested tracks overlap; later same-depth records
+	// follow the shared document paint order.
+	int bestScrollbarIndex = -1;
+	int bestScrollbarDepth = std::numeric_limits<int>::max();
+	bool bestScrollbarThumb = false;
+	ScrollbarAxis bestScrollbarAxis = ScrollbarAxis::None;
+	for (int index = 0; index < static_cast<int>(s_cssScrollLayoutSnapshot.records.size()); ++index) {
+		const CssScrollContainerRecord& record = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(index)];
+		for (const bool horizontal : {false, true}) {
+			const bool visible = horizontal ? record.horizontalScrollbarVisible : record.verticalScrollbarVisible;
+			if (!visible) continue;
+			const ScrollbarAxis axis = horizontal ? ScrollbarAxis::Horizontal : ScrollbarAxis::Vertical;
+			const bool thumb = cssScrollbarPointInRect(s_currentDoc, record, horizontal, true, x, y, s_scrollOffset);
+			const bool track = thumb || cssScrollbarPointInRect(s_currentDoc, record, horizontal, false, x, y, s_scrollOffset);
+			if (!track) continue;
+			const bool wins = bestScrollbarIndex < 0 || record.depth < bestScrollbarDepth ||
+				(record.depth == bestScrollbarDepth && index >= bestScrollbarIndex) ||
+				(record.depth == bestScrollbarDepth && index == bestScrollbarIndex && thumb && !bestScrollbarThumb);
+			if (!wins) continue;
+			bestScrollbarIndex = index;
+			bestScrollbarDepth = record.depth;
+			bestScrollbarThumb = thumb;
+			bestScrollbarAxis = axis;
+		}
+	}
+	if (bestScrollbarIndex >= 0) {
+		const CssScrollContainerRecord& record = s_cssScrollLayoutSnapshot.records[static_cast<size_t>(bestScrollbarIndex)];
+		s_hitScrollbarSerial = record.serial;
+		s_hitScrollbarAxis = bestScrollbarAxis;
+		s_hitScrollbarThumb = bestScrollbarThumb;
+		++s_cssScrollLayoutSnapshot.scrollbarHitTestInterceptions;
+		return HitTarget::ElementScrollbar;
 	}
 
 	// Controls win over labels when their rectangles overlap.  This makes a
