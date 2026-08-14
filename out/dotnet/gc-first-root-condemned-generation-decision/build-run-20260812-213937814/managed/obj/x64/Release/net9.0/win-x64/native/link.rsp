@@ -1,0 +1,44 @@
+﻿"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-condemned-generation-decision\build-run-20260812-213937814\managed\obj\x64\Release\net9.0\win-x64\native\HostLogProof.obj"
+/OUT:"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-condemned-generation-decision\build-run-20260812-213937814\managed\bin\x64\Release\net9.0\win-x64\native\HostLogProof.exe"
+/DEF:"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-condemned-generation-decision\build-run-20260812-213937814\managed\obj\x64\Release\net9.0\win-x64\native\HostLogProof.def"
+/fixed /base:0x10000000 /map:"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-condemned-generation-decision\build-run-20260812-213937814\artifact\NativeAotGcSingleThreadSuspendEe.map"
+/INCLUDE:ManagedMain
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-condemned-generation-decision\build-run-20260812-213937814\artifact\runtime_support.obj"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-condemned-generation-decision\build-run-20260812-213937814\runtime-pack\guidexos_nativeaot_platform.single-thread-suspend-ee.obj"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-condemned-generation-decision\build-run-20260812-213937814\runtime-pack\guidexos_nativeaot_gc_allocation_probe.single-thread-suspend-ee.obj"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-real-allocation\managed-artifact\sdk\bootstrapper.obj"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-real-allocation\managed-artifact\sdk\Runtime.WorkstationGC.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-real-allocation\managed-artifact\sdk\eventpipe-disabled.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-real-allocation\managed-artifact\sdk\Runtime.VxsortEnabled.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-real-allocation\managed-artifact\sdk\standalonegc-disabled.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-real-allocation\managed-artifact\sdk\zlibstatic.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-real-allocation\managed-artifact\sdk\System.Globalization.Native.Aot.lib"
+"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-real-allocation\managed-artifact\sdk\System.IO.Compression.Native.Aot.lib"
+"advapi32.lib"
+"bcrypt.lib"
+"crypt32.lib"
+"iphlpapi.lib"
+"kernel32.lib"
+"mswsock.lib"
+"ncrypt.lib"
+"normaliz.lib"
+"ntdll.lib"
+"ole32.lib"
+"oleaut32.lib"
+"secur32.lib"
+"user32.lib"
+"version.lib"
+"ws2_32.lib"
+/NOLOGO /MANIFEST:NO
+/MERGE:.managedcode=.text /MERGE:hydrated=.bss
+/DEBUG
+/INCREMENTAL:NO
+/SUBSYSTEM:NATIVE
+/ENTRY:ManagedMain /NOEXP /NOIMPLIB /STACK:1572864
+/NATVIS:"C:\Users\guideX\.nuget\packages\microsoft.dotnet.ilcompiler\9.0.0\build\NativeAOT.natvis"
+/IGNORE:4104
+/CETCOMPAT
+/NODEFAULTLIB:libucrt.lib
+/DEFAULTLIB:ucrt.lib
+/OPT:REF
+/OPT:ICF

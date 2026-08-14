@@ -1,0 +1,477 @@
+{
+    "outcome":  "B / genuine NativeAOT root completed the real queue_mark old_o null/mark-state decision; stopped before later mutation or traversal",
+    "proofMode":  "first-root-post-queue-mark-decision",
+    "marker":  "C011EC13",
+    "repositoryHead":  "cae40ef7df63f41c5fbfcf32d67400fc933f0998",
+    "startingCommittedHead":  "cae40ef7df63f41c5fbfcf32d67400fc933f0998",
+    "startingBranch":  "v1.1_DOTNET_SUPPORT",
+    "startingWorktreeStatus":  [
+                                   " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                                   " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                                   " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                                   "?? out/dotnet/gc-first-root-post-queue-mark-decision/"
+                               ],
+    "startingDirtyState":  [
+                               " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                               " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                               " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                               "?? out/dotnet/gc-first-root-post-queue-mark-decision/"
+                           ],
+    "endingDirtyState":  [
+                             " M scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1",
+                             " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h",
+                             " M tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp",
+                             "?? out/dotnet/gc-first-root-post-queue-mark-decision/"
+                         ],
+    "taskStartCheckpoint":  {
+                                "head":  "cae40ef7df63f41c5fbfcf32d67400fc933f0998",
+                                "branch":  "v1.1_DOTNET_SUPPORT",
+                                "dirtyState":  "dirty",
+                                "ordinaryKernelSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "ordinaryEspSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                            },
+    "lockedRuntimeIdentity":  {
+                                  "nativeAot":  "9.0.0",
+                                  "architecture":  "AMD64",
+                                  "gc":  "Workstation",
+                                  "gcInterfaces":  "5.3 / 2",
+                                  "sourceCommit":  "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+                                  "productionInitializeModules":  true,
+                                  "productionThreadStatic":  true
+                              },
+    "ordinaryBaseline":  {
+                             "startingBuildSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                             "startingEspSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                             "expectedSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                         },
+    "priorCheckpoint":  {
+                            "marker":  "C011EC12",
+                            "report":  "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_FIRST_MARK_MUTATION.md",
+                            "stop":  "after the authentic slot/cursor queue invariant and before old_o decision"
+                        },
+    "proofRoot":  {
+                      "slot":  "0x000000000394FBE0",
+                      "rawValue":  "0x0000000100A02F50",
+                      "storageObject":  "0x0000000100A02F50",
+                      "sentinel":  "0x0000000100A01F38"
+                  },
+    "findRange":  {
+                      "result":  "0x00000001",
+                      "rawRoot":  "0x0000000100A02F50",
+                      "membership":  "0x00000001"
+                  },
+    "workstationHeap":  {
+                            "multipleHeaps":  "0x00000000",
+                            "hpt":  "0x0000000000000000",
+                            "heapOf":  "0x0000000000000000",
+                            "heapNumber":  "0x00000000",
+                            "heapCount":  "0x00000001",
+                            "nullSentinelValid":  "0x00000001"
+                        },
+    "condemnedGeneration":  {
+                                "result":  "0x00000001",
+                                "generation":  "0x00000000",
+                                "condemnedGeneration":  "0x00000000",
+                                "maximumGeneration":  "0x00000002"
+                            },
+    "queueMark":  {
+                      "declaration":  "gcpriv.h:2729 mark_object_simple; gcpriv.h:1487-1504 mark_queue_t",
+                      "definition":  "gc.cpp:27987-28029 mark_object_simple; gc.cpp:27303-27335 queue_mark",
+                      "slotAddress":  "0x0000000010256260",
+                      "slotIndex":  "0x0000000000000000",
+                      "oldSlot":  "0x0000000000000000",
+                      "newSlot":  "0x0000000100A02F50",
+                      "oldObject":  "0x0000000000000000",
+                      "cursorBefore":  "0x0000000000000000",
+                      "cursorAfter":  "0x0000000000000001",
+                      "inheritedSlotWrites":  "0x00000001",
+                      "inheritedCursorWrites":  "0x00000001"
+                  },
+    "sourceTrace":  {
+                        "oldObjectMeaning":  "previous contents of slot_table[slot_index], captured before insertion",
+                        "nullBranch":  "gc.cpp:27321-27322 if(old_o==nullptr) return nullptr",
+                        "markedMacro":  "gc.cpp:11587 #define marked(i) header(i)-\u003eIsMarked()",
+                        "markedImplementation":  "gc.cpp:4789-4792 CObjectHeader::IsMarked reads GC_MARKED from RawGetMethodTable",
+                        "markRepresentation":  "object-header raw method-table-word GC_MARKED bit",
+                        "markedMutates":  false,
+                        "markedDereferences":  "only non-null path; skipped for null old_o",
+                        "nextMutation":  "GCHeap::Promote return / EnumGcRef root enumeration continuation; not executed"
+                    },
+    "decision":  {
+                     "requests":  "0x00000001",
+                     "entries":  "0x00000001",
+                     "completions":  "0x00000001",
+                     "duplicates":  "0x00000000",
+                     "nullTests":  "0x00000001",
+                     "nullResult":  "0x00000001",
+                     "branch":  "0x00000001",
+                     "markedRequests":  "0x00000000",
+                     "markedEntries":  "0x00000000",
+                     "markedReturns":  "0x00000000",
+                     "markedResult":  "0x00000000",
+                     "markStateReads":  "0x00000000",
+                     "decisionReturnAddress":  "0x000000001004E1E9",
+                     "safeStopAddress":  "0x0000000010011A20",
+                     "nextMutationAddress":  "0x000000001004E1E9"
+                 },
+    "markState":  {
+                      "representation":  "CObjectHeader::IsMarked / GC_MARKED",
+                      "reads":  "0x00000000",
+                      "result":  "0x00000000",
+                      "objectHeaderReads":  "0x00000000",
+                      "methodTableReads":  "0x00000000",
+                      "segmentReads":  "0x00000000",
+                      "regionReads":  "0x00000000"
+                  },
+    "mutation":  {
+                     "inheritedFromC011EC12":  2,
+                     "inheritedQueueSlotWrites":  "0x00000001",
+                     "inheritedCursorWrites":  "0x00000001",
+                     "newPostQueueAttempts":  "0x00000000",
+                     "newPostQueueExecutions":  "0x00000000",
+                     "markBitWrites":  "0x00000000",
+                     "logicalMarkComplete":  "0x00000000",
+                     "objectHeaderWrites":  0,
+                     "payloadWrites":  0,
+                     "segmentWrites":  0,
+                     "regionWrites":  0,
+                     "overflowWrites":  0,
+                     "traversalWorkItemWrites":  0
+                 },
+    "traversal":  {
+                      "logicalMarkComplete":  "0x00000000",
+                      "scheduled":  "0x00000000",
+                      "graph":  "0x00000000",
+                      "childReads":  "0x00000000",
+                      "childObjects":  "0x00000000",
+                      "secondObjectAttempts":  "0x00000000"
+                  },
+    "nextMutationBoundary":  {
+                                 "helper":  "GCHeap::Promote callback return / EnumGcRef continuation",
+                                 "source":  "gc.cpp:49541 returns from mark_object_simple, then GcEnum.cpp:81 callback return",
+                                 "instruction":  "0x000000001004E1E9",
+                                 "decisionReturnAddress":  "0x000000001004E1E9",
+                                 "safeStopAddress":  "0x0000000010011A20",
+                                 "executed":  false
+                             },
+    "threadStore":  {
+                        "lockHeld":  "0x00000001",
+                        "eeSuspended":  "0x00000001",
+                        "managedEntryProhibited":  "0x00000001",
+                        "registeredThreads":  "0x00000001",
+                        "enumeratedThreads":  "0x00000001",
+                        "includedThreads":  "0x00000001",
+                        "registryMutation":  "0x00000000",
+                        "restart":  "0x00000000",
+                        "resume":  "0x00000000"
+                    },
+    "execution":  {
+                      "callbackReturns":  "0x00000000",
+                      "secondCallbacks":  "0x00000000",
+                      "restart":  "0x00000000",
+                      "resume":  "0x00000000"
+                  },
+    "objectAndSentinelValidation":  {
+                                        "sentinelFailures":  "0x00000000",
+                                        "objectValidationBeforeFixup":  "0x00000000",
+                                        "objectValidationAfterFixup":  "0x00000000",
+                                        "duplicateObjectAddresses":  "0x00000000",
+                                        "objectHistoryOverflow":  "0x00000000"
+                                    },
+    "machineCode":  {
+                        "architecture":  "AMD64",
+                        "helperSymbol":  "?mark_object_simple@gc_heap@WKS@@CAXPEAPEAE@Z",
+                        "helperAddress":  "0x000000001004D990",
+                        "evidence":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-post-queue-mark-decision\\run-20260812-212255522\\post-queue-machine-code.txt",
+                        "disassembly":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-post-queue-mark-decision\\run-20260812-212255522\\artifact-disassembly.txt"
+                    },
+    "safeStop":  {
+                     "marker":  "C011EC13",
+                     "classification":  "B",
+                     "reason":  "one real old_o null/marked decision completed after C011EC12 queue unit; stopped before callback return, later mutation, traversal, or second object",
+                     "childTraversalAllowed":  false,
+                     "secondObjectAllowed":  false,
+                     "restartAllowed":  false,
+                     "resumeAllowed":  false
+                 },
+    "qemu":  {
+                 "version":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+                 "runCount":  3,
+                 "proofKernelSha256":  "87839E30D8E8454D7D5001F3E0AF1F201B138EF3A3D6BC970C30B5F43F2D6DF9",
+                 "serialSha256":  [
+                                      "DB58E13D8AEDF30725FC1FDEF3DB0EAF2F3228588EF00F5C180979AF44A797FB",
+                                      "4EA49679C6E9007449A62CDE868CCD9AC53A302081AC776FCB503C6312690925",
+                                      "915E3F98BB1FA050833B4142ADD9B4A54B07DBD2762008F4F1EB3D49214F98CB"
+                                  ],
+                 "exactCommandLog":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-post-queue-mark-decision\\run-20260812-212255522\\commands.txt",
+                 "runs":  [
+                              {
+                                  "name":  "first-run",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-post-queue-mark-decision\\run-20260812-212255522\\first-run\\serial.log",
+                                  "serialSha256":  "DB58E13D8AEDF30725FC1FDEF3DB0EAF2F3228588EF00F5C180979AF44A797FB",
+                                  "safeStopMarker":  "C011EC13",
+                                  "outcome":  "B",
+                                  "harnessTerminated":  true,
+                                  "root":  {
+                                               "slot":  "0x000000000394FBE0",
+                                               "rawValue":  "0x0000000100A02F50",
+                                               "storageObject":  "0x0000000100A02F50",
+                                               "sentinel":  "0x0000000100A01F38"
+                                           },
+                                  "queue":  {
+                                                "slotAddress":  "0x0000000010256260",
+                                                "slotIndex":  "0x0000000000000000",
+                                                "oldSlot":  "0x0000000000000000",
+                                                "newSlot":  "0x0000000100A02F50",
+                                                "oldObject":  "0x0000000000000000",
+                                                "cursorBefore":  "0x0000000000000000",
+                                                "cursorAfter":  "0x0000000000000001",
+                                                "queueBase":  "0x0000000010256260"
+                                            },
+                                  "decision":  {
+                                                   "requests":  "0x00000001",
+                                                   "entries":  "0x00000001",
+                                                   "completions":  "0x00000001",
+                                                   "duplicates":  "0x00000000",
+                                                   "nullTests":  "0x00000001",
+                                                   "nullResult":  "0x00000001",
+                                                   "branch":  "0x00000001",
+                                                   "markedRequests":  "0x00000000",
+                                                   "markedEntries":  "0x00000000",
+                                                   "markedReturns":  "0x00000000",
+                                                   "markedResult":  "0x00000000",
+                                                   "markStateReads":  "0x00000000",
+                                                   "decisionReturnAddress":  "0x000000001004E1E9",
+                                                   "safeStopAddress":  "0x0000000010011A20",
+                                                   "nextMutationAddress":  "0x000000001004E1E9"
+                                               },
+                                  "mutation":  {
+                                                   "inheritedQueueSlotWrites":  "0x00000001",
+                                                   "inheritedCursorWrites":  "0x00000001",
+                                                   "newAttempts":  "0x00000000",
+                                                   "newExecutions":  "0x00000000",
+                                                   "markBitWrites":  "0x00000000"
+                                               },
+                                  "traversal":  {
+                                                    "logicalMarkComplete":  "0x00000000",
+                                                    "scheduled":  "0x00000000",
+                                                    "graph":  "0x00000000",
+                                                    "childReads":  "0x00000000",
+                                                    "childObjects":  "0x00000000",
+                                                    "secondObjectAttempts":  "0x00000000"
+                                                },
+                                  "threadStore":  {
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001",
+                                                      "registeredThreads":  "0x00000001",
+                                                      "enumeratedThreads":  "0x00000001",
+                                                      "includedThreads":  "0x00000001",
+                                                      "registryMutation":  "0x00000000",
+                                                      "restart":  "0x00000000",
+                                                      "resume":  "0x00000000"
+                                                  },
+                                  "validation":  {
+                                                     "sentinelFailures":  "0x00000000",
+                                                     "objectValidationBeforeFixup":  "0x00000000",
+                                                     "objectValidationAfterFixup":  "0x00000000",
+                                                     "duplicateObjectAddresses":  "0x00000000",
+                                                     "objectHistoryOverflow":  "0x00000000"
+                                                 }
+                              },
+                              {
+                                  "name":  "repeat-1",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-post-queue-mark-decision\\run-20260812-212255522\\repeat-1\\serial.log",
+                                  "serialSha256":  "4EA49679C6E9007449A62CDE868CCD9AC53A302081AC776FCB503C6312690925",
+                                  "safeStopMarker":  "C011EC13",
+                                  "outcome":  "B",
+                                  "harnessTerminated":  true,
+                                  "root":  {
+                                               "slot":  "0x000000000394FBE0",
+                                               "rawValue":  "0x0000000100A02F50",
+                                               "storageObject":  "0x0000000100A02F50",
+                                               "sentinel":  "0x0000000100A01F38"
+                                           },
+                                  "queue":  {
+                                                "slotAddress":  "0x0000000010256260",
+                                                "slotIndex":  "0x0000000000000000",
+                                                "oldSlot":  "0x0000000000000000",
+                                                "newSlot":  "0x0000000100A02F50",
+                                                "oldObject":  "0x0000000000000000",
+                                                "cursorBefore":  "0x0000000000000000",
+                                                "cursorAfter":  "0x0000000000000001",
+                                                "queueBase":  "0x0000000010256260"
+                                            },
+                                  "decision":  {
+                                                   "requests":  "0x00000001",
+                                                   "entries":  "0x00000001",
+                                                   "completions":  "0x00000001",
+                                                   "duplicates":  "0x00000000",
+                                                   "nullTests":  "0x00000001",
+                                                   "nullResult":  "0x00000001",
+                                                   "branch":  "0x00000001",
+                                                   "markedRequests":  "0x00000000",
+                                                   "markedEntries":  "0x00000000",
+                                                   "markedReturns":  "0x00000000",
+                                                   "markedResult":  "0x00000000",
+                                                   "markStateReads":  "0x00000000",
+                                                   "decisionReturnAddress":  "0x000000001004E1E9",
+                                                   "safeStopAddress":  "0x0000000010011A20",
+                                                   "nextMutationAddress":  "0x000000001004E1E9"
+                                               },
+                                  "mutation":  {
+                                                   "inheritedQueueSlotWrites":  "0x00000001",
+                                                   "inheritedCursorWrites":  "0x00000001",
+                                                   "newAttempts":  "0x00000000",
+                                                   "newExecutions":  "0x00000000",
+                                                   "markBitWrites":  "0x00000000"
+                                               },
+                                  "traversal":  {
+                                                    "logicalMarkComplete":  "0x00000000",
+                                                    "scheduled":  "0x00000000",
+                                                    "graph":  "0x00000000",
+                                                    "childReads":  "0x00000000",
+                                                    "childObjects":  "0x00000000",
+                                                    "secondObjectAttempts":  "0x00000000"
+                                                },
+                                  "threadStore":  {
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001",
+                                                      "registeredThreads":  "0x00000001",
+                                                      "enumeratedThreads":  "0x00000001",
+                                                      "includedThreads":  "0x00000001",
+                                                      "registryMutation":  "0x00000000",
+                                                      "restart":  "0x00000000",
+                                                      "resume":  "0x00000000"
+                                                  },
+                                  "validation":  {
+                                                     "sentinelFailures":  "0x00000000",
+                                                     "objectValidationBeforeFixup":  "0x00000000",
+                                                     "objectValidationAfterFixup":  "0x00000000",
+                                                     "duplicateObjectAddresses":  "0x00000000",
+                                                     "objectHistoryOverflow":  "0x00000000"
+                                                 }
+                              },
+                              {
+                                  "name":  "repeat-2",
+                                  "serial":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-post-queue-mark-decision\\run-20260812-212255522\\repeat-2\\serial.log",
+                                  "serialSha256":  "915E3F98BB1FA050833B4142ADD9B4A54B07DBD2762008F4F1EB3D49214F98CB",
+                                  "safeStopMarker":  "C011EC13",
+                                  "outcome":  "B",
+                                  "harnessTerminated":  true,
+                                  "root":  {
+                                               "slot":  "0x000000000394FBE0",
+                                               "rawValue":  "0x0000000100A02F50",
+                                               "storageObject":  "0x0000000100A02F50",
+                                               "sentinel":  "0x0000000100A01F38"
+                                           },
+                                  "queue":  {
+                                                "slotAddress":  "0x0000000010256260",
+                                                "slotIndex":  "0x0000000000000000",
+                                                "oldSlot":  "0x0000000000000000",
+                                                "newSlot":  "0x0000000100A02F50",
+                                                "oldObject":  "0x0000000000000000",
+                                                "cursorBefore":  "0x0000000000000000",
+                                                "cursorAfter":  "0x0000000000000001",
+                                                "queueBase":  "0x0000000010256260"
+                                            },
+                                  "decision":  {
+                                                   "requests":  "0x00000001",
+                                                   "entries":  "0x00000001",
+                                                   "completions":  "0x00000001",
+                                                   "duplicates":  "0x00000000",
+                                                   "nullTests":  "0x00000001",
+                                                   "nullResult":  "0x00000001",
+                                                   "branch":  "0x00000001",
+                                                   "markedRequests":  "0x00000000",
+                                                   "markedEntries":  "0x00000000",
+                                                   "markedReturns":  "0x00000000",
+                                                   "markedResult":  "0x00000000",
+                                                   "markStateReads":  "0x00000000",
+                                                   "decisionReturnAddress":  "0x000000001004E1E9",
+                                                   "safeStopAddress":  "0x0000000010011A20",
+                                                   "nextMutationAddress":  "0x000000001004E1E9"
+                                               },
+                                  "mutation":  {
+                                                   "inheritedQueueSlotWrites":  "0x00000001",
+                                                   "inheritedCursorWrites":  "0x00000001",
+                                                   "newAttempts":  "0x00000000",
+                                                   "newExecutions":  "0x00000000",
+                                                   "markBitWrites":  "0x00000000"
+                                               },
+                                  "traversal":  {
+                                                    "logicalMarkComplete":  "0x00000000",
+                                                    "scheduled":  "0x00000000",
+                                                    "graph":  "0x00000000",
+                                                    "childReads":  "0x00000000",
+                                                    "childObjects":  "0x00000000",
+                                                    "secondObjectAttempts":  "0x00000000"
+                                                },
+                                  "threadStore":  {
+                                                      "lockHeld":  "0x00000001",
+                                                      "eeSuspended":  "0x00000001",
+                                                      "managedEntryProhibited":  "0x00000001",
+                                                      "registeredThreads":  "0x00000001",
+                                                      "enumeratedThreads":  "0x00000001",
+                                                      "includedThreads":  "0x00000001",
+                                                      "registryMutation":  "0x00000000",
+                                                      "restart":  "0x00000000",
+                                                      "resume":  "0x00000000"
+                                                  },
+                                  "validation":  {
+                                                     "sentinelFailures":  "0x00000000",
+                                                     "objectValidationBeforeFixup":  "0x00000000",
+                                                     "objectValidationAfterFixup":  "0x00000000",
+                                                     "duplicateObjectAddresses":  "0x00000000",
+                                                     "objectHistoryOverflow":  "0x00000000"
+                                                 }
+                              }
+                          ]
+             },
+    "regressions":  {
+                        "c011ec13":  "PASS 3/3 fresh QEMU 11.0.0 boots",
+                        "c011ec12":  "focused prerequisite retained",
+                        "c011ec11":  "focused prerequisite retained",
+                        "historicalSuite":  "retained without relabeling",
+                        "staticChecks":  "PASS script parse, manifest parse, serial evidence, ordinary restoration, git diff --check"
+                    },
+    "retainedFailures":  {
+                             "c011ec10ValidatorMismatch":  "retained historical mismatch",
+                             "historicalFirst64KiBExecution":  "retained",
+                             "staleCacheAttempts":  "retained",
+                             "initialRuntimePackIdentityMismatch":  "retained",
+                             "nativeStackPowerShellWrapper":  "retained NON-CLEAN",
+                             "localStorageTeardown":  "retained historical non-clean evidence"
+                         },
+    "blockedNonClean":  {
+                            "broadRegressionSuite":  "not rerun as one combined suite",
+                            "historicalValidators":  "obsolete hashes/assertions remain blocked/non-clean",
+                            "markingCompletion":  "out of scope"
+                        },
+    "documentation":  [
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_POST_QUEUE_MARK_DECISION.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_FIRST_MARK_MUTATION.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_PRE_MARK_BOUNDARY.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CONDEMNED_GENERATION_DECISION.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_HEAP_RESOLUTION.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_CALLBACK_ENTRY.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_ROOT_CALLBACK_BOUNDARY.md",
+                          "docs/dotnet/NATIVEAOT_THREAD_STATIC_RUNTIME_SUPPORT.md",
+                          "docs/dotnet/NATIVEAOT_GC_STARTUP_READINESS.md",
+                          "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FEASIBILITY.md"
+                      ],
+    "evidenceRoot":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-post-queue-mark-decision\\run-20260812-212255522",
+    "reportPath":  "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_POST_QUEUE_MARK_DECISION.md",
+    "manifestPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-first-root-post-queue-mark-decision\\run-20260812-212255522\\manifest.json",
+    "ordinaryRestoration":  {
+                                "buildSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "espSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "expectedSha256":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                            },
+    "ordinaryKernelAfter":  {
+                                "build":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550",
+                                "esp":  "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+                            }
+}

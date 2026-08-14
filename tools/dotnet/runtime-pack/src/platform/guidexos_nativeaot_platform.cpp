@@ -3658,6 +3658,419 @@ guideXosNativeAotFirstRootMarkWorklistWriteCompleted(
 
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_POST_QUEUE_MARK_DECISION_ALLOCATION)
+
+void emitFirstRootPostQueueMarkDecisionSafeStop() {
+    const guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-first-root-post-queue-mark-decision] SAFE_STOP marker=C011EC13");
+    suspendEeSerialPutString(" rootSlot=");
+    suspendEeSerialPutHex64(diagnostics.callbackRootSlot);
+    suspendEeSerialPutString(" rawRoot=");
+    suspendEeSerialPutHex64(diagnostics.callbackRootSlotLoadedValue);
+    suspendEeSerialPutString(" storageObject=");
+    suspendEeSerialPutHex64(diagnostics.runtimeThreadStaticStorageObjectAddress);
+    suspendEeSerialPutString(" sentinel=");
+    suspendEeSerialPutHex64(diagnostics.threadStaticProofSentinelAddress);
+    suspendEeSerialPutString(" membership=");
+    suspendEeSerialPutHex32(diagnostics.membershipResult);
+    suspendEeSerialPutString(" wksMultipleHeaps=");
+    suspendEeSerialPutHex32(diagnostics.workstationMultipleHeapsEnabled);
+    suspendEeSerialPutString(" hpt=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionThreadHeap);
+    suspendEeSerialPutString(" heapOf=");
+    suspendEeSerialPutHex64(diagnostics.heapResolutionHeapIdentity);
+    suspendEeSerialPutString(" heapNumber=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionHeapNumber);
+    suspendEeSerialPutString(" heapCount=");
+    suspendEeSerialPutHex32(diagnostics.heapResolutionTotalHeapCount);
+    suspendEeSerialPutString(" wksNullHeapValid=");
+    suspendEeSerialPutHex32(diagnostics.workstationSingleHeapSentinelValid);
+    suspendEeSerialPutString(" condemned=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckResult);
+    suspendEeSerialPutString(" generationFromRegion=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckGeneration);
+    suspendEeSerialPutString(" condemnedGeneration=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckCondemnedGeneration);
+    suspendEeSerialPutString(" maximumGeneration=");
+    suspendEeSerialPutHex32(diagnostics.condemnedCheckMaximumGeneration);
+    suspendEeSerialPutString(" markHelper=");
+    suspendEeSerialPutHex64(diagnostics.preMarkMarkHelperAddress);
+    suspendEeSerialPutString(" helperPo=");
+    suspendEeSerialPutHex64(diagnostics.firstMarkHelperPo);
+    suspendEeSerialPutString(" helperObject=");
+    suspendEeSerialPutHex64(diagnostics.firstMarkHelperObject);
+    suspendEeSerialPutString(" decisionRequests=");
+    suspendEeSerialPutHex32(diagnostics.postQueueDecisionRequestCount);
+    suspendEeSerialPutString(" decisionEntries=");
+    suspendEeSerialPutHex32(diagnostics.postQueueDecisionEntryCount);
+    suspendEeSerialPutString(" decisionCompletions=");
+    suspendEeSerialPutHex32(diagnostics.postQueueDecisionCompletionCount);
+    suspendEeSerialPutString(" decisionDuplicates=");
+    suspendEeSerialPutHex32(diagnostics.postQueueDecisionDuplicateCount);
+    suspendEeSerialPutString(" selectedSlot=");
+    suspendEeSerialPutHex64(diagnostics.postQueueSelectedSlotAddress);
+    suspendEeSerialPutString(" slotIndex=");
+    suspendEeSerialPutHex64(diagnostics.postQueueSlotIndex);
+    suspendEeSerialPutString(" slotOld=");
+    suspendEeSerialPutHex64(diagnostics.postQueueOldSlotValue);
+    suspendEeSerialPutString(" slotNew=");
+    suspendEeSerialPutHex64(diagnostics.postQueueNewSlotValue);
+    suspendEeSerialPutString(" queueBase=");
+    suspendEeSerialPutHex64(diagnostics.postQueueQueueBase);
+    suspendEeSerialPutString(" cursorBefore=");
+    suspendEeSerialPutHex64(diagnostics.postQueueCursorBefore);
+    suspendEeSerialPutString(" cursorAfter=");
+    suspendEeSerialPutHex64(diagnostics.postQueueCursorAfter);
+    suspendEeSerialPutString(" old_o=");
+    suspendEeSerialPutHex64(diagnostics.postQueueOldSlotValue);
+    suspendEeSerialPutString(" nullTests=");
+    suspendEeSerialPutHex32(diagnostics.postQueueNullTestCount);
+    suspendEeSerialPutString(" nullResult=");
+    suspendEeSerialPutHex32(diagnostics.postQueueNullTestResult);
+    suspendEeSerialPutString(" branch=");
+    suspendEeSerialPutHex32(diagnostics.postQueueBranch);
+    suspendEeSerialPutString(" markedRequests=");
+    suspendEeSerialPutHex32(diagnostics.postQueueMarkedRequestCount);
+    suspendEeSerialPutString(" markedEntries=");
+    suspendEeSerialPutHex32(diagnostics.postQueueMarkedEntryCount);
+    suspendEeSerialPutString(" markedReturns=");
+    suspendEeSerialPutHex32(diagnostics.postQueueMarkedReturnCount);
+    suspendEeSerialPutString(" markedResult=");
+    suspendEeSerialPutHex32(diagnostics.postQueueMarkedResult);
+    suspendEeSerialPutString(" markStateReads=");
+    suspendEeSerialPutHex32(diagnostics.postQueueMarkStateReadCount);
+    suspendEeSerialPutString(" objectHeaderReads=");
+    suspendEeSerialPutHex32(diagnostics.postQueueObjectHeaderReadCount);
+    suspendEeSerialPutString(" methodTableReads=");
+    suspendEeSerialPutHex32(diagnostics.postQueueMethodTableReadCount);
+    suspendEeSerialPutString(" segmentReads=");
+    suspendEeSerialPutHex32(diagnostics.postQueueSegmentReadCount);
+    suspendEeSerialPutString(" regionReads=");
+    suspendEeSerialPutHex32(diagnostics.postQueueRegionReadCount);
+    suspendEeSerialPutString(" inheritedQueueSlotWrites=");
+    suspendEeSerialPutHex32(diagnostics.firstMarkWorklistSlotWriteCount);
+    suspendEeSerialPutString(" inheritedCursorWrites=");
+    suspendEeSerialPutHex32(diagnostics.firstMarkWorklistCursorWriteCount);
+    suspendEeSerialPutString(" newMutationAttempts=");
+    suspendEeSerialPutHex32(diagnostics.postQueueNewMutationAttemptCount);
+    suspendEeSerialPutString(" newMutationExecutions=");
+    suspendEeSerialPutHex32(diagnostics.postQueueNewMutationExecutionCount);
+    suspendEeSerialPutString(" markBitWrites=");
+    suspendEeSerialPutHex32(diagnostics.firstMarkMarkBitWriteCount);
+    suspendEeSerialPutString(" logicalMarkComplete=");
+    suspendEeSerialPutHex32(diagnostics.postQueueLogicalMarkComplete);
+    suspendEeSerialPutString(" traversalScheduled=");
+    suspendEeSerialPutHex32(diagnostics.postQueueTraversalScheduled);
+    suspendEeSerialPutString(" graphTraversal=");
+    suspendEeSerialPutHex32(diagnostics.firstMarkGraphTraversalStartCount);
+    suspendEeSerialPutString(" childReferenceReads=");
+    suspendEeSerialPutHex32(diagnostics.firstMarkChildReferenceReadCount);
+    suspendEeSerialPutString(" childObjectsDiscovered=");
+    suspendEeSerialPutHex32(diagnostics.firstMarkChildObjectDiscoveredCount);
+    suspendEeSerialPutString(" secondObjectMarkAttempts=");
+    suspendEeSerialPutHex32(diagnostics.firstMarkSecondObjectMarkAttemptCount);
+    suspendEeSerialPutString(" decisionReturnAddress=");
+    suspendEeSerialPutHex64(diagnostics.postQueueDecisionReturnAddress);
+    suspendEeSerialPutString(" safeStopAddress=");
+    suspendEeSerialPutHex64(diagnostics.postQueueSafeStopAddress);
+    suspendEeSerialPutString(" nextMutationAddress=");
+    suspendEeSerialPutHex64(diagnostics.postQueueNextMutationAddress);
+    suspendEeSerialPutString(" promotionStart=");
+    suspendEeSerialPutHex32(diagnostics.callbackPromotionStartCount);
+    suspendEeSerialPutString(" promotions=");
+    suspendEeSerialPutHex32(diagnostics.callbackPromotionCount);
+    suspendEeSerialPutString(" callbackReturns=");
+    suspendEeSerialPutHex32(diagnostics.callbackReturnCount);
+    suspendEeSerialPutString(" secondCallbacks=");
+    suspendEeSerialPutHex32(diagnostics.duplicateCallbackInvocationCount);
+    suspendEeSerialPutString(" restart=");
+    suspendEeSerialPutHex32(diagnostics.restartRequestCount + diagnostics.restartEntryCount);
+    suspendEeSerialPutString(" resume=");
+    suspendEeSerialPutHex32(diagnostics.managedResumeCount);
+    suspendEeSerialPutString(" lockHeld=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryThreadStoreLockHeld);
+    suspendEeSerialPutString(" eeSuspended=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryEeSuspended);
+    suspendEeSerialPutString(" managedEntryProhibited=");
+    suspendEeSerialPutHex32(diagnostics.callbackEntryManagedEntryProhibited);
+    suspendEeSerialPutString(" registeredThreads=");
+    suspendEeSerialPutHex32(diagnostics.registeredManagedThreadCount);
+    suspendEeSerialPutString(" enumeratedThreads=");
+    suspendEeSerialPutHex32(diagnostics.enumeratedThreadCount);
+    suspendEeSerialPutString(" includedThreads=");
+    suspendEeSerialPutHex32(diagnostics.includedThreadCount);
+    suspendEeSerialPutString(" registryMutation=");
+    suspendEeSerialPutHex32(diagnostics.threadRegistryMutationCountAfterRoot);
+    suspendEeSerialPutString(" allocationContextsCleared=");
+    suspendEeSerialPutHex32(diagnostics.allocationContextFixupContextsCleared);
+    suspendEeSerialPutString(" sentinelFailures=");
+    suspendEeSerialPutHex32(diagnostics.sentinelValidationFailures);
+    suspendEeSerialPutString(" objectValidationBeforeFixup=");
+    suspendEeSerialPutHex32(diagnostics.objectValidationFailuresBeforeFixup);
+    suspendEeSerialPutString(" objectValidationAfterFixup=");
+    suspendEeSerialPutHex32(diagnostics.objectValidationFailuresAfterFixup);
+    suspendEeSerialPutString(" duplicateObjectAddresses=");
+    suspendEeSerialPutHex32(diagnostics.duplicateObjectAddressFailures);
+    suspendEeSerialPutString(" objectHistoryOverflow=");
+    suspendEeSerialPutHex32(diagnostics.objectHistoryOverflow);
+    suspendEeSerialPutString(" marker=C011EC13\n");
+}
+
+[[noreturn]] void firstRootPostQueueMarkDecisionSafeStop() {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.postQueueSafeStopObserved;
+    diagnostics.postQueueSafeStopReason =
+        GUIDEXOS_NATIVEAOT_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP_MARKER;
+    diagnostics.postQueueSafeStopAddress = reinterpret_cast<gx_uintptr>(
+        &firstRootPostQueueMarkDecisionSafeStop);
+    diagnostics.postQueueNextMutationAddress =
+        diagnostics.postQueueDecisionReturnAddress;
+    diagnostics.safeStopObserved = 1u;
+    diagnostics.stopReason = diagnostics.postQueueSafeStopReason;
+    diagnostics.stage =
+        GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F31_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP;
+    diagnostics.rootBoundaryFunction = reinterpret_cast<gx_uintptr>(
+        &firstRootPostQueueMarkDecisionSafeStop);
+    diagnostics.candidateObjectValidationAtStopCount = diagnostics.objectHistoryCount;
+
+    const bool nullPath = diagnostics.postQueueNullTestResult != 0u;
+    const bool markedPath = diagnostics.postQueueMarkedRequestCount != 0u;
+    const bool valid =
+        diagnostics.postQueueSafeStopObserved == 1u &&
+        diagnostics.postQueueDecisionRequestCount == 1u &&
+        diagnostics.postQueueDecisionEntryCount == 1u &&
+        diagnostics.postQueueDecisionCompletionCount == 1u &&
+        diagnostics.postQueueDecisionDuplicateCount == 0u &&
+        diagnostics.postQueueNullTestCount == 1u &&
+        diagnostics.postQueueObjectInput == diagnostics.firstMarkHelperObject &&
+        diagnostics.postQueueObjectInput == diagnostics.callbackRootSlotLoadedValue &&
+        diagnostics.postQueueObjectInput == diagnostics.runtimeThreadStaticStorageObjectAddress &&
+        diagnostics.firstMarkMutationAttemptCount == 1u &&
+        diagnostics.firstMarkMutationExecutionCount == 1u &&
+        diagnostics.firstMarkWorklistSlotWriteCount == 1u &&
+        diagnostics.firstMarkWorklistCursorWriteCount == 1u &&
+        diagnostics.firstMarkWorklistOldValue == 0u &&
+        diagnostics.firstMarkWorklistNewValue == diagnostics.postQueueObjectInput &&
+        diagnostics.firstMarkWorklistCursorAfter == 1u;
+    const bool pathValid = nullPath
+        ? diagnostics.postQueueMarkedRequestCount == 0u &&
+          diagnostics.postQueueMarkedEntryCount == 0u &&
+          diagnostics.postQueueMarkedReturnCount == 0u &&
+          diagnostics.postQueueMarkStateReadCount == 0u &&
+          diagnostics.postQueueBranch == 1u
+        : markedPath &&
+          diagnostics.postQueueMarkedRequestCount == 1u &&
+          diagnostics.postQueueMarkedEntryCount == 1u &&
+          diagnostics.postQueueMarkedReturnCount == 1u &&
+          diagnostics.postQueueMarkStateReadCount == 1u &&
+          (diagnostics.postQueueBranch == 3u || diagnostics.postQueueBranch == 4u);
+    const bool invariantValid =
+        diagnostics.postQueueNewMutationAttemptCount == 0u &&
+        diagnostics.postQueueNewMutationExecutionCount == 0u &&
+        diagnostics.firstMarkMarkBitWriteCount == 0u &&
+        diagnostics.firstMarkObjectHeaderWriteCount == 0u &&
+        diagnostics.firstMarkGcMetadataWriteCount == 0u &&
+        diagnostics.firstMarkSegmentWriteCount == 0u &&
+        diagnostics.postQueueLogicalMarkComplete == 0u &&
+        diagnostics.postQueueTraversalScheduled == 0u &&
+        diagnostics.firstMarkGraphTraversalStartCount == 0u &&
+        diagnostics.firstMarkChildReferenceReadCount == 0u &&
+        diagnostics.firstMarkChildObjectDiscoveredCount == 0u &&
+        diagnostics.firstMarkSecondObjectMarkAttemptCount == 0u &&
+        diagnostics.callbackPromotionCount == 0u &&
+        diagnostics.callbackPromotionStateWriteCount == 0u &&
+        diagnostics.callbackReturnCount == 0u &&
+        diagnostics.duplicateCallbackInvocationCount == 0u &&
+        diagnostics.restartRequestCount == 0u &&
+        diagnostics.restartEntryCount == 0u &&
+        diagnostics.managedResumeCount == 0u &&
+        diagnostics.firstMarkHelperReturnCount == 0u &&
+        diagnostics.callbackEntryThreadStoreLockHeld == 1u &&
+        diagnostics.callbackEntryEeSuspended == 1u &&
+        diagnostics.callbackEntryManagedEntryProhibited == 1u &&
+        diagnostics.sentinelValidationFailures == 0u &&
+        diagnostics.objectValidationFailuresBeforeFixup == 0u &&
+        diagnostics.objectValidationFailuresAfterFixup == 0u &&
+        diagnostics.objectOverlapFailuresAfterFixup == 0u &&
+        diagnostics.objectPatternFailuresAfterFixup == 0u &&
+        diagnostics.duplicateObjectAddressFailures == 0u &&
+        diagnostics.objectHistoryOverflow == 0u;
+    if (!valid || !pathValid || !invariantValid) {
+        diagnostics.postQueueSafeStopReason = 0xE130u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+    emitFirstRootPostQueueMarkDecisionSafeStop();
+    for (;;) {
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPostQueueWorklistWriteCompleted(
+    uintptr_t object, uintptr_t target, uintptr_t oldValue, uintptr_t newValue,
+    uintptr_t slotIndex, uintptr_t cursorAfter, uintptr_t queueBase,
+    uint32_t capacity) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.firstMarkMutationExecutionCount;
+    ++diagnostics.firstMarkWorklistSlotWriteCount;
+    ++diagnostics.firstMarkWorklistCursorWriteCount;
+    diagnostics.firstMarkWorklistTarget = target;
+    diagnostics.firstMarkWorklistOldValue = oldValue;
+    diagnostics.firstMarkWorklistNewValue = newValue;
+    diagnostics.firstMarkWorklistSlotIndexAfter = slotIndex;
+    diagnostics.firstMarkWorklistCursorAfter = cursorAfter;
+    diagnostics.firstMarkWorklistQueueBase = queueBase;
+    diagnostics.firstMarkWorklistCapacity = capacity;
+    if (diagnostics.firstMarkMutationExecutionCount != 1u ||
+        diagnostics.firstMarkMutationAttemptCount != 1u ||
+        object != diagnostics.firstMarkHelperObject ||
+        oldValue != diagnostics.firstMarkWorklistOldValue ||
+        newValue != object || slotIndex != diagnostics.firstMarkWorklistSlotIndexBefore ||
+        cursorAfter != 1u || queueBase != diagnostics.firstMarkWorklistQueueBase ||
+        capacity != 16u) {
+        diagnostics.postQueueSafeStopReason = 0xE131u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPostQueueDecisionRequested(
+    uintptr_t object, uintptr_t target, uintptr_t oldValue, uintptr_t newValue,
+    uintptr_t slotIndex, uintptr_t cursorBefore, uintptr_t cursorAfter,
+    uintptr_t queueBase, uint32_t capacity) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.postQueueDecisionRequestCount;
+    if (diagnostics.postQueueDecisionRequestCount != 1u) {
+        ++diagnostics.postQueueDecisionDuplicateCount;
+    }
+    diagnostics.postQueueObjectInput = object;
+    diagnostics.postQueueSelectedSlotAddress = target;
+    diagnostics.postQueueOldSlotValue = oldValue;
+    diagnostics.postQueueNewSlotValue = newValue;
+    diagnostics.postQueueSlotIndex = slotIndex;
+    diagnostics.postQueueCursorBefore = cursorBefore;
+    diagnostics.postQueueCursorAfter = cursorAfter;
+    diagnostics.postQueueQueueBase = queueBase;
+    if (diagnostics.postQueueDecisionRequestCount != 1u ||
+        object != diagnostics.firstMarkHelperObject ||
+        target != diagnostics.firstMarkWorklistTarget ||
+        oldValue != diagnostics.firstMarkWorklistOldValue ||
+        newValue != object || slotIndex != diagnostics.firstMarkWorklistSlotIndexBefore ||
+        cursorBefore != diagnostics.firstMarkWorklistCursorBefore ||
+        cursorAfter != diagnostics.firstMarkWorklistCursorAfter ||
+        queueBase != diagnostics.firstMarkWorklistQueueBase || capacity != 16u) {
+        diagnostics.postQueueSafeStopReason = 0xE132u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPostQueueDecisionEntered(uintptr_t object) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.postQueueDecisionEntryCount;
+    if (diagnostics.postQueueDecisionEntryCount != 1u ||
+        object != diagnostics.postQueueOldSlotValue) {
+        diagnostics.postQueueSafeStopReason = 0xE133u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" [[noreturn]] void __cdecl
+guideXosNativeAotFirstRootPostQueueNullDecisionCompleted(uintptr_t object) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.postQueueDecisionCompletionCount;
+    ++diagnostics.postQueueNullTestCount;
+    diagnostics.postQueueNullTestResult = 1u;
+    diagnostics.postQueueBranch = 1u;
+    diagnostics.postQueueDecisionReturnAddress =
+        reinterpret_cast<gx_uintptr>(_ReturnAddress());
+    if (object != diagnostics.postQueueOldSlotValue) {
+        diagnostics.postQueueSafeStopReason = 0xE134u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+    firstRootPostQueueMarkDecisionSafeStop();
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPostQueueNonNullDecisionStarted(uintptr_t object) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.postQueueNullTestCount;
+    diagnostics.postQueueNullTestResult = 0u;
+    diagnostics.postQueueBranch = 2u;
+    if (object != diagnostics.postQueueOldSlotValue) {
+        diagnostics.postQueueSafeStopReason = 0xE135u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPostQueueMarkedRequested(uintptr_t object) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.postQueueMarkedRequestCount;
+    if (diagnostics.postQueueMarkedRequestCount != 1u ||
+        object != diagnostics.postQueueOldSlotValue) {
+        diagnostics.postQueueSafeStopReason = 0xE136u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPostQueueMarkedCompleted(
+    uintptr_t object, uint32_t result) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    ++diagnostics.postQueueMarkedEntryCount;
+    ++diagnostics.postQueueMarkedReturnCount;
+    ++diagnostics.postQueueMarkStateReadCount;
+    ++diagnostics.postQueueDecisionCompletionCount;
+    diagnostics.postQueueMarkedResult = result;
+    diagnostics.postQueueBranch = result != 0u ? 3u : 4u;
+    if (object != diagnostics.postQueueOldSlotValue || result > 1u ||
+        diagnostics.postQueueMarkedEntryCount != 1u ||
+        diagnostics.postQueueDecisionCompletionCount != 1u) {
+        diagnostics.postQueueSafeStopReason = 0xE137u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+}
+
+extern "C" [[noreturn]] void __cdecl
+guideXosNativeAotFirstRootPostQueueMarkedTrueBoundary(uintptr_t object) {
+    if (object != g_guideXosAllocationDiagnostics.postQueueOldSlotValue) {
+        g_guideXosAllocationDiagnostics.postQueueSafeStopReason = 0xE138u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+    firstRootPostQueueMarkDecisionSafeStop();
+}
+
+extern "C" void __cdecl
+guideXosNativeAotFirstRootPostQueueMarkedFalseBoundary(uintptr_t object) {
+    if (object != g_guideXosAllocationDiagnostics.postQueueOldSlotValue) {
+        g_guideXosAllocationDiagnostics.postQueueSafeStopReason = 0xE139u;
+        emitFirstRootPostQueueMarkDecisionSafeStop();
+        guideXosFailFast(9u);
+    }
+    firstRootPostQueueMarkDecisionSafeStop();
+}
+
+#endif
+
 [[noreturn]] void firstRootPreMarkBoundarySafeStop(uintptr_t object,
                                                    uintptr_t heapSentinel,
                                                    uint32_t flags,

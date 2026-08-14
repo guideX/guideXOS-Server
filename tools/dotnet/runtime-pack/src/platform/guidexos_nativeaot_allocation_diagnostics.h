@@ -976,6 +976,49 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t allocationContextAfterCount;
     uint32_t objectHistoryCount;
     uint32_t objectHistoryOverflow;
+
+    /*
+     * C011EC13 proof-only post-queue decision evidence.  These fields are
+     * append-only so every earlier checkpoint retains its layout.  The
+     * source-injected observers record the real queue_mark old_o/null/marked
+     * decision without introducing a mark representation or a synthetic
+     * work item.
+     */
+    uint32_t postQueueDecisionRequestCount;
+    uint32_t postQueueDecisionEntryCount;
+    uint32_t postQueueDecisionCompletionCount;
+    uint32_t postQueueDecisionDuplicateCount;
+    uint32_t postQueueNullTestCount;
+    uint32_t postQueueNullTestResult;
+    uint32_t postQueueMarkedRequestCount;
+    uint32_t postQueueMarkedEntryCount;
+    uint32_t postQueueMarkedReturnCount;
+    uint32_t postQueueMarkedResult;
+    uint32_t postQueueMarkStateReadCount;
+    uint32_t postQueueObjectHeaderReadCount;
+    uint32_t postQueueMethodTableReadCount;
+    uint32_t postQueueSegmentReadCount;
+    uint32_t postQueueRegionReadCount;
+    uint32_t postQueueNewMutationAttemptCount;
+    uint32_t postQueueNewMutationExecutionCount;
+    uint32_t postQueueLogicalMarkComplete;
+    uint32_t postQueueTraversalScheduled;
+    uint32_t postQueueSafeStopObserved;
+    uint32_t postQueueSafeStopReason;
+    uint32_t postQueueBranch;
+    uint32_t reservedPostQueueDecision[4];
+
+    uintptr_t postQueueObjectInput;
+    uintptr_t postQueueSelectedSlotAddress;
+    uintptr_t postQueueOldSlotValue;
+    uintptr_t postQueueNewSlotValue;
+    uintptr_t postQueueQueueBase;
+    uintptr_t postQueueSlotIndex;
+    uintptr_t postQueueCursorBefore;
+    uintptr_t postQueueCursorAfter;
+    uintptr_t postQueueDecisionReturnAddress;
+    uintptr_t postQueueSafeStopAddress;
+    uintptr_t postQueueNextMutationAddress;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -1026,6 +1069,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F28_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_SAFE_STOP = 0xF28u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F29_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP = 0xF29u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F30_FIRST_ROOT_FIRST_MARK_MUTATION_SAFE_STOP = 0xF30u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F31_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP = 0xF31u,
 };
 
 enum {
@@ -1045,6 +1089,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_SAFE_STOP_MARKER = 0xC011EC10u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC11u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_MARK_MUTATION_SAFE_STOP_MARKER = 0xC011EC12u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP_MARKER = 0xC011EC13u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

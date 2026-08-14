@@ -1,0 +1,19 @@
+markHelperSymbol=?mark_object_simple@gc_heap@WKS@@CAXPEAPEAE@Z
+markHelperAddress=0x000000001004d990
+inheritedQueueSlotWriteInstruction=0x1004DA10
+inheritedQueueSlotWriteLine=    1004da10:	48 89 33             	mov    QWORD PTR [rbx],rsi
+inheritedCursorWriteInstruction=0x1004DA21
+inheritedCursorWriteLine=    1004da21:	48 89 05 b8 88 20 00 	mov    QWORD PTR [rip+0x2088b8],rax        # 0x102562e0
+nullDecisionHelper=guideXosNativeAotFirstRootPostQueueNullDecisionCompleted
+nullDecisionHelperAddress=0x00000000100164d0
+nullDecisionCallSite=0x1004E1E4
+nullDecisionCallLine=    1004e1e4:	e8 e7 82 fc ff       	call   0x100164d0
+nullTestInstruction=    1004e04f:	48 85 db             	test   rbx,rbx
+nullBranchInstruction=    1004e052:	0f 84 8a 01 00 00    	je     0x1004e1e2
+markedRepresentation=inline marked(old_o) -> header(old_o)->IsMarked() -> RawGetMethodTable() & GC_MARKED
+markedOutOfLineHelper=none
+nextMutationHelper=inline mark_queue_t::queue_mark set_marked(old_o) at locked gc.cpp:27333
+nextMutationInstruction=not-emitted; false boundary is non-returning at runtime
+nextMutationLine=
+source=locked gc.cpp:27316-27335 queue_mark; old_o capture, slot/cursor writes, null decision, then marked(old_o)
+safeStop=inside the source-valid old_o == nullptr branch after null result and before marked(old_o); no mark-state read or later mutation
