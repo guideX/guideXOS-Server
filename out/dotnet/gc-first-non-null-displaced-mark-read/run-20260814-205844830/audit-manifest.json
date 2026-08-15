@@ -173,11 +173,11 @@
   },
   "documentation": "docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_DISPLACED_MARK_READ.md",
   "gitCompletion": {
-    "milestoneCommit": null,
+    "milestoneCommit": "58811841f9a40e6c9150126c0dd6ee6ba79b4327",
     "commitMessage": "Prove first displaced GC mark-state read",
-    "pushResult": null,
-    "finalAheadBehind": null,
-    "finalWorktree": null
+    "pushResult": "succeeded via origin/v1.1_DOTNET_SUPPORT using the existing TortoiseGitPlink key path; no force-push",
+    "finalAheadBehind": "0/0",
+    "finalWorktree": "tracked files clean; retained raw proof/build/serial evidence remains untracked by deliberate scope"
   },
   "recommendedNextMilestone": "Establish the smallest source-valid pre-drain route for additional real root promotions without queue fabrication, forced wraparound, or broad child traversal."
 }
