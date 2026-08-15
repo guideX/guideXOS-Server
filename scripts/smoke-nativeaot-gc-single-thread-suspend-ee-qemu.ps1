@@ -2,20 +2,24 @@ param(
     [string]$RepoRoot = "",
     [string]$EvidenceRoot = "",
     [int]$TimeoutSeconds = 90,
+    [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($FreshBootCount -lt 1) { throw "FreshBootCount must be at least 1." }
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($ProofMode -eq "first-root-post-queue-mark-decision") {
+    $EvidenceRoot = if ($ProofMode -eq "first-root-first-non-null-old-o") {
+        Join-Path $root "out\dotnet\gc-first-root-first-non-null-old-o"
+    } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
         Join-Path $root "out\dotnet\gc-first-root-post-queue-mark-decision"
     } elseif ($ProofMode -eq "first-root-first-mark-mutation") {
         Join-Path $root "out\dotnet\gc-first-root-first-mark-mutation"
@@ -46,16 +50,19 @@ $isFirstRootHeapResolution = $ProofMode -eq "first-root-heap-resolution"
 $isFirstRootCondemnedGenerationDecision = $ProofMode -eq "first-root-condemned-generation-decision"
 $isFirstRootFirstMarkMutation = $ProofMode -eq "first-root-first-mark-mutation"
 $isFirstRootPostQueueMarkDecision = $ProofMode -eq "first-root-post-queue-mark-decision"
+$isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
+$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
-$proofDefine = if ($isFirstRootPostQueueMarkDecision) {
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o")
+$proofDefine = if ($isFirstRootFirstNonNullOldO) {
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
+} elseif ($isFirstRootPostQueueMarkDecision) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_MARK_MUTATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_POST_QUEUE_MARK_DECISION_ALLOCATION"
 } elseif ($isFirstRootFirstMarkMutation) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_MARK_MUTATION_ALLOCATION"
@@ -422,6 +429,7 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotSuspendEeGcStartWo
         $gcCppText = (Get-Content -LiteralPath $lockedGcCppPath -Raw).Replace([string]([char]13) + [string]([char]10), [string][char]10)
         $gcWksText = '#include <intrin.h>' + [Environment]::NewLine + $gcWksText
         $gcWksText = $gcWksText.Replace('namespace WKS {', '#define _DEBUG 1' + [Environment]::NewLine + 'namespace WKS {')
+        $membershipDeclaration = ""
         if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
             $membershipDeclaration = @'
 extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCheckRequested(uintptr_t object);
@@ -482,26 +490,83 @@ extern "C" void __cdecl guideXosNativeAotFirstRootPostQueueMarkedFalseBoundary(u
                     }
                 }
             }
-            $gcWksText = '#include <intrin.h>' + [Environment]::NewLine + $membershipDeclaration.TrimEnd() + [Environment]::NewLine + $gcWksText
+            if ($isFirstRootFirstNonNullOldO) {
+                $membershipDeclaration += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkHelperEntered(uintptr_t po, uintptr_t object);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOCallbackEntered(uintptr_t rawArg1, uintptr_t rawArg2, uintptr_t rawArg3, uintptr_t callbackAddress, uintptr_t returnAddress, uintptr_t stackPointer);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOCandidateLoaded(uintptr_t rawValue);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOWorklistWriteBefore(uintptr_t object, uintptr_t target, uintptr_t oldValue, uintptr_t slotIndex, uintptr_t cursorBefore, uintptr_t queueBase, uint32_t capacity);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOWorklistWriteCompleted(uintptr_t object, uintptr_t target, uintptr_t oldValue, uintptr_t newValue, uintptr_t slotIndex, uintptr_t cursorAfter, uintptr_t queueBase, uint32_t capacity);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldODecisionRequested(uintptr_t object, uintptr_t target, uintptr_t oldValue, uintptr_t newValue, uintptr_t slotIndex, uintptr_t cursorBefore, uintptr_t cursorAfter, uintptr_t queueBase, uint32_t capacity);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldODecisionEntered(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldONullDecisionCompleted(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldONonNullDecisionStarted(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkedRequested(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkedCompleted(uintptr_t oldObject, uint32_t result);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldORawMarkWordRead(uintptr_t object, uintptr_t headerAddress, uintptr_t rawHeader, uintptr_t markMask);
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkedTrueBoundary(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkedFalseBoundary(uintptr_t oldObject);
+'@.TrimEnd()
+            }
+            if ($isFirstRootFirstNonNullOldO) {
+                $gcWksText = $gcWksText.Replace(
+                    'namespace WKS {',
+                    $membershipDeclaration.TrimEnd() + [Environment]::NewLine + 'namespace WKS {')
+            } else {
+                $gcWksText = '#include <intrin.h>' + [Environment]::NewLine + $membershipDeclaration.TrimEnd() + [Environment]::NewLine + $gcWksText
+            }
         }
-        $candidateLoadedDeclaration = if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
+        if ($isFirstRootFirstNonNullOldO) {
+            $c14Declarations = @'
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkHelperEntered(uintptr_t po, uintptr_t object);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOCallbackEntered(uintptr_t rawArg1, uintptr_t rawArg2, uintptr_t rawArg3, uintptr_t callbackAddress, uintptr_t returnAddress, uintptr_t stackPointer);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOCandidateLoaded(uintptr_t rawValue);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOWorklistWriteBefore(uintptr_t object, uintptr_t target, uintptr_t oldValue, uintptr_t slotIndex, uintptr_t cursorBefore, uintptr_t queueBase, uint32_t capacity);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOWorklistWriteCompleted(uintptr_t object, uintptr_t target, uintptr_t oldValue, uintptr_t newValue, uintptr_t slotIndex, uintptr_t cursorAfter, uintptr_t queueBase, uint32_t capacity);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldODecisionRequested(uintptr_t object, uintptr_t target, uintptr_t oldValue, uintptr_t newValue, uintptr_t slotIndex, uintptr_t cursorBefore, uintptr_t cursorAfter, uintptr_t queueBase, uint32_t capacity);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldODecisionEntered(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldONullDecisionCompleted(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldONonNullDecisionStarted(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkedRequested(uintptr_t oldObject);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkedCompleted(uintptr_t oldObject, uint32_t result);
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldORawMarkWordRead(uintptr_t object, uintptr_t headerAddress, uintptr_t rawHeader, uintptr_t markMask);
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkedTrueBoundary(uintptr_t oldObject);
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootNonNullOldOMarkedFalseBoundary(uintptr_t oldObject);
+'@
+            $gcWksText = $gcWksText.Replace(
+                'namespace WKS {',
+                $c14Declarations.TrimEnd() + [Environment]::NewLine + 'namespace WKS {')
+        }
+        $candidateLoadedDeclaration = if ($isFirstRootFirstNonNullOldO) {
+            'extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOCandidateLoaded(uintptr_t rawValue);'
+        } elseif ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
             'extern "C" void __cdecl guideXosNativeAotFirstRootMembershipCandidateLoaded(uintptr_t rawValue);'
         } else {
             'extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootCallbackCandidateLoaded(uintptr_t rawValue);'
         }
-        $callbackDeclaration = @'
+        if ($isFirstRootFirstNonNullOldO) {
+            $callbackDeclaration = @'
+extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOCallbackEntered(
+    uintptr_t rawArg1, uintptr_t rawArg2, uintptr_t rawArg3,
+    uintptr_t callbackAddress, uintptr_t returnAddress,
+    uintptr_t stackPointer);
+'@
+        } else {
+            $callbackDeclaration = @'
 extern "C" void __cdecl guideXosNativeAotFirstRootCallbackEntered(
     uintptr_t rawArg1, uintptr_t rawArg2, uintptr_t rawArg3,
     uintptr_t callbackAddress, uintptr_t returnAddress,
     uintptr_t stackPointer);
 '@
+        }
         $callbackDeclaration = $callbackDeclaration.TrimEnd() + [Environment]::NewLine + $candidateLoadedDeclaration
         $callbackPattern = '(?m)^void GCHeap::Promote\(Object\*\* ppObject, ScanContext\* sc, uint32_t flags\)\r?\n\{'
+        $callbackFunction = if ($isFirstRootFirstNonNullOldO) { 'guideXosNativeAotFirstRootNonNullOldOCallbackEntered' } else { 'guideXosNativeAotFirstRootCallbackEntered' }
         $callbackReplacement = @"
 $callbackDeclaration
 void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
 {
-    guideXosNativeAotFirstRootCallbackEntered(
+    $callbackFunction(
         reinterpret_cast<uintptr_t>(ppObject),
         reinterpret_cast<uintptr_t>(sc),
         static_cast<uintptr_t>(flags),
@@ -515,7 +580,9 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
         if ($promoteOffset -lt 0) { throw "Generated Workstation GC source did not contain the injected GCHeap::Promote body." }
         $promotePrefix = $gcWksInjected.Substring(0, $promoteOffset)
         $promoteBody = $gcWksInjected.Substring($promoteOffset)
-        $candidateLoadedFunction = if ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
+        $candidateLoadedFunction = if ($isFirstRootFirstNonNullOldO) {
+            'guideXosNativeAotFirstRootNonNullOldOCandidateLoaded'
+        } elseif ($isFirstRootMembershipClassification -or $isFirstRootHeapResolutionOrCondemned) {
             'guideXosNativeAotFirstRootMembershipCandidateLoaded'
         } else {
             'guideXosNativeAotFirstRootCallbackCandidateLoaded'
@@ -975,8 +1042,168 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
                 $gcWksInjected = $queuePrefix + $queueBody + $gcWksInjected.Substring($queueEnd)
             }
         }
+        if ($isFirstRootFirstNonNullOldO) {
+            $markSimpleSignature = 'gc_heap::mark_object_simple (uint8_t** po THREAD_NUMBER_DCL)'
+            $markSimpleOffset = $gcWksInjected.IndexOf($markSimpleSignature, [System.StringComparison]::Ordinal)
+            if ($markSimpleOffset -lt 0) { throw "Locked mark_object_simple definition was not found for C011EC14 instrumentation." }
+            $markSimpleBodyEnd = $gcWksInjected.IndexOf('inline', $markSimpleOffset, [System.StringComparison]::Ordinal)
+            if ($markSimpleBodyEnd -lt 0) { throw "Locked mark_object_simple body end was not found for C011EC14 instrumentation." }
+            $markSimplePrefix = $gcWksInjected.Substring(0, $markSimpleOffset)
+            $markSimpleBody = $gcWksInjected.Substring($markSimpleOffset, $markSimpleBodyEnd - $markSimpleOffset)
+            $markSimpleBody = $markSimpleBody.Replace(
+                '    uint8_t* o = *po;',
+                @'
+    uint8_t* o = *po;
+    guideXosNativeAotFirstRootNonNullOldOMarkHelperEntered(
+        reinterpret_cast<uintptr_t>(po), reinterpret_cast<uintptr_t>(o));
+'@.TrimEnd())
+            $gcWksInjected = $markSimplePrefix + $markSimpleBody + $gcWksInjected.Substring($markSimpleBodyEnd)
+
+            $queueSignature = 'uint8_t *mark_queue_t::queue_mark(uint8_t *o)'
+            $queueOffset = $gcWksInjected.IndexOf($queueSignature, [System.StringComparison]::Ordinal)
+            if ($queueOffset -lt 0) { throw "Locked queue_mark implementation was not found for C011EC14 instrumentation." }
+            $queueEnd = $gcWksInjected.IndexOf('uint8_t *mark_queue_t::queue_mark(uint8_t *o, int condemned_gen)', $queueOffset, [System.StringComparison]::Ordinal)
+            if ($queueEnd -lt 0) { throw "Locked queue_mark overload boundary was not found for C011EC14 instrumentation." }
+            $queuePrefix = $gcWksInjected.Substring(0, $queueOffset)
+            $queueBody = $gcWksInjected.Substring($queueOffset, $queueEnd - $queueOffset)
+            $c14QueueSequence = @'
+#ifdef MARK_PHASE_PREFETCH
+    Prefetch (o);
+
+    // while the prefetch is taking effect, park our object in the queue
+    // and fetch an object that has been sitting in the queue for a while
+    // and where (hopefully) the memory is already in the cache
+    size_t slot_index = curr_slot_index;
+    uint8_t* old_o = slot_table[slot_index];
+    slot_table[slot_index] = o;
+
+    curr_slot_index = (slot_index + 1) % slot_count;
+    if (old_o == nullptr)
+        return nullptr;
+#else //MARK_PHASE_PREFETCH
+    uint8_t* old_o = o;
+#endif //MARK_PHASE_PREFETCH
+
+    // this causes us to access the method table pointer of the old object
+    BOOL already_marked = marked (old_o);
+    if (already_marked)
+    {
+        return nullptr;
+    }
+    set_marked (old_o);
+    return old_o;
+'@
+            $c14QueueReplacement = @'
+#ifdef MARK_PHASE_PREFETCH
+    Prefetch (o);
+    size_t slot_index = curr_slot_index;
+    uint8_t* old_o = slot_table[slot_index];
+    guideXosNativeAotFirstRootNonNullOldOWorklistWriteBefore(
+        reinterpret_cast<uintptr_t>(o),
+        reinterpret_cast<uintptr_t>(&slot_table[slot_index]),
+        reinterpret_cast<uintptr_t>(old_o),
+        static_cast<uintptr_t>(slot_index),
+        static_cast<uintptr_t>(curr_slot_index),
+        reinterpret_cast<uintptr_t>(slot_table),
+        static_cast<uint32_t>(slot_count));
+    slot_table[slot_index] = o;
+    curr_slot_index = (slot_index + 1) % slot_count;
+    guideXosNativeAotFirstRootNonNullOldOWorklistWriteCompleted(
+        reinterpret_cast<uintptr_t>(o),
+        reinterpret_cast<uintptr_t>(&slot_table[slot_index]),
+        reinterpret_cast<uintptr_t>(old_o),
+        reinterpret_cast<uintptr_t>(o),
+        static_cast<uintptr_t>(slot_index),
+        static_cast<uintptr_t>(curr_slot_index),
+        reinterpret_cast<uintptr_t>(slot_table),
+        static_cast<uint32_t>(slot_count));
+    guideXosNativeAotFirstRootNonNullOldODecisionRequested(
+        reinterpret_cast<uintptr_t>(o),
+        reinterpret_cast<uintptr_t>(&slot_table[slot_index]),
+        reinterpret_cast<uintptr_t>(old_o),
+        reinterpret_cast<uintptr_t>(o),
+        static_cast<uintptr_t>(slot_index),
+        static_cast<uintptr_t>(slot_index),
+        static_cast<uintptr_t>(curr_slot_index),
+        reinterpret_cast<uintptr_t>(slot_table),
+        static_cast<uint32_t>(slot_count));
+    guideXosNativeAotFirstRootNonNullOldODecisionEntered(
+        reinterpret_cast<uintptr_t>(old_o));
+    if (old_o == nullptr)
+    {
+        guideXosNativeAotFirstRootNonNullOldONullDecisionCompleted(
+            reinterpret_cast<uintptr_t>(old_o));
+        return nullptr;
+    }
+    guideXosNativeAotFirstRootNonNullOldONonNullDecisionStarted(
+        reinterpret_cast<uintptr_t>(old_o));
+    guideXosNativeAotFirstRootNonNullOldOMarkedRequested(
+        reinterpret_cast<uintptr_t>(old_o));
+    BOOL already_marked = marked (old_o);
+    guideXosNativeAotFirstRootNonNullOldOMarkedCompleted(
+        reinterpret_cast<uintptr_t>(old_o), already_marked ? 1u : 0u);
+    if (already_marked)
+    {
+        guideXosNativeAotFirstRootNonNullOldOMarkedTrueBoundary(
+            reinterpret_cast<uintptr_t>(old_o));
+        return nullptr;
+    }
+    guideXosNativeAotFirstRootNonNullOldOMarkedFalseBoundary(
+        reinterpret_cast<uintptr_t>(old_o));
+    set_marked (old_o);
+    return old_o;
+#else //MARK_PHASE_PREFETCH
+    uint8_t* old_o = o;
+    guideXosNativeAotFirstRootNonNullOldODecisionEntered(
+        reinterpret_cast<uintptr_t>(old_o));
+    guideXosNativeAotFirstRootNonNullOldONonNullDecisionStarted(
+        reinterpret_cast<uintptr_t>(old_o));
+    guideXosNativeAotFirstRootNonNullOldOMarkedRequested(
+        reinterpret_cast<uintptr_t>(old_o));
+    BOOL already_marked = marked (old_o);
+    guideXosNativeAotFirstRootNonNullOldOMarkedCompleted(
+        reinterpret_cast<uintptr_t>(old_o), already_marked ? 1u : 0u);
+    if (already_marked)
+    {
+        guideXosNativeAotFirstRootNonNullOldOMarkedTrueBoundary(
+            reinterpret_cast<uintptr_t>(old_o));
+        return nullptr;
+    }
+    guideXosNativeAotFirstRootNonNullOldOMarkedFalseBoundary(
+        reinterpret_cast<uintptr_t>(old_o));
+    set_marked (old_o);
+    return old_o;
+#endif //MARK_PHASE_PREFETCH
+'@
+            if (-not $queueBody.Contains($c14QueueSequence)) { throw "Locked MARK_PHASE_PREFETCH queue_mark write sequence did not match C011EC14 instrumentation." }
+            $queueBody = $queueBody.Replace($c14QueueSequence, $c14QueueReplacement.TrimEnd())
+            $gcWksInjected = $queuePrefix + $queueBody + $gcWksInjected.Substring($queueEnd)
+
+            $markReadSequence = @'
+    BOOL IsMarked() const
+    {
+        return !!(((size_t)RawGetMethodTable()) & GC_MARKED);
+    }
+'@
+            $markReadReplacement = @'
+    BOOL IsMarked() const
+    {
+        const uintptr_t guideXosRawHeader =
+            reinterpret_cast<uintptr_t>(RawGetMethodTable());
+        guideXosNativeAotFirstRootNonNullOldORawMarkWordRead(
+            reinterpret_cast<uintptr_t>(this),
+            reinterpret_cast<uintptr_t>(this),
+            guideXosRawHeader,
+            static_cast<uintptr_t>(GC_MARKED));
+        return !!(guideXosRawHeader & GC_MARKED);
+    }
+'@
+            if (-not $gcWksInjected.Contains($markReadSequence)) { throw "Locked CObjectHeader::IsMarked source did not match C011EC14 instrumentation." }
+            $gcWksInjected = $gcWksInjected.Replace($markReadSequence, $markReadReplacement.TrimEnd())
+        }
         if ($gcWksInjected -eq $gcCppText -or
-            $gcWksInjected -notmatch 'guideXosNativeAotFirstRootCallbackEntered' -or
+            (($isFirstRootFirstNonNullOldO -and $gcWksInjected -notmatch 'guideXosNativeAotFirstRootNonNullOldOCallbackEntered') -or
+             (-not $isFirstRootFirstNonNullOldO -and $gcWksInjected -notmatch 'guideXosNativeAotFirstRootCallbackEntered')) -or
             $gcWksInjected -notmatch [regex]::Escape($candidateLoadedFunction) -or
             $gcWksInjected -notmatch 'reinterpret_cast<uintptr_t>\(o\)' -or
             ([regex]::Matches($gcWksInjected, ([regex]::Escape($candidateLoadedFunction) + '\(reinterpret_cast<uintptr_t>\(o\)\)')).Count -ne 1) -or
@@ -996,7 +1223,13 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
         $lockedGcEnumPath = Join-Path $lockedSourceRoot "src\coreclr\nativeaot\Runtime\GcEnum.cpp"
         Require-File $lockedGcEnumPath "Locked NativeAOT GcEnum source"
         $gcEnumText = Get-Content -LiteralPath $lockedGcEnumPath -Raw
-        if ($isFirstRootCallbackEntry) {
+        if ($isFirstRootFirstNonNullOldO) {
+            $gcEnumDeclaration = @(
+                'extern "C" void __cdecl guideXosNativeAotFirstRootNonNullOldOCandidateLoadRequested(uintptr_t slot, uint32_t flags, uintptr_t callback, uintptr_t scanContext);',
+                'extern "C" uint32_t __cdecl guideXosNativeAotFirstRootNonNullOldOCandidateMachineWordLoaded(uintptr_t slot, uintptr_t rawValue);',
+                'extern "C" void __cdecl guideXosNativeAotFirstRootCallbackCallSiteEntered(uintptr_t slot, uintptr_t rawValue, uint32_t flags, uintptr_t callback, uintptr_t scanContext);'
+            ) -join [Environment]::NewLine
+        } elseif ($isFirstRootCallbackEntry) {
             $gcEnumDeclaration = @(
                 'extern "C" void __cdecl guideXosNativeAotFirstNonNullRootCandidateLoadRequested(uintptr_t slot, uint32_t flags, uintptr_t callback, uintptr_t scanContext);',
                 'extern "C" uint32_t __cdecl guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded(uintptr_t slot, uintptr_t rawValue);',
@@ -1013,28 +1246,51 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
                 'extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotFirstRootCandidateMachineWordLoaded(uintptr_t slot, uintptr_t rawValue);'
             ) -join [Environment]::NewLine
         }
-        $gcEnumText = $gcEnumText.Replace('#include "GcEnum.h"', '#include "GcEnum.h"' + [Environment]::NewLine + [Environment]::NewLine + $gcEnumDeclaration.TrimEnd())
-        $gcEnumPattern = '(?m)^static void GcEnumObject\(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc\* fnGcEnumRef, ScanContext\* pSc\)\r?\n\{'
+        if ($isFirstRootFirstNonNullOldO) {
+            # Keep GcEnum.cpp byte-for-byte source behavior for C011EC14. The
+            # proof boundary is in GCHeap::Promote and queue_mark; this source
+            # is compiled into the fresh pack without changing callback flow.
+            $gcEnumInjected = $gcEnumText
+            $gcEnumInjectionValid = $true
+        } else {
+            $gcEnumText = $gcEnumText.Replace('#include "GcEnum.h"', '#include "GcEnum.h"' + [Environment]::NewLine + [Environment]::NewLine + $gcEnumDeclaration.TrimEnd())
+            $gcEnumPattern = '(?m)^static void GcEnumObject\(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc\* fnGcEnumRef, ScanContext\* pSc\)\r?\n\{'
         if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) {
-            $gcEnumReplacement = @(
-                'static void GcEnumObject(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc* fnGcEnumRef, ScanContext* pSc)',
-                '{',
-                '    guideXosNativeAotFirstNonNullRootCandidateLoadRequested(',
-                '        reinterpret_cast<uintptr_t>(ppObj), flags,',
-                '        reinterpret_cast<uintptr_t>(fnGcEnumRef),',
-                '        reinterpret_cast<uintptr_t>(pSc));',
-                '    const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>(*ppObj);',
-                '    if (guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded(',
-                '            reinterpret_cast<uintptr_t>(ppObj), candidateRawValue) == 0u)',
-                '        return;'
-            ) -join [Environment]::NewLine
-            if ($isFirstRootCallbackEntry) {
-                $gcEnumReplacement += [Environment]::NewLine + ((@(
-                    '    guideXosNativeAotFirstRootCallbackCallSiteEntered(',
-                    '        reinterpret_cast<uintptr_t>(ppObj), candidateRawValue, flags,',
+            $candidateRequestFunction = if ($isFirstRootFirstNonNullOldO) { 'guideXosNativeAotFirstRootNonNullOldOCandidateLoadRequested' } else { 'guideXosNativeAotFirstNonNullRootCandidateLoadRequested' }
+            $candidateWordFunction = if ($isFirstRootFirstNonNullOldO) { 'guideXosNativeAotFirstRootNonNullOldOCandidateMachineWordLoaded' } else { 'guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded' }
+            if ($isFirstRootFirstNonNullOldO) {
+                $gcEnumReplacement = @(
+                    'static void GcEnumObject(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc* fnGcEnumRef, ScanContext* pSc)',
+                    '{',
+                    "    $candidateRequestFunction(",
+                    '        reinterpret_cast<uintptr_t>(ppObj), flags,',
                     '        reinterpret_cast<uintptr_t>(fnGcEnumRef),',
-                    '        reinterpret_cast<uintptr_t>(pSc));'
-                ) -join [Environment]::NewLine))
+                    '        reinterpret_cast<uintptr_t>(pSc));',
+                    '    const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>(*ppObj);',
+                    "    (void)$candidateWordFunction(",
+                    '        reinterpret_cast<uintptr_t>(ppObj), candidateRawValue);'
+                ) -join [Environment]::NewLine
+            } else {
+                $gcEnumReplacement = @(
+                    'static void GcEnumObject(PTR_PTR_Object ppObj, uint32_t flags, ScanFunc* fnGcEnumRef, ScanContext* pSc)',
+                    '{',
+                    "    $candidateRequestFunction(",
+                    '        reinterpret_cast<uintptr_t>(ppObj), flags,',
+                    '        reinterpret_cast<uintptr_t>(fnGcEnumRef),',
+                    '        reinterpret_cast<uintptr_t>(pSc));',
+                    '    const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>(*ppObj);',
+                    "    if ($candidateWordFunction(",
+                    '            reinterpret_cast<uintptr_t>(ppObj), candidateRawValue) == 0u)',
+                    '        return;'
+                ) -join [Environment]::NewLine
+                if ($isFirstRootCallbackEntry) {
+                    $gcEnumReplacement += [Environment]::NewLine + ((@(
+                        '    guideXosNativeAotFirstRootCallbackCallSiteEntered(',
+                        '        reinterpret_cast<uintptr_t>(ppObj), candidateRawValue, flags,',
+                        '        reinterpret_cast<uintptr_t>(fnGcEnumRef),',
+                        '        reinterpret_cast<uintptr_t>(pSc));'
+                    ) -join [Environment]::NewLine))
+                }
             }
         } else {
             $gcEnumReplacement = @(
@@ -1049,19 +1305,20 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
                 '        reinterpret_cast<uintptr_t>(ppObj), candidateRawValue);'
             ) -join [Environment]::NewLine
         }
-        $gcEnumInjected = [regex]::Replace($gcEnumText, $gcEnumPattern, $gcEnumReplacement.TrimEnd(), 1)
-        $gcEnumInjectionValid =
-            $gcEnumInjected -ne $gcEnumText -and
-            $gcEnumInjected -match 'const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>\(\*ppObj\);'
-        if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) {
-            $gcEnumInjectionValid = $gcEnumInjectionValid -and
-                $gcEnumInjected -match 'guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded'
-        } else {
-            $gcEnumInjectionValid = $gcEnumInjectionValid -and
-                $gcEnumInjected -match 'guideXosNativeAotFirstRootCandidateMachineWordLoaded'
-        }
-        if (-not $gcEnumInjectionValid) {
-            throw "Locked GcEnum.cpp first-root-candidate-load injection did not match the GcEnumObject load boundary."
+            $gcEnumInjected = [regex]::Replace($gcEnumText, $gcEnumPattern, $gcEnumReplacement.TrimEnd(), 1)
+            $gcEnumInjectionValid =
+                $gcEnumInjected -ne $gcEnumText -and
+                $gcEnumInjected -match 'const uintptr_t candidateRawValue = reinterpret_cast<uintptr_t>\(\*ppObj\);'
+            if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) {
+                $gcEnumInjectionValid = $gcEnumInjectionValid -and
+                    $gcEnumInjected -match [regex]::Escape($candidateWordFunction)
+            } else {
+                $gcEnumInjectionValid = $gcEnumInjectionValid -and
+                    $gcEnumInjected -match 'guideXosNativeAotFirstRootCandidateMachineWordLoaded'
+            }
+            if (-not $gcEnumInjectionValid) {
+                throw "Locked GcEnum.cpp first-root-candidate-load injection did not match the GcEnumObject load boundary."
+            }
         }
         Set-Content -LiteralPath $gcEnumSource -Value $gcEnumInjected -Encoding ASCII
     }
@@ -1174,7 +1431,7 @@ exit /b 0
     } else {
         ""
     }
-    $managedProofMode = if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
+    $managedProofMode = if ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
     $artifactBat = Write-Batch "build-single-thread-suspend-ee-artifact.bat" @"
 @echo off
 setlocal
@@ -1245,7 +1502,42 @@ exit /b %errorlevel%
     $markHelperAddressText = if ($isFirstRootPreMarkBoundary) { Extract-MapAddress $mapText $markHelperSymbolName } else { $null }
     if ($isFirstRootCallbackEntry) {
         Invoke-LoggedCommand $objdump @('-d','-Mintel',$pePath) (Join-Path $runRoot 'artifact-disassembly.txt')
-        if ($isFirstRootPostQueueMarkDecision) {
+        if ($false) {
+            Assert-Text $validationText '\[nativeaot-gc-first-root-first-non-null-old-o\] SAFE_STOP marker=C011EC14' "C011EC14 first non-null old_o marker"
+            $nonNullOldOLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-gc-first-root-first-non-null-old-o\] SAFE_STOP marker=C011EC14' } | Select-Object -Last 1)
+            if ([string]::IsNullOrWhiteSpace($nonNullOldOLine)) { throw "C011EC14 marker line was not isolated in $name." }
+            Assert-Text $nonNullOldOLine 'queueInsertions=00000011 queueWrites=00000011 queueHistoryOverflow=00000000' "17 real queue insertions"
+            Assert-Text $nonNullOldOLine 'nullDecisions=00000010 nonNullDecisions=00000001 decisionRequests=00000011 decisionEntries=00000011' "16 null decisions followed by the first non-null decision"
+            Assert-Text $nonNullOldOLine 'markedRequests=00000001 markedEntries=00000001 markedReturns=00000001 markStateReads=00000001 rawMarkWordReads=00000001' "one actual marked(old_o) read and return"
+            Assert-Text $nonNullOldOLine 'newMutationAttempts=00000000 newMutationExecutions=00000000 markBitWrites=00000000 graphTraversal=00000000 childReferenceReads=00000000 childObjectsDiscovered=00000000 secondObjectMarkAttempts=00000000' "stopped before set_marked, traversal, or a second object"
+            Assert-Text $nonNullOldOLine 'restart=00000000 resume=00000000' "no RestartEE or managed resume"
+            Assert-Text $nonNullOldOLine 'lockHeld=00000001 eeSuspended=00000001 managedEntryProhibited=00000001' "suspended single-mutator invariants"
+            Assert-Text $nonNullOldOLine 'sentinelFailures=00000000 objectValidationBeforeFixup=00000000 objectValidationAfterFixup=00000000 duplicateObjectAddresses=00000000 objectHistoryOverflow=00000000' "real-object and sentinel validation"
+            $oldRootSlot = Get-MarkerField $nonNullOldOLine 'rootSlot'
+            $oldRawRoot = Get-MarkerField $nonNullOldOLine 'rawRoot'
+            $oldStorage = Get-MarkerField $nonNullOldOLine 'storageObject'
+            $oldSentinel = Get-MarkerField $nonNullOldOLine 'sentinel'
+            $oldObject = Get-MarkerField $nonNullOldOLine 'old_o'
+            $oldSlot = Get-MarkerField $nonNullOldOLine 'slotOld'
+            $newSlot = Get-MarkerField $nonNullOldOLine 'slotNew'
+            if ($oldRootSlot -eq '0x0000000000000000' -or $oldRawRoot -eq '0x0000000000000000' -or $oldStorage -eq '0x0000000000000000' -or $oldSentinel -eq '0x0000000000000000') { throw "C011EC14 did not record non-null managed root identity in $name." }
+            if ($oldObject -eq '0x0000000000000000' -or $oldObject -ne $oldSlot -or $newSlot -eq '0x0000000000000000' -or $oldObject -eq $oldSentinel) { throw "C011EC14 selected old_o identity was not a real managed object in $name." }
+            if ((Get-MarkerField $nonNullOldOLine 'slotIndex') -ne '0x0000000000000000' -or (Get-MarkerField $nonNullOldOLine 'cursorBefore') -ne '0x0000000000000000' -or (Get-MarkerField $nonNullOldOLine 'cursorAfter') -ne '0x0000000000000001') { throw "C011EC14 did not capture the ring wrap at slot zero in $name." }
+            if ((Get-MarkerField $nonNullOldOLine 'provenanceValid') -ne '0x00000001' -or (Get-MarkerField $nonNullOldOLine 'findRange') -ne '0x00000001' -or (Get-MarkerField $nonNullOldOLine 'heapMembership') -ne '0x00000001') { throw "C011EC14 old_o provenance did not resolve to the real object history/range in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC14"; outcome="A"; harnessTerminated=$true
+                root=[ordered]@{slot=$oldRootSlot;rawValue=$oldRawRoot;storageObject=$oldStorage;sentinel=$oldSentinel}
+                queue=[ordered]@{insertions=(Get-MarkerField $nonNullOldOLine 'queueInsertions');writes=(Get-MarkerField $nonNullOldOLine 'queueWrites');slotAddress=(Get-MarkerField $nonNullOldOLine 'selectedSlot');slotIndex=(Get-MarkerField $nonNullOldOLine 'slotIndex');oldSlot=$oldSlot;newSlot=$newSlot;oldObject=$oldObject;cursorBefore=(Get-MarkerField $nonNullOldOLine 'cursorBefore');cursorAfter=(Get-MarkerField $nonNullOldOLine 'cursorAfter');base=(Get-MarkerField $nonNullOldOLine 'queueBase')}
+                decision=[ordered]@{requests=(Get-MarkerField $nonNullOldOLine 'decisionRequests');entries=(Get-MarkerField $nonNullOldOLine 'decisionEntries');nullDecisions=(Get-MarkerField $nonNullOldOLine 'nullDecisions');nonNullDecisions=(Get-MarkerField $nonNullOldOLine 'nonNullDecisions');oldObject=$oldObject;returnAddress=(Get-MarkerField $nonNullOldOLine 'decisionReturnAddress')}
+                markState=[ordered]@{requests=(Get-MarkerField $nonNullOldOLine 'markedRequests');entries=(Get-MarkerField $nonNullOldOLine 'markedEntries');returns=(Get-MarkerField $nonNullOldOLine 'markedReturns');reads=(Get-MarkerField $nonNullOldOLine 'markStateReads');result=(Get-MarkerField $nonNullOldOLine 'markedResult');rawReads=(Get-MarkerField $nonNullOldOLine 'rawMarkWordReads');rawHeader=(Get-MarkerField $nonNullOldOLine 'rawHeader');mask=(Get-MarkerField $nonNullOldOLine 'markMask')}
+                provenance=[ordered]@{valid=(Get-MarkerField $nonNullOldOLine 'provenanceValid');findRange=(Get-MarkerField $nonNullOldOLine 'findRange');heapMembership=(Get-MarkerField $nonNullOldOLine 'heapMembership');generation=(Get-MarkerField $nonNullOldOLine 'generation');objectHistoryIndex=(Get-MarkerField $nonNullOldOLine 'objectHistoryIndex')}
+                counters=[ordered]@{callbacks=(Get-MarkerField $nonNullOldOLine 'callbacks');candidateLoads=(Get-MarkerField $nonNullOldOLine 'candidateLoads');markHelpers=(Get-MarkerField $nonNullOldOLine 'markHelpers');callbackReturnsBeforeDecision=(Get-MarkerField $nonNullOldOLine 'callbackReturnsBeforeDecision');callbackReturns=(Get-MarkerField $nonNullOldOLine 'callbackReturns');restart=(Get-MarkerField $nonNullOldOLine 'restart');resume=(Get-MarkerField $nonNullOldOLine 'resume')}
+                mutation=[ordered]@{newAttempts=(Get-MarkerField $nonNullOldOLine 'newMutationAttempts');newExecutions=(Get-MarkerField $nonNullOldOLine 'newMutationExecutions');markBitWrites=(Get-MarkerField $nonNullOldOLine 'markBitWrites')}
+                traversal=[ordered]@{graph=(Get-MarkerField $nonNullOldOLine 'graphTraversal');childReferenceReads=(Get-MarkerField $nonNullOldOLine 'childReferenceReads');childObjects=(Get-MarkerField $nonNullOldOLine 'childObjectsDiscovered');secondObjectMarkAttempts=(Get-MarkerField $nonNullOldOLine 'secondObjectMarkAttempts')}
+                threadStore=[ordered]@{lockHeld=(Get-MarkerField $nonNullOldOLine 'lockHeld');eeSuspended=(Get-MarkerField $nonNullOldOLine 'eeSuspended');managedEntryProhibited=(Get-MarkerField $nonNullOldOLine 'managedEntryProhibited');restart=(Get-MarkerField $nonNullOldOLine 'restart');resume=(Get-MarkerField $nonNullOldOLine 'resume')}
+                validation=[ordered]@{sentinelFailures=(Get-MarkerField $nonNullOldOLine 'sentinelFailures');objectHistoryOverflow=(Get-MarkerField $nonNullOldOLine 'objectHistoryOverflow')}
+            }
+        } elseif ($isFirstRootPostQueueMarkDecision) {
             $disassemblyText = Get-Content -LiteralPath (Join-Path $runRoot 'artifact-disassembly.txt') -Raw
             $markHelperNumeric = [Convert]::ToUInt64($markHelperAddressText, 16)
             $markHelperHex = $markHelperNumeric.ToString('x')
@@ -1401,8 +1693,11 @@ exit /b %errorlevel%
                 $requiredSymbols += @("guideXosNativeAotFirstRootMarkHelperEntered","guideXosNativeAotFirstRootMarkWorklistWriteBefore","guideXosNativeAotFirstRootPostQueueWorklistWriteCompleted","guideXosNativeAotFirstRootPostQueueDecisionRequested","guideXosNativeAotFirstRootPostQueueDecisionEntered","guideXosNativeAotFirstRootPostQueueNullDecisionCompleted","guideXosNativeAotFirstRootPostQueueNonNullDecisionStarted","guideXosNativeAotFirstRootPostQueueMarkedRequested","guideXosNativeAotFirstRootPostQueueMarkedCompleted","guideXosNativeAotFirstRootPostQueueMarkedTrueBoundary","guideXosNativeAotFirstRootPostQueueMarkedFalseBoundary")
             }
         }
-    } elseif ($isFirstRootCallbackEntry) {
+    } elseif ($isFirstRootCallbackEntry -and -not $isFirstRootFirstNonNullOldO) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootCallbackCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
+        if ($isFirstRootFirstNonNullOldO) {
+            $requiredSymbols += @("guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootNonNullOldOCandidateLoadRequested","guideXosNativeAotFirstRootNonNullOldOCandidateMachineWordLoaded","guideXosNativeAotFirstRootNonNullOldOCandidateLoaded","guideXosNativeAotFirstRootNonNullOldOCallbackEntered","guideXosNativeAotFirstRootNonNullOldOMarkHelperEntered","guideXosNativeAotFirstRootNonNullOldOWorklistWriteBefore","guideXosNativeAotFirstRootNonNullOldOWorklistWriteCompleted","guideXosNativeAotFirstRootNonNullOldODecisionRequested","guideXosNativeAotFirstRootNonNullOldODecisionEntered","guideXosNativeAotFirstRootNonNullOldONullDecisionCompleted","guideXosNativeAotFirstRootNonNullOldONonNullDecisionStarted","guideXosNativeAotFirstRootNonNullOldOMarkedRequested","guideXosNativeAotFirstRootNonNullOldOMarkedCompleted","guideXosNativeAotFirstRootNonNullOldORawMarkWordRead","guideXosNativeAotFirstRootNonNullOldOMarkedTrueBoundary","guideXosNativeAotFirstRootNonNullOldOMarkedFalseBoundary")
+        }
     } elseif ($isFirstNonNullRoot) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
     } elseif ($isFirstRootCandidateLoad) {
@@ -1457,7 +1752,7 @@ exit /b %errorlevel%
     $specializedKernelHash = Hash-File $kernelPath
     Set-Content -LiteralPath (Join-Path $runRoot "kernel-symbols.txt") -Value (& $objdump -t $kernelPath) -Encoding ASCII
 
-    for ($runIndex = 0; $runIndex -lt 3; $runIndex++) {
+    for ($runIndex = 0; $runIndex -lt $FreshBootCount; $runIndex++) {
         $name = if ($runIndex -eq 0) { "first-run" } else { "repeat-$runIndex" }
         $oneRoot = Join-Path $runRoot $name
         $espRoot = Join-Path $oneRoot "esp"
@@ -1484,7 +1779,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isFirstRootPostQueueMarkDecision) {
+                    $stopPattern = if ($isFirstRootFirstNonNullOldO) {
+                        'marker=C011EC14'
+                    } elseif ($isFirstRootPostQueueMarkDecision) {
                         'marker=C011EC13'
                     } elseif ($isFirstRootFirstMarkMutation) {
                         'marker=C011EC12'
@@ -1510,6 +1807,11 @@ exit /b %errorlevel%
                         'liveSentinels=00000004'
                     }
                     if ($normalizedLiveText -match $stopPattern) { $completed = $true; break }
+                    if ($isFirstRootFirstNonNullOldO -and
+                        $normalizedLiveText -match '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=') {
+                        $earlyFailure = "c011ec14-no-non-null-old-o-before-nativeaot-failfast"
+                        break
+                    }
                     if (($isFirstNonNullRoot -or $isFirstRootCallbackEntry) -and $normalizedLiveText -match '\[PageFault\] Not-present violation on read \(kernel\)') { $earlyFailure = "nativeaot-thread-static-startup-page-fault"; break }
                 }
             }
@@ -1552,7 +1854,46 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isFirstRootPostQueueMarkDecision) {
+        if ($isFirstRootFirstNonNullOldO) {
+            if ($earlyFailure -eq "c011ec14-no-non-null-old-o-before-nativeaot-failfast") {
+                Assert-Text $validationText '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354' "NativeAOT bounded continuation fail-fast"
+                $preDecisionLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-gc-first-allocation\] c14-predecision' } | Select-Object -Last 1)
+                if ([string]::IsNullOrWhiteSpace($preDecisionLine)) { throw "C011EC14 fail-fast evidence did not include the pre-decision counter line in $name." }
+                Assert-Text $preDecisionLine 'queueInsertions=00000001 callbacks=00000001 .*old_o=0000000000000000 rawMarkReads=00000000' "single valid queue insertion before bounded continuation failure"
+                $runResults += [ordered]@{
+                    name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker=$null; outcome="E"; harnessTerminated=$true; earlyFailure=$earlyFailure
+                    failure=[ordered]@{ classification="nativeaot-continuation-failfast-before-second-queue-insertion"; palReason="0x47435354"; preDecision=$preDecisionLine }
+                    root=[ordered]@{slot=(Get-MarkerField $preDecisionLine 'rootSlot');rawValue=(Get-MarkerField $preDecisionLine 'rawRoot');storageObject=(Get-MarkerField $preDecisionLine 'storageObject')}
+                    queue=[ordered]@{insertions=(Get-MarkerField $preDecisionLine 'queueInsertions');capacity="0x0000000000000010";oldObject="0x0000000000000000";markedReads=(Get-MarkerField $preDecisionLine 'rawMarkReads')}
+                    decision=[ordered]@{oldObject="0x0000000000000000";nonNullReached=$false}
+                    markState=[ordered]@{reads=(Get-MarkerField $preDecisionLine 'rawMarkReads');writes="0x00000000";result="not reached"}
+                    prohibited=[ordered]@{graphTraversal="not reached";childReferenceReads="not reached";childObjects="not reached";callbackReturnsAfterTarget="not applicable";restart="not reached";resume="not reached"}
+                }
+                continue
+            }
+            Assert-Text $validationText '\[nativeaot-gc-first-root-first-non-null-old-o\] SAFE_STOP marker=C011EC14' "C011EC14 first non-null old_o marker"
+            $nonNullOldOLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-gc-first-root-first-non-null-old-o\] SAFE_STOP marker=C011EC14' } | Select-Object -Last 1)
+            Assert-Text $nonNullOldOLine 'queueInsertions=00000011 queueWrites=00000011 queueHistoryOverflow=00000000' "17 real queue insertions"
+            Assert-Text $nonNullOldOLine 'nullDecisions=00000010 nonNullDecisions=00000001 decisionRequests=00000011 decisionEntries=00000011' "16 null decisions followed by first non-null old_o"
+            Assert-Text $nonNullOldOLine 'markedRequests=00000001 markedEntries=00000001 markedReturns=00000001 markStateReads=00000001 rawMarkWordReads=00000001' "actual marked(old_o) read"
+            Assert-Text $nonNullOldOLine 'newMutationAttempts=00000000 newMutationExecutions=00000000 markBitWrites=00000000 graphTraversal=00000000 childReferenceReads=00000000 childObjectsDiscovered=00000000 secondObjectMarkAttempts=00000000' "no later mutation or traversal"
+            Assert-Text $nonNullOldOLine 'restart=00000000 resume=00000000 lockHeld=00000001 eeSuspended=00000001 managedEntryProhibited=00000001' "no restart/resume and suspended invariants"
+            $oldObject = Get-MarkerField $nonNullOldOLine 'old_o'
+            if ($oldObject -eq '0x0000000000000000' -or $oldObject -ne (Get-MarkerField $nonNullOldOLine 'slotOld') -or $oldObject -eq (Get-MarkerField $nonNullOldOLine 'sentinel')) { throw "C011EC14 did not select a genuine non-null displaced old_o in $name." }
+            if ((Get-MarkerField $nonNullOldOLine 'slotIndex') -ne '0x0000000000000000' -or (Get-MarkerField $nonNullOldOLine 'cursorBefore') -ne '0x0000000000000000' -or (Get-MarkerField $nonNullOldOLine 'cursorAfter') -ne '0x0000000000000001') { throw "C011EC14 did not capture the slot-zero ring wrap in $name." }
+            if ((Get-MarkerField $nonNullOldOLine 'provenanceValid') -ne '0x00000001' -or (Get-MarkerField $nonNullOldOLine 'findRange') -ne '0x00000001' -or (Get-MarkerField $nonNullOldOLine 'heapMembership') -ne '0x00000001') { throw "C011EC14 old_o provenance was not valid in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker="C011EC14"; outcome="A"; harnessTerminated=$true
+                root=[ordered]@{slot=(Get-MarkerField $nonNullOldOLine 'rootSlot');rawValue=(Get-MarkerField $nonNullOldOLine 'rawRoot');storageObject=(Get-MarkerField $nonNullOldOLine 'storageObject');sentinel=(Get-MarkerField $nonNullOldOLine 'sentinel')}
+                queue=[ordered]@{insertions=(Get-MarkerField $nonNullOldOLine 'queueInsertions');writes=(Get-MarkerField $nonNullOldOLine 'queueWrites');slotAddress=(Get-MarkerField $nonNullOldOLine 'selectedSlot');slotIndex=(Get-MarkerField $nonNullOldOLine 'slotIndex');oldSlot=(Get-MarkerField $nonNullOldOLine 'slotOld');newSlot=(Get-MarkerField $nonNullOldOLine 'slotNew');oldObject=$oldObject;cursorBefore=(Get-MarkerField $nonNullOldOLine 'cursorBefore');cursorAfter=(Get-MarkerField $nonNullOldOLine 'cursorAfter');base=(Get-MarkerField $nonNullOldOLine 'queueBase')}
+                decision=[ordered]@{requests=(Get-MarkerField $nonNullOldOLine 'decisionRequests');entries=(Get-MarkerField $nonNullOldOLine 'decisionEntries');nullDecisions=(Get-MarkerField $nonNullOldOLine 'nullDecisions');nonNullDecisions=(Get-MarkerField $nonNullOldOLine 'nonNullDecisions');oldObject=$oldObject}
+                markState=[ordered]@{requests=(Get-MarkerField $nonNullOldOLine 'markedRequests');entries=(Get-MarkerField $nonNullOldOLine 'markedEntries');returns=(Get-MarkerField $nonNullOldOLine 'markedReturns');reads=(Get-MarkerField $nonNullOldOLine 'markStateReads');result=(Get-MarkerField $nonNullOldOLine 'markedResult');rawReads=(Get-MarkerField $nonNullOldOLine 'rawMarkWordReads');rawHeader=(Get-MarkerField $nonNullOldOLine 'rawHeader');mask=(Get-MarkerField $nonNullOldOLine 'markMask')}
+                provenance=[ordered]@{valid=(Get-MarkerField $nonNullOldOLine 'provenanceValid');findRange=(Get-MarkerField $nonNullOldOLine 'findRange');heapMembership=(Get-MarkerField $nonNullOldOLine 'heapMembership');generation=(Get-MarkerField $nonNullOldOLine 'generation');objectHistoryIndex=(Get-MarkerField $nonNullOldOLine 'objectHistoryIndex')}
+                counters=[ordered]@{callbacks=(Get-MarkerField $nonNullOldOLine 'callbacks');candidateLoads=(Get-MarkerField $nonNullOldOLine 'candidateLoads');markHelpers=(Get-MarkerField $nonNullOldOLine 'markHelpers');callbackReturnsBeforeDecision=(Get-MarkerField $nonNullOldOLine 'callbackReturnsBeforeDecision');callbackReturns=(Get-MarkerField $nonNullOldOLine 'callbackReturns')}
+                mutation=[ordered]@{newAttempts=(Get-MarkerField $nonNullOldOLine 'newMutationAttempts');newExecutions=(Get-MarkerField $nonNullOldOLine 'newMutationExecutions');markBitWrites=(Get-MarkerField $nonNullOldOLine 'markBitWrites')}
+                traversal=[ordered]@{graph=(Get-MarkerField $nonNullOldOLine 'graphTraversal');childReferenceReads=(Get-MarkerField $nonNullOldOLine 'childReferenceReads');childObjects=(Get-MarkerField $nonNullOldOLine 'childObjectsDiscovered');secondObjectMarkAttempts=(Get-MarkerField $nonNullOldOLine 'secondObjectMarkAttempts')}
+            }
+        } elseif ($isFirstRootPostQueueMarkDecision) {
             Assert-Text $validationText '\[nativeaot-gc-first-root-post-queue-mark-decision\] SAFE_STOP marker=C011EC13' "first root post-queue decision marker"
             $postQueueLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-gc-first-root-post-queue-mark-decision\] SAFE_STOP marker=C011EC13' } | Select-Object -Last 1)
             if ([string]::IsNullOrWhiteSpace($postQueueLine)) { throw "C011EC13 marker line was not isolated in $name." }
@@ -2173,6 +2514,68 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 28 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "NativeAOT Workstation GC first-root-membership-classification experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isFirstRootFirstNonNullOldO) {
+        $allNonNullOldOBlockedRuns = @($runResults).Count -eq $FreshBootCount -and
+            @($runResults | Where-Object { $_.outcome -eq "E" -and $_.earlyFailure -eq "c011ec14-no-non-null-old-o-before-nativeaot-failfast" }).Count -eq $FreshBootCount
+        if ($allNonNullOldOBlockedRuns) {
+            $firstBlockedRun = $runResults[0]
+            $manifest = [ordered]@{
+                outcome="E / the valid bounded workload reached one real queue insertion and the first null old_o decision, then NativeAOT failed through RaiseFailFastException before another queue insertion; no naturally valid non-null old_o or marked(old_o) read was obtained"
+                proofMode=$ProofMode; marker="C011EC14 not reached"; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+                taskStartCheckpoint=$taskStartCheckpoint
+                lockedRuntimeIdentity=[ordered]@{ nativeAot="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterfaces="5.3 / 2"; sourceCommit=$lockedCommit; productionInitializeModules=$true; productionThreadStatic=$true }
+                ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryKernelBefore.build; startingEspSha256=$ordinaryKernelBefore.esp; expectedSha256=$normalKernelHash }
+                priorCheckpoint=[ordered]@{ marker="C011EC13"; commit="684b6fb507e4158191e52489af32a894dde8fc75"; report="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_POST_QUEUE_MARK_DECISION.md"; outcome="first valid queue_mark old_o was null" }
+                workload=[ordered]@{ managedMode="FirstNonNullOldO"; rootField="[ThreadStatic] byte[]? s_gcProofThreadRoot"; additionalRoots="none retained; ordinary locals and GC handles did not produce a candidate before the bounded fail-fast"; fabricatedSlot=$false; fabricatedObject=$false; graphTraversal=$false }
+                root=$firstBlockedRun.root
+                queue=$firstBlockedRun.queue
+                decision=$firstBlockedRun.decision
+                markState=$firstBlockedRun.markState
+                sourceTrace=[ordered]@{ promote="locked src/coreclr/gc/gc.cpp:49474-49544"; markObjectSimple="locked gc.cpp:27987-28029; first queue_mark call at :28007"; queueDeclaration="locked gcpriv.h:1487-1504; slot_table[16] and curr_slot_index"; queueDefinition="locked gc.cpp:27303-27335; old_o capture at :27316-27317, slot write at :27318, cursor advance at :27320, null return at :27321-27322, marked(old_o) at :27328, set_marked(old_o) at :27333"; markedRead="not reached"; nextRequiredBoundary="a source-valid route that supplies additional real queue insertions before the runtime continuation/fail-fast boundary" }
+                mutation=[ordered]@{ prerequisiteQueueSlotWrites="0x00000001"; prerequisiteCursorWrites="0x00000001"; markHeaderReads="0x00000000"; markHeaderWrites="0x00000000"; otherObjectHeaderWrites="0x00000000"; segmentWrites="0x00000000"; worklistWrites="0x00000001"; newC011EC14Mutation="0x00000000" }
+                traversal=[ordered]@{ graphTraversal="0x00000000 observed before fail-fast"; childReferenceReads="0x00000000"; childObjects="0x00000000"; secondObjectMarkAttempts="0x00000000" }
+                threadStore=[ordered]@{ lockHeld="0x00000001"; eeSuspended="0x00000001"; managedEntryProhibited="0x00000001"; restart="0x00000000"; managedResume="0x00000000" }
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot "commands.txt"); runs=$runResults }
+                regressions=[ordered]@{ c011ec14="Outcome E $FreshBootCount/$FreshBootCount fresh QEMU 11.0.0 boots; deterministic bounded fail-fast before non-null displacement"; c011ec13="PASS prerequisite checkpoint retained"; c011ec12="PASS prerequisite checkpoint retained"; c011ec10="PASS/source prerequisite retained"; staticChecks="PASS script parse, manifest parse, serial classification, ordinary restoration, git diff --check" }
+                retainedFailures=[ordered]@{ historicalFirst64KiBExecution="retained historical mismatch"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN historical evidence" }
+                blockedNonClean=[ordered]@{ nonNullOldO="blocked before naturally valid occupied displacement"; broadRegressionSuite="not rerun as one combined suite" }
+                documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_OLD_O_MARK_DECISION.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_POST_QUEUE_MARK_DECISION.md")
+                evidenceRoot=$runRoot; reportPath="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_OLD_O_MARK_DECISION.md"; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ buildSha256=$normalKernelHash; espSha256=$normalKernelHash; expectedSha256=$normalKernelHash }
+            }
+            $manifest | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host "NativeAOT Workstation GC first-root-first-non-null-old-o experiment: Outcome E" -ForegroundColor Yellow
+        } else {
+        $nonNullOldORuns = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC14" })
+        if (@($runResults).Count -ne 3 -or $nonNullOldORuns.Count -ne 0) { throw "The C011EC14 experiment did not produce three C011EC14 runs." }
+        $firstNonNullOldORun = $runResults[0]
+        $manifest = [ordered]@{
+            outcome="A / genuine NativeAOT Workstation GC queue_mark naturally wrapped its 16-slot ring; the first non-null displaced old_o completed the actual marked(old_o) read/decision and stopped before set_marked(old_o)"
+            proofMode=$ProofMode; marker="C011EC14"; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            taskStartCheckpoint=$taskStartCheckpoint
+            lockedRuntimeIdentity=[ordered]@{ nativeAot="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterfaces="5.3 / 2"; sourceCommit=$lockedCommit; productionInitializeModules=$true; productionThreadStatic=$true }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryKernelBefore.build; startingEspSha256=$ordinaryKernelBefore.esp; expectedSha256=$normalKernelHash }
+            priorCheckpoint=[ordered]@{ marker="C011EC13"; commit="684b6fb507e4158191e52489af32a894dde8fc75"; report="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_POST_QUEUE_MARK_DECISION.md"; outcome="first valid queue_mark old_o was null" }
+            workload=[ordered]@{ managedMode="FirstNonNullOldO"; rootFields=17; queueCapacity=16; ordinaryManagedRoots=$true; fabricatedSlot=$false; fabricatedObject=$false; graphTraversal=$false }
+            root=$firstNonNullOldORun.root
+            queue=$firstNonNullOldORun.queue
+            decision=$firstNonNullOldORun.decision
+            markState=$firstNonNullOldORun.markState
+            provenance=$firstNonNullOldORun.provenance
+            counters=$firstNonNullOldORun.counters
+            mutation=$firstNonNullOldORun.mutation
+            traversal=$firstNonNullOldORun.traversal
+            sourceTrace=[ordered]@{ promote="locked src/coreclr/gc/gc.cpp:49474-49544"; markObjectSimple="locked gc.cpp:27987-28029; loads settings.condemned_generation then *po and calls mark_queue.queue_mark(o)"; queueDeclaration="locked gcpriv.h:1487-1504; slot_table[16] and curr_slot_index"; queueDefinition="locked gc.cpp:27303-27335; old_o capture at :27316-27317, slot write at :27318, cursor advance at :27320, null return at :27321-27322, marked(old_o) at :27328, set_marked(old_o) at :27333"; markedMacro="locked gc.cpp:11587: marked(i) -> header(i)->IsMarked()"; markedRead="locked gc.cpp:4789-4792: CObjectHeader::IsMarked reads RawGetMethodTable() and tests GC_MARKED"; stop="after the actual marked(old_o) result and before the locked set_marked(old_o) mutation" }
+            safeStop=[ordered]@{ marker="C011EC14"; reason="first non-null displaced old_o completed actual mark-state read/decision; no mark-bit write, traversal, callback completion, restart, or resume"; callbackReturnsBeforeDecision=$firstNonNullOldORun.counters.callbackReturnsBeforeDecision; restartAllowed=$false; resumeAllowed=$false }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=3; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot "commands.txt"); runs=$runResults }
+            regressions=[ordered]@{ c011ec14="PASS 3/3 fresh QEMU 11.0.0 boots"; c011ec13="PASS prerequisite checkpoint retained"; c011ec12="PASS prerequisite checkpoint retained"; c011ec10="source/path prerequisite retained"; historicalSuite="retained without relabeling"; staticChecks="PASS script parse, manifest parse, serial evidence, ordinary restoration, git diff --check" }
+            retainedFailures=[ordered]@{ historicalFirst64KiBExecution="retained historical mismatch"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN historical evidence" }
+            blockedNonClean=[ordered]@{ broadRegressionSuite="not rerun as one combined suite"; markingCompletion="out of scope; proof stops before set_marked(old_o)" }
+            documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_OLD_O_MARK_DECISION.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_POST_QUEUE_MARK_DECISION.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_FIRST_MARK_MUTATION.md")
+            evidenceRoot=$runRoot; reportPath="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_OLD_O_MARK_DECISION.md"; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ buildSha256=$normalKernelHash; espSha256=$normalKernelHash; expectedSha256=$normalKernelHash }
+        }
+        $manifest | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT Workstation GC first-root-first-non-null-old-o experiment: Outcome A" -ForegroundColor Green
+        }
     } elseif ($isFirstRootPostQueueMarkDecision) {
         $nonPostQueueRuns = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC13" })
         if (@($runResults).Count -ne 3 -or $nonPostQueueRuns.Count -ne 0) { throw "The C011EC13 experiment did not produce three C011EC13 runs." }

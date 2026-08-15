@@ -49,6 +49,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_FIRST_NON_NULL_ROOT</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstNonNullOldO'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_FIRST_NON_NULL_ROOT;HOSTLOGPROOF_FIRST_NON_NULL_OLD_O</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'ThreadStaticPrimitive'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE</DefineConstants>
   </PropertyGroup>

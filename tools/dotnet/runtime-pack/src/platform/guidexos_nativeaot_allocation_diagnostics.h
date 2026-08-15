@@ -1019,6 +1019,84 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t postQueueDecisionReturnAddress;
     uintptr_t postQueueSafeStopAddress;
     uintptr_t postQueueNextMutationAddress;
+
+    /*
+     * C011EC14 proof-only first naturally non-null old_o evidence.  This
+     * block is append-only after C011EC13 so earlier checkpoint layouts stay
+     * stable.  The queue history is the real sixteen-slot ring history plus
+     * the seventeenth insertion that displaces the first object.
+     */
+    uint32_t firstNonNullOldOCallbackCount;
+    uint32_t firstNonNullOldOCandidateCount;
+    uint32_t firstNonNullOldOMarkHelperCount;
+    uint32_t firstNonNullOldOQueueInsertionCount;
+    uint32_t firstNonNullOldOWorklistWriteCount;
+    uint32_t firstNonNullOldONullDecisionCount;
+    uint32_t firstNonNullOldONonNullDecisionCount;
+    uint32_t firstNonNullOldODecisionRequestCount;
+    uint32_t firstNonNullOldODecisionEntryCount;
+    uint32_t firstNonNullOldOMarkedRequestCount;
+    uint32_t firstNonNullOldOMarkedEntryCount;
+    uint32_t firstNonNullOldOMarkedReturnCount;
+    uint32_t firstNonNullOldOMarkStateReadCount;
+    uint32_t firstNonNullOldOMarkedResult;
+    uint32_t firstNonNullOldORawMarkWordReadCount;
+    uint32_t firstNonNullOldOCallbackReturnCount;
+    uint32_t firstNonNullOldOCallbackReturnsBeforeDecision;
+    uint32_t firstNonNullOldONewMutationAttemptCount;
+    uint32_t firstNonNullOldONewMutationExecutionCount;
+    uint32_t firstNonNullOldOMarkBitWriteCount;
+    uint32_t firstNonNullOldOObjectHeaderWriteCount;
+    uint32_t firstNonNullOldOGcMetadataWriteCount;
+    uint32_t firstNonNullOldOSegmentWriteCount;
+    uint32_t firstNonNullOldOGraphTraversalCount;
+    uint32_t firstNonNullOldOChildReferenceReadCount;
+    uint32_t firstNonNullOldOChildObjectCount;
+    uint32_t firstNonNullOldOSecondObjectMarkAttemptCount;
+    uint32_t firstNonNullOldOSafeStopObserved;
+    uint32_t firstNonNullOldOSafeStopReason;
+    uint32_t firstNonNullOldOBranch;
+    uint32_t firstNonNullOldOQueueHistoryOverflow;
+    uint32_t firstNonNullOldOProvenanceValid;
+    uint32_t firstNonNullOldOFindRangeResult;
+    uint32_t firstNonNullOldOHeapMembershipResult;
+    uint32_t firstNonNullOldOGeneration;
+    uint32_t firstNonNullOldOHeaderReadCount;
+    uint32_t firstNonNullOldOOtherHeaderWriteCount;
+    uint32_t firstNonNullOldOTraversalWorkItemWriteCount;
+    uint32_t firstNonNullOldOObjectHistoryIndex;
+    uint32_t reservedFirstNonNullOldO[8];
+
+    uintptr_t firstNonNullOldOCurrentCallbackObject;
+    uintptr_t firstNonNullOldORootSlot;
+    uintptr_t firstNonNullOldORawRoot;
+    uintptr_t firstNonNullOldOSelectedSlotAddress;
+    uintptr_t firstNonNullOldOSlotOldValue;
+    uintptr_t firstNonNullOldOSlotNewValue;
+    uintptr_t firstNonNullOldOQueueBase;
+    uintptr_t firstNonNullOldOSlotIndex;
+    uintptr_t firstNonNullOldOCursorBefore;
+    uintptr_t firstNonNullOldOCursorAfter;
+    uintptr_t firstNonNullOldOOldObject;
+    uintptr_t firstNonNullOldOOldObjectHeaderAddress;
+    uintptr_t firstNonNullOldORawHeader;
+    uintptr_t firstNonNullOldOMarkMask;
+    uintptr_t firstNonNullOldODecisionReturnAddress;
+    uintptr_t firstNonNullOldOSafeStopAddress;
+    uintptr_t firstNonNullOldONextMutationAddress;
+    uintptr_t firstNonNullOldOHeapIdentity;
+    uintptr_t firstNonNullOldOCallbackEntryAddress;
+    uintptr_t firstNonNullOldOCallbackEntryReturnAddress;
+    uintptr_t firstNonNullOldOMarkHelperAddress;
+    uintptr_t firstNonNullOldOMarkHelperPo;
+    uintptr_t firstNonNullOldOMarkHelperObject;
+    uintptr_t firstNonNullOldOQueueObjectHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
+    uintptr_t firstNonNullOldOSlotAddressHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
+    uintptr_t firstNonNullOldOOldSlotHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
+    uintptr_t firstNonNullOldONewSlotHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
+    uintptr_t firstNonNullOldOSlotIndexHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
+    uintptr_t firstNonNullOldOCursorBeforeHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
+    uintptr_t firstNonNullOldOCursorAfterHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -1070,6 +1148,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F29_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP = 0xF29u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F30_FIRST_ROOT_FIRST_MARK_MUTATION_SAFE_STOP = 0xF30u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F31_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP = 0xF31u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F32_FIRST_ROOT_FIRST_NON_NULL_OLD_O_SAFE_STOP = 0xF32u,
 };
 
 enum {
@@ -1090,6 +1169,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_SAFE_STOP_MARKER = 0xC011EC11u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_MARK_MUTATION_SAFE_STOP_MARKER = 0xC011EC12u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP_MARKER = 0xC011EC13u,
+    GUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_NON_NULL_OLD_O_SAFE_STOP_MARKER = 0xC011EC14u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

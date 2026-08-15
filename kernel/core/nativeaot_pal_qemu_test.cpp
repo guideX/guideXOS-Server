@@ -549,6 +549,27 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeYield() {
         serial::puts(" allocLimit=");
         serial::put_hex64(diagnostics->allocationLimitBefore);
         serial::puts("\n");
+#if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+        serial::puts("[nativeaot-gc-first-allocation] c14-predecision queueInsertions=");
+        serial::put_hex32(diagnostics->firstNonNullOldOQueueInsertionCount);
+        serial::puts(" callbacks=");
+        serial::put_hex32(diagnostics->firstNonNullOldOCallbackCount);
+        serial::puts(" candidateLoads=");
+        serial::put_hex32(diagnostics->firstNonNullOldOCandidateCount);
+        serial::puts(" markHelpers=");
+        serial::put_hex32(diagnostics->firstNonNullOldOMarkHelperCount);
+        serial::puts(" old_o=");
+        serial::put_hex64(diagnostics->firstNonNullOldOOldObject);
+        serial::puts(" rawMarkReads=");
+        serial::put_hex32(diagnostics->firstNonNullOldORawMarkWordReadCount);
+        serial::puts(" rootSlot=");
+        serial::put_hex64(diagnostics->firstNonNullOldORootSlot);
+        serial::puts(" rawRoot=");
+        serial::put_hex64(diagnostics->firstNonNullOldORawRoot);
+        serial::puts(" storageObject=");
+        serial::put_hex64(diagnostics->runtimeThreadStaticStorageObjectAddress);
+        serial::puts("\n");
+#endif
     }
 #endif
     for (;;) {
@@ -1939,7 +1960,7 @@ void runFirstRealAllocationImpl(
     }
     resetBridgeState(base, size, generation);
 #if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
-    g_firstAllocationDiagnosticsAddress = getDiagnosticsAddress;
+    g_firstAllocationDiagnosticsAddress = 0u;
 #endif
 
     guidexos_nativeaot_pal_hooks legacy = {};
@@ -1975,6 +1996,8 @@ void runFirstRealAllocationImpl(
     }
 
     const int32_t startupResult = reinterpret_cast<StartupMain>(startupMainAddress)();
+    g_firstAllocationDiagnosticsAddress = reinterpret_cast<uintptr_t>(
+        reinterpret_cast<GetDiagnostics>(getDiagnosticsAddress)());
     const uint32_t palState = reinterpret_cast<State>(getStateAddress)();
     const uint32_t preGcState = reinterpret_cast<State>(getPreGcStateAddress)();
     const uint32_t startupAllocationCount = reinterpret_cast<State>(getAllocationCountAddress)();
