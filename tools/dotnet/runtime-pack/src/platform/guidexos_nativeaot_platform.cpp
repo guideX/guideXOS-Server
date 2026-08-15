@@ -199,7 +199,30 @@ void suspendEeSerialPutChar(char value) {
     __outbyte(0x3F8u, static_cast<unsigned char>(value));
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL)
+bool isOptionalTransitionDiagnostic(const char* value) {
+    static const char prefix[] = "[nativeaot-gc-next-genuine-root-provider]";
+    if (value == nullptr) {
+        return false;
+    }
+    for (gx_size index = 0u; prefix[index] != '\0'; ++index) {
+        if (value[index] == '\0') {
+            return false;
+        }
+        if (value[index] != prefix[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
+
 void suspendEeSerialPutString(const char* value) {
+#if defined(GUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL)
+    if (isOptionalTransitionDiagnostic(value)) {
+        return;
+    }
+#endif
     while (*value != '\0') {
         suspendEeSerialPutChar(*value++);
     }
@@ -4943,8 +4966,17 @@ guideXosNativeAotC011EC15GcScanRootsEntered(
         g_guideXosAllocationDiagnostics;
     ++d.c011ec15GcScanRootsRequestCount;
     ++d.c011ec15ProviderRequestCount;
+#if defined(GUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-stack-provider-transition-failfast] GcScanRoots-entry sentinel=");
+    suspendEeSerialPutHex64(d.threadStaticProofSentinelAddress);
+    suspendEeSerialPutString(" storageObject=");
+    suspendEeSerialPutHex64(d.runtimeThreadStaticStorageObjectAddress);
+    suspendEeSerialPutString("\n");
+#else
     suspendEeSerialPutString(
         "[nativeaot-gc-next-genuine-root-provider] GcScanRoots entry\n");
+#endif
 }
 
 extern "C" void __cdecl
@@ -4958,6 +4990,15 @@ guideXosNativeAotC011EC15ProviderEntered(
     d.c011ec15CurrentProvider = provider;
     d.c011ec15FirstRootProvider =
         d.c011ec15FirstRootProvider == 0u ? provider : d.c011ec15FirstRootProvider;
+#if defined(GUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL)
+    if (category == kC011EC15ProviderOrdinaryThreadStatic) {
+        suspendEeSerialPutString(
+            "[nativeaot-gc-stack-provider-transition-failfast] ordinary-provider-entered\n");
+    } else if (category == kC011EC15ProviderThreadStack) {
+        suspendEeSerialPutString(
+            "[nativeaot-gc-stack-provider-transition-failfast] stack-provider-transition-start\n");
+    }
+#endif
     (void)thread;
 }
 
@@ -5111,6 +5152,13 @@ guideXosNativeAotC011EC15EnumGcRefReturned(
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     ++d.c011ec15EnumGcRefContinuationCount;
+#if defined(GUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL)
+    if (slot == 0u && rawValue == 0u &&
+        d.c011ec15ProviderCategory == kC011EC15ProviderOrdinaryThreadStatic) {
+        suspendEeSerialPutString(
+            "[nativeaot-gc-stack-provider-transition-failfast] ordinary-provider-returned-null\n");
+    }
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
     if (slot != 0u) {
         suspendEeSerialPutString(

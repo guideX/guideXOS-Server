@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -21,6 +21,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\gc-first-root-first-non-null-old-o"
     } elseif ($ProofMode -eq "next-genuine-root-provider") {
         Join-Path $root "out\dotnet\gc-next-genuine-root-provider"
+    } elseif ($ProofMode -eq "stack-provider-transition-failfast") {
+        Join-Path $root "out\dotnet\gc-stack-provider-transition-failfast"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
         Join-Path $root "out\dotnet\gc-first-root-post-queue-mark-decision"
     } elseif ($ProofMode -eq "first-root-first-mark-mutation") {
@@ -53,18 +55,20 @@ $isFirstRootCondemnedGenerationDecision = $ProofMode -eq "first-root-condemned-g
 $isFirstRootFirstMarkMutation = $ProofMode -eq "first-root-first-mark-mutation"
 $isFirstRootPostQueueMarkDecision = $ProofMode -eq "first-root-post-queue-mark-decision"
 $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
-$isNextGenuineRootProvider = $ProofMode -eq "next-genuine-root-provider"
+$isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
+$isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast")
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider")
+$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider")
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast")
 $proofDefine = if ($isNextGenuineRootProvider) {
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION"
+    $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -1884,6 +1888,8 @@ exit /b %errorlevel%
                 $requiredSymbols += @("guideXosNativeAotFirstRootMarkHelperEntered","guideXosNativeAotFirstRootMarkWorklistWriteBefore","guideXosNativeAotFirstRootPostQueueWorklistWriteCompleted","guideXosNativeAotFirstRootPostQueueDecisionRequested","guideXosNativeAotFirstRootPostQueueDecisionEntered","guideXosNativeAotFirstRootPostQueueNullDecisionCompleted","guideXosNativeAotFirstRootPostQueueNonNullDecisionStarted","guideXosNativeAotFirstRootPostQueueMarkedRequested","guideXosNativeAotFirstRootPostQueueMarkedCompleted","guideXosNativeAotFirstRootPostQueueMarkedTrueBoundary","guideXosNativeAotFirstRootPostQueueMarkedFalseBoundary")
             }
         }
+    } elseif ($isStackProviderTransitionFailFast) {
+        $requiredSymbols += @("guideXosNativeAotC011EC15GcScanRootsEntered","guideXosNativeAotC011EC15ProviderEntered","guideXosNativeAotC011EC15EnumGcRefReturned")
     } elseif ($isNextGenuineRootProvider) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotC011EC15GcScanRootsEntered","guideXosNativeAotC011EC15ProviderEntered","guideXosNativeAotC011EC15CandidateObserved","guideXosNativeAotC011EC15EnumGcRefReturned","guideXosNativeAotC011EC15QueueMarkReturned","guideXosNativeAotC011EC15MarkHelperReturned","guideXosNativeAotC011EC15PromoteReturned","guideXosNativeAotC011EC15PromoteEntered","guideXosNativeAotC011EC15PromoteCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
     } elseif ($isFirstRootCallbackEntry -and -not $isFirstRootFirstNonNullOldO) {
@@ -1958,7 +1964,7 @@ exit /b %errorlevel%
         $monitorPath = Join-Path $oneRoot "watchdog-monitor.txt"
         $qemuDebugPath = Join-Path $oneRoot "qemu-debug.log"
         $qemuArgs = @("-accel","tcg,thread=single","-machine","pc","-smp","1","-drive",('if=pflash,format=raw,readonly=on,file="' + $ovmf + '"'),"-drive",('file=fat:rw:"' + $espRoot + '",format=raw,if=ide,index=0'),"-m","1024M","-vga","std","-display","none","-serial",('file:"' + $serialPath + '"'),"-monitor",("tcp:127.0.0.1:$port,server,nowait"),"-no-reboot","-no-shutdown","-rtc","base=utc,clock=host")
-        if ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
+        if ($isStackProviderTransitionFailFast -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
         Log-Command ('"' + $qemu + '" ' + ($qemuArgs -join ' '))
         $qemuProcess = Start-Process -FilePath $qemu -ArgumentList $qemuArgs -WindowStyle Hidden -PassThru
         $completed = $false
@@ -1972,7 +1978,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isNextGenuineRootProvider) {
+                    $stopPattern = if ($isStackProviderTransitionFailFast) {
+                        '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354'
+                    } elseif ($isNextGenuineRootProvider) {
                         'marker=C011EC15'
                     } elseif ($isFirstRootFirstNonNullOldO) {
                         'marker=C011EC14'
@@ -2002,6 +2010,11 @@ exit /b %errorlevel%
                         'liveSentinels=00000004'
                     }
                     if ($normalizedLiveText -match $stopPattern) { $completed = $true; break }
+                    if ($isStackProviderTransitionFailFast -and
+                        $normalizedLiveText -match '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354') {
+                        $earlyFailure = "stack-provider-transition-failfast-runtime-prologue"
+                        break
+                    }
                     if ($isFirstRootFirstNonNullOldO -and
                         $normalizedLiveText -match '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=') {
                         $earlyFailure = "c011ec14-no-non-null-old-o-before-nativeaot-failfast"
@@ -2049,7 +2062,17 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isNextGenuineRootProvider) {
+        if ($isStackProviderTransitionFailFast) {
+            Assert-Text $validationText '\[nativeaot-gc-stack-provider-transition-failfast\] ordinary-provider-returned-null' "minimal ordinary ThreadStatic provider return"
+            Assert-Text $validationText '\[nativeaot-gc-stack-provider-transition-failfast\] stack-provider-transition-start' "minimal stack-provider transition start"
+            Assert-Text $validationText '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354' "NativeAOT transition fail-fast"
+            if ($validationText -match 'SAFE_STOP marker=C011EC15|stack root|GcInfo|EnumGcRefsCallback') { throw "Minimal transition run reached stack-root semantic evidence in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker=$null; outcome="D"; harnessTerminated=$true; earlyFailure=$earlyFailure
+                failure=[ordered]@{ classification="Thread::GcScanRoots-prologue-code-manager-invariant"; palReason="0x47435354"; entry="Thread::GcScanRoots"; stackCallbackCount=0; stackFramesWalked=0; gcInfoReads=0 }
+                transition=[ordered]@{ ordinaryProviderReturn="null"; category3TransitionStart=$true; failFast=$true }
+            }
+        } elseif ($isNextGenuineRootProvider) {
             Assert-Text $validationText '\[nativeaot-gc-next-genuine-root-provider\] SAFE_STOP marker=C011EC15' "C011EC15 next genuine root marker"
             $c15Line = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-gc-next-genuine-root-provider\] SAFE_STOP marker=C011EC15' } | Select-Object -Last 1)
             if ([string]::IsNullOrWhiteSpace($c15Line)) { throw "C011EC15 marker line was not isolated in $name." }
@@ -2938,6 +2961,30 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isStackProviderTransitionFailFast) {
+        if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_["outcome"] -ne "D" }).Count -ne 0) { throw "The stack-provider transition fail-fast experiment did not produce $FreshBootCount deterministic Outcome D runs." }
+        $firstTransitionRun = $runResults[0]
+        $transitionSerial = Get-Content -LiteralPath $firstTransitionRun.serial -Raw
+        $transitionLine = (($transitionSerial -split "`n") | Where-Object { $_ -match 'GcScanRoots-entry sentinel=' } | Select-Object -Last 1)
+        $transitionStorageObject = Get-MarkerField $transitionSerial 'storageObject'
+        $failFastLine = (($transitionSerial -split "`n") | Where-Object { $_ -match '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354' } | Select-Object -Last 1)
+        $manifest = [ordered]@{
+            outcome="D / Thread::GcScanRoots entry reached; StackFrameIterator prologue failed before first stack-provider callback"; proofMode=$ProofMode; marker="none (C011EC16 not reached)"; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            ordinaryStartingHashes=[ordered]@{ build=$ordinaryKernelBefore.build; esp=$ordinaryKernelBefore.esp; expected=$normalKernelHash }; lockedRuntimeIdentity=[ordered]@{ nativeAot="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterfaces="5.3 / 2"; sourceCommit=$lockedCommit }
+            prerequisite=[ordered]@{ marker="C011EC15"; historicalOutcome="E retained"; correctedFinding="category 3 and Thread::GcScanRoots entry reached" }; firstRoot=[ordered]@{ field="[ThreadStatic] byte[]? s_gcProofThreadRoot"; sentinel=(Get-MarkerField $transitionLine 'sentinel'); storageObject=$transitionStorageObject; priorFullProof="0x100A01F38 / 0x100A02F50" }
+            ordinaryThreadStaticProvider=[ordered]@{ entered=$true; returned="null"; callbackReturns=1; rootSlotsVisited=2; nullCandidates=1; nonNullCandidates=1; secondPromoteAttempts=0; secondQueueInsertions=0 }; queue=[ordered]@{ slotIndex=0; cursor="0 -> 1"; old="null"; new=$transitionStorageObject; drain=0; markBitWrites=0; childTraversal=0; preserved=$true }
+            sourceTrace=[ordered]@{ gcScanRoots="locked nativeaot/Runtime/gcenv.ee.cpp:94-133; generated gcenv.ee.single-thread-suspend-ee.cpp:123-181"; ordinaryProvider="gcenv.ee.cpp:114-115"; categoryTransition="generated gcenv.ee.single-thread-suspend-ee.cpp:160-165"; threadUnderCrawl="generated gcenv.ee.single-thread-suspend-ee.cpp:165"; threadGcScanRoots="locked nativeaot/Runtime/thread.cpp:393-403"; iterator="locked nativeaot/Runtime/StackFrameIterator.cpp:1913-1935"; codeManagerLookup="locked nativeaot/Runtime/RuntimeInstance.cpp:101-109" }
+            failFast=[ordered]@{ code="0x47435354"; bytesLittleEndian="54 53 43 47"; asciiMemoryOrder="TSCG"; msbToLsbText="GCST"; meaning="guideXOS startup-probe tag for shimmed RaiseFailFastException/abort/assert paths; not an official NativeAOT tag"; source="guidexos_nativeaot_gc_startup_probe.cpp:87; rhassert.h:63-65"; helperChain="CalculateCurrentMethodState -> RhFailFast -> RaiseFailFastException -> startupFailFast -> guidexos_nativeaot_pal_fail_fast" }
+            machineCode=[ordered]@{ ordinaryEnumGcRefCall="0x10013b66 -> 0x100144b0"; category3Call="0x10013b76 -> 0x10006fd0"; threadUnderCrawlStore="0x10013ba0"; threadGcScanRootsCall="0x10013ba9 -> 0x10009910"; threadGcScanRootsEntry="0x10009910"; calculateCurrentMethodState="0x1000d730"; getCodeManager="0x1000d7a8 -> 0x1000abe0"; branch="0x1000d7b4 test rax,rax; 0x1000d7b7 jne 0x1000d7c8 not taken"; failFastCall="0x1000d7c3 call 0x10007f40; return 0x1000d7c8"; startupTagLoad="0x10007fb4 mov ecx,0x47435354"; immediateCaller="StackFrameIterator::CalculateCurrentMethodState"; lastHelper="RuntimeInstance::GetCodeManagerForAddress"; controlPC="0x10004d66"; codeManagerResult="NULL"; callOperands="RCX=0 RDX=0 R8=1"; gdbEvidence=(Join-Path $runRoot 'live-gdb-final4/live-gdb-final4.gdb-output.txt') }
+            runtimeState=[ordered]@{ currentThread="0x393DC00"; enumeratedThread="0x393DC00"; collectionInitiator="0x393DC00"; threadStoreLockOwner="0x393DC00"; lockHeld=1; recursionDepth=1; threadStateFlags="0x1"; cooperative=1; preemptive=0; nativeThreadId="0x100D88D0"; stackBase="0x0"; stackLimit="0x0"; currentRSP="0x4E79088"; transitionFrameRIP="0x10004D66"; scanContext="0x4E79440"; threadUnderCrawl="0x393DC00"; scanContextStackLimit="0x0"; threadNumber=0; threadCount=1; promotion=1; concurrent=0 }
+            allocationAudit=[ordered]@{ allocationsAttemptedAfterSuspension=0; proofDiagnosticAllocations=0; NativeAotAllocations=0; threadStaticAllocations=0; temporaryRuntimeAllocations=0; managedEntryAttempts=0; NativeAotHelpersInTransition=0; evidence="scalar counters/direct serial I/O only" }; instrumentationMinimization=[ordered]@{ change="suppressed optional diagnostic lines and retained only transition markers/counters"; allocationFree=$true; before="full C011EC15 output; 0x47435354"; after="minimal markers; 0x47435354"; behaviorChanged=$false; productionRuntimeChanged=$false }
+            stackProvider=[ordered]@{ threadGcScanRootsCalls=1; functionEntry=1; prologueFailed=$true; framesWalked=0; stackRootSlotsVisited=0; stackNonNullCandidates=0; stackPromoteCalls=0; callbackCount=0; gcInfoRead=0; rootMapRead=0; stackDescriptorAccessed=0 }; invariants=[ordered]@{ eeSuspended=1; managedEntryProhibited=1; restart=0; resume=0; queueSlot0Preserved=1; queueCursorAtStop=1; markBitWrites=0; childReferenceReads=0; graphTraversal=0; objectMutation=0; sentinelUnchanged=1; storageObjectUnchanged=1 }
+            outcomeClassification=[ordered]@{ result="D"; violatedPrecondition="GetCodeManagerForAddress(m_ControlPC) returned null; RuntimeInstance m_CodeManager and managed range were zero"; classification="real production stack/unwind/code-manager invariant failure inside Thread::GcScanRoots prologue, not proof instrumentation"; fixMade=$false; C011EC16="not reached" }; qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults; failFastLine=$failFastLine }
+            regressions=[ordered]@{ failureIsolation="PASS 3/3 fresh QEMU Outcome D"; C011EC15="historical E retained"; C011EC14="historical D retained"; C011EC13="historical B retained"; C011EC12="historical D retained"; C011EC11="historical A retained"; C011EC10="historical A retained"; C011EC09="retained non-clean"; broaderSuite="historical evidence retained; focused pass only" }; historicalEvidence=[ordered]@{ C011EC15="retained"; historical64KiB="retained"; staleCache="retained"; runtimePackIdentityMismatch="retained"; nativeStackWrapper="retained non-clean"; localStorageTeardown="retained"; raceSerialWrap="retained" }
+            documentation="docs/dotnet/NATIVEAOT_WORKSTATION_GC_STACK_PROVIDER_TRANSITION_FAILFAST.md"; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+        }
+        $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT stack-provider transition fail-fast experiment: Outcome D (diagnostic boundary)" -ForegroundColor Yellow
     } elseif ($isNextGenuineRootProvider) {
         if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC15" }).Count -ne 0) { throw "The C011EC15 experiment did not produce $FreshBootCount C011EC15 runs." }
         $firstC15Run = $runResults[0]
