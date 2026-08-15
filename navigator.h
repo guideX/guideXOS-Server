@@ -638,6 +638,12 @@ public:
 	static int SmokeFindInPage(const std::string& query);
 	static bool SmokeClickFirstLink();
 	static bool SmokeHitLinkById(const std::string& id);
+	static bool SmokeLinkGeometryById(const std::string& id,
+		int& outPaintX, int& outPaintY, int& outPaintW, int& outPaintH,
+		int& outFinalX, int& outFinalY, int& outFinalW, int& outFinalH,
+		int& outClipX, int& outClipY, int& outClipW, int& outClipH);
+	static bool SmokeHitLinkAt(int x, int y, const std::string& id);
+	static std::string SmokeHitTargetIdAt(int x, int y);
 	static void SmokeSetScrollOffset(int offset);
 	static int SmokeScrollOffset();
 	static bool SmokeSetElementScrollOffsetById(const std::string& id, int offsetX, int offsetY);

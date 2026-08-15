@@ -8403,6 +8403,17 @@ namespace {
 				record.usedWidth = std::max(1, normalGeometry.outerWidth);
 				record.usedHeight = std::max(1, normalGeometry.outerHeight);
 			}
+			// A sticky inline hyperlink can share a legacy inline-flow geometry
+			// record whose height includes the containing flow's following content.
+			// Its sticky constraint must use the link's own border box, otherwise
+			// the end constraint moves the visible fragment off-screen too early.
+			if (record.mode == PositionMode::Sticky && block.type == BlockType::Link) {
+				const int visualHeight = std::max(1, std::min(kCssPositionedGeometryCap,
+					cssBoundedGeometryAdd(cssPositionAutoContentHeight(block, doc, record.usedWidth),
+						cssVerticalBoxEdges(block.style, block.type == BlockType::Preformatted))));
+				if (record.usedHeight > visualHeight + std::max(1, blockTextLineHeight(block)))
+					record.usedHeight = visualHeight;
+			}
 			if (structuralOutOfFlowOwner != 0) {
 				const CssPositionedRecord* owner = cssPositionedRecordForSerial(doc, structuralOutOfFlowOwner);
 				if (owner) {
@@ -9342,6 +9353,79 @@ namespace {
 		return cssApplyOverflowClip(clip, block.style, screenX, screenY, outerW, outerH);
 	}
 
+	// Inline flows retain their normal-flow fragment positions for measurement,
+	// but a positioned anchor paints from its final border box.  Keep the
+	// content-origin translation in one place so paint and interaction cannot
+	// fall back to the pre-positioned x coordinate.
+	static int cssInlineFlowContentScreenX(const WebDocument& doc,
+		const InlineFlowLayout& flow, int parentAtomicX, bool embedded, int ownScrollX)
+	{
+		if (embedded) return cssBoundedCoordinateAdd(parentAtomicX + flow.contentX, ownScrollX);
+		if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, flow.anchorBlockIndex))
+			return cssBoundedCoordinateAdd(
+				cssPositionedScreenXForDocument(doc, *positioned) +
+				cssBorderLeftPx(flow.style) + cssPaddingLeftPx(flow.style, 0), ownScrollX);
+		return cssBoundedCoordinateAdd(flow.contentX +
+			cssLocalScrollOffsetForBlock(doc, flow.anchorBlockIndex, true), ownScrollX);
+	}
+
+	// Paint applies a fragment's relative/positioned displacement according to
+	// the inline item's owner record.  Keep the same decision available to
+	// fragment bounds and hit testing; using fragment.positionedOffset alone
+	// leaves a positioned link on its normal-flow coordinate at some scroll
+	// positions (notably sticky descendants).
+	static void cssInlineFragmentPositionedDelta(const WebDocument& doc,
+		const InlineFlowLayout& flow, const InlineFragmentLayout& fragment,
+		int& outX, int& outY)
+	{
+		outX = fragment.positionedOffsetX;
+		outY = fragment.positionedOffsetY;
+		if (fragment.itemIndex < 0 ||
+			fragment.itemIndex >= static_cast<int>(doc.inlineItems.size())) return;
+		const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(fragment.itemIndex)];
+		if (flow.anchorBlockIndex < 0 ||
+			flow.anchorBlockIndex >= static_cast<int>(doc.blocks.size())) return;
+		const uint64_t anchorSerial = doc.blocks[static_cast<size_t>(flow.anchorBlockIndex)].elementMetadata.serial;
+		const CssPositionedRecord* ownerPosition = cssPositionedRecordForSerial(doc, item.ownerSerial);
+		if (!ownerPosition) return;
+		if (ownerPosition->logicalSerial == anchorSerial) {
+			outX = 0;
+			outY = 0;
+			return;
+		}
+		outX = ownerPosition->finalX - ownerPosition->normalX;
+		outY = ownerPosition->finalY - ownerPosition->normalY;
+	}
+
+	static bool cssPositionedVisibleRectForBlock(const WebDocument& doc, int blockIndex,
+		int scrollOffset, CssPaintRect* outTarget, CssPaintRect* outClip, CssPaintRect* outVisible)
+	{
+		const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, blockIndex);
+		if (!positioned) return false;
+		const CssPaintRect target{
+			cssPositionedScreenXForDocument(doc, *positioned),
+			cssPositionedScreenYForDocument(doc, *positioned, scrollOffset),
+			positioned->usedWidth, positioned->usedHeight};
+		const CssPaintRect clip = cssPositionedClipForScreenBlock(doc, blockIndex,
+			target.x, target.y, target.w, target.h, scrollOffset);
+		const CssPaintRect visible = cssPaintRectIntersect(target, clip);
+		if (outTarget) *outTarget = target;
+		if (outClip) *outClip = clip;
+		if (outVisible) *outVisible = visible;
+		return visible.w > 0 && visible.h > 0;
+	}
+
+	static bool cssBlockHasInlineHitFragments(const WebDocument& doc, int blockIndex)
+	{
+		const InlineFlowLayout* flow = inlineFlowForBlock(doc, blockIndex);
+		if (!flow) return false;
+		for (const InlineFragmentLayout& fragment : flow->fragments) {
+			if (fragment.visible && !fragment.whitespace && fragment.blockIndex == blockIndex &&
+				fragment.w > 0 && fragment.h > 0) return true;
+		}
+		return false;
+	}
+
 	static bool cssScrollSerialDescendantOf(const WebDocument& doc, uint64_t serial,
 		uint64_t ancestor)
 	{
@@ -10094,13 +10178,11 @@ namespace {
 				blockIndex >= static_cast<int>(doc.blocks.size())) continue;
 			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
 			if (block.style.displayNone || block.style.visibility == VisibilityMode::Hidden) continue;
-			const CssPaintRect target{cssPositionedScreenXForDocument(doc, *record), cssPositionedScreenYForDocument(doc, *record, scrollOffset),
-				record->usedWidth, record->usedHeight};
-			const CssPaintRect clip = cssPositionedClipForScreenBlock(doc, blockIndex,
-				cssPositionedScreenXForDocument(doc, *record),
-				cssPositionedScreenYForDocument(doc, *record, scrollOffset),
-				record->usedWidth, record->usedHeight, scrollOffset);
-			const CssPaintRect clipped = cssPaintRectIntersect(target, clip);
+			if (block.type == BlockType::Link && cssBlockHasInlineHitFragments(doc, blockIndex)) continue;
+			CssPaintRect target;
+			CssPaintRect clip;
+			CssPaintRect clipped;
+			cssPositionedVisibleRectForBlock(doc, blockIndex, scrollOffset, &target, &clip, &clipped);
 			if (clipped.w > 0 && clipped.h > 0 && x >= clipped.x && x < clipped.x + clipped.w &&
 				y >= clipped.y && y < clipped.y + clipped.h) return blockIndex;
 		}
@@ -12803,8 +12885,11 @@ bool Navigator::SmokeHitLinkById(const std::string& id)
 	ensureCssPositionLayout(s_currentDoc);
 	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
 	Rect rect = linkBlockRect(blockIndex);
-	if (id.rfind("phase6a-", 0) == 0 &&
-		(id == "phase6a-nested-link" || s_cssScrollLayoutSnapshot.evidence.size() < 12000)) {
+	const bool positionedLinkEvidence = id.rfind("phase6b-", 0) == 0 ||
+		id.rfind("phase7a-", 0) == 0 || id.rfind("phase7b-", 0) == 0;
+	const bool stackingLinkEvidence = id.rfind("phase7b-z-", 0) == 0 || id.rfind("phase7b-equal-", 0) == 0;
+	if ((id.rfind("phase6a-", 0) == 0 || positionedLinkEvidence) &&
+		(id == "phase6a-nested-link" || stackingLinkEvidence || s_cssScrollLayoutSnapshot.evidence.size() < 12000)) {
 		const uint64_t blockSerial = s_currentDoc.blocks[static_cast<size_t>(blockIndex)].elementMetadata.serial;
 		const HtmlElementRef* blockElement = cssStructuralElementForSerial(s_currentDoc, blockSerial);
 		const CssBlockGeometry debugGeometry = cssGeometryForBlock(s_currentDoc, blockIndex);
@@ -12861,17 +12946,19 @@ bool Navigator::SmokeHitLinkById(const std::string& id)
 	// Use it as a bounded fallback so the smoke assertion samples the same
 	// viewport-space geometry used by the shared positioned hit-test pass.
 	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
-		const CssPaintRect target{
-			cssPositionedScreenXForDocument(s_currentDoc, *positioned),
-			cssPositionedScreenYForDocument(s_currentDoc, *positioned, s_scrollOffset),
-			positioned->usedWidth,
-			positioned->usedHeight};
-		const CssPaintRect clip = cssPositionedClipForScreenBlock(s_currentDoc, blockIndex,
-			target.x, target.y, positioned->usedWidth, positioned->usedHeight,
-			s_scrollOffset);
-		const CssPaintRect clipped = cssPaintRectIntersect(target, clip);
-		if (clipped.w > 0 && clipped.h > 0)
-			rect = Rect{clipped.x, clipped.y, clipped.w, clipped.h};
+		if (!cssBlockHasInlineHitFragments(s_currentDoc, blockIndex)) {
+			const CssPaintRect target{
+				cssPositionedScreenXForDocument(s_currentDoc, *positioned),
+				cssPositionedScreenYForDocument(s_currentDoc, *positioned, s_scrollOffset),
+				positioned->usedWidth,
+				positioned->usedHeight};
+			const CssPaintRect clip = cssPositionedClipForScreenBlock(s_currentDoc, blockIndex,
+				target.x, target.y, positioned->usedWidth, positioned->usedHeight,
+				s_scrollOffset);
+			const CssPaintRect clipped = cssPaintRectIntersect(target, clip);
+			if (clipped.w > 0 && clipped.h > 0)
+				rect = Rect{clipped.x, clipped.y, clipped.w, clipped.h};
+		}
 	}
 	if (rect.w <= 0 || rect.h <= 0) return false;
 	const int stepX = std::max(1, rect.w / 16);
@@ -12890,6 +12977,122 @@ bool Navigator::SmokeHitLinkById(const std::string& id)
 		}
 	}
 	return false;
+}
+
+bool Navigator::SmokeLinkGeometryById(const std::string& id,
+	int& outPaintX, int& outPaintY, int& outPaintW, int& outPaintH,
+	int& outFinalX, int& outFinalY, int& outFinalW, int& outFinalH,
+	int& outClipX, int& outClipY, int& outClipW, int& outClipH)
+{
+	outPaintX = outPaintY = outPaintW = outPaintH = 0;
+	outFinalX = outFinalY = outFinalW = outFinalH = 0;
+	outClipX = outClipY = outClipW = outClipH = 0;
+	if (s_windowId == 0) return false;
+	int blockIndex = -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[static_cast<size_t>(i)].id == id &&
+			s_currentDoc.blocks[static_cast<size_t>(i)].type == BlockType::Link) {
+			blockIndex = i;
+			break;
+		}
+	}
+	if (blockIndex < 0) return false;
+	ensureCssPositionLayout(s_currentDoc);
+	ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
+	const Rect paint = linkBlockRect(blockIndex);
+	outPaintX = paint.x;
+	outPaintY = paint.y;
+	outPaintW = paint.w;
+	outPaintH = paint.h;
+	if (const CssPositionedRecord* positioned = cssPositionedRecordForBlock(s_currentDoc, blockIndex)) {
+		// Inline positioned links paint and hit-test through their visual
+		// fragments.  Prefer that fragment rectangle for diagnostics and sample
+		// points; the positioned border box can be a one-pixel layout placeholder
+		// for an inline anchor and is not an interactive whitespace box.
+		if (cssBlockHasInlineHitFragments(s_currentDoc, blockIndex)) {
+			Rect fragments;
+			if (inlineFragmentRectForBlock(blockIndex, false, fragments)) {
+				outFinalX = fragments.x;
+				outFinalY = fragments.y;
+				outFinalW = fragments.w;
+				outFinalH = fragments.h;
+				const CssPaintRect target{
+					cssPositionedScreenXForDocument(s_currentDoc, *positioned),
+					cssPositionedScreenYForDocument(s_currentDoc, *positioned, s_scrollOffset),
+					positioned->usedWidth, positioned->usedHeight};
+				const CssPaintRect clip = cssPositionedClipForScreenBlock(s_currentDoc, blockIndex,
+					target.x, target.y, target.w, target.h, s_scrollOffset);
+				outClipX = clip.x;
+				outClipY = clip.y;
+				outClipW = clip.w;
+				outClipH = clip.h;
+				const CssPaintRect visible = cssPaintRectIntersect(
+					CssPaintRect{fragments.x, fragments.y, fragments.w, fragments.h}, clip);
+				return visible.w > 0 && visible.h > 0;
+			}
+		}
+		CssPaintRect target;
+		CssPaintRect clip;
+		CssPaintRect visible;
+		cssPositionedVisibleRectForBlock(s_currentDoc, blockIndex, s_scrollOffset,
+			&target, &clip, &visible);
+		outFinalX = target.x;
+		outFinalY = target.y;
+		outFinalW = target.w;
+		outFinalH = target.h;
+		outClipX = clip.x;
+		outClipY = clip.y;
+		outClipW = clip.w;
+		outClipH = clip.h;
+		return visible.w > 0 && visible.h > 0;
+	}
+	outFinalX = paint.x;
+	outFinalY = paint.y;
+	outFinalW = paint.w;
+	outFinalH = paint.h;
+	const CssPaintRect viewport = cssViewportClipRect();
+	outClipX = viewport.x;
+	outClipY = viewport.y;
+	outClipW = viewport.w;
+	outClipH = viewport.h;
+	return paint.w > 0 && paint.h > 0;
+}
+
+bool Navigator::SmokeHitLinkAt(int x, int y, const std::string& id)
+{
+	if (s_windowId == 0) return false;
+	int expectedBlockIndex = -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[static_cast<size_t>(i)].id == id &&
+			s_currentDoc.blocks[static_cast<size_t>(i)].type == BlockType::Link) {
+			expectedBlockIndex = i;
+			break;
+		}
+	}
+    if (expectedBlockIndex < 0) return false;
+    int hitIndex = -1;
+    const HitTarget target = hitTest(x, y, hitIndex);
+    const bool stackingProbe = id.rfind("phase7b-z-", 0) == 0 ||
+        id.rfind("phase7b-equal-", 0) == 0;
+    if (id.rfind("phase7b-", 0) == 0 &&
+        (stackingProbe || s_cssScrollLayoutSnapshot.evidence.size() < 12000)) {
+        s_cssScrollLayoutSnapshot.evidence += "hit-at=" + id + ",point=" + std::to_string(x) + ":" +
+            std::to_string(y) + ",target=" + std::to_string(static_cast<int>(target)) +
+            ",index=" + std::to_string(hitIndex) + ",expected=" + std::to_string(expectedBlockIndex) + ";";
+    }
+    return target == HitTarget::Link && hitIndex == expectedBlockIndex;
+}
+
+std::string Navigator::SmokeHitTargetIdAt(int x, int y)
+{
+	if (s_windowId == 0) return "window-unavailable";
+	int hitIndex = -1;
+	const HitTarget target = hitTest(x, y, hitIndex);
+	if (target == HitTarget::Link && hitIndex >= 0 &&
+		hitIndex < static_cast<int>(s_currentDoc.blocks.size()))
+		return s_currentDoc.blocks[static_cast<size_t>(hitIndex)].id.empty()
+			? std::string("link-without-id") : s_currentDoc.blocks[static_cast<size_t>(hitIndex)].id;
+	return "target-" + std::to_string(static_cast<int>(target));
 }
 
 void Navigator::SmokeSetScrollOffset(int offset)
@@ -14090,8 +14293,6 @@ void Navigator::renderDocument()
 		const int baseY = cssBoundedCoordinateAdd(boxY + borderTop + paddingTop,
 			cssOwnScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, false));
 		const int ownScrollX = cssOwnScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, true);
-		const int ancestorScrollX = embedded ? 0 :
-			cssLocalScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, true);
 		const bool ancestorClipPushed = false;
 		s_cssPaintOpacityPercent = std::max(0, std::min(100, flow.style.effectiveOpacityPercent));
 		drawBlockBox(s_windowId, flowOuterX, boxY, flowOuterWidth, boxH, flow.style);
@@ -14159,7 +14360,8 @@ void Navigator::renderDocument()
 				}
 			}
 			s_cssPaintOpacityPercent = std::max(0, std::min(100, paintStyle.effectiveOpacityPercent));
-			int fragX = (embedded ? parentX : 0) + flow.contentX + fragment.x + ancestorScrollX + ownScrollX;
+			int fragX = cssInlineFlowContentScreenX(s_currentDoc, flow,
+				embedded ? parentX : 0, embedded, ownScrollX) + fragment.x;
 			int fragY = baseY + fragment.y;
 			const int targetLocalX = item.blockIndex >= 0
 				? cssLocalScrollOffsetForBlock(s_currentDoc, item.blockIndex, true)
@@ -14173,15 +14375,12 @@ void Navigator::renderDocument()
 				cssLocalScrollOffsetForBlock(s_currentDoc, flow.anchorBlockIndex, false);
 			fragX += targetLocalX - anchorLocalX;
 			fragY += targetLocalY - anchorLocalY;
-			const CssPositionedRecord* ownerPosition = cssPositionedRecordForSerial(s_currentDoc, item.ownerSerial);
-			const uint64_t anchorSerial = anchor.elementMetadata.serial;
-			if (ownerPosition && ownerPosition->logicalSerial != anchorSerial) {
-				fragX = cssBoundedGeometryAdd(fragX, ownerPosition->finalX - ownerPosition->normalX);
-				fragY = cssBoundedGeometryAdd(fragY, ownerPosition->finalY - ownerPosition->normalY);
-			} else if (!ownerPosition) {
-				fragX = cssBoundedGeometryAdd(fragX, fragment.positionedOffsetX);
-				fragY = cssBoundedGeometryAdd(fragY, fragment.positionedOffsetY);
-			}
+			int positionedDeltaX = 0;
+			int positionedDeltaY = 0;
+			cssInlineFragmentPositionedDelta(s_currentDoc, flow, fragment,
+				positionedDeltaX, positionedDeltaY);
+			fragX = cssBoundedGeometryAdd(fragX, positionedDeltaX);
+			fragY = cssBoundedGeometryAdd(fragY, positionedDeltaY);
 			if (fragment.kind == InlineItemKind::AtomicBlock &&
 				fragment.atomicResultIndex >= 0 && fragment.atomicResultIndex < static_cast<int>(s_inlineLayoutSnapshot.atomicResults.size())) {
 				const CssAtomicLayoutResult& atomic = s_inlineLayoutSnapshot.atomicResults[static_cast<size_t>(fragment.atomicResultIndex)];
@@ -17269,6 +17468,16 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 			if (s_currentDoc.blocks[i].type != BlockType::Link ||
 				!cssBlockIsDescendantOfSerial(s_currentDoc.blocks[i], topBlock.elementMetadata.serial)) continue;
 			if (const CssPositionedRecord* descendantPosition = cssPositionedRecordForBlock(s_currentDoc, i)) {
+				if (cssBlockHasInlineHitFragments(s_currentDoc, i)) {
+					if (inlineFragmentContainsPoint(i, x, y)) {
+						const int paintRank = cssPositionPaintRank(s_currentDoc, i);
+						if (paintRank >= bestDescendantPaintRank) {
+							bestDescendantPaintRank = paintRank;
+							bestDescendantLink = i;
+						}
+					}
+					continue;
+				}
 				const CssPaintRect target{
 					cssPositionedScreenXForDocument(s_currentDoc, *descendantPosition),
 					cssPositionedScreenYForDocument(s_currentDoc, *descendantPosition, s_scrollOffset),
@@ -18980,10 +19189,7 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 		int flowDeltaX = 0;
 		int flowDeltaY = 0;
 		const CssPositionedRecord* flowPosition = cssPositionedRecordForBlock(s_currentDoc, flow->anchorBlockIndex);
-		if (flowPosition) {
-			flowDeltaX = flowPosition->finalX - flowPosition->normalX;
-			flowDeltaY = flowPosition->finalY - flowPosition->normalY;
-		} else if (!embedded) {
+		if (!flowPosition && !embedded) {
 			cssPositionRelativeAncestorDelta(s_currentDoc, flow->anchorBlockIndex, &flowDeltaX, &flowDeltaY);
 		}
 		const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
@@ -19002,9 +19208,11 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 			cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true));
 	const int flowLocalX = embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true);
 	const int flowLocalY = embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false);
-	const int targetLocalX = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true);
-	const int targetLocalY = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false);
-	int left = std::numeric_limits<int>::max();
+		const int targetLocalX = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, true);
+		const int targetLocalY = cssLocalScrollOffsetForBlock(s_currentDoc, blockIndex, false);
+		int fragmentPositionedDeltaX = 0;
+		int fragmentPositionedDeltaY = 0;
+		int left = std::numeric_limits<int>::max();
 	int top = std::numeric_limits<int>::max();
 	int right = 0;
 	int bottom = 0;
@@ -19012,18 +19220,20 @@ bool Navigator::inlineFragmentRectForBlock(int blockIndex, bool includeWhitespac
 	for (const InlineFragmentLayout& fragment : flow->fragments) {
 		if (!fragment.visible || fragment.blockIndex != blockIndex ||
 			(!includeWhitespace && fragment.whitespace)) continue;
-		const int x = (embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x +
-			(embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true)) +
-			(targetLocalX - flowLocalX) +
-			cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true);
+		const int x = cssInlineFlowContentScreenX(s_currentDoc, *flow,
+			embedded ? parentAtomic.x : 0, embedded,
+			cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true)) + fragment.x +
+			(targetLocalX - flowLocalX);
 		const int y = embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y +
 			cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false) :
 			drawY + flow->contentOffsetY + fragment.y + (targetLocalY - flowLocalY) +
 			cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false);
-			left = std::min(left, x + flowDeltaX + fragment.positionedOffsetX);
-			top = std::min(top, y + fragment.positionedOffsetY);
-			right = std::max(right, x + flowDeltaX + fragment.positionedOffsetX + std::max(0, fragment.w));
-			bottom = std::max(bottom, y + fragment.positionedOffsetY + std::max(0, fragment.h));
+			cssInlineFragmentPositionedDelta(s_currentDoc, *flow, fragment,
+				fragmentPositionedDeltaX, fragmentPositionedDeltaY);
+			left = std::min(left, x + flowDeltaX + fragmentPositionedDeltaX);
+			top = std::min(top, y + fragmentPositionedDeltaY);
+			right = std::max(right, x + flowDeltaX + fragmentPositionedDeltaX + std::max(0, fragment.w));
+			bottom = std::max(bottom, y + fragmentPositionedDeltaY + std::max(0, fragment.h));
 		found = true;
 	}
 	if (!found || right <= left || bottom <= top) return false;
@@ -19081,10 +19291,7 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	int flowDeltaX = 0;
 	int flowDeltaY = 0;
 	const CssPositionedRecord* flowPosition = cssPositionedRecordForBlock(s_currentDoc, flow->anchorBlockIndex);
-	if (flowPosition) {
-		flowDeltaX = flowPosition->finalX - flowPosition->normalX;
-		flowDeltaY = flowPosition->finalY - flowPosition->normalY;
-	} else if (!embedded) {
+	if (!flowPosition && !embedded) {
 		cssPositionRelativeAncestorDelta(s_currentDoc, flow->anchorBlockIndex, &flowDeltaX, &flowDeltaY);
 	}
 		const int drawY = embedded ? parentAtomic.y + flow->localOuterY :
@@ -19108,16 +19315,20 @@ bool Navigator::inlineFragmentContainsPoint(int blockIndex, int x, int y)
 	const CssPaintRect clip = embedded ? parentAtomic : cssClipRectForHit(
 		s_currentDoc, blockIndex, block,
 		flowOuterScreenX, boxY, flow->outerWidth, boxH, s_scrollOffset);
+	int fragmentPositionedDeltaX = 0;
+	int fragmentPositionedDeltaY = 0;
 	for (const InlineFragmentLayout& fragment : flow->fragments) {
 		if (!fragment.visible || fragment.whitespace || fragment.blockIndex != blockIndex) continue;
+		cssInlineFragmentPositionedDelta(s_currentDoc, *flow, fragment,
+			fragmentPositionedDeltaX, fragmentPositionedDeltaY);
 		const CssPaintRect clipped = cssClipHitTarget(
-			CssPaintRect{(embedded ? parentAtomic.x : 0) + flow->contentX + fragment.x + flowDeltaX + fragment.positionedOffsetX +
-				(embedded ? 0 : cssLocalScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true)) +
-				(targetLocalX - flowLocalX) +
-				cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true),
-				embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y + fragment.positionedOffsetY +
+			CssPaintRect{cssInlineFlowContentScreenX(s_currentDoc, *flow,
+				embedded ? parentAtomic.x : 0, embedded,
+				cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, true)) + fragment.x + flowDeltaX + fragmentPositionedDeltaX +
+				(targetLocalX - flowLocalX),
+				embedded ? drawY + cssBorderTopPx(flow->style) + cssPaddingTopPx(flow->style, 0) + fragment.y + fragmentPositionedDeltaY +
 					cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false) :
-					drawY + flow->contentOffsetY + fragment.y + fragment.positionedOffsetY +
+					drawY + flow->contentOffsetY + fragment.y + fragmentPositionedDeltaY +
 					(targetLocalY - flowLocalY) +
 					cssOwnScrollOffsetForBlock(s_currentDoc, flow->anchorBlockIndex, false),
 				fragment.kind == InlineItemKind::AtomicBlock ? std::max(0, fragment.boxWidth) : std::max(0, fragment.w),

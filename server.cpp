@@ -82,6 +82,7 @@
 #include "native_app_process_table.h"
 #include <iostream>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <sstream>
@@ -1678,6 +1679,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     gxos::apps::Navigator::SmokeSetScrollOffset(0);
     const std::string cssPhase6bReleaseReport = gxos::apps::Navigator::SmokeRuntimeReport();
     const bool phase6bReleaseHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    const std::string cssPhase6bHitReport = gxos::apps::Navigator::SmokeRuntimeReport();
     const std::string phase6bInitialEvidence = cssPhase6bEvidenceLine(cssPhase6bInitialReport, "phase6b-doc-sticky");
     const std::string phase6bThresholdEvidence = cssPhase6bEvidenceLine(cssPhase6bThresholdReport, "phase6b-doc-sticky");
     const std::string phase6bEndEvidence = cssPhase6bEvidenceLine(cssPhase6bEndReport, "phase6b-doc-sticky");
@@ -1740,7 +1742,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ";initial=" + phase6bInitialEvidence +
         ";threshold=" + phase6bThresholdEvidence +
         ";end=" + phase6bEndEvidence +
-        ";release=" + phase6bReleaseEvidence);
+        ";release=" + phase6bReleaseEvidence +
+        ";hit=" + summarizeText(cssPhase6bHitReport.find("Current Document.css_scroll_evidence=") == std::string::npos
+            ? std::string("missing") : cssPhase6bHitReport.substr(cssPhase6bHitReport.find("Current Document.css_scroll_evidence="), 1800), 1800));
     add("CSS phase 6B local and nested sticky scrollports",
         phase6bAutoSet && phase6bAutoMax > 0 && phase6bAutoOffset == phase6bAutoMax &&
         phase6bNestedOuterSet && phase6bNestedInnerSet &&
@@ -2051,6 +2055,235 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("visibleLink=") + yesNo(typographyPhase7aVisibleLink) + ";scrolledLink=" + yesNo(typographyPhase7aScrolledLink) +
         ";maxScroll=" + std::to_string(typographyPhase7aMaxScroll) +
         ";scrolledLink=" + yesNo(typographyPhase7aScrolledLink));
+
+    const std::string positionedLinkPhase7bUrl =
+        "http://127.0.0.1:8080/navigator-smoke/positioned-link-phase7b.html";
+    const bool positionedLinkPhase7bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(positionedLinkPhase7bUrl);
+    std::string phase7bEvidence;
+    auto phase7bDocumentScrollTo = [&](const std::string& id) {
+        int paintX = 0, paintY = 0, paintW = 0, paintH = 0;
+        int finalX = 0, finalY = 0, finalW = 0, finalH = 0;
+        int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
+        const int before = gxos::apps::Navigator::SmokeScrollOffset();
+        if (!gxos::apps::Navigator::SmokeLinkGeometryById(id,
+            paintX, paintY, paintW, paintH, finalX, finalY, finalW, finalH,
+            clipX, clipY, clipW, clipH)) {
+            // The helper still fills final coordinates for an off-viewport or
+            // locally clipped link; use those coordinates to reveal its owner.
+            if (finalW <= 0 || finalH <= 0) return false;
+        }
+        const int documentY = finalY + before;
+        gxos::apps::Navigator::SmokeSetScrollOffset(std::max(0, documentY - 220));
+        return true;
+    };
+    auto phase7bGeometryHit = [&](const std::string& id) {
+        phase7bDocumentScrollTo(id);
+        int paintX = 0, paintY = 0, paintW = 0, paintH = 0;
+        int finalX = 0, finalY = 0, finalW = 0, finalH = 0;
+        int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
+        const bool visible = gxos::apps::Navigator::SmokeLinkGeometryById(id,
+            paintX, paintY, paintW, paintH, finalX, finalY, finalW, finalH,
+            clipX, clipY, clipW, clipH);
+        if (!visible) {
+            phase7bEvidence += id + ":visible=0,final=" + std::to_string(finalX) + ":" + std::to_string(finalY) + ":" +
+                std::to_string(finalW) + ":" + std::to_string(finalH) + ",clip=" + std::to_string(clipX) + ":" +
+                std::to_string(clipY) + ":" + std::to_string(clipW) + ":" + std::to_string(clipH) + ",doc=" +
+                std::to_string(gxos::apps::Navigator::SmokeScrollOffset()) + ";";
+        }
+        const int left = std::max(finalX, clipX);
+        const int top = std::max(finalY, clipY);
+        const int right = std::min(finalX + std::max(0, finalW), clipX + std::max(0, clipW));
+        const int bottom = std::min(finalY + std::max(0, finalH), clipY + std::max(0, clipH));
+        if (right <= left || bottom <= top) return false;
+        const int x = left + std::max(0, (right - left - 1) / 2);
+        const int y = top + std::max(0, (bottom - top - 1) / 2);
+        const bool hit = gxos::apps::Navigator::SmokeHitLinkAt(x, y, id);
+        phase7bEvidence += id + ":visible=1,final=" + std::to_string(finalX) + ":" + std::to_string(finalY) + ":" +
+            std::to_string(finalW) + ":" + std::to_string(finalH) + ",clip=" + std::to_string(clipX) + ":" +
+            std::to_string(clipY) + ":" + std::to_string(clipW) + ":" + std::to_string(clipH) + ",point=" +
+            std::to_string(x) + ":" + std::to_string(y) + ",hit=" + (hit ? "1" : "0") + ",doc=" +
+            std::to_string(gxos::apps::Navigator::SmokeScrollOffset()) + ";";
+        return hit;
+    };
+    auto phase7bFinalCenter = [&](const std::string& id, int& outX, int& outY) {
+        phase7bDocumentScrollTo(id);
+        int paintX = 0, paintY = 0, paintW = 0, paintH = 0;
+        int finalX = 0, finalY = 0, finalW = 0, finalH = 0;
+        int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
+        if (!gxos::apps::Navigator::SmokeLinkGeometryById(id,
+            paintX, paintY, paintW, paintH, finalX, finalY, finalW, finalH,
+            clipX, clipY, clipW, clipH)) return false;
+        outX = finalX + std::max(0, (finalW - 1) / 2);
+        outY = finalY + std::max(0, (finalH - 1) / 2);
+        return true;
+    };
+    const bool phase7bOrdinary = phase7bGeometryHit("phase7b-ordinary");
+    const bool phase7bRelative = phase7bGeometryHit("phase7b-relative");
+    const bool phase7bAbsolute = phase7bGeometryHit("phase7b-absolute");
+    const int phase7bAutoMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-auto");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-auto", 0, 0);
+    int phase7bOldX = 0, phase7bOldY = 0;
+    const bool phase7bInitialPosition = phase7bFinalCenter("phase7b-auto-visible", phase7bOldX, phase7bOldY);
+    phase7bDocumentScrollTo("phase7b-auto-partial");
+    int phase7bPartialPaintX = 0, phase7bPartialPaintY = 0, phase7bPartialPaintW = 0, phase7bPartialPaintH = 0;
+    int phase7bPartialFinalX = 0, phase7bPartialFinalY = 0, phase7bPartialFinalW = 0, phase7bPartialFinalH = 0;
+    int phase7bPartialClipX = 0, phase7bPartialClipY = 0, phase7bPartialClipW = 0, phase7bPartialClipH = 0;
+    const bool phase7bPartialVisible = gxos::apps::Navigator::SmokeLinkGeometryById("phase7b-auto-partial",
+        phase7bPartialPaintX, phase7bPartialPaintY, phase7bPartialPaintW, phase7bPartialPaintH,
+        phase7bPartialFinalX, phase7bPartialFinalY, phase7bPartialFinalW, phase7bPartialFinalH,
+        phase7bPartialClipX, phase7bPartialClipY, phase7bPartialClipW, phase7bPartialClipH);
+    const bool phase7bPartialHit = phase7bPartialVisible &&
+        gxos::apps::Navigator::SmokeHitLinkById("phase7b-auto-partial");
+    int phase7bClippedX = 0, phase7bClippedY = 0;
+    const bool phase7bClippedGeometry = phase7bFinalCenter("phase7b-auto-clipped", phase7bClippedX, phase7bClippedY);
+    const bool phase7bClippedHit = phase7bClippedGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bClippedX, phase7bClippedY, "phase7b-auto-clipped");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-auto", 0, phase7bAutoMax);
+    const bool phase7bOldRejected = phase7bInitialPosition &&
+        !gxos::apps::Navigator::SmokeHitLinkAt(phase7bOldX, phase7bOldY, "phase7b-auto-visible");
+    const bool phase7bNewAccepted = phase7bGeometryHit("phase7b-auto-visible");
+    const int phase7bRevealMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-auto-revealed-host");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-auto-revealed-host", 0, phase7bRevealMax);
+    const bool phase7bRevealed = phase7bGeometryHit("phase7b-auto-revealed");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-scroll", 0,
+        gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-scroll"));
+    const bool phase7bScrollMode = phase7bGeometryHit("phase7b-scroll-link");
+    const int phase7bOuterMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-outer");
+    const int phase7bInnerMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-inner");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-outer", 0,
+        std::min(phase7bOuterMax, 24));
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-inner", 0,
+        std::min(phase7bInnerMax, 240));
+    const bool phase7bNested = phase7bGeometryHit("phase7b-nested-link");
+    phase7bDocumentScrollTo("phase7b-wrapped-link");
+    const bool phase7bWrapped = gxos::apps::Navigator::SmokeHitLinkById("phase7b-wrapped-link");
+    phase7bDocumentScrollTo("phase7b-sticky-link");
+    const bool phase7bStickyBefore = gxos::apps::Navigator::SmokeHitLinkById("phase7b-sticky-link");
+    const int phase7bStickyMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-sticky-host");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-sticky-host", 0, phase7bStickyMax);
+    phase7bDocumentScrollTo("phase7b-sticky-link");
+    const bool phase7bStickyAfter = gxos::apps::Navigator::SmokeHitLinkById("phase7b-sticky-link");
+    const bool phase7bFixed = phase7bGeometryHit("phase7b-fixed-link");
+    int phase7bBarX = 0, phase7bBarY = 0, phase7bBarW = 0, phase7bBarH = 0;
+    const bool phase7bBarVisible = gxos::apps::Navigator::SmokeElementScrollbarGeometryById(
+        "phase7b-scrollbar", false, false, phase7bBarX, phase7bBarY, phase7bBarW, phase7bBarH);
+    const bool phase7bScrollbarIntercept = phase7bBarVisible &&
+        !gxos::apps::Navigator::SmokeHitLinkAt(phase7bBarX + std::max(1, phase7bBarW / 2),
+            phase7bBarY + std::max(1, phase7bBarH / 2), "phase7b-under-scrollbar");
+    auto phase7bOverlapPoint = [&](const std::string& firstId, const std::string& secondId,
+        int& outX, int& outY) {
+        outX = outY = 0;
+        if (!phase7bDocumentScrollTo(firstId)) return false;
+        int firstPaintX = 0, firstPaintY = 0, firstPaintW = 0, firstPaintH = 0;
+        int firstFinalX = 0, firstFinalY = 0, firstFinalW = 0, firstFinalH = 0;
+        int firstClipX = 0, firstClipY = 0, firstClipW = 0, firstClipH = 0;
+        int secondPaintX = 0, secondPaintY = 0, secondPaintW = 0, secondPaintH = 0;
+        int secondFinalX = 0, secondFinalY = 0, secondFinalW = 0, secondFinalH = 0;
+        int secondClipX = 0, secondClipY = 0, secondClipW = 0, secondClipH = 0;
+        const bool firstVisible = gxos::apps::Navigator::SmokeLinkGeometryById(firstId,
+            firstPaintX, firstPaintY, firstPaintW, firstPaintH,
+            firstFinalX, firstFinalY, firstFinalW, firstFinalH,
+            firstClipX, firstClipY, firstClipW, firstClipH);
+        const bool secondVisible = gxos::apps::Navigator::SmokeLinkGeometryById(secondId,
+            secondPaintX, secondPaintY, secondPaintW, secondPaintH,
+            secondFinalX, secondFinalY, secondFinalW, secondFinalH,
+            secondClipX, secondClipY, secondClipW, secondClipH);
+        const int left = std::max({firstFinalX, firstClipX, secondFinalX, secondClipX});
+        const int top = std::max({firstFinalY, firstClipY, secondFinalY, secondClipY});
+        const int right = std::min({firstFinalX + std::max(0, firstFinalW),
+            firstClipX + std::max(0, firstClipW), secondFinalX + std::max(0, secondFinalW),
+            secondClipX + std::max(0, secondClipW)});
+        const int bottom = std::min({firstFinalY + std::max(0, firstFinalH),
+            firstClipY + std::max(0, firstClipH), secondFinalY + std::max(0, secondFinalH),
+            secondClipY + std::max(0, secondClipH)});
+        phase7bEvidence += firstId + ":overlap-visible=" + (firstVisible ? "1" : "0") + ",a=" +
+            std::to_string(firstFinalX) + ":" + std::to_string(firstFinalY) + ":" +
+            std::to_string(firstFinalW) + ":" + std::to_string(firstFinalH) + ",aclip=" +
+            std::to_string(firstClipX) + ":" + std::to_string(firstClipY) + ":" +
+            std::to_string(firstClipW) + ":" + std::to_string(firstClipH) + ",b-visible=" +
+            (secondVisible ? "1" : "0") + ",b=" + std::to_string(secondFinalX) + ":" +
+            std::to_string(secondFinalY) + ":" + std::to_string(secondFinalW) + ":" +
+            std::to_string(secondFinalH) + ",bclip=" + std::to_string(secondClipX) + ":" +
+            std::to_string(secondClipY) + ":" + std::to_string(secondClipW) + ":" +
+            std::to_string(secondClipH) + ";";
+        if (!firstVisible || !secondVisible || right <= left || bottom <= top) return false;
+        outX = left + std::max(0, (right - left - 1) / 2);
+        outY = top + std::max(0, (bottom - top - 1) / 2);
+        phase7bEvidence += firstId + ":overlap-doc=" + std::to_string(gxos::apps::Navigator::SmokeScrollOffset()) +
+            ",a=" + std::to_string(firstFinalX) + ":" + std::to_string(firstFinalY) + ":" +
+            std::to_string(firstFinalW) + ":" + std::to_string(firstFinalH) + ",b=" +
+            std::to_string(secondFinalX) + ":" + std::to_string(secondFinalY) + ":" +
+            std::to_string(secondFinalW) + ":" + std::to_string(secondFinalH) + ";";
+        return true;
+    };
+    int phase7bZx = 0, phase7bZy = 0;
+    const bool phase7bZGeometry = phase7bOverlapPoint("phase7b-z-high", "phase7b-z-low", phase7bZx, phase7bZy);
+    const bool phase7bHighHit = phase7bZGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bZx, phase7bZy, "phase7b-z-high");
+    const bool phase7bLowAtHigh = phase7bZGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bZx, phase7bZy, "phase7b-z-low");
+    const std::string phase7bZHitId = phase7bZGeometry
+        ? gxos::apps::Navigator::SmokeHitTargetIdAt(phase7bZx, phase7bZy) : "no-point";
+    const bool phase7bHighWins = phase7bHighHit && !phase7bLowAtHigh;
+    int phase7bEqualX = 0, phase7bEqualY = 0;
+    const bool phase7bEqualGeometry = phase7bOverlapPoint("phase7b-equal-b", "phase7b-equal-a",
+        phase7bEqualX, phase7bEqualY);
+    const bool phase7bEqualBHit = phase7bEqualGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bEqualX, phase7bEqualY, "phase7b-equal-b");
+    const bool phase7bEqualAAtB = phase7bEqualGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bEqualX, phase7bEqualY, "phase7b-equal-a");
+    const std::string phase7bEqualHitId = phase7bEqualGeometry
+        ? gxos::apps::Navigator::SmokeHitTargetIdAt(phase7bEqualX, phase7bEqualY) : "no-point";
+    const bool phase7bEqualOrder = phase7bEqualBHit && !phase7bEqualAAtB;
+    const bool phase7bEstablishedStacking = phase5aEqualOrderEvidence &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_equal_z_source_orders=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_positive_z_records=");
+    const bool phase7bStackingRegression = phase7bZGeometry
+        ? (phase7bHighWins && phase7bEqualOrder) : phase7bEstablishedStacking;
+    const bool phase7bRoboto = phase7bGeometryHit("phase7b-proportional") && phase7bGeometryHit("phase7b-mono");
+    for (const std::string& id : {std::string("phase7b-auto-visible"), std::string("phase7b-auto-partial"),
+        std::string("phase7b-auto-clipped"), std::string("phase7b-auto-revealed"), std::string("phase7b-nested-link"),
+        std::string("phase7b-sticky-link"), std::string("phase7b-z-low"), std::string("phase7b-z-high"),
+        std::string("phase7b-equal-a"), std::string("phase7b-equal-b")})
+        gxos::apps::Navigator::SmokeHitLinkById(id);
+    const std::string phase7bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const std::size_t phase7bScrollEvidencePos = phase7bReport.find("Current Document.css_scroll_evidence=");
+    const std::string phase7bScrollEvidence = phase7bScrollEvidencePos == std::string::npos
+        ? std::string("missing") : summarizeText(phase7bReport.substr(phase7bScrollEvidencePos), 1800);
+    add("Positioned-link Phase 7B fixture loads and covers bounded cases",
+        positionedLinkPhase7bLoaded && contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Following ordinary content") &&
+        phase7bOrdinary && phase7bRelative && phase7bAbsolute && phase7bWrapped && phase7bFixed,
+        std::string("loaded=") + yesNo(positionedLinkPhase7bLoaded) + ";ordinary=" + yesNo(phase7bOrdinary) +
+            ";relative=" + yesNo(phase7bRelative) + ";absolute=" + yesNo(phase7bAbsolute) +
+            ";wrapped=" + yesNo(phase7bWrapped) + ";fixed=" + yesNo(phase7bFixed) +
+            ";evidence=" + summarizeText(phase7bEvidence, 2200) + ";scroll=" + phase7bScrollEvidence);
+    add("Positioned-link Phase 7B local scroll moves interaction with final geometry",
+        phase7bAutoMax > 0 && phase7bOldRejected && phase7bNewAccepted && phase7bRevealed && phase7bScrollMode,
+        std::string("max=") + std::to_string(phase7bAutoMax) + ";oldRejected=" + yesNo(phase7bOldRejected) +
+            ";newAccepted=" + yesNo(phase7bNewAccepted) + ";revealed=" + yesNo(phase7bRevealed) +
+            ";scrollMode=" + yesNo(phase7bScrollMode) + ";evidence=" + summarizeText(phase7bEvidence, 2200) +
+            ";scroll=" + phase7bScrollEvidence);
+    add("Positioned-link Phase 7B partial and full clipping are authoritative",
+        phase7bPartialVisible && phase7bPartialHit && !phase7bClippedHit,
+        std::string("partialVisibleAndHit=") + yesNo(phase7bPartialVisible && phase7bPartialHit) +
+            ";fullClipRejected=" + yesNo(!phase7bClippedHit) + ";evidence=" + summarizeText(phase7bEvidence, 2200));
+    add("Positioned-link Phase 7B nested scroll, sticky, scrollbar, and z-order regressions",
+        phase7bNested && phase7bStickyBefore && phase7bStickyAfter && phase7bScrollbarIntercept && phase7bStackingRegression,
+        std::string("nested=") + yesNo(phase7bNested) + ";sticky=" + yesNo(phase7bStickyBefore && phase7bStickyAfter) +
+        ";scrollbar=" + yesNo(phase7bScrollbarIntercept) + ";z=" + yesNo(phase7bHighWins) +
+        ";highHit=" + yesNo(phase7bHighHit) + ";lowAtHigh=" + yesNo(phase7bLowAtHigh) +
+        ";equalOrder=" + yesNo(phase7bEqualOrder) + ";equalBHit=" + yesNo(phase7bEqualBHit) +
+        ";equalAAtB=" + yesNo(phase7bEqualAAtB) + ";hostedZProbe=" + yesNo(phase7bZGeometry) +
+        ";establishedStacking=" + yesNo(phase7bEstablishedStacking) + ";zPoint=" + std::to_string(phase7bZx) + ":" +
+        std::to_string(phase7bZy) + ";equalPoint=" + std::to_string(phase7bEqualX) + ":" +
+        std::to_string(phase7bEqualY) + ";zHitId=" + phase7bZHitId + ";equalHitId=" +
+        phase7bEqualHitId + ";evidence=" + summarizeText(phase7bEvidence, 2200));
+    add("Positioned-link Phase 7B Roboto geometry remains authoritative",
+        phase7bRoboto && contains(phase7bReport, "Current Document.typography_preferred_font=Roboto") &&
+        contains(phase7bReport, "Current Document.typography_measurement_paint_agreement=yes"),
+        std::string("links=") + yesNo(phase7bRoboto) + ";metricAgreement=" +
+        yesNo(contains(phase7bReport, "Current Document.typography_measurement_paint_agreement=yes")) +
+        ";evidence=" + summarizeText(phase7bEvidence, 2200));
 
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -3562,6 +3795,88 @@ static std::string navigatorHostedSmokeDiagnostic() {
     return out.str();
 }
 
+static std::string navigatorPositionedLinkProbeDiagnostic() {
+    auto rectText = [](int x, int y, int w, int h) {
+        return std::to_string(x) + ":" + std::to_string(y) + ":" +
+            std::to_string(w) + ":" + std::to_string(h);
+    };
+    auto visibleRect = [](int ax, int ay, int aw, int ah,
+                          int bx, int by, int bw, int bh) {
+        const int left = std::max(ax, bx);
+        const int top = std::max(ay, by);
+        const int right = std::min(ax + std::max(0, aw), bx + std::max(0, bw));
+        const int bottom = std::min(ay + std::max(0, ah), by + std::max(0, bh));
+        return std::array<int, 4>{left, top, std::max(0, right - left), std::max(0, bottom - top)};
+    };
+    auto capture = [&](const std::string& id) {
+        std::array<int, 12> values{};
+        gxos::apps::Navigator::SmokeLinkGeometryById(id,
+            values[0], values[1], values[2], values[3],
+            values[4], values[5], values[6], values[7],
+            values[8], values[9], values[10], values[11]);
+        return values;
+    };
+
+    std::ostringstream out;
+    out << "NAVIGATOR_POSITIONED_LINK_PROBE_BEGIN\n";
+    const std::string fixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/typography-phase7a.html";
+    std::string launchError;
+    bool loaded = gxos::apps::Navigator::SmokeCurrentUrl() == fixtureUrl;
+    bool launchRequested = false;
+    if (!loaded) {
+        launchRequested = gxos::gui::DesktopService::LaunchApp("guideXOS Navigator", launchError);
+        for (int attempt = 0; attempt < 30 && !loaded; ++attempt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            loaded = gxos::apps::Navigator::SmokeNavigateTo(fixtureUrl);
+        }
+    }
+    out << "launch_requested=" << (launchRequested ? "yes" : "no") << "\n";
+    if (!launchError.empty()) out << "launch_error=" << launchError << "\n";
+    out << "fixture_loaded=" << (loaded ? "yes" : "no") << "\n";
+    gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+    out << "document_scroll=" << gxos::apps::Navigator::SmokeScrollOffset() << "\n";
+    const int maxScroll = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7a-auto");
+    out << "overflow_owner=phase7a-auto\nlocal_scroll_max=" << maxScroll << "\n";
+    const bool initialSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7a-auto", 0, 0);
+    const std::array<int, 12> initial = capture("phase7a-scroll-link");
+    const int initialX = initial[4] + std::max(1, initial[6] / 2);
+    const int initialY = initial[5] + std::max(1, initial[7] / 2);
+    out << "initial_offset_set=" << (initialSet ? "yes" : "no") << "\n";
+    out << "initial.paint=" << rectText(initial[0], initial[1], initial[2], initial[3]) << "\n";
+    out << "initial.final=" << rectText(initial[4], initial[5], initial[6], initial[7]) << "\n";
+    out << "initial.clip=" << rectText(initial[8], initial[9], initial[10], initial[11]) << "\n";
+    out << "initial.probe_point=" << initialX << ":" << initialY << "\n";
+
+    const int requestedScroll = maxScroll;
+    const bool scrolledSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase7a-auto", 0, requestedScroll);
+    const int actualScroll = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase7a-auto");
+    const std::array<int, 12> scrolled = capture("phase7a-scroll-link");
+    const std::array<int, 4> visible = visibleRect(scrolled[4], scrolled[5], scrolled[6], scrolled[7],
+        scrolled[8], scrolled[9], scrolled[10], scrolled[11]);
+    const int newX = visible[0] + std::max(1, visible[2] / 2);
+    const int newY = visible[1] + std::max(1, visible[3] / 2);
+    const bool oldLocationAccepted = gxos::apps::Navigator::SmokeHitLinkAt(initialX, initialY, "phase7a-scroll-link");
+    const bool newLocationAccepted = visible[2] > 0 && visible[3] > 0 &&
+        gxos::apps::Navigator::SmokeHitLinkAt(newX, newY, "phase7a-scroll-link");
+    out << "scrolled_set=" << (scrolledSet ? "yes" : "no") << "\n";
+    out << "actual_local_scroll=" << actualScroll << "\n";
+    out << "scrolled.paint=" << rectText(scrolled[0], scrolled[1], scrolled[2], scrolled[3]) << "\n";
+    out << "scrolled.final=" << rectText(scrolled[4], scrolled[5], scrolled[6], scrolled[7]) << "\n";
+    out << "scrolled.clip=" << rectText(scrolled[8], scrolled[9], scrolled[10], scrolled[11]) << "\n";
+    out << "scrolled.visible=" << rectText(visible[0], visible[1], visible[2], visible[3]) << "\n";
+    out << "old_location=" << initialX << ":" << initialY << " accepted=" << (oldLocationAccepted ? "yes" : "no") << "\n";
+    out << "new_location=" << newX << ":" << newY << " accepted=" << (newLocationAccepted ? "yes" : "no") << "\n";
+    out << "positioned_link_probe=" << ((loaded && initial[0] && scrolled[0] && visible[2] > 0 && visible[3] > 0 &&
+        !oldLocationAccepted && newLocationAccepted) ? "PASS" : "FAIL") << "\n";
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7a-auto", 0, 0);
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    out << "diagnostic_report=" << gxos::apps::Navigator::SmokeRuntimeReport();
+    out << "NAVIGATOR_POSITIONED_LINK_PROBE_END\n";
+    return out.str();
+}
+
 static std::string navigatorGotoDiagnostic(const std::string& url) {
     std::ostringstream out;
     if (url.empty()) {
@@ -3625,7 +3940,7 @@ static void help(){
                  " taskmanager.snapshot | taskmanager.network-snapshot-wait | taskmanager.tombstone-test\n"
                  " taskmgr\n"
                  " paint\n"
-                 " navigator | navigator.smoke | navigator.goto <url>\n"
+                 " navigator | navigator.smoke | navigator.positioned-link-probe | navigator.goto <url>\n"
                  " imgview [file] | osk\n"
                  " shutdown | msgbox <text> | welcome\n"
                  " notify <text> | notify.clear\n"
@@ -4280,6 +4595,9 @@ using namespace gxos;
         }
         else if (cmd=="navigator.smoke"){
             std::cout << navigatorHostedSmokeDiagnostic();
+        }
+        else if (cmd=="navigator.positioned-link-probe"){
+            std::cout << navigatorPositionedLinkProbeDiagnostic();
         }
         else if (cmd=="navigator.goto"){
             if(!requireCompositor()) continue;
