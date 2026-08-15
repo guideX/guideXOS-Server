@@ -62,7 +62,8 @@
         "slotIndex": 0,
         "cursorBefore": 0,
         "cursorAfter": 1,
-        "slotAddress": "0x000000000393BBE0",
+        "slotAddress": "not independently captured by the C011EC14 harness; rootSlotAddress is recorded separately",
+        "rootSlotAddress": "0x000000000393BBE0",
         "priorSlotValue": "0x0000000000000000",
         "newSlotValue": "0x0000000100A02F50",
         "objectProvenance": "genuine NativeAOT thread-static storage-object root"
