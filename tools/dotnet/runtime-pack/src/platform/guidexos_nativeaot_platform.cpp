@@ -1340,6 +1340,10 @@ guideXosNativeAotFirstPerThreadRootForeachThreadEntered() {
     guidexos_nativeaot_allocation_diagnostics& diagnostics =
         g_guideXosAllocationDiagnostics;
     ++diagnostics.foreachThreadEntryCount;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] FOREACH_THREAD entry\n");
+#endif
     if (diagnostics.foreachThreadRequestCount != 1u ||
         diagnostics.threadStoreLockAcquisitionCount != 1u ||
         diagnostics.eeSuspended == 0u) {
@@ -1352,6 +1356,10 @@ guideXosNativeAotFirstPerThreadRootIteratorInitialized() {
     guidexos_nativeaot_allocation_diagnostics& diagnostics =
         g_guideXosAllocationDiagnostics;
     ++diagnostics.threadIteratorInitializationCount;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] thread iterator initialized\n");
+#endif
     if (diagnostics.foreachThreadEntryCount != 1u ||
         diagnostics.rootThreadListHeadBefore == 0u) {
         firstPerThreadRootProviderInvariantFailure();
@@ -1365,6 +1373,10 @@ guideXosNativeAotFirstPerThreadRootIteratorCompletion() {
 
 extern "C" void __cdecl
 guideXosNativeAotFirstPerThreadRootThreadEnumerated(uintptr_t thread) {
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] thread enumerated\n");
+#endif
     recordFirstPerThreadRootThread(reinterpret_cast<SuspendEeThread*>(thread));
 }
 
@@ -1389,6 +1401,10 @@ guideXosNativeAotFirstPerThreadRootThreadIncluded(uintptr_t thread) {
     guidexos_nativeaot_allocation_diagnostics& diagnostics =
         g_guideXosAllocationDiagnostics;
     ++diagnostics.includedThreadCount;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] thread included\n");
+#endif
     ++diagnostics.rootPerThreadDispatchRequestCount;
     ++diagnostics.rootPerThreadDispatchEntryCount;
     if (diagnostics.rootThreadRecordCount == 0u) {
@@ -1411,6 +1427,10 @@ guideXosNativeAotFirstPerThreadRootThreadStaticListObserved(uintptr_t thread,
     guidexos_nativeaot_allocation_diagnostics& diagnostics =
         g_guideXosAllocationDiagnostics;
     ++diagnostics.rootProviderRequestCount;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] inline provider observed\n");
+#endif
     if (list == 0u) {
         ++diagnostics.rootProviderSkipCount;
         diagnostics.rootProviderSkipReason = kRootProviderSkipNoInlineRoots;
@@ -1445,6 +1465,10 @@ guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered(uintptr_t thread,
         g_guideXosAllocationDiagnostics;
     ++diagnostics.rootProviderRequestCount;
     ++diagnostics.rootProviderEntryCount;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] ordinary provider entered\n");
+#endif
     diagnostics.rootProviderRuntimeCategory = kRootProviderSourceThreadStatics;
     diagnostics.rootProviderFunctionCode = kRootProviderFunctionThreadStaticStorage;
     diagnostics.rootProviderMetadataKind = kRootProviderMetadataThreadStaticStorage;
@@ -4788,6 +4812,327 @@ guideXosNativeAotFirstRootPreMarkBoundaryReached(
 
 #endif
 
+/* C011EC15: continue authentic root enumeration after the first callback. */
+enum {
+    kC011EC15ProviderInlineThreadStatic = 1u,
+    kC011EC15ProviderOrdinaryThreadStatic = 2u,
+    kC011EC15ProviderThreadStack = 3u,
+};
+
+static void emitC011EC15SafeStop() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] SAFE_STOP marker=C011EC15");
+    suspendEeSerialPutString(" firstRootSlot=");
+    suspendEeSerialPutHex64(d.c011ec15FirstRootSlot);
+    suspendEeSerialPutString(" firstRootRaw=");
+    suspendEeSerialPutHex64(d.c011ec15FirstRootValue);
+    suspendEeSerialPutString(" firstRootProviderCategory=");
+    suspendEeSerialPutHex32(d.c011ec15FirstRootProviderCategory);
+    suspendEeSerialPutString(" firstRootProvider=");
+    suspendEeSerialPutHex64(d.c011ec15FirstRootProvider);
+    suspendEeSerialPutString(" firstRootCallback=");
+    suspendEeSerialPutHex64(d.c011ec15FirstRootCallback);
+    suspendEeSerialPutString(" firstRootContext=");
+    suspendEeSerialPutHex64(d.c011ec15FirstRootContext);
+    suspendEeSerialPutString(" nextRootSlot=");
+    suspendEeSerialPutHex64(d.c011ec15NextRootSlot);
+    suspendEeSerialPutString(" nextRootRaw=");
+    suspendEeSerialPutHex64(d.c011ec15NextRootValue);
+    suspendEeSerialPutString(" nextRootProviderCategory=");
+    suspendEeSerialPutHex32(d.c011ec15ProviderContinuationCategory);
+    suspendEeSerialPutString(" nextRootProvider=");
+    suspendEeSerialPutHex64(d.c011ec15NextRootProvider);
+    suspendEeSerialPutString(" nextRootCallback=");
+    suspendEeSerialPutHex64(d.c011ec15NextRootCallback);
+    suspendEeSerialPutString(" nextRootContext=");
+    suspendEeSerialPutHex64(d.c011ec15NextRootContext);
+    suspendEeSerialPutString(" providerRequests=");
+    suspendEeSerialPutHex32(d.c011ec15ProviderRequestCount);
+    suspendEeSerialPutString(" providerEntries=");
+    suspendEeSerialPutHex32(d.c011ec15ProviderEntryCount);
+    suspendEeSerialPutString(" gcScanRootsRequests=");
+    suspendEeSerialPutHex32(d.c011ec15GcScanRootsRequestCount);
+    suspendEeSerialPutString(" rootSlotsVisited=");
+    suspendEeSerialPutHex32(d.c011ec15RootSlotVisitCount);
+    suspendEeSerialPutString(" nullCandidates=");
+    suspendEeSerialPutHex32(d.c011ec15NullCandidateCount);
+    suspendEeSerialPutString(" nonNullCandidates=");
+    suspendEeSerialPutHex32(d.c011ec15NonNullCandidateCount);
+    suspendEeSerialPutString(" firstRootCallbackReturns=");
+    suspendEeSerialPutHex32(d.c011ec15FirstRootCallbackReturnCount);
+    suspendEeSerialPutString(" enumGcRefContinuations=");
+    suspendEeSerialPutHex32(d.c011ec15EnumGcRefContinuationCount);
+    suspendEeSerialPutString(" promoteReturns=");
+    suspendEeSerialPutHex32(d.c011ec15PromoteReturnCount);
+    suspendEeSerialPutString(" promoteEntries=");
+    suspendEeSerialPutHex32(d.c011ec15PromoteEntryCount);
+    suspendEeSerialPutString(" markHelperReturns=");
+    suspendEeSerialPutHex32(d.c011ec15MarkHelperReturnCount);
+    suspendEeSerialPutString(" queueMarkReturns=");
+    suspendEeSerialPutHex32(d.c011ec15QueueMarkReturnCount);
+    suspendEeSerialPutString(" secondPromoteAttempts=");
+    suspendEeSerialPutHex32(d.c011ec15SecondPromoteAttemptCount);
+    suspendEeSerialPutString(" secondPromoteEntries=");
+    suspendEeSerialPutHex32(d.c011ec15SecondPromoteEntryCount);
+    suspendEeSerialPutString(" secondQueueMutationAttempts=");
+    suspendEeSerialPutHex32(d.c011ec15SecondQueueMutationAttemptCount);
+    suspendEeSerialPutString(" secondQueueMutationExecutions=");
+    suspendEeSerialPutHex32(d.c011ec15SecondQueueMutationExecutionCount);
+    suspendEeSerialPutString(" firstQueueSlot=");
+    suspendEeSerialPutHex64(d.c011ec15FirstQueueSlot);
+    suspendEeSerialPutString(" firstQueueSlotIndex=");
+    suspendEeSerialPutHex64(d.c011ec15FirstQueueSlotIndex);
+    suspendEeSerialPutString(" firstQueueOld=");
+    suspendEeSerialPutHex64(d.c011ec15FirstQueueOldValue);
+    suspendEeSerialPutString(" firstQueueNew=");
+    suspendEeSerialPutHex64(d.c011ec15FirstQueueNewValue);
+    suspendEeSerialPutString(" firstQueueCursorBefore=");
+    suspendEeSerialPutHex64(d.c011ec15FirstQueueCursorBefore);
+    suspendEeSerialPutString(" firstQueueCursorAfter=");
+    suspendEeSerialPutHex64(d.c011ec15FirstQueueCursorAfter);
+    suspendEeSerialPutString(" firstQueueBase=");
+    suspendEeSerialPutHex64(d.c011ec15FirstQueueBase);
+    suspendEeSerialPutString(" markBitWrites=");
+    suspendEeSerialPutHex32(d.c011ec15MarkBitWriteCount);
+    suspendEeSerialPutString(" childReferenceReads=");
+    suspendEeSerialPutHex32(d.c011ec15ChildReferenceReadCount);
+    suspendEeSerialPutString(" graphTraversal=");
+    suspendEeSerialPutHex32(d.c011ec15GraphTraversalCount);
+    suspendEeSerialPutString(" threadStoreLockHeld=");
+    suspendEeSerialPutHex32(d.c011ec15ThreadStoreLockHeld);
+    suspendEeSerialPutString(" eeSuspended=");
+    suspendEeSerialPutHex32(d.c011ec15EeSuspended);
+    suspendEeSerialPutString(" managedEntryProhibited=");
+    suspendEeSerialPutHex32(d.c011ec15ManagedEntryProhibited);
+    suspendEeSerialPutString(" restart=");
+    suspendEeSerialPutHex32(d.restartRequestCount + d.restartEntryCount);
+    suspendEeSerialPutString(" resume=");
+    suspendEeSerialPutHex32(d.managedResumeCount);
+    suspendEeSerialPutString(" sentinel=");
+    suspendEeSerialPutHex64(d.threadStaticProofSentinelAddress);
+    suspendEeSerialPutString(" storageObject=");
+    suspendEeSerialPutHex64(d.runtimeThreadStaticStorageObjectAddress);
+    suspendEeSerialPutString(" marker=C011EC15\n");
+}
+
+[[noreturn]] static void c011ec15SafeStop(uint32_t reason) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec15StopObserved = 1u;
+    d.c011ec15StopReason = reason;
+    d.c011ec15StopAddress = reinterpret_cast<uintptr_t>(&c011ec15SafeStop);
+    d.safeStopObserved = 1u;
+    d.stopReason = GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP_MARKER;
+    d.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F33_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP;
+    d.rootBoundaryFunction = d.c011ec15StopAddress;
+    validateAllocationContextFixupObjects(true);
+    emitC011EC15SafeStop();
+    for (;;) {
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15GcScanRootsEntered(
+    int condemned, int maxGeneration, uintptr_t scanContext) {
+    (void)condemned;
+    (void)maxGeneration;
+    (void)scanContext;
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec15GcScanRootsRequestCount;
+    ++d.c011ec15ProviderRequestCount;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] GcScanRoots entry\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15ProviderEntered(
+    uint32_t category, uintptr_t thread, uintptr_t provider) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec15ProviderEntryCount;
+    d.c011ec15ProviderCategory = category;
+    d.c011ec15ProviderContinuationCategory = category;
+    d.c011ec15CurrentProvider = provider;
+    d.c011ec15FirstRootProvider =
+        d.c011ec15FirstRootProvider == 0u ? provider : d.c011ec15FirstRootProvider;
+    (void)thread;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15CandidateObserved(
+    uintptr_t slot, uintptr_t rawValue, uint32_t flags,
+    uintptr_t callback, uintptr_t context) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec15RootSlotVisitCount;
+    if (rawValue == 0u) {
+        ++d.c011ec15NullCandidateCount;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+        suspendEeSerialPutString(
+            "[nativeaot-gc-next-genuine-root-provider] candidate null slot=");
+        suspendEeSerialPutHex64(slot);
+        suspendEeSerialPutString(" raw=");
+        suspendEeSerialPutHex64(rawValue);
+        suspendEeSerialPutString(" provider=");
+        suspendEeSerialPutHex64(d.c011ec15CurrentProvider);
+        suspendEeSerialPutString(" category=");
+        suspendEeSerialPutHex32(d.c011ec15ProviderCategory);
+        suspendEeSerialPutString("\n");
+#endif
+        return;
+    }
+    ++d.c011ec15NonNullCandidateCount;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] candidate non-null slot=");
+    suspendEeSerialPutHex64(slot);
+    suspendEeSerialPutString(" raw=");
+    suspendEeSerialPutHex64(rawValue);
+    suspendEeSerialPutString(" provider=");
+    suspendEeSerialPutHex64(d.c011ec15CurrentProvider);
+    suspendEeSerialPutString(" category=");
+    suspendEeSerialPutHex32(d.c011ec15ProviderCategory);
+    suspendEeSerialPutString(" callback=");
+    suspendEeSerialPutHex64(callback);
+    suspendEeSerialPutString(" context=");
+    suspendEeSerialPutHex64(context);
+    suspendEeSerialPutString(" flags=");
+    suspendEeSerialPutHex32(flags);
+    suspendEeSerialPutString("\n");
+#endif
+    if (d.c011ec15FirstRootCallbackReturnCount == 0u) {
+        d.c011ec15FirstRootSlot = slot;
+        d.c011ec15FirstRootValue = rawValue;
+        d.c011ec15FirstRootCallback = callback;
+        d.c011ec15FirstRootContext = context;
+        d.c011ec15FirstRootProviderCategory = d.c011ec15ProviderCategory;
+        d.c011ec15CallbackFlags = flags;
+        d.c011ec15CallbackContextValid = context != 0u ? 1u : 0u;
+        return;
+    }
+    d.c011ec15NextRootSlot = slot;
+    d.c011ec15NextRootValue = rawValue;
+    d.c011ec15NextRootProvider = d.c011ec15CurrentProvider;
+    d.c011ec15NextRootCallback = callback;
+    d.c011ec15NextRootContext = context;
+    if (callback == 0u || context == 0u) {
+        c011ec15SafeStop(0xEC1501u);
+    }
+    c011ec15SafeStop(0xC011EC15u);
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15PromoteEntered(
+    uintptr_t rawArg1, uintptr_t rawArg2, uintptr_t rawArg3,
+    uintptr_t callbackAddress, uintptr_t returnAddress,
+    uintptr_t stackPointer) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (rawArg1 == 0u) {
+        c011ec15SafeStop(0xEC1506u);
+    }
+    const uintptr_t rawValue = *reinterpret_cast<uintptr_t*>(rawArg1);
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        rawValue == 0u
+            ? "[nativeaot-gc-next-genuine-root-provider] Promote null\n"
+            : "[nativeaot-gc-next-genuine-root-provider] Promote non-null\n");
+#endif
+    if (d.c011ec15FirstRootCallbackReturnCount != 0u && rawValue != 0u) {
+        ++d.c011ec15SecondPromoteAttemptCount;
+        ++d.c011ec15SecondPromoteEntryCount;
+        c011ec15SafeStop(0xEC1507u);
+    }
+    ++d.c011ec15PromoteEntryCount;
+    d.c011ec15CallbackFlags = static_cast<uint32_t>(rawArg3);
+    d.c011ec15CallbackContextValid = rawArg2 != 0u ? 1u : 0u;
+    (void)callbackAddress;
+    (void)returnAddress;
+    (void)stackPointer;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15PromoteCandidateLoaded(uintptr_t object) {
+    // The source-valid candidate load is observed by GcEnumObject before the
+    // callback.  Null callbacks are part of normal root enumeration and must
+    // return so the next provider can be reached.
+    (void)object;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15QueueMarkReturned(
+    uintptr_t object, uintptr_t slot, uintptr_t oldValue,
+    uintptr_t newValue, uintptr_t slotIndex, uintptr_t cursorBefore,
+    uintptr_t cursorAfter, uintptr_t queueBase) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec15QueueMarkReturnCount;
+    d.c011ec15FirstQueueSlot = slot;
+    d.c011ec15FirstQueueSlotIndex = slotIndex;
+    d.c011ec15FirstQueueOldValue = oldValue;
+    d.c011ec15FirstQueueNewValue = newValue;
+    d.c011ec15FirstQueueCursorBefore = cursorBefore;
+    d.c011ec15FirstQueueCursorAfter = cursorAfter;
+    d.c011ec15FirstQueueBase = queueBase;
+    if (d.c011ec15QueueMarkReturnCount != 1u ||
+        d.c011ec15FirstRootValue != object || oldValue != 0u ||
+        newValue != object || slotIndex != 0u || cursorBefore != 0u ||
+        cursorAfter != 1u || slot != queueBase) {
+        c011ec15SafeStop(0xEC1502u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15MarkHelperReturned(uintptr_t object) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec15MarkHelperReturnCount;
+    if (object != d.c011ec15FirstRootValue) {
+        c011ec15SafeStop(0xEC1503u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15PromoteReturned(uintptr_t object) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec15PromoteReturnCount;
+    if (object != d.c011ec15FirstRootValue) {
+        c011ec15SafeStop(0xEC1504u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC15EnumGcRefReturned(
+    uintptr_t slot, uintptr_t rawValue, uintptr_t callback, uintptr_t context) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec15EnumGcRefContinuationCount;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    if (slot != 0u) {
+        suspendEeSerialPutString(
+            rawValue == 0u
+                ? "[nativeaot-gc-next-genuine-root-provider] EnumGcRef returned null slot\n"
+                : "[nativeaot-gc-next-genuine-root-provider] EnumGcRef returned non-null slot\n");
+    }
+#endif
+    if (rawValue != 0u && d.c011ec15FirstRootCallbackReturnCount == 0u) {
+        ++d.c011ec15FirstRootCallbackReturnCount;
+        if (slot != d.c011ec15FirstRootSlot || rawValue != d.c011ec15FirstRootValue ||
+            callback != d.c011ec15FirstRootCallback ||
+            context != d.c011ec15FirstRootContext) {
+            c011ec15SafeStop(0xEC1505u);
+        }
+        d.c011ec15ThreadStoreLockHeld =
+            d.threadStoreLockRecursionDepth == 1u ? 1u : 0u;
+        d.c011ec15EeSuspended = d.eeSuspended;
+        d.c011ec15ManagedEntryProhibited = d.managedEntryProhibited;
+    }
+}
+
 #endif
 
 #endif
@@ -6223,6 +6568,23 @@ extern "C" volatile guidexos_nativeaot_thread_static_diagnostics
 [[noreturn]] void guideXosFailFast(gx_uint32 reason) {
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) && defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     g_guideXosAllocationDiagnostics.failFastReason = reason;
+#if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-next-genuine-root-provider] fail-fast reason=");
+    suspendEeSerialPutHex32(reason);
+    suspendEeSerialPutString(" stage=");
+    suspendEeSerialPutHex32(g_guideXosAllocationDiagnostics.stage);
+    suspendEeSerialPutString(" providerEntries=");
+    suspendEeSerialPutHex32(
+        g_guideXosAllocationDiagnostics.c011ec15ProviderEntryCount);
+    suspendEeSerialPutString(" rootSlots=");
+    suspendEeSerialPutHex32(
+        g_guideXosAllocationDiagnostics.c011ec15RootSlotVisitCount);
+    suspendEeSerialPutString(" nonNull=");
+    suspendEeSerialPutHex32(
+        g_guideXosAllocationDiagnostics.c011ec15NonNullCandidateCount);
+    suspendEeSerialPutString("\n");
+#endif
 #endif
     __fastfail(kFastFailFatalAppExit);
     for (;;) {

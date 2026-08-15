@@ -55,3 +55,4 @@
 /samples/managed/HostLogProof/obj/
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx
+/out

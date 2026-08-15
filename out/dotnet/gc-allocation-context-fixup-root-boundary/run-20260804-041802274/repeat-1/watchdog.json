@@ -1,9 +1,0 @@
-{
-    "run":  "repeat-1",
-    "timeoutSeconds":  30,
-    "safeStopObserved":  true,
-    "harnessTerminated":  true,
-    "processId":  18604,
-    "serialPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-allocation-context-fixup-root-boundary\\run-20260804-041802274\\repeat-1\\serial.log",
-    "monitorPath":  "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\gc-allocation-context-fixup-root-boundary\\run-20260804-041802274\\repeat-1\\watchdog-monitor.txt"
-}

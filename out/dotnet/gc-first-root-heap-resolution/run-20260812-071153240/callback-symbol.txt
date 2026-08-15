@@ -1,5 +1,0 @@
-symbol=?Promote@GCHeap@WKS@@SAXPEAPEAVObject@@PEAUScanContext@@I@Z
-callbackAddress=0x0000000010026610
-source=locked src/coreclr/gc/gc.cpp:49474-49544, included by src/coreclr/gc/gcwks.cpp
-typedef=promote_func(Object**, ScanContext*, uint32_t)
-callingConvention=Microsoft x64 AMD64 (RCX, RDX, R8; RAX return unused; 32-byte shadow space)

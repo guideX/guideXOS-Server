@@ -1,8 +1,0 @@
-markHelperSymbol=?mark_object_simple@gc_heap@WKS@@CAXPEAPEAE@Z
-markHelperAddress=0x000000001004a700
-firstMutationInstruction=0x1004A76B
-firstMutationLine=    1004a76b:	48 89 2f             	mov    QWORD PTR [rdi],rbp
-nextMutationInstruction=
-nextMutationLine=
-source=locked gc.cpp:27308-27335 queue_mark; slot_table[slot_index]=o then curr_slot_index advancement
-safeStop=after the two-write queue invariant and before the old_o null test/marked(old_o)

@@ -1,1 +1,0 @@
--DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST -ID:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-collection-boundary\regressions\first-post-startup-commit-qemu\build\artifact

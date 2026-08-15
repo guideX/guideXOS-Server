@@ -1,5 +1,0 @@
-﻿
-D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-platform-object-replacement\rebuilt\qemu-exact-symbol-probe\guidexos_gcenv.elf.o:     file format elf64-x86-64
-architecture: i386:x86-64, flags 0x00000011:
-HAS_RELOC, HAS_SYMS
-start address 0x0000000000000000

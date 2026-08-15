@@ -1,3 +1,0 @@
-
-D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\track-b-hostlog-fresh-20260723\artifacts\HostLogProof.elf:     file format elf64-x86-64
-

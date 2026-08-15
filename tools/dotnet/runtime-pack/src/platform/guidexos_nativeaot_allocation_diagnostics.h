@@ -1097,6 +1097,63 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t firstNonNullOldOSlotIndexHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
     uintptr_t firstNonNullOldOCursorBeforeHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
     uintptr_t firstNonNullOldOCursorAfterHistory[GUIDEXOS_NATIVEAOT_MAX_OBJECT_HISTORY];
+
+    /*
+     * C011EC15 proof-only continuation after the first genuine root callback.
+     * This block is append-only.  The source-injected GcEnumObject observer
+     * records every authentic root slot, lets the first Promote/queue path
+     * return, and stops before the next non-null candidate is promoted.
+     */
+    uint32_t c011ec15GcScanRootsRequestCount;
+    uint32_t c011ec15ProviderEntryCount;
+    uint32_t c011ec15ProviderRequestCount;
+    uint32_t c011ec15RootSlotVisitCount;
+    uint32_t c011ec15NullCandidateCount;
+    uint32_t c011ec15NonNullCandidateCount;
+    uint32_t c011ec15FirstRootCallbackReturnCount;
+    uint32_t c011ec15EnumGcRefContinuationCount;
+    uint32_t c011ec15PromoteReturnCount;
+    uint32_t c011ec15MarkHelperReturnCount;
+    uint32_t c011ec15QueueMarkReturnCount;
+    uint32_t c011ec15SecondPromoteAttemptCount;
+    uint32_t c011ec15SecondPromoteEntryCount;
+    uint32_t c011ec15SecondQueueMutationAttemptCount;
+    uint32_t c011ec15SecondQueueMutationExecutionCount;
+    uint32_t c011ec15MarkBitWriteCount;
+    uint32_t c011ec15ChildReferenceReadCount;
+    uint32_t c011ec15GraphTraversalCount;
+    uint32_t c011ec15ProviderCategory;
+    uint32_t c011ec15FirstRootProviderCategory;
+    uint32_t c011ec15ProviderContinuationCategory;
+    uint32_t c011ec15StopObserved;
+    uint32_t c011ec15StopReason;
+    uint32_t c011ec15CallbackFlags;
+    uint32_t c011ec15CallbackContextValid;
+    uint32_t c011ec15PromoteEntryCount;
+    uint32_t c011ec15ThreadStoreLockHeld;
+    uint32_t c011ec15EeSuspended;
+    uint32_t c011ec15ManagedEntryProhibited;
+    uint32_t c011ec15Reserved[5];
+
+    uintptr_t c011ec15FirstRootSlot;
+    uintptr_t c011ec15FirstRootValue;
+    uintptr_t c011ec15FirstRootProvider;
+    uintptr_t c011ec15CurrentProvider;
+    uintptr_t c011ec15FirstRootCallback;
+    uintptr_t c011ec15FirstRootContext;
+    uintptr_t c011ec15NextRootSlot;
+    uintptr_t c011ec15NextRootValue;
+    uintptr_t c011ec15NextRootProvider;
+    uintptr_t c011ec15NextRootCallback;
+    uintptr_t c011ec15NextRootContext;
+    uintptr_t c011ec15FirstQueueSlot;
+    uintptr_t c011ec15FirstQueueSlotIndex;
+    uintptr_t c011ec15FirstQueueOldValue;
+    uintptr_t c011ec15FirstQueueNewValue;
+    uintptr_t c011ec15FirstQueueCursorBefore;
+    uintptr_t c011ec15FirstQueueCursorAfter;
+    uintptr_t c011ec15FirstQueueBase;
+    uintptr_t c011ec15StopAddress;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -1149,6 +1206,7 @@ enum {
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F30_FIRST_ROOT_FIRST_MARK_MUTATION_SAFE_STOP = 0xF30u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F31_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP = 0xF31u,
     GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F32_FIRST_ROOT_FIRST_NON_NULL_OLD_O_SAFE_STOP = 0xF32u,
+    GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F33_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP = 0xF33u,
 };
 
 enum {
@@ -1170,6 +1228,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_MARK_MUTATION_SAFE_STOP_MARKER = 0xC011EC12u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP_MARKER = 0xC011EC13u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_NON_NULL_OLD_O_SAFE_STOP_MARKER = 0xC011EC14u,
+    GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP_MARKER = 0xC011EC15u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

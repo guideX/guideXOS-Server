@@ -1,3 +1,0 @@
-GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1
-GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1
-NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-first-root-first-mark-mutation\build-run-20260812-213216189\gc-single-thread-suspend-ee-artifact.o

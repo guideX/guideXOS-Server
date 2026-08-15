@@ -1,1 +1,0 @@
-"cmd.exe" /d /c "call \"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-single-thread-suspend-ee\build\build-single-thread-suspend-ee-runtime-pack.bat\""

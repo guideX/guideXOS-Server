@@ -1,1 +1,0 @@
-"cmd.exe" /d /c "call \"D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-allocation-context-fixup-root-boundary\build\build-single-thread-suspend-ee-runtime-pack.bat\""

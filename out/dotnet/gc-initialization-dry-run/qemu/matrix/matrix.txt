@@ -1,9 +1,0 @@
-
-label  process    marker pass serial                                                                                   
------  -------    ------ ---- ------                                                                                   
-first  disposable   True True D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-initialization-dry-run\qemu\mat...
-repeat disposable   True True D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-initialization-dry-run\qemu\mat...
-fresh  disposable   True True D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\out\dotnet\gc-initialization-dry-run\qemu\mat...
-
-
-

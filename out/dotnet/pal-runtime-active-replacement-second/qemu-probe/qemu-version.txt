@@ -1,2 +1,0 @@
-QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)
-Copyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers
