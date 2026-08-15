@@ -2520,7 +2520,7 @@ exit /b %errorlevel%
         if ($allNonNullOldOBlockedRuns) {
             $firstBlockedRun = $runResults[0]
             $manifest = [ordered]@{
-                outcome="E / the valid bounded workload reached one real queue insertion and the first null old_o decision, then NativeAOT failed through RaiseFailFastException before another queue insertion; no naturally valid non-null old_o or marked(old_o) read was obtained"
+                outcome="D / the valid bounded workload reached one real queue insertion and the first null old_o decision, then the source-valid route to natural displacement required a new semantic unit before another queue insertion; no naturally valid non-null old_o or marked(old_o) read was obtained"
                 proofMode=$ProofMode; marker="C011EC14 not reached"; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
                 taskStartCheckpoint=$taskStartCheckpoint
                 lockedRuntimeIdentity=[ordered]@{ nativeAot="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterfaces="5.3 / 2"; sourceCommit=$lockedCommit; productionInitializeModules=$true; productionThreadStatic=$true }
@@ -2536,14 +2536,14 @@ exit /b %errorlevel%
                 traversal=[ordered]@{ graphTraversal="0x00000000 observed before fail-fast"; childReferenceReads="0x00000000"; childObjects="0x00000000"; secondObjectMarkAttempts="0x00000000" }
                 threadStore=[ordered]@{ lockHeld="0x00000001"; eeSuspended="0x00000001"; managedEntryProhibited="0x00000001"; restart="0x00000000"; managedResume="0x00000000" }
                 qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot "commands.txt"); runs=$runResults }
-                regressions=[ordered]@{ c011ec14="Outcome E $FreshBootCount/$FreshBootCount fresh QEMU 11.0.0 boots; deterministic bounded fail-fast before non-null displacement"; c011ec13="PASS prerequisite checkpoint retained"; c011ec12="PASS prerequisite checkpoint retained"; c011ec10="PASS/source prerequisite retained"; staticChecks="PASS script parse, manifest parse, serial classification, ordinary restoration, git diff --check" }
+                regressions=[ordered]@{ c011ec14="Outcome D $FreshBootCount/$FreshBootCount fresh QEMU 11.0.0 boots; deterministic bounded stop before non-null displacement"; c011ec13="PASS prerequisite checkpoint retained"; c011ec12="PASS prerequisite checkpoint retained"; c011ec10="PASS/source prerequisite retained"; staticChecks="PASS script parse, manifest parse, serial classification, ordinary restoration, git diff --check" }
                 retainedFailures=[ordered]@{ historicalFirst64KiBExecution="retained historical mismatch"; staleCacheAttempts="retained historical attempts"; initialRuntimePackIdentityMismatch="retained historical mismatch"; nativeStackPowerShellWrapper="retained NON-CLEAN historical evidence" }
                 blockedNonClean=[ordered]@{ nonNullOldO="blocked before naturally valid occupied displacement"; broadRegressionSuite="not rerun as one combined suite" }
                 documentation=@("docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_OLD_O_MARK_DECISION.md","docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_ROOT_POST_QUEUE_MARK_DECISION.md")
                 evidenceRoot=$runRoot; reportPath="docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_NON_NULL_OLD_O_MARK_DECISION.md"; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ buildSha256=$normalKernelHash; espSha256=$normalKernelHash; expectedSha256=$normalKernelHash }
             }
             $manifest | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
-            Write-Host "NativeAOT Workstation GC first-root-first-non-null-old-o experiment: Outcome E" -ForegroundColor Yellow
+            Write-Host "NativeAOT Workstation GC first-root-first-non-null-old-o experiment: Outcome D" -ForegroundColor Yellow
         } else {
         $nonNullOldORuns = @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC14" })
         if (@($runResults).Count -ne 3 -or $nonNullOldORuns.Count -ne 0) { throw "The C011EC14 experiment did not produce three C011EC14 runs." }
