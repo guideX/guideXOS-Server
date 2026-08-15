@@ -1,15 +1,15 @@
 {
     "schema_version":  "guidexos.navigator.ca-bundle-manifest.v0.1",
-    "bundle_type":  "smoke-fixture",
-    "source":  "repo-fixture:scripts/fixtures/navigator-smoke-root-ca-bundle.pem",
-    "generated_utc":  "2026-08-12T16:53:28.0415994Z",
+    "bundle_type":  "production-source",
+    "source":  "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE",
+    "generated_utc":  "2026-08-15T20:13:28.5910651Z",
     "root_count":  1,
-    "pem_bytes":  1256,
-    "sha256":  "11f1fecaeddaaa2504e72dd6bd4ccc3a33bbf38aa759f55ae0547ac4679ad4ce",
-    "subject_summary":  "CN=guideXOS Navigator Smoke Root CA",
-    "not_before_min":  "2026-06-03T05:57:07.0000000Z",
-    "not_after_max":  "2036-06-01T05:57:07.0000000Z",
+    "pem_bytes":  1166,
+    "sha256":  "c28c679d134e640c21cb739b617034e996d48a535b97499ffa667e832711e606",
+    "subject_summary":  "CN=guideXOS Navigator Validated Root CA",
+    "not_before_min":  "2025-01-01T00:00:00.0000000Z",
+    "not_after_max":  "2035-01-01T00:00:00.0000000Z",
     "production_ready":  "no",
-    "test_only":  "yes",
-    "rotation_id":  "sha256:11f1fecaeddaaa2504e72dd6bd4ccc3a33bbf38aa759f55ae0547ac4679ad4ce"
+    "test_only":  "no",
+    "rotation_id":  "sha256:c28c679d134e640c21cb739b617034e996d48a535b97499ffa667e832711e606"
 }

@@ -43,6 +43,47 @@ static char s_kernelLastDnsError[64];
 
 static void strappend(char* dst, const char* src, int maxLen);
 
+namespace {
+constexpr int kNavigatorToolbarButtonY = 12;
+constexpr int kNavigatorToolbarButtonGap = 6;
+constexpr int kNavigatorToolbarLeadingX = 16;
+constexpr int kNavigatorToolbarButtonMinW = 52;
+constexpr int kNavigatorToolbarIconSize = 16;
+constexpr int kNavigatorToolbarIconLeftPad = 4;
+constexpr int kNavigatorToolbarIconTextGap = 4;
+constexpr int kNavigatorToolbarTextLeftPad = 6;
+constexpr int kNavigatorToolbarTextRightPad = 6;
+constexpr int kNavigatorToolbarAddressGap = 8;
+constexpr int kNavigatorToolbarAddressRightPad = 20;
+
+struct NavigatorToolbarLayout {
+    int x[6]{};
+    int w[6]{};
+    int addressX = 0;
+    int addressW = 0;
+};
+
+static NavigatorToolbarLayout navigatorToolbarLayout(int windowWidth)
+{
+    static const char* labels[6] = {"Back", "Next", "Reload", "Home", "Marks", "Add"};
+    NavigatorToolbarLayout layout;
+    int x = kNavigatorToolbarLeadingX;
+    gxos::gui::SystemFont::EnsureInitialized();
+    for (int i = 0; i < 6; ++i) {
+        const int labelWidth = gxos::gui::SystemFont::MeasureWidth(gxos::gui::FontRole::Default, labels[i]);
+        const int contentWidth = kNavigatorToolbarIconLeftPad + kNavigatorToolbarIconSize +
+            kNavigatorToolbarIconTextGap + labelWidth + kNavigatorToolbarTextRightPad;
+        layout.x[i] = x;
+        layout.w[i] = contentWidth > kNavigatorToolbarButtonMinW ? contentWidth : kNavigatorToolbarButtonMinW;
+        x += layout.w[i] + kNavigatorToolbarButtonGap;
+    }
+    layout.addressX = x + kNavigatorToolbarAddressGap;
+    layout.addressW = windowWidth - layout.addressX - kNavigatorToolbarAddressRightPad;
+    if (layout.addressW < 0) layout.addressW = 0;
+    return layout;
+}
+}
+
 static gxos::GxosCaStoreInfo probe_missing_ca_path()
 {
     const char* probePath = "/certs/ca-bundle.missing";
@@ -142,6 +183,27 @@ static NavigatorSmokePathProbe probe_navigator_smoke_path(const char* path, bool
     }
 
     return probe;
+}
+
+static int navigatorToolbarSmokeIconResourceCount()
+{
+    static const char* toolbarPaths[6] = {
+        "/system/config/navigator/nav-back.png",
+        "/system/config/navigator/nav-next.png",
+        "/system/config/navigator/reload.png",
+        "/system/config/navigator/nav-home.png",
+        "/system/config/navigator/marks.png",
+        "/system/config/navigator/nav-add.png"
+    };
+    int available = 0;
+    for (const char* path : toolbarPaths) {
+        kernel::vfs::FileInfo info{};
+        if (kernel::vfs::stat(path, &info) == kernel::vfs::VFS_OK &&
+            info.type == kernel::vfs::FILE_TYPE_REGULAR) {
+            ++available;
+        }
+    }
+    return available;
 }
 
 // ============================================================
@@ -7216,19 +7278,21 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     framebuffer::fill_rect(x, y, w, TOOLBAR_H, 0xFF2B2F3A);
     framebuffer::fill_rect(x, y + TOOLBAR_H - 1, w, 1, 0xFF586076);
 
-    int addressW = (int)w - ADDRESS_X - 20;
+    const NavigatorToolbarLayout toolbarLayout = navigatorToolbarLayout((int)w);
+    const int addressX = toolbarLayout.addressX;
+    const int addressW = toolbarLayout.addressW;
     if (addressW > 0) {
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, ADDRESS_H, 0xFF161A22);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, 1, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y + ADDRESS_H - 1, (uint32_t)addressW, 1, 0xFF11151D);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, 1, ADDRESS_H, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
-        framebuffer::fill_rect(x + ADDRESS_X + addressW - 1, y + ADDRESS_Y, 1, ADDRESS_H, 0xFF11151D);
-        appDrawText(x + ADDRESS_X + 8, y + ADDRESS_Y + 7,
+        framebuffer::fill_rect(x + addressX, y + ADDRESS_Y, (uint32_t)addressW, ADDRESS_H, 0xFF161A22);
+        framebuffer::fill_rect(x + addressX, y + ADDRESS_Y, (uint32_t)addressW, 1, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
+        framebuffer::fill_rect(x + addressX, y + ADDRESS_Y + ADDRESS_H - 1, (uint32_t)addressW, 1, 0xFF11151D);
+        framebuffer::fill_rect(x + addressX, y + ADDRESS_Y, 1, ADDRESS_H, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
+        framebuffer::fill_rect(x + addressX + addressW - 1, y + ADDRESS_Y, 1, ADDRESS_H, 0xFF11151D);
+        appDrawText(x + addressX + 8, y + ADDRESS_Y + 7,
                     m_addressFocused ? m_addressBuffer : m_currentUrl,
                     rgb(232, 236, 246));
         if (m_addressFocused) {
-            int caretX = ADDRESS_X + 8 + m_addressCaret * 6;
-            if (caretX < ADDRESS_X + addressW - 4) {
+            int caretX = addressX + 8 + m_addressCaret * 6;
+            if (caretX < addressX + addressW - 4) {
                 framebuffer::fill_rect(x + (uint32_t)caretX, y + ADDRESS_Y + 4, 1, ADDRESS_H - 8, 0xFFE8ECF6);
             }
         }
@@ -7237,7 +7301,7 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     const int throbberFrame = m_loading
         ? (int)((((uint32_t)kernel::pit::ticks() - m_loadingStartTick) / 10u) % 12u)
         : 0;
-    if (m_loading && m_throbberFrames[throbberFrame].status == gxos::gui::ImageLoadStatus::Ok) {
+    if (m_loading && addressW >= 24 && m_throbberFrames[throbberFrame].status == gxos::gui::ImageLoadStatus::Ok) {
         gxos::gui::ImageAdapter::DrawToFramebuffer(m_throbberFrames[throbberFrame],
                                                    x + w - 46, y + ADDRESS_Y, 22, 22);
     }
@@ -7454,7 +7518,8 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
         m_mouseMode = NAV_MOUSE_ADDRESS_BAR_INTERACTION;
         blurFormBlock();
         focusAddressBar();
-        int charOffset = (x - ADDRESS_X - 8) / 6;
+        const NavigatorToolbarLayout toolbarLayout = navigatorToolbarLayout(m_window ? m_window->w : 0);
+        int charOffset = (x - toolbarLayout.addressX - 8) / 6;
         if (charOffset < 0) charOffset = 0;
         int len = strlen_local(m_addressBuffer);
         if (charOffset > len) charOffset = len;
@@ -7731,13 +7796,13 @@ void NavigatorApp::updateButtons()
 {
     if (!m_window) return;
     m_window->widgetCount = 0;
-    int x = 16;
-    m_backBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Back"); setButtonIcon(m_backBtnId, m_toolbarIcons[0]); x += BUTTON_W + BUTTON_GAP;
-    m_forwardBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Next"); setButtonIcon(m_forwardBtnId, m_toolbarIcons[1]); x += BUTTON_W + BUTTON_GAP;
-    m_reloadBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Reload"); setButtonIcon(m_reloadBtnId, m_toolbarIcons[2]); x += BUTTON_W + BUTTON_GAP;
-    m_homeBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Home"); setButtonIcon(m_homeBtnId, m_toolbarIcons[3]); x += BUTTON_W + BUTTON_GAP;
-    m_bookmarksBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Marks"); setButtonIcon(m_bookmarksBtnId, m_toolbarIcons[4]); x += BUTTON_W + BUTTON_GAP;
-    m_addBookmarkBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Add"); setButtonIcon(m_addBookmarkBtnId, m_toolbarIcons[5]);
+    const NavigatorToolbarLayout layout = navigatorToolbarLayout(m_window->w);
+    m_backBtnId = addButton(layout.x[0], kNavigatorToolbarButtonY, layout.w[0], BUTTON_H, "Back"); setButtonIcon(m_backBtnId, m_toolbarIcons[0]);
+    m_forwardBtnId = addButton(layout.x[1], kNavigatorToolbarButtonY, layout.w[1], BUTTON_H, "Next"); setButtonIcon(m_forwardBtnId, m_toolbarIcons[1]);
+    m_reloadBtnId = addButton(layout.x[2], kNavigatorToolbarButtonY, layout.w[2], BUTTON_H, "Reload"); setButtonIcon(m_reloadBtnId, m_toolbarIcons[2]);
+    m_homeBtnId = addButton(layout.x[3], kNavigatorToolbarButtonY, layout.w[3], BUTTON_H, "Home"); setButtonIcon(m_homeBtnId, m_toolbarIcons[3]);
+    m_bookmarksBtnId = addButton(layout.x[4], kNavigatorToolbarButtonY, layout.w[4], BUTTON_H, "Marks"); setButtonIcon(m_bookmarksBtnId, m_toolbarIcons[4]);
+    m_addBookmarkBtnId = addButton(layout.x[5], kNavigatorToolbarButtonY, layout.w[5], BUTTON_H, "Add"); setButtonIcon(m_addBookmarkBtnId, m_toolbarIcons[5]);
 }
 
 void NavigatorApp::loadChromeImages()
@@ -7777,6 +7842,7 @@ void NavigatorApp::loadChromeImages()
     serial::puts("/6 throbber_frames_loaded=");
     serial_put_dec64((uint64_t)throbberLoaded);
     serial::puts("/12\n");
+    serial::puts("[NAVIGATOR] phase7c_toolbar_icon_size=16 fallback=label-only cache=init-once\n");
 }
 
 void NavigatorApp::setButtonIcon(int widgetId, const gxos::gui::ImageBitmap& image)
@@ -12172,8 +12238,8 @@ void NavigatorApp::commitAddressBar()
 bool NavigatorApp::hitAddressBar(int x, int y) const
 {
     if (!m_window) return false;
-    int addressW = m_window->w - ADDRESS_X - 20;
-    return addressW > 0 && x >= ADDRESS_X && x < ADDRESS_X + addressW &&
+    const NavigatorToolbarLayout toolbarLayout = navigatorToolbarLayout(m_window->w);
+    return toolbarLayout.addressW > 0 && x >= toolbarLayout.addressX && x < toolbarLayout.addressX + toolbarLayout.addressW &&
            y >= ADDRESS_Y && y < ADDRESS_Y + ADDRESS_H;
 }
 
@@ -14509,6 +14575,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     const kernel::vfs::MountPoint* systemMount = kernel::vfs::get_mount("/system");
     const NavigatorSmokePathProbe certsProbe = probe_navigator_smoke_path("/certs", false);
     const NavigatorSmokePathProbe caBundleProbe = probe_navigator_smoke_path("/certs/ca-bundle.pem", true);
+    const int toolbarIconResourceCount = navigatorToolbarSmokeIconResourceCount();
     const bool localSmokeTlsReady = gxos::gxos_tls_local_smoke_https_ready();
     const char* localSmokeTlsBlocker = gxos::gxos_tls_local_smoke_https_blocker_reason();
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
@@ -14522,6 +14589,10 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] launch.path=AppManager::registerApp -> NavigatorApp::create\n");
     serial::puts("[NAVIGATOR-SMOKE] current.url=about:navigator-runtime\n");
     serial::puts("[NAVIGATOR-SMOKE] stale.placeholder=not active\n");
+    serial::puts("[NAVIGATOR-SMOKE] toolbar.icon_resources=");
+    serial_put_dec64(static_cast<uint64_t>(toolbarIconResourceCount));
+    serial::puts("/6\n");
+    serial::puts("[NAVIGATOR-SMOKE] toolbar.icon_size=16x16 fallback=label-only cache=init-once\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.local_png=enabled through shared ImageAdapter where VFS image data exists\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects/chunked\n");

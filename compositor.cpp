@@ -7064,6 +7064,10 @@ namespace gxos {
                 info.w = w.w;
                 info.h = w.h;
                 info.widgetCount = static_cast<int>(w.widgets.size());
+                info.widgetIconCount = 0;
+                for (const Widget& widget : w.widgets) {
+                    if (widget.icon.status == ImageLoadStatus::Ok) ++info.widgetIconCount;
+                }
                 info.minimized = w.minimized;
                 info.visible = w.visible && !w.tombstoned;
                 out.push_back(info);

@@ -453,12 +453,42 @@ static std::string navigatorHostedSmokeDiagnostic() {
         "registered_widget_count=" + std::to_string(toolbarWidgetCount) +
         " ids=[" + toolbarIdStr + "] (stale placeholder has <=4 buttons)");
 
+    // Widget registration and icon decode are asynchronous IPC messages. Refresh
+    // the compositor snapshot after the toolbar-registration wait so this check
+    // observes the actual cached icon handoff rather than the initial empty list.
+    if (foundWindow) {
+        for (int attempt = 0; attempt < 50 && navWindow.widgetIconCount < 6; ++attempt) {
+            const std::vector<gxos::gui::WindowDebugInfo> refreshedWindows = gxos::gui::Compositor::debugWindowsSnapshot();
+            for (const auto& window : refreshedWindows) {
+                if (window.id == navWindow.id) {
+                    navWindow = window;
+                    break;
+                }
+            }
+            if (navWindow.widgetIconCount >= 6) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    add("toolbar icon cache initialized",
+        foundWindow && navWindow.widgetIconCount >= 6,
+        foundWindow ? ("widget_icon_count=" + std::to_string(navWindow.widgetIconCount)) : "window not found");
+
     bool navigated = gxos::apps::Navigator::SmokeNavigateTo("about:navigator-runtime");
     std::string currentUrl = gxos::apps::Navigator::SmokeCurrentUrl();
     std::string runtimeReport = gxos::apps::Navigator::SmokeRuntimeReport();
     add("runtime URL loads", navigated && currentUrl == "about:navigator-runtime", "currentUrl=" + currentUrl);
     add("runtime report mode", contains(runtimeReport, "Runtime.Mode=hosted/compositor"), "expected hosted/compositor");
     add("runtime report launch path", contains(runtimeReport, "DesktopService::LaunchApp -> apps::Navigator::Launch"), "expected DesktopService/apps::Navigator");
+    add("toolbar icon resources", contains(runtimeReport, "Toolbar.icon_resources=6/6"), "expected six packaged Navigator assets");
+    add("toolbar icon size", contains(runtimeReport, "Toolbar.icon_size=16x16"), "expected bounded 16x16 toolbar icons");
+    add("toolbar icon/text geometry", contains(runtimeReport, "Toolbar.icon_rect_inside_button=yes") &&
+        contains(runtimeReport, "Toolbar.icon_text_nonoverlap=yes"), "expected safe icon/text geometry");
+    add("toolbar fallback path", contains(runtimeReport, "Toolbar.fallback=label_only_on_image_load_failure"), "expected label-preserving fallback");
+    add("toolbar full hit target", contains(runtimeReport, "Toolbar.hit_target=full_button_rectangle"), "expected full button hit target");
+    add("toolbar address geometry", contains(runtimeReport, "Toolbar.address_width_nonnegative=yes") &&
+        contains(runtimeReport, "Toolbar.narrow_window=address_width_clamped_to_zero"), "expected bounded address layout");
+    add("toolbar viewport unchanged", contains(runtimeReport, "Toolbar.toolbar_height=unchanged_64px") &&
+        contains(runtimeReport, "Toolbar.document_viewport=unchanged"), "expected centralized document viewport unchanged");
     add("stale placeholder inactive", contains(runtimeReport, "Runtime.Stale placeholder path=not active"), "expected not active");
     add("file read enabled", contains(runtimeReport, "Capabilities.File read=enabled"), "expected enabled");
     add("file write enabled", contains(runtimeReport, "Capabilities.File write=enabled"), "expected enabled");

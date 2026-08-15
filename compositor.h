@@ -146,6 +146,7 @@ namespace gxos { namespace gui {
         int w{0};
         int h{0};
         int widgetCount{0};
+        int widgetIconCount{0};
         bool minimized{false};
         bool visible{false};
     };

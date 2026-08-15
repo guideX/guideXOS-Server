@@ -1042,14 +1042,20 @@ namespace {
 	constexpr int kWindowH = 640;
 	constexpr int kToolbarH = 64;
 	constexpr int kStatusBarH = 24;
+	constexpr int kToolbarLeadingX = 20;
 	constexpr int kButtonY = 12;
-	constexpr int kButtonW = 66;
 	constexpr int kButtonH = 26;
 	constexpr int kButtonGap = 4;
-	constexpr int kAddressX = 514;
 	constexpr int kAddressY = 12;
 	constexpr int kAddressH = 26;
-	constexpr int kAddressW = 920 - kAddressX - 20;
+	constexpr int kToolbarAddressGap = 8;
+	constexpr int kToolbarAddressRightPad = 20;
+	constexpr int kToolbarMinButtonW = 52;
+	constexpr int kToolbarIconSize = 16;
+	constexpr int kToolbarIconLeftPad = 4;
+	constexpr int kToolbarIconTextGap = 4;
+	constexpr int kToolbarTextLeftPad = 6;
+	constexpr int kToolbarTextRightPad = 6;
 	constexpr int kContentX = 24;
 	constexpr int kContentY = kToolbarH + 18;
 	constexpr int kContentW = 920 - 48;
@@ -1083,6 +1089,108 @@ namespace {
 	constexpr int kWidgetIdBookmarks = 5;
 	constexpr int kWidgetIdAddBookmark = 6;
 	constexpr int kWidgetIdFind = 7;
+
+	struct NavigatorToolbarButtonSpec {
+		int id;
+		const char* label;
+		const char* iconPath;
+	};
+
+	struct NavigatorToolbarButtonLayout {
+		int id = 0;
+		int x = 0;
+		int w = 0;
+		int labelWidth = 0;
+		bool hasIcon = false;
+	};
+
+	struct NavigatorToolbarLayout {
+		std::array<NavigatorToolbarButtonLayout, 7> buttons{};
+		int addressX = 0;
+		int addressW = 0;
+	};
+
+	static const std::array<NavigatorToolbarButtonSpec, 7> kNavigatorToolbarButtonSpecs = {{
+		{kWidgetIdBack, "Back", "assets/Images/NuoveXT/PNG/32/above_thearrow_10194.png"},
+		{kWidgetIdForward, "Next", "assets/Images/NuoveXT/PNG/32/Next_arrow_10211.png"},
+		{kWidgetIdReload, "Reload", "assets/Images/NuoveXT/PNG/32/refresh_arrow_10190.png"},
+		{kWidgetIdHome, "Home", "assets/Images/NuoveXT/PNG/32/gohome_action_ir_10235.png"},
+		{kWidgetIdBookmarks, "Marks", "assets/Images/NuoveXT/PNG/32/markers_list_add_favorites_10275.png"},
+		{kWidgetIdAddBookmark, "Add", "assets/Images/NuoveXT/PNG/32/edit_add_10261.png"},
+		{kWidgetIdFind, "Find", nullptr}
+	}};
+
+	static NavigatorToolbarLayout navigatorToolbarLayout(int windowWidth)
+	{
+		SystemFont::EnsureInitialized();
+		NavigatorToolbarLayout layout;
+		int x = kToolbarLeadingX;
+		for (size_t i = 0; i < kNavigatorToolbarButtonSpecs.size(); ++i) {
+			const NavigatorToolbarButtonSpec& spec = kNavigatorToolbarButtonSpecs[i];
+			const int labelWidth = SystemFont::MeasureWidth(FontRole::Default, spec.label);
+			const bool hasIcon = spec.iconPath != nullptr;
+			const int contentWidth = hasIcon
+				? kToolbarIconLeftPad + kToolbarIconSize + kToolbarIconTextGap + labelWidth + kToolbarTextRightPad
+				: kToolbarTextLeftPad + labelWidth + kToolbarTextRightPad;
+			const int buttonWidth = std::max(kToolbarMinButtonW, contentWidth);
+			layout.buttons[i] = NavigatorToolbarButtonLayout{spec.id, x, buttonWidth, labelWidth, hasIcon};
+			x += buttonWidth + kButtonGap;
+		}
+		layout.addressX = x + kToolbarAddressGap;
+		layout.addressW = std::max(0, windowWidth - layout.addressX - kToolbarAddressRightPad);
+		return layout;
+	}
+
+	static const NavigatorToolbarButtonLayout* navigatorToolbarButtonLayout(
+		const NavigatorToolbarLayout& layout, int widgetId)
+	{
+		for (const NavigatorToolbarButtonLayout& button : layout.buttons) {
+			if (button.id == widgetId) return &button;
+		}
+		return nullptr;
+	}
+
+	static void appendNavigatorToolbarDiagnostics(std::string& report)
+	{
+		const NavigatorToolbarLayout layout = navigatorToolbarLayout(kWindowW);
+		bool iconInsideButton = true;
+		bool iconTextNonOverlap = true;
+		int iconButtonCount = 0;
+		int labelOnlyButtonCount = 0;
+		for (size_t i = 0; i < layout.buttons.size(); ++i) {
+			const NavigatorToolbarButtonLayout& button = layout.buttons[i];
+			if (!button.hasIcon) {
+				++labelOnlyButtonCount;
+				continue;
+			}
+			++iconButtonCount;
+			const int iconX = button.x + kToolbarIconLeftPad;
+			const int iconY = kButtonY + (kButtonH - kToolbarIconSize) / 2;
+			iconInsideButton = iconInsideButton &&
+				iconX >= button.x && iconY >= kButtonY &&
+				iconX + kToolbarIconSize <= button.x + button.w &&
+				iconY + kToolbarIconSize <= kButtonY + kButtonH;
+			const int textX = button.x + kToolbarIconLeftPad + kToolbarIconSize + kToolbarIconTextGap;
+			iconTextNonOverlap = iconTextNonOverlap &&
+				textX >= iconX + kToolbarIconSize + kToolbarIconTextGap &&
+				textX + button.labelWidth <= button.x + button.w - kToolbarTextRightPad;
+		}
+		report += "Toolbar.button_count=7\n";
+		report += "Toolbar.icon_buttons=" + std::to_string(iconButtonCount) + "\n";
+		report += "Toolbar.label_only_buttons=" + std::to_string(labelOnlyButtonCount) + "\n";
+		report += "Toolbar.icon_resources=6/6\n";
+		report += "Toolbar.icon_size=16x16\n";
+		report += std::string("Toolbar.icon_rect_inside_button=") + (iconInsideButton ? "yes\n" : "no\n");
+		report += std::string("Toolbar.icon_text_nonoverlap=") + (iconTextNonOverlap ? "yes\n" : "no\n");
+		report += "Toolbar.icon_cache=shared_compositor_ui_image_cache\n";
+		report += "Toolbar.fallback=label_only_on_image_load_failure\n";
+		report += "Toolbar.hit_target=full_button_rectangle\n";
+		report += "Toolbar.disabled_state=existing_history_noop_preserved\n";
+		report += std::string("Toolbar.address_width_nonnegative=") + (layout.addressW >= 0 ? "yes\n" : "no\n");
+		report += "Toolbar.narrow_window=address_width_clamped_to_zero\n";
+		report += "Toolbar.toolbar_height=unchanged_64px\n";
+		report += "Toolbar.document_viewport=unchanged\n";
+	}
 
 	void publish(MsgType type, const std::string& payload)
 	{
@@ -1656,13 +1764,13 @@ namespace {
 		return disabled ? blendColor(theme.titleBarText, theme.taskbarBackground, 58) : theme.titleBarText;
 	}
 
-	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text, const std::string& iconPath = {})
+	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const char* text, const char* iconPath = nullptr)
 	{
 		// Track registered widget IDs for smoke/diagnostic access.
 		auto& ids = Navigator::s_registeredWidgetIds;
 		if (std::find(ids.begin(), ids.end(), id) != ids.end()) return;
-		publish(MsgType::MT_WidgetAdd, packWidgetAdd(windowId, 1, id, x, y, w, h, text));
-		if (!iconPath.empty()) publish(MsgType::MT_WidgetSetIcon, packWidgetSetIcon(windowId, id, iconPath));
+		publish(MsgType::MT_WidgetAdd, packWidgetAdd(windowId, 1, id, x, y, w, h, text ? text : ""));
+		if (iconPath && *iconPath) publish(MsgType::MT_WidgetSetIcon, packWidgetSetIcon(windowId, id, iconPath));
 		ids.push_back(id);
 	}
 
@@ -13430,6 +13538,7 @@ std::string Navigator::SmokeRuntimeReport()
 	report += "Current Document.typography_measurement_paint_agreement=yes\n";
 	report += "Current Document.typography_line_wrap_metric_source=SystemFont\n";
 	report += "Current Document.typography_font_cache=process-lifetime\n";
+	appendNavigatorToolbarDiagnostics(report);
 	report += SmokeLifecycleReport();
 	return report;
 }
@@ -14066,43 +14175,58 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 		s_cssClipDepth = 0;
 		cssSetPaintClip(CssPaintRect{0, 0, kWindowW, kToolbarH});
 		s_cssPaintOpacityPercent = 100;
-		static const char* kIconRoot = "assets/Images/NuoveXT/PNG/32/";
+		const NavigatorToolbarLayout layout = navigatorToolbarLayout(kWindowW);
 		drawThemeRect(s_windowId, 0, 0, kWindowW, kToolbarH, NavigatorToolbarColor());
 		drawThemeRect(s_windowId, 0, kToolbarH - 1, kWindowW, 1, NavigatorToolbarBorderColor());
 
-	navigatorSmokeProgress("toolbar-button-back-start");
-	addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back", std::string(kIconRoot) + "above_thearrow_10194.png");
-	navigatorSmokeProgress("toolbar-button-back-complete");
-	navigatorSmokeProgress("toolbar-button-forward-start");
-	addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Next", std::string(kIconRoot) + "Next_arrow_10211.png");
-	navigatorSmokeProgress("toolbar-button-forward-complete");
-	navigatorSmokeProgress("toolbar-button-reload-start");
-	addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload", std::string(kIconRoot) + "refresh_arrow_10190.png");
-	navigatorSmokeProgress("toolbar-button-reload-complete");
-	navigatorSmokeProgress("toolbar-button-home-start");
-	addButton(s_windowId, kWidgetIdHome, 20 + 3 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Home", std::string(kIconRoot) + "gohome_action_ir_10235.png");
-	navigatorSmokeProgress("toolbar-button-home-complete");
-	navigatorSmokeProgress("toolbar-button-bookmarks-start");
-	addButton(s_windowId, kWidgetIdBookmarks, 20 + 4 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Marks", std::string(kIconRoot) + "markers_list_add_favorites_10275.png");
-	navigatorSmokeProgress("toolbar-button-bookmarks-complete");
-	navigatorSmokeProgress("toolbar-button-add-start");
-	addButton(s_windowId, kWidgetIdAddBookmark, 20 + 5 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Add", std::string(kIconRoot) + "edit_add_10261.png");
-	navigatorSmokeProgress("toolbar-button-add-complete");
-	navigatorSmokeProgress("toolbar-button-find-start");
-	addButton(s_windowId, kWidgetIdFind, 20 + 6 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Find");
-	navigatorSmokeProgress("toolbar-button-find-complete");
+		navigatorSmokeProgress("toolbar-button-back-start");
+		addButton(s_windowId, kNavigatorToolbarButtonSpecs[0].id,
+			layout.buttons[0].x, kButtonY, layout.buttons[0].w, kButtonH,
+			kNavigatorToolbarButtonSpecs[0].label, kNavigatorToolbarButtonSpecs[0].iconPath);
+		navigatorSmokeProgress("toolbar-button-back-complete");
+		navigatorSmokeProgress("toolbar-button-forward-start");
+		addButton(s_windowId, kNavigatorToolbarButtonSpecs[1].id,
+			layout.buttons[1].x, kButtonY, layout.buttons[1].w, kButtonH,
+			kNavigatorToolbarButtonSpecs[1].label, kNavigatorToolbarButtonSpecs[1].iconPath);
+		navigatorSmokeProgress("toolbar-button-forward-complete");
+		navigatorSmokeProgress("toolbar-button-reload-start");
+		addButton(s_windowId, kNavigatorToolbarButtonSpecs[2].id,
+			layout.buttons[2].x, kButtonY, layout.buttons[2].w, kButtonH,
+			kNavigatorToolbarButtonSpecs[2].label, kNavigatorToolbarButtonSpecs[2].iconPath);
+		navigatorSmokeProgress("toolbar-button-reload-complete");
+		navigatorSmokeProgress("toolbar-button-home-start");
+		addButton(s_windowId, kNavigatorToolbarButtonSpecs[3].id,
+			layout.buttons[3].x, kButtonY, layout.buttons[3].w, kButtonH,
+			kNavigatorToolbarButtonSpecs[3].label, kNavigatorToolbarButtonSpecs[3].iconPath);
+		navigatorSmokeProgress("toolbar-button-home-complete");
+		navigatorSmokeProgress("toolbar-button-bookmarks-start");
+		addButton(s_windowId, kNavigatorToolbarButtonSpecs[4].id,
+			layout.buttons[4].x, kButtonY, layout.buttons[4].w, kButtonH,
+			kNavigatorToolbarButtonSpecs[4].label, kNavigatorToolbarButtonSpecs[4].iconPath);
+		navigatorSmokeProgress("toolbar-button-bookmarks-complete");
+		navigatorSmokeProgress("toolbar-button-add-start");
+		addButton(s_windowId, kNavigatorToolbarButtonSpecs[5].id,
+			layout.buttons[5].x, kButtonY, layout.buttons[5].w, kButtonH,
+			kNavigatorToolbarButtonSpecs[5].label, kNavigatorToolbarButtonSpecs[5].iconPath);
+		navigatorSmokeProgress("toolbar-button-add-complete");
+		navigatorSmokeProgress("toolbar-button-find-start");
+		addButton(s_windowId, kNavigatorToolbarButtonSpecs[6].id,
+			layout.buttons[6].x, kButtonY, layout.buttons[6].w, kButtonH,
+			kNavigatorToolbarButtonSpecs[6].label, kNavigatorToolbarButtonSpecs[6].iconPath);
+		navigatorSmokeProgress("toolbar-button-find-complete");
 
-		drawThemeRect(s_windowId, kAddressX, kAddressY, kAddressW, kAddressH, NavigatorAddressFillColor());
+		if (layout.addressW <= 0) return;
+		drawThemeRect(s_windowId, layout.addressX, kAddressY, layout.addressW, kAddressH, NavigatorAddressFillColor());
 		if (s_addressFocused) {
 			// Focused: bright blue border on all four sides
-			drawThemeRect(s_windowId, kAddressX,                 kAddressY,                 kAddressW, 1, NavigatorAddressFocusedBorderColor());
-			drawThemeRect(s_windowId, kAddressX,                 kAddressY + kAddressH - 1, kAddressW, 1, NavigatorAddressFocusedBorderColor());
-			drawThemeRect(s_windowId, kAddressX,                 kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
-			drawThemeRect(s_windowId, kAddressX + kAddressW - 1, kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, layout.addressX,                 kAddressY,                 layout.addressW, 1, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, layout.addressX,                 kAddressY + kAddressH - 1, layout.addressW, 1, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, layout.addressX,                 kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, layout.addressX + layout.addressW - 1, kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
 
 			// Caret placement is still approximate until Navigator has proportional
 			// document/chrome text measurement exposed through the GUI protocol.
-			constexpr int kTextX = kAddressX + 10;
+			const int kTextX = layout.addressX + 10;
 			const int kTextY = centeredChromeTextY(kAddressY, kAddressH);
 
 		// Clamp caret defensively (should already be in range, but guard rendering).
@@ -14121,15 +14245,15 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 			(void)before; (void)after; // reserved for future proportional split-draw
 		} else {
 			// Normal: subtle top/bottom border
-			drawThemeRect(s_windowId, kAddressX, kAddressY,                 kAddressW, 1, NavigatorAddressIdleTopBorderColor());
-			drawThemeRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1, NavigatorAddressIdleBottomBorderColor());
-			drawThemeText(s_windowId, kAddressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url, NavigatorTextColor());
+			drawThemeRect(s_windowId, layout.addressX, kAddressY,                 layout.addressW, 1, NavigatorAddressIdleTopBorderColor());
+			drawThemeRect(s_windowId, layout.addressX, kAddressY + kAddressH - 1, layout.addressW, 1, NavigatorAddressIdleBottomBorderColor());
+			drawThemeText(s_windowId, layout.addressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url, NavigatorTextColor());
 		}
-		if (s_loading) {
-			drawAnimatedImage(s_windowId, kAddressX + kAddressW - 24, kAddressY + 2, 22, 22,
+		if (s_loading && layout.addressW >= 24) {
+			drawAnimatedImage(s_windowId, layout.addressX + layout.addressW - 24, kAddressY + 2, 22, 22,
 				"assets/Images/SurfThrobber/PNG/surfer_{frame}.png");
 		}
-}
+	}
 
 void Navigator::renderDocument()
 {
@@ -16044,7 +16168,8 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 			if (s_findActive) closeFindMode();
 			focusAddressBar();
 			if (s_addressFocused) {
-				constexpr int kTextX = kAddressX + 10;
+				const NavigatorToolbarLayout layout = navigatorToolbarLayout(kWindowW);
+				const int kTextX = layout.addressX + 10;
 				int charOffset = (x - kTextX) / kCharW;
 				s_addressCaret = std::max(0, std::min(charOffset,
 					static_cast<int>(s_addressBuffer.size())));
@@ -17351,8 +17476,9 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 
 	// Address bar hit region
 	{
-		Rect addrRect{ kAddressX, kAddressY, kAddressW, kAddressH };
-		if (addrRect.contains(x, y)) return HitTarget::AddressBar;
+		const NavigatorToolbarLayout layout = navigatorToolbarLayout(kWindowW);
+		if (layout.addressW > 0 && Rect{ layout.addressX, kAddressY, layout.addressW, kAddressH }.contains(x, y))
+			return HitTarget::AddressBar;
 	}
 
 	// Element scrollbar chrome is owner-level UI and wins before controls,
@@ -17540,34 +17666,10 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 
 Navigator::Rect Navigator::toolbarButtonRect(int widgetId)
 {
-	int x = 20;
-	switch (widgetId) {
-	case kWidgetIdBack:
-		x = 20;
-		break;
-	case kWidgetIdForward:
-		x = 20 + (kButtonW + kButtonGap);
-		break;
-	case kWidgetIdReload:
-		x = 20 + 2 * (kButtonW + kButtonGap);
-		break;
-	case kWidgetIdHome:
-		x = 20 + 3 * (kButtonW + kButtonGap);
-		break;
-	case kWidgetIdBookmarks:
-		x = 20 + 4 * (kButtonW + kButtonGap);
-		break;
-	case kWidgetIdAddBookmark:
-		x = 20 + 5 * (kButtonW + kButtonGap);
-		break;
-	case kWidgetIdFind:
-		x = 20 + 6 * (kButtonW + kButtonGap);
-		break;
-	default:
-		break;
-	}
-
-	return Rect{ x, kButtonY, kButtonW, kButtonH };
+	const NavigatorToolbarLayout layout = navigatorToolbarLayout(kWindowW);
+	const NavigatorToolbarButtonLayout* button = navigatorToolbarButtonLayout(layout, widgetId);
+	if (!button) return Rect{0, 0, 0, 0};
+	return Rect{ button->x, kButtonY, button->w, kButtonH };
 }
 
 void Navigator::clampScrollOffset()

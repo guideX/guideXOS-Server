@@ -699,12 +699,9 @@ private:
     static const int MAX_FORM_VALUE = 320;
     static const int TOOLBAR_H = 48;
     static const int STATUS_H = 24;
-    static const int BUTTON_W = 64;
     static const int BUTTON_H = 22;
-    static const int BUTTON_GAP = 6;
     static const int CONTENT_X = 16;
     static const int CONTENT_Y = 62;
-    static const int ADDRESS_X = 452;
     static const int ADDRESS_Y = 12;
     static const int ADDRESS_H = 22;
 
