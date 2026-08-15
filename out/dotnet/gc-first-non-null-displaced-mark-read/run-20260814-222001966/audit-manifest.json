@@ -163,7 +163,11 @@
   "gitHandoff": {
     "milestoneFilesOnly": true,
     "unrelatedPreExistingEvidenceStaged": false,
-    "commit": "pending checkpoint commit",
-    "push": "pending checkpoint push"
+    "commit": "93c04e80b4c4a02e9e17e9b2e896d262823e3a75",
+    "commitMessage": "Record bounded first displaced mark read outcome",
+    "push": "succeeded via origin/v1.1_DOTNET_SUPPORT using the existing TortoiseGitPlink/Pageant key path; no force-push",
+    "pushAttemptDefaultSsh": "failed with Permission denied (publickey); no credentials changed",
+    "finalAheadBehindAfterCheckpoint": "0/0",
+    "finalWorktree": "pre-existing untracked evidence remains preserved; no unrelated files staged"
   }
 }

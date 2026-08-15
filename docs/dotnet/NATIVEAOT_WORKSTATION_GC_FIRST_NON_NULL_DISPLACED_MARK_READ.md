@@ -368,6 +368,15 @@ The corrected report, proof-harness classification, and selected fresh audit
 evidence are intentional milestone files. Pre-existing unrelated/untracked
 evidence remains untouched and is not silently included.
 
+Checkpoint commit: `93c04e80b4c4a02e9e17e9b2e896d262823e3a75`,
+`Record bounded first displaced mark read outcome`. The first default SSH push
+attempt was rejected with `Permission denied (publickey)`; the configured
+TortoiseGitPlink/Pageant fallback then pushed
+`v1.1_DOTNET_SUPPORT` successfully to
+`origin/v1.1_DOTNET_SUPPORT`. No credentials were changed, and no
+force-push, amend, squash, reset, or rebase was used. The final upstream
+relationship after the checkpoint push was `0/0`.
+
 Recommended next smallest bounded milestone: establish a source-valid
 pre-drain route that supplies the minimum additional genuine root promotions
 needed to occupy queue slots, first determining whether NativeAOT's exact
