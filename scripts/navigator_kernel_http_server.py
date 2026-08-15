@@ -836,6 +836,30 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<div id='phase6c-clip' class='clip-outer'><div id='phase6c-clipped-scroll' class='clip-inner'><div class='large'>scrollbar is clipped by overflow:hidden ancestor</div></div></div>"
                              b"<div id='phase6c-tiny' class='tiny'>tiny</div><div id='phase6c-following' class='case following'>following normal-flow content remains outside scrollbar extent.</div><div style='height:260px'></div></body></html>")
             return
+        if path == "/navigator-smoke/typography-phase7a.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><title>Navigator Typography Phase 7A Roboto Integration</title><style>"
+                             b"html,body{margin:0;padding:0} body{font-size:16px;line-height:1.35;background:#f8fafc;color:#172033}"
+                             b"h1{font-size:28px;margin:8px 0;background:#dbeafe} h2{font-size:22px;margin:8px 0} h3{font-size:18px;margin:8px 0}"
+                             b"p{margin:8px 0}.narrow{width:190px;border:2px solid #2563eb;padding:6px}.family{margin:8px 0;padding:6px;border:2px solid #64748b;background:#fff}"
+                             b".mono{font-family:monospace}.unknown{font-family:DefinitelyNotInstalled}.flex{display:flex;flex-wrap:wrap;gap:8px;width:520px;padding:8px;border:2px solid #0891b2;background:#cffafe;box-sizing:border-box}.flex>div{flex:1 1 0;min-width:0;padding:6px;background:#a5f3fc}"
+                             b".relative{position:relative;left:8px;padding:6px;background:#dcfce7}.absolute-host{position:relative;height:46px;background:#fef3c7}.absolute{position:absolute;left:160px;top:8px;padding:5px;background:#fdba74}.fixed{position:fixed;left:650px;top:160px;padding:5px;background:#99f6e4;z-index:20}.sticky-host{position:sticky;top:4px;padding:6px;background:#bbf7d0;z-index:10}"
+                             b".hidden{width:250px;height:32px;overflow:hidden;padding:4px;border:2px solid #dc2626}.auto{position:relative;width:280px;height:74px;overflow:auto;padding:6px;border:2px solid #7c3aed;background:#ede9fe}.auto .tall{width:620px;height:210px;padding:4px}.auto .scroll-link{position:absolute;left:8px;top:230px;width:220px;height:24px;padding:4px}.following{margin:12px 0;padding:8px;background:#dcfce7}"
+                             b"</style></head><body><h1 id='phase7a-heading'>Typography Phase 7A</h1>"
+                             b"<p id='phase7a-body'>Normal body text with punctuation, digits 0123456789, and supported extended bytes: caf\xc3\xa9 \xe2\x80\x94 na\xc3\xafve.</p>"
+                             b"<p id='phase7a-paragraphs'>Multiple paragraphs keep ordinary flow readable. A second sentence exercises wrapping and vertical spacing after the first paragraph.</p>"
+                             b"<h2 id='phase7a-heading-small'>Smaller heading</h2><h3 id='phase7a-heading-large'>Heading size and baseline check</h3>"
+                             b"<p><b id='phase7a-bold'>Bold text</b> and <strong id='phase7a-strong'>strong text</strong> with <a id='phase7a-link' href='/navigator-smoke/basic.html'>a wrapped link whose measured width must remain clickable across line breaks</a>.</p>"
+                             b"<div class='narrow' id='phase7a-narrow'>Narrow container text wraps according to the selected proportional face and continues on the following line.</div>"
+                             b"<div class='family' id='phase7a-family'><p style='font-family:sans-serif'>sans-serif preferred proportional text</p><p style='font-family:Roboto, sans-serif'>Roboto family request</p><p class='unknown'>unknown family falls back safely</p><p class='mono'>monospace family remains distinct</p></div>"
+                             b"<pre id='phase7a-pre'>preformatted 0123 !?[]{} g j p q y\nsecond pre line keeps its monospace metrics</pre>"
+                             b"<p id='phase7a-code'>Mixed proportional text <code id='phase7a-inline-code'>inline code 1234 g j p q y</code> returns to normal text after code.</p>"
+                             b"<div class='flex' id='phase7a-flex'><div>Flex item one wraps with Roboto text.</div><div>Flex item two has constrained intrinsic width and wraps.</div></div>"
+                             b"<div class='relative' id='phase7a-relative'>Relative positioned text remains measurable.</div><div class='absolute-host'><span class='absolute' id='phase7a-absolute'>Absolute text</span></div>"
+                             b"<div class='fixed' id='phase7a-fixed'>Fixed text link <a id='phase7a-fixed-link' href='/navigator-smoke/basic.html'>fixed link</a></div><div class='sticky-host' id='phase7a-sticky'>Sticky text and <a id='phase7a-sticky-link' href='/navigator-smoke/basic.html'>sticky link</a></div>"
+                             b"<div class='hidden' id='phase7a-hidden'>Overflow hidden text must clip without corrupting layout.</div><div class='auto' id='phase7a-auto'><div class='tall'>Scrollable proportional text.<a id='phase7a-scroll-link' class='scroll-link' href='/navigator-smoke/basic.html'>a link after scrolling</a></div></div>"
+                             b"<div class='following' id='phase7a-following'>Following normal block flow remains intact after typography cases.</div></body></html>")
+            return
         if path == "/navigator-smoke/css-phase3h.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><title>CSS Phase 3H Traditional Positioning Completion</title><style>"

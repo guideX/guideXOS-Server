@@ -28,6 +28,30 @@ static inline int max_int(int a, int b)
 	return a > b ? a : b;
 }
 
+static int boundedScalePercent(int scalePercent)
+{
+	if (scalePercent < 25) return 25;
+	if (scalePercent > 600) return 600;
+	return scalePercent;
+}
+
+static int scaleStart(int value, int scalePercent)
+{
+	return (value * boundedScalePercent(scalePercent)) / 100;
+}
+
+static int scaleEnd(int value, int scalePercent)
+{
+	const int scaled = (value * boundedScalePercent(scalePercent) + 99) / 100;
+	return scaled > 0 ? scaled : 1;
+}
+
+static int scaleMetric(int value, int scalePercent)
+{
+	if (value <= 0) return value;
+	return max_int(1, scaleEnd(value, scalePercent));
+}
+
 static BitmapFontFace s_faces[] = {
 	{{FontSize::Small9, FontWeight::Regular, FontSlant::Normal}, "Roboto 9 Regular", "/system/fonts/roboto/roboto_9pt_regular.png", nullptr, 260, 160, 20, 20, 13, 8, 32, kPrintableGlyphCount, 12, 8, 4, 16, 0, 0, {}},
 	{{FontSize::Small9, FontWeight::Bold, FontSlant::Normal}, "Roboto 9 Bold", "/system/fonts/roboto/roboto_9pt_bold.png", nullptr, 260, 160, 20, 20, 13, 8, 32, kPrintableGlyphCount, 12, 8, 4, 16, 0, 0, {}},
@@ -436,6 +460,47 @@ int SystemFont::MeasureWidth(const BitmapFontFace* face, const char* str, int le
 	return width;
 }
 
+const BitmapFontFace* SystemFont::GetFaceForPixelSize(int requestedPx, FontWeight weight, FontSlant slant)
+{
+	if (requestedPx < 1) requestedPx = 1;
+	if (requestedPx > 72) requestedPx = 72;
+	return GetFace(requestedPx <= 13 ? FontSize::Small9 : FontSize::Normal12, weight, slant);
+}
+
+int SystemFont::ScalePercentForPixelSize(int requestedPx)
+{
+	if (requestedPx < 1) requestedPx = 1;
+	if (requestedPx > 72) requestedPx = 72;
+	if (requestedPx <= 13) return 100;
+	return boundedScalePercent((requestedPx * 100 + 6) / 12);
+}
+
+bool SystemFont::IsFaceFallback(const BitmapFontFace* face)
+{
+	return !face || face->fallback != 0 || face->atlasAlpha == nullptr;
+}
+
+bool SystemFont::IsRobotoAvailable()
+{
+	const BitmapFontFace* face = GetFace(FontSize::Normal12, FontWeight::Regular, FontSlant::Normal);
+	return !IsFaceFallback(face);
+}
+
+int SystemFont::MeasureWidthScaled(const BitmapFontFace* face, const char* str, int len, int scalePercent)
+{
+	if (!str) return 0;
+	if (IsFaceFallback(face)) return MeasureWidth(face, str, len);
+	if (scalePercent == 100) return MeasureWidth(face, str, len);
+
+	len = stringLength(str, len);
+	int width = 0;
+	for (int i = 0; i < len; ++i) {
+		const BitmapGlyphMetrics* metrics = glyphMetrics(*face, str[i]);
+		width += scaleMetric(metrics ? metrics->advance : fallbackAdvance(*face), scalePercent);
+	}
+	return width;
+}
+
 int SystemFont::MeasureWidth(FontRole role, const char* str, int len)
 {
 	return MeasureWidth(GetFace(role), str, len);
@@ -497,6 +562,30 @@ int SystemFont::MeasureHeight(FontRole role)
 	return MeasureHeight(GetFace(role));
 }
 
+int SystemFont::MeasureAscentScaled(const BitmapFontFace* face, int scalePercent)
+{
+	if (IsFaceFallback(face)) return MeasureAscent(face);
+	return scaleMetric(MeasureAscent(face), scalePercent);
+}
+
+int SystemFont::MeasureDescentScaled(const BitmapFontFace* face, int scalePercent)
+{
+	if (IsFaceFallback(face)) return MeasureDescent(face);
+	return scaleMetric(MeasureDescent(face), scalePercent);
+}
+
+int SystemFont::MeasureLineHeightScaled(const BitmapFontFace* face, int scalePercent)
+{
+	if (IsFaceFallback(face)) return MeasureLineHeight(face);
+	return scaleMetric(MeasureLineHeight(face), scalePercent);
+}
+
+int SystemFont::BaselineOffsetScaled(const BitmapFontFace* face, int scalePercent)
+{
+	if (IsFaceFallback(face)) return BaselineOffset(face);
+	return scaleMetric(BaselineOffset(face), scalePercent);
+}
+
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 void SystemFont::DrawText(HDC dc, int x, int y, const char* str, int len, COLORREF color, const BitmapFontFace* face)
 {
@@ -539,6 +628,53 @@ void SystemFont::DrawText(HDC dc, int x, int y, const char* str, int len, COLORR
 void SystemFont::DrawText(HDC dc, int x, int y, const char* str, int len, COLORREF color, FontRole role)
 {
 	DrawText(dc, x, y, str, len, color, GetFace(role));
+}
+
+void SystemFont::DrawTextScaled(HDC dc, int x, int y, const char* str, int len, COLORREF color,
+								const BitmapFontFace* face, int scalePercent)
+{
+	if (!dc || !str) return;
+	if (scalePercent == 100 || IsFaceFallback(face)) {
+		DrawText(dc, x, y, str, len, color, face);
+		return;
+	}
+
+	len = stringLength(str, len);
+	int cursorX = x;
+	for (int i = 0; i < len; ++i) {
+		int glyphIndex = static_cast<int>(static_cast<unsigned char>(str[i])) - static_cast<int>(face->firstCodepoint);
+		if (!validGlyphIndex(*face, glyphIndex)) {
+			cursorX += scaleMetric(fallbackAdvance(*face), scalePercent);
+			continue;
+		}
+
+		const BitmapGlyphMetrics& metrics = face->glyphs[glyphIndex];
+		if (!metrics.hasPixels) {
+			cursorX += scaleMetric(metrics.advance, scalePercent);
+			continue;
+		}
+
+		const int col = glyphIndex % face->columns;
+		const int row = glyphIndex / face->columns;
+		const int originX = col * face->cellWidth;
+		const int originY = row * face->cellHeight;
+		for (int py = 0; py < metrics.height; ++py) {
+			const int sourceY = metrics.yOffset + py;
+			const int destY0 = y + scaleStart(sourceY, scalePercent);
+			const int destY1 = y + scaleEnd(sourceY + 1, scalePercent);
+			for (int px = 0; px < metrics.width; ++px) {
+				const uint8_t alpha = atlasPixelAlpha(*face, originX + metrics.left + px, originY + metrics.top + py);
+				if (alpha == 0) continue;
+				const int destX0 = cursorX + scaleStart(metrics.xOffset + px, scalePercent);
+				const int destX1 = cursorX + scaleEnd(metrics.xOffset + px + 1, scalePercent);
+				for (int drawY = destY0; drawY < destY1; ++drawY) {
+					for (int drawX = destX0; drawX < destX1; ++drawX)
+						blendPixelHdc(dc, drawX, drawY, color, alpha);
+				}
+			}
+		}
+		cursorX += scaleMetric(metrics.advance, scalePercent);
+	}
 }
 #endif
 
@@ -584,6 +720,59 @@ void SystemFont::DrawTextToBuffer(uint32_t* pixels, int pitch, int bufW, int buf
 			}
 		}
 		cursorX += metrics.advance;
+	}
+}
+
+void SystemFont::DrawTextToBufferScaled(uint32_t* pixels, int pitch, int bufW, int bufH,
+									int x, int y, const char* str, int len, uint32_t color,
+									const BitmapFontFace* face, int scalePercent)
+{
+	if (!str || !pixels) return;
+	if (scalePercent == 100 || IsFaceFallback(face)) {
+		DrawTextToBuffer(pixels, pitch, bufW, bufH, x, y, str, len, color, face);
+		return;
+	}
+
+	len = stringLength(str, len);
+	int cursorX = x;
+	const int dstPitch = pitch / 4;
+	for (int i = 0; i < len; ++i) {
+		int glyphIndex = static_cast<int>(static_cast<unsigned char>(str[i])) - static_cast<int>(face->firstCodepoint);
+		if (!validGlyphIndex(*face, glyphIndex)) {
+			cursorX += scaleMetric(fallbackAdvance(*face), scalePercent);
+			continue;
+		}
+
+		const BitmapGlyphMetrics& metrics = face->glyphs[glyphIndex];
+		if (!metrics.hasPixels) {
+			cursorX += scaleMetric(metrics.advance, scalePercent);
+			continue;
+		}
+
+		const int col = glyphIndex % face->columns;
+		const int row = glyphIndex / face->columns;
+		const int originX = col * face->cellWidth;
+		const int originY = row * face->cellHeight;
+		for (int py = 0; py < metrics.height; ++py) {
+			const int sourceY = metrics.yOffset + py;
+			const int destY0 = y + scaleStart(sourceY, scalePercent);
+			const int destY1 = y + scaleEnd(sourceY + 1, scalePercent);
+			for (int px = 0; px < metrics.width; ++px) {
+				const uint8_t alpha = atlasPixelAlpha(*face, originX + metrics.left + px, originY + metrics.top + py);
+				if (alpha == 0) continue;
+				const int destX0 = cursorX + scaleStart(metrics.xOffset + px, scalePercent);
+				const int destX1 = cursorX + scaleEnd(metrics.xOffset + px + 1, scalePercent);
+				for (int drawY = destY0; drawY < destY1; ++drawY) {
+					if (drawY < 0 || drawY >= bufH) continue;
+					for (int drawX = destX0; drawX < destX1; ++drawX) {
+						if (drawX < 0 || drawX >= bufW) continue;
+						uint32_t& dst = pixels[drawY * dstPitch + drawX];
+						dst = blendColor(dst, color, alpha);
+					}
+				}
+			}
+		}
+		cursorX += scaleMetric(metrics.advance, scalePercent);
 	}
 }
 

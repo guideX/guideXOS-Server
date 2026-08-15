@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <algorithm>
 #include "ipc.h"
 #include <sstream>
 namespace gxos {
@@ -45,13 +46,27 @@ namespace gxos {
             MT_DesktopBackgroundInventoryChanged = 32, // payload: active background id
             MT_ClearFocus = 33,                // payload: window id losing focus
             MT_SyncFrame = 34,                 // payload: <window id>|<expected generation>|<expected app sequence>|<freeze>
-            MT_UnfreezeFrame = 35              // payload: window id; validation capture helper only
+            MT_UnfreezeFrame = 35,              // payload: window id; validation capture helper only
+            MT_DrawTextAtStyled = 36            // payload: <winId>|<x>|<y>|<r>|<g>|<b>|<fontSize>|<weight>|<slant>|<family>|<text>
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };
         struct KeyEvent { int keyCode; bool down; };
         struct MouseEvent { int x; int y; int dx; int dy; uint32_t buttons; };
         struct DrawImageSpec { uint64_t winId; int x; int y; int w; int h; std::string path; };
+        struct DrawTextStyleSpec {
+            uint64_t winId{0};
+            int x{0};
+            int y{0};
+            uint8_t r{220};
+            uint8_t g{220};
+            uint8_t b{220};
+            int fontSize{16};
+            int weight{0};
+            int slant{0};
+            int family{0}; // 0 = proportional/Roboto, 1 = legacy monospace
+            std::string text;
+        };
         struct FramePresentSpec {
             uint64_t winId{0};
             int x{0};
@@ -186,5 +201,37 @@ namespace gxos {
         }
         inline std::string packDrawTextAt(uint64_t winId, int x, int y, const std::string& text) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << text; return oss.str( ); }
         inline std::string packDrawTextAtColor(uint64_t winId, int x, int y, uint8_t r, uint8_t g, uint8_t b, const std::string& text) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << static_cast<int>(r) << "|" << static_cast<int>(g) << "|" << static_cast<int>(b) << "|" << text; return oss.str( ); }
+        inline std::string packDrawTextAtStyled(uint64_t winId, int x, int y, uint8_t r, uint8_t g, uint8_t b,
+                                                int fontSize, int weight, int slant, int family,
+                                                const std::string& text) {
+            std::ostringstream oss;
+            oss << winId << "|" << x << "|" << y << "|" << static_cast<int>(r) << "|" << static_cast<int>(g)
+                << "|" << static_cast<int>(b) << "|" << fontSize << "|" << weight << "|" << slant << "|" << family
+                << "|" << text;
+            return oss.str( );
+        }
+        inline bool unpackDrawTextAtStyled(const std::string& payload, DrawTextStyleSpec& spec) {
+            std::istringstream iss(payload);
+            std::string winS, xS, yS, rS, gS, bS, sizeS, weightS, slantS, familyS;
+            if (!std::getline(iss, winS, '|') || !std::getline(iss, xS, '|') || !std::getline(iss, yS, '|') ||
+                !std::getline(iss, rS, '|') || !std::getline(iss, gS, '|') || !std::getline(iss, bS, '|') ||
+                !std::getline(iss, sizeS, '|') || !std::getline(iss, weightS, '|') || !std::getline(iss, slantS, '|') ||
+                !std::getline(iss, familyS, '|') || !std::getline(iss, spec.text)) return false;
+            try {
+                spec.winId = std::stoull(winS);
+                spec.x = std::stoi(xS);
+                spec.y = std::stoi(yS);
+                spec.r = static_cast<uint8_t>(std::max(0, std::min(255, std::stoi(rS))));
+                spec.g = static_cast<uint8_t>(std::max(0, std::min(255, std::stoi(gS))));
+                spec.b = static_cast<uint8_t>(std::max(0, std::min(255, std::stoi(bS))));
+                spec.fontSize = std::max(1, std::min(72, std::stoi(sizeS)));
+                spec.weight = std::max(0, std::min(1, std::stoi(weightS)));
+                spec.slant = std::max(0, std::min(1, std::stoi(slantS)));
+                spec.family = std::max(0, std::min(1, std::stoi(familyS)));
+                return spec.winId != 0;
+            } catch (...) {
+                return false;
+            }
+        }
     }
 }

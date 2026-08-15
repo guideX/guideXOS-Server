@@ -2020,6 +2020,38 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(cssPhase6cFinalReport, "css_scrollbar_visibility_convergence=bounded-two-pass-overlay-stable"),
         "tiny=no-interactive-bars;convergence=bounded");
 
+    const bool typographyPhase7aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/typography-phase7a.html");
+    const std::string typographyPhase7aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string typographyPhase7aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const int typographyPhase7aMaxScroll = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7a-auto");
+    const bool typographyPhase7aVisibleLink = gxos::apps::Navigator::SmokeHitLinkById("phase7a-link");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7a-auto", 0, 210);
+    const bool typographyPhase7aScrolledLink = gxos::apps::Navigator::SmokeHitLinkById("phase7a-scroll-link");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7a-auto", 0, 0);
+    add("Typography phase 7A fixture loads and covers document surfaces",
+        typographyPhase7aLoaded && contains(typographyPhase7aText, "Typography Phase 7A") &&
+        contains(typographyPhase7aText, "preformatted") && contains(typographyPhase7aText, "inline code") &&
+        contains(typographyPhase7aText, "Flex item one") && contains(typographyPhase7aText, "Following normal block flow"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("Typography phase 7A selects Roboto with bounded fallback and metric agreement",
+        contains(typographyPhase7aReport, "Current Document.typography_preferred_font=Roboto") &&
+        contains(typographyPhase7aReport, "Current Document.typography_roboto_available=yes") &&
+        hasPositiveCount(typographyPhase7aReport, "Current Document.typography_proportional_runs=") &&
+        hasPositiveCount(typographyPhase7aReport, "Current Document.typography_monospace_runs=") &&
+        hasPositiveCount(typographyPhase7aReport, "Current Document.typography_font_family_fallbacks=") &&
+        contains(typographyPhase7aReport, "Current Document.typography_measurement_paint_agreement=yes") &&
+        contains(typographyPhase7aReport, "Current Document.typography_line_wrap_metric_source=SystemFont"),
+        std::string("proportional=") + yesNo(hasPositiveCount(typographyPhase7aReport, "Current Document.typography_proportional_runs=")) +
+        ";monospace=" + yesNo(hasPositiveCount(typographyPhase7aReport, "Current Document.typography_monospace_runs=")) +
+        ";fallback=" + yesNo(hasPositiveCount(typographyPhase7aReport, "Current Document.typography_font_family_fallbacks=")));
+    add("Typography phase 7A links, flex text, positioning, and overflow use current geometry",
+        typographyPhase7aVisibleLink && typographyPhase7aMaxScroll > 0 &&
+        contains(typographyPhase7aText, "Relative positioned text") && contains(typographyPhase7aText, "Absolute text") &&
+        contains(typographyPhase7aText, "Fixed text link") && contains(typographyPhase7aText, "Sticky text"),
+        std::string("visibleLink=") + yesNo(typographyPhase7aVisibleLink) + ";scrolledLink=" + yesNo(typographyPhase7aScrolledLink) +
+        ";maxScroll=" + std::to_string(typographyPhase7aMaxScroll) +
+        ";scrolledLink=" + yesNo(typographyPhase7aScrolledLink));
+
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssPhase2aReport = gxos::apps::Navigator::SmokeRuntimeReport();

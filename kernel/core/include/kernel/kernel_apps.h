@@ -22,18 +22,29 @@
 // std::string/std::vector document model in the freestanding kernel build.
 namespace gxos {
 namespace web {
+enum class GenericFontFamily : uint8_t {
+    Inherit = 0,
+    Roboto = 1,
+    SansSerif = 2,
+    Monospace = 3,
+    Serif = 4,
+    Unknown = 5,
+};
+
 struct WebStyle {
     bool     hasColor = false;
     uint32_t color = 0;
     bool     hasBackgroundColor = false;
     uint32_t backgroundColor = 0;
     bool     bold = false;
+    bool     italic = false;
     bool     underline = false;
     int      marginTop = -1;
     int      marginBottom = -1;
     int      marginLeft = -1;
     int      padding = -1;
     int      fontScaleOrSize = -1;
+    GenericFontFamily genericFontFamily = GenericFontFamily::Inherit;
 };
 
 struct CssDiagnostics {
@@ -562,6 +573,7 @@ public:
     virtual void onKeyChar(char c) override;
 
     static app::KernelApp* create() { return new NavigatorApp(); }
+    static bool smokeTypographyPhase7A();
     static bool smokeHttpFetch(const char* url, int* statusCode, char* contentType,
                                int contentTypeLen, int* bodyBytes, int* parsedBlocks,
                                char* error, int errorLen, char* finalUrl = nullptr,
@@ -936,7 +948,7 @@ private:
     void addBookmark(const char* title, const char* url);
     void loadDefaultBookmarks();
     void drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-    void drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxChars, int& outY) const;
+    void drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxWidth, int& outY, const gxos::web::WebStyle& style) const;
     bool isSelectableBlock(const DocBlock& block) const;
     void clearSelection();
     bool hasSelection() const;

@@ -17,6 +17,7 @@
 #include "include/kernel/desktop_icon_theme_flat.h"
 #include "include/kernel/file_clipboard.h"
 #include "include/kernel/image_adapter.h"
+#include "include/kernel/system_font.h"
 #include "include/kernel/nic.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/tcp.h"
@@ -218,10 +219,6 @@ static int css_margin_left_or(const gxos::web::WebStyle& style, int fallback) {
 
 static int css_padding_or(const gxos::web::WebStyle& style, int fallback) {
     return style.padding >= 0 ? style.padding : fallback;
-}
-
-static int css_font_size_or(const gxos::web::WebStyle& style, int fallback) {
-    return style.fontScaleOrSize > 0 ? style.fontScaleOrSize : fallback;
 }
 
 // Bitmap font constants (same as compositor)
@@ -802,6 +799,149 @@ static void appDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color
         cx += kGlyphW + kGlyphSpacing;
         text++;
     }
+}
+
+// Navigator document text uses the same bounded SystemFont face/metric path
+// as the hosted renderer.  Keep this adapter local to Navigator so legacy
+// kernel app chrome continues to use its established bitmap text path.
+static int navigatorFontPixelSize(const gxos::web::WebStyle& style)
+{
+    int px = style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 12;
+    if (px < 1) px = 1;
+    if (px > 72) px = 72;
+    return px;
+}
+
+static bool navigatorUsesMonospace(const gxos::web::WebStyle& style)
+{
+    return style.genericFontFamily == gxos::web::GenericFontFamily::Monospace;
+}
+
+static const gxos::gui::BitmapFontFace* navigatorFontFace(const gxos::web::WebStyle& style)
+{
+    if (navigatorUsesMonospace(style)) return nullptr;
+    const gxos::gui::FontWeight weight = style.bold
+        ? gxos::gui::FontWeight::Bold
+        : gxos::gui::FontWeight::Regular;
+    const gxos::gui::FontSlant slant = style.italic
+        ? gxos::gui::FontSlant::Italic
+        : gxos::gui::FontSlant::Normal;
+    return gxos::gui::SystemFont::GetFaceForPixelSize(navigatorFontPixelSize(style), weight, slant);
+}
+
+static int navigatorFontScale(const gxos::web::WebStyle& style)
+{
+    return gxos::gui::SystemFont::ScalePercentForPixelSize(navigatorFontPixelSize(style));
+}
+
+static int navigatorTextWidth(const gxos::web::WebStyle& style, const char* text, int len = -1)
+{
+    if (!text) return 0;
+    if (navigatorUsesMonospace(style)) {
+        const int textLen = len >= 0 ? len : strlen_local(text);
+        return textLen * (kGlyphW + kGlyphSpacing);
+    }
+    const gxos::gui::BitmapFontFace* face = navigatorFontFace(style);
+    return gxos::gui::SystemFont::MeasureWidthScaled(face, text, len, navigatorFontScale(style));
+}
+
+static int navigatorLineHeight(const gxos::web::WebStyle& style)
+{
+    if (navigatorUsesMonospace(style)) return kGlyphH + 3;
+    const gxos::gui::BitmapFontFace* face = navigatorFontFace(style);
+    int lineHeight = gxos::gui::SystemFont::MeasureLineHeightScaled(face, navigatorFontScale(style));
+    return lineHeight > 0 ? lineHeight : 1;
+}
+
+static int navigatorNextLineBreak(const char* text, int start, int end, int maxWidth,
+                                  const gxos::web::WebStyle& style)
+{
+    if (!text || start >= end) return start;
+    if (maxWidth < 1) maxWidth = 1;
+
+    const gxos::gui::BitmapFontFace* face = navigatorFontFace(style);
+    const int scale = navigatorFontScale(style);
+    int width = 0;
+    int lastSpace = -1;
+    int pos = start;
+    while (pos < end) {
+        const int advance = navigatorUsesMonospace(style)
+            ? (kGlyphW + kGlyphSpacing)
+            : gxos::gui::SystemFont::MeasureWidthScaled(face, text + pos, 1, scale);
+        if (pos > start && width + advance > maxWidth) {
+            return lastSpace > start ? lastSpace : pos;
+        }
+        width += advance;
+        if (text[pos] == ' ') lastSpace = pos;
+        ++pos;
+    }
+    return end;
+}
+
+static int navigatorWrappedLineCount(const char* text, int maxWidth,
+                                     const gxos::web::WebStyle& style)
+{
+    if (!text || !text[0]) return 1;
+    const int len = strlen_local(text);
+    int lines = 0;
+    int physicalStart = 0;
+    while (physicalStart <= len) {
+        int physicalEnd = physicalStart;
+        while (physicalEnd < len && text[physicalEnd] != '\n') ++physicalEnd;
+        ++lines;
+        int pos = physicalStart;
+        while (pos < physicalEnd) {
+            int breakAt = navigatorNextLineBreak(text, pos, physicalEnd, maxWidth, style);
+            if (breakAt <= pos) breakAt = pos + 1;
+            pos = breakAt;
+            while (pos < physicalEnd && text[pos] == ' ') ++pos;
+        }
+        if (physicalEnd >= len) break;
+        physicalStart = physicalEnd + 1;
+    }
+    return lines > 0 ? lines : 1;
+}
+
+static int navigatorLineCharOffset(const char* text, int start, int length, int x,
+                                   const gxos::web::WebStyle& style)
+{
+    if (!text || length <= 0 || x <= 0) return 0;
+    const gxos::gui::BitmapFontFace* face = navigatorFontFace(style);
+    const int scale = navigatorFontScale(style);
+    int width = 0;
+    for (int i = 0; i < length; ++i) {
+        const int advance = navigatorUsesMonospace(style)
+            ? (kGlyphW + kGlyphSpacing)
+            : gxos::gui::SystemFont::MeasureWidthScaled(face, text + start + i, 1, scale);
+        if (x < width + (advance + 1) / 2) return i;
+        width += advance;
+    }
+    return length;
+}
+
+static void navigatorDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color,
+                              const gxos::web::WebStyle& style)
+{
+    if (!text || !text[0]) return;
+    if (navigatorUsesMonospace(style)) {
+        appDrawText(x, y, text, color);
+        return;
+    }
+    if (framebuffer::is_available() && framebuffer::get_bpp() == 32) {
+        uint32_t* target = framebuffer::get_draw_buffer();
+        if (target) {
+            const int pitch = framebuffer::is_double_buffered()
+                ? static_cast<int>(framebuffer::get_width() * sizeof(uint32_t))
+                : static_cast<int>(framebuffer::get_pitch());
+            gxos::gui::SystemFont::DrawTextToBufferScaled(
+                target, pitch, static_cast<int>(framebuffer::get_width()),
+                static_cast<int>(framebuffer::get_height()), static_cast<int>(x),
+                static_cast<int>(y), text, -1, color, navigatorFontFace(style),
+                navigatorFontScale(style));
+            return;
+        }
+    }
+    appDrawText(x, y, text, color);
 }
 
 static void appDrawRect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
@@ -7142,6 +7282,114 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     appDrawText(x + 10, y + h - STATUS_H + 8, statusLine, rgb(222, 226, 236));
 }
 
+bool NavigatorApp::smokeTypographyPhase7A()
+{
+    NavigatorApp app;
+    app::KernelWindow smokeWindow;
+    smokeWindow.w = 640;
+    smokeWindow.h = 480;
+    app.m_window = &smokeWindow;
+
+    static const char kFixture[] =
+        "<style>"
+        "body{font-family:Roboto,sans-serif;font-size:12px;}"
+        ".bold{font-weight:bold;}"
+        ".italic{font-style:italic;}"
+        ".bolditalic{font-weight:bold;font-style:italic;}"
+        ".mono{font-family:monospace;}"
+        ".fallback{font-family:missing-family,Roboto;}"
+        ".unsupported{font-family:missing-family;}"
+        "</style>"
+        "<p class='normal'>Proportional normal text with descenders gyjpq.</p>"
+        "<p class='bold'>Bold proportional text.</p>"
+        "<p class='italic'>Italic proportional text.</p>"
+        "<p class='bolditalic'>Bold italic proportional text.</p>"
+        "<p class='fallback'>Fallback-list text remains visible.</p>"
+        "<p class='unsupported'>Unsupported family text remains visible.</p>"
+        "<pre class='mono'>for (i = 0; i &lt; 4; ++i)\n    puts(i);</pre>"
+        "<a href='http://guidexos.test:8080/navigator-smoke/final.html'>Wrapped positioned link text</a>";
+
+    app.parseHtmlDocument("http://guidexos.test:8080/navigator-smoke/typography-phase7a.html",
+                         kFixture, "http", "text/html", 200, "OK");
+
+    int normalIndex = -1;
+    int boldIndex = -1;
+    int italicIndex = -1;
+    int boldItalicIndex = -1;
+    int fallbackIndex = -1;
+    int unsupportedIndex = -1;
+    int monoIndex = -1;
+    int linkIndex = -1;
+    for (int i = 0; i < app.m_blockCount; ++i) {
+        const DocBlock& block = app.m_blocks[i];
+        if (block.kind == BLOCK_LINK) linkIndex = i;
+        if (block.kind == BLOCK_PREFORMATTED) monoIndex = i;
+        if (block.kind != BLOCK_PARAGRAPH) continue;
+        if (strstr(block.text, "Proportional normal")) normalIndex = i;
+        else if (strstr(block.text, "Bold proportional")) boldIndex = i;
+        else if (strstr(block.text, "Italic proportional")) italicIndex = i;
+        else if (strstr(block.text, "Bold italic")) boldItalicIndex = i;
+        else if (strstr(block.text, "Fallback-list")) fallbackIndex = i;
+        else if (strstr(block.text, "Unsupported family")) unsupportedIndex = i;
+    }
+
+    const bool robotoAvailable = gxos::gui::SystemFont::IsRobotoAvailable();
+    const gxos::web::WebStyle normalStyle = normalIndex >= 0 ? app.m_blocks[normalIndex].style : gxos::web::WebStyle{};
+    const gxos::web::WebStyle monoStyle = monoIndex >= 0 ? app.m_blocks[monoIndex].style : gxos::web::WebStyle{};
+    const int normalWidth = navigatorTextWidth(normalStyle, "iiWW");
+    const int monoWidth = navigatorTextWidth(monoStyle, "iiWW");
+    const int normalLineHeight = navigatorLineHeight(normalStyle);
+    const int normalLines = navigatorWrappedLineCount(
+        normalIndex >= 0 ? app.m_blocks[normalIndex].text : "", 180, normalStyle);
+
+    app.drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
+
+    bool linkGeometry = false;
+    if (linkIndex >= 0) {
+        const int maxWidth = smokeWindow.w - CONTENT_X * 2 - 32;
+        const int left = CONTENT_X + 14 + css_margin_left_or(app.m_bodyStyle, 0) +
+            css_margin_left_or(app.m_blocks[linkIndex].style, 0);
+        const int top = app.blockY(linkIndex, maxWidth) +
+            css_margin_top_or(app.m_blocks[linkIndex].style, 4);
+        linkGeometry = app.hitLinkIndex(left + 1, top + 1) == linkIndex;
+    }
+
+    const bool faceSelection = normalIndex >= 0 &&
+        (!robotoAvailable || !gxos::gui::SystemFont::IsFaceFallback(navigatorFontFace(normalStyle)));
+    const bool styleSelection = boldIndex >= 0 && app.m_blocks[boldIndex].style.bold &&
+        italicIndex >= 0 && app.m_blocks[italicIndex].style.italic &&
+        boldItalicIndex >= 0 && app.m_blocks[boldItalicIndex].style.bold &&
+        app.m_blocks[boldItalicIndex].style.italic;
+    const bool familySelection = monoIndex >= 0 && navigatorUsesMonospace(monoStyle) &&
+        fallbackIndex >= 0 && app.m_blocks[fallbackIndex].style.genericFontFamily == gxos::web::GenericFontFamily::Roboto &&
+        unsupportedIndex >= 0 && app.m_blocks[unsupportedIndex].style.genericFontFamily == gxos::web::GenericFontFamily::Unknown;
+    const bool metricAgreement = normalWidth > 0 && monoWidth > 0 && normalLineHeight > 0 && normalLines > 0;
+    const bool distinctMonospace = !robotoAvailable || normalWidth != monoWidth;
+    const bool pass = app.m_blockCount > 0 && faceSelection && styleSelection && familySelection &&
+        metricAgreement && distinctMonospace && linkGeometry;
+
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.roboto_available=");
+    serial::puts(robotoAvailable ? "yes\n" : "no\n");
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.font_initialization=process-lifetime\n");
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.normal_width=");
+    serial_put_dec((uint32_t)normalWidth);
+    serial::puts("\n[NAVIGATOR-SMOKE] typography.phase7a.monospace_width=");
+    serial_put_dec((uint32_t)monoWidth);
+    serial::puts("\n[NAVIGATOR-SMOKE] typography.phase7a.normal_line_height=");
+    serial_put_dec((uint32_t)normalLineHeight);
+    serial::puts("\n[NAVIGATOR-SMOKE] typography.phase7a.measurement_paint_agreement=");
+    serial::puts(metricAgreement ? "yes\n" : "no\n");
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.monospace_distinct=");
+    serial::puts(distinctMonospace ? "yes\n" : "no\n");
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.link_geometry=");
+    serial::puts(linkGeometry ? "yes\n" : "no\n");
+    serial::puts(pass ? "[NAVIGATOR-SMOKE] typography.phase7a.result=PASS\n"
+                      : "[NAVIGATOR-SMOKE] typography.phase7a.result=FAIL\n");
+
+    app.m_window = nullptr;
+    return pass;
+}
+
 void NavigatorApp::onMouseMove(int x, int y)
 {
     if (m_mouseLeftDown && !m_addressFocused) {
@@ -8611,12 +8859,15 @@ static void nav_style_merge(gxos::web::WebStyle& base, const gxos::web::WebStyle
     if (overrideStyle.hasColor) { base.hasColor = true; base.color = overrideStyle.color; }
     if (overrideStyle.hasBackgroundColor) { base.hasBackgroundColor = true; base.backgroundColor = overrideStyle.backgroundColor; }
     if (overrideStyle.bold) base.bold = true;
+    if (overrideStyle.italic) base.italic = true;
     if (overrideStyle.underline) base.underline = true;
     if (overrideStyle.marginTop >= 0) base.marginTop = overrideStyle.marginTop;
     if (overrideStyle.marginBottom >= 0) base.marginBottom = overrideStyle.marginBottom;
     if (overrideStyle.marginLeft >= 0) base.marginLeft = overrideStyle.marginLeft;
     if (overrideStyle.padding >= 0) base.padding = overrideStyle.padding;
     if (overrideStyle.fontScaleOrSize >= 0) base.fontScaleOrSize = overrideStyle.fontScaleOrSize;
+    if (overrideStyle.genericFontFamily != gxos::web::GenericFontFamily::Inherit)
+        base.genericFontFamily = overrideStyle.genericFontFamily;
 }
 
 static gxos::web::WebStyle nav_default_style_for_tag(const char* tag)
@@ -8628,7 +8879,7 @@ static gxos::web::WebStyle nav_default_style_for_tag(const char* tag)
     else if (streq_local(tag, "p")) { style.marginTop = 4; style.marginBottom = 8; }
     else if (streq_local(tag, "a")) { style.hasColor = true; style.color = 0xFF1E5CB8u; style.underline = true; style.marginTop = 4; style.marginBottom = 6; }
     else if (streq_local(tag, "li")) { style.marginTop = 2; style.marginBottom = 4; style.marginLeft = 12; }
-    else if (streq_local(tag, "pre") || streq_local(tag, "code")) { style.hasBackgroundColor = true; style.backgroundColor = 0xFFE6E8EEu; style.marginTop = 6; style.marginBottom = 8; style.padding = 4; }
+    else if (streq_local(tag, "pre") || streq_local(tag, "code")) { style.hasBackgroundColor = true; style.backgroundColor = 0xFFE6E8EEu; style.marginTop = 6; style.marginBottom = 8; style.padding = 4; style.genericFontFamily = gxos::web::GenericFontFamily::Monospace; }
     else if (streq_local(tag, "img")) { style.marginTop = 6; style.marginBottom = 6; }
     return style;
 }
@@ -8651,6 +8902,38 @@ static bool nav_parse_css_selector(const char* start, const char* end, NavCssRul
     rule.selectorType = NAV_CSS_ELEMENT; strcopy(rule.selector, selector, sizeof(rule.selector)); return true;
 }
 
+static bool nav_parse_font_family(const char* value, gxos::web::GenericFontFamily& outFamily)
+{
+    if (!value) return false;
+    bool sawUnknown = false;
+    const char* p = value;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == ',') ++p;
+        const char* end = p;
+        while (*end && *end != ',') ++end;
+        char token[40];
+        nav_trim_lower_copy(p, end, token, sizeof(token));
+        int tokenLen = strlen_local(token);
+        if (tokenLen >= 2 && ((token[0] == '\'' && token[tokenLen - 1] == '\'') ||
+                              (token[0] == '"' && token[tokenLen - 1] == '"'))) {
+            for (int i = 1; i + 1 < tokenLen; ++i) token[i - 1] = token[i];
+            token[tokenLen - 2] = '\0';
+        }
+        if (streq_local(token, "roboto")) { outFamily = gxos::web::GenericFontFamily::Roboto; return true; }
+        if (streq_local(token, "sans-serif")) { outFamily = gxos::web::GenericFontFamily::SansSerif; return true; }
+        if (streq_local(token, "monospace")) { outFamily = gxos::web::GenericFontFamily::Monospace; return true; }
+        if (streq_local(token, "serif")) { outFamily = gxos::web::GenericFontFamily::Serif; return true; }
+        if (token[0]) sawUnknown = true;
+        p = end;
+        if (*p == ',') ++p;
+    }
+    if (sawUnknown) {
+        outFamily = gxos::web::GenericFontFamily::Unknown;
+        return true;
+    }
+    return false;
+}
+
 static void nav_apply_css_decl(gxos::web::WebStyle& style, const char* propStart, const char* propEnd, const char* valueStart, const char* valueEnd, gxos::web::CssDiagnostics& diag)
 {
     char prop[32]; char value[48]; nav_trim_lower_copy(propStart, propEnd, prop, sizeof(prop)); nav_trim_lower_copy(valueStart, valueEnd, value, sizeof(value));
@@ -8659,6 +8942,8 @@ static void nav_apply_css_decl(gxos::web::WebStyle& style, const char* propStart
     if (streq_local(prop, "color")) { if (nav_parse_css_color(value, color)) { style.hasColor = true; style.color = color; } else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "background-color")) { if (nav_parse_css_color(value, color)) { style.hasBackgroundColor = true; style.backgroundColor = color; } else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "font-weight")) { if (streq_local(value, "bold")) style.bold = true; else if (!streq_local(value, "normal")) ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "font-style")) { if (streq_local(value, "italic") || streq_local(value, "oblique")) style.italic = true; else if (!streq_local(value, "normal")) ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "font-family")) { gxos::web::GenericFontFamily family = gxos::web::GenericFontFamily::Unknown; if (nav_parse_font_family(value, family)) style.genericFontFamily = family; else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "text-decoration")) { if (streq_local(value, "underline")) style.underline = true; else if (!streq_local(value, "none")) ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "margin")) { int px = nav_parse_css_px(value, ok); if (ok) { style.marginTop = px; style.marginBottom = px; style.marginLeft = px; } else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "margin-top")) { int px = nav_parse_css_px(value, ok); if (ok) style.marginTop = px; else ++diag.unsupportedDeclarationCount; }
@@ -11922,9 +12207,10 @@ void NavigatorApp::formControlRect(int blockIndex, int& x, int& y, int& w, int& 
 {
     x = y = w = h = 0;
     if (!m_window || blockIndex < 0 || blockIndex >= m_blockCount || !isFormBlock(m_blocks[blockIndex])) return;
-    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
+    int maxWidth = m_window->w - CONTENT_X * 2 - 32;
+    if (maxWidth < 32) maxWidth = 32;
     x = CONTENT_X + 14 + css_margin_left_or(m_bodyStyle, 0) + css_margin_left_or(m_blocks[blockIndex].style, 0);
-    y = blockY(blockIndex, maxChars) + css_margin_top_or(m_blocks[blockIndex].style, 4);
+    y = blockY(blockIndex, maxWidth) + css_margin_top_or(m_blocks[blockIndex].style, 4);
     w = (m_blocks[blockIndex].kind == BLOCK_FORM_SUBMIT) ? 112 :
         ((m_blocks[blockIndex].kind == BLOCK_FORM_CHECKBOX || m_blocks[blockIndex].kind == BLOCK_FORM_RADIO) ? 260 : 320);
     h = formControlHeight(m_blocks[blockIndex]);
@@ -11971,17 +12257,7 @@ void NavigatorApp::focusNextFormBlock()
 
 int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
 {
-    int len = strlen_local(block.text);
-    int lines = 1;
-    if (block.kind == BLOCK_PREFORMATTED) {
-        // Count embedded newlines; each is a new line in the output.
-        lines = 1;
-        for (int i = 0; block.text[i]; ++i) if (block.text[i] == '\n') ++lines;
-    } else if (maxChars > 0 && len > 0) {
-        // Approximate word-wrap line count.
-        lines = (len + maxChars - 1) / maxChars;
-        if (lines < 1) lines = 1;
-    }
+    int lines = navigatorWrappedLineCount(block.text, maxChars, block.style);
     if (block.kind == BLOCK_IMAGE) {
         int imageH = block.height > 0 ? block.height : (block.naturalHeight > 0 ? block.naturalHeight : 64);
         if (imageH > 420) imageH = 420;
@@ -11990,7 +12266,7 @@ int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
     if (isFormBlock(block)) {
         return css_margin_top_or(block.style, 4) + formControlHeight(block) + css_margin_bottom_or(block.style, 6);
     }
-    int lineH = block.kind == BLOCK_HEADING ? (css_font_size_or(block.style, 20) > 22 ? 20 : 16) : 16;
+    int lineH = navigatorLineHeight(block.style);
     int boxPadding = block.kind == BLOCK_PREFORMATTED ? css_padding_or(block.style, 4) * 2 : 0;
     // Extra pre-gap before headings is accounted for in blockY() via the caller.
     return css_margin_top_or(block.style, block.kind == BLOCK_HEADING ? 10 : 4) + lines * lineH + boxPadding + css_margin_bottom_or(block.style, block.kind == BLOCK_LIST_ITEM ? 4 : 8);
@@ -12045,8 +12321,8 @@ NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y
     nearest.offset = 0;
     if (!m_window) return nearest;
 
-    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
-    if (maxChars < 8) maxChars = 8;
+    int maxWidth = m_window->w - CONTENT_X * 2 - 32;
+    if (maxWidth < 32) maxWidth = 32;
     int nearestDistance = 1 << 30;
     int bodyMarginLeft = css_margin_left_or(m_bodyStyle, 0);
     for (int i = 0; i < m_blockCount; ++i) {
@@ -12057,15 +12333,13 @@ NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y
         int blockMarginTop = css_margin_top_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_HEADING ? 10 : 4);
         int blockMarginLeft = css_margin_left_or(m_blocks[i].style, 0);
         int blockPadding = css_padding_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_PREFORMATTED ? 4 : 0);
-        int lineH = m_blocks[i].kind == BLOCK_HEADING ? (css_font_size_or(m_blocks[i].style, 20) > 22 ? 20 : 16) : 16;
+        int lineH = navigatorLineHeight(m_blocks[i].style);
         int textX = CONTENT_X + 14 + bodyMarginLeft + blockMarginLeft + (m_blocks[i].kind == BLOCK_LIST_ITEM ? 14 : 0);
-        int textY = blockY(i, maxChars) + blockMarginTop + (m_blocks[i].kind == BLOCK_PREFORMATTED ? blockPadding : 0);
-        int wrapChars = maxChars - (m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 0);
-        if (wrapChars < 8) wrapChars = 8;
+        int textY = blockY(i, maxWidth) + blockMarginTop + (m_blocks[i].kind == BLOCK_PREFORMATTED ? blockPadding : 0);
+        int wrapWidth = maxWidth - (m_blocks[i].kind == BLOCK_LIST_ITEM ? 24 : 0);
+        if (wrapWidth < 32) wrapWidth = 32;
 
         int localLineIndex = 0;
-        int localLineStart = 0;
-        int localLineLen = 0;
         bool foundInside = false;
         int bestOffset = 0;
         int parse = 0;
@@ -12083,22 +12357,12 @@ NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y
             }
             int pos = parse;
             while (pos < lineEnd) {
-                int take = wrapChars;
-                if (pos + take > lineEnd) take = lineEnd - pos;
-                int breakAt = take;
-                if (pos + take < lineEnd) {
-                    for (int j = take; j > 0; --j) {
-                        if (text[pos + j] == ' ') { breakAt = j; break; }
-                    }
-                }
-                localLineStart = pos;
-                localLineLen = breakAt;
+                int breakAt = navigatorNextLineBreak(text, pos, lineEnd, wrapWidth, m_blocks[i].style);
+                if (breakAt <= pos) breakAt = pos + 1;
                 int lineTop = textY + localLineIndex * lineH;
                 if (y >= lineTop && y < lineTop + lineH) {
-                    int charOffset = (x - textX) / 6;
-                    if (charOffset < 0) charOffset = 0;
-                    if (charOffset > localLineLen) charOffset = localLineLen;
-                    bestOffset = localLineStart + charOffset;
+                    int charOffset = navigatorLineCharOffset(text, pos, breakAt - pos, x - textX, m_blocks[i].style);
+                    bestOffset = pos + charOffset;
                     foundInside = true;
                     break;
                 }
@@ -12121,7 +12385,7 @@ NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y
         if (clampToNearest) {
             int dx = 0;
             int minX = textX;
-            int maxX = textX + wrapChars * 6;
+            int maxX = textX + wrapWidth;
             if (x < minX) dx = minX - x;
             else if (x > maxX) dx = x - maxX;
             int dy = 0;
@@ -12263,25 +12527,26 @@ int NavigatorApp::blockY(int index, int maxChars) const
 int NavigatorApp::hitLinkIndex(int x, int y) const
 {
     if (!m_window) return -1;
-    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
+    int maxWidth = m_window->w - CONTENT_X * 2 - 32;
+    if (maxWidth < 32) maxWidth = 32;
     for (int i = 0; i < m_blockCount; ++i) {
         if (m_blocks[i].kind != BLOCK_LINK) continue;
-        int by = blockY(i, maxChars) + css_margin_top_or(m_blocks[i].style, 4);
-        int h = blockHeight(m_blocks[i], maxChars) - css_margin_top_or(m_blocks[i].style, 4);
-        int tw = strlen_local(m_blocks[i].text) * 6;
+        int by = blockY(i, maxWidth) + css_margin_top_or(m_blocks[i].style, 4);
+        int h = blockHeight(m_blocks[i], maxWidth) - css_margin_top_or(m_blocks[i].style, 4);
+        int tw = navigatorTextWidth(m_blocks[i].style, m_blocks[i].text);
+        if (tw > maxWidth) tw = maxWidth;
         int left = CONTENT_X + 14 + css_margin_left_or(m_bodyStyle, 0) + css_margin_left_or(m_blocks[i].style, 0);
         if (x >= left && x < left + tw && y >= by && y < by + h) return i;
     }
     return -1;
 }
 
-void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxChars, int& outY) const
+void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxWidth, int& outY, const gxos::web::WebStyle& style) const
 {
     char line[96];
     int len = strlen_local(text);
     int yy = (int)y;
-    if (maxChars > 90) maxChars = 90;
-    if (maxChars < 8) maxChars = 8;
+    if (maxWidth < 32) maxWidth = 32;
 
     // Split on embedded newlines first; then word-wrap each physical line.
     int lineStart = 0;
@@ -12295,22 +12560,16 @@ void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uin
         int segLen = lineEnd - lineStart;
         if (segLen == 0) {
             // Blank physical line (e.g. empty line in <pre>)
-            yy += 16;
+            yy += navigatorLineHeight(style);
         }
         while (pos < lineEnd) {
-            int take = maxChars;
-            if (pos + take > lineEnd) take = lineEnd - pos;
-            int breakAt = take;
-            if (pos + take < lineEnd) {
-                for (int i = take; i > 0; --i) {
-                    if (text[pos + i] == ' ') { breakAt = i; break; }
-                }
-            }
+            int breakAt = navigatorNextLineBreak(text, pos, lineEnd, maxWidth, style);
+            if (breakAt <= pos) breakAt = pos + 1;
             int copyLen = breakAt < 95 ? breakAt : 95;
             for (int i = 0; i < copyLen; ++i) line[i] = text[pos + i];
             line[copyLen] = '\0';
-            appDrawText(x, (uint32_t)yy, line, color);
-            yy += 16;
+            navigatorDrawText(x, (uint32_t)yy, line, color, style);
+            yy += navigatorLineHeight(style);
             pos += breakAt;
             while (pos < lineEnd && text[pos] == ' ') ++pos;
         }
@@ -12319,19 +12578,20 @@ void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uin
         lineStart = lineEnd + 1; // skip '\n'
     }
 
-    if (len == 0) yy += 16;
+    if (len == 0) yy += navigatorLineHeight(style);
     outY = yy;
 }
 
 void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
-    int maxChars = ((int)w - CONTENT_X * 2 - 32) / 6;
+    int maxWidth = (int)w - CONTENT_X * 2 - 32;
+    if (maxWidth < 32) maxWidth = 32;
     int bottom = (int)h - STATUS_H - 8;
     int bodyMarginLeft = css_margin_left_or(m_bodyStyle, 0);
     for (int i = 0; i < m_blockCount; ++i) {
-        int by = blockY(i, maxChars);
+        int by = blockY(i, maxWidth);
         if (by > bottom) continue;
-        if (by + blockHeight(m_blocks[i], maxChars) < CONTENT_Y) continue;
+        if (by + blockHeight(m_blocks[i], maxWidth) < CONTENT_Y) continue;
         int absY = (int)y + by;
         int blockMarginTop = css_margin_top_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_HEADING ? 10 : 4);
         int blockMarginLeft = css_margin_left_or(m_blocks[i].style, 0);
@@ -12351,41 +12611,41 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
                 int highlightW = (int)w - CONTENT_X * 2 - 32;
                 if (m_blocks[i].kind == BLOCK_LIST_ITEM) highlightX += 14;
                 if (highlightW > 0) {
-                    framebuffer::fill_rect((uint32_t)highlightX, (uint32_t)highlightY, (uint32_t)highlightW, (uint32_t)(blockHeight(m_blocks[i], maxChars) - css_margin_bottom_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 8)), rgb(110, 150, 220));
+                    framebuffer::fill_rect((uint32_t)highlightX, (uint32_t)highlightY, (uint32_t)highlightW, (uint32_t)(blockHeight(m_blocks[i], maxWidth) - css_margin_bottom_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 8)), rgb(110, 150, 220));
                 }
             }
         }
         if (m_blocks[i].kind == BLOCK_HEADING) {
             // Bold-looking heading: draw in a deep navy color, then a 2px accent bar.
             uint32_t color = css_color_or(rgb(22, 32, 52), m_blocks[i].style);
-            appDrawText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color);
-            if (m_blocks[i].style.bold) appDrawText(textX + 1, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color);
+            navigatorDrawText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, m_blocks[i].style);
             int barW = (int)w - CONTENT_X * 2 - 32;
-            framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop + 18), (uint32_t)(barW > 0 ? barW : 1), 2, rgb(55, 110, 200));
+            framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop + navigatorLineHeight(m_blocks[i].style) + 2), (uint32_t)(barW > 0 ? barW : 1), 2, rgb(55, 110, 200));
         } else if (m_blocks[i].kind == BLOCK_LINK) {
             uint32_t color = css_color_or(i == m_hoverLinkIndex ? rgb(10, 84, 160) : rgb(30, 92, 184), m_blocks[i].style);
             int linkOutY = absY + blockMarginTop;
-            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxChars, linkOutY);
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxWidth, linkOutY, m_blocks[i].style);
             // Underline each rendered line.
             if (m_blocks[i].style.underline) {
-                for (int ly = absY + blockMarginTop + 13; ly < linkOutY; ly += 16) {
-                    int lineCharCount = maxChars < 90 ? maxChars : 90;
-                    framebuffer::fill_rect(textX, (uint32_t)ly, (uint32_t)(lineCharCount * 6), 1, color);
+                for (int ly = absY + blockMarginTop + navigatorLineHeight(m_blocks[i].style) - 2; ly < linkOutY; ly += navigatorLineHeight(m_blocks[i].style)) {
+                    int lineWidth = navigatorTextWidth(m_blocks[i].style, m_blocks[i].text);
+                    if (lineWidth > maxWidth) lineWidth = maxWidth;
+                    framebuffer::fill_rect(textX, (uint32_t)ly, (uint32_t)lineWidth, 1, color);
                 }
             }
         } else if (m_blocks[i].kind == BLOCK_LIST_ITEM) {
             uint32_t color = css_color_or(rgb(54, 60, 72), m_blocks[i].style);
-            appDrawText(textX, (uint32_t)(absY + blockMarginTop), "-", rgb(72, 78, 92));
+            navigatorDrawText(textX, (uint32_t)(absY + blockMarginTop), "-", rgb(72, 78, 92), m_blocks[i].style);
             int outY = absY + blockMarginTop;
-            drawWrappedText(textX + 14, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxChars - 4, outY);
+            drawWrappedText(textX + 14, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxWidth - 24, outY, m_blocks[i].style);
         } else if (m_blocks[i].kind == BLOCK_PREFORMATTED) {
             // Light box background for preformatted blocks.
-            int preH = blockHeight(m_blocks[i], maxChars) - css_margin_top_or(m_blocks[i].style, 4) - css_margin_bottom_or(m_blocks[i].style, 8);
+            int preH = blockHeight(m_blocks[i], maxWidth) - css_margin_top_or(m_blocks[i].style, 4) - css_margin_bottom_or(m_blocks[i].style, 8);
             int boxW = (int)w - CONTENT_X * 2 - 28;
             if (boxW > 0 && preH > 0)
                 framebuffer::fill_rect(textX - 4, (uint32_t)(absY + blockMarginTop - 2), (uint32_t)(boxW), (uint32_t)(preH + blockPadding * 2), css_background_or(rgb(230, 232, 238), m_blocks[i].style));
             int outY = absY + blockMarginTop + blockPadding;
-            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop + blockPadding), m_blocks[i].text, css_color_or(rgb(40, 50, 68), m_blocks[i].style), maxChars, outY);
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop + blockPadding), m_blocks[i].text, css_color_or(rgb(40, 50, 68), m_blocks[i].style), maxWidth, outY, m_blocks[i].style);
         } else if (isFormBlock(m_blocks[i])) {
             DocBlock& block = m_blocks[i];
             int controlX = (int)textX;
@@ -12501,7 +12761,7 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
             }
         } else {
             int outY = absY + blockMarginTop;
-            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, css_color_or(rgb(54, 60, 72), m_blocks[i].style), maxChars, outY);
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, css_color_or(rgb(54, 60, 72), m_blocks[i].style), maxWidth, outY, m_blocks[i].style);
         }
     }
 }
@@ -12509,10 +12769,11 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 int NavigatorApp::maxScroll() const
 {
     int visible = m_window ? ((int)m_window->h - TOOLBAR_H - STATUS_H - 12) : 0;
-    int maxChars = m_window ? ((m_window->w - CONTENT_X * 2 - 32) / 6) : 80;
+    int maxWidth = m_window ? ((m_window->w - CONTENT_X * 2 - 32)) : 480;
+    if (maxWidth < 32) maxWidth = 32;
     int docHeight = 24;
     for (int i = 0; i < m_blockCount; ++i) {
-        docHeight += blockHeight(m_blocks[i], maxChars);
+        docHeight += blockHeight(m_blocks[i], maxWidth);
         // Match the pre-gap added in blockY.
         if (i + 1 < m_blockCount && m_blocks[i + 1].kind == BLOCK_HEADING)
             docHeight += 10;
@@ -16038,12 +16299,13 @@ static bool printNavigatorHttpSmokeCases()
 void printNavigatorRuntimeSmokeReport()
 {
     bool registered = printNavigatorRuntimeSmokePreamble();
+    bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
 #ifdef GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE
     bool httpOk = printNavigatorHttpSmokeCases();
-    serial::puts((registered && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
 #else
     serial::puts("[NAVIGATOR-SMOKE] http.active_cases=skipped\n");
-    serial::puts(registered ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
 #endif
     serial::puts("[NAVIGATOR-SMOKE] END\n");
 }
@@ -16051,8 +16313,9 @@ void printNavigatorRuntimeSmokeReport()
 void printNavigatorHttpRuntimeSmokeReport()
 {
     bool registered = printNavigatorRuntimeSmokePreamble();
+    bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
     bool httpOk = printNavigatorHttpSmokeCases();
-    serial::puts((registered && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
     serial::puts("[NAVIGATOR-SMOKE] END\n");
 }
 

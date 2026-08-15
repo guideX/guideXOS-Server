@@ -85,11 +85,21 @@ struct BitmapFontFace {
 class SystemFont {
 public:
 	static void EnsureInitialized();
+	// Navigator uses these helpers for a bounded CSS pixel-size model. The
+	// packaged atlas remains the authoritative source for both measurement and
+	// painting; scaling is performed only after the face has been selected.
+	static const BitmapFontFace* GetFaceForPixelSize(int requestedPx,
+		FontWeight weight = FontWeight::Regular, FontSlant slant = FontSlant::Normal);
+	static int ScalePercentForPixelSize(int requestedPx);
+	static bool IsFaceFallback(const BitmapFontFace* face);
+	static bool IsRobotoAvailable();
 	static const BitmapFontFace* GetFace(FontRole role);
 	static const BitmapFontFace* GetFace(FontSize size, FontWeight weight = FontWeight::Regular,
 										 FontSlant slant = FontSlant::Normal);
 	static const BitmapFontFace* GetFallbackFace();
 	static int MeasureWidth(const BitmapFontFace* face, const char* str, int len = -1);
+	static int MeasureWidthScaled(const BitmapFontFace* face, const char* str, int len,
+		int scalePercent);
 	static int MeasureWidth(FontRole role, const char* str, int len = -1);
 	static int MeasureAscent(const BitmapFontFace* face);
 	static int MeasureAscent(FontRole role);
@@ -101,10 +111,16 @@ public:
 	static int BaselineOffset(FontRole role);
 	static int MeasureHeight(const BitmapFontFace* face);
 	static int MeasureHeight(FontRole role);
+	static int MeasureAscentScaled(const BitmapFontFace* face, int scalePercent);
+	static int MeasureDescentScaled(const BitmapFontFace* face, int scalePercent);
+	static int MeasureLineHeightScaled(const BitmapFontFace* face, int scalePercent);
+	static int BaselineOffsetScaled(const BitmapFontFace* face, int scalePercent);
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 	static void DrawText(HDC dc, int x, int y, const char* str, int len, COLORREF color,
 						 const BitmapFontFace* face);
+	static void DrawTextScaled(HDC dc, int x, int y, const char* str, int len, COLORREF color,
+						 const BitmapFontFace* face, int scalePercent);
 	static void DrawText(HDC dc, int x, int y, const char* str, int len, COLORREF color,
 						 FontRole role = FontRole::Default);
 #endif
@@ -112,6 +128,9 @@ public:
 	static void DrawTextToBuffer(uint32_t* pixels, int pitch, int bufW, int bufH,
 								 int x, int y, const char* str, int len, uint32_t color,
 								 const BitmapFontFace* face);
+	static void DrawTextToBufferScaled(uint32_t* pixels, int pitch, int bufW, int bufH,
+								 int x, int y, const char* str, int len, uint32_t color,
+								 const BitmapFontFace* face, int scalePercent);
 	static void DrawTextToBuffer(uint32_t* pixels, int pitch, int bufW, int bufH,
 								 int x, int y, const char* str, int len, uint32_t color,
 								 FontRole role = FontRole::Default);

@@ -1752,6 +1752,10 @@ static std::string stripCssQuotes(const std::string& text)
 static bool parseGenericFontFamily(const std::string& rawValue, GenericFontFamily& outFamily)
 {
 	const std::string value = toLower(trim(stripCssQuotes(rawValue)));
+	if (value == "roboto") {
+		outFamily = GenericFontFamily::Roboto;
+		return true;
+	}
 	if (value == "sans-serif") {
 		outFamily = GenericFontFamily::SansSerif;
 		return true;
@@ -1762,6 +1766,12 @@ static bool parseGenericFontFamily(const std::string& rawValue, GenericFontFamil
 	}
 	if (value == "monospace") {
 		outFamily = GenericFontFamily::Monospace;
+		return true;
+	}
+	if (!value.empty()) {
+		// Keep an unknown family request as a bounded, deterministic fallback
+		// instead of rejecting the whole declaration or probing host fonts.
+		outFamily = GenericFontFamily::Unknown;
 		return true;
 	}
 	return false;
@@ -3495,19 +3505,24 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	}
 	if (prop == "font-family") {
 		std::vector<std::string> families = splitCssCommaTokens(val);
-		bool sawGeneric = false;
+		bool sawUnknown = false;
 		for (const std::string& family : families) {
 			GenericFontFamily genericFamily = GenericFontFamily::Inherit;
 			if (parseGenericFontFamily(family, genericFamily)) {
+				if (genericFamily == GenericFontFamily::Unknown) {
+					sawUnknown = true;
+					continue;
+				}
 				style.genericFontFamily = genericFamily;
-				sawGeneric = true;
 				return accept(CssProperty::GenericFontFamily);
 			}
 		}
-		if (!sawGeneric) {
-			++diag.unsupportedDeclarationCount;
+		if (sawUnknown) {
+			style.genericFontFamily = GenericFontFamily::Unknown;
+			return accept(CssProperty::GenericFontFamily);
 		}
-		return sawGeneric;
+		++diag.unsupportedDeclarationCount;
+		return false;
 	}
 	if (prop == "list-style" || prop == "list-style-type") {
 		std::vector<std::string> tokens = splitCssTokens(val);
@@ -4272,6 +4287,9 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		tagName == "samp" || tagName == "cite" || tagName == "q" || tagName == "code" ||
 		tagName == "img" || tagName == "input" || tagName == "textarea" || tagName == "select") {
 		style.display = DisplayMode::Inline;
+	}
+	if (tagName == "pre" || tagName == "code") {
+		style.genericFontFamily = GenericFontFamily::Monospace;
 	}
 	if (tagName == "body") {
 		style.hasColor = true;

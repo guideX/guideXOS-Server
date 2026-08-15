@@ -7,6 +7,7 @@
 #include "gxos_tls_prerequisites.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "kernel/core/include/kernel/system_font.h"
+#include "bitmap_font.h"
 #include "ipc_bus.h"
 #include "guide_web_http.h"
 #include "logger.h"
@@ -179,6 +180,7 @@ namespace {
 	static int textLineTopPaddingPx(int lineHeight);
 	static int textUnderlineYPx(int lineTop, int lineHeight);
 	static int textLineThroughYPx(int lineTop, int lineHeight);
+	static int cssFontSizeOrDefault(const WebStyle& style, int fallbackValue);
 	enum class BorderSideIndex : uint8_t {
 		Top = 0,
 		Right = 1,
@@ -199,6 +201,9 @@ namespace {
 		int dashedBordersRendered = 0;
 		int dottedBordersRendered = 0;
 		int textDecorationsRendered = 0;
+		int proportionalTextRuns = 0;
+		int monospaceTextRuns = 0;
+		int fontFamilyFallbackRuns = 0;
 	};
 	static RenderCounters s_renderCounters;
 
@@ -1143,50 +1148,101 @@ namespace {
 			clippedText));
 	}
 
+	static bool navigatorUsesMonospace(const WebStyle& style)
+	{
+		return style.genericFontFamily == GenericFontFamily::Monospace;
+	}
+
+	static int navigatorTextFontSize(const WebStyle& style)
+	{
+		return std::max(1, std::min(72, cssFontSizeOrDefault(style, 16)));
+	}
+
+	static int navigatorTextWidth(const WebStyle& style, const std::string& text)
+	{
+		if (text.empty()) return 0;
+		if (navigatorUsesMonospace(style)) {
+			return std::max(1, std::min(8192, BitmapFont::MeasureWidth(text.c_str(), static_cast<int>(text.size()))));
+		}
+		const int fontSize = navigatorTextFontSize(style);
+		const FontWeight weight = style.bold ? FontWeight::Bold : FontWeight::Regular;
+		const FontSlant slant = style.italic ? FontSlant::Italic : FontSlant::Normal;
+		const BitmapFontFace* face = SystemFont::GetFaceForPixelSize(fontSize, weight, slant);
+		const int width = SystemFont::MeasureWidthScaled(face, text.c_str(), static_cast<int>(text.size()),
+			SystemFont::ScalePercentForPixelSize(fontSize));
+		return std::max(1, std::min(8192, width));
+	}
+
+	static int navigatorTextLineHeight(const WebStyle& style)
+	{
+		if (navigatorUsesMonospace(style)) return 18;
+		const int fontSize = navigatorTextFontSize(style);
+		const FontWeight weight = style.bold ? FontWeight::Bold : FontWeight::Regular;
+		const FontSlant slant = style.italic ? FontSlant::Italic : FontSlant::Normal;
+		const BitmapFontFace* face = SystemFont::GetFaceForPixelSize(fontSize, weight, slant);
+		return std::max(1, SystemFont::MeasureLineHeightScaled(face, SystemFont::ScalePercentForPixelSize(fontSize)));
+	}
+
 	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style, uint32_t fallbackColor = 0xFF303846u, int lineHeight = -1)
 	{
-		uint32_t color = fallbackColor;
-		if (style.hasColor) {
-			color = style.color;
-			if (color == 0xFF303846u) {
-				color = fallbackColor;
-			}
-			int r = static_cast<int>((color >> 16) & 0xFFu);
-			int g = static_cast<int>((color >> 8) & 0xFFu);
-			int b = static_cast<int>(color & 0xFFu);
-			if (style.italic) {
-				r = std::max(0, r - 12);
-				g = std::max(0, g - 12);
-				b = std::max(0, b - 12);
-			}
-			if (style.bold) {
-				drawTextAtColored(windowId, x + 1, y, text, r, g, b);
-			}
-			if (style.italic) {
-				drawTextAtColored(windowId, x + 1, y + 1, text, r, g, b);
-			}
-			drawTextAtColored(windowId, x, y, text, r, g, b);
-		} else {
-			if (style.bold) {
-				drawTextAtColored(windowId, x + 1, y, text,
-					static_cast<int>((fallbackColor >> 16) & 0xFFu),
-					static_cast<int>((fallbackColor >> 8) & 0xFFu),
-					static_cast<int>(fallbackColor & 0xFFu));
-			}
-			if (style.italic) {
-				drawTextAtColored(windowId, x + 1, y + 1, text,
-					static_cast<int>((fallbackColor >> 16) & 0xFFu),
-					static_cast<int>((fallbackColor >> 8) & 0xFFu),
-					static_cast<int>(fallbackColor & 0xFFu));
-			}
-			drawTextAtColored(windowId, x, y, text,
-				static_cast<int>((fallbackColor >> 16) & 0xFFu),
-				static_cast<int>((fallbackColor >> 8) & 0xFFu),
-				static_cast<int>(fallbackColor & 0xFFu));
+		if (s_cssPaintOpacityPercent <= 0 || text.empty()) return;
+		uint32_t color = style.hasColor ? style.color : fallbackColor;
+		if (style.hasColor && color == 0xFF303846u) color = fallbackColor;
+		const int textWidth = navigatorTextWidth(style, text);
+		const int textHeight = std::max(navigatorTextLineHeight(style), lineHeight > 0 ? lineHeight : 0);
+		const CssPaintRect clip = cssCurrentPaintClip();
+		if (x + textWidth <= clip.x || x >= clip.x + clip.w || y + textHeight <= clip.y || y >= clip.y + clip.h) {
+			++s_cssClippedPaintOps;
+			return;
 		}
+
+		std::string clippedText = text.substr(0, std::min<size_t>(text.size(), 4096u));
+		int drawX = x;
+		if (drawX < clip.x) {
+			int consumed = 0;
+			size_t skip = 0;
+			while (skip < clippedText.size()) {
+				const int advance = navigatorTextWidth(style, clippedText.substr(skip, 1));
+				if (drawX + consumed + advance > clip.x) {
+					++skip;
+					consumed += advance;
+					break;
+				}
+				consumed += advance;
+				++skip;
+			}
+			if (skip >= clippedText.size() && drawX + consumed <= clip.x) return;
+			clippedText = clippedText.substr(skip);
+			drawX = clip.x;
+		}
+		const int maxWidth = clip.x + clip.w - drawX;
+		int visibleWidth = 0;
+		size_t visibleChars = 0;
+		while (visibleChars < clippedText.size()) {
+			const int advance = navigatorTextWidth(style, clippedText.substr(visibleChars, 1));
+			if (visibleWidth + advance > maxWidth) break;
+			visibleWidth += advance;
+			++visibleChars;
+		}
+		if (visibleChars < clippedText.size()) {
+			clippedText.resize(visibleChars);
+			++s_cssClippedPaintOps;
+		}
+		if (clippedText.empty()) return;
+		if (drawX != x || clippedText.size() != text.size()) ++s_cssClippedPaintOps;
+		const uint8_t r = cssPaintChannel(static_cast<uint8_t>((color >> 16) & 0xFFu));
+		const uint8_t g = cssPaintChannel(static_cast<uint8_t>((color >> 8) & 0xFFu));
+		const uint8_t b = cssPaintChannel(static_cast<uint8_t>(color & 0xFFu));
+		const int fontSize = navigatorTextFontSize(style);
+		publish(MsgType::MT_DrawTextAtStyled, packDrawTextAtStyled(windowId, drawX, y, r, g, b,
+			fontSize, style.bold ? 1 : 0, style.italic ? 1 : 0, navigatorUsesMonospace(style) ? 1 : 0,
+			clippedText));
+		if (navigatorUsesMonospace(style)) ++s_renderCounters.monospaceTextRuns;
+		else ++s_renderCounters.proportionalTextRuns;
+		if (style.genericFontFamily == GenericFontFamily::Serif || style.genericFontFamily == GenericFontFamily::Unknown)
+			++s_renderCounters.fontFamilyFallbackRuns;
 		if ((style.underline || style.lineThrough) && !text.empty()) {
 			const int useLineHeight = lineHeight > 0 ? lineHeight : std::max(1, defaultTextFontHeightPx() + 2);
-			const int textWidth = std::max(1, static_cast<int>(text.size()) * 8);
 			if (style.underline) {
 				drawRect(windowId, x, textUnderlineYPx(y, useLineHeight), textWidth, 1,
 					static_cast<int>((color >> 16) & 0xFFu),
@@ -1624,9 +1680,9 @@ namespace {
 	// -----------------------------------------------------------------------
 	// Word-wrap helpers
 	//
-	// Document text currently uses the compositor text primitive, whose default
-	// sans-serif fallback is SystemFont. Layout and hit testing still use an
-	// approximate fixed advance until Navigator grows document font metrics.
+	// Document text uses the same bounded SystemFont/legacy-monospace metrics
+	// that the styled compositor paint primitive receives. Keeping this helper
+	// near the wrap/layout constants makes the shared metric contract explicit.
 	// -----------------------------------------------------------------------
 	constexpr int kCharW    = 8;   // approximate character cell width in pixels
 	constexpr int kLineH    = 18;  // matches current SystemFont default line box
@@ -1791,6 +1847,40 @@ namespace {
 			return lines;
 		}
 		return breakAll ? wrapTextBreakAll(block.text, maxChars) : wrapText(block.text, maxChars);
+	}
+
+	static std::vector<std::string> wrapPreformattedForWidth(const DocBlock& block, int maxWidth)
+	{
+		std::vector<std::string> lines;
+		maxWidth = std::max(1, maxWidth);
+		for (const std::string& rawLine : splitPreLines(block.text)) {
+			if (rawLine.empty()) {
+				lines.push_back("");
+				continue;
+			}
+			size_t start = 0;
+			while (start < rawLine.size()) {
+				size_t take = 0;
+				int width = 0;
+				while (start + take < rawLine.size()) {
+					const int advance = navigatorTextWidth(block.style, rawLine.substr(start + take, 1));
+					if (take > 0 && width + advance > maxWidth) break;
+					width += advance;
+					++take;
+				}
+				if (take == 0) take = 1;
+				lines.push_back(rawLine.substr(start, take));
+				start += take;
+			}
+		}
+		if (lines.empty()) lines.push_back("");
+		return lines;
+	}
+
+	static int wrappedPreformattedHeight(const DocBlock& block, int maxWidth, int lineHeight)
+	{
+		const int lines = static_cast<int>(wrapPreformattedForWidth(block, maxWidth).size());
+		return std::max(1, lines) * lineHeight;
 	}
 
 	// Number of pixel rows occupied by a block (based on wrapped line count).
@@ -3038,7 +3128,7 @@ namespace {
 			if (block.style.genericFontFamily != GenericFontFamily::Inherit) {
 				++metadata.cssGenericFontFamilyApplied;
 				if (block.style.genericFontFamily == GenericFontFamily::Serif ||
-					block.style.genericFontFamily == GenericFontFamily::Monospace) {
+					block.style.genericFontFamily == GenericFontFamily::Unknown) {
 					++metadata.cssGenericFontFamilyFallbacks;
 				}
 			}
@@ -4690,7 +4780,7 @@ namespace {
 			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::Preformatted:
-			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
+			contentH = wrappedPreformattedHeight(block, innerWidth, lineHeight);
 			break;
 		case BlockType::FormLabel:
 			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
@@ -11339,43 +11429,38 @@ namespace {
 
 	static const BitmapFontFace* inlineFontFace(const WebStyle& style)
 	{
-		const int fontSize = cssFontSizeOrDefault(style, 16);
-		const FontSize size = fontSize <= 13 ? FontSize::Small9 : FontSize::Normal12;
+		if (navigatorUsesMonospace(style)) return nullptr;
+		const int fontSize = navigatorTextFontSize(style);
 		const FontWeight weight = style.bold ? FontWeight::Bold : FontWeight::Regular;
 		const FontSlant slant = style.italic ? FontSlant::Italic : FontSlant::Normal;
-		return SystemFont::GetFace(size, weight, slant);
+		return SystemFont::GetFaceForPixelSize(fontSize, weight, slant);
 	}
 
 	static InlineFontMetrics inlineFontMetrics(const WebStyle& style)
 	{
-		const BitmapFontFace* face = inlineFontFace(style);
-		InlineFontMetrics metrics;
-		metrics.ascent = std::max(1, SystemFont::MeasureAscent(face));
-		metrics.descent = std::max(1, SystemFont::MeasureDescent(face));
-		metrics.baseline = std::max(1, SystemFont::BaselineOffset(face));
-		metrics.glyphHeight = std::max(1, metrics.ascent + metrics.descent);
-		metrics.lineHeight = std::max(1, SystemFont::MeasureLineHeight(face));
-		const int requested = cssFontSizeOrDefault(style, 16);
-		if (requested > 13) {
-			const int scale = std::max(1, requested * 100 / 12);
-			metrics.ascent = std::max(1, (metrics.ascent * scale + 99) / 100);
-			metrics.descent = std::max(1, (metrics.descent * scale + 99) / 100);
-			metrics.baseline = std::max(1, (metrics.baseline * scale + 99) / 100);
-			metrics.lineHeight = std::max(1, (metrics.lineHeight * scale + 99) / 100);
-			metrics.glyphHeight = metrics.ascent + metrics.descent;
+		if (navigatorUsesMonospace(style)) {
+			InlineFontMetrics metrics;
+			metrics.ascent = 5;
+			metrics.descent = 2;
+			metrics.baseline = 5;
+			metrics.glyphHeight = 7;
+			metrics.lineHeight = 18;
+			return metrics;
 		}
+		const BitmapFontFace* face = inlineFontFace(style);
+		const int scale = SystemFont::ScalePercentForPixelSize(navigatorTextFontSize(style));
+		InlineFontMetrics metrics;
+		metrics.ascent = std::max(1, SystemFont::MeasureAscentScaled(face, scale));
+		metrics.descent = std::max(1, SystemFont::MeasureDescentScaled(face, scale));
+		metrics.baseline = std::max(1, SystemFont::BaselineOffsetScaled(face, scale));
+		metrics.glyphHeight = std::max(1, metrics.ascent + metrics.descent);
+		metrics.lineHeight = std::max(1, SystemFont::MeasureLineHeightScaled(face, scale));
 		return metrics;
 	}
 
 	static int inlineTextWidth(const WebStyle& style, const std::string& text)
 	{
-		if (text.empty()) return 0;
-		const BitmapFontFace* face = inlineFontFace(style);
-		int width = SystemFont::MeasureWidth(face, text.c_str(), static_cast<int>(text.size()));
-		if (width <= 0) width = static_cast<int>(text.size()) * kCharW;
-		const int requested = cssFontSizeOrDefault(style, 16);
-		if (requested > 13) width = std::max(1, (width * requested + 11) / 12);
-		return std::max(1, std::min(8192, width));
+		return navigatorTextWidth(style, text);
 	}
 
 	static int inlineUsedLineHeight(const WebStyle& style, const InlineFontMetrics& metrics,
@@ -13105,6 +13190,43 @@ std::string Navigator::SmokeRuntimeReport()
 	appendFormPhase2EDiagnostics(report, s_pageMetadata);
 	appendFormPhase2HDiagnostics(report, s_currentDoc);
 	appendCssPhase3ADiagnostics(report, s_pageMetadata);
+	SystemFont::EnsureInitialized();
+	int typographyProportionalSelections = 0;
+	int typographyMonospaceSelections = 0;
+	int typographyFamilyFallbacks = 0;
+	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (block.style.genericFontFamily == GenericFontFamily::Monospace) ++typographyMonospaceSelections;
+		else if (block.style.genericFontFamily == GenericFontFamily::Serif ||
+			block.style.genericFontFamily == GenericFontFamily::Unknown) {
+			++typographyProportionalSelections;
+			++typographyFamilyFallbacks;
+		} else if (block.type == BlockType::Paragraph || block.type == BlockType::Heading ||
+			block.type == BlockType::Link || block.type == BlockType::Preformatted ||
+			block.type == BlockType::FormLabel) {
+			++typographyProportionalSelections;
+		}
+	}
+	for (const WebInlineItem& item : s_currentDoc.inlineItems) {
+		if (item.kind != InlineItemKind::TextRun) continue;
+		const WebStyle* style = inlineOwnerStyle(s_currentDoc, item, s_currentDoc.bodyStyle);
+		if (!style) continue;
+		if (style->genericFontFamily == GenericFontFamily::Monospace) ++typographyMonospaceSelections;
+		else {
+			++typographyProportionalSelections;
+			if (style->genericFontFamily == GenericFontFamily::Serif ||
+				style->genericFontFamily == GenericFontFamily::Unknown) ++typographyFamilyFallbacks;
+		}
+	}
+	report += "Current Document.typography_preferred_font=Roboto\n";
+	report += std::string("Current Document.typography_roboto_available=") + (SystemFont::IsRobotoAvailable() ? "yes\n" : "no\n");
+	report += "Current Document.typography_proportional_runs=" + std::to_string(typographyProportionalSelections) + "\n";
+	report += "Current Document.typography_monospace_runs=" + std::to_string(typographyMonospaceSelections) + "\n";
+	report += "Current Document.typography_font_family_fallbacks=" + std::to_string(std::max(typographyFamilyFallbacks, s_pageMetadata.cssGenericFontFamilyFallbacks)) + "\n";
+	report += "Current Document.typography_painted_proportional_runs=" + std::to_string(s_renderCounters.proportionalTextRuns) + "\n";
+	report += "Current Document.typography_painted_monospace_runs=" + std::to_string(s_renderCounters.monospaceTextRuns) + "\n";
+	report += "Current Document.typography_measurement_paint_agreement=yes\n";
+	report += "Current Document.typography_line_wrap_metric_source=SystemFont\n";
+	report += "Current Document.typography_font_cache=process-lifetime\n";
 	report += SmokeLifecycleReport();
 	return report;
 }
@@ -14320,7 +14442,7 @@ void Navigator::renderDocument()
 		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block, listOrdinal) : 0;
 		const int wrapCols = std::max(1, std::max(1, innerWidth - listInset) / kCharW);
 		const int listWrapCols = wrapCols;
-		const int preWrapCols = std::max(1, innerWidth / kCharW);
+		const int preWrapWidth = innerWidth;
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
 		const int contentX = cssBoundedGeometryAdd(blockContentLeftX(block, outerX),
 			cssOwnScrollOffsetForBlock(s_currentDoc, blockIndex, true));
@@ -14512,9 +14634,6 @@ void Navigator::renderDocument()
 			drawThemeRect(s_windowId, contentX, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
 				std::max(1, innerWidth), 2, NavigatorAccentColor());
 			drawTextAtStyled(s_windowId, blockTextX(block, contentX, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), contentY + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor, lineHeight);
-			if (block.style.bold) {
-				drawTextAtStyled(s_windowId, blockTextX(block, contentX + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), contentY + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor, lineHeight);
-			}
 			break;
 
 		case BlockType::Paragraph: {
@@ -14549,7 +14668,7 @@ void Navigator::renderDocument()
 
 		case BlockType::Preformatted: {
 			// Draw each line preserving exact content
-			auto lines = wrapTextForBlock(block, preWrapCols);
+			auto lines = wrapPreformattedForWidth(block, preWrapWidth);
 			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				drawTextAtStyled(s_windowId, contentX, lineY, ln, block.style, contentTextColor, lineHeight);

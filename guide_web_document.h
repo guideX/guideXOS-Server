@@ -447,6 +447,8 @@ enum class GenericFontFamily : uint8_t {
 	SansSerif = 1,
 	Serif     = 2,
 	Monospace = 3,
+	Roboto    = 4,
+	Unknown   = 5,
 };
 
 struct HtmlElementRef {
