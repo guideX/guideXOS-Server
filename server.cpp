@@ -489,6 +489,36 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(runtimeReport, "Toolbar.narrow_window=address_width_clamped_to_zero"), "expected bounded address layout");
     add("toolbar viewport unchanged", contains(runtimeReport, "Toolbar.toolbar_height=unchanged_64px") &&
         contains(runtimeReport, "Toolbar.document_viewport=unchanged"), "expected centralized document viewport unchanged");
+    const auto hasPositiveThrobberCount = [](const std::string& report, const std::string& prefix) {
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return false;
+        const std::size_t valuePos = pos + prefix.size();
+        return valuePos < report.size() &&
+            std::isdigit(static_cast<unsigned char>(report[valuePos])) &&
+            report[valuePos] != '0';
+    };
+    add("throbber frame/resource contract",
+        contains(runtimeReport, "Throbber.active_frame_count=12") &&
+        contains(runtimeReport, "Throbber.frame_dimensions=72x72") &&
+        contains(runtimeReport, "Throbber.paint_dimensions=22x22") &&
+        contains(runtimeReport, "Throbber.frame_index=bounded_0_to_11") &&
+        contains(runtimeReport, "Throbber.cache=process_lifetime_compositor_ui_image_cache") &&
+        contains(runtimeReport, "Throbber.per_frame_resource_load=none") &&
+        contains(runtimeReport, "Throbber.per_frame_decode=none"),
+        "expected fixed cached surfer frame set");
+    add("throbber loading lifecycle balance",
+        contains(runtimeReport, "Throbber.loading_state=idle") &&
+        contains(runtimeReport, "Throbber.loading_terminal_balance=yes") &&
+        hasPositiveThrobberCount(runtimeReport, "Throbber.loading_entries=") &&
+        hasPositiveThrobberCount(runtimeReport, "Throbber.loading_exits="),
+        "expected balanced terminal idle state");
+    const bool noOpBack = !gxos::apps::Navigator::SmokeGoBack();
+    const bool noOpForward = !gxos::apps::Navigator::SmokeGoForward();
+    const std::string noOpHistoryReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("throbber no-op history stays idle",
+        noOpBack && noOpForward && contains(noOpHistoryReport, "Throbber.loading_state=idle") &&
+        contains(noOpHistoryReport, "Throbber.loading_terminal_balance=yes"),
+        "expected empty Back/Forward actions to avoid a new load");
     add("stale placeholder inactive", contains(runtimeReport, "Runtime.Stale placeholder path=not active"), "expected not active");
     add("file read enabled", contains(runtimeReport, "Capabilities.File read=enabled"), "expected enabled");
     add("file write enabled", contains(runtimeReport, "Capabilities.File write=enabled"), "expected enabled");

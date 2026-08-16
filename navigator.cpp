@@ -110,6 +110,9 @@ std::string Navigator::s_lastPostHttpStatus;
 std::string Navigator::s_lastPostContentType;
 bool        Navigator::s_findActive = false;
 bool        Navigator::s_loading = false;
+static uint64_t s_throbberLoadingEntries = 0;
+static uint64_t s_throbberLoadingExits = 0;
+static uint64_t s_throbberPaintSubmissions = 0;
 std::string Navigator::s_findBuffer;
 int         Navigator::s_findCaret = 0;
 std::vector<Navigator::FindMatch> Navigator::s_findMatches;
@@ -1190,6 +1193,24 @@ namespace {
 		report += "Toolbar.narrow_window=address_width_clamped_to_zero\n";
 		report += "Toolbar.toolbar_height=unchanged_64px\n";
 		report += "Toolbar.document_viewport=unchanged\n";
+		report += "Throbber.source_frames=assets/Images/SurfThrobber/PNG/surfer_{00..11}.png\n";
+		report += "Throbber.active_frame_count=12\n";
+		report += "Throbber.frame_dimensions=72x72\n";
+		report += "Throbber.paint_dimensions=22x22\n";
+		report += "Throbber.cadence=hosted_compositor_100ms_per_frame\n";
+		report += "Throbber.frame_index=bounded_0_to_11\n";
+		report += "Throbber.loading_owner=top_level_document_navigation\n";
+		report += "Throbber.cache=process_lifetime_compositor_ui_image_cache\n";
+		report += "Throbber.per_frame_resource_load=none\n";
+		report += "Throbber.per_frame_decode=none\n";
+		report += "Throbber.idle_animation_work=none\n";
+		report += "Throbber.pointer=noninteractive\n";
+		report += "Throbber.fallback=hidden_if_frame_unavailable\n";
+		report += "Throbber.loading_entries=" + std::to_string(s_throbberLoadingEntries) + "\n";
+		report += "Throbber.loading_exits=" + std::to_string(s_throbberLoadingExits) + "\n";
+		report += "Throbber.paint_submissions=" + std::to_string(s_throbberPaintSubmissions) + "\n";
+		report += std::string("Throbber.loading_terminal_balance=") +
+		(s_throbberLoadingEntries == s_throbberLoadingExits ? "yes\n" : "no\n");
 	}
 
 	void publish(MsgType type, const std::string& payload)
@@ -13698,6 +13719,7 @@ std::string Navigator::SmokeLifecycleReport()
 	refreshLifecycleOwnershipEvidence();
 	std::ostringstream out;
 	out << "navigator.lifecycle.report\n";
+	out << "Throbber.loading_state=" << (s_loading ? "active" : "idle") << "\n";
 	out << "navigator_visible_document_generation=" << s_lifecycleDiagnostics.visibleDocumentGeneration << "\n";
 	out << "navigator_inspected_document_generation=" << s_lifecycleDiagnostics.inspectedDocumentGeneration << "\n";
 	out << "navigator_visible_document_category=" << documentCategoryName(s_lifecycleDiagnostics.visibleDocumentCategory) << "\n";
@@ -14250,6 +14272,7 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 			drawThemeText(s_windowId, layout.addressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url, NavigatorTextColor());
 		}
 		if (s_loading && layout.addressW >= 24) {
+			incrementLifecycleCounter(s_throbberPaintSubmissions);
 			drawAnimatedImage(s_windowId, layout.addressX + layout.addressW - 24, kAddressY + 2, 22, 22,
 				"assets/Images/SurfThrobber/PNG/surfer_{frame}.png");
 		}
@@ -17876,6 +17899,7 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	else s_staleMouseReleaseGeneration = 0;
 	clearMousePressState();
 	s_loading = true;
+	incrementLifecycleCounter(s_throbberLoadingEntries);
 	navigatorSmokeProgress("replacement-state-cleared");
 	if (s_windowId != 0) {
 		navigatorSmokeProgress("pre-load-paint-start");
@@ -18005,6 +18029,7 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	}
 
 	s_loading = false;
+	incrementLifecycleCounter(s_throbberLoadingExits);
 	s_pendingDocumentUrl.clear();
 	s_pendingTransitionCategory = NavigatorTransitionCategory::Navigation;
 	refreshLifecycleOwnershipEvidence();
