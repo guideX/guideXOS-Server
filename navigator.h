@@ -120,6 +120,17 @@ struct NavigatorPageMetadata {
 		int         cssTableRowCount = 0;
 		int         cssTableCellCount = 0;
 		int         cssTableLayoutFallbackCount = 0;
+		int         cssTableLogicalColumnCount = 0;
+		int         cssTableDataCellCountPhase8B = 0;
+		int         cssTableColspanCellCount = 0;
+		int         cssTableMaximumColspan = 1;
+		int         cssTableWrappedCellCount = 0;
+		int         cssTableWideCount = 0;
+		int         cssTableMalformedFallbackCount = 0;
+		int         cssTableRowspanDeferredCount = 0;
+		int         cssTableLinkHitTestEvidence = 0;
+		int         cssTableGeometryClamps = 0;
+		std::string cssTableGeometryEvidence;
 		int         cssListRenderCount = 0;
 		int         cssClampedValueCount = 0;
 		int         cssLengthValueClampCount = 0;
@@ -642,6 +653,11 @@ public:
 		int& outPaintX, int& outPaintY, int& outPaintW, int& outPaintH,
 		int& outFinalX, int& outFinalY, int& outFinalW, int& outFinalH,
 		int& outClipX, int& outClipY, int& outClipW, int& outClipH);
+	static bool SmokeTableGeometryById(const std::string& id,
+		int& outX, int& outY, int& outW, int& outH,
+		int& outRows, int& outColumns);
+	static bool SmokeBlockGeometryById(const std::string& id,
+		int& outX, int& outY, int& outW, int& outH);
 	static bool SmokeHitLinkAt(int x, int y, const std::string& id);
 	static std::string SmokeHitTargetIdAt(int x, int y);
 	static void SmokeSetScrollOffset(int offset);

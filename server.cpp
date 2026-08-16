@@ -743,7 +743,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
     add("CSS wide table clamps safely",
         contains(cssTableWideReport, "Current Document.CSS enabled=yes") &&
-        hasPositiveCount(cssTableWideReport, "Current Document.CSS table layout fallbacks=") &&
+        (hasPositiveCount(cssTableWideReport, "Current Document.CSS table layout fallbacks=") ||
+         hasPositiveCount(cssTableWideReport, "Current Document.table_logical_columns=")) &&
         hasPositiveCount(cssTableWideReport, "Current Document.CSS tables rendered="),
         "fallbacks=" + reportLine(cssTableWideReport, "Current Document.CSS table layout fallbacks=") +
         "; tables=" + reportLine(cssTableWideReport, "Current Document.CSS tables rendered=") +
@@ -817,6 +818,103 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssTable1dReport, "Current Document.CSS table header cells rendered=") &&
         hasPositiveCount(cssTable1dReport, "Current Document.CSS visited links styled="),
         "report=\"" + summarizeText(cssTable1dReport, 260) + "\"");
+
+    const std::string tablePhase8bUrl =
+        "http://127.0.0.1:8080/navigator-smoke/table-phase8b.html";
+    const bool tablePhase8bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(tablePhase8bUrl);
+    const std::string tablePhase8bText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string tablePhase8bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    int table8bX = 0, table8bY = 0, table8bW = 0, table8bH = 0;
+    int table8bRows = 0, table8bColumns = 0;
+    const bool table8bGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8b-basic", table8bX, table8bY, table8bW, table8bH, table8bRows, table8bColumns);
+    int following8bX = 0, following8bY = 0, following8bW = 0, following8bH = 0;
+    const bool following8bGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "phase8b-following", following8bX, following8bY, following8bW, following8bH);
+    int span8bX = 0, span8bY = 0, span8bW = 0, span8bH = 0;
+    int span8bRows = 0, span8bColumns = 0;
+    const bool span8bGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8b-spans", span8bX, span8bY, span8bW, span8bH, span8bRows, span8bColumns);
+    int wide8bX = 0, wide8bY = 0, wide8bW = 0, wide8bH = 0;
+    int wide8bRows = 0, wide8bColumns = 0;
+    const bool wide8bGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8b-wide", wide8bX, wide8bY, wide8bW, wide8bH, wide8bRows, wide8bColumns);
+    const int table8bWideMaxX = gxos::apps::Navigator::SmokeElementMaxScrollXById("phase8b-wide-scroll");
+    gxos::apps::Navigator::SmokeSetScrollOffset(std::max(0, wide8bY - 120));
+    int table8bBarX = 0, table8bBarY = 0, table8bBarW = 0, table8bBarH = 0;
+    const bool table8bHorizontalBar = gxos::apps::Navigator::SmokeElementScrollbarGeometryById(
+        "phase8b-wide-scroll", true, false, table8bBarX, table8bBarY, table8bBarW, table8bBarH);
+    const bool table8bLinkBeforeScroll = gxos::apps::Navigator::SmokeHitLinkById("phase8b-scrolled-link");
+    const bool table8bScrolled = table8bWideMaxX > 0 &&
+        gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+            "phase8b-wide-scroll", table8bWideMaxX, 0);
+    int table8bLinkPaintX = 0, table8bLinkPaintY = 0, table8bLinkPaintW = 0, table8bLinkPaintH = 0;
+    int table8bLinkFinalX = 0, table8bLinkFinalY = 0, table8bLinkFinalW = 0, table8bLinkFinalH = 0;
+    int table8bLinkClipX = 0, table8bLinkClipY = 0, table8bLinkClipW = 0, table8bLinkClipH = 0;
+    const bool table8bLinkGeometry = gxos::apps::Navigator::SmokeLinkGeometryById(
+        "phase8b-scrolled-link", table8bLinkPaintX, table8bLinkPaintY, table8bLinkPaintW, table8bLinkPaintH,
+        table8bLinkFinalX, table8bLinkFinalY, table8bLinkFinalW, table8bLinkFinalH,
+        table8bLinkClipX, table8bLinkClipY, table8bLinkClipW, table8bLinkClipH);
+    const bool table8bLinkAfterScroll = table8bScrolled &&
+        gxos::apps::Navigator::SmokeHitLinkById("phase8b-scrolled-link");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase8b-wide-scroll", 0, 0);
+    const std::string table8bFinalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("HTML table Phase 8B fixture loads", tablePhase8bLoaded &&
+        contains(tablePhase8bText, "HTML Table Layout Foundation") &&
+        contains(tablePhase8bText, "Phase 8B shared-column caption") &&
+        contains(tablePhase8bText, "wrapped cell link") &&
+        contains(tablePhase8bText, "local image in a table cell") &&
+        contains(tablePhase8bText, "Malformed table markup"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl() + ",text=\"" +
+        summarizeText(tablePhase8bText, 500) + "\"");
+    add("HTML table Phase 8B bounded diagnostics", tablePhase8bLoaded &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.CSS tables rendered=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.CSS table rows rendered=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.CSS table cells rendered=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_logical_columns=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_data_cells=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_colspan_cells=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_maximum_colspan=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_wrapped_cells=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_malformed_fallbacks=") &&
+        contains(tablePhase8bReport, "Current Document.table_rowspan_model=single-row-safe-fallback-deferred") &&
+        contains(tablePhase8bReport, "Current Document.table_geometry_evidence="),
+        "report=\"" + summarizeText(tablePhase8bReport, 1200) + "\"");
+    add("HTML table Phase 8B shared grid and normal flow geometry", table8bGeometry &&
+        table8bRows >= 4 && table8bColumns == 2 && table8bW > 0 && table8bH > 0 &&
+        following8bGeometry && following8bY >= table8bY + table8bH,
+        "table=" + std::to_string(table8bX) + ":" + std::to_string(table8bY) + ":" +
+        std::to_string(table8bW) + ":" + std::to_string(table8bH) + ",rows=" +
+        std::to_string(table8bRows) + ",columns=" + std::to_string(table8bColumns) +
+        ",following=" + std::to_string(following8bX) + ":" + std::to_string(following8bY) +
+        ":" + std::to_string(following8bW) + ":" + std::to_string(following8bH));
+    add("HTML table Phase 8B colspan and header geometry", span8bGeometry &&
+        span8bRows >= 4 && span8bColumns >= 3 && span8bW > 0 && span8bH > 0 &&
+        contains(tablePhase8bReport, "Current Document.CSS table header cells rendered="),
+        "spans=" + std::to_string(span8bX) + ":" + std::to_string(span8bY) + ":" +
+        std::to_string(span8bW) + ":" + std::to_string(span8bH) + ",rows=" +
+        std::to_string(span8bRows) + ",columns=" + std::to_string(span8bColumns) +
+        ",evidence=" + evidenceSnippet(tablePhase8bReport, "Current Document.table_geometry_evidence="));
+    add("HTML table Phase 8B links and wide-table scrollbar", table8bHorizontalBar &&
+        table8bBarW > 0 && table8bBarH > 0 && table8bWideMaxX > 0 &&
+        table8bLinkAfterScroll &&
+        hasPositiveCount(table8bFinalReport, "Current Document.table_link_hit_test_evidence=") &&
+        wide8bGeometry && wide8bW > 0 && wide8bH > 0,
+        std::string("bar=") + yesNo(table8bHorizontalBar) + ",maxScrollX=" +
+        std::to_string(table8bWideMaxX) + ",barRect=" + std::to_string(table8bBarX) + ":" +
+        std::to_string(table8bBarY) + ":" + std::to_string(table8bBarW) + ":" +
+        std::to_string(table8bBarH) + ",linkBefore=" + yesNo(table8bLinkBeforeScroll) +
+        ",linkAfter=" + yesNo(table8bLinkAfterScroll) + ",wide=" +
+        std::to_string(wide8bX) + ":" + std::to_string(wide8bY) + ":" +
+        std::to_string(wide8bW) + ":" + std::to_string(wide8bH) + ",evidence=" +
+        evidenceSnippet(tablePhase8bReport, "Current Document.table_geometry_evidence=") +
+        ",linkGeometry=" + yesNo(table8bLinkGeometry) + ",paint=" +
+        std::to_string(table8bLinkPaintX) + ":" + std::to_string(table8bLinkPaintY) + ":" +
+        std::to_string(table8bLinkPaintW) + ":" + std::to_string(table8bLinkPaintH) + ",final=" +
+        std::to_string(table8bLinkFinalX) + ":" + std::to_string(table8bLinkFinalY) + ":" +
+        std::to_string(table8bLinkFinalW) + ":" + std::to_string(table8bLinkFinalH) + ",clip=" +
+        std::to_string(table8bLinkClipX) + ":" + std::to_string(table8bLinkClipY) + ":" +
+        std::to_string(table8bLinkClipW) + ":" + std::to_string(table8bLinkClipH));
 
     bool textPolishLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/text-polish.html");
     std::string textPolishText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -953,7 +1051,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS text decorations rendered=") &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family applied=") &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family fallbacks=") &&
-        hasPositiveCount(cssPhase1fReport, "Current Document.CSS table layout fallbacks=") &&
+        (hasPositiveCount(cssPhase1fReport, "Current Document.CSS table layout fallbacks=") ||
+         hasPositiveCount(cssPhase1fReport, "Current Document.table_logical_columns=")) &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS table captions rendered="),
         cssPhase1fDetail);
 

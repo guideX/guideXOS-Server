@@ -38,6 +38,19 @@ enum class BlockType : uint8_t {
 	FormLabel     = 12,
 };
 
+// Bounded HTML table roles. The parser records these on the compact block
+// stream so Navigator's table pass does not rediscover raw tag names while
+// painting. Arbitrary CSS display:table-* is intentionally out of scope.
+enum class TableRole : uint8_t {
+	None = 0,
+	Table,
+	Caption,
+	RowGroup,
+	Row,
+	HeaderCell,
+	DataCell,
+};
+
 // Bounded form metadata. This is a value object rather than a DOM node or a
 // live submission model. Values are retained only for the existing local
 // text-control primitive and are excluded from diagnostics/evidence.
@@ -464,6 +477,7 @@ struct HtmlElementRef {
 	uint16_t    typeIndex = 0;
 	uint16_t    typeCount = 0;
 	uint64_t    previousSiblingSerial = 0;
+	TableRole   tableRole = TableRole::None;
 	bool        hasLinkTarget = false;
 	bool        visited = false;
 	FormControlMetadata formControl;
@@ -795,6 +809,22 @@ struct CssDiagnostics {
 	int    flexEvidenceRecords = 0;
 	std::string flexEvidence;
 	int    declarationsProcessed = 0;
+	// Phase 8B bounded HTML table diagnostics. These are document-level
+	// counters/evidence, not per-cell logging.
+	int    tableCount = 0;
+	int    tableRowCount = 0;
+	int    tableLogicalColumnCount = 0;
+	int    tableHeaderCellCount = 0;
+	int    tableDataCellCount = 0;
+	int    tableColspanCellCount = 0;
+	int    tableMaximumColspan = 1;
+	int    tableWrappedCellCount = 0;
+	int    tableWideCount = 0;
+	int    tableMalformedFallbackCount = 0;
+	int    tableRowspanDeferredCount = 0;
+	int    tableLinkHitTestEvidence = 0;
+	int    tableGeometryClamps = 0;
+	std::string tableGeometryEvidence;
 	int    inheritanceDepthClamps = 0;
 	int    pseudoClassesParsed = 0;
 	int    structuralPseudoMatches = 0;
@@ -1056,6 +1086,17 @@ struct FormOption {
 	bool disabled = false;
 };
 
+// Compact content atom retained only for a bounded table cell. It lets the
+// table pass account for an image or link without introducing a second DOM or
+// renderer. Text remains aggregated on DocBlock::text for existing callers.
+struct TableCellContentItem {
+	BlockType kind = BlockType::Paragraph;
+	std::string text;
+	std::string url;
+	std::string id;
+	int blockIndex = -1;
+};
+
 struct DocBlock {
 	BlockType   type;
 	std::string text;  // display text; for Image this mirrors alt text
@@ -1069,6 +1110,14 @@ struct DocBlock {
 	std::string className;
 	std::string id;
 	std::string inlineStyle;
+	TableRole   tableRole = TableRole::None;
+	uint64_t    tableSerial = 0;
+	uint64_t    tableRowGroupSerial = 0;
+	uint64_t    tableRowSerial = 0;
+	int         tableColSpan = 1;
+	int         tableRowSpan = 1;
+	bool        tableSpanMalformed = false;
+	std::vector<TableCellContentItem> tableContents;
 	std::vector<HtmlElementRef> ancestors;
 	HtmlElementRef elementMetadata;
 	WebStyle    style;

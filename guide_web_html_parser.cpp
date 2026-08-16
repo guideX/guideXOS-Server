@@ -81,6 +81,8 @@ namespace {
 	constexpr size_t kCssLiteMaxInlineTextBytes = 4096;
 	constexpr size_t kCssLiteMaxRecoveryAttemptsPerGroup = 16;
 	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
+	constexpr size_t kTableMaxCellContents = 64;
+	constexpr int kTableMaxColspan = 8;
 	constexpr size_t kFormMaxControls = 128;
 	constexpr size_t kFormMaxValueBytes = 256;
 	constexpr size_t kFormMaxPlaceholderBytes = 128;
@@ -685,6 +687,40 @@ static bool parseCssNumber(const std::string& rawValue, double& out)
 	} catch (...) {
 		return false;
 	}
+}
+
+static int parseTableSpanAttr(const std::string& tagBody, const std::string& attr,
+	CssDiagnostics& diagnostics, bool& malformed)
+{
+	const std::string raw = trim(extractAttr(tagBody, attr));
+	malformed = false;
+	if (raw.empty()) return 1;
+	int value = 0;
+	bool sawDigit = false;
+	for (char c : raw) {
+		if (c < '0' || c > '9') {
+			malformed = true;
+			break;
+		}
+		sawDigit = true;
+		if (value > kTableMaxColspan) {
+			value = kTableMaxColspan;
+			malformed = true;
+			break;
+		}
+		value = value * 10 + (c - '0');
+		if (value > kTableMaxColspan) {
+			value = kTableMaxColspan;
+			malformed = true;
+			break;
+		}
+	}
+	if (!sawDigit || value <= 0) {
+		malformed = true;
+		value = 1;
+	}
+	if (malformed) ++diagnostics.tableMalformedFallbackCount;
+	return std::max(1, std::min(kTableMaxColspan, value));
 }
 
 static int roundCssNumber(double value)
@@ -5517,12 +5553,23 @@ struct ParserState {
 	std::string  currentTableCaptionText;
 	bool         currentTableCellHeader = false;
 	std::string  currentTableCellHref;
+	std::string  currentTableCellLinkId;
+	int          currentTableCellColSpan = 1;
+	int          currentTableCellRowSpan = 1;
+	bool         currentTableCellSpanMalformed = false;
+	std::vector<TableCellContentItem> currentTableCellContents;
 };
 
 static HtmlElementRef elementRefFromTagBody(const std::string& tagName, const std::string& tagBody)
 {
 	HtmlElementRef element;
 	element.tagName = toLower(tagName);
+	if (element.tagName == "table") element.tableRole = TableRole::Table;
+	else if (element.tagName == "caption") element.tableRole = TableRole::Caption;
+	else if (element.tagName == "thead" || element.tagName == "tbody" || element.tagName == "tfoot") element.tableRole = TableRole::RowGroup;
+	else if (element.tagName == "tr") element.tableRole = TableRole::Row;
+	else if (element.tagName == "th") element.tableRole = TableRole::HeaderCell;
+	else if (element.tagName == "td") element.tableRole = TableRole::DataCell;
 	element.className = extractAttr(tagBody, "class");
 	element.id = extractAttr(tagBody, "id");
 	element.inlineStyle = extractAttr(tagBody, "style");
@@ -6045,6 +6092,14 @@ static void flushText(ParserState& st)
 	if (st.open == OpenTag::TableCell) {
 		if (!st.currentTableCellText.empty()) st.currentTableCellText += ' ';
 		st.currentTableCellText += t;
+		if (st.currentTableCellContents.size() < kTableMaxCellContents) {
+			TableCellContentItem item;
+			item.kind = st.currentTableCellHref.empty() ? BlockType::Paragraph : BlockType::Link;
+			item.text = t;
+			item.url = st.currentTableCellHref;
+			item.id = st.currentTableCellLinkId;
+			st.currentTableCellContents.push_back(std::move(item));
+		}
 		return;
 	}
 	if (st.open == OpenTag::Caption) {
@@ -6257,6 +6312,14 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 
 	if (st.inScript) return;
 	if (st.inStyle) return;
+	// Common block content inside a cell remains cell-owned. The compact parser
+	// does not emit nested paragraph boxes here; it records their structural
+	// scope and keeps the text in the cell's normal-flow content stream.
+	if (st.open == OpenTag::TableCell &&
+		(name == "p" || name == "h1" || name == "h2" || name == "h3" || name == "pre")) {
+		pushElement(st, elementRef);
+		return;
+	}
 
 	// Mark body reached.
 	if (name == "body") {
@@ -6405,6 +6468,17 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.currentTableCellText.clear();
 		st.currentTableCellHeader = (name == "th");
 		st.currentTableCellHref.clear();
+		st.currentTableCellLinkId.clear();
+		bool colspanMalformed = false;
+		bool rowspanMalformed = false;
+		st.currentTableCellColSpan = parseTableSpanAttr(tagBody, "colspan", st.doc.cssDiagnostics, colspanMalformed);
+		st.currentTableCellRowSpan = parseTableSpanAttr(tagBody, "rowspan", st.doc.cssDiagnostics, rowspanMalformed);
+		st.currentTableCellSpanMalformed = colspanMalformed || rowspanMalformed;
+		if (st.currentTableCellRowSpan != 1) {
+			++st.doc.cssDiagnostics.tableRowspanDeferredCount;
+			st.currentTableCellRowSpan = 1;
+		}
+		st.currentTableCellContents.clear();
 		st.classBuf = extractAttr(tagBody, "class");
 		st.idBuf = extractAttr(tagBody, "id");
 		st.styleBuf = extractAttr(tagBody, "style");
@@ -6745,6 +6819,18 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		const uint64_t flowSerial = inlineFlowSerial(st);
 		block.inlineFlowSerial = flowSerial;
 		const int blockIndex = static_cast<int>(st.doc.blocks.size());
+		const uint64_t containingCellSerial = nearestAncestorSerial(st, "td") != 0
+			? nearestAncestorSerial(st, "td") : nearestAncestorSerial(st, "th");
+		if (containingCellSerial != 0) {
+			block.atomicContainerSerial = containingCellSerial;
+			TableCellContentItem item;
+			item.kind = BlockType::Image;
+			item.text = alt;
+			item.url = block.url;
+			item.blockIndex = blockIndex;
+			if (st.currentTableCellContents.size() < kTableMaxCellContents)
+				st.currentTableCellContents.push_back(std::move(item));
+		}
 		st.doc.blocks.push_back(std::move(block));
 		appendInlineItem(st, InlineItemKind::ReplacedImage, {}, blockIndex, flowSerial,
 			findStructuralElement(st, imageElement.serial));
@@ -6788,6 +6874,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		if (!href.empty()) {
 			// Resolve relative URL against the document base.
 			st.hrefBuf = resolveRelativeUrl(st.doc.url, href);
+			st.currentTableCellLinkId = extractAttr(tagBody, "id");
 			elementRef.hasLinkTarget = true;
 			elementRef.visited = st.visitedUrls && st.visitedUrls->find(st.hrefBuf) != st.visitedUrls->end();
 			if (st.open == OpenTag::TableCell) {
@@ -6795,6 +6882,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			}
 		} else {
 			st.hrefBuf.clear();
+			st.currentTableCellLinkId.clear();
 		}
 		if (st.open != OpenTag::TableCell) {
 			st.open = OpenTag::A;
@@ -6897,9 +6985,15 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			st.idBuf.clear();
 			st.styleBuf.clear();
 		} else {
+			// A table-cell anchor shares the cell's compact content stream rather
+			// than becoming a standalone DocBlock.  Flush while its href and ID
+			// are still active so link hit-test metadata remains attached to the
+			// text item.
+			flushText(st);
 			popElementByName(st, name);
 			st.currentTableCellHref = st.currentTableCellHref.empty() ? st.hrefBuf : st.currentTableCellHref;
 			st.hrefBuf.clear();
+			st.currentTableCellLinkId.clear();
 		}
 	}
 	if (name == "blockquote" || name == "figure" || name == "dl") {
@@ -6914,6 +7008,9 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			DocBlock block = makeTextBlock(BlockType::Paragraph, "caption",
 				st.currentTableCaptionText, "", st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
 			block.elementMetadata = activeBlockElement(st);
+			block.tableRole = TableRole::Caption;
+			block.tableSerial = nearestAncestorSerial(st, "table");
+			block.atomicContainerSerial = block.tableSerial;
 			st.doc.blocks.push_back(std::move(block));
 		}
 		st.currentTableCaptionText.clear();
@@ -6930,6 +7027,16 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		DocBlock block = makeTextBlock(BlockType::Paragraph, name, st.currentTableCellText, "",
 			st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
 		block.elementMetadata = activeBlockElement(st);
+		block.tableRole = st.currentTableCellHeader ? TableRole::HeaderCell : TableRole::DataCell;
+		block.tableSerial = nearestAncestorSerial(st, "table");
+		block.tableRowGroupSerial = nearestAncestorSerial(st, "thead");
+		if (block.tableRowGroupSerial == 0) block.tableRowGroupSerial = nearestAncestorSerial(st, "tbody");
+		if (block.tableRowGroupSerial == 0) block.tableRowGroupSerial = nearestAncestorSerial(st, "tfoot");
+		block.tableRowSerial = nearestAncestorSerial(st, "tr");
+		block.tableColSpan = st.currentTableCellColSpan;
+		block.tableRowSpan = st.currentTableCellRowSpan;
+		block.tableSpanMalformed = st.currentTableCellSpanMalformed;
+		block.tableContents = st.currentTableCellContents;
 		if (!st.currentTableCellHref.empty()) {
 			block.url = st.currentTableCellHref;
 		}
@@ -6937,6 +7044,11 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.currentTableCellText.clear();
 		st.currentTableCellHeader = false;
 		st.currentTableCellHref.clear();
+		st.currentTableCellLinkId.clear();
+		st.currentTableCellColSpan = 1;
+		st.currentTableCellRowSpan = 1;
+		st.currentTableCellSpanMalformed = false;
+		st.currentTableCellContents.clear();
 		st.open = OpenTag::None;
 		st.activeBlockSerial = 0;
 		popElementByName(st, name);
@@ -7058,6 +7170,13 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		name == "figure" || name == "blockquote" || name == "dl") {
 		flushText(st);
 		appendInlineAtomicMarker(st, name);
+		popElementByName(st, name);
+		return;
+	}
+	if (st.open == OpenTag::TableCell &&
+		(name == "p" || name == "h1" || name == "h2" || name == "h3" || name == "pre") &&
+		(nearestAncestorSerial(st, "td") != 0 || nearestAncestorSerial(st, "th") != 0)) {
+		flushText(st);
 		popElementByName(st, name);
 		return;
 	}
