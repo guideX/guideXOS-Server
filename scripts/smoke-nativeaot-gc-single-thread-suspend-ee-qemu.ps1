@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -25,6 +25,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\gc-stack-provider-transition-failfast"
     } elseif ($ProofMode -eq "stack-provider-code-manager-registration") {
         Join-Path $root "out\dotnet\gc-stack-provider-code-manager-registration"
+    } elseif ($ProofMode -eq "stack-provider-transition-frame-control-pc") {
+        Join-Path $root "out\dotnet\gc-stack-provider-transition-frame-control-pc"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
         Join-Path $root "out\dotnet\gc-first-root-post-queue-mark-decision"
     } elseif ($ProofMode -eq "first-root-first-mark-mutation") {
@@ -59,19 +61,20 @@ $isFirstRootPostQueueMarkDecision = $ProofMode -eq "first-root-post-queue-mark-d
 $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
-$isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration")
+$isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
+$isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc")
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration")
+$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration")
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc")
 $proofDefine = if ($isNextGenuineRootProvider) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
-    $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } else { "" }
+    $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($isTransitionFrameControlPc) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
@@ -263,11 +266,18 @@ $platformContract = Join-Path $gcStartupRoot "guidexos_nativeaot_gc_startup_plat
 $palStartup = Join-Path $gcStartupRoot "PalRedhawkMinWin.gc-startup.obj"
 $startupDiagnostic = Join-Path $gcStartupRoot "startup-diagnostic.obj"
 $gcHelpersDiagnostic = Join-Path $gcStartupRoot "gc-helpers-diagnostic.obj"
+$gcHelpersC011EC18Source = Join-Path $runtimeRoot "gc-helpers-c011ec18.cpp"
+$gcHelpersC011EC18Obj = Join-Path $runtimeRoot "gc-helpers-c011ec18.obj"
+$stackFrameIteratorSource = Join-Path $runtimeRoot "StackFrameIterator.c011ec18.cpp"
+$stackFrameIteratorObj = Join-Path $runtimeRoot "StackFrameIterator.c011ec18.obj"
 $gcHelpersAlign = Join-Path $gcStartupRoot "gc-helpers-align-up.obj"
 $threadObj = Join-Path $oldArtifact "thread.renamed.obj"
 $ehObj = Join-Path $oldArtifact "EHHelpers.renamed.obj"
 $allocFastObj = Join-Path $oldArtifact "AllocFast.renamed.obj"
+$allocFastPublicObj = Join-Path $runtimeRoot "AllocFast.c011ec18-public.obj"
+$allocFastLinkObj = if ($isTransitionFrameControlPc) { $allocFastPublicObj } else { $allocFastObj }
 $runtimeSupportObj = Join-Path $artifactRoot "runtime_support.obj"
+$managedRuntimePackObj = Join-Path $artifactRoot "managed-runtime-pack.c011ec18.lib"
 $hostShimObj = Join-Path $artifactRoot "guidexos_nativeaot_managed_host_shims.obj"
 $startupProbeObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_startup_probe.managed.obj"
 $adaptedArchive = Join-Path $artifactRoot "Runtime.WorkstationGC.guidexos-nativeaot-single-thread-suspend-ee.lib"
@@ -459,6 +469,109 @@ extern "C" void __cdecl guideXosNativeAotC011EC15ProviderEntered(uint32_t catego
         }
     }
     Set-Content -LiteralPath $gcEnvEeSource -Value $injectedText -Encoding ASCII
+
+    if ($isTransitionFrameControlPc) {
+        $lockedGcHelpersPath = Join-Path $lockedSourceRoot "src\coreclr\nativeaot\Runtime\GCHelpers.cpp"
+        $lockedStackFrameIteratorPath = Join-Path $lockedSourceRoot "src\coreclr\nativeaot\Runtime\StackFrameIterator.cpp"
+        Require-File $lockedGcHelpersPath "Locked NativeAOT GCHelpers.cpp source"
+        Require-File $lockedStackFrameIteratorPath "Locked NativeAOT StackFrameIterator.cpp source"
+
+        $gcHelpersText = (Get-Content -LiteralPath $lockedGcHelpersPath -Raw).Replace("`r`n", "`n")
+        $gcHelpersDeclaration = @'
+extern "C" void __cdecl guideXosNativeAotC011EC18RhpGcAllocEntered(
+    uintptr_t frameAddress, uintptr_t eeType, uintptr_t flags,
+    uintptr_t numElements, uintptr_t threadAddress);
+'@
+        $gcHelpersText = $gcHelpersText.Replace(
+            '#include "interoplibinterface.h"',
+            '#include "interoplibinterface.h"' + [Environment]::NewLine + $gcHelpersDeclaration.TrimEnd())
+        $gcHelpersPattern = '(?s)(EXTERN_C void\* F_CALL_CONV RhpGcAlloc\(MethodTable\* pEEType, uint32_t uFlags, uintptr_t numElements, PInvokeTransitionFrame\* pTransitionFrame\)\s*\{\s*)(Thread\* pThread = ThreadStore::GetCurrentThread\(\);)'
+        $gcHelpersReplacement = '$1$2' + [Environment]::NewLine + '    guideXosNativeAotC011EC18RhpGcAllocEntered(' + [Environment]::NewLine + '        reinterpret_cast<uintptr_t>(pTransitionFrame), reinterpret_cast<uintptr_t>(pEEType),' + [Environment]::NewLine + '        static_cast<uintptr_t>(uFlags), numElements, reinterpret_cast<uintptr_t>(pThread));'
+        $gcHelpersText = [regex]::Replace($gcHelpersText, $gcHelpersPattern, $gcHelpersReplacement, 1)
+        if ($gcHelpersText -notmatch 'guideXosNativeAotC011EC18RhpGcAllocEntered') {
+            throw "C011EC18 GCHelpers.cpp injection did not match RhpGcAlloc."
+        }
+        Set-Content -LiteralPath $gcHelpersC011EC18Source -Value $gcHelpersText -Encoding ASCII
+
+        $stackFrameIteratorText = (Get-Content -LiteralPath $lockedStackFrameIteratorPath -Raw).Replace("`r`n", "`n")
+        $stackFrameIteratorDeclarations = @'
+
+extern "C" void __cdecl guideXosNativeAotC011EC18IteratorInitial(
+    uintptr_t frameAddress, uintptr_t controlPc, uintptr_t sp,
+    uintptr_t fp, uintptr_t flags);
+extern "C" void __cdecl guideXosNativeAotC011EC18IteratorCodeManagerLookup(
+    uintptr_t controlPc, uintptr_t sp, uintptr_t fp, uintptr_t manager);
+extern "C" void __cdecl guideXosNativeAotC011EC18IteratorFindMethodInfo(
+    uintptr_t controlPc, uintptr_t methodInfo, uintptr_t found);
+extern "C" void __cdecl guideXosNativeAotC011EC18IteratorFramePointer(uintptr_t framePointer);
+extern "C" void __cdecl guideXosNativeAotC011EC18IteratorUnwind(
+    uintptr_t controlPc, uintptr_t sp);
+'@
+        $stackFrameIteratorText = $stackFrameIteratorText.Replace(
+            '#include "StackFrameIterator.h"',
+            '#include "StackFrameIterator.h"' + $stackFrameIteratorDeclarations.TrimEnd())
+        $iteratorInitial = @'
+    if (pFrame->m_Flags & PTFF_SAVE_RSP)  { m_RegDisplay.SP   = *pPreservedRegsCursor++; }
+    guideXosNativeAotC011EC18IteratorInitial(
+        reinterpret_cast<uintptr_t>(pFrame),
+        reinterpret_cast<uintptr_t>(m_ControlPC),
+        static_cast<uintptr_t>(m_RegDisplay.GetSP()),
+        static_cast<uintptr_t>(m_RegDisplay.GetFP()),
+        static_cast<uintptr_t>(pFrame->m_Flags));
+'@
+        $iteratorInitialNeedle = '    if (pFrame->m_Flags & PTFF_SAVE_RSP)  { m_RegDisplay.SP   = *pPreservedRegsCursor++; }'
+        if (-not $stackFrameIteratorText.Contains($iteratorInitialNeedle)) {
+            throw "C011EC18 StackFrameIterator initial SP injection point was not found."
+        }
+        $stackFrameIteratorText = $stackFrameIteratorText.Replace($iteratorInitialNeedle, $iteratorInitial.TrimEnd())
+        $iteratorLookupNeedle = @'
+        m_pCodeManager = dac_cast<PTR_ICodeManager>(m_pInstance->GetCodeManagerForAddress(m_ControlPC));
+        FAILFAST_OR_DAC_FAIL(m_pCodeManager);
+
+        FAILFAST_OR_DAC_FAIL(m_pCodeManager->FindMethodInfo(m_ControlPC, &m_methodInfo));
+'@
+        $iteratorLookupReplacement = @'
+        m_pCodeManager = dac_cast<PTR_ICodeManager>(m_pInstance->GetCodeManagerForAddress(m_ControlPC));
+        guideXosNativeAotC011EC18IteratorCodeManagerLookup(
+            reinterpret_cast<uintptr_t>(m_ControlPC),
+            static_cast<uintptr_t>(m_RegDisplay.GetSP()),
+            static_cast<uintptr_t>(m_RegDisplay.GetFP()),
+            reinterpret_cast<uintptr_t>(m_pCodeManager));
+        FAILFAST_OR_DAC_FAIL(m_pCodeManager);
+
+        const bool guideXosC011EC18FindMethodInfoResult =
+            m_pCodeManager->FindMethodInfo(m_ControlPC, &m_methodInfo);
+        guideXosNativeAotC011EC18IteratorFindMethodInfo(
+            reinterpret_cast<uintptr_t>(m_ControlPC),
+            reinterpret_cast<uintptr_t>(&m_methodInfo),
+            guideXosC011EC18FindMethodInfoResult ? 1u : 0u);
+        FAILFAST_OR_DAC_FAIL(guideXosC011EC18FindMethodInfoResult);
+'@
+        if (-not $stackFrameIteratorText.Contains($iteratorLookupNeedle)) {
+            throw "C011EC18 StackFrameIterator code-manager injection point was not found."
+        }
+        $stackFrameIteratorText = $stackFrameIteratorText.Replace($iteratorLookupNeedle, $iteratorLookupReplacement.TrimEnd())
+        $stackFrameIteratorText = $stackFrameIteratorText.Replace(
+            '    m_FramePointer = GetCodeManager()->GetFramePointer(&m_methodInfo, &m_RegDisplay);',
+            '    m_FramePointer = GetCodeManager()->GetFramePointer(&m_methodInfo, &m_RegDisplay);' + [Environment]::NewLine + '    guideXosNativeAotC011EC18IteratorFramePointer(reinterpret_cast<uintptr_t>(m_FramePointer));')
+        $iteratorUnwindReplacement = '    NextInternal();' + [Environment]::NewLine + '    guideXosNativeAotC011EC18IteratorUnwind(reinterpret_cast<uintptr_t>(m_ControlPC), static_cast<uintptr_t>(m_RegDisplay.GetSP()));' + [Environment]::NewLine
+        $iteratorUnwindPattern = '    NextInternal\(\);\r?\n(?=    STRESS_LOG1)'
+        if ($stackFrameIteratorText -notmatch $iteratorUnwindPattern) {
+            throw "C011EC18 StackFrameIterator unwind injection point was not found."
+        }
+        $stackFrameIteratorText = [regex]::Replace($stackFrameIteratorText, $iteratorUnwindPattern, $iteratorUnwindReplacement, 1)
+        if ($stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorInitial' -or
+            $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorCodeManagerLookup' -or
+            $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorFindMethodInfo' -or
+            $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorFramePointer' -or
+            $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorUnwind') {
+            throw "C011EC18 StackFrameIterator source injection did not match all required iterator boundaries."
+        }
+        Set-Content -LiteralPath $stackFrameIteratorSource -Value $stackFrameIteratorText -Encoding ASCII
+        Copy-Item -LiteralPath $allocFastObj -Destination $allocFastPublicObj -Force
+        Invoke-LoggedCommand $objcopy @('--redefine-sym', 'guideXosStockRhpNewArray=RhpNewArray', $allocFastPublicObj) (Join-Path $runRoot 'allocfast-public-symbol.log')
+    }
+
     if ($isFirstRootCallbackEntry) {
         $lockedGcwksPath = Join-Path $lockedSourceRoot "src\coreclr\gc\gcwks.cpp"
         $lockedGcCppPath = Join-Path $lockedSourceRoot "src\coreclr\gc\gc.cpp"
@@ -1625,12 +1738,39 @@ exit /b 0
             "/DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION $proofDefine ")
         Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
     }
+    $c011ec18CompileBat = $null
+    if ($isTransitionFrameControlPc) {
+        $c011ec18CompileBat = Write-Batch "build-single-thread-suspend-ee-c011ec18-instrumentation.bat" @"
+@echo off
+setlocal
+call "$vsBat" >nul
+if errorlevel 1 exit /b %errorlevel%
+cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /DGUIDEXOS_NATIVEAOT_GC_STARTUP /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\windows" /I"$nativeAotRoot\Runtime\inc" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$palSourceRoot" /Fo:"$gcHelpersC011EC18Obj" "$gcHelpersC011EC18Source"
+if errorlevel 1 exit /b %errorlevel%
+cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\eventpipe" /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$palSourceRoot" /FI"$sourceRoot\gc\env\common.h" /Fo:"$stackFrameIteratorObj" "$stackFrameIteratorSource"
+if errorlevel 1 exit /b %errorlevel%
+exit /b 0
+"@
+    }
     $probeObjectPropertyArgument = if ($isAllocationContextFixupRootBoundary) {
         "-p:HostLogProofRuntimePackProbeObj=$probeObj"
     } else {
         ""
     }
     $managedProofMode = if ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
+    $managedRuntimePackProperty = if ($isTransitionFrameControlPc) {
+        "-p:HostLogProofRuntimePackObj=$managedRuntimePackObj"
+    } else {
+        "-p:HostLogProofRuntimePackObj=$platformObj"
+    }
+    $managedRuntimePackAssembly = if ($isTransitionFrameControlPc) {
+@"
+lib.exe /nologo /OUT:"$managedRuntimePackObj" "$platformObj" "$allocFastPublicObj"
+if errorlevel 1 exit /b %errorlevel%
+"@
+    } else {
+        ""
+    }
     $artifactBat = Write-Batch "build-single-thread-suspend-ee-artifact.bat" @"
 @echo off
 setlocal
@@ -1638,7 +1778,8 @@ call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /TC /c /GS- /Zl /Fo:"$runtimeSupportObj" "$runtimeSupportSource"
 if errorlevel 1 exit /b %errorlevel%
-"$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=$managedProofMode -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ -p:HostLogProofRuntimePackObj=$platformObj $probeObjectPropertyArgument -p:IlcSdkPath=$oldArtifact\sdk\
+$managedRuntimePackAssembly
+"$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=$managedProofMode -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ $managedRuntimePackProperty $probeObjectPropertyArgument -p:IlcSdkPath=$oldArtifact\sdk\
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:"$hostShimObj" "$hostShimSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -1656,19 +1797,26 @@ exit /b 0
     } else {
         ""
     }
+    $c011ec18ArchiveArgs = if ($isTransitionFrameControlPc) {
+        "/REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\GCHelpers.cpp.obj`" /REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\StackFrameIterator.cpp.obj`" `"$stackFrameIteratorObj`""
+    } else {
+        ""
+    }
+    $archiveAllocFastObj = if ($isTransitionFrameControlPc) { $allocFastLinkObj } else { $allocFastObj }
+    $linkGcHelpersObj = if ($isTransitionFrameControlPc) { $gcHelpersC011EC18Obj } else { $gcHelpersDiagnostic }
     $archiveBat = Write-Batch "build-single-thread-suspend-ee-gc-archive.bat" @"
 @echo off
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
- lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\PalRedhawkMinWin.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\thread.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.obj')" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\gcenv.ee.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj" "$palBridge" "$palStartup" "$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$gcEnvEe" "$gcBridgeBoundary" "$platformContract" "$threadObj" "$ehObj" "$allocFastObj" "$probeObj" $gcWksArchiveArgs $gcEnumArchiveArgs
+ lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\PalRedhawkMinWin.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\thread.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.obj')" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\gcenv.ee.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj" "$palBridge" "$palStartup" "$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$gcEnvEe" "$gcBridgeBoundary" "$platformContract" "$threadObj" "$ehObj" "$archiveAllocFastObj" "$probeObj" $gcWksArchiveArgs $gcEnumArchiveArgs $c011ec18ArchiveArgs
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
     $linkBat = Write-Batch "link-single-thread-suspend-ee.bat" @"
 @echo off
 call "$vsBat" >nul
-link.exe /nologo /MANIFEST:NO /INCREMENTAL:NO /fixed /base:0x10000000 /SUBSYSTEM:NATIVE /ENTRY:GuideXosNativeAotGcStartupMain /OUT:"$pePath" /MAP:"$mapPath" /INCLUDE:RhInitialize /MERGE:.managedcode=.text /MERGE:.managed=.text /MERGE:hydrated=.bss /EXPORT:GuideXosNativeAotGcStartupMain /EXPORT:GuideXosNativeAotGcStartupInstallPalHooks /EXPORT:GuideXosNativeAotGcStartupInstallHookTable /EXPORT:GuideXosNativeAotGcStartupInstallPlatformHooks /EXPORT:GuideXosNativeAotGcStartupGetState /EXPORT:GuideXosNativeAotGcStartupGetPreGcState /EXPORT:GuideXosNativeAotGcStartupGetAllocationCount /EXPORT:GuideXosNativeAotGcStartupGetLastAllocationSize /EXPORT:GuideXosNativeAotGcStartupGetDiagnosticStage /EXPORT:ManagedMain /EXPORT:guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment /EXPORT:guideXosManagedAllocationFinalize /EXPORT:guideXosManagedAllocationGetDiagnostics /EXPORT:guideXosManagedAllocationValidateObject /EXPORT:guideXosManagedAllocationRecordSentinelValidation /EXPORT:guideXosManagedAllocationGetLoopStatus /EXPORT:guideXosManagedAllocationGetHardLimit /NODEFAULTLIB:libucrt.lib /DEFAULTLIB:ucrt.lib /IGNORE:4104 "$managedPublishRoot\obj\x64\Release\net9.0\win-x64\native\HostLogProof.obj" "$runtimeSupportObj" "$platformObj" "$oldArtifact\sdk\bootstrapper.obj" "$adaptedArchive" "$startupProbeObj" "$hostShimObj" "$startupDiagnostic" "$gcHelpersDiagnostic" "$gcHelpersAlign" "$oldArtifact\sdk\eventpipe-disabled.lib" "$oldArtifact\sdk\Runtime.VxsortEnabled.lib" "$oldArtifact\sdk\standalonegc-disabled.lib" "$oldArtifact\sdk\zlibstatic.lib" "$oldArtifact\sdk\System.Globalization.Native.Aot.lib" "$oldArtifact\sdk\System.IO.Compression.Native.Aot.lib"
+link.exe /nologo /MANIFEST:NO /INCREMENTAL:NO /fixed /base:0x10000000 /SUBSYSTEM:NATIVE /ENTRY:GuideXosNativeAotGcStartupMain /OUT:"$pePath" /MAP:"$mapPath" /INCLUDE:RhInitialize /MERGE:.managedcode=.text /MERGE:.managed=.text /MERGE:hydrated=.bss /EXPORT:GuideXosNativeAotGcStartupMain /EXPORT:GuideXosNativeAotGcStartupInstallPalHooks /EXPORT:GuideXosNativeAotGcStartupInstallHookTable /EXPORT:GuideXosNativeAotGcStartupInstallPlatformHooks /EXPORT:GuideXosNativeAotGcStartupGetState /EXPORT:GuideXosNativeAotGcStartupGetPreGcState /EXPORT:GuideXosNativeAotGcStartupGetAllocationCount /EXPORT:GuideXosNativeAotGcStartupGetLastAllocationSize /EXPORT:GuideXosNativeAotGcStartupGetDiagnosticStage /EXPORT:ManagedMain /EXPORT:guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment /EXPORT:guideXosManagedAllocationFinalize /EXPORT:guideXosManagedAllocationGetDiagnostics /EXPORT:guideXosManagedAllocationValidateObject /EXPORT:guideXosManagedAllocationRecordSentinelValidation /EXPORT:guideXosManagedAllocationGetLoopStatus /EXPORT:guideXosManagedAllocationGetHardLimit /NODEFAULTLIB:libucrt.lib /DEFAULTLIB:ucrt.lib /IGNORE:4104 "$managedPublishRoot\obj\x64\Release\net9.0\win-x64\native\HostLogProof.obj" "$runtimeSupportObj" "$platformObj" "$oldArtifact\sdk\bootstrapper.obj" "$adaptedArchive" "$startupProbeObj" "$hostShimObj" "$startupDiagnostic" "$linkGcHelpersObj" "$gcHelpersAlign" "$oldArtifact\sdk\eventpipe-disabled.lib" "$oldArtifact\sdk\Runtime.VxsortEnabled.lib" "$oldArtifact\sdk\standalonegc-disabled.lib" "$oldArtifact\sdk\zlibstatic.lib" "$oldArtifact\sdk\System.Globalization.Native.Aot.lib" "$oldArtifact\sdk\System.IO.Compression.Native.Aot.lib"
 exit /b %errorlevel%
 "@
 
@@ -1676,10 +1824,12 @@ exit /b %errorlevel%
         $stalePaths = @($platformObj,$gcEnvEe,$probeObj,$gcBridgeBoundary,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$elfPath,$mapPath)
         if ($isCandidateLoadEnumeration) { $stalePaths += $gcEnum }
         if ($isFirstRootCallbackEntry) { $stalePaths += $gcWks }
+        if ($isTransitionFrameControlPc) { $stalePaths += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$managedRuntimePackObj) }
         foreach ($stale in $stalePaths) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
         Invoke-Batch $runtimeBat "runtime-pack-build.log"
+        if ($isTransitionFrameControlPc) { Invoke-Batch $c011ec18CompileBat "c011ec18-instrumentation-build.log" }
         Invoke-Batch $artifactBat "managed-artifact-build.log"
         Invoke-Batch $archiveBat "gc-archive-build.log"
         Invoke-Batch $linkBat "managed-link.log"
@@ -1687,6 +1837,7 @@ exit /b %errorlevel%
     $requiredBuildOutputs = @($platformObj,$gcEnvEe,$probeObj,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$mapPath)
     if ($isCandidateLoadEnumeration) { $requiredBuildOutputs += $gcEnum }
     if ($isFirstRootCallbackEntry) { $requiredBuildOutputs += $gcWks }
+    if ($isTransitionFrameControlPc) { $requiredBuildOutputs += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$allocFastPublicObj,$managedRuntimePackObj) }
     foreach ($path in $requiredBuildOutputs) { Require-File $path "Single-thread SuspendEE build output" }
     Invoke-LoggedCommand $python @($converter,$pePath,$elfPath,"--map",$mapPath,"--symbol","ManagedMain") (Join-Path $runRoot "pe-to-elf.log")
     Require-File $elfPath "Single-thread SuspendEE ELF"
@@ -1896,6 +2047,9 @@ exit /b %errorlevel%
         $requiredSymbols += @("guideXosNativeAotC011EC15GcScanRootsEntered","guideXosNativeAotC011EC15ProviderEntered","guideXosNativeAotC011EC15EnumGcRefReturned")
     } elseif ($isNextGenuineRootProvider) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotC011EC15GcScanRootsEntered","guideXosNativeAotC011EC15ProviderEntered","guideXosNativeAotC011EC15CandidateObserved","guideXosNativeAotC011EC15EnumGcRefReturned","guideXosNativeAotC011EC15QueueMarkReturned","guideXosNativeAotC011EC15MarkHelperReturned","guideXosNativeAotC011EC15PromoteReturned","guideXosNativeAotC011EC15PromoteEntered","guideXosNativeAotC011EC15PromoteCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
+        if ($isTransitionFrameControlPc) {
+            $requiredSymbols += @("guideXosNativeAotC011EC18RhpGcAllocEntered","guideXosNativeAotC011EC18IteratorInitial","guideXosNativeAotC011EC18IteratorCodeManagerLookup","guideXosNativeAotC011EC18IteratorFindMethodInfo","guideXosNativeAotC011EC18IteratorFramePointer","guideXosNativeAotC011EC18IteratorUnwind")
+        }
     } elseif ($isFirstRootCallbackEntry -and -not $isFirstRootFirstNonNullOldO) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootCallbackCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
         if ($isFirstRootFirstNonNullOldO) {
@@ -1968,7 +2122,7 @@ exit /b %errorlevel%
         $monitorPath = Join-Path $oneRoot "watchdog-monitor.txt"
         $qemuDebugPath = Join-Path $oneRoot "qemu-debug.log"
         $qemuArgs = @("-accel","tcg,thread=single","-machine","pc","-smp","1","-drive",('if=pflash,format=raw,readonly=on,file="' + $ovmf + '"'),"-drive",('file=fat:rw:"' + $espRoot + '",format=raw,if=ide,index=0'),"-m","1024M","-vga","std","-display","none","-serial",('file:"' + $serialPath + '"'),"-monitor",("tcp:127.0.0.1:$port,server,nowait"),"-no-reboot","-no-shutdown","-rtc","base=utc,clock=host")
-        if ($isStackProviderTransitionFailFast -or $isCodeManagerRegistration -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
+        if ($isStackProviderTransitionFailFast -or $isCodeManagerRegistration -or $isTransitionFrameControlPc -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
         Log-Command ('"' + $qemu + '" ' + ($qemuArgs -join ' '))
         $qemuProcess = Start-Process -FilePath $qemu -ArgumentList $qemuArgs -WindowStyle Hidden -PassThru
         $completed = $false
@@ -2068,7 +2222,58 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isCodeManagerRegistration) {
+        if ($isTransitionFrameControlPc) {
+            $preflightLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-code-manager\] preflight .*marker=C011EC17-PREFLIGHT' } | Select-Object -Last 1)
+            $transitionPreflightLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-code-manager\] C011EC18-PREFLIGHT .*marker=C011EC18-PREFLIGHT' } | Select-Object -Last 1)
+            $iteratorInitialLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-code-manager\] C011EC18 iterator-initial .*marker=C011EC18-ITERATOR' } | Select-Object -Last 1)
+            $directMarkerLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-code-manager\] transition-frame-control-pc .*marker=C011EC18' } | Select-Object -Last 1)
+            $findMethodLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-code-manager\] C011EC18 FindMethodInfo .*marker=C011EC18-FIND-METHOD' } | Select-Object -Last 1)
+            $c15Line = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-gc-next-genuine-root-provider\] SAFE_STOP marker=C011EC15' } | Select-Object -Last 1)
+            foreach ($evidence in @(@($preflightLine, 'C011EC17 preflight'), @($transitionPreflightLine, 'C011EC18 transition preflight'), @($iteratorInitialLine, 'C011EC18 iterator initial'), @($directMarkerLine, 'C011EC18 direct marker'), @($findMethodLine, 'C011EC18 FindMethodInfo'), @($c15Line, 'C011EC15 post-transition boundary'))) {
+                if ([string]::IsNullOrWhiteSpace($evidence[0])) { throw "Missing $($evidence[1]) evidence in $name." }
+            }
+            $preflightFields = ($preflightLine -split '\[nativeaot-code-manager\] preflight ', 2)[-1]
+            $transitionFields = ($transitionPreflightLine -split '\[nativeaot-code-manager\] C011EC18-PREFLIGHT ', 2)[-1]
+            $directFields = ($directMarkerLine -split '\[nativeaot-code-manager\] transition-frame-control-pc ', 2)[-1]
+            $registeredLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-code-manager\] registered module=' } | Select-Object -Last 1)
+            if ([string]::IsNullOrWhiteSpace($registeredLine)) { throw "C011EC17 registration evidence was missing in C011EC18 run $name." }
+            $registeredManager = Get-MarkerField $registeredLine 'manager'
+            $transitionInRange = Get-MarkerField $transitionFields 'transitionInRange'
+            $transitionFrame = Get-MarkerField $transitionFields 'frame'
+            $transitionRip = Get-MarkerField $transitionFields 'transitionRIP'
+            $savedRsp = Get-MarkerField $transitionFields 'savedRSP'
+            $iteratorControlPc = Get-MarkerField $directFields 'iteratorControlPC'
+            $iteratorManager = Get-MarkerField $directFields 'manager'
+            $authenticManager = Get-MarkerField $directFields 'authenticManager'
+            $methodInfo = Get-MarkerField $directFields 'methodInfo'
+            $methodInfoResult = Get-MarkerField $directFields 'methodInfoResult'
+            if ($transitionInRange -ne '0x00000001' -or
+                $transitionFrame -eq '0x0000000000000000' -or
+                $transitionRip -eq '0x0000000000000000' -or
+                $transitionRip -ne $iteratorControlPc -or
+                $iteratorManager -eq '0x0000000000000000' -or
+                $iteratorManager -ne $authenticManager -or
+                $iteratorManager -ne $registeredManager -or
+                $methodInfo -eq '0x0000000000000000' -or
+                $methodInfoResult -ne '0x00000001') {
+                throw "C011EC18 did not prove the structurally saved managed PC and production code-manager lookup in $name."
+            }
+            Assert-Text $findMethodLine 'result=00000001' "successful NativeAOT FindMethodInfo"
+            Assert-Text $c15Line 'c18FindMethodInfoSuccess=00000001' "C011EC18 method metadata success at C011EC15 boundary"
+            Assert-Text $c15Line 'c18TransitionInRange=00000001' "C011EC18 managed-range membership"
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC15'; outcome='A'; harnessTerminated=$true
+                registration=[ordered]@{ marker=$registeredLine; preflight=$preflightLine; manager=$registeredManager; managedStart=(Get-MarkerField $preflightFields 'managedStart'); managedSize=(Get-MarkerField $preflightFields 'managedSize'); managedEnd=(Get-MarkerField $preflightFields 'managedEnd'); originalOutOfRangePC='0x00000000100547F6'; originalOutOfRangeMembership='false' }
+                transition=[ordered]@{ frame=$transitionFrame; currentNativeRIP=(Get-MarkerField $transitionFields 'currentRIP'); currentNativeReturnSlot=(Get-MarkerField $transitionFields 'currentReturnSlot'); transitionRIP=$transitionRip; transitionRBP=(Get-MarkerField $transitionFields 'transitionRBP'); frameThread=(Get-MarkerField $transitionFields 'frameThread'); thread=(Get-MarkerField $transitionFields 'thread'); flags=(Get-MarkerField $transitionFields 'flags'); savedRSP=$savedRsp; savedRBP=(Get-MarkerField $transitionFields 'savedRBP'); transitionInManagedRange=$transitionInRange; nativeManager=(Get-MarkerField $transitionFields 'nativeManager'); transitionManager=(Get-MarkerField $transitionFields 'transitionManager') }
+                iterator=[ordered]@{ initialControlPC=$iteratorControlPc; initialSP=(Get-MarkerField $directFields 'iteratorSP'); initialFP=(Get-MarkerField $directFields 'iteratorFP'); codeManager=$iteratorManager; methodInfo=$methodInfo; framePointer=(Get-MarkerField $c15Line 'c18FramePointer'); unwindSteps=(Get-MarkerField $c15Line 'c18UnwindSteps'); framesWalked=(Get-MarkerField $c15Line 'c18StackFrames') }
+                methodInfo=[ordered]@{ attempted=$true; result='success'; metadataValid=(Get-MarkerField $c15Line 'c18MetadataValid'); findMethodInfoAttempts=(Get-MarkerField $c15Line 'c18FindMethodInfoAttempts'); findMethodInfoSuccess=(Get-MarkerField $c15Line 'c18FindMethodInfoSuccess') }
+                stack=[ordered]@{ providerCallbacks=(Get-MarkerField $c15Line 'c18StackProviderCallbacks'); rootSlots=(Get-MarkerField $c15Line 'c18StackRootSlots'); secondPromoteAttempts=(Get-MarkerField $c15Line 'secondPromoteAttempts'); secondPromoteEntries=(Get-MarkerField $c15Line 'secondPromoteEntries'); secondQueueInsertions=(Get-MarkerField $c15Line 'secondQueueMutationExecutions'); stackBoundsConsumed=(Get-MarkerField $c15Line 'c18StackBoundsConsumed') }
+                queue=[ordered]@{ firstSlot=(Get-MarkerField $c15Line 'firstQueueSlot'); slotIndex=(Get-MarkerField $c15Line 'firstQueueSlotIndex'); cursorBefore=(Get-MarkerField $c15Line 'firstQueueCursorBefore'); cursorAfter=(Get-MarkerField $c15Line 'firstQueueCursorAfter'); old=(Get-MarkerField $c15Line 'firstQueueOld'); new=(Get-MarkerField $c15Line 'firstQueueNew'); cursor=(Get-MarkerField $c15Line 'firstQueueCursorAfter') }
+                root=[ordered]@{ sentinel=(Get-MarkerField $c15Line 'sentinel'); storageObject=(Get-MarkerField $c15Line 'storageObject'); firstRoot=(Get-MarkerField $c15Line 'firstRootRaw'); nextRoot=(Get-MarkerField $c15Line 'nextRootRaw') }
+                invariants=[ordered]@{ lockHeld=(Get-MarkerField $c15Line 'threadStoreLockHeld'); eeSuspended=(Get-MarkerField $c15Line 'eeSuspended'); managedEntryProhibited=(Get-MarkerField $c15Line 'managedEntryProhibited'); restart=(Get-MarkerField $c15Line 'restart'); resume=(Get-MarkerField $c15Line 'resume'); markBitWrites=(Get-MarkerField $c15Line 'markBitWrites'); childReferenceReads=(Get-MarkerField $c15Line 'childReferenceReads'); graphTraversal=(Get-MarkerField $c15Line 'graphTraversal') }
+                c011ec18=[ordered]@{ directMarker=$directMarkerLine; iteratorInitial=$iteratorInitialLine; findMethodInfo=$findMethodLine }
+            }
+        } elseif ($isCodeManagerRegistration) {
             $preflightLine = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-code-manager\] preflight .*marker=C011EC17-PREFLIGHT' } | Select-Object -Last 1)
             if ([string]::IsNullOrWhiteSpace($preflightLine)) { throw "C011EC17 did not emit its allocation-free preflight marker in $name." }
             $preflightFields = ($preflightLine -split '\[nativeaot-code-manager\] preflight ', 2)[-1]
@@ -2995,6 +3200,23 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isTransitionFrameControlPc) {
+        if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_["safeStopMarker"] -ne "C011EC15" -or $_["outcome"] -ne "A" }).Count -ne 0) { throw "The C011EC18 transition-frame provenance experiment did not produce $FreshBootCount deterministic Outcome A runs." }
+        $firstTransitionFrameRun = $runResults[0]
+        $manifest = [ordered]@{
+            outcome="A / the native wrapper provenance defect was repaired by restoring the locked NativeAOT RhpNewArray entry; the structurally saved PInvokeTransitionFrame m_RIP was presented to StackFrameIterator, CoffNativeCodeManager lookup succeeded, FindMethodInfo succeeded, and the real C011EC15 provider boundary was reached"
+            proofMode=$ProofMode; marker="C011EC18"; preflightMarker="C011EC18-PREFLIGHT"; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            lockedRuntimeIdentity=[ordered]@{ nativeAot="9.0.0"; architecture="AMD64"; gc="Workstation"; gcInterfaces="5.3 / 2"; sourceCommit=$lockedCommit; codeManager="CoffNativeCodeManager" }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryKernelBefore.build; startingEspSha256=$ordinaryKernelBefore.esp; expectedSha256=$normalKernelHash }
+            transition=$firstTransitionFrameRun.transition; iterator=$firstTransitionFrameRun.iterator; methodInfo=$firstTransitionFrameRun.methodInfo; stack=$firstTransitionFrameRun.stack; queue=$firstTransitionFrameRun.queue; root=$firstTransitionFrameRun.root; invariants=$firstTransitionFrameRun.invariants; registration=$firstTransitionFrameRun.registration; c011ec18=$firstTransitionFrameRun.c011ec18
+            runs=$runResults
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot "commands.txt"); evidenceRoot=$runRoot }
+            regressions=[ordered]@{ C011EC18="PASS $FreshBootCount/$FreshBootCount fresh QEMU runs with deterministic transition provenance and Outcome A"; C011EC17="historical registration result retained; the prior null-manager boundary was crossed naturally"; C011EC15="real next-provider safe-stop retained"; C011EC14_to_C011EC02="historical evidence retained; not relabeled"; staticChecks="script parse, manifest parse, serial checkpoints, ordinary restoration, git diff --check" }
+            documentation="docs/dotnet/NATIVEAOT_WORKSTATION_GC_TRANSITION_FRAME_CONTROL_PC_PROVENANCE.md"
+            ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+        }
+        $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT transition-frame control-PC provenance experiment: Outcome A (C011EC18)" -ForegroundColor Green
     } elseif ($isCodeManagerRegistration) {
         if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_["outcome"] -notin @("A", "B", "D") }).Count -ne 0) { throw "The C011EC17 code-manager registration experiment did not produce $FreshBootCount valid runs." }
         $firstCodeManagerRun = $runResults[0]

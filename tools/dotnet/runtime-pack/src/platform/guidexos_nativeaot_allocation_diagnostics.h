@@ -1154,6 +1154,58 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec15FirstQueueCursorAfter;
     uintptr_t c011ec15FirstQueueBase;
     uintptr_t c011ec15StopAddress;
+
+    /*
+     * C011EC18 transition-frame provenance. These fields are append-only and
+     * are populated from the locked RhpGcAlloc/PInvokeTransitionFrame and
+     * StackFrameIterator paths. They are structural observations, not a
+     * substitute context or a managed-PC correction.
+     */
+    uint32_t c011ec18TransitionFrameCount;
+    uint32_t c011ec18IteratorInitialCount;
+    uint32_t c011ec18LookupCount;
+    uint32_t c011ec18FindMethodInfoAttemptCount;
+    uint32_t c011ec18FindMethodInfoSuccessCount;
+    uint32_t c011ec18FramePointerCalculationCount;
+    uint32_t c011ec18UnwindStepCount;
+    uint32_t c011ec18StackFrameCount;
+    uint32_t c011ec18StackRootSlotCount;
+    uint32_t c011ec18StackProviderCallbackCount;
+    uint32_t c011ec18StackBoundsConsumed;
+    uint32_t c011ec18MethodMetadataValid;
+    uint32_t c011ec18MarkerEmitted;
+    uint32_t c011ec18TransitionInManagedRange;
+    uint32_t c011ec18FailFastReason;
+    uint32_t c011ec18Reserved[2];
+
+    uintptr_t c011ec18CurrentNativeRip;
+    uintptr_t c011ec18CurrentNativeRsp;
+    uintptr_t c011ec18TransitionFrameAddress;
+    uintptr_t c011ec18TransitionFrameRip;
+    uintptr_t c011ec18TransitionFrameRbp;
+    uintptr_t c011ec18TransitionFrameThreadField;
+    uintptr_t c011ec18ThreadAddress;
+    uintptr_t c011ec18PreviousTransitionFrame;
+    uintptr_t c011ec18TransitionFrameFlags;
+    uintptr_t c011ec18SavedRbx;
+    uintptr_t c011ec18SavedRsi;
+    uintptr_t c011ec18SavedRdi;
+    uintptr_t c011ec18SavedR12;
+    uintptr_t c011ec18SavedR13;
+    uintptr_t c011ec18SavedR14;
+    uintptr_t c011ec18SavedR15;
+    uintptr_t c011ec18SavedRsp;
+    uintptr_t c011ec18IteratorControlPc;
+    uintptr_t c011ec18IteratorInitialSp;
+    uintptr_t c011ec18IteratorInitialFp;
+    uintptr_t c011ec18IteratorCodeManager;
+    uintptr_t c011ec18IteratorMethodInfo;
+    uintptr_t c011ec18IteratorFramePointer;
+    uintptr_t c011ec18IteratorUnwindControlPc;
+    uintptr_t c011ec18CurrentNativeCodeManager;
+    uintptr_t c011ec18CurrentNativeInManagedRange;
+    uintptr_t c011ec18TransitionCodeManager;
+    uintptr_t c011ec18AuthenticManagedCodeManager;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -1229,6 +1281,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_POST_QUEUE_MARK_DECISION_SAFE_STOP_MARKER = 0xC011EC13u,
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_NON_NULL_OLD_O_SAFE_STOP_MARKER = 0xC011EC14u,
     GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP_MARKER = 0xC011EC15u,
+    GUIDEXOS_NATIVEAOT_TRANSITION_FRAME_CONTROL_PC_MARKER = 0xC011EC18u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

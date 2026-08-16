@@ -4975,6 +4975,54 @@ static void emitC011EC15SafeStop() {
     suspendEeSerialPutHex64(d.threadStaticProofSentinelAddress);
     suspendEeSerialPutString(" storageObject=");
     suspendEeSerialPutHex64(d.runtimeThreadStaticStorageObjectAddress);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
+    suspendEeSerialPutString(" c18Frame=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameAddress);
+    suspendEeSerialPutString(" c18CurrentNativeRIP=");
+    suspendEeSerialPutHex64(d.c011ec18CurrentNativeRip);
+    suspendEeSerialPutString(" c18CurrentNativeReturnSlot=");
+    suspendEeSerialPutHex64(d.c011ec18CurrentNativeRsp);
+    suspendEeSerialPutString(" c18TransitionRIP=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameRip);
+    suspendEeSerialPutString(" c18TransitionRBP=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameRbp);
+    suspendEeSerialPutString(" c18SavedRSP=");
+    suspendEeSerialPutHex64(d.c011ec18SavedRsp);
+    suspendEeSerialPutString(" c18TransitionInRange=");
+    suspendEeSerialPutHex32(d.c011ec18TransitionInManagedRange);
+    suspendEeSerialPutString(" c18IteratorControlPC=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorControlPc);
+    suspendEeSerialPutString(" c18IteratorSP=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorInitialSp);
+    suspendEeSerialPutString(" c18IteratorFP=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorInitialFp);
+    suspendEeSerialPutString(" c18Manager=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorCodeManager);
+    suspendEeSerialPutString(" c18AuthenticManager=");
+    suspendEeSerialPutHex64(d.c011ec18AuthenticManagedCodeManager);
+    suspendEeSerialPutString(" c18MethodInfo=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorMethodInfo);
+    suspendEeSerialPutString(" c18FindMethodInfoAttempts=");
+    suspendEeSerialPutHex32(d.c011ec18FindMethodInfoAttemptCount);
+    suspendEeSerialPutString(" c18FindMethodInfoSuccess=");
+    suspendEeSerialPutHex32(d.c011ec18FindMethodInfoSuccessCount);
+    suspendEeSerialPutString(" c18MetadataValid=");
+    suspendEeSerialPutHex32(d.c011ec18MethodMetadataValid);
+    suspendEeSerialPutString(" c18FramePointer=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorFramePointer);
+    suspendEeSerialPutString(" c18FramePointerCalculations=");
+    suspendEeSerialPutHex32(d.c011ec18FramePointerCalculationCount);
+    suspendEeSerialPutString(" c18UnwindSteps=");
+    suspendEeSerialPutHex32(d.c011ec18UnwindStepCount);
+    suspendEeSerialPutString(" c18StackFrames=");
+    suspendEeSerialPutHex32(d.c011ec18StackFrameCount);
+    suspendEeSerialPutString(" c18StackProviderCallbacks=");
+    suspendEeSerialPutHex32(d.c011ec18StackProviderCallbackCount);
+    suspendEeSerialPutString(" c18StackRootSlots=");
+    suspendEeSerialPutHex32(d.c011ec18StackRootSlotCount);
+    suspendEeSerialPutString(" c18StackBoundsConsumed=");
+    suspendEeSerialPutHex32(d.c011ec18StackBoundsConsumed);
+#endif
     suspendEeSerialPutString(" marker=C011EC15\n");
 }
 
@@ -4994,7 +5042,7 @@ static void emitC011EC15SafeStop() {
     }
 }
 
-#if defined(GUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER) || defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
 static void emitC011EC17StackWalkPreflight() {
     RuntimeInstance* runtime = GetRuntimeInstance();
     Thread* thread = ThreadStore::GetCurrentThreadIfAvailable();
@@ -5053,6 +5101,293 @@ static void emitC011EC17StackWalkPreflight() {
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
+static bool c011ec18IsInsideManagedRange(
+    uintptr_t address, RuntimeInstance* runtime, ICodeManager** codeManager) {
+    void* managedCodeStart = nullptr;
+    uint32_t managedCodeSize = 0u;
+    const bool rangeValid = getNativeAotRange(
+        reinterpret_cast<void*>(&__managedcode_a),
+        reinterpret_cast<void*>(&__managedcode_z),
+        &managedCodeStart,
+        &managedCodeSize);
+    const uintptr_t managedStart = reinterpret_cast<uintptr_t>(managedCodeStart);
+    const uintptr_t managedEnd = managedStart + managedCodeSize;
+    const bool inside = rangeValid && address >= managedStart && address < managedEnd;
+    if (codeManager != nullptr) {
+        *codeManager = runtime != nullptr && address != 0u
+            ? runtime->GetCodeManagerForAddress(reinterpret_cast<void*>(address))
+            : nullptr;
+    }
+    return inside;
+}
+
+static void emitC011EC18Marker() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (d.c011ec18MarkerEmitted != 0u ||
+        d.c011ec18TransitionFrameAddress == 0u ||
+        d.c011ec18TransitionFrameRip == 0u ||
+        d.c011ec18IteratorControlPc != d.c011ec18TransitionFrameRip ||
+        d.c011ec18TransitionCodeManager == 0u ||
+        d.c011ec18IteratorCodeManager != d.c011ec18TransitionCodeManager ||
+        d.c011ec18AuthenticManagedCodeManager == 0u ||
+        d.c011ec18FindMethodInfoSuccessCount == 0u ||
+        d.c011ec18MethodMetadataValid == 0u) {
+        return;
+    }
+
+    d.c011ec18MarkerEmitted = 1u;
+    suspendEeSerialPutString("[nativeaot-code-manager] transition-frame-control-pc frame=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameAddress);
+    suspendEeSerialPutString(" transitionRIP=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameRip);
+    suspendEeSerialPutString(" iteratorControlPC=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorControlPc);
+    suspendEeSerialPutString(" iteratorSP=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorInitialSp);
+    suspendEeSerialPutString(" iteratorFP=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorInitialFp);
+    suspendEeSerialPutString(" manager=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorCodeManager);
+    suspendEeSerialPutString(" methodInfo=");
+    suspendEeSerialPutHex64(d.c011ec18IteratorMethodInfo);
+    suspendEeSerialPutString(" methodInfoResult=");
+    suspendEeSerialPutHex32(d.c011ec18FindMethodInfoSuccessCount != 0u ? 1u : 0u);
+    suspendEeSerialPutString(" managedRange=");
+    suspendEeSerialPutHex32(d.c011ec18TransitionInManagedRange);
+    suspendEeSerialPutString(" transitionInRange=");
+    suspendEeSerialPutHex32(d.c011ec18TransitionInManagedRange);
+    suspendEeSerialPutString(" authenticManager=");
+    suspendEeSerialPutHex64(d.c011ec18AuthenticManagedCodeManager);
+    suspendEeSerialPutString(" marker=C011EC18\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC18RhpGcAllocEntered(
+    uintptr_t frameAddress, uintptr_t eeType, uintptr_t flags,
+    uintptr_t numElements, uintptr_t threadAddress) {
+    (void)eeType;
+    (void)flags;
+    (void)numElements;
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec18TransitionFrameCount;
+
+    PInvokeTransitionFrame* frame =
+        reinterpret_cast<PInvokeTransitionFrame*>(frameAddress);
+    d.c011ec18CurrentNativeRip =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec18CurrentNativeRsp =
+        reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
+    d.c011ec18TransitionFrameAddress = frameAddress;
+    d.c011ec18TransitionFrameRip = frame != nullptr
+        ? reinterpret_cast<uintptr_t>(frame->m_RIP) : 0u;
+    d.c011ec18TransitionFrameRbp = frame != nullptr
+        ? reinterpret_cast<uintptr_t>(frame->m_FramePointer) : 0u;
+    d.c011ec18TransitionFrameThreadField = frame != nullptr
+        ? reinterpret_cast<uintptr_t>(frame->m_pThread) : 0u;
+    d.c011ec18ThreadAddress = threadAddress;
+    d.c011ec18PreviousTransitionFrame = 0u;
+    d.c011ec18TransitionFrameFlags = frame != nullptr
+        ? static_cast<uintptr_t>(frame->m_Flags) : 0u;
+    d.c011ec18SavedRbx = 0u;
+    d.c011ec18SavedRsi = 0u;
+    d.c011ec18SavedRdi = 0u;
+    d.c011ec18SavedR12 = 0u;
+    d.c011ec18SavedR13 = 0u;
+    d.c011ec18SavedR14 = 0u;
+    d.c011ec18SavedR15 = 0u;
+    d.c011ec18SavedRsp = 0u;
+    if (threadAddress != 0u) {
+        RuntimeThreadLocals* locals =
+            reinterpret_cast<RuntimeThreadLocals*>(threadAddress);
+        d.c011ec18PreviousTransitionFrame =
+            reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+    }
+    if (frame != nullptr) {
+        const uintptr_t* saved =
+            reinterpret_cast<const uintptr_t*>(frame->m_PreservedRegs);
+        const uintptr_t savedPreservedMask =
+            PTFF_SAVE_RBX | PTFF_SAVE_RSI | PTFF_SAVE_RDI |
+            PTFF_SAVE_R12 | PTFF_SAVE_R13 | PTFF_SAVE_R14 | PTFF_SAVE_R15;
+        if ((d.c011ec18TransitionFrameFlags & savedPreservedMask) == savedPreservedMask) {
+            d.c011ec18SavedRbx = saved[0];
+            d.c011ec18SavedRsi = saved[1];
+            d.c011ec18SavedRdi = saved[2];
+            d.c011ec18SavedR12 = saved[3];
+            d.c011ec18SavedR13 = saved[4];
+            d.c011ec18SavedR14 = saved[5];
+            d.c011ec18SavedR15 = saved[6];
+        }
+        if ((d.c011ec18TransitionFrameFlags & PTFF_SAVE_RSP) != 0u) {
+            d.c011ec18SavedRsp = saved[7];
+        }
+    }
+
+    RuntimeInstance* runtime = GetRuntimeInstance();
+    ICodeManager* nativeManager = nullptr;
+    ICodeManager* transitionManager = nullptr;
+    const bool transitionInRange = c011ec18IsInsideManagedRange(
+        d.c011ec18TransitionFrameRip, runtime, &transitionManager);
+    (void)c011ec18IsInsideManagedRange(
+        d.c011ec18CurrentNativeRip, runtime, &nativeManager);
+    d.c011ec18CurrentNativeCodeManager =
+        reinterpret_cast<uintptr_t>(nativeManager);
+    d.c011ec18CurrentNativeInManagedRange =
+        c011ec18IsInsideManagedRange(
+            d.c011ec18CurrentNativeRip, runtime, nullptr) ? 1u : 0u;
+    d.c011ec18TransitionCodeManager =
+        reinterpret_cast<uintptr_t>(transitionManager);
+    d.c011ec18TransitionInManagedRange = transitionInRange ? 1u : 0u;
+    d.c011ec18AuthenticManagedCodeManager =
+        reinterpret_cast<uintptr_t>(transitionManager);
+
+}
+
+static void emitC011EC18Preflight() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (d.c011ec18TransitionFrameAddress == 0u) {
+        return;
+    }
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC18-PREFLIGHT frame=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameAddress);
+    suspendEeSerialPutString(" currentRIP=");
+    suspendEeSerialPutHex64(d.c011ec18CurrentNativeRip);
+    suspendEeSerialPutString(" currentReturnSlot=");
+    suspendEeSerialPutHex64(d.c011ec18CurrentNativeRsp);
+    suspendEeSerialPutString(" transitionRIP=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameRip);
+    suspendEeSerialPutString(" transitionRBP=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameRbp);
+    suspendEeSerialPutString(" frameThread=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameThreadField);
+    suspendEeSerialPutString(" thread=");
+    suspendEeSerialPutHex64(d.c011ec18ThreadAddress);
+    suspendEeSerialPutString(" previousFrame=");
+    suspendEeSerialPutHex64(d.c011ec18PreviousTransitionFrame);
+    suspendEeSerialPutString(" flags=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameFlags);
+    suspendEeSerialPutString(" savedRSP=");
+    suspendEeSerialPutHex64(d.c011ec18SavedRsp);
+    suspendEeSerialPutString(" savedRBX=");
+    suspendEeSerialPutHex64(d.c011ec18SavedRbx);
+    suspendEeSerialPutString(" savedRSI=");
+    suspendEeSerialPutHex64(d.c011ec18SavedRsi);
+    suspendEeSerialPutString(" savedRDI=");
+    suspendEeSerialPutHex64(d.c011ec18SavedRdi);
+    suspendEeSerialPutString(" savedR12=");
+    suspendEeSerialPutHex64(d.c011ec18SavedR12);
+    suspendEeSerialPutString(" savedR13=");
+    suspendEeSerialPutHex64(d.c011ec18SavedR13);
+    suspendEeSerialPutString(" savedR14=");
+    suspendEeSerialPutHex64(d.c011ec18SavedR14);
+    suspendEeSerialPutString(" savedR15=");
+    suspendEeSerialPutHex64(d.c011ec18SavedR15);
+    suspendEeSerialPutString(" savedRBP=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionFrameRbp);
+    suspendEeSerialPutString(" nativeManager=");
+    suspendEeSerialPutHex64(d.c011ec18CurrentNativeCodeManager);
+    suspendEeSerialPutString(" currentNativeInRange=");
+    suspendEeSerialPutHex32(d.c011ec18CurrentNativeInManagedRange);
+    suspendEeSerialPutString(" transitionManager=");
+    suspendEeSerialPutHex64(d.c011ec18TransitionCodeManager);
+    suspendEeSerialPutString(" transitionInRange=");
+    suspendEeSerialPutHex32(d.c011ec18TransitionInManagedRange);
+    suspendEeSerialPutString(" marker=C011EC18-PREFLIGHT\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC18IteratorInitial(
+    uintptr_t frameAddress, uintptr_t controlPc, uintptr_t sp,
+    uintptr_t fp, uintptr_t flags) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec18IteratorInitialCount;
+    ++d.c011ec18StackFrameCount;
+    d.c011ec18IteratorControlPc = controlPc;
+    d.c011ec18IteratorInitialSp = sp;
+    d.c011ec18IteratorInitialFp = fp;
+    d.c011ec18TransitionFrameFlags = flags;
+    if (frameAddress != d.c011ec18TransitionFrameAddress ||
+        controlPc != d.c011ec18TransitionFrameRip ||
+        (((d.c011ec18TransitionFrameFlags & PTFF_SAVE_RSP) != 0u) &&
+         sp != d.c011ec18SavedRsp) ||
+        fp != d.c011ec18TransitionFrameRbp) {
+        d.c011ec18FailFastReason = 0xEC1801u;
+    }
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC18 iterator-initial controlPC=");
+    suspendEeSerialPutHex64(controlPc);
+    suspendEeSerialPutString(" SP=");
+    suspendEeSerialPutHex64(sp);
+    suspendEeSerialPutString(" FP=");
+    suspendEeSerialPutHex64(fp);
+    suspendEeSerialPutString(" frame=");
+    suspendEeSerialPutHex64(frameAddress);
+    suspendEeSerialPutString(" flags=");
+    suspendEeSerialPutHex64(flags);
+    suspendEeSerialPutString(" marker=C011EC18-ITERATOR\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC18IteratorCodeManagerLookup(
+    uintptr_t controlPc, uintptr_t sp, uintptr_t fp, uintptr_t manager) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec18LookupCount;
+    d.c011ec18IteratorControlPc = controlPc;
+    d.c011ec18IteratorInitialSp = sp;
+    d.c011ec18IteratorInitialFp = fp;
+    d.c011ec18IteratorCodeManager = manager;
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC18 lookup controlPC=");
+    suspendEeSerialPutHex64(controlPc);
+    suspendEeSerialPutString(" manager=");
+    suspendEeSerialPutHex64(manager);
+    suspendEeSerialPutString(" marker=C011EC18-LOOKUP\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC18IteratorFindMethodInfo(
+    uintptr_t controlPc, uintptr_t methodInfo, uintptr_t found) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec18FindMethodInfoAttemptCount;
+    d.c011ec18IteratorControlPc = controlPc;
+    d.c011ec18IteratorMethodInfo = methodInfo;
+    if (found != 0u) {
+        ++d.c011ec18FindMethodInfoSuccessCount;
+        d.c011ec18MethodMetadataValid = methodInfo != 0u ? 1u : 0u;
+        emitC011EC18Marker();
+    }
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC18 FindMethodInfo controlPC=");
+    suspendEeSerialPutHex64(controlPc);
+    suspendEeSerialPutString(" methodInfo=");
+    suspendEeSerialPutHex64(methodInfo);
+    suspendEeSerialPutString(" result=");
+    suspendEeSerialPutHex32(found != 0u ? 1u : 0u);
+    suspendEeSerialPutString(" marker=C011EC18-FIND-METHOD\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC18IteratorFramePointer(uintptr_t framePointer) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec18FramePointerCalculationCount;
+    d.c011ec18IteratorFramePointer = framePointer;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC18IteratorUnwind(
+    uintptr_t controlPc, uintptr_t sp) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec18UnwindStepCount;
+    d.c011ec18IteratorUnwindControlPc = controlPc;
+    d.c011ec18IteratorInitialSp = sp;
+}
+#endif
+
 extern "C" void __cdecl
 guideXosNativeAotC011EC15GcScanRootsEntered(
     int condemned, int maxGeneration, uintptr_t scanContext) {
@@ -5063,8 +5398,11 @@ guideXosNativeAotC011EC15GcScanRootsEntered(
         g_guideXosAllocationDiagnostics;
     ++d.c011ec15GcScanRootsRequestCount;
     ++d.c011ec15ProviderRequestCount;
-#if defined(GUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER) || defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
     emitC011EC17StackWalkPreflight();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
+    emitC011EC18Preflight();
+#endif
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL)
     suspendEeSerialPutString(
@@ -5088,6 +5426,11 @@ guideXosNativeAotC011EC15ProviderEntered(
     d.c011ec15ProviderCategory = category;
     d.c011ec15ProviderContinuationCategory = category;
     d.c011ec15CurrentProvider = provider;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
+    if (category == kC011EC15ProviderThreadStack) {
+        ++d.c011ec18StackProviderCallbackCount;
+    }
+#endif
     d.c011ec15FirstRootProvider =
         d.c011ec15FirstRootProvider == 0u ? provider : d.c011ec15FirstRootProvider;
 #if defined(GUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL)
@@ -5109,6 +5452,11 @@ guideXosNativeAotC011EC15CandidateObserved(
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     ++d.c011ec15RootSlotVisitCount;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
+    if (d.c011ec15ProviderCategory == kC011EC15ProviderThreadStack) {
+        ++d.c011ec18StackRootSlotCount;
+    }
+#endif
     if (rawValue == 0u) {
         ++d.c011ec15NullCandidateCount;
 #if defined(GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION)
@@ -7364,6 +7712,7 @@ guideXosNativeAotCollectionBoundarySafeStop(gx_uint32 suspendReason) {
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+#if !defined(GUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY)
 extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size length) {
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     ++g_guideXosObservedRhpNewArrayEntries;
@@ -7811,6 +8160,7 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     return result;
 #endif
 }
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 extern "C" __declspec(dllexport) const guidexos_nativeaot_allocation_diagnostics*
@@ -8034,6 +8384,78 @@ guideXosManagedAllocationValidateObject(
     void* arrayObject, gx_size length, gx_uint32 sequence,
     gx_uint32 zeroByteCount, gx_uint32 patternValid) {
     const gx_uintptr objectAddress = reinterpret_cast<gx_uintptr>(arrayObject);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
+    // C011EC18 deliberately enters the locked stock RhpNewArray assembly
+    // directly.  That path must not be wrapped just to populate this
+    // proof-only observer's bookkeeping, so derive the observer fields from
+    // the real managed object and the locked GC probe instead.
+    if (arrayObject != nullptr) {
+        guidexos_nativeaot_allocation_diagnostics& diagnostics =
+            g_guideXosAllocationDiagnostics;
+        const gx_uintptr eeType =
+            *reinterpret_cast<const gx_uintptr*>(arrayObject);
+        gx_size observedObjectSize = 0u;
+        if (sourceDerivedArrayObjectSize(
+                reinterpret_cast<void*>(eeType), length,
+                &observedObjectSize)) {
+            diagnostics.eeType = eeType;
+            diagnostics.requestedArrayLength = static_cast<gx_uint32>(length);
+            diagnostics.requestedObjectSize =
+                static_cast<gx_uint32>(observedObjectSize);
+            diagnostics.derivedObjectSize = observedObjectSize;
+            diagnostics.currentObject = objectAddress;
+            diagnostics.currentObjectEnd = objectAddress + observedObjectSize;
+            diagnostics.objectAddress = objectAddress;
+            diagnostics.returnedObject = objectAddress;
+            diagnostics.arrayData = objectAddress + kManagedArrayDataOffset;
+            ++diagnostics.allocationCount;
+            ++diagnostics.rhpNewArrayEntries;
+            ++diagnostics.rhpNewArrayCount;
+            ++diagnostics.allocationRequestCount;
+            ++diagnostics.realGcAllocationEntries;
+            ++diagnostics.realGcAllocationCount;
+
+            gx_uintptr allocationContext = 0u;
+            gx_uintptr allocationLimit = 0u;
+            gx_uintptr currentThread = 0u;
+            gx_uintptr gcHeap = 0u;
+            gx_uint32 gcCount = 0u;
+            gx_uintptr allocatedBytes = 0u;
+            gx_uint32 finalizableObjects = 0u;
+            gx_uint32 gcInProgress = 0u;
+            gx_uint32 gcMode = 0u;
+            gx_uintptr contextIdentity = 0u;
+            gx_uintptr allocBytes = 0u;
+            gx_uintptr allocBytesUoh = 0u;
+            if (guidexos_nativeaot_gc_read_state(
+                    &allocationContext, &allocationLimit, &currentThread,
+                    &gcHeap, &gcCount, &allocatedBytes, &finalizableObjects,
+                    &gcInProgress, &gcMode, &contextIdentity, &allocBytes,
+                    &allocBytesUoh) == 0) {
+                diagnostics.allocationContextAfter = allocationContext;
+                diagnostics.allocationLimitAfter = allocationLimit;
+                diagnostics.runtimeThreadRecord = currentThread;
+                diagnostics.gcCountAfter = gcCount;
+                diagnostics.gcBytesAfter = allocatedBytes;
+                diagnostics.finalizableObjectCountAfter = finalizableObjects;
+                diagnostics.gcInProgressAfter = gcInProgress;
+                diagnostics.gcMode = gcMode;
+            }
+            gx_uintptr heapBase = 0u;
+            gx_uintptr heapAllocated = 0u;
+            gx_uintptr heapReserved = 0u;
+            gx_uint32 heapOwned = 0u;
+            if (guidexos_nativeaot_gc_describe_object(
+                    arrayObject, &heapBase, &heapAllocated, &heapReserved,
+                    &heapOwned) == 0) {
+                diagnostics.heapBase = heapBase;
+                diagnostics.heapAllocated = heapAllocated;
+                diagnostics.heapReserved = heapReserved;
+                diagnostics.heapOwnershipVerified = heapOwned;
+            }
+        }
+    }
+#endif
     const gx_size objectSize = g_guideXosAllocationDiagnostics.derivedObjectSize;
     const gx_uintptr objectEnd = objectAddress + objectSize;
 #if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
