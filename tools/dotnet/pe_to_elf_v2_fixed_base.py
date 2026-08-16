@@ -5,11 +5,12 @@ Origin: D:/dev/guideXOSUEFI/Tools/pe_to_elf_v2.py
 Origin source revision: e2bbb0ef6d3eb78eb316235ec4b5748ee95718b0
 Origin blob before the proof patch: ac3f8ecef8451e471d486c4d96a54e2b039071f7
 
-This copy preserves the canonical converter and adds one proof-specific
-envelope correction: ET_EXEC output starts with a read-only, fileless
-PT_LOAD reservation for the page containing the PE image base. Keep this
-copy synchronized with the canonical converter; do not evolve it into a
-second general-purpose converter.
+This copy preserves the canonical converter and adds the guideXOS NativeAOT
+image envelope required by the locked Windows runtime: the first PT_LOAD
+contains the PE headers at the fixed image base. The production
+CoffNativeCodeManager::RhRegisterOSModule path consumes those headers when it
+finds the exception directory. Keep this copy synchronized with the canonical
+converter; do not evolve it into a second general-purpose converter.
 """
 
 from __future__ import annotations
@@ -63,11 +64,15 @@ class PeSection:
     characteristics: int
 
 
-def parse_pe_sections(pe: bytes) -> tuple[int, int, int, list[PeSection]]:
+def parse_pe_sections(pe: bytes) -> tuple[int, int, int, int, list[PeSection]]:
     if pe[:2] != b"MZ":
         raise SystemExit("Input is not PE (missing MZ)")
 
+    if len(pe) < 0x40:
+        raise SystemExit("Input PE is truncated before e_lfanew")
     pe_off = u32(pe, 0x3C)
+    if pe_off > len(pe) - 4:
+        raise SystemExit("Input PE e_lfanew is outside the file")
     if pe[pe_off:pe_off + 4] != b"PE\x00\x00":
         raise SystemExit("Input is not PE (missing PE\\0\\0)")
 
@@ -76,14 +81,22 @@ def parse_pe_sections(pe: bytes) -> tuple[int, int, int, list[PeSection]]:
     size_of_optional_header = u16(pe, coff_off + 16)
 
     opt_off = coff_off + 20
+    if opt_off > len(pe) - size_of_optional_header:
+        raise SystemExit("Input PE optional header is truncated")
     magic = u16(pe, opt_off)
     if magic != 0x20B:
         raise SystemExit(f"Unsupported PE optional header magic: 0x{magic:04X}")
 
     address_of_entry_point = u32(pe, opt_off + 16)
     image_base = u64(pe, opt_off + 24)
+    size_of_headers = u32(pe, opt_off + 60)
+    if size_of_headers == 0 or size_of_headers > 0x1000 or size_of_headers > len(pe):
+        raise SystemExit(f"Unsupported PE header span: 0x{size_of_headers:X}")
 
     sec_table_off = opt_off + size_of_optional_header
+    section_table_size = number_of_sections * 40
+    if section_table_size > len(pe) - sec_table_off:
+        raise SystemExit("Input PE section table is truncated")
 
     sections: list[PeSection] = []
     for i in range(number_of_sections):
@@ -94,10 +107,16 @@ def parse_pe_sections(pe: bytes) -> tuple[int, int, int, list[PeSection]]:
         raw_size = u32(pe, off + 16)
         raw_ptr = u32(pe, off + 20)
         characteristics = u32(pe, off + 36)
+        if vaddr > 0xFFFFFFFF - vsize:
+            raise SystemExit(f"PE section {name!r} virtual range overflows 32-bit RVA")
+        if raw_ptr > len(pe) or raw_size > len(pe) - raw_ptr:
+            raise SystemExit(f"PE section {name!r} raw range is outside the file")
         sections.append(PeSection(name, vaddr, vsize, raw_ptr, raw_size, characteristics))
 
+    if image_base > 0xFFFFFFFFFFFFFFFF - address_of_entry_point:
+        raise SystemExit("PE entry point address overflows 64-bit VA")
     entry = image_base + address_of_entry_point
-    return image_base, address_of_entry_point, entry, sections
+    return image_base, address_of_entry_point, entry, size_of_headers, sections
 
 
 def find_function_prologue(pe: bytes, symbol_va: int, image_base: int, sections: list[PeSection]) -> int | None:
@@ -172,7 +191,7 @@ def align_up(x: int, a: int) -> int:
 
 
 def to_elf(pe: bytes, custom_entry: int | None = None) -> bytes:
-    image_base, ep_rva, entry, sections = parse_pe_sections(pe)
+    image_base, ep_rva, entry, size_of_headers, sections = parse_pe_sections(pe)
 
     if custom_entry is not None:
         entry = custom_entry
@@ -196,13 +215,24 @@ def to_elf(pe: bytes, custom_entry: int | None = None) -> bytes:
         raise SystemExit(f"PE image base is not page aligned: 0x{image_base:X}")
 
     e_phnum = len(load_secs) + 1
+    if e_phnum > 0xFFFF:
+        raise SystemExit("Too many PE sections for an ELF program-header table")
 
     phoff = e_ehsize
-    headers_size = e_ehsize + e_phentsize * e_phnum
-    cur_off = align_up(headers_size, 0x1000)
+    elf_headers_size = e_ehsize + e_phentsize * e_phnum
+    cur_off = align_up(elf_headers_size, 0x1000)
 
-    phdrs = [(1, 4, 0, image_base, image_base, 0, 0x1000, 0x1000)]
-    seg_blobs: list[tuple[int, bytes]] = []
+    # The fixed-base loader maps the first PT_LOAD at the PE image base. Keep
+    # the actual PE DOS/NT/section headers there: the locked Windows
+    # CoffNativeCodeManager reads IMAGE_NT_HEADERS and its exception data
+    # directory from this address during RhRegisterOSModule.
+    header_file_off = cur_off
+    header_file_end = header_file_off + size_of_headers
+    if header_file_end < header_file_off:
+        raise SystemExit("PE header file offset overflows")
+    cur_off = align_up(header_file_end, 0x1000)
+    phdrs = [(1, 4, header_file_off, image_base, image_base, size_of_headers, 0x1000, 0x1000)]
+    seg_blobs: list[tuple[int, bytes]] = [(header_file_off, pe[:size_of_headers])]
 
     for s in load_secs:
         data = pe[s.raw_ptr:s.raw_ptr + s.raw_size]
@@ -212,8 +242,13 @@ def to_elf(pe: bytes, custom_entry: int | None = None) -> bytes:
         p_flags = (pf_x * 1) | (pf_w * 2) | (pf_r * 4)
 
         file_off = cur_off
-        cur_off = align_up(cur_off + len(data), 0x1000)
+        data_end = file_off + len(data)
+        if data_end < file_off:
+            raise SystemExit(f"PE section {s.name!r} file range overflows")
+        cur_off = align_up(data_end, 0x1000)
 
+        if image_base > 0xFFFFFFFFFFFFFFFF - s.vaddr:
+            raise SystemExit(f"PE section {s.name!r} virtual address overflows 64-bit VA")
         vaddr = image_base + s.vaddr
         p_type = 1
         p_offset = file_off
@@ -275,7 +310,7 @@ def main() -> int:
     args = ap.parse_args()
 
     pe = args.input.read_bytes()
-    pe_image_base, _, pe_entry, sections = parse_pe_sections(pe)
+    pe_image_base, _, pe_entry, _, sections = parse_pe_sections(pe)
     print(f"PE Image Base: 0x{pe_image_base:X}")
     print(f"PE Default Entry: 0x{pe_entry:X}")
 

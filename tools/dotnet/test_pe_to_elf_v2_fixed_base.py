@@ -1,4 +1,4 @@
-"""Focused PE-to-ELF regression tests for NativeAOT fileless sections."""
+"""Focused PE-to-ELF regression tests for NativeAOT image geometry."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ def synthetic_pe() -> bytes:
     struct.pack_into("<H", image, optional, 0x20B)
     struct.pack_into("<I", image, optional + 16, 0x1000)
     struct.pack_into("<Q", image, optional + 24, image_base)
+    struct.pack_into("<I", image, optional + 60, 0x200)
 
     sections = [
         (b".text", 0x30, 0x1000, 0x20, 0x200, 0x60000020),
@@ -48,7 +49,7 @@ def synthetic_pe() -> bytes:
     return bytes(image)
 
 
-class PeToElfFilelessSectionTests(unittest.TestCase):
+class PeToElfImageGeometryTests(unittest.TestCase):
     def test_zero_raw_section_is_a_zero_filled_load_segment(self) -> None:
         elf = to_elf(synthetic_pe())
         phnum = struct.unpack_from("<H", elf, 56)[0]
@@ -59,6 +60,12 @@ class PeToElfFilelessSectionTests(unittest.TestCase):
             for index in range(phnum)
         ]
         by_vaddr = {segment[3]: segment for segment in segments}
+        image_base = by_vaddr[0x10000000]
+        self.assertEqual(image_base[0], 1)  # PT_LOAD
+        self.assertEqual(image_base[1], 4)  # read-only PE header page
+        self.assertEqual(image_base[5], 0x200)  # actual PE header bytes
+        self.assertEqual(image_base[6], 0x1000)  # loader-visible image-base page
+        self.assertEqual(elf[image_base[2]:image_base[2] + 2], b"MZ")
         hydrated = by_vaddr[0x10002000]
         self.assertEqual(hydrated[0], 1)  # PT_LOAD
         self.assertEqual(hydrated[1], 6)  # readable and writable

@@ -18,6 +18,7 @@ typedef void* LPVOID;
 #include "threadstore.h"
 #include "threadstore.inl"
 #include "thread.inl"
+#include "RuntimeInstance.h"
 #include "MethodTable.h"
 #include "ObjectLayout.h"
 #endif
@@ -39,6 +40,25 @@ typedef void* LPVOID;
 #endif
 
 #pragma intrinsic(__readgsqword)
+
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+// These symbols have the external C++ linkage emitted by the locked
+// Bootstrap/main.cpp.  Declare them outside the platform translation unit's
+// anonymous namespace so the linker resolves the production bookends rather
+// than anonymous-namespace lookalikes.
+extern void* __managedcode_a();
+extern void* __managedcode_z();
+extern void* __unbox_a();
+extern void* __unbox_z();
+extern "C" bool RhRegisterOSModule(
+    void* osModule,
+    void* managedCodeStart,
+    uint32_t managedCodeSize,
+    void* unboxingStubsStart,
+    uint32_t unboxingStubsSize,
+    void** pClasslibFunctions,
+    uint32_t nClasslibFunctions);
+#endif
 
 namespace {
 
@@ -82,6 +102,24 @@ extern "C" guidexos_nativeaot_allocation_diagnostics
 [[noreturn]] void guideXosFailFast(gx_uint32 reason);
 #if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
 extern "C" void __cdecl guideXosNativeAotAllocationContextFixupRequest();
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+extern bool g_guideXosNativeAotCodeManagerRegistered;
+
+bool getNativeAotRange(void* start, void* end, void** rangeStart, uint32_t* rangeSize) {
+    if (start == nullptr || end == nullptr || rangeStart == nullptr || rangeSize == nullptr) {
+        return false;
+    }
+    const uintptr_t startAddress = reinterpret_cast<uintptr_t>(start);
+    const uintptr_t endAddress = reinterpret_cast<uintptr_t>(end);
+    if (endAddress <= startAddress || endAddress - startAddress > 0xFFFFFFFFu) {
+        return false;
+    }
+    *rangeStart = start;
+    *rangeSize = static_cast<uint32_t>(endAddress - startAddress);
+    return *rangeSize != 0u;
+}
 #endif
 #endif
 
@@ -4956,6 +4994,65 @@ static void emitC011EC15SafeStop() {
     }
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER)
+static void emitC011EC17StackWalkPreflight() {
+    RuntimeInstance* runtime = GetRuntimeInstance();
+    Thread* thread = ThreadStore::GetCurrentThreadIfAvailable();
+    uintptr_t controlPc = 0u;
+    if (thread != nullptr) {
+        RuntimeThreadLocals* locals = reinterpret_cast<RuntimeThreadLocals*>(thread);
+        // Thread::GetTransitionFrame selects the deferred frame for the
+        // suspending cooperative thread and the cached frame otherwise.  The
+        // live m_pTransitionFrame is intentionally null in this state.
+        PInvokeTransitionFrame* transitionFrame =
+            ThreadStore::GetSuspendingThread() == thread
+                ? locals->m_pDeferredTransitionFrame
+                : locals->m_pCachedTransitionFrame;
+        const uintptr_t transitionAddress =
+            reinterpret_cast<uintptr_t>(transitionFrame);
+        if (transitionAddress > 0x1000u && transitionFrame != nullptr) {
+            controlPc = reinterpret_cast<uintptr_t>(transitionFrame->m_RIP);
+        }
+    }
+
+    void* managedCodeStart = nullptr;
+    uint32_t managedCodeSize = 0u;
+    const bool managedRangeValid = getNativeAotRange(
+        reinterpret_cast<void*>(&__managedcode_a),
+        reinterpret_cast<void*>(&__managedcode_z),
+        &managedCodeStart,
+        &managedCodeSize);
+    const uintptr_t managedCodeEnd = managedRangeValid
+        ? reinterpret_cast<uintptr_t>(managedCodeStart) + managedCodeSize
+        : 0u;
+    const bool isManaged = runtime != nullptr && controlPc != 0u &&
+        runtime->IsManaged(reinterpret_cast<void*>(controlPc));
+    ICodeManager* codeManager = runtime != nullptr && controlPc != 0u
+        ? runtime->GetCodeManagerForAddress(reinterpret_cast<void*>(controlPc))
+        : nullptr;
+
+    suspendEeSerialPutString("[nativeaot-code-manager] preflight runtime=");
+    suspendEeSerialPutHex64(reinterpret_cast<gx_uintptr>(runtime));
+    suspendEeSerialPutString(" manager=");
+    suspendEeSerialPutHex64(reinterpret_cast<gx_uintptr>(codeManager));
+    suspendEeSerialPutString(" managedStart=");
+    suspendEeSerialPutHex64(reinterpret_cast<gx_uintptr>(managedCodeStart));
+    suspendEeSerialPutString(" managedSize=");
+    suspendEeSerialPutHex64(static_cast<gx_uintptr>(managedCodeSize));
+    suspendEeSerialPutString(" managedEnd=");
+    suspendEeSerialPutHex64(static_cast<gx_uintptr>(managedCodeEnd));
+    suspendEeSerialPutString(" controlPC=");
+    suspendEeSerialPutHex64(static_cast<gx_uintptr>(controlPc));
+    suspendEeSerialPutString(" isManaged=");
+    suspendEeSerialPutHex32(isManaged ? 1u : 0u);
+    suspendEeSerialPutString(" lookup=");
+    suspendEeSerialPutHex64(reinterpret_cast<gx_uintptr>(codeManager));
+    suspendEeSerialPutString(" registration=");
+    suspendEeSerialPutHex32(g_guideXosNativeAotCodeManagerRegistered ? 1u : 0u);
+    suspendEeSerialPutString(" marker=C011EC17-PREFLIGHT\n");
+}
+#endif
+
 extern "C" void __cdecl
 guideXosNativeAotC011EC15GcScanRootsEntered(
     int condemned, int maxGeneration, uintptr_t scanContext) {
@@ -4966,6 +5063,9 @@ guideXosNativeAotC011EC15GcScanRootsEntered(
         g_guideXosAllocationDiagnostics;
     ++d.c011ec15GcScanRootsRequestCount;
     ++d.c011ec15ProviderRequestCount;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER)
+    emitC011EC17StackWalkPreflight();
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL)
     suspendEeSerialPutString(
         "[nativeaot-gc-stack-provider-transition-failfast] GcScanRoots-entry sentinel=");
@@ -6595,6 +6695,9 @@ extern "C" void InitializeModules(
     void** pClasslibFunctions, int nClasslibFunctions);
 extern "C" void* __modules_a[];
 extern "C" void* __modules_z[];
+// These are the same C++ bookend functions passed by the locked
+// Bootstrap/main.cpp.  They delimit the linker-produced managed-code and
+// unboxing-stub ranges; they are not guideXOS-owned synthetic symbols.
 extern "C" void* PalGetModuleHandleFromPointer(void* pointer);
 extern "C" void GetRuntimeException();
 extern "C" void RuntimeFailFast();
@@ -6605,6 +6708,7 @@ extern "C" void OnUnhandledException();
 extern "C" void IDynamicCastableIsInterfaceImplemented();
 extern "C" void IDynamicCastableGetInterfaceImplementation();
 bool g_guideXosNativeAotModulesInitialized = false;
+bool g_guideXosNativeAotCodeManagerRegistered = false;
 void* g_guideXosNativeAotClasslibFunctions[16] = {};
 #endif
 
@@ -6697,6 +6801,60 @@ void initializeNativeAotModules() {
         __modules_z < __modules_a) {
         guideXosFailFast(10u);
     }
+
+    // The stock Windows bootstrapper registers the production
+    // CoffNativeCodeManager immediately after RhInitialize and before
+    // InitializeModules.  The guideXOS direct-ELF entry bypasses that
+    // Bootstrap/main.cpp path, so perform the same contract here using the
+    // actual PE image header at osModule and the linker-produced bookends.
+    void* managedCodeStart = nullptr;
+    uint32_t managedCodeSize = 0u;
+    void* unboxingStubsStart = nullptr;
+    uint32_t unboxingStubsSize = 0u;
+    if (g_guideXosNativeAotCodeManagerRegistered ||
+        !getNativeAotRange(
+            reinterpret_cast<void*>(&__managedcode_a),
+            reinterpret_cast<void*>(&__managedcode_z),
+            &managedCodeStart,
+            &managedCodeSize) ||
+        !getNativeAotRange(
+            reinterpret_cast<void*>(&__unbox_a),
+            reinterpret_cast<void*>(&__unbox_z),
+            &unboxingStubsStart,
+            &unboxingStubsSize)) {
+        guideXosFailFast(0xC011EC17u);
+    }
+    if (!RhRegisterOSModule(
+            osModule,
+            managedCodeStart,
+            managedCodeSize,
+            unboxingStubsStart,
+            unboxingStubsSize,
+            g_guideXosNativeAotClasslibFunctions,
+            16u)) {
+#if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
+        suspendEeSerialPutString(
+            "[nativeaot-code-manager] production code-manager registration failed\n");
+#endif
+        guideXosFailFast(0xC011EC17u);
+    }
+    g_guideXosNativeAotCodeManagerRegistered = true;
+#if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
+    suspendEeSerialPutString(
+        "[nativeaot-code-manager] registered module=");
+    suspendEeSerialPutHex64(reinterpret_cast<gx_uintptr>(osModule));
+    suspendEeSerialPutString(" managedStart=");
+    suspendEeSerialPutHex64(reinterpret_cast<gx_uintptr>(managedCodeStart));
+    suspendEeSerialPutString(" managedSize=");
+    suspendEeSerialPutHex64(static_cast<gx_uintptr>(managedCodeSize));
+    suspendEeSerialPutString(" managedEnd=");
+    suspendEeSerialPutHex64(
+        reinterpret_cast<gx_uintptr>(managedCodeStart) + managedCodeSize);
+    suspendEeSerialPutString(" manager=");
+    suspendEeSerialPutHex64(reinterpret_cast<gx_uintptr>(
+        GetRuntimeInstance()->GetCodeManagerForAddress(managedCodeStart)));
+    suspendEeSerialPutString(" registrationCount=00000001\n");
+#endif
 
     g_guideXosNativeAotModulesInitialized = true;
 #if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
