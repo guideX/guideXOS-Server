@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -35,6 +35,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\gc-stack-provider-transition-frame-control-pc"
     } elseif ($ProofMode -eq "stack-provider-unwind-gc-info") {
         Join-Path $root "out\dotnet\gc-stack-provider-unwind-gc-info"
+    } elseif ($ProofMode -eq "stack-provider-unwind-caller-frame") {
+        Join-Path $root "out\dotnet\gc-stack-provider-unwind-caller-frame"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
         Join-Path $root "out\dotnet\gc-first-root-post-queue-mark-decision"
     } elseif ($ProofMode -eq "first-root-first-mark-mutation") {
@@ -70,22 +72,24 @@ $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
-$isC011EC19 = $ProofMode -eq "stack-provider-unwind-gc-info"
-$isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info")
+$isC011EC20 = $ProofMode -eq "stack-provider-unwind-caller-frame"
+$isC011EC19 = $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
+$isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info")
+$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info")
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
 $proofDefine = if ($isNextGenuineRootProvider) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($isTransitionFrameControlPc -or $isC011EC19) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
     $c19Define = if ($isC011EC19) { " /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO" } else { "" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define"
+    $c20Define = if ($isC011EC20) { " /DGUIDEXOS_NATIVEAOT_C011EC20_UNWIND" } else { "" }
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -598,6 +602,11 @@ extern "C" void __cdecl guideXosNativeAotC011EC19GcInfoDecodeStarted(uintptr_t g
 extern "C" void __cdecl guideXosNativeAotC011EC19GcInfoInterruptibility(uint32_t interruptible, uint32_t hasRanges);
 extern "C" void __cdecl guideXosNativeAotC011EC19GcInfoDecodeCompleted(uint32_t result);
 extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC19SafeStop(uint32_t reason);
+extern "C" void __cdecl guideXosNativeAotC011EC20TransitionCrossed(uintptr_t frameType, uintptr_t frameAddress, uintptr_t savedRip, uintptr_t savedSp, uintptr_t savedFp, uintptr_t threadAddress, uintptr_t flags, uintptr_t previousTransitionFrame);
+extern "C" void __cdecl guideXosNativeAotC011EC20UnwindInputs(uintptr_t imageBase, uintptr_t runtimeFunction, uintptr_t beginRva, uintptr_t endRva, uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags, uintptr_t inputRip, uintptr_t inputRsp, uintptr_t inputRbp, uintptr_t inputRbx, uintptr_t inputRsi, uintptr_t inputRdi, uintptr_t inputR12, uintptr_t inputR13, uintptr_t inputR14, uintptr_t inputR15);
+extern "C" void __cdecl guideXosNativeAotC011EC20UnwindCompleted(uint32_t result, uintptr_t outputRip, uintptr_t outputRsp, uintptr_t outputRbp, uintptr_t establisherFrame, uintptr_t handlerData, uintptr_t restoredRbx, uintptr_t restoredRsi, uintptr_t restoredRdi, uintptr_t restoredR12, uintptr_t restoredR13, uintptr_t restoredR14, uintptr_t restoredR15, uint32_t restoredRegisterCount, uintptr_t previousTransitionFrame);
+extern "C" void __cdecl guideXosNativeAotC011EC20CallerMethodInfo(uintptr_t controlPc, uintptr_t codeManager, uintptr_t methodInfo, uintptr_t methodStart, uintptr_t methodEnd, uintptr_t runtimeFunction, uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags);
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(uint32_t reason);
 '@
             $coffText = $coffText.Replace(
                 '#include "CoffNativeCodeManager.h"',
@@ -605,6 +614,36 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC19SafeStop(u
             $coffText = $coffText.Replace(
                 '#include "gcinfodecoder.cpp"',
                 '#include "' + $lockedGcInfoWrapperPath + '"')
+            $coffCallerMethodNeedle = @'
+    pMethodInfo->executionAborted = false;
+
+    return true;
+'@
+            $coffCallerMethodReplacement = @'
+    pMethodInfo->executionAborted = false;
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC20_UNWIND)
+    size_t guideXosCallerUnwindDataBlobSize;
+    PTR_VOID guideXosCallerUnwindDataBlob = GetUnwindDataBlob(
+        m_moduleBase, pMethodInfo->runtimeFunction, &guideXosCallerUnwindDataBlobSize);
+    uint8_t guideXosCallerBlockFlags = *(
+        dac_cast<DPTR(uint8_t)>(guideXosCallerUnwindDataBlob) +
+        guideXosCallerUnwindDataBlobSize);
+    guideXosNativeAotC011EC20CallerMethodInfo(
+        reinterpret_cast<uintptr_t>(ControlPC), reinterpret_cast<uintptr_t>(this),
+        reinterpret_cast<uintptr_t>(pMethodInfoOut),
+        static_cast<uintptr_t>(m_moduleBase + pMethodInfo->mainRuntimeFunction->BeginAddress),
+        static_cast<uintptr_t>(m_moduleBase + pMethodInfo->mainRuntimeFunction->EndAddress),
+        reinterpret_cast<uintptr_t>(pMethodInfo->runtimeFunction),
+        reinterpret_cast<uintptr_t>(guideXosCallerUnwindDataBlob),
+        guideXosCallerUnwindDataBlobSize,
+        static_cast<uintptr_t>(guideXosCallerBlockFlags));
+#endif
+
+    return true;
+'@
+            if (-not $coffText.Contains($coffCallerMethodNeedle)) { throw "C011EC20 CoffNativeCodeManager caller FindMethodInfo boundary was not found." }
+            $coffText = Replace-First $coffText $coffCallerMethodNeedle $coffCallerMethodReplacement.TrimEnd()
             $coffGcNeedle = @'
     *gcInfo = p;
 
@@ -721,7 +760,45 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC19SafeStop(u
             return true;
         }
 '@
-            $coffTransitionStopReplacement = @'
+            $coffTransitionStopReplacement = if ($isC011EC20) {
+@'
+        if ((flags & USFF_StopUnwindOnTransitionFrame) != 0)
+        {
+            PInvokeTransitionFrame* guideXosTransitionFrame = *ppPreviousTransitionFrame;
+            uintptr_t guideXosTransitionFlags = guideXosTransitionFrame != nullptr
+                ? static_cast<uintptr_t>(guideXosTransitionFrame->m_Flags) : 0u;
+            uintptr_t guideXosTransitionSavedSp = 0u;
+            if (guideXosTransitionFrame != nullptr &&
+                (guideXosTransitionFlags & PTFF_SAVE_RSP) != 0u)
+            {
+                const uintptr_t* guideXosSavedRegs = reinterpret_cast<const uintptr_t*>(
+                    guideXosTransitionFrame->m_PreservedRegs);
+                guideXosTransitionSavedSp = guideXosSavedRegs[7];
+            }
+            guideXosNativeAotC011EC20TransitionCrossed(
+                1u, reinterpret_cast<uintptr_t>(guideXosTransitionFrame),
+                guideXosTransitionFrame != nullptr
+                    ? reinterpret_cast<uintptr_t>(guideXosTransitionFrame->m_RIP) : 0u,
+                guideXosTransitionSavedSp,
+                guideXosTransitionFrame != nullptr
+                    ? reinterpret_cast<uintptr_t>(guideXosTransitionFrame->m_FramePointer) : 0u,
+                guideXosTransitionFrame != nullptr
+                    ? reinterpret_cast<uintptr_t>(guideXosTransitionFrame->m_pThread) : 0u,
+                guideXosTransitionFlags,
+                reinterpret_cast<uintptr_t>(*ppPreviousTransitionFrame));
+            if (guideXosTransitionFrame == nullptr)
+            {
+                // The locked transition contract did not expose a frame to
+                // continue from. Do not feed ordinary unwind a fabricated
+                // caller context; classify the boundary as Outcome C.
+                guideXosNativeAotC011EC20SafeStop(0xC0200003u);
+            }
+            // C011EC20 deliberately crosses the C011EC19 safe-stop boundary.
+            // The ordinary AMD64 unwind below remains the locked runtime path.
+        }
+'@.TrimEnd()
+            } else {
+@'
         if ((flags & USFF_StopUnwindOnTransitionFrame) != 0)
         {
             guideXosNativeAotC011EC19UnwindCompleted(
@@ -732,7 +809,8 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC19SafeStop(u
             guideXosNativeAotC011EC19SafeStop(0xC0190002u);
             return true;
         }
-'@
+'@.TrimEnd()
+            }
             if (-not $coffText.Contains($coffTransitionStopNeedle)) { throw "C011EC19 CoffNativeCodeManager transition-stop unwind boundary was not found." }
             $coffText = Replace-First $coffText $coffTransitionStopNeedle $coffTransitionStopReplacement.TrimEnd()
             $coffRtlNeedle = @'
@@ -747,7 +825,55 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC19SafeStop(u
 
     pRegisterSet->SP = context.Rsp;
 '@
-            $coffRtlReplacement = @'
+            $coffRtlReplacement = if ($isC011EC20) {
+@'
+#if defined(TARGET_AMD64)
+    guideXosNativeAotC011EC20UnwindInputs(
+        static_cast<uintptr_t>(m_moduleBase),
+        reinterpret_cast<uintptr_t>(pNativeMethodInfo->runtimeFunction),
+        static_cast<uintptr_t>(pNativeMethodInfo->runtimeFunction->BeginAddress),
+        static_cast<uintptr_t>(pNativeMethodInfo->runtimeFunction->EndAddress),
+        reinterpret_cast<uintptr_t>(pUnwindDataBlob), unwindDataBlobSize,
+        static_cast<uintptr_t>(unwindBlockFlags),
+        static_cast<uintptr_t>(context.Rip), static_cast<uintptr_t>(context.Rsp),
+        static_cast<uintptr_t>(context.Rbp), static_cast<uintptr_t>(context.Rbx),
+        static_cast<uintptr_t>(context.Rsi), static_cast<uintptr_t>(context.Rdi),
+        static_cast<uintptr_t>(context.R12), static_cast<uintptr_t>(context.R13),
+        static_cast<uintptr_t>(context.R14), static_cast<uintptr_t>(context.R15));
+#endif
+
+    RtlVirtualUnwind(NULL,
+                    dac_cast<TADDR>(m_moduleBase),
+                    pRegisterSet->IP,
+                    (PRUNTIME_FUNCTION)pNativeMethodInfo->runtimeFunction,
+                    &context,
+                    &HandlerData,
+                    &EstablisherFrame,
+                    &contextPointers);
+
+    pRegisterSet->SP = context.Rsp;
+    pRegisterSet->IP = context.Rip;
+
+#if defined(TARGET_AMD64)
+    guideXosNativeAotC011EC20UnwindCompleted(
+        1u, static_cast<uintptr_t>(context.Rip), static_cast<uintptr_t>(context.Rsp),
+        static_cast<uintptr_t>(context.Rbp), static_cast<uintptr_t>(EstablisherFrame),
+        reinterpret_cast<uintptr_t>(HandlerData), static_cast<uintptr_t>(context.Rbx),
+        static_cast<uintptr_t>(context.Rsi), static_cast<uintptr_t>(context.Rdi),
+        static_cast<uintptr_t>(context.R12), static_cast<uintptr_t>(context.R13),
+        static_cast<uintptr_t>(context.R14), static_cast<uintptr_t>(context.R15),
+        (contextPointers.Rbx != nullptr ? 1u : 0u) +
+        (contextPointers.Rsi != nullptr ? 1u : 0u) +
+        (contextPointers.Rdi != nullptr ? 1u : 0u) +
+        (contextPointers.R12 != nullptr ? 1u : 0u) +
+        (contextPointers.R13 != nullptr ? 1u : 0u) +
+        (contextPointers.R14 != nullptr ? 1u : 0u) +
+        (contextPointers.R15 != nullptr ? 1u : 0u),
+        reinterpret_cast<uintptr_t>(*ppPreviousTransitionFrame));
+#endif
+'@.TrimEnd()
+            } else {
+@'
     RtlVirtualUnwind(NULL,
                     dac_cast<TADDR>(m_moduleBase),
                     pRegisterSet->IP,
@@ -766,6 +892,7 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC19SafeStop(u
 
     pRegisterSet->SP = context.Rsp;
 '@
+            }
             if (-not $coffText.Contains($coffRtlNeedle)) { throw "C011EC19 CoffNativeCodeManager RtlVirtualUnwind boundary was not found." }
             $coffText = Replace-First $coffText $coffRtlNeedle $coffRtlReplacement.TrimEnd()
             Set-Content -LiteralPath $coffNativeCodeManagerSource -Value $coffText -Encoding ASCII
@@ -1974,6 +2101,7 @@ exit /b 0
         Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
     }
     $c011ec18CompileBat = $null
+    $c20CompileDefine = if ($isC011EC20) { " /DGUIDEXOS_NATIVEAOT_C011EC20_UNWIND" } else { "" }
     if ($isTransitionFrameControlPc -or $isC011EC19) {
         $c011ec18CompileBat = Write-Batch "build-single-thread-suspend-ee-c011ec18-instrumentation.bat" @"
 @echo off
@@ -1984,7 +2112,7 @@ cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /B
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\eventpipe" /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$palSourceRoot" /FI"$sourceRoot\gc\env\common.h" /Fo:"$stackFrameIteratorObj" "$stackFrameIteratorSource"
 if errorlevel 1 exit /b %errorlevel%
-$(if ($isC011EC19) { "cl.exe /nologo /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /DUSE_GC_INFO_DECODER /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO /I`"$nativeAotRoot\Runtime`" /I`"$nativeAotRoot\Runtime\windows`" /I`"$sourceRoot`" /I`"$sourceRoot\native`" /I`"$sourceRoot\gc`" /I`"$sourceRoot\gc\env`" /I`"$nativeAotRoot\Runtime\inc`" /I`"$nativeAotRoot\Runtime\eventpipe`" /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /I`"$palSourceRoot`" /FI`"$sourceRoot\gc\env\common.h`" /Fo:`"$coffNativeCodeManagerObj`" `"$coffNativeCodeManagerSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
+$(if ($isC011EC19) { "cl.exe /nologo /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /DUSE_GC_INFO_DECODER /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO$c20CompileDefine /I`"$nativeAotRoot\Runtime`" /I`"$nativeAotRoot\Runtime\windows`" /I`"$sourceRoot`" /I`"$sourceRoot\native`" /I`"$sourceRoot\gc`" /I`"$sourceRoot\gc\env`" /I`"$nativeAotRoot\Runtime\inc`" /I`"$nativeAotRoot\Runtime\eventpipe`" /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /I`"$palSourceRoot`" /FI`"$sourceRoot\gc\env\common.h`" /Fo:`"$coffNativeCodeManagerObj`" `"$coffNativeCodeManagerSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
 exit /b 0
 "@
     }
@@ -2287,7 +2415,13 @@ exit /b %errorlevel%
     } elseif ($isNextGenuineRootProvider) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotC011EC15GcScanRootsEntered","guideXosNativeAotC011EC15ProviderEntered","guideXosNativeAotC011EC15CandidateObserved","guideXosNativeAotC011EC15EnumGcRefReturned","guideXosNativeAotC011EC15QueueMarkReturned","guideXosNativeAotC011EC15MarkHelperReturned","guideXosNativeAotC011EC15PromoteReturned","guideXosNativeAotC011EC15PromoteEntered","guideXosNativeAotC011EC15PromoteCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
         if ($isC011EC19) {
-            $requiredSymbols += @("guideXosNativeAotC011EC18RhpGcAllocEntered","guideXosNativeAotC011EC18IteratorInitial","guideXosNativeAotC011EC18IteratorCodeManagerLookup","guideXosNativeAotC011EC18IteratorFindMethodInfo","guideXosNativeAotC011EC18IteratorFramePointer","guideXosNativeAotC011EC18IteratorUnwind","guideXosNativeAotC011EC19GcRootReported","guideXosNativeAotC011EC19UnwindEntered","guideXosNativeAotC011EC19UnwindMetadata","guideXosNativeAotC011EC19UnwindCompleted","guideXosNativeAotC011EC19GcInfoLookup","guideXosNativeAotC011EC19GcInfoDecodeStarted","guideXosNativeAotC011EC19GcInfoInterruptibility","guideXosNativeAotC011EC19GcInfoDecodeCompleted","guideXosNativeAotC011EC19SafeStop")
+            $requiredSymbols += @("guideXosNativeAotC011EC18RhpGcAllocEntered","guideXosNativeAotC011EC18IteratorInitial","guideXosNativeAotC011EC18IteratorCodeManagerLookup","guideXosNativeAotC011EC18IteratorFindMethodInfo","guideXosNativeAotC011EC18IteratorFramePointer","guideXosNativeAotC011EC18IteratorUnwind","guideXosNativeAotC011EC19GcRootReported","guideXosNativeAotC011EC19UnwindEntered","guideXosNativeAotC011EC19UnwindMetadata","guideXosNativeAotC011EC19GcInfoLookup","guideXosNativeAotC011EC19GcInfoDecodeStarted","guideXosNativeAotC011EC19GcInfoInterruptibility","guideXosNativeAotC011EC19GcInfoDecodeCompleted")
+            if (-not $isC011EC20) {
+                $requiredSymbols += @("guideXosNativeAotC011EC19UnwindCompleted","guideXosNativeAotC011EC19SafeStop")
+            }
+            if ($isC011EC20) {
+                $requiredSymbols += @("guideXosNativeAotC011EC20TransitionCrossed","guideXosNativeAotC011EC20UnwindInputs","guideXosNativeAotC011EC20CallerMethodInfo","guideXosNativeAotC011EC20UnwindCompleted","guideXosNativeAotC011EC20SafeStop")
+            }
         }
     } elseif ($isFirstRootCallbackEntry -and -not $isFirstRootFirstNonNullOldO) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootCallbackCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
@@ -2375,7 +2509,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC19) {
+                    $stopPattern = if ($isC011EC20) {
+                        'marker=C011EC20'
+                    } elseif ($isC011EC19) {
                         'marker=C011EC19'
                     } elseif ($isCodeManagerRegistration) {
                         '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354|marker=C011EC15'
@@ -2463,7 +2599,28 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isC011EC19) {
+        if ($isC011EC20) {
+            $c20ProofLine = (($validationText -split "`n") | Where-Object { $_ -match 'marker=C011EC20($|\s)' } | Select-Object -Last 1)
+            $c20SafeStopLine = (($validationText -split "`n") | Where-Object { $_ -match 'marker=C011EC20-SAFE_STOP' } | Select-Object -Last 1)
+            if ([string]::IsNullOrWhiteSpace($c20ProofLine) -and [string]::IsNullOrWhiteSpace($c20SafeStopLine)) { throw "C011EC20 did not emit a proof or classified safe-stop line in $name." }
+            $c20Line = if (-not [string]::IsNullOrWhiteSpace($c20ProofLine)) { $c20ProofLine } else { $c20SafeStopLine }
+            $c20OutcomeCode = Get-MarkerField $c20Line 'outcome'
+            $c20Outcome = switch ($c20OutcomeCode) { '0x00000001' { 'A' } '0x00000002' { 'B' } '0x00000003' { 'C' } '0x00000005' { 'E' } default { 'D' } }
+            if (-not [string]::IsNullOrWhiteSpace($c20ProofLine)) {
+                foreach ($field in @('crossingAttempts','crossingResults','unwindAttempts','rtlVirtualUnwindCalls','unwindResult','outputRIP','outputRSP','callerSpMoved','callerFrameDistinct','restoredRegisterCount')) {
+                    if ((Get-MarkerField $c20Line $field) -eq $null -or (Get-MarkerField $c20Line $field) -eq '0x00000000') { throw "C011EC20 proof field $field was empty in $name." }
+                }
+                if ($c20Outcome -notin @('A','B','E')) { throw "C011EC20 emitted a proof marker without a valid A/B/E outcome in $name." }
+            }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker=if ($c20Outcome -in @('A','B','E')) { 'C011EC20' } else { 'C011EC20-SAFE_STOP' }; outcome=$c20Outcome; harnessTerminated=$true; markerLine=$c20Line
+                transition=[ordered]@{ frameType=(Get-MarkerField $c20Line 'transitionFrameType'); frame=(Get-MarkerField $c20Line 'transitionFrame'); savedRIP=(Get-MarkerField $c20Line 'transitionSavedRIP'); savedSP=(Get-MarkerField $c20Line 'transitionSavedSP'); savedFP=(Get-MarkerField $c20Line 'transitionSavedFP'); previousFrame=(Get-MarkerField $c20Line 'previousTransitionFrame'); crossingAttempts=(Get-MarkerField $c20Line 'crossingAttempts'); crossingResults=(Get-MarkerField $c20Line 'crossingResults') }
+                unwind=[ordered]@{ attempts=(Get-MarkerField $c20Line 'unwindAttempts'); rtlVirtualUnwindCalls=(Get-MarkerField $c20Line 'rtlVirtualUnwindCalls'); runtimeFunction=(Get-MarkerField $c20Line 'runtimeFunction'); unwindInfo=(Get-MarkerField $c20Line 'unwindInfo'); unwindInfoSize=(Get-MarkerField $c20Line 'unwindInfoSize'); blockFlags=(Get-MarkerField $c20Line 'unwindBlockFlags'); inputRIP=(Get-MarkerField $c20Line 'inputRIP'); inputRSP=(Get-MarkerField $c20Line 'inputRSP'); inputRBP=(Get-MarkerField $c20Line 'inputRBP'); outputRIP=(Get-MarkerField $c20Line 'outputRIP'); outputRSP=(Get-MarkerField $c20Line 'outputRSP'); outputRBP=(Get-MarkerField $c20Line 'outputRBP'); establisherFrame=(Get-MarkerField $c20Line 'establisherFrame'); handlerData=(Get-MarkerField $c20Line 'handlerData'); restoredRBX=(Get-MarkerField $c20Line 'restoredRBX'); restoredRSI=(Get-MarkerField $c20Line 'restoredRSI'); restoredRDI=(Get-MarkerField $c20Line 'restoredRDI'); restoredR12=(Get-MarkerField $c20Line 'restoredR12'); restoredR13=(Get-MarkerField $c20Line 'restoredR13'); restoredR14=(Get-MarkerField $c20Line 'restoredR14'); restoredR15=(Get-MarkerField $c20Line 'restoredR15'); restoredRegisterCount=(Get-MarkerField $c20Line 'restoredRegisterCount') }
+                caller=[ordered]@{ managedRange=(Get-MarkerField $c20Line 'callerManagedRange'); codeManager=(Get-MarkerField $c20Line 'callerCodeManager'); findMethodInfoAttempts=(Get-MarkerField $c20Line 'callerFindMethodInfoAttempts'); findMethodInfoSuccess=(Get-MarkerField $c20Line 'callerFindMethodInfoSuccess'); methodInfo=(Get-MarkerField $c20Line 'callerMethodInfo'); methodStart=(Get-MarkerField $c20Line 'callerMethodStart'); methodEnd=(Get-MarkerField $c20Line 'callerMethodEnd'); gcInfoAttempted=(Get-MarkerField $c20Line 'callerGcInfoAttempted'); gcInfoResult=(Get-MarkerField $c20Line 'callerGcInfoResult'); stackMoved=(Get-MarkerField $c20Line 'callerSpMoved'); stackAligned=(Get-MarkerField $c20Line 'callerSpAligned'); frameDistinct=(Get-MarkerField $c20Line 'callerFrameDistinct') }
+                roots=[ordered]@{ currentFrame=(Get-MarkerField $c20Line 'c19RootReports'); register=(Get-MarkerField $c20Line 'c19RegisterRoots'); stack=(Get-MarkerField $c20Line 'c19StackRoots'); promoteAttempts=(Get-MarkerField $c20Line 'c19PromoteAttempts'); promoteEntries=(Get-MarkerField $c20Line 'c19PromoteEntries'); promoteReturns=(Get-MarkerField $c20Line 'c19PromoteReturns') }
+                accounting=[ordered]@{ frames=(Get-MarkerField $c20Line 'framesWalked'); callbacks=(Get-MarkerField $c20Line 'stackProviderCallbacks'); totalRoots=(Get-MarkerField $c20Line 'totalRoots'); markWrites=(Get-MarkerField $c20Line 'markWrites'); childReads=(Get-MarkerField $c20Line 'childReads'); graphTraversal=(Get-MarkerField $c20Line 'graphTraversal'); stackBase=(Get-MarkerField $c20Line 'stackBase'); stackLimit=(Get-MarkerField $c20Line 'stackLimit'); scanContextStackLimit=(Get-MarkerField $c20Line 'scanContextStackLimit'); boundsConsumed=(Get-MarkerField $c20Line 'stackBoundsConsumed'); promoteEntries=(Get-MarkerField $c20Line 'promoteEntries'); promoteReturns=(Get-MarkerField $c20Line 'promoteReturns') }
+            }
+        } elseif ($isC011EC19) {
             Assert-Text $validationText '\[nativeaot-gc-unwind-gc-info\] SAFE_STOP marker=C011EC19' "C011EC19 unwind/GC-info marker"
             $c19Line = (($validationText -split "`n") | Where-Object { $_ -match '\[nativeaot-gc-unwind-gc-info\] SAFE_STOP marker=C011EC19' } | Select-Object -Last 1)
             if ((Get-MarkerField $c19Line 'initialControlPC') -ne '0x0000000010001D3F' -or (Get-MarkerField $c19Line 'methodInfo') -eq '0x0000000000000000' -or (Get-MarkerField $c19Line 'unwindInfo') -eq '0x0000000000000000' -or (Get-MarkerField $c19Line 'gcInfo') -eq '0x0000000000000000') { throw "C011EC19 did not retain genuine managed metadata pointers in $name." }
@@ -3457,6 +3614,21 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC20) {
+        if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -notin @('C011EC20','C011EC20-SAFE_STOP') }).Count -ne 0) { throw "The C011EC20 caller-frame experiment did not produce $FreshBootCount classified unwind runs." }
+        $firstC20Run = $runResults[0]
+        $c20Outcome = if (@($runResults | Where-Object { $_.outcome -ne $firstC20Run.outcome }).Count -eq 0) { $firstC20Run.outcome } else { 'D' }
+        $manifest = [ordered]@{
+            outcome="$c20Outcome / C011EC20 first ordinary unwind classification"; proofMode=$ProofMode; marker=if ($c20Outcome -in @('A','B','E')) { 'C011EC20' } else { 'C011EC20-SAFE_STOP' }; preflightMarker='C011EC20-PREFLIGHT'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit; codeManager='CoffNativeCodeManager' }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryKernelBefore.build; startingEspSha256=$ordinaryKernelBefore.esp; expectedSha256=$normalKernelHash }
+            transition=$firstC20Run.transition; unwind=$firstC20Run.unwind; caller=$firstC20Run.caller; roots=$firstC20Run.roots; accounting=$firstC20Run.accounting; runs=$runResults
+            sourceTrace=[ordered]@{ transitionDecision='locked CoffNativeCodeManager.cpp:671-707'; ordinaryUnwind='locked CoffNativeCodeManager.cpp:735-842'; iteratorContinuation='locked StackFrameIterator.cpp:1529-1600'; callerLookup='locked CoffNativeCodeManager.cpp:254-300 plus C011EC20 independent validation' }
+            regressions=[ordered]@{ C011EC19='retained source path and root chronology'; C011EC18='retained transition provenance'; C011EC15='retained queue/promotion counters'; staticChecks='script parse, source-injection guards, serial checkpoints, ordinary restoration, git diff --check' }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_CALLER_FRAME_UNWIND.md'; ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }; sensitiveAllocations='0 observed after EE suspension; bounded scalar diagnostics only'
+        }
+        $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT caller-frame unwind experiment: Outcome $c20Outcome (C011EC20)" -ForegroundColor Green
     } elseif ($isC011EC19) {
         if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC19' }).Count -ne 0) { throw "The C011EC19 unwind/GC-info experiment did not produce $FreshBootCount genuine metadata-boundary runs." }
         $firstC19Run = $runResults[0]

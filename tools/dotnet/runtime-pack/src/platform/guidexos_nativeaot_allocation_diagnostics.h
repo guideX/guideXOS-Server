@@ -1264,6 +1264,80 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec19SecondQueueCursorAfter;
     uintptr_t c011ec19SecondQueueOldValue;
     uintptr_t c011ec19SecondQueueNewValue;
+
+    /*
+     * C011EC20 ordinary AMD64 unwind evidence. These fields are append-only:
+     * C011EC19 remains the historical first-frame/root boundary above, while
+     * C011EC20 records the real transition crossing, RtlVirtualUnwind
+     * context, preserved registers, and independent caller validation.
+     */
+    uint32_t c011ec20TransitionCrossingAttempts;
+    uint32_t c011ec20TransitionCrossingResults;
+    uint32_t c011ec20UnwindAttemptCount;
+    uint32_t c011ec20RtlVirtualUnwindCallCount;
+    uint32_t c011ec20UnwindResult;
+    uint32_t c011ec20CallerManagedRange;
+    uint32_t c011ec20CallerCodeManagerFound;
+    uint32_t c011ec20CallerFindMethodInfoAttempts;
+    uint32_t c011ec20CallerFindMethodInfoSuccess;
+    uint32_t c011ec20CallerGcInfoAttempted;
+    uint32_t c011ec20CallerGcInfoResult;
+    uint32_t c011ec20CallerSpMoved;
+    uint32_t c011ec20CallerSpAligned;
+    uint32_t c011ec20CallerFrameDistinct;
+    uint32_t c011ec20RestoredRegisterCount;
+    uint32_t c011ec20MarkerEmitted;
+    uint32_t c011ec20SafeStopReason;
+    uint32_t c011ec20Outcome;
+    uint32_t c011ec20SensitiveAllocationCount;
+    uint32_t c011ec20Reserved[3];
+
+    uintptr_t c011ec20TransitionFrameType;
+    uintptr_t c011ec20TransitionFrameAddress;
+    uintptr_t c011ec20TransitionSavedRip;
+    uintptr_t c011ec20TransitionSavedSp;
+    uintptr_t c011ec20TransitionSavedFp;
+    uintptr_t c011ec20TransitionThread;
+    uintptr_t c011ec20TransitionFlags;
+    uintptr_t c011ec20PreviousTransitionFrame;
+    uintptr_t c011ec20InputRip;
+    uintptr_t c011ec20InputRsp;
+    uintptr_t c011ec20InputRbp;
+    uintptr_t c011ec20ImageBase;
+    uintptr_t c011ec20RuntimeFunction;
+    uintptr_t c011ec20BeginRva;
+    uintptr_t c011ec20EndRva;
+    uintptr_t c011ec20UnwindInfo;
+    uintptr_t c011ec20UnwindInfoSize;
+    uintptr_t c011ec20UnwindBlockFlags;
+    uintptr_t c011ec20OutputRip;
+    uintptr_t c011ec20OutputRsp;
+    uintptr_t c011ec20OutputRbp;
+    uintptr_t c011ec20EstablisherFrame;
+    uintptr_t c011ec20HandlerData;
+    uintptr_t c011ec20InputRbx;
+    uintptr_t c011ec20InputRsi;
+    uintptr_t c011ec20InputRdi;
+    uintptr_t c011ec20InputR12;
+    uintptr_t c011ec20InputR13;
+    uintptr_t c011ec20InputR14;
+    uintptr_t c011ec20InputR15;
+    uintptr_t c011ec20RestoredRbx;
+    uintptr_t c011ec20RestoredRsi;
+    uintptr_t c011ec20RestoredRdi;
+    uintptr_t c011ec20RestoredR12;
+    uintptr_t c011ec20RestoredR13;
+    uintptr_t c011ec20RestoredR14;
+    uintptr_t c011ec20RestoredR15;
+    uintptr_t c011ec20CallerCodeManager;
+    uintptr_t c011ec20CallerMethodInfo;
+    uintptr_t c011ec20CallerMethodStart;
+    uintptr_t c011ec20CallerMethodEnd;
+    uintptr_t c011ec20CallerRuntimeFunction;
+    uintptr_t c011ec20CallerUnwindInfo;
+    uintptr_t c011ec20CallerUnwindInfoSize;
+    uintptr_t c011ec20CallerUnwindBlockFlags;
+    uintptr_t c011ec20CallerGcInfo;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -1341,6 +1415,7 @@ enum {
     GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP_MARKER = 0xC011EC15u,
     GUIDEXOS_NATIVEAOT_TRANSITION_FRAME_CONTROL_PC_MARKER = 0xC011EC18u,
     GUIDEXOS_NATIVEAOT_UNWIND_GC_INFO_BOUNDARY_MARKER = 0xC011EC19u,
+    GUIDEXOS_NATIVEAOT_CALLER_FRAME_UNWIND_MARKER = 0xC011EC20u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };

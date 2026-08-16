@@ -5405,6 +5405,10 @@ guideXosNativeAotC011EC15GcScanRootsEntered(
 #if defined(GUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO)
     suspendEeSerialPutString(
         "[nativeaot-gc-unwind-gc-info] preflight marker=C011EC19-PREFLIGHT\n");
+#if defined(GUIDEXOS_NATIVEAOT_C011EC20_UNWIND)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-unwind-caller-frame] preflight marker=C011EC20-PREFLIGHT\n");
+#endif
 #endif
 #endif
 #endif
@@ -5892,6 +5896,300 @@ guideXosNativeAotC011EC19SafeStop(uint32_t reason) {
     d.stopReason = GUIDEXOS_NATIVEAOT_UNWIND_GC_INFO_BOUNDARY_MARKER;
     d.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F33_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP;
     emitC011EC19SafeStop();
+    for (;;) {
+    }
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC20_UNWIND)
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC20SafeStop(uint32_t reason);
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC20TransitionCrossed(
+    uintptr_t frameType, uintptr_t frameAddress, uintptr_t savedRip,
+    uintptr_t savedSp, uintptr_t savedFp, uintptr_t threadAddress,
+    uintptr_t flags, uintptr_t previousTransitionFrame) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec20TransitionCrossingAttempts;
+    d.c011ec20TransitionFrameType = frameType;
+    d.c011ec20TransitionFrameAddress = frameAddress;
+    d.c011ec20TransitionSavedRip = savedRip;
+    d.c011ec20TransitionSavedSp = savedSp;
+    d.c011ec20TransitionSavedFp = savedFp;
+    d.c011ec20TransitionThread = threadAddress;
+    d.c011ec20TransitionFlags = flags;
+    d.c011ec20PreviousTransitionFrame = previousTransitionFrame;
+    if (frameAddress != 0u && savedRip != 0u) {
+        ++d.c011ec20TransitionCrossingResults;
+    } else {
+        d.c011ec20Outcome = 3u; // Outcome C: transition crossing blocker.
+    }
+    suspendEeSerialPutString(
+        "[nativeaot-gc-unwind-caller-frame] transition-crossed frameType=");
+    suspendEeSerialPutHex64(frameType);
+    suspendEeSerialPutString(" frame=");
+    suspendEeSerialPutHex64(frameAddress);
+    suspendEeSerialPutString(" savedRIP=");
+    suspendEeSerialPutHex64(savedRip);
+    suspendEeSerialPutString(" savedSP=");
+    suspendEeSerialPutHex64(savedSp);
+    suspendEeSerialPutString(" previous=");
+    suspendEeSerialPutHex64(previousTransitionFrame);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC20UnwindInputs(
+    uintptr_t imageBase, uintptr_t runtimeFunction, uintptr_t beginRva,
+    uintptr_t endRva, uintptr_t unwindInfo, uintptr_t unwindInfoSize,
+    uintptr_t blockFlags, uintptr_t inputRip, uintptr_t inputRsp,
+    uintptr_t inputRbp, uintptr_t inputRbx, uintptr_t inputRsi,
+    uintptr_t inputRdi, uintptr_t inputR12, uintptr_t inputR13,
+    uintptr_t inputR14, uintptr_t inputR15) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec20UnwindAttemptCount;
+    d.c011ec20ImageBase = imageBase;
+    d.c011ec20RuntimeFunction = runtimeFunction;
+    d.c011ec20BeginRva = beginRva;
+    d.c011ec20EndRva = endRva;
+    d.c011ec20UnwindInfo = unwindInfo;
+    d.c011ec20UnwindInfoSize = unwindInfoSize;
+    d.c011ec20UnwindBlockFlags = blockFlags;
+    d.c011ec20InputRip = inputRip;
+    d.c011ec20InputRsp = inputRsp;
+    d.c011ec20InputRbp = inputRbp;
+    d.c011ec20InputRbx = inputRbx;
+    d.c011ec20InputRsi = inputRsi;
+    d.c011ec20InputRdi = inputRdi;
+    d.c011ec20InputR12 = inputR12;
+    d.c011ec20InputR13 = inputR13;
+    d.c011ec20InputR14 = inputR14;
+    d.c011ec20InputR15 = inputR15;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-unwind-caller-frame] unwind-inputs rip=");
+    suspendEeSerialPutHex64(inputRip);
+    suspendEeSerialPutString(" rsp=");
+    suspendEeSerialPutHex64(inputRsp);
+    suspendEeSerialPutString(" rf=");
+    suspendEeSerialPutHex64(runtimeFunction);
+    suspendEeSerialPutString(" unwindInfo=");
+    suspendEeSerialPutHex64(unwindInfo);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC20CallerMethodInfo(
+    uintptr_t controlPc, uintptr_t codeManager, uintptr_t methodInfo,
+    uintptr_t methodStart, uintptr_t methodEnd, uintptr_t runtimeFunction,
+    uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (controlPc == 0u || controlPc != d.c011ec20OutputRip ||
+        d.c011ec20RtlVirtualUnwindCallCount == 0u) {
+        return;
+    }
+    d.c011ec20CallerCodeManager = codeManager;
+    d.c011ec20CallerMethodInfo = methodInfo;
+    d.c011ec20CallerMethodStart = methodStart;
+    d.c011ec20CallerMethodEnd = methodEnd;
+    d.c011ec20CallerRuntimeFunction = runtimeFunction;
+    d.c011ec20CallerUnwindInfo = unwindInfo;
+    d.c011ec20CallerUnwindInfoSize = unwindInfoSize;
+    d.c011ec20CallerUnwindBlockFlags = blockFlags;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC20UnwindCompleted(
+    uint32_t result, uintptr_t outputRip, uintptr_t outputRsp,
+    uintptr_t outputRbp, uintptr_t establisherFrame, uintptr_t handlerData,
+    uintptr_t restoredRbx, uintptr_t restoredRsi, uintptr_t restoredRdi,
+    uintptr_t restoredR12, uintptr_t restoredR13, uintptr_t restoredR14,
+    uintptr_t restoredR15, uint32_t restoredRegisterCount,
+    uintptr_t previousTransitionFrame) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec20RtlVirtualUnwindCallCount;
+    d.c011ec20UnwindResult = result;
+    d.c011ec20OutputRip = outputRip;
+    d.c011ec20OutputRsp = outputRsp;
+    d.c011ec20OutputRbp = outputRbp;
+    d.c011ec20EstablisherFrame = establisherFrame;
+    d.c011ec20HandlerData = handlerData;
+    d.c011ec20RestoredRbx = restoredRbx;
+    d.c011ec20RestoredRsi = restoredRsi;
+    d.c011ec20RestoredRdi = restoredRdi;
+    d.c011ec20RestoredR12 = restoredR12;
+    d.c011ec20RestoredR13 = restoredR13;
+    d.c011ec20RestoredR14 = restoredR14;
+    d.c011ec20RestoredR15 = restoredR15;
+    d.c011ec20RestoredRegisterCount = restoredRegisterCount;
+    d.c011ec20PreviousTransitionFrame = previousTransitionFrame;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-unwind-caller-frame] unwind-complete rip=");
+    suspendEeSerialPutHex64(outputRip);
+    suspendEeSerialPutString(" rsp=");
+    suspendEeSerialPutHex64(outputRsp);
+    suspendEeSerialPutString(" rbp=");
+    suspendEeSerialPutHex64(outputRbp);
+    suspendEeSerialPutString(" restored=");
+    suspendEeSerialPutHex32(restoredRegisterCount);
+    suspendEeSerialPutString("\n");
+
+    RuntimeInstance* runtime = GetRuntimeInstance();
+    ICodeManager* callerCodeManager = nullptr;
+    const bool callerInManagedRange = c011ec18IsInsideManagedRange(
+        outputRip, runtime, &callerCodeManager);
+    d.c011ec20CallerManagedRange = callerInManagedRange ? 1u : 0u;
+    d.c011ec20CallerCodeManagerFound = callerCodeManager != nullptr ? 1u : 0u;
+
+    if (callerInManagedRange && callerCodeManager != nullptr) {
+        MethodInfo callerMethodInfo = {};
+        ++d.c011ec20CallerFindMethodInfoAttempts;
+        if (callerCodeManager->FindMethodInfo(
+                reinterpret_cast<void*>(outputRip), &callerMethodInfo)) {
+            ++d.c011ec20CallerFindMethodInfoSuccess;
+        }
+    }
+
+    d.c011ec20CallerSpMoved = outputRsp != d.c011ec20InputRsp ? 1u : 0u;
+    d.c011ec20CallerSpAligned = (outputRsp & (sizeof(uintptr_t) - 1u)) == 0u ? 1u : 0u;
+    d.c011ec20CallerFrameDistinct =
+        outputRip != d.c011ec20InputRip && outputRsp != d.c011ec20InputRsp ? 1u : 0u;
+
+    const bool transitionCrossed =
+        d.c011ec20TransitionCrossingAttempts == 1u &&
+        d.c011ec20TransitionCrossingResults == 1u;
+    const bool unwindValid =
+        transitionCrossed && d.c011ec20UnwindAttemptCount == 1u &&
+        d.c011ec20RtlVirtualUnwindCallCount == 1u && result != 0u &&
+        outputRip != 0u && outputRsp != 0u && d.c011ec20CallerSpMoved != 0u &&
+        d.c011ec20CallerSpAligned != 0u && d.c011ec20CallerFrameDistinct != 0u &&
+        restoredRegisterCount != 0u;
+    const bool callerValidated = !callerInManagedRange
+        ? callerCodeManager == nullptr
+        : d.c011ec20CallerFindMethodInfoSuccess != 0u;
+
+    if (!unwindValid || !callerValidated) {
+        d.c011ec20Outcome = 4u; // Outcome D: unwind/validation defect.
+        guideXosNativeAotC011EC20SafeStop(0xC0200004u);
+    }
+    d.c011ec20Outcome = callerInManagedRange ? 1u : 5u; // A or legitimate native E.
+    guideXosNativeAotC011EC20SafeStop(callerInManagedRange ? 0xC0200001u : 0xC0200005u);
+}
+
+static void emitC011EC20SafeStop() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    const bool proof = d.c011ec20Outcome == 1u || d.c011ec20Outcome == 5u;
+    suspendEeSerialPutString(
+        proof ? "[nativeaot-gc-unwind-caller-frame] SAFE_STOP marker=C011EC20"
+              : "[nativeaot-gc-unwind-caller-frame] SAFE_STOP marker=C011EC20-SAFE_STOP");
+#define C20_HEX32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C20_HEX64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C20_HEX64("transitionFrameType", d.c011ec20TransitionFrameType);
+    C20_HEX64("transitionFrame", d.c011ec20TransitionFrameAddress);
+    C20_HEX64("transitionSavedRIP", d.c011ec20TransitionSavedRip);
+    C20_HEX64("transitionSavedSP", d.c011ec20TransitionSavedSp);
+    C20_HEX64("transitionSavedFP", d.c011ec20TransitionSavedFp);
+    C20_HEX64("transitionThread", d.c011ec20TransitionThread);
+    C20_HEX64("transitionFlags", d.c011ec20TransitionFlags);
+    C20_HEX64("previousTransitionFrame", d.c011ec20PreviousTransitionFrame);
+    C20_HEX32("crossingAttempts", d.c011ec20TransitionCrossingAttempts);
+    C20_HEX32("crossingResults", d.c011ec20TransitionCrossingResults);
+    C20_HEX32("unwindAttempts", d.c011ec20UnwindAttemptCount);
+    C20_HEX32("rtlVirtualUnwindCalls", d.c011ec20RtlVirtualUnwindCallCount);
+    C20_HEX32("unwindResult", d.c011ec20UnwindResult);
+    C20_HEX64("imageBase", d.c011ec20ImageBase);
+    C20_HEX64("runtimeFunction", d.c011ec20RuntimeFunction);
+    C20_HEX64("beginRVA", d.c011ec20BeginRva);
+    C20_HEX64("endRVA", d.c011ec20EndRva);
+    C20_HEX64("unwindInfo", d.c011ec20UnwindInfo);
+    C20_HEX64("unwindInfoSize", d.c011ec20UnwindInfoSize);
+    C20_HEX64("unwindBlockFlags", d.c011ec20UnwindBlockFlags);
+    C20_HEX64("inputRIP", d.c011ec20InputRip);
+    C20_HEX64("inputRSP", d.c011ec20InputRsp);
+    C20_HEX64("inputRBP", d.c011ec20InputRbp);
+    C20_HEX64("outputRIP", d.c011ec20OutputRip);
+    C20_HEX64("outputRSP", d.c011ec20OutputRsp);
+    C20_HEX64("outputRBP", d.c011ec20OutputRbp);
+    C20_HEX64("establisherFrame", d.c011ec20EstablisherFrame);
+    C20_HEX64("handlerData", d.c011ec20HandlerData);
+    C20_HEX64("inputRBX", d.c011ec20InputRbx);
+    C20_HEX64("inputRSI", d.c011ec20InputRsi);
+    C20_HEX64("inputRDI", d.c011ec20InputRdi);
+    C20_HEX64("inputR12", d.c011ec20InputR12);
+    C20_HEX64("inputR13", d.c011ec20InputR13);
+    C20_HEX64("inputR14", d.c011ec20InputR14);
+    C20_HEX64("inputR15", d.c011ec20InputR15);
+    C20_HEX64("restoredRBX", d.c011ec20RestoredRbx);
+    C20_HEX64("restoredRSI", d.c011ec20RestoredRsi);
+    C20_HEX64("restoredRDI", d.c011ec20RestoredRdi);
+    C20_HEX64("restoredR12", d.c011ec20RestoredR12);
+    C20_HEX64("restoredR13", d.c011ec20RestoredR13);
+    C20_HEX64("restoredR14", d.c011ec20RestoredR14);
+    C20_HEX64("restoredR15", d.c011ec20RestoredR15);
+    C20_HEX32("restoredRegisterCount", d.c011ec20RestoredRegisterCount);
+    C20_HEX32("callerManagedRange", d.c011ec20CallerManagedRange);
+    C20_HEX32("callerCodeManagerFound", d.c011ec20CallerCodeManagerFound);
+    C20_HEX64("callerCodeManager", d.c011ec20CallerCodeManager);
+    C20_HEX32("callerFindMethodInfoAttempts", d.c011ec20CallerFindMethodInfoAttempts);
+    C20_HEX32("callerFindMethodInfoSuccess", d.c011ec20CallerFindMethodInfoSuccess);
+    C20_HEX64("callerMethodInfo", d.c011ec20CallerMethodInfo);
+    C20_HEX64("callerMethodStart", d.c011ec20CallerMethodStart);
+    C20_HEX64("callerMethodEnd", d.c011ec20CallerMethodEnd);
+    C20_HEX64("callerRuntimeFunction", d.c011ec20CallerRuntimeFunction);
+    C20_HEX64("callerUnwindInfo", d.c011ec20CallerUnwindInfo);
+    C20_HEX64("callerUnwindInfoSize", d.c011ec20CallerUnwindInfoSize);
+    C20_HEX64("callerUnwindBlockFlags", d.c011ec20CallerUnwindBlockFlags);
+    C20_HEX32("callerGcInfoAttempted", d.c011ec20CallerGcInfoAttempted);
+    C20_HEX32("callerGcInfoResult", d.c011ec20CallerGcInfoResult);
+    C20_HEX32("callerSpMoved", d.c011ec20CallerSpMoved);
+    C20_HEX32("callerSpAligned", d.c011ec20CallerSpAligned);
+    C20_HEX32("callerFrameDistinct", d.c011ec20CallerFrameDistinct);
+    C20_HEX32("outcome", d.c011ec20Outcome);
+    C20_HEX32("safeStopReason", d.c011ec20SafeStopReason);
+    C20_HEX32("c19RootReports", d.c011ec19RootReportCount);
+    C20_HEX32("c19RegisterRoots", d.c011ec19RegisterRootCount);
+    C20_HEX32("c19StackRoots", d.c011ec19StackRootCount);
+    C20_HEX32("c19PromoteAttempts", d.c011ec19FirstStackDerivedPromoteAttemptCount);
+    C20_HEX32("c19PromoteEntries", d.c011ec19FirstStackDerivedPromoteEntryCount);
+    C20_HEX32("c19PromoteReturns", d.c011ec19FirstStackDerivedPromoteReturnCount);
+    C20_HEX32("framesWalked", d.c011ec18StackFrameCount);
+    C20_HEX32("stackProviderCallbacks", d.c011ec18StackProviderCallbackCount);
+    C20_HEX32("totalRoots", d.c011ec15RootSlotVisitCount);
+    C20_HEX64("stackBase", d.rootThreadRecords[0].stackLow);
+    C20_HEX64("stackLimit", d.rootThreadRecords[0].stackHigh);
+    C20_HEX64("scanContextStackLimit", d.callbackContextStackLimit);
+    C20_HEX32("stackBoundsConsumed", d.c011ec18StackBoundsConsumed);
+    C20_HEX32("markWrites", d.c011ec15MarkBitWriteCount);
+    C20_HEX32("childReads", d.c011ec15ChildReferenceReadCount);
+    C20_HEX32("graphTraversal", d.c011ec15GraphTraversalCount);
+    C20_HEX32("promoteEntries", d.c011ec15PromoteEntryCount);
+    C20_HEX32("promoteReturns", d.c011ec15PromoteReturnCount);
+    C20_HEX32("threadStoreRecursion", d.threadStoreLockRecursionDepth);
+    C20_HEX32("eeSuspended", d.eeSuspended);
+    C20_HEX32("managedEntryProhibited", d.managedEntryProhibited);
+#undef C20_HEX32
+#undef C20_HEX64
+    suspendEeSerialPutString(" marker=");
+    suspendEeSerialPutString(proof ? "C011EC20" : "C011EC20-SAFE_STOP");
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC20SafeStop(uint32_t reason) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec20SafeStopReason = reason;
+    d.safeStopObserved = 1u;
+    d.stopReason = GUIDEXOS_NATIVEAOT_CALLER_FRAME_UNWIND_MARKER;
+    d.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F33_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP;
+    emitC011EC20SafeStop();
     for (;;) {
     }
 }
