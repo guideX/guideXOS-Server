@@ -128,6 +128,15 @@ struct NavigatorPageMetadata {
 		int         cssTableWideCount = 0;
 		int         cssTableMalformedFallbackCount = 0;
 		int         cssTableRowspanDeferredCount = 0;
+		int         cssTableRowspanCellCount = 0;
+		int         cssTableMaximumRowspan = 1;
+		int         cssTableOccupiedGridSkips = 0;
+		int         cssTableRowspanHeightAdjustments = 0;
+		int         cssTableCombinedSpanCount = 0;
+		int         cssTableResolvedVerticalEdgeCount = 0;
+		int         cssTableResolvedHorizontalEdgeCount = 0;
+		int         cssTableSuppressedInteriorSpanEdgeCount = 0;
+		int         cssTableBorderConflictCount = 0;
 		int         cssTableLinkHitTestEvidence = 0;
 		int         cssTableGeometryClamps = 0;
 		std::string cssTableGeometryEvidence;
@@ -656,6 +665,9 @@ public:
 	static bool SmokeTableGeometryById(const std::string& id,
 		int& outX, int& outY, int& outW, int& outH,
 		int& outRows, int& outColumns);
+	static bool SmokeTableCellGeometryById(const std::string& id,
+		int& outX, int& outY, int& outW, int& outH,
+		int& outRow, int& outColumn, int& outRowSpan, int& outColSpan);
 	static bool SmokeBlockGeometryById(const std::string& id,
 		int& outX, int& outY, int& outW, int& outH);
 	static bool SmokeHitLinkAt(int x, int y, const std::string& id);

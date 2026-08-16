@@ -83,6 +83,7 @@ namespace {
 	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
 	constexpr size_t kTableMaxCellContents = 64;
 	constexpr int kTableMaxColspan = 8;
+	constexpr int kTableMaxRowspan = 16;
 	constexpr size_t kFormMaxControls = 128;
 	constexpr size_t kFormMaxValueBytes = 256;
 	constexpr size_t kFormMaxPlaceholderBytes = 128;
@@ -690,7 +691,7 @@ static bool parseCssNumber(const std::string& rawValue, double& out)
 }
 
 static int parseTableSpanAttr(const std::string& tagBody, const std::string& attr,
-	CssDiagnostics& diagnostics, bool& malformed)
+	int maximum, CssDiagnostics& diagnostics, bool& malformed)
 {
 	const std::string raw = trim(extractAttr(tagBody, attr));
 	malformed = false;
@@ -703,14 +704,14 @@ static int parseTableSpanAttr(const std::string& tagBody, const std::string& att
 			break;
 		}
 		sawDigit = true;
-		if (value > kTableMaxColspan) {
-			value = kTableMaxColspan;
+		if (value > maximum) {
+			value = maximum;
 			malformed = true;
 			break;
 		}
 		value = value * 10 + (c - '0');
-		if (value > kTableMaxColspan) {
-			value = kTableMaxColspan;
+		if (value > maximum) {
+			value = maximum;
 			malformed = true;
 			break;
 		}
@@ -720,7 +721,7 @@ static int parseTableSpanAttr(const std::string& tagBody, const std::string& att
 		value = 1;
 	}
 	if (malformed) ++diagnostics.tableMalformedFallbackCount;
-	return std::max(1, std::min(kTableMaxColspan, value));
+	return std::max(1, std::min(maximum, value));
 }
 
 static int roundCssNumber(double value)
@@ -5550,6 +5551,9 @@ struct ParserState {
 	std::string  currentLegendText;
 	uint64_t     currentLegendSerial = 0;
 	std::string  currentTableCellText;
+	std::string  currentTableCellClass;
+	std::string  currentTableCellId;
+	std::string  currentTableCellStyle;
 	std::string  currentTableCaptionText;
 	bool         currentTableCellHeader = false;
 	std::string  currentTableCellHref;
@@ -6471,17 +6475,18 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.currentTableCellLinkId.clear();
 		bool colspanMalformed = false;
 		bool rowspanMalformed = false;
-		st.currentTableCellColSpan = parseTableSpanAttr(tagBody, "colspan", st.doc.cssDiagnostics, colspanMalformed);
-		st.currentTableCellRowSpan = parseTableSpanAttr(tagBody, "rowspan", st.doc.cssDiagnostics, rowspanMalformed);
+		st.currentTableCellColSpan = parseTableSpanAttr(tagBody, "colspan", kTableMaxColspan,
+			st.doc.cssDiagnostics, colspanMalformed);
+		st.currentTableCellRowSpan = parseTableSpanAttr(tagBody, "rowspan", kTableMaxRowspan,
+			st.doc.cssDiagnostics, rowspanMalformed);
 		st.currentTableCellSpanMalformed = colspanMalformed || rowspanMalformed;
-		if (st.currentTableCellRowSpan != 1) {
-			++st.doc.cssDiagnostics.tableRowspanDeferredCount;
-			st.currentTableCellRowSpan = 1;
-		}
 		st.currentTableCellContents.clear();
-		st.classBuf = extractAttr(tagBody, "class");
-		st.idBuf = extractAttr(tagBody, "id");
-		st.styleBuf = extractAttr(tagBody, "style");
+		st.currentTableCellClass = extractAttr(tagBody, "class");
+		st.currentTableCellId = extractAttr(tagBody, "id");
+		st.currentTableCellStyle = extractAttr(tagBody, "style");
+		st.classBuf = st.currentTableCellClass;
+		st.idBuf = st.currentTableCellId;
+		st.styleBuf = st.currentTableCellStyle;
 		pushElement(st, elementRef);
 		activateCurrentBlock(st);
 		return;
@@ -7025,7 +7030,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		flushText(st);
 		appendInlineAtomicMarker(st, name);
 		DocBlock block = makeTextBlock(BlockType::Paragraph, name, st.currentTableCellText, "",
-			st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+			st.currentTableCellClass, st.currentTableCellId, captureBlockAncestors(st), st.currentTableCellStyle);
 		block.elementMetadata = activeBlockElement(st);
 		block.tableRole = st.currentTableCellHeader ? TableRole::HeaderCell : TableRole::DataCell;
 		block.tableSerial = nearestAncestorSerial(st, "table");
@@ -7039,6 +7044,16 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		block.tableContents = st.currentTableCellContents;
 		if (!st.currentTableCellHref.empty()) {
 			block.url = st.currentTableCellHref;
+		} else {
+			// Keep compact cell-link ownership robust when malformed nesting or a
+			// bounded recovery path cleared the transient href state. The content
+			// item remains authoritative for table hit testing.
+			for (const TableCellContentItem& item : block.tableContents) {
+				if (item.kind == BlockType::Link && !item.url.empty()) {
+					block.url = item.url;
+					break;
+				}
+			}
 		}
 		st.doc.blocks.push_back(std::move(block));
 		st.currentTableCellText.clear();
@@ -7048,6 +7063,9 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.currentTableCellColSpan = 1;
 		st.currentTableCellRowSpan = 1;
 		st.currentTableCellSpanMalformed = false;
+		st.currentTableCellClass.clear();
+		st.currentTableCellId.clear();
+		st.currentTableCellStyle.clear();
 		st.currentTableCellContents.clear();
 		st.open = OpenTag::None;
 		st.activeBlockSerial = 0;

@@ -845,9 +845,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
     const bool table8bHorizontalBar = gxos::apps::Navigator::SmokeElementScrollbarGeometryById(
         "phase8b-wide-scroll", true, false, table8bBarX, table8bBarY, table8bBarW, table8bBarH);
     const bool table8bLinkBeforeScroll = gxos::apps::Navigator::SmokeHitLinkById("phase8b-scrolled-link");
+    const int table8bScrollTarget = std::min(table8bWideMaxX, 240);
     const bool table8bScrolled = table8bWideMaxX > 0 &&
         gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
-            "phase8b-wide-scroll", table8bWideMaxX, 0);
+            "phase8b-wide-scroll", table8bScrollTarget, 0);
     int table8bLinkPaintX = 0, table8bLinkPaintY = 0, table8bLinkPaintW = 0, table8bLinkPaintH = 0;
     int table8bLinkFinalX = 0, table8bLinkFinalY = 0, table8bLinkFinalW = 0, table8bLinkFinalH = 0;
     int table8bLinkClipX = 0, table8bLinkClipY = 0, table8bLinkClipW = 0, table8bLinkClipH = 0;
@@ -877,7 +878,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(tablePhase8bReport, "Current Document.table_maximum_colspan=") &&
         hasPositiveCount(tablePhase8bReport, "Current Document.table_wrapped_cells=") &&
         hasPositiveCount(tablePhase8bReport, "Current Document.table_malformed_fallbacks=") &&
-        contains(tablePhase8bReport, "Current Document.table_rowspan_model=single-row-safe-fallback-deferred") &&
+        contains(tablePhase8bReport, "Current Document.table_rowspan_model=bounded-occupancy-grid-max16-two-pass-height-solve") &&
         contains(tablePhase8bReport, "Current Document.table_geometry_evidence="),
         "report=\"" + summarizeText(tablePhase8bReport, 1200) + "\"");
     add("HTML table Phase 8B shared grid and normal flow geometry", table8bGeometry &&
@@ -915,6 +916,105 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::to_string(table8bLinkFinalW) + ":" + std::to_string(table8bLinkFinalH) + ",clip=" +
         std::to_string(table8bLinkClipX) + ":" + std::to_string(table8bLinkClipY) + ":" +
         std::to_string(table8bLinkClipW) + ":" + std::to_string(table8bLinkClipH));
+
+    const std::string tablePhase8cUrl =
+        "http://127.0.0.1:8080/navigator-smoke/table-phase8c.html";
+    const bool tablePhase8cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(tablePhase8cUrl);
+    const std::string tablePhase8cText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string tablePhase8cReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    int table8cX = 0, table8cY = 0, table8cW = 0, table8cH = 0, table8cRows = 0, table8cColumns = 0;
+    const bool table8cGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8c-basic", table8cX, table8cY, table8cW, table8cH, table8cRows, table8cColumns);
+    int span2X = 0, span2Y = 0, span2W = 0, span2H = 0, span2Row = 0, span2Column = 0, span2Rows = 0, span2Columns = 0;
+    int span3X = 0, span3Y = 0, span3W = 0, span3H = 0, span3Row = 0, span3Column = 0, span3Rows = 0, span3Columns = 0;
+    int combinedX = 0, combinedY = 0, combinedW = 0, combinedH = 0, combinedRow = 0, combinedColumn = 0, combinedRows = 0, combinedColumns = 0;
+    const bool span2Geometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-span2", span2X, span2Y, span2W, span2H, span2Row, span2Column, span2Rows, span2Columns);
+    const bool span3Geometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-span3", span3X, span3Y, span3W, span3H, span3Row, span3Column, span3Rows, span3Columns);
+    const bool combinedGeometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-combined", combinedX, combinedY, combinedW, combinedH, combinedRow, combinedColumn, combinedRows, combinedColumns);
+    int groupHeadX = 0, groupHeadY = 0, groupHeadW = 0, groupHeadH = 0, groupHeadRow = 0, groupHeadColumn = 0, groupHeadRows = 0, groupHeadColumns = 0;
+    int groupBodyX = 0, groupBodyY = 0, groupBodyW = 0, groupBodyH = 0, groupBodyRow = 0, groupBodyColumn = 0, groupBodyRows = 0, groupBodyColumns = 0;
+    const bool groupHeadGeometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-group-head", groupHeadX, groupHeadY, groupHeadW, groupHeadH, groupHeadRow, groupHeadColumn, groupHeadRows, groupHeadColumns);
+    const bool groupBodyGeometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-group-body", groupBodyX, groupBodyY, groupBodyW, groupBodyH, groupBodyRow, groupBodyColumn, groupBodyRows, groupBodyColumns);
+    int following8cX = 0, following8cY = 0, following8cW = 0, following8cH = 0;
+    const bool following8cGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "phase8c-following", following8cX, following8cY, following8cW, following8cH);
+    int collapseX = 0, collapseY = 0, collapseW = 0, collapseH = 0, collapseRows = 0, collapseColumns = 0;
+    const bool collapseGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8c-collapse", collapseX, collapseY, collapseW, collapseH, collapseRows, collapseColumns);
+    const int wide8cMaxX = gxos::apps::Navigator::SmokeElementMaxScrollXById("phase8c-wide-scroll");
+    int wide8cTableX = 0, wide8cTableY = 0, wide8cTableW = 0, wide8cTableH = 0, wide8cTableRows = 0, wide8cTableColumns = 0;
+    const bool wide8cTableGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8c-wide", wide8cTableX, wide8cTableY, wide8cTableW, wide8cTableH, wide8cTableRows, wide8cTableColumns);
+    gxos::apps::Navigator::SmokeSetScrollOffset(std::max(0, wide8cTableY - 120));
+    int wide8cLinkPaintX = 0, wide8cLinkPaintY = 0, wide8cLinkPaintW = 0, wide8cLinkPaintH = 0;
+    int wide8cLinkFinalX = 0, wide8cLinkFinalY = 0, wide8cLinkFinalW = 0, wide8cLinkFinalH = 0;
+    int wide8cLinkClipX = 0, wide8cLinkClipY = 0, wide8cLinkClipW = 0, wide8cLinkClipH = 0;
+    const bool wide8cLinkBefore = gxos::apps::Navigator::SmokeHitLinkById("phase8c-scrolled-link");
+    const int wide8cScrollTarget = std::min(wide8cMaxX, 240);
+    const bool wide8cScrolled = wide8cMaxX > 0 && gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase8c-wide-scroll", wide8cScrollTarget, 0);
+    const bool wide8cLinkGeometry = gxos::apps::Navigator::SmokeLinkGeometryById(
+        "phase8c-scrolled-link", wide8cLinkPaintX, wide8cLinkPaintY, wide8cLinkPaintW, wide8cLinkPaintH,
+        wide8cLinkFinalX, wide8cLinkFinalY, wide8cLinkFinalW, wide8cLinkFinalH,
+        wide8cLinkClipX, wide8cLinkClipY, wide8cLinkClipW, wide8cLinkClipH);
+    const bool wide8cLinkAfter = wide8cScrolled && gxos::apps::Navigator::SmokeHitLinkById("phase8c-scrolled-link");
+    const bool wide8cReset = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase8c-wide-scroll", 0, 0);
+    const bool wide8cOldRejected = wide8cScrolled && wide8cLinkGeometry && wide8cReset && !gxos::apps::Navigator::SmokeHitLinkAt(
+        wide8cLinkPaintX + wide8cScrollTarget + std::max(0, wide8cLinkPaintW / 2),
+        wide8cLinkPaintY + std::max(0, wide8cLinkPaintH / 2), "phase8c-scrolled-link");
+    const std::string tablePhase8cFinalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("HTML table Phase 8C fixture loads", tablePhase8cLoaded &&
+        contains(tablePhase8cText, "Rowspan and Border-Collapse Semantics") &&
+        contains(tablePhase8cText, "thead rowspan clamps") &&
+        contains(tablePhase8cText, "Wide collapsed table") &&
+        contains(tablePhase8cText, "Following normal-flow content"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl() + ",text=\"" + summarizeText(tablePhase8cText, 700) + "\"");
+    add("HTML table Phase 8C occupancy and bounded diagnostics", tablePhase8cLoaded &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_rowspan_cells=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_maximum_rowspan=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_occupied_grid_skips=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_rowspan_height_adjustments=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_combined_spans=") &&
+        contains(tablePhase8cReport, "Current Document.table_rowspan_model=bounded-occupancy-grid-max16-two-pass-height-solve"),
+        "report=\"" + summarizeText(tablePhase8cReport, 1500) + "\"");
+    add("HTML table Phase 8C spanning geometry", table8cGeometry && span2Geometry && span3Geometry && combinedGeometry &&
+        table8cRows >= 10 && table8cColumns >= 3 && span2Rows == 2 && span3Rows == 3 &&
+        combinedRows == 3 && combinedColumns == 2 && span2H > 0 && span3H > 0 && combinedW > span2W &&
+        combinedY >= span3Y + span3H,
+        "table=" + std::to_string(table8cX) + ":" + std::to_string(table8cY) + ":" + std::to_string(table8cW) + ":" + std::to_string(table8cH) +
+        ",span2=" + std::to_string(span2X) + ":" + std::to_string(span2Y) + ":" + std::to_string(span2W) + ":" + std::to_string(span2H) +
+        ",span3=" + std::to_string(span3X) + ":" + std::to_string(span3Y) + ":" + std::to_string(span3W) + ":" + std::to_string(span3H) +
+        ",combined=" + std::to_string(combinedX) + ":" + std::to_string(combinedY) + ":" + std::to_string(combinedW) + ":" + std::to_string(combinedH));
+    add("HTML table Phase 8C row-group clamps and malformed spans", groupHeadGeometry && groupBodyGeometry &&
+        groupHeadRows == 1 && groupBodyRows == 2 &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_malformed_fallbacks=") &&
+        contains(tablePhase8cReport, "Current Document.table_geometry_evidence="),
+        "theadRows=" + std::to_string(groupHeadRows) + ",tbodyRows=" + std::to_string(groupBodyRows) +
+        ",evidence=" + evidenceSnippet(tablePhase8cReport, "Current Document.table_geometry_evidence="));
+    add("HTML table Phase 8C collapsed edges and normal flow", collapseGeometry && collapseW >= 520 && collapseW <= 528 &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.CSS collapsed tables rendered=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_resolved_vertical_edges=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_resolved_horizontal_edges=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_suppressed_interior_span_edges=") &&
+        following8cGeometry && following8cY >= table8cY + table8cH,
+        "collapse=" + std::to_string(collapseX) + ":" + std::to_string(collapseY) + ":" + std::to_string(collapseW) + ":" + std::to_string(collapseH) +
+        ",following=" + std::to_string(following8cX) + ":" + std::to_string(following8cY) + ":" + std::to_string(following8cW) + ":" + std::to_string(following8cH) +
+        ",evidence=" + evidenceSnippet(tablePhase8cReport, "Current Document.table_geometry_evidence="));
+    add("HTML table Phase 8C spanning links and wide collapsed scrolling", wide8cTableGeometry && wide8cMaxX > 0 && wide8cLinkGeometry &&
+        wide8cScrolled && wide8cLinkAfter && wide8cOldRejected &&
+        hasPositiveCount(tablePhase8cFinalReport, "Current Document.table_link_hit_test_evidence="),
+        std::string("maxScrollX=") + std::to_string(wide8cMaxX) + ",before=" + yesNo(wide8cLinkBefore) +
+        ",after=" + yesNo(wide8cLinkAfter) + ",oldRejected=" + yesNo(wide8cOldRejected) +
+        ",linkGeometry=" + yesNo(wide8cLinkGeometry) + ",paint=" + std::to_string(wide8cLinkPaintX) + ":" +
+        std::to_string(wide8cLinkPaintY) + ":" + std::to_string(wide8cLinkPaintW) + ":" + std::to_string(wide8cLinkPaintH) +
+        ",final=" + std::to_string(wide8cLinkFinalX) + ":" + std::to_string(wide8cLinkFinalY) + ":" +
+        std::to_string(wide8cLinkFinalW) + ":" + std::to_string(wide8cLinkFinalH) + ",evidence=" +
+        evidenceSnippet(tablePhase8cFinalReport, "Current Document.css_scroll_evidence="));
 
     bool textPolishLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/text-polish.html");
     std::string textPolishText = gxos::apps::Navigator::SmokeCurrentDocumentText();
