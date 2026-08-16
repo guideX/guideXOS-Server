@@ -1806,6 +1806,26 @@ namespace {
 		return top + (height > lineH ? (height - lineH) / 2 : 0);
 	}
 
+	int chromeTextWidth(const std::string& text)
+	{
+		if (text.empty()) return 0;
+		SystemFont::EnsureInitialized();
+		return std::max(0, SystemFont::MeasureWidth(FontRole::Default, text.c_str(),
+			static_cast<int>(text.size())));
+	}
+
+	int chromeCaretOffsetFromX(const std::string& text, int textX, int x)
+	{
+		const int target = std::max(0, x - textX);
+		int measured = 0;
+		for (size_t i = 0; i < text.size(); ++i) {
+			const int advance = chromeTextWidth(text.substr(i, 1));
+			if (target < measured + std::max(1, advance) / 2) return static_cast<int>(i);
+			measured += advance;
+		}
+		return static_cast<int>(text.size());
+	}
+
 	// -----------------------------------------------------------------------
 	// Word-wrap helpers
 	//
@@ -14246,30 +14266,42 @@ void Navigator::updateDisplay(bool renderDocumentContent)
 			drawThemeRect(s_windowId, layout.addressX,                 kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
 			drawThemeRect(s_windowId, layout.addressX + layout.addressW - 1, kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
 
-			// Caret placement is still approximate until Navigator has proportional
-			// document/chrome text measurement exposed through the GUI protocol.
 			const int kTextX = layout.addressX + 10;
 			const int kTextY = centeredChromeTextY(kAddressY, kAddressH);
 
-		// Clamp caret defensively (should already be in range, but guard rendering).
-		int caretPos = std::max(0, std::min(s_addressCaret,
-			static_cast<int>(s_addressBuffer.size())));
+			// Clamp caret defensively (should already be in range, but guard rendering).
+			int caretPos = std::max(0, std::min(s_addressCaret,
+				static_cast<int>(s_addressBuffer.size())));
 
-		std::string before = s_addressBuffer.substr(0, static_cast<size_t>(caretPos));
-		std::string after  = s_addressBuffer.substr(static_cast<size_t>(caretPos));
+			std::string before = s_addressBuffer.substr(0, static_cast<size_t>(caretPos));
+			std::string after  = s_addressBuffer.substr(static_cast<size_t>(caretPos));
 
-		int caretX = kTextX + caretPos * kCharW;
+			int caretX = kTextX + chromeTextWidth(before);
+			const int caretMinX = layout.addressX + 1;
+			const int caretMaxX = std::max(caretMinX, layout.addressX + std::max(1, layout.addressW - 2));
+			caretX = std::max(caretMinX, std::min(caretX, caretMaxX));
 
-		// Draw the full text (simpler for renderers that don't do sub-string positioning).
+			// Draw the full text (simpler for renderers that don't do sub-string positioning).
+			const bool addressTextClipPushed = cssPushPaintClip(CssPaintRect{
+				layout.addressX + 1, kAddressY + 1,
+				std::max(0, layout.addressW - 2), std::max(0, kAddressH - 2)});
 			drawThemeText(s_windowId, kTextX, kTextY, s_addressBuffer, NavigatorTextColor());
+			if (addressTextClipPushed) cssPopPaintClip();
 			// Draw a 1-px wide caret bar on top.
 			drawThemeRect(s_windowId, caretX, kAddressY + 4, 1, kAddressH - 8, NavigatorAccentColor());
 			(void)before; (void)after; // reserved for future proportional split-draw
 		} else {
-			// Normal: subtle top/bottom border
+			// Normal: subtle four-sided border keeps the field legible without
+			// changing toolbar geometry or the established chrome palette.
 			drawThemeRect(s_windowId, layout.addressX, kAddressY,                 layout.addressW, 1, NavigatorAddressIdleTopBorderColor());
 			drawThemeRect(s_windowId, layout.addressX, kAddressY + kAddressH - 1, layout.addressW, 1, NavigatorAddressIdleBottomBorderColor());
+			drawThemeRect(s_windowId, layout.addressX, kAddressY, 1, kAddressH, NavigatorAddressIdleTopBorderColor());
+			drawThemeRect(s_windowId, layout.addressX + layout.addressW - 1, kAddressY, 1, kAddressH, NavigatorAddressIdleTopBorderColor());
+			const bool addressTextClipPushed = cssPushPaintClip(CssPaintRect{
+				layout.addressX + 1, kAddressY + 1,
+				std::max(0, layout.addressW - 2), std::max(0, kAddressH - 2)});
 			drawThemeText(s_windowId, layout.addressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url, NavigatorTextColor());
+			if (addressTextClipPushed) cssPopPaintClip();
 		}
 		if (s_loading && layout.addressW >= 24) {
 			incrementLifecycleCounter(s_throbberPaintSubmissions);
@@ -15318,7 +15350,8 @@ void Navigator::renderStatusBar()
 		}
 		drawThemeText(s_windowId, 16, findTextY, "Find: " + shown, NavigatorTextColor());
 		int caretPos = std::min(s_findCaret, maxChars);
-		drawThemeRect(s_windowId, 64 + caretPos * kCharW, kWindowH - kStatusBarH + 6, 1, kStatusBarH - 12, NavigatorAccentColor());
+		drawThemeRect(s_windowId, 16 + chromeTextWidth("Find: " + shown.substr(0, static_cast<size_t>(caretPos))),
+			kWindowH - kStatusBarH + 6, 1, kStatusBarH - 12, NavigatorAccentColor());
 		drawThemeText(s_windowId, 440, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), findMatchStatusText() + "   Enter/Down: next   Up: prev   Esc: close",
 			isSciFiThemeActive() ? NavigatorMutedTextColor() : NavigatorTextColor());
 		return;
@@ -16193,7 +16226,7 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 			if (s_addressFocused) {
 				const NavigatorToolbarLayout layout = navigatorToolbarLayout(kWindowW);
 				const int kTextX = layout.addressX + 10;
-				int charOffset = (x - kTextX) / kCharW;
+				int charOffset = chromeCaretOffsetFromX(s_addressBuffer, kTextX, x);
 				s_addressCaret = std::max(0, std::min(charOffset,
 					static_cast<int>(s_addressBuffer.size())));
 				renderToolbar();
