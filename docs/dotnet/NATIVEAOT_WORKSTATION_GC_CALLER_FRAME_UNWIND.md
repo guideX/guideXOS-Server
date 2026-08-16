@@ -17,6 +17,10 @@ at `0x10106337` (offset `0x11F`, non-interruptible). It proved one frame, one st
 provider callback, six roots, four register roots, one stack root, and four authentic
 category-3 GC-info root callbacks.
 
+Fresh C20 boots reported the same method interval and a relocated stack-local
+method-info pointer (`0x4E83538`); this expected stack-placement difference does not
+change the historical C011EC19 pointer above.
+
 The C011EC19 chronology is preserved: the original queue transition was `0 -> 1`
 at `0x10230560`, and the later first stack-derived insertion was `4 -> 5` at
 `0x10230580`. Mark writes, child reads, and graph traversal remained zero.
