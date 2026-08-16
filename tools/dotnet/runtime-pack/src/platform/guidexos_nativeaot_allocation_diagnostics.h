@@ -1206,6 +1206,64 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec18CurrentNativeInManagedRange;
     uintptr_t c011ec18TransitionCodeManager;
     uintptr_t c011ec18AuthenticManagedCodeManager;
+
+    /*
+     * C011EC19 first genuine NativeAOT unwind / GC-info boundary. These
+     * append-only scalar fields distinguish method lookup, unwind metadata,
+     * caller state, GC-info decoding, root callbacks, and promotion.
+     */
+    uint32_t c011ec19UnwindEntryCount;
+    uint32_t c011ec19UnwindMetadataCount;
+    uint32_t c011ec19UnwindRtlCount;
+    uint32_t c011ec19UnwindCompletedCount;
+    uint32_t c011ec19UnwindResult;
+    uint32_t c011ec19GcInfoLookupCount;
+    uint32_t c011ec19GcInfoDecodeAttemptCount;
+    uint32_t c011ec19GcInfoDecodeResult;
+    uint32_t c011ec19Interruptible;
+    uint32_t c011ec19HasInterruptibleRanges;
+    uint32_t c011ec19RootReportCount;
+    uint32_t c011ec19RegisterRootCount;
+    uint32_t c011ec19StackRootCount;
+    uint32_t c011ec19FirstRootKind;
+    uint32_t c011ec19FirstStackDerivedPromoteAttemptCount;
+    uint32_t c011ec19FirstStackDerivedPromoteEntryCount;
+    uint32_t c011ec19FirstStackDerivedPromoteReturnCount;
+    uint32_t c011ec19SecondQueueInsertionCount;
+    uint32_t c011ec19MarkerEmitted;
+    uint32_t c011ec19SafeStopReason;
+    uint32_t c011ec19PreservedRegisterCount;
+    uint32_t c011ec19Reserved[5];
+
+    uintptr_t c011ec19MethodInfo;
+    uintptr_t c011ec19RuntimeFunction;
+    uintptr_t c011ec19MainRuntimeFunction;
+    uintptr_t c011ec19MethodStart;
+    uintptr_t c011ec19MethodEnd;
+    uintptr_t c011ec19ControlPc;
+    uintptr_t c011ec19InputSp;
+    uintptr_t c011ec19InputFp;
+    uintptr_t c011ec19UnwindInfo;
+    uintptr_t c011ec19UnwindInfoSize;
+    uintptr_t c011ec19UnwindBlockFlags;
+    uintptr_t c011ec19GcInfo;
+    uintptr_t c011ec19EhInfo;
+    uintptr_t c011ec19CodeOffset;
+    uintptr_t c011ec19SafePointAddress;
+    uintptr_t c011ec19CallerControlPc;
+    uintptr_t c011ec19CallerSp;
+    uintptr_t c011ec19CallerFp;
+    uintptr_t c011ec19PreviousTransitionFrame;
+    uintptr_t c011ec19FirstRootSlot;
+    uintptr_t c011ec19FirstRootValue;
+    uintptr_t c011ec19FirstRootRegisterSlot;
+    uintptr_t c011ec19FirstStackRootSlot;
+    uintptr_t c011ec19FirstStackRootValue;
+    uintptr_t c011ec19SecondQueueSlot;
+    uintptr_t c011ec19SecondQueueCursorBefore;
+    uintptr_t c011ec19SecondQueueCursorAfter;
+    uintptr_t c011ec19SecondQueueOldValue;
+    uintptr_t c011ec19SecondQueueNewValue;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
@@ -1282,6 +1340,7 @@ enum {
     GUIDEXOS_NATIVEAOT_FIRST_ROOT_FIRST_NON_NULL_OLD_O_SAFE_STOP_MARKER = 0xC011EC14u,
     GUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP_MARKER = 0xC011EC15u,
     GUIDEXOS_NATIVEAOT_TRANSITION_FRAME_CONTROL_PC_MARKER = 0xC011EC18u,
+    GUIDEXOS_NATIVEAOT_UNWIND_GC_INFO_BOUNDARY_MARKER = 0xC011EC19u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_GC_START_WORK = 1u,
     GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_NEXT_POST_DISABLE = 2u,
 };
