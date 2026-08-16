@@ -47,6 +47,7 @@
 #include "ipc_bus.h"
 #include "console_service.h"
 #include "compositor.h"
+#include "desktop_theme.h"
 #include "gui_protocol.h"
 #include "vfs.h"
 #include "gxm_loader.h"
@@ -2302,7 +2303,7 @@ static void help(){
                  " bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]\n"
                  " bus.cap <chan> <cap> | bus.stats <chan>\n"
                  " console.start | console.send <text> | console.pop [timeoutMs]\n"
-                 " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id> | gui.key <keyCode> <down|up> [modifiers]\n"
+                 " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id> | gui.key <keyCode> <down|up> [modifiers] | gui.mouse <windowId> <x> <y> <button> <down|up|move>\n"
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id> | gui.sync <id> <frameGeneration> [frameSequence] [freeze] | gui.unfreeze <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
@@ -2483,6 +2484,43 @@ using namespace gxos;
             std::string idS; iss>>idS; std::string rest; std::getline(iss, rest); if(rest.size()>0 && rest[0]==' ') rest.erase(0,1); ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DrawText; std::string payload = idS+"|"+rest; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Text queued"<<std::endl;
         } else if (cmd=="gui.close"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Close; m.dstPid=Lifecycle::state().compositorPid; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Close requested"<<std::endl;
         } else if (cmd=="gui.key"){ if(!requireCompositor()) continue; int keyCode=0, modifiers=0; std::string action; iss>>keyCode>>action>>modifiers; if(action!="down" && action!="up"){ std::cout<<"Usage: gui.key <keyCode> <down|up> [modifiers]"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_InputKey; m.dstPid=Lifecycle::state().compositorPid; const std::string payload=std::to_string(keyCode)+"|"+action+"|"+std::to_string(modifiers); m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Key queued"<<std::endl;
+        } else if (cmd=="gui.mouse") {
+            if(!requireCompositor()) continue;
+            uint64_t windowId = 0;
+            int appX = 0, appY = 0, button = 0;
+            std::string action;
+            iss >> windowId >> appX >> appY >> button >> action;
+            if (windowId == 0 || action != "down" && action != "up" && action != "move") {
+                std::cout << "Usage: gui.mouse <windowId> <x> <y> <button> <down|up|move>" << std::endl;
+                continue;
+            }
+            gxos::gui::WindowDebugInfo target;
+            bool found = false;
+            for (const auto& candidate : gxos::gui::Compositor::debugWindowsSnapshot()) {
+                if (candidate.id == windowId) {
+                    target = candidate;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                std::cout << "gui.mouse target window not found: " << windowId << std::endl;
+                continue;
+            }
+            const int screenX = target.x + appX;
+            const int screenY = target.y + GetCurrentDesktopTheme().titleBarHeight + appY;
+            ipc::Message m;
+            m.type = (uint32_t)gui::MsgType::MT_InputMouse;
+            m.dstPid = Lifecycle::state().compositorPid;
+            // The compositor input endpoint expects screen coordinates and
+            // performs the window-to-app coordinate conversion before routing
+            // the event to the owning application.
+            const std::string payload = std::to_string(screenX) + "|" + std::to_string(screenY) +
+                "|" + std::to_string(button) + "|" + action;
+            m.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(m), false);
+            std::cout << "Mouse queued window=" << windowId << " x=" << appX << " y=" << appY
+                      << " button=" << button << " action=" << action << std::endl;
         } else if (cmd=="gui.rect"){ if(!requireCompositor()) continue; std::string idS; int x,y,w,h,r,g,b; iss>>idS>>x>>y>>w>>h>>r>>g>>b; std::ostringstream oss; oss<<idS<<"|"<<x<<"|"<<y<<"|"<<w<<"|"<<h<<"|"<<r<<"|"<<g<<"|"<<b; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DrawRect; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Rect queued"<<std::endl;
         } else if (cmd=="gui.move"){ if(!requireCompositor()) continue; std::string idS; int x,y; iss>>idS>>x>>y; std::ostringstream oss; oss<<idS<<"|"<<x<<"|"<<y; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Move; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Move queued"<<std::endl;
         } else if (cmd=="gui.resize"){ if(!requireCompositor()) continue; std::string idS; int w,h; iss>>idS>>w>>h; std::ostringstream oss; oss<<idS<<"|"<<w<<"|"<<h; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Resize; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Resize queued"<<std::endl;
