@@ -1275,6 +1275,7 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t c011ec20TransitionCrossingResults;
     uint32_t c011ec20UnwindAttemptCount;
     uint32_t c011ec20RtlVirtualUnwindCallCount;
+    uint32_t c011ec20RtlVirtualUnwindReturned;
     uint32_t c011ec20UnwindResult;
     uint32_t c011ec20CallerManagedRange;
     uint32_t c011ec20CallerCodeManagerFound;
@@ -1315,6 +1316,7 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec20OutputRbp;
     uintptr_t c011ec20EstablisherFrame;
     uintptr_t c011ec20HandlerData;
+    uintptr_t c011ec20RtlVirtualUnwindResult;
     uintptr_t c011ec20InputRbx;
     uintptr_t c011ec20InputRsi;
     uintptr_t c011ec20InputRdi;

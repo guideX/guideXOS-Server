@@ -604,7 +604,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC19GcInfoDecodeCompleted(uint32_t 
 extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC19SafeStop(uint32_t reason);
 extern "C" void __cdecl guideXosNativeAotC011EC20TransitionCrossed(uintptr_t frameType, uintptr_t frameAddress, uintptr_t savedRip, uintptr_t savedSp, uintptr_t savedFp, uintptr_t threadAddress, uintptr_t flags, uintptr_t previousTransitionFrame);
 extern "C" void __cdecl guideXosNativeAotC011EC20UnwindInputs(uintptr_t imageBase, uintptr_t runtimeFunction, uintptr_t beginRva, uintptr_t endRva, uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags, uintptr_t inputRip, uintptr_t inputRsp, uintptr_t inputRbp, uintptr_t inputRbx, uintptr_t inputRsi, uintptr_t inputRdi, uintptr_t inputR12, uintptr_t inputR13, uintptr_t inputR14, uintptr_t inputR15);
-extern "C" void __cdecl guideXosNativeAotC011EC20UnwindCompleted(uint32_t result, uintptr_t outputRip, uintptr_t outputRsp, uintptr_t outputRbp, uintptr_t establisherFrame, uintptr_t handlerData, uintptr_t restoredRbx, uintptr_t restoredRsi, uintptr_t restoredRdi, uintptr_t restoredR12, uintptr_t restoredR13, uintptr_t restoredR14, uintptr_t restoredR15, uint32_t restoredRegisterCount, uintptr_t previousTransitionFrame);
+extern "C" void __cdecl guideXosNativeAotC011EC20UnwindCompleted(uint32_t result, uintptr_t outputRip, uintptr_t outputRsp, uintptr_t outputRbp, uintptr_t establisherFrame, uintptr_t handlerData, uintptr_t rtlVirtualUnwindResult, uintptr_t restoredRbx, uintptr_t restoredRsi, uintptr_t restoredRdi, uintptr_t restoredR12, uintptr_t restoredR13, uintptr_t restoredR14, uintptr_t restoredR15, uint32_t restoredRegisterCount, uintptr_t previousTransitionFrame);
 extern "C" void __cdecl guideXosNativeAotC011EC20CallerMethodInfo(uintptr_t controlPc, uintptr_t codeManager, uintptr_t methodInfo, uintptr_t methodStart, uintptr_t methodEnd, uintptr_t runtimeFunction, uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags);
 extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(uint32_t reason);
 '@
@@ -786,15 +786,11 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(u
                     ? reinterpret_cast<uintptr_t>(guideXosTransitionFrame->m_pThread) : 0u,
                 guideXosTransitionFlags,
                 reinterpret_cast<uintptr_t>(*ppPreviousTransitionFrame));
-            if (guideXosTransitionFrame == nullptr)
-            {
-                // The locked transition contract did not expose a frame to
-                // continue from. Do not feed ordinary unwind a fabricated
-                // caller context; classify the boundary as Outcome C.
-                guideXosNativeAotC011EC20SafeStop(0xC0200003u);
-            }
-            // C011EC20 deliberately crosses the C011EC19 safe-stop boundary.
-            // The ordinary AMD64 unwind below remains the locked runtime path.
+            // A null value is the legitimate top-level reverse-P/Invoke
+            // result: this slot contains the previous transition frame, not
+            // the current frame independently proven by C011EC19.  C20
+            // preserves that boundary and continues into the locked ordinary
+            // AMD64 unwind below; it never synthesizes a caller frame.
         }
 '@.TrimEnd()
             } else {
@@ -842,7 +838,7 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(u
         static_cast<uintptr_t>(context.R14), static_cast<uintptr_t>(context.R15));
 #endif
 
-    RtlVirtualUnwind(NULL,
+    PEXCEPTION_ROUTINE guideXosRtlVirtualUnwindResult = RtlVirtualUnwind(NULL,
                     dac_cast<TADDR>(m_moduleBase),
                     pRegisterSet->IP,
                     (PRUNTIME_FUNCTION)pNativeMethodInfo->runtimeFunction,
@@ -858,7 +854,9 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(u
     guideXosNativeAotC011EC20UnwindCompleted(
         1u, static_cast<uintptr_t>(context.Rip), static_cast<uintptr_t>(context.Rsp),
         static_cast<uintptr_t>(context.Rbp), static_cast<uintptr_t>(EstablisherFrame),
-        reinterpret_cast<uintptr_t>(HandlerData), static_cast<uintptr_t>(context.Rbx),
+        reinterpret_cast<uintptr_t>(HandlerData),
+        reinterpret_cast<uintptr_t>(guideXosRtlVirtualUnwindResult),
+        static_cast<uintptr_t>(context.Rbx),
         static_cast<uintptr_t>(context.Rsi), static_cast<uintptr_t>(context.Rdi),
         static_cast<uintptr_t>(context.R12), static_cast<uintptr_t>(context.R13),
         static_cast<uintptr_t>(context.R14), static_cast<uintptr_t>(context.R15),
@@ -2607,7 +2605,7 @@ exit /b %errorlevel%
             $c20OutcomeCode = Get-MarkerField $c20Line 'outcome'
             $c20Outcome = switch ($c20OutcomeCode) { '0x00000001' { 'A' } '0x00000002' { 'B' } '0x00000003' { 'C' } '0x00000005' { 'E' } default { 'D' } }
             if (-not [string]::IsNullOrWhiteSpace($c20ProofLine)) {
-                foreach ($field in @('crossingAttempts','crossingResults','unwindAttempts','rtlVirtualUnwindCalls','unwindResult','outputRIP','outputRSP','callerSpMoved','callerFrameDistinct','restoredRegisterCount')) {
+                foreach ($field in @('crossingAttempts','crossingResults','unwindAttempts','rtlVirtualUnwindCalls','unwindResult','rtlVirtualUnwindReturned','outputRIP','outputRSP','callerSpMoved','callerFrameDistinct','restoredRegisterCount')) {
                     if ((Get-MarkerField $c20Line $field) -eq $null -or (Get-MarkerField $c20Line $field) -eq '0x00000000') { throw "C011EC20 proof field $field was empty in $name." }
                 }
                 if ($c20Outcome -notin @('A','B','E')) { throw "C011EC20 emitted a proof marker without a valid A/B/E outcome in $name." }
@@ -2615,7 +2613,7 @@ exit /b %errorlevel%
             $runResults += [ordered]@{
                 name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker=if ($c20Outcome -in @('A','B','E')) { 'C011EC20' } else { 'C011EC20-SAFE_STOP' }; outcome=$c20Outcome; harnessTerminated=$true; markerLine=$c20Line
                 transition=[ordered]@{ frameType=(Get-MarkerField $c20Line 'transitionFrameType'); frame=(Get-MarkerField $c20Line 'transitionFrame'); savedRIP=(Get-MarkerField $c20Line 'transitionSavedRIP'); savedSP=(Get-MarkerField $c20Line 'transitionSavedSP'); savedFP=(Get-MarkerField $c20Line 'transitionSavedFP'); previousFrame=(Get-MarkerField $c20Line 'previousTransitionFrame'); crossingAttempts=(Get-MarkerField $c20Line 'crossingAttempts'); crossingResults=(Get-MarkerField $c20Line 'crossingResults') }
-                unwind=[ordered]@{ attempts=(Get-MarkerField $c20Line 'unwindAttempts'); rtlVirtualUnwindCalls=(Get-MarkerField $c20Line 'rtlVirtualUnwindCalls'); runtimeFunction=(Get-MarkerField $c20Line 'runtimeFunction'); unwindInfo=(Get-MarkerField $c20Line 'unwindInfo'); unwindInfoSize=(Get-MarkerField $c20Line 'unwindInfoSize'); blockFlags=(Get-MarkerField $c20Line 'unwindBlockFlags'); inputRIP=(Get-MarkerField $c20Line 'inputRIP'); inputRSP=(Get-MarkerField $c20Line 'inputRSP'); inputRBP=(Get-MarkerField $c20Line 'inputRBP'); outputRIP=(Get-MarkerField $c20Line 'outputRIP'); outputRSP=(Get-MarkerField $c20Line 'outputRSP'); outputRBP=(Get-MarkerField $c20Line 'outputRBP'); establisherFrame=(Get-MarkerField $c20Line 'establisherFrame'); handlerData=(Get-MarkerField $c20Line 'handlerData'); restoredRBX=(Get-MarkerField $c20Line 'restoredRBX'); restoredRSI=(Get-MarkerField $c20Line 'restoredRSI'); restoredRDI=(Get-MarkerField $c20Line 'restoredRDI'); restoredR12=(Get-MarkerField $c20Line 'restoredR12'); restoredR13=(Get-MarkerField $c20Line 'restoredR13'); restoredR14=(Get-MarkerField $c20Line 'restoredR14'); restoredR15=(Get-MarkerField $c20Line 'restoredR15'); restoredRegisterCount=(Get-MarkerField $c20Line 'restoredRegisterCount') }
+                unwind=[ordered]@{ attempts=(Get-MarkerField $c20Line 'unwindAttempts'); rtlVirtualUnwindCalls=(Get-MarkerField $c20Line 'rtlVirtualUnwindCalls'); rtlVirtualUnwindReturned=(Get-MarkerField $c20Line 'rtlVirtualUnwindReturned'); rtlVirtualUnwindResult=(Get-MarkerField $c20Line 'rtlVirtualUnwindResult'); runtimeFunction=(Get-MarkerField $c20Line 'runtimeFunction'); unwindInfo=(Get-MarkerField $c20Line 'unwindInfo'); unwindInfoSize=(Get-MarkerField $c20Line 'unwindInfoSize'); blockFlags=(Get-MarkerField $c20Line 'unwindBlockFlags'); inputRIP=(Get-MarkerField $c20Line 'inputRIP'); inputRSP=(Get-MarkerField $c20Line 'inputRSP'); inputRBP=(Get-MarkerField $c20Line 'inputRBP'); outputRIP=(Get-MarkerField $c20Line 'outputRIP'); outputRSP=(Get-MarkerField $c20Line 'outputRSP'); outputRBP=(Get-MarkerField $c20Line 'outputRBP'); establisherFrame=(Get-MarkerField $c20Line 'establisherFrame'); handlerData=(Get-MarkerField $c20Line 'handlerData'); restoredRBX=(Get-MarkerField $c20Line 'restoredRBX'); restoredRSI=(Get-MarkerField $c20Line 'restoredRSI'); restoredRDI=(Get-MarkerField $c20Line 'restoredRDI'); restoredR12=(Get-MarkerField $c20Line 'restoredR12'); restoredR13=(Get-MarkerField $c20Line 'restoredR13'); restoredR14=(Get-MarkerField $c20Line 'restoredR14'); restoredR15=(Get-MarkerField $c20Line 'restoredR15'); restoredRegisterCount=(Get-MarkerField $c20Line 'restoredRegisterCount') }
                 caller=[ordered]@{ managedRange=(Get-MarkerField $c20Line 'callerManagedRange'); codeManager=(Get-MarkerField $c20Line 'callerCodeManager'); findMethodInfoAttempts=(Get-MarkerField $c20Line 'callerFindMethodInfoAttempts'); findMethodInfoSuccess=(Get-MarkerField $c20Line 'callerFindMethodInfoSuccess'); methodInfo=(Get-MarkerField $c20Line 'callerMethodInfo'); methodStart=(Get-MarkerField $c20Line 'callerMethodStart'); methodEnd=(Get-MarkerField $c20Line 'callerMethodEnd'); gcInfoAttempted=(Get-MarkerField $c20Line 'callerGcInfoAttempted'); gcInfoResult=(Get-MarkerField $c20Line 'callerGcInfoResult'); stackMoved=(Get-MarkerField $c20Line 'callerSpMoved'); stackAligned=(Get-MarkerField $c20Line 'callerSpAligned'); frameDistinct=(Get-MarkerField $c20Line 'callerFrameDistinct') }
                 roots=[ordered]@{ currentFrame=(Get-MarkerField $c20Line 'c19RootReports'); register=(Get-MarkerField $c20Line 'c19RegisterRoots'); stack=(Get-MarkerField $c20Line 'c19StackRoots'); promoteAttempts=(Get-MarkerField $c20Line 'c19PromoteAttempts'); promoteEntries=(Get-MarkerField $c20Line 'c19PromoteEntries'); promoteReturns=(Get-MarkerField $c20Line 'c19PromoteReturns') }
                 accounting=[ordered]@{ frames=(Get-MarkerField $c20Line 'framesWalked'); callbacks=(Get-MarkerField $c20Line 'stackProviderCallbacks'); totalRoots=(Get-MarkerField $c20Line 'totalRoots'); markWrites=(Get-MarkerField $c20Line 'markWrites'); childReads=(Get-MarkerField $c20Line 'childReads'); graphTraversal=(Get-MarkerField $c20Line 'graphTraversal'); stackBase=(Get-MarkerField $c20Line 'stackBase'); stackLimit=(Get-MarkerField $c20Line 'stackLimit'); scanContextStackLimit=(Get-MarkerField $c20Line 'scanContextStackLimit'); boundsConsumed=(Get-MarkerField $c20Line 'stackBoundsConsumed'); promoteEntries=(Get-MarkerField $c20Line 'promoteEntries'); promoteReturns=(Get-MarkerField $c20Line 'promoteReturns') }

@@ -5923,6 +5923,25 @@ guideXosNativeAotC011EC20TransitionCrossed(
     d.c011ec20PreviousTransitionFrame = previousTransitionFrame;
     if (frameAddress != 0u && savedRip != 0u) {
         ++d.c011ec20TransitionCrossingResults;
+    } else if (d.c011ec18TransitionFrameAddress != 0u &&
+               d.c011ec18TransitionFrameRip != 0u) {
+        /*
+         * The reverse-P/Invoke decoder reports the previous transition
+         * frame.  At the top-level reverse-P/Invoke boundary that pointer is
+         * intentionally null.  C011EC19 independently recorded the current
+         * transition-associated frame, so preserve that evidence while
+         * allowing C011EC20 to continue through the ordinary unwind path.
+         */
+        d.c011ec20TransitionFrameAddress =
+            d.c011ec18TransitionFrameAddress;
+        d.c011ec20TransitionSavedRip = d.c011ec18TransitionFrameRip;
+        d.c011ec20TransitionSavedSp = d.c011ec18SavedRsp;
+        d.c011ec20TransitionSavedFp = d.c011ec18TransitionFrameRbp;
+        d.c011ec20TransitionThread = d.c011ec18ThreadAddress;
+        d.c011ec20TransitionFlags = d.c011ec18TransitionFrameFlags;
+        d.c011ec20PreviousTransitionFrame =
+            d.c011ec18PreviousTransitionFrame;
+        ++d.c011ec20TransitionCrossingResults;
     } else {
         d.c011ec20Outcome = 3u; // Outcome C: transition crossing blocker.
     }
@@ -6005,6 +6024,7 @@ extern "C" void __cdecl
 guideXosNativeAotC011EC20UnwindCompleted(
     uint32_t result, uintptr_t outputRip, uintptr_t outputRsp,
     uintptr_t outputRbp, uintptr_t establisherFrame, uintptr_t handlerData,
+    uintptr_t rtlVirtualUnwindResult,
     uintptr_t restoredRbx, uintptr_t restoredRsi, uintptr_t restoredRdi,
     uintptr_t restoredR12, uintptr_t restoredR13, uintptr_t restoredR14,
     uintptr_t restoredR15, uint32_t restoredRegisterCount,
@@ -6012,12 +6032,14 @@ guideXosNativeAotC011EC20UnwindCompleted(
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     ++d.c011ec20RtlVirtualUnwindCallCount;
+    d.c011ec20RtlVirtualUnwindReturned = result != 0u ? 1u : 0u;
     d.c011ec20UnwindResult = result;
     d.c011ec20OutputRip = outputRip;
     d.c011ec20OutputRsp = outputRsp;
     d.c011ec20OutputRbp = outputRbp;
     d.c011ec20EstablisherFrame = establisherFrame;
     d.c011ec20HandlerData = handlerData;
+    d.c011ec20RtlVirtualUnwindResult = rtlVirtualUnwindResult;
     d.c011ec20RestoredRbx = restoredRbx;
     d.c011ec20RestoredRsi = restoredRsi;
     d.c011ec20RestoredRdi = restoredRdi;
@@ -6119,6 +6141,8 @@ static void emitC011EC20SafeStop() {
     C20_HEX64("outputRBP", d.c011ec20OutputRbp);
     C20_HEX64("establisherFrame", d.c011ec20EstablisherFrame);
     C20_HEX64("handlerData", d.c011ec20HandlerData);
+    C20_HEX32("rtlVirtualUnwindReturned", d.c011ec20RtlVirtualUnwindReturned);
+    C20_HEX64("rtlVirtualUnwindResult", d.c011ec20RtlVirtualUnwindResult);
     C20_HEX64("inputRBX", d.c011ec20InputRbx);
     C20_HEX64("inputRSI", d.c011ec20InputRsi);
     C20_HEX64("inputRDI", d.c011ec20InputRdi);
