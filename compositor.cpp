@@ -857,10 +857,12 @@ namespace gxos {
                 type == MsgType::MT_DrawTextAtColor || type == MsgType::MT_DrawRect ||
                 type == MsgType::MT_FramePresent || type == MsgType::MT_DrawImage ||
                 type == MsgType::MT_DrawImageAnimated;
-            if (renderAck && dstPid != 0) {
+            if (renderAck) {
                 // Rendering is fire-and-forget at the native host API. Do not
-                // enqueue draw acknowledgments in the bounded app mailbox;
-                // the app never consumes them and they can block real input.
+                // enqueue draw acknowledgments in either the bounded app
+                // mailbox or the shared output channel; neither path is
+                // consumed by the native app, and an expanded debugger tree
+                // can otherwise fill the channel while starving input.
                 return;
             }
             ipc::Bus::publish(kGuiChanOut, std::move(out), false);
@@ -5544,22 +5546,43 @@ namespace gxos {
             } break;
             case MsgType::MT_InputKey: {
                 // Handle keyboard input from kernel (bare-metal) or test harness
-                // Format: <keycode>|<action>
+                // Formats: <keycode>|<action>|<modifiers> or
+                // <windowId>|<keycode>|<action>|<modifiers>.
+                std::vector<std::string> fields;
                 std::istringstream iss(s);
-                std::string keyCodeStr, action;
-                std::getline(iss, keyCodeStr, '|');
-                std::getline(iss, action);
+                std::string field;
+                while (std::getline(iss, field, '|')) fields.push_back(field);
                 
                 try {
-                    int keyCode = std::stoi(keyCodeStr);
+                    const bool targeted = fields.size() >= 4;
+                    if ((!targeted && fields.size() < 2) || (targeted && fields.size() < 4))
+                        throw std::runtime_error("invalid key payload");
+                    uint64_t targetWindow = 0;
+                    const size_t keyIndex = targeted ? 1u : 0u;
+                    const size_t actionIndex = targeted ? 2u : 1u;
+                    const size_t modifierIndex = targeted ? 3u : 2u;
+                    if (targeted) targetWindow = std::stoull(fields[0]);
+                    const int keyCode = std::stoi(fields[keyIndex]);
+                    const std::string& action = fields[actionIndex];
+                    const std::string modifiers = fields.size() > modifierIndex ? fields[modifierIndex] : "0";
                     uint64_t ownerPid = 0;
                     {
                         std::lock_guard<std::mutex> lk(g_lock);
-                        ownerPid = inputOwnerPid( );
+                        if (targeted) {
+                            const auto target = g_windows.find(targetWindow);
+                            if (target == g_windows.end() || target->second.minimized || target->second.tombstoned) {
+                                Logger::write(LogLevel::Warn, "Compositor: targeted key window is unavailable: " + std::to_string(targetWindow));
+                                break;
+                            }
+                            ownerPid = target->second.ownerPid;
+                        } else {
+                            ownerPid = inputOwnerPid( );
+                        }
                     }
                     
-                    // Forward to focused window
-                    publishOut(MsgType::MT_InputKey, std::to_string(keyCode) + "|" + action, ownerPid);
+                    // Forward to the explicit target when provided; the
+                    // legacy form continues to use the compositor focus.
+                    publishOut(MsgType::MT_InputKey, std::to_string(keyCode) + "|" + action + "|" + modifiers, ownerPid);
                 } catch (const std::exception& e) {
                     Logger::write(LogLevel::Error, std::string("Compositor: Failed to parse MT_InputKey: ") + e.what());
                 }
