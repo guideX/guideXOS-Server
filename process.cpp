@@ -4,6 +4,7 @@
 #include "logger.h"
 #include "allocator.h"
 #include "built_in_app_metadata.h"
+#include "gui_protocol.h"
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -22,6 +23,22 @@ namespace gxos {
     uint64_t ProcessTable::g_nextPid = 10; 
     std::mutex ProcessTable::g_lock;
     std::mutex ProcessTable::g_tombstoneLock;
+
+    namespace {
+        bool isPriorityInputMessage(uint32_t type) {
+            switch (static_cast<gui::MsgType>(type)) {
+            case gui::MsgType::MT_InputKey:
+            case gui::MsgType::MT_InputMouse:
+            case gui::MsgType::MT_SetFocus:
+            case gui::MsgType::MT_ClearFocus:
+            case gui::MsgType::MT_Activate:
+            case gui::MsgType::MT_Close:
+                return true;
+            default:
+                return false;
+            }
+        }
+    }
 
     Process::~Process() {
 #if defined(_WIN32)
@@ -231,6 +248,8 @@ namespace gxos {
             if (it == g_proc.end()) return false;
             proc = it->second;
         }
+        if (isPriorityInputMessage(msg.type))
+            return proc->mbox.try_push_priority(std::move(msg));
         proc->mbox.push(std::move(msg));
         return true;
     }

@@ -1483,14 +1483,11 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             if (remainingMs > 25) remainingMs = 25;
         }
 
-        // Compositor draw acknowledgments are deliberately retained in the
-        // bounded app mailbox for compatibility, but they are not app events.
-        // Prefer a pending key without changing queue capacity or dropping
-        // those acknowledgments so a render-heavy modal transition cannot
-        // starve keyboard delivery.
-        const uint32_t inputKeyType = static_cast<uint32_t>(gui::MsgType::MT_InputKey);
-        bool received = ipc::Bus::popType("gui.output", inputKeyType, message, 0);
-        if (!received) received = ipc::Bus::pop("gui.output", message, remainingMs);
+        // Rendering acknowledgments are not published to gui.output. Keep the
+        // remaining input/window messages in compositor order so a key cannot
+        // overtake an earlier tab click and change the UI state in which that
+        // key is interpreted.
+        const bool received = ipc::Bus::pop("gui.output", message, remainingMs);
         if (!received) break;
 
         gx_event_type eventType = eventTypeForMessage(message.type);
