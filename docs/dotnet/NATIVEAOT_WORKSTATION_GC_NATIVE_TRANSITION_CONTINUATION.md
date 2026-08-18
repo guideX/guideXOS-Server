@@ -113,6 +113,6 @@ The converter, PowerShell parse, source guards, manifest checks, ordinary-payloa
 
 ## Git and next milestone
 
-C011EC20 history was not rewritten. The final commit and push state are recorded in this section after the C011EC21 milestone commit.
+C011EC20 history was not rewritten. The implementation milestone commit is `0872eef1` (`Trace NativeAOT native transition continuation`). The final documentation state is on branch `v1.1_DOTNET_SUPPORT`, tracking `origin/v1.1_DOTNET_SUPPORT`; after the documentation-finalization commit the local divergence is ahead `3`, behind `0`, with a clean tracked worktree and no untracked entries. Push was attempted and failed with GitHub's exact `git@github.com: Permission denied (publickey)` error. No machine-wide Git, SSH, Pageant, or OpenSSH settings were changed.
 
 The next smallest milestone is to provide or implement the exact NativeAOT native unwind/transition record required to continue from `runFirstRealAllocationImpl`, with independently valid metadata for every native step. Do not widen the managed range or add a heuristic walker.
