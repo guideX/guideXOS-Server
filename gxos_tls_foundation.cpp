@@ -191,8 +191,25 @@ void gxos_mbedtls_platform_exit_noop(int)
 
 void gxos_tls_smoke_debug_trace(const char* event, uint32_t value)
 {
+    /*
+     * PSA/Mbed TLS is deliberately freestanding here, so the crypto C
+     * sources cannot use the kernel logger directly.  Keep the bridge
+     * bounded: event names are fixed literals from the TLS/PSA sources and
+     * values are status/size/identifier fields only.
+     */
+    static uint32_t traceCount = 0;
+    if (traceCount >= 2048u) return;
+    ++traceCount;
+#if defined(GXOS_BARE_METAL)
+    kernel::serial::puts("[TLS-CRYPTO] ");
+    kernel::serial::puts(event ? event : "(null)");
+    kernel::serial::puts(" value=0x");
+    kernel::serial::put_hex32(value);
+    kernel::serial::puts("\n");
+#else
     (void) event;
     (void) value;
+#endif
 }
 }
 #endif
