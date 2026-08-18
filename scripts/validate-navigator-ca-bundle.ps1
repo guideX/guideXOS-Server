@@ -15,6 +15,7 @@ param(
     [string]$OutputManifestPath,
     [string]$SourceDescription,
     [string]$RotationId,
+    [string]$GeneratedUtc,
     [ValidateSet("auto", "yes", "no")]
     [string]$ProductionReady = "auto"
 )
@@ -125,7 +126,8 @@ function Get-NavigatorCaBundleManifest {
     param(
         [Parameter(Mandatory = $true)][string]$LiteralPath,
         [Parameter(Mandatory = $true)][string]$Type,
-        [Parameter(Mandatory = $true)][string]$Source
+        [Parameter(Mandatory = $true)][string]$Source,
+        [AllowNull()][string]$ManifestGeneratedUtc
     )
 
     if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
@@ -191,6 +193,17 @@ function Get-NavigatorCaBundleManifest {
     }
 
     $profile = Get-NavigatorCaBundleProfile -Type $Type
+    $generatedUtcText = [datetime]::UtcNow.ToString("o")
+    if (-not [string]::IsNullOrWhiteSpace($ManifestGeneratedUtc)) {
+        try {
+            $generatedUtcText = ([datetime]::Parse(
+                    $ManifestGeneratedUtc.Trim(),
+                    [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)).ToString("o")
+        } catch {
+            throw "GeneratedUtc must be a valid UTC timestamp: $ManifestGeneratedUtc"
+        }
+    }
     if ($ProductionReady -ne "auto") {
         if ($Type -eq "shipped-root-candidate") {
             $profile.ProductionReady = $ProductionReady
@@ -212,7 +225,7 @@ function Get-NavigatorCaBundleManifest {
         schema_version = "guidexos.navigator.ca-bundle-manifest.v0.1"
         bundle_type = $Type
         source = $Source
-        generated_utc = ([datetime]::UtcNow.ToString("o"))
+        generated_utc = $generatedUtcText
         root_count = [int]$matches.Count
         pem_bytes = [int64]$item.Length
         sha256 = $sha256
@@ -234,7 +247,7 @@ if ([string]::IsNullOrWhiteSpace($SourceDescription)) {
 
 $bundleFullPath = [System.IO.Path]::GetFullPath($BundlePath)
 $manifestFullPath = [System.IO.Path]::GetFullPath($OutputManifestPath)
-$manifest = Get-NavigatorCaBundleManifest -LiteralPath $bundleFullPath -Type $BundleType -Source $SourceDescription.Trim()
+$manifest = Get-NavigatorCaBundleManifest -LiteralPath $bundleFullPath -Type $BundleType -Source $SourceDescription.Trim() -ManifestGeneratedUtc $GeneratedUtc
 
 $manifestDirectory = Split-Path -Parent $manifestFullPath
 if (-not [string]::IsNullOrWhiteSpace($manifestDirectory)) {

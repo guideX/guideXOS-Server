@@ -1252,6 +1252,7 @@ void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
     result->tlsSetupStep[0] = '\0';
     result->tlsSetupErrorCode = 0;
     result->tlsSetupErrorName[0] = '\0';
+    result->tlsHandshakeErrorName[0] = '\0';
     result->tlsSuiteContractCount = 0;
     result->tlsSuiteContractRealCount = 0;
     result->tlsSuiteContractInstalled = false;
@@ -2060,11 +2061,17 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
             source == GxosTrustStoreSource::SmokeFixtureTrust
                 ? nullptr
                 : trust_store_manifest_blocker(caInfo);
+        const bool manifestProductionReady =
+            caInfo.manifest.status == GxosCaManifestStatus::Loaded &&
+            caInfo.manifest.productionReady &&
+            !caInfo.manifest.testOnly &&
+            caInfo.manifest.hashMatch;
         const bool publicInternetReady =
-            source == GxosTrustStoreSource::ProductionPublicProbeTrust &&
             manifestBlocker == nullptr &&
-            public_internet_trust_opt_in_enabled() &&
-            caInfo.manifest.productionReady;
+            manifestProductionReady &&
+            (source == GxosTrustStoreSource::ProductionRootStore ||
+             (source == GxosTrustStoreSource::ProductionPublicProbeTrust &&
+              public_internet_trust_opt_in_enabled()));
         if (manifestBlocker) {
             return {
                 GxosTrustStorePolicyState::TrustStoreMalformed,
@@ -2228,18 +2235,21 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
         } else {
             effectiveState = GxosValidatedHttpsPolicyState::ProductionValidated;
             validatedNavigationEnabled = true;
-            productionReady = true;
-            // A production trust store is the security boundary for arbitrary
-            // origins. Once it is parsed and the TLS prerequisites are ready,
-            // normal Navigator navigation must not depend on a test-only
-            // hostname/pilot token. Keep the legacy token as diagnostic input
-            // for the proof rails, but never make it a second certificate
-            // validation gate.
-            broadPublicHttpsEnabled = true;
-            detail = "Production HTTPS prerequisites are satisfied; arbitrary-origin HTTPS navigation is enabled with production trust and hostname validation.";
-            publicHttpsPilotReason = publicHttpsPilotRequested
-                ? "Arbitrary-origin HTTPS is enabled; legacy public-https-pilot proof token is present."
-                : "Arbitrary-origin HTTPS is enabled by ProductionValidated trust prerequisites; public-https-pilot is only a legacy proof token.";
+            productionReady = trustPolicy.publicInternetReady;
+            // A production-ready manifest is the security boundary for
+            // arbitrary origins. Deterministic non-production bundles may
+            // still exercise the explicit validated fixture rails, but they
+            // must never turn on generic public HTTPS navigation.
+            broadPublicHttpsEnabled = trustPolicy.publicInternetReady;
+            if (trustPolicy.publicInternetReady) {
+                detail = "Production HTTPS prerequisites are satisfied; arbitrary-origin HTTPS navigation is enabled with production trust and hostname validation.";
+                publicHttpsPilotReason = publicHttpsPilotRequested
+                    ? "Arbitrary-origin HTTPS is enabled; legacy public-https-pilot proof token is present."
+                    : "Arbitrary-origin HTTPS is enabled by ProductionValidated trust prerequisites; public-https-pilot is only a legacy proof token.";
+            } else {
+                detail = "The deterministic production-policy fixture is parsed and usable for explicit certificate-validation rails, but its manifest is not production-ready; arbitrary-origin HTTPS remains disabled.";
+                publicHttpsPilotReason = "Public HTTPS pilot requires a production-ready CA manifest; deterministic fixture trust is never sufficient.";
+            }
             blocker = nullptr;
         }
     } else {
@@ -2466,6 +2476,9 @@ const char* tls_setup_error_name(int code)
 #ifdef MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO
     case MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO: return "MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO";
 #endif
+#ifdef MBEDTLS_ERR_PK_UNKNOWN_NAMED_CURVE
+    case MBEDTLS_ERR_PK_UNKNOWN_NAMED_CURVE: return "MBEDTLS_ERR_PK_UNKNOWN_NAMED_CURVE";
+#endif
     default: return "MBEDTLS_ERR_UNKNOWN";
     }
 }
@@ -2580,6 +2593,17 @@ const int kGxosTlsClientCiphersuites[] = {
 constexpr size_t kGxosTlsClientCiphersuiteCount = 4u;
 constexpr size_t kGxosTlsClientCiphersuiteMax = 4u;
 constexpr int kGxosTlsRenegotiationInfoScsv = 0x00ff;
+
+/*
+ * Keep the bounded first public-Web offer on the complete P-256 path. The
+ * build also knows X25519 for future interoperability, but selecting it here
+ * would force the freestanding software path through an unboundedly expensive
+ * curve operation on the current kernel profile.
+ */
+const uint16_t kGxosTlsClientGroups[] = {
+    MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1,
+    MBEDTLS_SSL_IANA_TLS_GROUP_NONE
+};
 
 void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
                               gxos::web::HttpByteStreamTlsStatus status,
@@ -3815,6 +3839,8 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
             break;
         }
 
+        mbedtls_ssl_conf_groups(&session->conf, kGxosTlsClientGroups);
+
         mbedtls_ssl_conf_authmode(&session->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         mbedtls_ssl_conf_ca_chain(&session->conf, &runtime.caChain, nullptr);
         result->caChainReady = runtime.caChainInitialized;
@@ -3879,6 +3905,8 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         }
         if (ret != 0) {
             result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+            copy_text(result->tlsHandshakeErrorName, sizeof(result->tlsHandshakeErrorName),
+                tls_setup_error_name(ret));
             result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&session->ssl));
             result->certificateValidationSuccess = result->verifyFlags == 0;
             result->hostnameValidationSuccess = result->certificateValidationSuccess &&

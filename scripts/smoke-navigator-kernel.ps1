@@ -335,6 +335,7 @@ $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_HTTPS_FAULT_MODE",
     "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE",
     "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE",
+    "GXOS_NAVIGATOR_DISABLE_SHIPPED_PRODUCTION_CA",
     "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE",
     "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_ROTATION_ID",
     "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY",
@@ -395,6 +396,7 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_HTTPS_FAULT_MODE" -Value $HttpsFaultMode
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE" -Value $UserCaSource
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE" -Value $ProductionCaSource
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_DISABLE_SHIPPED_PRODUCTION_CA" -Value $(if (-not $UseSmokeFixture -and [string]::IsNullOrWhiteSpace($ProductionCaSource) -and [string]::IsNullOrWhiteSpace($CandidateCaSource)) { "1" } else { $null })
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE" -Value $CandidateCaSource
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_ROTATION_ID" -Value $CandidateRotationId
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY" -Value ($(if ($CandidateProductionReady) { "1" } else { $null }))
@@ -1346,9 +1348,9 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_error=(none)",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=yes",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Arbitrary-origin HTTPS is enabled by ProductionValidated trust prerequisites; public-https-pilot is only a legacy proof token.",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Public HTTPS pilot requires a production-ready CA manifest; deterministic fixture trust is never sufficient.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=no",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] tls_readiness_blocker=(none)",
             "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
@@ -1495,7 +1497,7 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
             "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed",
@@ -1634,12 +1636,11 @@ if ($resolvedCandidateBundlePath) {
 Write-Host "Kernel smoke scenario selection: group=$effectiveScenarioGroup count=$($selectedScenarios.Count)"
 
 foreach ($scenario in $selectedScenarios) {
-    # ProductionValidated now enables the generic arbitrary-origin path even
-    # without the legacy public-https-pilot proof token. Keep the pilot fixture
-    # assertions on that path so this rail proves the new policy semantics.
+    # Only an explicitly selected public-pilot scenario may run the local
+    # public-pilot fixture. Deterministic production-policy fixtures without a
+    # production-ready manifest must remain blocked before TLS.
     $publicHttpsFixtureEnabled =
-        ($scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and $scenario.PublicPilotEnabled) -or
-        $scenario.Name -eq "production_validated"
+        ($scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and $scenario.PublicPilotEnabled)
     if ($publicHttpsFixtureEnabled) {
         $scenario.Checks = @($scenario.Checks + $publicPilotEnabledChecks)
         if (-not $realPublicProbeEnabled) {

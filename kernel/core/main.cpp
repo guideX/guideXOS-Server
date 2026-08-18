@@ -105,7 +105,6 @@
 #include <arch/graphics.h>
 #endif
 
-#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) || defined(GXOS_NAVIGATOR_BOOT_STAGED_CONFIG_ACTIVE) || defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE)
 static bool navigator_smoke_mount_path_exists_exact(const char* path)
 {
     if (!path) return false;
@@ -163,42 +162,41 @@ static void mount_navigator_smoke_alias_if_available(const char* aliasPath,
     kernel::serial::puts(successMessage);
 }
 
-static void mount_navigator_smoke_ca_fixture_if_available()
+static void mount_navigator_boot_ca_store_if_available()
 {
     mount_navigator_smoke_alias_if_available(
         "/certs",
         "/system/certs",
-        "[KERNEL] Navigator smoke CA source directory unavailable at /system/certs\n",
-        "[KERNEL] Navigator smoke /certs mount already active\n",
-        "[KERNEL] Navigator smoke failed to mount /certs from /system/certs\n",
-        "[KERNEL] Navigator smoke mounted /certs from boot ramdisk path /system/certs\n");
+        "[KERNEL] Navigator boot CA source directory unavailable at /system/certs\n",
+        "[KERNEL] Navigator /certs mount already active\n",
+        "[KERNEL] Navigator failed to mount /certs from /system/certs\n",
+        "[KERNEL] Navigator mounted /certs from boot ramdisk path /system/certs\n");
 }
 
-static void mount_navigator_smoke_config_if_available()
+static void mount_navigator_boot_config_if_available()
 {
     mount_navigator_smoke_alias_if_available(
         "/config",
         "/system/config",
-        "[KERNEL] Navigator smoke config source directory unavailable at /system/config\n",
-        "[KERNEL] Navigator smoke /config mount already active\n",
-        "[KERNEL] Navigator smoke failed to mount /config from /system/config\n",
-        "[KERNEL] Navigator smoke mounted /config from boot ramdisk path /system/config\n");
+        "[KERNEL] Navigator boot config source directory unavailable at /system/config\n",
+        "[KERNEL] Navigator /config mount already active\n",
+        "[KERNEL] Navigator failed to mount /config from /system/config\n",
+        "[KERNEL] Navigator mounted /config from boot ramdisk path /system/config\n");
     mount_navigator_smoke_alias_if_available(
         "/config/certs",
         "/system/config/certs",
-        "[KERNEL] Navigator smoke config certs directory unavailable at /system/config/certs\n",
-        "[KERNEL] Navigator smoke /config/certs mount already active\n",
-        "[KERNEL] Navigator smoke failed to mount /config/certs from /system/config/certs\n",
-        "[KERNEL] Navigator smoke mounted /config/certs from boot ramdisk path /system/config/certs\n");
+        "[KERNEL] Navigator boot config certs directory unavailable at /system/config/certs\n",
+        "[KERNEL] Navigator /config/certs mount already active\n",
+        "[KERNEL] Navigator failed to mount /config/certs from /system/config/certs\n",
+        "[KERNEL] Navigator mounted /config/certs from boot ramdisk path /system/config/certs\n");
     mount_navigator_smoke_alias_if_available(
         "/config/navigator",
         "/system/config/navigator",
-        "[KERNEL] Navigator smoke config navigator directory unavailable at /system/config/navigator\n",
-        "[KERNEL] Navigator smoke /config/navigator mount already active\n",
-        "[KERNEL] Navigator smoke failed to mount /config/navigator from /system/config/navigator\n",
-        "[KERNEL] Navigator smoke mounted /config/navigator from boot ramdisk path /system/config/navigator\n");
+        "[KERNEL] Navigator boot config navigator directory unavailable at /system/config/navigator\n",
+        "[KERNEL] Navigator /config/navigator mount already active\n",
+        "[KERNEL] Navigator failed to mount /config/navigator from /system/config/navigator\n",
+        "[KERNEL] Navigator mounted /config/navigator from boot ramdisk path /system/config/navigator\n");
 }
-#endif
 
 #if ARCH_HAS_PIC_8259
 namespace {
@@ -955,10 +953,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
             kernel::desktop::set_wallpaper_image_pack(reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->RamdiskBase)), bootinfo->RamdiskSize);
-#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) || defined(GXOS_NAVIGATOR_BOOT_STAGED_CONFIG_ACTIVE) || defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE)
-            mount_navigator_smoke_ca_fixture_if_available();
-            mount_navigator_smoke_config_if_available();
-#endif
+            mount_navigator_boot_ca_store_if_available();
+            mount_navigator_boot_config_if_available();
         }
 
         kernel::desktop::reload_persisted_wallpaper();

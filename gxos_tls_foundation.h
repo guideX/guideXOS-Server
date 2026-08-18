@@ -298,6 +298,7 @@ struct GxosTlsLocalHandshakeResult {
     char tlsSetupStep[32];
     int tlsSetupErrorCode;
     char tlsSetupErrorName[48];
+    char tlsHandshakeErrorName[64];
     size_t tlsSuiteContractCount;
     size_t tlsSuiteContractRealCount;
     bool tlsSuiteContractInstalled;

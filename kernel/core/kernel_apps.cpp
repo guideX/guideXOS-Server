@@ -12294,17 +12294,22 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
 
     const bool direct = nav_starts_with(url, "https://");
     const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    const bool broadPublicBlocked =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
+        !httpsPolicy.broadPublicHttpsEnabled;
     const bool selectedButBlocked =
         (httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
          httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) &&
         !(httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
           httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) &&
         httpsPolicy.blocker && httpsPolicy.blocker[0];
-    const bool titleOk = selectedButBlocked ||
+    const bool selectedOrBroadPublicBlocked = selectedButBlocked || broadPublicBlocked;
+    const bool titleOk = selectedOrBroadPublicBlocked ||
         streq_local(app.m_title, direct ? "HTTPS Unsupported" : "HTTPS Redirect Unsupported");
     const bool errorOk =
         nav_starts_with(app.m_metaErrorStatus, direct ? "HTTPS/TLS unsupported" : "HTTPS/TLS unsupported redirect") ||
-        (selectedButBlocked && streq_local(app.m_metaErrorStatus, httpsPolicy.blocker));
+        (selectedButBlocked && streq_local(app.m_metaErrorStatus, httpsPolicy.blocker)) ||
+        (broadPublicBlocked && streq_local(app.m_metaErrorStatus, httpsPolicy.publicHttpsPilotReason));
     return streq_local(app.m_metaRequestedUrl, url) &&
            streq_local(app.m_metaFinalUrl, expectedFinalUrl) &&
            errorOk &&
@@ -16086,6 +16091,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
         nav_i64_to_text((int64_t)tlsHandshakeErrorCode, signedNumber, sizeof(signedNumber));
         serial::puts(signedNumber);
     }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_handshake_error_name=");
+    serial::puts(tlsResult.tlsHandshakeErrorName[0] ? tlsResult.tlsHandshakeErrorName : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_transport_error_code=");
     {
         char signedNumber[32];
