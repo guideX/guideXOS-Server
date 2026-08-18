@@ -2229,14 +2229,17 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
             effectiveState = GxosValidatedHttpsPolicyState::ProductionValidated;
             validatedNavigationEnabled = true;
             productionReady = true;
-            if (publicHttpsPilotRequested) {
-                broadPublicHttpsEnabled = true;
-                detail = "Production HTTPS prerequisites are satisfied, explicit validated fixture HTTPS navigation is enabled, and the controlled public HTTPS pilot is enabled.";
-                publicHttpsPilotReason = "Public HTTPS pilot is enabled for hostname-only HTTPS targets under ProductionValidated.";
-            } else {
-                detail = "Production HTTPS prerequisites are satisfied and explicit validated fixture HTTPS navigation is enabled; public HTTPS pilot remains disabled until public-https-pilot=enabled.";
-                publicHttpsPilotReason = "Public HTTPS pilot requires public-https-pilot=enabled under ProductionValidated.";
-            }
+            // A production trust store is the security boundary for arbitrary
+            // origins. Once it is parsed and the TLS prerequisites are ready,
+            // normal Navigator navigation must not depend on a test-only
+            // hostname/pilot token. Keep the legacy token as diagnostic input
+            // for the proof rails, but never make it a second certificate
+            // validation gate.
+            broadPublicHttpsEnabled = true;
+            detail = "Production HTTPS prerequisites are satisfied; arbitrary-origin HTTPS navigation is enabled with production trust and hostname validation.";
+            publicHttpsPilotReason = publicHttpsPilotRequested
+                ? "Arbitrary-origin HTTPS is enabled; legacy public-https-pilot proof token is present."
+                : "Arbitrary-origin HTTPS is enabled by ProductionValidated trust prerequisites; public-https-pilot is only a legacy proof token.";
             blocker = nullptr;
         }
     } else {
@@ -4062,11 +4065,11 @@ const char* gxos_tls_certificate_validation_policy()
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
         policy.productionReady &&
         policy.broadPublicHttpsEnabled) {
-        return "production validated HTTPS pilot enabled; production CA, hostname validation, secure RNG, plausible wall clock, and explicit public-pilot selection are required, and plaintext fallback remains disabled";
+        return "production validated arbitrary-origin HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, and plaintext fallback remains disabled";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
         policy.productionReady) {
-        return "production validated fixture HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, public HTTPS pilot remains opt-in, and plaintext fallback remains disabled";
+        return "production validated arbitrary-origin HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, and plaintext fallback remains disabled";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated) {
         return "production-selected but not effective; broader validated bare-metal https:// remains fail-closed until the production CA bundle and TLS prerequisites are complete";

@@ -66,6 +66,7 @@ enum class HttpError {
 	TlsProtocolUnsupported,
 	TlsReadFailed,
 	TlsWriteFailed,
+	TruncatedResponse,
 };
 
 struct HttpResponse {
@@ -77,7 +78,11 @@ struct HttpResponse {
 	std::string body;
 	std::string contentType;
 	std::string transferEncoding;
+	std::string responseFraming;
 	std::string contentEncoding;
+	bool contentLengthPresent = false;
+	std::size_t contentLength = 0;
+	bool truncatedResponse = false;
 	int redirectCount = 0;
 	std::vector<std::string> redirectChain;
 	bool headerCapHit = false;

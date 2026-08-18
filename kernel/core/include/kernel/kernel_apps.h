@@ -16,6 +16,7 @@
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
 #include "display_configuration_service.h"
+#include "../../../../guide_web_http_shared.h"
 
 // Bare-metal Navigator is a capability-limited adapter.  It mirrors the small
 // guideWeb CSS-lite value types it needs without including the hosted
@@ -689,7 +690,7 @@ private:
     };
 
     static const int MAX_STATUS_LEN = 128;
-    static const int MAX_URL_LEN = 160;
+    static const int MAX_URL_LEN = 512;
     static const int MAX_TITLE_LEN_NAV = 96;
     static const int MAX_BLOCKS = 64;
     static const int MAX_BLOCK_TEXT = 320;
@@ -826,6 +827,10 @@ private:
     int m_metaHttpStatusCode;
     char m_metaHttpReason[48];
     char m_metaContentType[48];
+    char m_metaResponseFraming[24];
+    int m_metaContentLength;
+    bool m_metaContentLengthPresent;
+    bool m_metaTruncatedResponse;
     char m_metaContentEncoding[32];
     char m_metaUnsupportedReason[128];
     bool m_metaRedirected;
@@ -847,7 +852,7 @@ private:
     char m_metaLastImageError[128];
     char m_metaScheme[8];
     bool m_metaDnsUsed;
-    char m_metaDnsHost[64];
+    char m_metaDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char m_metaDnsResolvedIp[16];
     char m_metaDnsError[64];
     bool m_metaTlsUsed;
@@ -870,8 +875,8 @@ private:
     char m_metaTransportSelection[40];
     char m_metaTlsStatus[40];
     char m_metaTransportPolicyReason[128];
-    char m_metaTlsHostname[64];
-    char m_metaTlsSniHost[64];
+    char m_metaTlsHostname[gxos::web::kHttpSharedMaxHostnameBytes + 1];
+    char m_metaTlsSniHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char m_metaTlsProtocol[32];
     char m_metaTlsCipherSuite[64];
     bool m_metaCssDetected;

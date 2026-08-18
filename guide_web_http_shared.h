@@ -12,6 +12,9 @@ namespace web {
 
 static const int kHttpSharedMaxHeaderBytes = 32 * 1024;
 static const int kHttpSharedMaxBodyBytes = 256 * 1024;
+static const int kHttpSharedMaxUrlBytes = 2048;
+static const int kHttpSharedMaxHostnameBytes = 253;
+static const int kHttpSharedMaxRemoteResources = 32;
 static const int kHttpSharedConnectTimeoutMs = 5000;
 static const int kHttpSharedReadTimeoutMs = 5000;
 static const int kHttpSharedMaxRedirects = 5;
@@ -264,6 +267,23 @@ inline bool httpSharedParseChunkSize(const char* start, const char* end, int* ou
         if (!httpSharedHexValue(*p, &digit)) return false;
         if (value > ((0x7fffffff - digit) >> 4)) return false;
         value = (value << 4) + digit;
+    }
+    *outSize = value;
+    return true;
+}
+
+inline bool httpSharedParseDecimalSize(const char* start, const char* end, int* outSize)
+{
+    if (!start || !end || !outSize || end < start) return false;
+    while (start < end && httpSharedIsSpace(*start)) ++start;
+    while (end > start && httpSharedIsSpace(end[-1])) --end;
+    if (start == end) return false;
+    int value = 0;
+    for (const char* p = start; p < end; ++p) {
+        if (*p < '0' || *p > '9') return false;
+        const int digit = *p - '0';
+        if (value > (0x7fffffff - digit) / 10) return false;
+        value = value * 10 + digit;
     }
     *outSize = value;
     return true;

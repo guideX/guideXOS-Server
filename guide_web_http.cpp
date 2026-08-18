@@ -69,6 +69,26 @@ static bool isSupportedHttpScheme(const std::string& scheme)
 	return scheme == "http" || scheme == "https";
 }
 
+static bool isValidHostname(const std::string& host)
+{
+	if (host.empty() || host.size() > static_cast<size_t>(kHttpSharedMaxHostnameBytes)) return false;
+	if (host.front() == '.' || host.back() == '.') return false;
+	size_t labelLength = 0;
+	for (char ch : host) {
+		if (ch == '.') {
+			if (labelLength == 0 || labelLength > 63) return false;
+			labelLength = 0;
+			continue;
+		}
+		const unsigned char uch = static_cast<unsigned char>(ch);
+		if (!std::isalnum(uch) && ch != '-') return false;
+		if (labelLength == 0 && ch == '-') return false;
+		++labelLength;
+		if (labelLength > 63) return false;
+	}
+	return labelLength > 0 && host.back() != '-';
+}
+
 static void setError(HttpResponse& response, HttpError error, const std::string& message)
 {
 	response.error = error;
@@ -182,13 +202,33 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 	response.contentType = firstContentTypeToken(response.headerValue("Content-Type"));
 	response.transferEncoding = toLowerAscii(trimAscii(response.headerValue("Transfer-Encoding")));
 	response.contentEncoding = toLowerAscii(trimAscii(response.headerValue("Content-Encoding")));
+	const std::string contentLengthHeader = trimAscii(response.headerValue("Content-Length"));
+	if (!contentLengthHeader.empty()) {
+		int contentLength = 0;
+		if (!httpSharedParseDecimalSize(contentLengthHeader.data(),
+			contentLengthHeader.data() + contentLengthHeader.size(), &contentLength)) {
+			setError(response, HttpError::MalformedResponse, "HTTP Content-Length was malformed.");
+			return false;
+		}
+		response.contentLengthPresent = true;
+		response.contentLength = static_cast<size_t>(contentLength);
+		if (response.contentLength > kHttpMaxBodyBytes) {
+			response.bodyCapHit = true;
+			setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
+			return false;
+		}
+	}
 
 	if (isRedirectStatus(response.statusCode)) {
+		response.responseFraming = response.transferEncoding.empty()
+			? (response.contentLengthPresent ? "content-length" : "connection-close")
+			: "chunked";
 		return true;
 	}
 
 	if (!response.transferEncoding.empty() && !hasHeaderToken(response.transferEncoding, "identity")) {
 		if (hasHeaderToken(response.transferEncoding, "chunked")) {
+			response.responseFraming = "chunked";
 			std::string decoded;
 			std::string chunkError;
 			if (!decodeChunkedBody(response.body, decoded, chunkError)) {
@@ -211,6 +251,17 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 		response.bodyCapHit = true;
 		setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 		return false;
+	} else if (response.contentLengthPresent) {
+		response.responseFraming = "content-length";
+		if (response.body.size() < response.contentLength) {
+			response.truncatedResponse = true;
+			setError(response, HttpError::TruncatedResponse,
+				"HTTP response ended before Content-Length bytes were received.");
+			return false;
+		}
+		if (response.body.size() > response.contentLength) response.body.resize(response.contentLength);
+	} else {
+		response.responseFraming = "connection-close";
 	}
 
 	if (!response.contentEncoding.empty() && !hasHeaderToken(response.contentEncoding, "identity")) {
@@ -1278,6 +1329,16 @@ std::string ParsedHttpUrl::origin() const
 ParsedHttpUrl parseHttpUrl(const std::string& url)
 {
 	ParsedHttpUrl parsed;
+	if (url.empty() || url.size() > static_cast<size_t>(kHttpSharedMaxUrlBytes)) {
+		parsed.error = "URL exceeds the Navigator safety limit.";
+		return parsed;
+	}
+	for (char ch : url) {
+		if (static_cast<unsigned char>(ch) < 0x20 || ch == 0x7f) {
+			parsed.error = "URL contains a control character.";
+			return parsed;
+		}
+	}
 	size_t schemeEnd = url.find("://");
 	if (schemeEnd == std::string::npos) {
 		parsed.error = "URL is missing a scheme.";
@@ -1320,6 +1381,22 @@ ParsedHttpUrl parseHttpUrl(const std::string& url)
 	}
 	if (parsed.host.empty()) {
 		parsed.error = "URL host is empty.";
+		return parsed;
+	}
+	parsed.host = toLowerAscii(parsed.host);
+	bool numericHost = true;
+	for (char ch : parsed.host) {
+		if ((ch < '0' || ch > '9') && ch != '.') {
+			numericHost = false;
+			break;
+		}
+	}
+	if (!numericHost && !isValidHostname(parsed.host)) {
+		parsed.error = "URL hostname is invalid or exceeds the safety limit.";
+		return parsed;
+	}
+	if (numericHost && parsed.host.size() > 15) {
+		parsed.error = "Numeric IPv4 host is too long.";
 		return parsed;
 	}
 
@@ -1374,6 +1451,7 @@ const char* httpErrorName(HttpError error)
 	case HttpError::TlsProtocolUnsupported: return "TlsProtocolUnsupported";
 	case HttpError::TlsReadFailed: return "TlsReadFailed";
 	case HttpError::TlsWriteFailed: return "TlsWriteFailed";
+	case HttpError::TruncatedResponse: return "TruncatedResponse";
 	}
 	return "Unknown";
 }
@@ -1419,15 +1497,20 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 	}
 
 	addrinfo hints = {};
+	hints.ai_flags = AI_ADDRCONFIG;
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
 	addrinfo* addresses = nullptr;
 	std::string portText = std::to_string(parsed.port);
+	// Winsock's resolver owns DNS retransmission/timeout policy. The network
+	// operation after resolution is explicitly bounded below; using the normal
+	// resolver here preserves system DNS search/split-DNS behavior.
 	int gai = getaddrinfo(parsed.host.c_str(), portText.c_str(), &hints, &addresses);
 	if (gai != 0 || !addresses) {
-		setError(response, HttpError::ResolveFailed, "Could not resolve host: " + parsed.host);
+		setError(response, gai == WSAETIMEDOUT ? HttpError::Timeout : HttpError::ResolveFailed,
+			gai == WSAETIMEDOUT ? "DNS resolution timed out." : "Could not resolve host: " + parsed.host);
 		return response;
 	}
 
@@ -1496,12 +1579,13 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 
 	const bool isPost = toLowerAscii(method) == "post";
 	std::ostringstream request;
-	request << (isPost ? "POST" : "GET") << " " << parsed.requestTarget() << " HTTP/1.0\r\n"
+	request << (isPost ? "POST" : "GET") << " " << parsed.requestTarget() << " HTTP/1.1\r\n"
 		<< "Host: " << parsed.host;
 	if (!((parsed.scheme == "http" && parsed.port == 80) ||
 		(parsed.scheme == "https" && parsed.port == 443))) request << ":" << parsed.port;
 	request << "\r\n"
-		<< "User-Agent: guideXOS-Navigator/0.1\r\n"
+		<< "User-Agent: guideXOS-Navigator/0.2\r\n"
+		<< "Accept: text/html, text/plain, image/png, */*\r\n"
 		<< "Accept-Encoding: identity\r\n"
 		<< "Connection: close\r\n";
 	if (isPost) {
@@ -1532,6 +1616,8 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 	raw.reserve(16u * 1024u);
 	bool sawHeaderEnd = false;
 	bool rawChunked = false;
+	bool contentLengthKnown = false;
+	size_t expectedBodyBytes = 0;
 	size_t headerBytes = 0;
 	char buffer[4096];
 	for (;;) {
@@ -1564,6 +1650,33 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 				headerBytes = end + delimiterLen;
 				rawChunked = toLowerAscii(raw.substr(0, end)).find("transfer-encoding:") != std::string::npos &&
 					toLowerAscii(raw.substr(0, end)).find("chunked") != std::string::npos;
+				const std::string headerBlock = raw.substr(0, end);
+				std::istringstream headerLines(headerBlock);
+				std::string headerLine;
+				while (std::getline(headerLines, headerLine)) {
+					if (!headerLine.empty() && headerLine.back() == '\r') headerLine.pop_back();
+					const size_t colon = headerLine.find(':');
+					if (colon == std::string::npos ||
+						toLowerAscii(trimAscii(headerLine.substr(0, colon))) != "content-length") continue;
+					const std::string value = trimAscii(headerLine.substr(colon + 1));
+					int length = 0;
+					if (!httpSharedParseDecimalSize(value.data(), value.data() + value.size(), &length)) {
+						if (activeTls) copyTlsDiagnostics(response, *activeTls);
+						stream.close(stream.context);
+						setError(response, HttpError::MalformedResponse, "HTTP Content-Length was malformed.");
+						return response;
+					}
+					expectedBodyBytes = static_cast<size_t>(length);
+					contentLengthKnown = !rawChunked;
+					if (expectedBodyBytes > kHttpMaxBodyBytes) {
+						if (activeTls) copyTlsDiagnostics(response, *activeTls);
+						stream.close(stream.context);
+						response.bodyCapHit = true;
+						setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
+						return response;
+					}
+					break;
+				}
 			} else if (raw.size() > kHttpMaxHeaderBytes) {
 				if (activeTls) copyTlsDiagnostics(response, *activeTls);
 				stream.close(stream.context);
@@ -1580,6 +1693,7 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 			setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 			return response;
 		}
+		if (sawHeaderEnd && contentLengthKnown && raw.size() >= headerBytes + expectedBodyBytes) break;
 	}
 	if (activeTls) copyTlsDiagnostics(response, *activeTls);
 	stream.close(stream.context);

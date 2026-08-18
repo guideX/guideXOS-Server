@@ -3886,7 +3886,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("forms-lite POST request headers", contains(postResultText, "Method: POST") &&
         contains(postResultText, "Content-Type: application/x-www-form-urlencoded") &&
         contains(postResultText, "Host: 127.0.0.1:8080") &&
-        contains(postResultText, "User-Agent: guideXOS-Navigator/0.1") &&
+        contains(postResultText, "User-Agent: guideXOS-Navigator/0.2") &&
         contains(postResultText, "Accept-Encoding: identity") &&
         contains(postResultText, "Connection: close"), "echo response contains required hosted POST headers");
     add("forms-lite POST encoded successful controls", contains(postResultText,
@@ -4170,6 +4170,7 @@ static std::string navigatorGotoDiagnostic(const std::string& url) {
     out << "requested_url=" << url << "\n";
     out << "current_url=" << gxos::apps::Navigator::SmokeCurrentUrl() << "\n";
     out << "current_block_count=" << gxos::apps::Navigator::SmokeCurrentBlockCount() << "\n";
+	out << gxos::apps::Navigator::SmokePageDiagnostics();
     return out.str();
 }
 

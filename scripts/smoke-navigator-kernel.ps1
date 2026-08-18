@@ -577,18 +577,22 @@ function Test-NavigatorKernelSmokeOutput {
     param(
         [Parameter(Mandatory = $true)][string]$Output,
         [Parameter(Mandatory = $true)][string[]]$Contains,
-        [AllowNull()][hashtable]$RegexChecks
+    [AllowNull()][hashtable]$RegexChecks
     )
 
+    # Serial output can interleave the periodic kernel heartbeat between two
+    # Navigator puts. Remove only that bounded diagnostic record so checks
+    # continue to validate the actual Navigator line content.
+    $normalizedOutput = $Output -replace '\[KERNEL-HEARTBEAT\][^\r\n]*(?:\r?\n)?', ''
     $missing = @()
     foreach ($check in $Contains) {
-        if (-not $Output.Contains($check)) {
+        if (-not $normalizedOutput.Contains($check)) {
             $missing += $check
         }
     }
     if ($RegexChecks) {
         foreach ($pattern in $RegexChecks.Keys) {
-            if (-not [regex]::IsMatch($Output, $pattern)) {
+            if (-not [regex]::IsMatch($normalizedOutput, $pattern)) {
                 $missing += $RegexChecks[$pattern]
             }
         }
@@ -828,9 +832,9 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] registered=true",
     "[NAVIGATOR-SMOKE] runtime.mode=bare-metal/kernel",
     "[NAVIGATOR-SMOKE] launch.path=AppManager::registerApp -> NavigatorApp::create",
-    "[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects/chunked",
+    "[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects/chunked",
     "[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps + PolicyValidatedTlsHttps)",
-    "[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; validated fixture hosts stay policy-gated, public HTTPS stays pilot-gated, plaintext fallback stays disabled, and policy stays fail-closed by default",
+    "[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; production trust enables arbitrary-origin HTTPS, plaintext fallback stays disabled, and policy stays fail-closed by default",
     "[NAVIGATOR-SMOKE] tls_prereq.rng_quality=Secure",
     "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=yes",
@@ -952,7 +956,7 @@ $publicPilotDisabledChecks = @(
 $publicPilotEnabledChecks = @(
     "[NAVIGATOR-SMOKE] https.case.public_pilot_decision.enabled=yes",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_decision.transport_selection=PolicyValidatedTlsHttps",
-    "[NAVIGATOR-SMOKE] https.case.public_pilot_decision.reason=ProductionValidated public HTTPS pilot matched.",
+    "[NAVIGATOR-SMOKE] https.case.public_pilot_decision.reason=ProductionValidated arbitrary-origin HTTPS matched.",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.enabled=yes",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.http_status=200",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.tls_tcp_connect_attempts=1",
@@ -1342,8 +1346,8 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_error=(none)",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Public HTTPS pilot requires public-https-pilot=enabled under ProductionValidated.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Arbitrary-origin HTTPS is enabled by ProductionValidated trust prerequisites; public-https-pilot is only a legacy proof token.",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=yes",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] tls_readiness_blocker=(none)",
@@ -1469,7 +1473,7 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=yes",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Public HTTPS pilot is enabled for hostname-only HTTPS targets under ProductionValidated.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Arbitrary-origin HTTPS is enabled; legacy public-https-pilot proof token is present.",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=yes",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
@@ -1491,7 +1495,7 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
             "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed",
@@ -1630,7 +1634,13 @@ if ($resolvedCandidateBundlePath) {
 Write-Host "Kernel smoke scenario selection: group=$effectiveScenarioGroup count=$($selectedScenarios.Count)"
 
 foreach ($scenario in $selectedScenarios) {
-    if ($scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and $scenario.PublicPilotEnabled) {
+    # ProductionValidated now enables the generic arbitrary-origin path even
+    # without the legacy public-https-pilot proof token. Keep the pilot fixture
+    # assertions on that path so this rail proves the new policy semantics.
+    $publicHttpsFixtureEnabled =
+        ($scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and $scenario.PublicPilotEnabled) -or
+        $scenario.Name -eq "production_validated"
+    if ($publicHttpsFixtureEnabled) {
         $scenario.Checks = @($scenario.Checks + $publicPilotEnabledChecks)
         if (-not $realPublicProbeEnabled) {
             $scenario.Checks = @($scenario.Checks + $realPublicProbeDisabledChecks)

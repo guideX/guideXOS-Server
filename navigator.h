@@ -52,6 +52,10 @@ struct NavigatorPageMetadata {
 	std::string httpReasonPhrase;
 	std::string contentType;
 	std::string contentEncoding;
+	std::string responseFraming;
+	bool        contentLengthPresent = false;
+	size_t      contentLength = 0;
+	bool        truncatedResponse = false;
 	bool        redirected = false;
 	int         redirectCount = 0;
 	std::string errorStatus;
@@ -684,6 +688,7 @@ public:
 	static bool SmokePointerInput(int x, int y, int button, const std::string& action);
 	static bool SmokeDragFirstLinkSelectsWithoutNavigation();
 	static std::string SmokeRuntimeReport();
+	static std::string SmokePageDiagnostics();
 	static std::string SmokeLifecycleReport();
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();

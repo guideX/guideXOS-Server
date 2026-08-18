@@ -2063,6 +2063,7 @@ namespace {
 
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
 	static std::vector<std::string> s_remoteImageTempFiles;
+	static int s_remoteImageFetchCount = 0;
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
 	static void imageDisplaySize(const DocBlock& block, int availableWidth, int& outW, int& outH,
 		bool* outConstrained = nullptr, bool* outAspectPreserved = nullptr, bool* outClamped = nullptr);
@@ -11039,12 +11040,12 @@ namespace {
 			{"Capabilities", "File read", "enabled"},
 			{"Capabilities", "File write", "enabled for bookmark persistence"},
 			{"Capabilities", "Local PNG", "enabled"},
-			{"Capabilities", "HTTP", "enabled for http:// and hosted https:// via Winsock transport"},
-			{"Capabilities", "Remote PNG", "enabled for http:// and hosted https:// PNG images"},
+			{"Capabilities", "HTTP", "enabled for http:// and arbitrary https:// via bounded Winsock transport"},
+			{"Capabilities", "Remote PNG", "enabled for http:// and arbitrary https:// PNG images"},
 			{"Capabilities", "Downloads", "enabled for unsupported HTTP(S) content within body limit"},
 			{"Capabilities", "Temp files", "enabled for compositor image handoff"},
 			{"Capabilities", "Bookmark persistence", "enabled"},
-			{"Capabilities", "HTTPS/TLS", "enabled hosted-only"},
+			{"Capabilities", "HTTPS/TLS", "enabled with Schannel certificate and hostname validation"},
 			{"Capabilities", "TLS backend", tlsBackendInfo.backendName ? tlsBackendInfo.backendName : "(none)"},
 			{"Evidence Lane", "evidence_lane", "hosted"},
 			{"Evidence Lane", "tls_backend", "schannel"},
@@ -11830,6 +11831,14 @@ namespace {
 		info.attempted = true;
 
 		if (isRemoteHttpUrl(block.url)) {
+			if (s_remoteImageFetchCount >= gxos::web::kHttpSharedMaxRemoteResources) {
+				info.status = gxos::gui::ImageLoadStatus::NotFound;
+				info.message = "[remote resource limit]";
+				info.errorDetail = "Navigator remote resource limit reached";
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			++s_remoteImageFetchCount;
 			gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(block.url);
 			if (!response.ok()) {
 				info.status = gxos::gui::ImageLoadStatus::NotFound;
@@ -14403,6 +14412,38 @@ std::string Navigator::SmokeLifecycleReport()
 	out << "navigator_save_text_password_redacted=" << yesNo(s_lifecycleDiagnostics.saveTextPasswordRedacted) << "\n";
 	out << "navigator_save_text_hidden_control_excluded=" << yesNo(s_lifecycleDiagnostics.saveTextHiddenControlExcluded) << "\n";
 	out << "navigator_save_text_diagnostics_excluded=" << yesNo(s_lifecycleDiagnostics.saveTextDiagnosticsExcluded) << "\n";
+	return out.str();
+}
+
+std::string Navigator::SmokePageDiagnostics()
+{
+	if (visibleDocumentOwnsInspectedSource()) storePageMetadata(s_pageMetadata, s_currentDoc);
+	std::ostringstream out;
+	const NavigatorPageMetadata& m = s_pageMetadata;
+	out << "navigator.page_diagnostics\n";
+	out << "requested_url=" << m.requestedUrl << "\n";
+	out << "final_url=" << m.finalUrl << "\n";
+	out << "source_type=" << m.sourceType << "\n";
+	out << "http_status=" << m.httpStatusCode << "\n";
+	out << "content_type=" << m.contentType << "\n";
+	out << "content_encoding=" << m.contentEncoding << "\n";
+	out << "response_framing=" << m.responseFraming << "\n";
+	out << "content_length_present=" << yesNo(m.contentLengthPresent) << "\n";
+	out << "content_length=" << m.contentLength << "\n";
+	out << "truncated_response=" << yesNo(m.truncatedResponse) << "\n";
+	out << "redirect_count=" << m.redirectCount << "\n";
+	out << "error_status=" << m.errorStatus << "\n";
+	out << "tls_backend=" << m.tlsBackend << "\n";
+	out << "tls_status=" << m.tlsStatus << "\n";
+	out << "tls_validated=" << yesNo(m.tlsValidated) << "\n";
+	out << "tls_hostname=" << m.tlsCertificateHostname << "\n";
+	out << "tls_hostname_validation=" << m.tlsCertificateHostnameValidation << "\n";
+	out << "tls_protocol=" << m.tlsProtocol << "\n";
+	out << "raw_source_bytes=" << m.rawSourceBytes << "\n";
+	out << "document_block_count=" << m.documentBlockCount << "\n";
+	out << "remote_resource_count=" << m.remoteImageCount << "\n";
+	out << "resource_failures=" << m.failedImageCount << "\n";
+	out << "unsupported_reason=" << m.unsupportedReason << "\n";
 	return out.str();
 }
 
@@ -18719,6 +18760,7 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	}
 	cleanupRemoteImageTempFiles();
 	s_imageCache.clear();
+	s_remoteImageFetchCount = 0;
 	// clearDocumentFocus() above is the complete replacement boundary.  Do not
 	// call blurDocumentInput() here: its recomputation guard intentionally
 	// refreshes an active source document, and doing that against the old
@@ -18764,7 +18806,7 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 		doc = buildSimpleDocument(url,
 			"Unsupported URL",
 			"Unsupported URL",
-			"Navigator supports about:, file://, http://, and hosted https:// URLs in this build.");
+			"Navigator supports about:, file://, http://, and bounded https:// URLs in this build.");
 		NavigatorPageMetadata metadata;
 		metadata.requestedUrl = url;
 		metadata.finalUrl = url;
@@ -19019,6 +19061,12 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Scheme", m.scheme), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", m.contentType), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content encoding", m.contentEncoding), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Response framing", m.responseFraming), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content-Length present", yesNo(m.contentLengthPresent)), ""});
+	if (m.contentLengthPresent) {
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content-Length", static_cast<int>(m.contentLength)), ""});
+	}
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Truncated response", yesNo(m.truncatedResponse)), ""});
 
 	if (m.httpStatusCode > 0) {
 		std::string status = std::to_string(m.httpStatusCode);
@@ -19768,6 +19816,10 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.httpReasonPhrase = response.reasonPhrase;
 	metadata.contentType = response.contentType;
 	metadata.contentEncoding = response.contentEncoding;
+	metadata.responseFraming = response.responseFraming;
+	metadata.contentLengthPresent = response.contentLengthPresent;
+	metadata.contentLength = response.contentLength;
+	metadata.truncatedResponse = response.truncatedResponse;
 	if (response.redirectCount < 0 || response.redirectCount > gxos::web::kHttpMaxRedirects)
 		incrementLifecycleCounter(s_lifecycleDiagnostics.transitionMetadataClamps);
 	metadata.redirectCount = std::max(0, std::min(response.redirectCount, gxos::web::kHttpMaxRedirects));
@@ -19888,6 +19940,9 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 		} else if (response.error == gxos::web::HttpError::MalformedChunkedEncoding) {
 			title = "Malformed Chunked Response";
 			summary = "TLS succeeded, but the server's chunked response could not be decoded safely.";
+		} else if (response.error == gxos::web::HttpError::TruncatedResponse) {
+			title = "Truncated Response";
+			summary = "The remote server closed the connection before the advertised response body was complete.";
 		} else if (response.error == gxos::web::HttpError::RedirectLimitExceeded) {
 			title = "Redirect Limit Exceeded";
 			summary = "Navigator stopped following redirects after hitting its safety limit.";

@@ -37,7 +37,7 @@ namespace kernel {
 namespace apps {
 
 static bool s_kernelLastDnsUsed = false;
-static char s_kernelLastDnsHost[64];
+static char s_kernelLastDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
 static char s_kernelLastDnsResolvedIp[16];
 static char s_kernelLastDnsError[64];
 
@@ -7155,6 +7155,10 @@ NavigatorApp::NavigatorApp()
     m_metaHttpStatusCode = 0;
     m_metaHttpReason[0] = '\0';
     m_metaContentType[0] = '\0';
+    m_metaResponseFraming[0] = '\0';
+    m_metaContentLength = 0;
+    m_metaContentLengthPresent = false;
+    m_metaTruncatedResponse = false;
     m_metaContentEncoding[0] = '\0';
     m_metaUnsupportedReason[0] = '\0';
     m_metaRedirected = false;
@@ -8096,12 +8100,36 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("Source type: ", m_metaSourceType);
     NAV_INFO_TEXT("Content type: ", m_metaContentType[0] ? m_metaContentType : "(none)");
     NAV_INFO_TEXT("Content encoding: ", m_metaContentEncoding[0] ? m_metaContentEncoding : "(none)");
+    NAV_INFO_TEXT("Response framing: ", m_metaResponseFraming[0] ? m_metaResponseFraming : "(none)");
+    NAV_INFO_TEXT("Content-Length present: ", m_metaContentLengthPresent ? "yes" : "no");
+    if (m_metaContentLengthPresent) NAV_INFO_INT("Content-Length: ", m_metaContentLength);
+    NAV_INFO_TEXT("Truncated response: ", m_metaTruncatedResponse ? "yes" : "no");
     NAV_INFO_TEXT("Unsupported reason: ", m_metaUnsupportedReason[0] ? m_metaUnsupportedReason : "(none)");
     if (m_metaHttpStatusCode > 0) NAV_INFO_INT("HTTP status: ", m_metaHttpStatusCode);
     else NAV_INFO_TEXT("HTTP status: ", "not applicable");
     NAV_INFO_TEXT("Redirected: ", m_metaRedirected ? "yes" : "no");
     NAV_INFO_INT("Redirect count: ", m_metaRedirectCount);
     NAV_INFO_TEXT("Error status: ", m_metaErrorStatus[0] ? m_metaErrorStatus : "(none)");
+    // Keep the small Forms-lite contract near the top of Page Info so the
+    // bounded document block budget cannot hide it behind transport details.
+    NAV_INFO_TEXT("Forms-lite interactive controls: ", "enabled");
+    NAV_INFO_TEXT("Forms-lite POST interactive: ", "enabled");
+    NAV_INFO_TEXT("Forms-lite POST bare-metal: ", "enabled-basic");
+    NAV_INFO_INT("Forms: ", m_metaFormCount);
+    NAV_INFO_INT("Text inputs: ", m_metaTextInputCount);
+    NAV_INFO_INT("Checkboxes: ", m_metaCheckboxCount);
+    NAV_INFO_INT("Radio buttons: ", m_metaRadioCount);
+    NAV_INFO_INT("Textareas: ", m_metaTextareaCount);
+    NAV_INFO_INT("Selects: ", m_metaSelectCount);
+    NAV_INFO_INT("Submit buttons: ", m_metaSubmitCount);
+    NAV_INFO_INT("Unsupported forms: ", m_metaUnsupportedFormCount);
+    NAV_INFO_TEXT("Last submitted method: ", m_lastSubmittedFormMethod[0] ? m_lastSubmittedFormMethod : "(none)");
+    NAV_INFO_TEXT("Last submitted action: ", m_lastSubmittedFormAction[0] ? m_lastSubmittedFormAction : "(none)");
+    NAV_INFO_TEXT("Last submitted status: ", m_lastSubmittedFormStatus[0] ? m_lastSubmittedFormStatus : "(none)");
+    NAV_INFO_TEXT("Last form error: ", m_lastFormError[0] ? m_lastFormError : "(none)");
+    NAV_INFO_TEXT("Last POST HTTP status: ", m_lastPostHttpStatus[0] ? m_lastPostHttpStatus : "(none)");
+    NAV_INFO_TEXT("Last POST content type: ", m_lastPostContentType[0] ? m_lastPostContentType : "(none)");
+    NAV_INFO_INT("Last POST body bytes: ", m_lastPostBodyBytes);
     NAV_INFO_TEXT("Header cap hit: ", m_metaHeaderCapHit ? "yes" : "no");
     NAV_INFO_TEXT("Body cap hit: ", m_metaBodyCapHit ? "yes" : "no");
     NAV_INFO_TEXT("TLS succeeded before content failure: ", m_metaTlsSucceededBeforeContentFailure ? "yes" : "no");
@@ -8245,24 +8273,6 @@ void NavigatorApp::buildPageInfoDocument()
     strcopy(line, "Text selection: enabled; clipboard mode: ", sizeof(line));
     strappend(line, m_clipboardMode[0] ? m_clipboardMode : "Navigator internal clipboard", sizeof(line));
     addBlock(BLOCK_LIST_ITEM, line);
-    NAV_INFO_TEXT("Forms-lite interactive controls: ", "enabled");
-    NAV_INFO_TEXT("Forms-lite POST interactive: ", "enabled");
-    NAV_INFO_TEXT("Forms-lite POST bare-metal: ", "enabled-basic");
-    NAV_INFO_INT("Forms: ", m_metaFormCount);
-    NAV_INFO_INT("Text inputs: ", m_metaTextInputCount);
-    NAV_INFO_INT("Checkboxes: ", m_metaCheckboxCount);
-    NAV_INFO_INT("Radio buttons: ", m_metaRadioCount);
-    NAV_INFO_INT("Textareas: ", m_metaTextareaCount);
-    NAV_INFO_INT("Selects: ", m_metaSelectCount);
-    NAV_INFO_INT("Submit buttons: ", m_metaSubmitCount);
-    NAV_INFO_INT("Unsupported forms: ", m_metaUnsupportedFormCount);
-    NAV_INFO_TEXT("Last submitted method: ", m_lastSubmittedFormMethod[0] ? m_lastSubmittedFormMethod : "(none)");
-    NAV_INFO_TEXT("Last submitted action: ", m_lastSubmittedFormAction[0] ? m_lastSubmittedFormAction : "(none)");
-    NAV_INFO_TEXT("Last submitted status: ", m_lastSubmittedFormStatus[0] ? m_lastSubmittedFormStatus : "(none)");
-    NAV_INFO_TEXT("Last form error: ", m_lastFormError[0] ? m_lastFormError : "(none)");
-    NAV_INFO_TEXT("Last POST HTTP status: ", m_lastPostHttpStatus[0] ? m_lastPostHttpStatus : "(none)");
-    NAV_INFO_TEXT("Last POST content type: ", m_lastPostContentType[0] ? m_lastPostContentType : "(none)");
-    NAV_INFO_INT("Last POST body bytes: ", m_lastPostBodyBytes);
     NAV_INFO_INT("Raw/source bytes: ", m_metaSourceBytes);
     NAV_INFO_TEXT("Source preview truncated: ", m_metaSourceTruncated ? "yes" : "no");
 #undef NAV_INFO_TEXT
@@ -8336,11 +8346,11 @@ void NavigatorApp::buildRuntimeDocument()
 
     addBlock(BLOCK_HEADING, "Capabilities");
     addBlock(BLOCK_LIST_ITEM, "File read: enabled through VFS; Local PNG: enabled through shared ImageAdapter where VFS image data exists");
-    addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects and chunked decoding");
+    addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records; HTTP redirects: enabled, limit 5; HTTP chunked transfer decoding: enabled");
     addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images; Downloads: enabled for unsupported HTTP(S) content within the response body limit");
-    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: local-only controlled guidexos.test:8443/navigator-smoke/ remains available for smoke, and explicit dev/prod trust-store policy can enable validated bare-metal https:// navigation without plaintext fallback");
-    addBlock(BLOCK_LIST_ITEM, "Public HTTPS pilot: production-only, explicit opt-in through the HTTPS policy config, hostname-only, and still fail-closed without a real production CA bundle");
+    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: controlled local smoke remains available, and ProductionValidated trust-store policy enables arbitrary-origin bare-metal https:// with DNS, SNI, certificate, and hostname checks without plaintext fallback");
+    addBlock(BLOCK_LIST_ITEM, "Public HTTPS: enabled for arbitrary hostnames only after ProductionValidated trust-store prerequisites; IPv4-only, bounded, and fail-closed without a real production CA bundle");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS bare-metal transport is ready with CA and hostname validation");
     addBlock(BLOCK_LIST_ITEM, "TLS policy layer: shared HttpByteStream transport policy selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; plaintext fallback stays disabled");
     addBlock(BLOCK_LIST_ITEM, "Content encodings: identity only; unsupported gzip/br/deflate responses produce a friendly document after successful TLS instead of rendering compressed bytes");
@@ -8615,8 +8625,8 @@ void NavigatorApp::buildHttpsUnsupportedDocument(const char* url, bool redirecte
     m_blockCount = 0;
     addBlock(BLOCK_HEADING, redirected ? "HTTPS Redirect Unsupported" : "HTTPS Unsupported");
     addBlock(BLOCK_PARAGRAPH, redirected
-        ? "Navigator only follows HTTPS redirects that satisfy the active bare-metal TLS policy. Targets outside the local smoke allowlist, explicit validated fixture policy, or the controlled public HTTPS pilot stay blocked."
-        : "Bare-metal Navigator https:// requires either the controlled local smoke allowlist, an explicit validated fixture policy, or the controlled public HTTPS pilot with production trust prerequisites. Otherwise navigation fails closed.");
+        ? "Navigator only follows HTTPS redirects that satisfy the active bare-metal TLS policy. ProductionValidated trust enables arbitrary hostnames; other policy states remain fail-closed."
+        : "Bare-metal Navigator https:// requires either the controlled local smoke allowlist, dev fixture policy, or ProductionValidated trust prerequisites. Otherwise navigation fails closed.");
     if (detail && detail[0]) addBlock(BLOCK_PARAGRAPH, detail);
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
@@ -9077,7 +9087,7 @@ void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out,
         return;
     }
     if (href[0] == '/') {
-        if (baseUrl && nav_starts_with(baseUrl, "http://")) {
+        if (baseUrl && (nav_starts_with(baseUrl, "http://") || nav_starts_with(baseUrl, "https://"))) {
             strcopy(out, baseUrl, outSize);
             int len = strlen_local(out);
             int originLen = 7;
@@ -9305,7 +9315,10 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         networkResponse);
 }
 
-static const int kKernelHttpUrlLen = 160;
+// Kernel Navigator keeps URLs bounded in every document/resource slot while
+// allowing ordinary public hostnames and useful paths. IPv6 remains outside
+// this IPv4-only transport milestone.
+static const int kKernelHttpUrlLen = 512;
 static const int kKernelHttpHeaderLimit = gxos::web::kHttpSharedMaxHeaderBytes;
 static const int kKernelHttpBodyLimit = gxos::web::kHttpSharedMaxBodyBytes;
 static const int kKernelHttpRawLimit = kKernelHttpHeaderLimit + kKernelHttpBodyLimit;
@@ -9352,7 +9365,8 @@ struct KernelHttpUrl {
     uint32_t ip;
     uint16_t port;
     bool hostIsNumeric;
-    char host[64];
+    bool httpsScheme;
+    char host[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char path[kKernelHttpUrlLen];
     char error[96];
 };
@@ -9363,7 +9377,11 @@ struct KernelHttpResponse {
     char reason[48];
     char contentType[48];
     char transferEncoding[32];
+    char responseFraming[24];
     char contentEncoding[32];
+    int contentLength;
+    bool contentLengthPresent;
+    bool truncatedResponse;
     char unsupportedReason[128];
     char location[kKernelHttpUrlLen];
     int bodyBytes;
@@ -9371,7 +9389,7 @@ struct KernelHttpResponse {
     bool headerCapHit;
     bool bodyCapHit;
     bool dnsUsed;
-    char dnsHost[64];
+    char dnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char dnsResolvedIp[16];
     char dnsError[64];
     char requestedUrl[kKernelHttpUrlLen];
@@ -9409,7 +9427,11 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->reason[0] = '\0';
     response->contentType[0] = '\0';
     response->transferEncoding[0] = '\0';
+    response->responseFraming[0] = '\0';
     response->contentEncoding[0] = '\0';
+    response->contentLength = 0;
+    response->contentLengthPresent = false;
+    response->truncatedResponse = false;
     response->unsupportedReason[0] = '\0';
     response->location[0] = '\0';
     response->bodyBytes = 0;
@@ -9459,6 +9481,10 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     strcopy(m_metaHttpReason, httpReason ? httpReason : "", sizeof(m_metaHttpReason));
     strcopy(m_metaContentType, contentType ? contentType : "", sizeof(m_metaContentType));
     strcopy(m_metaContentEncoding, networkResponse ? networkResponse->contentEncoding : "", sizeof(m_metaContentEncoding));
+    strcopy(m_metaResponseFraming, networkResponse ? networkResponse->responseFraming : "", sizeof(m_metaResponseFraming));
+    m_metaContentLength = networkResponse ? networkResponse->contentLength : 0;
+    m_metaContentLengthPresent = networkResponse ? networkResponse->contentLengthPresent : false;
+    m_metaTruncatedResponse = networkResponse ? networkResponse->truncatedResponse : false;
     strcopy(m_metaUnsupportedReason, networkResponse ? networkResponse->unsupportedReason : "", sizeof(m_metaUnsupportedReason));
     m_metaRedirectCount = redirectCount;
     m_metaRedirected = redirectCount > 0;
@@ -9555,7 +9581,8 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     for (int i = 0; i < m_blockCount; ++i) {
         if (m_blocks[i].kind == BLOCK_IMAGE) {
             ++m_metaImageBlocks;
-            if (nav_starts_with(m_blocks[i].url, "http://")) ++m_metaRemoteImages;
+            if (nav_starts_with(m_blocks[i].url, "http://") ||
+                nav_starts_with(m_blocks[i].url, "https://")) ++m_metaRemoteImages;
             else if (nav_starts_with(m_blocks[i].url, "file://")) ++m_metaLocalImages;
             if (m_blocks[i].imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) ++m_metaLoadedImages;
             else {
@@ -9615,6 +9642,7 @@ static bool parse_numeric_ipv4_local(const char* text, const char* end, uint32_t
 static bool nav_hostname_is_valid(const char* start, const char* end)
 {
     if (!start || !end || start >= end) return false;
+    if (end - start > gxos::web::kHttpSharedMaxHostnameBytes) return false;
     int labelLen = 0;
     bool lastWasDot = true;
     for (const char* p = start; p < end; ++p) {
@@ -9649,6 +9677,7 @@ static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
     parsed->ip = 0;
     parsed->port = 80;
     parsed->hostIsNumeric = false;
+    parsed->httpsScheme = false;
     parsed->host[0] = '\0';
     parsed->path[0] = '/';
     parsed->path[1] = '\0';
@@ -9656,6 +9685,10 @@ static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
 
     if (!nav_starts_with(url, "http://")) {
         strcopy(parsed->error, "Only http:// URLs are supported", sizeof(parsed->error));
+        return false;
+    }
+    if (strlen_local(url) >= kKernelHttpUrlLen) {
+        strcopy(parsed->error, "HTTP URL exceeds the Navigator safety limit", sizeof(parsed->error));
         return false;
     }
 
@@ -9713,6 +9746,10 @@ static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
         if (*p == '?') parsed->path[oi++] = '/';
         while (*p && oi < kKernelHttpUrlLen - 1) parsed->path[oi++] = *p++;
         parsed->path[oi] = '\0';
+        if (*p) {
+            strcopy(parsed->error, "HTTP URL path exceeds the Navigator safety limit", sizeof(parsed->error));
+            return false;
+        }
     }
     return true;
 }
@@ -9756,7 +9793,7 @@ static void kernel_tcp_http_byte_stream_close(void* context)
 {
     KernelTcpHttpByteStreamContext* tcp = static_cast<KernelTcpHttpByteStreamContext*>(context);
     if (!tcp || tcp->socket < 0) return;
-    // Navigator request streams are one-shot HTTP/1.0 connections that are fully
+    // Navigator request streams are one-shot HTTP/1.1 connections that are fully
     // consumed before close. Abort frees the TCB immediately so redirect hops do
     // not inherit linger/TIME_WAIT pressure from the previous socket.
     if (tcp->abortUsedFlag) {
@@ -9822,14 +9859,6 @@ static bool kernel_https_policy_fixture_match(const KernelHttpUrl& parsed)
         nav_starts_with(parsed.path, kNavigatorPolicyValidatedPathPrefix);
 }
 
-static bool kernel_https_public_pilot_fixture_match(const KernelHttpUrl& parsed)
-{
-    return !parsed.hostIsNumeric &&
-        streq_local(parsed.host, kNavigatorPublicPilotHttpsHost) &&
-        parsed.port == kNavigatorControlledHttpsPort &&
-        nav_starts_with(parsed.path, kNavigatorPublicPilotPathPrefix);
-}
-
 static bool kernel_http_transport_uses_tls(gxos::web::HttpByteStreamTransportSelection selection)
 {
     return selection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps ||
@@ -9879,7 +9908,7 @@ static bool kernel_https_public_pilot_target_allowed(const KernelHttpUrl& parsed
     if (out && outSize > 0) out[0] = '\0';
     if (parsed.hostIsNumeric) {
         if (out && outSize > 0) {
-            strcopy(out, "HTTPS/TLS unsupported: public HTTPS pilot does not allow numeric-IP hosts", outSize);
+            strcopy(out, "HTTPS/TLS unsupported: validated HTTPS does not allow numeric-IP hosts", outSize);
         }
         return false;
     }
@@ -9888,7 +9917,7 @@ static bool kernel_https_public_pilot_target_allowed(const KernelHttpUrl& parsed
             strcopy(out,
                 httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
                     ? httpsPolicy.publicHttpsPilotReason
-                    : "Public HTTPS pilot is disabled by policy.",
+                    : "Production trust validation is not enabled for arbitrary-origin HTTPS.",
                 outSize);
         }
         return false;
@@ -10014,15 +10043,10 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
         }
         return kernel_http_blocked_https_transport_policy(reason);
     }
-    if (productionValidated &&
-        (kernel_https_public_pilot_fixture_match(parsed) || !kernel_https_policy_fixture_match(parsed))) {
+    if (productionValidated && httpsPolicy.broadPublicHttpsEnabled) {
         if (kernel_https_public_pilot_target_allowed(parsed, httpsPolicy, reason, reasonSize)) {
             if (reason && reasonSize > 0) {
-                if (kernel_https_public_pilot_fixture_match(parsed)) {
-                    strcopy(reason, "Controlled public HTTPS pilot fixture matched.", reasonSize);
-                } else {
-                    strcopy(reason, "ProductionValidated public HTTPS pilot matched.", reasonSize);
-                }
+                strcopy(reason, "ProductionValidated arbitrary-origin HTTPS matched.", reasonSize);
             }
             return kernel_http_policy_validated_tls_transport_policy(reason);
         }
@@ -10033,9 +10057,9 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
             strcopy(reason,
                 httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode
                     ? "HTTPS/TLS unsupported: UserTrustStoreDevMode only allows explicit validated fixture hosts."
-                    : (httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
-                        ? httpsPolicy.publicHttpsPilotReason
-                        : "HTTPS/TLS unsupported: ProductionValidated currently allows explicit fixture hosts only."),
+                        : (httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
+                            ? httpsPolicy.publicHttpsPilotReason
+                            : "HTTPS/TLS unsupported: production trust validation is not ready for arbitrary origins."),
                 reasonSize);
         }
         return kernel_http_blocked_policy_transport_policy(reason);
@@ -10187,6 +10211,7 @@ static bool parse_https_url_kernel(const char* url, KernelHttpUrl* parsed)
     parsed->ip = 0;
     parsed->port = 443;
     parsed->hostIsNumeric = false;
+    parsed->httpsScheme = true;
     parsed->host[0] = '\0';
     parsed->path[0] = '/';
     parsed->path[1] = '\0';
@@ -10194,6 +10219,10 @@ static bool parse_https_url_kernel(const char* url, KernelHttpUrl* parsed)
 
     if (!nav_starts_with(url, "https://")) {
         strcopy(parsed->error, "Only https:// URLs are supported", sizeof(parsed->error));
+        return false;
+    }
+    if (strlen_local(url) >= kKernelHttpUrlLen) {
+        strcopy(parsed->error, "HTTPS URL exceeds the Navigator safety limit", sizeof(parsed->error));
         return false;
     }
 
@@ -10251,6 +10280,10 @@ static bool parse_https_url_kernel(const char* url, KernelHttpUrl* parsed)
         if (*p == '?') parsed->path[oi++] = '/';
         while (*p && oi < kKernelHttpUrlLen - 1) parsed->path[oi++] = *p++;
         parsed->path[oi] = '\0';
+        if (*p) {
+            strcopy(parsed->error, "HTTPS URL path exceeds the Navigator safety limit", sizeof(parsed->error));
+            return false;
+        }
     }
     return true;
 }
@@ -10261,7 +10294,11 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     response->reason[0] = '\0';
     response->contentType[0] = '\0';
     response->transferEncoding[0] = '\0';
+    response->responseFraming[0] = '\0';
     response->contentEncoding[0] = '\0';
+    response->contentLength = 0;
+    response->contentLengthPresent = false;
+    response->truncatedResponse = false;
     response->location[0] = '\0';
     response->bodyBytes = 0;
 
@@ -10326,6 +10363,20 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
             if (gxos::web::httpSharedEqualsInsensitive(name, "content-type")) gxos::web::httpSharedNormalizeContentType(valueStart, e, response->contentType, sizeof(response->contentType));
             else if (gxos::web::httpSharedEqualsInsensitive(name, "transfer-encoding")) gxos::web::httpSharedCopyTrimmed(valueStart, e, response->transferEncoding, sizeof(response->transferEncoding), true);
             else if (gxos::web::httpSharedEqualsInsensitive(name, "content-encoding")) gxos::web::httpSharedCopyTrimmed(valueStart, e, response->contentEncoding, sizeof(response->contentEncoding), true);
+            else if (gxos::web::httpSharedEqualsInsensitive(name, "content-length")) {
+                int contentLength = 0;
+                if (!gxos::web::httpSharedParseDecimalSize(valueStart, e, &contentLength)) {
+                    strcopy(response->error, "Malformed HTTP Content-Length", sizeof(response->error));
+                    return false;
+                }
+                response->contentLengthPresent = true;
+                response->contentLength = contentLength;
+                if (contentLength > kKernelHttpBodyLimit) {
+                    response->bodyCapHit = true;
+                    strcopy(response->error, "HTTP body too large", sizeof(response->error));
+                    return false;
+                }
+            }
             else if (gxos::web::httpSharedEqualsInsensitive(name, "location")) {
                 while (valueStart < e && (*valueStart == ' ' || *valueStart == '\t')) ++valueStart;
                 int li = 0;
@@ -10338,6 +10389,15 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
 
     int encodedBodyBytes = rawLen - bodyStart;
     if (encodedBodyBytes < 0) encodedBodyBytes = 0;
+
+    if (response->transferEncoding[0] &&
+        gxos::web::httpSharedHeaderHasToken(response->transferEncoding, "chunked")) {
+        strcopy(response->responseFraming, "chunked", sizeof(response->responseFraming));
+    } else if (response->contentLengthPresent) {
+        strcopy(response->responseFraming, "content-length", sizeof(response->responseFraming));
+    } else {
+        strcopy(response->responseFraming, "connection-close", sizeof(response->responseFraming));
+    }
 
     if (gxos::web::httpSharedIsRedirectStatus(response->statusCode)) {
         int copyBytes = encodedBodyBytes;
@@ -10371,9 +10431,16 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
             strcopy(response->error, "HTTP body too large", sizeof(response->error));
             return false;
         }
-        for (int i = 0; i < encodedBodyBytes; ++i) response->body[i] = s_kernelHttpRaw[bodyStart + i];
-        response->body[encodedBodyBytes] = '\0';
-        response->bodyBytes = encodedBodyBytes;
+        if (response->contentLengthPresent && encodedBodyBytes < response->contentLength) {
+            response->truncatedResponse = true;
+            strcopy(response->error, "Truncated HTTP response", sizeof(response->error));
+            return false;
+        }
+        int bodyBytes = response->contentLengthPresent ? response->contentLength : encodedBodyBytes;
+        if (bodyBytes > encodedBodyBytes) bodyBytes = encodedBodyBytes;
+        for (int i = 0; i < bodyBytes; ++i) response->body[i] = s_kernelHttpRaw[bodyStart + i];
+        response->body[bodyBytes] = '\0';
+        response->bodyBytes = bodyBytes;
     }
 
     if (response->contentEncoding[0] && !gxos::web::httpSharedHeaderHasToken(response->contentEncoding, "identity")) {
@@ -10459,12 +10526,12 @@ static bool kernel_http_build_request(const char* method, const KernelHttpUrl& p
     if (requestBytesOut) *requestBytesOut = 0;
     if (!request || requestSize <= 0) return false;
     const bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
-    const bool isHttps = parsed.port == 443 || parsed.port == kNavigatorControlledHttpsPort;
+    const bool isHttps = parsed.httpsScheme;
     int q = 0;
 #define APPEND_REQ(svalue) do { const char* _s = (svalue); while (_s && *_s && q < requestSize - 1) request[q++] = *_s++; } while (0)
     APPEND_REQ(isPost ? "POST " : "GET ");
     APPEND_REQ(parsed.path);
-    APPEND_REQ(" HTTP/1.0\r\nHost: ");
+    APPEND_REQ(" HTTP/1.1\r\nHost: ");
     APPEND_REQ(parsed.host);
     if ((!isHttps && parsed.port != 80) || (isHttps && parsed.port != 443)) {
         char portText[12];
@@ -10472,7 +10539,7 @@ static bool kernel_http_build_request(const char* method, const KernelHttpUrl& p
         APPEND_REQ(":");
         APPEND_REQ(portText);
     }
-    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.1\r\nAccept: text/html, text/plain\r\nAccept-Encoding: identity\r\nConnection: close\r\n");
+    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.2\r\nAccept: text/html, text/plain, image/png, */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n");
     if (isPost) {
         char bodyLengthText[16];
         nav_int_to_text(bodyBytes, bodyLengthText, sizeof(bodyLengthText));
@@ -10493,6 +10560,10 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
 {
     if (!stream || !response) return false;
     int rawLen = 0;
+    int framedBodyStart = -1;
+    int expectedBodyBytes = 0;
+    bool contentLengthKnown = false;
+    bool chunkedResponse = false;
     uint32_t startTicks = (uint32_t)kernel::pit::ticks();
     uint32_t maxTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
     while (true) {
@@ -10521,7 +10592,54 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
                 return false;
             }
             for (int i = 0; i < n; ++i) s_kernelHttpRaw[rawLen++] = chunk[i];
+            if (framedBodyStart < 0) {
+                for (int i = 0; i + 3 < rawLen; ++i) {
+                    if (s_kernelHttpRaw[i] == '\r' && s_kernelHttpRaw[i + 1] == '\n' &&
+                        s_kernelHttpRaw[i + 2] == '\r' && s_kernelHttpRaw[i + 3] == '\n') {
+                        framedBodyStart = i + 4;
+                        break;
+                    }
+                    if (i + 1 < rawLen && s_kernelHttpRaw[i] == '\n' && s_kernelHttpRaw[i + 1] == '\n') {
+                        framedBodyStart = i + 2;
+                        break;
+                    }
+                }
+            }
+            if (framedBodyStart >= 0 && !contentLengthKnown && !chunkedResponse) {
+                const char* h = s_kernelHttpRaw;
+                const char* headerEnd = s_kernelHttpRaw + framedBodyStart;
+                while (h < headerEnd) {
+                    const char* e = h;
+                    while (e < headerEnd && *e != '\r' && *e != '\n') ++e;
+                    const char* colon = h;
+                    while (colon < e && *colon != ':') ++colon;
+                    if (colon < e) {
+                        char name[40];
+                        gxos::web::httpSharedCopyTrimmed(h, colon, name, sizeof(name), true);
+                        if (gxos::web::httpSharedEqualsInsensitive(name, "transfer-encoding")) {
+                            char transferValue[64];
+                            gxos::web::httpSharedCopyTrimmed(colon + 1, e, transferValue, sizeof(transferValue), true);
+                            if (gxos::web::httpSharedHeaderHasToken(transferValue, "chunked")) chunkedResponse = true;
+                        } else if (gxos::web::httpSharedEqualsInsensitive(name, "content-length")) {
+                            int parsedLength = 0;
+                            if (gxos::web::httpSharedParseDecimalSize(colon + 1, e, &parsedLength)) {
+                                if (parsedLength > kKernelHttpBodyLimit) {
+                                    response->bodyCapHit = true;
+                                    strcopy(response->error, "HTTP body too large", sizeof(response->error));
+                                    return false;
+                                }
+                                expectedBodyBytes = parsedLength;
+                                contentLengthKnown = true;
+                            }
+                        }
+                    }
+                    h = e;
+                    while (h < headerEnd && (*h == '\r' || *h == '\n')) ++h;
+                }
+            }
             startTicks = (uint32_t)kernel::pit::ticks();
+            if (framedBodyStart >= 0 && contentLengthKnown &&
+                rawLen >= framedBodyStart + expectedBodyBytes) break;
             continue;
         }
         if (n == 0) break;
@@ -10536,7 +10654,8 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
                     response->unsupportedReason[0] ||
                     streq_local(response->error, "Malformed HTTP response") ||
                     streq_local(response->error, "Malformed HTTP status line") ||
-                    streq_local(response->error, "Malformed chunked response");
+                    streq_local(response->error, "Malformed chunked response") ||
+                    streq_local(response->error, "Truncated HTTP response");
                 if (!parsedPartial && contentFailure) {
                     return false;
                 }
@@ -10602,14 +10721,17 @@ static void kernel_http_finalize_tls_status(KernelHttpResponse* response, bool p
         response->unsupportedReason[0] ||
         streq_local(response->error, "Malformed HTTP response") ||
         streq_local(response->error, "Malformed HTTP status line") ||
-        streq_local(response->error, "Malformed chunked response");
+        streq_local(response->error, "Malformed chunked response") ||
+        streq_local(response->error, "Truncated HTTP response");
     if (!parsedOk) {
         if (!response->tlsResult.error[0] && response->error[0]) {
             strcopy(response->tlsResult.error, response->error, sizeof(response->tlsResult.error));
         }
         if (response->tlsResult.handshakeSuccess && contentFailure) {
             response->tlsSucceededBeforeContentFailure = true;
-            if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
+            if (response->bodyCapHit || kernel_http_error_contains_too_large(response->error)) {
+                response->tlsResult.transportStatus = gxos::web::HttpByteStreamTlsStatus::ResponseTooLarge;
+            } else if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
                 response->tlsResult.transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
             }
         } else if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::Success ||
@@ -11097,12 +11219,14 @@ static bool nav_url_path_ends_with_png(const char* url)
     return endsWithIgnoreCaseLocal(path, ".png");
 }
 
-static void nav_push_url(char stack[][160], int& count, const char* url);
+static const int kNavigatorUrlStorageBytes = 512;
+static void nav_push_url(char stack[][kNavigatorUrlStorageBytes], int& count, const char* url);
 
 void NavigatorApp::prepareImageResources()
 {
     gxos::gui::ImageSafetyLimits localLimits = gxos::gui::DefaultImageSafetyLimits();
     gxos::gui::ImageSafetyLimits remoteLimits = nav_kernel_remote_png_limits();
+    int remoteFetchCount = 0;
     for (int i = 0; i < m_blockCount; ++i) {
         if (m_blocks[i].kind != BLOCK_IMAGE) continue;
         m_blocks[i].imagePixels = nullptr;
@@ -11122,12 +11246,19 @@ void NavigatorApp::prepareImageResources()
             continue;
         }
 
-        if (!nav_starts_with(m_blocks[i].url, "http://")) {
+        if (!nav_starts_with(m_blocks[i].url, "http://") &&
+            !nav_starts_with(m_blocks[i].url, "https://")) {
             m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
             strcopy(m_blocks[i].imageError, "Unsupported image URL scheme", sizeof(m_blocks[i].imageError));
             continue;
         }
 
+        if (remoteFetchCount >= gxos::web::kHttpSharedMaxRemoteResources) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
+            strcopy(m_blocks[i].imageError, "Remote resource limit reached", sizeof(m_blocks[i].imageError));
+            continue;
+        }
+        ++remoteFetchCount;
         KernelHttpResponse* response = kernel_http_fetch(m_blocks[i].url);
         if (!response->ok) {
             m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
@@ -11839,16 +11970,15 @@ bool NavigatorApp::smokeFormsLitePost(const char* action, int* statusCode, char*
                          app.m_lastPostBodyBytes == formBodyBytes &&
                          streq_local(app.m_lastPostContentType, response->contentType);
     app.buildPageInfoDocument();
-    diagnosticsOk = diagnosticsOk &&
-                    blocksContain("Forms-lite POST bare-metal: enabled-basic") &&
-                    blocksContain("Last submitted method: POST") &&
-                    blocksContain("Last POST body bytes: 67");
+    const bool pageInfoOk = blocksContain("Forms-lite POST bare-metal: enabled-basic") &&
+                            blocksContain("Last submitted method: POST") &&
+                            blocksContain("Last POST body bytes: 67");
     app.buildRuntimeDocument();
-    diagnosticsOk = diagnosticsOk &&
-                    blocksContain("Forms-lite POST forms bare-metal: enabled-basic") &&
-                    blocksContain("Forms-lite POST redirect policy: 303 becomes GET") &&
-                    blocksContain("Last submitted method: POST") &&
-                    blocksContain("Last POST body bytes: 67");
+    const bool runtimeOk = blocksContain("Forms-lite POST forms bare-metal: enabled-basic") &&
+                           blocksContain("Forms-lite POST redirect policy: 303 becomes GET") &&
+                           blocksContain("Last submitted method: POST") &&
+                           blocksContain("Last POST body bytes: 67");
+    diagnosticsOk = diagnosticsOk && pageInfoOk && runtimeOk;
     if (statusCode) *statusCode = response->statusCode;
     if (contentType && contentTypeLen > 0) strcopy(contentType, response->contentType, contentTypeLen);
     if (bodyBytes) *bodyBytes = response->bodyBytes;
@@ -11858,6 +11988,27 @@ bool NavigatorApp::smokeFormsLitePost(const char* action, int* statusCode, char*
     if (submittedBodyBytes) *submittedBodyBytes = app.m_lastPostBodyBytes;
     if ((!response->ok || !diagnosticsOk) && error && errorLen > 0) {
         strcopy(error, response->error[0] ? response->error : "Forms-lite POST diagnostics mismatch", errorLen);
+    }
+    if (!response->ok || !diagnosticsOk) {
+        serial::puts("[NAVIGATOR-SMOKE] forms_post.debug.method=");
+        serial::puts(app.m_lastSubmittedFormMethod);
+        serial::puts(" action=");
+        serial::puts(app.m_lastSubmittedFormAction);
+        serial::puts(" response_type=");
+        serial::puts(response->contentType);
+        serial::puts(" post_type=");
+        serial::puts(app.m_lastPostContentType);
+        serial::puts(" page_info=");
+        serial::puts(pageInfoOk ? "yes" : "no");
+        serial::puts(" runtime=");
+        serial::puts(runtimeOk ? "yes" : "no");
+        serial::puts(" body_bytes=");
+        char bodyBytesText[24];
+        nav_int_to_text(app.m_lastPostBodyBytes, bodyBytesText, sizeof(bodyBytesText));
+        serial::puts(bodyBytesText);
+        serial::puts(" http_status=");
+        serial::puts(app.m_lastPostHttpStatus);
+        serial::puts("\n");
     }
     return response->ok && diagnosticsOk;
 }
@@ -11940,6 +12091,27 @@ bool NavigatorApp::smokeInteractiveFormsLitePost(const char* formUrl, int* statu
               app.m_lastPostBodyBytes == 67 && renderedOk && diagnosticsOk;
     if (!ok && error && errorLen > 0) {
         strcopy(error, response->error[0] ? response->error : "Interactive Forms-lite POST smoke mismatch", errorLen);
+    }
+    if (!ok) {
+        serial::puts("[NAVIGATOR-SMOKE] interactive_forms.debug.controls=");
+        serial::puts(controlsOk ? "yes" : "no");
+        serial::puts(" rendered=");
+        serial::puts(renderedOk ? "yes" : "no");
+        serial::puts(" diagnostics=");
+        serial::puts(diagnosticsOk ? "yes" : "no");
+        serial::puts(" method=");
+        serial::puts(app.m_lastSubmittedFormMethod);
+        serial::puts(" post_status=");
+        serial::puts(app.m_lastPostHttpStatus);
+        serial::puts(" post_type=");
+        serial::puts(app.m_lastPostContentType);
+        serial::puts(" body_bytes=");
+        char bodyBytesText[24];
+        nav_int_to_text(app.m_lastPostBodyBytes, bodyBytesText, sizeof(bodyBytesText));
+        serial::puts(bodyBytesText);
+        serial::puts(" response_type=");
+        serial::puts(response->contentType);
+        serial::puts("\n");
     }
     return ok;
 }
@@ -12086,7 +12258,7 @@ void NavigatorApp::loadUrl(const char* url)
     } else if (nav_starts_with(normalized, "http://") || nav_starts_with(normalized, "https://")) {
         loadHttpUrl(normalized);
     } else {
-        buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, http://, or a policy-gated https:// URL.");
+        buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, http://, or a bounded policy-validated https:// URL.");
         rememberPageMetadata(normalized, normalized, "unsupported", "", "Unsupported URL scheme", nullptr, 0);
     }
     m_scrollY = 0;
@@ -12142,14 +12314,14 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
            tlsAttempts == expectedTlsTcpConnectAttempts;
 }
 
-static void nav_push_url(char stack[][160], int& count, const char* url)
+static void nav_push_url(char stack[][kNavigatorUrlStorageBytes], int& count, const char* url)
 {
     if (!url || !url[0]) return;
     if (count >= 12) {
-        for (int i = 1; i < 12; ++i) strcopy(stack[i - 1], stack[i], 160);
+        for (int i = 1; i < 12; ++i) strcopy(stack[i - 1], stack[i], kNavigatorUrlStorageBytes);
         count = 11;
     }
-    strcopy(stack[count++], url, 160);
+    strcopy(stack[count++], url, kNavigatorUrlStorageBytes);
 }
 
 void NavigatorApp::navigateTo(const char* url)
@@ -13219,7 +13391,7 @@ static const char* navigator_real_public_probe_prerequisite_blocker(
         return
             httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
                 ? httpsPolicy.publicHttpsPilotReason
-                : "Real public HTTPS probe requires ProductionValidated plus public-https-pilot=enabled.";
+                : "Real public HTTPS probe requires ProductionValidated trust prerequisites.";
     }
 
     if (trustStorePolicy.state != gxos::GxosTrustStorePolicyState::TrustStoreParsed) {
@@ -13706,7 +13878,8 @@ static bool printNavigatorHttpsCompatibilityCase(const char* name,
                 tlsTcpConnectAttempts >= 1 &&
                 verifyFlags == 0 &&
                 nav_smoke_text_equals(transportSelection, target.transportSelection) &&
-                nav_smoke_text_equals(tlsStatus, "TlsReadFailed");
+                (nav_smoke_text_equals(tlsStatus, "TlsReadFailed") ||
+                 nav_smoke_text_equals(tlsStatus, "ResponseTooLarge"));
             if (failClosedLargeResponse) {
                 pass = true;
             }
@@ -14595,15 +14768,15 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] toolbar.icon_size=16x16 fallback=label-only cache=init-once\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.local_png=enabled through shared ImageAdapter where VFS image data exists\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects/chunked\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects/chunked\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local-only HTTPS remains enabled for guidexos.test:8443/navigator-smoke/; explicit dev/prod trust-store policy can enable validated fixture HTTPS, and ProductionValidated plus public-https-pilot=enabled can enable a controlled public HTTPS pilot with CA and hostname checks and no plaintext fallback\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local smoke remains enabled for guidexos.test:8443/navigator-smoke/; ProductionValidated trust-store policy enables arbitrary-origin IPv4 HTTPS with CA, SNI, and hostname checks and no plaintext fallback\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=Mbed TLS transport ready with CA and hostname validation\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_smoke_local=enabled wrong-host and direct hook diagnostics remain available\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps + PolicyValidatedTlsHttps)\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; validated fixture hosts stay policy-gated, public HTTPS stays pilot-gated, plaintext fallback stays disabled, and policy stays fail-closed by default\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; production trust enables arbitrary-origin HTTPS, plaintext fallback stays disabled, and policy stays fail-closed by default\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=local allowlist, validated fixture HTTPS, and controlled public HTTPS pilot redirect policy are covered\n");
@@ -15456,7 +15629,7 @@ static bool printNavigatorPublicPilotDecisionCase()
     const bool pass = parseOk &&
         (allow == pilotEnabled) &&
         (pilotEnabled
-            ? nav_smoke_text_equals(reason, "ProductionValidated public HTTPS pilot matched.")
+            ? nav_smoke_text_equals(reason, "ProductionValidated arbitrary-origin HTTPS matched.")
             : reason[0] != '\0');
 
     serial::puts("[NAVIGATOR-SMOKE] https.case.public_pilot_decision.enabled=");
@@ -15553,7 +15726,7 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_enabled=");
     serial::puts(pilotEnabled ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_blocker=");
-    serial::puts(pilotEnabled ? "(none)" : (prerequisiteBlocker ? prerequisiteBlocker : "production_public_pilot_enabled requires public-https-pilot=enabled."));
+    serial::puts(pilotEnabled ? "(none)" : (prerequisiteBlocker ? prerequisiteBlocker : "production_public_pilot_enabled requires ProductionValidated trust prerequisites."));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_config_path=");
     serial::puts(httpsPolicy.configPath ? httpsPolicy.configPath : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_config_source=");
