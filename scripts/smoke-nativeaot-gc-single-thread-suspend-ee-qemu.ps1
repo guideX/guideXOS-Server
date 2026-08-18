@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -37,6 +37,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\gc-stack-provider-unwind-gc-info"
     } elseif ($ProofMode -eq "stack-provider-unwind-caller-frame") {
         Join-Path $root "out\dotnet\gc-stack-provider-unwind-caller-frame"
+    } elseif ($ProofMode -eq "stack-provider-native-transition-continuation") {
+        Join-Path $root "out\dotnet\gc-stack-provider-native-transition-continuation"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
         Join-Path $root "out\dotnet\gc-first-root-post-queue-mark-decision"
     } elseif ($ProofMode -eq "first-root-first-mark-mutation") {
@@ -72,24 +74,26 @@ $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
-$isC011EC20 = $ProofMode -eq "stack-provider-unwind-caller-frame"
-$isC011EC19 = $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
-$isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
+$isC011EC21 = $ProofMode -eq "stack-provider-native-transition-continuation"
+$isC011EC20 = $ProofMode -in @("stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isC011EC19 = $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
+$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame")
+$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $proofDefine = if ($isNextGenuineRootProvider) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($isTransitionFrameControlPc -or $isC011EC19) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
     $c19Define = if ($isC011EC19) { " /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO" } else { "" }
     $c20Define = if ($isC011EC20) { " /DGUIDEXOS_NATIVEAOT_C011EC20_UNWIND" } else { "" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define"
+    $c21Define = if ($isC011EC21) { " /DGUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION" } else { "" }
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -277,6 +281,8 @@ $probeObj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_allocation_probe.singl
 $gcBridgeBoundary = Join-Path $runtimeRoot "guidexos_nativeaot_gcenv_startup_bridge.single-thread-suspend-ee.obj"
 $gcBridgeSource = Join-Path $root "tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_gcenv_startup_bridge.cpp"
 $platformContract = Join-Path $gcStartupRoot "guidexos_nativeaot_gc_startup_platform_contract.obj"
+$platformContractSource = Join-Path $root "tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_gc_startup_platform_contract.cpp"
+$platformContractC21Obj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_startup_platform_contract.c011ec21.obj"
 $palStartup = Join-Path $gcStartupRoot "PalRedhawkMinWin.gc-startup.obj"
 $startupDiagnostic = Join-Path $gcStartupRoot "startup-diagnostic.obj"
 $gcHelpersDiagnostic = Join-Path $gcStartupRoot "gc-helpers-diagnostic.obj"
@@ -303,6 +309,8 @@ $runResults = @()
 foreach ($path in @($palBridge,$gcEnv,$gcBridgeSource,$platformContract,$palStartup,$startupDiagnostic,$gcHelpersDiagnostic,$gcHelpersAlign,$threadObj,$ehObj,$allocFastObj)) {
     Require-File $path "Authorized replacement input"
 }
+if ($isC011EC21) { Require-File $platformContractSource "C011EC21 startup-platform contract source" }
+if ($isC011EC21) { $platformContract = $platformContractC21Obj }
 Require-File $identityManifestPath "Authorized normalized adapted-GC identity manifest"
 
 try {
@@ -2111,6 +2119,7 @@ if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\eventpipe" /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$palSourceRoot" /FI"$sourceRoot\gc\env\common.h" /Fo:"$stackFrameIteratorObj" "$stackFrameIteratorSource"
 if errorlevel 1 exit /b %errorlevel%
 $(if ($isC011EC19) { "cl.exe /nologo /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /DUSE_GC_INFO_DECODER /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO$c20CompileDefine /I`"$nativeAotRoot\Runtime`" /I`"$nativeAotRoot\Runtime\windows`" /I`"$sourceRoot`" /I`"$sourceRoot\native`" /I`"$sourceRoot\gc`" /I`"$sourceRoot\gc\env`" /I`"$nativeAotRoot\Runtime\inc`" /I`"$nativeAotRoot\Runtime\eventpipe`" /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /I`"$palSourceRoot`" /FI`"$sourceRoot\gc\env\common.h`" /Fo:`"$coffNativeCodeManagerObj`" `"$coffNativeCodeManagerSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
+$(if ($isC011EC21) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /Fo:`"$platformContractC21Obj`" `"$platformContractSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
 exit /b 0
 "@
     }
@@ -2126,8 +2135,9 @@ exit /b 0
         "-p:HostLogProofRuntimePackObj=$platformObj"
     }
     $managedRuntimePackAssembly = if ($isTransitionFrameControlPc -or $isC011EC19) {
+        $managedRuntimePackContract = if ($isC011EC21) { ' "' + $platformContract + '"' } else { "" }
 @"
-lib.exe /nologo /OUT:"$managedRuntimePackObj" "$platformObj" "$allocFastPublicObj"
+lib.exe /nologo /OUT:"$managedRuntimePackObj" "$platformObj" "$allocFastPublicObj"$managedRuntimePackContract
 if errorlevel 1 exit /b %errorlevel%
 "@
     } else {
@@ -2418,7 +2428,13 @@ exit /b %errorlevel%
                 $requiredSymbols += @("guideXosNativeAotC011EC19UnwindCompleted","guideXosNativeAotC011EC19SafeStop")
             }
             if ($isC011EC20) {
-                $requiredSymbols += @("guideXosNativeAotC011EC20TransitionCrossed","guideXosNativeAotC011EC20UnwindInputs","guideXosNativeAotC011EC20CallerMethodInfo","guideXosNativeAotC011EC20UnwindCompleted","guideXosNativeAotC011EC20SafeStop")
+                $requiredSymbols += @("guideXosNativeAotC011EC20TransitionCrossed","guideXosNativeAotC011EC20UnwindInputs","guideXosNativeAotC011EC20CallerMethodInfo","guideXosNativeAotC011EC20UnwindCompleted")
+                if (-not $isC011EC21) {
+                    $requiredSymbols += "guideXosNativeAotC011EC20SafeStop"
+                }
+            }
+            if ($isC011EC21) {
+                $requiredSymbols += @("guideXosNativeAotC011EC21DescribeNativeCaller","guideXosNativeAotC011EC21SafeStop")
             }
         }
     } elseif ($isFirstRootCallbackEntry -and -not $isFirstRootFirstNonNullOldO) {
@@ -2471,14 +2487,60 @@ exit /b %errorlevel%
     Copy-Item -LiteralPath $rawObj -Destination $embeddedObj -Force
     Invoke-LoggedCommand $objcopy @("--redefine-sym","${startSymbol}=guidexos_nativeaot_gc_startup_artifact_start","--redefine-sym","${endSymbol}=guidexos_nativeaot_gc_startup_artifact_end","--redefine-sym","${sizeSymbol}=guidexos_nativeaot_gc_startup_artifact_size","--set-section-alignment",".data=4096","--rename-section",".data=.data,alloc,load,readonly,data,contents",$embeddedObj) (Join-Path $runRoot "embed-final.log")
 
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST -I$artifactRoot"
-    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
+    $c21KernelDefine = if ($isC011EC21) { " -DGUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION" } else { "" }
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine -I$artifactRoot"
+    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","clean") (Join-Path $runRoot "kernel-preclean.log")
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
     Require-File $kernelPath "Specialized single-thread SuspendEE kernel"
     $specializedKernelHash = Hash-File $kernelPath
     Set-Content -LiteralPath (Join-Path $runRoot "kernel-symbols.txt") -Value (& $objdump -t $kernelPath) -Encoding ASCII
+    $nativeHelperAudit = $null
+    if ($isC011EC21) {
+        $kernelSymbolsText = (& $objdump -t -C $kernelPath 2>&1) -join "`n"
+        $nativeDisassemblyText = (& $objdump -d -C --start-address=0x1acfa0 --stop-address=0x1af0c0 $kernelPath 2>&1) -join "`n"
+        $nativeSectionsText = (& $objdump -h $kernelPath 2>&1) -join "`n"
+        $nativeUnwindText = (& $objdump -Wf $kernelPath 2>&1) -join "`n"
+        $helperSymbolMatch = [regex]::Match(
+            $kernelSymbolsText,
+            '(?im)^(?<address>[0-9a-f]{16})\s+\w\s+.*runFirstRealAllocationImpl')
+        if (-not $helperSymbolMatch.Success) {
+            throw "C011EC21 could not resolve runFirstRealAllocationImpl in the linked kernel symbols."
+        }
+        foreach ($kernelSymbol in @('guideXosNativeAotC011EC21DescribeNativeCaller')) {
+            if ($kernelSymbolsText -notmatch [regex]::Escape($kernelSymbol)) {
+                throw "C011EC21 kernel symbol audit could not resolve $kernelSymbol."
+            }
+        }
+        if ($nativeDisassemblyText -notmatch '(?im)^\s*[0-9a-f]+:\s+ff 94 24 88 03 00 00\s+call') {
+            throw "C011EC21 did not retain the source-correlated indirect ManagedMain call site in the native helper disassembly."
+        }
+        if ($nativeSectionsText -notmatch '(?im)\s\.text\s') {
+            throw "C011EC21 kernel section audit did not find the executable .text section."
+        }
+        if ($nativeSectionsText -match '(?im)\s\.eh_frame\s' -or $nativeUnwindText -match '(?im)FDE\s+cie') {
+            throw "C011EC21 expected no DWARF native unwind metadata for runFirstRealAllocationImpl, but an FDE was found."
+        }
+        Set-Content -LiteralPath (Join-Path $runRoot 'native-helper-symbols.txt') -Value $kernelSymbolsText -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $runRoot 'native-helper-disassembly.txt') -Value $nativeDisassemblyText -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $runRoot 'native-helper-sections.txt') -Value $nativeSectionsText -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $runRoot 'native-helper-unwind-audit.txt') -Value $nativeUnwindText -Encoding ASCII
+        $nativeHelperAudit = [ordered]@{
+            symbol='kernel::nativeaot_pal_qemu_test::(anonymous namespace)::runFirstRealAllocationImpl'
+            linkedAddress=('0x' + $helperSymbolMatch.Groups['address'].Value.ToUpperInvariant())
+            source='kernel/core/nativeaot_pal_qemu_test.cpp:1915-2356; managed call at source line 2200'
+            module='kernel.elf'
+            section='.text'
+            callSite='indirect call [rsp+0x388] immediately before recovered return RIP; objdump-correlated'
+            runtimeFunction='none in kernel .pdata'
+            unwindInfo='none; no .xdata/.eh_frame FDE covering helper'
+            nativeSymbols=(Join-Path $runRoot 'native-helper-symbols.txt')
+            disassembly=(Join-Path $runRoot 'native-helper-disassembly.txt')
+            sections=(Join-Path $runRoot 'native-helper-sections.txt')
+            unwindAudit=(Join-Path $runRoot 'native-helper-unwind-audit.txt')
+        }
+    }
 
     for ($runIndex = 0; $runIndex -lt $FreshBootCount; $runIndex++) {
         $name = if ($runIndex -eq 0) { "first-run" } else { "repeat-$runIndex" }
@@ -2507,7 +2569,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC20) {
+                    $stopPattern = if ($isC011EC21) {
+                        'marker=C011EC21'
+                    } elseif ($isC011EC20) {
                         'marker=C011EC20'
                     } elseif ($isC011EC19) {
                         'marker=C011EC19'
@@ -2597,7 +2661,94 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isC011EC20) {
+        if ($isC011EC21) {
+            Assert-Text $validationText 'marker=C011EC21(\s|$)' "C011EC21 native continuation marker"
+            $c21Line = ($validationText -replace '\r?\n', ' ')
+            foreach ($field in @(
+                'transitionFrameType','transitionFrame','transitionSavedRIP','transitionSavedSP','transitionSavedFP',
+                'previousTransitionFrame','crossingAttempts','crossingResults','unwindAttempts',
+                'rtlVirtualUnwindCalls','unwindResult','rtlVirtualUnwindReturned','outputRIP','outputRSP','outputRBP',
+                'callerManagedRange','callerCodeManagerFound','callerFindMethodInfoAttempts','callerGcInfoAttempted',
+                'framesWalked','totalRoots','c19RootReports','c19RegisterRoots','c19StackRoots',
+                'c19PromoteAttempts','c19PromoteEntries','c19PromoteReturns','stackBoundsConsumed',
+                'markWrites','childReads','graphTraversal','promoteEntries','promoteReturns',
+                'c21NativeFrameCandidate','c21NativeUnwindAttempts','c21NativeUnwindMetadata','c21NativeUnwindResult',
+                'c21ManagedReentry','c21ManagedStackBottom','c21NullPredecessorMeaning','c21TransitionLinkingDefect',
+                'c21Outcome','c21NativeRIP','c21NativeRSP','c21NativeRBP','c21HelperStart','c21FunctionOffset',
+                'c21CallSite','c21ModuleIdentity','c21SectionIdentity','c21RuntimeFunction','c21UnwindInfo',
+                'c19SecondQueueInsertions','c19SecondQueueSlot','c19SecondQueueCursorBefore',
+                'c19SecondQueueCursorAfter','c19SecondQueueOld','c19SecondQueueNew')) {
+                if ((Get-MarkerField $c21Line $field) -eq $null) { throw "C011EC21 field $field was missing in $name." }
+            }
+            if ((Get-MarkerField $c21Line 'transitionFrameType') -ne '0x0000000000000001' -or
+                (Get-MarkerField $c21Line 'previousTransitionFrame') -ne '0x0000000000000000' -or
+                (Get-MarkerField $c21Line 'crossingAttempts') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'crossingResults') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'unwindAttempts') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'rtlVirtualUnwindCalls') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'unwindResult') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'rtlVirtualUnwindReturned') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'callerManagedRange') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'callerCodeManagerFound') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'callerFindMethodInfoAttempts') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'callerGcInfoAttempted') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'framesWalked') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'totalRoots') -ne '0x00000006' -or
+                (Get-MarkerField $c21Line 'c19RootReports') -ne '0x00000004' -or
+                (Get-MarkerField $c21Line 'c19RegisterRoots') -ne '0x00000003' -or
+                (Get-MarkerField $c21Line 'c19StackRoots') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'c19PromoteAttempts') -ne '0x00000004' -or
+                (Get-MarkerField $c21Line 'c19PromoteEntries') -ne '0x00000004' -or
+                (Get-MarkerField $c21Line 'c19PromoteReturns') -ne '0x00000004' -or
+                (Get-MarkerField $c21Line 'stackBoundsConsumed') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'markWrites') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'childReads') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'graphTraversal') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'c21NativeFrameCandidate') -ne '0x00000001' -or
+                (Get-MarkerField $c21Line 'c21NativeUnwindAttempts') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'c21NativeUnwindMetadata') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'c21NativeUnwindResult') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'c21ManagedReentry') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'c21ManagedStackBottom') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'c21NullPredecessorMeaning') -ne '0x00000002' -or
+                (Get-MarkerField $c21Line 'c21TransitionLinkingDefect') -ne '0x00000000' -or
+                (Get-MarkerField $c21Line 'c21Outcome') -ne '0x00000005' -or
+                (Get-MarkerField $c21Line 'c21NativeRIP') -ne (Get-MarkerField $c21Line 'outputRIP') -or
+                (Get-MarkerField $c21Line 'c21NativeRSP') -ne (Get-MarkerField $c21Line 'outputRSP') -or
+                (Get-MarkerField $c21Line 'c21NativeRBP') -ne (Get-MarkerField $c21Line 'outputRBP') -or
+                (Get-MarkerField $c21Line 'c21ModuleIdentity') -ne '0x0000000000000001' -or
+                (Get-MarkerField $c21Line 'c21SectionIdentity') -ne '0x0000000000000001' -or
+                (Get-MarkerField $c21Line 'c21RuntimeFunction') -ne '0x0000000000000000' -or
+                (Get-MarkerField $c21Line 'c21UnwindInfo') -ne '0x0000000000000000' -or
+                (Get-MarkerField $c21Line 'c19SecondQueueInsertions') -ne '0x00000004' -or
+                (Get-MarkerField $c21Line 'c19SecondQueueCursorBefore') -ne '0x0000000000000004' -or
+                (Get-MarkerField $c21Line 'c19SecondQueueCursorAfter') -ne '0x0000000000000005' -or
+                (Get-MarkerField $c21Line 'c19SecondQueueOld') -ne '0x0000000000000000' -or
+                (Get-MarkerField $c21Line 'c19SecondQueueNew') -eq '0x0000000000000000') {
+                throw "C011EC21 did not preserve the C20 unwind, native-boundary, root chronology, or queue-cursor contract in $name."
+            }
+            $c21Rip = [Convert]::ToUInt64((Get-MarkerField $c21Line 'c21NativeRIP').Substring(2), 16)
+            $c21CallSite = [Convert]::ToUInt64((Get-MarkerField $c21Line 'c21CallSite').Substring(2), 16)
+            if ($c21CallSite -ne ($c21Rip - [uint64]7)) {
+                throw "C011EC21 call-site provenance did not identify the audited return-site instruction in $name."
+            }
+            if ($null -eq $nativeHelperAudit -or
+                (Get-MarkerField $c21Line 'c21HelperStart') -ne $nativeHelperAudit.linkedAddress) {
+                throw "C011EC21 runtime helper provenance did not match the linked kernel symbol audit in $name."
+            }
+            $c21Outcome = 'E'
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC21'; outcome=$c21Outcome; harnessTerminated=$true; markerLine=$c21Line
+                transition=[ordered]@{ frameType='PInvokeTransitionFrame'; frame=(Get-MarkerField $c21Line 'transitionFrame'); reversePInvokeType='1'; savedRIP=(Get-MarkerField $c21Line 'transitionSavedRIP'); savedSP=(Get-MarkerField $c21Line 'transitionSavedSP'); savedFP=(Get-MarkerField $c21Line 'transitionSavedFP'); previousFrame=(Get-MarkerField $c21Line 'previousTransitionFrame'); nullPredecessorMeaning='2 / no older transition record; locked iterator proceeds to ordinary native unwind/classification'; crossingAttempts=(Get-MarkerField $c21Line 'crossingAttempts'); crossingResults=(Get-MarkerField $c21Line 'crossingResults') }
+                unwind=[ordered]@{ attempts=(Get-MarkerField $c21Line 'unwindAttempts'); rtlVirtualUnwindCalls=(Get-MarkerField $c21Line 'rtlVirtualUnwindCalls'); rtlVirtualUnwindReturned=(Get-MarkerField $c21Line 'rtlVirtualUnwindReturned'); rtlVirtualUnwindResult=(Get-MarkerField $c21Line 'rtlVirtualUnwindResult'); runtimeFunction=(Get-MarkerField $c21Line 'runtimeFunction'); unwindInfo=(Get-MarkerField $c21Line 'unwindInfo'); unwindInfoSize=(Get-MarkerField $c21Line 'unwindInfoSize'); blockFlags=(Get-MarkerField $c21Line 'unwindBlockFlags'); inputRIP=(Get-MarkerField $c21Line 'inputRIP'); inputRSP=(Get-MarkerField $c21Line 'inputRSP'); inputRBP=(Get-MarkerField $c21Line 'inputRBP'); outputRIP=(Get-MarkerField $c21Line 'outputRIP'); outputRSP=(Get-MarkerField $c21Line 'outputRSP'); outputRBP=(Get-MarkerField $c21Line 'outputRBP'); establisherFrame=(Get-MarkerField $c21Line 'establisherFrame'); restoredRBX=(Get-MarkerField $c21Line 'restoredRBX'); restoredRSI=(Get-MarkerField $c21Line 'restoredRSI'); restoredRDI=(Get-MarkerField $c21Line 'restoredRDI'); restoredR12=(Get-MarkerField $c21Line 'restoredR12'); restoredR13=(Get-MarkerField $c21Line 'restoredR13'); restoredR14=(Get-MarkerField $c21Line 'restoredR14'); restoredR15=(Get-MarkerField $c21Line 'restoredR15'); restoredRegisterCount=(Get-MarkerField $c21Line 'restoredRegisterCount') }
+                caller=[ordered]@{ symbol='kernel::nativeaot_pal_qemu_test::(anonymous namespace)::runFirstRealAllocationImpl'; functionOffset=(Get-MarkerField $c21Line 'c21FunctionOffset'); rip=(Get-MarkerField $c21Line 'c21NativeRIP'); rsp=(Get-MarkerField $c21Line 'c21NativeRSP'); rbp=(Get-MarkerField $c21Line 'c21NativeRBP'); callSite=(Get-MarkerField $c21Line 'c21CallSite'); module='kernel.elf'; section='.text'; moduleIdentity=(Get-MarkerField $c21Line 'c21ModuleIdentity'); sectionIdentity=(Get-MarkerField $c21Line 'c21SectionIdentity'); managedRange=(Get-MarkerField $c21Line 'callerManagedRange'); codeManager=(Get-MarkerField $c21Line 'callerCodeManager'); findMethodInfoAttempts=(Get-MarkerField $c21Line 'callerFindMethodInfoAttempts'); gcInfoAttempted=(Get-MarkerField $c21Line 'callerGcInfoAttempted') }
+                nativeFrameChain=@([ordered]@{ index=0; rip=(Get-MarkerField $c21Line 'c21NativeRIP'); rsp=(Get-MarkerField $c21Line 'c21NativeRSP'); rbp=(Get-MarkerField $c21Line 'c21NativeRBP'); symbol='runFirstRealAllocationImpl'; runtimeFunction='none'; unwindInfo='none'; unwindAttempted=$false; callerRIP=$null; callerRSP=$null; unwindResult='not attempted; metadata blocker' })
+                nativeContinuation=[ordered]@{ frameCandidate=(Get-MarkerField $c21Line 'c21NativeFrameCandidate'); unwindAttempts=(Get-MarkerField $c21Line 'c21NativeUnwindAttempts'); metadataAvailable=(Get-MarkerField $c21Line 'c21NativeUnwindMetadata'); unwindResult=(Get-MarkerField $c21Line 'c21NativeUnwindResult'); managedReentry=(Get-MarkerField $c21Line 'c21ManagedReentry'); managedStackBottom=(Get-MarkerField $c21Line 'c21ManagedStackBottom'); helperStart=(Get-MarkerField $c21Line 'c21HelperStart'); helperEnd=(Get-MarkerField $c21Line 'c21HelperEnd'); callSite=(Get-MarkerField $c21Line 'c21CallSite'); runtimeFunction=(Get-MarkerField $c21Line 'c21RuntimeFunction'); unwindInfo=(Get-MarkerField $c21Line 'c21UnwindInfo'); outcome=(Get-MarkerField $c21Line 'c21Outcome') }
+                roots=[ordered]@{ currentFrame=(Get-MarkerField $c21Line 'c19RootReports'); register=(Get-MarkerField $c21Line 'c19RegisterRoots'); stack=(Get-MarkerField $c21Line 'c19StackRoots'); promoteAttempts=(Get-MarkerField $c21Line 'c19PromoteAttempts'); promoteEntries=(Get-MarkerField $c21Line 'c19PromoteEntries'); promoteReturns=(Get-MarkerField $c21Line 'c19PromoteReturns') }
+                accounting=[ordered]@{ frames=(Get-MarkerField $c21Line 'framesWalked'); callbacks=(Get-MarkerField $c21Line 'stackProviderCallbacks'); totalRoots=(Get-MarkerField $c21Line 'totalRoots'); markWrites=(Get-MarkerField $c21Line 'markWrites'); childReads=(Get-MarkerField $c21Line 'childReads'); graphTraversal=(Get-MarkerField $c21Line 'graphTraversal'); boundsConsumed=(Get-MarkerField $c21Line 'stackBoundsConsumed'); promoteEntries=(Get-MarkerField $c21Line 'promoteEntries'); promoteReturns=(Get-MarkerField $c21Line 'promoteReturns') }
+                queue=[ordered]@{ insertions=(Get-MarkerField $c21Line 'c19SecondQueueInsertions'); slot=(Get-MarkerField $c21Line 'c19SecondQueueSlot'); cursorBefore=(Get-MarkerField $c21Line 'c19SecondQueueCursorBefore'); cursorAfter=(Get-MarkerField $c21Line 'c19SecondQueueCursorAfter'); old=(Get-MarkerField $c21Line 'c19SecondQueueOld'); new=(Get-MarkerField $c21Line 'c19SecondQueueNew') }
+            }
+        } elseif ($isC011EC20) {
             $c20ProofLine = (($validationText -split "`n") | Where-Object { $_ -match 'marker=C011EC20($|\s)' } | Select-Object -Last 1)
             $c20SafeStopLine = (($validationText -split "`n") | Where-Object { $_ -match 'marker=C011EC20-SAFE_STOP' } | Select-Object -Last 1)
             if ([string]::IsNullOrWhiteSpace($c20ProofLine) -and [string]::IsNullOrWhiteSpace($c20SafeStopLine)) { throw "C011EC20 did not emit a proof or classified safe-stop line in $name." }
@@ -3612,6 +3763,36 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC21) {
+        if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC21' }).Count -ne 0) {
+            throw "The C011EC21 native continuation experiment did not produce $FreshBootCount C011EC21 runs."
+        }
+        $firstC21Run = $runResults[0]
+        if (@($runResults | Where-Object { $_.outcome -ne 'E' }).Count -ne 0) {
+            throw "C011EC21 did not classify every fresh boot as the deterministic native-unwind metadata blocker Outcome E."
+        }
+        $manifest = [ordered]@{
+            outcome='E / runFirstRealAllocationImpl is a legitimate native caller, but the native helper has no structural unwind metadata; C011EC21 also characterizes the next NativeAOT transition contract (success marker type 3)'
+            proofMode=$ProofMode; marker='C011EC21'; preflightMarker='C011EC21-PREFLIGHT'; successType='3 / next NativeAOT transition contract identified'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit; codeManager='CoffNativeCodeManager'; managedRange='[0x10001000,0x10050950)' }
+            c011ec20Boundary=[ordered]@{ managedControlPC='0x0000000010001D3F'; managedMethod='ManagedMain'; managedMethodInterval='[0x10001C20,0x10001E84)'; outputRIP=$firstC21Run.unwind.outputRIP; outputRSP=$firstC21Run.unwind.outputRSP; outputRBP=$firstC21Run.unwind.outputRBP; establisherFrame=$firstC21Run.unwind.establisherFrame; previousTransition=$firstC21Run.transition.previousFrame }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryKernelBefore.build; startingEspSha256=$ordinaryKernelBefore.esp; expectedSha256=$normalKernelHash }
+            transition=$firstC21Run.transition; unwind=$firstC21Run.unwind; caller=$firstC21Run.caller; nativeFrameChain=$firstC21Run.nativeFrameChain; nativeContinuation=$firstC21Run.nativeContinuation
+            managedReentry=[ordered]@{ found=$false; rip=$null; managedRange=$firstC21Run.caller.managedRange; codeManager=$firstC21Run.caller.codeManager; findMethodInfo='not attempted'; methodInterval=$null }
+            managedStackBottom=[ordered]@{ proven=$false; reason='previous transition == 0 is not a stack-bottom proof; locked StackFrameIterator.cpp takes its ordinary native continuation branch and would require independently valid native unwind metadata or another transition contract' }
+            transitionLinking=[ordered]@{ defect=$false; nullPredecessorMeaning='2 / no older transition record supplied; ordinary native unwind/classification continues'; reversePInvokeType='1'; transitionType='PInvokeTransitionFrame' }
+            roots=$firstC21Run.roots; accounting=$firstC21Run.accounting; queue=$firstC21Run.queue; bounds=[ordered]@{ stackBase=(Get-MarkerField $firstC21Run.markerLine 'stackBase'); stackLimit=(Get-MarkerField $firstC21Run.markerLine 'stackLimit'); scanContextStackLimit=(Get-MarkerField $firstC21Run.markerLine 'scanContextStackLimit'); consumed=$firstC21Run.accounting.boundsConsumed }
+            nativeHelperAudit=$nativeHelperAudit
+            sourceTrace=[ordered]@{ iterator='locked src/coreclr/nativeaot/Runtime/StackFrameIterator.cpp:1529-1600, 1720, 1830, 1913-1948'; transitionUnwind='locked src/coreclr/nativeaot/Runtime/windows/CoffNativeCodeManager.cpp:651-711'; ordinaryAmd64Unwind='locked CoffNativeCodeManager.cpp:778-788, 830-842'; managedRange='locked RuntimeInstance.cpp:96-109'; findMethodInfo='locked CoffNativeCodeManager.cpp:254-295'; helperSource='kernel/core/nativeaot_pal_qemu_test.cpp:1915-2356 and 2386-2413; managed indirect call source line 2200'; nativeChain='kernel::main -> runFirstRealAllocation ABI wrapper -> runFirstRealAllocationImpl -> indirect ManagedMain call; public wrapper tail-jumps to the helper' }
+            sensitivePath=[ordered]@{ allocations=0; dynamicStrings=0; collections=0; managedReentry=0; schedulerTransitions=0; arbitraryStackScans=0; largeDumps=0; safeStop='bounded scalar/pointer diagnostics; stopped before any native continuation attempt' }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot 'commands.txt'); evidenceRoot=$runRoot; runs=$runResults }
+            payloadHashes=[ordered]@{ pe=(Hash-File $pePath); elf=(Hash-File $elfPath); proofKernel=$specializedKernelHash; map=(Hash-File $mapPath) }
+            regressions=[ordered]@{ C011EC20='PASS retained: one genuine managed unwind into native RIP 0x1AE365; no reinterpretation'; C011EC19='PASS retained: four category-3 roots, six total roots, four stack Promote attempts/entries/returns'; C011EC15='PASS retained: queue chronology 4 -> 5, mark writes 0, child reads 0, graph traversal 0'; converter='PASS PE-to-ELF converter invocation and fixed-base map validation'; PowerShell='PASS parser validation'; sourceGuards='PASS locked-source and manifest checks'; ordinaryPayload='PASS restored by finally'; staticChecks='PASS git diff --check, serial checkpoints, native symbol/disassembly/unwind audit' }
+            retainedChronology=[ordered]@{ totalRoots='6'; category3Roots='4'; registerRoots='3'; stackRoots='1'; promoteAttempts='4'; promoteEntries='4'; promoteReturns='4'; firstStackDerivedSlot='retained historical C011EC19 value'; queueCursor='4 -> 5'; markWrites='0'; childReads='0'; graphTraversal='0' }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_NATIVE_TRANSITION_CONTINUATION.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+        }
+        $manifest | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT native transition continuation experiment: Outcome E / C011EC21" -ForegroundColor Green
     } elseif ($isC011EC20) {
         if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -notin @('C011EC20','C011EC20-SAFE_STOP') }).Count -ne 0) { throw "The C011EC20 caller-frame experiment did not produce $FreshBootCount classified unwind runs." }
         $firstC20Run = $runResults[0]

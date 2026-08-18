@@ -57,6 +57,11 @@ guidexos_nativeaot_gc_startup_platform_generation(void) {
     return g_generation;
 }
 
+extern "C" uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_get_native_continuation_hook(void) {
+    return installed() ? static_cast<uintptr_t>(g_table.reserved[0]) : 0u;
+}
+
 extern "C" void* GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_create_event(uint32_t manual_reset, uint32_t initial_state) {
     return installed() ? g_table.create_event(manual_reset, initial_state) : nullptr;

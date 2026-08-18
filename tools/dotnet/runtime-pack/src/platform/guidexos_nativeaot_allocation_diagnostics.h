@@ -1293,6 +1293,24 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t c011ec20SensitiveAllocationCount;
     uint32_t c011ec20Reserved[3];
 
+    /*
+     * C011EC21 native continuation evidence. These fields are append-only:
+     * C011EC19/C20 retain the managed-frame/root chronology above, while
+     * C011EC21 records the recovered native helper provenance and the
+     * metadata-governed stop at that helper.
+     */
+    uint32_t c011ec21NativeFrameCandidate;
+    uint32_t c011ec21NativeUnwindAttemptCount;
+    uint32_t c011ec21NativeUnwindMetadataAvailable;
+    uint32_t c011ec21NativeUnwindResult;
+    uint32_t c011ec21ManagedReentryFound;
+    uint32_t c011ec21ManagedStackBottomProven;
+    uint32_t c011ec21TransitionNullInterpretation;
+    uint32_t c011ec21TransitionLinkingDefect;
+    uint32_t c011ec21MarkerEmitted;
+    uint32_t c011ec21Outcome;
+    uint32_t c011ec21Reserved[2];
+
     uintptr_t c011ec20TransitionFrameType;
     uintptr_t c011ec20TransitionFrameAddress;
     uintptr_t c011ec20TransitionSavedRip;
@@ -1340,6 +1358,18 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec20CallerUnwindInfoSize;
     uintptr_t c011ec20CallerUnwindBlockFlags;
     uintptr_t c011ec20CallerGcInfo;
+
+    uintptr_t c011ec21NativeRip;
+    uintptr_t c011ec21NativeRsp;
+    uintptr_t c011ec21NativeRbp;
+    uintptr_t c011ec21NativeHelperStart;
+    uintptr_t c011ec21NativeHelperEnd;
+    uintptr_t c011ec21NativeFunctionOffset;
+    uintptr_t c011ec21NativeCallSite;
+    uintptr_t c011ec21NativeModuleIdentity;
+    uintptr_t c011ec21NativeSectionIdentity;
+    uintptr_t c011ec21NativeRuntimeFunction;
+    uintptr_t c011ec21NativeUnwindInfo;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

@@ -23,7 +23,7 @@
 #include "runtime/memory/guidexos_virtual_memory_region.h"
 #include "runtime/synchronization/guidexos_event.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_gc_startup_platform_contract.h"
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST) || defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_allocation_diagnostics.h"
 #endif
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
@@ -46,6 +46,10 @@ extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
 
 namespace kernel {
 namespace nativeaot_pal_qemu_test {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+extern "C" void __cdecl guideXosNativeAotC011EC21DescribeNativeCaller(
+    uintptr_t recoveredRip, uintptr_t recoveredRsp, uintptr_t recoveredRbp);
+#endif
 namespace {
 
 constexpr uintptr_t kPageSize = 0x1000u;
@@ -137,7 +141,7 @@ uint64_t g_lastWorkerThreadId = 0;
 uintptr_t g_lastWorkerStackLow = 0;
 uintptr_t g_lastWorkerStackHigh = 0;
 uintptr_t g_lastWorkerStackCurrent = 0;
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST) || defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
 uintptr_t g_firstAllocationDiagnosticsAddress = 0;
 
 // The NativeAOT image uses the Win64 TLS vector contract directly:
@@ -1108,6 +1112,10 @@ void fillStartupPlatformTable(
     table->virtual_memory_limit = startupVirtualLimit;
     table->physical_memory_limit = startupPhysicalLimit;
     table->memory_status = startupMemoryStatus;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+    table->reserved[0] = reinterpret_cast<uintptr_t>(
+        &guideXosNativeAotC011EC21DescribeNativeCaller);
+#endif
 }
 
 void runStartupImpl(const uint8_t* artifact, size_t artifactSize,
@@ -1959,7 +1967,7 @@ void runFirstRealAllocationImpl(
         return;
     }
     resetBridgeState(base, size, generation);
-#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
+#if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST) || defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
     g_firstAllocationDiagnosticsAddress = 0u;
 #endif
 
@@ -2354,6 +2362,40 @@ void runFirstRealAllocationImpl(
 #endif
 
 } // namespace
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+extern "C" void __cdecl guideXosNativeAotC011EC21DescribeNativeCaller(
+    uintptr_t recoveredRip, uintptr_t recoveredRsp, uintptr_t recoveredRbp) {
+    /*
+     * This callback is deliberately image-local and scalar-only. It obtains
+     * the helper symbol from the same linked translation unit, records the
+     * return-site instruction identified by the audited x64 call shape, and
+     * does not inspect stack memory or fabricate native unwind state.
+     */
+    const uintptr_t helperStart = reinterpret_cast<uintptr_t>(
+        &runFirstRealAllocationImpl);
+    /* The exact linked symbol interval is captured by the static audit. */
+    const uintptr_t helperEnd = 0u;
+    const uintptr_t callSite = recoveredRip >= 7u ? recoveredRip - 7u : 0u;
+    guidexos_nativeaot_allocation_diagnostics* diagnostics =
+        reinterpret_cast<guidexos_nativeaot_allocation_diagnostics*>(
+            g_firstAllocationDiagnosticsAddress);
+    if (diagnostics != nullptr) {
+        diagnostics->c011ec21NativeRip = recoveredRip;
+        diagnostics->c011ec21NativeRsp = recoveredRsp;
+        diagnostics->c011ec21NativeRbp = recoveredRbp;
+        diagnostics->c011ec21NativeHelperStart = helperStart;
+        diagnostics->c011ec21NativeHelperEnd = helperEnd;
+        diagnostics->c011ec21NativeFunctionOffset =
+            recoveredRip >= helperStart ? recoveredRip - helperStart : 0u;
+        diagnostics->c011ec21NativeCallSite = callSite;
+        diagnostics->c011ec21NativeModuleIdentity = 1u;
+        diagnostics->c011ec21NativeSectionIdentity = 1u;
+        diagnostics->c011ec21NativeRuntimeFunction = 0u;
+        diagnostics->c011ec21NativeUnwindInfo = 0u;
+    }
+}
+#endif
 
 void run(const uint8_t* artifact, size_t artifactSize,
          uintptr_t installAddress, uintptr_t mainAddress,

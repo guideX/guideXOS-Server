@@ -43,6 +43,8 @@ typedef uint64_t (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_gc_limit_hook)
 typedef void (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_gc_memory_status_hook)(
     uint64_t restricted_limit, uint32_t* memory_load,
     uint64_t* available_physical, uint64_t* available_page_file);
+typedef void (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_gc_native_continuation_hook)(
+    uintptr_t recovered_rip, uintptr_t recovered_rsp, uintptr_t recovered_rbp);
 
 #pragma pack(push, 8)
 typedef struct guidexos_nativeaot_gc_startup_platform_table_v1 {
@@ -95,6 +97,9 @@ guidexos_nativeaot_gc_uninstall_startup_platform_hooks(void);
 
 uint64_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_startup_platform_generation(void);
+
+uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_get_native_continuation_hook(void);
 
 void* GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_create_event(uint32_t manual_reset, uint32_t initial_state);

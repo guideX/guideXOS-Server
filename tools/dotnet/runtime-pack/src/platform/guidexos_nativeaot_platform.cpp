@@ -1,5 +1,8 @@
 #include <intrin.h>
 #include "guidexos_nativeaot_allocation_diagnostics.h"
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+#include "guidexos_nativeaot_gc_startup_platform_contract.h"
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
 #include "guidexos_nativeaot_thread_static_diagnostics.h"
 #endif
@@ -102,6 +105,21 @@ extern "C" guidexos_nativeaot_allocation_diagnostics
 [[noreturn]] void guideXosFailFast(gx_uint32 reason);
 #if defined(GUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION)
 extern "C" void __cdecl guideXosNativeAotAllocationContextFixupRequest();
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+extern "C" void __cdecl guideXosNativeAotC011EC21DescribeNativeCaller(
+    uintptr_t recoveredRip, uintptr_t recoveredRsp, uintptr_t recoveredRbp) {
+    const guidexos_nativeaot_gc_native_continuation_hook hook =
+        reinterpret_cast<guidexos_nativeaot_gc_native_continuation_hook>(
+            guidexos_nativeaot_gc_get_native_continuation_hook());
+    if (hook != nullptr) {
+        hook(recoveredRip, recoveredRsp, recoveredRbp);
+    } else {
+        g_guideXosAllocationDiagnostics.c011ec21TransitionLinkingDefect = 1u;
+    }
+}
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC21SafeStop(uint32_t reason);
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
@@ -5406,8 +5424,13 @@ guideXosNativeAotC011EC15GcScanRootsEntered(
     suspendEeSerialPutString(
         "[nativeaot-gc-unwind-gc-info] preflight marker=C011EC19-PREFLIGHT\n");
 #if defined(GUIDEXOS_NATIVEAOT_C011EC20_UNWIND)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-native-transition] preflight marker=C011EC21-PREFLIGHT\n");
+#else
     suspendEeSerialPutString(
         "[nativeaot-gc-unwind-caller-frame] preflight marker=C011EC20-PREFLIGHT\n");
+#endif
 #endif
 #endif
 #endif
@@ -6081,6 +6104,31 @@ guideXosNativeAotC011EC20UnwindCompleted(
     d.c011ec20CallerFrameDistinct =
         outputRip != d.c011ec20InputRip && outputRsp != d.c011ec20InputRsp ? 1u : 0u;
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+    /*
+     * C011EC21 deliberately stops at the first recovered native caller. The
+     * kernel-side provenance callback supplies the exact helper symbol and
+     * call-site identity from the same linked image; no stack word is read.
+     */
+    d.c011ec21NativeFrameCandidate = 1u;
+    d.c011ec21NativeRip = outputRip;
+    d.c011ec21NativeRsp = outputRsp;
+    d.c011ec21NativeRbp = outputRbp;
+    d.c011ec21NativeUnwindAttemptCount = 0u;
+    d.c011ec21NativeUnwindMetadataAvailable = 0u;
+    d.c011ec21NativeUnwindResult = 0u;
+    d.c011ec21ManagedReentryFound = 0u;
+    d.c011ec21ManagedStackBottomProven = 0u;
+    d.c011ec21TransitionNullInterpretation =
+        previousTransitionFrame == 0u ? 2u : 3u;
+    d.c011ec21TransitionLinkingDefect =
+        previousTransitionFrame == 0u ? 0u : 1u;
+    d.c011ec21Outcome = 5u;
+    guideXosNativeAotC011EC21DescribeNativeCaller(
+        outputRip, outputRsp, outputRbp);
+    guideXosNativeAotC011EC21SafeStop(0xC0210005u);
+#endif
+
     const bool transitionCrossed =
         d.c011ec20TransitionCrossingAttempts == 1u &&
         d.c011ec20TransitionCrossingResults == 1u;
@@ -6105,10 +6153,24 @@ guideXosNativeAotC011EC20UnwindCompleted(
 static void emitC011EC20SafeStop() {
     const guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
-    const bool proof = d.c011ec20Outcome == 1u || d.c011ec20Outcome == 5u;
+    const bool c011ec21 =
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+        d.c011ec21MarkerEmitted != 0u;
+#else
+        false;
+#endif
+    const bool proof = c011ec21
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+        ? d.c011ec21Outcome == 5u
+#else
+        ? false
+#endif
+        : (d.c011ec20Outcome == 1u || d.c011ec20Outcome == 5u);
     suspendEeSerialPutString(
-        proof ? "[nativeaot-gc-unwind-caller-frame] SAFE_STOP marker=C011EC20"
-              : "[nativeaot-gc-unwind-caller-frame] SAFE_STOP marker=C011EC20-SAFE_STOP");
+        c011ec21
+            ? "[nativeaot-gc-native-transition] SAFE_STOP marker=C011EC21"
+            : (proof ? "[nativeaot-gc-unwind-caller-frame] SAFE_STOP marker=C011EC20"
+                    : "[nativeaot-gc-unwind-caller-frame] SAFE_STOP marker=C011EC20-SAFE_STOP"));
 #define C20_HEX32(name, value) \
     suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
 #define C20_HEX64(name, value) \
@@ -6177,6 +6239,34 @@ static void emitC011EC20SafeStop() {
     C20_HEX32("callerFrameDistinct", d.c011ec20CallerFrameDistinct);
     C20_HEX32("outcome", d.c011ec20Outcome);
     C20_HEX32("safeStopReason", d.c011ec20SafeStopReason);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+    C20_HEX32("c21NativeFrameCandidate", d.c011ec21NativeFrameCandidate);
+    C20_HEX32("c21NativeUnwindAttempts", d.c011ec21NativeUnwindAttemptCount);
+    C20_HEX32("c21NativeUnwindMetadata", d.c011ec21NativeUnwindMetadataAvailable);
+    C20_HEX32("c21NativeUnwindResult", d.c011ec21NativeUnwindResult);
+    C20_HEX32("c21ManagedReentry", d.c011ec21ManagedReentryFound);
+    C20_HEX32("c21ManagedStackBottom", d.c011ec21ManagedStackBottomProven);
+    C20_HEX32("c21NullPredecessorMeaning", d.c011ec21TransitionNullInterpretation);
+    C20_HEX32("c21TransitionLinkingDefect", d.c011ec21TransitionLinkingDefect);
+    C20_HEX32("c21Outcome", d.c011ec21Outcome);
+    C20_HEX64("c21NativeRIP", d.c011ec21NativeRip);
+    C20_HEX64("c21NativeRSP", d.c011ec21NativeRsp);
+    C20_HEX64("c21NativeRBP", d.c011ec21NativeRbp);
+    C20_HEX64("c21HelperStart", d.c011ec21NativeHelperStart);
+    C20_HEX64("c21HelperEnd", d.c011ec21NativeHelperEnd);
+    C20_HEX64("c21FunctionOffset", d.c011ec21NativeFunctionOffset);
+    C20_HEX64("c21CallSite", d.c011ec21NativeCallSite);
+    C20_HEX64("c21ModuleIdentity", d.c011ec21NativeModuleIdentity);
+    C20_HEX64("c21SectionIdentity", d.c011ec21NativeSectionIdentity);
+    C20_HEX64("c21RuntimeFunction", d.c011ec21NativeRuntimeFunction);
+    C20_HEX64("c21UnwindInfo", d.c011ec21NativeUnwindInfo);
+    C20_HEX32("c19SecondQueueInsertions", d.c011ec19SecondQueueInsertionCount);
+    C20_HEX64("c19SecondQueueSlot", d.c011ec19SecondQueueSlot);
+    C20_HEX64("c19SecondQueueCursorBefore", d.c011ec19SecondQueueCursorBefore);
+    C20_HEX64("c19SecondQueueCursorAfter", d.c011ec19SecondQueueCursorAfter);
+    C20_HEX64("c19SecondQueueOld", d.c011ec19SecondQueueOldValue);
+    C20_HEX64("c19SecondQueueNew", d.c011ec19SecondQueueNewValue);
+#endif
     C20_HEX32("c19RootReports", d.c011ec19RootReportCount);
     C20_HEX32("c19RegisterRoots", d.c011ec19RegisterRootCount);
     C20_HEX32("c19StackRoots", d.c011ec19StackRootCount);
@@ -6201,9 +6291,26 @@ static void emitC011EC20SafeStop() {
 #undef C20_HEX32
 #undef C20_HEX64
     suspendEeSerialPutString(" marker=");
-    suspendEeSerialPutString(proof ? "C011EC20" : "C011EC20-SAFE_STOP");
+    suspendEeSerialPutString(c011ec21 ? "C011EC21" : (proof ? "C011EC20" : "C011EC20-SAFE_STOP"));
     suspendEeSerialPutString("\n");
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC21SafeStop(uint32_t reason) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec21MarkerEmitted = 1u;
+    d.c011ec21Outcome = 5u;
+    d.c011ec20SafeStopReason = reason;
+    d.safeStopObserved = 1u;
+    d.stopReason = GUIDEXOS_NATIVEAOT_CALLER_FRAME_UNWIND_MARKER;
+    d.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F33_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP;
+    emitC011EC20SafeStop();
+    for (;;) {
+    }
+}
+#endif
 
 extern "C" __declspec(noreturn) void __cdecl
 guideXosNativeAotC011EC20SafeStop(uint32_t reason) {
