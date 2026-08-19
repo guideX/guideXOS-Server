@@ -9,6 +9,7 @@
 #endif
 
 #include "include/kernel/nativeaot_pal_qemu_test.h"
+#include "include/kernel/native_unwind_provider.h"
 
 #if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 
@@ -1115,6 +1116,8 @@ void fillStartupPlatformTable(
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
     table->reserved[0] = reinterpret_cast<uintptr_t>(
         &guideXosNativeAotC011EC21DescribeNativeCaller);
+    table->reserved[GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_PLATFORM_RESERVED_INDEX] =
+        reinterpret_cast<uintptr_t>(&guideXosNativeUnwindLookup);
 #endif
 }
 
@@ -1928,7 +1931,8 @@ void runFirstRealAllocationImpl(
     uintptr_t getAllocationCountAddress, uintptr_t getLastAllocationSizeAddress,
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
-    uint64_t generation, uintptr_t beginExperimentAddress) {
+    uint64_t generation, uintptr_t beginExperimentAddress,
+    uintptr_t standaloneNativeUnwindAddress) {
     bool allPassed = true;
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     serial::puts("[nativeaot-thread-static] BEGIN\n");
@@ -1966,6 +1970,57 @@ void runFirstRealAllocationImpl(
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
     }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+    // The kernel native module is registered before NativeAOT initialization
+    // and well before any EE-suspended path.  Preflight uses the actual
+    // relinked helper address and the same generic PC lookup callback that the
+    // iterator will use; it does not special-case the helper in the provider.
+    const int32_t nativeModuleRegistration =
+        guideXosNativeUnwindRegisterKernelModule();
+    firstAllocationStatus("Kernel native unwind module registration",
+                          nativeModuleRegistration == 0, allPassed);
+    guidexos_nativeaot_native_unwind_lookup_result preflight = {};
+    const uintptr_t actualHelperPc = reinterpret_cast<uintptr_t>(
+        &runFirstRealAllocationImpl);
+    const int32_t preflightLookup = guideXosNativeUnwindLookup(
+        actualHelperPc, &preflight);
+    uint32_t secondNativeFunctionIndex = 0xFFFFFFFFu;
+    const int32_t focusedCoverage = guideXosNativeUnwindValidateFocusedCoverage(
+        &secondNativeFunctionIndex);
+    firstAllocationStatus("Kernel native unwind helper lookup",
+                          preflightLookup == 0, allPassed);
+    firstAllocationStatus("Kernel native unwind focused coverage",
+                          focusedCoverage == 0, allPassed);
+    if (nativeModuleRegistration == 0 && preflightLookup == 0 &&
+        focusedCoverage == 0) {
+        serial::puts("[nativeaot-gc-native-unwind] preflight marker=C011EC23-PREFLIGHT");
+        serial::puts(" helperPC=");
+        serial::put_hex64(actualHelperPc);
+        serial::puts(" moduleBase=");
+        serial::put_hex64(preflight.module_base);
+        serial::puts(" pdataStart=");
+        serial::put_hex64(preflight.pdata_start);
+        serial::puts(" pdataEnd=");
+        serial::put_hex64(preflight.pdata_end);
+        serial::puts(" runtimeFunction=");
+        serial::put_hex64(preflight.runtime_function);
+        serial::puts(" unwindInfo=");
+        serial::put_hex64(preflight.unwind_info);
+        serial::puts(" beginRVA=");
+        serial::put_hex64(preflight.begin_address);
+        serial::puts(" endRVA=");
+        serial::put_hex64(preflight.end_address);
+        serial::puts(" unwindRVA=");
+        serial::put_hex64(preflight.unwind_data);
+        serial::puts(" entries=");
+        serial::put_hex32(static_cast<uint32_t>(
+            (preflight.pdata_end - preflight.pdata_start) / 12u));
+        serial::puts(" focusedCoverage=1 secondFunctionIndex=");
+        serial::put_hex32(secondNativeFunctionIndex);
+        serial::puts("\n");
+    }
+#endif
     resetBridgeState(base, size, generation);
 #if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST) || defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
     g_firstAllocationDiagnosticsAddress = 0u;
@@ -2055,6 +2110,21 @@ void runFirstRealAllocationImpl(
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
     }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
+    // InitializeModules clears the real-GC diagnostics record.  Run the
+    // standalone native check after that initialization, but still before
+    // ManagedMain can request a collection or enter the suspended walk.
+    if (standaloneNativeUnwindAddress != 0u) {
+        using StandaloneNativeUnwind = uint32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+            uintptr_t);
+        const uint32_t standaloneResult =
+            reinterpret_cast<StandaloneNativeUnwind>(standaloneNativeUnwindAddress)(
+                reinterpret_cast<uintptr_t>(&runFirstRealAllocationImpl));
+        firstAllocationStatus("Second genuine native unwind",
+                              standaloneResult == 1u, allPassed);
+    }
+#endif
 
     if (beginExperimentAddress != 0u) {
         using BeginExperiment = void (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
@@ -2433,14 +2503,15 @@ void runFirstRealAllocation(
     uintptr_t getAllocationCountAddress, uintptr_t getLastAllocationSizeAddress,
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
-    uint64_t generation, uintptr_t beginExperimentAddress) {
+    uint64_t generation, uintptr_t beginExperimentAddress,
+    uintptr_t standaloneNativeUnwindAddress) {
     runFirstRealAllocationImpl(
         artifact, artifactSize, installPalAddress, installTableAddress,
         installPlatformAddress, startupMainAddress, getStateAddress,
         getPreGcStateAddress, getAllocationCountAddress,
         getLastAllocationSizeAddress, getDiagnosticStageAddress,
         managedMainAddress, finalizeAddress, getDiagnosticsAddress, generation,
-        beginExperimentAddress);
+        beginExperimentAddress, standaloneNativeUnwindAddress);
 }
 #endif
 #endif

@@ -1,5 +1,6 @@
 #include <intrin.h>
 #include "guidexos_nativeaot_allocation_diagnostics.h"
+#include "guidexos_nativeaot_amd64_unwind_primitive.h"
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #endif
@@ -120,6 +121,10 @@ extern "C" void __cdecl guideXosNativeAotC011EC21DescribeNativeCaller(
 }
 extern "C" __declspec(noreturn) void __cdecl
 guideXosNativeAotC011EC21SafeStop(uint32_t reason);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC23SafeStop(uint32_t reason);
+#endif
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
@@ -5140,6 +5145,393 @@ static bool c011ec18IsInsideManagedRange(
     return inside;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
+/*
+ * This is the narrow PAL bridge for the locked iterator's REGDISPLAY.  It
+ * mirrors only the AMD64 prefix used by the locked regdisplay.h and keeps the
+ * native provider independent from NativeAOT's managed ICodeManager ABI.
+ */
+struct GuideXosNativeAmd64RegDisplay {
+    uintptr_t pRax;
+    uintptr_t pRcx;
+    uintptr_t pRdx;
+    uintptr_t pRbx;
+    uintptr_t pRbp;
+    uintptr_t pRsi;
+    uintptr_t pRdi;
+    uintptr_t pR8;
+    uintptr_t pR9;
+    uintptr_t pR10;
+    uintptr_t pR11;
+    uintptr_t pR12;
+    uintptr_t pR13;
+    uintptr_t pR14;
+    uintptr_t pR15;
+    uintptr_t SP;
+    uintptr_t IP;
+};
+
+constexpr size_t kC011EC23ContextRbx = 0x90u;
+constexpr size_t kC011EC23ContextRsp = 0x98u;
+constexpr size_t kC011EC23ContextRbp = 0xA0u;
+constexpr size_t kC011EC23ContextRsi = 0xA8u;
+constexpr size_t kC011EC23ContextRdi = 0xB0u;
+constexpr size_t kC011EC23ContextR12 = 0xD8u;
+constexpr size_t kC011EC23ContextR13 = 0xE0u;
+constexpr size_t kC011EC23ContextR14 = 0xE8u;
+constexpr size_t kC011EC23ContextR15 = 0xF0u;
+constexpr size_t kC011EC23ContextRip = 0xF8u;
+constexpr uint32_t kC011EC23MaximumNativeFrames = 8u;
+
+alignas(16) uint64_t g_c011ec23StandaloneStack[4096] = {};
+
+struct GuideXosC011Ec23StandaloneEvidence {
+    uint32_t attempted;
+    uint32_t succeeded;
+    uint32_t result;
+    uint32_t index;
+    uintptr_t runtimeFunction;
+    uintptr_t unwindInfo;
+    uintptr_t outputRip;
+    uintptr_t outputRsp;
+};
+
+GuideXosC011Ec23StandaloneEvidence g_c011ec23StandaloneEvidence = {};
+
+uint16_t c011ec23UnwindWord(const uint8_t* bytes, uint32_t slot) {
+    return static_cast<uint16_t>(bytes[slot * 2u]) |
+           static_cast<uint16_t>(bytes[slot * 2u + 1u]) << 8;
+}
+
+bool c011ec23StandaloneSafeShape(const uint8_t* unwindInfo,
+                                 uint32_t* maximumOffset) {
+    if (unwindInfo == nullptr || maximumOffset == nullptr ||
+        (unwindInfo[0] & 0x07u) != 1u || (unwindInfo[0] >> 3) != 0u) {
+        return false;
+    }
+    const uint32_t codeCount = unwindInfo[2];
+    uint32_t slotsUsed = 0u;
+    uint32_t stackAdvance = 0u;
+    uint32_t largestAccess = 0u;
+    while (slotsUsed < codeCount) {
+        const uint16_t word = c011ec23UnwindWord(unwindInfo + 4u, slotsUsed);
+        const uint32_t unwindOp = (word >> 8) & 0x0Fu;
+        const uint32_t opInfo = word >> 12;
+        uint32_t slots = 1u;
+        switch (unwindOp) {
+            case 0u: // UWOP_PUSH_NONVOL
+                stackAdvance += 8u;
+                break;
+            case 1u: // UWOP_ALLOC_LARGE
+                if (opInfo != 0u || slotsUsed + 1u >= codeCount) return false;
+                stackAdvance += static_cast<uint32_t>(
+                    c011ec23UnwindWord(unwindInfo + 4u, slotsUsed + 1u)) * 8u;
+                slots = 2u;
+                break;
+            case 2u: // UWOP_ALLOC_SMALL
+                stackAdvance += opInfo * 8u + 8u;
+                break;
+            case 4u: // UWOP_SAVE_NONVOL
+                if (slotsUsed + 1u >= codeCount) return false;
+                largestAccess = stackAdvance + static_cast<uint32_t>(
+                    c011ec23UnwindWord(unwindInfo + 4u, slotsUsed + 1u)) * 8u;
+                slots = 2u;
+                break;
+            default:
+                // The small standalone harness intentionally does not invent
+                // XMM, frame-register, far-save, or machine-frame state.
+                return false;
+        }
+        if (stackAdvance > 0x5000u || largestAccess > 0x5000u) return false;
+        slotsUsed += slots;
+    }
+    if (slotsUsed != codeCount) return false;
+    *maximumOffset = stackAdvance > largestAccess ? stackAdvance : largestAccess;
+    return *maximumOffset < 0x5000u;
+}
+
+bool c011ec23RunStandaloneSecondUnwind(
+    const guidexos_nativeaot_native_unwind_lookup_result& seed,
+    guidexos_nativeaot_allocation_diagnostics& diagnostics) {
+    const uintptr_t pdataStart = static_cast<uintptr_t>(seed.pdata_start);
+    const uintptr_t pdataEnd = static_cast<uintptr_t>(seed.pdata_end);
+    if (pdataStart == 0u || pdataEnd <= pdataStart ||
+        (pdataEnd - pdataStart) % sizeof(guidexos_nativeaot_runtime_function) != 0u) {
+        return false;
+    }
+    const uint32_t count = static_cast<uint32_t>(
+        (pdataEnd - pdataStart) / sizeof(guidexos_nativeaot_runtime_function));
+    const auto* table = reinterpret_cast<const guidexos_nativeaot_runtime_function*>(
+        pdataStart);
+    for (uint32_t index = 1u; index < count; ++index) {
+        if (index == seed.table_index) continue;
+        const auto& entry = table[index];
+        const uintptr_t infoAddress = static_cast<uintptr_t>(seed.module_base) +
+            entry.unwind_data;
+        const uint8_t* info = reinterpret_cast<const uint8_t*>(infoAddress);
+        if (info[2] < 2u) continue;
+        uint32_t maximumOffset = 0u;
+        if (!c011ec23StandaloneSafeShape(info, &maximumOffset)) continue;
+        const uintptr_t functionStart = static_cast<uintptr_t>(seed.module_base) +
+            entry.begin_address;
+        if (entry.begin_address >= entry.end_address ||
+            entry.end_address - entry.begin_address < 2u) continue;
+
+        for (uint32_t slot = 0u; slot < 4096u; ++slot) {
+            g_c011ec23StandaloneStack[slot] =
+                UINT64_C(0xC0235EC000000000) + slot;
+        }
+        uint8_t context[0x100u] = {};
+        uint64_t* contextPointers[10] = {};
+        const uintptr_t initialRsp = reinterpret_cast<uintptr_t>(
+            &g_c011ec23StandaloneStack[1024]);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRsp) = initialRsp;
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRbp) = initialRsp;
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRip) =
+            functionStart + (info[1] + 1u < entry.end_address - entry.begin_address
+                ? info[1] + 1u : 1u);
+        void* handlerData = nullptr;
+        uint64_t establisherFrame = 0u;
+        guideXosRtlVirtualUnwind(
+            0u, seed.module_base,
+            *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRip),
+            const_cast<guidexos_nativeaot_runtime_function*>(&entry), context,
+            &handlerData, &establisherFrame, contextPointers);
+        const uintptr_t outputRip = static_cast<uintptr_t>(
+            *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRip));
+        const uintptr_t outputRsp = static_cast<uintptr_t>(
+            *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRsp));
+        diagnostics.c011ec23SecondFunctionAttempted = 1u;
+        diagnostics.c011ec23SecondFunctionIndex = index;
+        diagnostics.c011ec23SecondRuntimeFunction =
+            reinterpret_cast<uintptr_t>(&entry);
+        diagnostics.c011ec23SecondUnwindInfo = infoAddress;
+        diagnostics.c011ec23SecondOutputRip = outputRip;
+        diagnostics.c011ec23SecondOutputRsp = outputRsp;
+        diagnostics.c011ec23SecondFunctionResult =
+            outputRip != 0u && outputRsp > initialRsp &&
+            (outputRsp & (sizeof(uintptr_t) - 1u)) == 0u ? 1u : 2u;
+        diagnostics.c011ec23SecondFunctionSucceeded =
+            diagnostics.c011ec23SecondFunctionResult == 1u ? 1u : 0u;
+        g_c011ec23StandaloneEvidence.attempted = 1u;
+        g_c011ec23StandaloneEvidence.succeeded =
+            diagnostics.c011ec23SecondFunctionSucceeded;
+        g_c011ec23StandaloneEvidence.result =
+            diagnostics.c011ec23SecondFunctionResult;
+        g_c011ec23StandaloneEvidence.index = index;
+        g_c011ec23StandaloneEvidence.runtimeFunction =
+            diagnostics.c011ec23SecondRuntimeFunction;
+        g_c011ec23StandaloneEvidence.unwindInfo =
+            diagnostics.c011ec23SecondUnwindInfo;
+        g_c011ec23StandaloneEvidence.outputRip =
+            diagnostics.c011ec23SecondOutputRip;
+        g_c011ec23StandaloneEvidence.outputRsp =
+            diagnostics.c011ec23SecondOutputRsp;
+        if (diagnostics.c011ec23SecondFunctionSucceeded != 0u) return true;
+    }
+    return false;
+}
+
+uint64_t c011ec23LoadRegister(uintptr_t location) {
+    return location == 0u ? 0u : *reinterpret_cast<const uint64_t*>(location);
+}
+
+void c011ec23StoreRegDisplayLocations(
+    GuideXosNativeAmd64RegDisplay* display, uint64_t** locations) {
+    if (display == nullptr || locations == nullptr) return;
+    display->pRbx = reinterpret_cast<uintptr_t>(locations[0]);
+    display->pRbp = reinterpret_cast<uintptr_t>(locations[2]);
+    display->pRsi = reinterpret_cast<uintptr_t>(locations[3]);
+    display->pRdi = reinterpret_cast<uintptr_t>(locations[4]);
+    display->pR12 = reinterpret_cast<uintptr_t>(locations[5]);
+    display->pR13 = reinterpret_cast<uintptr_t>(locations[6]);
+    display->pR14 = reinterpret_cast<uintptr_t>(locations[7]);
+    display->pR15 = reinterpret_cast<uintptr_t>(locations[8]);
+}
+
+extern "C" uint32_t __cdecl
+guideXosNativeAotC011EC23TryNativeUnwind(
+    uintptr_t controlPc, uintptr_t regDisplayAddress) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (g_c011ec23StandaloneEvidence.succeeded != 0u) {
+        d.c011ec23SecondFunctionAttempted =
+            g_c011ec23StandaloneEvidence.attempted;
+        d.c011ec23SecondFunctionSucceeded =
+            g_c011ec23StandaloneEvidence.succeeded;
+        d.c011ec23SecondFunctionResult = g_c011ec23StandaloneEvidence.result;
+        d.c011ec23SecondFunctionIndex = g_c011ec23StandaloneEvidence.index;
+        d.c011ec23SecondRuntimeFunction =
+            g_c011ec23StandaloneEvidence.runtimeFunction;
+        d.c011ec23SecondUnwindInfo = g_c011ec23StandaloneEvidence.unwindInfo;
+        d.c011ec23SecondOutputRip = g_c011ec23StandaloneEvidence.outputRip;
+        d.c011ec23SecondOutputRsp = g_c011ec23StandaloneEvidence.outputRsp;
+    }
+    GuideXosNativeAmd64RegDisplay* display =
+        reinterpret_cast<GuideXosNativeAmd64RegDisplay*>(regDisplayAddress);
+    if (display == nullptr || controlPc == 0u) {
+        d.c011ec23UnwindResult = 4u;
+        d.c011ec23Outcome = 4u;
+        return 0u;
+    }
+
+    uintptr_t currentPc = controlPc;
+    for (uint32_t frameIndex = 0u;
+         frameIndex < kC011EC23MaximumNativeFrames; ++frameIndex) {
+        ++d.c011ec23LookupAttemptCount;
+        guidexos_nativeaot_native_unwind_lookup_result lookup = {};
+        if (guidexos_nativeaot_gc_native_unwind_lookup(currentPc, &lookup) != 0) {
+            if (d.c011ec23NativeFramesCrossed != 0u) {
+                d.c011ec23UnwindResult = 3u;
+                d.c011ec23Outcome = 3u;
+                guideXosNativeAotC011EC23SafeStop(0xC0230003u);
+            }
+            d.c011ec23UnwindResult = 4u;
+            d.c011ec23Outcome = 4u;
+            return 0u;
+        }
+
+        ++d.c011ec23LookupSuccessCount;
+        if (frameIndex == 0u) {
+            d.c011ec23InputRip = currentPc;
+            d.c011ec23InputRsp = display->SP;
+            d.c011ec23InputRbp = c011ec23LoadRegister(display->pRbp);
+            d.c011ec23ModuleBase = static_cast<uintptr_t>(lookup.module_base);
+            d.c011ec23ExecutableStart = static_cast<uintptr_t>(lookup.executable_start);
+            d.c011ec23ExecutableEnd = static_cast<uintptr_t>(lookup.executable_end);
+            d.c011ec23PdataStart = static_cast<uintptr_t>(lookup.pdata_start);
+            d.c011ec23PdataEnd = static_cast<uintptr_t>(lookup.pdata_end);
+            d.c011ec23XdataStart = static_cast<uintptr_t>(lookup.xdata_start);
+            d.c011ec23XdataEnd = static_cast<uintptr_t>(lookup.xdata_end);
+            d.c011ec23RuntimeFunction = static_cast<uintptr_t>(lookup.runtime_function);
+            d.c011ec23UnwindInfo = static_cast<uintptr_t>(lookup.unwind_info);
+            d.c011ec23BeginAddress = lookup.begin_address;
+            d.c011ec23EndAddress = lookup.end_address;
+            d.c011ec23UnwindData = lookup.unwind_data;
+            d.c011ec23UnwindVersion = lookup.unwind_version;
+            d.c011ec23UnwindFlags = lookup.unwind_flags;
+            d.c011ec23PrologueSize = lookup.prologue_size;
+            d.c011ec23UnwindCodeCount = lookup.unwind_code_count;
+            d.c011ec23FrameRegister = lookup.frame_register;
+            d.c011ec23FrameOffset = lookup.frame_offset;
+        }
+
+        uint8_t context[0x100u] = {};
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRbx) =
+            c011ec23LoadRegister(display->pRbx);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRsp) = display->SP;
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRbp) =
+            c011ec23LoadRegister(display->pRbp);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRsi) =
+            c011ec23LoadRegister(display->pRsi);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRdi) =
+            c011ec23LoadRegister(display->pRdi);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextR12) =
+            c011ec23LoadRegister(display->pR12);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextR13) =
+            c011ec23LoadRegister(display->pR13);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextR14) =
+            c011ec23LoadRegister(display->pR14);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextR15) =
+            c011ec23LoadRegister(display->pR15);
+        *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRip) = currentPc;
+
+        uint64_t* contextPointers[10] = {};
+        contextPointers[0] = reinterpret_cast<uint64_t*>(display->pRbx);
+        contextPointers[2] = reinterpret_cast<uint64_t*>(display->pRbp);
+        contextPointers[3] = reinterpret_cast<uint64_t*>(display->pRsi);
+        contextPointers[4] = reinterpret_cast<uint64_t*>(display->pRdi);
+        contextPointers[5] = reinterpret_cast<uint64_t*>(display->pR12);
+        contextPointers[6] = reinterpret_cast<uint64_t*>(display->pR13);
+        contextPointers[7] = reinterpret_cast<uint64_t*>(display->pR14);
+        contextPointers[8] = reinterpret_cast<uint64_t*>(display->pR15);
+
+        void* handlerData = nullptr;
+        uint64_t establisherFrame = 0u;
+        ++d.c011ec23UnwindAttemptCount;
+        ++d.c011ec23RtlVirtualUnwindCallCount;
+        guideXosRtlVirtualUnwind(
+            0u, lookup.module_base, currentPc,
+            reinterpret_cast<void*>(lookup.runtime_function),
+            context, &handlerData, &establisherFrame, contextPointers);
+        ++d.c011ec23RtlVirtualUnwindReturned;
+
+        const uintptr_t outputRip = static_cast<uintptr_t>(
+            *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRip));
+        const uintptr_t outputRsp = static_cast<uintptr_t>(
+            *reinterpret_cast<uint64_t*>(context + kC011EC23ContextRsp));
+        const uintptr_t outputRbp = c011ec23LoadRegister(display->pRbp);
+        if (frameIndex == 0u) {
+            d.c011ec23OutputRip = outputRip;
+            d.c011ec23OutputRsp = outputRsp;
+            d.c011ec23OutputRbp = outputRbp;
+            d.c011ec23EstablisherFrame = static_cast<uintptr_t>(establisherFrame);
+            d.c011ec23HandlerData = reinterpret_cast<uintptr_t>(handlerData);
+            d.c011ec23RestoredRbx = c011ec23LoadRegister(display->pRbx);
+            d.c011ec23RestoredRbp = c011ec23LoadRegister(display->pRbp);
+            d.c011ec23RestoredRsi = c011ec23LoadRegister(display->pRsi);
+            d.c011ec23RestoredRdi = c011ec23LoadRegister(display->pRdi);
+            d.c011ec23RestoredR12 = c011ec23LoadRegister(display->pR12);
+            d.c011ec23RestoredR13 = c011ec23LoadRegister(display->pR13);
+            d.c011ec23RestoredR14 = c011ec23LoadRegister(display->pR14);
+            d.c011ec23RestoredR15 = c011ec23LoadRegister(display->pR15);
+            d.c011ec23RestoredRegisterCount =
+                (contextPointers[0] != nullptr ? 1u : 0u) +
+                (contextPointers[2] != nullptr ? 1u : 0u) +
+                (contextPointers[3] != nullptr ? 1u : 0u) +
+                (contextPointers[4] != nullptr ? 1u : 0u) +
+                (contextPointers[5] != nullptr ? 1u : 0u) +
+                (contextPointers[6] != nullptr ? 1u : 0u) +
+                (contextPointers[7] != nullptr ? 1u : 0u) +
+                (contextPointers[8] != nullptr ? 1u : 0u);
+        }
+        if (outputRip == 0u || outputRsp <= display->SP ||
+            (outputRsp & (sizeof(uintptr_t) - 1u)) != 0u) {
+            d.c011ec23UnwindResult = 5u;
+            d.c011ec23Outcome = 5u;
+            return 0u;
+        }
+
+        display->SP = outputRsp;
+        display->IP = outputRip;
+        c011ec23StoreRegDisplayLocations(display, contextPointers);
+        ++d.c011ec23NativeFramesCrossed;
+        currentPc = outputRip;
+
+        RuntimeInstance* runtime = GetRuntimeInstance();
+        ICodeManager* callerCodeManager = nullptr;
+        if (c011ec18IsInsideManagedRange(currentPc, runtime,
+                                         &callerCodeManager)) {
+            d.c011ec23ManagedReentryFound = 1u;
+            d.c011ec23CallerManagedRange = 1u;
+            d.c011ec23CallerCodeManager =
+                reinterpret_cast<uintptr_t>(callerCodeManager);
+            d.c011ec23CallerCodeManagerFound = callerCodeManager != nullptr ? 1u : 0u;
+            d.c011ec23UnwindResult = 1u;
+            d.c011ec23Outcome = 2u;
+            return 1u;
+        }
+    }
+
+    d.c011ec23UnwindResult = 3u;
+    d.c011ec23Outcome = 3u;
+    guideXosNativeAotC011EC23SafeStop(0xC0230008u);
+}
+
+extern "C" __declspec(dllexport) uint32_t __cdecl
+guideXosNativeAotC011EC23StandaloneNativeUnwind(uintptr_t helperPc) {
+    guidexos_nativeaot_allocation_diagnostics& diagnostics =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_native_unwind_lookup_result helper = {};
+    if (helperPc == 0u || guidexos_nativeaot_gc_native_unwind_lookup(
+            helperPc, &helper) != 0) {
+        diagnostics.c011ec23SecondFunctionResult = 2u;
+        return 0u;
+    }
+    return c011ec23RunStandaloneSecondUnwind(helper, diagnostics) ? 1u : 0u;
+}
+#endif
+
 static void emitC011EC18Marker() {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
@@ -5377,6 +5769,17 @@ guideXosNativeAotC011EC18IteratorFindMethodInfo(
         ++d.c011ec18FindMethodInfoSuccessCount;
         d.c011ec18MethodMetadataValid = methodInfo != 0u ? 1u : 0u;
         emitC011EC18Marker();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
+        if (d.c011ec23ManagedReentryFound != 0u &&
+            controlPc == d.c011ec23OutputRip && methodInfo != 0u) {
+            d.c011ec23CallerFindMethodInfoAttempts = 1u;
+            d.c011ec23CallerFindMethodInfoSuccess = 1u;
+            d.c011ec23CallerMethodInfo = methodInfo;
+            d.c011ec23UnwindResult = 2u;
+            d.c011ec23Outcome = 2u;
+            guideXosNativeAotC011EC23SafeStop(0xC0230002u);
+        }
+#endif
     }
     suspendEeSerialPutString("[nativeaot-code-manager] C011EC18 FindMethodInfo controlPC=");
     suspendEeSerialPutHex64(controlPc);
@@ -5425,8 +5828,13 @@ guideXosNativeAotC011EC15GcScanRootsEntered(
         "[nativeaot-gc-unwind-gc-info] preflight marker=C011EC19-PREFLIGHT\n");
 #if defined(GUIDEXOS_NATIVEAOT_C011EC20_UNWIND)
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-native-unwind] preflight marker=C011EC23-PREFLIGHT\n");
+#else
     suspendEeSerialPutString(
         "[nativeaot-gc-native-transition] preflight marker=C011EC21-PREFLIGHT\n");
+#endif
 #else
     suspendEeSerialPutString(
         "[nativeaot-gc-unwind-caller-frame] preflight marker=C011EC20-PREFLIGHT\n");
@@ -6104,7 +6512,8 @@ guideXosNativeAotC011EC20UnwindCompleted(
     d.c011ec20CallerFrameDistinct =
         outputRip != d.c011ec20InputRip && outputRsp != d.c011ec20InputRsp ? 1u : 0u;
 
-#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION) && \
+    !defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
     /*
      * C011EC21 deliberately stops at the first recovered native caller. The
      * kernel-side provenance callback supplies the exact helper symbol and
@@ -6129,6 +6538,7 @@ guideXosNativeAotC011EC20UnwindCompleted(
     guideXosNativeAotC011EC21SafeStop(0xC0210005u);
 #endif
 
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
     const bool transitionCrossed =
         d.c011ec20TransitionCrossingAttempts == 1u &&
         d.c011ec20TransitionCrossingResults == 1u;
@@ -6148,6 +6558,7 @@ guideXosNativeAotC011EC20UnwindCompleted(
     }
     d.c011ec20Outcome = callerInManagedRange ? 1u : 5u; // A or legitimate native E.
     guideXosNativeAotC011EC20SafeStop(callerInManagedRange ? 0xC0200001u : 0xC0200005u);
+#endif
 }
 
 static void emitC011EC20SafeStop() {
@@ -6294,6 +6705,114 @@ static void emitC011EC20SafeStop() {
     suspendEeSerialPutString(c011ec21 ? "C011EC21" : (proof ? "C011EC20" : "C011EC20-SAFE_STOP"));
     suspendEeSerialPutString("\n");
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
+static void emitC011EC23SafeStop() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-native-unwind] SAFE_STOP");
+#define C23_HEX32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C23_HEX64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C23_HEX32("lookupAttempts", d.c011ec23LookupAttemptCount);
+    C23_HEX32("lookupSuccesses", d.c011ec23LookupSuccessCount);
+    C23_HEX32("unwindAttempts", d.c011ec23UnwindAttemptCount);
+    C23_HEX32("rtlVirtualUnwindCalls", d.c011ec23RtlVirtualUnwindCallCount);
+    C23_HEX32("rtlVirtualUnwindReturned", d.c011ec23RtlVirtualUnwindReturned);
+    C23_HEX32("unwindResult", d.c011ec23UnwindResult);
+    C23_HEX32("nativeFramesCrossed", d.c011ec23NativeFramesCrossed);
+    C23_HEX32("managedReentry", d.c011ec23ManagedReentryFound);
+    C23_HEX32("callerManagedRange", d.c011ec23CallerManagedRange);
+    C23_HEX32("callerCodeManagerFound", d.c011ec23CallerCodeManagerFound);
+    C23_HEX32("callerFindMethodInfoAttempts", d.c011ec23CallerFindMethodInfoAttempts);
+    C23_HEX32("callerFindMethodInfoSuccess", d.c011ec23CallerFindMethodInfoSuccess);
+    C23_HEX32("secondFunctionAttempted", d.c011ec23SecondFunctionAttempted);
+    C23_HEX32("secondFunctionSucceeded", d.c011ec23SecondFunctionSucceeded);
+    C23_HEX32("secondFunctionResult", d.c011ec23SecondFunctionResult);
+    C23_HEX32("secondFunctionIndex", d.c011ec23SecondFunctionIndex);
+    C23_HEX64("inputRIP", d.c011ec23InputRip);
+    C23_HEX64("inputRSP", d.c011ec23InputRsp);
+    C23_HEX64("inputRBP", d.c011ec23InputRbp);
+    C23_HEX64("outputRIP", d.c011ec23OutputRip);
+    C23_HEX64("outputRSP", d.c011ec23OutputRsp);
+    C23_HEX64("outputRBP", d.c011ec23OutputRbp);
+    C23_HEX64("establisherFrame", d.c011ec23EstablisherFrame);
+    C23_HEX64("handlerData", d.c011ec23HandlerData);
+    C23_HEX64("moduleBase", d.c011ec23ModuleBase);
+    C23_HEX64("executableStart", d.c011ec23ExecutableStart);
+    C23_HEX64("executableEnd", d.c011ec23ExecutableEnd);
+    C23_HEX64("pdataStart", d.c011ec23PdataStart);
+    C23_HEX64("pdataEnd", d.c011ec23PdataEnd);
+    C23_HEX64("xdataStart", d.c011ec23XdataStart);
+    C23_HEX64("xdataEnd", d.c011ec23XdataEnd);
+    C23_HEX64("runtimeFunction", d.c011ec23RuntimeFunction);
+    C23_HEX64("unwindInfo", d.c011ec23UnwindInfo);
+    C23_HEX64("beginRVA", d.c011ec23BeginAddress);
+    C23_HEX64("endRVA", d.c011ec23EndAddress);
+    C23_HEX64("unwindRVA", d.c011ec23UnwindData);
+    C23_HEX32("unwindVersion", d.c011ec23UnwindVersion);
+    C23_HEX32("unwindFlags", d.c011ec23UnwindFlags);
+    C23_HEX32("prologueSize", d.c011ec23PrologueSize);
+    C23_HEX32("unwindCodeCount", d.c011ec23UnwindCodeCount);
+    C23_HEX32("frameRegister", d.c011ec23FrameRegister);
+    C23_HEX32("frameOffset", d.c011ec23FrameOffset);
+    C23_HEX64("restoredRBX", d.c011ec23RestoredRbx);
+    C23_HEX64("restoredRBP", d.c011ec23RestoredRbp);
+    C23_HEX64("restoredRSI", d.c011ec23RestoredRsi);
+    C23_HEX64("restoredRDI", d.c011ec23RestoredRdi);
+    C23_HEX64("restoredR12", d.c011ec23RestoredR12);
+    C23_HEX64("restoredR13", d.c011ec23RestoredR13);
+    C23_HEX64("restoredR14", d.c011ec23RestoredR14);
+    C23_HEX64("restoredR15", d.c011ec23RestoredR15);
+    C23_HEX32("restoredRegisterCount", d.c011ec23RestoredRegisterCount);
+    C23_HEX64("secondRuntimeFunction", d.c011ec23SecondRuntimeFunction);
+    C23_HEX64("secondUnwindInfo", d.c011ec23SecondUnwindInfo);
+    C23_HEX64("secondOutputRIP", d.c011ec23SecondOutputRip);
+    C23_HEX64("secondOutputRSP", d.c011ec23SecondOutputRsp);
+    C23_HEX64("callerCodeManager", d.c011ec23CallerCodeManager);
+    C23_HEX64("callerMethodInfo", d.c011ec23CallerMethodInfo);
+    C23_HEX64("callerMethodStart", d.c011ec23CallerMethodStart);
+    C23_HEX64("callerMethodEnd", d.c011ec23CallerMethodEnd);
+    C23_HEX32("c19RootReports", d.c011ec19RootReportCount);
+    C23_HEX32("c19RegisterRoots", d.c011ec19RegisterRootCount);
+    C23_HEX32("c19StackRoots", d.c011ec19StackRootCount);
+    C23_HEX32("c19PromoteAttempts", d.c011ec19FirstStackDerivedPromoteAttemptCount);
+    C23_HEX32("c19PromoteEntries", d.c011ec19FirstStackDerivedPromoteEntryCount);
+    C23_HEX32("c19PromoteReturns", d.c011ec19FirstStackDerivedPromoteReturnCount);
+    C23_HEX32("framesWalked", d.c011ec18StackFrameCount);
+    C23_HEX32("totalRoots", d.c011ec15RootSlotVisitCount);
+    C23_HEX32("stackBoundsConsumed", d.c011ec18StackBoundsConsumed);
+    C23_HEX32("markWrites", d.c011ec15MarkBitWriteCount);
+    C23_HEX32("childReads", d.c011ec15ChildReferenceReadCount);
+    C23_HEX32("graphTraversal", d.c011ec15GraphTraversalCount);
+    C23_HEX32("promoteEntries", d.c011ec15PromoteEntryCount);
+    C23_HEX32("promoteReturns", d.c011ec15PromoteReturnCount);
+    C23_HEX64("stackBase", d.rootThreadRecords[0].stackLow);
+    C23_HEX64("stackLimit", d.rootThreadRecords[0].stackHigh);
+    C23_HEX64("scanContextStackLimit", d.callbackContextStackLimit);
+    C23_HEX32("safeStopReason", d.c011ec23SafeStopReason);
+    C23_HEX32("outcome", d.c011ec23Outcome);
+#undef C23_HEX32
+#undef C23_HEX64
+    suspendEeSerialPutString(" marker=C011EC23\n");
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC23SafeStop(uint32_t reason) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec23MarkerEmitted = 1u;
+    d.c011ec23SafeStopReason = reason;
+    d.safeStopObserved = 1u;
+    d.stopReason = GUIDEXOS_NATIVEAOT_CALLER_FRAME_UNWIND_MARKER;
+    d.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F33_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP;
+    emitC011EC23SafeStop();
+    for (;;) {
+    }
+}
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
 extern "C" __declspec(noreturn) void __cdecl

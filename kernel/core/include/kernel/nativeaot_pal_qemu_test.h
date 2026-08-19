@@ -27,7 +27,8 @@ void runFirstRealAllocation(
     uintptr_t getAllocationCountAddress, uintptr_t getLastAllocationSizeAddress,
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
-    uint64_t generation, uintptr_t beginExperimentAddress = 0);
+    uint64_t generation, uintptr_t beginExperimentAddress = 0,
+    uintptr_t standaloneNativeUnwindAddress = 0);
 
 #endif
 

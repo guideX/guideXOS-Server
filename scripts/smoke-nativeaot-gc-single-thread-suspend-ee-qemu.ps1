@@ -75,6 +75,7 @@ $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-f
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
 $isC011EC21 = $ProofMode -eq "stack-provider-native-transition-continuation"
+$isC011EC23 = $isC011EC21
 $isC011EC20 = $ProofMode -in @("stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isC011EC19 = $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
@@ -93,7 +94,8 @@ $proofDefine = if ($isNextGenuineRootProvider) {
     $c19Define = if ($isC011EC19) { " /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO" } else { "" }
     $c20Define = if ($isC011EC20) { " /DGUIDEXOS_NATIVEAOT_C011EC20_UNWIND" } else { "" }
     $c21Define = if ($isC011EC21) { " /DGUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION" } else { "" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define"
+    $c23Define = if ($isC011EC23) { " /DGUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND" } else { "" }
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -224,7 +226,7 @@ function Read-Monitor([int]$Port, [string]$Path) {
 }
 
 function Get-MarkerField([string]$Text, [string]$Name) {
-    $match = [regex]::Match($Text, '\b' + [regex]::Escape($Name) + '=(?<value>[0-9A-Fa-f]+)')
+    $match = [regex]::Match($Text, [regex]::Escape($Name) + '=(?<value>[0-9A-Fa-f]+)')
     if (-not $match.Success) { return $null }
     return "0x" + $match.Groups['value'].Value.ToUpperInvariant()
 }
@@ -265,6 +267,7 @@ $platformSource = Join-Path $root "tools\dotnet\runtime-pack\src\platform\guidex
 $probeSource = Join-Path $root "tools\dotnet\runtime-pack\src\probes\guidexos_nativeaot_gc_allocation_probe.cpp"
 $hostShimSource = Join-Path $root "tools\dotnet\runtime-pack\src\probes\guidexos_nativeaot_managed_host_shims.cpp"
 $startupProbeSource = Join-Path $root "tools\dotnet\runtime-pack\src\probes\guidexos_nativeaot_gc_startup_probe.cpp"
+$nativeUnwindPrimitiveSource = Join-Path $root "tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_amd64_unwind_primitive.cpp"
 $runtimeSupportSource = Join-Path $root "samples\managed\HostLogProof\runtime_support.c"
 $replacementRoot = Join-Path $root "out\dotnet\gc-first-real-allocation\identity\build1\rebuilt"
 $identityManifestPath = Join-Path $root "out\dotnet\gc-first-real-allocation\identity\build1\stock\identity.json"
@@ -302,6 +305,7 @@ $runtimeSupportObj = Join-Path $artifactRoot "runtime_support.obj"
 $managedRuntimePackObj = Join-Path $artifactRoot "managed-runtime-pack.c011ec18.lib"
 $hostShimObj = Join-Path $artifactRoot "guidexos_nativeaot_managed_host_shims.obj"
 $startupProbeObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_startup_probe.managed.obj"
+$nativeUnwindPrimitiveObj = Join-Path $runtimeRoot "guidexos_nativeaot_amd64_unwind_primitive.obj"
 $adaptedArchive = Join-Path $artifactRoot "Runtime.WorkstationGC.guidexos-nativeaot-single-thread-suspend-ee.lib"
 $manifestPath = Join-Path $runRoot "manifest.json"
 $runResults = @()
@@ -531,9 +535,64 @@ extern "C" void __cdecl guideXosNativeAotC011EC18IteratorFramePointer(uintptr_t 
 extern "C" void __cdecl guideXosNativeAotC011EC18IteratorUnwind(
     uintptr_t controlPc, uintptr_t sp);
 '@
+        if ($isC011EC23) {
+            $stackFrameIteratorDeclarations += @'
+extern "C" uint32_t __cdecl guideXosNativeAotC011EC23TryNativeUnwind(
+    uintptr_t controlPc, uintptr_t regDisplay);
+'@
+        }
         $stackFrameIteratorText = $stackFrameIteratorText.Replace(
             '#include "StackFrameIterator.h"',
             '#include "StackFrameIterator.h"' + $stackFrameIteratorDeclarations.TrimEnd())
+        if ($isC011EC23) {
+            $nativeMethodStateNeedle = @'
+    if ((m_dwFlags & (SkipNativeFrames|UnwoundReversePInvoke)) == UnwoundReversePInvoke)
+    {
+        // There is no implementation of ICodeManager for native code.
+        m_pCodeManager = nullptr;
+        m_effectiveSafePointAddress = nullptr;
+        m_FramePointer = nullptr;
+        m_dwFlags |= MethodStateCalculated;
+        return;
+    }
+'@
+            $nativeMethodStateReplacement = @'
+    const bool guideXosNativeFrameCandidate =
+        ((m_dwFlags & (SkipNativeFrames|UnwoundReversePInvoke)) == UnwoundReversePInvoke) ||
+        (m_pCodeManager != NULL && !m_pInstance->IsManaged(m_ControlPC));
+    if (guideXosNativeFrameCandidate)
+    {
+        const uint32_t guideXosNativeUnwindResult =
+            guideXosNativeAotC011EC23TryNativeUnwind(
+                reinterpret_cast<uintptr_t>(m_ControlPC),
+                reinterpret_cast<uintptr_t>(&m_RegDisplay));
+        if (guideXosNativeUnwindResult == 1u)
+        {
+            SetControlPC(dac_cast<PTR_VOID>(
+                PCODEToPINSTR(m_RegDisplay.GetIP())));
+            m_pPreviousTransitionFrame = nullptr;
+            m_dwFlags &= ~UnwoundReversePInvoke;
+        }
+        else
+        {
+            // Native frames have no ICodeManager.  The PAL provider either
+            // stopped safely after a bounded native chain or left the frame
+            // unavailable; neither case is a managed frame.
+            m_pCodeManager = nullptr;
+            m_effectiveSafePointAddress = nullptr;
+            m_FramePointer = nullptr;
+            m_dwFlags |= MethodStateCalculated;
+            return;
+        }
+    }
+'@
+            $nativeMethodStateNeedle = $nativeMethodStateNeedle.Replace("`r`n", "`n")
+            $nativeMethodStateReplacement = $nativeMethodStateReplacement.Replace("`r`n", "`n")
+            if (-not $stackFrameIteratorText.Contains($nativeMethodStateNeedle)) {
+                throw "C011EC23 StackFrameIterator native-method-state injection point was not found."
+            }
+            $stackFrameIteratorText = Replace-First $stackFrameIteratorText $nativeMethodStateNeedle $nativeMethodStateReplacement
+        }
         $iteratorInitial = @'
     if (pFrame->m_Flags & PTFF_SAVE_RSP)  { m_RegDisplay.SP   = *pPreservedRegsCursor++; }
     guideXosNativeAotC011EC18IteratorInitial(
@@ -588,7 +647,8 @@ extern "C" void __cdecl guideXosNativeAotC011EC18IteratorUnwind(
             $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorCodeManagerLookup' -or
             $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorFindMethodInfo' -or
             $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorFramePointer' -or
-            $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorUnwind') {
+            $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorUnwind' -or
+            ($isC011EC23 -and $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC23TryNativeUnwind')) {
             throw "C011EC18 StackFrameIterator source injection did not match all required iterator boundaries."
         }
         Set-Content -LiteralPath $stackFrameIteratorSource -Value $stackFrameIteratorText -Encoding ASCII
@@ -2072,6 +2132,8 @@ call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256 /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
 if errorlevel 1 exit /b %errorlevel%
+cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /Fo:"$nativeUnwindPrimitiveObj" "$nativeUnwindPrimitiveSource"
+if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DGXOS_BARE_METAL /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$nativeAotRoot\Runtime" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$gcBridgeBoundary" "$gcBridgeSource"
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DGXOS_BARE_METAL /DGXOS_TRUE_VIRTUAL_MEMORY /D_FEATURE_NATIVEAOT /DNATIVEAOT /DTARGET_AMD64 /DHOST_AMD64 /DHOST_64BIT /D_WIN64 /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime" /I"$sourceRoot\native" /Fo:"$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$(Join-Path $root 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp')"
@@ -2137,7 +2199,7 @@ exit /b 0
     $managedRuntimePackAssembly = if ($isTransitionFrameControlPc -or $isC011EC19) {
         $managedRuntimePackContract = if ($isC011EC21) { ' "' + $platformContract + '"' } else { "" }
 @"
-lib.exe /nologo /OUT:"$managedRuntimePackObj" "$platformObj" "$allocFastPublicObj"$managedRuntimePackContract
+lib.exe /nologo /OUT:"$managedRuntimePackObj" "$platformObj" "$nativeUnwindPrimitiveObj" "$allocFastPublicObj"$managedRuntimePackContract
 if errorlevel 1 exit /b %errorlevel%
 "@
     } else {
@@ -2153,9 +2215,9 @@ if errorlevel 1 exit /b %errorlevel%
 $managedRuntimePackAssembly
 "$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=$managedProofMode -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ $managedRuntimePackProperty $probeObjectPropertyArgument -p:IlcSdkPath=$oldArtifact\sdk\
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:"$hostShimObj" "$hostShimSource"
-if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DGUIDEXOS_NATIVEAOT_MANAGED_IMAGE /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$nativeAotRoot\Runtime" /Fo:"$startupProbeObj" "$startupProbeSource"
+if errorlevel 1 exit /b %errorlevel%
+cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:"$hostShimObj" "$hostShimSource"
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
@@ -2189,15 +2251,15 @@ exit /b 0
     $linkBat = Write-Batch "link-single-thread-suspend-ee.bat" @"
 @echo off
 call "$vsBat" >nul
-link.exe /nologo /MANIFEST:NO /INCREMENTAL:NO /fixed /base:0x10000000 /SUBSYSTEM:NATIVE /ENTRY:GuideXosNativeAotGcStartupMain /OUT:"$pePath" /MAP:"$mapPath" /INCLUDE:RhInitialize /MERGE:.managedcode=.text /MERGE:.managed=.text /MERGE:hydrated=.bss /EXPORT:GuideXosNativeAotGcStartupMain /EXPORT:GuideXosNativeAotGcStartupInstallPalHooks /EXPORT:GuideXosNativeAotGcStartupInstallHookTable /EXPORT:GuideXosNativeAotGcStartupInstallPlatformHooks /EXPORT:GuideXosNativeAotGcStartupGetState /EXPORT:GuideXosNativeAotGcStartupGetPreGcState /EXPORT:GuideXosNativeAotGcStartupGetAllocationCount /EXPORT:GuideXosNativeAotGcStartupGetLastAllocationSize /EXPORT:GuideXosNativeAotGcStartupGetDiagnosticStage /EXPORT:ManagedMain /EXPORT:guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment /EXPORT:guideXosManagedAllocationFinalize /EXPORT:guideXosManagedAllocationGetDiagnostics /EXPORT:guideXosManagedAllocationValidateObject /EXPORT:guideXosManagedAllocationRecordSentinelValidation /EXPORT:guideXosManagedAllocationGetLoopStatus /EXPORT:guideXosManagedAllocationGetHardLimit /NODEFAULTLIB:libucrt.lib /DEFAULTLIB:ucrt.lib /IGNORE:4104 "$managedPublishRoot\obj\x64\Release\net9.0\win-x64\native\HostLogProof.obj" "$runtimeSupportObj" "$platformObj" "$oldArtifact\sdk\bootstrapper.obj" "$adaptedArchive" "$startupProbeObj" "$hostShimObj" "$startupDiagnostic" "$linkGcHelpersObj" "$gcHelpersAlign" "$oldArtifact\sdk\eventpipe-disabled.lib" "$oldArtifact\sdk\Runtime.VxsortEnabled.lib" "$oldArtifact\sdk\standalonegc-disabled.lib" "$oldArtifact\sdk\zlibstatic.lib" "$oldArtifact\sdk\System.Globalization.Native.Aot.lib" "$oldArtifact\sdk\System.IO.Compression.Native.Aot.lib"
+link.exe /nologo /MANIFEST:NO /INCREMENTAL:NO /fixed /base:0x10000000 /SUBSYSTEM:NATIVE /ENTRY:GuideXosNativeAotGcStartupMain /OUT:"$pePath" /MAP:"$mapPath" /INCLUDE:RhInitialize /MERGE:.managedcode=.text /MERGE:.managed=.text /MERGE:hydrated=.bss /EXPORT:GuideXosNativeAotGcStartupMain /EXPORT:GuideXosNativeAotGcStartupInstallPalHooks /EXPORT:GuideXosNativeAotGcStartupInstallHookTable /EXPORT:GuideXosNativeAotGcStartupInstallPlatformHooks /EXPORT:GuideXosNativeAotGcStartupGetState /EXPORT:GuideXosNativeAotGcStartupGetPreGcState /EXPORT:GuideXosNativeAotGcStartupGetAllocationCount /EXPORT:GuideXosNativeAotGcStartupGetLastAllocationSize /EXPORT:GuideXosNativeAotGcStartupGetDiagnosticStage /EXPORT:ManagedMain /EXPORT:guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment /EXPORT:guideXosManagedAllocationFinalize /EXPORT:guideXosManagedAllocationGetDiagnostics /EXPORT:guideXosManagedAllocationValidateObject /EXPORT:guideXosManagedAllocationRecordSentinelValidation /EXPORT:guideXosManagedAllocationGetLoopStatus /EXPORT:guideXosManagedAllocationGetHardLimit /NODEFAULTLIB:libucrt.lib /DEFAULTLIB:ucrt.lib /IGNORE:4104 "$managedPublishRoot\obj\x64\Release\net9.0\win-x64\native\HostLogProof.obj" "$runtimeSupportObj" "$platformObj" "$nativeUnwindPrimitiveObj" "$oldArtifact\sdk\bootstrapper.obj" "$adaptedArchive" "$startupProbeObj" "$hostShimObj" "$startupDiagnostic" "$linkGcHelpersObj" "$gcHelpersAlign" "$oldArtifact\sdk\eventpipe-disabled.lib" "$oldArtifact\sdk\Runtime.VxsortEnabled.lib" "$oldArtifact\sdk\standalonegc-disabled.lib" "$oldArtifact\sdk\zlibstatic.lib" "$oldArtifact\sdk\System.Globalization.Native.Aot.lib" "$oldArtifact\sdk\System.IO.Compression.Native.Aot.lib"
 exit /b %errorlevel%
 "@
 
     if (-not $SkipManagedBuild) {
-        $stalePaths = @($platformObj,$gcEnvEe,$probeObj,$gcBridgeBoundary,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$elfPath,$mapPath)
+        $stalePaths = @($platformObj,$nativeUnwindPrimitiveObj,$gcEnvEe,$probeObj,$gcBridgeBoundary,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$elfPath,$mapPath)
         if ($isCandidateLoadEnumeration) { $stalePaths += $gcEnum }
         if ($isFirstRootCallbackEntry) { $stalePaths += $gcWks }
-        if ($isTransitionFrameControlPc -or $isC011EC19) { $stalePaths += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$managedRuntimePackObj) }
+        if ($isTransitionFrameControlPc -or $isC011EC19) { $stalePaths += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$managedRuntimePackObj,$nativeUnwindPrimitiveObj) }
         if ($isC011EC19) { $stalePaths += $coffNativeCodeManagerObj }
         foreach ($stale in $stalePaths) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
@@ -2211,7 +2273,7 @@ exit /b %errorlevel%
     $requiredBuildOutputs = @($platformObj,$gcEnvEe,$probeObj,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$mapPath)
     if ($isCandidateLoadEnumeration) { $requiredBuildOutputs += $gcEnum }
     if ($isFirstRootCallbackEntry) { $requiredBuildOutputs += $gcWks }
-    if ($isTransitionFrameControlPc -or $isC011EC19) { $requiredBuildOutputs += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$allocFastPublicObj,$managedRuntimePackObj) }
+    if ($isTransitionFrameControlPc -or $isC011EC19) { $requiredBuildOutputs += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$allocFastPublicObj,$managedRuntimePackObj,$nativeUnwindPrimitiveObj) }
     if ($isC011EC19) { $requiredBuildOutputs += $coffNativeCodeManagerObj }
     foreach ($path in $requiredBuildOutputs) { Require-File $path "Single-thread SuspendEE build output" }
     Invoke-LoggedCommand $python @($converter,$pePath,$elfPath,"--map",$mapPath,"--symbol","ManagedMain") (Join-Path $runRoot "pe-to-elf.log")
@@ -2433,7 +2495,7 @@ exit /b %errorlevel%
                     $requiredSymbols += "guideXosNativeAotC011EC20SafeStop"
                 }
             }
-            if ($isC011EC21) {
+            if ($isC011EC21 -and -not $isC011EC23) {
                 $requiredSymbols += @("guideXosNativeAotC011EC21DescribeNativeCaller","guideXosNativeAotC011EC21SafeStop")
             }
         }
@@ -2471,6 +2533,9 @@ exit /b %errorlevel%
         GUIDEXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_FINALIZE_ADDRESS = "guideXosManagedAllocationFinalize"
         GUIDEXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_GET_DIAGNOSTICS_ADDRESS = "guideXosManagedAllocationGetDiagnostics"
     }
+    if ($isC011EC23) {
+        $exports.GUIDEXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_STANDALONE_NATIVE_UNWIND_ADDRESS = "guideXosNativeAotC011EC23StandaloneNativeUnwind"
+    }
     $headerLines = @("#pragma once", "", "#include <stdint.h>", "")
     foreach ($define in $exports.Keys) { $headerLines += "#define $define ((uintptr_t)0x$(Extract-MapAddress $mapText $exports[$define])u)" }
     $exportHeader = Join-Path $artifactRoot "guidexos_nativeaot_gc_single_thread_suspend_ee_exports.h"
@@ -2488,8 +2553,9 @@ exit /b %errorlevel%
     Invoke-LoggedCommand $objcopy @("--redefine-sym","${startSymbol}=guidexos_nativeaot_gc_startup_artifact_start","--redefine-sym","${endSymbol}=guidexos_nativeaot_gc_startup_artifact_end","--redefine-sym","${sizeSymbol}=guidexos_nativeaot_gc_startup_artifact_size","--set-section-alignment",".data=4096","--rename-section",".data=.data,alloc,load,readonly,data,contents",$embeddedObj) (Join-Path $runRoot "embed-final.log")
 
     $c21KernelDefine = if ($isC011EC21) { " -DGUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION" } else { "" }
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine -I$artifactRoot"
-    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
+    $c23KernelDefine = if ($isC011EC23) { " -DGUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND" } else { "" }
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine -I$artifactRoot"
+    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","clean") (Join-Path $runRoot "kernel-preclean.log")
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
@@ -2499,7 +2565,6 @@ exit /b %errorlevel%
     $nativeHelperAudit = $null
     if ($isC011EC21) {
         $kernelSymbolsText = (& $objdump -t -C $kernelPath 2>&1) -join "`n"
-        $nativeDisassemblyText = (& $objdump -d -C --start-address=0x1acfa0 --stop-address=0x1af0c0 $kernelPath 2>&1) -join "`n"
         $nativeSectionsText = (& $objdump -h $kernelPath 2>&1) -join "`n"
         $nativeUnwindText = (& $objdump -Wf $kernelPath 2>&1) -join "`n"
         $helperSymbolMatch = [regex]::Match(
@@ -2508,6 +2573,10 @@ exit /b %errorlevel%
         if (-not $helperSymbolMatch.Success) {
             throw "C011EC21 could not resolve runFirstRealAllocationImpl in the linked kernel symbols."
         }
+        $helperAddress = [Convert]::ToUInt64($helperSymbolMatch.Groups['address'].Value, 16)
+        $disassemblyStart = if ($helperAddress -gt 0x2000) { $helperAddress - 0x2000 } else { 0 }
+        $disassemblyStop = $helperAddress + 0x2000
+        $nativeDisassemblyText = (& $objdump -d -C ("--start-address=0x{0:X}" -f $disassemblyStart) ("--stop-address=0x{0:X}" -f $disassemblyStop) $kernelPath 2>&1) -join "`n"
         foreach ($kernelSymbol in @('guideXosNativeAotC011EC21DescribeNativeCaller')) {
             if ($kernelSymbolsText -notmatch [regex]::Escape($kernelSymbol)) {
                 throw "C011EC21 kernel symbol audit could not resolve $kernelSymbol."
@@ -2533,8 +2602,8 @@ exit /b %errorlevel%
             module='kernel.elf'
             section='.text'
             callSite='indirect call [rsp+0x388] immediately before recovered return RIP; objdump-correlated'
-            runtimeFunction='none in kernel .pdata'
-            unwindInfo='none; no .xdata/.eh_frame FDE covering helper'
+            runtimeFunction=if ($isC011EC23) { 'genuine retained .pdata entry; see C011EC23-PREFLIGHT' } else { 'none in kernel .pdata' }
+            unwindInfo=if ($isC011EC23) { 'genuine retained .xdata UNWIND_INFO; see C011EC23-PREFLIGHT' } else { 'none; no .xdata/.eh_frame FDE covering helper' }
             nativeSymbols=(Join-Path $runRoot 'native-helper-symbols.txt')
             disassembly=(Join-Path $runRoot 'native-helper-disassembly.txt')
             sections=(Join-Path $runRoot 'native-helper-sections.txt')
@@ -2569,7 +2638,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC21) {
+                    $stopPattern = if ($isC011EC23) {
+                        'marker=C011EC23(\s|$)'
+                    } elseif ($isC011EC21) {
                         'marker=C011EC21'
                     } elseif ($isC011EC20) {
                         'marker=C011EC20'
@@ -2661,7 +2732,78 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isC011EC21) {
+        if ($isC011EC23) {
+            Assert-Text $validationText 'marker=C011EC23(\s|$)' "C011EC23 native-unwind marker"
+            $c23PreflightLine = (($validationText -split "`n") | Where-Object { $_ -match 'marker=C011EC23-PREFLIGHT' } | Select-Object -Last 1)
+            if ([string]::IsNullOrWhiteSpace($c23PreflightLine)) { throw "C011EC23-PREFLIGHT was not emitted in $name." }
+            foreach ($field in @('helperPC','moduleBase','pdataStart','pdataEnd','runtimeFunction','unwindInfo','entries')) {
+                if ((Get-MarkerField $c23PreflightLine $field) -eq $null) { throw "C011EC23-PREFLIGHT field $field was missing in $name." }
+            }
+            if ((Get-MarkerField $c23PreflightLine 'runtimeFunction') -eq '0x0000000000000000' -or
+                (Get-MarkerField $c23PreflightLine 'unwindInfo') -eq '0x0000000000000000' -or
+                (Get-MarkerField $c23PreflightLine 'entries') -eq '0x00000000') {
+                throw "C011EC23-PREFLIGHT did not prove registered lookup coverage in $name."
+            }
+            $c23Line = (($validationText -split "`n") | Where-Object {
+                $_ -match '\[nativeaot-gc-native-unwind\] SAFE_STOP' -and
+                $_ -match 'marker=C011EC23(\s|$)'
+            } | Select-Object -Last 1)
+            if ([string]::IsNullOrWhiteSpace($c23Line)) { throw "C011EC23 marker line was not isolated in $name." }
+            foreach ($field in @(
+                'lookupAttempts','lookupSuccesses','unwindAttempts','rtlVirtualUnwindCalls',
+                'rtlVirtualUnwindReturned','unwindResult','nativeFramesCrossed','managedReentry',
+                'callerManagedRange','callerCodeManagerFound','callerFindMethodInfoAttempts',
+                'callerFindMethodInfoSuccess','inputRIP','inputRSP','inputRBP','outputRIP',
+                'outputRSP','outputRBP','establisherFrame','moduleBase','pdataStart','pdataEnd',
+                'xdataStart','xdataEnd','runtimeFunction','unwindInfo','beginRVA','endRVA',
+                'unwindRVA','unwindVersion','unwindFlags','prologueSize','unwindCodeCount',
+                'frameRegister','frameOffset','restoredRegisterCount','framesWalked','totalRoots',
+                'secondFunctionAttempted','secondFunctionSucceeded','secondFunctionResult',
+                'secondFunctionIndex','secondRuntimeFunction','secondUnwindInfo',
+                'secondOutputRIP','secondOutputRSP',
+                'c19RootReports','c19RegisterRoots','c19StackRoots','c19PromoteAttempts',
+                'c19PromoteEntries','c19PromoteReturns','stackBoundsConsumed','markWrites',
+                'childReads','graphTraversal','promoteEntries','promoteReturns','safeStopReason',
+                'outcome')) {
+                if ((Get-MarkerField $c23Line $field) -eq $null) { throw "C011EC23 field $field was missing in $name." }
+            }
+            $lookupSuccesses = [Convert]::ToUInt32((Get-MarkerField $c23Line 'lookupSuccesses').Substring(2), 16)
+            $unwindAttempts = [Convert]::ToUInt32((Get-MarkerField $c23Line 'unwindAttempts').Substring(2), 16)
+            $framesCrossed = [Convert]::ToUInt32((Get-MarkerField $c23Line 'nativeFramesCrossed').Substring(2), 16)
+            $inputRsp = [Convert]::ToUInt64((Get-MarkerField $c23Line 'inputRSP').Substring(2), 16)
+            $outputRsp = [Convert]::ToUInt64((Get-MarkerField $c23Line 'outputRSP').Substring(2), 16)
+            $inputRip = Get-MarkerField $c23Line 'inputRIP'
+            $outputRip = Get-MarkerField $c23Line 'outputRIP'
+            if ($lookupSuccesses -eq 0 -or $unwindAttempts -eq 0 -or $framesCrossed -eq 0 -or
+                (Get-MarkerField $c23Line 'secondFunctionAttempted') -ne '0x00000001' -or
+                (Get-MarkerField $c23Line 'secondFunctionSucceeded') -ne '0x00000001' -or
+                $inputRip -eq $outputRip -or $outputRsp -le $inputRsp -or
+                (Get-MarkerField $c23Line 'rtlVirtualUnwindCalls') -ne '0x00000001' -or
+                (Get-MarkerField $c23Line 'rtlVirtualUnwindReturned') -ne '0x00000001' -or
+                (Get-MarkerField $c23Line 'unwindVersion') -ne '0x00000001' -or
+                (Get-MarkerField $c23Line 'unwindFlags') -ne '0x00000000' -or
+                (Get-MarkerField $c23Line 'totalRoots') -ne '0x00000006' -or
+                (Get-MarkerField $c23Line 'c19RootReports') -ne '0x00000004' -or
+                (Get-MarkerField $c23Line 'c19RegisterRoots') -ne '0x00000003' -or
+                (Get-MarkerField $c23Line 'c19StackRoots') -ne '0x00000001' -or
+                (Get-MarkerField $c23Line 'c19PromoteAttempts') -ne '0x00000004' -or
+                (Get-MarkerField $c23Line 'c19PromoteEntries') -ne '0x00000004' -or
+                (Get-MarkerField $c23Line 'c19PromoteReturns') -ne '0x00000004' -or
+                (Get-MarkerField $c23Line 'stackBoundsConsumed') -ne '0x00000000' -or
+                (Get-MarkerField $c23Line 'markWrites') -ne '0x00000000' -or
+                (Get-MarkerField $c23Line 'childReads') -ne '0x00000000' -or
+                (Get-MarkerField $c23Line 'graphTraversal') -ne '0x00000000') {
+                throw "C011EC23 did not prove bounded genuine native unwind or preserve the C011EC19 chronology in $name."
+            }
+            $runOutcome = if ((Get-MarkerField $c23Line 'managedReentry') -eq '0x00000001') { 'B' } else { 'C' }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC23'; outcome=$runOutcome; harnessTerminated=$true; markerLine=$c23Line
+                unwind=[ordered]@{ lookupAttempts=(Get-MarkerField $c23Line 'lookupAttempts'); lookupSuccesses=(Get-MarkerField $c23Line 'lookupSuccesses'); attempts=(Get-MarkerField $c23Line 'unwindAttempts'); rtlVirtualUnwindCalls=(Get-MarkerField $c23Line 'rtlVirtualUnwindCalls'); rtlVirtualUnwindReturned=(Get-MarkerField $c23Line 'rtlVirtualUnwindReturned'); result=(Get-MarkerField $c23Line 'unwindResult'); inputRIP=$inputRip; inputRSP=(Get-MarkerField $c23Line 'inputRSP'); inputRBP=(Get-MarkerField $c23Line 'inputRBP'); outputRIP=$outputRip; outputRSP=(Get-MarkerField $c23Line 'outputRSP'); outputRBP=(Get-MarkerField $c23Line 'outputRBP'); establisherFrame=(Get-MarkerField $c23Line 'establisherFrame'); moduleBase=(Get-MarkerField $c23Line 'moduleBase'); pdataStart=(Get-MarkerField $c23Line 'pdataStart'); pdataEnd=(Get-MarkerField $c23Line 'pdataEnd'); xdataStart=(Get-MarkerField $c23Line 'xdataStart'); xdataEnd=(Get-MarkerField $c23Line 'xdataEnd'); runtimeFunction=(Get-MarkerField $c23Line 'runtimeFunction'); unwindInfo=(Get-MarkerField $c23Line 'unwindInfo'); beginRVA=(Get-MarkerField $c23Line 'beginRVA'); endRVA=(Get-MarkerField $c23Line 'endRVA'); unwindRVA=(Get-MarkerField $c23Line 'unwindRVA'); unwindVersion=(Get-MarkerField $c23Line 'unwindVersion'); unwindFlags=(Get-MarkerField $c23Line 'unwindFlags'); prologueSize=(Get-MarkerField $c23Line 'prologueSize'); unwindCodeCount=(Get-MarkerField $c23Line 'unwindCodeCount'); frameRegister=(Get-MarkerField $c23Line 'frameRegister'); frameOffset=(Get-MarkerField $c23Line 'frameOffset'); restoredRegisterCount=(Get-MarkerField $c23Line 'restoredRegisterCount'); secondFunctionAttempted=(Get-MarkerField $c23Line 'secondFunctionAttempted'); secondFunctionSucceeded=(Get-MarkerField $c23Line 'secondFunctionSucceeded'); secondFunctionResult=(Get-MarkerField $c23Line 'secondFunctionResult'); secondFunctionIndex=(Get-MarkerField $c23Line 'secondFunctionIndex'); secondRuntimeFunction=(Get-MarkerField $c23Line 'secondRuntimeFunction'); secondUnwindInfo=(Get-MarkerField $c23Line 'secondUnwindInfo'); secondOutputRIP=(Get-MarkerField $c23Line 'secondOutputRIP'); secondOutputRSP=(Get-MarkerField $c23Line 'secondOutputRSP') }
+                caller=[ordered]@{ managed=(Get-MarkerField $c23Line 'managedReentry'); managedRange=(Get-MarkerField $c23Line 'callerManagedRange'); codeManager=(Get-MarkerField $c23Line 'callerCodeManager'); findMethodInfoAttempts=(Get-MarkerField $c23Line 'callerFindMethodInfoAttempts'); findMethodInfoSuccess=(Get-MarkerField $c23Line 'callerFindMethodInfoSuccess') }
+                roots=[ordered]@{ total=(Get-MarkerField $c23Line 'totalRoots'); category3=(Get-MarkerField $c23Line 'c19RootReports'); register=(Get-MarkerField $c23Line 'c19RegisterRoots'); stack=(Get-MarkerField $c23Line 'c19StackRoots'); promoteAttempts=(Get-MarkerField $c23Line 'c19PromoteAttempts'); promoteEntries=(Get-MarkerField $c23Line 'c19PromoteEntries'); promoteReturns=(Get-MarkerField $c23Line 'c19PromoteReturns') }
+                accounting=[ordered]@{ frames=(Get-MarkerField $c23Line 'framesWalked'); totalRoots=(Get-MarkerField $c23Line 'totalRoots'); stackBoundsConsumed=(Get-MarkerField $c23Line 'stackBoundsConsumed'); markWrites=(Get-MarkerField $c23Line 'markWrites'); childReads=(Get-MarkerField $c23Line 'childReads'); graphTraversal=(Get-MarkerField $c23Line 'graphTraversal'); promoteEntries=(Get-MarkerField $c23Line 'promoteEntries'); promoteReturns=(Get-MarkerField $c23Line 'promoteReturns') }
+            }
+        } elseif ($isC011EC21 -and -not $isC011EC23) {
             Assert-Text $validationText 'marker=C011EC21(\s|$)' "C011EC21 native continuation marker"
             $c21Line = ($validationText -replace '\r?\n', ' ')
             foreach ($field in @(
@@ -3763,7 +3905,32 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
-    } elseif ($isC011EC21) {
+    } elseif ($isC011EC23) {
+        if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC23' }).Count -ne 0) {
+            throw "The C011EC23 native-unwind experiment did not produce $FreshBootCount C011EC23 runs."
+        }
+        $firstC23Run = $runResults[0]
+        $c23Outcomes = @($runResults | ForEach-Object { $_.outcome } | Select-Object -Unique)
+        if ($c23Outcomes.Count -ne 1 -or $c23Outcomes[0] -notin @('B','C')) {
+            throw "C011EC23 did not produce a stable supported native-unwind outcome across fresh boots."
+        }
+        $finalOutcome = $c23Outcomes[0]
+        $manifest = [ordered]@{
+            outcome="$finalOutcome / genuine kernel native unwind provider crossed runFirstRealAllocationImpl"; proofMode=$ProofMode; marker='C011EC23'; preflightMarker='C011EC23-PREFLIGHT'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit; codeManager='CoffNativeCodeManager'; managedRange='[0x10001000,0x10050950)' }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryKernelBefore.build; startingEspSha256=$ordinaryKernelBefore.esp; expectedSha256=$normalKernelHash }
+            nativeHelperAudit=$nativeHelperAudit; nativeProvider=$firstC23Run.unwind; caller=$firstC23Run.caller; roots=$firstC23Run.roots; accounting=$firstC23Run.accounting; runs=$runResults
+            sourceTrace=[ordered]@{ linker='kernel/arch/amd64/linker.ld'; provider='kernel/core/native_unwind_provider.cpp; kernel/core/include/kernel/native_unwind_provider.h'; contract='tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_native_unwind_contract.h'; startup='kernel/core/nativeaot_pal_qemu_test.cpp and guidexos_nativeaot_gc_startup_platform_contract'; iterator='injected locked src/coreclr/nativeaot/Runtime/StackFrameIterator.cpp CalculateCurrentMethodState native branch'; unwindPrimitive='tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_gc_startup_probe.cpp:267-489' }
+            sensitivePath=[ordered]@{ allocations=0; dynamicStrings=0; collections=0; registrationAfterSuspension=0; sortingAfterSuspension=0; arbitraryStackScans=0; largeDumps=0; nativeFramesNotManaged=$true }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot 'commands.txt'); evidenceRoot=$runRoot; runs=$runResults }
+            payloadHashes=[ordered]@{ pe=(Hash-File $pePath); elf=(Hash-File $elfPath); proofKernel=$specializedKernelHash; map=(Hash-File $mapPath) }
+            regressions=[ordered]@{ C011EC19='retained: four category-3 roots, six total roots, four stack Promote attempts/entries/returns'; C011EC20='retained genuine managed-to-native transition'; provider='PASS startup registration, bounded lookup, final table validation, genuine RtlVirtualUnwind'; converter='PASS PE-to-ELF converter invocation and fixed-base map validation'; sourceGuards='PASS locked-source injection guards and manifest checks'; ordinaryPayload='restored by finally' }
+            ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_KERNEL_NATIVE_UNWIND_PROVIDER.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "NativeAOT kernel native unwind provider experiment: Outcome $finalOutcome / C011EC23" -ForegroundColor Green
+    } elseif ($isC011EC21 -and -not $isC011EC23) {
         if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC21' }).Count -ne 0) {
             throw "The C011EC21 native continuation experiment did not produce $FreshBootCount C011EC21 runs."
         }

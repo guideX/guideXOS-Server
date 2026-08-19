@@ -1370,6 +1370,76 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec21NativeSectionIdentity;
     uintptr_t c011ec21NativeRuntimeFunction;
     uintptr_t c011ec21NativeUnwindInfo;
+
+    /*
+     * C011EC23 bounded native-module provider evidence. These fields are
+     * append-only so the C011EC19-C011EC21 chronology remains decodable.
+     * Native frames are recorded here but are never represented as managed
+     * code-manager frames.
+     */
+    uint32_t c011ec23LookupAttemptCount;
+    uint32_t c011ec23LookupSuccessCount;
+    uint32_t c011ec23UnwindAttemptCount;
+    uint32_t c011ec23RtlVirtualUnwindCallCount;
+    uint32_t c011ec23RtlVirtualUnwindReturned;
+    uint32_t c011ec23UnwindResult;
+    uint32_t c011ec23NativeFramesCrossed;
+    uint32_t c011ec23ManagedReentryFound;
+    uint32_t c011ec23CallerManagedRange;
+    uint32_t c011ec23CallerCodeManagerFound;
+    uint32_t c011ec23CallerFindMethodInfoAttempts;
+    uint32_t c011ec23CallerFindMethodInfoSuccess;
+    uint32_t c011ec23RestoredRegisterCount;
+    uint32_t c011ec23MarkerEmitted;
+    uint32_t c011ec23SafeStopReason;
+    uint32_t c011ec23Outcome;
+    uint32_t c011ec23SecondFunctionAttempted;
+    uint32_t c011ec23SecondFunctionSucceeded;
+    uint32_t c011ec23SecondFunctionResult;
+    uint32_t c011ec23SecondFunctionIndex;
+
+    uintptr_t c011ec23InputRip;
+    uintptr_t c011ec23InputRsp;
+    uintptr_t c011ec23InputRbp;
+    uintptr_t c011ec23OutputRip;
+    uintptr_t c011ec23OutputRsp;
+    uintptr_t c011ec23OutputRbp;
+    uintptr_t c011ec23EstablisherFrame;
+    uintptr_t c011ec23HandlerData;
+    uintptr_t c011ec23ModuleBase;
+    uintptr_t c011ec23ExecutableStart;
+    uintptr_t c011ec23ExecutableEnd;
+    uintptr_t c011ec23PdataStart;
+    uintptr_t c011ec23PdataEnd;
+    uintptr_t c011ec23XdataStart;
+    uintptr_t c011ec23XdataEnd;
+    uintptr_t c011ec23RuntimeFunction;
+    uintptr_t c011ec23UnwindInfo;
+    uintptr_t c011ec23BeginAddress;
+    uintptr_t c011ec23EndAddress;
+    uintptr_t c011ec23UnwindData;
+    uint32_t c011ec23UnwindVersion;
+    uint32_t c011ec23UnwindFlags;
+    uint32_t c011ec23PrologueSize;
+    uint32_t c011ec23UnwindCodeCount;
+    uint32_t c011ec23FrameRegister;
+    uint32_t c011ec23FrameOffset;
+    uintptr_t c011ec23CallerCodeManager;
+    uintptr_t c011ec23CallerMethodInfo;
+    uintptr_t c011ec23CallerMethodStart;
+    uintptr_t c011ec23CallerMethodEnd;
+    uintptr_t c011ec23RestoredRbx;
+    uintptr_t c011ec23RestoredRbp;
+    uintptr_t c011ec23RestoredRsi;
+    uintptr_t c011ec23RestoredRdi;
+    uintptr_t c011ec23RestoredR12;
+    uintptr_t c011ec23RestoredR13;
+    uintptr_t c011ec23RestoredR14;
+    uintptr_t c011ec23RestoredR15;
+    uintptr_t c011ec23SecondRuntimeFunction;
+    uintptr_t c011ec23SecondUnwindInfo;
+    uintptr_t c011ec23SecondOutputRip;
+    uintptr_t c011ec23SecondOutputRsp;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
