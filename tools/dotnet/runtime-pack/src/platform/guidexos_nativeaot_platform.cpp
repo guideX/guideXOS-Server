@@ -130,6 +130,10 @@ extern "C" uint32_t __cdecl guideXosNativeAotC011EC24PreflightRealFrame(
     uintptr_t helperPc, uintptr_t liveRsp);
 extern "C" __declspec(noreturn) void __cdecl
 guideXosNativeAotC011EC24SafeStop(uint32_t reason);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC25SafeStop(uint32_t reason);
+#endif
 #endif
 #endif
 
@@ -5220,6 +5224,18 @@ struct GuideXosC011Ec24PreflightEvidence {
 
 GuideXosC011Ec24PreflightEvidence g_c011ec24PreflightEvidence = {};
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+struct GuideXosC011Ec25UnwindProgram {
+    uint32_t codeCount;
+    uint32_t stackAdvance;
+    uint32_t supported;
+    uint32_t chained;
+    uint32_t allocationBytes;
+    uint32_t pushCount;
+    uint16_t opcodeWords[12];
+};
+#endif
+
 uint16_t c011ec24ReadWord(const uint8_t* bytes, uint32_t slot) {
     return static_cast<uint16_t>(bytes[slot * 2u]) |
            static_cast<uint16_t>(bytes[slot * 2u + 1u]) << 8;
@@ -5815,6 +5831,255 @@ uint32_t c011ec24RunStandaloneChecks(uintptr_t helperPc) {
         helperPassed && secondPassed ? 2u : (helperPassed ? 1u : 0u);
     return diagnostics.c011ec24StandaloneTests == 2u ? 1u : 0u;
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+bool c011ec25DecodeProgram(
+    const guidexos_nativeaot_native_unwind_lookup_result& lookup,
+    GuideXosC011Ec25UnwindProgram* program) {
+    if (program == nullptr || lookup.unwind_info == 0u) return false;
+    const uint8_t* info = reinterpret_cast<const uint8_t*>(
+        static_cast<uintptr_t>(lookup.unwind_info));
+    if ((info[0] & 0x07u) != 1u || (info[0] >> 3) != 0u) return false;
+    program->codeCount = info[2];
+    program->stackAdvance = 0u;
+    program->supported = 1u;
+    program->chained = 0u;
+    program->allocationBytes = 0u;
+    program->pushCount = 0u;
+    if (program->codeCount > 12u) return false;
+    const uint8_t* codes = info + 4u;
+    for (uint32_t index = 0u; index < program->codeCount; ++index) {
+        program->opcodeWords[index] = c011ec24ReadWord(codes, index);
+    }
+    for (uint32_t index = 0u; index < program->codeCount;) {
+        const uint16_t word = c011ec24ReadWord(codes, index);
+        const uint32_t unwindOp = (word >> 8) & 0x0Fu;
+        const uint32_t opInfo = word >> 12;
+        uint32_t slots = 1u;
+        switch (unwindOp) {
+            case 0u: // UWOP_PUSH_NONVOL
+                program->stackAdvance += 8u;
+                ++program->pushCount;
+                break;
+            case 1u: // UWOP_ALLOC_LARGE
+                if (opInfo == 0u) {
+                    if (index + 1u >= program->codeCount) return false;
+                    const uint32_t bytes = static_cast<uint32_t>(
+                        c011ec24ReadWord(codes, index + 1u)) * 8u;
+                    program->stackAdvance += bytes;
+                    program->allocationBytes += bytes;
+                    slots = 2u;
+                } else if (opInfo == 1u) {
+                    if (index + 2u >= program->codeCount) return false;
+                    const uint32_t bytes = static_cast<uint32_t>(
+                        c011ec24ReadWord(codes, index + 1u)) |
+                        static_cast<uint32_t>(c011ec24ReadWord(
+                            codes, index + 2u)) << 16;
+                    program->stackAdvance += bytes;
+                    program->allocationBytes += bytes;
+                    slots = 3u;
+                } else {
+                    return false;
+                }
+                break;
+            case 2u: // UWOP_ALLOC_SMALL
+                program->stackAdvance += opInfo * 8u + 8u;
+                program->allocationBytes += opInfo * 8u + 8u;
+                break;
+            case 3u: // UWOP_SET_FPREG
+                break;
+            case 4u: // UWOP_SAVE_NONVOL
+                if (index + 1u >= program->codeCount) return false;
+                slots = 2u;
+                break;
+            case 5u: // UWOP_SAVE_NONVOL_FAR
+                if (index + 2u >= program->codeCount) return false;
+                slots = 3u;
+                break;
+            case 8u: // UWOP_SAVE_XMM128
+                if (index + 1u >= program->codeCount) return false;
+                slots = 2u;
+                break;
+            case 9u: // UWOP_SAVE_XMM128_FAR
+                if (index + 2u >= program->codeCount) return false;
+                slots = 3u;
+                break;
+            case 10u: // UWOP_PUSH_MACHFRAME
+                program->stackAdvance += opInfo != 0u ? 48u : 40u;
+                break;
+            default:
+                return false;
+        }
+        index += slots;
+    }
+    return true;
+}
+
+void emitC011EC25Preflight() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-native-entry-boundary] preflight marker=C011EC25-PREFLIGHT");
+#define C25PF32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C25PF64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C25PF32("secondMetadataValid", d.c011ec25SecondMetadataValid);
+    C25PF32("secondOutputAgreement", d.c011ec25SecondOutputAgreement);
+    C25PF32("secondOpcodeCount", d.c011ec25SecondOpcodeCount);
+    C25PF32("secondStackAdvance", d.c011ec25SecondStackAdvance);
+    C25PF64("secondInputRIP", d.c011ec25SecondInputRip);
+    C25PF64("secondInputRSP", d.c011ec25SecondInputRsp);
+    C25PF64("secondInputRBP", d.c011ec25SecondInputRbp);
+    C25PF64("secondReturnSlot", d.c011ec25SecondReturnSlot);
+    C25PF64("secondReturnValue", d.c011ec25SecondReturnValue);
+    C25PF64("expectedCallerRIP", d.c011ec25ExpectedCallerRip);
+    C25PF64("expectedCallerRSP", d.c011ec25ExpectedCallerRsp);
+    C25PF64("secondOutputRIP", d.c011ec25SecondOutputRip);
+    C25PF64("secondOutputRSP", d.c011ec25SecondOutputRsp);
+    C25PF64("secondOutputRBP", d.c011ec25SecondOutputRbp);
+    C25PF64("secondEstablisherFrame", d.c011ec25SecondEstablisherFrame);
+    C25PF64("secondHandlerData", d.c011ec25SecondHandlerData);
+    C25PF64("thirdPhysicalPC", d.c011ec25ThirdPhysicalPc);
+    C25PF64("thirdLinkedPC", d.c011ec25ThirdLinkedPc);
+    C25PF64("linkedEntryPC", d.c011ec25LinkedEntryPc);
+    C25PF64("linkedHaltPC", d.c011ec25LinkedHaltPc);
+    C25PF64("bootStackTop", d.c011ec25BootStackTop);
+    C25PF32("thirdInKernelRange", d.c011ec25ThirdInKernelRange);
+    C25PF32("thirdLinkedLookupAttempted", d.c011ec25ThirdLinkedLookupAttempted);
+    C25PF32("thirdLinkedLookupSucceeded", d.c011ec25ThirdLinkedLookupSucceeded);
+    C25PF32("thirdPhysicalLookupAttempted", d.c011ec25ThirdPhysicalLookupAttempted);
+    C25PF32("thirdPhysicalLookupSucceeded", d.c011ec25ThirdPhysicalLookupSucceeded);
+    C25PF32("thirdMetadataPresent", d.c011ec25ThirdMetadataPresent);
+    C25PF32("assemblyEntryBoundary", d.c011ec25AssemblyEntryBoundary);
+    C25PF32("nonReturningHandoff", d.c011ec25NonReturningHandoff);
+    C25PF32("stackBottomProven", d.c011ec25StackBottomProven);
+    C25PF32("providerLookupResult", d.c011ec25ProviderLookupResult);
+    C25PF32("linkedLookupResult", d.c011ec25LinkedLookupResult);
+    C25PF32("physicalLookupResult", d.c011ec25PhysicalLookupResult);
+    for (uint32_t index = 0u; index < d.c011ec25SecondOpcodeCount; ++index) {
+        suspendEeSerialPutString(" opcodeWord");
+        suspendEeSerialPutHex32(index);
+        suspendEeSerialPutString("=");
+        suspendEeSerialPutHex32(d.c011ec25SecondOpcodeWords[index]);
+    }
+#undef C25PF32
+#undef C25PF64
+    suspendEeSerialPutString("\n");
+}
+
+bool c011ec25ValidateBoundary(
+    const guidexos_nativeaot_native_unwind_lookup_result& lookup,
+    uintptr_t inputRip, uintptr_t inputRsp, uintptr_t inputRbp,
+    uintptr_t outputRip, uintptr_t outputRsp, uintptr_t outputRbp,
+    uintptr_t establisherFrame, uintptr_t handlerData,
+    uintptr_t recoveredRbx, uintptr_t recoveredRsi, uintptr_t recoveredRdi,
+    uintptr_t recoveredRbp) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec25ProviderLookupResult = 0u;
+    d.c011ec25SecondInputRip = inputRip;
+    d.c011ec25SecondInputRsp = inputRsp;
+    d.c011ec25SecondInputRbp = inputRbp;
+    d.c011ec25SecondOutputRip = outputRip;
+    d.c011ec25SecondOutputRsp = outputRsp;
+    d.c011ec25SecondOutputRbp = outputRbp;
+    d.c011ec25SecondEstablisherFrame = establisherFrame;
+    d.c011ec25SecondHandlerData = handlerData;
+    d.c011ec25SecondRecoveredRbx = recoveredRbx;
+    d.c011ec25SecondRecoveredRsi = recoveredRsi;
+    d.c011ec25SecondRecoveredRdi = recoveredRdi;
+    d.c011ec25SecondRecoveredRbp = recoveredRbp;
+
+    GuideXosC011Ec25UnwindProgram program = {};
+    if (!c011ec25DecodeProgram(lookup, &program)) return false;
+    d.c011ec25SecondMetadataValid = 1u;
+    d.c011ec25SecondOpcodeCount = program.codeCount;
+    d.c011ec25SecondStackAdvance = program.stackAdvance;
+    for (uint32_t index = 0u; index < program.codeCount; ++index) {
+        d.c011ec25SecondOpcodeWords[index] = program.opcodeWords[index];
+    }
+    if (inputRsp > ~static_cast<uintptr_t>(0) - program.stackAdvance) {
+        return false;
+    }
+    d.c011ec25SecondReturnSlot = inputRsp + program.stackAdvance;
+    d.c011ec25SecondReturnValue = *reinterpret_cast<const uintptr_t*>(
+        d.c011ec25SecondReturnSlot);
+    d.c011ec25ExpectedCallerRip = d.c011ec25SecondReturnValue;
+    d.c011ec25ExpectedCallerRsp = d.c011ec25SecondReturnSlot + 8u;
+    d.c011ec25SecondOutputAgreement =
+        outputRip == d.c011ec25ExpectedCallerRip &&
+        outputRsp == d.c011ec25ExpectedCallerRsp &&
+        outputRbp == inputRbp ? 1u : 0u;
+
+    // The first C24 lookup already captured the linked kernel geometry in the
+    // append-only diagnostics record.  Reuse that geometry here rather than
+    // calling a kernel-provider symbol that is not part of the managed
+    // artifact's link contract.
+    const uintptr_t linkedModuleBase = d.c011ec23ModuleBase;
+    const uintptr_t linkedExecutableStart = d.c011ec23ExecutableStart;
+    const uintptr_t linkedExecutableEnd = d.c011ec23ExecutableEnd;
+    if (linkedModuleBase == 0u || linkedExecutableStart == 0u ||
+        linkedExecutableEnd <= linkedExecutableStart ||
+        lookup.module_base == linkedModuleBase ||
+        outputRip < lookup.module_base ||
+        outputRip >= lookup.executable_end) {
+        return false;
+    }
+    d.c011ec25ThirdPhysicalPc = outputRip;
+    d.c011ec25ThirdInKernelRange = 1u;
+    d.c011ec25ThirdLinkedPc = linkedModuleBase +
+        (outputRip - lookup.module_base);
+    if (d.c011ec25ThirdLinkedPc < linkedExecutableStart ||
+        d.c011ec25ThirdLinkedPc >= linkedExecutableEnd) {
+        return false;
+    }
+    // The entry and .halt offsets are proven against the linked ELF .boot
+    // section by the C25 harness.  The post-call RSP is the value of
+    // boot_stack_top after kernel_main returns; retain that independently
+    // derived value here for the runtime boundary proof.
+    d.c011ec25LinkedEntryPc = linkedModuleBase;
+    d.c011ec25LinkedHaltPc = linkedModuleBase + 0x1Eu;
+    d.c011ec25BootStackTop = d.c011ec25ExpectedCallerRsp;
+    d.c011ec25AssemblyEntryBoundary =
+        d.c011ec25ThirdLinkedPc == d.c011ec25LinkedHaltPc ? 1u : 0u;
+
+    guidexos_nativeaot_native_unwind_lookup_result linkedThird = {};
+    d.c011ec25ThirdLinkedLookupAttempted = 1u;
+    d.c011ec25LinkedLookupResult = static_cast<uint32_t>(
+        guidexos_nativeaot_gc_native_unwind_lookup(
+            d.c011ec25ThirdLinkedPc, &linkedThird));
+    d.c011ec25ThirdLinkedLookupSucceeded =
+        d.c011ec25LinkedLookupResult == 0u ? 1u : 0u;
+
+    guidexos_nativeaot_native_unwind_lookup_result physicalThird = {};
+    d.c011ec25ThirdPhysicalLookupAttempted = 1u;
+    d.c011ec25PhysicalLookupResult = static_cast<uint32_t>(
+        guidexos_nativeaot_gc_native_unwind_lookup(
+            d.c011ec25ThirdPhysicalPc, &physicalThird));
+    d.c011ec25ThirdPhysicalLookupSucceeded =
+        d.c011ec25PhysicalLookupResult == 0u ? 1u : 0u;
+    d.c011ec25ThirdMetadataPresent =
+        (d.c011ec25ThirdLinkedLookupSucceeded != 0u ||
+         d.c011ec25ThirdPhysicalLookupSucceeded != 0u) ? 1u : 0u;
+    d.c011ec25NonReturningHandoff =
+        d.c011ec25AssemblyEntryBoundary != 0u ? 1u : 0u;
+    d.c011ec25StackBottomProven =
+        d.c011ec25AssemblyEntryBoundary != 0u &&
+        d.c011ec25ThirdMetadataPresent == 0u &&
+        outputRsp == d.c011ec25BootStackTop ? 1u : 0u;
+    d.c011ec25PreflightProven =
+        d.c011ec25SecondMetadataValid != 0u &&
+        d.c011ec25SecondOutputAgreement != 0u &&
+        d.c011ec25ThirdInKernelRange != 0u &&
+        d.c011ec25AssemblyEntryBoundary != 0u &&
+        d.c011ec25ThirdMetadataPresent == 0u &&
+        d.c011ec25NonReturningHandoff != 0u &&
+        d.c011ec25StackBottomProven != 0u ? 1u : 0u;
+    if (d.c011ec25PreflightProven != 0u) emitC011EC25Preflight();
+    return d.c011ec25PreflightProven != 0u;
+}
+#endif
 #endif
 
 uint64_t c011ec23LoadRegister(uintptr_t location) {
@@ -5910,7 +6175,11 @@ guideXosNativeAotC011EC23TryNativeUnwind(
             GuideXosC011Ec24UnwindProgram program = {};
             if (!c011ec24DecodeProgram(lookup, d, &program) ||
                 program.chained != 0u) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+                guideXosNativeAotC011EC25SafeStop(0xC0250003u);
+#else
                 guideXosNativeAotC011EC24SafeStop(0xC0240001u);
+#endif
             }
             d.c011ec24DerivedReturnSlot = static_cast<uintptr_t>(display->SP) +
                 program.stackAdvance;
@@ -6093,10 +6362,18 @@ guideXosNativeAotC011EC23TryNativeUnwind(
                 d.c011ec24PreflightReturnValue != d.c011ec24DerivedReturnValue ||
                 d.c011ec24PreflightOutputRip != outputRip ||
                 d.c011ec24PreflightOutputRsp != outputRsp) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+                guideXosNativeAotC011EC25SafeStop(0xC0250004u);
+#else
                 guideXosNativeAotC011EC24SafeStop(0xC0240002u);
+#endif
             }
             if (d.c011ec24CallerValid == 0u) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+                guideXosNativeAotC011EC25SafeStop(0xC0250005u);
+#else
                 guideXosNativeAotC011EC24SafeStop(0xC0240003u);
+#endif
             }
         }
         if (frameIndex == 1u) {
@@ -6108,9 +6385,33 @@ guideXosNativeAotC011EC23TryNativeUnwind(
                 context, kC011EC23ContextRbp);
             if (outputRip == d.c011ec23OutputRip ||
                 outputRsp <= d.c011ec24SecondInputRsp) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+                guideXosNativeAotC011EC25SafeStop(0xC0250001u);
+#else
                 guideXosNativeAotC011EC24SafeStop(0xC0240005u);
+#endif
             }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+            if (!c011ec25ValidateBoundary(
+                    lookup,
+                    d.c011ec24SecondInputRip,
+                    d.c011ec24SecondInputRsp,
+                    d.c011ec24SecondInputRbp,
+                    outputRip,
+                    outputRsp,
+                    d.c011ec24SecondOutputRbp,
+                    establisherFrame,
+                    reinterpret_cast<uintptr_t>(handlerData),
+                    c011ec23LoadRegister(display->pRbx),
+                    c011ec23LoadRegister(display->pRsi),
+                    c011ec23LoadRegister(display->pRdi),
+                    c011ec23LoadRegister(display->pRbp))) {
+                guideXosNativeAotC011EC25SafeStop(0xC0250002u);
+            }
+            guideXosNativeAotC011EC25SafeStop(0xC0250000u);
+#else
             guideXosNativeAotC011EC24SafeStop(0xC0240004u);
+#endif
         }
 #endif
 
@@ -7439,7 +7740,7 @@ guideXosNativeAotC011EC23SafeStop(uint32_t reason) {
 }
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE)
-static void emitC011EC24SafeStop() {
+static void emitC011EC24SafeStop(const char* finalMarker) {
     const guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     suspendEeSerialPutString(
@@ -7539,6 +7840,47 @@ static void emitC011EC24SafeStop() {
     C24_HEX64("stackLimit", d.rootThreadRecords[0].stackHigh);
     C24_HEX64("scanContextStackLimit", d.callbackContextStackLimit);
     C24_HEX32("safeStopReason", d.c011ec24SafeStopReason);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+    C24_HEX32("c25PreflightProven", d.c011ec25PreflightProven);
+    C24_HEX32("c25SecondMetadataValid", d.c011ec25SecondMetadataValid);
+    C24_HEX32("c25SecondOutputAgreement", d.c011ec25SecondOutputAgreement);
+    C24_HEX32("c25ThirdInKernelRange", d.c011ec25ThirdInKernelRange);
+    C24_HEX32("c25ThirdLinkedLookupAttempted", d.c011ec25ThirdLinkedLookupAttempted);
+    C24_HEX32("c25ThirdLinkedLookupSucceeded", d.c011ec25ThirdLinkedLookupSucceeded);
+    C24_HEX32("c25ThirdPhysicalLookupAttempted", d.c011ec25ThirdPhysicalLookupAttempted);
+    C24_HEX32("c25ThirdPhysicalLookupSucceeded", d.c011ec25ThirdPhysicalLookupSucceeded);
+    C24_HEX32("c25ThirdMetadataPresent", d.c011ec25ThirdMetadataPresent);
+    C24_HEX32("c25AssemblyEntryBoundary", d.c011ec25AssemblyEntryBoundary);
+    C24_HEX32("c25NonReturningHandoff", d.c011ec25NonReturningHandoff);
+    C24_HEX32("c25StackBottomProven", d.c011ec25StackBottomProven);
+    C24_HEX32("c25SecondOpcodeCount", d.c011ec25SecondOpcodeCount);
+    C24_HEX32("c25SecondStackAdvance", d.c011ec25SecondStackAdvance);
+    C24_HEX32("c25ProviderLookupResult", d.c011ec25ProviderLookupResult);
+    C24_HEX32("c25LinkedLookupResult", d.c011ec25LinkedLookupResult);
+    C24_HEX32("c25PhysicalLookupResult", d.c011ec25PhysicalLookupResult);
+    C24_HEX32("c25SafeStopReason", d.c011ec25SafeStopReason);
+    C24_HEX64("c25SecondReturnSlot", d.c011ec25SecondReturnSlot);
+    C24_HEX64("c25SecondReturnValue", d.c011ec25SecondReturnValue);
+    C24_HEX64("c25ExpectedCallerRIP", d.c011ec25ExpectedCallerRip);
+    C24_HEX64("c25ExpectedCallerRSP", d.c011ec25ExpectedCallerRsp);
+    C24_HEX64("c25ThirdPhysicalPC", d.c011ec25ThirdPhysicalPc);
+    C24_HEX64("c25ThirdLinkedPC", d.c011ec25ThirdLinkedPc);
+    C24_HEX64("c25LinkedEntryPC", d.c011ec25LinkedEntryPc);
+    C24_HEX64("c25LinkedHaltPC", d.c011ec25LinkedHaltPc);
+    C24_HEX64("c25BootStackTop", d.c011ec25BootStackTop);
+    C24_HEX64("c25SecondEstablisherFrame", d.c011ec25SecondEstablisherFrame);
+    C24_HEX64("c25SecondHandlerData", d.c011ec25SecondHandlerData);
+    C24_HEX64("c25SecondRecoveredRBX", d.c011ec25SecondRecoveredRbx);
+    C24_HEX64("c25SecondRecoveredRSI", d.c011ec25SecondRecoveredRsi);
+    C24_HEX64("c25SecondRecoveredRDI", d.c011ec25SecondRecoveredRdi);
+    C24_HEX64("c25SecondRecoveredRBP", d.c011ec25SecondRecoveredRbp);
+    for (uint32_t index = 0u; index < d.c011ec25SecondOpcodeCount; ++index) {
+        suspendEeSerialPutString(" c25OpcodeWord");
+        suspendEeSerialPutHex32(index);
+        suspendEeSerialPutString("=");
+        suspendEeSerialPutHex32(d.c011ec25SecondOpcodeWords[index]);
+    }
+#endif
     for (uint32_t index = 0u; index < d.c011ec24UnwindOpcodeCount; ++index) {
         suspendEeSerialPutString(" opcodeWord");
         suspendEeSerialPutHex32(index);
@@ -7547,7 +7889,9 @@ static void emitC011EC24SafeStop() {
     }
 #undef C24_HEX32
 #undef C24_HEX64
-    suspendEeSerialPutString(" marker=C011EC24\n");
+    suspendEeSerialPutString(" marker=");
+    suspendEeSerialPutString(finalMarker);
+    suspendEeSerialPutString("\n");
 }
 
 extern "C" __declspec(noreturn) void __cdecl
@@ -7559,10 +7903,25 @@ guideXosNativeAotC011EC24SafeStop(uint32_t reason) {
     d.safeStopObserved = 1u;
     d.stopReason = GUIDEXOS_NATIVEAOT_CALLER_FRAME_UNWIND_MARKER;
     d.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F33_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP;
-    emitC011EC24SafeStop();
+    emitC011EC24SafeStop("C011EC24");
     for (;;) {
     }
 }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC25SafeStop(uint32_t reason) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec25MarkerEmitted = 1u;
+    d.c011ec25SafeStopReason = reason;
+    d.safeStopObserved = 1u;
+    d.stopReason = GUIDEXOS_NATIVEAOT_CALLER_FRAME_UNWIND_MARKER;
+    d.stage = GUIDEXOS_NATIVEAOT_ALLOC_STAGE_F33_NEXT_GENUINE_ROOT_PROVIDER_SAFE_STOP;
+    emitC011EC24SafeStop("C011EC25");
+    for (;;) {
+    }
+}
+#endif
 #endif
 #endif
 

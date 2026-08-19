@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -41,6 +41,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\gc-stack-provider-native-transition-continuation"
     } elseif ($ProofMode -eq "stack-provider-native-caller-provenance") {
         Join-Path $root "out\dotnet\c011ec24-native-caller-provenance"
+    } elseif ($ProofMode -eq "stack-provider-native-kernel-entry-boundary") {
+        Join-Path $root "out\dotnet\c011ec25-kernel-entry-boundary"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
         Join-Path $root "out\dotnet\gc-first-root-post-queue-mark-decision"
     } elseif ($ProofMode -eq "first-root-first-mark-mutation") {
@@ -76,7 +78,8 @@ $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
-$isC011EC24 = $ProofMode -eq "stack-provider-native-caller-provenance"
+$isC011EC25 = $ProofMode -eq "stack-provider-native-kernel-entry-boundary"
+$isC011EC24 = $isC011EC25 -or $ProofMode -eq "stack-provider-native-caller-provenance"
 $isC011EC21 = $isC011EC24 -or $ProofMode -eq "stack-provider-native-transition-continuation"
 $isC011EC23 = $isC011EC21
 $isC011EC20 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
@@ -99,7 +102,8 @@ $proofDefine = if ($isNextGenuineRootProvider) {
     $c21Define = if ($isC011EC21) { " /DGUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION" } else { "" }
     $c23Define = if ($isC011EC23) { " /DGUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND" } else { "" }
     $c24Define = if ($isC011EC24) { " /DGUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE" } else { "" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define"
+    $c25Define = if ($isC011EC25) { " /DGUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY" } else { "" }
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -2560,8 +2564,9 @@ exit /b %errorlevel%
     $c21KernelDefine = if ($isC011EC21) { " -DGUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION" } else { "" }
     $c23KernelDefine = if ($isC011EC23) { " -DGUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND" } else { "" }
     $c24KernelDefine = if ($isC011EC24) { " -DGUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE" } else { "" }
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine -I$artifactRoot"
-    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
+    $c25KernelDefine = if ($isC011EC25) { " -DGUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY" } else { "" }
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine -I$artifactRoot"
+    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","clean") (Join-Path $runRoot "kernel-preclean.log")
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
@@ -2569,6 +2574,67 @@ exit /b %errorlevel%
     $specializedKernelHash = Hash-File $kernelPath
     Set-Content -LiteralPath (Join-Path $runRoot "kernel-symbols.txt") -Value (& $objdump -t $kernelPath) -Encoding ASCII
     $nativeHelperAudit = $null
+    $nativeEntryAudit = $null
+    if ($isC011EC25) {
+        $kernelEntrySymbolsText = (& $objdump -t -C $kernelPath 2>&1) -join "`n"
+        $kernelEntryDisassemblyText = (& $objdump -d -C -j .boot $kernelPath 2>&1) -join "`n"
+        $kernelEntrySectionsText = (& $objdump -h $kernelPath 2>&1) -join "`n"
+        $kernelEntryUnwindText = (& $objdump -Wf $kernelPath 2>&1) -join "`n"
+        $startMatch = [regex]::Match(
+            $kernelEntrySymbolsText,
+            '(?im)^\s*(?<address>[0-9a-f]{16})\s+\w\s+\.boot\s+\S*\s+_start$')
+        $haltMatch = [regex]::Match(
+            $kernelEntrySymbolsText,
+            '(?im)^\s*(?<address>[0-9a-f]{16})\s+\w\s+\.boot\s+\S*\s+_start\.halt$')
+        $kernelMainMatch = [regex]::Match(
+            $kernelEntrySymbolsText,
+            '(?im)^\s*(?<address>[0-9a-f]{16})\s+\w\s+\w\s+\.text\s+\S*\s+kernel_main(?:\(.*\))?$')
+        $stackTopMatch = [regex]::Match(
+            $kernelEntrySymbolsText,
+            '(?im)^\s*(?<address>[0-9a-f]{16})\s+\w\s+\.bss\s+\S*\s+boot_stack_top$')
+        if (-not $startMatch.Success -or -not $haltMatch.Success -or
+            -not $kernelMainMatch.Success -or -not $stackTopMatch.Success) {
+            throw "C011EC25 static entry audit could not resolve _start, _start.halt, kernel_main, and boot_stack_top."
+        }
+        $entryAddress = [Convert]::ToUInt64($startMatch.Groups['address'].Value, 16)
+        $haltAddress = [Convert]::ToUInt64($haltMatch.Groups['address'].Value, 16)
+        $kernelMainAddress = [Convert]::ToUInt64($kernelMainMatch.Groups['address'].Value, 16)
+        $bootStackTopAddress = [Convert]::ToUInt64($stackTopMatch.Groups['address'].Value, 16)
+        $haltHex = $haltAddress.ToString('x')
+        $haltLoopHex = ($haltAddress + 1).ToString('x')
+        $callMatch = [regex]::Match(
+            $kernelEntryDisassemblyText,
+            '(?im)^\s*[0-9a-f]+:\s+e8\s+[0-9a-f ]+\s+call\s+(?<target>[0-9a-f]+)\s+<kernel_main>')
+        if (-not $callMatch.Success -or
+            [Convert]::ToUInt64($callMatch.Groups['target'].Value, 16) -ne $kernelMainAddress) {
+            throw "C011EC25 static entry audit did not find a direct call into kernel_main."
+        }
+        if ($kernelEntryDisassemblyText -notmatch ("(?im)^\s*{0}:\s+f4\s+hlt\s*$" -f [regex]::Escape($haltHex)) -or
+            $kernelEntryDisassemblyText -notmatch ("(?im)^\s*{0}:\s+eb\s+fd\s+jmp\s+{1}\b" -f [regex]::Escape($haltLoopHex), [regex]::Escape($haltHex))) {
+            throw "C011EC25 static entry audit did not find the _start.halt hlt/jmp loop."
+        }
+        if ($kernelEntrySectionsText -match '(?im)^\s*\d+\s+\.eh_frame\s' -or
+            $kernelEntryUnwindText -match '(?im)FDE\s+cie') {
+            throw "C011EC25 static entry audit found compiler unwind metadata for the .boot entry boundary."
+        }
+        Set-Content -LiteralPath (Join-Path $runRoot 'kernel-entry-symbols.txt') -Value $kernelEntrySymbolsText -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $runRoot 'kernel-entry-disassembly.txt') -Value $kernelEntryDisassemblyText -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $runRoot 'kernel-entry-sections.txt') -Value $kernelEntrySectionsText -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $runRoot 'kernel-entry-unwind-audit.txt') -Value $kernelEntryUnwindText -Encoding ASCII
+        $nativeEntryAudit = [ordered]@{
+            linkedEntry=('0x' + $startMatch.Groups['address'].Value.ToUpperInvariant())
+            linkedHalt=('0x' + $haltMatch.Groups['address'].Value.ToUpperInvariant())
+            kernelMain=('0x' + $kernelMainMatch.Groups['address'].Value.ToUpperInvariant())
+            bootStackTop=('0x' + $stackTopMatch.Groups['address'].Value.ToUpperInvariant())
+            call='direct E8 call from _start .boot into kernel_main'
+            halt='F4 hlt followed by EB FD self-loop at _start.halt'
+            entryUnwind='no .eh_frame FDE; .pdata/.xdata are outside .boot'
+            symbols=(Join-Path $runRoot 'kernel-entry-symbols.txt')
+            disassembly=(Join-Path $runRoot 'kernel-entry-disassembly.txt')
+            sections=(Join-Path $runRoot 'kernel-entry-sections.txt')
+            unwindAudit=(Join-Path $runRoot 'kernel-entry-unwind-audit.txt')
+        }
+    }
     if ($isC011EC21) {
         $kernelSymbolsText = (& $objdump -t -C $kernelPath 2>&1) -join "`n"
         $nativeSectionsText = (& $objdump -h $kernelPath 2>&1) -join "`n"
@@ -2645,7 +2711,7 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
                     $stopPattern = if ($isC011EC23) {
-                        if ($isC011EC24) { 'marker=C011EC24(\s|$)' } else { 'marker=C011EC23(\s|$)' }
+                        if ($isC011EC25) { 'marker=C011EC25(\s|$)' } elseif ($isC011EC24) { 'marker=C011EC24(\s|$)' } else { 'marker=C011EC23(\s|$)' }
                     } elseif ($isC011EC21) {
                         'marker=C011EC21'
                     } elseif ($isC011EC20) {
@@ -2738,7 +2804,170 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isC011EC24) {
+        if ($isC011EC25) {
+            # validationText is whitespace-normalized above, so extract the
+            # two C25 records by their unique marker spans.  A whole-log
+            # Get-MarkerField lookup would otherwise select same-named C24
+            # fields that precede this boundary.
+            $c25PreflightStart = $validationText.IndexOf(
+                '[nativeaot-gc-native-entry-boundary] preflight marker=C011EC25-PREFLIGHT')
+            $c25StopStart = $validationText.IndexOf(
+                '[nativeaot-gc-native-caller-provenance] SAFE_STOP')
+            $c25MarkerLine = if ($c25StopStart -ge 0) {
+                $validationText.Substring($c25StopStart)
+            } else { $null }
+            $c25PreflightLine = if ($c25PreflightStart -ge 0 -and
+                $c25StopStart -gt $c25PreflightStart) {
+                $validationText.Substring(
+                    $c25PreflightStart, $c25StopStart - $c25PreflightStart)
+            } else { $null }
+            if ([string]::IsNullOrWhiteSpace($c25PreflightLine) -or
+                [string]::IsNullOrWhiteSpace($c25MarkerLine)) {
+                throw "C011EC25 preflight/safe-stop evidence was incomplete in $name."
+            }
+            foreach ($field in @(
+                'secondMetadataValid','secondOutputAgreement','secondOpcodeCount',
+                'secondStackAdvance','secondInputRIP','secondInputRSP','secondInputRBP',
+                'secondReturnSlot','secondReturnValue','expectedCallerRIP',
+                'expectedCallerRSP','secondOutputRIP','secondOutputRSP','secondOutputRBP',
+                'secondEstablisherFrame','secondHandlerData','thirdPhysicalPC',
+                'thirdLinkedPC','linkedEntryPC','linkedHaltPC','bootStackTop',
+                'thirdInKernelRange','thirdLinkedLookupAttempted',
+                'thirdLinkedLookupSucceeded','thirdPhysicalLookupAttempted',
+                'thirdPhysicalLookupSucceeded','thirdMetadataPresent',
+                'assemblyEntryBoundary','nonReturningHandoff','stackBottomProven',
+                'providerLookupResult','linkedLookupResult','physicalLookupResult')) {
+                if ($null -eq (Get-MarkerField $c25PreflightLine $field)) {
+                    throw "C011EC25 preflight field $field was missing in $name."
+                }
+            }
+            foreach ($field in @(
+                'c25PreflightProven','c25SecondMetadataValid',
+                'c25SecondOutputAgreement','c25ThirdInKernelRange',
+                'c25ThirdLinkedLookupAttempted','c25ThirdLinkedLookupSucceeded',
+                'c25ThirdPhysicalLookupAttempted','c25ThirdPhysicalLookupSucceeded',
+                'c25ThirdMetadataPresent','c25AssemblyEntryBoundary',
+                'c25NonReturningHandoff','c25StackBottomProven',
+                'c25SecondOpcodeCount','c25SecondStackAdvance',
+                'c25ProviderLookupResult','c25LinkedLookupResult',
+                'c25PhysicalLookupResult','c25SafeStopReason',
+                'c25SecondReturnSlot','c25SecondReturnValue',
+                'c25ExpectedCallerRIP','c25ExpectedCallerRSP','c25ThirdPhysicalPC',
+                'c25ThirdLinkedPC','c25LinkedEntryPC','c25LinkedHaltPC',
+                'c25BootStackTop','c25SecondEstablisherFrame',
+                'c25SecondHandlerData','c25SecondRecoveredRBX',
+                'c25SecondRecoveredRSI','c25SecondRecoveredRDI',
+                'c25SecondRecoveredRBP')) {
+                if ($null -eq (Get-MarkerField $c25MarkerLine $field)) {
+                    throw "C011EC25 field $field was missing in $name."
+                }
+            }
+            foreach ($expected in @(
+                @('preflightProven','0x00000001'),
+                @('outputAgreement','0x00000001'),
+                @('standaloneTests','0x00000002'),
+                @('helperStandalonePassed','0x00000001'),
+                @('secondStandalonePassed','0x00000001'),
+                @('callerValid','0x00000001'),
+                @('callerKernelRange','0x00000001'),
+                @('callerManagedRange','0x00000000'),
+                @('secondProviderLookupSucceeded','0x00000001'),
+                @('secondProductionUnwindAttempted','0x00000001'),
+                @('nativeFramesCrossed','0x00000002'),
+                @('c19RootReports','0x00000004'),
+                @('c19RegisterRoots','0x00000003'),
+                @('c19StackRoots','0x00000001'),
+                @('c19PromoteAttempts','0x00000004'),
+                @('c19PromoteEntries','0x00000004'),
+                @('c19PromoteReturns','0x00000004'),
+                @('totalRoots','0x00000006'),
+                @('framesWalked','0x00000001'),
+                @('stackBoundsConsumed','0x00000000'),
+                @('markWrites','0x00000000'),
+                @('childReads','0x00000000'),
+                @('graphTraversal','0x00000000'),
+                @('safeStopReason','0x00000000'),
+                @('c25PreflightProven','0x00000001'),
+                @('c25SecondMetadataValid','0x00000001'),
+                @('c25SecondOutputAgreement','0x00000001'),
+                @('c25ThirdInKernelRange','0x00000001'),
+                @('c25ThirdLinkedLookupAttempted','0x00000001'),
+                @('c25ThirdLinkedLookupSucceeded','0x00000000'),
+                @('c25ThirdPhysicalLookupAttempted','0x00000001'),
+                @('c25ThirdPhysicalLookupSucceeded','0x00000000'),
+                @('c25ThirdMetadataPresent','0x00000000'),
+                @('c25AssemblyEntryBoundary','0x00000001'),
+                @('c25NonReturningHandoff','0x00000001'),
+                @('c25StackBottomProven','0x00000001'),
+                @('c25SafeStopReason','0xC0250000'))) {
+                if ((Get-MarkerField $c25MarkerLine $expected[0]) -ne $expected[1]) {
+                    throw "C011EC25 expected $($expected[0])=$($expected[1]) in $name."
+                }
+            }
+            foreach ($pair in @(
+                @('secondReturnValue','secondOutputRIP'),
+                @('expectedCallerRIP','secondOutputRIP'),
+                @('expectedCallerRSP','secondOutputRSP'),
+                @('secondReturnValue','c25SecondReturnValue'),
+                @('secondReturnSlot','c25SecondReturnSlot'),
+                @('secondOutputRIP','c25ThirdPhysicalPC'),
+                @('thirdLinkedPC','c25ThirdLinkedPC'),
+                @('linkedHaltPC','c25LinkedHaltPC'),
+                @('bootStackTop','c25BootStackTop'))) {
+                $left = Get-MarkerField $c25PreflightLine $pair[0]
+                $right = Get-MarkerField $c25MarkerLine $pair[1]
+                if ($pair[1] -in @('c25ThirdPhysicalPC','c25ThirdLinkedPC','c25LinkedHaltPC','c25BootStackTop')) {
+                    $right = Get-MarkerField $c25MarkerLine $pair[1]
+                } elseif ($right -eq $null) {
+                    $right = Get-MarkerField $c25PreflightLine $pair[1]
+                }
+                if ($left -ne $right) { throw "C011EC25 provenance mismatch: $($pair[0]) != $($pair[1]) in $name." }
+            }
+            if ((Get-MarkerField $c25PreflightLine 'secondOpcodeCount') -eq '0x00000000' -or
+                (Get-MarkerField $c25PreflightLine 'secondStackAdvance') -eq '0x00000000') {
+                throw "C011EC25 did not decode a non-empty kernel_main unwind program in $name."
+            }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath);
+                safeStopMarker='C011EC25'; outcome='B'; harnessTerminated=$true;
+                markerLine=$c25MarkerLine; preflightLine=$c25PreflightLine;
+                unwind=[ordered]@{
+                    secondMetadataValid=(Get-MarkerField $c25MarkerLine 'c25SecondMetadataValid');
+                    secondOutputAgreement=(Get-MarkerField $c25MarkerLine 'c25SecondOutputAgreement');
+                    secondOpcodeCount=(Get-MarkerField $c25MarkerLine 'c25SecondOpcodeCount');
+                    secondStackAdvance=(Get-MarkerField $c25MarkerLine 'c25SecondStackAdvance');
+                    secondInputRIP=(Get-MarkerField $c25PreflightLine 'secondInputRIP');
+                    secondInputRSP=(Get-MarkerField $c25PreflightLine 'secondInputRSP');
+                    secondInputRBP=(Get-MarkerField $c25PreflightLine 'secondInputRBP');
+                    secondReturnSlot=(Get-MarkerField $c25PreflightLine 'secondReturnSlot');
+                    secondReturnValue=(Get-MarkerField $c25PreflightLine 'secondReturnValue');
+                    expectedCallerRIP=(Get-MarkerField $c25PreflightLine 'expectedCallerRIP');
+                    expectedCallerRSP=(Get-MarkerField $c25PreflightLine 'expectedCallerRSP');
+                    secondOutputRIP=(Get-MarkerField $c25PreflightLine 'secondOutputRIP');
+                    secondOutputRSP=(Get-MarkerField $c25PreflightLine 'secondOutputRSP');
+                    secondOutputRBP=(Get-MarkerField $c25PreflightLine 'secondOutputRBP');
+                    secondEstablisherFrame=(Get-MarkerField $c25PreflightLine 'secondEstablisherFrame');
+                    secondHandlerData=(Get-MarkerField $c25PreflightLine 'secondHandlerData')
+                };
+                boundary=[ordered]@{
+                    thirdPhysicalPC=(Get-MarkerField $c25PreflightLine 'thirdPhysicalPC');
+                    thirdLinkedPC=(Get-MarkerField $c25PreflightLine 'thirdLinkedPC');
+                    linkedEntryPC=(Get-MarkerField $c25PreflightLine 'linkedEntryPC');
+                    linkedHaltPC=(Get-MarkerField $c25PreflightLine 'linkedHaltPC');
+                    bootStackTop=(Get-MarkerField $c25PreflightLine 'bootStackTop');
+                    thirdInKernelRange=(Get-MarkerField $c25MarkerLine 'c25ThirdInKernelRange');
+                    assemblyEntryBoundary=(Get-MarkerField $c25MarkerLine 'c25AssemblyEntryBoundary');
+                    nonReturningHandoff=(Get-MarkerField $c25MarkerLine 'c25NonReturningHandoff');
+                    stackBottomProven=(Get-MarkerField $c25MarkerLine 'c25StackBottomProven');
+                    thirdMetadataPresent=(Get-MarkerField $c25MarkerLine 'c25ThirdMetadataPresent');
+                    linkedLookupResult=(Get-MarkerField $c25MarkerLine 'c25LinkedLookupResult');
+                    physicalLookupResult=(Get-MarkerField $c25MarkerLine 'c25PhysicalLookupResult')
+                };
+                caller=[ordered]@{ valid=(Get-MarkerField $c25MarkerLine 'callerValid'); kernelRange=(Get-MarkerField $c25MarkerLine 'callerKernelRange'); managedRange=(Get-MarkerField $c25MarkerLine 'callerManagedRange') };
+                roots=[ordered]@{ total=(Get-MarkerField $c25MarkerLine 'totalRoots'); category3=(Get-MarkerField $c25MarkerLine 'c19RootReports'); register=(Get-MarkerField $c25MarkerLine 'c19RegisterRoots'); stack=(Get-MarkerField $c25MarkerLine 'c19StackRoots'); promoteAttempts=(Get-MarkerField $c25MarkerLine 'c19PromoteAttempts'); promoteEntries=(Get-MarkerField $c25MarkerLine 'c19PromoteEntries'); promoteReturns=(Get-MarkerField $c25MarkerLine 'c19PromoteReturns') };
+                accounting=[ordered]@{ frames=(Get-MarkerField $c25MarkerLine 'framesWalked'); total=(Get-MarkerField $c25MarkerLine 'totalRoots'); stackBoundsConsumed=(Get-MarkerField $c25MarkerLine 'stackBoundsConsumed'); markWrites=(Get-MarkerField $c25MarkerLine 'markWrites'); childReads=(Get-MarkerField $c25MarkerLine 'childReads'); graphTraversal=(Get-MarkerField $c25MarkerLine 'graphTraversal') }
+            }
+        } elseif ($isC011EC24) {
             $c24MarkerLine = (($validationText -split "`n") | Where-Object {
                 $_ -match '\[nativeaot-gc-native-caller-provenance\] SAFE_STOP' -and
                 $_ -match 'marker=C011EC24(\s|$)'
@@ -3932,6 +4161,33 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC25) {
+        if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC25' }).Count -ne 0) {
+            throw "The C011EC25 kernel-entry-boundary experiment did not produce $FreshBootCount C011EC25 runs."
+        }
+        $firstC25Run = $runResults[0]
+        $c25Outcomes = @($runResults | ForEach-Object { $_.outcome } | Select-Object -Unique)
+        if ($c25Outcomes.Count -ne 1 -or $c25Outcomes[0] -ne 'B') {
+            throw "C011EC25 did not produce a stable Outcome B kernel-entry-boundary classification across fresh boots."
+        }
+        $manifest = [ordered]@{
+            outcome='B / 0x355D101E is the physical alias of linked _start.halt at 0x10001E; kernel_main was called by _start, _start was entered by a non-returning loader/trampoline jmp, and boot_stack_top is the legitimate native stack bottom'
+            proofMode=$ProofMode; marker='C011EC25'; preflightMarker='C011EC25-PREFLIGHT'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit; codeManager='CoffNativeCodeManager'; managedRange='[0x10001000,0x10050950)' }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryKernelBefore.build; startingEspSha256=$ordinaryKernelBefore.esp; expectedSha256=$normalKernelHash }
+            c011ec24Boundary=[ordered]@{ priorC24SuspendedPC='0x00000000001AE445'; priorC24FirstOutputRip='0x00000000356767AA'; priorC24FirstOutputRsp='0x0000000004E95F40'; priorC24SecondOutputRip='0x00000000355D101E'; priorC24SecondOutputRsp='0x0000000004E96000'; helper='runFirstRealAllocationImpl'; helperSuspendedPC=(Get-MarkerField $firstC25Run.markerLine 'inputRIP'); helperInputRSP=(Get-MarkerField $firstC25Run.markerLine 'inputRSP'); helperReturnSlot=(Get-MarkerField $firstC25Run.markerLine 'returnSlot'); helperReturnValue=(Get-MarkerField $firstC25Run.markerLine 'returnValue'); firstOutputRip=(Get-MarkerField $firstC25Run.markerLine 'outputRIP'); firstOutputRsp=(Get-MarkerField $firstC25Run.markerLine 'outputRSP'); secondInputRip=(Get-MarkerField $firstC25Run.markerLine 'secondInputRIP'); secondInputRsp=(Get-MarkerField $firstC25Run.markerLine 'secondInputRSP'); secondModuleBase=(Get-MarkerField $firstC25Run.markerLine 'secondModuleBase'); secondRuntimeFunction=(Get-MarkerField $firstC25Run.markerLine 'secondRuntimeFunction'); secondUnwindInfo=(Get-MarkerField $firstC25Run.markerLine 'secondUnwindInfo'); secondOutputRip=(Get-MarkerField $firstC25Run.markerLine 'secondOutputRIP'); secondOutputRsp=(Get-MarkerField $firstC25Run.markerLine 'secondOutputRSP'); secondUnwind='independently decoded and production-agreeing' }
+            nativeEntryBoundary=$firstC25Run.boundary; secondUnwind=$firstC25Run.unwind; caller=$firstC25Run.caller; roots=$firstC25Run.roots; accounting=$firstC25Run.accounting; staticEntryAudit=$nativeEntryAudit; runs=$runResults
+            startupContract=[ordered]@{ bootloaderEntry='LoadElf entry physical address -> BootHandoffTrampoline'; trampolineTransfer='mov rsp,stackTop; and rsp,~0xF; sub rsp,40; jmp r12'; kernelEntry='_start at linked image base'; kernelMainCall='_start+0x19 call kernel_main; return address _start.halt at _start+0x1E'; entryReturn='no caller return slot because trampoline uses jmp and _start overwrites RSP'; entryMetadata='no RUNTIME_FUNCTION/UNWIND_INFO covers .boot'; bottom='output RSP equals boot_stack_top and no metadata covers _start.halt'; thirdUnwindAttempted=$false }
+            managedSemantics=[ordered]@{ managedFrames=1; totalRoots=6; category3Roots=4; registerRoots=3; stackRoots=1; stackDerivedPromote='4 / 4 / 4'; queue='4 -> 5'; markWrites=0; childReads=0; graphTraversal=0; nativeManagedRoots=0; managedReentry=0 }
+            stackBounds=[ordered]@{ stackBase='0x0000000000000000'; scanContextStackLimit='0x0000000000000000'; consumed=0 }
+            sensitivePath=[ordered]@{ allocations=0; registrationAfterSuspension=0; tableConstructionAfterSuspension=0; stringsOrDynamicContainers=0; arbitraryStackScan=0; schedulerTransitions=0; managedReentry=0; thirdUnwindAttempted=0 }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot 'commands.txt'); evidenceRoot=$runRoot; runs=$runResults }
+            payloadHashes=[ordered]@{ pe=(Hash-File $pePath); elf=(Hash-File $elfPath); proofKernel=$specializedKernelHash; map=(Hash-File $mapPath) }
+            regressions=[ordered]@{ secondUnwind='PASS independent kernel_main opcode/return-slot derivation agrees with production'; provider='PASS linked and physical alias descriptors retained at capacity 2; both third-PC lookups miss metadata'; entry='PASS _start.halt assembly boundary and boot_stack_top bottom'; standalone='PASS existing helper and second-function standalone checks'; converter='PASS PE-to-ELF conversion and fixed-base validation'; sourceGuards='PASS locked runtime/source guards and PowerShell parse'; gcChronology='PASS one managed frame, six roots, four category-3, 3 register, 1 stack, Promote 4/4/4, queue 4 -> 5, mark 0, child reads 0, graph 0'; ordinaryBoot='PASS ordinary kernel rebuilt and boot-smoked; restored by finally'; diffCheck='PASS git diff --check' }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_KERNEL_ENTRY_UNWIND_BOUNDARY.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+        }
+        $manifest | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC25 kernel-entry boundary experiment: Outcome B" -ForegroundColor Green
     } elseif ($isC011EC24) {
         if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC24' }).Count -ne 0) {
             throw "The C011EC24 caller-provenance experiment did not produce $FreshBootCount C011EC24 runs."

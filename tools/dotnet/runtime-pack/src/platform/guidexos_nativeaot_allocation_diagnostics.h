@@ -1504,6 +1504,50 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec24RecoveredR13;
     uintptr_t c011ec24RecoveredR14;
     uintptr_t c011ec24RecoveredR15;
+
+    /* C011EC25 kernel-entry boundary evidence; append-only after C24. */
+    uint32_t c011ec25MarkerEmitted;
+    uint32_t c011ec25PreflightProven;
+    uint32_t c011ec25SecondMetadataValid;
+    uint32_t c011ec25SecondOutputAgreement;
+    uint32_t c011ec25ThirdInKernelRange;
+    uint32_t c011ec25ThirdLinkedLookupAttempted;
+    uint32_t c011ec25ThirdLinkedLookupSucceeded;
+    uint32_t c011ec25ThirdPhysicalLookupAttempted;
+    uint32_t c011ec25ThirdPhysicalLookupSucceeded;
+    uint32_t c011ec25ThirdMetadataPresent;
+    uint32_t c011ec25AssemblyEntryBoundary;
+    uint32_t c011ec25NonReturningHandoff;
+    uint32_t c011ec25StackBottomProven;
+    uint32_t c011ec25SecondOpcodeCount;
+    uint32_t c011ec25SecondStackAdvance;
+    uint32_t c011ec25ProviderLookupResult;
+    uint32_t c011ec25LinkedLookupResult;
+    uint32_t c011ec25PhysicalLookupResult;
+    uint32_t c011ec25SafeStopReason;
+    uint16_t c011ec25SecondOpcodeWords[12];
+
+    uintptr_t c011ec25SecondInputRip;
+    uintptr_t c011ec25SecondInputRsp;
+    uintptr_t c011ec25SecondInputRbp;
+    uintptr_t c011ec25SecondReturnSlot;
+    uintptr_t c011ec25SecondReturnValue;
+    uintptr_t c011ec25ExpectedCallerRip;
+    uintptr_t c011ec25ExpectedCallerRsp;
+    uintptr_t c011ec25SecondOutputRip;
+    uintptr_t c011ec25SecondOutputRsp;
+    uintptr_t c011ec25SecondOutputRbp;
+    uintptr_t c011ec25SecondEstablisherFrame;
+    uintptr_t c011ec25SecondHandlerData;
+    uintptr_t c011ec25SecondRecoveredRbx;
+    uintptr_t c011ec25SecondRecoveredRsi;
+    uintptr_t c011ec25SecondRecoveredRdi;
+    uintptr_t c011ec25SecondRecoveredRbp;
+    uintptr_t c011ec25ThirdPhysicalPc;
+    uintptr_t c011ec25ThirdLinkedPc;
+    uintptr_t c011ec25LinkedEntryPc;
+    uintptr_t c011ec25LinkedHaltPc;
+    uintptr_t c011ec25BootStackTop;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
