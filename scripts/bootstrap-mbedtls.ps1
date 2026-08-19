@@ -11,7 +11,6 @@ $Destination = [System.IO.Path]::GetFullPath($Destination)
 $StagingRoot = [System.IO.Path]::GetFullPath($StagingRoot)
 $lockPath = Join-Path $RepoRoot 'guidexos\mbedtls.lock'
 $profilePath = Join-Path $RepoRoot 'guidexos\mbedtls_profile.json'
-$patchPath = Join-Path $RepoRoot 'patches\mbedtls\0001-guidexos-phase8f.patch'
 
 if (-not (Test-Path -LiteralPath $lockPath)) {
     throw "Missing dependency lock file: $lockPath"
@@ -19,12 +18,19 @@ if (-not (Test-Path -LiteralPath $lockPath)) {
 if (-not (Test-Path -LiteralPath $profilePath)) {
     throw "Missing dependency profile manifest: $profilePath"
 }
-if (-not (Test-Path -LiteralPath $patchPath)) {
-    throw "Missing tracked Mbed TLS patch series: $patchPath"
-}
-
 $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
 $profile = Get-Content -LiteralPath $profilePath -Raw | ConvertFrom-Json
+$patchPaths = @($profile.patchSeries | ForEach-Object {
+    Join-Path $RepoRoot ($_ -replace '/', '\\')
+})
+if ($patchPaths.Count -eq 0) {
+    throw "Mbed TLS profile contains no tracked patch series."
+}
+foreach ($patchPath in $patchPaths) {
+    if (-not (Test-Path -LiteralPath $patchPath)) {
+        throw "Missing tracked Mbed TLS patch series: $patchPath"
+    }
+}
 
 if ($Destination -eq [System.IO.Path]::GetFullPath((Join-Path $RepoRoot 'third_party\mbedtls')) -and
     (Test-Path -LiteralPath $Destination) -and -not $Install) {
@@ -72,10 +78,12 @@ if ($actualTfCommit -ne $lock.tfPsaCrypto.commit) {
     throw "TF-PSA-Crypto checkout is not pinned: expected $($lock.tfPsaCrypto.commit), got $actualTfCommit."
 }
 
-& git -C $source apply --check --recount $patchPath
-if ($LASTEXITCODE -ne 0) { throw "Mbed TLS guideXOS patch validation failed." }
-& git -C $source apply --recount $patchPath
-if ($LASTEXITCODE -ne 0) { throw "Mbed TLS guideXOS patch application failed." }
+foreach ($patchPath in $patchPaths) {
+    & git -C $source apply --check --recount $patchPath
+    if ($LASTEXITCODE -ne 0) { throw "Mbed TLS guideXOS patch validation failed: $patchPath" }
+    & git -C $source apply --recount $patchPath
+    if ($LASTEXITCODE -ne 0) { throw "Mbed TLS guideXOS patch application failed: $patchPath" }
+}
 
 $pythonCommand = Get-Command $PythonPath -ErrorAction SilentlyContinue
 if ($null -eq $pythonCommand -and -not (Test-Path -LiteralPath $PythonPath)) {

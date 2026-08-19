@@ -1,0 +1,24 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/framework/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/include/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/framework/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/include/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/drivers/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/drivers/everest/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/drivers/p256-m/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/drivers/builtin/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/drivers/pqcp/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/extras/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/platform/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/utilities/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/core/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/tf-psa-crypto/pkgconfig/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/library/cmake_install.cmake",
+		"D:/dev/guideXOSServerV0.2/tmp/phase8i-native/pkgconfig/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

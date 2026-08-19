@@ -9351,7 +9351,7 @@ static const char* kNavigatorRealPublicProbeCaCertsCompatPath = "/config/navigat
 static const char* kNavigatorRealPublicProbeCaEnabledPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
 static const char* kNavigatorRealPublicProbeCaEnabledCompatPath = "/config/navigator/RPUBCAEN.TXT";
 static const char* kNavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/";
-static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.4";
+static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.5";
 static const uint32_t kNavigatorSmokeTextFileMaxBytes = 512u;
 
 enum class NavigatorHttpsSmokeFaultMode {
@@ -13248,6 +13248,34 @@ static const NavigatorReviewedPublicTarget kNavigatorReviewedPublicTargets[] = {
         443,
         "/",
         "Stable badssl DNS-hosted HTTPS endpoint used to prove real-world DNS, TCP, TLS, certificate, and hostname validation without enabling arbitrary public browsing."
+    },
+    {
+        "https://example.com/",
+        "example.com",
+        443,
+        "/",
+        "IANA example HTTPS page used as the first real HTML/Navigator public page target."
+    },
+    {
+        "https://www.gnu.org/",
+        "www.gnu.org",
+        443,
+        "/",
+        "GNU HTTPS homepage retained as a reviewed public HTML target for the post-example.com navigation sequence."
+    },
+    {
+        "https://news.ycombinator.com/",
+        "news.ycombinator.com",
+        443,
+        "/",
+        "Hacker News HTTPS homepage retained as a reviewed public HTML target for the post-example.com navigation sequence."
+    },
+    {
+        "https://en.wikipedia.org/",
+        "en.wikipedia.org",
+        443,
+        "/",
+        "English Wikipedia HTTPS homepage retained as a reviewed public HTML target for the post-example.com navigation sequence."
     }
 };
 
@@ -13363,7 +13391,7 @@ static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
             config.targetValid = false;
             strcopy(config.reviewedTargetPolicy, "rejected", sizeof(config.reviewedTargetPolicy));
             strcopy(config.reviewedTargetReason,
-                "The requested target is outside the reviewed public HTTPS allowlist for v0.4.",
+                "The requested target is outside the reviewed public HTTPS allowlist for v0.5.",
                 sizeof(config.reviewedTargetReason));
         }
     }

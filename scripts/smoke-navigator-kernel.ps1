@@ -42,6 +42,11 @@ function Invoke-KernelBuildForSmoke {
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "gxos_tls_foundation.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "tcp.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -File -Filter "*.o" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match "[\\/]obj[\\/]third_party[\\/]" } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "main.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
     $kernelBuildStdout = Join-Path $LogDir "navigator-kernel-build.stdout.log"
@@ -452,6 +457,12 @@ function Invoke-NavigatorKernelSmokeQemuPass {
             "-object", "rng-builtin,id=rng0",
             "-device", "virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000"
         )
+
+        $netDumpPath = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_QEMU_NET_DUMP", "Process")
+        if (-not [string]::IsNullOrWhiteSpace($netDumpPath)) {
+            $args += @("-object", "filter-dump,id=phase8h_dump,netdev=net0,file=`"$netDumpPath`"")
+            Write-Host "QEMU packet capture enabled: $netDumpPath"
+        }
 
         $proc = Start-Process -FilePath $qemu -ArgumentList $args -PassThru -WindowStyle Hidden
         try {

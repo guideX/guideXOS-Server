@@ -94,9 +94,15 @@ if (Test-Path -LiteralPath $configPath) {
     }
 }
 
-$patchPath = Join-Path $RepoRoot 'patches\mbedtls\0001-guidexos-phase8f.patch'
-if (-not (Test-Path -LiteralPath $patchPath)) {
-    Add-ProfileError("missing tracked patch series: $patchPath")
+if ($profile.patchSeries.Count -eq 0) {
+    Add-ProfileError('Mbed TLS profile contains no tracked patch series')
+} else {
+    foreach ($patchPathEntry in $profile.patchSeries) {
+        $patchPath = Join-Path $RepoRoot ($patchPathEntry -replace '/', '\\')
+        if (-not (Test-Path -LiteralPath $patchPath)) {
+            Add-ProfileError("missing tracked patch series: $patchPath")
+        }
+    }
 }
 
 if (Test-Path -LiteralPath (Join-Path $DependencyRoot '.git')) {
