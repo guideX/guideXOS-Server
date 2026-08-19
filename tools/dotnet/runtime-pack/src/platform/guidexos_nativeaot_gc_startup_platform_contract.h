@@ -9,6 +9,7 @@
 #include <stddef.h>
 
 #include "guidexos_nativeaot_pal_contract.h"
+#include "guidexos_nativeaot_native_unwind_contract.h"
 
 #define GUIDEXOS_NATIVEAOT_GC_PLATFORM_MAGIC UINT64_C(0x47584743504C5431)
 #define GUIDEXOS_NATIVEAOT_GC_PLATFORM_ABI_VERSION 1u
@@ -100,6 +101,14 @@ guidexos_nativeaot_gc_startup_platform_generation(void);
 
 uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_get_native_continuation_hook(void);
+
+uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_get_native_unwind_lookup_hook(void);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_native_unwind_lookup(
+    uintptr_t control_pc,
+    guidexos_nativeaot_native_unwind_lookup_result* result);
 
 void* GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_create_event(uint32_t manual_reset, uint32_t initial_state);

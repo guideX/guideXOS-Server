@@ -62,6 +62,26 @@ guidexos_nativeaot_gc_get_native_continuation_hook(void) {
     return installed() ? static_cast<uintptr_t>(g_table.reserved[0]) : 0u;
 }
 
+extern "C" uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_get_native_unwind_lookup_hook(void) {
+    return installed()
+        ? static_cast<uintptr_t>(g_table.reserved[
+              GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_PLATFORM_RESERVED_INDEX])
+        : 0u;
+}
+
+extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_native_unwind_lookup(
+    uintptr_t control_pc,
+    guidexos_nativeaot_native_unwind_lookup_result* result) {
+    const uintptr_t hookAddress =
+        guidexos_nativeaot_gc_get_native_unwind_lookup_hook();
+    if (hookAddress == 0u || result == nullptr) return -1;
+    const auto hook = reinterpret_cast<guidexos_nativeaot_native_unwind_lookup_hook>(
+        hookAddress);
+    return hook(control_pc, result);
+}
+
 extern "C" void* GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_create_event(uint32_t manual_reset, uint32_t initial_state) {
     return installed() ? g_table.create_event(manual_reset, initial_state) : nullptr;
