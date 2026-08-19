@@ -47,6 +47,62 @@ static TCB s_tcbs[MAX_TCBS];
 static Statistics s_stats;
 static int s_nextFd = 100;  // Start at 100 to distinguish from UDP sockets
 
+#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
+static uint32_t s_wireTraceCount = 0;
+
+static bool wire_trace_allowed()
+{
+    if (s_wireTraceCount >= 128u) return false;
+    ++s_wireTraceCount;
+    return true;
+}
+
+static void wire_trace_segment(const char* direction, const TCB* tcb,
+                               const ParsedSegment* received, uint8_t flags,
+                               uint32_t seq, uint32_t ack, uint16_t window,
+                               uint16_t payloadLength)
+{
+    if (!wire_trace_allowed()) return;
+    serial::puts("[TCP-TRACE] ");
+    serial::puts(direction);
+    serial::puts(" flags=0x");
+    serial::put_hex8(flags);
+    serial::puts(" seq=0x");
+    serial::put_hex32(seq);
+    serial::puts(" ack=0x");
+    serial::put_hex32(ack);
+    serial::puts(" len=0x");
+    serial::put_hex16(payloadLength);
+    serial::puts(" wnd=0x");
+    serial::put_hex16(window);
+    if (tcb) {
+        serial::puts(" expect=0x");
+        serial::put_hex32(tcb->rcv_nxt);
+        serial::puts(" snd_una=0x");
+        serial::put_hex32(tcb->snd_una);
+    }
+    if (received) {
+        serial::puts(" rx_state=0x");
+        serial::put_hex8(static_cast<uint8_t>(tcb ? tcb->state : STATE_CLOSED));
+    }
+    serial::puts("\n");
+}
+
+static void wire_trace_event(const char* event, uint32_t value)
+{
+    if (!wire_trace_allowed()) return;
+    serial::puts("[TCP-TRACE] ");
+    serial::puts(event);
+    serial::puts(" value=0x");
+    serial::put_hex32(value);
+    serial::puts("\n");
+}
+#else
+static void wire_trace_segment(const char*, const TCB*, const ParsedSegment*,
+                               uint8_t, uint32_t, uint32_t, uint16_t, uint16_t) {}
+static void wire_trace_event(const char*, uint32_t) {}
+#endif
+
 // ================================================================
 // Checksum calculation
 // ================================================================
@@ -209,6 +265,10 @@ static Status send_segment(TCB* tcb, uint8_t flags,
     const ipv4::NetworkConfig* cfg = ipv4::get_config();
     if (!cfg) return TCP_ERR_NETDOWN;
     
+    const uint32_t traceSeq = tcb->snd_nxt;
+    const uint32_t traceAck = tcb->rcv_nxt;
+    const uint16_t traceWindow = static_cast<uint16_t>(tcb->rcv_wnd);
+
     // Build TCP segment
     uint8_t segment[HEADER_LEN_MIN + MAX_SEGMENT_DATA];
     Header* hdr = reinterpret_cast<Header*>(segment);
@@ -258,6 +318,8 @@ static Status send_segment(TCB* tcb, uint8_t flags,
     
     tcb->retxTime = static_cast<uint32_t>(pit::ticks());
     s_stats.segmentsSent++;
+    wire_trace_segment("tx", tcb, nullptr, flags, traceSeq, traceAck,
+                       traceWindow, dataLen);
     
     return TCP_OK;
 }
@@ -585,6 +647,8 @@ int tcp_recv(int sockfd, void* buf, uint16_t maxLen)
     
     // Update receive window
     tcb->rcv_wnd = RX_BUFFER_SIZE - tcb->rxLen;
+
+    wire_trace_event("app_recv", static_cast<uint32_t>(toRecv));
     
     return static_cast<int>(toRecv);
 }
@@ -733,7 +797,9 @@ static void process_segment(TCB* tcb, const ParsedSegment* seg)
     if (!tcb || !seg) return;
     
     // Handle RST
-    if (seg->flags & FLAG_RST) {
+        if (seg->flags & FLAG_RST) {
+        wire_trace_segment("rx_rst", tcb, seg, seg->flags, seg->seqNum,
+                           seg->ackNum, seg->window, seg->dataLen);
         serial::puts("[TCP] RST received\n");
         tcb->state = STATE_CLOSED;
         s_stats.connectionsReset++;
@@ -807,6 +873,11 @@ static void process_segment(TCB* tcb, const ParsedSegment* seg)
                     tcb->rcv_nxt += toRecv;
                     tcb->rcv_wnd = RX_BUFFER_SIZE - tcb->rxLen;
                     tcb->needAck = true;
+                    wire_trace_event("rx_payload_accepted", toRecv);
+                } else {
+                    wire_trace_segment("rx_payload_discard_seq", tcb, seg,
+                                       seg->flags, seg->seqNum, seg->ackNum,
+                                       seg->window, seg->dataLen);
                 }
             }
             
@@ -898,6 +969,7 @@ static void process_segment(TCB* tcb, const ParsedSegment* seg)
 void handle_segment(const ipv4::ParsedPacket* ipPacket)
 {
     if (!ipPacket || !ipPacket->payload || ipPacket->payloadLen < HEADER_LEN_MIN) {
+        wire_trace_event("rx_drop_short", ipPacket ? ipPacket->payloadLen : 0);
         s_stats.checksumErrors++;
         return;
     }
@@ -905,6 +977,7 @@ void handle_segment(const ipv4::ParsedPacket* ipPacket)
     // Verify checksum
     if (!verify_checksum(ipPacket->srcAddr, ipPacket->dstAddr,
                          ipPacket->payload, ipPacket->payloadLen)) {
+        wire_trace_event("rx_drop_checksum", ipPacket->payloadLen);
         s_stats.checksumErrors++;
         return;
     }
@@ -940,6 +1013,9 @@ void handle_segment(const ipv4::ParsedPacket* ipPacket)
     Endpoint remote = { seg.srcIP, seg.srcPort };
     
     TCB* tcb = find_tcb(&local, &remote);
+
+    wire_trace_segment("rx", tcb, &seg, seg.flags, seg.seqNum, seg.ackNum,
+                       seg.window, seg.dataLen);
     
     if (tcb) {
         process_segment(tcb, &seg);

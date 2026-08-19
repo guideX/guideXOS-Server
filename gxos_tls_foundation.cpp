@@ -45,10 +45,10 @@
 #if __has_include("third_party/mbedtls/tf-psa-crypto/core/tf_psa_crypto_config_check_before.h")
 #define GXOS_TLS_MBEDTLS_TF_PSA_CONFIG_CHECKS_PRESENT 1
 #endif
-#if __has_include("third_party/mbedtls/guidexos/mbedtls_config.h")
+#if __has_include("guidexos/mbedtls_config.h")
 #define GXOS_TLS_MBEDTLS_CONFIG_PRESENT 1
 #endif
-#if __has_include("third_party/mbedtls/guidexos/crypto_config.h")
+#if __has_include("guidexos/crypto_config.h")
 #define GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT 1
 #endif
 #if defined(GXOS_TLS_MBEDTLS_SOURCE_PRESENT) && defined(GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT) && __has_include("third_party/mbedtls/include/mbedtls/build_info.h")
@@ -386,10 +386,10 @@ constexpr const char* kHostedHttpsPolicySource = "hosted Schannel default";
 constexpr const char* kBareMetalMbedTlsImportPath = "third_party/mbedtls";
 constexpr const char* kBareMetalMbedTlsExpectedVersion =
     "official Mbed TLS 4.1.0 source tree with populated TF-PSA-Crypto dependency";
-constexpr const char* kBareMetalConfigPath = "third_party/mbedtls/guidexos/mbedtls_config.h";
-constexpr const char* kBareMetalCryptoConfigPath = "third_party/mbedtls/guidexos/crypto_config.h";
+constexpr const char* kBareMetalConfigPath = "guidexos/mbedtls_config.h";
+constexpr const char* kBareMetalCryptoConfigPath = "guidexos/crypto_config.h";
 constexpr const char* kBareMetalTfPsaPath = "third_party/mbedtls/tf-psa-crypto";
-constexpr const char* kBareMetalBuildPlanPath = "third_party/mbedtls/guidexos/mbedtls_sources.mk";
+constexpr const char* kBareMetalBuildPlanPath = "guidexos/mbedtls_sources.mk";
 constexpr const char* kBareMetalPlannedSubset =
     "runtime-linked Mbed TLS 4.1.0 TLS/X.509 subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, one-shot CA parsing, smoke-only local handshake coverage, and explicit-policy validated HTTPS enablement.";
 constexpr size_t kBareMetalPlannedSourceCount = 55;
@@ -1248,6 +1248,13 @@ void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
     result->usedSniHostname = false;
     result->requestBytesWritten = 0;
     result->responseBytesRead = 0;
+    result->tlsBioSendCalls = 0;
+    result->tlsBioRecvCalls = 0;
+    result->tlsBioBytesSent = 0;
+    result->tlsBioBytesReceived = 0;
+    result->tlsBioLastSendResult = 0;
+    result->tlsBioLastRecvResult = 0;
+    result->tlsHandshakeElapsedMs = 0;
     result->verifyFlags = 0;
     result->transportError = 0;
     result->mbedtlsError = 0;
@@ -1968,7 +1975,7 @@ const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
     case GxosCaParseStatus::SourceMissing:
         return "Mbed TLS source import is incomplete at third_party/mbedtls";
     case GxosCaParseStatus::ConfigMissing:
-        return "guideXOS Mbed TLS 4.x config pair is incomplete under third_party/mbedtls/guidexos";
+        return "guideXOS Mbed TLS 4.x tracked config overlay is incomplete under guidexos";
     case GxosCaParseStatus::ParseError:
         return info.error ? info.error : "Root CA bundle could not be parsed";
     default:
@@ -2514,15 +2521,31 @@ constexpr uint32_t kGxosTlsSmokeIoTimeoutMs = 5000;
 
 struct GxosTlsSmokeIoContext {
     GxosTlsByteStream stream{};
+    GxosTlsLocalHandshakeResult* result = nullptr;
     int lastTransportError = 0;
     bool tracedSend = false;
     bool tracedRecv = false;
     uint32_t sendCalls = 0;
     uint32_t recvCalls = 0;
+    size_t bytesSent = 0;
+    size_t bytesReceived = 0;
+    int lastSendResult = 0;
+    int lastRecvResult = 0;
 };
 
-void tls_trace_stage(const char*) {}
-void tls_trace_stream_io(const char*, uint32_t, int, int) {}
+void tls_trace_stage(const char* event)
+{
+    gxos_tls_smoke_debug_trace(event, static_cast<uint32_t>(kernel::pit::ticks()));
+}
+
+void tls_trace_stream_io(const char* event, uint32_t call, int requested, int result)
+{
+    /* Pack the bounded request/result pair for serial inspection. */
+    const uint32_t packed = ((static_cast<uint32_t>(requested) & 0xFFFFu) << 16) |
+        (static_cast<uint32_t>(result) & 0xFFFFu);
+    gxos_tls_smoke_debug_trace(event, packed);
+    gxos_tls_smoke_debug_trace("stream_io_call", call);
+}
 
 uint32_t tls_timeout_ticks(uint32_t timeoutMs)
 {
@@ -2547,6 +2570,13 @@ int gxos_tls_stream_send(void* context, const unsigned char* buffer, size_t leng
     int requestLength = static_cast<int>(length > 0x7FFFu ? 0x7FFFu : length);
     if (requestLength <= 0 && length != 0) requestLength = 0x7FFF;
     const int sent = io->stream.write(io->stream.context, buffer, requestLength);
+    io->lastSendResult = sent;
+    if (sent > 0) io->bytesSent += static_cast<size_t>(sent);
+    if (io->result) {
+        io->result->tlsBioSendCalls = io->sendCalls;
+        io->result->tlsBioBytesSent = io->bytesSent;
+        io->result->tlsBioLastSendResult = sent;
+    }
     if (io->sendCalls <= 8u) {
         tls_trace_stream_io("stream_send_io", io->sendCalls, requestLength, sent);
     }
@@ -2568,6 +2598,13 @@ int gxos_tls_stream_recv(void* context, unsigned char* buffer, size_t length)
     int requestLength = static_cast<int>(length > 0x7FFFu ? 0x7FFFu : length);
     if (requestLength <= 0 && length != 0) requestLength = 0x7FFF;
     const int received = io->stream.read(io->stream.context, buffer, requestLength);
+    io->lastRecvResult = received;
+    if (received > 0) io->bytesReceived += static_cast<size_t>(received);
+    if (io->result) {
+        io->result->tlsBioRecvCalls = io->recvCalls;
+        io->result->tlsBioBytesReceived = io->bytesReceived;
+        io->result->tlsBioLastRecvResult = received;
+    }
     if (io->recvCalls <= 16u || received > 0) {
         tls_trace_stream_io("stream_recv_io", io->recvCalls, requestLength, received);
     }
@@ -3008,7 +3045,7 @@ GxosTlsBackendInfo make_backend_info()
             GxosTlsBackendStatus::SourceMissing,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
-            "Vendored Mbed TLS source tree is missing at third_party/mbedtls; handshake support stays disabled."
+            "Mbed TLS source tree is missing at third_party/mbedtls; run the pinned bootstrap before building."
         };
     }
     if (!importInfo.sourceReadyForCompile) {
@@ -3826,6 +3863,7 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
     session->tcpStream = tcpStream;
     session->result = result;
     session->io.stream = tcpStream;
+    session->io.result = result;
     mbedtls_ssl_init(&session->ssl);
     mbedtls_ssl_config_init(&session->conf);
 
@@ -3909,6 +3947,8 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         while ((ret = mbedtls_ssl_handshake(&session->ssl)) != 0) {
             result->mbedtlsError = ret;
             result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+            tls_trace_stream_io("handshake_result", 0,
+                result->mbedtlsState, ret);
             if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
                 if (!tls_wait_until_ready(&session->tcpStream, startTicks, handshakeTimeout)) {
                     tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
@@ -3920,6 +3960,8 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
             }
             break;
         }
+        result->tlsHandshakeElapsedMs =
+            (static_cast<uint32_t>(kernel::pit::ticks()) - startTicks) * 10u;
         if (ret != 0) {
             result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
             copy_text(result->tlsHandshakeErrorName, sizeof(result->tlsHandshakeErrorName),

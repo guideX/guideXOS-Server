@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "mbedtls": {
+    "repository": "https://github.com/Mbed-TLS/mbedtls.git",
+    "version": "4.1.0",
+    "commit": "0fe989b6b514192783c469039edd325fd0989806",
+    "tag": "mbedtls-4.1.0"
+  },
+  "tfPsaCrypto": {
+    "repository": "https://github.com/Mbed-TLS/TF-PSA-Crypto.git",
+    "version": "1.1.0",
+    "commit": "29160dd877d29658279fd683b2ae57b320ddcf09",
+    "tag": "v1.1.0"
+  },
+  "patchSeries": [
+    "patches/mbedtls/0001-guidexos-phase8f.patch"
+  ],
+  "sourceSha256": {
+    "library/ssl_tls.c": "8d6838cf9b1cd84e75849c803fbb1fcb972b2d1f1281982db1421f42db0e2499",
+    "library/ssl_tls12_client.c": "f5512dd091b2721b2577c89971d0737a842e79fff8c9d2c266b695aa75587978",
+    "library/ssl_msg.c": "22dbb08234e925f9b9f6ea2867f6d434991ecc68368cdd569ace5e69cced5c82",
+    "library/x509_crt.c": "235a80c070573ecdfc20f3888a2c606c81992cfd423ebda637c58e19717f23be",
+    "tf-psa-crypto/platform/memory_buffer_alloc.c": "399b3c9aa7a6ccb7e7d3cf071545ad2f2f262a94438e6acad93d34570ebf327f",
+    "tf-psa-crypto/core/psa_crypto.c": "778a1ad0285d046570102c03c0c1e75a68e679f668a80985c70b5e0d3759a4d3",
+    "tf-psa-crypto/extras/pkparse.c": "f127971963f303aed6a442e21b45bea915b7d2667e7882000328bf256904bbd6",
+    "tf-psa-crypto/extras/pk.c": "d78cd194e1dc4323cfe70a0f8f6894f033e8e7e4b1fae030f4b5413089f83676",
+    "tf-psa-crypto/extras/pk_wrap.c": "ceb3d1f5ff9440ef5a6e254ee9df8e6a73d128213116f14d09f9fa3e96400c65",
+    "tf-psa-crypto/drivers/builtin/src/bignum.c": "6bbf471686b3cfb6c5bd7e3c7adc2e9faf43f754824c48cb6b5822f5960c8c6c",
+    "tf-psa-crypto/drivers/builtin/src/bignum_core.c": "a6d6cc4617e3a64ad88275d6ea4ed4fe3cd56bca425c52edd7c3b802124c0fa6",
+    "tf-psa-crypto/drivers/builtin/src/ecp.c": "2f064bd949efcc150f0107f38244400db2dd863b40208b280baf3c1b55cde0f0",
+    "tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c": "5346237105d426457c59c8f359db12d4a30ad0f9818721a40be6342522a8b526",
+    "tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c": "cddd40fcd5d4ac2c73e7b2353e6d5ec97e05fa003d4bbe0229442dfebb8b7248",
+    "tf-psa-crypto/drivers/builtin/src/rsa.c": "753b86f7d886794b36c3ca9aa7906f6e3dc796adfe9aa79f0f7d0d9b3601725b"
+  },
+  "overlaySha256": {
+    "guidexos/mbedtls_config.h": "0522973769b959493ed06797e697682b918f718a1ad3b09d140241a80dcc0fde",
+    "guidexos/crypto_config.h": "baee4813cdb11c62208914b1cfd32bfed9d0e840ac56c84ee19103a255358bcb",
+    "guidexos/mbedtls_sources.mk": "738224aba4911c2af721ee1e88527f10398ddb7faf728fc4d3ec730990160cde"
+  }
+}

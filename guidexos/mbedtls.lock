@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "mbedtls": {
+    "repository": "https://github.com/Mbed-TLS/mbedtls.git",
+    "version": "4.1.0",
+    "commit": "0fe989b6b514192783c469039edd325fd0989806",
+    "tag": "mbedtls-4.1.0"
+  },
+  "tfPsaCrypto": {
+    "repository": "https://github.com/Mbed-TLS/TF-PSA-Crypto.git",
+    "version": "1.1.0",
+    "commit": "29160dd877d29658279fd683b2ae57b320ddcf09",
+    "tag": "v1.1.0"
+  }
+}

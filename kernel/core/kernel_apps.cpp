@@ -16103,6 +16103,28 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec((uint32_t)(tlsRequestBytesWritten > 0 ? tlsRequestBytesWritten : 0));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_response_bytes_read=");
     serial_put_dec((uint32_t)(tlsResponseBytesRead > 0 ? tlsResponseBytesRead : 0));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_send_calls=");
+    serial_put_dec64((uint64_t)tlsResult.tlsBioSendCalls);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_recv_calls=");
+    serial_put_dec64((uint64_t)tlsResult.tlsBioRecvCalls);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_bytes_sent=");
+    serial_put_dec64((uint64_t)tlsResult.tlsBioBytesSent);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_bytes_received=");
+    serial_put_dec64((uint64_t)tlsResult.tlsBioBytesReceived);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_last_send_result=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsResult.tlsBioLastSendResult, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_last_recv_result=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsResult.tlsBioLastRecvResult, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_handshake_elapsed_ms=");
+    serial_put_dec64((uint64_t)tlsResult.tlsHandshakeElapsedMs);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_validated=");
     serial::puts(tlsValidated ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.certificate_validation_result=");

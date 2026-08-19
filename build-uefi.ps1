@@ -111,7 +111,9 @@ Write-Host ""
 if (!$SkipKernel) {
     Write-Host "[3/6] Building Kernel ($Arch)..." -ForegroundColor Yellow
 
-    # Stay in root directory - the Makefile uses kernel/ prefixed paths
+    # Keep the working directory consistent with build.ps1.  The kernel
+    # Makefile's source rules are rooted at kernel/; its dependency profile
+    # itself is resolved through the repository root.
     Push-Location $RootDir
 
     # Check if make is available
@@ -176,7 +178,7 @@ if (!$SkipKernel) {
         Write-Host ""
         Write-Host "      Or use WSL:" -ForegroundColor Cyan
         Write-Host "        wsl --install" -ForegroundColor White
-        Write-Host "        wsl -e bash -c 'make -f kernel/Makefile ARCH=$Arch'" -ForegroundColor White
+        Write-Host "        wsl -e bash -c 'cd kernel && make ARCH=$Arch'" -ForegroundColor White
         Write-Host ""
         Write-Host "      Continuing without kernel (bootloader is ready)..." -ForegroundColor Gray
         Write-Host ""
@@ -206,10 +208,14 @@ if (!$SkipKernel) {
             }
         }
 
-        # Build kernel - Makefile must be invoked from project root with -f flag
-        & $Make -f kernel/Makefile ARCH=$Arch
+        # Build from kernel/ so the Makefile's source patterns and generated
+        # object paths agree with the normal build wrapper.
+        Push-Location $KernelDir
+        & $Make ARCH=$Arch
+        $KernelMakeExitCode = $LASTEXITCODE
+        Pop-Location
 
-        if ($LASTEXITCODE -ne 0) {
+        if ($KernelMakeExitCode -ne 0) {
             Write-Host "      ERROR: Kernel build failed" -ForegroundColor Red
             Pop-Location
             exit 1

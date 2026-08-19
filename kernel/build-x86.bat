@@ -81,18 +81,26 @@ set "CFLAGS=%CFLAGS% -nostdlib -nostdinc++ -fno-builtin -DGXOS_BARE_METAL"
 set "CFLAGS=%CFLAGS% -m32 -march=i686"
 set "CFLAGS=%CFLAGS% -I. -I.. -Icore/include -Iarch/%ARCH%/include"
 set "MBEDTLS_ROOT=..\third_party\mbedtls"
+if not exist "..\guidexos\mbedtls_sources.mk" (
+    echo [ERROR] Tracked guideXOS Mbed TLS profile is missing.
+    echo         Run: powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\bootstrap-mbedtls.ps1 -Install
+    exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\verify-mbedtls-profile.ps1 -DependencyRoot "%MBEDTLS_ROOT%" -RepoRoot ..
+if errorlevel 1 (
+    echo [ERROR] guideXOS Mbed TLS profile verification failed.
+    exit /b 1
+)
 if exist "%MBEDTLS_ROOT%\include\mbedtls\version.h" (
     set "CFLAGS=%CFLAGS% -I%MBEDTLS_ROOT%\include -I%MBEDTLS_ROOT%\library"
     set "CFLAGS=%CFLAGS% -I%MBEDTLS_ROOT%\tf-psa-crypto -I%MBEDTLS_ROOT%\tf-psa-crypto\core -I%MBEDTLS_ROOT%\tf-psa-crypto\include"
     set "CFLAGS=%CFLAGS% -I%MBEDTLS_ROOT%\tf-psa-crypto\drivers\builtin\include -I%MBEDTLS_ROOT%\tf-psa-crypto\drivers\p256-m\p256-m\include -I%MBEDTLS_ROOT%\tf-psa-crypto\drivers\p256-m\p256-m\include\p256-m"
     set "CFLAGS=%CFLAGS% -I%MBEDTLS_ROOT%\tf-psa-crypto\drivers\p256-m\p256-m_driver_interface -I%MBEDTLS_ROOT%\tf-psa-crypto\dispatch -I%MBEDTLS_ROOT%\tf-psa-crypto\extras -I%MBEDTLS_ROOT%\tf-psa-crypto\platform -I%MBEDTLS_ROOT%\tf-psa-crypto\utilities"
-    if exist "mbedtls-guidexos-defines.h" (
-        set "CFLAGS=%CFLAGS% -imacros mbedtls-guidexos-defines.h"
-    ) else (
-        echo [INFO] mbedtls-guidexos-defines.h not found; continuing without optional import macros.
-    )
+    set "CFLAGS=%CFLAGS% -DMBEDTLS_CONFIG_FILE=\"guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"guidexos/crypto_config.h\""
 ) else (
-    echo [INFO] Vendored Mbed TLS tree not found; building without optional TLS import headers.
+    echo [ERROR] Pinned Mbed TLS dependency tree is missing.
+    echo         Run: powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\bootstrap-mbedtls.ps1 -Install
+    exit /b 1
 )
 
 REM Assembler flags

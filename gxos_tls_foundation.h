@@ -277,6 +277,13 @@ struct GxosTlsLocalHandshakeResult {
     bool usedSniHostname;
     size_t requestBytesWritten;
     size_t responseBytesRead;
+    size_t tlsBioSendCalls;
+    size_t tlsBioRecvCalls;
+    size_t tlsBioBytesSent;
+    size_t tlsBioBytesReceived;
+    int tlsBioLastSendResult;
+    int tlsBioLastRecvResult;
+    uint32_t tlsHandshakeElapsedMs;
     uint32_t verifyFlags;
     int transportError;
     int mbedtlsError;

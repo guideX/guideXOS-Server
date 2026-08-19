@@ -12,6 +12,12 @@ else
     RM = rm -rf $1
 endif
 
+# Resolve repository paths from this Makefile rather than from the caller's
+# current directory.  The build wrappers invoke make from kernel/; absolute
+# dependency paths keep the profile checks independent of that wrapper detail.
+GUIDEXOS_KERNEL_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+GUIDEXOS_REPO_ROOT := $(abspath $(GUIDEXOS_KERNEL_DIR)/..)
+
 # Detect architecture if not specified
 ifndef ARCH
     ARCH := $(shell uname -m)
@@ -51,8 +57,12 @@ CC ?= $(subst g++,gcc,$(CXX))
 MBEDTLS_GUIDEXOS_ENABLED := 0
 MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED := 0
 MBEDTLS_GUIDEXOS_LINK_ENABLED := 0
-MBEDTLS_GUIDEXOS_MANIFEST := ../third_party/mbedtls/guidexos/mbedtls_sources.mk
-MBEDTLS_GUIDEXOS_VERSION_HEADER := ../third_party/mbedtls/include/mbedtls/version.h
+MBEDTLS_GUIDEXOS_REPO_ROOT := $(GUIDEXOS_REPO_ROOT)
+MBEDTLS_GUIDEXOS_MANIFEST := $(GUIDEXOS_REPO_ROOT)/guidexos/mbedtls_sources.mk
+MBEDTLS_GUIDEXOS_VERSION_HEADER := $(GUIDEXOS_REPO_ROOT)/third_party/mbedtls/include/mbedtls/version.h
+ifeq ($(wildcard $(MBEDTLS_GUIDEXOS_MANIFEST)),)
+$(error guideXOS Mbed TLS profile is missing; run ../scripts/bootstrap-mbedtls.ps1 -Install before building)
+endif
 ifneq ($(wildcard $(MBEDTLS_GUIDEXOS_MANIFEST)),)
 include $(MBEDTLS_GUIDEXOS_MANIFEST)
 ifeq ($(MBEDTLS_GUIDEXOS_COMPILE_READY),1)
@@ -63,22 +73,24 @@ ifeq ($(MBEDTLS_GUIDEXOS_LINK_READY),1)
 MBEDTLS_GUIDEXOS_LINK_ENABLED := 1
 endif
 endif
+ifeq ($(MBEDTLS_GUIDEXOS_LAYOUT_READY),0)
+$(error guideXOS Mbed TLS dependency/profile is incomplete or generated files are missing; run ../scripts/bootstrap-mbedtls.ps1 -Install)
+endif
 
-# Treat the vendored Mbed TLS tree as optional in this branch. When the import
-# is present, these wildcard prerequisites help the compiler objects rebuild if
-# the import state changes. When it is absent, they collapse to nothing so the
-# kernel still builds in SourceMissing mode.
+# These prerequisites make kernel objects rebuild if the pinned dependency or
+# tracked guideXOS profile changes.  Missing dependency/profile state is a
+# hard build error above; there is no SourceMissing fallback for TLS anymore.
 MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS := \
-	$(wildcard ../third_party/mbedtls) \
-	$(wildcard ../third_party/mbedtls/guidexos) \
-	$(wildcard ../third_party/mbedtls/include) \
-	$(wildcard ../third_party/mbedtls/include/mbedtls) \
-	$(wildcard ../third_party/mbedtls/library) \
-	$(wildcard ../third_party/mbedtls/tf-psa-crypto) \
-	$(wildcard ../third_party/mbedtls/guidexos/mbedtls_sources.mk) \
-	$(wildcard ../third_party/mbedtls/guidexos/mbedtls_config.h) \
-	$(wildcard ../third_party/mbedtls/guidexos/crypto_config.h) \
-	$(wildcard ../third_party/mbedtls/include/mbedtls/version.h)
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/third_party/mbedtls) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/guidexos) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/third_party/mbedtls/include) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/third_party/mbedtls/include/mbedtls) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/third_party/mbedtls/library) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/third_party/mbedtls/tf-psa-crypto) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/guidexos/mbedtls_sources.mk) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/guidexos/mbedtls_config.h) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/guidexos/crypto_config.h) \
+	$(wildcard $(GUIDEXOS_REPO_ROOT)/third_party/mbedtls/include/mbedtls/version.h)
 
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
@@ -115,16 +127,19 @@ CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
 ARCH_OBJS := $(patsubst arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
 ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
-MBEDTLS_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
-MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
+MBEDTLS_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
+MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst $(GUIDEXOS_REPO_ROOT)/third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
 
 ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
 DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
 
 # Targets
-.PHONY: all clean info mbedtls-guidexos-compile-probe
+.PHONY: all clean info verify-mbedtls-guidexos mbedtls-guidexos-compile-probe
 
-all: mbedtls-guidexos-compile-probe $(KERNEL)
+all: verify-mbedtls-guidexos mbedtls-guidexos-compile-probe $(KERNEL)
+
+verify-mbedtls-guidexos:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File "$(GUIDEXOS_REPO_ROOT)/scripts/verify-mbedtls-profile.ps1" -DependencyRoot "$(GUIDEXOS_REPO_ROOT)/third_party/mbedtls" -RepoRoot "$(GUIDEXOS_REPO_ROOT)"
 
 ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)
 mbedtls-guidexos-compile-probe: $(MBEDTLS_COMPILE_PROBE_C_OBJS)
@@ -206,7 +221,7 @@ $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.s
 	@echo "Assembling $<..."
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(OBJ_DIR)/third_party/%.o: ../third_party/%.c
+$(OBJ_DIR)/third_party/%.o: $(GUIDEXOS_REPO_ROOT)/third_party/%.c
 	@$(call MKDIR,$(dir $@))
 	@echo "Compiling $<..."
 	$(CXX) -x c $(filter-out -std=c++14 -fno-exceptions -fno-rtti -nostdinc++,$(CFLAGS)) $(DEPFLAGS) -c $< -o $@
