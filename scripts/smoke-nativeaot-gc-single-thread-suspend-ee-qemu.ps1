@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -39,6 +39,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\gc-stack-provider-unwind-caller-frame"
     } elseif ($ProofMode -eq "stack-provider-native-transition-continuation") {
         Join-Path $root "out\dotnet\gc-stack-provider-native-transition-continuation"
+    } elseif ($ProofMode -eq "stack-provider-native-caller-provenance") {
+        Join-Path $root "out\dotnet\c011ec24-native-caller-provenance"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
         Join-Path $root "out\dotnet\gc-first-root-post-queue-mark-decision"
     } elseif ($ProofMode -eq "first-root-first-mark-mutation") {
@@ -74,20 +76,21 @@ $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
-$isC011EC21 = $ProofMode -eq "stack-provider-native-transition-continuation"
+$isC011EC24 = $ProofMode -eq "stack-provider-native-caller-provenance"
+$isC011EC21 = $isC011EC24 -or $ProofMode -eq "stack-provider-native-transition-continuation"
 $isC011EC23 = $isC011EC21
-$isC011EC20 = $ProofMode -in @("stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
-$isC011EC19 = $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
-$isNextGenuineRootProvider = $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isC011EC20 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isC011EC19 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isNextGenuineRootProvider = $isC011EC24 -or $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isFirstRootCallbackEntry = $isC011EC24 -or $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
-$isAllocationContextFixupRootBoundary = $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isFirstPerThreadRootProvider = $isC011EC24 -or $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isAllocationContextFixupRootBoundary = $isC011EC24 -or $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $proofDefine = if ($isNextGenuineRootProvider) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($isTransitionFrameControlPc -or $isC011EC19) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
@@ -95,7 +98,8 @@ $proofDefine = if ($isNextGenuineRootProvider) {
     $c20Define = if ($isC011EC20) { " /DGUIDEXOS_NATIVEAOT_C011EC20_UNWIND" } else { "" }
     $c21Define = if ($isC011EC21) { " /DGUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION" } else { "" }
     $c23Define = if ($isC011EC23) { " /DGUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND" } else { "" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define"
+    $c24Define = if ($isC011EC24) { " /DGUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE" } else { "" }
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -139,7 +143,7 @@ $mapPath = Join-Path $artifactRoot "NativeAotGcSingleThreadSuspendEe.map"
 $kernelPath = Join-Path $root "kernel\build\amd64\bin\kernel.elf"
 $espKernelPath = Join-Path $root "ESP\kernel.elf"
 $normalKernelSource = Join-Path $buildRoot "ordinary-kernel-before.elf"
-$normalKernelHash = "161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+$normalKernelHash = "A5B634F9D034FE2FFFB11048693321ECA387902E95C5E8CAE4624D63F52CD68B"
 $activeArchive = Join-Path $root "out\dotnet\pal-runtime-active-replacement\archives\Runtime.WorkstationGC.guidexos-nativeaot-pal.lib"
 $activeArchiveHash = "C617D95647A20862947B52A1301DF96FE9104E5A13F11BB0C016B8370DDE115F"
 $bootloader = Join-Path $root "guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe"
@@ -233,13 +237,14 @@ function Get-MarkerField([string]$Text, [string]$Name) {
 
 $startingCommittedHead = (& git -C $root rev-parse HEAD).Trim()
 $startingBranch = (& git -C $root branch --show-current).Trim()
+$upstream = (& git -C $root rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null).Trim()
 $startingWorktreeStatus = @(& git -C $root status --short)
 $taskStartCheckpoint = [ordered]@{
     head=$startingCommittedHead
     branch=$startingBranch
     dirtyState=if ($startingWorktreeStatus.Count -eq 0) { "clean" } else { "dirty" }
-    ordinaryKernelSha256="161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
-    ordinaryEspSha256="161B83E992154422665B59D7E10447D6CFDC1B1AE2B33F3B54E349C3E10AA550"
+    ordinaryKernelSha256="A5B634F9D034FE2FFFB11048693321ECA387902E95C5E8CAE4624D63F52CD68B"
+    ordinaryEspSha256="A5B634F9D034FE2FFFB11048693321ECA387902E95C5E8CAE4624D63F52CD68B"
 }
 
 New-Item -ItemType Directory -Force -Path $runRoot, $buildRoot, $artifactRoot, $runtimeRoot | Out-Null
@@ -2554,8 +2559,9 @@ exit /b %errorlevel%
 
     $c21KernelDefine = if ($isC011EC21) { " -DGUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION" } else { "" }
     $c23KernelDefine = if ($isC011EC23) { " -DGUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND" } else { "" }
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine -I$artifactRoot"
-    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
+    $c24KernelDefine = if ($isC011EC24) { " -DGUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE" } else { "" }
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine -I$artifactRoot"
+    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","clean") (Join-Path $runRoot "kernel-preclean.log")
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
@@ -2582,7 +2588,7 @@ exit /b %errorlevel%
                 throw "C011EC21 kernel symbol audit could not resolve $kernelSymbol."
             }
         }
-        if ($nativeDisassemblyText -notmatch '(?im)^\s*[0-9a-f]+:\s+ff 94 24 88 03 00 00\s+call') {
+        if (-not $isC011EC24 -and $nativeDisassemblyText -notmatch '(?im)^\s*[0-9a-f]+:\s+ff 94 24 88 03 00 00\s+call') {
             throw "C011EC21 did not retain the source-correlated indirect ManagedMain call site in the native helper disassembly."
         }
         if ($nativeSectionsText -notmatch '(?im)\s\.text\s') {
@@ -2639,7 +2645,7 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
                     $stopPattern = if ($isC011EC23) {
-                        'marker=C011EC23(\s|$)'
+                        if ($isC011EC24) { 'marker=C011EC24(\s|$)' } else { 'marker=C011EC23(\s|$)' }
                     } elseif ($isC011EC21) {
                         'marker=C011EC21'
                     } elseif ($isC011EC20) {
@@ -2732,7 +2738,28 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isC011EC23) {
+        if ($isC011EC24) {
+            $c24MarkerLine = (($validationText -split "`n") | Where-Object {
+                $_ -match '\[nativeaot-gc-native-caller-provenance\] SAFE_STOP' -and
+                $_ -match 'marker=C011EC24(\s|$)'
+            } | Select-Object -Last 1)
+            $c24PreflightLine = (($validationText -split "`n") | Where-Object { $_ -match 'marker=C011EC24-PREFLIGHT' } | Select-Object -Last 1)
+            if ([string]::IsNullOrWhiteSpace($c24PreflightLine) -or [string]::IsNullOrWhiteSpace($c24MarkerLine)) {
+                throw "C011EC24 preflight/safe-stop evidence was incomplete in $name."
+            }
+            $c24Fields = @('preflightProven','outputAgreement','callerValid','callerKernelRange','callerManagedRange','standaloneTests','helperStandalonePassed','secondStandalonePassed','unwindOpcodeCount','stackAdvance','lookupAttempts','lookupSuccesses','unwindAttempts','rtlVirtualUnwindCalls','rtlVirtualUnwindReturned','unwindResult','nativeFramesCrossed','managedReentry','secondProviderLookupAttempted','secondProviderLookupSucceeded','secondProductionUnwindAttempted','secondUnwindResult','outcome','inputRIP','inputRSP','inputRBP','returnSlot','returnValue','expectedCallerRIP','expectedCallerRSP','outputRIP','outputRSP','outputRBP','secondModuleBase','secondExecutableStart','secondExecutableEnd','secondRuntimeFunction','secondUnwindInfo','secondInputRIP','secondInputRSP','secondInputRBP','secondOutputRIP','secondOutputRSP','secondOutputRBP','preflightReturnSlot','preflightReturnValue','preflightOutputRIP','preflightOutputRSP','liveRSP','sourceRBX','sourceRSI','sourceRDI','sourceRBP','sourceR12','sourceR13','sourceR14','sourceR15','preRBX','preRSI','preRDI','preRBP','preR12','preR13','preR14','preR15','recoveredRBX','recoveredRSI','recoveredRDI','recoveredRBP','recoveredR12','recoveredR13','recoveredR14','recoveredR15','c19RootReports','c19RegisterRoots','c19StackRoots','c19PromoteAttempts','c19PromoteEntries','c19PromoteReturns','framesWalked','totalRoots','stackBoundsConsumed','markWrites','childReads','graphTraversal','queueCursorBefore','queueCursorAfter','safeStopReason')
+            foreach ($field in $c24Fields) { if ($null -eq (Get-MarkerField $c24MarkerLine $field)) { throw "C011EC24 field $field was missing in $name." } }
+            foreach ($expected in @(@('preflightProven','0x00000001'),@('outputAgreement','0x00000001'),@('standaloneTests','0x00000002'),@('helperStandalonePassed','0x00000001'),@('secondStandalonePassed','0x00000001'),@('unwindOpcodeCount','0x0000000A'),@('stackAdvance','0x000003B8'),@('callerValid','0x00000001'),@('callerKernelRange','0x00000001'),@('callerManagedRange','0x00000000'),@('secondProviderLookupAttempted','0x00000001'),@('secondProviderLookupSucceeded','0x00000001'),@('secondProductionUnwindAttempted','0x00000001'),@('secondUnwindResult','0x00000003'),@('lookupAttempts','0x00000002'),@('lookupSuccesses','0x00000002'),@('unwindAttempts','0x00000002'),@('rtlVirtualUnwindCalls','0x00000002'),@('rtlVirtualUnwindReturned','0x00000002'),@('unwindResult','0x00000003'),@('nativeFramesCrossed','0x00000002'),@('totalRoots','0x00000006'),@('c19RootReports','0x00000004'),@('c19RegisterRoots','0x00000003'),@('c19StackRoots','0x00000001'),@('c19PromoteAttempts','0x00000004'),@('c19PromoteEntries','0x00000004'),@('c19PromoteReturns','0x00000004'),@('stackBoundsConsumed','0x00000000'),@('markWrites','0x00000000'),@('childReads','0x00000000'),@('graphTraversal','0x00000000'),@('safeStopReason','0xC0240004'))) { if ((Get-MarkerField $c24MarkerLine $expected[0]) -ne $expected[1]) { throw "C011EC24 expected $($expected[0])=$($expected[1]) in $name." } }
+            foreach ($pair in @(@('returnValue','outputRIP'),@('expectedCallerRIP','outputRIP'),@('expectedCallerRSP','outputRSP'),@('preflightReturnValue','returnValue'),@('preflightReturnSlot','returnSlot'),@('preflightOutputRIP','outputRIP'),@('preflightOutputRSP','outputRSP'))) { if ((Get-MarkerField $c24MarkerLine $pair[0]) -ne (Get-MarkerField $c24MarkerLine $pair[1])) { throw "C011EC24 provenance mismatch: $($pair[0]) != $($pair[1]) in $name." } }
+            if ((Get-MarkerField $c24MarkerLine 'secondOutputRIP') -eq (Get-MarkerField $c24MarkerLine 'outputRIP') -or (Get-MarkerField $c24MarkerLine 'secondOutputRSP') -le (Get-MarkerField $c24MarkerLine 'outputRSP')) { throw "C011EC24 second unwind did not produce a distinct caller in $name." }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC24'; outcome='C'; harnessTerminated=$true; markerLine=$c24MarkerLine; preflightLine=$c24PreflightLine
+                unwind=[ordered]@{ lookupAttempts=(Get-MarkerField $c24MarkerLine 'lookupAttempts'); lookupSuccesses=(Get-MarkerField $c24MarkerLine 'lookupSuccesses'); attempts=(Get-MarkerField $c24MarkerLine 'unwindAttempts'); rtlVirtualUnwindCalls=(Get-MarkerField $c24MarkerLine 'rtlVirtualUnwindCalls'); rtlVirtualUnwindReturned=(Get-MarkerField $c24MarkerLine 'rtlVirtualUnwindReturned'); result=(Get-MarkerField $c24MarkerLine 'unwindResult'); inputRIP=(Get-MarkerField $c24MarkerLine 'inputRIP'); inputRSP=(Get-MarkerField $c24MarkerLine 'inputRSP'); inputRBP=(Get-MarkerField $c24MarkerLine 'inputRBP'); outputRIP=(Get-MarkerField $c24MarkerLine 'outputRIP'); outputRSP=(Get-MarkerField $c24MarkerLine 'outputRSP'); derivedReturnSlot=(Get-MarkerField $c24MarkerLine 'returnSlot'); derivedReturnValue=(Get-MarkerField $c24MarkerLine 'returnValue'); expectedCallerRSP=(Get-MarkerField $c24MarkerLine 'expectedCallerRSP'); opcodeCount=(Get-MarkerField $c24MarkerLine 'unwindOpcodeCount'); stackAdvance=(Get-MarkerField $c24MarkerLine 'stackAdvance'); secondProviderLookupAttempted=(Get-MarkerField $c24MarkerLine 'secondProviderLookupAttempted'); secondProviderLookupSucceeded=(Get-MarkerField $c24MarkerLine 'secondProviderLookupSucceeded'); secondProductionUnwindAttempted=(Get-MarkerField $c24MarkerLine 'secondProductionUnwindAttempted'); secondUnwindResult=(Get-MarkerField $c24MarkerLine 'secondUnwindResult'); secondModuleBase=(Get-MarkerField $c24MarkerLine 'secondModuleBase'); secondExecutableStart=(Get-MarkerField $c24MarkerLine 'secondExecutableStart'); secondExecutableEnd=(Get-MarkerField $c24MarkerLine 'secondExecutableEnd'); secondRuntimeFunction=(Get-MarkerField $c24MarkerLine 'secondRuntimeFunction'); secondUnwindInfo=(Get-MarkerField $c24MarkerLine 'secondUnwindInfo'); secondInputRip=(Get-MarkerField $c24MarkerLine 'secondInputRIP'); secondInputRsp=(Get-MarkerField $c24MarkerLine 'secondInputRSP'); secondInputRbp=(Get-MarkerField $c24MarkerLine 'secondInputRBP'); secondOutputRip=(Get-MarkerField $c24MarkerLine 'secondOutputRIP'); secondOutputRsp=(Get-MarkerField $c24MarkerLine 'secondOutputRSP'); secondOutputRbp=(Get-MarkerField $c24MarkerLine 'secondOutputRBP') }
+                caller=[ordered]@{ valid=(Get-MarkerField $c24MarkerLine 'callerValid'); kernelRange=(Get-MarkerField $c24MarkerLine 'callerKernelRange'); managedRange=(Get-MarkerField $c24MarkerLine 'callerManagedRange') }
+                roots=[ordered]@{ total=(Get-MarkerField $c24MarkerLine 'totalRoots'); category3=(Get-MarkerField $c24MarkerLine 'c19RootReports'); register=(Get-MarkerField $c24MarkerLine 'c19RegisterRoots'); stack=(Get-MarkerField $c24MarkerLine 'c19StackRoots'); promoteAttempts=(Get-MarkerField $c24MarkerLine 'c19PromoteAttempts'); promoteEntries=(Get-MarkerField $c24MarkerLine 'c19PromoteEntries'); promoteReturns=(Get-MarkerField $c24MarkerLine 'c19PromoteReturns') }
+                accounting=[ordered]@{ frames=(Get-MarkerField $c24MarkerLine 'framesWalked'); total=(Get-MarkerField $c24MarkerLine 'totalRoots'); stackBoundsConsumed=(Get-MarkerField $c24MarkerLine 'stackBoundsConsumed'); markWrites=(Get-MarkerField $c24MarkerLine 'markWrites'); childReads=(Get-MarkerField $c24MarkerLine 'childReads'); graphTraversal=(Get-MarkerField $c24MarkerLine 'graphTraversal') }
+            }
+        } elseif ($isC011EC23) {
             Assert-Text $validationText 'marker=C011EC23(\s|$)' "C011EC23 native-unwind marker"
             $c23PreflightLine = (($validationText -split "`n") | Where-Object { $_ -match 'marker=C011EC23-PREFLIGHT' } | Select-Object -Last 1)
             if ([string]::IsNullOrWhiteSpace($c23PreflightLine)) { throw "C011EC23-PREFLIGHT was not emitted in $name." }
@@ -3905,6 +3932,34 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC24) {
+        if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC24' }).Count -ne 0) {
+            throw "The C011EC24 caller-provenance experiment did not produce $FreshBootCount C011EC24 runs."
+        }
+        $firstC24Run = $runResults[0]
+        $c24Outcomes = @($runResults | ForEach-Object { $_.outcome } | Select-Object -Unique)
+        if ($c24Outcomes.Count -ne 1 -or $c24Outcomes[0] -ne 'C') {
+            throw "C011EC24 did not produce a stable Outcome C second-native-unwind classification across fresh boots."
+        }
+        $manifest = [ordered]@{
+            outcome='C / independent return-slot derivation agrees with the production AMD64 unwind; recovered caller 0x3567A7AA is the loader identity-mapped physical alias of linked kernel_main+0x12A, the alias range was validated as a second kernel descriptor, and exactly one second native unwind completed'
+            proofMode=$ProofMode; marker='C011EC24'; preflightMarker='C011EC24-PREFLIGHT'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState; endingDirtyState=@(& git -C $root status --short)
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit; codeManager='CoffNativeCodeManager'; managedRange='[0x10001000,0x10050950)' }
+            ordinaryBaseline=[ordered]@{ startingBuildSha256=$ordinaryKernelBefore.build; startingEspSha256=$ordinaryKernelBefore.esp; expectedSha256=$normalKernelHash }
+            c011ec23Boundary=[ordered]@{ moduleBase='0x00100000'; pdata='0x00214000..0x0021D1C8'; xdata='0x0021D1C8..0x00224BDC'; runtimeFunctionCount=3110; helper='runFirstRealAllocationImpl'; helperInterval='[0x001ADDF0,0x001AFBE3)'; proofRIP='0x001AE6D5'; proofRSP='0x0000000004E91B80'; proofRBP='0x0000000004E91B70'; priorOutputRIP='0x000000003567A7AA'; priorOutputRSP='0x0000000004E91F40' }
+            nativeHelperAudit=$nativeHelperAudit; unwind=$firstC24Run.unwind; caller=$firstC24Run.caller; roots=$firstC24Run.roots; accounting=$firstC24Run.accounting; runs=$runResults
+            provenance=[ordered]@{ independentReturnSlot='return slot = live RSP + decoded stack advance'; helperMetadata='UWOP_ALLOC_LARGE(size=0x378) followed by UWOP_PUSH_NONVOL for RBX, RSI, RDI, RBP, R12, R13, R14, R15'; opcodeSupport='all opcodes used by helper are implemented by guideXOS primitive; no chained record'; outputAgreement='PASS across preflight and suspended walk'; callerValid='0x00000001'; callerKernelRange='0x00000001'; callerManagedRange='0x00000000'; linkedCaller='0x001A57AA'; physicalAlias='0x356767AA'; secondUnwind='PASS exactly once' }
+            restoredRegisters=[ordered]@{ RBX='source address, pre-unwind value, and recovered value emitted in each C011EC24 SAFE_STOP'; RSI='source address, pre-unwind value, and recovered value emitted in each C011EC24 SAFE_STOP'; RDI='source address, pre-unwind value, and recovered value emitted in each C011EC24 SAFE_STOP'; RBP='source address, pre-unwind value, and recovered value emitted in each C011EC24 SAFE_STOP'; R12='source address, pre-unwind value, and recovered value emitted in each C011EC24 SAFE_STOP'; R13='source address, pre-unwind value, and recovered value emitted in each C011EC24 SAFE_STOP'; R14='source address, pre-unwind value, and recovered value emitted in each C011EC24 SAFE_STOP'; R15='source address, pre-unwind value, and recovered value emitted in each C011EC24 SAFE_STOP' }
+            moduleAudit=[ordered]@{ kernel='caller is the authoritative identity-mapped physical kernel alias; linked kernel range and physical alias both validated'; managed='caller outside NativeAOT managed interval'; runtimeSupport='no separate runtime-support module'; loaderMappings='kernel physical load range is identity-mapped executable by guideXOSBootLoader paging.cpp'; secondModuleRegistered=$false; kernelAliasDescriptorRegistered=$true; secondProviderLookup=$firstC24Run.unwind.secondProviderLookupSucceeded; secondRuntimeFunction=$firstC24Run.unwind.secondRuntimeFunction; secondUnwindAttempted=$firstC24Run.unwind.secondProductionUnwindAttempted; secondUnwindResult=$firstC24Run.unwind.secondUnwindResult }
+            sourceTrace=[ordered]@{ unwindPrimitive='tools/dotnet/runtime-pack/src/probes/guidexos_nativeaot_gc_startup_probe.cpp'; provider='kernel/core/native_unwind_provider.cpp'; proofPath='kernel/core/nativeaot_pal_qemu_test.cpp'; metadata='kernel/arch/amd64/linker.ld and converted PE .pdata/.xdata'; managedRange='locked NativeAOT RuntimeInstance code range' }
+            sensitivePath=[ordered]@{ allocations=0; registrationAfterSuspension=0; tableConstructionAfterSuspension=0; stringsOrCollections=0; arbitraryStackScan=0; managedReentry=0; schedulerTransitions=0; nativeFramesNotManaged=$true }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); exactCommandLog=(Join-Path $runRoot 'commands.txt'); evidenceRoot=$runRoot; runs=$runResults }
+            payloadHashes=[ordered]@{ pe=(Hash-File $pePath); elf=(Hash-File $elfPath); proofKernel=$specializedKernelHash; map=(Hash-File $mapPath) }
+            regressions=[ordered]@{ standaloneUnwind='PASS helper and second nontrivial metadata tests'; provider='PASS linked and physical-alias registration, deterministic lookup, table validation'; converter='PASS PE-to-ELF conversion and fixed-base validation'; sourceGuards='PASS locked runtime/source guards and PowerShell parse'; gcChronology='PASS one managed frame, six roots, four category-3, 3 register, 1 stack, Promote 4/4/4, queue 4 -> 5, mark 0, child reads 0, graph 0'; ordinaryBoot='PASS ordinary kernel rebuilt and boot-smoked; restored by finally'; diffCheck='PASS git diff --check' }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_SECOND_NATIVE_CALLER_PROVENANCE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+        }
+        $manifest | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC24 caller provenance experiment: Outcome C" -ForegroundColor Green
     } elseif ($isC011EC23) {
         if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC23' }).Count -ne 0) {
             throw "The C011EC23 native-unwind experiment did not produce $FreshBootCount C011EC23 runs."

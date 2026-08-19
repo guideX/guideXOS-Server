@@ -1980,6 +1980,11 @@ void runFirstRealAllocationImpl(
         guideXosNativeUnwindRegisterKernelModule();
     firstAllocationStatus("Kernel native unwind module registration",
                           nativeModuleRegistration == 0, allPassed);
+    serial::puts("[nativeaot-gc-single-thread-suspend-ee] native unwind registry capacity=");
+    serial::put_hex32(guideXosNativeUnwindRegistryCapacity());
+    serial::puts(" count=");
+    serial::put_hex32(guideXosNativeUnwindRegistryCount());
+    serial::puts("\n");
     guidexos_nativeaot_native_unwind_lookup_result preflight = {};
     const uintptr_t actualHelperPc = reinterpret_cast<uintptr_t>(
         &runFirstRealAllocationImpl);
@@ -2116,14 +2121,31 @@ void runFirstRealAllocationImpl(
     // standalone native check after that initialization, but still before
     // ManagedMain can request a collection or enter the suspended walk.
     if (standaloneNativeUnwindAddress != 0u) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE)
+        uintptr_t c011ec24LiveRsp = 0u;
+#if defined(__GNUC__) || defined(__clang__)
+        __asm__ volatile("mov %%rsp, %0" : "=r"(c011ec24LiveRsp));
+#endif
+        using StandaloneNativeUnwind = uint32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+            uintptr_t, uintptr_t);
+        const uint32_t standaloneResult =
+            reinterpret_cast<StandaloneNativeUnwind>(standaloneNativeUnwindAddress)(
+                reinterpret_cast<uintptr_t>(&runFirstRealAllocationImpl),
+                c011ec24LiveRsp);
+#else
         using StandaloneNativeUnwind = uint32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
             uintptr_t);
         const uint32_t standaloneResult =
             reinterpret_cast<StandaloneNativeUnwind>(standaloneNativeUnwindAddress)(
                 reinterpret_cast<uintptr_t>(&runFirstRealAllocationImpl));
+#endif
         firstAllocationStatus("Second genuine native unwind",
                               standaloneResult == 1u, allPassed);
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE)
+    // The C24 standalone entry also emits C011EC24-PREFLIGHT after its two
+    // bounded synthetic checks and direct live return-slot derivation.
+#endif
 #endif
 
     if (beginExperimentAddress != 0u) {

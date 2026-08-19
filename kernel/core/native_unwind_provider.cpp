@@ -19,6 +19,7 @@ constexpr uint32_t kMaximumTableEntries = 8192u;
 
 guidexos_nativeaot_native_unwind_module g_modules[kRegistryCapacity] = {};
 uint32_t g_module_count = 0u;
+uintptr_t g_kernel_physical_base = static_cast<uintptr_t>(0x100000u);
 
 bool addOverflow(uintptr_t left, uintptr_t right, uintptr_t* result) {
     if (result == nullptr || left > (~static_cast<uintptr_t>(0) - right)) {
@@ -171,7 +172,62 @@ guidexos_nativeaot_native_unwind_module makeKernelModule() {
     return module;
 }
 
+bool translateLinkedAddress(uintptr_t linkedAddress, uintptr_t linkedBase,
+                            uintptr_t aliasBase, uintptr_t* aliasAddress) {
+    return aliasAddress != nullptr && linkedAddress >= linkedBase &&
+        !addOverflow(aliasBase, linkedAddress - linkedBase, aliasAddress);
+}
+
+guidexos_nativeaot_native_unwind_module makeKernelPhysicalAlias(
+    const guidexos_nativeaot_native_unwind_module& linked) {
+    guidexos_nativeaot_native_unwind_module alias = linked;
+    const uintptr_t linkedBase = static_cast<uintptr_t>(linked.module_base);
+    uintptr_t executableStart = 0u;
+    uintptr_t executableEnd = 0u;
+    uintptr_t pdataStart = 0u;
+    uintptr_t pdataEnd = 0u;
+    uintptr_t xdataStart = 0u;
+    uintptr_t xdataEnd = 0u;
+    alias.module_base = g_kernel_physical_base;
+    if (!translateLinkedAddress(static_cast<uintptr_t>(linked.executable_start),
+                                linkedBase, alias.module_base,
+                                &executableStart) ||
+        !translateLinkedAddress(static_cast<uintptr_t>(linked.executable_end),
+                                linkedBase, alias.module_base,
+                                &executableEnd) ||
+        !translateLinkedAddress(static_cast<uintptr_t>(linked.pdata_start),
+                                linkedBase, alias.module_base,
+                                &pdataStart) ||
+        !translateLinkedAddress(static_cast<uintptr_t>(linked.pdata_end),
+                                linkedBase, alias.module_base,
+                                &pdataEnd) ||
+        !translateLinkedAddress(static_cast<uintptr_t>(linked.xdata_start),
+                                linkedBase, alias.module_base,
+                                &xdataStart) ||
+        !translateLinkedAddress(static_cast<uintptr_t>(linked.xdata_end),
+                                linkedBase, alias.module_base,
+                                &xdataEnd)) {
+        alias = {};
+        return alias;
+    }
+    alias.executable_start = executableStart;
+    alias.executable_end = executableEnd;
+    alias.pdata_start = pdataStart;
+    alias.pdata_end = pdataEnd;
+    alias.xdata_start = xdataStart;
+    alias.xdata_end = xdataEnd;
+    alias.runtime_function_table = alias.pdata_start;
+    return alias;
+}
+
 } // namespace
+
+extern "C" void guideXosNativeUnwindSetKernelPhysicalBase(
+    uintptr_t physical_base) {
+    if (g_module_count == 0u && physical_base != 0u) {
+        g_kernel_physical_base = physical_base;
+    }
+}
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guideXosNativeUnwindRegisterKernelModule(void) {
@@ -180,6 +236,13 @@ guideXosNativeUnwindRegisterKernelModule(void) {
     guidexos_nativeaot_native_unwind_module module = makeKernelModule();
     if (!validateTable(&module)) return -1;
     g_modules[g_module_count++] = module;
+    if (g_kernel_physical_base != module.module_base) {
+        if (g_module_count >= kRegistryCapacity) return -1;
+        guidexos_nativeaot_native_unwind_module alias =
+            makeKernelPhysicalAlias(module);
+        if (!validateTable(&alias)) return -1;
+        g_modules[g_module_count++] = alias;
+    }
     return 0;
 }
 
@@ -293,6 +356,15 @@ guideXosNativeUnwindValidateFocusedCoverage(uint32_t* second_function_index) {
     if (table[0].begin_address + 1u < table[0].end_address &&
         !expectLookup(base + table[0].begin_address + 1u, true)) {
         return -1;
+    }
+    if (g_module_count > 1u) {
+        const guidexos_nativeaot_native_unwind_module& alias = g_modules[1];
+        if (!expectLookup(static_cast<uintptr_t>(alias.module_base) +
+                              table[0].begin_address,
+                          true) ||
+            !expectLookup(static_cast<uintptr_t>(alias.executable_end), false)) {
+            return -1;
+        }
     }
     if (table[middle].begin_address + 1u < table[middle].end_address &&
         !expectLookup(base + table[middle].begin_address + 1u, true)) {

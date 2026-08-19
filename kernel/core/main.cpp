@@ -78,6 +78,9 @@ extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_start[];
 extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+#include "include/kernel/native_unwind_provider.h"
+#endif
 #if defined(GXOS_NATIVE_MUTEX_QEMU_TEST)
 #include "include/kernel/native_mutex_qemu_test.h"
 #endif
@@ -269,6 +272,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (bootinfo && bootinfo->Magic == guideXOS::GUIDEXOS_BOOTINFO_MAGIC) {
             is_bootinfo = true;
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+            guideXosNativeUnwindSetKernelPhysicalBase(
+                static_cast<uintptr_t>(bootinfo->KernelPhysicalBase));
+#endif
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             if (kernel::memory::address_space::initialize(bootinfo)) {

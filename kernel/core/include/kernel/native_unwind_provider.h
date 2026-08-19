@@ -13,6 +13,10 @@ extern "C" {
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guideXosNativeUnwindRegisterKernelModule(void);
 
+// Supplies the authoritative UEFI physical load base before registration so
+// the provider can publish the loader's identity-mapped kernel alias too.
+void guideXosNativeUnwindSetKernelPhysicalBase(uintptr_t physical_base);
+
 // Bounded, read-only PC lookup used by the NativeAOT platform hook.
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guideXosNativeUnwindLookup(
