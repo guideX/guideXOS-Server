@@ -723,14 +723,26 @@ int main() {
         cleanupStepOut();
         return 1;
     }
+    const uint64_t stepOutUserReturnOwner = 0x8000000000000094ull;
+    gx_development_debug_snapshot stepOutUserReturnBind{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT,
+                                                       stepOutUserReturnOwner, savedReturnAddress, 44, 79),
+                                           "native-debugger-runtime-proof", &stepOutUserReturnBind) == gxos::apps::GX_OK &&
+                stepOutUserReturnBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND &&
+                stepOutUserReturnBind.bindingCount == 1 && stepOutCode[69] == 0xCC,
+                "Step Out user breakpoint bind at the shared return destination")) {
+        cleanupStepOut();
+        return 1;
+    }
     const uint64_t stepOutOwner = 0x8000000000000093ull;
     gx_development_debug_snapshot stepOutTempBind{};
     if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT,
                                                        stepOutOwner, savedReturnAddress, 44, 79),
                                            "native-debugger-runtime-proof", &stepOutTempBind) == gxos::apps::GX_OK &&
                 stepOutTempBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND &&
-                stepOutTempBind.bindingCount == 1 && stepOutCode[69] == 0xCC,
-                "Step Out temporary return breakpoint bind")) {
+                stepOutTempBind.bindingId == stepOutUserReturnBind.bindingId &&
+                stepOutTempBind.bindingCount == 2 && stepOutCode[69] == 0xCC,
+                "Step Out temporary return owner shares the user physical binding")) {
         cleanupStepOut();
         return 1;
     }
@@ -764,19 +776,32 @@ int main() {
     if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER,
                                                        stepOutOwner, savedReturnAddress, 44, 79),
                                            "native-debugger-runtime-proof", &stepOutRemove) == gxos::apps::GX_OK &&
-                stepOutCode[69] == stepOutReturnOriginalByte && stepOutCode[17] == 0xCC,
-                "Step Out temporary owner removal restores only the return byte")) {
+                stepOutRemove.bindingId == stepOutUserReturnBind.bindingId &&
+                stepOutRemove.bindingCount == 1 && stepOutRemove.bindingInstalled != 0 &&
+                stepOutCode[69] == 0xCC && stepOutCode[17] == 0xCC,
+                "Step Out removes only its owner and preserves the user return trap")) {
         cleanupStepOut();
         return 1;
     }
-    gx_development_debug_request stepOutResume = makeRequest(
-        GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP, 0, savedReturnAddress, 44, 79);
-    stepOutResume.threadId = stepOutReturnTrap.threadId;
-    stepOutResume.stopGeneration = stepOutReturnTrap.context.stopGeneration;
-    gx_development_debug_snapshot stepOutResumeResult{};
-    if (!expect(NativeAppDebugger::Command(stepOutResume, "native-debugger-runtime-proof",
-                                           &stepOutResumeResult) == gxos::apps::GX_OK,
-                "Step Out caller resume after the return trap")) {
+    gx_development_debug_request stepOutUserContinue = makeRequest(
+        GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT, stepOutUserReturnOwner, savedReturnAddress, 44, 79);
+    stepOutUserContinue.flags = GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT;
+    stepOutUserContinue.threadId = stepOutReturnTrap.threadId;
+    stepOutUserContinue.stopGeneration = stepOutReturnTrap.context.stopGeneration;
+    gx_development_debug_snapshot stepOutUserContinueResult{};
+    if (!expect(NativeAppDebugger::Command(stepOutUserContinue, "native-debugger-runtime-proof",
+                                           &stepOutUserContinueResult) == gxos::apps::GX_OK &&
+                stepOutUserContinueResult.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING &&
+                stepOutCode[69] == stepOutReturnOriginalByte,
+                "Continue from the overlap stop uses the surviving user breakpoint owner")) {
+        cleanupStepOut();
+        return 1;
+    }
+    gx_development_debug_snapshot stepOutUserStep{};
+    if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP, stepOutUserStep, 44, 79) &&
+                stepOutUserStep.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_INTERNAL_BREAKPOINT &&
+                stepOutUserStep.context.valid != 0 && stepOutCode[69] == 0xCC,
+                "overlap user continuation rebinds the physical breakpoint")) {
         cleanupStepOut();
         return 1;
     }
