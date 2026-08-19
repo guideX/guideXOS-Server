@@ -729,7 +729,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
         }
         if (existing) {
             if (existing->ownerCount >= kMaxLogicalOwners) { setError(snapshot, "logical breakpoint owner limit exceeded"); return GX_ERROR_FAILED; }
-            for (uint32_t i = 0; i < existing->ownerCount; ++i) if (existing->owners[i] == request.breakpointId) { snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_BOUND; snapshot->bindingId = existing->bindingId; snapshot->originalByte = existing->originalByte; snapshot->installedByte = existing->installedByte; snapshot->originalByteValid = 1; snapshot->bindingInstalled = 1; return GX_OK; }
+            for (uint32_t i = 0; i < existing->ownerCount; ++i) if (existing->owners[i] == request.breakpointId) { snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_BOUND; snapshot->bindingId = existing->bindingId; snapshot->originalByte = existing->originalByte; snapshot->installedByte = existing->installedByte; snapshot->originalByteValid = 1; snapshot->bindingInstalled = 1; snapshot->bindingCount = existing->ownerCount; return GX_OK; }
             existing->owners[existing->ownerCount++] = request.breakpointId;
             snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_BOUND;
             snapshot->bindingId = existing->bindingId;
@@ -1159,7 +1159,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
             snapshot->targetAddress = runtime->trapAddress.load(std::memory_order_acquire);
             snapshot->bindingId = runtime->trapBindingId.load(std::memory_order_acquire);
             snapshot->context = runtime->trapContext;
-            for (const PhysicalBinding& binding : runtime->bindings) if (binding.used && binding.bindingId == snapshot->bindingId) { snapshot->originalByte = binding.originalByte; snapshot->installedByte = binding.installedByte; snapshot->originalByteValid = 1; break; }
+            for (const PhysicalBinding& binding : runtime->bindings) if (binding.used && binding.bindingId == snapshot->bindingId) { snapshot->originalByte = binding.originalByte; snapshot->installedByte = binding.installedByte; snapshot->originalByteValid = 1; snapshot->bindingInstalled = binding.installed ? 1 : 0; snapshot->bindingCount = binding.ownerCount; break; }
             Logger::write(LogLevel::Info, "[NativeAppDebugger] breakpoint trap observed runtimeId=" + std::to_string(runtime->runtimeId) +
                 " bindingId=" + std::to_string(snapshot->bindingId));
         } else snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
