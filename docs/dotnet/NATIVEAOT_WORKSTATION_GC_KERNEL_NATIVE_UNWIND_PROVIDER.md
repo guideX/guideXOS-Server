@@ -243,8 +243,12 @@ kernel `A7F95FA8B6D728FB2ADEFCDB33C061A8D376833C9B02EBDCE61D1480E01469E8`,
 and MAP `FBCF8573763C86B5B988B52EDB4E67BA974A18ADD8EF01E4CE64216E44FD1474`.
 
 The PE-to-ELF converter and fixed-base map validation passed. Normal kernel
-build and linker/map sanity passed. The newly built ordinary source-state
-kernel retained non-overlapping `.pdata/.xdata` and was archived as
+build and linker/map sanity passed. A disposable ordinary source-state boot
+also reached `[KERNEL] Entering main loop` and emitted
+`[NAVIGATOR-SMOKE] result=PASS`; the NativeAOT-startup smoke wrapper reported
+no NativeAOT marker because this was intentionally a normal kernel boot, not a
+NativeAOT proof invocation. The newly built ordinary source-state kernel
+retained non-overlapping `.pdata/.xdata` and was archived as
 `out/dotnet/c011ec23-final-validation/ordinary-production-kernel.elf` with
 SHA-256 `A5B634F9D034FE2FFFB11048693321ECA387902E95C5E8CAE4624D63F52CD68D`.
 The historical pre-milestone known-good build and ESP payload were
