@@ -207,6 +207,6 @@ All QEMU processes were terminated after testing. The harness retained C19–C26
 
 ## Git and next milestone
 
-Starting repository state was branch `v1.1_DOTNET_SUPPORT`, HEAD `b7491fcb58807cea4dc10ea63b4284d196ffe2e1`, upstream `origin/v1.1_DOTNET_SUPPORT`, ahead 1 / behind 0, clean, with zero untracked entries. The intended C27 changes are the harness, diagnostics header, diagnostics implementation, and this document. Push policy remains unchanged: no push was performed.
+Starting repository state was branch `v1.1_DOTNET_SUPPORT`, HEAD `b7491fcb58807cea4dc10ea63b4284d196ffe2e1`, upstream `origin/v1.1_DOTNET_SUPPORT`, ahead 1 / behind 0, clean, with zero untracked entries. The local reflog records the upstream ref advancing to C26 at 22:04; that update was external to this run. Final state is branch `v1.1_DOTNET_SUPPORT`, HEAD `3dcb1c8fa56b39a8bf4beb667d7321d8bb542c88`, upstream `origin/v1.1_DOTNET_SUPPORT` at `b7491fcb58807cea4dc10ea63b4284d196ffe2e1`, ahead 1 / behind 0, clean, with zero untracked entries. The intended C27 changes are the harness, diagnostics header, diagnostics implementation, and this document. Commit: `3dcb1c8f Advance NativeAOT GC object traversal`. Push policy remains unchanged: this run performed no push.
 
 The next smallest independent milestone is to retain the first marked-object boundary and investigate the next authentic WKS graph-worklist contract or the first supported object-layout/child-scanner continuation. Full collection completion remains out of scope for C011EC27.
