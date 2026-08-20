@@ -85,6 +85,19 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def write_fragmented_response(self, fragments, close=False):
+        """Write a deliberately segmented HTTP/1.1 response.
+
+        The ordinary helper above exercises normal BaseHTTPRequestHandler
+        buffering. These endpoints intentionally split header lines, framing
+        markers, and body bytes so the kernel HTTP reader is tested against
+        legal segmentation rather than a convenient local packet shape.
+        """
+        for fragment in fragments:
+            self.connection.sendall(fragment)
+        if close:
+            self.close_connection = True
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         host = self.headers.get("Host", "")
@@ -1716,6 +1729,38 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                 self.wfile.write(("%x\r\n" % len(chunk)).encode("ascii"))
                 self.wfile.write(chunk + b"\r\n")
             self.wfile.write(b"0\r\n\r\n")
+            return
+        if path == "/navigator-smoke/stream-split-content-length.html":
+            body = b"<html><body><h1>Split Content-Length</h1><p>body arrives over several writes.</p></body></html>"
+            body_length = str(len(body)).encode("ascii")
+            self.write_fragmented_response((
+                b"HTTP/1.1 200 OK\r\nContent-",
+                b"Type: text/html; charset=utf-8\r\nContent-Length: ",
+                body_length[:1], body_length[1:], b"\r\nConnection: close\r\n\r",
+                b"\n", body[:13], body[13:47], body[47:]
+            ), close=True)
+            return
+        if path == "/navigator-smoke/stream-split-chunked.html":
+            chunks = (
+                b"<html><body><h1>Split chunked response</h1>",
+                b"<p>chunk framing and body boundaries are arbitrary.</p></body></html>",
+            )
+            body_fragments = [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nTransfer-Encoding: ",
+                b"chunked\r\nConnection: keep-alive\r\n\r\n",
+            ]
+            for index, chunk in enumerate(chunks):
+                size = ("%x;fixture=split" % len(chunk)).encode("ascii")
+                body_fragments.extend((size[:2], size[2:] + b"\r", b"\n", chunk[:9], chunk[9:], b"\r", b"\n"))
+            body_fragments.extend((b"0\r", b"\nX-Split-Trailer: yes\r\n", b"\r", b"\n"))
+            self.write_fragmented_response(tuple(body_fragments))
+            return
+        if path == "/navigator-smoke/stream-connection-close.html":
+            body = b"<html><body><h1>Connection-close response</h1><p>EOF completes this body.</p></body></html>"
+            self.write_fragmented_response((
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n",
+                body[:7], body[7:31], body[31:]
+            ), close=True)
             return
         if compat_path == "/navigator-smoke/gzip.html":
             body = gzip.compress(b"<html><body><h1>Compressed</h1></body></html>")

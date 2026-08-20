@@ -1261,6 +1261,15 @@ void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
     result->tlsBioBytesReceived = 0;
     result->tlsBioLastSendResult = 0;
     result->tlsBioLastRecvResult = 0;
+    result->tlsReadCalls = 0;
+    result->tlsReadWantReadCount = 0;
+    result->tlsReadWantWriteCount = 0;
+    result->tlsReadCloseNotifyCount = 0;
+    result->tlsReadEofCount = 0;
+    result->tlsReadFatalErrorCount = 0;
+    result->tlsReadProgressEvents = 0;
+    result->tlsReadLastResult = 0;
+    result->tlsResponseReadElapsedMs = 0;
     result->tlsHandshakeElapsedMs = 0;
     result->verifyFlags = 0;
     result->transportError = 0;
@@ -2532,6 +2541,7 @@ void tls_set_setup_error(GxosTlsLocalHandshakeResult* result, int code, const ch
 #if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
 constexpr uint32_t kGxosTlsSmokeHandshakeTimeoutMs = 5000;
 constexpr uint32_t kGxosTlsSmokeIoTimeoutMs = 5000;
+constexpr uint32_t kGxosTlsSmokeResponseTransactionTimeoutMs = 30000;
 
 struct GxosTlsSmokeIoContext {
     GxosTlsByteStream stream{};
@@ -2543,6 +2553,7 @@ struct GxosTlsSmokeIoContext {
     uint32_t recvCalls = 0;
     size_t bytesSent = 0;
     size_t bytesReceived = 0;
+    uint32_t lastProgressTicks = 0;
     int lastSendResult = 0;
     int lastRecvResult = 0;
 };
@@ -2614,6 +2625,7 @@ int gxos_tls_stream_recv(void* context, unsigned char* buffer, size_t length)
     const int received = io->stream.read(io->stream.context, buffer, requestLength);
     io->lastRecvResult = received;
     if (received > 0) io->bytesReceived += static_cast<size_t>(received);
+    if (received > 0) io->lastProgressTicks = static_cast<uint32_t>(kernel::pit::ticks());
     if (io->result) {
         io->result->tlsBioRecvCalls = io->recvCalls;
         io->result->tlsBioBytesReceived = io->bytesReceived;
@@ -2643,6 +2655,19 @@ struct GxosTlsHttpByteStreamSession {
     mbedtls_ssl_config conf;
     bool closed = false;
 };
+
+bool tls_http_response_wait_until_ready(GxosTlsHttpByteStreamSession* session,
+                                        uint32_t transactionStartTicks,
+                                        uint32_t idleTimeoutTicks,
+                                        uint32_t totalTimeoutTicks)
+{
+    if (!session) return false;
+    if (session->tcpStream.poll) session->tcpStream.poll(session->tcpStream.context);
+    const uint32_t now = static_cast<uint32_t>(kernel::pit::ticks());
+    const uint32_t lastProgress = session->io.lastProgressTicks;
+    return (now - lastProgress) <= idleTimeoutTicks &&
+        (now - transactionStartTicks) <= totalTimeoutTicks;
+}
 
 /*
  * Keep the freestanding client offer explicit and limited to the four
@@ -2863,38 +2888,72 @@ int tls_http_byte_stream_read(void* context, uint8_t* buffer, int length)
     if (!session || !session->result || !buffer || length <= 0) return -1;
 
     tls_set_stage(session->result, "response_read");
-    uint32_t ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+    const uint32_t ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
     const uint32_t ioTimeout = tls_timeout_ticks(kGxosTlsSmokeIoTimeoutMs);
+    const uint32_t totalTimeout = tls_timeout_ticks(kGxosTlsSmokeResponseTransactionTimeoutMs);
+    session->io.lastProgressTicks = ioStartTicks;
     for (;;) {
         const int ret = mbedtls_ssl_read(&session->ssl,
             reinterpret_cast<unsigned char*>(buffer), (size_t)length);
+        ++session->result->tlsReadCalls;
+        session->result->tlsReadLastResult = ret;
         if (ret > 0) {
             session->result->responseReadSuccess = true;
             session->result->responseBytesRead += (size_t)ret;
+            ++session->result->tlsReadProgressEvents;
             session->result->mbedtlsError = 0;
             session->result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
             session->result->transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
+            session->result->tlsResponseReadElapsedMs =
+                (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
             return ret;
         }
 
         session->result->mbedtlsError = ret;
         session->result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
-        if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == MBEDTLS_ERR_SSL_CONN_EOF) {
+        if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+            ++session->result->tlsReadCloseNotifyCount;
             session->result->mbedtlsError = 0;
+            session->result->tlsResponseReadElapsedMs =
+                (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
             return 0;
         }
-        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            if (!tls_wait_until_ready(&session->tcpStream, ioStartTicks, ioTimeout)) {
+        if (ret == 0 || ret == MBEDTLS_ERR_SSL_CONN_EOF) {
+            ++session->result->tlsReadEofCount;
+            session->result->mbedtlsError = 0;
+            session->result->tlsResponseReadElapsedMs =
+                (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
+            return 0;
+        }
+        if (ret == MBEDTLS_ERR_SSL_WANT_READ) {
+            ++session->result->tlsReadWantReadCount;
+            if (!tls_http_response_wait_until_ready(session, ioStartTicks, ioTimeout, totalTimeout)) {
                 tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
                     "TLS response read timed out.");
+                session->result->tlsResponseReadElapsedMs =
+                    (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
+                return -1;
+            }
+            continue;
+        }
+        if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            ++session->result->tlsReadWantWriteCount;
+            if (!tls_http_response_wait_until_ready(session, ioStartTicks, ioTimeout, totalTimeout)) {
+                tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
+                    "TLS response read timed out.");
+                session->result->tlsResponseReadElapsedMs =
+                    (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
                 return -1;
             }
             continue;
         }
 
+        ++session->result->tlsReadFatalErrorCount;
         session->result->transportError = session->io.lastTransportError;
         tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
             "TLS response read failed.");
+        session->result->tlsResponseReadElapsedMs =
+            (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
         return -1;
     }
 }

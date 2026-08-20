@@ -283,6 +283,15 @@ struct GxosTlsLocalHandshakeResult {
     size_t tlsBioBytesReceived;
     int tlsBioLastSendResult;
     int tlsBioLastRecvResult;
+    size_t tlsReadCalls;
+    size_t tlsReadWantReadCount;
+    size_t tlsReadWantWriteCount;
+    size_t tlsReadCloseNotifyCount;
+    size_t tlsReadEofCount;
+    size_t tlsReadFatalErrorCount;
+    size_t tlsReadProgressEvents;
+    int tlsReadLastResult;
+    uint32_t tlsResponseReadElapsedMs;
     uint32_t tlsHandshakeElapsedMs;
     uint32_t verifyFlags;
     int transportError;

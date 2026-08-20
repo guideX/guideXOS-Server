@@ -9401,6 +9401,7 @@ static const int kKernelHttpRawLimit = kKernelHttpHeaderLimit + kKernelHttpBodyL
 static const int kKernelHttpPostBodyLimit = 8 * 1024;
 static const int kKernelHttpConnectTimeoutMs = gxos::web::kHttpSharedConnectTimeoutMs;
 static const int kKernelHttpReadTimeoutMs = gxos::web::kHttpSharedReadTimeoutMs;
+static const int kKernelHttpTransactionTimeoutMs = 30 * 1000;
 static const uint32_t kNavigatorTlsSmokeCnMismatchFlag = 0x04u;
 static const char* kNavigatorControlledHttpsHost = "guidexos.test";
 static const uint16_t kNavigatorControlledHttpsPort = 8443;
@@ -9487,6 +9488,24 @@ struct KernelHttpResponse {
     int redirectHopIndex;
     char redirectHopUrl[kKernelHttpUrlLen];
     char tlsBackend[48];
+    uint32_t tcpReadCalls;
+    uint32_t tcpWouldBlockReads;
+    uint32_t tcpAppBytesDelivered;
+    uint32_t tcpPayloadSegments;
+    uint32_t tcpPayloadBytesReceived;
+    uint32_t tcpPayloadBytesAccepted;
+    uint32_t tcpPayloadBytesDropped;
+    uint32_t tcpWindowUpdateAcks;
+    uint32_t tcpWindowReopenEvents;
+    uint32_t tcpLocalZeroWindowEvents;
+    uint32_t tcpPeerZeroWindowEvents;
+    uint32_t tcpAdvertisedWindow;
+    uint32_t tcpMinimumAdvertisedWindow;
+    uint32_t tcpLastPeerWindow;
+    uint32_t httpReadProgressEvents;
+    uint32_t httpReadWouldBlockCount;
+    uint32_t httpReadElapsedMs;
+    bool httpReadTimedOut;
     gxos::GxosTlsLocalHandshakeResult tlsResult;
     char body[kKernelHttpBodyLimit + 1];
 };
@@ -9537,6 +9556,24 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->redirectHopIndex = 0;
     response->redirectHopUrl[0] = '\0';
     response->tlsBackend[0] = '\0';
+    response->tcpReadCalls = 0;
+    response->tcpWouldBlockReads = 0;
+    response->tcpAppBytesDelivered = 0;
+    response->tcpPayloadSegments = 0;
+    response->tcpPayloadBytesReceived = 0;
+    response->tcpPayloadBytesAccepted = 0;
+    response->tcpPayloadBytesDropped = 0;
+    response->tcpWindowUpdateAcks = 0;
+    response->tcpWindowReopenEvents = 0;
+    response->tcpLocalZeroWindowEvents = 0;
+    response->tcpPeerZeroWindowEvents = 0;
+    response->tcpAdvertisedWindow = 0;
+    response->tcpMinimumAdvertisedWindow = 0;
+    response->tcpLastPeerWindow = 0;
+    response->httpReadProgressEvents = 0;
+    response->httpReadWouldBlockCount = 0;
+    response->httpReadElapsedMs = 0;
+    response->httpReadTimedOut = false;
     response->tlsResult = gxos::GxosTlsLocalHandshakeResult{};
     response->body[0] = '\0';
 }
@@ -9847,14 +9884,39 @@ static int s_kernelHttpControlledLocalHttpsLoads = 0;
 struct KernelTcpHttpByteStreamContext {
     int socket;
     bool* abortUsedFlag;
+    KernelHttpResponse* response;
 };
+
+static void kernel_http_sync_tcp_telemetry(KernelTcpHttpByteStreamContext* tcp)
+{
+    if (!tcp || !tcp->response || tcp->socket < 0) return;
+    kernel::tcp::TcpStreamTelemetry telemetry{};
+    if (!kernel::tcp::tcp_get_stream_telemetry(tcp->socket, &telemetry)) return;
+    KernelHttpResponse* response = tcp->response;
+    response->tcpReadCalls = telemetry.appReadCalls;
+    response->tcpWouldBlockReads = telemetry.appWouldBlockReads;
+    response->tcpAppBytesDelivered = telemetry.appBytesDelivered;
+    response->tcpPayloadSegments = telemetry.rxPayloadSegments;
+    response->tcpPayloadBytesReceived = telemetry.rxPayloadBytes;
+    response->tcpPayloadBytesAccepted = telemetry.rxPayloadAcceptedBytes;
+    response->tcpPayloadBytesDropped = telemetry.rxPayloadDroppedBytes;
+    response->tcpWindowUpdateAcks = telemetry.windowUpdateAcks;
+    response->tcpWindowReopenEvents = telemetry.windowReopenEvents;
+    response->tcpLocalZeroWindowEvents = telemetry.localZeroWindowEvents;
+    response->tcpPeerZeroWindowEvents = telemetry.peerZeroWindowEvents;
+    response->tcpAdvertisedWindow = telemetry.advertisedWindow;
+    response->tcpMinimumAdvertisedWindow = telemetry.minimumAdvertisedWindow;
+    response->tcpLastPeerWindow = telemetry.lastPeerWindow;
+}
 
 static int kernel_tcp_http_byte_stream_read(void* context, uint8_t* buffer, int length)
 {
     KernelTcpHttpByteStreamContext* tcp = static_cast<KernelTcpHttpByteStreamContext*>(context);
     if (!tcp || tcp->socket < 0 || !buffer || length <= 0) return kernel::tcp::TCP_ERR_INVALID;
     if (length > 0xFFFF) length = 0xFFFF;
-    return kernel::tcp::tcp_recv(tcp->socket, buffer, (uint16_t)length);
+    const int result = kernel::tcp::tcp_recv(tcp->socket, buffer, (uint16_t)length);
+    kernel_http_sync_tcp_telemetry(tcp);
+    return result;
 }
 
 static int kernel_tcp_http_byte_stream_write(void* context, const uint8_t* buffer, int length)
@@ -10640,8 +10702,10 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
     int expectedBodyBytes = 0;
     bool contentLengthKnown = false;
     bool chunkedResponse = false;
-    uint32_t startTicks = (uint32_t)kernel::pit::ticks();
-    uint32_t maxTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
+    const uint32_t transactionStartTicks = (uint32_t)kernel::pit::ticks();
+    uint32_t lastProgressTicks = transactionStartTicks;
+    const uint32_t idleTimeoutTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
+    const uint32_t transactionTimeoutTicks = (uint32_t)(kKernelHttpTransactionTimeoutMs / 10 + 1);
     while (true) {
         kernel_http_poll_once();
         char chunk[512];
@@ -10713,9 +10777,22 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
                     while (h < headerEnd && (*h == '\r' || *h == '\n')) ++h;
                 }
             }
-            startTicks = (uint32_t)kernel::pit::ticks();
+            ++response->httpReadProgressEvents;
+            lastProgressTicks = (uint32_t)kernel::pit::ticks();
             if (framedBodyStart >= 0 && contentLengthKnown &&
                 rawLen >= framedBodyStart + expectedBodyBytes) break;
+            if (framedBodyStart >= 0 && chunkedResponse) {
+                bool malformedChunked = false;
+                if (gxos::web::httpSharedChunkedBodyComplete(
+                        s_kernelHttpRaw + framedBodyStart,
+                        rawLen - framedBodyStart, &malformedChunked)) {
+                    break;
+                }
+                if (malformedChunked) {
+                    strcopy(response->error, "Malformed chunked response", sizeof(response->error));
+                    return false;
+                }
+            }
             continue;
         }
         if (n == 0) break;
@@ -10741,13 +10818,20 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
                 gxos::web::HttpByteStreamTlsStatus::TlsReadFailed);
             return false;
         }
-        if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
+        ++response->httpReadWouldBlockCount;
+        const uint32_t nowTicks = (uint32_t)kernel::pit::ticks();
+        if ((nowTicks - lastProgressTicks) > idleTimeoutTicks ||
+            (nowTicks - transactionStartTicks) > transactionTimeoutTicks) {
+            response->httpReadTimedOut = true;
             kernel_http_set_stream_error(response,
                 rawLen > 0 ? "HTTP read timeout after partial response" : "HTTP read timeout",
                 gxos::web::HttpByteStreamTlsStatus::TlsReadFailed);
+            response->httpReadElapsedMs = (nowTicks - transactionStartTicks) * 10u;
             return false;
         }
     }
+    response->httpReadElapsedMs =
+        ((uint32_t)kernel::pit::ticks() - transactionStartTicks) * 10u;
     s_kernelHttpRaw[rawLen] = '\0';
     return kernel_http_parse_response(response, rawLen);
 }
@@ -10832,6 +10916,7 @@ static bool kernel_http_open_stream(KernelHttpUrl* parsed,
     activeStream->stream = gxos::web::HttpByteStream{};
     activeStream->tcpContext.socket = -1;
     activeStream->tcpContext.abortUsedFlag = &response->tcpAbortUsed;
+    activeStream->tcpContext.response = response;
     response->tcpAbortUsed = false;
 
     if (!kernel_http_resolve_host(parsed, response)) {
@@ -15927,6 +16012,7 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     bool redirectedHttpsRetryUsed = false;
     bool attempted = false;
     KernelHttpResponse tlsProbeResponse{};
+    KernelHttpResponse capturedNavigationResponse{};
     gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const char* resultLabel = "SKIP";
     const char* skipReason = "(none)";
@@ -16077,6 +16163,11 @@ static bool printNavigatorRealPublicHttpsProbeCase()
             &redirectedHttpsRetryUsed,
             &redirectHopIndex,
             redirectHopUrl, sizeof(redirectHopUrl));
+        // smokeCaptureHttpsNavigation uses the ordinary Navigator handoff and
+        // leaves its completed transaction in the shared response object. Take
+        // the bounded trace snapshot before the secondary raw TLS request
+        // below reuses that storage.
+        capturedNavigationResponse = s_kernelHttpResponse;
         kernel_tls_smoke_request_once(probeConfig.targetUrl, tlsSniHost, &tlsProbeResponse, &tlsResult);
 
         const bool tlsSuccess =
@@ -16323,26 +16414,80 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec((uint32_t)(tlsRequestBytesWritten > 0 ? tlsRequestBytesWritten : 0));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_response_bytes_read=");
     serial_put_dec((uint32_t)(tlsResponseBytesRead > 0 ? tlsResponseBytesRead : 0));
+    const gxos::GxosTlsLocalHandshakeResult& traceResult = attempted
+        ? capturedNavigationResponse.tlsResult
+        : tlsResult;
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_send_calls=");
-    serial_put_dec64((uint64_t)tlsResult.tlsBioSendCalls);
+    serial_put_dec64((uint64_t)traceResult.tlsBioSendCalls);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_recv_calls=");
-    serial_put_dec64((uint64_t)tlsResult.tlsBioRecvCalls);
+    serial_put_dec64((uint64_t)traceResult.tlsBioRecvCalls);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_bytes_sent=");
-    serial_put_dec64((uint64_t)tlsResult.tlsBioBytesSent);
+    serial_put_dec64((uint64_t)traceResult.tlsBioBytesSent);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_bytes_received=");
-    serial_put_dec64((uint64_t)tlsResult.tlsBioBytesReceived);
+    serial_put_dec64((uint64_t)traceResult.tlsBioBytesReceived);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_last_send_result=");
     {
         char signedNumber[32];
-        nav_i64_to_text((int64_t)tlsResult.tlsBioLastSendResult, signedNumber, sizeof(signedNumber));
+        nav_i64_to_text((int64_t)traceResult.tlsBioLastSendResult, signedNumber, sizeof(signedNumber));
         serial::puts(signedNumber);
     }
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_last_recv_result=");
     {
         char signedNumber[32];
-        nav_i64_to_text((int64_t)tlsResult.tlsBioLastRecvResult, signedNumber, sizeof(signedNumber));
+        nav_i64_to_text((int64_t)traceResult.tlsBioLastRecvResult, signedNumber, sizeof(signedNumber));
         serial::puts(signedNumber);
     }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_calls=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadCalls);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_want_read_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadWantReadCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_want_write_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadWantWriteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_close_notify_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadCloseNotifyCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_eof_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadEofCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_fatal_error_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadFatalErrorCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_progress_events=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadProgressEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_elapsed_ms=");
+    serial_put_dec64((uint64_t)traceResult.tlsResponseReadElapsedMs);
+    const KernelHttpResponse& streamResponse = attempted ? capturedNavigationResponse : s_kernelHttpResponse;
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_read_calls=");
+    serial_put_dec64((uint64_t)streamResponse.tcpReadCalls);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_would_block_reads=");
+    serial_put_dec64((uint64_t)streamResponse.tcpWouldBlockReads);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_payload_segments=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPayloadSegments);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_payload_bytes_received=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPayloadBytesReceived);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_payload_bytes_accepted=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPayloadBytesAccepted);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_payload_bytes_dropped=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPayloadBytesDropped);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_window_update_acks=");
+    serial_put_dec64((uint64_t)streamResponse.tcpWindowUpdateAcks);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_window_reopen_events=");
+    serial_put_dec64((uint64_t)streamResponse.tcpWindowReopenEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_local_zero_window_events=");
+    serial_put_dec64((uint64_t)streamResponse.tcpLocalZeroWindowEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_peer_zero_window_events=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPeerZeroWindowEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_advertised_window=");
+    serial_put_dec64((uint64_t)streamResponse.tcpAdvertisedWindow);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_minimum_advertised_window=");
+    serial_put_dec64((uint64_t)streamResponse.tcpMinimumAdvertisedWindow);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_last_peer_window=");
+    serial_put_dec64((uint64_t)streamResponse.tcpLastPeerWindow);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_read_progress_events=");
+    serial_put_dec64((uint64_t)streamResponse.httpReadProgressEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_read_would_block_count=");
+    serial_put_dec64((uint64_t)streamResponse.httpReadWouldBlockCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_read_elapsed_ms=");
+    serial_put_dec64((uint64_t)streamResponse.httpReadElapsedMs);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_read_timed_out=");
+    serial::puts(streamResponse.httpReadTimedOut ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_handshake_elapsed_ms=");
     serial_put_dec64((uint64_t)tlsResult.tlsHandshakeElapsedMs);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_validated=");
@@ -16762,6 +16907,15 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/redirect-loop", false, false, true) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("chunked", "http://10.0.2.2:8080/navigator-smoke/chunked.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/chunked.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("stream_split_content_length",
+        "http://10.0.2.2:8080/navigator-smoke/stream-split-content-length.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/stream-split-content-length.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("stream_split_chunked",
+        "http://10.0.2.2:8080/navigator-smoke/stream-split-chunked.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/stream-split-chunked.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("stream_connection_close",
+        "http://10.0.2.2:8080/navigator-smoke/stream-connection-close.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/stream-connection-close.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("missing_404", "http://10.0.2.2:8080/navigator-smoke/missing.html", 404,
         "http://10.0.2.2:8080/navigator-smoke/missing.html", true, false, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("gzip_unsupported", "http://10.0.2.2:8080/navigator-smoke/gzip.html", 200,

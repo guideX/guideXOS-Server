@@ -357,6 +357,56 @@ inline bool httpSharedDecodeChunkedBody(const char* encoded, int encodedLen,
     }
 }
 
+// Inspect only the framing state of a bounded chunked body. This lets the
+// receive loop stop at the terminating zero chunk even when the server keeps
+// the HTTP/1.1 connection alive. A false result means either more bytes are
+// needed or the framing is malformed; malformed is reported separately.
+inline bool httpSharedChunkedBodyComplete(const char* encoded, int encodedLen,
+                                          bool* malformed)
+{
+    if (malformed) *malformed = false;
+    if (!encoded || encodedLen < 0) return false;
+
+    int pos = 0;
+    for (;;) {
+        int lineEnd = -1;
+        int delimiterLen = 0;
+        for (int i = pos; i < encodedLen; ++i) {
+            if (i + 1 < encodedLen && encoded[i] == '\r' && encoded[i + 1] == '\n') {
+                lineEnd = i;
+                delimiterLen = 2;
+                break;
+            }
+            if (encoded[i] == '\n') {
+                lineEnd = i;
+                delimiterLen = 1;
+                break;
+            }
+        }
+        if (lineEnd < 0) return false;
+
+        int chunkSize = 0;
+        if (!httpSharedParseChunkSize(encoded + pos, encoded + lineEnd, &chunkSize)) {
+            if (malformed) *malformed = true;
+            return false;
+        }
+        pos = lineEnd + delimiterLen;
+        if (chunkSize == 0) return true;
+        if (chunkSize > encodedLen - pos) return false;
+
+        pos += chunkSize;
+        if (pos + 1 < encodedLen && encoded[pos] == '\r' && encoded[pos + 1] == '\n') {
+            pos += 2;
+        } else if (pos < encodedLen && encoded[pos] == '\n') {
+            ++pos;
+        } else {
+            if (pos == encodedLen) return false;
+            if (malformed) *malformed = true;
+            return false;
+        }
+    }
+}
+
 inline const char* httpSharedErrorName(HttpSharedError error)
 {
     switch (error) {

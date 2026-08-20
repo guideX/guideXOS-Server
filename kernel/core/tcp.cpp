@@ -184,7 +184,10 @@ static TCB* alloc_tcb()
             memzero(&s_tcbs[i], sizeof(TCB));
             s_tcbs[i].active = true;
             s_tcbs[i].state = STATE_CLOSED;
-            s_tcbs[i].rcv_wnd = WINDOW_DEFAULT;
+            s_tcbs[i].rcv_wnd = RX_BUFFER_SIZE;
+            s_tcbs[i].lastAdvertisedRcvWnd = RX_BUFFER_SIZE;
+            s_tcbs[i].telemetry.advertisedWindow = RX_BUFFER_SIZE;
+            s_tcbs[i].telemetry.minimumAdvertisedWindow = RX_BUFFER_SIZE;
             return &s_tcbs[i];
         }
     }
@@ -318,6 +321,12 @@ static Status send_segment(TCB* tcb, uint8_t flags,
     
     tcb->retxTime = static_cast<uint32_t>(pit::ticks());
     s_stats.segmentsSent++;
+    if (flags & FLAG_ACK) ++tcb->telemetry.ackSegmentsSent;
+    tcb->lastAdvertisedRcvWnd = static_cast<uint16_t>(tcb->rcv_wnd);
+    tcb->telemetry.advertisedWindow = tcb->lastAdvertisedRcvWnd;
+    if (tcb->telemetry.advertisedWindow < tcb->telemetry.minimumAdvertisedWindow) {
+        tcb->telemetry.minimumAdvertisedWindow = tcb->telemetry.advertisedWindow;
+    }
     wire_trace_segment("tx", tcb, nullptr, flags, traceSeq, traceAck,
                        traceWindow, dataLen);
     
@@ -623,6 +632,7 @@ int tcp_recv(int sockfd, void* buf, uint16_t maxLen)
     if (!sock || !sock->tcb) return TCP_ERR_INVALID;
     
     TCB* tcb = sock->tcb;
+    ++tcb->telemetry.appReadCalls;
     
     // Check if we have data
     if (tcb->rxLen == 0) {
@@ -630,8 +640,10 @@ int tcp_recv(int sockfd, void* buf, uint16_t maxLen)
         if (tcb->state == STATE_CLOSE_WAIT ||
             tcb->state == STATE_CLOSED ||
             tcb->finReceived) {
+            ++tcb->telemetry.appEofReads;
             return 0;  // EOF
         }
+        ++tcb->telemetry.appWouldBlockReads;
         return TCP_ERR_WOULDBLOCK;
     }
     
@@ -644,9 +656,24 @@ int tcp_recv(int sockfd, void* buf, uint16_t maxLen)
         tcb->rxTail = (tcb->rxTail + 1) % RX_BUFFER_SIZE;
     }
     tcb->rxLen -= toRecv;
+    tcb->telemetry.appBytesDelivered += toRecv;
     
     // Update receive window
+    const uint16_t oldWindow = static_cast<uint16_t>(tcb->rcv_wnd);
     tcb->rcv_wnd = RX_BUFFER_SIZE - tcb->rxLen;
+    if (oldWindow == 0 && tcb->rcv_wnd > 0) {
+        ++tcb->telemetry.windowReopenEvents;
+    }
+
+    // The packet path sends an ACK when it accepts data, but that ACK can
+    // advertise a small or zero window before the TLS/BIO consumer drains the
+    // ring. Send a generic window-update ACK as soon as application progress
+    // grows the window beyond the last value advertised to the peer.
+    if (tcb->rcv_wnd > tcb->lastAdvertisedRcvWnd) {
+        if (send_segment(tcb, FLAG_ACK, nullptr, 0) == TCP_OK) {
+            ++tcb->telemetry.windowUpdateAcks;
+        }
+    }
 
     wire_trace_event("app_recv", static_cast<uint32_t>(toRecv));
     
@@ -856,10 +883,14 @@ static void process_segment(TCB* tcb, const ParsedSegment* seg)
                     tcb->retxCount = 0;
                 }
                 tcb->snd_wnd = seg->window;
+                tcb->telemetry.lastPeerWindow = seg->window;
+                if (seg->window == 0) ++tcb->telemetry.peerZeroWindowEvents;
             }
             
             // Process data
             if (seg->dataLen > 0) {
+                ++tcb->telemetry.rxPayloadSegments;
+                tcb->telemetry.rxPayloadBytes += seg->dataLen;
                 if (seg->seqNum == tcb->rcv_nxt) {
                     // In-order data
                     uint16_t space = RX_BUFFER_SIZE - tcb->rxLen;
@@ -870,11 +901,15 @@ static void process_segment(TCB* tcb, const ParsedSegment* seg)
                         tcb->rxHead = (tcb->rxHead + 1) % RX_BUFFER_SIZE;
                     }
                     tcb->rxLen += toRecv;
+                    tcb->telemetry.rxPayloadAcceptedBytes += toRecv;
+                    tcb->telemetry.rxPayloadDroppedBytes += seg->dataLen - toRecv;
                     tcb->rcv_nxt += toRecv;
                     tcb->rcv_wnd = RX_BUFFER_SIZE - tcb->rxLen;
+                    if (tcb->rcv_wnd == 0) ++tcb->telemetry.localZeroWindowEvents;
                     tcb->needAck = true;
                     wire_trace_event("rx_payload_accepted", toRecv);
                 } else {
+                    tcb->telemetry.rxPayloadDroppedBytes += seg->dataLen;
                     wire_trace_segment("rx_payload_discard_seq", tcb, seg,
                                        seg->flags, seg->seqNum, seg->ackNum,
                                        seg->window, seg->dataLen);
@@ -1147,6 +1182,20 @@ void process_timers()
 const Statistics* get_stats()
 {
     return &s_stats;
+}
+
+bool tcp_get_stream_telemetry(int sockfd, TcpStreamTelemetry* telemetry)
+{
+    if (!telemetry) return false;
+    Socket* sock = find_socket(sockfd);
+    if (!sock || !sock->tcb) return false;
+    *telemetry = sock->tcb->telemetry;
+    telemetry->advertisedWindow = sock->tcb->rcv_wnd;
+    if (telemetry->advertisedWindow < telemetry->minimumAdvertisedWindow) {
+        telemetry->minimumAdvertisedWindow = telemetry->advertisedWindow;
+    }
+    telemetry->lastPeerWindow = sock->tcb->snd_wnd;
+    return true;
 }
 
 // ================================================================
