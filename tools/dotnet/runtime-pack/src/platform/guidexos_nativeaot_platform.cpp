@@ -8265,6 +8265,280 @@ guideXosNativeAotC011EC26PostScanAfterGcScanRootsEntered() {
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC27_POST_ROOT_QUEUE)
+static void emitC011EC27Preflight() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-post-root-queue] preflight marker=C011EC27-PREFLIGHT");
+#define C27PF32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C27PF64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C27PF32("c26Completion", d.c011ec26MarkerEmitted);
+    C27PF32("rootEnumerationComplete", d.c011ec26GcScanRootsEnumerationComplete);
+    C27PF32("afterGcScanRoots", d.c011ec27AfterGcScanRootsReached);
+    C27PF32("queueItemsConsumed", d.c011ec27QueueItemConsumedCount);
+    C27PF32("markStateReads", d.c011ec27MarkStateReadCount);
+    C27PF64("queueOwner", d.c011ec27QueueOwner);
+    C27PF64("queueBase", d.c011ec27QueueBase);
+    C27PF64("consumedSlot", d.c011ec27ConsumedSlot);
+    C27PF64("consumedObject", d.c011ec27ConsumedObject);
+    C27PF64("markWordAddress", d.c011ec27MarkWordAddress);
+    C27PF64("markMask", d.c011ec27MarkMask);
+#undef C27PF32
+#undef C27PF64
+    suspendEeSerialPutString("\n");
+}
+
+static void emitC011EC27Completion() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-post-root-queue] COMPLETE marker=C011EC27");
+#define C27_HEX32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C27_HEX64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C27_HEX32("successLevel", d.c011ec27OutcomeLevel);
+    C27_HEX32("c26Completion", d.c011ec26MarkerEmitted);
+    C27_HEX32("iteratorCompletionCount", d.c011ec26IteratorCompletionCount);
+    C27_HEX32("gcScanRootsEntries", d.c011ec26GcScanRootsEntryCount);
+    C27_HEX32("gcScanRootsReturns", d.c011ec26GcScanRootsReturnCount);
+    C27_HEX32("rootEnumerationComplete", d.c011ec26GcScanRootsEnumerationComplete);
+    C27_HEX32("totalRoots", d.c011ec15RootSlotVisitCount);
+    C27_HEX32("category3Roots", d.c011ec19RootReportCount);
+    C27_HEX32("registerRoots", d.c011ec19RegisterRootCount);
+    C27_HEX32("stackRoots", d.c011ec19StackRootCount);
+    C27_HEX32("promoteAttempts", d.c011ec19FirstStackDerivedPromoteAttemptCount);
+    C27_HEX32("promoteEntries", d.c011ec19FirstStackDerivedPromoteEntryCount);
+    C27_HEX32("promoteReturns", d.c011ec19FirstStackDerivedPromoteReturnCount);
+    C27_HEX32("firstPostStackRootSource", d.c011ec26FirstPostStackRootSource);
+    C27_HEX32("postStackRootSourceCount", d.c011ec26PostStackRootSourceCount);
+    C27_HEX64("queueCursorBeforeStack", d.c011ec26QueueCursorBeforeStack);
+    C27_HEX64("queueCursorAfterStack", d.c011ec26QueueCursorAfterStack);
+    C27_HEX64("queueCursorAtGcScanRootsReturn", d.c011ec26QueueCursorAtGcScanRootsReturn);
+    C27_HEX32("afterGcScanRoots", d.c011ec27AfterGcScanRootsReached);
+    C27_HEX64("afterGcScanRootsAddress", d.c011ec27AfterGcScanRootsAddress);
+    C27_HEX32("queueItemsConsumed", d.c011ec27QueueItemConsumedCount);
+    C27_HEX64("queueOwner", d.c011ec27QueueOwner);
+    C27_HEX64("queueBase", d.c011ec27QueueBase);
+    C27_HEX64("queueCursorBefore", d.c011ec27QueueCursorBefore);
+    C27_HEX64("consumedIndex", d.c011ec27ConsumedSlotIndex);
+    C27_HEX64("consumedSlot", d.c011ec27ConsumedSlot);
+    C27_HEX64("consumedObject", d.c011ec27ConsumedObject);
+    C27_HEX64("firstQueueInsertionObject", d.c011ec15FirstQueueNewValue);
+    C27_HEX64("firstRootValue", d.c011ec15FirstRootValue);
+    C27_HEX32("firstRootProviderCategory", d.c011ec15FirstRootProviderCategory);
+    C27_HEX32("consumedObjectSourceCategory",
+        d.c011ec27ConsumedObject == d.c011ec15FirstQueueNewValue
+            ? d.c011ec15FirstRootProviderCategory : 0u);
+    C27_HEX64("sentinel", d.threadStaticProofSentinelAddress);
+    C27_HEX64("storageObject", d.runtimeThreadStaticStorageObjectAddress);
+    C27_HEX64("consumedSlotValueAfter", d.c011ec27ConsumedSlotValueAfter);
+    C27_HEX64("queueCursorAfterConsumption", d.c011ec27QueueCursorAfterConsumption);
+    C27_HEX64("queueInsertionsAtConsumed", d.c011ec27QueueInsertionsAtConsumed);
+    C27_HEX64("queueInsertionsAtAfter", d.c011ec27QueueInsertionsAtAfter);
+    C27_HEX32("newQueueInsertion", d.c011ec27NewQueueInsertionCount);
+    C27_HEX32("markStateReads", d.c011ec27MarkStateReadCount);
+    C27_HEX32("markStateBefore", (d.c011ec27MarkWordBefore & d.c011ec27MarkMask) != 0u ? 1u : 0u);
+    C27_HEX32("markTestResult", d.c011ec27MarkStateResult);
+    C27_HEX64("markWordAddress", d.c011ec27MarkWordAddress);
+    C27_HEX64("markWordBefore", d.c011ec27MarkWordBefore);
+    C27_HEX64("markMask", d.c011ec27MarkMask);
+    C27_HEX32("markWriteAttempted", d.c011ec27MarkWriteAttemptCount != 0u ? 1u : 0u);
+    C27_HEX32("markWrites", d.c011ec27MarkWriteCount);
+    C27_HEX64("markWordAfter", d.c011ec27MarkWordAfter);
+    C27_HEX32("newlyMarked", d.c011ec27MarkWriteCount != 0u ? 1u : 0u);
+    C27_HEX32("childScanAttempted", d.c011ec27ChildScanAttemptCount);
+    C27_HEX32("childReads", d.c011ec27ChildReferenceReadCount);
+    C27_HEX32("childPromoteAttempted", d.c011ec27ChildPromoteAttemptCount);
+    C27_HEX32("graphTraversal", d.c011ec27GraphTraversalCount);
+    C27_HEX64("parentObject", d.c011ec27ParentObject);
+    C27_HEX64("parentMethodTable", d.c011ec27ParentMethodTable);
+    C27_HEX64("childSlot", d.c011ec27ChildSlot);
+    C27_HEX64("childValue", d.c011ec27ChildValue);
+    C27_HEX32("c26NativeUnwinds", d.c011ec23UnwindAttemptCount);
+    C27_HEX32("c26ThirdUnwindAttempts", d.c011ec26ThirdUnwindAttemptCount);
+    C27_HEX32("stackBoundsConsumed", d.c011ec18StackBoundsConsumed);
+    C27_HEX64("stackBase", d.rootThreadRecords[0].stackLow);
+    C27_HEX64("stackLimit", d.rootThreadRecords[0].stackHigh);
+    C27_HEX64("scanContextStackLimit", d.callbackContextStackLimit);
+    C27_HEX32("queueInvariantFailures", d.c011ec27QueueInvariantFailures);
+    C27_HEX32("objectInvariantFailures", d.c011ec27ObjectInvariantFailures);
+    C27_HEX32("eeSuspended", d.c011ec15EeSuspended);
+    C27_HEX32("cooperative", d.rootThreadRecords[0].cooperative);
+    C27_HEX32("preemptive", d.rootThreadRecords[0].preemptive);
+    C27_HEX32("restart", d.restartRequestCount + d.restartEntryCount);
+    C27_HEX32("resume", d.managedResumeCount);
+    C27_HEX32("safeStopReason", d.c011ec27SafeStopReason);
+#undef C27_HEX32
+#undef C27_HEX64
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC27QueueItemConsumed(
+    uintptr_t queueOwner, uintptr_t queueBase, uintptr_t slotAddress,
+    uintptr_t slotIndex, uintptr_t cursorBefore, uintptr_t object,
+    uintptr_t slotValueAfter, uintptr_t cursorAfterConsumption) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec27QueueItemConsumedCount;
+    if (d.c011ec27QueueItemConsumedCount != 1u) return;
+    d.c011ec27QueueOwner = queueOwner;
+    d.c011ec27QueueBase = queueBase;
+    d.c011ec27ConsumedSlot = slotAddress;
+    d.c011ec27ConsumedSlotIndex = slotIndex;
+    d.c011ec27QueueCursorBefore = cursorBefore;
+    d.c011ec27ConsumedObject = object;
+    d.c011ec27ConsumedSlotValueAfter = slotValueAfter;
+    d.c011ec27QueueCursorAfterConsumption = cursorAfterConsumption;
+    d.c011ec27QueueInsertionsAtConsumed = d.c011ec15QueueMarkReturnCount;
+    const uintptr_t expectedSlot =
+        queueBase + slotIndex * sizeof(uintptr_t);
+    if (queueOwner == 0u || queueBase == 0u || slotAddress != expectedSlot ||
+        slotIndex >= 16u || cursorBefore >= 16u ||
+        cursorAfterConsumption >= 16u || slotValueAfter != 0u ||
+        object == 0u || (object & (sizeof(uintptr_t) - 1u)) != 0u) {
+        ++d.c011ec27QueueInvariantFailures;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC27MarkStateRead(
+    uintptr_t object, uintptr_t headerAddress, uintptr_t rawHeader,
+    uintptr_t markMask, uintptr_t result) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec27MarkStateReadCount;
+    if (object != d.c011ec27ConsumedObject || d.c011ec27MarkWordAddress != 0u) {
+        return;
+    }
+    d.c011ec27MarkWordAddress = headerAddress;
+    d.c011ec27MarkWordBefore = rawHeader;
+    d.c011ec27MarkMask = markMask;
+    d.c011ec27MarkStateResult = result != 0u ? 1u : 0u;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC27MarkWriteAttempted(
+    uintptr_t object, uintptr_t headerAddress, uintptr_t rawHeaderBefore,
+    uintptr_t markMask) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec27MarkWriteAttemptCount;
+    if (object == d.c011ec27ConsumedObject && d.c011ec27MarkWordAddress == 0u) {
+        d.c011ec27MarkWordAddress = headerAddress;
+        d.c011ec27MarkWordBefore = rawHeaderBefore;
+        d.c011ec27MarkMask = markMask;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC27MarkWriteCompleted(
+    uintptr_t object, uintptr_t headerAddress, uintptr_t rawHeaderAfter,
+    uintptr_t markMask, uintptr_t cursorAfter) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec27MarkWriteCount;
+    if (object != d.c011ec27ConsumedObject || d.c011ec27MarkWordAddress == 0u) {
+        return;
+    }
+    d.c011ec27MarkWordAddress = headerAddress;
+    d.c011ec27MarkWordAfter = rawHeaderAfter;
+    d.c011ec27MarkMask = markMask;
+    if ((rawHeaderAfter & markMask) == 0u || cursorAfter >= 16u) {
+        ++d.c011ec27ObjectInvariantFailures;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC27ChildScanAttempted(
+    uintptr_t parent, uintptr_t methodTable, uintptr_t objectSize) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec27ChildScanAttemptCount;
+    ++d.c011ec27GraphTraversalCount;
+    if (d.c011ec27ParentObject == 0u) {
+        d.c011ec27ParentObject = parent;
+        d.c011ec27ParentMethodTable = methodTable;
+    }
+    if (parent == 0u || methodTable == 0u || objectSize == 0u) {
+        ++d.c011ec27ObjectInvariantFailures;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC27ChildReferenceRead(
+    uintptr_t parent, uintptr_t slot, uintptr_t child, uintptr_t classification) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec27ChildReferenceReadCount;
+    if (d.c011ec27ChildSlot == 0u) {
+        d.c011ec27ParentObject = parent;
+        d.c011ec27ChildSlot = slot;
+        d.c011ec27ChildValue = child;
+    }
+    (void)classification;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC27ChildPromoteAttempted(
+    uintptr_t parent, uintptr_t slot, uintptr_t child) {
+    ++g_guideXosAllocationDiagnostics.c011ec27ChildPromoteAttemptCount;
+    (void)parent;
+    (void)slot;
+    (void)child;
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC27PostRootAfterGcScanRootsEntered() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec27AfterGcScanRootsReached = 1u;
+    d.c011ec27AfterGcScanRootsAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec27QueueInsertionsAtAfter = d.c011ec15QueueMarkReturnCount;
+    if (d.c011ec27QueueInsertionsAtConsumed != 0u &&
+        d.c011ec27QueueInsertionsAtAfter >= d.c011ec27QueueInsertionsAtConsumed) {
+        d.c011ec27NewQueueInsertionCount = static_cast<uint32_t>(
+            d.c011ec27QueueInsertionsAtAfter - d.c011ec27QueueInsertionsAtConsumed);
+    }
+    const bool c26Complete =
+        d.c011ec26MarkerEmitted != 0u &&
+        d.c011ec26GcScanRootsEnumerationComplete != 0u &&
+        d.c011ec26IteratorCompletionCount == 1u &&
+        d.c011ec26GcScanRootsReturnCount == 1u &&
+        d.c011ec26StackProviderCallbackReturnCount == 1u &&
+        d.c011ec23UnwindAttemptCount == 2u &&
+        d.c011ec26ThirdUnwindAttemptCount == 0u;
+    const bool consumed =
+        d.c011ec27QueueItemConsumedCount != 0u &&
+        d.c011ec27ConsumedObject != 0u &&
+        d.c011ec27QueueInvariantFailures == 0u;
+    const bool markResolved =
+        d.c011ec27MarkStateReadCount != 0u &&
+        d.c011ec27MarkWordAddress != 0u &&
+        d.c011ec27MarkMask != 0u;
+    if (c26Complete && consumed && markResolved) {
+        d.c011ec27PreflightProven = 1u;
+        d.c011ec27OutcomeLevel = d.c011ec27ChildReferenceReadCount != 0u
+            ? 3u : (d.c011ec27MarkWriteCount != 0u ? 2u : 1u);
+        emitC011EC27Preflight();
+        d.c011ec27MarkerEmitted = 1u;
+        d.c011ec27SafeStopReason = 0u;
+        emitC011EC27Completion();
+    } else {
+        d.c011ec27SafeStopReason =
+            consumed ? 0xC0270002u : 0xC0270001u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-post-root-queue] BLOCKED outcome=E marker=C011EC27-BLOCKED\n");
+    }
+    for (;;) {
+    }
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
 extern "C" __declspec(noreturn) void __cdecl
 guideXosNativeAotC011EC21SafeStop(uint32_t reason) {

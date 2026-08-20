@@ -1592,6 +1592,45 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec26QueueCursorAfterStack;
     uintptr_t c011ec26QueueCursorAtGcScanRootsReturn;
     uintptr_t c011ec26PostScanAddress;
+
+    /* C011EC27 first authentic post-root Workstation queue/mark boundary. */
+    uint32_t c011ec27AfterGcScanRootsReached;
+    uint32_t c011ec27PreflightProven;
+    uint32_t c011ec27QueueItemConsumedCount;
+    uint32_t c011ec27MarkStateReadCount;
+    uint32_t c011ec27MarkStateResult;
+    uint32_t c011ec27MarkWriteAttemptCount;
+    uint32_t c011ec27MarkWriteCount;
+    uint32_t c011ec27ChildScanAttemptCount;
+    uint32_t c011ec27ChildReferenceReadCount;
+    uint32_t c011ec27ChildPromoteAttemptCount;
+    uint32_t c011ec27GraphTraversalCount;
+    uint32_t c011ec27NewQueueInsertionCount;
+    uint32_t c011ec27OutcomeLevel;
+    uint32_t c011ec27MarkerEmitted;
+    uint32_t c011ec27SafeStopReason;
+    uint32_t c011ec27QueueInvariantFailures;
+    uint32_t c011ec27ObjectInvariantFailures;
+
+    uintptr_t c011ec27AfterGcScanRootsAddress;
+    uintptr_t c011ec27QueueOwner;
+    uintptr_t c011ec27QueueBase;
+    uintptr_t c011ec27ConsumedSlot;
+    uintptr_t c011ec27ConsumedSlotIndex;
+    uintptr_t c011ec27QueueCursorBefore;
+    uintptr_t c011ec27QueueCursorAfterConsumption;
+    uintptr_t c011ec27ConsumedObject;
+    uintptr_t c011ec27ConsumedSlotValueAfter;
+    uintptr_t c011ec27MarkWordAddress;
+    uintptr_t c011ec27MarkWordBefore;
+    uintptr_t c011ec27MarkMask;
+    uintptr_t c011ec27MarkWordAfter;
+    uintptr_t c011ec27ParentObject;
+    uintptr_t c011ec27ParentMethodTable;
+    uintptr_t c011ec27ChildSlot;
+    uintptr_t c011ec27ChildValue;
+    uintptr_t c011ec27QueueInsertionsAtConsumed;
+    uintptr_t c011ec27QueueInsertionsAtAfter;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

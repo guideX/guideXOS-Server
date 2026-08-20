@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -45,6 +45,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec25-kernel-entry-boundary"
     } elseif ($ProofMode -eq "stack-provider-native-kernel-stack-completion") {
         Join-Path $root "out\dotnet\c011ec26-stack-walk-completion"
+    } elseif ($ProofMode -eq "post-root-queue-mark-processing") {
+        Join-Path $root "out\dotnet\c011ec27-post-root-queue-mark-processing"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
         Join-Path $root "out\dotnet\gc-first-root-post-queue-mark-decision"
     } elseif ($ProofMode -eq "first-root-first-mark-mutation") {
@@ -80,7 +82,8 @@ $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
-$isC011EC26 = $ProofMode -eq "stack-provider-native-kernel-stack-completion"
+$isC011EC27 = $ProofMode -eq "post-root-queue-mark-processing"
+$isC011EC26 = $isC011EC27 -or $ProofMode -eq "stack-provider-native-kernel-stack-completion"
 $isC011EC25 = $isC011EC26 -or $ProofMode -eq "stack-provider-native-kernel-entry-boundary"
 $isC011EC24 = $isC011EC25 -or $ProofMode -eq "stack-provider-native-caller-provenance"
 $isC011EC21 = $isC011EC24 -or $ProofMode -eq "stack-provider-native-transition-continuation"
@@ -107,7 +110,8 @@ $proofDefine = if ($isNextGenuineRootProvider) {
     $c24Define = if ($isC011EC24) { " /DGUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE" } else { "" }
     $c25Define = if ($isC011EC25) { " /DGUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY" } else { "" }
     $c26Define = if ($isC011EC26) { " /DGUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION" } else { "" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define"
+    $c27Define = if ($isC011EC27) { " /DGUIDEXOS_NATIVEAOT_C011EC27_POST_ROOT_QUEUE" } else { "" }
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -412,6 +416,11 @@ extern "C" void __cdecl guideXosNativeAotC011EC26StackProviderReturned();
 extern "C" void __cdecl guideXosNativeAotC011EC26GcScanRootsReturned();
 extern "C" void __cdecl guideXosNativeAotC011EC26PostScanAfterGcScanRootsEntered();
 '@.TrimEnd()
+        if ($isC011EC27) {
+            $declaration += [Environment]::NewLine + @'
+extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC27PostRootAfterGcScanRootsEntered();
+'@.TrimEnd()
+        }
     }
     $lockedEeText = $lockedEeText.Replace('#include "volatile.h"', '#include "volatile.h"' + [Environment]::NewLine + [Environment]::NewLine + $declaration.TrimEnd())
     $suspendPattern = '(?m)^void GCToEEInterface::SuspendEE\(SUSPEND_REASON reason\)\r?\n\{'
@@ -503,7 +512,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC26PostScanAfterGcScanRootsEntered
         }
         if ($isC011EC26) {
             $afterScanPattern = '(?m)^void GCToEEInterface::AfterGcScanRoots\(int condemned, int /\*max_gen\*/, ScanContext\* sc\)\r?\n\{'
-            $afterScanReplacement = 'void GCToEEInterface::AfterGcScanRoots(int condemned, int /*max_gen*/, ScanContext* sc)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotC011EC26PostScanAfterGcScanRootsEntered();'
+            $afterScanReplacement = 'void GCToEEInterface::AfterGcScanRoots(int condemned, int /*max_gen*/, ScanContext* sc)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotC011EC26PostScanAfterGcScanRootsEntered();' + $(if ($isC011EC27) { [Environment]::NewLine + '    guideXosNativeAotC011EC27PostRootAfterGcScanRootsEntered();' } else { '' })
             $injectedText = [regex]::Replace($injectedText, $afterScanPattern, $afterScanReplacement, 1)
         }
     } elseif ($isAllocationContextFixupRootBoundary) {
@@ -1272,6 +1281,17 @@ extern "C" void __cdecl guideXosNativeAotC011EC15PromoteReturned(uintptr_t objec
 extern "C" void __cdecl guideXosNativeAotC011EC15PromoteEntered(uintptr_t rawArg1, uintptr_t rawArg2, uintptr_t rawArg3, uintptr_t callbackAddress, uintptr_t returnAddress, uintptr_t stackPointer);
 extern "C" void __cdecl guideXosNativeAotC011EC15PromoteCandidateLoaded(uintptr_t object);
 '@.TrimEnd()
+                if ($isC011EC27) {
+                    $c14Declarations += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotC011EC27QueueItemConsumed(uintptr_t queueOwner, uintptr_t queueBase, uintptr_t slotAddress, uintptr_t slotIndex, uintptr_t cursorBefore, uintptr_t object, uintptr_t slotValueAfter, uintptr_t cursorAfterConsumption);
+extern "C" void __cdecl guideXosNativeAotC011EC27MarkStateRead(uintptr_t object, uintptr_t headerAddress, uintptr_t rawHeader, uintptr_t markMask, uintptr_t result);
+extern "C" void __cdecl guideXosNativeAotC011EC27MarkWriteAttempted(uintptr_t object, uintptr_t headerAddress, uintptr_t rawHeaderBefore, uintptr_t markMask);
+extern "C" void __cdecl guideXosNativeAotC011EC27MarkWriteCompleted(uintptr_t object, uintptr_t headerAddress, uintptr_t rawHeaderAfter, uintptr_t markMask, uintptr_t cursorAfter);
+extern "C" void __cdecl guideXosNativeAotC011EC27ChildScanAttempted(uintptr_t parent, uintptr_t methodTable, uintptr_t objectSize);
+extern "C" void __cdecl guideXosNativeAotC011EC27ChildReferenceRead(uintptr_t parent, uintptr_t slot, uintptr_t child, uintptr_t classification);
+extern "C" void __cdecl guideXosNativeAotC011EC27ChildPromoteAttempted(uintptr_t parent, uintptr_t slot, uintptr_t child);
+'@.TrimEnd()
+                }
             }
             $gcWksText = $gcWksText.Replace(
                 'namespace WKS {',
@@ -1873,6 +1893,147 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
             if (-not $queueBody.Contains($c15QueueSequence)) { throw "Locked MARK_PHASE_PREFETCH queue_mark sequence did not match C011EC15 instrumentation." }
             $queueBody = $queueBody.Replace($c15QueueSequence, $c15QueueReplacement.TrimEnd())
             $gcWksInjected = $queuePrefix + $queueBody + $gcWksInjected.Substring($queueEnd)
+        }
+        if ($isC011EC27) {
+            $markReadSequence = @'
+    BOOL IsMarked() const
+    {
+        return !!(((size_t)RawGetMethodTable()) & GC_MARKED);
+    }
+'@
+            $markReadReplacement = @'
+    BOOL IsMarked() const
+    {
+        const uintptr_t guideXosRawHeader =
+            reinterpret_cast<uintptr_t>(RawGetMethodTable());
+        guideXosNativeAotC011EC27MarkStateRead(
+            reinterpret_cast<uintptr_t>(this),
+            reinterpret_cast<uintptr_t>(this),
+            guideXosRawHeader,
+            static_cast<uintptr_t>(GC_MARKED),
+            (guideXosRawHeader & GC_MARKED) != 0u ? 1u : 0u);
+        return !!(guideXosRawHeader & GC_MARKED);
+    }
+'@
+            if (-not $gcWksInjected.Contains($markReadSequence)) {
+                throw "Locked CObjectHeader::IsMarked source did not match C011EC27 instrumentation."
+            }
+            $gcWksInjected = $gcWksInjected.Replace($markReadSequence, $markReadReplacement.TrimEnd())
+
+            $nextMarkedSignature = 'uint8_t* mark_queue_t::get_next_marked()'
+            $nextMarkedOffset = $gcWksInjected.IndexOf($nextMarkedSignature, [System.StringComparison]::Ordinal)
+            if ($nextMarkedOffset -lt 0) {
+                throw "Locked mark_queue_t::get_next_marked implementation was not found for C011EC27 instrumentation."
+            }
+            $nextMarkedEnd = $gcWksInjected.IndexOf('void mark_queue_t::verify_empty()', $nextMarkedOffset, [System.StringComparison]::Ordinal)
+            if ($nextMarkedEnd -lt 0) {
+                throw "Locked mark_queue_t::verify_empty boundary was not found for C011EC27 instrumentation."
+            }
+            $nextMarkedPrefix = $gcWksInjected.Substring(0, $nextMarkedOffset)
+            $nextMarkedBody = $gcWksInjected.Substring($nextMarkedOffset, $nextMarkedEnd - $nextMarkedOffset)
+            $nextMarkedSequence = @'
+        uint8_t* o = slot_table[slot_index];
+        slot_table[slot_index] = nullptr;
+        slot_index = (slot_index + 1) % slot_count;
+'@
+            $nextMarkedReplacement = @'
+        const size_t guideXosConsumedSlotIndex = slot_index;
+        const size_t guideXosQueueCursorBefore = curr_slot_index;
+        uint8_t* o = slot_table[slot_index];
+        slot_table[slot_index] = nullptr;
+        slot_index = (slot_index + 1) % slot_count;
+        if (o != nullptr)
+        {
+            guideXosNativeAotC011EC27QueueItemConsumed(
+                reinterpret_cast<uintptr_t>(this),
+                reinterpret_cast<uintptr_t>(slot_table),
+                reinterpret_cast<uintptr_t>(&slot_table[guideXosConsumedSlotIndex]),
+                static_cast<uintptr_t>(guideXosConsumedSlotIndex),
+                static_cast<uintptr_t>(guideXosQueueCursorBefore),
+                reinterpret_cast<uintptr_t>(o),
+                reinterpret_cast<uintptr_t>(slot_table[guideXosConsumedSlotIndex]),
+                static_cast<uintptr_t>(slot_index));
+        }
+'@
+            if (-not $nextMarkedBody.Contains($nextMarkedSequence)) {
+                throw "Locked get_next_marked dequeue sequence did not match C011EC27 instrumentation."
+            }
+            $nextMarkedBody = $nextMarkedBody.Replace($nextMarkedSequence, $nextMarkedReplacement.TrimEnd())
+            $nextMarkedBody = $nextMarkedBody.Replace(
+                @'
+                set_marked (o);
+                curr_slot_index = slot_index;
+                return o;
+'@,
+                @'
+                guideXosNativeAotC011EC27MarkWriteAttempted(
+                    reinterpret_cast<uintptr_t>(o),
+                    reinterpret_cast<uintptr_t>(o),
+                    reinterpret_cast<uintptr_t>(header(o)->RawGetMethodTable()),
+                    static_cast<uintptr_t>(GC_MARKED));
+                set_marked (o);
+                curr_slot_index = slot_index;
+                guideXosNativeAotC011EC27MarkWriteCompleted(
+                    reinterpret_cast<uintptr_t>(o),
+                    reinterpret_cast<uintptr_t>(o),
+                    reinterpret_cast<uintptr_t>(header(o)->RawGetMethodTable()),
+                    static_cast<uintptr_t>(GC_MARKED),
+                    static_cast<uintptr_t>(curr_slot_index));
+                return o;
+'@.TrimEnd())
+            if ($nextMarkedBody -notmatch 'guideXosNativeAotC011EC27QueueItemConsumed' -or
+                $nextMarkedBody -notmatch 'guideXosNativeAotC011EC27MarkWriteAttempted' -or
+                $nextMarkedBody -notmatch 'guideXosNativeAotC011EC27MarkWriteCompleted') {
+                throw "Locked get_next_marked mark path did not match C011EC27 instrumentation."
+            }
+            $gcWksInjected = $nextMarkedPrefix + $nextMarkedBody + $gcWksInjected.Substring($nextMarkedEnd)
+
+            $drainSignature = 'void gc_heap::drain_mark_queue ()'
+            $drainOffset = $gcWksInjected.IndexOf($drainSignature, [System.StringComparison]::Ordinal)
+            if ($drainOffset -lt 0) {
+                throw "Locked gc_heap::drain_mark_queue implementation was not found for C011EC27 instrumentation."
+            }
+            $drainEnd = $gcWksInjected.IndexOf('#ifdef BACKGROUND_GC', $drainOffset, [System.StringComparison]::Ordinal)
+            if ($drainEnd -lt 0) {
+                throw "Locked background-GC boundary was not found after drain_mark_queue for C011EC27 instrumentation."
+            }
+            $drainPrefix = $gcWksInjected.Substring(0, $drainOffset)
+            $drainBody = $gcWksInjected.Substring($drainOffset, $drainEnd - $drainOffset)
+            $drainBody = $drainBody.Replace(
+                @'
+        if (contain_pointers_or_collectible (o))
+        {
+            go_through_object_cl (method_table(o), o, s, poo,
+'@,
+                @'
+        if (contain_pointers_or_collectible (o))
+        {
+            guideXosNativeAotC011EC27ChildScanAttempted(
+                reinterpret_cast<uintptr_t>(o),
+                reinterpret_cast<uintptr_t>(method_table(o)),
+                static_cast<uintptr_t>(s));
+            go_through_object_cl (method_table(o), o, s, poo,
+'@.TrimEnd())
+            $drainBody = $drainBody.Replace(
+                '                                        uint8_t* oo = mark_queue.queue_mark(*poo, condemned_gen);',
+                @'
+                                        guideXosNativeAotC011EC27ChildReferenceRead(
+                                            reinterpret_cast<uintptr_t>(o),
+                                            reinterpret_cast<uintptr_t>(poo),
+                                            reinterpret_cast<uintptr_t>(*poo),
+                                            *poo != nullptr ? 1u : 0u);
+                                        guideXosNativeAotC011EC27ChildPromoteAttempted(
+                                            reinterpret_cast<uintptr_t>(o),
+                                            reinterpret_cast<uintptr_t>(poo),
+                                            reinterpret_cast<uintptr_t>(*poo));
+                                        uint8_t* oo = mark_queue.queue_mark(*poo, condemned_gen);
+'@.TrimEnd())
+            if ($drainBody -notmatch 'guideXosNativeAotC011EC27ChildScanAttempted' -or
+                $drainBody -notmatch 'guideXosNativeAotC011EC27ChildReferenceRead' -or
+                $drainBody -notmatch 'guideXosNativeAotC011EC27ChildPromoteAttempted') {
+                throw "Locked drain_mark_queue child path did not match C011EC27 instrumentation."
+            }
+            $gcWksInjected = $drainPrefix + $drainBody + $gcWksInjected.Substring($drainEnd)
         }
         if ($isC14QueueInstrumentation -and -not $isNextGenuineRootProvider) {
             $markSimpleSignature = 'gc_heap::mark_object_simple (uint8_t** po THREAD_NUMBER_DCL)'
@@ -2755,8 +2916,9 @@ exit /b %errorlevel%
     $c24KernelDefine = if ($isC011EC24) { " -DGUIDEXOS_NATIVEAOT_C011EC24_CALLER_PROVENANCE" } else { "" }
     $c25KernelDefine = if ($isC011EC25) { " -DGUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY" } else { "" }
     $c26KernelDefine = if ($isC011EC26) { " -DGUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION" } else { "" }
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine -I$artifactRoot"
-    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","C011EC26_STACK_COMPLETION=$isC011EC26","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
+    $c27KernelDefine = if ($isC011EC27) { " -DGUIDEXOS_NATIVEAOT_C011EC27_POST_ROOT_QUEUE" } else { "" }
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine$c27KernelDefine -I$artifactRoot"
+    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","C011EC26_STACK_COMPLETION=$isC011EC26","C011EC27_POST_ROOT_QUEUE=$isC011EC27","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","clean") (Join-Path $runRoot "kernel-preclean.log")
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
@@ -2846,6 +3008,9 @@ exit /b %errorlevel%
     if ($isC011EC26) {
         $requiredSymbols += @("guideXosNativeAotC011EC26IteratorCompleted","guideXosNativeAotC011EC26StackProviderReturned","guideXosNativeAotC011EC26GcScanRootsEntered","guideXosNativeAotC011EC26GcScanRootsReturned","guideXosNativeAotC011EC26ThreadGcScanRootsEntered","guideXosNativeAotC011EC26ThreadGcScanRootsReturned","guideXosNativeAotC011EC26PostScanAfterGcScanRootsEntered")
     }
+    if ($isC011EC27) {
+        $requiredSymbols += @("guideXosNativeAotC011EC27PostRootAfterGcScanRootsEntered","guideXosNativeAotC011EC27QueueItemConsumed","guideXosNativeAotC011EC27MarkStateRead","guideXosNativeAotC011EC27MarkWriteAttempted","guideXosNativeAotC011EC27MarkWriteCompleted","guideXosNativeAotC011EC27ChildScanAttempted","guideXosNativeAotC011EC27ChildReferenceRead","guideXosNativeAotC011EC27ChildPromoteAttempted")
+    }
     if ($isC011EC21) {
         $kernelSymbolsText = (& $objdump -t -C $kernelPath 2>&1) -join "`n"
         $nativeSectionsText = (& $objdump -h $kernelPath 2>&1) -join "`n"
@@ -2922,7 +3087,7 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
                     $stopPattern = if ($isC011EC23) {
-                        if ($isC011EC26) { 'marker=C011EC26(\s|$)' } elseif ($isC011EC25) { 'marker=C011EC25(\s|$)' } elseif ($isC011EC24) { 'marker=C011EC24(\s|$)' } else { 'marker=C011EC23(\s|$)' }
+                        if ($isC011EC27) { 'marker=C011EC27(?:\s|-)' } elseif ($isC011EC26) { 'marker=C011EC26(\s|$)' } elseif ($isC011EC25) { 'marker=C011EC25(\s|$)' } elseif ($isC011EC24) { 'marker=C011EC24(\s|$)' } else { 'marker=C011EC23(\s|$)' }
                     } elseif ($isC011EC21) {
                         'marker=C011EC21'
                     } elseif ($isC011EC20) {
@@ -3015,7 +3180,64 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isC011EC26) {
+        if ($isC011EC27) {
+            $c26PreflightStart = $validationText.IndexOf('[nativeaot-gc-stack-completion] preflight marker=C011EC26-PREFLIGHT')
+            $c26CompleteStart = $validationText.IndexOf('[nativeaot-gc-stack-completion] COMPLETE marker=C011EC26')
+            $c27PreflightStart = $validationText.IndexOf('[nativeaot-gc-post-root-queue] preflight marker=C011EC27-PREFLIGHT')
+            $c27CompleteStart = $validationText.IndexOf('[nativeaot-gc-post-root-queue] COMPLETE marker=C011EC27')
+            $c27BlockedStart = $validationText.IndexOf('[nativeaot-gc-post-root-queue] BLOCKED')
+            $c26PreflightLine = if ($c26PreflightStart -ge 0 -and $c26CompleteStart -gt $c26PreflightStart) { $validationText.Substring($c26PreflightStart, $c26CompleteStart - $c26PreflightStart) } else { $null }
+            $c26MarkerLine = if ($c26CompleteStart -ge 0 -and $c27PreflightStart -gt $c26CompleteStart) { $validationText.Substring($c26CompleteStart, $c27PreflightStart - $c26CompleteStart) } else { $null }
+            if ($c27CompleteStart -lt 0) {
+                if ($c27BlockedStart -ge 0) {
+                    $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC27-BLOCKED'; outcome='E'; successLevel=0; harnessTerminated=$true; markerLine=$validationText.Substring($c27BlockedStart); c26MarkerLine=$c26MarkerLine; c26PreflightLine=$c26PreflightLine }
+                    continue
+                }
+                throw "C011EC27 preflight/completion evidence was incomplete in $name."
+            }
+            $c27PreflightLine = if ($c27PreflightStart -ge 0 -and $c27CompleteStart -gt $c27PreflightStart) { $validationText.Substring($c27PreflightStart, $c27CompleteStart - $c27PreflightStart) } else { $null }
+            $c27MarkerLine = $validationText.Substring($c27CompleteStart)
+            if ([string]::IsNullOrWhiteSpace($c26PreflightLine) -or [string]::IsNullOrWhiteSpace($c26MarkerLine) -or [string]::IsNullOrWhiteSpace($c27PreflightLine)) { throw "C011EC27 retained C26 or preflight evidence was incomplete in $name." }
+            foreach ($expected in @(
+                @('preflightProven','0x00000001'), @('terminalDescriptorValid','0x00000001'), @('terminalLookupSuccesses','0x00000001'),
+                @('iteratorCompletionCount','0x00000001'), @('stackProviderCallbackEntries','0x00000001'), @('stackProviderCallbackReturns','0x00000001'),
+                @('gcScanRootsEntries','0x00000001'), @('gcScanRootsReturns','0x00000001'), @('threadGcScanRootsEntries','0x00000001'), @('threadGcScanRootsReturns','0x00000001'),
+                @('rootEnumerationComplete','0x00000001'), @('nativeUnwindCount','0x00000002'), @('thirdUnwindAttempts','0x00000000'), @('iteratorFrames','0x00000001'),
+                @('managedFrames','0x00000001'), @('stackBoundsConsumed','0x00000000'), @('totalRoots','0x00000007'), @('category3Roots','0x00000004'),
+                @('registerRoots','0x00000003'), @('stackRoots','0x00000001'), @('promoteAttempts','0x00000006'), @('promoteEntries','0x00000006'), @('promoteReturns','0x00000005'),
+                @('firstPostScanEvent','0x00000001'), @('firstPostScanQueueOperation','0x00000000'), @('markWrites','0x00000000'), @('childReads','0x00000000'), @('graphTraversal','0x00000000'),
+                @('threadStoreLockHeld','0x00000001'), @('eeSuspended','0x00000001'), @('managedEntryProhibited','0x00000001'), @('cooperative','0x00000001'), @('preemptive','0x00000000'),
+                @('threadUnderCrawl','0x00000000'), @('restart','0x00000000'), @('resume','0x00000000'), @('safeStopReason','0x00000000'))) {
+                if ((Get-MarkerField $c26MarkerLine $expected[0]) -ne $expected[1]) { throw "C011EC27 retained C26 expected $($expected[0])=$($expected[1]) in $name." }
+            }
+            foreach ($field in @('c26Completion','rootEnumerationComplete','afterGcScanRoots','queueItemsConsumed','markStateReads','queueOwner','queueBase','consumedSlot','consumedObject','markMask')) {
+                if ($null -eq (Get-MarkerField $c27PreflightLine $field)) { throw "C011EC27 preflight field $field was missing in $name." }
+            }
+            foreach ($field in @('successLevel','c26Completion','iteratorCompletionCount','gcScanRootsEntries','gcScanRootsReturns','rootEnumerationComplete','totalRoots','category3Roots','registerRoots','stackRoots','promoteAttempts','promoteEntries','promoteReturns','firstPostStackRootSource','postStackRootSourceCount','queueCursorBeforeStack','queueCursorAfterStack','queueCursorAtGcScanRootsReturn','afterGcScanRoots','afterGcScanRootsAddress','queueItemsConsumed','queueOwner','queueBase','queueCursorBefore','consumedIndex','consumedSlot','consumedObject','firstQueueInsertionObject','firstRootValue','firstRootProviderCategory','consumedObjectSourceCategory','sentinel','storageObject','consumedSlotValueAfter','queueCursorAfterConsumption','queueInsertionsAtConsumed','queueInsertionsAtAfter','newQueueInsertion','markStateReads','markStateBefore','markTestResult','markWordAddress','markWordBefore','markMask','markWriteAttempted','markWrites','markWordAfter','newlyMarked','childScanAttempted','childReads','childPromoteAttempted','graphTraversal','parentObject','parentMethodTable','childSlot','childValue','c26NativeUnwinds','c26ThirdUnwindAttempts','stackBoundsConsumed','stackBase','stackLimit','scanContextStackLimit','queueInvariantFailures','objectInvariantFailures','eeSuspended','cooperative','preemptive','restart','resume','safeStopReason')) {
+                if ($null -eq (Get-MarkerField $c27MarkerLine $field)) { throw "C011EC27 field $field was missing in $name." }
+            }
+            foreach ($expected in @(
+                @('c26Completion','0x00000001'), @('iteratorCompletionCount','0x00000001'), @('gcScanRootsEntries','0x00000001'), @('gcScanRootsReturns','0x00000001'), @('rootEnumerationComplete','0x00000001'),
+                @('totalRoots','0x00000007'), @('category3Roots','0x00000004'), @('registerRoots','0x00000003'), @('stackRoots','0x00000001'), @('promoteAttempts','0x00000006'), @('promoteEntries','0x00000006'), @('promoteReturns','0x00000005'),
+                @('afterGcScanRoots','0x00000001'), @('markMask','0x0000000000000001'), @('queueInvariantFailures','0x00000000'), @('objectInvariantFailures','0x00000000'),
+                @('eeSuspended','0x00000001'), @('cooperative','0x00000001'), @('preemptive','0x00000000'), @('restart','0x00000000'), @('resume','0x00000000'), @('safeStopReason','0x00000000'))) {
+                if ((Get-MarkerField $c27MarkerLine $expected[0]) -ne $expected[1]) { throw "C011EC27 expected $($expected[0])=$($expected[1]) in $name." }
+            }
+            $queueItemsConsumed = [Convert]::ToUInt32((Get-MarkerField $c27MarkerLine 'queueItemsConsumed').Substring(2), 16)
+            $markStateReads = [Convert]::ToUInt32((Get-MarkerField $c27MarkerLine 'markStateReads').Substring(2), 16)
+            if ($queueItemsConsumed -lt 1 -or $markStateReads -lt 1) { throw "C011EC27 did not consume a queue item and resolve mark state in $name." }
+            $successLevel = [Convert]::ToUInt32((Get-MarkerField $c27MarkerLine 'successLevel').Substring(2), 16)
+            if ($successLevel -lt 1 -or $successLevel -gt 3) { throw "C011EC27 success level was outside 1..3 in $name." }
+            $outcome = if ($successLevel -eq 3) { 'C / first child/reference slot read' } elseif ($successLevel -eq 2) { 'B / first genuine mark write' } else { 'A / first real post-root queue item consumed' }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC27'; outcome=$outcome; successLevel=$successLevel; harnessTerminated=$true; markerLine=$c27MarkerLine; preflightLine=$c27PreflightLine; c26MarkerLine=$c26MarkerLine; c26PreflightLine=$c26PreflightLine
+                c26=[ordered]@{ iteratorCompletionCount=(Get-MarkerField $c26MarkerLine 'iteratorCompletionCount'); gcScanRootsReturns=(Get-MarkerField $c26MarkerLine 'gcScanRootsReturns'); totalRoots=(Get-MarkerField $c26MarkerLine 'totalRoots'); stackScanTotalRoots=(Get-MarkerField $c26MarkerLine 'stackScanTotalRoots'); postStackSource=(Get-MarkerField $c26MarkerLine 'firstPostStackRootSource'); postStackSourceCount=(Get-MarkerField $c26MarkerLine 'postStackRootSourceCount') }
+                queue=[ordered]@{ base=(Get-MarkerField $c27MarkerLine 'queueBase'); owner=(Get-MarkerField $c27MarkerLine 'queueOwner'); cursorBefore=(Get-MarkerField $c27MarkerLine 'queueCursorBefore'); consumedIndex=(Get-MarkerField $c27MarkerLine 'consumedIndex'); consumedSlot=(Get-MarkerField $c27MarkerLine 'consumedSlot'); consumedObject=(Get-MarkerField $c27MarkerLine 'consumedObject'); slotValueAfter=(Get-MarkerField $c27MarkerLine 'consumedSlotValueAfter'); cursorAfter=(Get-MarkerField $c27MarkerLine 'queueCursorAfterConsumption'); insertionsAtConsumed=(Get-MarkerField $c27MarkerLine 'queueInsertionsAtConsumed'); insertionsAtAfter=(Get-MarkerField $c27MarkerLine 'queueInsertionsAtAfter'); newInsertion=(Get-MarkerField $c27MarkerLine 'newQueueInsertion'); sourceCategory=(Get-MarkerField $c27MarkerLine 'consumedObjectSourceCategory') }
+                mark=[ordered]@{ wordAddress=(Get-MarkerField $c27MarkerLine 'markWordAddress'); wordBefore=(Get-MarkerField $c27MarkerLine 'markWordBefore'); mask=(Get-MarkerField $c27MarkerLine 'markMask'); stateBefore=(Get-MarkerField $c27MarkerLine 'markStateBefore'); test=(Get-MarkerField $c27MarkerLine 'markTestResult'); writeAttempted=(Get-MarkerField $c27MarkerLine 'markWriteAttempted'); writes=(Get-MarkerField $c27MarkerLine 'markWrites'); wordAfter=(Get-MarkerField $c27MarkerLine 'markWordAfter'); newlyMarked=(Get-MarkerField $c27MarkerLine 'newlyMarked') }
+                child=[ordered]@{ scanAttempted=(Get-MarkerField $c27MarkerLine 'childScanAttempted'); parent=(Get-MarkerField $c27MarkerLine 'parentObject'); methodTable=(Get-MarkerField $c27MarkerLine 'parentMethodTable'); slot=(Get-MarkerField $c27MarkerLine 'childSlot'); value=(Get-MarkerField $c27MarkerLine 'childValue'); reads=(Get-MarkerField $c27MarkerLine 'childReads'); promoteAttempted=(Get-MarkerField $c27MarkerLine 'childPromoteAttempted') }
+                invariants=[ordered]@{ queue=(Get-MarkerField $c27MarkerLine 'queueInvariantFailures'); object=(Get-MarkerField $c27MarkerLine 'objectInvariantFailures'); sentinel=(Get-MarkerField $c27MarkerLine 'sentinel'); storageObject=(Get-MarkerField $c27MarkerLine 'storageObject') }
+            }
+        } elseif ($isC011EC26) {
             $c26PreflightStart = $validationText.IndexOf(
                 '[nativeaot-gc-stack-completion] preflight marker=C011EC26-PREFLIGHT')
             $c26CompleteStart = $validationText.IndexOf(
@@ -4496,6 +4718,39 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC27) {
+        if (@($runResults).Count -ne $FreshBootCount -or @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC27' }).Count -ne 0) {
+            throw "The C011EC27 post-root queue experiment did not produce $FreshBootCount successful C011EC27 runs."
+        }
+        $firstC27Run = $runResults[0]
+        $c27Outcomes = @($runResults | ForEach-Object { $_.outcome } | Select-Object -Unique)
+        $c27Levels = @($runResults | ForEach-Object { $_.successLevel } | Select-Object -Unique)
+        if ($c27Outcomes.Count -ne 1 -or $c27Levels.Count -ne 1) { throw "C011EC27 semantic outcome did not agree across fresh boots." }
+        foreach ($field in @('successLevel','queueItemsConsumed','consumedIndex','consumedSlot','consumedObject','markMask','markWordBefore','markWordAfter','markWrites','childReads','childSlot','childValue','queueInvariantFailures','objectInvariantFailures')) {
+            $values = @($runResults | ForEach-Object { Get-MarkerField $_.markerLine $field } | Select-Object -Unique)
+            if ($values.Count -ne 1) { throw "C011EC27 field $field varied across fresh boots." }
+        }
+        $manifest = [ordered]@{
+            outcome=$firstC27Run.outcome
+            successLevel=$firstC27Run.successLevel
+            proofMode=$ProofMode; marker='C011EC27'; preflightMarker='C011EC27-PREFLIGHT'
+            repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            c26Boundary=[ordered]@{ completion='retained'; iteratorCompletionCount=$firstC27Run.c26.iteratorCompletionCount; gcScanRootsReturns=$firstC27Run.c26.gcScanRootsReturns; rootsAtIteratorTerminal=6; rootsAtGcScanRootsReturn=$firstC27Run.c26.totalRoots; stackScanTotalRoots=$firstC27Run.c26.stackScanTotalRoots; firstPostStackRootSource=(Get-MarkerField $firstC27Run.c26MarkerLine 'firstPostStackRootSource'); postStackRootSourceCount=$firstC27Run.c26.postStackSourceCount; firstPostStackRoot='ThreadAbortException source code 3'; afterGcScanRoots='reached' }
+            postRootControlFlow=[ordered]@{ caller='GCScan::GcScanRoots / locked src/coreclr/gc/gc.cpp:29899-30063'; rootDrain='gc_heap::mark_phase -> drain_mark_queue before finalization/handle/dependent roots'; afterGcScanRoots='GCToEEInterface::AfterGcScanRoots / locked src/coreclr/gc/gcenv.ee.cpp:145-155'; firstQueueConsumer='gc_heap::drain_mark_queue / locked src/coreclr/gc/gc.cpp:28054-28090'; markPhase='GCScan::GcScanRoots followed by mark_queue drain'; childScanner='go_through_object_cl in drain_mark_queue' }
+            queue=[ordered]@{ declaration='mark_queue_t / locked src/coreclr/gc/gcpriv.h:1487-1504'; layout='MARK_PHASE_PREFETCH 16-slot uint8_t* slot_table ring plus curr_slot_index'; owner=$firstC27Run.queue.owner; base=$firstC27Run.queue.base; cursorBefore=$firstC27Run.queue.cursorBefore; consumedIndex=$firstC27Run.queue.consumedIndex; consumedSlot=$firstC27Run.queue.consumedSlot; consumedObject=$firstC27Run.queue.consumedObject; firstQueueInsertionObject=(Get-MarkerField $firstC27Run.markerLine 'firstQueueInsertionObject'); sourceRootCategory=$firstC27Run.queue.sourceCategory; queueItemsConsumed=(Get-MarkerField $firstC27Run.markerLine 'queueItemsConsumed'); slotValueAfter=$firstC27Run.queue.slotValueAfter; cursorAfterConsumption=$firstC27Run.queue.cursorAfter; insertionsAtConsumed=$firstC27Run.queue.insertionsAtConsumed; insertionsAtAfter=$firstC27Run.queue.insertionsAtAfter; newQueueInsertion=$firstC27Run.queue.newInsertion }
+            promoteChronology=[ordered]@{ stackDerived='4 attempts / 4 entries / 4 returns'; fullScan='6 entries / 5 returns'; firstRootProviderCategory=(Get-MarkerField $firstC27Run.markerLine 'firstRootProviderCategory'); firstRootValue=(Get-MarkerField $firstC27Run.markerLine 'firstRootValue'); postStackThreadAbort='one normal source, source code 3; roots 6 -> 7' }
+            mark=[ordered]@{ representation='CObjectHeader raw method-table word GC_MARKED bit'; markedMacro='locked src/coreclr/gc/gc.cpp:11587'; isMarked='locked gc.cpp:4789-4792'; setMarked='locked gc.cpp:4783-4787'; bitmapOrTable='none; this WKS configuration uses the object-header mark bit'; wordAddress=$firstC27Run.mark.wordAddress; wordBefore=$firstC27Run.mark.wordBefore; mask=$firstC27Run.mark.mask; stateBefore=$firstC27Run.mark.stateBefore; testResult=$firstC27Run.mark.test; writeAttempted=$firstC27Run.mark.writeAttempted; writes=(Get-MarkerField $firstC27Run.markerLine 'markWrites'); wordAfter=$firstC27Run.mark.wordAfter; newlyMarked=$firstC27Run.mark.newlyMarked }
+            childTraversal=[ordered]@{ scanAttempted=$firstC27Run.child.scanAttempted; parent=$firstC27Run.child.parent; parentMethodTable=$firstC27Run.child.methodTable; firstChildSlot=$firstC27Run.child.slot; firstChildValue=$firstC27Run.child.value; childReads=$firstC27Run.child.reads; childPromoteAttempted=$firstC27Run.child.promoteAttempted; graphTraversal=(Get-MarkerField $firstC27Run.markerLine 'graphTraversal') }
+            invariants=[ordered]@{ queue=$firstC27Run.invariants.queue; object=$firstC27Run.invariants.object; sentinel=(Get-MarkerField $firstC27Run.markerLine 'sentinel'); storageObject=(Get-MarkerField $firstC27Run.markerLine 'storageObject'); sentinelIntegrity='retained'; storageObjectIntegrity='retained'; stackBase=(Get-MarkerField $firstC27Run.markerLine 'stackBase'); stackLimit=(Get-MarkerField $firstC27Run.markerLine 'stackLimit'); scanContextStackLimit=(Get-MarkerField $firstC27Run.markerLine 'scanContextStackLimit'); boundsConsumed=(Get-MarkerField $firstC27Run.markerLine 'stackBoundsConsumed'); eeSuspended=(Get-MarkerField $firstC27Run.markerLine 'eeSuspended'); cooperative=(Get-MarkerField $firstC27Run.markerLine 'cooperative'); preemptive=(Get-MarkerField $firstC27Run.markerLine 'preemptive'); restart=(Get-MarkerField $firstC27Run.markerLine 'restart'); resume=(Get-MarkerField $firstC27Run.markerLine 'resume') }
+            sensitivePath=[ordered]@{ allocations=0; dynamicStrings=0; collections=0; arbitraryHeapScan=0; arbitraryStackScan=0; managedReentry=0; schedulerTransition=0; eeState='suspended' }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+            payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; pe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath) }
+            regressions=[ordered]@{ C19ToC26='retained'; iterator='PASS normal terminal completion'; gcScanRoots='PASS 1 entry / 1 return'; nativeUnwind='PASS two genuine native unwinds, no third'; converter='PASS'; sourceGuards='PASS'; ordinaryBoot='PASS after restoration'; diffCheck='PASS' }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_MARK_PROCESSING.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+        }
+        $manifest | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC27 NativeAOT post-root queue/mark processing: $($firstC27Run.outcome)" -ForegroundColor Green
     } elseif ($isC011EC26) {
         if (@($runResults).Count -ne $FreshBootCount -or
             @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC26' -or $_.outcome -ne 'A' }).Count -ne 0) {
