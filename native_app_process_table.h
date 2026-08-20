@@ -28,6 +28,7 @@ struct NativeAppProcessInfo {
     bool experimentalExecutionEnabled = false;
     std::string hostArchitecture;
     uint32_t hostLogCallCount = 0;
+    uint32_t hostedShutdownStage = 0;
     uint32_t requestWindowCallCount = 0;
     uint32_t drawTextCallCount = 0;
     uint32_t pollEventCallCount = 0;

@@ -1,6 +1,7 @@
 #include "console_service.h"
 #include "desktop_service.h"
 #include "desktop_folder.h"
+#include "native_app_debug_log.h"
 #include "native_app_process_table.h"
 #include "process.h"
 #include "logger.h"
@@ -74,6 +75,8 @@ namespace gxos { namespace svc {
                 << " lastEventType=" << static_cast<uint32_t>(process.lastEventType)
                 << " lastEventWindow=" << process.lastEventWindow
                 << " lastPollEventResult=" << process.lastPollEventResult
+                << " shutdownStage=" << gxos::apps::NativeAppRuntime::HostedShutdownStageName(process.hostedShutdownStage)
+                << " shutdownStageCode=" << process.hostedShutdownStage
                 << " drawRectCallCount=" << process.drawRectCallCount
                 << " lastDrawRectWindow=" << process.lastDrawRectWindow
                 << " lastDrawRectWidth=" << process.lastDrawRectWidth
@@ -100,6 +103,30 @@ namespace gxos { namespace svc {
                 << " experimentalExecutionEnabled=" << (process.experimentalExecutionEnabled ? "true" : "false")
                 << " hostArchitecture=" << process.hostArchitecture
                 << "\n";
+        }
+        return oss.str();
+    }
+
+    static std::string nativeAppDebugLogDiagnostic(const std::string& rawCount) {
+        size_t requested = 24;
+        if (!rawCount.empty()) {
+            try {
+                requested = static_cast<size_t>(std::stoul(rawCount));
+            } catch (...) {
+                requested = 24;
+            }
+        }
+        requested = std::max<size_t>(1, std::min<size_t>(64, requested));
+
+        std::ostringstream oss;
+        const auto entries = gxos::apps::NativeAppDebugLog::Recent(requested);
+        oss << "Native app debug log: " << entries.size() << "\n";
+        for (const auto& entry : entries) {
+            oss << "#" << entry.timestamp
+                << " runtimeId=" << entry.runtimeId
+                << " appId=" << entry.appId
+                << " severity=" << entry.severity
+                << " message=" << entry.message << "\n";
         }
         return oss.str();
     }
@@ -143,6 +170,8 @@ namespace gxos { namespace svc {
             if(startsWith(line, "nativeapp.inspect ")) { publishOutput(gxos::gui::DesktopService::InspectNativeAppPipeline(trim(line.substr(18)))); continue; }
             if(startsWith(line, "nativeapp.smoketest ")) { publishOutput(gxos::gui::DesktopService::NativeAppPipelineSmokeTest(trim(line.substr(20)))); continue; }
             if(line=="nativeapp.processes") { publishOutput(nativeAppProcessesDiagnostic()); continue; }
+            if(line=="nativeapp.debuglog") { publishOutput(nativeAppDebugLogDiagnostic("")); continue; }
+            if(startsWith(line, "nativeapp.debuglog ")) { publishOutput(nativeAppDebugLogDiagnostic(trim(line.substr(19)))); continue; }
             // Basic demo: echo and simple commands
             std::string resp = "[console] " + line;
             publishOutput(resp);

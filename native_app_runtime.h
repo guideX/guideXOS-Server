@@ -205,6 +205,9 @@ struct NativeAppRuntimeContext {
     uint32_t cleanedWindowCount = 0;
     uint32_t hostLogCallCount = 0;
     std::string lastHostLogMessage;
+    // Monotonic hosted Developer Studio shutdown stage. This is diagnostic
+    // state only and remains queryable after the native app exits.
+    uint32_t hostedShutdownStage = 0;
     uint32_t lastApiVersionReturned = 0;
     uint32_t unsupportedHostCallCount = 0;
     std::vector<gx_handle> createdWindowHandles;
@@ -289,6 +292,7 @@ public:
     static void RequestCloseOwnedWindows(NativeAppRuntimeContext& context);
     static void Cleanup(NativeAppRuntimeContext& context, NativeAppLifecycleState finalState, int32_t exitCode, const std::string& failureReason = std::string());
     static const char* ToString(NativeAppLifecycleState state);
+    static const char* HostedShutdownStageName(uint32_t stage);
 
 private:
     static void LogContext(const NativeAppRuntimeContext& context, const std::string& abi);
