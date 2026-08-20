@@ -70,6 +70,14 @@ guidexos_nativeaot_gc_get_native_unwind_lookup_hook(void) {
         : 0u;
 }
 
+extern "C" uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_get_native_unwind_classify_hook(void) {
+    return installed()
+        ? static_cast<uintptr_t>(g_table.reserved[
+              GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFY_PLATFORM_RESERVED_INDEX])
+        : 0u;
+}
+
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_native_unwind_lookup(
     uintptr_t control_pc,
@@ -78,6 +86,20 @@ guidexos_nativeaot_gc_native_unwind_lookup(
         guidexos_nativeaot_gc_get_native_unwind_lookup_hook();
     if (hookAddress == 0u || result == nullptr) return -1;
     const auto hook = reinterpret_cast<guidexos_nativeaot_native_unwind_lookup_hook>(
+        hookAddress);
+    return hook(control_pc, result);
+}
+
+extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_native_unwind_classify(
+    uintptr_t control_pc,
+    guidexos_nativeaot_native_unwind_lookup_result* result) {
+    const uintptr_t hookAddress =
+        guidexos_nativeaot_gc_get_native_unwind_classify_hook();
+    if (hookAddress == 0u || result == nullptr) {
+        return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNSUPPORTED;
+    }
+    const auto hook = reinterpret_cast<guidexos_nativeaot_native_unwind_classify_hook>(
         hookAddress);
     return hook(control_pc, result);
 }

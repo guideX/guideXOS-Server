@@ -1118,6 +1118,8 @@ void fillStartupPlatformTable(
         &guideXosNativeAotC011EC21DescribeNativeCaller);
     table->reserved[GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_PLATFORM_RESERVED_INDEX] =
         reinterpret_cast<uintptr_t>(&guideXosNativeUnwindLookup);
+    table->reserved[GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFY_PLATFORM_RESERVED_INDEX] =
+        reinterpret_cast<uintptr_t>(&guideXosNativeUnwindClassify);
 #endif
 }
 

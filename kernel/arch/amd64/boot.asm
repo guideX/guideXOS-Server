@@ -8,6 +8,9 @@
 
 section .boot
 global _start
+global _start.halt
+global __guidexos_native_terminal_start
+global __guidexos_native_terminal_end
 
 _start:
     ; Disable interrupts
@@ -32,9 +35,11 @@ _start:
     call kernel_main
     
     ; Should never reach here
-.halt:
+__guidexos_native_terminal_start:
+_start.halt:
     hlt
-    jmp .halt
+    jmp _start.halt
+__guidexos_native_terminal_end:
 
 section .bss
 align 16

@@ -9,6 +9,8 @@ extern "C" const unsigned char __guidexos_native_pdata_start[];
 extern "C" const unsigned char __guidexos_native_pdata_end[];
 extern "C" const unsigned char __guidexos_native_xdata_start[];
 extern "C" const unsigned char __guidexos_native_xdata_end[];
+extern "C" const unsigned char __guidexos_native_terminal_start[];
+extern "C" const unsigned char __guidexos_native_terminal_end[];
 
 namespace {
 
@@ -20,6 +22,9 @@ constexpr uint32_t kMaximumTableEntries = 8192u;
 guidexos_nativeaot_native_unwind_module g_modules[kRegistryCapacity] = {};
 uint32_t g_module_count = 0u;
 uintptr_t g_kernel_physical_base = static_cast<uintptr_t>(0x100000u);
+uint32_t g_terminal_start_rva = 0u;
+uint32_t g_terminal_end_rva = 0u;
+bool g_terminal_range_valid = false;
 
 bool addOverflow(uintptr_t left, uintptr_t right, uintptr_t* result) {
     if (result == nullptr || left > (~static_cast<uintptr_t>(0) - right)) {
@@ -48,6 +53,42 @@ bool containsRange(uintptr_t start, uintptr_t end,
 bool resolveBaseRva(uintptr_t moduleBase, uint32_t rva, uintptr_t* address) {
     return address != nullptr && !addOverflow(
         moduleBase, static_cast<uintptr_t>(rva), address);
+}
+
+bool initializeTerminalRange(const guidexos_nativeaot_native_unwind_module& module) {
+    const uintptr_t linkedBase = static_cast<uintptr_t>(module.module_base);
+    const uintptr_t terminalStart = reinterpret_cast<uintptr_t>(
+        &__guidexos_native_terminal_start);
+    const uintptr_t terminalEnd = reinterpret_cast<uintptr_t>(
+        &__guidexos_native_terminal_end);
+    if (!contains(static_cast<uintptr_t>(module.executable_start),
+                  static_cast<uintptr_t>(module.executable_end), terminalStart) ||
+        terminalEnd <= terminalStart ||
+        terminalEnd > static_cast<uintptr_t>(module.executable_end) ||
+        terminalStart < linkedBase || terminalEnd < linkedBase ||
+        terminalStart - linkedBase > UINT32_MAX ||
+        terminalEnd - linkedBase > UINT32_MAX) {
+        return false;
+    }
+    g_terminal_start_rva = static_cast<uint32_t>(terminalStart - linkedBase);
+    g_terminal_end_rva = static_cast<uint32_t>(terminalEnd - linkedBase);
+    g_terminal_range_valid = true;
+    return true;
+}
+
+bool terminalRangeForModule(const guidexos_nativeaot_native_unwind_module& module,
+                            uintptr_t* start, uintptr_t* end) {
+    if (!g_terminal_range_valid || start == nullptr || end == nullptr ||
+        !resolveBaseRva(static_cast<uintptr_t>(module.module_base),
+                        g_terminal_start_rva, start) ||
+        !resolveBaseRva(static_cast<uintptr_t>(module.module_base),
+                        g_terminal_end_rva, end)) {
+        return false;
+    }
+    return *start < *end &&
+        contains(static_cast<uintptr_t>(module.executable_start),
+                 static_cast<uintptr_t>(module.executable_end), *start) &&
+        *end <= static_cast<uintptr_t>(module.executable_end);
 }
 
 bool validateUnwindInfo(const guidexos_nativeaot_native_unwind_module& module,
@@ -235,6 +276,7 @@ guideXosNativeUnwindRegisterKernelModule(void) {
     if (g_module_count >= kRegistryCapacity) return -1;
     guidexos_nativeaot_native_unwind_module module = makeKernelModule();
     if (!validateTable(&module)) return -1;
+    if (!initializeTerminalRange(module)) return -1;
     g_modules[g_module_count++] = module;
     if (g_kernel_physical_base != module.module_base) {
         if (g_module_count >= kRegistryCapacity) return -1;
@@ -311,6 +353,67 @@ guideXosNativeUnwindLookup(
     return -1;
 }
 
+extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guideXosNativeUnwindClassify(
+    uintptr_t control_pc,
+    guidexos_nativeaot_native_unwind_lookup_result* result) {
+    if (result == nullptr) {
+        return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_MALFORMED;
+    }
+    *result = {};
+
+    const int32_t lookupResult = guideXosNativeUnwindLookup(control_pc, result);
+    if (lookupResult == 0) {
+        return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNWINDABLE;
+    }
+
+    for (uint32_t moduleIndex = 0u; moduleIndex < g_module_count; ++moduleIndex) {
+        const guidexos_nativeaot_native_unwind_module& module =
+            g_modules[moduleIndex];
+        if (module.validation_state != 1u) {
+            return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_MALFORMED;
+        }
+        uintptr_t terminalStart = 0u;
+        uintptr_t terminalEnd = 0u;
+        if (!terminalRangeForModule(module, &terminalStart, &terminalEnd)) {
+            return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_MALFORMED;
+        }
+        if (contains(terminalStart, terminalEnd, control_pc)) {
+            result->module_base = module.module_base;
+            result->executable_start = module.executable_start;
+            result->executable_end = module.executable_end;
+            result->pdata_start = module.pdata_start;
+            result->pdata_end = module.pdata_end;
+            result->xdata_start = module.xdata_start;
+            result->xdata_end = module.xdata_end;
+            result->begin_address = g_terminal_start_rva;
+            result->end_address = g_terminal_end_rva;
+            result->table_index = UINT32_MAX;
+            return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_TERMINAL;
+        }
+        if (contains(static_cast<uintptr_t>(module.executable_start),
+                     static_cast<uintptr_t>(module.executable_end), control_pc)) {
+            const RuntimeFunction* table = reinterpret_cast<const RuntimeFunction*>(
+                static_cast<uintptr_t>(module.runtime_function_table));
+            for (uint32_t index = 0u; index < module.runtime_function_count; ++index) {
+                uintptr_t begin = 0u;
+                uintptr_t end = 0u;
+                if (resolveBaseRva(static_cast<uintptr_t>(module.module_base),
+                                   table[index].begin_address, &begin) &&
+                    resolveBaseRva(static_cast<uintptr_t>(module.module_base),
+                                   table[index].end_address, &end) &&
+                    contains(begin, end, control_pc)) {
+                    // The legacy lookup found an address in a registered
+                    // function but could not validate its metadata.
+                    return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_MALFORMED;
+                }
+            }
+            return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNSUPPORTED;
+        }
+    }
+    return GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNSUPPORTED;
+}
+
 extern "C" const guidexos_nativeaot_native_unwind_module*
 guideXosNativeUnwindGetKernelModule(void) {
     return g_module_count == 0u ? nullptr : &g_modules[0];
@@ -339,6 +442,10 @@ guideXosNativeUnwindValidateFocusedCoverage(uint32_t* second_function_index) {
         const bool hit = guideXosNativeUnwindLookup(pc, &result) == 0;
         return hit == expectedHit;
     };
+    const auto expectClassification = [](uintptr_t pc, int32_t expected) {
+        guidexos_nativeaot_native_unwind_lookup_result result = {};
+        return guideXosNativeUnwindClassify(pc, &result) == expected;
+    };
     const uint32_t count = module.runtime_function_count;
     if (count == 0u || !expectLookup(base + table[0].begin_address, true)) {
         return -1;
@@ -365,6 +472,28 @@ guideXosNativeUnwindValidateFocusedCoverage(uint32_t* second_function_index) {
             !expectLookup(static_cast<uintptr_t>(alias.executable_end), false)) {
             return -1;
         }
+        if (!expectClassification(static_cast<uintptr_t>(alias.module_base) +
+                                      g_terminal_start_rva,
+                                  GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_TERMINAL)) {
+            return -1;
+        }
+    }
+    if (!expectClassification(base + g_terminal_start_rva,
+                              GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_TERMINAL)) {
+        return -1;
+    }
+    if (g_terminal_start_rva > 0u &&
+        !expectClassification(base + g_terminal_start_rva - 1u,
+                              GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNSUPPORTED)) {
+        return -1;
+    }
+    if (!expectClassification(static_cast<uintptr_t>(0x7FFF0000u),
+                              GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNSUPPORTED) ||
+        !expectClassification(static_cast<uintptr_t>(0x10001000u),
+                              GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNSUPPORTED) ||
+        !expectClassification(base + table[0].begin_address,
+                              GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNWINDABLE)) {
+        return -1;
     }
     if (table[middle].begin_address + 1u < table[middle].end_address &&
         !expectLookup(base + table[middle].begin_address + 1u, true)) {

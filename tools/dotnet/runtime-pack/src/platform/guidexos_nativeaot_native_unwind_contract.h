@@ -12,6 +12,14 @@
 #define GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_ABI_VERSION 1u
 #define GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_ENCODING_BASE_RVA 1u
 
+// Classification is deliberately distinct from the legacy lookup result:
+// metadata absence is not a stack bottom unless the registered image
+// semantics validate the terminal boundary for this exact PC.
+#define GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNWINDABLE 0
+#define GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_TERMINAL 1
+#define GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_UNSUPPORTED (-1)
+#define GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_MALFORMED (-2)
+
 #pragma pack(push, 8)
 typedef struct guidexos_nativeaot_native_unwind_module {
     uint64_t module_base;
@@ -56,7 +64,13 @@ typedef int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *
         uintptr_t control_pc,
         guidexos_nativeaot_native_unwind_lookup_result* result);
 
+typedef int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *
+    guidexos_nativeaot_native_unwind_classify_hook)(
+        uintptr_t control_pc,
+        guidexos_nativeaot_native_unwind_lookup_result* result);
+
 #define GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_PLATFORM_RESERVED_INDEX 1u
+#define GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFY_PLATFORM_RESERVED_INDEX 2u
 
 typedef struct guidexos_nativeaot_runtime_function {
     uint32_t begin_address;

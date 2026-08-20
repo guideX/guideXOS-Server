@@ -1548,6 +1548,50 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec25LinkedEntryPc;
     uintptr_t c011ec25LinkedHaltPc;
     uintptr_t c011ec25BootStackTop;
+
+    /* C011EC26 normal terminal-boundary completion; append-only after C25. */
+    uint32_t c011ec26MarkerEmitted;
+    uint32_t c011ec26PreflightProven;
+    uint32_t c011ec26TerminalLookupAttemptCount;
+    uint32_t c011ec26TerminalLookupSuccessCount;
+    uint32_t c011ec26TerminalClassificationResult;
+    uint32_t c011ec26TerminalDescriptorValid;
+    uint32_t c011ec26IteratorCompletionCount;
+    uint32_t c011ec26StackProviderCallbackEntryCount;
+    uint32_t c011ec26StackProviderCallbackReturnCount;
+    uint32_t c011ec26GcScanRootsEntryCount;
+    uint32_t c011ec26GcScanRootsReturnCount;
+    uint32_t c011ec26ThreadGcScanRootsEntryCount;
+    uint32_t c011ec26ThreadGcScanRootsReturnCount;
+    uint32_t c011ec26GcScanRootsEnumerationComplete;
+    uint32_t c011ec26ThirdUnwindAttemptCount;
+    uint32_t c011ec26FirstPostScanEvent;
+    uint32_t c011ec26FirstPostScanQueueOperation;
+    uint32_t c011ec26FirstPostStackRootSource;
+    uint32_t c011ec26PostStackRootSourceCount;
+    uint32_t c011ec26StackScanTotalRootCount;
+    uint32_t c011ec26StackScanCategory3RootCount;
+    uint32_t c011ec26StackScanRegisterRootCount;
+    uint32_t c011ec26StackScanStackRootCount;
+    uint32_t c011ec26StackScanPromoteAttemptCount;
+    uint32_t c011ec26StackScanPromoteEntryCount;
+    uint32_t c011ec26StackScanPromoteReturnCount;
+    uint32_t c011ec26SafeStopReason;
+    uint32_t c011ec26Reserved[2];
+
+    uintptr_t c011ec26TerminalInputPc;
+    uintptr_t c011ec26TerminalSelectedPc;
+    uintptr_t c011ec26TerminalLinkedPc;
+    uintptr_t c011ec26TerminalModuleBase;
+    uintptr_t c011ec26TerminalExecutableStart;
+    uintptr_t c011ec26TerminalExecutableEnd;
+    uintptr_t c011ec26TerminalBeginRva;
+    uintptr_t c011ec26TerminalEndRva;
+    uintptr_t c011ec26TerminalRsp;
+    uintptr_t c011ec26QueueCursorBeforeStack;
+    uintptr_t c011ec26QueueCursorAfterStack;
+    uintptr_t c011ec26QueueCursorAtGcScanRootsReturn;
+    uintptr_t c011ec26PostScanAddress;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

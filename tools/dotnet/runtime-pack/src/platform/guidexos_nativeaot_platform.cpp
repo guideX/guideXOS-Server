@@ -6079,6 +6079,83 @@ bool c011ec25ValidateBoundary(
     if (d.c011ec25PreflightProven != 0u) emitC011EC25Preflight();
     return d.c011ec25PreflightProven != 0u;
 }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION)
+bool c011ec26ValidateSecondUnwind(
+    const guidexos_nativeaot_native_unwind_lookup_result& lookup,
+    uintptr_t inputRip, uintptr_t inputRsp, uintptr_t inputRbp,
+    uintptr_t outputRip, uintptr_t outputRsp, uintptr_t outputRbp,
+    uintptr_t establisherFrame, uintptr_t handlerData,
+    uintptr_t recoveredRbx, uintptr_t recoveredRsi, uintptr_t recoveredRdi,
+    uintptr_t recoveredRbp) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec25SecondInputRip = inputRip;
+    d.c011ec25SecondInputRsp = inputRsp;
+    d.c011ec25SecondInputRbp = inputRbp;
+    d.c011ec25SecondOutputRip = outputRip;
+    d.c011ec25SecondOutputRsp = outputRsp;
+    d.c011ec25SecondOutputRbp = outputRbp;
+    d.c011ec25SecondEstablisherFrame = establisherFrame;
+    d.c011ec25SecondHandlerData = handlerData;
+    d.c011ec25SecondRecoveredRbx = recoveredRbx;
+    d.c011ec25SecondRecoveredRsi = recoveredRsi;
+    d.c011ec25SecondRecoveredRdi = recoveredRdi;
+    d.c011ec25SecondRecoveredRbp = recoveredRbp;
+
+    GuideXosC011Ec25UnwindProgram program = {};
+    if (!c011ec25DecodeProgram(lookup, &program) ||
+        inputRsp > ~static_cast<uintptr_t>(0) - program.stackAdvance) {
+        d.c011ec25SecondMetadataValid = 0u;
+        return false;
+    }
+    d.c011ec25SecondMetadataValid = 1u;
+    d.c011ec25SecondOpcodeCount = program.codeCount;
+    d.c011ec25SecondStackAdvance = program.stackAdvance;
+    for (uint32_t index = 0u; index < program.codeCount; ++index) {
+        d.c011ec25SecondOpcodeWords[index] = program.opcodeWords[index];
+    }
+    d.c011ec25SecondReturnSlot = inputRsp + program.stackAdvance;
+    d.c011ec25SecondReturnValue = *reinterpret_cast<const uintptr_t*>(
+        d.c011ec25SecondReturnSlot);
+    d.c011ec25ExpectedCallerRip = d.c011ec25SecondReturnValue;
+    d.c011ec25ExpectedCallerRsp = d.c011ec25SecondReturnSlot + 8u;
+    d.c011ec25SecondOutputAgreement =
+        outputRip == d.c011ec25ExpectedCallerRip &&
+        outputRsp == d.c011ec25ExpectedCallerRsp &&
+        outputRbp == inputRbp ? 1u : 0u;
+    return d.c011ec25SecondOutputAgreement != 0u;
+}
+
+static void emitC011EC26Preflight() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-stack-completion] preflight marker=C011EC26-PREFLIGHT");
+#define C26PF32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C26PF64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C26PF32("terminalClassification", d.c011ec26TerminalClassificationResult);
+    C26PF32("terminalDescriptorValid", d.c011ec26TerminalDescriptorValid);
+    C26PF32("terminalLookupAttempts", d.c011ec26TerminalLookupAttemptCount);
+    C26PF32("terminalLookupSuccesses", d.c011ec26TerminalLookupSuccessCount);
+    C26PF32("nativeUnwindCount", d.c011ec23UnwindAttemptCount);
+    C26PF32("nativeFramesCrossed", d.c011ec23NativeFramesCrossed);
+    C26PF32("thirdUnwindAttempts", d.c011ec26ThirdUnwindAttemptCount);
+    C26PF64("terminalInputPC", d.c011ec26TerminalInputPc);
+    C26PF64("terminalSelectedPC", d.c011ec26TerminalSelectedPc);
+    C26PF64("terminalLinkedPC", d.c011ec26TerminalLinkedPc);
+    C26PF64("terminalModuleBase", d.c011ec26TerminalModuleBase);
+    C26PF64("terminalExecutableStart", d.c011ec26TerminalExecutableStart);
+    C26PF64("terminalExecutableEnd", d.c011ec26TerminalExecutableEnd);
+    C26PF64("terminalBeginRVA", d.c011ec26TerminalBeginRva);
+    C26PF64("terminalEndRVA", d.c011ec26TerminalEndRva);
+    C26PF64("terminalRSP", d.c011ec26TerminalRsp);
+#undef C26PF32
+#undef C26PF64
+    suspendEeSerialPutString("\n");
+}
+#endif
 #endif
 #endif
 
@@ -6128,6 +6205,63 @@ guideXosNativeAotC011EC23TryNativeUnwind(
     uintptr_t currentPc = controlPc;
     for (uint32_t frameIndex = 0u;
          frameIndex < kC011EC23MaximumNativeFrames; ++frameIndex) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION)
+        ++d.c011ec26TerminalLookupAttemptCount;
+        guidexos_nativeaot_native_unwind_lookup_result terminal = {};
+        const int32_t terminalClassification =
+            guidexos_nativeaot_gc_native_unwind_classify(currentPc, &terminal);
+        d.c011ec26TerminalClassificationResult =
+            static_cast<uint32_t>(terminalClassification);
+        if (terminalClassification ==
+            GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_TERMINAL) {
+            d.c011ec26TerminalInputPc = currentPc;
+            d.c011ec26TerminalSelectedPc = currentPc;
+            d.c011ec26TerminalModuleBase = terminal.module_base;
+            d.c011ec26TerminalExecutableStart = terminal.executable_start;
+            d.c011ec26TerminalExecutableEnd = terminal.executable_end;
+            d.c011ec26TerminalBeginRva = terminal.begin_address;
+            d.c011ec26TerminalEndRva = terminal.end_address;
+            d.c011ec26TerminalRsp = display->SP;
+            const uintptr_t linkedBase = d.c011ec23ModuleBase;
+            const uintptr_t selectedBase =
+                static_cast<uintptr_t>(terminal.module_base);
+            const bool descriptorValid =
+                selectedBase != 0u && terminal.executable_start != 0u &&
+                terminal.executable_end > terminal.executable_start &&
+                terminal.begin_address < terminal.end_address &&
+                terminal.runtime_function == 0u && terminal.unwind_info == 0u &&
+                terminal.unwind_data == 0u && terminal.table_index == UINT32_MAX &&
+                currentPc >= selectedBase &&
+                currentPc - selectedBase >= terminal.begin_address &&
+                currentPc - selectedBase < terminal.end_address;
+            d.c011ec26TerminalDescriptorValid = descriptorValid ? 1u : 0u;
+            if (descriptorValid && linkedBase != 0u && currentPc >= selectedBase &&
+                currentPc - selectedBase <= ~static_cast<uintptr_t>(0) - linkedBase) {
+                d.c011ec26TerminalLinkedPc = linkedBase +
+                    (currentPc - selectedBase);
+            }
+            ++d.c011ec26TerminalLookupSuccessCount;
+            d.c011ec23UnwindResult = 6u;
+            d.c011ec23Outcome = 6u;
+            d.c011ec26PreflightProven =
+                descriptorValid && d.c011ec23NativeFramesCrossed == 2u &&
+                d.c011ec25SecondMetadataValid != 0u &&
+                d.c011ec25SecondOutputAgreement != 0u &&
+                d.c011ec26ThirdUnwindAttemptCount == 0u ? 1u : 0u;
+            if (d.c011ec26PreflightProven != 0u) {
+                emitC011EC26Preflight();
+            } else {
+                d.c011ec26SafeStopReason = 0xC0260001u;
+                guideXosNativeAotC011EC25SafeStop(0xC0260001u);
+            }
+            return 2u;
+        }
+        if (terminalClassification ==
+            GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFICATION_MALFORMED) {
+            d.c011ec26SafeStopReason = 0xC0260002u;
+            guideXosNativeAotC011EC25SafeStop(0xC0260002u);
+        }
+#endif
         ++d.c011ec23LookupAttemptCount;
         guidexos_nativeaot_native_unwind_lookup_result lookup = {};
         if (guidexos_nativeaot_gc_native_unwind_lookup(currentPc, &lookup) != 0) {
@@ -6392,6 +6526,25 @@ guideXosNativeAotC011EC23TryNativeUnwind(
 #endif
             }
 #if defined(GUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION)
+            if (!c011ec26ValidateSecondUnwind(
+                    lookup,
+                    d.c011ec24SecondInputRip,
+                    d.c011ec24SecondInputRsp,
+                    d.c011ec24SecondInputRbp,
+                    outputRip,
+                    outputRsp,
+                    d.c011ec24SecondOutputRbp,
+                    establisherFrame,
+                    reinterpret_cast<uintptr_t>(handlerData),
+                    c011ec23LoadRegister(display->pRbx),
+                    c011ec23LoadRegister(display->pRsi),
+                    c011ec23LoadRegister(display->pRdi),
+                    c011ec23LoadRegister(display->pRbp))) {
+                d.c011ec26SafeStopReason = 0xC0260003u;
+                guideXosNativeAotC011EC25SafeStop(0xC0260003u);
+            }
+#else
             if (!c011ec25ValidateBoundary(
                     lookup,
                     d.c011ec24SecondInputRip,
@@ -6408,7 +6561,10 @@ guideXosNativeAotC011EC23TryNativeUnwind(
                     c011ec23LoadRegister(display->pRbp))) {
                 guideXosNativeAotC011EC25SafeStop(0xC0250002u);
             }
+#endif
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION)
             guideXosNativeAotC011EC25SafeStop(0xC0250000u);
+#endif
 #else
             guideXosNativeAotC011EC24SafeStop(0xC0240004u);
 #endif
@@ -6794,6 +6950,11 @@ guideXosNativeAotC011EC15ProviderEntered(
 #if defined(GUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY)
     if (category == kC011EC15ProviderThreadStack) {
         ++d.c011ec18StackProviderCallbackCount;
+    }
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION)
+    if (category == kC011EC15ProviderThreadStack) {
+        ++d.c011ec26StackProviderCallbackEntryCount;
     }
 #endif
     d.c011ec15FirstRootProvider =
@@ -7923,6 +8084,185 @@ guideXosNativeAotC011EC25SafeStop(uint32_t reason) {
 }
 #endif
 #endif
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION)
+static void emitC011EC26Completion() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-stack-completion] COMPLETE marker=C011EC26");
+#define C26_HEX32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C26_HEX64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C26_HEX32("preflightProven", d.c011ec26PreflightProven);
+    C26_HEX32("terminalClassification", d.c011ec26TerminalClassificationResult);
+    C26_HEX32("terminalDescriptorValid", d.c011ec26TerminalDescriptorValid);
+    C26_HEX32("terminalLookupAttempts", d.c011ec26TerminalLookupAttemptCount);
+    C26_HEX32("terminalLookupSuccesses", d.c011ec26TerminalLookupSuccessCount);
+    C26_HEX32("iteratorCompletionCount", d.c011ec26IteratorCompletionCount);
+    C26_HEX32("stackProviderCallbackEntries", d.c011ec26StackProviderCallbackEntryCount);
+    C26_HEX32("stackProviderCallbackReturns", d.c011ec26StackProviderCallbackReturnCount);
+    C26_HEX32("gcScanRootsEntries", d.c011ec26GcScanRootsEntryCount);
+    C26_HEX32("gcScanRootsReturns", d.c011ec26GcScanRootsReturnCount);
+    C26_HEX32("threadGcScanRootsEntries", d.c011ec26ThreadGcScanRootsEntryCount);
+    C26_HEX32("threadGcScanRootsReturns", d.c011ec26ThreadGcScanRootsReturnCount);
+    C26_HEX32("rootEnumerationComplete", d.c011ec26GcScanRootsEnumerationComplete);
+    C26_HEX32("nativeUnwindCount", d.c011ec23UnwindAttemptCount);
+    C26_HEX32("thirdUnwindAttempts", d.c011ec26ThirdUnwindAttemptCount);
+    C26_HEX32("iteratorFrames", d.c011ec18StackFrameCount);
+    C26_HEX32("managedFrames", d.c011ec18StackFrameCount);
+    C26_HEX32("stackBoundsConsumed", d.c011ec18StackBoundsConsumed);
+    C26_HEX32("totalRoots", d.c011ec15RootSlotVisitCount);
+    C26_HEX32("category3Roots", d.c011ec19RootReportCount);
+    C26_HEX32("registerRoots", d.c011ec19RegisterRootCount);
+    C26_HEX32("stackRoots", d.c011ec19StackRootCount);
+    C26_HEX32("promoteAttempts", d.c011ec19FirstStackDerivedPromoteAttemptCount);
+    C26_HEX32("promoteEntries", d.c011ec19FirstStackDerivedPromoteEntryCount);
+    C26_HEX32("promoteReturns", d.c011ec19FirstStackDerivedPromoteReturnCount);
+    C26_HEX64("queueCursorBeforeStack", d.c011ec26QueueCursorBeforeStack);
+    C26_HEX64("queueCursorAfterStack", d.c011ec26QueueCursorAfterStack);
+    C26_HEX64("queueCursorAtGcScanRootsReturn", d.c011ec26QueueCursorAtGcScanRootsReturn);
+    C26_HEX32("firstPostScanEvent", d.c011ec26FirstPostScanEvent);
+    C26_HEX32("firstPostScanQueueOperation", d.c011ec26FirstPostScanQueueOperation);
+    C26_HEX32("firstPostStackRootSource", d.c011ec26FirstPostStackRootSource);
+    C26_HEX32("postStackRootSourceCount", d.c011ec26PostStackRootSourceCount);
+    C26_HEX32("stackScanTotalRoots", d.c011ec26StackScanTotalRootCount);
+    C26_HEX32("stackScanCategory3Roots", d.c011ec26StackScanCategory3RootCount);
+    C26_HEX32("stackScanRegisterRoots", d.c011ec26StackScanRegisterRootCount);
+    C26_HEX32("stackScanStackRoots", d.c011ec26StackScanStackRootCount);
+    C26_HEX32("stackScanPromoteAttempts", d.c011ec26StackScanPromoteAttemptCount);
+    C26_HEX32("stackScanPromoteEntries", d.c011ec26StackScanPromoteEntryCount);
+    C26_HEX32("stackScanPromoteReturns", d.c011ec26StackScanPromoteReturnCount);
+    C26_HEX32("markWrites", d.c011ec15MarkBitWriteCount);
+    C26_HEX32("childReads", d.c011ec15ChildReferenceReadCount);
+    C26_HEX32("graphTraversal", d.c011ec15GraphTraversalCount);
+    C26_HEX32("threadStoreLockHeld", d.c011ec15ThreadStoreLockHeld);
+    C26_HEX32("eeSuspended", d.c011ec15EeSuspended);
+    C26_HEX32("managedEntryProhibited", d.c011ec15ManagedEntryProhibited);
+    C26_HEX32("cooperative", d.rootThreadRecords[0].cooperative);
+    C26_HEX32("preemptive", d.rootThreadRecords[0].preemptive);
+    C26_HEX32("threadUnderCrawl", d.callbackContextThreadUnderCrawl != 0u ? 1u : 0u);
+    C26_HEX32("restart", d.restartRequestCount + d.restartEntryCount);
+    C26_HEX32("resume", d.managedResumeCount);
+    C26_HEX32("safeStopReason", d.c011ec26SafeStopReason);
+    C26_HEX64("terminalInputPC", d.c011ec26TerminalInputPc);
+    C26_HEX64("terminalSelectedPC", d.c011ec26TerminalSelectedPc);
+    C26_HEX64("terminalLinkedPC", d.c011ec26TerminalLinkedPc);
+    C26_HEX64("terminalModuleBase", d.c011ec26TerminalModuleBase);
+    C26_HEX64("terminalExecutableStart", d.c011ec26TerminalExecutableStart);
+    C26_HEX64("terminalExecutableEnd", d.c011ec26TerminalExecutableEnd);
+    C26_HEX64("terminalBeginRVA", d.c011ec26TerminalBeginRva);
+    C26_HEX64("terminalEndRVA", d.c011ec26TerminalEndRva);
+    C26_HEX64("terminalRSP", d.c011ec26TerminalRsp);
+    C26_HEX64("postScanAddress", d.c011ec26PostScanAddress);
+    C26_HEX64("stackBase", d.rootThreadRecords[0].stackLow);
+    C26_HEX64("stackLimit", d.rootThreadRecords[0].stackHigh);
+    C26_HEX64("scanContextStackLimit", d.callbackContextStackLimit);
+#undef C26_HEX32
+#undef C26_HEX64
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26GcScanRootsEntered(
+    int condemned, int maxGeneration, uintptr_t scanContext) {
+    (void)condemned;
+    (void)maxGeneration;
+    (void)scanContext;
+    ++g_guideXosAllocationDiagnostics.c011ec26GcScanRootsEntryCount;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26ThreadGcScanRootsEntered() {
+    ++g_guideXosAllocationDiagnostics.c011ec26ThreadGcScanRootsEntryCount;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26ThreadGcScanRootsReturned() {
+    ++g_guideXosAllocationDiagnostics.c011ec26ThreadGcScanRootsReturnCount;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26IteratorCompleted() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec26IteratorCompletionCount;
+    d.c011ec26StackScanTotalRootCount = d.c011ec15RootSlotVisitCount;
+    d.c011ec26StackScanCategory3RootCount = d.c011ec19RootReportCount;
+    d.c011ec26StackScanRegisterRootCount = d.c011ec19RegisterRootCount;
+    d.c011ec26StackScanStackRootCount = d.c011ec19StackRootCount;
+    d.c011ec26StackScanPromoteAttemptCount =
+        d.c011ec19FirstStackDerivedPromoteAttemptCount;
+    d.c011ec26StackScanPromoteEntryCount =
+        d.c011ec19FirstStackDerivedPromoteEntryCount;
+    d.c011ec26StackScanPromoteReturnCount =
+        d.c011ec19FirstStackDerivedPromoteReturnCount;
+    d.c011ec26QueueCursorBeforeStack = d.c011ec19SecondQueueCursorBefore;
+    d.c011ec26QueueCursorAfterStack = d.c011ec19SecondQueueCursorAfter;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26PostStackRootSource(uint32_t source) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec26PostStackRootSourceCount;
+    if (d.c011ec26FirstPostStackRootSource == 0u) {
+        d.c011ec26FirstPostStackRootSource = source;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26StackProviderEntered() {
+    ++g_guideXosAllocationDiagnostics.c011ec26StackProviderCallbackEntryCount;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26StackProviderReturned() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec26StackProviderCallbackReturnCount;
+    d.c011ec26QueueCursorAfterStack = d.c011ec19SecondQueueCursorAfter;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26GcScanRootsReturned() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec26GcScanRootsReturnCount;
+    d.c011ec26GcScanRootsEnumerationComplete = 1u;
+    d.c011ec26QueueCursorAtGcScanRootsReturn =
+        d.c011ec19SecondQueueCursorAfter;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC26PostScanAfterGcScanRootsEntered() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (d.c011ec26FirstPostScanEvent == 0u) {
+        d.c011ec26FirstPostScanEvent = 1u;
+        d.c011ec26FirstPostScanQueueOperation = 0u;
+        d.c011ec26PostScanAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    }
+    if (d.c011ec26MarkerEmitted == 0u &&
+        d.c011ec26PreflightProven != 0u &&
+        d.c011ec26TerminalDescriptorValid != 0u &&
+        d.c011ec26IteratorCompletionCount == 1u &&
+        d.c011ec26StackProviderCallbackEntryCount == 1u &&
+        d.c011ec26StackProviderCallbackReturnCount == 1u &&
+        d.c011ec26ThreadGcScanRootsEntryCount == 1u &&
+        d.c011ec26ThreadGcScanRootsReturnCount == 1u &&
+        d.c011ec26GcScanRootsEntryCount == 1u &&
+        d.c011ec26GcScanRootsReturnCount == 1u &&
+        d.c011ec26GcScanRootsEnumerationComplete != 0u &&
+        d.c011ec23UnwindAttemptCount == 2u &&
+        d.c011ec26ThirdUnwindAttemptCount == 0u) {
+        d.c011ec26MarkerEmitted = 1u;
+        d.c011ec26SafeStopReason = 0u;
+        emitC011EC26Completion();
+    }
+}
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)

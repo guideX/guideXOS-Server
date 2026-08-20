@@ -105,8 +105,16 @@ guidexos_nativeaot_gc_get_native_continuation_hook(void);
 uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_get_native_unwind_lookup_hook(void);
 
+uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_get_native_unwind_classify_hook(void);
+
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_native_unwind_lookup(
+    uintptr_t control_pc,
+    guidexos_nativeaot_native_unwind_lookup_result* result);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_native_unwind_classify(
     uintptr_t control_pc,
     guidexos_nativeaot_native_unwind_lookup_result* result);
 

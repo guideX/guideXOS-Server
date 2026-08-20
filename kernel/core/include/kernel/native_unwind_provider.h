@@ -23,6 +23,14 @@ guideXosNativeUnwindLookup(
     uintptr_t control_pc,
     guidexos_nativeaot_native_unwind_lookup_result* result);
 
+// Full provider classification.  UNWINDABLE retains the normal lookup
+// contract; TERMINAL is returned only for the registered structural kernel
+// boundary; UNSUPPORTED and MALFORMED remain distinct failure classes.
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guideXosNativeUnwindClassify(
+    uintptr_t control_pc,
+    guidexos_nativeaot_native_unwind_lookup_result* result);
+
 const guidexos_nativeaot_native_unwind_module*
 guideXosNativeUnwindGetKernelModule(void);
 
