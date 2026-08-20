@@ -220,9 +220,35 @@ static void strcopy(char* dst, const char* src, int maxLen) {
 }
 
 static int strlen_local(const char* s) {
+    if (!s) return 0;
     int len = 0;
     while (s[len]) len++;
     return len;
+}
+
+static void nav_copy_serial_safe_text(const char* src, char* dst, int dstSize)
+{
+    if (!dst || dstSize <= 0) return;
+    dst[0] = '\0';
+    if (!src) return;
+
+    int out = 0;
+    bool pendingSpace = false;
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(src);
+         *p && out < dstSize - 1; ++p) {
+        const unsigned char ch = *p;
+        if (ch < 0x20u) {
+            pendingSpace = out > 0;
+            continue;
+        }
+        if (pendingSpace && out < dstSize - 1) {
+            dst[out++] = ' ';
+            pendingSpace = false;
+        }
+        dst[out++] = static_cast<char>(ch);
+    }
+    while (out > 0 && dst[out - 1] == ' ') --out;
+    dst[out] = '\0';
 }
 
 static bool streq_local(const char* a, const char* b) {
@@ -7143,6 +7169,7 @@ NavigatorApp::NavigatorApp()
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
       m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1),
       m_loading(false), m_throbberFrame(0), m_loadingStartTick(0),
+      m_documentGeneration(0),
       m_focusedFormBlock(-1), m_formCaret(0)
 {
     strcopy(m_status, "Ready", MAX_STATUS_LEN);
@@ -7171,6 +7198,21 @@ NavigatorApp::NavigatorApp()
     m_metaSourcePreview[0] = '\0';
     m_metaSourceBytes = 0;
     m_metaSourceTruncated = false;
+    m_metaBodyBufferValid = false;
+    m_metaBodyNullTerminated = false;
+    m_metaBodyComplete = false;
+    m_metaBodyOwnership[0] = '\0';
+    m_metaHandoffEntered = false;
+    m_metaHandoffResult[0] = '\0';
+    m_metaParserInvoked = false;
+    m_metaParserCompleted = false;
+    m_metaParserInputBytes = 0;
+    m_metaDocumentCreated = false;
+    m_metaDocumentCount = 0;
+    m_metaActiveDocumentGeneration = 0;
+    m_metaTextFragmentCount = 0;
+    m_metaLinkCount = 0;
+    m_metaVisibleText[0] = '\0';
     m_metaDocumentBlocks = 0;
     m_metaImageBlocks = 0;
     m_metaLoadedImages = 0;
@@ -9109,8 +9151,20 @@ void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out,
     strcopy(out + len, href, outSize - len);
 }
 
-void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const char* sourceType, const char* contentType, int httpStatusCode, const char* httpReason, const char* requestedUrl, int redirectCount, const KernelHttpResponse* networkResponse)
+void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const char* sourceType, const char* contentType, int httpStatusCode, const char* httpReason, const char* requestedUrl, int redirectCount, const KernelHttpResponse* networkResponse, int inputBytes)
 {
+    const int boundedInputBytes = inputBytes >= 0
+        ? (inputBytes > gxos::web::kHttpSharedMaxBodyBytes ? gxos::web::kHttpSharedMaxBodyBytes : inputBytes)
+        : strlen_local(html);
+    m_metaParserInvoked = true;
+    m_metaParserCompleted = false;
+    m_metaParserInputBytes = boundedInputBytes > 0 ? boundedInputBytes : 0;
+    m_metaDocumentCreated = false;
+    m_metaDocumentCount = 0;
+    m_metaActiveDocumentGeneration = m_documentGeneration;
+    m_metaTextFragmentCount = 0;
+    m_metaLinkCount = 0;
+    m_metaVisibleText[0] = '\0';
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, url ? url : "Document", MAX_TITLE_LEN_NAV);
     m_blockCount = 0;
@@ -9309,8 +9363,24 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         addBlock(BLOCK_PREFORMATTED, html ? html : "", "", &style);
     }
     prepareImageResources();
+    m_metaParserCompleted = true;
+    m_metaDocumentCreated = m_blockCount > 0;
+    m_metaDocumentCount = m_metaDocumentCreated ? 1 : 0;
+    m_metaActiveDocumentGeneration = m_documentGeneration;
+    for (int i = 0; i < m_blockCount; ++i) {
+        const DocBlock& block = m_blocks[i];
+        if (block.kind == BLOCK_LINK) ++m_metaLinkCount;
+        if (!block.text[0]) continue;
+        ++m_metaTextFragmentCount;
+        if (!m_metaVisibleText[0] &&
+            (block.kind == BLOCK_HEADING || block.kind == BLOCK_PARAGRAPH ||
+             block.kind == BLOCK_LINK || block.kind == BLOCK_LIST_ITEM ||
+             block.kind == BLOCK_PREFORMATTED)) {
+            nav_copy_serial_safe_text(block.text, m_metaVisibleText, sizeof(m_metaVisibleText));
+        }
+    }
     rememberPageMetadata(requestedUrl ? requestedUrl : url, url, sourceType ? sourceType : "file",
-        contentType ? contentType : "text/html", "", html, html ? strlen_local(html) : 0,
+        contentType ? contentType : "text/html", "", html, boundedInputBytes,
         &cssDiagnostics, &bodyStyle, httpStatusCode, httpReason ? httpReason : "", redirectCount,
         networkResponse);
 }
@@ -11297,6 +11367,36 @@ void NavigatorApp::loadHttpUrl(const char* url)
 
 void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* response)
 {
+    m_metaHandoffEntered = response != nullptr;
+    m_metaHandoffResult[0] = '\0';
+    m_metaParserInvoked = false;
+    m_metaParserCompleted = false;
+    m_metaParserInputBytes = 0;
+    m_metaDocumentCreated = false;
+    m_metaDocumentCount = 0;
+    m_metaActiveDocumentGeneration = m_documentGeneration;
+    m_metaTextFragmentCount = 0;
+    m_metaLinkCount = 0;
+    m_metaVisibleText[0] = '\0';
+    m_metaBodyBufferValid = false;
+    m_metaBodyNullTerminated = false;
+    m_metaBodyComplete = false;
+    strcopy(m_metaBodyOwnership, "not-transferred", sizeof(m_metaBodyOwnership));
+    if (!response) {
+        strcopy(m_metaHandoffResult, "rejected:null-response", sizeof(m_metaHandoffResult));
+        buildErrorDocument(url ? url : "", "Navigator received no HTTP response object.");
+        rememberPageMetadata(url, url, "http", "", "Null HTTP response", nullptr, 0);
+        return;
+    }
+    const bool bodyBytesInBounds = response->bodyBytes >= 0 &&
+        response->bodyBytes <= kKernelHttpBodyLimit;
+    m_metaBodyBufferValid = bodyBytesInBounds;
+    m_metaBodyNullTerminated = bodyBytesInBounds && response->body[response->bodyBytes] == '\0';
+    m_metaBodyComplete = response->ok && !response->truncatedResponse &&
+        (!response->contentLengthPresent || response->bodyBytes == response->contentLength);
+    strcopy(m_metaBodyOwnership,
+        "static-response-buffer-copied-to-document-buffer", sizeof(m_metaBodyOwnership));
+    strcopy(m_metaHandoffResult, "pending", sizeof(m_metaHandoffResult));
     const char* transportSource = response && response->scheme[0] ? response->scheme : "http";
     auto buildCompatibilityFailureDocument = [&](const char* title, const char* summary) {
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
@@ -11354,6 +11454,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
     };
 
     if (!response->ok) {
+        strcopy(m_metaHandoffResult, "rejected:response-not-ok", sizeof(m_metaHandoffResult));
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
         const char* requestedUrl = response->requestedUrl[0] ? response->requestedUrl : url;
         const bool requestedHttps = nav_starts_with(requestedUrl, "https://");
@@ -11431,12 +11532,25 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         if (gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html")) {
             int docBytes = response->bodyBytes;
             if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
+            if (!m_metaBodyBufferValid || !m_metaBodyNullTerminated) {
+                strcopy(m_metaHandoffResult, "rejected:invalid-body-buffer", sizeof(m_metaHandoffResult));
+                buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url,
+                    "Navigator rejected an invalid HTTP body buffer.");
+                rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url,
+                    response->finalUrl[0] ? response->finalUrl : url, transportSource,
+                    response->contentType, "Invalid HTTP body buffer", nullptr, 0, nullptr, nullptr,
+                    response->statusCode, response->reason, response->redirectCount, response);
+                return;
+            }
             for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
             s_kernelHttpDocumentBody[docBytes] = '\0';
+            strcopy(m_metaHandoffResult, "accepted:html-document", sizeof(m_metaHandoffResult));
             parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
                 transportSource, response->contentType, response->statusCode, response->reason,
-                response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount, response);
+                response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount, response,
+                docBytes);
         } else if (!response->contentType[0] || gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
+            strcopy(m_metaHandoffResult, "accepted:plain-text-document", sizeof(m_metaHandoffResult));
             strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
             strcopy(m_title, response->finalUrl[0] ? response->finalUrl : url, MAX_TITLE_LEN_NAV);
             m_blockCount = 0;
@@ -11446,6 +11560,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
                 response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason,
                 response->redirectCount, response);
         } else {
+            strcopy(m_metaHandoffResult, "rejected:unsupported-mime", sizeof(m_metaHandoffResult));
             DownloadRecord record{};
             strcopy(record.url, response->requestedUrl[0] ? response->requestedUrl : url, sizeof(record.url));
             strcopy(record.finalUrl, response->finalUrl[0] ? response->finalUrl : url, sizeof(record.finalUrl));
@@ -11522,6 +11637,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
 
     if (response->statusCode == 301 || response->statusCode == 302 || response->statusCode == 303 ||
         response->statusCode == 307 || response->statusCode == 308) {
+        strcopy(m_metaHandoffResult, "accepted:redirect-document", sizeof(m_metaHandoffResult));
         strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
         strcopy(m_title, "HTTP Redirect", MAX_TITLE_LEN_NAV);
         m_blockCount = 0;
@@ -11536,6 +11652,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         return;
     }
 
+    strcopy(m_metaHandoffResult, "rejected:non-success-status", sizeof(m_metaHandoffResult));
     char message[160];
     strcopy(message, "HTTP error status ", sizeof(message));
     int len = strlen_local(message);
@@ -11632,7 +11749,7 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
         app.parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
             response->scheme[0] ? response->scheme : "http", response->contentType, response->statusCode,
             response->reason, response->requestedUrl[0] ? response->requestedUrl : url,
-            response->redirectCount, response);
+            response->redirectCount, response, docBytes);
     } else if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
         app.m_blockCount = 0;
         app.addBlock(BLOCK_PREFORMATTED, response->body);
@@ -12229,6 +12346,8 @@ void NavigatorApp::loadUrl(const char* url)
         setStatus("Navigation already in progress");
         return;
     }
+    if (m_documentGeneration == 0xFFFFFFFFu) m_documentGeneration = 1;
+    else ++m_documentGeneration;
     static bool animationOwnerLogged = false;
     if (!animationOwnerLogged) {
         serial::puts("[NAVIGATOR] throbber_animation=passive_elapsed_time\n");
@@ -13663,6 +13782,73 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (redirectHopIndex) *redirectHopIndex = app.m_metaRedirectHopIndex;
     if (redirectHopUrl && redirectHopUrlLen > 0) {
         strcopy(redirectHopUrl, app.m_metaRedirectHopUrl, redirectHopUrlLen);
+    }
+
+    // Phase 8K evidence is emitted only for the production, non-allowlisted
+    // HTTPS lane. The navigation above is still the ordinary NavigatorApp
+    // loadUrl -> loadHttpResponse -> parseHtmlDocument path; this block only
+    // exposes its bounded state for the public proof log.
+    if (app.m_metaTlsUsed && !app.m_metaTlsAllowlistLocalOnly &&
+        streq_local(app.m_metaSourceType, "https")) {
+        char safeTitle[MAX_TITLE_LEN_NAV];
+        nav_copy_serial_safe_text(app.m_title, safeTitle, sizeof(safeTitle));
+        serial::puts("[NAVIGATOR-8K] navigation_generation=");
+        serial_put_dec(app.m_documentGeneration);
+        serial::puts("\n[NAVIGATOR-8K] handoff.entry=");
+        serial::puts(app.m_metaHandoffEntered ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] handoff.requested_url=");
+        serial::puts(app.m_metaRequestedUrl[0] ? app.m_metaRequestedUrl : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] handoff.final_url=");
+        serial::puts(app.m_metaFinalUrl[0] ? app.m_metaFinalUrl : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] handoff.mime=");
+        serial::puts(app.m_metaContentType[0] ? app.m_metaContentType : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] handoff.body_bytes=");
+        serial_put_dec((uint32_t)app.m_metaSourceBytes);
+        serial::puts("\n[NAVIGATOR-8K] handoff.result=");
+        serial::puts(app.m_metaHandoffResult[0] ? app.m_metaHandoffResult : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] http.status=");
+        serial_put_dec((uint32_t)app.m_metaHttpStatusCode);
+        serial::puts("\n[NAVIGATOR-8K] http.response_framing=");
+        serial::puts(app.m_metaResponseFraming[0] ? app.m_metaResponseFraming : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] http.content_length_present=");
+        serial::puts(app.m_metaContentLengthPresent ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] http.content_length=");
+        serial_put_dec((uint32_t)app.m_metaContentLength);
+        serial::puts("\n[NAVIGATOR-8K] body.completion=");
+        serial::puts(app.m_metaBodyComplete ? "complete" : "incomplete");
+        serial::puts("\n[NAVIGATOR-8K] body.buffer_valid=");
+        serial::puts(app.m_metaBodyBufferValid ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] body.null_terminated=");
+        serial::puts(app.m_metaBodyNullTerminated ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] body.ownership=");
+        serial::puts(app.m_metaBodyOwnership[0] ? app.m_metaBodyOwnership : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] parser.invoked=");
+        serial::puts(app.m_metaParserInvoked ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] parser.input_bytes=");
+        serial_put_dec((uint32_t)app.m_metaParserInputBytes);
+        serial::puts("\n[NAVIGATOR-8K] parser.completed=");
+        serial::puts(app.m_metaParserCompleted ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] document.created=");
+        serial::puts(app.m_metaDocumentCreated ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] document.count=");
+        serial_put_dec((uint32_t)app.m_metaDocumentCount);
+        serial::puts("\n[NAVIGATOR-8K] document.active_generation=");
+        serial_put_dec(app.m_metaActiveDocumentGeneration);
+        serial::puts("\n[NAVIGATOR-8K] document.block_count=");
+        serial_put_dec((uint32_t)app.m_metaDocumentBlocks);
+        serial::puts("\n[NAVIGATOR-8K] layout.block_count=");
+        serial_put_dec((uint32_t)app.m_metaDocumentBlocks);
+        serial::puts("\n[NAVIGATOR-8K] document.text_fragment_count=");
+        serial_put_dec((uint32_t)app.m_metaTextFragmentCount);
+        serial::puts("\n[NAVIGATOR-8K] document.link_count=");
+        serial_put_dec((uint32_t)app.m_metaLinkCount);
+        serial::puts("\n[NAVIGATOR-8K] document.image_count=");
+        serial_put_dec((uint32_t)app.m_metaImageBlocks);
+        serial::puts("\n[NAVIGATOR-8K] document.title=");
+        serial::puts(safeTitle[0] ? safeTitle : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] document.visible_text=");
+        serial::puts(app.m_metaVisibleText[0] ? app.m_metaVisibleText : "(none)");
+        serial::puts("\n");
     }
 }
 

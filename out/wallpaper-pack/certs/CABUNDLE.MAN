@@ -2,7 +2,7 @@
     "schema_version":  "guidexos.navigator.ca-bundle-manifest.v0.1",
     "bundle_type":  "production-public-probe-merged",
     "source":  "merged:explicit-public-root-input+assets/certs/mozilla-cacert-2026-08-13.pem",
-    "generated_utc":  "2026-08-19T14:13:02.1244626Z",
+    "generated_utc":  "2026-08-13T03:12:01.0000000Z",
     "root_count":  121,
     "pem_bytes":  189071,
     "sha256":  "6fc3d825ab0b97410fc77810d4aeffbfe56133ddc33a765d585c5f31b7930df8",

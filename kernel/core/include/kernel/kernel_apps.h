@@ -821,6 +821,7 @@ private:
     bool m_loading;
     int m_throbberFrame;
     uint32_t m_loadingStartTick;
+    uint32_t m_documentGeneration;
     char m_metaRequestedUrl[MAX_URL_LEN];
     char m_metaFinalUrl[MAX_URL_LEN];
     char m_metaSourceType[24];
@@ -843,6 +844,21 @@ private:
     char m_metaSourcePreview[MAX_SOURCE_PREVIEW];
     int m_metaSourceBytes;
     bool m_metaSourceTruncated;
+    bool m_metaBodyBufferValid;
+    bool m_metaBodyNullTerminated;
+    bool m_metaBodyComplete;
+    char m_metaBodyOwnership[96];
+    bool m_metaHandoffEntered;
+    char m_metaHandoffResult[96];
+    bool m_metaParserInvoked;
+    bool m_metaParserCompleted;
+    int m_metaParserInputBytes;
+    bool m_metaDocumentCreated;
+    int m_metaDocumentCount;
+    uint32_t m_metaActiveDocumentGeneration;
+    int m_metaTextFragmentCount;
+    int m_metaLinkCount;
+    char m_metaVisibleText[160];
     int m_metaDocumentBlocks;
     int m_metaImageBlocks;
     int m_metaLoadedImages;
@@ -985,7 +1001,8 @@ private:
                            const char* httpReason = "",
                            const char* requestedUrl = nullptr,
                            int redirectCount = 0,
-                           const KernelHttpResponse* networkResponse = nullptr);
+                           const KernelHttpResponse* networkResponse = nullptr,
+                           int inputBytes = -1);
     void prepareImageResources();
     void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
     void rememberDownload(const DownloadRecord& record);
