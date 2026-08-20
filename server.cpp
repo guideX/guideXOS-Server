@@ -80,6 +80,7 @@
 #include "module_manager.h"
 #include "package_manager.h"
 #include "native_elf_executor.h"
+#include "native_app_debug_log.h"
 #include "native_app_process_table.h"
 #include "development_run_service.h"
 #include <iostream>
@@ -146,6 +147,8 @@ static std::string nativeAppProcessesDiagnostic() {
             << " lastEventType=" << static_cast<uint32_t>(process.lastEventType)
             << " lastEventWindow=" << process.lastEventWindow
             << " lastPollEventResult=" << process.lastPollEventResult
+            << " shutdownStage=" << gxos::apps::NativeAppRuntime::HostedShutdownStageName(process.hostedShutdownStage)
+            << " shutdownStageCode=" << process.hostedShutdownStage
             << " drawRectCallCount=" << process.drawRectCallCount
             << " lastDrawRectWindow=" << process.lastDrawRectWindow
             << " lastDrawRectWidth=" << process.lastDrawRectWidth
@@ -172,6 +175,30 @@ static std::string nativeAppProcessesDiagnostic() {
             << " experimentalExecutionEnabled=" << (process.experimentalExecutionEnabled ? "true" : "false")
             << " hostArchitecture=" << process.hostArchitecture
             << "\n";
+    }
+    return oss.str();
+}
+
+static std::string nativeAppDebugLogDiagnostic(const std::string& rawCount) {
+    size_t requested = 24;
+    if (!rawCount.empty()) {
+        try {
+            requested = static_cast<size_t>(std::stoul(rawCount));
+        } catch (...) {
+            requested = 24;
+        }
+    }
+    requested = std::max<size_t>(1, std::min<size_t>(64, requested));
+
+    std::ostringstream oss;
+    const auto entries = gxos::apps::NativeAppDebugLog::Recent(requested);
+    oss << "Native app debug log: " << entries.size() << "\n";
+    for (const auto& entry : entries) {
+        oss << "#" << entry.timestamp
+            << " runtimeId=" << entry.runtimeId
+            << " appId=" << entry.appId
+            << " severity=" << entry.severity
+            << " message=" << entry.message << "\n";
     }
     return oss.str();
 }
@@ -4493,7 +4520,7 @@ static void help(){
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
                  " desktop.wallpaper <path> | desktop.background.remove <id> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig | desktop.display.summary | desktop.display.viewport [1|2]\n"
                  " desktop.apps | desktop.apps.verbose | desktop.windows.owners | desktop.startup.regression | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
-                 " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
+                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes | nativeapp.debuglog [count]\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
                  " notepad | notepad <file>\n"
@@ -5030,6 +5057,10 @@ using namespace gxos;
         }
         else if (cmd=="nativeapp.processes"){
             std::cout << nativeAppProcessesDiagnostic();
+        }
+        else if (cmd=="nativeapp.debuglog"){
+            std::string count; std::getline(iss, count); if(count.size()>0 && count[0]==' ') count.erase(0,1);
+            std::cout << nativeAppDebugLogDiagnostic(count);
         }
         else if (cmd=="desktop.pinapp"){
             std::string name; std::getline(iss, name); if(name.size()>0 && name[0]==' ') name.erase(0,1);

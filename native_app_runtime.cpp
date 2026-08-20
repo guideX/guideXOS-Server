@@ -57,6 +57,12 @@ constexpr uint32_t kMaxWorkspaceIoBytes = 256u * 1024u;
 constexpr uint32_t kMaxWorkspaceListEntries = 129u;
 constexpr uint64_t kMaxPresentFrameBytes = 16ull * 1024ull * 1024ull;
 constexpr uint64_t kMaxNativeAppStackBytes = 8ull * 1024ull * 1024ull;
+constexpr uint32_t kHostedShutdownRequest = 1;
+constexpr uint32_t kHostedShutdownStopRequested = 2;
+constexpr uint32_t kHostedShutdownTargetTeardown = 3;
+constexpr uint32_t kHostedShutdownSessionTeardown = 4;
+constexpr uint32_t kHostedShutdownWindowRelease = 5;
+constexpr uint32_t kHostedShutdownComplete = 6;
 
 bool frameDiagnosticsEnabled() {
     static const bool enabled = []() {
@@ -189,6 +195,18 @@ bool copyNativePath(const NativeAppRuntimeContext& context, const char* path, st
 
     failureReason = "path-not-null-terminated-within-limit";
     return false;
+}
+
+uint32_t hostedShutdownStageForMessage(const char* message) {
+    if (!message) return 0;
+    const std::string value(message);
+    if (value.find("GUIDEXOS_DEVELOPER_STUDIO_MARKER debug_shutdown_request=") == 0) return kHostedShutdownRequest;
+    if (value.find("GUIDEXOS_DEVELOPER_STUDIO_MARKER debug_stop=requested") == 0) return kHostedShutdownStopRequested;
+    if (value.find("GUIDEXOS_DEVELOPER_STUDIO_MARKER debug_target_teardown=PASS") == 0) return kHostedShutdownTargetTeardown;
+    if (value.find("GUIDEXOS_DEVELOPER_STUDIO_MARKER debug_session_teardown=PASS") == 0) return kHostedShutdownSessionTeardown;
+    if (value.find("GUIDEXOS_DEVELOPER_STUDIO_MARKER debug_window_release=") == 0) return kHostedShutdownWindowRelease;
+    if (value.find("GUIDEXOS_DEVELOPER_STUDIO_MARKER debug_shutdown_complete=PASS") == 0) return kHostedShutdownComplete;
+    return 0;
 }
 
 bool copyNativeString(const NativeAppRuntimeContext& context, const char* value, uint32_t maxBytes, std::string& output) {
@@ -665,7 +683,11 @@ gx_result hostLog(NativeGxAppContext* ctx, const char* message) {
     const char* safeMessage = message ? message : "<null>";
     ++context->hostLogCallCount;
     context->lastHostLogMessage = safeMessage;
+    const uint32_t shutdownStage = hostedShutdownStageForMessage(safeMessage);
+    if (shutdownStage > context->hostedShutdownStage)
+        context->hostedShutdownStage = shutdownStage;
     NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", std::string("host log: ") + safeMessage);
+    NativeAppProcessTable::UpdateFromRuntime(*context);
     Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " log: " + safeMessage);
     return GX_OK;
 }
@@ -1842,6 +1864,21 @@ void NativeAppRuntime::Cleanup(NativeAppRuntimeContext& context, NativeAppLifecy
             }
         }
 
+        // The hosted Studio emits the request/teardown markers before it exits.
+        // Publish the final two markers from the runtime after owned windows have
+        // been released so the lifecycle remains queryable even if the app-side
+        // diagnostic stream closes at the same time as the process.
+        if (context.hostedShutdownStage >= kHostedShutdownWindowRelease) {
+            context.hostedShutdownStage = kHostedShutdownComplete;
+            const std::string releaseMarker = "GUIDEXOS_DEVELOPER_STUDIO_MARKER debug_window_release=PASS";
+            const std::string completeMarker = "GUIDEXOS_DEVELOPER_STUDIO_MARKER debug_shutdown_complete=PASS";
+            NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", releaseMarker);
+            NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", completeMarker);
+            Logger::write(LogLevel::Info, "[NativeAppRuntime] App: " + appLabel(&context) + " " + releaseMarker);
+            Logger::write(LogLevel::Info, "[NativeAppRuntime] App: " + appLabel(&context) + " " + completeMarker);
+            NativeAppProcessTable::UpdateFromRuntime(context);
+        }
+
         context.endTime = std::chrono::steady_clock::now();
         context.lifecycleState = finalState == NativeAppLifecycleState::Failed ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited;
         g_hostLifecycleState = context.lifecycleState;
@@ -1872,6 +1909,18 @@ const char* NativeAppRuntime::ToString(NativeAppLifecycleState state) {
     case NativeAppLifecycleState::Exited: return "Exited";
     case NativeAppLifecycleState::Failed: return "Failed";
     default: return "Unknown";
+    }
+}
+
+const char* NativeAppRuntime::HostedShutdownStageName(uint32_t stage) {
+    switch (stage) {
+    case kHostedShutdownRequest: return "request";
+    case kHostedShutdownStopRequested: return "stop_requested";
+    case kHostedShutdownTargetTeardown: return "target_teardown";
+    case kHostedShutdownSessionTeardown: return "session_teardown";
+    case kHostedShutdownWindowRelease: return "window_release";
+    case kHostedShutdownComplete: return "complete";
+    default: return "none";
     }
 }
 
