@@ -16487,7 +16487,10 @@ static bool printNavigatorPublicPilotDowngradeCase()
 
 static bool printNavigatorHttpSmokeCases()
 {
-    bool httpOk = true;
+    // Run the explicitly requested public proof lane before the broad local
+    // compatibility matrix.  A later legacy/native-app fault must not erase
+    // the evidence for an already-authorized public HTTPS probe.
+    bool httpOk = printNavigatorRealPublicHttpsProbeCase();
     httpOk = printNavigatorLocalTlsSmokeCase() && httpOk;
     httpOk = printNavigatorLocalTlsRedirectCase() && httpOk;
     httpOk = printNavigatorLocalTlsWrongHostnameFailureCase() && httpOk;
@@ -16593,7 +16596,6 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/forms/post-echo", 1) && httpOk;
     httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_hostname", "http://10.0.2.2:8080/forms/post-redirect-hostname",
         "http://guidexos.test:8080/forms/post-echo", 1, "10.0.2.2") && httpOk;
-    httpOk = printNavigatorRealPublicHttpsProbeCase() && httpOk;
     return httpOk;
 }
 
@@ -16602,8 +16604,12 @@ void printNavigatorRuntimeSmokeReport()
     bool registered = printNavigatorRuntimeSmokePreamble();
     bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
 #ifdef GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE
+    const bool phase8jRawOk = gxos::gxos_tls_run_phase8j_raw_ecdsa_diagnostics();
+    serial::puts(phase8jRawOk
+        ? "[NAVIGATOR-SMOKE] phase8j.raw_ecdsa.result=PASS\n"
+        : "[NAVIGATOR-SMOKE] phase8j.raw_ecdsa.result=FAIL\n");
     bool httpOk = printNavigatorHttpSmokeCases();
-    serial::puts((registered && typographyOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk && phase8jRawOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
 #else
     serial::puts("[NAVIGATOR-SMOKE] http.active_cases=skipped\n");
     serial::puts((registered && typographyOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");

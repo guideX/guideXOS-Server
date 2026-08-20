@@ -96,6 +96,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Mbed TLS configuration-check generation failed." }
     & $PythonPath 'tf-psa-crypto\scripts\generate_config_checks.py'
     if ($LASTEXITCODE -ne 0) { throw "TF-PSA-Crypto configuration-check generation failed." }
+    & $PythonPath 'tf-psa-crypto\scripts\generate_driver_wrappers.py'
+    if ($LASTEXITCODE -ne 0) { throw "TF-PSA-Crypto driver-wrapper generation failed." }
 } finally {
     Pop-Location
 }

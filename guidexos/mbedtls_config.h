@@ -22,7 +22,7 @@
 #define MBEDTLS_X509_REMOVE_INFO
 
 /* Prefer a conservative record size for the bounded guideXOS arena. */
-#define MBEDTLS_SSL_IN_CONTENT_LEN 4096
+#define MBEDTLS_SSL_IN_CONTENT_LEN 16384
 #define MBEDTLS_SSL_OUT_CONTENT_LEN 4096
 
 /* Expose runtime version information for diagnostics once the import is complete. */
@@ -33,4 +33,3 @@
 #define MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
 
 #endif /* GUIDEXOS_MBEDTLS_CONFIG_H */
-

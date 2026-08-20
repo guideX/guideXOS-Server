@@ -1,4 +1,5 @@
 #include "gxos_tls_foundation.h"
+#include "tests/phase8j_ecdsa_vectors.h"
 #include "gxos_tls_prerequisites.h"
 
 #if defined(GXOS_BARE_METAL)
@@ -189,6 +190,13 @@ void gxos_mbedtls_platform_exit_noop(int)
 {
 }
 
+static uint32_t gxos_tls_smoke_trace_count = 0;
+
+static void gxos_tls_smoke_debug_trace_reset()
+{
+    gxos_tls_smoke_trace_count = 0;
+}
+
 void gxos_tls_smoke_debug_trace(const char* event, uint32_t value)
 {
     /*
@@ -197,9 +205,8 @@ void gxos_tls_smoke_debug_trace(const char* event, uint32_t value)
      * bounded: event names are fixed literals from the TLS/PSA sources and
      * values are status/size/identifier fields only.
      */
-    static uint32_t traceCount = 0;
-    if (traceCount >= 2048u) return;
-    ++traceCount;
+    if (gxos_tls_smoke_trace_count >= 65536u) return;
+    ++gxos_tls_smoke_trace_count;
 #if defined(GXOS_BARE_METAL)
     kernel::serial::puts("[TLS-CRYPTO] ");
     kernel::serial::puts(event ? event : "(null)");
@@ -3765,6 +3772,141 @@ const char* gxos_tls_arena_status_name(GxosTlsArenaStatus status)
 GxosTlsArenaInfo gxos_tls_arena_info()
 {
     return make_tls_arena_info();
+}
+
+bool gxos_tls_run_phase8j_raw_ecdsa_diagnostics()
+{
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    if (!ensure_psa_initialized()) {
+        gxos_tls_smoke_debug_trace("phase8j.psa_init.failed", 0);
+        return false;
+    }
+
+    gxos_tls_smoke_debug_trace_reset();
+    gxos_tls_smoke_debug_trace("phase8j.raw.begin", 0);
+    gxos_tls_smoke_debug_trace("phase8j.config.nist_optim",
+#if defined(MBEDTLS_ECP_NIST_OPTIM)
+                               1u
+#else
+                               0u
+#endif
+    );
+    gxos_tls_smoke_debug_trace("phase8j.config.p256_driver",
+#if defined(MBEDTLS_PSA_P256M_DRIVER_ENABLED)
+                               1u
+#else
+                               0u
+#endif
+    );
+    gxos_tls_smoke_debug_trace("phase8j.config.restartable",
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+                               1u
+#else
+                               0u
+#endif
+    );
+#if defined(MBEDTLS_ECP_WINDOW_SIZE)
+    gxos_tls_smoke_debug_trace("phase8j.config.window_size",
+                               static_cast<uint32_t>(MBEDTLS_ECP_WINDOW_SIZE));
+#else
+    gxos_tls_smoke_debug_trace("phase8j.config.window_size", 0u);
+#endif
+#if defined(MBEDTLS_ECP_FIXED_POINT_OPTIM)
+    gxos_tls_smoke_debug_trace("phase8j.config.fixed_point",
+                               static_cast<uint32_t>(MBEDTLS_ECP_FIXED_POINT_OPTIM));
+#else
+    gxos_tls_smoke_debug_trace("phase8j.config.fixed_point", 0u);
+#endif
+    gxos_tls_smoke_debug_trace("phase8j.config.mpi_uint_bytes",
+                               static_cast<uint32_t>(sizeof(mbedtls_mpi_uint)));
+
+    bool allPassed = true;
+    for (size_t i = 0; i < kGxosPhase8jEcdsaVectorCount; ++i) {
+        const GxosPhase8jEcdsaVector& vector = kGxosPhase8jEcdsaVectors[i];
+        gxos_tls_smoke_debug_trace("phase8j.vector.begin", vector.bits);
+
+        psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+        psa_set_key_type(&attributes,
+                         PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+        psa_set_key_bits(&attributes, vector.bits);
+        psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_VERIFY_HASH);
+        psa_set_key_algorithm(&attributes,
+                              vector.bits == 256
+                                  ? PSA_ALG_ECDSA(PSA_ALG_SHA_256)
+                                  : PSA_ALG_ECDSA(PSA_ALG_SHA_384));
+
+        psa_key_id_t key = PSA_KEY_ID_NULL;
+        psa_status_t status = psa_import_key(&attributes,
+                                              vector.publicKey,
+                                              vector.publicKeyLength,
+                                              &key);
+        gxos_tls_smoke_debug_trace("phase8j.key_import",
+                                   static_cast<uint32_t>(status));
+        bool vectorPassed = status == PSA_SUCCESS;
+        if (vectorPassed) {
+            gxos_tls_smoke_debug_trace("phase8j.verify.entry", vector.bits);
+            status = psa_verify_hash(key,
+                                     psa_get_key_algorithm(&attributes),
+                                     vector.hash,
+                                     vector.hashLength,
+                                     vector.signature,
+                                     vector.signatureLength);
+            gxos_tls_smoke_debug_trace("phase8j.verify.return",
+                                       static_cast<uint32_t>(status));
+            vectorPassed = status == PSA_SUCCESS;
+            (void) psa_destroy_key(key);
+        }
+
+        psa_reset_key_attributes(&attributes);
+
+        uint8_t alteredSignature[96] = {};
+        if (vector.signatureLength <= sizeof(alteredSignature)) {
+            for (size_t j = 0; j < vector.signatureLength; ++j) {
+                alteredSignature[j] = vector.signature[j];
+            }
+            alteredSignature[vector.signatureLength - 1] ^= 0x01u;
+
+            attributes = PSA_KEY_ATTRIBUTES_INIT;
+            psa_set_key_type(&attributes,
+                             PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+            psa_set_key_bits(&attributes, vector.bits);
+            psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_VERIFY_HASH);
+            psa_set_key_algorithm(&attributes,
+                                  vector.bits == 256
+                                      ? PSA_ALG_ECDSA(PSA_ALG_SHA_256)
+                                      : PSA_ALG_ECDSA(PSA_ALG_SHA_384));
+            key = PSA_KEY_ID_NULL;
+            status = psa_import_key(&attributes,
+                                    vector.publicKey,
+                                    vector.publicKeyLength,
+                                    &key);
+            if (status == PSA_SUCCESS) {
+                status = psa_verify_hash(key,
+                                         psa_get_key_algorithm(&attributes),
+                                         vector.hash,
+                                         vector.hashLength,
+                                         alteredSignature,
+                                         vector.signatureLength);
+                (void) psa_destroy_key(key);
+            }
+            gxos_tls_smoke_debug_trace("phase8j.verify.altered_return",
+                                       static_cast<uint32_t>(status));
+            vectorPassed = vectorPassed && status == PSA_ERROR_INVALID_SIGNATURE;
+            psa_reset_key_attributes(&attributes);
+        } else {
+            vectorPassed = false;
+        }
+
+        gxos_tls_smoke_debug_trace("phase8j.vector.result",
+                                   vectorPassed ? 1u : 0u);
+        allPassed = allPassed && vectorPassed;
+    }
+
+    gxos_tls_smoke_debug_trace("phase8j.raw.result", allPassed ? 1u : 0u);
+    return allPassed;
+#else
+    return false;
+#endif
 }
 
 const char* gxos_tls_hook_status_name(GxosTlsHookStatus status)

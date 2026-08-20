@@ -342,6 +342,9 @@ const char* gxos_tls_certificate_validation_policy();
 bool gxos_tls_prerequisites_ready();
 const char* gxos_tls_prerequisites_blocker_reason();
 
+/* Direct PSA ECDSA probes used by the Phase 8J bare-metal crypto rail. */
+bool gxos_tls_run_phase8j_raw_ecdsa_diagnostics();
+
 #if defined(GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE)
 bool gxos_tls_capability_contract_negative_test(GxosTlsLocalHandshakeResult* result);
 #endif
