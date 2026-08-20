@@ -216,6 +216,8 @@ main() {
     # Network support (Intel E1000)
     QEMU_ARGS+=("-netdev" "user,id=net0")
     QEMU_ARGS+=("-device" "e1000,netdev=net0")
+    QEMU_ARGS+=("-object" "rng-builtin,id=rng0")
+    QEMU_ARGS+=("-device" "virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000")
     
     # Debug options
     if $DEBUG; then

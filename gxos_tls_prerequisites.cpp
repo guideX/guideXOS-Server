@@ -10,6 +10,8 @@
 namespace gxos {
 namespace {
 
+bool s_entropyReadMarkerEmitted = false;
+
 bool is_leap_year(uint16_t year)
 {
     return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
@@ -57,6 +59,10 @@ bool gxos_random_bytes(void* buffer, size_t len)
         for (size_t i = 0; i < request; ++i) out[i] = chunk[i];
         out += request;
         len -= request;
+    }
+    if (!s_entropyReadMarkerEmitted) {
+        s_entropyReadMarkerEmitted = true;
+        kernel::serial::puts("[RNG] entropy sample request success; secure source read confirmed\n");
     }
     return true;
 }

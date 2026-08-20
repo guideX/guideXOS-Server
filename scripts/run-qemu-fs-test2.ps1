@@ -16,6 +16,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 $DiskDir = Join-Path $ProjectDir "disks"
 $EspDir = Join-Path $ProjectDir "ESP"
+. (Join-Path $ScriptDir "qemu-secure-rng-args.ps1")
 
 $UseFat32 = -not $Ext4Only
 $UseExt4 = -not $Fat32Only
@@ -211,6 +212,7 @@ function Main {
     # Network support
     $qemuArgs += "-netdev", "user,id=net0"
     $qemuArgs += "-device", "e1000,netdev=net0"
+    $qemuArgs += Get-GxosQemuSecureRngArguments
 
     if ($Debug) {
         $qemuArgs += "-d", "int,cpu_reset"

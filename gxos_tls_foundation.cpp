@@ -1307,6 +1307,7 @@ struct BareMetalTlsRuntimeState {
     bool allocatorInitialized = false;
     bool psaInitAttempted = false;
     bool psaInitialized = false;
+    bool psaCallbackMarkerEmitted = false;
     bool caChainInitialized = false;
     bool allocatorExhausted = false;
     GxosTlsHookStatus allocatorStatus = GxosTlsHookStatus::Pending;
@@ -2454,6 +2455,11 @@ bool ensure_psa_initialized()
         return false;
     }
 
+    if (!state.psaCallbackMarkerEmitted) {
+        state.psaCallbackMarkerEmitted = true;
+        kernel::serial::puts("[TLS-PSA] external RNG callback registered; secure entropy status=ready\n");
+    }
+
     if (state.psaInitialized) {
         state.psaStatus = GxosTlsHookStatus::Ready;
         copy_text(state.psaDetail, sizeof(state.psaDetail),
@@ -2472,6 +2478,7 @@ bool ensure_psa_initialized()
 
     state.psaInitialized = true;
     state.psaStatus = GxosTlsHookStatus::Ready;
+    kernel::serial::puts("[TLS-PSA] psa_crypto_init status=success\n");
     copy_text(state.psaDetail, sizeof(state.psaDetail),
         "psa_crypto_init() completed successfully for CA parsing.");
     return true;

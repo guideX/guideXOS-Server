@@ -16,6 +16,7 @@ $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 . (Join-Path $Root "scripts\process_environment.ps1")
 Normalize-ProcessEnvironment
+. (Join-Path $Root "scripts\qemu-secure-rng-args.ps1")
 . (Join-Path $Root "scripts\navigator_smoke_repo_hygiene.ps1")
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -453,10 +454,9 @@ function Invoke-NavigatorKernelSmokeQemuPass {
             "-no-reboot",
             "-rtc", "base=utc,clock=host",
             "-netdev", "user,id=net0",
-            "-device", "e1000,netdev=net0",
-            "-object", "rng-builtin,id=rng0",
-            "-device", "virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000"
+            "-device", "e1000,netdev=net0"
         )
+        $args += Get-GxosQemuSecureRngArguments
 
         $netDumpPath = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_QEMU_NET_DUMP", "Process")
         if (-not [string]::IsNullOrWhiteSpace($netDumpPath)) {

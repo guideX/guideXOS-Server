@@ -31,6 +31,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 $DiskDir = Join-Path $ProjectDir "disks"
 $EspDir = Join-Path $ProjectDir "ESP"
+. (Join-Path $ScriptDir "qemu-secure-rng-args.ps1")
 
 # Determine which disks to use
 $UseFat32 = -not $Ext4Only
@@ -230,6 +231,7 @@ function Main {
     # Network support (Intel E1000)
     $qemuArgs += "-netdev", "user,id=net0"
     $qemuArgs += "-device", "e1000,netdev=net0"
+    $qemuArgs += Get-GxosQemuSecureRngArguments
     
     # Debug options
     if ($Debug) {

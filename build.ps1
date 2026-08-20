@@ -33,6 +33,7 @@ $RootDir = $PSScriptRoot
 $ProcessEnvironmentScript = Join-Path $RootDir "scripts\process_environment.ps1"
 . $ProcessEnvironmentScript
 Normalize-ProcessEnvironment
+. (Join-Path $RootDir "scripts\qemu-secure-rng-args.ps1")
 . (Join-Path $RootDir "scripts\build-native-command.ps1")
 $ESPDir = Join-Path $RootDir "ESP"
 $KernelDir = Join-Path $RootDir "kernel"
@@ -705,6 +706,7 @@ if ($AllReady) {
                 "-netdev", "user,id=net0",
                 "-device", "e1000,netdev=net0"
             )
+            $QemuArgs += Get-GxosQemuSecureRngArguments
             if ($Debug) {
                 $QemuArgs += "-d", "int,cpu_reset"
                 $QemuArgs += "-D", "qemu-debug.log"

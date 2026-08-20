@@ -11,6 +11,7 @@ setlocal enabledelayedexpansion
 
 REM Get the directory where this script is located
 set "SCRIPT_DIR=%~dp0"
+call "%SCRIPT_DIR%scripts\qemu-secure-rng-args.bat"
 
 echo ====================================
 echo   guideXOS UEFI Boot
@@ -162,6 +163,8 @@ if "%SPLIT_PFLASH%"=="1" (
         -drive file=fat:rw:ESP,format=raw ^
         -netdev user,id=net0 ^
         -device e1000,netdev=net0 ^
+        %GXOS_QEMU_RNG_OBJECT% ^
+        %GXOS_QEMU_RNG_DEVICE% ^
         -m 1024M ^
         -vga std ^
         -display gtk ^
@@ -177,6 +180,8 @@ if "%SPLIT_PFLASH%"=="1" (
         -drive file=fat:rw:ESP,format=raw ^
         -netdev user,id=net0 ^
         -device e1000,netdev=net0 ^
+        %GXOS_QEMU_RNG_OBJECT% ^
+        %GXOS_QEMU_RNG_DEVICE% ^
         -m 1024M ^
         -vga std ^
         -display gtk ^

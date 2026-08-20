@@ -117,6 +117,8 @@ if [ "$SPLIT_PFLASH" = "1" ]; then
         -drive file=fat:rw:ESP,format=raw \
         -netdev user,id=net0 \
         -device e1000,netdev=net0 \
+        -object rng-builtin,id=rng0 \
+        -device virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000 \
         -m 1024M \
         -vga std \
         -display gtk \
@@ -132,6 +134,8 @@ else
         -drive file=fat:rw:ESP,format=raw \
         -netdev user,id=net0 \
         -device e1000,netdev=net0 \
+        -object rng-builtin,id=rng0 \
+        -device virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000 \
         -m 1024M \
         -vga std \
         -display gtk \

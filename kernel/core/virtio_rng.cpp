@@ -301,6 +301,7 @@ static bool initialize_legacy_device(bool announce = true)
     set_last_status(STATUS_SUCCESS);
     update_feature_report_status();
     if (announce) {
+        serial::puts("[VIRTIO-RNG] Device present=yes; driver ready=yes; secure entropy source ready\n");
         serial::puts("[VIRTIO-RNG] Initialized via legacy PCI transport\n");
     }
     return true;
@@ -416,11 +417,12 @@ bool init()
         if (s_state.lastStatus == STATUS_UNSUPPORTED_VIRTIO_MODE) {
             serial::puts("[VIRTIO-RNG] Entropy device found but transport mode is unsupported\n");
         } else {
-            serial::puts("[VIRTIO-RNG] No virtio-rng PCI device detected\n");
+            serial::puts("[VIRTIO-RNG] Device present=no; no virtio-rng PCI device detected\n");
         }
         return false;
     }
 
+    serial::puts("[VIRTIO-RNG] Device present=yes; legacy PCI transport selected\n");
     return initialize_legacy_device();
 #endif
 }

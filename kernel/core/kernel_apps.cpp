@@ -8655,7 +8655,13 @@ void NavigatorApp::buildErrorDocument(const char* url, const char* reason)
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, "Navigator Error", MAX_TITLE_LEN_NAV);
     m_blockCount = 0;
-    addBlock(BLOCK_HEADING, "Page Not Found");
+    const bool connectionFailure = reason &&
+        (strstr(reason, "TLS") || strstr(reason, "HTTPS") ||
+         strstr(reason, "certificate") || strstr(reason, "hostname") ||
+         strstr(reason, "connection") || strstr(reason, "DNS") ||
+         strstr(reason, "secure entropy") || strstr(reason, "Secure entropy") ||
+         strstr(reason, "PSA"));
+    addBlock(BLOCK_HEADING, connectionFailure ? "Secure Connection Failed" : "Page Not Found");
     addBlock(BLOCK_PARAGRAPH, reason ? reason : "Navigator could not load this page.");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
 }
