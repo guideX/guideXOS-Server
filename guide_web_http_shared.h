@@ -399,6 +399,10 @@ inline bool httpSharedChunkedBodyComplete(const char* encoded, int encodedLen,
             pos += 2;
         } else if (pos < encodedLen && encoded[pos] == '\n') {
             ++pos;
+        } else if (pos < encodedLen && encoded[pos] == '\r' && pos + 1 == encodedLen) {
+            // The CRLF terminator itself may be split across receive reads.
+            // A trailing CR is incomplete framing, not malformed framing.
+            return false;
         } else {
             if (pos == encodedLen) return false;
             if (malformed) *malformed = true;

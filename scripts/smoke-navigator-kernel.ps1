@@ -52,12 +52,23 @@ function Invoke-KernelBuildForSmoke {
         Remove-Item -Force -ErrorAction SilentlyContinue
     $kernelBuildStdout = Join-Path $LogDir "navigator-kernel-build.stdout.log"
     $kernelBuildStderr = Join-Path $LogDir "navigator-kernel-build.stderr.log"
-    $kernelBuildProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList @("/c", (Join-Path $Root "build-kernel.bat")) `
-        -WorkingDirectory $Root -PassThru -Wait -WindowStyle Hidden `
-        -RedirectStandardOutput $kernelBuildStdout -RedirectStandardError $kernelBuildStderr
+    # Run the wrapper synchronously in the current shell. Start-Process -Wait
+    # with redirected output could leave this smoke runner waiting after the
+    # child build had already produced kernel.elf, preventing the authoritative
+    # public-pilot ramdisk stage from running.
+    $kernelBuildScript = Join-Path $Root "build-kernel.bat"
+    $oldBuildErrorActionPreference = $ErrorActionPreference
+    try {
+        # MinGW emits existing warnings on stderr. Keep those diagnostics in
+        # the build log without letting PowerShell's Stop preference turn a
+        # successful build into a harness failure.
+        $ErrorActionPreference = "Continue"
+        & cmd.exe /c "`"$kernelBuildScript`"" *> $kernelBuildStdout
+        $buildCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldBuildErrorActionPreference
+    }
     Get-Content $kernelBuildStdout, $kernelBuildStderr -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
-    $buildCode = $kernelBuildProcess.ExitCode
     if ($null -ne $oldExtra) {
         $env:EXTRA_CFLAGS = $oldExtra
     } else {
@@ -394,7 +405,8 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
         [bool]$UseSmokeFixture,
         [bool]$EnableRealPublicProbe = $false,
         [bool]$RequireRealPublicProbe = $false,
-        [AllowNull()][string]$RealPublicProbeTarget = $null
+        [AllowNull()][string]$RealPublicProbeTarget = $null,
+        [AllowNull()][string]$RealPublicProbeCaBundleSource = $null
     )
 
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_CA_FIXTURE" -Value ($(if ($UseSmokeFixture) { "1" } else { $null }))
@@ -412,18 +424,77 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS" -Value ($(if ($RequireRealPublicProbe) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeTarget } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeTarget } else { $null }))
+    # Do not rely on a caller's inherited CA-source environment here. The
+    # active scenario must explicitly determine the bundle that is copied into
+    # the final ramdisk, otherwise the earlier smoke-fixture build can leave a
+    # production-looking host staging directory paired with an old guest image.
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeCaBundleSource } else { $null }))
 
     Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
     $packScript = Join-Path $Root "scripts\generate-wallpaper-pack.ps1"
-    & $packScript -InputDir (Join-Path $Root "assets\Backgrounds") `
+    $packOutput = @(& $packScript -InputDir (Join-Path $Root "assets\Backgrounds") `
         -OutputDir (Join-Path $Root "out\wallpaper-pack") `
-        -OutputImage (Join-Path $Root "ESP\ramdisk.img")
+        -OutputImage (Join-Path $Root "ESP\ramdisk.img") *>&1)
+    foreach ($line in $packOutput) {
+        Write-Host $line
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "generate-wallpaper-pack.ps1 failed for the current smoke scenario."
     }
 
     $productionManifestPath = Join-Path $Root "out\wallpaper-pack\certs\ca-bundle.manifest"
     $userManifestPath = Join-Path $Root "out\wallpaper-pack\config\certs\ca-bundle.manifest"
+
+    if ($EnableRealPublicProbe) {
+        $navigatorConfigDir = Join-Path $Root "out\wallpaper-pack\config\navigator"
+        $targetPath = Join-Path $navigatorConfigDir "real-public-https-probe-url.txt"
+        $targetCompatPath = Join-Path $navigatorConfigDir "RPUBURL.TXT"
+        $requiredPath = Join-Path $navigatorConfigDir "real-public-https-probe-required.txt"
+        $requiredCompatPath = Join-Path $navigatorConfigDir "RPUBRQ.TXT"
+        $policyPath = Join-Path $navigatorConfigDir "https-policy.txt"
+        $manifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $productionManifestPath
+        if ($null -eq $manifest -or
+            [string]$manifest.bundle_type -ne "production-public-probe-merged" -or
+            [string]$manifest.production_ready -ne "yes" -or
+            [string]$manifest.test_only -ne "no") {
+            throw "Public-pilot staging produced a guest CA manifest that is not production-ready. The final ramdisk was not allowed to run."
+        }
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $targetCompatPath -PathType Leaf)) {
+            throw "Public-pilot staging omitted the requested target metadata from the final ramdisk."
+        }
+        $stagedTarget = (Get-Content -LiteralPath $targetPath -Raw).Trim()
+        $stagedCompatTarget = (Get-Content -LiteralPath $targetCompatPath -Raw).Trim()
+        if ($stagedTarget -ne $RealPublicProbeTarget.Trim() -or $stagedCompatTarget -ne $RealPublicProbeTarget.Trim()) {
+            throw "Public-pilot staging target mismatch: expected '$RealPublicProbeTarget', got '$stagedTarget' / '$stagedCompatTarget'."
+        }
+        if ($RequireRealPublicProbe) {
+            if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf) -or
+                -not (Test-Path -LiteralPath $requiredCompatPath -PathType Leaf)) {
+                throw "Public-pilot staging omitted the required-probe marker from the final ramdisk."
+            }
+        } elseif ((Test-Path -LiteralPath $requiredPath -PathType Leaf) -or
+            (Test-Path -LiteralPath $requiredCompatPath -PathType Leaf)) {
+            throw "Public-pilot staging leaked a required-probe marker from a previous target."
+        }
+        if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) {
+            throw "Public-pilot staging omitted the HTTPS policy from the final ramdisk."
+        }
+        $stagedPolicy = Get-Content -LiteralPath $policyPath -Raw
+        if ($stagedPolicy -notmatch '(?im)^\s*production-validated\s*$' -or
+            $stagedPolicy -notmatch '(?im)^\s*public-https-pilot=enabled\s*$') {
+            throw "Public-pilot staging policy does not enable production-validated public HTTPS for the requested run."
+        }
+        $stagedPackLines = @($packOutput | ForEach-Object { [string]$_ })
+        foreach ($requiredRamdiskPath in @(
+                "added /certs/CABUNDLE.MAN",
+                "added /config/navigator/RPUBURL.TXT",
+                "added /config/navigator/https-policy.txt")) {
+            if (-not ($stagedPackLines -match [regex]::Escape($requiredRamdiskPath))) {
+                throw "Public-pilot ramdisk image did not report the required guest file: $requiredRamdiskPath"
+            }
+        }
+    }
 
     return [pscustomobject]@{
         ProductionManifestPath = $productionManifestPath
@@ -1007,7 +1078,8 @@ $publicPilotEnabledChecks = @(
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.tls_tcp_connect_attempts=1",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.transport_selection=BlockedPolicy",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.tls_status=PolicyBlocked",
-    "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.error=HTTPS downgrade redirect blocked"
+    "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.error=HTTPS downgrade redirect blocked",
+    "[NAVIGATOR-SMOKE] http.case.real_public_https_png_resource.result=PASS"
 )
 
 $realPublicProbeDisabledChecks = @(
@@ -1708,7 +1780,8 @@ try {
             -UseSmokeFixture $scenario.UseSmokeFixture `
             -EnableRealPublicProbe:$enableRealPublicProbeForScenario `
             -RequireRealPublicProbe:($enableRealPublicProbeForScenario -and $realPublicProbeRequired) `
-            -RealPublicProbeTarget $(if ($enableRealPublicProbeForScenario) { $realPublicProbeTarget } else { $null })
+            -RealPublicProbeTarget $(if ($enableRealPublicProbeForScenario) { $realPublicProbeTarget } else { $null }) `
+            -RealPublicProbeCaBundleSource $(if ($enableRealPublicProbeForScenario) { $realPublicProbeCaBundleSource } else { $null })
 
         try {
             $policyHost = Get-NavigatorKernelSmokePolicyHost -Scenario $scenario

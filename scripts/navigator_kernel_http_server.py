@@ -1797,6 +1797,12 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Relative PNG</h1><img src=\"logo.png\" alt=\"relative png\"></body></html>")
             return
+        if path == "/navigator-smoke/real-public-png.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Real public HTTPS PNG resource</h1>"
+                             b"<img src=\"https://upload.wikimedia.org/wikipedia/commons/6/63/Wikipedia-logo.png\" "
+                             b"alt=\"real public HTTPS PNG\"></body></html>")
+            return
         if path == "/navigator-smoke/hostname-image.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Hostname PNG</h1><img src=\"logo.png\" alt=\"hostname png\"></body></html>")

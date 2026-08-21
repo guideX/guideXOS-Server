@@ -1372,6 +1372,8 @@ struct BareMetalCaStoreState {
     char computedSha256[65] = {};
     char manifestError[160] = {};
     uint8_t manifestBytes[kGxosMaxCaManifestBytes + 1] = {};
+    bool publicInternetOptInChecked = false;
+    bool publicInternetOptInEnabled = false;
 };
 
 struct BareMetalHttpsPolicyConfigInfo {
@@ -1895,6 +1897,12 @@ const char* fallback_path_if_missing(const char* primaryPath,
 
 bool public_internet_trust_opt_in_enabled()
 {
+    BareMetalCaStoreState& caState = ca_store_state();
+    if (caState.publicInternetOptInChecked) {
+        return caState.publicInternetOptInEnabled;
+    }
+
+    caState.publicInternetOptInChecked = true;
     kernel::vfs::FileInfo info{};
     kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
     const char* readPath = fallback_path_if_missing(
@@ -1931,10 +1939,12 @@ bool public_internet_trust_opt_in_enabled()
 
     char token[33];
     copy_trimmed_ascii_span(token, sizeof(token), begin, end);
-    return text_equals_insensitive(token, "enabled") ||
+    const bool enabled = text_equals_insensitive(token, "enabled") ||
         text_equals_insensitive(token, "1") ||
         text_equals_insensitive(token, "true") ||
         text_equals_insensitive(token, "yes");
+    caState.publicInternetOptInEnabled = enabled;
+    return caState.publicInternetOptInEnabled;
 }
 #endif
 
@@ -2107,12 +2117,16 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
             caInfo.manifest.productionReady &&
             !caInfo.manifest.testOnly &&
             caInfo.manifest.hashMatch;
+        const bool publicOptIn =
+            source == GxosTrustStoreSource::ProductionPublicProbeTrust
+                ? public_internet_trust_opt_in_enabled()
+                : false;
         const bool publicInternetReady =
             manifestBlocker == nullptr &&
             manifestProductionReady &&
             (source == GxosTrustStoreSource::ProductionRootStore ||
              (source == GxosTrustStoreSource::ProductionPublicProbeTrust &&
-              public_internet_trust_opt_in_enabled()));
+              publicOptIn));
         if (manifestBlocker) {
             return {
                 GxosTrustStorePolicyState::TrustStoreMalformed,

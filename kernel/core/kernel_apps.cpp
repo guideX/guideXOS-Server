@@ -7273,6 +7273,7 @@ NavigatorApp::NavigatorApp()
 }
 
 NavigatorApp::~NavigatorApp() {
+    releaseImageResources();
 }
 
 bool NavigatorApp::init()
@@ -9173,6 +9174,7 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
     m_metaVisibleText[0] = '\0';
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, url ? url : "Document", MAX_TITLE_LEN_NAV);
+    releaseImageResources();
     m_blockCount = 0;
     blurFormBlock();
 
@@ -9368,7 +9370,12 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         gxos::web::WebStyle style = nav_style_for_tag("pre", "", "", bodyStyle, cssRules, cssRuleCount);
         addBlock(BLOCK_PREFORMATTED, html ? html : "", "", &style);
     }
+    rememberPageMetadata(requestedUrl ? requestedUrl : url, url, sourceType ? sourceType : "file",
+        contentType ? contentType : "text/html", "", html, boundedInputBytes,
+        &cssDiagnostics, &bodyStyle, httpStatusCode, httpReason ? httpReason : "", redirectCount,
+        networkResponse);
     prepareImageResources();
+    refreshImageResourceMetadata();
     m_metaParserCompleted = true;
     m_metaDocumentCreated = m_blockCount > 0;
     m_metaDocumentCount = m_metaDocumentCreated ? 1 : 0;
@@ -9385,10 +9392,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             nav_copy_serial_safe_text(block.text, m_metaVisibleText, sizeof(m_metaVisibleText));
         }
     }
-    rememberPageMetadata(requestedUrl ? requestedUrl : url, url, sourceType ? sourceType : "file",
-        contentType ? contentType : "text/html", "", html, boundedInputBytes,
-        &cssDiagnostics, &bodyStyle, httpStatusCode, httpReason ? httpReason : "", redirectCount,
-        networkResponse);
 }
 
 // Kernel Navigator keeps URLs bounded in every document/resource slot while
@@ -9509,6 +9512,54 @@ struct KernelHttpResponse {
     gxos::GxosTlsLocalHandshakeResult tlsResult;
     char body[kKernelHttpBodyLimit + 1];
 };
+
+// Public-pilot diagnostics must not copy the bounded response body onto the
+// kernel call stack.  Keep only the transport telemetry that is printed after
+// a second request reuses s_kernelHttpResponse.
+struct KernelHttpTraceSnapshot {
+    gxos::GxosTlsLocalHandshakeResult tlsResult;
+    uint32_t tcpReadCalls;
+    uint32_t tcpWouldBlockReads;
+    uint32_t tcpPayloadSegments;
+    uint32_t tcpPayloadBytesReceived;
+    uint32_t tcpPayloadBytesAccepted;
+    uint32_t tcpPayloadBytesDropped;
+    uint32_t tcpWindowUpdateAcks;
+    uint32_t tcpWindowReopenEvents;
+    uint32_t tcpLocalZeroWindowEvents;
+    uint32_t tcpPeerZeroWindowEvents;
+    uint32_t tcpAdvertisedWindow;
+    uint32_t tcpMinimumAdvertisedWindow;
+    uint32_t tcpLastPeerWindow;
+    uint32_t httpReadProgressEvents;
+    uint32_t httpReadWouldBlockCount;
+    uint32_t httpReadElapsedMs;
+    bool httpReadTimedOut;
+};
+
+static void kernel_http_capture_trace_snapshot(const KernelHttpResponse& response,
+                                               KernelHttpTraceSnapshot* snapshot)
+{
+    if (!snapshot) return;
+    snapshot->tlsResult = response.tlsResult;
+    snapshot->tcpReadCalls = response.tcpReadCalls;
+    snapshot->tcpWouldBlockReads = response.tcpWouldBlockReads;
+    snapshot->tcpPayloadSegments = response.tcpPayloadSegments;
+    snapshot->tcpPayloadBytesReceived = response.tcpPayloadBytesReceived;
+    snapshot->tcpPayloadBytesAccepted = response.tcpPayloadBytesAccepted;
+    snapshot->tcpPayloadBytesDropped = response.tcpPayloadBytesDropped;
+    snapshot->tcpWindowUpdateAcks = response.tcpWindowUpdateAcks;
+    snapshot->tcpWindowReopenEvents = response.tcpWindowReopenEvents;
+    snapshot->tcpLocalZeroWindowEvents = response.tcpLocalZeroWindowEvents;
+    snapshot->tcpPeerZeroWindowEvents = response.tcpPeerZeroWindowEvents;
+    snapshot->tcpAdvertisedWindow = response.tcpAdvertisedWindow;
+    snapshot->tcpMinimumAdvertisedWindow = response.tcpMinimumAdvertisedWindow;
+    snapshot->tcpLastPeerWindow = response.tcpLastPeerWindow;
+    snapshot->httpReadProgressEvents = response.httpReadProgressEvents;
+    snapshot->httpReadWouldBlockCount = response.httpReadWouldBlockCount;
+    snapshot->httpReadElapsedMs = response.httpReadElapsedMs;
+    snapshot->httpReadTimedOut = response.httpReadTimedOut;
+}
 
 static KernelHttpResponse s_kernelHttpResponse;
 static char s_kernelHttpRaw[kKernelHttpRawLimit + 1];
@@ -9937,7 +9988,16 @@ static void kernel_tcp_http_byte_stream_close(void* context)
     if (tcp->abortUsedFlag) {
         *tcp->abortUsedFlag = true;
     }
-    kernel::tcp::tcp_abort(tcp->socket);
+    // If the peer already sent FIN, complete the ordinary CLOSE_WAIT ->
+    // LAST_ACK lifecycle. Sending an RST from CLOSE_WAIT after a complete
+    // response races the TCP teardown path and can invalidate the TCB while
+    // the TLS caller is returning. Abort remains the bounded error path for
+    // sockets that have not reached peer-close.
+    if (kernel::tcp::tcp_getstate(tcp->socket) == kernel::tcp::STATE_CLOSE_WAIT) {
+        kernel::tcp::tcp_close(tcp->socket);
+    } else {
+        kernel::tcp::tcp_abort(tcp->socket);
+    }
     tcp->socket = -1;
 }
 
@@ -10163,6 +10223,28 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
     }
 
     const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    if (!parsed.hostIsNumeric && !kernel_https_policy_fixture_match(parsed)) {
+        const gxos::GxosTrustStorePolicyInfo trustPolicy = gxos::gxos_tls_trust_store_policy_info();
+        const gxos::GxosCaStoreInfo caInfo = gxos::gxos_ca_store_info();
+        serial::puts("[NAVIGATOR-POLICY] public_candidate_host=");
+        serial::puts(parsed.host);
+        serial::puts(" state=");
+        serial::puts(gxos::gxos_validated_https_policy_state_name(httpsPolicy.state));
+        serial::puts(" selected=");
+        serial::puts(gxos::gxos_validated_https_policy_state_name(httpsPolicy.selectedState));
+        serial::puts(" broad_public=");
+        serial::puts(httpsPolicy.broadPublicHttpsEnabled ? "yes" : "no");
+        serial::puts(" trust_public=");
+        serial::puts(trustPolicy.publicInternetReady ? "yes" : "no");
+        serial::puts(" source=");
+        serial::puts(gxos::gxos_trust_store_source_name(trustPolicy.source));
+        serial::puts(" manifest_type=");
+        serial::puts(caInfo.manifest.bundleType ? caInfo.manifest.bundleType : "(none)");
+        serial::puts(" manifest_ready=");
+        serial::puts(caInfo.manifest.productionReady ? "yes" : "no");
+        serial::puts(" manifest_hash=");
+        serial::puts(caInfo.manifest.hashMatch ? "yes\n" : "no\n");
+    }
     const bool policyValidatedEnabled =
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated;
@@ -10833,7 +10915,23 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
     response->httpReadElapsedMs =
         ((uint32_t)kernel::pit::ticks() - transactionStartTicks) * 10u;
     s_kernelHttpRaw[rawLen] = '\0';
-    return kernel_http_parse_response(response, rawLen);
+    const bool parsed = kernel_http_parse_response(response, rawLen);
+    serial::puts("[HTTP-STREAM] complete raw_bytes=");
+    char rawBytesText[16];
+    nav_int_to_text(rawLen, rawBytesText, sizeof(rawBytesText));
+    serial::puts(rawBytesText);
+    serial::puts(" body_bytes=");
+    char parsedBodyText[16];
+    nav_int_to_text(response->bodyBytes, parsedBodyText, sizeof(parsedBodyText));
+    serial::puts(parsedBodyText);
+    serial::puts(" parsed=");
+    serial::puts(parsed ? "yes" : "no");
+    serial::puts(" framing=");
+    serial::puts(response->responseFraming[0] ? response->responseFraming : "unknown");
+    serial::puts(" error=");
+    serial::puts(response->error[0] ? response->error : "(none)");
+    serial::puts("\n");
+    return parsed;
 }
 
 struct KernelHttpActiveStream {
@@ -10951,6 +11049,7 @@ static bool kernel_http_open_stream(KernelHttpUrl* parsed,
         kernel::tcp::tcp_close(sock);
         return false;
     }
+
     if (!kernel_tcp_wait_connected(sock, response->error, sizeof(response->error))) {
         if (kernel_http_transport_uses_tls(policy.selection)) {
             kernel_http_mark_tls_failure(response, gxos::web::HttpByteStreamTlsStatus::TcpConnectFailed,
@@ -11254,9 +11353,10 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
             strcopy(response->finalUrl, current, sizeof(response->finalUrl));
             response->redirectHopIndex = redirectCount;
             strcopy(response->redirectHopUrl, current, sizeof(response->redirectHopUrl));
-            if (attempt == 0 &&
+            const bool retryRedirectedTls = attempt == 0 &&
                 kernel_http_should_retry_redirected_tls_open(
-                    response, current, currentMethod, redirectCount, currentBodyBytes)) {
+                    response, current, currentMethod, redirectCount, currentBodyBytes);
+            if (retryRedirectedTls) {
                 ++totalTlsRetryCount;
                 lastTlsBytesWrittenBeforeRetry = (int)response->tlsResult.requestBytesWritten;
                 lastRetryHopIndex = redirectCount;
@@ -11279,8 +11379,12 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
                 strcopy(response->redirectHopUrl, lastRetryHopUrl, sizeof(response->redirectHopUrl));
             }
         }
-        if (!response->ok) return response;
-        if (!gxos::web::httpSharedIsRedirectStatus(response->statusCode)) return response;
+        if (!response->ok) {
+            return response;
+        }
+        if (!gxos::web::httpSharedIsRedirectStatus(response->statusCode)) {
+            return response;
+        }
         if (!response->location[0]) return response;
         if (redirectCount == gxos::web::kHttpSharedMaxRedirects) {
             response->ok = false;
@@ -11383,11 +11487,28 @@ static bool nav_url_path_ends_with_png(const char* url)
 static const int kNavigatorUrlStorageBytes = 512;
 static void nav_push_url(char stack[][kNavigatorUrlStorageBytes], int& count, const char* url);
 
+void NavigatorApp::releaseImageResources()
+{
+    for (int i = 0; i < m_blockCount; ++i) {
+        DocBlock& block = m_blocks[i];
+        if (block.imagePixels) {
+            gxos::gui::ImageBitmap bitmap{};
+            bitmap.status = gxos::gui::ImageLoadStatus::Ok;
+            bitmap.pixels = block.imagePixels;
+            bitmap.width = block.naturalWidth > 0 ? (uint32_t)block.naturalWidth : 0;
+            bitmap.height = block.naturalHeight > 0 ? (uint32_t)block.naturalHeight : 0;
+            gxos::gui::ImageAdapter::Release(bitmap);
+        }
+        block.imagePixels = nullptr;
+    }
+}
+
 void NavigatorApp::prepareImageResources()
 {
     gxos::gui::ImageSafetyLimits localLimits = gxos::gui::DefaultImageSafetyLimits();
     gxos::gui::ImageSafetyLimits remoteLimits = nav_kernel_remote_png_limits();
     int remoteFetchCount = 0;
+    int resourceTraceCount = 0;
     for (int i = 0; i < m_blockCount; ++i) {
         if (m_blocks[i].kind != BLOCK_IMAGE) continue;
         m_blocks[i].imagePixels = nullptr;
@@ -11420,7 +11541,42 @@ void NavigatorApp::prepareImageResources()
             continue;
         }
         ++remoteFetchCount;
+        if (resourceTraceCount < gxos::web::kHttpSharedMaxRemoteResources) {
+            serial::puts("[NAVIGATOR-RESOURCE] fetch_begin index=");
+            char indexText[16];
+            nav_int_to_text(i, indexText, sizeof(indexText));
+            serial::puts(indexText);
+            serial::puts(" remote_count=");
+            char countText[16];
+            nav_int_to_text(remoteFetchCount, countText, sizeof(countText));
+            serial::puts(countText);
+            serial::puts(" url=");
+            serial::puts(m_blocks[i].url);
+            serial::puts("\n");
+            ++resourceTraceCount;
+        }
         KernelHttpResponse* response = kernel_http_fetch(m_blocks[i].url);
+        if (resourceTraceCount <= gxos::web::kHttpSharedMaxRemoteResources) {
+            serial::puts("[NAVIGATOR-RESOURCE] fetch_result index=");
+            char indexText[16];
+            nav_int_to_text(i, indexText, sizeof(indexText));
+            serial::puts(indexText);
+            serial::puts(" ok=");
+            serial::puts(response->ok ? "yes" : "no");
+            serial::puts(" status=");
+            char statusText[16];
+            nav_int_to_text(response->statusCode, statusText, sizeof(statusText));
+            serial::puts(statusText);
+            serial::puts(" body=");
+            char bodyText[16];
+            nav_int_to_text(response->bodyBytes, bodyText, sizeof(bodyText));
+            serial::puts(bodyText);
+            serial::puts(" type=");
+            serial::puts(response->contentType[0] ? response->contentType : "(none)");
+            serial::puts(" final=");
+            serial::puts(response->finalUrl[0] ? response->finalUrl : m_blocks[i].url);
+            serial::puts("\n");
+        }
         if (!response->ok) {
             m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
             strcopy(m_blocks[i].imageError, response->error[0] ? response->error : "Remote image fetch failed", sizeof(m_blocks[i].imageError));
@@ -11445,11 +11601,60 @@ void NavigatorApp::prepareImageResources()
         m_blocks[i].naturalWidth = (int)bitmap.width;
         m_blocks[i].naturalHeight = (int)bitmap.height;
         m_blocks[i].imagePixels = bitmap.pixels;
+        if (resourceTraceCount <= gxos::web::kHttpSharedMaxRemoteResources) {
+            serial::puts("[NAVIGATOR-RESOURCE] decode_result index=");
+            char indexText[16];
+            nav_int_to_text(i, indexText, sizeof(indexText));
+            serial::puts(indexText);
+            serial::puts(" status=");
+            serial::puts(gxos::gui::ImageLoadStatusName(bitmap.status));
+            serial::puts(" dims=");
+            char widthText[16];
+            char heightText[16];
+            nav_int_to_text((int)bitmap.width, widthText, sizeof(widthText));
+            nav_int_to_text((int)bitmap.height, heightText, sizeof(heightText));
+            serial::puts(widthText);
+            serial::putc('x');
+            serial::puts(heightText);
+            serial::puts("\n");
+        }
         if (bitmap.status != gxos::gui::ImageLoadStatus::Ok) {
             strcopy(m_blocks[i].imageError, gxos::gui::ImageLoadStatusName(bitmap.status), sizeof(m_blocks[i].imageError));
         }
     }
 }
+
+void NavigatorApp::refreshImageResourceMetadata()
+{
+    m_metaImageBlocks = 0;
+    m_metaLoadedImages = 0;
+    m_metaFailedImages = 0;
+    m_metaRemoteImages = 0;
+    m_metaLocalImages = 0;
+    m_metaLastImageError[0] = '\0';
+    for (int i = 0; i < m_blockCount; ++i) {
+        const DocBlock& block = m_blocks[i];
+        if (block.kind != BLOCK_IMAGE) continue;
+        ++m_metaImageBlocks;
+        if (nav_starts_with(block.url, "http://") || nav_starts_with(block.url, "https://")) {
+            ++m_metaRemoteImages;
+        } else if (nav_starts_with(block.url, "file://")) {
+            ++m_metaLocalImages;
+        }
+        if (block.imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) {
+            ++m_metaLoadedImages;
+        } else {
+            ++m_metaFailedImages;
+            if (!m_metaLastImageError[0]) {
+                strcopy(m_metaLastImageError,
+                    block.imageError[0] ? block.imageError :
+                    gxos::gui::ImageLoadStatusName((gxos::gui::ImageLoadStatus)block.imageStatus),
+                    sizeof(m_metaLastImageError));
+            }
+        }
+    }
+}
+
 void NavigatorApp::loadHttpUrl(const char* url)
 {
     clearPageDownloadMetadata();
@@ -11636,6 +11841,21 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
             s_kernelHttpDocumentBody[docBytes] = '\0';
             strcopy(m_metaHandoffResult, "accepted:html-document", sizeof(m_metaHandoffResult));
+            serial::puts("[NAVIGATOR-STREAM] document_handoff status=");
+            char handoffStatus[16];
+            nav_int_to_text(response->statusCode, handoffStatus, sizeof(handoffStatus));
+            serial::puts(handoffStatus);
+            serial::puts(" body_bytes=");
+            char handoffBytes[16];
+            nav_int_to_text(docBytes, handoffBytes, sizeof(handoffBytes));
+            serial::puts(handoffBytes);
+            serial::puts(" framing=");
+            serial::puts(response->responseFraming[0] ? response->responseFraming : "unknown");
+            serial::puts(" requested=");
+            serial::puts(response->requestedUrl[0] ? response->requestedUrl : url);
+            serial::puts(" final=");
+            serial::puts(response->finalUrl[0] ? response->finalUrl : url);
+            serial::puts("\n");
             parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
                 transportSource, response->contentType, response->statusCode, response->reason,
                 response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount, response,
@@ -11831,7 +12051,12 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
         return false;
     }
 
-    NavigatorApp app;
+    NavigatorApp* heapApp = new NavigatorApp();
+    if (!heapApp) {
+        if (error && errorLen > 0) strcopy(error, "Navigator allocation failed", errorLen);
+        return false;
+    }
+    NavigatorApp& app = *heapApp;
     if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html")) {
         int docBytes = response->bodyBytes;
         if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
@@ -11849,7 +12074,9 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (remoteImages) *remoteImages = app.m_metaRemoteImages;
     if (loadedImages) *loadedImages = app.m_metaLoadedImages;
     if (failedImages) *failedImages = app.m_metaFailedImages;
-    return response->ok;
+    const bool result = response->ok;
+    delete heapApp;
+    return result;
 }
 
 bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
@@ -12445,6 +12672,10 @@ void NavigatorApp::loadUrl(const char* url)
         animationOwnerLogged = true;
     }
     m_loading = true;
+    // A new navigation ends the previous document lifetime. Remote image
+    // pixels must not accumulate while the bounded shared HTTP buffers are
+    // reused for the next transaction.
+    releaseImageResources();
     m_throbberFrame = 0;
     m_loadingStartTick = (uint32_t)kernel::pit::ticks();
     invalidate();
@@ -13816,7 +14047,21 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
 
     const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
-    NavigatorApp app;
+    if (url && nav_starts_with(url, "https://") && !nav_starts_with(url, "https://guidexos.test")) {
+        const gxos::GxosValidatedHttpsPolicyInfo preLoadPolicy = gxos::gxos_validated_https_policy_info();
+        serial::puts("[NAVIGATOR-POLICY] before_app_load broad_public=");
+        serial::puts(preLoadPolicy.broadPublicHttpsEnabled ? "yes\n" : "no\n");
+    }
+    // Large public documents exercise the full bounded Navigator object and
+    // parser scratch state. Keep this smoke capture heap-owned, matching the
+    // normal AppManager-created Navigator, so a 256 KiB body cannot consume
+    // the kernel call stack.
+    NavigatorApp* heapApp = new NavigatorApp();
+    if (!heapApp) {
+        if (error && errorLen > 0) strcopy(error, "Navigator allocation failed", errorLen);
+        return;
+    }
+    NavigatorApp& app = *heapApp;
     app.loadUrl(url);
     const int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
     const int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
@@ -13941,6 +14186,7 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
         serial::puts(app.m_metaVisibleText[0] ? app.m_metaVisibleText : "(none)");
         serial::puts("\n");
     }
+    delete heapApp;
 }
 
 struct NavigatorHttpsCompatibilityTargetInfo {
@@ -14646,7 +14892,7 @@ static bool printNavigatorLocalTlsWrongHostnameFailureCase()
 {
     const bool localReady = gxos::gxos_tls_local_smoke_https_ready();
     const char* url = "https://guidexos.test:8443/navigator-smoke/tls-basic.html";
-    KernelHttpResponse response{};
+    KernelHttpResponse& response = s_kernelHttpResponse;
     gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const bool requestOk = kernel_tls_smoke_request_once(url, "wrong.guidexos.test", &response, &tlsResult);
     const bool hostnameFailed = !tlsResult.hostnameValidationSuccess &&
@@ -15783,7 +16029,7 @@ static bool printNavigatorPolicyValidatedWrongHostnameFailureCase()
     const bool certFaultExpected = navigator_https_cert_fault_expected(faultMode);
     char url[160];
     navigator_https_policy_url(httpsPolicy, "/navigator-policy/ok.html", url, sizeof(url));
-    KernelHttpResponse response{};
+    KernelHttpResponse& response = s_kernelHttpResponse;
     gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const bool requestOk = kernel_tls_smoke_request_once(url, "wrong.guidexos.test", &response, &tlsResult);
     const bool hostnameFailed = !tlsResult.hostnameValidationSuccess &&
@@ -16011,8 +16257,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     bool tcpAbortUsed = false;
     bool redirectedHttpsRetryUsed = false;
     bool attempted = false;
-    KernelHttpResponse tlsProbeResponse{};
-    KernelHttpResponse capturedNavigationResponse{};
+    KernelHttpTraceSnapshot capturedNavigationTrace{};
+    KernelHttpTraceSnapshot streamTrace{};
     gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const char* resultLabel = "SKIP";
     const char* skipReason = "(none)";
@@ -16167,8 +16413,9 @@ static bool printNavigatorRealPublicHttpsProbeCase()
         // leaves its completed transaction in the shared response object. Take
         // the bounded trace snapshot before the secondary raw TLS request
         // below reuses that storage.
-        capturedNavigationResponse = s_kernelHttpResponse;
-        kernel_tls_smoke_request_once(probeConfig.targetUrl, tlsSniHost, &tlsProbeResponse, &tlsResult);
+        kernel_http_capture_trace_snapshot(s_kernelHttpResponse, &capturedNavigationTrace);
+        kernel_tls_smoke_request_once(probeConfig.targetUrl, tlsSniHost, &s_kernelHttpResponse, &tlsResult);
+        kernel_http_capture_trace_snapshot(s_kernelHttpResponse, &streamTrace);
 
         const bool tlsSuccess =
             tlsTcpConnectAttempts >= 1 &&
@@ -16415,8 +16662,11 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_response_bytes_read=");
     serial_put_dec((uint32_t)(tlsResponseBytesRead > 0 ? tlsResponseBytesRead : 0));
     const gxos::GxosTlsLocalHandshakeResult& traceResult = attempted
-        ? capturedNavigationResponse.tlsResult
+        ? capturedNavigationTrace.tlsResult
         : tlsResult;
+    const KernelHttpTraceSnapshot& streamResponse = attempted
+        ? capturedNavigationTrace
+        : streamTrace;
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_send_calls=");
     serial_put_dec64((uint64_t)traceResult.tlsBioSendCalls);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_recv_calls=");
@@ -16453,7 +16703,6 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec64((uint64_t)traceResult.tlsReadProgressEvents);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_elapsed_ms=");
     serial_put_dec64((uint64_t)traceResult.tlsResponseReadElapsedMs);
-    const KernelHttpResponse& streamResponse = attempted ? capturedNavigationResponse : s_kernelHttpResponse;
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_read_calls=");
     serial_put_dec64((uint64_t)streamResponse.tcpReadCalls);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_would_block_reads=");
@@ -16930,6 +17179,13 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/image-chunked.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_nonpng", "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", true, true, false, 1, 0, 1) && httpOk;
+    const gxos::GxosValidatedHttpsPolicyInfo publicPolicy = gxos::gxos_validated_https_policy_info();
+    if (publicPolicy.broadPublicHttpsEnabled) {
+        httpOk = printNavigatorHttpSmokeCase("real_public_https_png_resource",
+            "http://10.0.2.2:8080/navigator-smoke/real-public-png.html", 200,
+            "http://10.0.2.2:8080/navigator-smoke/real-public-png.html", true, true, false,
+            1, 1, 0) && httpOk;
+    }
     httpOk = printNavigatorHttpSmokeCase("hostname_image_relative", "http://guidexos.test:8080/navigator-smoke/hostname-image.html", 200,
         "http://guidexos.test:8080/navigator-smoke/hostname-image.html", true, true, false, 1, 1, 0, "10.0.2.2") && httpOk;
     httpOk = printNavigatorHttpSmokeCase("text_polish", "http://10.0.2.2:8080/navigator-smoke/text-polish.html", 200,

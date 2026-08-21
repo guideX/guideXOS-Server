@@ -1003,7 +1003,9 @@ private:
                            int redirectCount = 0,
                            const KernelHttpResponse* networkResponse = nullptr,
                            int inputBytes = -1);
+    void releaseImageResources();
     void prepareImageResources();
+    void refreshImageResourceMetadata();
     void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
     void rememberDownload(const DownloadRecord& record);
     void clearPageDownloadMetadata();
