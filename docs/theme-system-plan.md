@@ -712,17 +712,19 @@ Phase 5 closes the remaining hosted shell popup consistency gap for the opt-in S
 
 ### Phase 5 Validation State
 
-* `.\build.bat` was attempted but was blocked before compilation because the checkout is missing the required vendored `third_party\stb\stb_image.h` header. No unrelated dependency was imported in this phase.
+* The checkout intentionally ignores `/third_party`; the missing local `third_party\stb\stb_image.h` was restored from an established guideXOS Server workspace after confirming the expected v2.30 contents and Git blob identity. No dependency-management or vendored source file was added to the repository.
+* `.\build.bat` succeeded from the exact `v0.3_SCI_FI_THEME` checkout and produced the hosted executable used below. The build emitted existing compiler warnings but no dependency, compile, or link failure.
 * `.\scripts\smoke-theme-system.ps1 -SkipBuild` passed.
 * `.\scripts\smoke-live-directory-desktop-status.ps1 -SkipBuild` passed.
-* `git diff --check` passed after the source changes.
-* Hosted visual/runtime proof for this exact build was not available because the required build prerequisite is absent. An unrelated compositor binary from another workspace was not used as evidence.
+* `.\scripts\smoke-hosted-display-runtime.ps1` passed in its no-gates, synthetic-only, and dual-window modes.
+* `git diff --check` passed.
+* Established hosted runtime screenshots and manual inspection proved the exact branch executable in Classic and Sci Fi. Evidence covered the desktop context menu, folder-icon-size submenu, taskbar tooltip, and taskbar context menu. The visual evidence is manual and not machine-comparable; screenshots remained local validation artifacts and were not added to git.
 
 ### Phase 5 Resulting State and Next Known Gaps
 
 * The hosted Sci Fi popup consistency implementation is complete within the Phase 5 boundary.
-* The missing `stb_image.h` build prerequisite must be restored before a fresh executable can be built for hosted screenshot and interaction proof.
-* Once the hosted build prerequisite is restored, re-run the Classic and Sci Fi popup checklist: desktop context menu open/hover/dismiss, one safe command, taskbar tooltip timing/placement, and taskbar context-menu open/dismiss/hit testing.
+* Classic and Sci Fi popup behavior was exercised on the fresh exact-branch build: open, hover, submenu routing, safe command activation, normal dismissal, tooltip timing/placement, taskbar targeting, and theme switching Classic -> Sci Fi -> Classic.
+* Phase 5 is closed with implementation and hosted runtime proof complete. The next sci-fi-theme implementation phase may be planned separately; Phase 6 is not part of this validation record.
 * Bare-metal theme parity, rounded clipping/hit-testing, blur/glass, animations, high-DPI/scaling, theme-scoped wallpaper, and broader app-surface work remain deferred.
 
 ## Manual Validation Runbook
