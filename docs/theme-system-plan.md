@@ -698,6 +698,33 @@ Phase 4H implements a conservative hosted Image Viewer app-surface pilot for Sci
 * The conditional styling boundary remains in force.
 * A future stabilization pass should re-check lifecycle and readability.
 
+## Phase 5
+
+Phase 5 closes the remaining hosted shell popup consistency gap for the opt-in Sci Fi theme. It keeps the existing popup geometry and input model unchanged while making the desktop right-click menu and hosted taskbar tooltip use the same dark navy / indigo / blue surface relationships already used by the hosted taskbar, Start menu, taskbar context menu, and window chrome.
+
+* Hosted desktop right-click menus and the existing folder-icon-size submenu now select Sci Fi surface, border, separator, hover, and text colors from `GetCurrentDesktopTheme()` and the existing `WindowRenderer` blending conventions.
+* Hosted taskbar tooltips now select Sci Fi surface, border, and text colors from the current desktop theme.
+* The existing taskbar context menu keeps its current themed surface, border, and hover path; its Sci Fi text now uses the existing theme title text color instead of the remaining literal popup text color.
+* Classic keeps the previous popup and tooltip color literals and remains the default/fallback theme.
+* Theme lookup occurs during paint, so subsequently displayed popups follow the active theme after the existing reload/switch mechanism runs.
+* Menu and tooltip dimensions, placement, timing, hit regions, command routing, dismissal, capture, focus, and taskbar behavior were not changed.
+* No new popup abstraction, effects, animation, transparency, blur, glow, clipping, or geometry was added.
+
+### Phase 5 Validation State
+
+* `.\build.bat` was attempted but was blocked before compilation because the checkout is missing the required vendored `third_party\stb\stb_image.h` header. No unrelated dependency was imported in this phase.
+* `.\scripts\smoke-theme-system.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-live-directory-desktop-status.ps1 -SkipBuild` passed.
+* `git diff --check` passed after the source changes.
+* Hosted visual/runtime proof for this exact build was not available because the required build prerequisite is absent. An unrelated compositor binary from another workspace was not used as evidence.
+
+### Phase 5 Resulting State and Next Known Gaps
+
+* The hosted Sci Fi popup consistency implementation is complete within the Phase 5 boundary.
+* The missing `stb_image.h` build prerequisite must be restored before a fresh executable can be built for hosted screenshot and interaction proof.
+* Once the hosted build prerequisite is restored, re-run the Classic and Sci Fi popup checklist: desktop context menu open/hover/dismiss, one safe command, taskbar tooltip timing/placement, and taskbar context-menu open/dismiss/hit testing.
+* Bare-metal theme parity, rounded clipping/hit-testing, blur/glass, animations, high-DPI/scaling, theme-scoped wallpaper, and broader app-surface work remain deferred.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -761,11 +788,10 @@ Phase 4H implements a conservative hosted Image Viewer app-surface pilot for Sci
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, the Phase 4F extended app-surface closeout, the Phase 4G Image Viewer readiness inventory, the Phase 4G.1 hosted large-image lifecycle safety check, and the Phase 4H hosted Image Viewer chrome-only app-surface pilot.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, the Phase 4F extended app-surface closeout, the Phase 4G Image Viewer readiness inventory, the Phase 4G.1 hosted large-image lifecycle safety check, the Phase 4H hosted Image Viewer chrome-only app-surface pilot, and the Phase 5 hosted shell popup consistency pass.
 
 ## Recommended Next Pass
 
-1. Phase 2G.1 manual visual validation fixes, if screenshots or manual testing finds issues.
-2. Phase 2H theme screenshot / manual smoke harness, if feasible.
-3. Future app-surface pilots, one app at a time.
-4. Future high-DPI and resolution work as a separate track.
+1. Restore the missing hosted build prerequisite and complete the Phase 5 Classic/Sci Fi popup visual and interaction checklist.
+2. If useful, add a focused hosted screenshot harness for popup surfaces without changing popup behavior.
+3. Continue only with separately scoped deferred work such as bare-metal parity, high-DPI/scaling, rounded clipping/hit-testing research, or future app-surface polish.

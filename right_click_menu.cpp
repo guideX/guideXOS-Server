@@ -7,6 +7,10 @@
 #include "file_operations.h"
 #include "file_explorer.h"
 #include "notification_manager.h"
+#include "desktop_theme.h"
+#ifdef _WIN32
+#include "window_renderer.h"
+#endif
 #include "kernel/core/include/kernel/system_font.h"
 #include <cstring>
 
@@ -388,15 +392,35 @@ void RightClickMenu::Draw(HDC dc) {
     if (!s_visible) return;
 
     int menuH = (int)s_items.size() * kItemH;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const uint32_t menuSurface = sciFiTheme
+        ? WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBackground, 12)
+        : 0xFF222222u;
+    const COLORREF menuBackground = sciFiTheme
+        ? WindowRenderer::ToColorRef(menuSurface)
+        : RGB(34, 34, 34);
+    const COLORREF menuBorder = sciFiTheme
+        ? WindowRenderer::ToColorRef(WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.accent, 40))
+        : RGB(63, 63, 63);
+    const COLORREF menuSeparator = sciFiTheme
+        ? WindowRenderer::ToColorRef(WindowRenderer::BlendThemeColor(theme.windowBorder, theme.mutedAccent, 28))
+        : RGB(74, 74, 74);
+    const COLORREF menuHover = sciFiTheme
+        ? WindowRenderer::ToColorRef(WindowRenderer::BlendThemeColor(menuSurface, theme.accent, 22))
+        : RGB(49, 49, 49);
+    const COLORREF menuText = sciFiTheme
+        ? WindowRenderer::ToColorRef(theme.titleBarText)
+        : RGB(220, 220, 220);
 
     // Menu background (semi-transparent dark)
     RECT bgRect = {s_x, s_y, s_x + kMenuW, s_y + menuH};
-    HBRUSH bgBrush = CreateSolidBrush(RGB(34, 34, 34));
+    HBRUSH bgBrush = CreateSolidBrush(menuBackground);
     FillRect(dc, &bgRect, bgBrush);
     DeleteObject(bgBrush);
 
     // Border
-    HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(63, 63, 63));
+    HPEN borderPen = CreatePen(PS_SOLID, 1, menuBorder);
     HGDIOBJ oldPen = SelectObject(dc, borderPen);
     HGDIOBJ oldBrush = SelectObject(dc, (HBRUSH)GetStockObject(NULL_BRUSH));
     Rectangle(dc, s_x, s_y, s_x + kMenuW, s_y + menuH);
@@ -420,10 +444,10 @@ void RightClickMenu::Draw(HDC dc) {
         if (cursor.x >= itemRect.left && cursor.x <= itemRect.right &&
             cursor.y >= itemRect.top && cursor.y <= itemRect.bottom) {
             if (s_items[i].separator) {
-                HBRUSH sepBg = CreateSolidBrush(RGB(34, 34, 34));
+                HBRUSH sepBg = CreateSolidBrush(menuBackground);
                 FillRect(dc, &itemRect, sepBg);
                 DeleteObject(sepBg);
-                HPEN sepPen = CreatePen(PS_SOLID, 1, RGB(74, 74, 74));
+                HPEN sepPen = CreatePen(PS_SOLID, 1, menuSeparator);
                 HGDIOBJ oldSepPen = SelectObject(dc, sepPen);
                 MoveToEx(dc, itemRect.left + 10, itemRect.top + kItemH / 2, nullptr);
                 LineTo(dc, itemRect.right - 10, itemRect.top + kItemH / 2);
@@ -431,16 +455,16 @@ void RightClickMenu::Draw(HDC dc) {
                 DeleteObject(sepPen);
                 continue;
             }
-            HBRUSH hov = CreateSolidBrush(RGB(49, 49, 49));
+            HBRUSH hov = CreateSolidBrush(menuHover);
             FillRect(dc, &itemRect, hov);
             DeleteObject(hov);
         }
 
         if (s_items[i].separator) {
-            HBRUSH sepBg = CreateSolidBrush(RGB(34, 34, 34));
+            HBRUSH sepBg = CreateSolidBrush(menuBackground);
             FillRect(dc, &itemRect, sepBg);
             DeleteObject(sepBg);
-            HPEN sepPen = CreatePen(PS_SOLID, 1, RGB(74, 74, 74));
+            HPEN sepPen = CreatePen(PS_SOLID, 1, menuSeparator);
             HGDIOBJ oldSepPen = SelectObject(dc, sepPen);
             MoveToEx(dc, itemRect.left + 10, itemRect.top + kItemH / 2, nullptr);
             LineTo(dc, itemRect.right - 10, itemRect.top + kItemH / 2);
@@ -451,17 +475,17 @@ void RightClickMenu::Draw(HDC dc) {
 
         const int textY = iy + (kItemH > lineH ? (kItemH - lineH) / 2 : 0);
         if (s_items[i].checked) {
-            SystemFont::DrawText(dc, s_x + kPadding, textY, "[x]", 3, RGB(220, 220, 220), FontRole::Default);
+            SystemFont::DrawText(dc, s_x + kPadding, textY, "[x]", 3, menuText, FontRole::Default);
         }
 
         SystemFont::DrawText(dc, s_x + kPadding + 22, textY,
                              s_items[i].label.c_str(), (int)s_items[i].label.size(),
-                             RGB(220, 220, 220), FontRole::Default);
+                             menuText, FontRole::Default);
 
         // Submenu arrow indicator
         if (s_items[i].hasSubmenu) {
             SystemFont::DrawText(dc, s_x + kMenuW - 20, textY, ">", 1,
-                                 RGB(220, 220, 220), FontRole::Default);
+                                 menuText, FontRole::Default);
         }
     }
 
@@ -472,11 +496,11 @@ void RightClickMenu::Draw(HDC dc) {
         int subH = kItemH * kFolderIconSizeOptionCount;
 
         RECT subBg = {subX, subY, subX + kSubMenuW, subY + subH};
-        HBRUSH subBgBrush = CreateSolidBrush(RGB(34, 34, 34));
+        HBRUSH subBgBrush = CreateSolidBrush(menuBackground);
         FillRect(dc, &subBg, subBgBrush);
         DeleteObject(subBgBrush);
 
-        HPEN subBorderPen = CreatePen(PS_SOLID, 1, RGB(63, 63, 63));
+        HPEN subBorderPen = CreatePen(PS_SOLID, 1, menuBorder);
         HGDIOBJ oldSubPen = SelectObject(dc, subBorderPen);
         HGDIOBJ oldSubBrush2 = SelectObject(dc, (HBRUSH)GetStockObject(NULL_BRUSH));
         Rectangle(dc, subX, subY, subX + kSubMenuW, subY + subH);
@@ -491,7 +515,7 @@ void RightClickMenu::Draw(HDC dc) {
 
             if (cursor.x >= subItem.left && cursor.x <= subItem.right &&
                 cursor.y >= subItem.top && cursor.y <= subItem.bottom) {
-                HBRUSH shov = CreateSolidBrush(RGB(49, 49, 49));
+                HBRUSH shov = CreateSolidBrush(menuHover);
                 FillRect(dc, &subItem, shov);
                 DeleteObject(shov);
             }
@@ -499,11 +523,11 @@ void RightClickMenu::Draw(HDC dc) {
             const int subTextY = sy + (kItemH > lineH ? (kItemH - lineH) / 2 : 0);
             if ((i == 0 && !smallIcons) || (i == 1 && smallIcons)) {
                 SystemFont::DrawText(dc, subX + kPadding, subTextY, "*", 1,
-                                     RGB(220, 220, 220), FontRole::Default);
+                                     menuText, FontRole::Default);
             }
             SystemFont::DrawText(dc, subX + kPadding + 14, subTextY,
                                  folderIconSizeLabel(i), (int)strlen(folderIconSizeLabel(i)),
-                                 RGB(220, 220, 220), FontRole::Default);
+                                 menuText, FontRole::Default);
         }
     }
 }

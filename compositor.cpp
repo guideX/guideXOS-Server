@@ -4779,7 +4779,8 @@ namespace gxos {
                                 FillRect(dc, &itemR, sel);
                                 DeleteObject(sel);
                             }
-                            drawUiText(dc, itemR.left + 8, itemR.top + 6, tmLabels[tmi], RGB(230, 230, 240), FontRole::Small);
+                            drawUiText(dc, itemR.left + 8, itemR.top + 6, tmLabels[tmi],
+                                sciFiTheme ? colorFromTheme(theme.titleBarText) : RGB(230, 230, 240), FontRole::Small);
                         }
                     }
                 }
@@ -7507,6 +7508,8 @@ namespace gxos {
 
         void Compositor::drawTaskbarTooltip(HDC dc, int x, int y, const char* text) {
             if (!text || !text[0]) return;
+            const DesktopTheme& theme = GetCurrentDesktopTheme();
+            const bool sciFiTheme = hostedSciFiTheme(theme);
             int pad = 6;
             int tipW = measureUiText(text, (int)strlen(text), FontRole::Small) + pad * 2;
             int tipH = uiTextHeight(FontRole::Small) + pad * 2;
@@ -7516,10 +7519,14 @@ namespace gxos {
             if (tipX < 0) tipX = 0;
             if (tipY < 0) tipY = 0;
             RECT tipR = { tipX, tipY, tipX + tipW, tipY + tipH };
-            HBRUSH bg = CreateSolidBrush(RGB(55, 55, 65));
+            HBRUSH bg = CreateSolidBrush(sciFiTheme
+                ? WindowRenderer::ToColorRef(hostedPanelSurfaceColor(theme))
+                : RGB(55, 55, 65));
             FillRect(dc, &tipR, bg);
             DeleteObject(bg);
-            HPEN border = CreatePen(PS_SOLID, 1, RGB(100, 105, 120));
+            HPEN border = CreatePen(PS_SOLID, 1, sciFiTheme
+                ? WindowRenderer::ToColorRef(hostedPanelBorderColor(theme))
+                : RGB(100, 105, 120));
             HGDIOBJ oldPen = SelectObject(dc, border);
             HGDIOBJ oldBr = SelectObject(dc, GetStockObject(NULL_BRUSH));
             Rectangle(dc, tipR.left, tipR.top, tipR.right, tipR.bottom);
@@ -7527,7 +7534,8 @@ namespace gxos {
             SelectObject(dc, oldBr);
             DeleteObject(border);
             SetBkMode(dc, TRANSPARENT);
-            drawUiText(dc, tipX + pad, tipY + pad, text, (int)strlen(text), RGB(220, 220, 230), FontRole::Small);
+            drawUiText(dc, tipX + pad, tipY + pad, text, (int)strlen(text),
+                sciFiTheme ? WindowRenderer::ToColorRef(theme.titleBarText) : RGB(220, 220, 230), FontRole::Small);
         }
 #endif
 
