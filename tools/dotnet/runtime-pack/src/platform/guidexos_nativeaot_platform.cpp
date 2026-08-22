@@ -1547,6 +1547,15 @@ guideXosNativeAotFirstPerThreadRootThreadStaticListObserved(uintptr_t thread,
     diagnostics.firstRootCandidateMetadataLocation = list;
     diagnostics.candidateMetadataContainerIdentity = list;
     diagnostics.threadStaticProofStorageAddress = list;
+#elif defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    diagnostics.candidateMetadataLocationCount = 1u;
+    diagnostics.firstRootCandidateMetadataLocation = list;
+    diagnostics.candidateMetadataContainerIdentity = list;
+    diagnostics.candidateProviderThreadIdentity = thread;
+    diagnostics.candidateOwnerThreadIdentity = thread;
+    diagnostics.candidateProviderFunctionCode =
+        kRootProviderFunctionInlineThreadStaticList;
+    validateAllocationContextFixupObjects(true);
 #else
     firstPerThreadRootProviderSafeStop();
 #endif
@@ -1572,7 +1581,7 @@ guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered(uintptr_t thread,
     diagnostics.firstRootProviderMetadataContainer = storage;
     diagnostics.candidateMetadataLocationCount = 1u;
     diagnostics.firstRootCandidateMetadataLocation = storage;
-#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_CANDIDATE_LOAD_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION)
+#if defined(GUIDEXOS_NATIVEAOT_FIRST_ROOT_CANDIDATE_LOAD_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
     diagnostics.candidateSlotAddress = storage;
     diagnostics.candidateMetadataContainerIdentity = storage;
     diagnostics.candidateProviderThreadIdentity = thread;
@@ -9242,6 +9251,164 @@ guideXosNativeAotC011EC29HandleMapRead(
 }
 
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+static void emitC011EC31Preflight() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-live] preflight marker=C011EC31-PREFLIGHT");
+#define C31PF32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C31PF64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C31PF32("c011ec29Preflight", d.c011ec29PreflightProven);
+    C31PF32("afterGcScanRootsReturns", d.c011ec29AfterGcScanRootsReturnCount);
+    C31PF32("nextPhaseEntries", d.c011ec29NextPhaseEntryCount);
+    C31PF32("allocationEntryCount", d.c011ec31AllocationEntryCount);
+    C31PF32("allocationCount", d.c011ec31AllocationCount);
+    C31PF32("weakHandleAllocationResult", d.c011ec31WeakHandleAllocationCallbackCount != 0u ? 1u : 0u);
+    C31PF32("weakHandleAllocationCallbacks", d.c011ec31WeakHandleAllocationCallbackCount);
+    C31PF32("handleType", d.c011ec31HandleType);
+    C31PF64("allocationEntryAddress", d.c011ec31AllocationEntryAddress);
+    C31PF64("target", d.c011ec31Target);
+    C31PF64("strongRootSlot", d.c011ec31StrongRootSlot);
+    C31PF64("strongRootValueBefore", d.c011ec31StrongRootValueBefore);
+    C31PF64("weakHandleSlot", d.c011ec31WeakHandleSlot);
+    C31PF64("weakHandleValueBefore", d.c011ec31WeakHandleValueBefore);
+    C31PF32("strongRootCandidates", d.c011ec31StrongRootCandidateCount);
+    C31PF32("strongHandlePromotions", d.c011ec31StrongHandlePromotionCount);
+    C31PF32("strongRootMatched", d.c011ec31StrongRootMatched);
+    C31PF32("proofHandleMatched", d.c011ec31ProofHandleMatched);
+    C31PF32("handleScanEntries", d.c011ec30HandleScanEntryCount);
+    C31PF32("handleMapReads", d.c011ec30HandleMapReadCount);
+    C31PF32("bucketsVisited", d.c011ec30BucketVisitCount);
+    C31PF32("tablesVisited", d.c011ec30HandleTableVisitCount);
+    C31PF32("segmentsVisited", d.c011ec30SegmentVisitCount);
+    C31PF32("blocksVisited", d.c011ec30BlockVisitCount);
+    C31PF32("slotsInspected", d.c011ec30HandleSlotInspectCount);
+    C31PF32("nonNullShortWeakHandles", d.c011ec30CandidateHandleCount);
+    C31PF64("table", d.c011ec31HandleTableAddress);
+    C31PF64("segment", d.c011ec31SegmentAddress);
+    C31PF64("block", d.c011ec31BlockAddress);
+    C31PF64("blockFirstSlot", d.c011ec31BlockFirstSlotAddress);
+    C31PF64("slot", d.c011ec31SlotAddress);
+    C31PF32("blockType", d.c011ec30FirstBlockType);
+    C31PF32("blockIndex", d.c011ec30FirstBlockIndex);
+    C31PF32("slotIndex", d.c011ec30FirstSlotIndex);
+#undef C31PF32
+#undef C31PF64
+    suspendEeSerialPutString("\n");
+}
+
+static void emitC011EC31Completion() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-live] COMPLETE marker=C011EC31");
+#define C31_HEX32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C31_HEX64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C31_HEX32("successLevel", 3u);
+    C31_HEX32("c011ec31Preflight", d.c011ec31PreflightProven);
+    C31_HEX32("c011ec29Preflight", d.c011ec29PreflightProven);
+    C31_HEX32("afterGcScanRootsEntries", d.c011ec29AfterGcScanRootsEntryCount);
+    C31_HEX32("afterGcScanRootsReturns", d.c011ec29AfterGcScanRootsReturnCount);
+    C31_HEX32("nextPhaseEntries", d.c011ec29NextPhaseEntryCount);
+    C31_HEX32("allocationEntryCount", d.c011ec31AllocationEntryCount);
+    C31_HEX32("allocationCount", d.c011ec31AllocationCount);
+    C31_HEX32("weakHandleAllocationResult", d.c011ec31WeakHandleAllocationCallbackCount != 0u ? 1u : 0u);
+    C31_HEX32("weakHandleAllocationCallbacks", d.c011ec31WeakHandleAllocationCallbackCount);
+    C31_HEX32("handleType", d.c011ec31HandleType);
+    C31_HEX64("allocationEntryAddress", d.c011ec31AllocationEntryAddress);
+    C31_HEX64("target", d.c011ec31Target);
+    C31_HEX64("strongRootSlot", d.c011ec31StrongRootSlot);
+    C31_HEX64("strongRootValueBefore", d.c011ec31StrongRootValueBefore);
+    C31_HEX64("weakHandleSlot", d.c011ec31WeakHandleSlot);
+    C31_HEX64("weakHandleValueBefore", d.c011ec31WeakHandleValueBefore);
+    C31_HEX32("strongRootCandidates", d.c011ec31StrongRootCandidateCount);
+    C31_HEX32("strongHandlePromotions", d.c011ec31StrongHandlePromotionCount);
+    C31_HEX32("strongRootMatched", d.c011ec31StrongRootMatched);
+    C31_HEX32("proofHandleMatched", d.c011ec31ProofHandleMatched);
+    C31_HEX32("bucketsVisited", d.c011ec30BucketVisitCount);
+    C31_HEX32("tablesVisited", d.c011ec30HandleTableVisitCount);
+    C31_HEX32("segmentsVisited", d.c011ec30SegmentVisitCount);
+    C31_HEX32("blocksVisited", d.c011ec30BlockVisitCount);
+    C31_HEX32("slotsInspected", d.c011ec30HandleSlotInspectCount);
+    C31_HEX32("shortWeakSlots", d.c011ec30CandidateHandleCount);
+    C31_HEX32("nonNullShortWeakHandles", d.c011ec30CandidateHandleCount);
+    C31_HEX32("nullSlots", d.c011ec30NullHandleCount);
+    C31_HEX32("livenessCallbacks", d.c011ec30LivenessCheckCount);
+    C31_HEX32("livenessDecisions", d.c011ec30LivenessDecisionCount);
+    C31_HEX32("liveDecisions", d.c011ec30LiveDecisionCount);
+    C31_HEX32("deadDecisions", d.c011ec30DeadDecisionCount);
+    C31_HEX32("condemnedGeneration", d.c011ec31CondemnedGeneration);
+    C31_HEX32("targetGeneration", d.c011ec31TargetGeneration);
+    C31_HEX64("markWordAddress", d.c011ec31MarkWordAddress);
+    C31_HEX64("markWordBefore", d.c011ec31MarkWordBefore);
+    C31_HEX32("markMask", d.c011ec31MarkMask);
+    C31_HEX32("markStateBefore", d.c011ec31MarkStateBefore);
+    C31_HEX32("markedPromoted", d.c011ec31LivenessResult);
+    C31_HEX32("livenessResult", d.c011ec31LivenessResult);
+    C31_HEX64("livenessCallbackFunction", d.c011ec30FirstCallbackAddress);
+    C31_HEX64("livenessCallbackEntry", d.c011ec31LivenessCallbackEntryAddress);
+    C31_HEX64("livenessDecisionAddress", d.c011ec31LivenessDecisionAddress);
+    C31_HEX32("mutationAttempted", d.c011ec31MutationAttempted);
+    C31_HEX32("clearingStore", d.c011ec31ClearingStore);
+    C31_HEX32("preservedCount", d.c011ec31PreservedCount);
+    C31_HEX32("clearedCount", d.c011ec31ClearedCount);
+    C31_HEX64("table", d.c011ec31HandleTableAddress);
+    C31_HEX64("segment", d.c011ec31SegmentAddress);
+    C31_HEX64("block", d.c011ec31BlockAddress);
+    C31_HEX64("blockFirstSlot", d.c011ec31BlockFirstSlotAddress);
+    C31_HEX64("slot", d.c011ec31SlotAddress);
+    C31_HEX32("blockType", d.c011ec30FirstBlockType);
+    C31_HEX32("blockIndex", d.c011ec30FirstBlockIndex);
+    C31_HEX32("slotIndex", d.c011ec30FirstSlotIndex);
+    C31_HEX64("slotBefore", d.c011ec31SlotBefore);
+    C31_HEX64("slotAfter", d.c011ec31SlotAfter);
+    C31_HEX32("queuePendingWork", d.c011ec29PendingQueueAtTransition);
+    C31_HEX32("markPendingWork", d.c011ec29MarkPendingAtTransition);
+    C31_HEX32("unexpectedWeakRooting", d.c011ec31UnexpectedWeakRooting);
+    C31_HEX32("sensitiveAllocations", d.c011ec29SensitiveAllocationCount);
+    C31_HEX32("eeSuspended", d.c011ec29EeSuspended);
+    C31_HEX32("threadStoreLockHeld", d.c011ec29ThreadStoreLockHeld);
+    C31_HEX64("threadStoreLockOwner", d.c011ec29ThreadStoreLockOwner);
+    C31_HEX32("threadStoreRecursion", d.c011ec29ThreadStoreRecursion);
+    C31_HEX32("cooperative", d.c011ec29Cooperative);
+    C31_HEX32("preemptive", d.c011ec29Preemptive);
+    C31_HEX32("managedEntryProhibited", d.c011ec29ManagedEntryProhibited);
+    C31_HEX32("restart", d.c011ec29RestartCount);
+    C31_HEX32("resume", d.c011ec29ResumeCount);
+    C31_HEX32("safeStopReason", d.c011ec30SafeStopReason);
+#undef C31_HEX32
+#undef C31_HEX64
+    suspendEeSerialPutString("\n");
+}
+
+static void emitC011EC31Blocked(uint32_t reason) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec30SafeStopReason = reason;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-live] BLOCKED outcome=H marker=C011EC31-BLOCKED");
+#define C31B32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+    C31B32("allocationCount", d.c011ec31AllocationCount);
+    C31B32("handleType", d.c011ec31HandleType);
+    C31B32("strongHandlePromotions", d.c011ec31StrongHandlePromotionCount);
+    C31B32("strongRootMatched", d.c011ec31StrongRootMatched);
+    C31B32("proofHandleMatched", d.c011ec31ProofHandleMatched);
+    C31B32("livenessCallbacks", d.c011ec30LivenessCheckCount);
+    C31B32("livenessDecisions", d.c011ec30LivenessDecisionCount);
+    C31B32("liveDecisions", d.c011ec30LiveDecisionCount);
+    C31B32("deadDecisions", d.c011ec30DeadDecisionCount);
+    C31B32("safeStopReason", d.c011ec30SafeStopReason);
+#undef C31B32
+    suspendEeSerialPutString("\n");
+}
+#endif
+
 static void emitC011EC30Preflight() {
     const guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
@@ -9358,6 +9525,114 @@ static void c011ec30CaptureContract() {
         g_guideXosAllocationDiagnostics;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+extern "C" void __cdecl
+guideXosNativeAotC011EC31HandleAllocationEntered(
+    uintptr_t allocationEntryAddress) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec31AllocationEntryCount;
+    if (d.c011ec31AllocationEntryAddress == 0u)
+        d.c011ec31AllocationEntryAddress = allocationEntryAddress;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-live] production RhpHandleAlloc entry=");
+    suspendEeSerialPutHex64(allocationEntryAddress);
+    suspendEeSerialPutString(" count=");
+    suspendEeSerialPutHex32(d.c011ec31AllocationEntryCount);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC31HandleAllocated(
+    uintptr_t handleSlot, uintptr_t target, uint32_t handleType,
+    uintptr_t allocationContinuationAddress) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec31AllocationCount;
+    d.c011ec31HandleType = handleType;
+    d.c011ec31AllocationEntryAddress = allocationContinuationAddress;
+    d.c011ec31Target = target;
+    d.c011ec31WeakHandleSlot = handleSlot;
+    d.c011ec31WeakHandleValueBefore = handleSlot == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t *>(handleSlot);
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-live] production handle result slot=");
+    suspendEeSerialPutHex64(handleSlot);
+    suspendEeSerialPutString(" target=");
+    suspendEeSerialPutHex64(target);
+    suspendEeSerialPutString(" type=");
+    suspendEeSerialPutHex32(handleType);
+    suspendEeSerialPutString(" count=");
+    suspendEeSerialPutHex32(d.c011ec31AllocationCount);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" int __cdecl
+guideXosNativeAotC011EC31WeakHandleAllocatedImpl(
+    uintptr_t target, uintptr_t strongRootSlot, uintptr_t strongRootValue,
+    uintptr_t weakHandleSlot, uint32_t handleType) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec31WeakHandleAllocationCallbackCount;
+    d.c011ec31HandleType = handleType;
+    d.c011ec31Target = target;
+    d.c011ec31WeakHandleSlot = weakHandleSlot;
+    d.c011ec31StrongRootSlot = strongRootSlot;
+    d.c011ec31StrongRootValueBefore = strongRootValue;
+    if (d.c011ec31WeakHandleSlot == 0u)
+        d.c011ec31WeakHandleSlot = weakHandleSlot;
+    d.c011ec31WeakHandleValueBefore = d.c011ec31WeakHandleSlot == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t *>(d.c011ec31WeakHandleSlot);
+    const bool valid =
+        target != 0u && strongRootSlot != 0u &&
+        strongRootValue == target && weakHandleSlot != 0u &&
+        d.c011ec31WeakHandleSlot == weakHandleSlot &&
+        d.c011ec31WeakHandleValueBefore == target &&
+        handleType == 0u && d.c011ec31HandleType == 0u;
+    return valid ? 0 : -1;
+}
+
+extern "C" int __cdecl
+guideXosNativeAotC011EC31StrongRootRecordedImpl(
+    uintptr_t strongRootSlot, uintptr_t strongRootValue) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec31StrongRootSlot = strongRootSlot;
+    d.c011ec31StrongRootValueBefore = strongRootValue;
+    const uintptr_t observedValue = strongRootSlot == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t *>(strongRootSlot);
+    const bool valid =
+        strongRootSlot != 0u && strongRootValue != 0u &&
+        d.c011ec31Target != 0u && strongRootValue == d.c011ec31Target;
+    if (valid && observedValue != strongRootValue)
+        return -1;
+    return valid ? 0 : -1;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC31StrongHandlePromoted(
+    uintptr_t slotAddress, uintptr_t target) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec31StrongHandlePromotionCount;
+    if (slotAddress == d.c011ec31StrongRootSlot &&
+        target == d.c011ec31StrongRootValueBefore &&
+        target == d.c011ec31Target)
+        d.c011ec31StrongRootMatched = 1u;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC31StrongRootCandidate(
+    uintptr_t slotAddress, uintptr_t value) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec31StrongRootCandidateCount;
+    if (slotAddress == d.c011ec31StrongRootSlot &&
+        value == d.c011ec31Target)
+        d.c011ec31StrongRootMatched = 1u;
+}
+#endif
+
 extern "C" void __cdecl
 guideXosNativeAotC011EC30HandleScanEntered(
     uint32_t condemned, uint32_t maxGeneration, uintptr_t scanContext) {
@@ -9386,6 +9661,8 @@ guideXosNativeAotC011EC30HandleScanEntered(
     d.c011ec30MaximumGeneration = 0u;
     d.c011ec30HandleScanFlags = 0u;
     d.c011ec30FirstBlockType = 0u;
+    d.c011ec30FirstBlockIndex = 0u;
+    d.c011ec30FirstSlotIndex = 0u;
     d.c011ec30FirstGenerationWord = 0u;
     d.c011ec30FirstAgeMask = 0u;
     d.c011ec30FirstDecisionPromoted = 0u;
@@ -9420,6 +9697,28 @@ guideXosNativeAotC011EC30HandleScanEntered(
     d.c011ec30FirstOperationAddress = 0u;
     d.c011ec30FirstTableIndex = 0u;
     d.c011ec30FirstCpuIndex = 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    d.c011ec31ProofHandleMatched = 0u;
+    d.c011ec31PreflightProven = 0u;
+    d.c011ec31LivenessResult = 0u;
+    d.c011ec31MarkMask = 0u;
+    d.c011ec31MarkStateBefore = 0u;
+    d.c011ec31CondemnedGeneration = condemned;
+    d.c011ec31TargetGeneration = 0xFFFFFFFFu;
+    d.c011ec31MutationAttempted = 0u;
+    d.c011ec31ClearingStore = 0u;
+    d.c011ec31PreservedCount = 0u;
+    d.c011ec31ClearedCount = 0u;
+    d.c011ec31UnexpectedWeakRooting = 0u;
+    d.c011ec31SensitiveAllocationCount = 0u;
+    d.c011ec31Reserved[0] = 0u;
+    d.c011ec31LivenessCallbackEntryAddress = 0u;
+    d.c011ec31LivenessDecisionAddress = 0u;
+    d.c011ec31CurrentSegmentAddress = 0u;
+    d.c011ec31CurrentBlockFirstSlotAddress = 0u;
+    d.c011ec31CurrentBlockIndex = 0u;
+    d.c011ec31CurrentBlockType = 0u;
+#endif
     d.c011ec30FirstHandleScanAddress =
         reinterpret_cast<uintptr_t>(_ReturnAddress());
     d.c011ec30CondemnedGeneration = condemned;
@@ -9500,7 +9799,8 @@ guideXosNativeAotC011EC30SegmentVisited(
 extern "C" void __cdecl
 guideXosNativeAotC011EC30BlockVisited(
     uintptr_t segmentAddress, uint32_t blockIndex,
-    uint32_t blockType, uint32_t generationWord, uint32_t ageMask) {
+    uint32_t blockType, uint32_t generationWord, uint32_t ageMask,
+    uintptr_t blockFirstSlotAddress) {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     ++d.c011ec30BlockVisitCount;
@@ -9509,8 +9809,16 @@ guideXosNativeAotC011EC30BlockVisited(
         d.c011ec30FirstBlockType = blockType;
         d.c011ec30FirstGenerationWord = generationWord;
         d.c011ec30FirstAgeMask = ageMask;
+        d.c011ec30FirstBlockIndex = blockIndex;
     }
-    (void)blockIndex;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    d.c011ec31CurrentSegmentAddress = segmentAddress;
+    d.c011ec31CurrentBlockFirstSlotAddress = blockFirstSlotAddress;
+    d.c011ec31CurrentBlockIndex = blockIndex;
+    d.c011ec31CurrentBlockType = blockType;
+#else
+    (void)blockFirstSlotAddress;
+#endif
 }
 
 extern "C" void __cdecl
@@ -9535,6 +9843,31 @@ guideXosNativeAotC011EC30HandleSlotCandidate(
         d.c011ec30FirstSlotBefore = value;
         d.c011ec30FirstTarget = value;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    if (d.c011ec31ProofHandleMatched == 0u &&
+        d.c011ec31WeakHandleSlot != 0u &&
+        slotAddress == d.c011ec31WeakHandleSlot &&
+        value == d.c011ec31Target &&
+        d.c011ec31CurrentSegmentAddress != 0u &&
+        d.c011ec31CurrentBlockFirstSlotAddress != 0u &&
+        slotAddress >= d.c011ec31CurrentBlockFirstSlotAddress &&
+        slotAddress < d.c011ec31CurrentBlockFirstSlotAddress +
+            (64u * sizeof(uintptr_t)) &&
+        ((slotAddress - d.c011ec31CurrentBlockFirstSlotAddress) %
+            sizeof(uintptr_t)) == 0u) {
+        d.c011ec31ProofHandleMatched = 1u;
+        d.c011ec31HandleTableAddress = d.c011ec30FirstTableAddress;
+        d.c011ec31SegmentAddress = d.c011ec31CurrentSegmentAddress;
+        d.c011ec31BlockAddress = d.c011ec31CurrentBlockFirstSlotAddress;
+        d.c011ec31BlockFirstSlotAddress =
+            d.c011ec31CurrentBlockFirstSlotAddress;
+        d.c011ec30FirstBlockType = d.c011ec31CurrentBlockType;
+        d.c011ec30FirstBlockIndex = d.c011ec31CurrentBlockIndex;
+        d.c011ec30FirstSlotIndex = static_cast<uint32_t>(
+            (slotAddress - d.c011ec31CurrentBlockFirstSlotAddress) /
+            sizeof(uintptr_t));
+    }
+#endif
 }
 
 extern "C" void __cdecl
@@ -9560,6 +9893,11 @@ guideXosNativeAotC011EC30ProductionCallbackEntered() {
     if (d.c011ec30FirstProductionCallbackEntryAddress == 0u)
         d.c011ec30FirstProductionCallbackEntryAddress =
             reinterpret_cast<uintptr_t>(_ReturnAddress());
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    if (d.c011ec31LivenessCallbackEntryAddress == 0u)
+        d.c011ec31LivenessCallbackEntryAddress =
+            d.c011ec30FirstProductionCallbackEntryAddress;
+#endif
 }
 
 extern "C" void __cdecl
@@ -9593,6 +9931,41 @@ guideXosNativeAotC011EC30LivenessCheckEntered(
     emitC011EC30Preflight();
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+extern "C" void __cdecl
+guideXosNativeAotC011EC31LivenessCheckEntered(
+    uintptr_t slotAddress, uintptr_t target, uint32_t targetGeneration,
+    uintptr_t markWordAddress, uintptr_t markWordBefore,
+    uintptr_t markMask) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec31SlotAddress = slotAddress;
+    d.c011ec31SlotBefore = target;
+    d.c011ec31Target = target;
+    d.c011ec31TargetGeneration = targetGeneration;
+    d.c011ec31MarkWordAddress = markWordAddress;
+    d.c011ec31MarkWordBefore = markWordBefore;
+    d.c011ec31MarkMask = static_cast<uint32_t>(markMask);
+    d.c011ec31MarkStateBefore =
+        (markWordBefore & markMask) != 0u ? 1u : 0u;
+    d.c011ec31LivenessDecisionAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if (d.c011ec31StrongRootMatched == 0u)
+        d.c011ec31UnexpectedWeakRooting = 1u;
+    if (d.c011ec31ProofHandleMatched != 0u &&
+        d.c011ec31AllocationCount != 0u &&
+        d.c011ec31WeakHandleAllocationCallbackCount == 1u &&
+        d.c011ec31StrongHandlePromotionCount != 0u &&
+        d.c011ec31StrongRootMatched != 0u &&
+        d.c011ec31HandleType == 0u &&
+        d.c011ec31WeakHandleValueBefore == target &&
+        d.c011ec31StrongRootValueBefore == target) {
+        d.c011ec31PreflightProven = 1u;
+        emitC011EC31Preflight();
+    }
+}
+#endif
+
 extern "C" void __cdecl
 guideXosNativeAotC011EC30LivenessDecisionObserved(uint32_t promoted) {
     guidexos_nativeaot_allocation_diagnostics& d =
@@ -9605,6 +9978,9 @@ guideXosNativeAotC011EC30LivenessDecisionObserved(uint32_t promoted) {
         ++d.c011ec30DeadDecisionCount;
         d.c011ec30FirstDecisionPromoted = 0u;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    d.c011ec31LivenessResult = promoted != 0u ? 1u : 0u;
+#endif
 }
 
 extern "C" __declspec(noreturn) void __cdecl
@@ -9612,6 +9988,76 @@ guideXosNativeAotC011EC30LivenessDecisionCompleted(
     uintptr_t slotAddress, uintptr_t before, uintptr_t after) {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    d.c011ec31SlotAddress = slotAddress;
+    d.c011ec31SlotBefore = before;
+    d.c011ec31SlotAfter = after;
+    d.c011ec31MutationAttempted = before != after ? 1u : 0u;
+    d.c011ec31ClearingStore = before != 0u && after == 0u ? 1u : 0u;
+    if (before != 0u && before == after)
+        ++d.c011ec31PreservedCount;
+    if (before != 0u && after == 0u)
+        ++d.c011ec31ClearedCount;
+    d.c011ec31LivenessDecisionAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    const bool c31Valid =
+        d.c011ec31PreflightProven != 0u &&
+        d.c011ec31AllocationEntryCount != 0u &&
+        d.c011ec31AllocationCount != 0u &&
+        d.c011ec31AllocationEntryCount != 0u &&
+        d.c011ec31WeakHandleAllocationCallbackCount == 1u &&
+        d.c011ec31HandleType == 0u &&
+        d.c011ec31StrongHandlePromotionCount != 0u &&
+        d.c011ec31StrongRootMatched != 0u &&
+        d.c011ec31ProofHandleMatched != 0u &&
+        d.c011ec30HandleScanEntryCount == 1u &&
+        d.c011ec30HandleMapReadCount == 1u &&
+        d.c011ec30BucketVisitCount != 0u &&
+        d.c011ec30HandleTableVisitCount != 0u &&
+        d.c011ec30SegmentVisitCount != 0u &&
+        d.c011ec30BlockVisitCount != 0u &&
+        d.c011ec30HandleSlotInspectCount != 0u &&
+        d.c011ec30CandidateHandleCount == 1u &&
+        d.c011ec30LivenessCheckCount == 1u &&
+        d.c011ec30LivenessDecisionCount == 1u &&
+        d.c011ec31LivenessResult == 1u &&
+        d.c011ec31MarkStateBefore != 0u &&
+        d.c011ec31MutationAttempted == 0u &&
+        d.c011ec31ClearingStore == 0u &&
+        d.c011ec31PreservedCount == 1u &&
+        d.c011ec31ClearedCount == 0u &&
+        before == d.c011ec31Target && after == before &&
+        slotAddress == d.c011ec31WeakHandleSlot &&
+        d.c011ec30FirstCallbackAddress != 0u &&
+        d.c011ec30FirstCallbackAddress == d.c011ec30ExpectedCallbackAddress &&
+        d.c011ec30CallbackDispatchCount == 1u &&
+        d.c011ec30ProductionCallbackEntryCount == 1u &&
+        d.c011ec31StrongRootValueBefore == d.c011ec31Target &&
+        d.c011ec31HandleTableAddress != 0u &&
+        d.c011ec31SegmentAddress != 0u &&
+        d.c011ec31BlockAddress != 0u &&
+        d.c011ec31SlotAddress == d.c011ec31WeakHandleSlot &&
+        d.c011ec29AfterGcScanRootsEntryCount == 1u &&
+        d.c011ec29AfterGcScanRootsReturnCount == 1u &&
+        d.c011ec29NextPhaseEntryCount == 1u &&
+        d.c011ec29PendingQueueAtTransition == 0u &&
+        d.c011ec29MarkPendingAtTransition == 0u &&
+        d.c011ec29EeSuspended != 0u &&
+        d.c011ec29ThreadStoreLockHeld != 0u &&
+        d.c011ec29ManagedEntryProhibited != 0u &&
+        d.c011ec29RestartCount == 0u && d.c011ec29ResumeCount == 0u &&
+        d.c011ec29SensitiveAllocationCount == 0u &&
+        d.c011ec30DiagnosticMutationCount == 0u;
+    if (c31Valid) {
+        d.c011ec30SafeStopReason = 0u;
+        d.c011ec30MarkerEmitted = 1u;
+        emitC011EC31Completion();
+    } else {
+        emitC011EC31Blocked(0xC0310002u);
+    }
+    for (;;) {
+    }
+#endif
     d.c011ec30FirstSlotAddress = slotAddress;
     d.c011ec30FirstSlotBefore = before;
     d.c011ec30FirstSlotAfter = after;
@@ -9707,6 +10153,13 @@ guideXosNativeAotC011EC30HandleScanCompleted(
     uint32_t condemned, uint32_t maxGeneration) {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    (void)condemned;
+    (void)maxGeneration;
+    emitC011EC31Blocked(0xC0310001u);
+    for (;;) {
+    }
+#endif
     d.c011ec30NoHandleCompletion =
         d.c011ec30CandidateHandleCount == 0u ? 1u : 0u;
     if (d.c011ec30PreflightProven == 0u) {
@@ -11613,6 +12066,22 @@ void initializeRuntimeState(unsigned char* block) {
 
 } // namespace
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC31WeakHandleAllocated(
+    uintptr_t target, uintptr_t strongRootSlot, uintptr_t strongRootValue,
+    uintptr_t weakHandleSlot, uint32_t handleType) {
+    return guideXosNativeAotC011EC31WeakHandleAllocatedImpl(
+        target, strongRootSlot, strongRootValue, weakHandleSlot, handleType);
+}
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC31StrongRootRecorded(
+    uintptr_t strongRootSlot, uintptr_t strongRootValue) {
+    return guideXosNativeAotC011EC31StrongRootRecordedImpl(
+        strongRootSlot, strongRootValue);
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 // HostLogProof's generated NativeAOT P/Invoke slot is intentionally bound by
 // the application-scoped runtime pack. The ELF loader does not run the Windows
@@ -11623,6 +12092,15 @@ extern "C" __declspec(dllexport) int __cdecl guideXosManagedThreadStaticProofRec
     uint32_t marker, uint32_t kind, uintptr_t assigned, uintptr_t readback,
     uint32_t expected, uint32_t actual, uint32_t identityMatch,
     uint32_t objectValid);
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC31WeakHandleAllocated__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC31WeakHandleAllocated(
+    uintptr_t target, uintptr_t strongRootSlot, uintptr_t strongRootValue,
+    uintptr_t weakHandleSlot, uint32_t handleType);
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC31StrongRootRecorded__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC31StrongRootRecorded(
+    uintptr_t strongRootSlot, uintptr_t strongRootValue);
 #endif
 #if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi;
@@ -13120,6 +13598,18 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedThreadStaticProofRecord__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosManagedThreadStaticProofRecordFn>(
             guideXosManagedThreadStaticProofRecord));
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
+    using GuideXosNativeAotC011EC31WeakHandleAllocatedFn = int (__cdecl*)(
+        uintptr_t, uintptr_t, uintptr_t, uintptr_t, uint32_t);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC31WeakHandleAllocated__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC31WeakHandleAllocatedFn>(
+            guideXosNativeAotC011EC31WeakHandleAllocated));
+    using GuideXosNativeAotC011EC31StrongRootRecordedFn = int (__cdecl*)(
+        uintptr_t, uintptr_t);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC31StrongRootRecorded__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC31StrongRootRecordedFn>(
+            guideXosNativeAotC011EC31StrongRootRecorded));
 #endif
 #if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     using GuideXosManagedArrayHostLogFn = int (__cdecl*)(void*, void*);
