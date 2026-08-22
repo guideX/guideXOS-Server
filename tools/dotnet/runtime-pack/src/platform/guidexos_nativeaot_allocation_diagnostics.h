@@ -1719,6 +1719,56 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec28LastMarkWordAfter;
     uintptr_t c011ec28LastMarkMask;
     uintptr_t c011ec28NextProductionBoundary;
+
+    /* C011EC29 first post-mark short-weak handle phase boundary. */
+    uint32_t c011ec29AfterGcScanRootsEntryCount;
+    uint32_t c011ec29AfterGcScanRootsReturnCount;
+    uint32_t c011ec29PreflightProven;
+    uint32_t c011ec29NextPhaseEntryCount;
+    uint32_t c011ec29ShortWeakHandleScanEntryCount;
+    uint32_t c011ec29HandleMapReadCount;
+    uint32_t c011ec29FirstMutationAttempted;
+    uint32_t c011ec29MarkerEmitted;
+    uint32_t c011ec29SafeStopReason;
+    uint32_t c011ec29HandleTableMapBucketPresent;
+    uint32_t c011ec29HandleScanFlags;
+    uint32_t c011ec29CondemnedGeneration;
+    uint32_t c011ec29MaximumGeneration;
+    uint32_t c011ec29GenerationCount;
+    uint32_t c011ec29HeapCount;
+    uint32_t c011ec29HeapNumber;
+    uint32_t c011ec29CollectionReason;
+    uint32_t c011ec29Compacting;
+    uint32_t c011ec29Promotion;
+    uint32_t c011ec29FullCollection;
+    uint32_t c011ec29EeSuspended;
+    uint32_t c011ec29Cooperative;
+    uint32_t c011ec29Preemptive;
+    uint32_t c011ec29ThreadStoreLockHeld;
+    uint32_t c011ec29ThreadStoreRecursion;
+    uint32_t c011ec29ManagedEntryProhibited;
+    uint32_t c011ec29ManagedEntryAttempts;
+    uint32_t c011ec29SensitiveAllocationCount;
+    uint32_t c011ec29PendingQueueAtTransition;
+    uint32_t c011ec29MarkPendingAtTransition;
+    uint32_t c011ec29RestartCount;
+    uint32_t c011ec29ResumeCount;
+
+    uintptr_t c011ec29AfterGcScanRootsEntryAddress;
+    uintptr_t c011ec29AfterGcScanRootsReturnAddress;
+    uintptr_t c011ec29ScanContext;
+    uintptr_t c011ec29NextPhaseCallSite;
+    uintptr_t c011ec29HeapAddress;
+    uintptr_t c011ec29FirstHandleScanAddress;
+    uintptr_t c011ec29FirstHandleTableMapAddress;
+    uintptr_t c011ec29FirstHandleTableMapBucketsFieldAddress;
+    uintptr_t c011ec29FirstHandleTableMapBucketsValue;
+    uintptr_t c011ec29FirstHandleTableMapMaxIndex;
+    uintptr_t c011ec29FirstOperationAddress;
+    uintptr_t c011ec29ThreadStoreLockOwner;
+    uintptr_t c011ec29FirstMutationTarget;
+    uintptr_t c011ec29FirstMutationBefore;
+    uintptr_t c011ec29FirstMutationAfter;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

@@ -8941,6 +8941,306 @@ guideXosNativeAotC011EC28DrainBoundaryEntered() {
     }
 }
 
+static void emitC011EC29Preflight() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-post-mark-phase] preflight marker=C011EC29-PREFLIGHT");
+#define C29PF32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C29PF64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C29PF32("c26Completion", d.c011ec26MarkerEmitted);
+    C29PF32("c27Completion", d.c011ec27MarkerEmitted);
+    C29PF32("c28Completion", d.c011ec28QueueSemanticsValidated);
+    C29PF32("queueClosed", d.c011ec28QueueOccupancy == 0u &&
+        d.c011ec28FinalDrainEmptyResult != 0u ? 1u : 0u);
+    C29PF32("finalQueueCount", d.c011ec28FinalCount);
+    C29PF32("finalEmptyResult", d.c011ec28QueueEmptyResult);
+    C29PF32("finalDrainEmptyResult", d.c011ec28FinalDrainEmptyResult);
+    C29PF32("markWrites", d.c011ec28MarkWriteCount);
+    C29PF32("graphScans", d.c011ec28ObjectsScanned);
+    C29PF32("childReads", d.c011ec28ReferenceSlotsVisited);
+    C29PF32("afterGcScanRootsEntries", d.c011ec29AfterGcScanRootsEntryCount);
+    C29PF32("afterGcScanRootsReturns", d.c011ec29AfterGcScanRootsReturnCount);
+    C29PF32("nextPhaseEntries", d.c011ec29NextPhaseEntryCount);
+    C29PF64("nextPhaseCallSite", d.c011ec29NextPhaseCallSite);
+#undef C29PF32
+#undef C29PF64
+    suspendEeSerialPutString("\n");
+}
+
+static void emitC011EC29Completion() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-post-mark-phase] COMPLETE marker=C011EC29");
+#define C29_HEX32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C29_HEX64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C29_HEX32("successLevel", 1u);
+    C29_HEX32("c011ec29Preflight", d.c011ec29PreflightProven);
+    C29_HEX32("afterGcScanRootsEntries", d.c011ec29AfterGcScanRootsEntryCount);
+    C29_HEX32("afterGcScanRootsReturns", d.c011ec29AfterGcScanRootsReturnCount);
+    C29_HEX64("afterGcScanRootsEntryAddress", d.c011ec29AfterGcScanRootsEntryAddress);
+    C29_HEX64("afterGcScanRootsReturnAddress", d.c011ec29AfterGcScanRootsReturnAddress);
+    C29_HEX32("nextPhaseEntries", d.c011ec29NextPhaseEntryCount);
+    C29_HEX64("nextPhaseCallSite", d.c011ec29NextPhaseCallSite);
+    C29_HEX32("shortWeakHandleScanEntries", d.c011ec29ShortWeakHandleScanEntryCount);
+    C29_HEX64("firstHandleScanAddress", d.c011ec29FirstHandleScanAddress);
+    C29_HEX32("handleMapReads", d.c011ec29HandleMapReadCount);
+    C29_HEX64("firstHandleTableMapAddress", d.c011ec29FirstHandleTableMapAddress);
+    C29_HEX64("firstHandleTableMapBucketsFieldAddress", d.c011ec29FirstHandleTableMapBucketsFieldAddress);
+    C29_HEX64("firstReadValue", d.c011ec29FirstHandleTableMapBucketsValue);
+    C29_HEX64("firstHandleTableMapMaxIndex", d.c011ec29FirstHandleTableMapMaxIndex);
+    C29_HEX32("handleTableMapBucketPresent", d.c011ec29HandleTableMapBucketPresent);
+    C29_HEX64("firstOperationAddress", d.c011ec29FirstOperationAddress);
+    C29_HEX32("firstMutationAttempted", d.c011ec29FirstMutationAttempted);
+    C29_HEX64("mutationTarget", d.c011ec29FirstMutationTarget);
+    C29_HEX64("mutationBefore", d.c011ec29FirstMutationBefore);
+    C29_HEX64("mutationAfter", d.c011ec29FirstMutationAfter);
+    C29_HEX32("condemnedGeneration", d.c011ec29CondemnedGeneration);
+    C29_HEX32("maximumGeneration", d.c011ec29MaximumGeneration);
+    C29_HEX32("generationCount", d.c011ec29GenerationCount);
+    C29_HEX32("heapNumber", d.c011ec29HeapNumber);
+    C29_HEX32("heapCount", d.c011ec29HeapCount);
+    C29_HEX32("collectionReason", d.c011ec29CollectionReason);
+    C29_HEX32("compacting", d.c011ec29Compacting);
+    C29_HEX32("relocating", 0u);
+    C29_HEX32("promotion", d.c011ec29Promotion);
+    C29_HEX32("fullCollection", d.c011ec29FullCollection);
+    C29_HEX32("shortWeakReached", d.c011ec29ShortWeakHandleScanEntryCount != 0u ? 1u : 0u);
+    C29_HEX32("finalizationReached", 0u);
+    C29_HEX32("planReached", 0u);
+    C29_HEX32("sweepReached", 0u);
+    C29_HEX32("relocationReached", 0u);
+    C29_HEX32("restartPreparationReached", 0u);
+    C29_HEX32("eeSuspended", d.c011ec29EeSuspended);
+    C29_HEX32("threadStoreLockHeld", d.c011ec29ThreadStoreLockHeld);
+    C29_HEX64("threadStoreLockOwner", d.c011ec29ThreadStoreLockOwner);
+    C29_HEX32("threadStoreRecursion", d.c011ec29ThreadStoreRecursion);
+    C29_HEX32("cooperative", d.c011ec29Cooperative);
+    C29_HEX32("preemptive", d.c011ec29Preemptive);
+    C29_HEX32("managedEntryProhibited", d.c011ec29ManagedEntryProhibited);
+    C29_HEX32("managedEntryAttempts", d.c011ec29ManagedEntryAttempts);
+    C29_HEX32("sensitiveAllocations", d.c011ec29SensitiveAllocationCount);
+    C29_HEX64("stackBase", d.rootThreadRecords[0].stackLow);
+    C29_HEX64("stackLimit", d.rootThreadRecords[0].stackHigh);
+    C29_HEX64("scanContextStackLimit", d.callbackContextStackLimit);
+    C29_HEX32("stackBoundsConsumed", d.c011ec18StackBoundsConsumed);
+    C29_HEX32("queuePendingAtTransition", d.c011ec29PendingQueueAtTransition);
+    C29_HEX32("markPendingAtTransition", d.c011ec29MarkPendingAtTransition);
+    C29_HEX32("markWrites", d.c011ec28MarkWriteCount);
+    C29_HEX32("graphScans", d.c011ec28ObjectsScanned);
+    C29_HEX32("childReads", d.c011ec28ReferenceSlotsVisited);
+    C29_HEX32("restart", d.c011ec29RestartCount);
+    C29_HEX32("resume", d.c011ec29ResumeCount);
+    C29_HEX32("safeStopReason", d.c011ec29SafeStopReason);
+#undef C29_HEX32
+#undef C29_HEX64
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC29AfterGcScanRootsEntered(
+    int condemned, int maxGeneration, uintptr_t scanContext) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec29AfterGcScanRootsEntryCount;
+    d.c011ec29AfterGcScanRootsEntryAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec29CondemnedGeneration = static_cast<uint32_t>(condemned);
+    d.c011ec29MaximumGeneration = static_cast<uint32_t>(maxGeneration);
+    d.c011ec29ScanContext = scanContext;
+    d.c011ec29EeSuspended = d.c011ec15EeSuspended;
+    d.c011ec29Cooperative = d.rootThreadRecords[0].cooperative;
+    d.c011ec29Preemptive = d.rootThreadRecords[0].preemptive;
+    d.c011ec29ThreadStoreLockHeld = d.c011ec15ThreadStoreLockHeld;
+    d.c011ec29ThreadStoreLockOwner = d.threadStoreLockOwner;
+    d.c011ec29ThreadStoreRecursion = d.threadStoreLockRecursionDepth;
+    d.c011ec29ManagedEntryProhibited = d.c011ec15ManagedEntryProhibited;
+    d.c011ec29RestartCount = d.restartRequestCount + d.restartEntryCount;
+    d.c011ec29ResumeCount = d.managedResumeCount;
+    d.c011ec29PendingQueueAtTransition = d.c011ec28QueueOccupancy != 0u ? 1u : 0u;
+    d.c011ec29MarkPendingAtTransition =
+        (d.c011ec28QueueOccupancy != 0u || d.c011ec28ChildQueuePending != 0u) ? 1u : 0u;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC29AfterGcScanRootsReturned() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec29AfterGcScanRootsReturnCount;
+    d.c011ec29AfterGcScanRootsReturnAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC29NextPhaseEntered(
+    int condemned, int maxGeneration, uintptr_t scanContext,
+    uint32_t collectionReason, uint32_t compacting, uint32_t promotion,
+    uintptr_t heap, uint32_t generationCount, uint32_t heapNumber,
+    uint32_t fullCollection) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec29NextPhaseEntryCount;
+    d.c011ec29NextPhaseCallSite = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec29CondemnedGeneration = static_cast<uint32_t>(condemned);
+    d.c011ec29MaximumGeneration = static_cast<uint32_t>(maxGeneration);
+    d.c011ec29ScanContext = scanContext;
+    d.c011ec29CollectionReason = collectionReason;
+    d.c011ec29Compacting = compacting;
+    d.c011ec29Promotion = promotion;
+    d.c011ec29HeapAddress = heap;
+    d.c011ec29GenerationCount = generationCount;
+    d.c011ec29HeapNumber = heapNumber;
+    d.c011ec29HeapCount = 1u;
+    d.c011ec29FullCollection = fullCollection;
+    d.c011ec29EeSuspended = d.c011ec15EeSuspended;
+    d.c011ec29Cooperative = d.rootThreadRecords[0].cooperative;
+    d.c011ec29Preemptive = d.rootThreadRecords[0].preemptive;
+    d.c011ec29ThreadStoreLockHeld = d.c011ec15ThreadStoreLockHeld;
+    d.c011ec29ThreadStoreLockOwner = d.threadStoreLockOwner;
+    d.c011ec29ThreadStoreRecursion = d.threadStoreLockRecursionDepth;
+    d.c011ec29ManagedEntryProhibited = d.c011ec15ManagedEntryProhibited;
+    d.c011ec29RestartCount = d.restartRequestCount + d.restartEntryCount;
+    d.c011ec29ResumeCount = d.managedResumeCount;
+    d.c011ec29PendingQueueAtTransition = d.c011ec28QueueOccupancy != 0u ? 1u : 0u;
+    d.c011ec29MarkPendingAtTransition =
+        (d.c011ec28QueueOccupancy != 0u || d.c011ec28ChildQueuePending != 0u) ? 1u : 0u;
+    d.c011ec28NextProductionBoundary = d.c011ec29NextPhaseCallSite;
+
+    const bool c26Complete =
+        d.c011ec26MarkerEmitted != 0u &&
+        d.c011ec26GcScanRootsEnumerationComplete != 0u &&
+        d.c011ec26IteratorCompletionCount == 1u &&
+        d.c011ec26GcScanRootsReturnCount == 1u &&
+        d.c011ec26StackProviderCallbackReturnCount == 1u &&
+        d.c011ec23UnwindAttemptCount == 2u &&
+        d.c011ec26ThirdUnwindAttemptCount == 0u;
+    const bool c27Complete =
+        d.c011ec27QueueItemConsumedCount != 0u &&
+        d.c011ec27MarkWriteCount != 0u &&
+        d.c011ec27ChildReferenceReadCount != 0u;
+    const bool queueClosed =
+        d.c011ec28DrainReturnCount != 0u &&
+        d.c011ec28FinalDrainEmptyResult != 0u &&
+        d.c011ec28QueueOccupancy == 0u &&
+        d.c011ec28QueueInvariantFailures == 0u &&
+        d.c011ec28ChildQueuePending == 0u;
+    d.c011ec28QueueSemanticsValidated =
+        d.c011ec28QueueSemanticsValidated != 0u &&
+        d.c011ec28InitialQueueBase != 0u &&
+        d.c011ec28FinalQueueBase != 0u &&
+        queueClosed ? 1u : 0u;
+    const bool complete = c26Complete && c27Complete && queueClosed &&
+        d.c011ec28QueueSemanticsValidated != 0u &&
+        d.c011ec28QueueSuccessfulDequeueCount != 0u &&
+        d.c011ec28QueueSuccessfulEnqueueCount != 0u &&
+        d.c011ec28MarkWriteCount != 0u &&
+        d.c011ec28ReferenceSlotsVisited != 0u &&
+        d.c011ec29AfterGcScanRootsEntryCount == 1u &&
+        d.c011ec29AfterGcScanRootsReturnCount == 1u;
+    if (complete) {
+        emitC011EC28Preflight();
+        d.c011ec27MarkerEmitted = 1u;
+        d.c011ec27SafeStopReason = 0u;
+        emitC011EC28Completion();
+        d.c011ec29PreflightProven = 1u;
+        emitC011EC29Preflight();
+    } else {
+        d.c011ec29SafeStopReason = 0xC0290001u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-post-mark-phase] BLOCKED outcome=H marker=C011EC29-BLOCKED");
+#define C29B32(name, value) \
+        suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+        C29B32("c26Complete", c26Complete ? 1u : 0u);
+        C29B32("c27Complete", c27Complete ? 1u : 0u);
+        C29B32("queueClosed", queueClosed ? 1u : 0u);
+        C29B32("queueSemantics", d.c011ec28QueueSemanticsValidated);
+        C29B32("dequeues", d.c011ec28QueueSuccessfulDequeueCount);
+        C29B32("enqueues", d.c011ec28QueueSuccessfulEnqueueCount);
+        C29B32("markTests", d.c011ec28MarkTestCount);
+        C29B32("markWrites", d.c011ec28MarkWriteCount);
+        C29B32("childReads", d.c011ec28ReferenceSlotsVisited);
+        C29B32("drainReturns", d.c011ec28DrainReturnCount);
+        C29B32("finalDrainEmpty", d.c011ec28FinalDrainEmptyResult);
+        C29B32("queueOccupancy", d.c011ec28QueueOccupancy);
+        C29B32("queueInvariantFailures", d.c011ec28QueueInvariantFailures);
+        C29B32("initialQueueBase", d.c011ec28InitialQueueBase != 0u ? 1u : 0u);
+        C29B32("finalQueueBase", d.c011ec28FinalQueueBase != 0u ? 1u : 0u);
+        C29B32("afterGcScanRootsEntries", d.c011ec29AfterGcScanRootsEntryCount);
+        C29B32("afterGcScanRootsReturns", d.c011ec29AfterGcScanRootsReturnCount);
+#undef C29B32
+        suspendEeSerialPutString("\n");
+        for (;;) {
+        }
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC29HandleScanEntered(
+    uint32_t condemned, uint32_t maxGeneration, uintptr_t scanContext) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec29ShortWeakHandleScanEntryCount;
+    d.c011ec29FirstHandleScanAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec29CondemnedGeneration = condemned;
+    d.c011ec29MaximumGeneration = maxGeneration;
+    d.c011ec29ScanContext = scanContext;
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC29HandleMapRead(
+    uintptr_t mapAddress, uintptr_t bucketsFieldAddress,
+    uintptr_t bucketsValue, uintptr_t maxIndex, uint32_t flags) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec29HandleMapReadCount;
+    d.c011ec29FirstOperationAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec29FirstHandleTableMapAddress = mapAddress;
+    d.c011ec29FirstHandleTableMapBucketsFieldAddress = bucketsFieldAddress;
+    d.c011ec29FirstHandleTableMapBucketsValue = bucketsValue;
+    d.c011ec29FirstHandleTableMapMaxIndex = maxIndex;
+    d.c011ec29HandleTableMapBucketPresent = bucketsValue != 0u ? 1u : 0u;
+    d.c011ec29HandleScanFlags = flags;
+    d.c011ec29EeSuspended = d.c011ec15EeSuspended;
+    d.c011ec29Cooperative = d.rootThreadRecords[0].cooperative;
+    d.c011ec29Preemptive = d.rootThreadRecords[0].preemptive;
+    d.c011ec29ThreadStoreLockHeld = d.c011ec15ThreadStoreLockHeld;
+    d.c011ec29ThreadStoreLockOwner = d.threadStoreLockOwner;
+    d.c011ec29ThreadStoreRecursion = d.threadStoreLockRecursionDepth;
+    d.c011ec29ManagedEntryProhibited = d.c011ec15ManagedEntryProhibited;
+    d.c011ec29RestartCount = d.restartRequestCount + d.restartEntryCount;
+    d.c011ec29ResumeCount = d.managedResumeCount;
+    const bool valid =
+        d.c011ec29PreflightProven != 0u &&
+        d.c011ec29AfterGcScanRootsEntryCount == 1u &&
+        d.c011ec29AfterGcScanRootsReturnCount == 1u &&
+        d.c011ec29NextPhaseEntryCount == 1u &&
+        d.c011ec29ShortWeakHandleScanEntryCount == 1u &&
+        d.c011ec29HandleMapReadCount == 1u &&
+        mapAddress != 0u && bucketsFieldAddress != 0u &&
+        d.c011ec29PendingQueueAtTransition == 0u &&
+        d.c011ec29MarkPendingAtTransition == 0u &&
+        d.c011ec29EeSuspended != 0u &&
+        d.c011ec29ThreadStoreLockHeld != 0u &&
+        d.c011ec29ManagedEntryProhibited != 0u &&
+        d.c011ec29RestartCount == 0u && d.c011ec29ResumeCount == 0u;
+    if (valid) {
+        d.c011ec29SafeStopReason = 0u;
+        d.c011ec29MarkerEmitted = 1u;
+        emitC011EC29Completion();
+    } else {
+        d.c011ec29SafeStopReason = 0xC0290002u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-post-mark-phase] BLOCKED outcome=H marker=C011EC29-BLOCKED\n");
+    }
+    for (;;) {
+    }
+}
+
 extern "C" __declspec(noreturn) void __cdecl
 guideXosNativeAotC011EC27PostRootAfterGcScanRootsEntered() {
     guidexos_nativeaot_allocation_diagnostics& d =
