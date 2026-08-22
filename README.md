@@ -1,94 +1,72 @@
 ﻿<img alt="" src="https://guidexos.com/images/screenshots/guidexos_server_main_gui.jpg" />
 
-# guideXOS Server
+♦ guideXOS Server
 
 A multi-architecture operating system exploring a future where applications are not tied to a single CPU architecture.
 
----
+■■■ At a Glance
 
-## At a Glance
+● 11 CPU architectures supported (x86, Sparc8, Sparc64, RISC-V, IA-64, PPC64, MIPS64, ARM, ARM64, LOONGARCH, more)
+● Strict layered OS design
+● UEFI-first modern boot path
+● Kernel-level networking stack
+● Desktop environment already running
+● Future universal app format (`.gxapp`)
 
-* 11 CPU architectures supported (x86 -> RISC-V -> IA-64)
-* Strict layered OS design
-* UEFI-first modern boot path
-* Kernel-level networking stack
-* Desktop environment already running
-* Future universal app format (`.gxapp`)
-
----
-
-## What is guideXOS?
-
+● What is guideXOS?
 guideXOS Server is an experimental operating system focused on one big idea:
-
 **What if apps could run across completely different CPU architectures... natively?**
-
 Instead of locking software to x86 or ARM, guideXOS is building toward a universal application platform backed by a multi-architecture kernel.
-
 ---
-
 ## Architecture
-
 ```text
 Firmware -> Bootloader -> Kernel -> guideXOSServer -> Applications
 ```
-
 ### Core Principles
-
-* Bootloader loads kernel only
-* Kernel is the only boot-aware layer
-* GUI lives in user space
-* No shortcuts, no layer violations
-
+● Bootloader loads kernel only
+● Kernel is the only boot-aware layer
+● GUI lives in user space
+● No shortcuts, no layer violations
 ---
-
 ## Supported Architectures
-
 | Tier     | Architectures                          |
 | -------- | -------------------------------------- |
 | MVP      | x86, amd64, riscv64                    |
 | Next     | arm64, ia64, sparc64                   |
 | Extended | arm, sparc, ppc64, mips64, loongarch64 |
-
 Total: 11 architectures in-tree
-
 ---
-
 ## What Already Works
-
 ### Boot and Platform
-
-* UEFI bootloader (primary path)
-* BIOS / legacy support
-* ACPI and OpenSBI support
-
+● UEFI bootloader (primary path)
+● BIOS / legacy support
+● ACPI and OpenSBI support
 ### Storage
-
-* ATA / AHCI / NVMe
-* USB storage
-* FAT32, exFAT, ext2/4, UFS
-
+● ATA / AHCI / NVMe
+● USB storage
+● FAT32, exFAT, ext2/4, UFS
+### Display
+● Multiple Monitors (in QEMU only)
 ### Networking
-
-* IPv4 stack (TCP, UDP, ICMP)
-* DHCP and DNS
-* Kernel socket layer
+● IPv4 stack (TCP, UDP, ICMP)
+● DHCP and DNS
+● Kernel socket layer
 
 ### Graphics and Input
 
-* Framebuffer rendering
-* PS/2 and USB input
-* Multi-platform display backends
+● Framebuffer rendering
+● PS/2 and USB input
+● Multi-platform display backends
 
 ---
 
 ## Current Gaps
 
-* IPv6
-* GPU acceleration
-* VirtIO
-* Full ARM64 maturity
-* Security features (ASLR, TPM, Secure Boot)
+● IPv6
+● GPU acceleration
+● VirtIO
+● Full ARM64 maturity
+● Security features (ASLR, TPM, Secure Boot)
 
 ---
 
@@ -112,22 +90,22 @@ make qemu
 The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a default browsing mode.
 Current milestone: bare-metal Navigator can render a reviewed real public HTTPS page through opt-in public proof mode.
 
-* Deterministic kernel smoke: `.\scripts\smoke-navigator-kernel.ps1`
-* Dedicated public HTTPS proof: `.\scripts\smoke-navigator-public-https.ps1`
-* Reviewed target matrix helper: `.\scripts\smoke-navigator-public-https-allowlist.ps1`
-* Optional combined debug matrix: `.\scripts\smoke-navigator-kernel.ps1 -IncludePublicPilot`
-* Workflow: `.github/workflows/navigator-public-https-probe.yml`
-* Secret: `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`
-* Default target: `https://sha256.badssl.com/`
-* Reviewed public target allowlist v0.4:
-  * `https://sha256.badssl.com/` because it is a stable badssl DNS-hosted HTTPS endpoint that proves DNS, TCP, TLS, certificate, and hostname validation without opening general public browsing
-* Candidate prep helper: `scripts/prepare-navigator-shipped-root-candidate.ps1`
-* Candidate evidence linker: `scripts/promote-navigator-public-https-evidence.ps1`
-* Automated artifact assertion: `scripts/assert-navigator-public-https-pass.ps1`
-* Structured evidence export: `scripts/export-navigator-public-https-evidence.ps1`
-* Public-root validator/manifest helper: `scripts/validate-navigator-ca-bundle.ps1`
-* Review/operator contract: `scripts/fixtures/README.md`
-* Interactive screenshot launch: `.\scripts\run-navigator-public-https-screenshot.ps1`
+● Deterministic kernel smoke: `.\scripts\smoke-navigator-kernel.ps1`
+● Dedicated public HTTPS proof: `.\scripts\smoke-navigator-public-https.ps1`
+● Reviewed target matrix helper: `.\scripts\smoke-navigator-public-https-allowlist.ps1`
+● Optional combined debug matrix: `.\scripts\smoke-navigator-kernel.ps1 -IncludePublicPilot`
+● Workflow: `.github/workflows/navigator-public-https-probe.yml`
+● Secret: `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`
+● Default target: `https://sha256.badssl.com/`
+● Reviewed public target allowlist v0.4:
+  ● `https://sha256.badssl.com/` because it is a stable badssl DNS-hosted HTTPS endpoint that proves DNS, TCP, TLS, certificate, and hostname validation without opening general public browsing
+● Candidate prep helper: `scripts/prepare-navigator-shipped-root-candidate.ps1`
+● Candidate evidence linker: `scripts/promote-navigator-public-https-evidence.ps1`
+● Automated artifact assertion: `scripts/assert-navigator-public-https-pass.ps1`
+● Structured evidence export: `scripts/export-navigator-public-https-evidence.ps1`
+● Public-root validator/manifest helper: `scripts/validate-navigator-ca-bundle.ps1`
+● Review/operator contract: `scripts/fixtures/README.md`
+● Interactive screenshot launch: `.\scripts\run-navigator-public-https-screenshot.ps1`
 
 The screenshot launcher defaults to `https://sha256.badssl.com/`, rejects targets outside the reviewed allowlist, and stages the same explicit proof policy and trust material as the passing proof:
 
@@ -176,10 +154,10 @@ run-qemu.bat
 
 Uses:
 
-* UEFI (OVMF)
-* q35 machine
-* FAT ESP
-* serial debug output
+● UEFI (OVMF)
+● q35 machine
+● FAT ESP
+● serial debug output
 
 ---
 
@@ -187,11 +165,11 @@ Uses:
 
 ### Phase 8 (Current Focus)
 
-* Developer SDK
-* `.gxapp` universal format
-* Cross-architecture toolchains
-* musl libc integration
-* Package management
+● Developer SDK
+● `.gxapp` universal format
+● Cross-architecture toolchains
+● musl libc integration
+● Package management
 
 ### Path Forward
 
@@ -200,36 +178,24 @@ Uses:
 3. Deliver `.gxapp` system
 4. MVP on:
 
-   * x86
-   * amd64
-   * riscv64
+   ● x86
+   ● amd64
+   ● riscv64
 5. Expand architecture support
-
 ---
-
 ## Why This Project Exists
-
 Most operating systems optimize for one architecture.
-
 guideXOS asks:
-
 **What if architecture did not matter anymore?**
-
 ---
-
 ## Project Status
-
-* Active development
-* Research-focused
-* Not production-ready
-
+● Active development
+● Research-focused
+● Not production-ready
 Most stable path today:
 Windows -> amd64 -> UEFI -> QEMU
-
 ---
-
 ## Project Layout
-
 ```text
 guideXOS.SERVER/
 ├── guideXOSBootLoader/   UEFI bootloader
@@ -243,33 +209,20 @@ guideXOS.SERVER/
 ├── build.ps1             main build script
 └── README.md
 ```
-
 ---
-
 ## Contributing
-
 Before adding anything, ask:
-
-* Which layer does this belong in?
-* Can this be done in user mode?
-* Does this break layering rules?
-
+● Which layer does this belong in?
+● Can this be done in user mode?
+● Does this break layering rules?
 Avoid:
-
-* GUI in kernel
-* Bootloader loading user-mode
-* Layer shortcuts
-
+● GUI in kernel
+● Bootloader loading user-mode
+● Layer shortcuts
 ---
-
 ## License
-
 Copyright (c) 2024-2026 guideX
-
 ---
-
 ## Final Thought
-
 guideXOS is not trying to compete with existing operating systems.
-
 It is exploring what comes after them.
