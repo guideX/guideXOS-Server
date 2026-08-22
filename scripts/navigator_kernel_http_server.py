@@ -1783,6 +1783,15 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(500, "text/html; charset=utf-8",
                              b"<html><body><h1>Server Error</h1><p>fixture 500</p></body></html>")
             return
+        if compat_path == "/navigator-smoke/parser-stack.html":
+            repeated = (b"<div class='fixture-row'><h2>Parser stack row</h2>"
+                        b"<p><a href='/navigator-smoke/final.html'>bounded parser content</a> "
+                        b"keeps the document local and deterministic.</p></div>") * 320
+            body = (b"<html><head><title>Parser stack regression</title>"
+                    b"<style>body{color:#111827}.fixture-row{display:block}</style>"
+                    b"</head><body><h1>Parser stack regression</h1>" + repeated + b"</body></html>")
+            self.write_bytes(200, "text/html; charset=utf-8", body)
+            return
         if compat_path == "/navigator-smoke/large-body.txt":
             self.write_bytes(200, "text/plain; charset=utf-8", b"A" * (264 * 1024))
             return

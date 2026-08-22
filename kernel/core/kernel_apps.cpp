@@ -9160,6 +9160,27 @@ void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out,
 
 void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const char* sourceType, const char* contentType, int httpStatusCode, const char* httpReason, const char* requestedUrl, int redirectCount, const KernelHttpResponse* networkResponse, int inputBytes)
 {
+    // Public smoke navigation runs from the deliberately small 16 KiB boot
+    // stack. Keep parser scratch storage static so a real HTML document does
+    // not combine its bounded local arrays with the HTTPS probe call chain and
+    // corrupt the caller's return frame.
+    static NavCssRule cssRules[32]{};
+    static char currentFormAction[MAX_URL_LEN];
+    static char currentFormMethod[8];
+    static char currentFormEncoding[48];
+    static char text[MAX_BLOCK_TEXT];
+    static char className[64];
+    static char id[64];
+    static char action[MAX_URL_LEN];
+    static char type[24];
+    static char rows[12];
+    static char src[MAX_URL_LEN];
+    static char alt[96];
+    static char widthText[16];
+    static char heightText[16];
+    static char resolved[MAX_URL_LEN];
+    static char href[MAX_URL_LEN];
+
     const int boundedInputBytes = inputBytes >= 0
         ? (inputBytes > gxos::web::kHttpSharedMaxBodyBytes ? gxos::web::kHttpSharedMaxBodyBytes : inputBytes)
         : strlen_local(html);
@@ -9174,21 +9195,25 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
     m_metaVisibleText[0] = '\0';
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, url ? url : "Document", MAX_TITLE_LEN_NAV);
+    serial::puts("[NAVIGATOR-PARSER] begin bytes=");
+    serial_put_dec((uint32_t)m_metaParserInputBytes);
+    serial::puts("\n");
     releaseImageResources();
     m_blockCount = 0;
     blurFormBlock();
 
-    NavCssRule cssRules[32]{};
     int cssRuleCount = 0;
     gxos::web::CssDiagnostics cssDiagnostics{};
     gxos::web::WebStyle bodyStyle{};
     nav_scan_css(html ? html : "", cssRules, cssRuleCount, 32, cssDiagnostics, bodyStyle);
+    serial::puts("[NAVIGATOR-PARSER] css_complete rules=");
+    serial_put_dec((uint32_t)cssRuleCount);
+    serial::puts(" style_bytes=");
+    serial_put_dec((uint32_t)cssDiagnostics.styleBytesProcessed);
+    serial::puts("\n");
 
     int nextFormIndex = 0;
     int currentFormIndex = -1;
-    char currentFormAction[MAX_URL_LEN];
-    char currentFormMethod[8];
-    char currentFormEncoding[48];
     bool currentFormUnsupported = false;
     currentFormAction[0] = '\0';
     strcopy(currentFormMethod, "get", sizeof(currentFormMethod));
@@ -9213,9 +9238,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         if (!tagEnd) { ++p; continue; }
 
         const char* close = nullptr;
-        char text[MAX_BLOCK_TEXT];
-        char className[64];
-        char id[64];
         nav_extract_attr(p, tagEnd, "class", className, sizeof(className));
         nav_extract_attr(p, tagEnd, "id", id, sizeof(id));
         if (nav_close_tag_at(p, "form")) {
@@ -9225,7 +9247,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             strcopy(currentFormEncoding, "application/x-www-form-urlencoded", sizeof(currentFormEncoding));
             currentFormUnsupported = false;
         } else if (nav_tag_at(p, "form")) {
-            char action[MAX_URL_LEN];
             nav_extract_attr(p, tagEnd, "action", action, sizeof(action));
             nav_extract_attr(p, tagEnd, "method", currentFormMethod, sizeof(currentFormMethod));
             nav_extract_attr(p, tagEnd, "enctype", currentFormEncoding, sizeof(currentFormEncoding));
@@ -9239,7 +9260,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
                 !streq_local(currentFormEncoding, "application/x-www-form-urlencoded");
             currentFormIndex = nextFormIndex++;
         } else if (nav_tag_at(p, "input") && currentFormIndex >= 0) {
-            char type[24];
             nav_extract_attr(p, tagEnd, "type", type, sizeof(type));
             nav_lower_string(type);
             if (!type[0] || streq_local(type, "text")) {
@@ -9272,7 +9292,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             close = nav_find_close_tag(tagEnd + 1, "textarea");
             DocBlock* block = addFormBlock(BLOCK_FORM_TEXTAREA, "textarea");
             if (block) {
-                char rows[12];
                 nav_extract_attr(p, tagEnd, "name", block->inputName, sizeof(block->inputName));
                 nav_extract_attr(p, tagEnd, "placeholder", block->placeholder, sizeof(block->placeholder));
                 nav_extract_attr(p, tagEnd, "rows", rows, sizeof(rows));
@@ -9316,7 +9335,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             }
         } else if (nav_tag_at(p, "button") && currentFormIndex >= 0) {
             close = nav_find_close_tag(tagEnd + 1, "button");
-            char type[24];
             nav_extract_attr(p, tagEnd, "type", type, sizeof(type));
             nav_lower_string(type);
             if (!type[0] || streq_local(type, "submit")) {
@@ -9353,7 +9371,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         } else if (nav_tag_at(p, "style")) {
             close = nav_find_close_tag(tagEnd + 1, "style");
         } else if (nav_tag_at(p, "img")) {
-            char src[MAX_URL_LEN]; char alt[96]; char widthText[16]; char heightText[16]; char resolved[MAX_URL_LEN];
             nav_extract_attr(p, tagEnd, "src", src, MAX_URL_LEN);
             nav_extract_attr(p, tagEnd, "alt", alt, 96);
             nav_extract_attr(p, tagEnd, "width", widthText, 16);
@@ -9361,7 +9378,7 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             if (src[0]) { resolveHref(url, src, resolved, MAX_URL_LEN); gxos::web::WebStyle style = nav_style_for_tag("img", className, id, bodyStyle, cssRules, cssRuleCount); addImageBlock(src, alt, resolved, nav_parse_positive_int(widthText), nav_parse_positive_int(heightText), &style); }
         } else if (nav_tag_at(p, "a")) {
             close = nav_find_close_tag(tagEnd + 1, "a");
-            if (close) { char href[MAX_URL_LEN]; char resolved[MAX_URL_LEN]; nav_extract_href(p, tagEnd, href, MAX_URL_LEN); resolveHref(url, href, resolved, MAX_URL_LEN); nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("a", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_LINK, text, resolved, &style); }
+            if (close) { nav_extract_href(p, tagEnd, href, MAX_URL_LEN); resolveHref(url, href, resolved, MAX_URL_LEN); nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("a", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_LINK, text, resolved, &style); }
         }
         p = close ? nav_find_char(close, '>') : tagEnd;
         if (p && *p == '>') ++p;
@@ -9374,7 +9391,11 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         contentType ? contentType : "text/html", "", html, boundedInputBytes,
         &cssDiagnostics, &bodyStyle, httpStatusCode, httpReason ? httpReason : "", redirectCount,
         networkResponse);
+    serial::puts("[NAVIGATOR-PARSER] metadata_complete blocks=");
+    serial_put_dec((uint32_t)m_blockCount);
+    serial::puts("\n");
     prepareImageResources();
+    serial::puts("[NAVIGATOR-PARSER] resources_complete\n");
     refreshImageResourceMetadata();
     m_metaParserCompleted = true;
     m_metaDocumentCreated = m_blockCount > 0;
@@ -9392,6 +9413,9 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             nav_copy_serial_safe_text(block.text, m_metaVisibleText, sizeof(m_metaVisibleText));
         }
     }
+    serial::puts("[NAVIGATOR-PARSER] complete blocks=");
+    serial_put_dec((uint32_t)m_blockCount);
+    serial::puts("\n");
 }
 
 // Kernel Navigator keeps URLs bounded in every document/resource slot while
@@ -9431,7 +9455,7 @@ static const char* kNavigatorRealPublicProbeCaCertsCompatPath = "/config/navigat
 static const char* kNavigatorRealPublicProbeCaEnabledPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
 static const char* kNavigatorRealPublicProbeCaEnabledCompatPath = "/config/navigator/RPUBCAEN.TXT";
 static const char* kNavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/";
-static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.5";
+static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.6";
 static const uint32_t kNavigatorSmokeTextFileMaxBytes = 512u;
 
 enum class NavigatorHttpsSmokeFaultMode {
@@ -12709,6 +12733,7 @@ void NavigatorApp::loadUrl(const char* url)
     blurFormBlock();
     setStatus("Ready");
     m_loading = false;
+    serial::puts("[NAVIGATOR-LOAD] complete\n");
 
 }
 
@@ -13717,6 +13742,76 @@ static const NavigatorReviewedPublicTarget kNavigatorReviewedPublicTargets[] = {
         443,
         "/",
         "English Wikipedia HTTPS homepage retained as a reviewed public HTML target for the post-example.com navigation sequence."
+    },
+    {
+        "https://www.iana.org/",
+        "www.iana.org",
+        443,
+        "/",
+        "IANA HTTPS homepage adds a standards-oriented HTML control with stable public hosting."
+    },
+    {
+        "https://www.w3.org/",
+        "www.w3.org",
+        443,
+        "/",
+        "W3C HTTPS homepage adds a standards-oriented HTML page with CSS and form markup."
+    },
+    {
+        "https://www.python.org/",
+        "www.python.org",
+        443,
+        "/",
+        "Python HTTPS homepage adds a large, production-hosted HTML page with scripts and responsive CSS."
+    },
+    {
+        "https://www.rust-lang.org/",
+        "www.rust-lang.org",
+        443,
+        "/",
+        "Rust HTTPS homepage adds a modern public HTML page with external resources."
+    },
+    {
+        "https://www.kernel.org/",
+        "www.kernel.org",
+        443,
+        "/",
+        "Kernel.org HTTPS homepage adds a public HTML page from a technically relevant production host."
+    },
+    {
+        "https://www.mozilla.org/",
+        "www.mozilla.org",
+        443,
+        "/",
+        "Mozilla HTTPS homepage adds a public HTML page with production certificate and resource diversity."
+    },
+    {
+        "https://www.nasa.gov/",
+        "www.nasa.gov",
+        443,
+        "/",
+        "NASA HTTPS homepage adds a public HTML page with a large real-world document and media references."
+    },
+    {
+        "https://www.apache.org/",
+        "www.apache.org",
+        443,
+        "/",
+        "Apache HTTPS homepage adds a stable open-source project HTML control."
+    },
+    {
+        "https://www.rfc-editor.org/",
+        "www.rfc-editor.org",
+        443,
+        "/",
+        "RFC Editor HTTPS homepage adds a standards-document HTML control."
+    },
+    {
+        "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+        "upload.wikimedia.org",
+        443,
+        "/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+        "Direct Wikimedia Commons PNG control for binary MIME handling, response bounds, and non-HTML navigation capture."
     }
 };
 
@@ -14063,6 +14158,7 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     }
     NavigatorApp& app = *heapApp;
     app.loadUrl(url);
+    serial::puts("[NAVIGATOR-CAPTURE] load_returned\n");
     const int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
     const int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
 
@@ -14119,6 +14215,7 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (redirectHopUrl && redirectHopUrlLen > 0) {
         strcopy(redirectHopUrl, app.m_metaRedirectHopUrl, redirectHopUrlLen);
     }
+    serial::puts("[NAVIGATOR-CAPTURE] metadata_copied\n");
 
     // Phase 8K evidence is emitted only for the production, non-allowlisted
     // HTTPS lane. The navigation above is still the ordinary NavigatorApp
@@ -14186,7 +14283,9 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
         serial::puts(app.m_metaVisibleText[0] ? app.m_metaVisibleText : "(none)");
         serial::puts("\n");
     }
+    serial::puts("[NAVIGATOR-CAPTURE] before_delete\n");
     delete heapApp;
+    serial::puts("[NAVIGATOR-CAPTURE] complete\n");
 }
 
 struct NavigatorHttpsCompatibilityTargetInfo {
@@ -17095,6 +17194,9 @@ static bool printNavigatorHttpSmokeCases()
     httpOk = printNavigatorPublicPilotDowngradeCase() && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_html_200",
         "/navigator-smoke/basic.html", 200, "/navigator-smoke/basic.html", 0,
+        "text/html", "", "", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_parser_stack",
+        "/navigator-smoke/parser-stack.html", 200, "/navigator-smoke/parser-stack.html", 0,
         "text/html", "", "", "", false, false, false) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_text_200",
         "/navigator-smoke/plain.txt", 200, "/navigator-smoke/plain.txt", 0,

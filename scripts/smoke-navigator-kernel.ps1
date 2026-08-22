@@ -7,7 +7,8 @@ param(
     [string]$CandidateBundlePath,
     [string]$CandidateRotationId,
     [switch]$CandidateReviewed,
-    [string[]]$ScenarioFilter
+    [string[]]$ScenarioFilter,
+    [switch]$ReuseActiveBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -182,9 +183,13 @@ $oldSmokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE
 $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = "1"
 $oldTlsDiagnostics = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_TLS_DIAGNOSTICS", "Process")
 $env:GXOS_NAVIGATOR_TLS_DIAGNOSTICS = "1"
-Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE"
+if ($ReuseActiveBuild) {
+    Write-Host "Reusing the already-built active Navigator HTTP/PNG smoke kernel."
+} else {
+    Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE"
+}
 $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = $oldSmokeCaFixture
-$activeSmokeBuild = $true
+$activeSmokeBuild = -not $ReuseActiveBuild
 
 $ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
 if (-not (Test-Path $ovmf)) { throw "OVMF image not found: $ovmf" }
@@ -952,6 +957,7 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_html_200.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_parser_stack.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_text_200.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_404.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_500.result=PASS",

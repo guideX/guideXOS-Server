@@ -10,5 +10,5 @@ REM Copyright (c) 2024 guideX
 REM
 
 setlocal
-powershell -ExecutionPolicy Bypass -File "%~dp0build.ps1" %*
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0build.ps1" %*
 exit /b %ERRORLEVEL%
