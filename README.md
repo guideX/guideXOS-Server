@@ -60,20 +60,40 @@ Total: 11 architectures in-tree
 * USB storage
 * FAT32, exFAT, ext2/4, UFS
 
-### Display
-* Multiple Monitors (in QEMU only)
-
 ### Networking
 
 * IPv4 stack (TCP, UDP, ICMP)
 * DHCP and DNS
 * Kernel socket layer
 
+### guideXOS Navigator
+* Integrated graphical web browser
+* HTTP and HTTPS browsing
+* TLS certificate and hostname validation
+* Redirect handling
+* HTML and CSS rendering
+* Tables, positioned layout, overflow and scrolling
+* Web font rendering
+* HTTPS image fetching and PNG decoding
+
+### Development Tools
+* guideXOS Developer Studio
+* Source editor and project tooling
+* Type/member intelligence
+* Integrated debugger
+* Breakpoints and conditional breakpoints
+* Step Into, Step Over and Step Out
+* Call Stack, Locals, Arguments and Watches
+
 ### Graphics and Input
 
+* Graphical desktop environment
+* Windowed applications
 * Framebuffer rendering
 * PS/2 and USB input
 * Multi-platform display backends
+* Multiple-monitor support in QEMU
+* Mirror and extended-desktop modes
 
 ---
 
