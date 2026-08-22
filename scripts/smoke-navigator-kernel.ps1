@@ -963,6 +963,7 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] https.case.compat_500.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_download.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_gzip.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_gzip_chunked.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_br.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_deflate.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_redirect_relative.result=PASS",
@@ -971,6 +972,8 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] https.case.compat_large_body.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_large_headers.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.basic.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.request_headers.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.request_headers_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.relative_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.absolute_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.hostname_basic.result=PASS",
@@ -981,11 +984,18 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] http.case.stream_split_chunked.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.stream_connection_close.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.missing_404.result=PASS",
-    "[NAVIGATOR-SMOKE] http.case.gzip_unsupported.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.gzip.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.gzip_chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.deflate.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.negotiated_gzip.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.negotiated_deflate.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.negotiated_identity.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.negotiated_br.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_relative.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_absolute.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_compressed.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_nonpng.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.hostname_image_relative.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.forms_post.result=PASS",
@@ -1019,6 +1029,7 @@ $commonRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_500\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_500.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_download\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_download.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_gzip\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_gzip.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_gzip_chunked\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_gzip_chunked.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_br\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_br.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_deflate\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_deflate.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_redirect_relative\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_redirect_relative.enabled=<yes|no>"

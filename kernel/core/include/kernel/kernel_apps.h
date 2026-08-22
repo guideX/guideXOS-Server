@@ -678,7 +678,9 @@ public:
                                             bool* redirectedHttpsRetryUsed = nullptr,
                                             int* redirectHopIndex = nullptr,
                                             char* redirectHopUrl = nullptr,
-                                            int redirectHopUrlLen = 0);
+                                            int redirectHopUrlLen = 0,
+                                            int* encodedBodyBytes = nullptr,
+                                            int* decodedBodyBytes = nullptr);
 
 private:
     enum NavigatorMouseMode {
@@ -831,6 +833,8 @@ private:
     char m_metaResponseFraming[24];
     int m_metaContentLength;
     bool m_metaContentLengthPresent;
+    int m_metaEncodedBodyBytes;
+    int m_metaDecodedBodyBytes;
     bool m_metaTruncatedResponse;
     char m_metaContentEncoding[32];
     char m_metaUnsupportedReason[128];

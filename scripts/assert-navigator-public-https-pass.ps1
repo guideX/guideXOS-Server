@@ -245,6 +245,10 @@ function Test-NavigatorPublicHttpsPassContract {
     $httpStatusPassed = [int]::TryParse($httpStatus, [ref]$httpStatusValue)
     Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "http_status" -Passed $httpStatusPassed -Detail $(if ($httpStatusPassed) { "HTTP status recorded: $httpStatusValue" } else { "http_status must be present and numeric, got '$httpStatus'." })
 
+    $requestAcceptEncoding = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "request_accept_encoding"
+    $requestAcceptEncodingPassed = [string]::Equals($requestAcceptEncoding, "gzip, deflate", [System.StringComparison]::OrdinalIgnoreCase)
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "request_accept_encoding" -Passed $requestAcceptEncodingPassed -Detail "Expected request_accept_encoding=gzip, deflate, got '$requestAcceptEncoding'."
+
     $plaintextFallback = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "plaintext_fallback"
     Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "plaintext_fallback" -Passed ([string]::Equals($plaintextFallback, "no", [System.StringComparison]::OrdinalIgnoreCase)) -Detail "Expected plaintext_fallback=no, got '$plaintextFallback'."
 
@@ -325,6 +329,7 @@ function Invoke-NavigatorPublicHttpsAssertionSelfTest {
             "[NAVIGATOR-PUBLIC-HTTPS] verify_flags=0",
             "[NAVIGATOR-PUBLIC-HTTPS] sni_host=sha256.badssl.com",
             "[NAVIGATOR-PUBLIC-HTTPS] http_status=200",
+            "[NAVIGATOR-PUBLIC-HTTPS] request_accept_encoding=gzip, deflate",
             "[NAVIGATOR-PUBLIC-HTTPS] plaintext_fallback=no"
         )
 

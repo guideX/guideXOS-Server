@@ -98,6 +98,17 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         if close:
             self.close_connection = True
 
+    def has_production_accept_encoding(self):
+        values = self.headers.get_all("Accept-Encoding") or []
+        return len(values) == 1 and values[0].strip().lower() == "gzip, deflate"
+
+    def reject_bad_accept_encoding(self):
+        if self.has_production_accept_encoding():
+            return False
+        self.write_bytes(406, "text/plain; charset=utf-8",
+                         b"Navigator request did not use the production compression policy.")
+        return True
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         host = self.headers.get("Host", "")
@@ -111,6 +122,24 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         if compat_path == "/navigator-smoke/basic.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Basic</h1><p>basic html body</p></body></html>")
+            return
+        if compat_path == "/navigator-smoke/request-headers.html":
+            if self.reject_bad_accept_encoding():
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Request header policy accepted</h1>"
+                             b"<p>Exactly one production Accept-Encoding header was received.</p></body></html>")
+            return
+        if compat_path == "/navigator-smoke/request-headers-redirect":
+            if self.reject_bad_accept_encoding():
+                return
+            self.write_redirect(302, f"{compat_prefix}request-headers-final.html")
+            return
+        if compat_path == "/navigator-smoke/request-headers-final.html":
+            if self.reject_bad_accept_encoding():
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Redirected request header policy accepted</h1></body></html>")
             return
         if path == "/navigator-smoke/css-inline.html":
             self.write_bytes(200, "text/html; charset=utf-8",
@@ -1763,17 +1792,64 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             ), close=True)
             return
         if compat_path == "/navigator-smoke/gzip.html":
-            body = gzip.compress(b"<html><body><h1>Compressed</h1></body></html>")
-            self.write_bytes(200, "text/html; charset=utf-8", body, {"Content-Encoding": "gzip"})
+            body = gzip.compress(b"<html><body><h1>Compressed</h1></body></html>", mtime=0)
+            self.write_bytes(200, "text/html; charset=utf-8", body,
+                             {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+            return
+        if compat_path == "/navigator-smoke/negotiated-gzip.html":
+            if self.reject_bad_accept_encoding():
+                return
+            body = gzip.compress(b"<html><body><h1>Negotiated gzip</h1></body></html>", mtime=0)
+            self.write_bytes(200, "text/html; charset=utf-8", body,
+                             {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+            return
+        if compat_path == "/navigator-smoke/negotiated-deflate.html":
+            if self.reject_bad_accept_encoding():
+                return
+            body = zlib.compress(b"<html><body><h1>Negotiated deflate</h1></body></html>")
+            self.write_bytes(200, "text/html; charset=utf-8", body,
+                             {"Content-Encoding": "deflate", "Vary": "Accept-Encoding"})
+            return
+        if compat_path == "/navigator-smoke/negotiated-identity.html":
+            if self.reject_bad_accept_encoding():
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Negotiated identity</h1></body></html>",
+                             {"Vary": "Accept-Encoding"})
+            return
+        if compat_path == "/navigator-smoke/negotiated-br.html":
+            if self.reject_bad_accept_encoding():
+                return
+            self.write_bytes(200, "text/html; charset=utf-8", b"not-really-brotli",
+                             {"Content-Encoding": "br", "Vary": "Accept-Encoding"})
+            return
+        if compat_path == "/navigator-smoke/malformed-gzip.html":
+            malformed = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x00"
+            self.write_bytes(200, "text/html; charset=utf-8", malformed,
+                             {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+            return
+        if compat_path == "/navigator-smoke/gzip-chunked.html":
+            body = gzip.compress(b"<html><body><h1>Chunked Compressed</h1></body></html>", mtime=0)
+            chunks = (body[:7], body[7:23], body[23:])
+            fragments = [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n",
+                b"Transfer-Encoding: chunked\r\nContent-Encoding: gzip\r\nVary: Accept-Encoding\r\nConnection: keep-alive\r\n\r\n",
+            ]
+            for chunk in chunks:
+                size = ("%x;fixture=compressed" % len(chunk)).encode("ascii")
+                fragments.extend((size, b"\r\n", chunk, b"\r\n"))
+            fragments.extend((b"0\r\nX-Content-Fixture: gzip-chunked\r\n\r\n",))
+            self.write_fragmented_response(tuple(fragments))
             return
         if compat_path == "/navigator-smoke/br.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"not-really-brotli",
-                             {"Content-Encoding": "br"})
+                             {"Content-Encoding": "br", "Vary": "Accept-Encoding"})
             return
         if compat_path == "/navigator-smoke/deflate.html":
             body = zlib.compress(b"<html><body><h1>Deflate</h1></body></html>")
-            self.write_bytes(200, "text/html; charset=utf-8", body, {"Content-Encoding": "deflate"})
+            self.write_bytes(200, "text/html; charset=utf-8", body,
+                             {"Content-Encoding": "deflate", "Vary": "Accept-Encoding"})
             return
         if compat_path == "/navigator-smoke/missing.html":
             self.write_bytes(404, "text/html; charset=utf-8",
@@ -1828,6 +1904,10 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Chunked PNG</h1><img src=\"chunked.png\" alt=\"chunked png\"></body></html>")
             return
+        if compat_path == "/navigator-smoke/image-compressed.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Compressed PNG</h1><img src=\"compressed-logo.png\" alt=\"compressed png\"></body></html>")
+            return
         if path == "/navigator-smoke/image-nonpng.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Non PNG</h1><img src=\"not-png.txt\" alt=\"not png\"></body></html>")
@@ -1857,6 +1937,13 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                 self.wfile.write(("%x\r\n" % len(chunk)).encode("ascii"))
                 self.wfile.write(chunk + b"\r\n")
             self.wfile.write(b"0\r\n\r\n")
+            return
+        if compat_path == "/navigator-smoke/compressed-logo.png":
+            if self.reject_bad_accept_encoding():
+                return
+            body = gzip.compress(SMOKE_PNG, mtime=0)
+            self.write_bytes(200, "image/png", body,
+                             {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
             return
         if path == "/navigator-smoke/not-png.txt":
             self.write_bytes(200, "text/plain", b"this is not a png")

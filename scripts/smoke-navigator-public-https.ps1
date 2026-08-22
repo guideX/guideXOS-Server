@@ -101,6 +101,13 @@ function Write-NavigatorPublicHttpsProofPack {
         verify_flags = [string]$Fields["verify_flags"]
         http_status = [string]$Fields["http_status"]
         content_type = [string]$Fields["content_type"]
+        content_encoding = [string]$Fields["content_encoding"]
+        request_accept_encoding = [string]$Fields["request_accept_encoding"]
+        body_bytes = [string]$Fields["body_bytes"]
+        encoded_body_bytes = [string]$Fields["encoded_body_bytes"]
+        decoded_body_bytes = [string]$Fields["decoded_body_bytes"]
+        decoded_body_cap = [string]$Fields["decoded_body_cap"]
+        decoded_cap_headroom = [string]$Fields["decoded_cap_headroom"]
         page_render_result = [string]$Fields["page_render_result"]
         plaintext_fallback = [string]$Fields["plaintext_fallback"]
         public_https_opt_in = [string]$Fields["public_proof_lane_active"]
@@ -1150,6 +1157,12 @@ $fields = [ordered]@{
     redirect_count = "0"
     content_type = "(not-attempted)"
     content_encoding = "(not-attempted)"
+    request_accept_encoding = "(not-attempted)"
+    body_bytes = "0"
+    encoded_body_bytes = "0"
+    decoded_body_bytes = "0"
+    decoded_body_cap = "262144"
+    decoded_cap_headroom = "262144"
     header_cap_hit = "no"
     body_cap_hit = "no"
     downgrade_blocked = "no"
@@ -1507,6 +1520,12 @@ try {
         "http_status",
         "content_type",
         "content_encoding",
+        "request_accept_encoding",
+        "body_bytes",
+        "encoded_body_bytes",
+        "decoded_body_bytes",
+        "decoded_body_cap",
+        "decoded_cap_headroom",
         "header_cap_hit",
         "body_cap_hit",
         "downgrade_blocked",

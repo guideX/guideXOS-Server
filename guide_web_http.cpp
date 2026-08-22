@@ -124,6 +124,65 @@ static bool decodeChunkedBody(const std::string& encoded, std::string& decoded, 
 	return true;
 }
 
+static bool combinedHeaderValue(const HttpResponse& response, const std::string& name, std::string& combined)
+{
+	const std::string needle = toLowerAscii(name);
+	combined.clear();
+	int count = 0;
+	for (const HttpHeader& header : response.headers) {
+		if (toLowerAscii(header.name) != needle) continue;
+		if (count++ > 0) combined += ", ";
+		combined += trimAscii(header.value);
+		if (combined.size() > 64) return false;
+	}
+	return true;
+}
+
+static bool decodeContentEncoding(HttpResponse& response)
+{
+	response.encodedBodyBytes = response.body.size();
+	response.decodedBodyBytes = 0;
+	const HttpContentCoding coding = httpSharedParseContentCoding(response.contentEncoding.c_str());
+	if (coding == HttpContentCoding::Unsupported) {
+		setError(response, HttpError::UnsupportedContentEncoding,
+			"Unsupported Content-Encoding: " + response.contentEncoding);
+		return false;
+	}
+	if (coding == HttpContentCoding::Identity) {
+		response.decodedBodyBytes = response.body.size();
+		return true;
+	}
+
+	static HttpContentDecoderWorkspace workspace;
+	std::string decoded(kHttpMaxBodyBytes, '\0');
+	int decodedLength = 0;
+	char error[160] = {};
+	const HttpContentDecodeResult result = httpSharedDecodeContent(
+		reinterpret_cast<const uint8_t*>(response.body.data()),
+		static_cast<int>(response.body.size()), coding,
+		reinterpret_cast<uint8_t*>(&decoded[0]), static_cast<int>(decoded.size()),
+		&decodedLength, &workspace, error, sizeof(error));
+	response.decodedBodyBytes = decodedLength > 0
+		? static_cast<std::size_t>(std::min(decodedLength, static_cast<int>(kHttpMaxBodyBytes)))
+		: 0;
+	if (result == HttpContentDecodeResult::DecodedResponseTooLarge) {
+		response.bodyCapHit = true;
+		setError(response, HttpError::DecodedResponseTooLarge,
+			"Decoded response exceeded the safety limit.");
+		response.body.clear();
+		return false;
+	}
+	if (result != HttpContentDecodeResult::Success) {
+		setError(response, HttpError::MalformedCompressedResponse,
+			error[0] ? error : "Compressed response was malformed.");
+		response.body.clear();
+		return false;
+	}
+	decoded.resize(static_cast<std::size_t>(decodedLength));
+	response.body = std::move(decoded);
+	return true;
+}
+
 static bool isRedirectStatus(int statusCode)
 {
 	return httpSharedIsRedirectStatus(statusCode);
@@ -201,7 +260,12 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 
 	response.contentType = firstContentTypeToken(response.headerValue("Content-Type"));
 	response.transferEncoding = toLowerAscii(trimAscii(response.headerValue("Transfer-Encoding")));
-	response.contentEncoding = toLowerAscii(trimAscii(response.headerValue("Content-Encoding")));
+	std::string combinedContentEncoding;
+	if (!combinedHeaderValue(response, "Content-Encoding", combinedContentEncoding)) {
+		setError(response, HttpError::MalformedResponse, "HTTP Content-Encoding header was too large.");
+		return false;
+	}
+	response.contentEncoding = toLowerAscii(combinedContentEncoding);
 	const std::string contentLengthHeader = trimAscii(response.headerValue("Content-Length"));
 	if (!contentLengthHeader.empty()) {
 		int contentLength = 0;
@@ -220,6 +284,8 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 	}
 
 	if (isRedirectStatus(response.statusCode)) {
+		response.encodedBodyBytes = response.body.size();
+		response.decodedBodyBytes = response.body.size();
 		response.responseFraming = response.transferEncoding.empty()
 			? (response.contentLengthPresent ? "content-length" : "connection-close")
 			: "chunked";
@@ -264,13 +330,7 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 		response.responseFraming = "connection-close";
 	}
 
-	if (!response.contentEncoding.empty() && !hasHeaderToken(response.contentEncoding, "identity")) {
-		setError(response, HttpError::UnsupportedContentEncoding,
-			"Unsupported Content-Encoding: " + response.contentEncoding);
-		return false;
-	}
-
-	return true;
+	return decodeContentEncoding(response);
 }
 
 #if defined(_WIN32)
@@ -900,16 +960,23 @@ static HttpResponse sendSinglePythonSmokeHttpsRequest(const ParsedHttpUrl& parse
 	response.tlsCipherSuite = helperCipher.empty() ? "Hosted smoke helper" : helperCipher;
 	response.contentType = firstContentTypeToken(response.headerValue("Content-Type"));
 	response.transferEncoding = toLowerAscii(trimAscii(response.headerValue("Transfer-Encoding")));
-	response.contentEncoding = toLowerAscii(trimAscii(response.headerValue("Content-Encoding")));
-	if (isRedirectStatus(response.statusCode)) return response;
+	std::string helperContentEncoding;
+	if (!combinedHeaderValue(response, "Content-Encoding", helperContentEncoding)) {
+		setError(response, HttpError::MalformedResponse, "HTTP Content-Encoding header was too large.");
+		return response;
+	}
+	response.contentEncoding = toLowerAscii(helperContentEncoding);
+	if (isRedirectStatus(response.statusCode)) {
+		response.encodedBodyBytes = response.body.size();
+		response.decodedBodyBytes = response.body.size();
+		return response;
+	}
 	if (response.body.size() > kHttpMaxBodyBytes) {
+		response.bodyCapHit = true;
 		setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 		return response;
 	}
-	if (!response.contentEncoding.empty() && !hasHeaderToken(response.contentEncoding, "identity")) {
-		setError(response, HttpError::UnsupportedContentEncoding,
-			"Unsupported Content-Encoding: " + response.contentEncoding);
-	}
+	decodeContentEncoding(response);
 	return response;
 }
 
@@ -1443,6 +1510,8 @@ const char* httpErrorName(HttpError error)
 	case HttpError::InsecureRedirectBlocked: return "InsecureRedirectBlocked";
 	case HttpError::UnsupportedTransferEncoding: return "UnsupportedTransferEncoding";
 	case HttpError::UnsupportedContentEncoding: return "UnsupportedContentEncoding";
+	case HttpError::MalformedCompressedResponse: return "MalformedCompressedResponse";
+	case HttpError::DecodedResponseTooLarge: return "DecodedResponseTooLarge";
 	case HttpError::MalformedChunkedEncoding: return "MalformedChunkedEncoding";
 	case HttpError::TlsHandshakeFailed: return "TlsHandshakeFailed";
 	case HttpError::TlsCertificateValidationFailed: return "TlsCertificateValidationFailed";
@@ -1586,7 +1655,7 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 	request << "\r\n"
 		<< "User-Agent: guideXOS-Navigator/0.2\r\n"
 		<< "Accept: text/html, text/plain, image/png, */*\r\n"
-		<< "Accept-Encoding: identity\r\n"
+		<< "Accept-Encoding: " << kHttpSharedProductionAcceptEncoding << "\r\n"
 		<< "Connection: close\r\n";
 	if (isPost) {
 		request << "Content-Type: " << (contentType.empty() ? "application/x-www-form-urlencoded" : contentType) << "\r\n"

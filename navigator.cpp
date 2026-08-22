@@ -19066,6 +19066,8 @@ WebDocument Navigator::buildPageInfoDocument()
 	if (m.contentLengthPresent) {
 		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content-Length", static_cast<int>(m.contentLength)), ""});
 	}
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Encoded body bytes", static_cast<int>(m.encodedBodyBytes)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Decoded body bytes", static_cast<int>(m.decodedBodyBytes)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Truncated response", yesNo(m.truncatedResponse)), ""});
 
 	if (m.httpStatusCode > 0) {
@@ -19819,6 +19821,8 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.responseFraming = response.responseFraming;
 	metadata.contentLengthPresent = response.contentLengthPresent;
 	metadata.contentLength = response.contentLength;
+	metadata.encodedBodyBytes = response.encodedBodyBytes;
+	metadata.decodedBodyBytes = response.decodedBodyBytes;
 	metadata.truncatedResponse = response.truncatedResponse;
 	if (response.redirectCount < 0 || response.redirectCount > gxos::web::kHttpMaxRedirects)
 		incrementLifecycleCounter(s_lifecycleDiagnostics.transitionMetadataClamps);

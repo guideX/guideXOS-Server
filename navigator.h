@@ -55,6 +55,8 @@ struct NavigatorPageMetadata {
 	std::string responseFraming;
 	bool        contentLengthPresent = false;
 	size_t      contentLength = 0;
+	size_t      encodedBodyBytes = 0;
+	size_t      decodedBodyBytes = 0;
 	bool        truncatedResponse = false;
 	bool        redirected = false;
 	int         redirectCount = 0;

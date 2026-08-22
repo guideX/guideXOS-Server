@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include "guide_web_content_decoder.h"
+
 namespace gxos {
 namespace web {
 
@@ -18,6 +20,11 @@ static const int kHttpSharedMaxRemoteResources = 32;
 static const int kHttpSharedConnectTimeoutMs = 5000;
 static const int kHttpSharedReadTimeoutMs = 5000;
 static const int kHttpSharedMaxRedirects = 5;
+
+// One production compression policy is shared by hosted, bare-metal, and
+// fixture-visible Navigator request construction.  Only codings handled by
+// the bounded Content-Encoding decoder may be advertised here.
+static const char kHttpSharedProductionAcceptEncoding[] = "gzip, deflate";
 
 // Plain HTTP and future TLS adapters expose the same bounded byte-stream
 // contract. TLS can later wrap a connected plain TCP stream without changing
@@ -333,25 +340,90 @@ inline bool httpSharedDecodeChunkedBody(const char* encoded, int encodedLen,
             if (out < decodedCapacity) decoded[out] = '\0';
             return true;
         }
-        if (out + chunkSize > decodedCapacity - 1 || out + chunkSize > kHttpSharedMaxBodyBytes) {
+        if (chunkSize > decodedCapacity - 1 - out || chunkSize > kHttpSharedMaxBodyBytes - out) {
             httpSharedCopyLiteral("Decoded chunked response body exceeded the safety limit.",
                 error, errorLen);
             return false;
         }
-        if (pos + chunkSize > encodedLen) {
+        if (chunkSize > encodedLen - pos) {
             httpSharedCopyLiteral("Chunked response ended in the middle of a chunk.",
                 error, errorLen);
             return false;
         }
         for (int i = 0; i < chunkSize; ++i) decoded[out++] = encoded[pos + i];
         pos += chunkSize;
-        if (pos + 1 < encodedLen && encoded[pos] == '\r' && encoded[pos + 1] == '\n') {
+        if (encodedLen - pos >= 2 && encoded[pos] == '\r' && encoded[pos + 1] == '\n') {
             pos += 2;
         } else if (pos < encodedLen && encoded[pos] == '\n') {
             pos += 1;
         } else {
             httpSharedCopyLiteral("Chunked response was missing the chunk terminator.",
                 error, errorLen);
+            return false;
+        }
+    }
+}
+
+// Transfer framing can be removed in-place in the raw transaction buffer:
+// chunk framing always advances the input cursor farther than the compacted
+// output cursor.  This keeps the encoded Content-Encoding stream available
+// without adding another 256 KiB transaction buffer.
+inline bool httpSharedDecodeChunkedBodyInPlace(char* encoded, int encodedLen,
+                                               int decodedCapacity, int* decodedLen,
+                                               char* error, int errorLen)
+{
+    if (decodedLen) *decodedLen = 0;
+    if (error && errorLen > 0) error[0] = '\0';
+    if (!encoded || encodedLen < 0 || decodedCapacity <= 0) return false;
+
+    int pos = 0;
+    int out = 0;
+    for (;;) {
+        int lineEnd = -1;
+        int delimiterLen = 0;
+        for (int i = pos; i < encodedLen; ++i) {
+            if (i + 1 < encodedLen && encoded[i] == '\r' && encoded[i + 1] == '\n') {
+                lineEnd = i;
+                delimiterLen = 2;
+                break;
+            }
+            if (encoded[i] == '\n') {
+                lineEnd = i;
+                delimiterLen = 1;
+                break;
+            }
+        }
+        if (lineEnd < 0) {
+            httpSharedCopyLiteral("Chunked response ended before a chunk-size line completed.", error, errorLen);
+            return false;
+        }
+        int chunkSize = 0;
+        if (!httpSharedParseChunkSize(encoded + pos, encoded + lineEnd, &chunkSize)) {
+            httpSharedCopyLiteral("Chunked response included an invalid chunk size.", error, errorLen);
+            return false;
+        }
+        pos = lineEnd + delimiterLen;
+        if (chunkSize == 0) {
+            if (decodedLen) *decodedLen = out;
+            if (out < decodedCapacity) encoded[out] = '\0';
+            return true;
+        }
+        if (chunkSize > decodedCapacity - out || chunkSize > kHttpSharedMaxBodyBytes - out) {
+            httpSharedCopyLiteral("Decoded chunked response body exceeded the safety limit.", error, errorLen);
+            return false;
+        }
+        if (chunkSize > encodedLen - pos) {
+            httpSharedCopyLiteral("Chunked response ended in the middle of a chunk.", error, errorLen);
+            return false;
+        }
+        for (int i = 0; i < chunkSize; ++i) encoded[out++] = encoded[pos + i];
+        pos += chunkSize;
+        if (pos + 1 < encodedLen && encoded[pos] == '\r' && encoded[pos + 1] == '\n') {
+            pos += 2;
+        } else if (pos < encodedLen && encoded[pos] == '\n') {
+            ++pos;
+        } else {
+            httpSharedCopyLiteral("Chunked response was missing the chunk terminator.", error, errorLen);
             return false;
         }
     }

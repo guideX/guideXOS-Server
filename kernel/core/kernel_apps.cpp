@@ -7185,6 +7185,8 @@ NavigatorApp::NavigatorApp()
     m_metaResponseFraming[0] = '\0';
     m_metaContentLength = 0;
     m_metaContentLengthPresent = false;
+    m_metaEncodedBodyBytes = 0;
+    m_metaDecodedBodyBytes = 0;
     m_metaTruncatedResponse = false;
     m_metaContentEncoding[0] = '\0';
     m_metaUnsupportedReason[0] = '\0';
@@ -8146,6 +8148,8 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("Response framing: ", m_metaResponseFraming[0] ? m_metaResponseFraming : "(none)");
     NAV_INFO_TEXT("Content-Length present: ", m_metaContentLengthPresent ? "yes" : "no");
     if (m_metaContentLengthPresent) NAV_INFO_INT("Content-Length: ", m_metaContentLength);
+    NAV_INFO_INT("Encoded body bytes: ", m_metaEncodedBodyBytes);
+    NAV_INFO_INT("Decoded body bytes: ", m_metaDecodedBodyBytes);
     NAV_INFO_TEXT("Truncated response: ", m_metaTruncatedResponse ? "yes" : "no");
     NAV_INFO_TEXT("Unsupported reason: ", m_metaUnsupportedReason[0] ? m_metaUnsupportedReason : "(none)");
     if (m_metaHttpStatusCode > 0) NAV_INFO_INT("HTTP status: ", m_metaHttpStatusCode);
@@ -8396,7 +8400,7 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "Public HTTPS: enabled for arbitrary hostnames only after ProductionValidated trust-store prerequisites; IPv4-only, bounded, and fail-closed without a real production CA bundle");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS bare-metal transport is ready with CA and hostname validation");
     addBlock(BLOCK_LIST_ITEM, "TLS policy layer: shared HttpByteStream transport policy selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; plaintext fallback stays disabled");
-    addBlock(BLOCK_LIST_ITEM, "Content encodings: identity only; unsupported gzip/br/deflate responses produce a friendly document after successful TLS instead of rendering compressed bytes");
+    addBlock(BLOCK_LIST_ITEM, "Content encodings: identity, gzip, and zlib-wrapped deflate are decoded under the bounded body policy; unsupported br and stacked encodings produce a friendly document after successful TLS");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls; Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST interactive: enabled");
@@ -9489,6 +9493,8 @@ struct KernelHttpResponse {
     char unsupportedReason[128];
     char location[kKernelHttpUrlLen];
     int bodyBytes;
+    int encodedBodyBytes;
+    int decodedBodyBytes;
     int redirectCount;
     bool headerCapHit;
     bool bodyCapHit;
@@ -9588,6 +9594,9 @@ static void kernel_http_capture_trace_snapshot(const KernelHttpResponse& respons
 static KernelHttpResponse s_kernelHttpResponse;
 static char s_kernelHttpRaw[kKernelHttpRawLimit + 1];
 static char s_kernelHttpDocumentBody[kKernelHttpBodyLimit + 1];
+// Shared sequential HTTP use keeps this workspace transaction-local by
+// discipline while placing all DEFLATE/Huffman scratch outside the boot stack.
+static gxos::web::HttpContentDecoderWorkspace s_kernelHttpContentDecoderWorkspace;
 
 static void kernel_http_reset_response(KernelHttpResponse* response)
 {
@@ -9605,6 +9614,8 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->unsupportedReason[0] = '\0';
     response->location[0] = '\0';
     response->bodyBytes = 0;
+    response->encodedBodyBytes = 0;
+    response->decodedBodyBytes = 0;
     response->redirectCount = 0;
     response->headerCapHit = false;
     response->bodyCapHit = false;
@@ -9672,6 +9683,8 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     strcopy(m_metaResponseFraming, networkResponse ? networkResponse->responseFraming : "", sizeof(m_metaResponseFraming));
     m_metaContentLength = networkResponse ? networkResponse->contentLength : 0;
     m_metaContentLengthPresent = networkResponse ? networkResponse->contentLengthPresent : false;
+    m_metaEncodedBodyBytes = networkResponse ? networkResponse->encodedBodyBytes : 0;
+    m_metaDecodedBodyBytes = networkResponse ? networkResponse->decodedBodyBytes : 0;
     m_metaTruncatedResponse = networkResponse ? networkResponse->truncatedResponse : false;
     strcopy(m_metaUnsupportedReason, networkResponse ? networkResponse->unsupportedReason : "", sizeof(m_metaUnsupportedReason));
     m_metaRedirectCount = redirectCount;
@@ -10545,6 +10558,8 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     response->truncatedResponse = false;
     response->location[0] = '\0';
     response->bodyBytes = 0;
+    response->encodedBodyBytes = 0;
+    response->decodedBodyBytes = 0;
 
     int headerEnd = -1;
     int bodyStart = -1;
@@ -10593,6 +10608,7 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     for (const char* r = reasonStart; r < lineEnd && ri < (int)sizeof(response->reason) - 1; ++r) response->reason[ri++] = *r;
     response->reason[ri] = '\0';
 
+    bool contentEncodingHeaderSeen = false;
     const char* h = lineEnd;
     while (h < s_kernelHttpRaw + headerEnd) {
         while (h < s_kernelHttpRaw + headerEnd && (*h == '\r' || *h == '\n')) ++h;
@@ -10606,7 +10622,32 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
             const char* valueStart = colon + 1;
             if (gxos::web::httpSharedEqualsInsensitive(name, "content-type")) gxos::web::httpSharedNormalizeContentType(valueStart, e, response->contentType, sizeof(response->contentType));
             else if (gxos::web::httpSharedEqualsInsensitive(name, "transfer-encoding")) gxos::web::httpSharedCopyTrimmed(valueStart, e, response->transferEncoding, sizeof(response->transferEncoding), true);
-            else if (gxos::web::httpSharedEqualsInsensitive(name, "content-encoding")) gxos::web::httpSharedCopyTrimmed(valueStart, e, response->contentEncoding, sizeof(response->contentEncoding), true);
+            else if (gxos::web::httpSharedEqualsInsensitive(name, "content-encoding")) {
+                const char* encodingStart = valueStart;
+                const char* encodingEnd = e;
+                while (encodingStart < encodingEnd && gxos::web::httpSharedIsSpace(*encodingStart)) ++encodingStart;
+                while (encodingEnd > encodingStart && gxos::web::httpSharedIsSpace(encodingEnd[-1])) --encodingEnd;
+                const int encodingBytes = (int)(encodingEnd - encodingStart);
+                const int existingBytes = strlen_local(response->contentEncoding);
+                const int separatorBytes = contentEncodingHeaderSeen ? 2 : 0;
+                if (encodingBytes <= 0 || existingBytes + separatorBytes + encodingBytes >= (int)sizeof(response->contentEncoding)) {
+                    strcopy(response->unsupportedReason, "Malformed Content-Encoding", sizeof(response->unsupportedReason));
+                    strcopy(response->error, "Malformed HTTP Content-Encoding", sizeof(response->error));
+                    return false;
+                }
+                int oi = existingBytes;
+                if (contentEncodingHeaderSeen) {
+                    response->contentEncoding[oi++] = ',';
+                    response->contentEncoding[oi++] = ' ';
+                }
+                for (const char* v = encodingStart; v < encodingEnd; ++v) {
+                    char c = *v;
+                    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+                    response->contentEncoding[oi++] = c;
+                }
+                response->contentEncoding[oi] = '\0';
+                contentEncodingHeaderSeen = true;
+            }
             else if (gxos::web::httpSharedEqualsInsensitive(name, "content-length")) {
                 int contentLength = 0;
                 if (!gxos::web::httpSharedParseDecimalSize(valueStart, e, &contentLength)) {
@@ -10649,6 +10690,8 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
         for (int i = 0; i < copyBytes; ++i) response->body[i] = s_kernelHttpRaw[bodyStart + i];
         response->body[copyBytes] = '\0';
         response->bodyBytes = copyBytes;
+        response->encodedBodyBytes = copyBytes;
+        response->decodedBodyBytes = copyBytes;
         response->ok = true;
         return true;
     }
@@ -10657,13 +10700,14 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
         if (gxos::web::httpSharedHeaderHasToken(response->transferEncoding, "chunked")) {
             int decodedBytes = 0;
             char chunkError[128];
-            if (!gxos::web::httpSharedDecodeChunkedBody(s_kernelHttpRaw + bodyStart, encodedBodyBytes,
-                    response->body, sizeof(response->body), &decodedBytes, chunkError, sizeof(chunkError))) {
-                response->bodyCapHit = nav_starts_with(chunkError, "HTTP body exceeded");
+            if (!gxos::web::httpSharedDecodeChunkedBodyInPlace(s_kernelHttpRaw + bodyStart, encodedBodyBytes,
+                    kKernelHttpBodyLimit, &decodedBytes, chunkError, sizeof(chunkError))) {
+                response->bodyCapHit = nav_starts_with(chunkError, "HTTP body exceeded") ||
+                    nav_starts_with(chunkError, "Decoded chunked response body exceeded");
                 strcopy(response->error, chunkError[0] ? chunkError : "Malformed chunked response", sizeof(response->error));
                 return false;
             }
-            response->bodyBytes = decodedBytes;
+            encodedBodyBytes = decodedBytes;
         } else {
             strcopy(response->unsupportedReason, "Unsupported Transfer-Encoding", sizeof(response->unsupportedReason));
             strcopy(response->error, "Unsupported transfer encoding", sizeof(response->error));
@@ -10680,18 +10724,40 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
             strcopy(response->error, "Truncated HTTP response", sizeof(response->error));
             return false;
         }
-        int bodyBytes = response->contentLengthPresent ? response->contentLength : encodedBodyBytes;
-        if (bodyBytes > encodedBodyBytes) bodyBytes = encodedBodyBytes;
-        for (int i = 0; i < bodyBytes; ++i) response->body[i] = s_kernelHttpRaw[bodyStart + i];
-        response->body[bodyBytes] = '\0';
-        response->bodyBytes = bodyBytes;
+        if (response->contentLengthPresent) encodedBodyBytes = response->contentLength;
     }
 
-    if (response->contentEncoding[0] && !gxos::web::httpSharedHeaderHasToken(response->contentEncoding, "identity")) {
-        strcopy(response->unsupportedReason, "Unsupported Content-Encoding", sizeof(response->unsupportedReason));
-        strcopy(response->error, "Unsupported content encoding", sizeof(response->error));
+    response->encodedBodyBytes = encodedBodyBytes;
+    const gxos::web::HttpContentCoding coding =
+        gxos::web::httpSharedParseContentCoding(response->contentEncoding);
+    int decodedBytes = 0;
+    char decodeError[128];
+    const gxos::web::HttpContentDecodeResult decodeResult =
+        gxos::web::httpSharedDecodeContent(
+            reinterpret_cast<const uint8_t*>(s_kernelHttpRaw + bodyStart), encodedBodyBytes,
+            coding, reinterpret_cast<uint8_t*>(response->body), kKernelHttpBodyLimit,
+            &decodedBytes, &s_kernelHttpContentDecoderWorkspace,
+            decodeError, sizeof(decodeError));
+    response->decodedBodyBytes = decodedBytes > kKernelHttpBodyLimit
+        ? kKernelHttpBodyLimit : decodedBytes;
+    if (decodeResult != gxos::web::HttpContentDecodeResult::Success) {
+        response->bodyBytes = 0;
+        response->body[0] = '\0';
+        if (decodeResult == gxos::web::HttpContentDecodeResult::UnsupportedEncoding) {
+            strcopy(response->unsupportedReason, "Unsupported Content-Encoding", sizeof(response->unsupportedReason));
+            strcopy(response->error, "Unsupported content encoding", sizeof(response->error));
+        } else if (decodeResult == gxos::web::HttpContentDecodeResult::DecodedResponseTooLarge) {
+            response->bodyCapHit = true;
+            strcopy(response->unsupportedReason, "Decoded Response Too Large", sizeof(response->unsupportedReason));
+            strcopy(response->error, "Decoded response too large", sizeof(response->error));
+        } else {
+            strcopy(response->unsupportedReason, "Malformed Compressed Response", sizeof(response->unsupportedReason));
+            strcopy(response->error, "Compressed response invalid", sizeof(response->error));
+        }
         return false;
     }
+    response->bodyBytes = decodedBytes;
+    response->body[decodedBytes] = '\0';
 
     response->ok = true;
     return true;
@@ -10771,6 +10837,9 @@ static bool kernel_http_build_request(const char* method, const KernelHttpUrl& p
     if (!request || requestSize <= 0) return false;
     const bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
     const bool isHttps = parsed.httpsScheme;
+    // Every bare-metal document, redirect hop, POST, and resource request
+    // passes through this constructor and advertises only the shared decoder's
+    // supported production codings.
     int q = 0;
 #define APPEND_REQ(svalue) do { const char* _s = (svalue); while (_s && *_s && q < requestSize - 1) request[q++] = *_s++; } while (0)
     APPEND_REQ(isPost ? "POST " : "GET ");
@@ -10783,7 +10852,9 @@ static bool kernel_http_build_request(const char* method, const KernelHttpUrl& p
         APPEND_REQ(":");
         APPEND_REQ(portText);
     }
-    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.2\r\nAccept: text/html, text/plain, image/png, */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n");
+    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.2\r\nAccept: text/html, text/plain, image/png, */*\r\nAccept-Encoding: ");
+    APPEND_REQ(gxos::web::kHttpSharedProductionAcceptEncoding);
+    APPEND_REQ("\r\nConnection: close\r\n");
     if (isPost) {
         char bodyLengthText[16];
         nav_int_to_text(bodyBytes, bodyLengthText, sizeof(bodyLengthText));
@@ -11713,7 +11784,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
     m_metaBodyBufferValid = bodyBytesInBounds;
     m_metaBodyNullTerminated = bodyBytesInBounds && response->body[response->bodyBytes] == '\0';
     m_metaBodyComplete = response->ok && !response->truncatedResponse &&
-        (!response->contentLengthPresent || response->bodyBytes == response->contentLength);
+        (!response->contentLengthPresent || response->encodedBodyBytes == response->contentLength);
     strcopy(m_metaBodyOwnership,
         "static-response-buffer-copied-to-document-buffer", sizeof(m_metaBodyOwnership));
     strcopy(m_metaHandoffResult, "pending", sizeof(m_metaHandoffResult));
@@ -11765,6 +11836,18 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         if (response->bodyCapHit) {
             addBlock(BLOCK_LIST_ITEM, "Body limit hit: 262144 bytes");
         }
+        if (response->encodedBodyBytes > 0 || response->contentEncoding[0]) {
+            char sizeText[24];
+            nav_int_to_text(response->encodedBodyBytes, sizeText, sizeof(sizeText));
+            strcopy(line, "Encoded body bytes: ", sizeof(line));
+            strappend(line, sizeText, sizeof(line));
+            addBlock(BLOCK_LIST_ITEM, line);
+            nav_int_to_text(response->decodedBodyBytes, sizeText, sizeof(sizeText));
+            strcopy(line, "Decoded body bytes: ", sizeof(line));
+            strappend(line, sizeText, sizeof(line));
+            addBlock(BLOCK_LIST_ITEM, line);
+            addBlock(BLOCK_LIST_ITEM, "Decoded body cap: 262144 bytes");
+        }
         addBlock(BLOCK_LIST_ITEM,
             response->tlsSucceededBeforeContentFailure
                 ? "TLS succeeded before content failure: yes"
@@ -11795,6 +11878,22 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             buildUnsupportedContentEncodingDocument(finalUrl, response->contentEncoding);
             rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
                 "Unsupported content encoding", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "Compressed response invalid")) {
+            buildCompatibilityFailureDocument("Compressed Response Invalid",
+                "Navigator rejected the compressed response before invoking the HTML or resource decoder.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "Compressed Response Invalid", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "Decoded response too large")) {
+            buildCompatibilityFailureDocument("Decoded Response Too Large",
+                "Navigator rejected the decoded representation because it exceeded the configured body limit.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "Decoded Response Too Large", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
                 response->redirectCount, response);
             return;
         }
@@ -14094,7 +14193,9 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
                                                bool* redirectedHttpsRetryUsed,
                                                int* redirectHopIndex,
                                                char* redirectHopUrl,
-                                               int redirectHopUrlLen)
+                                               int redirectHopUrlLen,
+                                               int* encodedBodyBytes,
+                                               int* decodedBodyBytes)
 {
     if (requestedUrl && requestedUrlLen > 0) requestedUrl[0] = '\0';
     if (statusCode) *statusCode = 0;
@@ -14139,6 +14240,8 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (redirectedHttpsRetryUsed) *redirectedHttpsRetryUsed = false;
     if (redirectHopIndex) *redirectHopIndex = 0;
     if (redirectHopUrl && redirectHopUrlLen > 0) redirectHopUrl[0] = '\0';
+    if (encodedBodyBytes) *encodedBodyBytes = 0;
+    if (decodedBodyBytes) *decodedBodyBytes = 0;
 
     const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
@@ -14159,6 +14262,15 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     NavigatorApp& app = *heapApp;
     app.loadUrl(url);
     serial::puts("[NAVIGATOR-CAPTURE] load_returned\n");
+    serial::puts("[NAVIGATOR-CONTENT] encoded_body_bytes=");
+    serial_put_dec((uint32_t)app.m_metaEncodedBodyBytes);
+    serial::puts(" decoded_body_bytes=");
+    serial_put_dec((uint32_t)app.m_metaDecodedBodyBytes);
+    serial::puts(" content_encoding=");
+    serial::puts(app.m_metaContentEncoding[0] ? app.m_metaContentEncoding : "identity");
+    serial::puts(" result=");
+    serial::puts(app.m_metaErrorStatus[0] ? app.m_metaErrorStatus : "success");
+    serial::puts("\n");
     const int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
     const int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
 
@@ -14166,6 +14278,8 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (statusCode) *statusCode = app.m_metaHttpStatusCode;
     if (contentType && contentTypeLen > 0) strcopy(contentType, app.m_metaContentType, contentTypeLen);
     if (bodyBytes) *bodyBytes = app.m_metaSourceBytes;
+    if (encodedBodyBytes) *encodedBodyBytes = app.m_metaEncodedBodyBytes;
+    if (decodedBodyBytes) *decodedBodyBytes = app.m_metaDecodedBodyBytes;
     if (parsedBlocks) *parsedBlocks = app.m_blockCount;
     if (error && errorLen > 0) strcopy(error, app.m_metaErrorStatus, errorLen);
     if (finalUrl && finalUrlLen > 0) strcopy(finalUrl, app.m_metaFinalUrl, finalUrlLen);
@@ -16333,6 +16447,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     char redirectHopUrl[160] = {};
     int statusCode = 0;
     int bodyBytes = 0;
+    int encodedBodyBytes = 0;
+    int decodedBodyBytes = 0;
     int parsedBlocks = 0;
     int redirectCount = 0;
     int redirectHopIndex = 0;
@@ -16507,7 +16623,9 @@ static bool printNavigatorRealPublicHttpsProbeCase()
             &tcpAbortUsed,
             &redirectedHttpsRetryUsed,
             &redirectHopIndex,
-            redirectHopUrl, sizeof(redirectHopUrl));
+            redirectHopUrl, sizeof(redirectHopUrl),
+            &encodedBodyBytes,
+            &decodedBodyBytes);
         // smokeCaptureHttpsNavigation uses the ordinary Navigator handoff and
         // leaves its completed transaction in the shared response object. Take
         // the bounded trace snapshot before the secondary raw TLS request
@@ -16884,8 +17002,19 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(redirectHopUrl[0] ? redirectHopUrl : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_status=");
     serial_put_dec((uint32_t)statusCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.request_accept_encoding=");
+    serial::puts(gxos::web::kHttpSharedProductionAcceptEncoding);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.body_bytes=");
     serial_put_dec((uint32_t)bodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.encoded_body_bytes=");
+    serial_put_dec((uint32_t)encodedBodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_body_bytes=");
+    serial_put_dec((uint32_t)decodedBodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_body_cap=");
+    serial_put_dec((uint32_t)gxos::web::kHttpSharedMaxBodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_cap_headroom=");
+    serial_put_dec((uint32_t)(decodedBodyBytes < gxos::web::kHttpSharedMaxBodyBytes
+        ? gxos::web::kHttpSharedMaxBodyBytes - decodedBodyBytes : 0));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.parsed_blocks=");
     serial_put_dec((uint32_t)parsedBlocks);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.content_type=");
@@ -17213,16 +17342,17 @@ static bool printNavigatorHttpSmokeCases()
         false, false, false) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_gzip",
         "/navigator-smoke/gzip.html", 200, "/navigator-smoke/gzip.html", 0,
-        "text/html", "gzip", "Unsupported content encoding", "Unsupported Content-Encoding",
-        false, false, true) && httpOk;
+        "text/html", "gzip", "", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_gzip_chunked",
+        "/navigator-smoke/gzip-chunked.html", 200, "/navigator-smoke/gzip-chunked.html", 0,
+        "text/html", "gzip", "", "", false, false, false) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_br",
         "/navigator-smoke/br.html", 200, "/navigator-smoke/br.html", 0,
         "text/html", "br", "Unsupported content encoding", "Unsupported Content-Encoding",
         false, false, true) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_deflate",
         "/navigator-smoke/deflate.html", 200, "/navigator-smoke/deflate.html", 0,
-        "text/html", "deflate", "Unsupported content encoding", "Unsupported Content-Encoding",
-        false, false, true) && httpOk;
+        "text/html", "deflate", "", "", false, false, false) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_redirect_relative",
         "/navigator-smoke/tls-redirect-relative", 200, "/navigator-smoke/final.html", 1,
         "text/html", "", "", "", false, false, false) && httpOk;
@@ -17246,6 +17376,10 @@ static bool printNavigatorHttpSmokeCases()
         "https://10.0.2.2:8443/navigator-smoke/tls-basic.html", 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("basic", "http://10.0.2.2:8080/navigator-smoke/basic.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/basic.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("request_headers", "http://10.0.2.2:8080/navigator-smoke/request-headers.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/request-headers.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("request_headers_redirect", "http://10.0.2.2:8080/navigator-smoke/request-headers-redirect", 200,
+        "http://10.0.2.2:8080/navigator-smoke/request-headers-final.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("relative_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-relative", 200,
         "http://10.0.2.2:8080/navigator-smoke/final.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("absolute_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-absolute", 200,
@@ -17269,8 +17403,22 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/stream-connection-close.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("missing_404", "http://10.0.2.2:8080/navigator-smoke/missing.html", 404,
         "http://10.0.2.2:8080/navigator-smoke/missing.html", true, false, false) && httpOk;
-    httpOk = printNavigatorHttpSmokeCase("gzip_unsupported", "http://10.0.2.2:8080/navigator-smoke/gzip.html", 200,
-        "http://10.0.2.2:8080/navigator-smoke/gzip.html", false, false, true) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("gzip", "http://10.0.2.2:8080/navigator-smoke/gzip.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/gzip.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("gzip_chunked", "http://10.0.2.2:8080/navigator-smoke/gzip-chunked.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/gzip-chunked.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("deflate", "http://10.0.2.2:8080/navigator-smoke/deflate.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/deflate.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("negotiated_gzip", "http://10.0.2.2:8080/navigator-smoke/negotiated-gzip.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/negotiated-gzip.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("negotiated_deflate", "http://10.0.2.2:8080/navigator-smoke/negotiated-deflate.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/negotiated-deflate.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("negotiated_identity", "http://10.0.2.2:8080/navigator-smoke/negotiated-identity.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/negotiated-identity.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("negotiated_br", "http://10.0.2.2:8080/navigator-smoke/negotiated-br.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/negotiated-br.html", false, false, true) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("malformed_gzip", "http://10.0.2.2:8080/navigator-smoke/malformed-gzip.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/malformed-gzip.html", false, false, true) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_relative", "http://10.0.2.2:8080/navigator-smoke/image-relative.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-relative.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_absolute", "http://10.0.2.2:8080/navigator-smoke/image-absolute.html", 200,
@@ -17279,6 +17427,8 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/image-redirect.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_chunked", "http://10.0.2.2:8080/navigator-smoke/image-chunked.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-chunked.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_compressed", "http://10.0.2.2:8080/navigator-smoke/image-compressed.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-compressed.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_nonpng", "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", true, true, false, 1, 0, 1) && httpOk;
     const gxos::GxosValidatedHttpsPolicyInfo publicPolicy = gxos::gxos_validated_https_policy_info();

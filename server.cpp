@@ -3747,10 +3747,47 @@ static std::string navigatorHostedSmokeDiagnostic() {
 
     bool httpsGzipLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/gzip.html");
     std::string httpsGzipText = gxos::apps::Navigator::SmokeCurrentDocumentText();
-    add("HTTPS unsupported compression stays friendly", httpsGzipLoaded &&
-        contains(httpsGzipText, "Unsupported Content Encoding") &&
-        contains(httpsGzipText, "UnsupportedContentEncoding"),
-        "expected existing parser behavior over TLS");
+    bool httpsGzipPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string httpsGzipPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS gzip content decoding stays bounded", httpsGzipLoaded &&
+        contains(httpsGzipText, "Compressed") &&
+        httpsGzipPageInfoLoaded &&
+        contains(httpsGzipPageInfo, "Content encoding: gzip") &&
+        contains(httpsGzipPageInfo, "Encoded body bytes: ") &&
+        contains(httpsGzipPageInfo, "Decoded body bytes: "),
+        "expected bounded gzip decode and encoded/decoded telemetry over TLS");
+
+    bool httpsDeflateLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/deflate.html");
+    std::string httpsDeflateText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    bool httpsDeflatePageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string httpsDeflatePageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS deflate content decoding stays bounded", httpsDeflateLoaded &&
+        contains(httpsDeflateText, "Deflate") &&
+        httpsDeflatePageInfoLoaded &&
+        contains(httpsDeflatePageInfo, "Content encoding: deflate") &&
+        contains(httpsDeflatePageInfo, "Encoded body bytes: ") &&
+        contains(httpsDeflatePageInfo, "Decoded body bytes: "),
+        "expected bounded zlib-wrapped deflate decode over TLS");
+
+    bool httpsIdentityLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/plain.txt");
+    std::string httpsIdentityText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    bool httpsIdentityPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string httpsIdentityPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS identity response remains unchanged", httpsIdentityLoaded &&
+        contains(httpsIdentityText, "Navigator HTTPS text fixture") &&
+        httpsIdentityPageInfoLoaded &&
+        contains(httpsIdentityPageInfo, "Content encoding: ") &&
+        contains(httpsIdentityPageInfo, "Encoded body bytes: ") &&
+        contains(httpsIdentityPageInfo, "Decoded body bytes: "),
+        "expected identity response to bypass decompression");
+
+    bool httpsBrLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/br.html");
+    std::string httpsBrText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS Brotli remains explicitly unsupported", httpsBrLoaded &&
+        contains(httpsBrText, "Unsupported Content Encoding") &&
+        contains(httpsBrText, "UnsupportedContentEncoding") &&
+        !contains(httpsBrText, "not-really-brotli"),
+        "expected unsupported br to fail closed rather than pass as identity");
 
     bool badCertificateLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://127.0.0.1:8443/navigator-smoke/basic.html");
     std::string badCertificateText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -3887,7 +3924,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(postResultText, "Content-Type: application/x-www-form-urlencoded") &&
         contains(postResultText, "Host: 127.0.0.1:8080") &&
         contains(postResultText, "User-Agent: guideXOS-Navigator/0.2") &&
-        contains(postResultText, "Accept-Encoding: identity") &&
+        contains(postResultText, "Accept-Encoding: gzip, deflate") &&
+        !contains(postResultText, "Accept-Encoding: identity") &&
+        !contains(postResultText, "Accept-Encoding: br") &&
         contains(postResultText, "Connection: close"), "echo response contains required hosted POST headers");
     add("forms-lite POST encoded successful controls", contains(postResultText,
         "q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+line&size=m") &&
