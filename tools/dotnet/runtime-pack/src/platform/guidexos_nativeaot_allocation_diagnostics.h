@@ -1877,6 +1877,61 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec31CurrentBlockFirstSlotAddress;
     uint32_t c011ec31CurrentBlockIndex;
     uint32_t c011ec31CurrentBlockType;
+
+    /* C011EC32 one genuine dead short-weak handle. */
+    uint32_t c011ec32AllocationEntryCount;
+    uint32_t c011ec32AllocationCount;
+    uint32_t c011ec32WeakHandleAllocationCallbackCount;
+    uint32_t c011ec32HandleType;
+    uint32_t c011ec32HelperReturned;
+    uint32_t c011ec32StrongRootMatchCount;
+    uint32_t c011ec32StackRootMatchCount;
+    uint32_t c011ec32RegisterRootMatchCount;
+    uint32_t c011ec32OrdinaryRootMatchCount;
+    uint32_t c011ec32StaticThreadStaticRootMatchCount;
+    uint32_t c011ec32ThreadAbortRootMatchCount;
+    uint32_t c011ec32StrongHandleMatchCount;
+    uint32_t c011ec32GraphDerivedPromotionCount;
+    uint32_t c011ec32TargetQueueInsertionCount;
+    uint32_t c011ec32TargetChildDiscoveryCount;
+    uint32_t c011ec32TargetMarkWriteCount;
+    uint32_t c011ec32ProofHandleMatched;
+    uint32_t c011ec32PreflightProven;
+    uint32_t c011ec32LivenessResult;
+    uint32_t c011ec32MarkMask;
+    uint32_t c011ec32MarkStateBefore;
+    uint32_t c011ec32CondemnedGeneration;
+    uint32_t c011ec32TargetGeneration;
+    uint32_t c011ec32MutationAttempted;
+    uint32_t c011ec32ClearingStore;
+    uint32_t c011ec32ClearedCount;
+    uint32_t c011ec32PreservedCount;
+    uint32_t c011ec32UnexpectedWeakRooting;
+    uint32_t c011ec32SensitiveAllocationCount;
+    uint32_t c011ec32Reserved[2];
+
+    uintptr_t c011ec32AllocationEntryAddress;
+    uintptr_t c011ec32HelperReturnAddress;
+    uintptr_t c011ec32Target;
+    uintptr_t c011ec32TargetType;
+    uintptr_t c011ec32WeakHandleSlot;
+    uintptr_t c011ec32WeakHandleValueBefore;
+    uintptr_t c011ec32HandleTableAddress;
+    uintptr_t c011ec32SegmentAddress;
+    uintptr_t c011ec32BlockAddress;
+    uintptr_t c011ec32BlockFirstSlotAddress;
+    uintptr_t c011ec32SlotAddress;
+    uintptr_t c011ec32SlotBefore;
+    uintptr_t c011ec32SlotAfter;
+    uintptr_t c011ec32MarkWordAddress;
+    uintptr_t c011ec32MarkWordBefore;
+    uintptr_t c011ec32LivenessCallbackEntryAddress;
+    uintptr_t c011ec32LivenessDecisionAddress;
+    uintptr_t c011ec32ClearingStoreAddress;
+    uintptr_t c011ec32CurrentSegmentAddress;
+    uintptr_t c011ec32CurrentBlockFirstSlotAddress;
+    uint32_t c011ec32CurrentBlockIndex;
+    uint32_t c011ec32CurrentBlockType;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
