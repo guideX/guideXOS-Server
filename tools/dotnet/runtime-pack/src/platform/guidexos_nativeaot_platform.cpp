@@ -9500,6 +9500,7 @@ static void emitC011EC32Preflight() {
     C32PF32("targetChildDiscoveries", d.c011ec32TargetChildDiscoveryCount);
     C32PF32("targetMarkWrites", d.c011ec32TargetMarkWriteCount);
     C32PF32("proofHandleMatched", d.c011ec32ProofHandleMatched);
+    C32PF32("bucketIndex", d.c011ec32BucketIndex);
     C32PF32("markStateBefore", d.c011ec32MarkStateBefore);
     C32PF32("markMask", d.c011ec32MarkMask);
     C32PF64("markWordAddress", d.c011ec32MarkWordAddress);
@@ -9558,6 +9559,7 @@ static void emitC011EC32Completion() {
     C32_HEX32("targetChildDiscoveries", d.c011ec32TargetChildDiscoveryCount);
     C32_HEX32("targetMarkWrites", d.c011ec32TargetMarkWriteCount);
     C32_HEX32("proofHandleMatched", d.c011ec32ProofHandleMatched);
+    C32_HEX32("bucketIndex", d.c011ec32BucketIndex);
     C32_HEX32("bucketsVisited", d.c011ec30BucketVisitCount);
     C32_HEX32("tablesVisited", d.c011ec30HandleTableVisitCount);
     C32_HEX32("segmentsVisited", d.c011ec30SegmentVisitCount);
@@ -10134,6 +10136,7 @@ guideXosNativeAotC011EC30HandleScanEntered(
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK)
     d.c011ec32ProofHandleMatched = 0u;
+    d.c011ec32BucketIndex = 0xFFFFFFFFu;
     d.c011ec32PreflightProven = 0u;
     d.c011ec32LivenessResult = 0u;
     d.c011ec32MarkMask = 0u;
@@ -10195,6 +10198,10 @@ guideXosNativeAotC011EC30BucketVisited(
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     ++d.c011ec30BucketVisitCount;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK)
+    if (d.c011ec32BucketIndex == 0xFFFFFFFFu)
+        d.c011ec32BucketIndex = bucketIndex;
+#endif
     if (d.c011ec30FirstBucketAddress == 0u) {
         d.c011ec30FirstBucketAddress = bucketAddress;
         d.c011ec30FirstBucketTableArray = tableArray;

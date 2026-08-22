@@ -1896,6 +1896,7 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t c011ec32TargetChildDiscoveryCount;
     uint32_t c011ec32TargetMarkWriteCount;
     uint32_t c011ec32ProofHandleMatched;
+    uint32_t c011ec32BucketIndex;
     uint32_t c011ec32PreflightProven;
     uint32_t c011ec32LivenessResult;
     uint32_t c011ec32MarkMask;

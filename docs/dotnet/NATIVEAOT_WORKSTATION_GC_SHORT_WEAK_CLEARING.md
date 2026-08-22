@@ -42,13 +42,14 @@ The C26–C30 chronology remained intact: complete managed/native stack walk, `G
 
 The proof handle was matched by allocation provenance plus exact structural traversal, not by target-address search:
 
+- bucket index: `0`, the single non-null bucket reached by `HandleTableMap`;
 - bucket/table: table `0x000000001023A380`;
 - segment: `0x0000000104020000`;
 - block: `0x0000000104021200`, first slot `0x0000000104021200`, block type `0`, block index `1`;
 - slot index `63`, slot `0x00000001040213F8`;
 - aggregate traversal: 1 bucket, 1 table, 1 segment, 1 block, 16 slots inspected, 1 short-weak slot, 1 non-null short-weak handle, 15 null slots.
 
-`C011EC32-PREFLIGHT` was emitted only after the real allocation, helper-return validation, C29 closure, root/graph audit, and exact structural match. The production callback was `CheckPromoted` (callback address `0x000000001007CE10`, callback entry `0x000000001007CE27`) and the production decision boundary returned at `0x000000001007CEBD`.
+`C011EC32-PREFLIGHT` was emitted only after the real allocation, helper-return validation, C29 closure, root/graph audit, and exact structural match. The production callback was `CheckPromoted` (callback address `0x000000001007CED0`, callback entry `0x000000001007CEE7`) and the production decision boundary returned at `0x000000001007CF7D`.
 
 Liveness evidence:
 
@@ -67,7 +68,7 @@ The C29 queue and mark closure were already complete at short-weak entry: pendin
 The locked dead branch attempted the normal clearing mutation exactly once:
 
 - mutation attempted: `1`;
-- clearing store: `1`, store return address `0x000000001007CE9C`;
+- clearing store: `1`, store return address `0x000000001007CF5C`;
 - slot before: `0x0000000100A01F38`;
 - slot after: `0x0000000000000000`;
 - cleared handles: `1`;
@@ -79,7 +80,7 @@ No diagnostic write-back occurred. EE/thread invariants remained valid: EE suspe
 
 Evidence root:
 
-`out/dotnet/c011ec32-short-weak-dead-handle/run-20260822-150507213`
+`out/dotnet/c011ec32-short-weak-dead-handle/run-20260822-151552673`
 
 QEMU: `QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)`.
 
@@ -87,16 +88,16 @@ All three runs reported C011EC32, success level 3, and identical semantic fields
 
 | Run | Serial SHA-256 | Result |
 |---|---|---|
-| first-run | `E1FDD3B3D15F0F9393E9DA270ECF216D11A943CC115929D8D00D919230462A11` | Outcome C |
-| repeat-1 | `9CC159DA2D29683244D2AE8728559A06A23BA95291271C47D6B12006FB669199` | Outcome C |
-| repeat-2 | `DF09887A720FD6233555A0FFFDDBF0EE86A7E665C02304A3C2F1669B34B8C6E8` | Outcome C |
+| first-run | `120C996C80E484941D93110C59CD3EBA61D64609B621E3145C65239618BF6148` | Outcome C |
+| repeat-1 | `93243A45615F2B4CB50BFE394ED4B0C82BB4153E0F22E1FE6C97270F61D612EC` | Outcome C |
+| repeat-2 | `627A1CA6B942748B559DE2DD8FE7D4580886544745C41F386494B1122E31B8DC` | Outcome C |
 
 Proof artifact hashes for this run:
 
-- proof kernel: `10837C56170B21ABB3D89DCD23AC0438F6F2E55CC931844815196BB609F6E077`;
-- PE: `826180B9E08F2D49D63DA6E15CDED6E09976AD039393F1465A9CD2FC97617E2D`;
-- ELF: `3CACD7310B0514A89CDDB576F1FCF3B9779CE7CB5BE62601F252AE3E5F1010B7`;
-- MAP: `FF3A2850A894C6730F5D114A6F5715EFDC31E2AD9D410227F1CF109F309A919F`.
+- proof kernel: `5B0A1D03A4B14DF699F4228D3FC70AA65301C3870BDA7B842E22AFB169B23D38`;
+- PE: `00D2C704FA70926D6E0D2DA84E879D2B38A92F5E5A40FD901420353A8E7F0A30`;
+- ELF: `925C03087AE811E59EBE163A02584F385A7744F64ADD024153AF386DA8ED6236`;
+- MAP: `7FF9230413A7C1311F47AB0BEC122B3C831B661DEEBD6A385105984E6370F7B3`.
 
 ## Regression and restoration status
 
