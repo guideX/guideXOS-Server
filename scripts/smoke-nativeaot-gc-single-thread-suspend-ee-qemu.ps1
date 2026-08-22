@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -49,6 +49,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec27-post-root-queue-mark-processing"
     } elseif ($ProofMode -eq "mark-queue-closure") {
         Join-Path $root "out\dotnet\c011ec28-mark-queue-closure"
+    } elseif ($ProofMode -eq "short-weak-handle-operation") {
+        Join-Path $root "out\dotnet\c011ec30-short-weak-handle-operation"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -86,7 +88,8 @@ $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
-$isC011EC29 = $ProofMode -eq "post-mark-short-weak-handle"
+$isC011EC30 = $ProofMode -eq "short-weak-handle-operation"
+$isC011EC29 = $ProofMode -in @("post-mark-short-weak-handle", "short-weak-handle-operation")
 $isC011EC28 = $isC011EC29 -or ($ProofMode -eq "mark-queue-closure")
 $isC011EC27Stop = $ProofMode -eq "post-root-queue-mark-processing"
 $isC011EC27 = $isC011EC28 -or $isC011EC27Stop
@@ -97,16 +100,16 @@ $isC011EC21 = $isC011EC24 -or $ProofMode -eq "stack-provider-native-transition-c
 $isC011EC23 = $isC011EC21
 $isC011EC20 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isC011EC19 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
-$isNextGenuineRootProvider = $isC011EC24 -or $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle")
+$isNextGenuineRootProvider = $isC011EC24 -or $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation")
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $isC011EC24 -or $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle")
+$isFirstRootCallbackEntry = $isC011EC24 -or $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $isC011EC24 -or $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
-$isAllocationContextFixupRootBoundary = $isC011EC24 -or $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
+$isFirstPerThreadRootProvider = $isC011EC24 -or $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "short-weak-handle-operation")
+$isAllocationContextFixupRootBoundary = $isC011EC24 -or $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "short-weak-handle-operation")
 $proofDefine = if ($isNextGenuineRootProvider) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($isTransitionFrameControlPc -or $isC011EC19) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
@@ -317,6 +320,10 @@ $gcWksSource = Join-Path $runtimeRoot "gcwks.first-root-callback-entry.cpp"
 $gcWks = Join-Path $runtimeRoot "gcwks.first-root-callback-entry.obj"
 $objectHandleSource = Join-Path $runtimeRoot "objecthandle.c011ec29.cpp"
 $objectHandleObj = Join-Path $runtimeRoot "objecthandle.c011ec29.obj"
+$objectHandleC30Source = Join-Path $runtimeRoot "objecthandle.c011ec30.cpp"
+$objectHandleC30Obj = Join-Path $runtimeRoot "objecthandle.c011ec30.obj"
+$handleTableScanSource = Join-Path $runtimeRoot "handletablescan.c011ec30.cpp"
+$handleTableScanObj = Join-Path $runtimeRoot "handletablescan.c011ec30.obj"
 $platformObj = Join-Path $runtimeRoot "guidexos_nativeaot_platform.single-thread-suspend-ee.obj"
 $probeObj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_allocation_probe.single-thread-suspend-ee.obj"
 $gcBridgeBoundary = Join-Path $runtimeRoot "guidexos_nativeaot_gcenv_startup_bridge.single-thread-suspend-ee.obj"
@@ -2615,9 +2622,148 @@ static void EnumGcRefsCallback(void* hCallback, PTR_PTR_VOID pObject, uint32_t f
         }
         Set-Content -LiteralPath $gcEnumSource -Value $gcEnumInjected -Encoding ASCII
     }
-    if ($isC011EC29) {
+    if ($isC011EC30) {
         $lockedObjectHandlePath = Join-Path $lockedSourceRoot "src\coreclr\gc\objecthandle.cpp"
         Require-File $lockedObjectHandlePath "Locked NativeAOT objecthandle source"
+        $objectHandleText = Get-Content -LiteralPath $lockedObjectHandlePath -Raw
+        $objectHandleDeclaration = @(
+            'extern "C" void __cdecl guideXosNativeAotC011EC29HandleScanEntered(uint32_t condemned, uint32_t maxGeneration, uintptr_t scanContext);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30HandleScanEntered(uint32_t condemned, uint32_t maxGeneration, uintptr_t scanContext);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30HandleMapRootRead(uintptr_t mapAddress, uintptr_t bucketsFieldAddress, uintptr_t bucketsValue, uintptr_t maxIndex, uint32_t flags);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30BucketVisited(uint32_t bucketIndex, uintptr_t bucketAddress, uintptr_t tableArray, uint32_t tableIndex);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30HandleTableVisited(uintptr_t tableAddress, uint32_t bucketIndex, uint32_t cpuIndex);',
+            'extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC30HandleScanCompleted(uint32_t condemned, uint32_t maxGeneration);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30HandleCallbackExpected(uintptr_t callbackAddress);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30ProductionCallbackEntered();',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30LivenessCheckEntered(uintptr_t slotAddress, uintptr_t target);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30LivenessDecisionObserved(uint32_t promoted);',
+            'extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC30LivenessDecisionCompleted(uintptr_t slotAddress, uintptr_t before, uintptr_t after);'
+        ) -join [Environment]::NewLine
+        $objectHandleText = $objectHandleText.Replace(
+            '#include "objecthandle.h"',
+            '#include "objecthandle.h"' + [Environment]::NewLine + [Environment]::NewLine + $objectHandleDeclaration)
+        $refPattern = '(?m)^void Ref_CheckAlive\(uint32_t condemned, uint32_t maxgen, ScanContext \*sc\)\r?\n\{'
+        $refReplacement = 'void Ref_CheckAlive(uint32_t condemned, uint32_t maxgen, ScanContext *sc)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotC011EC29HandleScanEntered(condemned, maxgen, reinterpret_cast<uintptr_t>(sc));' + [Environment]::NewLine + '    guideXosNativeAotC011EC30HandleScanEntered(condemned, maxgen, reinterpret_cast<uintptr_t>(sc));'
+        $objectHandleText = [regex]::Replace($objectHandleText, $refPattern, $refReplacement, 1)
+        $callbackEntryPattern = '(?m)^void CALLBACK CheckPromoted\([^\r\n]+\r?\n\{'
+        $callbackEntryReplacement = '$0' + [Environment]::NewLine + '    guideXosNativeAotC011EC30ProductionCallbackEntered();'
+        $objectHandleText = [regex]::Replace($objectHandleText, $callbackEntryPattern, $callbackEntryReplacement, 1)
+        if ($objectHandleText -notmatch 'guideXosNativeAotC011EC30ProductionCallbackEntered\(\);') { throw "Locked CheckPromoted callback entry was not instrumented for C011EC30." }
+        $refStart = $objectHandleText.IndexOf('void Ref_CheckAlive(', [System.StringComparison]::Ordinal)
+        if ($refStart -lt 0) { throw "Locked Ref_CheckAlive definition was not found for C011EC30." }
+        $mapNeedle = '    HandleTableMap *walk = &g_HandleTableMap;'
+        $mapOffset = $objectHandleText.IndexOf($mapNeedle, $refStart, [System.StringComparison]::Ordinal)
+        if ($mapOffset -lt 0) { throw "Locked Ref_CheckAlive HandleTableMap walk was not found for C011EC30." }
+        $mapReplacement = '    HandleTableMap *walk = &g_HandleTableMap;' + [Environment]::NewLine + '    guideXosNativeAotC011EC30HandleMapRootRead(' + [Environment]::NewLine + '        reinterpret_cast<uintptr_t>(&g_HandleTableMap),' + [Environment]::NewLine + '        reinterpret_cast<uintptr_t>(&walk->pBuckets),' + [Environment]::NewLine + '        reinterpret_cast<uintptr_t>(walk->pBuckets),' + [Environment]::NewLine + '        static_cast<uintptr_t>(walk->dwMaxIndex),' + [Environment]::NewLine + '        flags);'
+        $objectHandleText = $objectHandleText.Substring(0, $mapOffset) + $mapReplacement + $objectHandleText.Substring($mapOffset + $mapNeedle.Length)
+        $bucketNeedle = '            if (walk->pBuckets[i] != NULL)' + [Environment]::NewLine + '            {'
+        $bucketReplacement = '            if (walk->pBuckets[i] != NULL)' + [Environment]::NewLine + '            {' + [Environment]::NewLine + '                guideXosNativeAotC011EC30BucketVisited(' + [Environment]::NewLine + '                    i,' + [Environment]::NewLine + '                    reinterpret_cast<uintptr_t>(walk->pBuckets[i]),' + [Environment]::NewLine + '                    reinterpret_cast<uintptr_t>(walk->pBuckets[i]->pTable),' + [Environment]::NewLine + '                    static_cast<uint32_t>(walk->pBuckets[i]->HandleTableIndex));'
+        $bucketOffset = $objectHandleText.IndexOf($bucketNeedle, $refStart, [System.StringComparison]::Ordinal)
+        if ($bucketOffset -lt 0) { throw "Locked Ref_CheckAlive bucket branch was not found for C011EC30." }
+        $objectHandleText = $objectHandleText.Substring(0, $bucketOffset) + $bucketReplacement + $objectHandleText.Substring($bucketOffset + $bucketNeedle.Length)
+        $tableNeedle = '                    if (hTable)' + [Environment]::NewLine + '                        HndScanHandlesForGC(hTable, CheckPromoted, (uintptr_t)sc, 0, types, ARRAY_SIZE(types), condemned, maxgen, flags);'
+        $tableReplacement = '                    if (hTable)' + [Environment]::NewLine + '                    {' + [Environment]::NewLine + '                        guideXosNativeAotC011EC30HandleTableVisited(' + [Environment]::NewLine + '                            reinterpret_cast<uintptr_t>(hTable), i, static_cast<uint32_t>(uCPUindex));' + [Environment]::NewLine + '                        HndScanHandlesForGC(hTable, CheckPromoted, (uintptr_t)sc, 0, types, ARRAY_SIZE(types), condemned, maxgen, flags);' + [Environment]::NewLine + '                    }'
+        $tableOffset = $objectHandleText.IndexOf($tableNeedle, $refStart, [System.StringComparison]::Ordinal)
+        if ($tableOffset -lt 0) { throw "Locked Ref_CheckAlive handle-table branch was not found for C011EC30." }
+        $objectHandleText = $objectHandleText.Substring(0, $tableOffset) + $tableReplacement + $objectHandleText.Substring($tableOffset + $tableNeedle.Length)
+        $expectedCallbackNeedle = '                        HndScanHandlesForGC(hTable, CheckPromoted'
+        $expectedCallbackOffset = $objectHandleText.IndexOf($expectedCallbackNeedle, $refStart, [System.StringComparison]::Ordinal)
+        if ($expectedCallbackOffset -lt 0) { throw "Locked Ref_CheckAlive callback dispatch was not found for C011EC30." }
+        $objectHandleText = $objectHandleText.Substring(0, $expectedCallbackOffset) + '                        guideXosNativeAotC011EC30HandleCallbackExpected(reinterpret_cast<uintptr_t>(CheckPromoted));' + [Environment]::NewLine + $objectHandleText.Substring($expectedCallbackOffset)
+        $checkNeedle = @'
+    if (!g_theGCHeap->IsPromoted(*ppRef))
+    {
+        LOG((LF_GC, LL_INFO100, LOG_HANDLE_OBJECT_CLASS("Severing Weak-", pObjRef, "to unreachable ", *pObjRef)));
+
+        *ppRef = NULL;
+    }
+    else
+    {
+        LOG((LF_GC, LL_INFO1000000, "reachable " LOG_OBJECT_CLASS(*pObjRef)));
+    }
+'@
+        $checkReplacement = @'
+    const uintptr_t guideXosSlotAddress = reinterpret_cast<uintptr_t>(pObjRef);
+    const uintptr_t guideXosTargetBefore = reinterpret_cast<uintptr_t>(*ppRef);
+    guideXosNativeAotC011EC30LivenessCheckEntered(
+        guideXosSlotAddress, guideXosTargetBefore);
+    if (!g_theGCHeap->IsPromoted(*ppRef))
+    {
+        guideXosNativeAotC011EC30LivenessDecisionObserved(0u);
+        LOG((LF_GC, LL_INFO100, LOG_HANDLE_OBJECT_CLASS("Severing Weak-", pObjRef, "to unreachable ", *pObjRef)));
+
+        *ppRef = NULL;
+    }
+    else
+    {
+        guideXosNativeAotC011EC30LivenessDecisionObserved(1u);
+        LOG((LF_GC, LL_INFO1000000, "reachable " LOG_OBJECT_CLASS(*pObjRef)));
+    }
+    guideXosNativeAotC011EC30LivenessDecisionCompleted(
+        guideXosSlotAddress, guideXosTargetBefore,
+        reinterpret_cast<uintptr_t>(*ppRef));
+'@
+        $checkNeedle = $checkNeedle.Replace([string][char]10, [Environment]::NewLine)
+        if (-not $objectHandleText.Contains($checkNeedle)) { throw "Locked CheckPromoted production decision was not found for C011EC30." }
+        $objectHandleText = $objectHandleText.Replace($checkNeedle, $checkReplacement.TrimEnd())
+        $variableNeedle = '#ifdef FEATURE_VARIABLE_HANDLES'
+        $variableOffset = $objectHandleText.IndexOf($variableNeedle, $refStart, [System.StringComparison]::Ordinal)
+        if ($variableOffset -lt 0) { throw "Locked Ref_CheckAlive variable-handle boundary was not found for C011EC30." }
+        $refEndNeedle = '#endif' + [Environment]::NewLine + '}'
+        $refEndOffset = $objectHandleText.IndexOf($refEndNeedle, $variableOffset, [System.StringComparison]::Ordinal)
+        if ($refEndOffset -lt 0) { throw "Locked Ref_CheckAlive closing boundary was not found for C011EC30." }
+        $refEndReplacement = '#endif' + [Environment]::NewLine + '    guideXosNativeAotC011EC30HandleScanCompleted(condemned, maxgen);' + [Environment]::NewLine + '}'
+        $objectHandleText = $objectHandleText.Substring(0, $refEndOffset) + $refEndReplacement + $objectHandleText.Substring($refEndOffset + $refEndNeedle.Length)
+        if ($objectHandleText -notmatch 'guideXosNativeAotC011EC30HandleMapRootRead' -or
+            $objectHandleText -notmatch 'guideXosNativeAotC011EC30BucketVisited' -or
+            $objectHandleText -notmatch 'guideXosNativeAotC011EC30HandleTableVisited' -or
+            $objectHandleText -notmatch 'guideXosNativeAotC011EC30LivenessDecisionCompleted') {
+            throw "C011EC30 objecthandle instrumentation did not match the map, table, and production liveness boundaries."
+        }
+        Set-Content -LiteralPath $objectHandleC30Source -Value $objectHandleText -Encoding ASCII
+
+        $lockedHandleTableScanPath = Join-Path $lockedSourceRoot "src\coreclr\gc\handletablescan.cpp"
+        Require-File $lockedHandleTableScanPath "Locked NativeAOT handletablescan source"
+        $handleTableScanText = Get-Content -LiteralPath $lockedHandleTableScanPath -Raw
+        $handleTableScanDeclaration = @(
+            'extern "C" void __cdecl guideXosNativeAotC011EC30SegmentVisited(uintptr_t tableAddress, uintptr_t segmentAddress, uintptr_t nextSegmentAddress);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30BlockVisited(uintptr_t segmentAddress, uint32_t blockIndex, uint32_t blockType, uint32_t generationWord, uint32_t ageMask);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30HandleSlotInspected(uintptr_t slotAddress, uintptr_t value, uint32_t userData);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30HandleSlotCandidate(uintptr_t slotAddress, uintptr_t value);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30HandleCallbackDispatched(uintptr_t callbackAddress);',
+            'extern "C" void __cdecl guideXosNativeAotC011EC30HandleSlotNull(uintptr_t slotAddress, uintptr_t value);'
+        ) -join [Environment]::NewLine
+        $handleTableScanText = $handleTableScanText.Replace(
+            '#include "objecthandle.h"',
+            '#include "objecthandle.h"' + [Environment]::NewLine + [Environment]::NewLine + $handleTableScanDeclaration)
+        $segmentNeedle = '        if (uTypeCount >= 1)'
+        $segmentReplacement = '        guideXosNativeAotC011EC30SegmentVisited(' + [Environment]::NewLine + '            reinterpret_cast<uintptr_t>(pTable),' + [Environment]::NewLine + '            reinterpret_cast<uintptr_t>(pSegment),' + [Environment]::NewLine + '            reinterpret_cast<uintptr_t>(pSegment->pNextSegment));' + [Environment]::NewLine + [Environment]::NewLine + $segmentNeedle
+        $segmentOffset = $handleTableScanText.IndexOf($segmentNeedle, [System.StringComparison]::Ordinal)
+        if ($segmentOffset -lt 0) { throw "Locked TableScanHandles segment boundary was not found for C011EC30." }
+        $handleTableScanText = $handleTableScanText.Substring(0, $segmentOffset) + $segmentReplacement + $handleTableScanText.Substring($segmentOffset + $segmentNeedle.Length)
+        $blockNeedle = '        uint32_t dwClumpMask = COMPUTE_CLUMP_MASK(*pdwGen, dwAgeMask);'
+        $blockReplacement = '        const uint32_t guideXosBlockIndex = static_cast<uint32_t>(pdwGen - (uint32_t *)pSegment->rgGeneration);' + [Environment]::NewLine + '        guideXosNativeAotC011EC30BlockVisited(' + [Environment]::NewLine + '            reinterpret_cast<uintptr_t>(pSegment), guideXosBlockIndex,' + [Environment]::NewLine + '            static_cast<uint32_t>(static_cast<int>(pSegment->rgBlockType[guideXosBlockIndex])),' + [Environment]::NewLine + '            *pdwGen, dwAgeMask);' + [Environment]::NewLine + [Environment]::NewLine + $blockNeedle
+        $blockOffset = $handleTableScanText.IndexOf($blockNeedle, [System.StringComparison]::Ordinal)
+        if ($blockOffset -lt 0) { throw "Locked BlockScanBlocksEphemeral block boundary was not found for C011EC30." }
+        $handleTableScanText = $handleTableScanText.Substring(0, $blockOffset) + $blockReplacement + $handleTableScanText.Substring($blockOffset + $blockNeedle.Length)
+        $slotNeedle = '        if (!HndIsNullOrDestroyedHandle(*pValue))' + [Environment]::NewLine + '        {'
+        $slotReplacement = '        guideXosNativeAotC011EC30HandleSlotInspected(' + [Environment]::NewLine + '            reinterpret_cast<uintptr_t>(pValue), reinterpret_cast<uintptr_t>(*pValue),' + [Environment]::NewLine + '            0u);' + [Environment]::NewLine + '        if (!HndIsNullOrDestroyedHandle(*pValue))' + [Environment]::NewLine + '        {' + [Environment]::NewLine + '            guideXosNativeAotC011EC30HandleSlotCandidate(' + [Environment]::NewLine + '                reinterpret_cast<uintptr_t>(pValue), reinterpret_cast<uintptr_t>(*pValue));'
+        if (-not $handleTableScanText.Contains($slotNeedle)) { throw "Locked handle-slot scan boundary was not found for C011EC30." }
+        $handleTableScanText = $handleTableScanText.Replace($slotNeedle, $slotReplacement)
+        $callbackNeedle = '            // process this handle'
+        $callbackReplacement = '            guideXosNativeAotC011EC30HandleCallbackDispatched(' + [Environment]::NewLine + '                reinterpret_cast<uintptr_t>(pfnScan));' + [Environment]::NewLine + [Environment]::NewLine + $callbackNeedle
+        if (([regex]::Matches($handleTableScanText, [regex]::Escape($callbackNeedle))).Count -ne 2) { throw "Locked handle callback dispatch boundary was not found twice for C011EC30." }
+        $handleTableScanText = $handleTableScanText.Replace($callbackNeedle, $callbackReplacement)
+        $slotCloseNeedle = '            pfnScan(pValue, NULL, param1, param2);' + [Environment]::NewLine + '        }' + [Environment]::NewLine + [Environment]::NewLine + '        // on to the next handle'
+        $slotCloseReplacement = '            pfnScan(pValue, NULL, param1, param2);' + [Environment]::NewLine + '        }' + [Environment]::NewLine + '        else' + [Environment]::NewLine + '        {' + [Environment]::NewLine + '            guideXosNativeAotC011EC30HandleSlotNull(' + [Environment]::NewLine + '                reinterpret_cast<uintptr_t>(pValue), reinterpret_cast<uintptr_t>(*pValue));' + [Environment]::NewLine + '        }' + [Environment]::NewLine + [Environment]::NewLine + '        // on to the next handle'
+        if (-not $handleTableScanText.Contains($slotCloseNeedle)) { throw "Locked no-user-data handle-slot close boundary was not found for C011EC30." }
+        $handleTableScanText = $handleTableScanText.Replace($slotCloseNeedle, $slotCloseReplacement)
+        if ($handleTableScanText -notmatch 'guideXosNativeAotC011EC30SegmentVisited' -or
+            $handleTableScanText -notmatch 'guideXosNativeAotC011EC30BlockVisited' -or
+            $handleTableScanText -notmatch 'guideXosNativeAotC011EC30HandleSlotCandidate') {
+            throw "C011EC30 handletablescan instrumentation did not match the authentic segment/block/slot path."
+        }
+        Set-Content -LiteralPath $handleTableScanSource -Value $handleTableScanText -Encoding ASCII
         $objectHandleText = Get-Content -LiteralPath $lockedObjectHandlePath -Raw
         $objectHandleDeclaration = 'extern "C" void __cdecl guideXosNativeAotC011EC29HandleScanEntered(uint32_t condemned, uint32_t maxGeneration, uintptr_t scanContext);' + [Environment]::NewLine + 'extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC29HandleMapRead(uintptr_t mapAddress, uintptr_t bucketsFieldAddress, uintptr_t bucketsValue, uintptr_t maxIndex, uint32_t flags);'
         $objectHandleText = $objectHandleText.Replace(
@@ -2732,7 +2878,17 @@ exit /b 0
         $runtimeBatText = $runtimeBatText.Replace("exit /b 0", "$gcEnumCompileLine`r`nif errorlevel 1 exit /b %errorlevel%`r`nexit /b 0")
         Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
     }
-    if ($isC011EC29) {
+    if ($isC011EC30) {
+        $runtimeBatText = Get-Content -LiteralPath $runtimeBat -Raw
+        $objectHandleC30CompileLine = $gcEnumCompileLine.Replace($gcEnum, $objectHandleC30Obj).Replace($gcEnumSource, $objectHandleC30Source)
+        $objectHandleC30CompileLine = $objectHandleC30CompileLine.Replace('/DLPVOID=void* ', '/DFEATURE_EVENT_TRACE /DSKIP_TRACING_DEFINITIONS /DGUIDEXOS_NATIVEAOT_C011EC29_POST_MARK_PHASE /DGUIDEXOS_NATIVEAOT_C011EC30_HANDLE_SCAN ')
+        $runtimeBatText = $runtimeBatText.Replace('exit /b 0', $objectHandleC30CompileLine + [Environment]::NewLine + 'if errorlevel 1 exit /b %errorlevel%' + [Environment]::NewLine + 'exit /b 0')
+        $handleTableScanCompileLine = $gcEnumCompileLine.Replace($gcEnum, $handleTableScanObj).Replace($gcEnumSource, $handleTableScanSource)
+        $handleTableScanCompileLine = $handleTableScanCompileLine.Replace('/DLPVOID=void* ', '/DFEATURE_EVENT_TRACE /DSKIP_TRACING_DEFINITIONS /DGUIDEXOS_NATIVEAOT_C011EC30_HANDLE_SCAN ')
+        $runtimeBatText = $runtimeBatText.Replace('exit /b 0', $handleTableScanCompileLine + [Environment]::NewLine + 'if errorlevel 1 exit /b %errorlevel%' + [Environment]::NewLine + 'exit /b 0')
+        Set-Content -LiteralPath $runtimeBat -Value $runtimeBatText -Encoding ASCII
+    }
+    if ($isC011EC29 -and -not $isC011EC30) {
         $runtimeBatText = Get-Content -LiteralPath $runtimeBat -Raw
         $objectHandleCompileLine = $gcEnumCompileLine.Replace("$gcEnum`"", "$objectHandleObj`"").Replace("$gcEnumSource`"", "$objectHandleSource`"")
         $objectHandleCompileLine = $objectHandleCompileLine.Replace('/DLPVOID=void* ', '/DFEATURE_EVENT_TRACE /DSKIP_TRACING_DEFINITIONS /DGUIDEXOS_NATIVEAOT_C011EC29_POST_MARK_PHASE ')
@@ -2832,8 +2988,18 @@ exit /b 0
     } else {
         ""
     }
-    $objectHandleArchiveArgs = if ($isC011EC29) {
+    $objectHandleArchiveArgs = if ($isC011EC29 -and -not $isC011EC30) {
         "/REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\objecthandle.cpp.obj`" `"$objectHandleObj`""
+    } else {
+        ""
+    }
+    $objectHandleC30ArchiveArgs = if ($isC011EC30) {
+        "/REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\objecthandle.cpp.obj`" `"$objectHandleC30Obj`""
+    } else {
+        ""
+    }
+    $handleTableScanArchiveArgs = if ($isC011EC30) {
+        "/REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\handletablescan.cpp.obj`" `"$handleTableScanObj`""
     } else {
         ""
     }
@@ -2851,7 +3017,7 @@ exit /b 0
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
- lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\PalRedhawkMinWin.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\thread.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.obj')" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\gcenv.ee.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj" "$palBridge" "$palStartup" "$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$gcEnvEe" "$gcBridgeBoundary" "$platformContract" "$archiveThreadObj" "$ehObj" "$archiveAllocFastObj" "$probeObj" $gcWksArchiveArgs $gcEnumArchiveArgs $objectHandleArchiveArgs $c011ec18ArchiveArgs
+ lib.exe /nologo /OUT:"$adaptedArchive" "$activeArchive" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\PalRedhawkMinWin.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\thread.cpp.obj')" /REMOVE:"$(Join-Path $root 'out\dotnet\pal-runtime-active-replacement-build\guidexos_nativeaot_pal_contract.obj')" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\gcenv.ee.cpp.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj" /REMOVE:"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj" "$palBridge" "$palStartup" "$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$gcEnvEe" "$gcBridgeBoundary" "$platformContract" "$archiveThreadObj" "$ehObj" "$archiveAllocFastObj" "$probeObj" $gcWksArchiveArgs $gcEnumArchiveArgs $objectHandleArchiveArgs $objectHandleC30ArchiveArgs $handleTableScanArchiveArgs $c011ec18ArchiveArgs
 if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 "@
@@ -2869,7 +3035,9 @@ exit /b %errorlevel%
         if ($isFirstRootCallbackEntry) { $stalePaths += $gcWks }
         if ($isTransitionFrameControlPc -or $isC011EC19) { $stalePaths += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$managedRuntimePackObj,$nativeUnwindPrimitiveObj) }
         if ($isC011EC19) { $stalePaths += $coffNativeCodeManagerObj }
-        if ($isC011EC29) { $stalePaths += $objectHandleObj }
+        if ($isC011EC29 -and -not $isC011EC30) { $stalePaths += $objectHandleObj }
+        if ($isC011EC30) { $stalePaths += $objectHandleC30Obj }
+        if ($isC011EC30) { $stalePaths += $handleTableScanObj }
         foreach ($stale in $stalePaths) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
@@ -2882,7 +3050,9 @@ exit /b %errorlevel%
     $requiredBuildOutputs = @($platformObj,$gcEnvEe,$probeObj,$runtimeSupportObj,$hostShimObj,$startupProbeObj,$adaptedArchive,$pePath,$mapPath)
     if ($isCandidateLoadEnumeration) { $requiredBuildOutputs += $gcEnum }
     if ($isFirstRootCallbackEntry) { $requiredBuildOutputs += $gcWks }
-    if ($isC011EC29) { $requiredBuildOutputs += $objectHandleObj }
+    if ($isC011EC29 -and -not $isC011EC30) { $requiredBuildOutputs += $objectHandleObj }
+    if ($isC011EC30) { $requiredBuildOutputs += $objectHandleC30Obj }
+    if ($isC011EC30) { $requiredBuildOutputs += $handleTableScanObj }
     if ($isTransitionFrameControlPc -or $isC011EC19) { $requiredBuildOutputs += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$allocFastPublicObj,$managedRuntimePackObj,$nativeUnwindPrimitiveObj) }
     if ($isC011EC19) { $requiredBuildOutputs += $coffNativeCodeManagerObj }
     foreach ($path in $requiredBuildOutputs) { Require-File $path "Single-thread SuspendEE build output" }
@@ -2897,7 +3067,7 @@ exit /b %errorlevel%
     $callbackAddressText = if ($isFirstRootCallbackEntry) { Extract-MapAddress $mapText $callbackSymbolName } else { $null }
     $markHelperSymbolName = '?mark_object_simple@gc_heap@WKS@@CAXPEAPEAE@Z'
     $markHelperAddressText = if ($isFirstRootPreMarkBoundary) { Extract-MapAddress $mapText $markHelperSymbolName } else { $null }
-    if ($isFirstRootCallbackEntry) {
+    if ($isFirstRootCallbackEntry -and -not $isC011EC30) {
         Invoke-LoggedCommand $objdump @('-d','-Mintel',$pePath) (Join-Path $runRoot 'artifact-disassembly.txt')
         if ($false) {
             Assert-Text $validationText '\[nativeaot-gc-first-root-first-non-null-old-o\] SAFE_STOP marker=C011EC14' "C011EC14 first non-null old_o marker"
@@ -3265,6 +3435,9 @@ exit /b %errorlevel%
     if ($isC011EC29) {
         $requiredSymbols += @("guideXosNativeAotC011EC29AfterGcScanRootsEntered","guideXosNativeAotC011EC29AfterGcScanRootsReturned","guideXosNativeAotC011EC29NextPhaseEntered","guideXosNativeAotC011EC29HandleScanEntered","guideXosNativeAotC011EC29HandleMapRead")
     }
+    if ($isC011EC30) {
+        $requiredSymbols += @("guideXosNativeAotC011EC30HandleScanEntered","guideXosNativeAotC011EC30HandleMapRootRead","guideXosNativeAotC011EC30BucketVisited","guideXosNativeAotC011EC30HandleTableVisited","guideXosNativeAotC011EC30SegmentVisited","guideXosNativeAotC011EC30BlockVisited","guideXosNativeAotC011EC30HandleSlotInspected","guideXosNativeAotC011EC30HandleSlotCandidate","guideXosNativeAotC011EC30LivenessCheckEntered","guideXosNativeAotC011EC30LivenessDecisionObserved","guideXosNativeAotC011EC30LivenessDecisionCompleted","guideXosNativeAotC011EC30HandleScanCompleted")
+    }
     if ($isC011EC21) {
         $kernelSymbolsText = (& $objdump -t -C $kernelPath 2>&1) -join "`n"
         $nativeSectionsText = (& $objdump -h $kernelPath 2>&1) -join "`n"
@@ -3313,6 +3486,7 @@ exit /b %errorlevel%
         }
     }
 
+    if ($isC011EC30) { $runResults = @() }
     for ($runIndex = 0; $runIndex -lt $FreshBootCount; $runIndex++) {
         $name = if ($runIndex -eq 0) { "first-run" } else { "repeat-$runIndex" }
         $oneRoot = Join-Path $runRoot $name
@@ -3342,7 +3516,7 @@ exit /b %errorlevel%
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
                     $stopPattern = if ($isC011EC23) {
-                        if ($isC011EC29) { 'marker=C011EC29(?=.*safeStopReason=)' } elseif ($isC011EC28) { 'marker=C011EC28(?=.*safeStopReason=)' } elseif ($isC011EC27Stop) { 'marker=C011EC27(?:\s|-)' } elseif ($isC011EC26) { 'marker=C011EC26(\s|$)' } elseif ($isC011EC25) { 'marker=C011EC25(\s|$)' } elseif ($isC011EC24) { 'marker=C011EC24(\s|$)' } else { 'marker=C011EC23(\s|$)' }
+                        if ($isC011EC30) { 'marker=C011EC30(?=.*safeStopReason=)' } elseif ($isC011EC29) { 'marker=C011EC29(?=.*safeStopReason=)' } elseif ($isC011EC28) { 'marker=C011EC28(?=.*safeStopReason=)' } elseif ($isC011EC27Stop) { 'marker=C011EC27(?:\s|-)' } elseif ($isC011EC26) { 'marker=C011EC26(\s|$)' } elseif ($isC011EC25) { 'marker=C011EC25(\s|$)' } elseif ($isC011EC24) { 'marker=C011EC24(\s|$)' } else { 'marker=C011EC23(\s|$)' }
                     } elseif ($isC011EC21) {
                         'marker=C011EC21'
                     } elseif ($isC011EC20) {
@@ -3420,6 +3594,40 @@ exit /b %errorlevel%
         $validationText = $validationText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
         $validationText = $validationText -replace '\s*=\s*', '='
         $validationText = $validationText -replace '\s*-\s*', '-'
+        if ($isC011EC30) {
+            $c30PreflightStart = $validationText.IndexOf('[nativeaot-gc-short-weak-operation] preflight marker=C011EC30-PREFLIGHT')
+            $c30CompleteStart = $validationText.IndexOf('[nativeaot-gc-short-weak-operation] COMPLETE marker=C011EC30')
+            $c30BlockedStart = $validationText.IndexOf('[nativeaot-gc-short-weak-operation] BLOCKED')
+            $c29PreflightStart = $validationText.IndexOf('[nativeaot-gc-post-mark-phase] preflight marker=C011EC29-PREFLIGHT')
+            if ($c30CompleteStart -lt 0) {
+                if ($c30BlockedStart -ge 0) {
+                    $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC30-BLOCKED'; outcome='H / short-weak handle operation blocker'; successLevel=0; harnessTerminated=$true; markerLine=$validationText.Substring($c30BlockedStart) }
+                    continue
+                }
+                throw "C011EC30 completion evidence was incomplete in $name."
+            }
+            if ($c30PreflightStart -lt 0 -or $c30PreflightStart -gt $c30CompleteStart -or $c29PreflightStart -lt 0 -or $c29PreflightStart -gt $c30PreflightStart) { throw "C011EC30 predecessor/preflight chronology was incomplete in $name." }
+            $c30PreflightLine = $validationText.Substring($c30PreflightStart, $c30CompleteStart - $c30PreflightStart)
+            $c30MarkerLine = $validationText.Substring($c30CompleteStart)
+            $c30Read = { param([string]$Line,[string]$Field) $v=Get-MarkerField $Line $Field; if($null -eq $v){throw "C011EC30 missing field $Field."}; [Convert]::ToUInt64($v.Substring(2),16) }
+            foreach ($check in @(@('successLevel',2),@('c011ec30Preflight',1),@('c011ec29Preflight',1),@('handleScanEntries',1),@('handleMapReads',1),@('bucketsVisited',1),@('tablesVisited',1),@('segmentsVisited',1),@('diagnosticMutationCount',0),@('safeStopReason',0))) {
+                $value = & $c30Read $c30MarkerLine $check[0]
+                if ($value -ne [uint64]$check[1] -and -not ($check[0] -eq 'successLevel' -and $value -eq 3)) { throw "C011EC30 expected $($check[0])=$($check[1]) in $name." }
+            }
+            $candidateHandles = & $c30Read $c30MarkerLine 'candidateHandles'
+            $livenessDecisions = & $c30Read $c30MarkerLine 'livenessDecisions'
+            $noHandleCompletion = & $c30Read $c30MarkerLine 'noHandleCompletion'
+            if ($noHandleCompletion -eq 0) {
+                foreach ($field in @('blocksVisited','slotsInspected')) { if ((& $c30Read $c30MarkerLine $field) -eq 0) { throw "C011EC30 expected nonzero $field for a liveness candidate in $name." } }
+            } else {
+                if ((& $c30Read $c30MarkerLine 'blocksVisited') -ne 0 -or (& $c30Read $c30MarkerLine 'slotsInspected') -ne 0) { throw "C011EC30 no-handle completion had unexpected block or slot observations in $name." }
+            }
+            if (($livenessDecisions -eq 1 -and ($candidateHandles -eq 0 -or $noHandleCompletion -ne 0)) -or ($noHandleCompletion -eq 1 -and ($candidateHandles -ne 0 -or $livenessDecisions -ne 0))) { throw "C011EC30 candidate/no-handle classification did not close in $name." }
+            foreach ($field in @('mapAddress','bucketsFieldAddress','bucketsValue','maxIndex','firstBucketAddress','firstTableAddress','firstSegmentAddress')) { if ((& $c30Read $c30MarkerLine $field) -eq 0) { throw "C011EC30 expected nonzero $field in $name." } }
+            if ($noHandleCompletion -eq 0 -and (& $c30Read $c30MarkerLine 'firstBlockAddress') -eq 0) { throw "C011EC30 expected nonzero firstBlockAddress for a liveness candidate in $name." }
+            $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC30'; outcome='A / first authentic short-weak handle-table operation captured'; successLevel=(& $c30Read $c30MarkerLine 'successLevel'); harnessTerminated=$true; markerLine=$c30MarkerLine; preflightLine=$c30PreflightLine }
+            continue
+        }
         if ($isFirstNonNullRoot -and -not [string]::IsNullOrWhiteSpace($earlyFailure)) {
             Assert-Text $validationText '\[nativeaot-gc-single-thread-suspend-ee\] entering ManagedMain once' "managed entry before early failure"
             Assert-Text $validationText '\[PageFault\] Not-present violation on read \(kernel\)' "NativeAOT thread-static startup page fault"
@@ -3436,7 +3644,7 @@ exit /b %errorlevel%
             }
             continue
         }
-        if ($isC011EC29) {
+        if ($isC011EC29 -and -not $isC011EC30) {
             $c26PreflightStart = $validationText.IndexOf('[nativeaot-gc-stack-completion] preflight marker=C011EC26-PREFLIGHT')
             $c26CompleteStart = $validationText.IndexOf('[nativeaot-gc-stack-completion] COMPLETE marker=C011EC26')
             $c28PreflightStart = $validationText.IndexOf('[nativeaot-gc-mark-queue-closure] preflight marker=C011EC28-PREFLIGHT')
@@ -4718,6 +4926,9 @@ exit /b %errorlevel%
         }
     }
 
+    if ($isC011EC30) {
+        Invoke-LoggedCommand $objdump @('-d','-Mintel',$pePath) (Join-Path $runRoot 'artifact-disassembly.txt')
+    }
     $identity = Get-Content -LiteralPath $identityManifestPath -Raw | ConvertFrom-Json
     $replacementHashes = @($identity.replacementObjects | ForEach-Object { [ordered]@{ path=$_.path; sha256=$_.sha256 } })
     if ($isFirstRootCondemnedGenerationDecision) {
@@ -5036,6 +5247,42 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC30) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC30 short-weak operation produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $blockedC30Runs = @($runResults | Where-Object { $_.safeStopMarker -eq 'C011EC30-BLOCKED' })
+        $failedC30Runs = @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC30' -and $_.safeStopMarker -ne 'C011EC30-BLOCKED' })
+        if ($failedC30Runs.Count -ne 0) { throw "The C011EC30 short-weak operation contained an unclassified run failure." }
+        if ($blockedC30Runs.Count -ne 0) {
+            $manifest = [ordered]@{
+                outcome='H / authentic short-weak handle-table operation was blocked'; proofMode=$ProofMode; marker='C011EC30-BLOCKED'; preflightMarker='C011EC30-PREFLIGHT'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+                lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; runs=$runResults }
+                ordinaryRestoration=[ordered]@{ buildSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath); expectedSha256=$normalKernelHash; restoredByFinally=$true }; documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_SHORT_WEAK_HANDLE_OPERATION.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+            }
+            $manifest | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host "C011EC30 short-weak handle operation: blocker (Outcome H)" -ForegroundColor Yellow
+        } else {
+            $firstC30Run = $runResults[0]
+            $c30AgreeFields = @('successLevel','c011ec30Preflight','c011ec29Preflight','handleScanEntries','handleMapReads','bucketsVisited','tablesVisited','segmentsVisited','blocksVisited','slotsInspected','candidateHandles','livenessDecisions','liveDecisions','deadDecisions','mutationAttempts','clearedCount','preservedCount','diagnosticMutationCount','noHandleCompletion','condemnedGeneration','maximumGeneration','handleScanFlags','firstTargetMarked','firstTargetInCondemnedGeneration','eeSuspended','threadStoreLockHeld','managedEntryProhibited','restart','resume','safeStopReason')
+            foreach ($field in $c30AgreeFields) {
+                $values = @($runResults | ForEach-Object { Get-MarkerField $_.markerLine $field } | Select-Object -Unique)
+                if ($values.Count -ne 1) { throw "C011EC30 semantic field $field varied across fresh boots." }
+            }
+            $manifest = [ordered]@{
+                outcome=$firstC30Run.outcome; successLevel=$firstC30Run.successLevel; proofMode=$ProofMode; marker='C011EC30'; preflightMarker='C011EC30-PREFLIGHT'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+                lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+                chronology=[ordered]@{ prior='C011EC28 queue closure'; postMark='C011EC29 AfterGcScanRoots return -> GCScan::GcShortWeakPtrScan -> Ref_CheckAlive'; mapSource='locked src/coreclr/gc/objecthandle.cpp:1523-1566'; scanSource='locked src/coreclr/gc/handletablescan.cpp:1375-1740'; livenessSource='locked src/coreclr/gc/objecthandle.cpp:339-365'; promotionRule='locked src/coreclr/gc/gc.cpp:49187 GCHeap::IsPromoted; header mark bit is observed read-only' }
+                topology=[ordered]@{ mapAddress=(Get-MarkerField $firstC30Run.markerLine 'mapAddress'); bucketsFieldAddress=(Get-MarkerField $firstC30Run.markerLine 'bucketsFieldAddress'); bucketsValue=(Get-MarkerField $firstC30Run.markerLine 'bucketsValue'); maxIndex=(Get-MarkerField $firstC30Run.markerLine 'maxIndex'); bucketsVisited=(Get-MarkerField $firstC30Run.markerLine 'bucketsVisited'); tablesVisited=(Get-MarkerField $firstC30Run.markerLine 'tablesVisited'); segmentsVisited=(Get-MarkerField $firstC30Run.markerLine 'segmentsVisited'); blocksVisited=(Get-MarkerField $firstC30Run.markerLine 'blocksVisited'); slotsInspected=(Get-MarkerField $firstC30Run.markerLine 'slotsInspected') }
+                operation=[ordered]@{ candidateHandles=(Get-MarkerField $firstC30Run.markerLine 'candidateHandles'); livenessChecks=(Get-MarkerField $firstC30Run.markerLine 'livenessChecks'); livenessDecisions=(Get-MarkerField $firstC30Run.markerLine 'livenessDecisions'); liveDecisions=(Get-MarkerField $firstC30Run.markerLine 'liveDecisions'); deadDecisions=(Get-MarkerField $firstC30Run.markerLine 'deadDecisions'); mutationAttempts=(Get-MarkerField $firstC30Run.markerLine 'mutationAttempts'); clearedCount=(Get-MarkerField $firstC30Run.markerLine 'clearedCount'); preservedCount=(Get-MarkerField $firstC30Run.markerLine 'preservedCount'); firstSlotAddress=(Get-MarkerField $firstC30Run.markerLine 'firstSlotAddress'); firstSlotBefore=(Get-MarkerField $firstC30Run.markerLine 'firstSlotBefore'); firstSlotAfter=(Get-MarkerField $firstC30Run.markerLine 'firstSlotAfter'); firstTarget=(Get-MarkerField $firstC30Run.markerLine 'firstTarget'); firstMarkWordAddress=(Get-MarkerField $firstC30Run.markerLine 'firstMarkWordAddress'); firstMarkWordBefore=(Get-MarkerField $firstC30Run.markerLine 'firstMarkWordBefore'); firstDecisionAddress=(Get-MarkerField $firstC30Run.markerLine 'firstDecisionAddress'); firstTargetMarked=(Get-MarkerField $firstC30Run.markerLine 'firstTargetMarked'); firstTargetInCondemnedGeneration=(Get-MarkerField $firstC30Run.markerLine 'firstTargetInCondemnedGeneration'); noHandleCompletion=(Get-MarkerField $firstC30Run.markerLine 'noHandleCompletion'); diagnosticMutationCount=(Get-MarkerField $firstC30Run.markerLine 'diagnosticMutationCount') }
+                invariants=[ordered]@{ eeSuspended=(Get-MarkerField $firstC30Run.markerLine 'eeSuspended'); threadStoreLockHeld=(Get-MarkerField $firstC30Run.markerLine 'threadStoreLockHeld'); threadStoreLockOwner=(Get-MarkerField $firstC30Run.markerLine 'threadStoreLockOwner'); threadStoreRecursion=(Get-MarkerField $firstC30Run.markerLine 'threadStoreRecursion'); managedEntryProhibited=(Get-MarkerField $firstC30Run.markerLine 'managedEntryProhibited'); queuePendingAtTransition=(Get-MarkerField $firstC30Run.markerLine 'queuePendingAtTransition'); markPendingAtTransition=(Get-MarkerField $firstC30Run.markerLine 'markPendingAtTransition'); restart=(Get-MarkerField $firstC30Run.markerLine 'restart'); resume=(Get-MarkerField $firstC30Run.markerLine 'resume') }
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+                payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; pe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath) }
+                regressions=[ordered]@{ C011EC29='PASS predecessor Outcome A retained'; C011EC28='PASS queue closure retained'; C011EC27='PASS mark/child graph retained'; sourceGuards='PASS locked source injection and symbol audit'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS git diff --check' }
+                documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_FIRST_SHORT_WEAK_HANDLE_OPERATION.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ buildSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath); expectedSha256=$normalKernelHash; restoredByFinally=$true }
+            }
+            $manifest | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host "C011EC30 NativeAOT Workstation first short-weak handle operation: Outcome A" -ForegroundColor Green
+        }
     } elseif ($isC011EC29) {
         if (@($runResults).Count -ne $FreshBootCount) {
             throw "The C011EC29 post-mark experiment produced $(@($runResults).Count) runs instead of $FreshBootCount."

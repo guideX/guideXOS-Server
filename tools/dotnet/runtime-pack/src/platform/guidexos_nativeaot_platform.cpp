@@ -9241,6 +9241,544 @@ guideXosNativeAotC011EC29HandleMapRead(
     }
 }
 
+
+static void emitC011EC30Preflight() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-operation] preflight marker=C011EC30-PREFLIGHT");
+#define C30PF32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C30PF64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C30PF32("c011ec29Preflight", d.c011ec29PreflightProven);
+    C30PF32("afterGcScanRootsReturns", d.c011ec29AfterGcScanRootsReturnCount);
+    C30PF32("nextPhaseEntries", d.c011ec29NextPhaseEntryCount);
+    C30PF32("handleScanEntries", d.c011ec30HandleScanEntryCount);
+    C30PF32("handleMapReads", d.c011ec30HandleMapReadCount);
+    C30PF32("bucketsVisited", d.c011ec30BucketVisitCount);
+    C30PF32("tablesVisited", d.c011ec30HandleTableVisitCount);
+    C30PF32("segmentsVisited", d.c011ec30SegmentVisitCount);
+    C30PF32("blocksVisited", d.c011ec30BlockVisitCount);
+    C30PF32("slotsInspected", d.c011ec30HandleSlotInspectCount);
+    C30PF32("candidateHandles", d.c011ec30CandidateHandleCount);
+    C30PF32("noHandleCompletion", d.c011ec30NoHandleCompletion);
+    C30PF64("mapAddress", d.c011ec30FirstHandleTableMapAddress);
+    C30PF64("bucketsFieldAddress", d.c011ec30FirstHandleTableMapBucketsFieldAddress);
+    C30PF64("bucketsValue", d.c011ec30FirstHandleTableMapBucketsValue);
+    C30PF64("maxIndex", d.c011ec30FirstHandleTableMapMaxIndex);
+#undef C30PF32
+#undef C30PF64
+    suspendEeSerialPutString("\n");
+}
+
+static void emitC011EC30Completion() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-operation] COMPLETE marker=C011EC30");
+#define C30_HEX32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C30_HEX64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C30_HEX32("successLevel", d.c011ec30LivenessDecisionCount != 0u ? 3u : 2u);
+    C30_HEX32("c011ec30Preflight", d.c011ec30PreflightProven);
+    C30_HEX32("c011ec29Preflight", d.c011ec29PreflightProven);
+    C30_HEX32("afterGcScanRootsEntries", d.c011ec29AfterGcScanRootsEntryCount);
+    C30_HEX32("afterGcScanRootsReturns", d.c011ec29AfterGcScanRootsReturnCount);
+    C30_HEX32("nextPhaseEntries", d.c011ec29NextPhaseEntryCount);
+    C30_HEX32("handleScanEntries", d.c011ec30HandleScanEntryCount);
+    C30_HEX32("handleMapReads", d.c011ec30HandleMapReadCount);
+    C30_HEX32("bucketsVisited", d.c011ec30BucketVisitCount);
+    C30_HEX32("tablesVisited", d.c011ec30HandleTableVisitCount);
+    C30_HEX32("segmentsVisited", d.c011ec30SegmentVisitCount);
+    C30_HEX32("blocksVisited", d.c011ec30BlockVisitCount);
+    C30_HEX32("slotsInspected", d.c011ec30HandleSlotInspectCount);
+    C30_HEX32("nullHandles", d.c011ec30NullHandleCount);
+    C30_HEX32("candidateHandles", d.c011ec30CandidateHandleCount);
+    C30_HEX32("livenessChecks", d.c011ec30LivenessCheckCount);
+    C30_HEX32("livenessDecisions", d.c011ec30LivenessDecisionCount);
+    C30_HEX32("callbackDispatches", d.c011ec30CallbackDispatchCount);
+    C30_HEX32("productionCallbackEntries", d.c011ec30ProductionCallbackEntryCount);
+    C30_HEX32("callbackMatchesExpected", (d.c011ec30FirstCallbackAddress != 0u && d.c011ec30FirstCallbackAddress == d.c011ec30ExpectedCallbackAddress) ? 1u : 0u);
+    C30_HEX32("liveDecisions", d.c011ec30LiveDecisionCount);
+    C30_HEX32("deadDecisions", d.c011ec30DeadDecisionCount);
+    C30_HEX32("mutationAttempts", d.c011ec30MutationAttemptCount);
+    C30_HEX32("clearedCount", d.c011ec30ClearedCount);
+    C30_HEX32("preservedCount", d.c011ec30PreservedCount);
+    C30_HEX32("diagnosticMutationCount", d.c011ec30DiagnosticMutationCount);
+    C30_HEX32("noHandleCompletion", d.c011ec30NoHandleCompletion);
+    C30_HEX32("condemnedGeneration", d.c011ec30CondemnedGeneration);
+    C30_HEX32("maximumGeneration", d.c011ec30MaximumGeneration);
+    C30_HEX32("handleScanFlags", d.c011ec30HandleScanFlags);
+    C30_HEX32("firstBlockType", d.c011ec30FirstBlockType);
+    C30_HEX32("firstGenerationWord", d.c011ec30FirstGenerationWord);
+    C30_HEX32("firstAgeMask", d.c011ec30FirstAgeMask);
+    C30_HEX32("firstDecisionPromoted", d.c011ec30FirstDecisionPromoted);
+    C30_HEX32("firstTargetMarked", d.c011ec30FirstTargetMarked);
+    C30_HEX32("firstTargetInCondemnedGeneration", d.c011ec30FirstTargetInCondemnedGeneration);
+    C30_HEX64("mapAddress", d.c011ec30FirstHandleTableMapAddress);
+    C30_HEX64("bucketsFieldAddress", d.c011ec30FirstHandleTableMapBucketsFieldAddress);
+    C30_HEX64("bucketsValue", d.c011ec30FirstHandleTableMapBucketsValue);
+    C30_HEX64("maxIndex", d.c011ec30FirstHandleTableMapMaxIndex);
+    C30_HEX64("firstBucketAddress", d.c011ec30FirstBucketAddress);
+    C30_HEX64("firstBucketTableArray", d.c011ec30FirstBucketTableArray);
+    C30_HEX64("firstTableAddress", d.c011ec30FirstTableAddress);
+    C30_HEX64("firstSegmentAddress", d.c011ec30FirstSegmentAddress);
+    C30_HEX64("firstBlockAddress", d.c011ec30FirstBlockAddress);
+    C30_HEX64("firstSlotAddress", d.c011ec30FirstSlotAddress);
+    C30_HEX64("firstSlotBefore", d.c011ec30FirstSlotBefore);
+    C30_HEX64("firstSlotAfter", d.c011ec30FirstSlotAfter);
+    C30_HEX64("firstTarget", d.c011ec30FirstTarget);
+    C30_HEX64("firstMarkWordAddress", d.c011ec30FirstMarkWordAddress);
+    C30_HEX64("firstMarkWordBefore", d.c011ec30FirstMarkWordBefore);
+    C30_HEX64("firstDecisionAddress", d.c011ec30FirstDecisionAddress);
+    C30_HEX64("firstOperationAddress", d.c011ec30FirstOperationAddress);
+    C30_HEX64("firstTableIndex", d.c011ec30FirstTableIndex);
+    C30_HEX64("firstCpuIndex", d.c011ec30FirstCpuIndex);
+    C30_HEX32("eeSuspended", d.c011ec29EeSuspended);
+    C30_HEX32("threadStoreLockHeld", d.c011ec29ThreadStoreLockHeld);
+    C30_HEX64("threadStoreLockOwner", d.c011ec29ThreadStoreLockOwner);
+    C30_HEX32("threadStoreRecursion", d.c011ec29ThreadStoreRecursion);
+    C30_HEX32("cooperative", d.c011ec29Cooperative);
+    C30_HEX32("preemptive", d.c011ec29Preemptive);
+    C30_HEX32("managedEntryProhibited", d.c011ec29ManagedEntryProhibited);
+    C30_HEX32("queuePendingAtTransition", d.c011ec29PendingQueueAtTransition);
+    C30_HEX32("markPendingAtTransition", d.c011ec29MarkPendingAtTransition);
+    C30_HEX32("restart", d.c011ec29RestartCount);
+    C30_HEX32("resume", d.c011ec29ResumeCount);
+    C30_HEX32("safeStopReason", d.c011ec30SafeStopReason);
+#undef C30_HEX32
+#undef C30_HEX64
+    suspendEeSerialPutString("\n");
+}
+
+static void c011ec30CaptureContract() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30HandleScanEntered(
+    uint32_t condemned, uint32_t maxGeneration, uintptr_t scanContext) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec30HandleScanEntryCount = 1u;
+    d.c011ec30HandleMapReadCount = 0u;
+    d.c011ec30BucketVisitCount = 0u;
+    d.c011ec30HandleTableVisitCount = 0u;
+    d.c011ec30SegmentVisitCount = 0u;
+    d.c011ec30BlockVisitCount = 0u;
+    d.c011ec30HandleSlotInspectCount = 0u;
+    d.c011ec30NullHandleCount = 0u;
+    d.c011ec30CandidateHandleCount = 0u;
+    d.c011ec30LivenessCheckCount = 0u;
+    d.c011ec30LivenessDecisionCount = 0u;
+    d.c011ec30LiveDecisionCount = 0u;
+    d.c011ec30DeadDecisionCount = 0u;
+    d.c011ec30MutationAttemptCount = 0u;
+    d.c011ec30ClearedCount = 0u;
+    d.c011ec30PreservedCount = 0u;
+    d.c011ec30PreflightProven = 0u;
+    d.c011ec30NoHandleCompletion = 0u;
+    d.c011ec30MarkerEmitted = 0u;
+    d.c011ec30CondemnedGeneration = 0u;
+    d.c011ec30MaximumGeneration = 0u;
+    d.c011ec30HandleScanFlags = 0u;
+    d.c011ec30FirstBlockType = 0u;
+    d.c011ec30FirstGenerationWord = 0u;
+    d.c011ec30FirstAgeMask = 0u;
+    d.c011ec30FirstDecisionPromoted = 0u;
+    d.c011ec30FirstTargetMarked = 0u;
+    d.c011ec30FirstTargetInCondemnedGeneration = 0u;
+    d.c011ec30DiagnosticMutationCount = 0u;
+    d.c011ec30CallbackDispatchCount = 0u;
+    d.c011ec30ProductionCallbackEntryCount = 0u;
+    d.c011ec30Reserved[0] = 0u;
+    d.c011ec30ScanContext = 0u;
+    d.c011ec30FirstHandleScanAddress = 0u;
+    d.c011ec30FirstHandleTableMapAddress = 0u;
+    d.c011ec30FirstHandleTableMapBucketsFieldAddress = 0u;
+    d.c011ec30FirstHandleTableMapBucketsValue = 0u;
+    d.c011ec30FirstHandleTableMapMaxIndex = 0u;
+    d.c011ec30FirstBucketAddress = 0u;
+    d.c011ec30FirstBucketTableArray = 0u;
+    d.c011ec30FirstTableAddress = 0u;
+    d.c011ec30FirstSegmentAddress = 0u;
+    d.c011ec30FirstNextSegmentAddress = 0u;
+    d.c011ec30FirstBlockAddress = 0u;
+    d.c011ec30FirstSlotAddress = 0u;
+    d.c011ec30FirstSlotBefore = 0u;
+    d.c011ec30FirstSlotAfter = 0u;
+    d.c011ec30FirstTarget = 0u;
+    d.c011ec30FirstMarkWordAddress = 0u;
+    d.c011ec30FirstMarkWordBefore = 0u;
+    d.c011ec30FirstDecisionAddress = 0u;
+    d.c011ec30FirstCallbackAddress = 0u;
+    d.c011ec30FirstProductionCallbackEntryAddress = 0u;
+    d.c011ec30ExpectedCallbackAddress = 0u;
+    d.c011ec30FirstOperationAddress = 0u;
+    d.c011ec30FirstTableIndex = 0u;
+    d.c011ec30FirstCpuIndex = 0u;
+    d.c011ec30FirstHandleScanAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec30CondemnedGeneration = condemned;
+    d.c011ec30MaximumGeneration = maxGeneration;
+    d.c011ec30ScanContext = scanContext;
+    d.c011ec30HandleScanFlags = 0u;
+    d.c011ec30SafeStopReason = 0u;
+    c011ec30CaptureContract();
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30HandleMapRootRead(
+    uintptr_t mapAddress, uintptr_t bucketsFieldAddress,
+    uintptr_t bucketsValue, uintptr_t maxIndex, uint32_t flags) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30HandleMapReadCount;
+    d.c011ec30FirstHandleTableMapAddress = mapAddress;
+    d.c011ec30FirstHandleTableMapBucketsFieldAddress = bucketsFieldAddress;
+    d.c011ec30FirstHandleTableMapBucketsValue = bucketsValue;
+    d.c011ec30FirstHandleTableMapMaxIndex = maxIndex;
+    d.c011ec30FirstOperationAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec30HandleScanFlags = flags;
+    d.c011ec29HandleMapReadCount = 1u;
+    d.c011ec29FirstHandleTableMapAddress = mapAddress;
+    d.c011ec29FirstHandleTableMapBucketsFieldAddress = bucketsFieldAddress;
+    d.c011ec29FirstHandleTableMapBucketsValue = bucketsValue;
+    d.c011ec29FirstHandleTableMapMaxIndex = maxIndex;
+    d.c011ec29HandleTableMapBucketPresent = bucketsValue != 0u ? 1u : 0u;
+    d.c011ec29FirstOperationAddress = d.c011ec30FirstOperationAddress;
+    d.c011ec29FirstMutationAttempted = 0u;
+    c011ec30CaptureContract();
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30BucketVisited(
+    uint32_t bucketIndex, uintptr_t bucketAddress,
+    uintptr_t tableArray, uint32_t tableIndex) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30BucketVisitCount;
+    if (d.c011ec30FirstBucketAddress == 0u) {
+        d.c011ec30FirstBucketAddress = bucketAddress;
+        d.c011ec30FirstBucketTableArray = tableArray;
+        d.c011ec30FirstTableIndex = tableIndex;
+    }
+    (void)bucketIndex;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30HandleTableVisited(
+    uintptr_t tableAddress, uint32_t bucketIndex, uint32_t cpuIndex) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30HandleTableVisitCount;
+    if (d.c011ec30FirstTableAddress == 0u) {
+        d.c011ec30FirstTableAddress = tableAddress;
+        d.c011ec30FirstCpuIndex = cpuIndex;
+    }
+    (void)bucketIndex;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30SegmentVisited(
+    uintptr_t tableAddress, uintptr_t segmentAddress,
+    uintptr_t nextSegmentAddress) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30SegmentVisitCount;
+    if (d.c011ec30FirstSegmentAddress == 0u) {
+        d.c011ec30FirstSegmentAddress = segmentAddress;
+        d.c011ec30FirstNextSegmentAddress = nextSegmentAddress;
+    }
+    (void)tableAddress;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30BlockVisited(
+    uintptr_t segmentAddress, uint32_t blockIndex,
+    uint32_t blockType, uint32_t generationWord, uint32_t ageMask) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30BlockVisitCount;
+    if (d.c011ec30FirstBlockAddress == 0u) {
+        d.c011ec30FirstBlockAddress = segmentAddress;
+        d.c011ec30FirstBlockType = blockType;
+        d.c011ec30FirstGenerationWord = generationWord;
+        d.c011ec30FirstAgeMask = ageMask;
+    }
+    (void)blockIndex;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30HandleSlotInspected(
+    uintptr_t slotAddress, uintptr_t value, uint32_t userData) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30HandleSlotInspectCount;
+    (void)slotAddress;
+    (void)value;
+    (void)userData;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30HandleSlotCandidate(
+    uintptr_t slotAddress, uintptr_t value) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30CandidateHandleCount;
+    if (d.c011ec30FirstSlotAddress == 0u) {
+        d.c011ec30FirstSlotAddress = slotAddress;
+        d.c011ec30FirstSlotBefore = value;
+        d.c011ec30FirstTarget = value;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30HandleCallbackExpected(uintptr_t callbackAddress) {
+    g_guideXosAllocationDiagnostics.c011ec30ExpectedCallbackAddress =
+        callbackAddress;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30HandleCallbackDispatched(uintptr_t callbackAddress) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30CallbackDispatchCount;
+    if (d.c011ec30FirstCallbackAddress == 0u)
+        d.c011ec30FirstCallbackAddress = callbackAddress;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30ProductionCallbackEntered() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30ProductionCallbackEntryCount;
+    if (d.c011ec30FirstProductionCallbackEntryAddress == 0u)
+        d.c011ec30FirstProductionCallbackEntryAddress =
+            reinterpret_cast<uintptr_t>(_ReturnAddress());
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30HandleSlotNull(
+    uintptr_t slotAddress, uintptr_t value) {
+    ++g_guideXosAllocationDiagnostics.c011ec30NullHandleCount;
+    (void)slotAddress;
+    (void)value;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30LivenessCheckEntered(
+    uintptr_t slotAddress, uintptr_t target) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30LivenessCheckCount;
+    if (d.c011ec30LivenessCheckCount != 1u)
+        return;
+    d.c011ec30FirstSlotAddress = slotAddress;
+    d.c011ec30FirstSlotBefore = target;
+    d.c011ec30FirstTarget = target;
+    d.c011ec30FirstMarkWordAddress = target;
+    d.c011ec30FirstMarkWordBefore =
+        target != 0u ? *reinterpret_cast<const uintptr_t *>(target) : 0u;
+    d.c011ec30FirstTargetMarked =
+        (d.c011ec30FirstMarkWordBefore & static_cast<uintptr_t>(1u)) != 0u ? 1u : 0u;
+    d.c011ec30FirstTargetInCondemnedGeneration = 0xFFFFFFFFu;
+    d.c011ec30FirstDecisionAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec30PreflightProven = 1u;
+    emitC011EC30Preflight();
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC30LivenessDecisionObserved(uint32_t promoted) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec30LivenessDecisionCount;
+    if (promoted != 0u) {
+        ++d.c011ec30LiveDecisionCount;
+        d.c011ec30FirstDecisionPromoted = 1u;
+    } else {
+        ++d.c011ec30DeadDecisionCount;
+        d.c011ec30FirstDecisionPromoted = 0u;
+    }
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC30LivenessDecisionCompleted(
+    uintptr_t slotAddress, uintptr_t before, uintptr_t after) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec30FirstSlotAddress = slotAddress;
+    d.c011ec30FirstSlotBefore = before;
+    d.c011ec30FirstSlotAfter = after;
+    d.c011ec30FirstDecisionAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if (before != after)
+        ++d.c011ec30MutationAttemptCount;
+    if (before != 0u && after == 0u)
+        ++d.c011ec30ClearedCount;
+    if (before != 0u && before == after)
+        ++d.c011ec30PreservedCount;
+    const bool valid =
+        d.c011ec29PreflightProven != 0u &&
+        d.c011ec29AfterGcScanRootsEntryCount == 1u &&
+        d.c011ec29AfterGcScanRootsReturnCount == 1u &&
+        d.c011ec29NextPhaseEntryCount == 1u &&
+        d.c011ec30HandleScanEntryCount == 1u &&
+        d.c011ec30HandleMapReadCount == 1u &&
+        d.c011ec30BucketVisitCount != 0u &&
+        d.c011ec30HandleTableVisitCount != 0u &&
+        d.c011ec30SegmentVisitCount != 0u &&
+        d.c011ec30BlockVisitCount != 0u &&
+        d.c011ec30HandleSlotInspectCount != 0u &&
+        d.c011ec30CandidateHandleCount != 0u &&
+        d.c011ec30CallbackDispatchCount == 1u &&
+        d.c011ec30ProductionCallbackEntryCount == 1u &&
+        d.c011ec30FirstCallbackAddress != 0u &&
+        d.c011ec30FirstCallbackAddress == d.c011ec30ExpectedCallbackAddress &&
+        d.c011ec30LivenessCheckCount == 1u &&
+        d.c011ec30LivenessDecisionCount == 1u &&
+        d.c011ec30DiagnosticMutationCount == 0u &&
+        d.c011ec30FirstHandleTableMapAddress != 0u &&
+        d.c011ec30FirstBucketAddress != 0u &&
+        d.c011ec30FirstTableAddress != 0u &&
+        d.c011ec30FirstSegmentAddress != 0u &&
+        d.c011ec30FirstBlockAddress != 0u &&
+        d.c011ec30FirstSlotAddress != 0u &&
+        d.c011ec29EeSuspended != 0u &&
+        d.c011ec29ThreadStoreLockHeld != 0u &&
+        d.c011ec29ManagedEntryProhibited != 0u &&
+        d.c011ec29PendingQueueAtTransition == 0u &&
+        d.c011ec29MarkPendingAtTransition == 0u &&
+        d.c011ec29RestartCount == 0u &&
+        d.c011ec29ResumeCount == 0u;
+    if (valid) {
+        d.c011ec30SafeStopReason = 0u;
+        d.c011ec30MarkerEmitted = 1u;
+        emitC011EC30Completion();
+    } else {
+        d.c011ec30SafeStopReason = 0xC0300002u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-operation] BLOCKED outcome=H marker=C011EC30-BLOCKED");
+#define C30B32(name, value) \
+        suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+        C30B32("c29Preflight", d.c011ec29PreflightProven);
+        C30B32("afterEntries", d.c011ec29AfterGcScanRootsEntryCount);
+        C30B32("afterReturns", d.c011ec29AfterGcScanRootsReturnCount);
+        C30B32("nextEntries", d.c011ec29NextPhaseEntryCount);
+        C30B32("scanEntries", d.c011ec30HandleScanEntryCount);
+        C30B32("mapReads", d.c011ec30HandleMapReadCount);
+        C30B32("buckets", d.c011ec30BucketVisitCount);
+        C30B32("tables", d.c011ec30HandleTableVisitCount);
+        C30B32("segments", d.c011ec30SegmentVisitCount);
+        C30B32("blocks", d.c011ec30BlockVisitCount);
+        C30B32("slots", d.c011ec30HandleSlotInspectCount);
+        C30B32("candidates", d.c011ec30CandidateHandleCount);
+        C30B32("callbackDispatches", d.c011ec30CallbackDispatchCount);
+        C30B32("productionCallbackEntries", d.c011ec30ProductionCallbackEntryCount);
+        C30B32("callbackMatchesExpected", (d.c011ec30FirstCallbackAddress != 0u && d.c011ec30FirstCallbackAddress == d.c011ec30ExpectedCallbackAddress) ? 1u : 0u);
+        suspendEeSerialPutString(" callbackAddress=");
+        suspendEeSerialPutHex64(d.c011ec30FirstCallbackAddress);
+        suspendEeSerialPutString(" expectedCallbackAddress=");
+        suspendEeSerialPutHex64(d.c011ec30ExpectedCallbackAddress);
+        C30B32("livenessChecks", d.c011ec30LivenessCheckCount);
+        C30B32("livenessDecisions", d.c011ec30LivenessDecisionCount);
+        C30B32("diagnosticMutationCount", d.c011ec30DiagnosticMutationCount);
+        C30B32("eeSuspended", d.c011ec29EeSuspended);
+        C30B32("threadStoreLockHeld", d.c011ec29ThreadStoreLockHeld);
+        C30B32("managedEntryProhibited", d.c011ec29ManagedEntryProhibited);
+        C30B32("pendingQueue", d.c011ec29PendingQueueAtTransition);
+        C30B32("markPending", d.c011ec29MarkPendingAtTransition);
+        C30B32("restart", d.c011ec29RestartCount);
+        C30B32("resume", d.c011ec29ResumeCount);
+#undef C30B32
+        suspendEeSerialPutString("\n");
+    }
+    for (;;) {
+    }
+}
+
+extern "C" __declspec(noreturn) void __cdecl
+guideXosNativeAotC011EC30HandleScanCompleted(
+    uint32_t condemned, uint32_t maxGeneration) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec30NoHandleCompletion =
+        d.c011ec30CandidateHandleCount == 0u ? 1u : 0u;
+    if (d.c011ec30PreflightProven == 0u) {
+        d.c011ec30PreflightProven = 1u;
+        emitC011EC30Preflight();
+    }
+    const bool valid =
+        d.c011ec29PreflightProven != 0u &&
+        d.c011ec29AfterGcScanRootsEntryCount == 1u &&
+        d.c011ec29AfterGcScanRootsReturnCount == 1u &&
+        d.c011ec29NextPhaseEntryCount == 1u &&
+        d.c011ec30HandleScanEntryCount == 1u &&
+        d.c011ec30HandleMapReadCount == 1u &&
+        d.c011ec30NoHandleCompletion != 0u &&
+        d.c011ec30LivenessDecisionCount == 0u &&
+        d.c011ec30DiagnosticMutationCount == 0u &&
+        d.c011ec29EeSuspended != 0u &&
+        d.c011ec29ThreadStoreLockHeld != 0u &&
+        d.c011ec29ManagedEntryProhibited != 0u &&
+        condemned == d.c011ec30CondemnedGeneration &&
+        maxGeneration == d.c011ec30MaximumGeneration;
+    if (valid) {
+        d.c011ec30SafeStopReason = 0u;
+        d.c011ec30MarkerEmitted = 1u;
+        emitC011EC30Completion();
+    } else {
+        d.c011ec30SafeStopReason = 0xC0300001u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-operation] BLOCKED outcome=H marker=C011EC30-BLOCKED");
+#define C30B32(name, value) \
+        suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+        C30B32("c29Preflight", d.c011ec29PreflightProven);
+        C30B32("afterEntries", d.c011ec29AfterGcScanRootsEntryCount);
+        C30B32("afterReturns", d.c011ec29AfterGcScanRootsReturnCount);
+        C30B32("nextEntries", d.c011ec29NextPhaseEntryCount);
+        C30B32("scanEntries", d.c011ec30HandleScanEntryCount);
+        C30B32("mapReads", d.c011ec30HandleMapReadCount);
+        C30B32("buckets", d.c011ec30BucketVisitCount);
+        C30B32("tables", d.c011ec30HandleTableVisitCount);
+        C30B32("segments", d.c011ec30SegmentVisitCount);
+        C30B32("blocks", d.c011ec30BlockVisitCount);
+        C30B32("slots", d.c011ec30HandleSlotInspectCount);
+        C30B32("candidates", d.c011ec30CandidateHandleCount);
+        C30B32("livenessChecks", d.c011ec30LivenessCheckCount);
+        C30B32("livenessDecisions", d.c011ec30LivenessDecisionCount);
+        C30B32("diagnosticMutationCount", d.c011ec30DiagnosticMutationCount);
+        C30B32("eeSuspended", d.c011ec29EeSuspended);
+        C30B32("threadStoreLockHeld", d.c011ec29ThreadStoreLockHeld);
+        C30B32("managedEntryProhibited", d.c011ec29ManagedEntryProhibited);
+        C30B32("pendingQueue", d.c011ec29PendingQueueAtTransition);
+        C30B32("markPending", d.c011ec29MarkPendingAtTransition);
+        C30B32("restart", d.c011ec29RestartCount);
+        C30B32("resume", d.c011ec29ResumeCount);
+        C30B32("callbackDispatches", d.c011ec30CallbackDispatchCount);
+        C30B32("productionCallbackEntries", d.c011ec30ProductionCallbackEntryCount);
+        C30B32("callbackMatchesExpected", (d.c011ec30FirstCallbackAddress != 0u && d.c011ec30FirstCallbackAddress == d.c011ec30ExpectedCallbackAddress) ? 1u : 0u);
+        suspendEeSerialPutString(" callbackAddress=");
+        suspendEeSerialPutHex64(d.c011ec30FirstCallbackAddress);
+        suspendEeSerialPutString(" expectedCallbackAddress=");
+        suspendEeSerialPutHex64(d.c011ec30ExpectedCallbackAddress);
+        C30B32("condemned", condemned);
+        C30B32("recordedCondemned", d.c011ec30CondemnedGeneration);
+        C30B32("maxGeneration", maxGeneration);
+        C30B32("recordedMaxGeneration", d.c011ec30MaximumGeneration);
+#undef C30B32
+        suspendEeSerialPutString("\n");
+    }
+    for (;;) {
+    }
+}
+
+
 extern "C" __declspec(noreturn) void __cdecl
 guideXosNativeAotC011EC27PostRootAfterGcScanRootsEntered() {
     guidexos_nativeaot_allocation_diagnostics& d =

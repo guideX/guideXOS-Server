@@ -1769,6 +1769,67 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec29FirstMutationTarget;
     uintptr_t c011ec29FirstMutationBefore;
     uintptr_t c011ec29FirstMutationAfter;
+
+    /* C011EC30 first authentic short-weak handle-table operation. */
+    uint32_t c011ec30HandleScanEntryCount;
+    uint32_t c011ec30HandleMapReadCount;
+    uint32_t c011ec30BucketVisitCount;
+    uint32_t c011ec30HandleTableVisitCount;
+    uint32_t c011ec30SegmentVisitCount;
+    uint32_t c011ec30BlockVisitCount;
+    uint32_t c011ec30HandleSlotInspectCount;
+    uint32_t c011ec30NullHandleCount;
+    uint32_t c011ec30CandidateHandleCount;
+    uint32_t c011ec30LivenessCheckCount;
+    uint32_t c011ec30LivenessDecisionCount;
+    uint32_t c011ec30LiveDecisionCount;
+    uint32_t c011ec30DeadDecisionCount;
+    uint32_t c011ec30MutationAttemptCount;
+    uint32_t c011ec30ClearedCount;
+    uint32_t c011ec30PreservedCount;
+    uint32_t c011ec30PreflightProven;
+    uint32_t c011ec30NoHandleCompletion;
+    uint32_t c011ec30MarkerEmitted;
+    uint32_t c011ec30SafeStopReason;
+    uint32_t c011ec30CondemnedGeneration;
+    uint32_t c011ec30MaximumGeneration;
+    uint32_t c011ec30HandleScanFlags;
+    uint32_t c011ec30FirstBlockType;
+    uint32_t c011ec30FirstGenerationWord;
+    uint32_t c011ec30FirstAgeMask;
+    uint32_t c011ec30FirstDecisionPromoted;
+    uint32_t c011ec30FirstTargetMarked;
+    uint32_t c011ec30FirstTargetInCondemnedGeneration;
+    uint32_t c011ec30DiagnosticMutationCount;
+    uint32_t c011ec30CallbackDispatchCount;
+    uint32_t c011ec30ProductionCallbackEntryCount;
+    uint32_t c011ec30Reserved[1];
+
+    uintptr_t c011ec30ScanContext;
+    uintptr_t c011ec30FirstHandleScanAddress;
+    uintptr_t c011ec30FirstHandleTableMapAddress;
+    uintptr_t c011ec30FirstHandleTableMapBucketsFieldAddress;
+    uintptr_t c011ec30FirstHandleTableMapBucketsValue;
+    uintptr_t c011ec30FirstHandleTableMapMaxIndex;
+    uintptr_t c011ec30FirstBucketAddress;
+    uintptr_t c011ec30FirstBucketTableArray;
+    uintptr_t c011ec30FirstTableAddress;
+    uintptr_t c011ec30FirstSegmentAddress;
+    uintptr_t c011ec30FirstNextSegmentAddress;
+    uintptr_t c011ec30FirstBlockAddress;
+    uintptr_t c011ec30FirstSlotAddress;
+    uintptr_t c011ec30FirstSlotBefore;
+    uintptr_t c011ec30FirstSlotAfter;
+    uintptr_t c011ec30FirstTarget;
+    uintptr_t c011ec30FirstMarkWordAddress;
+    uintptr_t c011ec30FirstMarkWordBefore;
+    uintptr_t c011ec30FirstDecisionAddress;
+    uintptr_t c011ec30FirstCallbackAddress;
+    uintptr_t c011ec30FirstProductionCallbackEntryAddress;
+    uintptr_t c011ec30ExpectedCallbackAddress;
+    uintptr_t c011ec30FirstOperationAddress;
+    uintptr_t c011ec30FirstTableIndex;
+    uintptr_t c011ec30FirstCpuIndex;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
