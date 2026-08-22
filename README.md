@@ -1,4 +1,6 @@
-﻿# guideXOS Server
+﻿<img alt="" src="https://guidexos.com/images/screenshots/guidexos_server_main_gui.jpg" />
+
+# guideXOS Server
 
 A multi-architecture operating system exploring a future where applications are not tied to a single CPU architecture.
 
