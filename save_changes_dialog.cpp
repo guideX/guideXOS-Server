@@ -50,7 +50,9 @@ namespace gxos { namespace dialogs {
             ipc::Message createMsg;
             createMsg.type = (uint32_t)MsgType::MT_Create;
             std::ostringstream oss;
-            oss << "Unsaved Changes|380|160|" << x << "|" << y;
+            oss << "Unsaved Changes|380|160|"
+                << (static_cast<unsigned int>(x) | gui::kWindowCreateFlagCoreDialogSurface)
+                << "|" << y;
             std::string payload = oss.str();
             createMsg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish(kGuiChanIn, std::move(createMsg), false);

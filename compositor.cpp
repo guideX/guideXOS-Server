@@ -315,7 +315,41 @@ namespace gxos {
             return theme.titleBarText;
         }
 
+        static bool isSciFiCoreDialogSurface(const WinInfo& winfo, const DesktopTheme& theme) {
+            return winfo.coreDialogSurface && theme.id == DesktopThemeId::SciFi;
+        }
+
+        static bool isPrimaryCoreDialogButton(const WinInfo& winfo, const Widget& widget) {
+            (void)winfo;
+            return widget.id == 1;
+        }
+
+        static uint32_t coreDialogSciFiWidgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            const uint32_t secondaryBase = WindowRenderer::BlendThemeColor(theme.windowBackground, theme.taskbarBackground, 18);
+            const uint32_t primaryBase = WindowRenderer::BlendThemeColor(theme.windowBackground, theme.accent, 24);
+            const uint32_t base = isPrimaryCoreDialogButton(winfo, widget) ? primaryBase : secondaryBase;
+            if (widget.pressed) return WindowRenderer::BlendThemeColor(base, theme.accent, 28);
+            if (widget.hover) return WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 18);
+            return base;
+        }
+
+        static uint32_t coreDialogSciFiWidgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            const uint32_t secondaryBase = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.taskbarBorder, 20);
+            const uint32_t primaryBase = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.accent, 38);
+            const uint32_t base = isPrimaryCoreDialogButton(winfo, widget) ? primaryBase : secondaryBase;
+            if (widget.pressed) return WindowRenderer::BlendThemeColor(base, theme.accent, 24);
+            if (widget.hover) return WindowRenderer::BlendThemeColor(base, theme.titleBarText, 14);
+            return base;
+        }
+
+        static uint32_t coreDialogSciFiWidgetTextColor(const DesktopTheme& theme, const Widget&) {
+            return theme.titleBarText;
+        }
+
         static uint32_t widgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isSciFiCoreDialogSurface(winfo, theme)) {
+                return coreDialogSciFiWidgetFillColor(winfo, widget, theme);
+            }
             if (isImageViewerWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
                     ? imageViewerSciFiWidgetFillColor(theme, widget)
@@ -330,6 +364,9 @@ namespace gxos {
         }
 
         static uint32_t widgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isSciFiCoreDialogSurface(winfo, theme)) {
+                return coreDialogSciFiWidgetBorderColor(winfo, widget, theme);
+            }
             if (isImageViewerWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
                     ? imageViewerSciFiWidgetBorderColor(theme, widget)
@@ -344,6 +381,9 @@ namespace gxos {
         }
 
         static uint32_t widgetTextColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isSciFiCoreDialogSurface(winfo, theme)) {
+                return coreDialogSciFiWidgetTextColor(theme, widget);
+            }
             if (isImageViewerWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
                     ? imageViewerSciFiWidgetTextColor(theme, widget)
@@ -4565,7 +4605,11 @@ namespace gxos {
                     }
                     for (const auto& ri : winfo.rects) { 
                         RECT rr{ contentX + ri.x, contentY + ri.y, contentX + ri.x + ri.w, contentY + ri.h };
-                        HBRUSH rb = CreateSolidBrush(RGB(ri.r, ri.g, ri.b)); 
+                        const uint32_t rectColor = isSciFiCoreDialogSurface(winfo, theme)
+                            ? WindowRenderer::BlendThemeColor(theme.windowBackground, theme.taskbarBackground, 12)
+                            : (0xFF000000u | (static_cast<uint32_t>(ri.r) << 16) |
+                                (static_cast<uint32_t>(ri.g) << 8) | ri.b);
+                        HBRUSH rb = CreateSolidBrush(colorFromTheme(rectColor));
                         FillRect(dc, &rr, rb); 
                         DeleteObject(rb); 
                     }
@@ -4594,7 +4638,10 @@ namespace gxos {
                     }
                     int ty = contentY;
                     for (const auto& tx : winfo.texts) {
-                        drawUiText(dc, contentX, ty, tx, RGB(220, 220, 220), FontRole::Default);
+                        const COLORREF textColor = isSciFiCoreDialogSurface(winfo, theme)
+                            ? colorFromTheme(theme.titleBarText)
+                            : RGB(220, 220, 220);
+                        drawUiText(dc, contentX, ty, tx, textColor, FontRole::Default);
                         ty += uiTextHeight(FontRole::Default);
                     }
                     
@@ -6272,6 +6319,7 @@ namespace gxos {
                     wi.visible = true;
                     wi.resizable = (createFlags & gui::kWindowCreateFlagResizable) != 0;
                     wi.modal = isDialogTitle(title);
+                    wi.coreDialogSurface = (createFlags & gui::kWindowCreateFlagCoreDialogSurface) != 0;
                     wi.ownerPid = m.srcPid;
                     wi.persistenceKey = persistenceKey;
                     int desktopWidth = 1024;
@@ -7833,8 +7881,11 @@ namespace gxos {
                         }
                     }
                     for (const auto& ri : w.rects) {
-                        fbFillRect(pixels, pitch, fbW, fbH, contentX + ri.x, contentY + ri.y, ri.w, ri.h,
-                                   (static_cast<uint32_t>(ri.r) << 16) | (static_cast<uint32_t>(ri.g) << 8) | ri.b);
+                        const uint32_t rectColor = isSciFiCoreDialogSurface(w, theme)
+                            ? WindowRenderer::BlendThemeColor(theme.windowBackground, theme.taskbarBackground, 12)
+                            : ((static_cast<uint32_t>(ri.r) << 16) |
+                                (static_cast<uint32_t>(ri.g) << 8) | ri.b);
+                        fbFillRect(pixels, pitch, fbW, fbH, contentX + ri.x, contentY + ri.y, ri.w, ri.h, rectColor);
                     }
                     for (const auto& img : w.images) {
                         const ImageBitmap& shown = displayedImage(img);
@@ -7864,7 +7915,9 @@ namespace gxos {
                     int ty = contentY;
                     for (const auto& tx : w.texts) {
                         fbDrawText(pixels, pitch, fbW, fbH,
-                            contentX, ty, tx, 0x00DCDCDC, FontRole::Default);
+                            contentX, ty, tx,
+                            isSciFiCoreDialogSurface(w, theme) ? theme.titleBarText : 0x00DCDCDC,
+                            FontRole::Default);
                         ty += SystemFont::MeasureHeight(FontRole::Default);
                     }
 

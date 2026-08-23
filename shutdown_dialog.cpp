@@ -67,7 +67,9 @@ int ShutdownDialog::main(int argc, char** argv) {
     {
         ipc::Message m;
         m.type = static_cast<uint32_t>(gui::MsgType::MT_Create);
-        std::string payload = "Confirm Shutdown|" + std::to_string(kDialogW) + "|" + std::to_string(kDialogH);
+        std::string payload = "Confirm Shutdown|" + std::to_string(kDialogW) + "|" +
+            std::to_string(kDialogH) + "|" +
+            std::to_string(gui::kWindowCreateFlagCoreDialogSurface);
         m.data.assign(payload.begin(), payload.end());
         std::cout << "[ShutdownDialog] Publishing MT_Create to gui.input" << std::endl;
         ipc::Bus::publish("gui.input", std::move(m), false);

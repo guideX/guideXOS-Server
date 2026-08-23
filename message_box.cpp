@@ -39,7 +39,9 @@ int MessageBox::main(int /*argc*/, char** /*argv*/) {
     {
         ipc::Message m;
         m.type = static_cast<uint32_t>(gui::MsgType::MT_Create);
-        std::string payload = s_title + "|" + std::to_string(kDialogW) + "|" + std::to_string(kDialogH);
+        std::string payload = s_title + "|" + std::to_string(kDialogW) + "|" +
+            std::to_string(kDialogH) + "|" +
+            std::to_string(gui::kWindowCreateFlagCoreDialogSurface);
         m.data.assign(payload.begin(), payload.end());
         ipc::Bus::publish("gui.input", std::move(m), false);
     }

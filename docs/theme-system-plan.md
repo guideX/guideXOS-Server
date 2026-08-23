@@ -727,6 +727,33 @@ Phase 5 closes the remaining hosted shell popup consistency gap for the opt-in S
 * Phase 5 is closed with implementation and hosted runtime proof complete. The next sci-fi-theme implementation phase may be planned separately; Phase 6 is not part of this validation record.
 * Bare-metal theme parity, rounded clipping/hit-testing, blur/glass, animations, high-DPI/scaling, theme-scoped wallpaper, and broader app-surface work remain deferred.
 
+## Phase 6A
+
+Phase 6A applies the existing Sci Fi desktop language to the three smaller hosted core modal surfaces: Message Box, Shutdown, and Save Changes. Open, Save As, and other file-picker dialogs remain outside this phase because their client surfaces and interaction models are substantially larger.
+
+* The three dialog creators mark their retained window surface through a dedicated visual create flag. The marker carries no geometry, resizability, modality, command, or input semantics.
+* The hosted compositor uses that marker to apply the existing Sci Fi `DesktopTheme` relationships to dialog client text, the existing Shutdown panel surface, button fills, button borders, and button text. Button id 1 remains the existing primary action; all other buttons use the existing secondary relationship.
+* Hover and pressed states blend from the existing `accent`, `mutedAccent`, `windowBackground`, `windowBorder`, `taskbarBackground`, `taskbarBorder`, and `titleBarText` values. No new arbitrary palette was introduced.
+* Classic remains the default and follows the prior widget, panel, and client-text fallback colors. Dialog dimensions, positions, button IDs, hit regions, focus, keyboard handling, modality, close behavior, shutdown behavior, callbacks, and document lifecycle behavior were not changed.
+* No generic button-system redesign was added. The shared compositor widget path is gated to the marked core dialog surfaces only.
+
+### Phase 6A Validation State
+
+* `third_party\stb\stb_image.h` remained available as ignored local vendor state.
+* `.\build.bat` succeeded from the exact `v0.3_SCI_FI_THEME` checkout. Existing compiler warnings remained; there were no new compile or link failures.
+* `.\scripts\smoke-theme-system.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-live-directory-desktop-status.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-hosted-display-runtime.ps1` passed in no-gates, synthetic-only, and dual-window modes. Its cleanup removed the tracked `display-options.cfg`; the file was restored byte-for-byte to the `HEAD` baseline, and `desktop.json`/`desktop.state` were verified byte-for-byte against `HEAD`. No runtime state is part of the Phase 6A change.
+* The exact built executable created Message Box and Shutdown windows with the new core-dialog marker while preserving the existing 320x140 and 360x160 geometry. A safe shutdown-dialog launch was performed; no destructive action was selected.
+* Full screenshot-based dialog visual and mouse/keyboard interaction proof was limited in this environment because the hidden hosted compositor windows were not exposed as targetable Computer Use windows. No unsupported visual pass is claimed. The implementation is therefore complete with proof partially limited; a follow-up hosted capture pass should exercise Message Box, Shutdown, and Save Changes in both themes and record hover, focus, dismissal, and result semantics.
+
+### Phase 6A Resulting State and Remaining Gaps
+
+* Message Box, Shutdown, and Save Changes now share the surrounding Sci Fi shell's client text, panel, border, and button relationships when Sci Fi is active.
+* Open and Save As file dialogs remain outside Phase 6A.
+* Generic controls outside these three marked dialogs remain unchanged; generic text boxes, lists, checkboxes, radio buttons, combo boxes, tabs, and scrollbars remain future work.
+* The next evidence-supported phase is a dedicated hosted dialog capture/interaction pass for these three surfaces, followed separately by Open/Save file-picker styling. No Phase 6B implementation was started.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.

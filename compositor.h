@@ -78,6 +78,7 @@ namespace gxos { namespace gui {
         int snapState{0}; 
         bool tombstoned{false}; 
         bool modal{false};
+        bool coreDialogSurface{false};
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         HBITMAP taskbarIcon{nullptr}; 
 #endif

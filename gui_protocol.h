@@ -70,6 +70,10 @@ namespace gxos {
         constexpr uint32_t kPixelFormatXrgb8888 = 1u;
         constexpr uint32_t kWindowCreateFlagResizable = 1u << 0;
         constexpr uint32_t kWindowCreateFlagCentered = 1u << 1;
+        // Visual marker for the small hosted system dialogs that share the
+        // existing modal surface treatment. It has no geometry or input
+        // semantics and is separate from the generic widget theme path.
+        constexpr uint32_t kWindowCreateFlagCoreDialogSurface = 1u << 2;
         inline std::vector<uint8_t> packString(const std::string& s) { return std::vector<uint8_t>(s.begin( ), s.end( )); }
         inline std::string unpackString(const std::vector<uint8_t>& d) { return std::string(d.begin( ), d.end( )); }
 
