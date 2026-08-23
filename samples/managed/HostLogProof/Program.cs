@@ -51,6 +51,19 @@ public static unsafe class Program
         nint targetType,
         nint weakHandleSlot);
 
+#if HOSTLOGPROOF_C011EC37
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC37ManagedCheckpoint")]
+    private static extern int GuideXosNativeAotC011EC37ManagedCheckpoint(
+        uint checkpoint,
+        nint weakHandleSlot);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC37ManagedCheckpoint()
+    {
+        return GuideXosNativeAotC011EC37ManagedCheckpoint(1u, 0);
+    }
+#endif
+
     private readonly struct ShortWeakLifetimeSetup
     {
         internal readonly nint Target;
@@ -574,6 +587,18 @@ public static unsafe class Program
         // status and ordinary allocation sentinels.
         for (uint iteration = 0u; iteration < hardLimit; iteration++)
         {
+#if HOSTLOGPROOF_C011EC37
+            int completedCollections =
+                GuideXosNativeAotC011EC33GetCompletedCollections();
+            if (completedCollections >= 2)
+            {
+                // This scalar increment is the deterministic managed
+                // continuation checkpoint. It does not allocate or retain a
+                // new object before the native observer records success.
+                int checkpointStatus = RunC011EC37ManagedCheckpoint();
+                return checkpointStatus == 0 ? 0 : GxAbi.ErrorInvalidArgument;
+            }
+#endif
             bool sentinelsValid = ValidateSample(sentinel0, 0u) &&
                 ValidateSample(sentinel1, 1u) &&
                 ValidateSample(sentinel2, 2u) &&

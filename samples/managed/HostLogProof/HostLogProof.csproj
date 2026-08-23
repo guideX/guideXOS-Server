@@ -57,6 +57,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'LifetimeTransitionSecondCollection'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstNonNullRoot'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_FIRST_NON_NULL_ROOT</DefineConstants>
   </PropertyGroup>

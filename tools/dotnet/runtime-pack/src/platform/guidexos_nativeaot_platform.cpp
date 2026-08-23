@@ -6245,7 +6245,8 @@ guideXosNativeAotC011EC23TryNativeUnwind(
         return 0u;
     }
 
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     /* Native unwind starts before the production GcScanRoots callback.  Use
      * the already-crossed frame count to identify the active collection at
      * this earlier boundary; the later root callback retains these fields. */
@@ -6260,7 +6261,8 @@ guideXosNativeAotC011EC23TryNativeUnwind(
          frameIndex < kC011EC23MaximumNativeFrames; ++frameIndex) {
 #if defined(GUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION)
         ++d.c011ec26TerminalLookupAttemptCount;
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
         if (d.c011ec33ActiveCollection == 1u ||
             d.c011ec33ActiveCollection == 2u) {
             if (frameIndex > 2u) {
@@ -6313,7 +6315,8 @@ guideXosNativeAotC011EC23TryNativeUnwind(
                 return 2u;
             }
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
             const bool c36PerCollectionUnwind =
                 (d.c011ec33ActiveCollection == 1u ||
                  d.c011ec33ActiveCollection == 2u) &&
@@ -6566,7 +6569,8 @@ guideXosNativeAotC011EC23TryNativeUnwind(
         display->IP = outputRip;
         c011ec23StoreRegDisplayLocations(display, contextPointers);
         ++d.c011ec23NativeFramesCrossed;
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
         if (d.c011ec33ActiveCollection == 1u ||
             d.c011ec33ActiveCollection == 2u) {
             ++d.c011ec33Collections[d.c011ec33ActiveCollection - 1u]
@@ -9583,6 +9587,11 @@ extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC33GetComplet
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC33LifetimeBoundaryReturned__Ansi;
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC33LifetimeBoundaryReturned(
     uintptr_t target, uintptr_t targetType, uintptr_t weakHandleSlot);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC37ManagedCheckpoint__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC37ManagedCheckpoint(
+    uint32_t checkpoint, uintptr_t weakHandleSlot);
+#endif
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK)
@@ -10232,8 +10241,13 @@ static void guideXosNativeAotC011EC33EmitLive() {
     const guidexos_nativeaot_c011ec33_collection_record& r =
         d.c011ec33Collections[0];
 #if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] LIVE marker=C011EC37-C1-LIVE");
+#else
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] LIVE marker=C011EC36-C1-LIVE");
+#endif
 #else
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] LIVE marker=C011EC33-LIVE");
@@ -10245,6 +10259,7 @@ static void guideXosNativeAotC011EC33EmitLive() {
     C33L32("collection", 1u);
     C33L64("target", r.targetAtRoot);
     C33L64("weakSlot", r.weakHandleSlot);
+    C33L64("weakValue", r.weakSlotAfter);
     C33L64("slotBefore", r.weakSlotBefore);
     C33L64("slotAfter", r.weakSlotAfter);
     C33L32("targetRootMatches", r.targetRootMatches);
@@ -10281,7 +10296,10 @@ static void guideXosNativeAotC011EC33EmitPreflight() {
         g_guideXosAllocationDiagnostics;
     const guidexos_nativeaot_c011ec33_collection_record& r =
         d.c011ec33Collections[1];
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC37-PREFLIGHT");
+#elif defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC36-PREFLIGHT");
 #else
@@ -10473,7 +10491,10 @@ static void guideXosNativeAotC011EC33EmitBlocked(uint32_t reason) {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     d.c011ec33SafeStopReason = reason;
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] BLOCKED outcome=D marker=C011EC37-BLOCKED");
+#elif defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] BLOCKED outcome=D marker=C011EC36-BLOCKED");
 #else
@@ -10522,6 +10543,10 @@ static void guideXosNativeAotC011EC33EmitBlocked(uint32_t reason) {
 extern "C" void __cdecl
 guideXosNativeAotC011EC33PostWeakPhase(uint32_t phase);
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+static void guideXosNativeAotC011EC37RecordPhase(uint32_t phase);
+#endif
+
 extern "C" __declspec(dllexport) int __cdecl
 guideXosNativeAotC011EC33WeakHandleAllocated(
     uintptr_t target, uintptr_t targetType, uintptr_t weakHandleSlot,
@@ -10559,8 +10584,25 @@ guideXosNativeAotC011EC33GetCompletedCollections() {
     if (g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount != 0u)
         guideXosNativeAotC011EC35ManagedResumeCheck();
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    // C36's authentic workload may complete preliminary gen-0 collections
+    // before the condemned-gen-1 collection reaches the same weak slot.
+    // Keep the managed proof loop in its allocation phase until the C37
+    // post-clear preflight has actually been emitted.
+    const uint32_t restartReturns =
+        g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount;
+    const bool c2Ready =
+        g_guideXosAllocationDiagnostics.c011ec37PreflightEmitted != 0u &&
+        g_guideXosAllocationDiagnostics.c011ec33Collections[1].collectionCompleted != 0u &&
+        g_guideXosAllocationDiagnostics.c011ec33Collections[1].eeRestartReturns != 0u;
+    const int result =
+        !c2Ready
+            ? (restartReturns == 0u ? 0 : 1)
+            : static_cast<int>(restartReturns);
+#else
     const int result = static_cast<int>(
         g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount);
+#endif
     return result;
 }
 
@@ -10575,7 +10617,19 @@ guideXosNativeAotC011EC33LifetimeBoundaryReturned(
         d.c011ec33WeakHandleAllocationCount == 1u &&
         target != 0u && targetType == d.c011ec33TargetType &&
         weakHandleSlot == d.c011ec33WeakHandleSlot && observed != 0u;
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    const bool c35RelocatedIdentity =
+        d.c011ec35RelocatedHandle.managedResume != 0u &&
+        d.c011ec35RelocatedHandle.handleMarkerEmitted != 0u &&
+        d.c011ec35RelocatedHandle.exactSlot == weakHandleSlot &&
+        d.c011ec35RelocatedHandle.exactSlotAfter == observed &&
+        observed != d.c011ec33InitialTarget;
+    if (!valid || !c35RelocatedIdentity) {
+        guideXosNativeAotC011EC33EmitBlocked(0xC0330001u);
+        for (;;) {
+        }
+    }
+#elif defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     const bool c35RelocatedIdentity =
         d.c011ec35RelocatedHandle.managedResume != 0u &&
         d.c011ec35RelocatedHandle.handleMarkerEmitted != 0u &&
@@ -10662,7 +10716,8 @@ guideXosNativeAotC011EC33GcScanRootsEntered(
     r.thirdUnwindAttempts = thirdUnwindAttempts;
     r.managedFrames = managedFrames;
     r.rootOwningFrameMatches = rootOwningFrameMatches;
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     if (d.c011ec33ActiveCollection == 2u) {
         suspendEeSerialPutString(
             "[nativeaot-gc-short-weak-lifetime] C2-GC-ROOTS");
@@ -10736,6 +10791,12 @@ guideXosNativeAotC011EC33GcRootReported(
     ++r.rootReports;
     const uintptr_t value = slot == 0u
         ? 0u : *reinterpret_cast<const uintptr_t*>(slot);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    if (d.c011ec33ActiveCollection == 2u &&
+        value == d.c011ec33TargetAfterCollection1) {
+        ++d.c011ec37DeadTargetRerootCount;
+    }
+#endif
     if (value != d.c011ec32Target) return;
     /* The same physical managed root is reported again during the
      * relocation-side root pass. Count logical root slots, not callback
@@ -10774,6 +10835,9 @@ guideXosNativeAotC011EC33PostWeakPhase(uint32_t phase) {
     r.postWeakPhaseAddress =
         reinterpret_cast<uintptr_t>(_ReturnAddress());
     d.c011ec33LastPostWeakPhaseAddress = r.postWeakPhaseAddress;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    guideXosNativeAotC011EC37RecordPhase(phase);
+#endif
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] POST-WEAK phase=");
     suspendEeSerialPutHex32(phase);
@@ -10816,7 +10880,8 @@ guideXosNativeAotC011EC33LivenessCheckEntered(
     r.blocksVisited = d.c011ec30BlockVisitCount;
     r.slotsInspected = d.c011ec30HandleSlotInspectCount;
     r.candidateHandles = d.c011ec30CandidateHandleCount;
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     if (d.c011ec33ActiveCollection >= 1u) {
         suspendEeSerialPutString(d.c011ec33ActiveCollection == 1u
             ? "[nativeaot-gc-short-weak-lifetime] C1-CALLBACK"
@@ -10855,7 +10920,9 @@ guideXosNativeAotC011EC33LivenessCheckEntered(
 #endif
         true) {
         d.c011ec33PreflightProven = 1u;
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
         guideXosNativeAotC011EC33EmitPreflight();
+#endif
     }
 }
 
@@ -10915,7 +10982,7 @@ guideXosNativeAotC011EC33RestartEEReturned(int /*finishedGc*/) {
     guidexos_nativeaot_c011ec33_collection_record& r =
         guideXosNativeAotC011EC33CurrentCollection();
     ++r.eeRestartReturns;
-    r.managedResumeCount = d.c011ec33ManagedResumeCount;
+    ++r.managedResumeCount;
     if (d.c011ec33RestartReturnCount == 1u) {
         d.c011ec33Collection1Completed = 1u;
     }
@@ -11047,7 +11114,8 @@ guideXosNativeAotC011EC30HandleScanEntered(
     d.c011ec30HandleScanFlags = 0u;
     d.c011ec30SafeStopReason = 0u;
     c011ec30CaptureContract();
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     if (d.c011ec33ActiveCollection >= 1u) {
         suspendEeSerialPutString(d.c011ec33ActiveCollection == 1u
             ? "[nativeaot-gc-short-weak-lifetime] C1-HANDLE-SCAN"
@@ -11856,6 +11924,14 @@ guideXosNativeAotC011EC35HandleSlotObserved(
         g_guideXosAllocationDiagnostics;
     guidexos_nativeaot_c011ec35_relocated_handle_record& r =
         guideXosNativeAotC011EC35Record();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    if (d.c011ec33ActiveCollection == 2u &&
+        d.c011ec37PreflightEmitted != 0u &&
+        slot == d.c011ec33WeakHandleSlot &&
+        value == d.c011ec33TargetAfterCollection1) {
+        ++d.c011ec37StaleWeakPointerCount;
+    }
+#endif
     if (r.exactSlot == 0u) {
         if (handleType == 0u && slot == d.c011ec33WeakHandleSlot &&
             value == d.c011ec33InitialTarget && table != 0u &&
@@ -12021,6 +12097,18 @@ guideXosNativeAotC011EC35CollectionPhase(uint32_t phase) {
     if (r.firstPhaseAddress == 0u)
         r.firstPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
     r.nextPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    if (g_guideXosAllocationDiagnostics.c011ec33ActiveCollection == 2u) {
+        switch (phase) {
+        case 1u: guideXosNativeAotC011EC33PostWeakPhase(19u); break;
+        case 3u: guideXosNativeAotC011EC33PostWeakPhase(16u); break;
+        case 4u: guideXosNativeAotC011EC33PostWeakPhase(21u); break;
+        case 5u: guideXosNativeAotC011EC33PostWeakPhase(22u); break;
+        case 6u: guideXosNativeAotC011EC33PostWeakPhase(23u); break;
+        default: break;
+        }
+    }
+#endif
 }
 
 extern "C" void __cdecl
@@ -12050,11 +12138,19 @@ guideXosNativeAotC011EC35ManagedResumeCheck() {
         r.phaseGenerationBoundsReturned != 0u && r.gcDone != 0u &&
         r.restartEntries != 0u && r.restartReturns != 0u &&
         r.eeResumedAfterRestart != 0u && d.c011ec33Collection1Completed != 0u;
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     if (!valid) {
         r.safeStopReason = 0xC0360001u;
         suspendEeSerialPutString(
-            "[nativeaot-gc-short-weak-lifetime] BLOCKED marker=C011EC36-RESUME-BLOCKED");
+            "[nativeaot-gc-short-weak-lifetime] BLOCKED marker=");
+        suspendEeSerialPutString(
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+            "C011EC37-C1-RESUME-BLOCKED"
+#else
+            "C011EC36-RESUME-BLOCKED"
+#endif
+        );
         suspendEeSerialPutString(" weakSlot=");
         suspendEeSerialPutHex64(r.exactSlot);
         suspendEeSerialPutString(" weakValue=");
@@ -12069,7 +12165,14 @@ guideXosNativeAotC011EC35ManagedResumeCheck() {
     }
     r.safeStopReason = 0u;
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] RESUMED marker=C011EC36-RESUMED");
+        "[nativeaot-gc-short-weak-lifetime] RESUMED marker=");
+    suspendEeSerialPutString(
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+        "C011EC37-C1-RESUMED"
+#else
+        "C011EC36-RESUMED"
+#endif
+    );
     suspendEeSerialPutString(" method=CreateAndRunLiveCollection1 weakSlot=");
     suspendEeSerialPutHex64(r.exactSlot);
     suspendEeSerialPutString(" weakValue=");
@@ -12182,6 +12285,281 @@ guideXosNativeAotC011EC35ManagedResumeCheck() {
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+static const char* guideXosNativeAotC011EC37PhaseName(uint32_t phase) {
+    switch (phase) {
+    case 1u: return "short-weak-return";
+    case 2u: return "finalization-entry";
+    case 3u: return "finalization-return";
+    case 4u: return "long-weak-entry";
+    case 5u: return "long-weak-return";
+    case 6u: return "sync-block-weak-entry";
+    case 7u: return "sync-block-weak-return";
+    case 8u: return "plan-entry";
+    case 9u: return "plan-return";
+    case 10u: return "relocate-entry";
+    case 11u: return "relocate-return";
+    case 12u: return "compact-or-sweep-entry";
+    case 13u: return "root-relocation-entry";
+    case 14u: return "root-relocation-return";
+    case 15u: return "handle-relocation-entry";
+    case 16u: return "compact-or-sweep-return";
+    case 19u: return "handle-relocation-return";
+    case 21u: return "generation-bounds-complete";
+    case 22u: return "card-brick-cleanup-complete";
+    case 23u: return "gc-done";
+    default: return "unknown";
+    }
+}
+
+static bool guideXosNativeAotC011EC37PhaseIsEntry(uint32_t phase) {
+    return phase == 2u || phase == 4u || phase == 6u || phase == 8u ||
+        phase == 10u || phase == 12u || phase == 13u || phase == 15u;
+}
+
+static uint32_t guideXosNativeAotC011EC37PhaseMutation(
+    uint32_t phase,
+    const guidexos_nativeaot_c011ec33_collection_record& record) {
+    if (phase == 1u) return record.clearedCount != 0u ? 1u : 0u;
+    if (phase == 10u || phase == 11u || phase == 12u || phase == 13u ||
+        phase == 14u || phase == 15u || phase == 16u || phase == 19u) {
+        return record.compacting != 0u ? 1u : 0u;
+    }
+    if (phase == 21u || phase == 22u || phase == 23u) return 1u;
+    return 0u;
+}
+
+static void guideXosNativeAotC011EC37RecordPhase(uint32_t phase) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (d.c011ec33ActiveCollection != 2u || phase >= 24u) return;
+    guidexos_nativeaot_c011ec33_collection_record& record =
+        guideXosNativeAotC011EC33CurrentCollection();
+    const bool entry = guideXosNativeAotC011EC37PhaseIsEntry(phase);
+    const uint32_t mutation = guideXosNativeAotC011EC37PhaseMutation(
+        phase, record);
+    ++record.c011ec37PhaseEventCount;
+    // Phase numbers are stable IDs, not a chronology ordinal. The serial
+    // events preserve actual order; duplicate mandatory transitions are
+    // recorded as order errors.
+    if (entry) {
+        if (record.c011ec37PhaseEntryCounts[phase] != 0u &&
+            (phase == 8u || phase == 10u || phase == 12u || phase == 13u ||
+             phase == 15u)) {
+            ++record.c011ec37PhaseOrderErrors;
+        }
+        ++record.c011ec37PhaseEntryCounts[phase];
+        record.c011ec37PhaseEntryMask |= 1u << phase;
+    } else {
+        if (record.c011ec37PhaseReturnCounts[phase] != 0u &&
+            (phase == 1u || phase == 9u || phase == 11u || phase == 14u ||
+             phase == 16u || phase == 19u || phase == 21u || phase == 22u ||
+             phase == 23u)) {
+            ++record.c011ec37PhaseOrderErrors;
+        }
+        ++record.c011ec37PhaseReturnCounts[phase];
+        record.c011ec37PhaseReturnMask |= 1u << phase;
+    }
+    record.c011ec37PhaseLast = phase;
+    if (mutation != 0u) record.c011ec37PhaseMutationMask |= 1u << phase;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C37-PHASE");
+    suspendEeSerialPutString(" collection=00000002 phase=");
+    suspendEeSerialPutHex32(phase);
+    suspendEeSerialPutString(" name=");
+    suspendEeSerialPutString(guideXosNativeAotC011EC37PhaseName(phase));
+    suspendEeSerialPutString(" function=");
+    suspendEeSerialPutString(guideXosNativeAotC011EC37PhaseName(phase));
+    suspendEeSerialPutString(" event=");
+    suspendEeSerialPutString(entry ? "entry" : "return");
+    suspendEeSerialPutString(" mutation=");
+    suspendEeSerialPutHex32(mutation);
+    suspendEeSerialPutString(" complete=");
+    suspendEeSerialPutHex32(entry ? 0u : 1u);
+    suspendEeSerialPutString(" weakValue=");
+    suspendEeSerialPutHex64(d.c011ec33WeakHandleSlot == 0u ? 0u :
+        *reinterpret_cast<const uintptr_t*>(d.c011ec33WeakHandleSlot));
+    suspendEeSerialPutString(" address=");
+    suspendEeSerialPutHex64(record.postWeakPhaseAddress);
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC37ResetPhaseChronology(
+    guidexos_nativeaot_c011ec33_collection_record& record) {
+    record.c011ec37PhaseEventCount = 0u;
+    record.c011ec37PhaseOrderErrors = 0u;
+    record.c011ec37PhaseLast = 0u;
+    record.c011ec37PhaseEntryMask = 0u;
+    record.c011ec37PhaseReturnMask = 0u;
+    record.c011ec37PhaseMutationMask = 0u;
+    for (uint32_t i = 0u; i < 24u; ++i) {
+        record.c011ec37PhaseEntryCounts[i] = 0u;
+        record.c011ec37PhaseReturnCounts[i] = 0u;
+    }
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC37ManagedCheckpoint(
+    uint32_t checkpoint, uintptr_t weakHandleSlot) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    const guidexos_nativeaot_c011ec33_collection_record& c1 =
+        d.c011ec33Collections[0];
+    const guidexos_nativeaot_c011ec33_collection_record& c2 =
+        d.c011ec33Collections[1];
+    const uintptr_t effectiveWeakHandleSlot = weakHandleSlot == 0u
+        ? d.c011ec33WeakHandleSlot : weakHandleSlot;
+    const uintptr_t weakValue = effectiveWeakHandleSlot == 0u ? 0u :
+        *reinterpret_cast<const uintptr_t*>(effectiveWeakHandleSlot);
+    d.c011ec37ManagedContinuationControlPc =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec37ManagedCheckpoint = checkpoint;
+    const bool compacting = c2.compacting != 0u;
+    const bool phaseChronology =
+        c2.c011ec37PhaseEventCount > 1u &&
+        c2.c011ec37PhaseOrderErrors == 0u &&
+        c2.c011ec37PhaseReturnCounts[1u] == 1u &&
+        c2.c011ec37PhaseEntryCounts[8u] == 1u &&
+        c2.c011ec37PhaseReturnCounts[9u] == 1u &&
+        c2.c011ec37PhaseReturnCounts[21u] == 1u &&
+        c2.c011ec37PhaseReturnCounts[22u] == 1u &&
+        c2.c011ec37PhaseReturnCounts[23u] == 1u &&
+        (!compacting ||
+            (c2.c011ec37PhaseEntryCounts[10u] == 1u &&
+             c2.c011ec37PhaseReturnCounts[11u] == 1u &&
+             c2.c011ec37PhaseEntryCounts[12u] == 1u &&
+             c2.c011ec37PhaseReturnCounts[16u] == 1u &&
+             c2.c011ec37PhaseEntryCounts[13u] == 1u &&
+             c2.c011ec37PhaseReturnCounts[14u] == 1u &&
+             c2.c011ec37PhaseEntryCounts[15u] == 1u &&
+             c2.c011ec37PhaseReturnCounts[19u] == 1u));
+    const bool valid = checkpoint == 1u &&
+        d.c011ec37PreflightEmitted != 0u &&
+        c1.collectionCompleted != 0u && c1.eeRestartReturns != 0u &&
+        c1.managedResumeCount != 0u && c2.collectionCompleted != 0u &&
+        c2.eeRestartEntries != 0u && c2.eeRestartReturns != 0u &&
+        d.c011ec33RestartEntryCount >= 2u &&
+        d.c011ec33RestartReturnCount >= 2u &&
+        d.c011ec33ManagedResumeCount >= 2u && weakValue == 0u &&
+        d.c011ec37DeadTargetRerootCount == 0u &&
+        d.c011ec37StaleWeakPointerCount == 0u && phaseChronology &&
+        d.c011ec29SensitiveAllocationCount == 0u &&
+        d.c011ec29ManagedEntryAttempts == 0u;
+    if (!valid) {
+        d.c011ec37SafeStopReason = 0xC0370001u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] BLOCKED marker=C011EC37-BLOCKED");
+        suspendEeSerialPutString(" weakValue=");
+        suspendEeSerialPutHex64(weakValue);
+        suspendEeSerialPutString(" phaseEvents=");
+        suspendEeSerialPutHex32(c2.c011ec37PhaseEventCount);
+        suspendEeSerialPutString(" phaseOrderErrors=");
+        suspendEeSerialPutHex32(c2.c011ec37PhaseOrderErrors);
+        suspendEeSerialPutString(" c1Completed=");
+        suspendEeSerialPutHex32(c1.collectionCompleted);
+        suspendEeSerialPutString(" c1RestartReturns=");
+        suspendEeSerialPutHex32(c1.eeRestartReturns);
+        suspendEeSerialPutString(" c1ManagedResume=");
+        suspendEeSerialPutHex32(c1.managedResumeCount);
+        suspendEeSerialPutString(" c2Completed=");
+        suspendEeSerialPutHex32(c2.collectionCompleted);
+        suspendEeSerialPutString(" c2RestartEntries=");
+        suspendEeSerialPutHex32(c2.eeRestartEntries);
+        suspendEeSerialPutString(" c2RestartReturns=");
+        suspendEeSerialPutHex32(c2.eeRestartReturns);
+        suspendEeSerialPutString(" c2ManagedResume=");
+        suspendEeSerialPutHex32(c2.managedResumeCount);
+        suspendEeSerialPutString(" restartEntries=");
+        suspendEeSerialPutHex32(d.c011ec33RestartEntryCount);
+        suspendEeSerialPutString(" restartReturns=");
+        suspendEeSerialPutHex32(d.c011ec33RestartReturnCount);
+        suspendEeSerialPutString(" resumeTotal=");
+        suspendEeSerialPutHex32(d.c011ec33ManagedResumeCount);
+        suspendEeSerialPutString(" reroots=");
+        suspendEeSerialPutHex32(d.c011ec37DeadTargetRerootCount);
+        suspendEeSerialPutString(" stale=");
+        suspendEeSerialPutHex32(d.c011ec37StaleWeakPointerCount);
+        suspendEeSerialPutString(" sensitive=");
+        suspendEeSerialPutHex32(d.c011ec29SensitiveAllocationCount);
+        suspendEeSerialPutString(" managedReentry=");
+        suspendEeSerialPutHex32(d.c011ec29ManagedEntryAttempts);
+        suspendEeSerialPutString(" safeStopReason=");
+        suspendEeSerialPutHex32(d.c011ec37SafeStopReason);
+        suspendEeSerialPutString("\n");
+        return -1;
+    }
+    d.c011ec37SafeStopReason = 0u;
+    d.c011ec37ManagedMarkerEmitted = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] MANAGED marker=C011EC37-MANAGED");
+    suspendEeSerialPutString(" method=RunC011EC37ManagedCheckpoint");
+    suspendEeSerialPutString(" controlPC=");
+    suspendEeSerialPutHex64(d.c011ec37ManagedContinuationControlPc);
+    suspendEeSerialPutString(" checkpoint=");
+    suspendEeSerialPutHex32(checkpoint);
+    suspendEeSerialPutString(" weakSlot=");
+    suspendEeSerialPutHex64(effectiveWeakHandleSlot);
+    suspendEeSerialPutString(" weakValue=");
+    suspendEeSerialPutHex64(weakValue);
+    suspendEeSerialPutString("\n");
+    d.c011ec37CompletionMarkerEmitted = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC37 outcome=C");
+#define C37C32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C37C64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C37C32("successLevel", 3u);
+    C37C32("collection1Completed", c1.collectionCompleted);
+    C37C32("collection1RestartReturns", c1.eeRestartReturns);
+    C37C32("collection1ManagedResume", c1.managedResumeCount);
+    C37C32("collection2Completed", c2.collectionCompleted);
+    C37C32("collection2GcDone", c2.collectionCompleted);
+    C37C32("collection2RestartEntries", c2.eeRestartEntries);
+    C37C32("collection2RestartReturns", c2.eeRestartReturns);
+    C37C32("collection2ManagedResume", c2.managedResumeCount);
+    C37C32("collection2CondemnedGeneration", c2.condemnedGeneration);
+    C37C32("collection2CollectionReason", c2.collectionReason);
+    C37C32("collection2Compacting", c2.compacting);
+    C37C32("collection2Relocating", c2.relocating);
+    C37C32("collection2PhaseEvents", c2.c011ec37PhaseEventCount);
+    C37C32("collection2PhaseOrderErrors", c2.c011ec37PhaseOrderErrors);
+    C37C32("collection2PhaseEntryMask", c2.c011ec37PhaseEntryMask);
+    C37C32("collection2PhaseReturnMask", c2.c011ec37PhaseReturnMask);
+    C37C32("collection2PhaseMutationMask", c2.c011ec37PhaseMutationMask);
+    C37C32("collection2TargetRoots", c2.targetRootMatches);
+    C37C32("collection2TargetPromote", c2.targetPromoteCount);
+    C37C32("collection2TargetMarked", c2.targetMarked);
+    C37C32("collection2Dead", c2.deadDecisions);
+    C37C32("collection2Cleared", c2.clearedCount);
+    C37C32("collection2IsPromoted", c2.liveDecisions != 0u ? 1u : 0u);
+    C37C64("sameWeakSlot", d.c011ec33WeakHandleSlot);
+    C37C64("weakValueBeforeC2Scan", c2.weakSlotBefore);
+    C37C64("weakValueAfterClear", weakValue);
+    C37C32("staleWeakPointerCount", d.c011ec37StaleWeakPointerCount);
+    C37C32("deadTargetRerootCount", d.c011ec37DeadTargetRerootCount);
+    C37C32("preflight", d.c011ec37PreflightEmitted);
+    C37C32("restartEntryTotal", d.c011ec33RestartEntryCount);
+    C37C32("restartReturnTotal", d.c011ec33RestartReturnCount);
+    C37C32("resumeTotal", d.c011ec33ManagedResumeCount);
+    C37C32("eeSuspendedBeforeRestart", c2.eeSuspended);
+    C37C32("threadStoreLockHeld", c2.threadStoreLockHeld);
+    C37C32("threadStoreLockRecursion", d.threadStoreLockRecursionDepth);
+    C37C32("cooperative", d.rootThreadRecords[0].cooperative);
+    C37C32("preemptive", d.rootThreadRecords[0].preemptive);
+    C37C32("eeResumedAfter", c2.eeRestartReturns != 0u ? 1u : 0u);
+    C37C32("sensitiveAllocations", d.c011ec29SensitiveAllocationCount);
+    C37C32("managedReentryWhileSuspended", d.c011ec29ManagedEntryAttempts);
+    C37C64("managedContinuationControlPC", d.c011ec37ManagedContinuationControlPc);
+    C37C64("weakSlotAfterManagedResume", weakValue);
+    C37C32("safeStopReason", d.c011ec37SafeStopReason);
+#undef C37C32
+#undef C37C64
+    suspendEeSerialPutString("\n");
+    return 0;
+}
+#endif
+
 extern "C" void __cdecl
 guideXosNativeAotC011EC30LivenessDecisionObserved(uint32_t promoted) {
     guidexos_nativeaot_allocation_diagnostics& d =
@@ -12263,14 +12641,31 @@ guideXosNativeAotC011EC30LivenessDecisionCompleted(
 #endif
             true;
         if (deadValid) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+            // The same active C2 record can include preliminary gen-0
+            // collections. Keep only the chronology beginning with the
+            // short-weak return for the collection that cleared this slot.
+            guideXosNativeAotC011EC37ResetPhaseChronology(r);
+#endif
             d.c011ec33MarkerEmitted = 1u;
             d.c011ec33SafeStopReason = 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+            d.c011ec37PreflightEmitted = 1u;
+            guideXosNativeAotC011EC33EmitPreflight();
+            return;
+#else
             guideXosNativeAotC011EC33EmitCompletion();
+#endif
         } else {
             guideXosNativeAotC011EC33EmitBlocked(0xC0330002u);
         }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
         for (;;) {
         }
+#else
+        for (;;) {
+        }
+#endif
     }
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK)
@@ -12518,7 +12913,8 @@ guideXosNativeAotC011EC30HandleScanCompleted(
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
 #if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     if (d.c011ec33ActiveCollection == 1u ||
         d.c011ec33ActiveCollection == 2u) {
 #else
@@ -15589,7 +15985,8 @@ guideXosManagedAllocationValidateObject(
         ++g_guideXosAllocationDiagnostics.contextGeometryFailures;
         failure = 1u;
     }
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     // The first post-resume validation is the natural managed boundary:
     // return from CreateAndRunLiveCollection1 before starting Collection 2.
     // This is the selected FIRST_REFILL/SEGMENT_BOUNDARY implementation used
@@ -15809,7 +16206,8 @@ extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationValidateObj
         g_guideXosAllocationDiagnostics.sampledObjectFailures += 1u;
         return -1;
     }
-#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION) || \
+    defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
     // The validation call made for the allocation that resumes after
     // Collection 1 is the last helper-side managed boundary.  Return a
     // scalar completion code so the helper can return without another probe
@@ -16032,6 +16430,13 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC33LifetimeBoundaryReturned__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC33LifetimeBoundaryReturnedFn>(
             guideXosNativeAotC011EC33LifetimeBoundaryReturned));
+#if defined(GUIDEXOS_NATIVEAOT_C011EC37_SECOND_COLLECTION)
+    using GuideXosNativeAotC011EC37ManagedCheckpointFn = int (__cdecl*)(
+        uint32_t, uintptr_t);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC37ManagedCheckpoint__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC37ManagedCheckpointFn>(
+            guideXosNativeAotC011EC37ManagedCheckpoint));
+#endif
 #endif
 #if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     using GuideXosManagedArrayHostLogFn = int (__cdecl*)(void*, void*);

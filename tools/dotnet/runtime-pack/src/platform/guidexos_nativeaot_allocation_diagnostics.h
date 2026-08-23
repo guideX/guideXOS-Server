@@ -197,6 +197,18 @@ typedef struct guidexos_nativeaot_c011ec33_collection_record {
     uint32_t postWeakPhase;
     uint32_t postWeakPhaseCount;
 
+    /* C011EC37 bounded post-clear phase chronology.  The arrays are fixed
+     * scalar storage so the suspended collector path never allocates or
+     * constructs a diagnostic container. */
+    uint32_t c011ec37PhaseEventCount;
+    uint32_t c011ec37PhaseOrderErrors;
+    uint32_t c011ec37PhaseLast;
+    uint32_t c011ec37PhaseEntryMask;
+    uint32_t c011ec37PhaseReturnMask;
+    uint32_t c011ec37PhaseMutationMask;
+    uint32_t c011ec37PhaseEntryCounts[24];
+    uint32_t c011ec37PhaseReturnCounts[24];
+
     uintptr_t targetAtRoot;
     uintptr_t weakHandleSlot;
     uintptr_t weakSlotBefore;
@@ -2206,6 +2218,16 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t c011ec33SafeStopReason;
     uint32_t c011ec33LastPostWeakPhase;
     uint32_t c011ec33PostWeakPhaseCount;
+
+    /* C011EC37 repeated-collection completion evidence. */
+    uint32_t c011ec37PreflightEmitted;
+    uint32_t c011ec37ManagedMarkerEmitted;
+    uint32_t c011ec37CompletionMarkerEmitted;
+    uint32_t c011ec37ManagedCheckpoint;
+    uint32_t c011ec37DeadTargetRerootCount;
+    uint32_t c011ec37StaleWeakPointerCount;
+    uint32_t c011ec37SafeStopReason;
+    uintptr_t c011ec37ManagedContinuationControlPc;
 
     uintptr_t c011ec33InitialTarget;
     uintptr_t c011ec33TargetType;
