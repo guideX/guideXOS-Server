@@ -285,6 +285,101 @@ typedef struct guidexos_nativeaot_c011ec34_relocation_record {
     uintptr_t nextCallerAfterReturn;
 } guidexos_nativeaot_c011ec34_relocation_record;
 
+/* C011EC35 authentic handle-relocation evidence.  This record is append-only
+ * and contains only scalar observations from the real UpdatePointer scan. */
+typedef struct guidexos_nativeaot_c011ec35_relocated_handle_record {
+    uint32_t handleScanEntered;
+    uint32_t handleScanReturned;
+    uint32_t slotInspections;
+    uint32_t callbackEntries;
+    uint32_t callbackReturns;
+    uint32_t rewrittenHandles;
+    uint32_t unchangedHandles;
+    uint32_t shortWeakInspected;
+    uint32_t shortWeakCallbacks;
+    uint32_t shortWeakRewritten;
+    uint32_t shortWeakUnchanged;
+    uint32_t exactSlotObserved;
+    uint32_t exactSlotCallbackEntered;
+    uint32_t exactSlotCallbackReturned;
+    uint32_t exactCallbackActive;
+    uint32_t exactSlotRewritten;
+    uint32_t exactSlotStale;
+    uint32_t scanMode;
+    uint32_t scanFlags;
+    uint32_t condemnedGeneration;
+    uint32_t maximumGeneration;
+    uint32_t typeCount;
+    uint32_t typeMask;
+    uint32_t callbackInvariantFailures;
+    uint32_t relocationLookupEntries;
+    uint32_t relocationLookupReturns;
+    uint32_t relocationLookupSuccesses;
+    uint32_t relocationLookupFailures;
+    uint32_t phaseHandleScanReturned;
+    uint32_t phaseRelocateReturned;
+    uint32_t phaseCompactReturned;
+    uint32_t phaseGenerationBoundsReturned;
+    uint32_t phaseCardsReturned;
+    uint32_t gcDone;
+    uint32_t restartEntries;
+    uint32_t restartReturns;
+    uint32_t managedResume;
+    uint32_t eeSuspendedBeforeRestart;
+    uint32_t eeResumedAfterRestart;
+    uint32_t threadStoreLockHeld;
+    uint32_t managedEntryProhibited;
+    uint32_t sensitiveAllocations;
+    uint32_t managedReentryWhileSuspended;
+    uint32_t pendingCallbackType;
+    uintptr_t pendingCallbackSlot;
+    uint32_t preflightEmitted;
+    uint32_t handleMarkerEmitted;
+    uint32_t completionMarkerEmitted;
+    uint32_t safeStopReason;
+    uint32_t categoryInspected[16];
+    uint32_t categoryCallbacks[16];
+    uint32_t categoryRewritten[16];
+    uint32_t categoryUnchanged[16];
+    uintptr_t scanContext;
+    uintptr_t scanCallback;
+    uintptr_t updatePointerFunction;
+    uintptr_t exactTable;
+    uintptr_t exactSegment;
+    uintptr_t exactBlock;
+    uintptr_t exactBlockFirstSlot;
+    uintptr_t exactSlot;
+    uintptr_t exactSlotBefore;
+    uintptr_t exactSlotAfter;
+    uintptr_t exactTargetGeneration;
+    uintptr_t exactHandleType;
+    uintptr_t exactBlockIndex;
+    uintptr_t exactSlotIndex;
+    uintptr_t exactFlags;
+    uintptr_t exactCallbackFunction;
+    uintptr_t exactCallbackEntry;
+    uintptr_t exactCallbackReturn;
+    uintptr_t exactMutationFunction;
+    uintptr_t exactStoreReturnAddress;
+    uintptr_t exactRelocationLookupAddress;
+    uintptr_t exactRelocationLookupReturnAddress;
+    uintptr_t exactRelocationOldObject;
+    uintptr_t exactRelocationNewObject;
+    uintptr_t exactBrickTable;
+    uintptr_t exactBrickIndex;
+    uintptr_t exactBrickEntry;
+    uintptr_t exactTreeNode;
+    uintptr_t exactRelocationDistance;
+    uintptr_t preRelocationObject;
+    uintptr_t postRelocationObject;
+    uintptr_t managedRootPostRelocation;
+    uintptr_t managedResumeControlPc;
+    uintptr_t restartEntryAddress;
+    uintptr_t restartReturnAddress;
+    uintptr_t firstPhaseAddress;
+    uintptr_t nextPhaseAddress;
+} guidexos_nativeaot_c011ec35_relocated_handle_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2115,6 +2210,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
 
     /* C011EC34 relocation-root update evidence. */
     guidexos_nativeaot_c011ec34_relocation_record c011ec34Relocation;
+    /* C011EC35 surviving short-weak handle relocation evidence. */
+    guidexos_nativeaot_c011ec35_relocated_handle_record c011ec35RelocatedHandle;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

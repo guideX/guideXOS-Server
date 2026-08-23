@@ -10404,8 +10404,19 @@ guideXosNativeAotC011EC33WeakHandleAllocated(
     return valid ? 0 : -1;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+static guidexos_nativeaot_c011ec35_relocated_handle_record&
+guideXosNativeAotC011EC35Record();
+extern "C" void __cdecl guideXosNativeAotC011EC35CollectionPhase(uint32_t phase);
+extern "C" void __cdecl guideXosNativeAotC011EC35ManagedResumeCheck();
+#endif
+
 extern "C" __declspec(dllexport) int __cdecl
 guideXosNativeAotC011EC33GetCompletedCollections() {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+    if (g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount != 0u)
+        guideXosNativeAotC011EC35ManagedResumeCheck();
+#endif
     return static_cast<int>(g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount);
 }
 
@@ -10637,6 +10648,9 @@ guideXosNativeAotC011EC33GcDoneEntered(int /*condemned*/) {
         g_guideXosAllocationDiagnostics;
     ++d.c011ec33GcDoneCount;
     guideXosNativeAotC011EC33CurrentCollection().collectionCompleted = 1u;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+    guideXosNativeAotC011EC35CollectionPhase(6u);
+#endif
 }
 
 extern "C" void __cdecl
@@ -10645,6 +10659,15 @@ guideXosNativeAotC011EC33RestartEEEntered(int /*finishedGc*/) {
         g_guideXosAllocationDiagnostics;
     ++d.c011ec33RestartEntryCount;
     guideXosNativeAotC011EC33CurrentCollection().eeRestartEntries++;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    ++r.restartEntries;
+    r.eeSuspendedBeforeRestart = d.eeSuspended;
+    r.threadStoreLockHeld = d.threadStoreLockRecursionDepth != 0u ? 1u : 0u;
+    r.managedEntryProhibited = d.managedEntryProhibited;
+    r.restartEntryAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+#endif
 }
 
 extern "C" void __cdecl
@@ -10660,6 +10683,15 @@ guideXosNativeAotC011EC33RestartEEReturned(int /*finishedGc*/) {
     if (d.c011ec33RestartReturnCount == 1u) {
         d.c011ec33Collection1Completed = 1u;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+    guidexos_nativeaot_c011ec35_relocated_handle_record& c35 =
+        guideXosNativeAotC011EC35Record();
+    ++c35.restartReturns;
+    c35.eeResumedAfterRestart = 1u;
+    c35.restartReturnAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    c35.threadStoreLockHeld = d.threadStoreLockRecursionDepth != 0u ? 1u : 0u;
+    c35.managedEntryProhibited = d.managedEntryProhibited;
+#endif
 }
 #endif
 
@@ -11059,6 +11091,16 @@ guideXosNativeAotC011EC31LivenessCheckEntered(
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+static void guideXosNativeAotC011EC35RelocationLookupObserved(
+    uintptr_t oldObject, uintptr_t newObject, uintptr_t brickTable,
+    uintptr_t brickIndex, uintptr_t brickEntry, uintptr_t treeNode,
+    uintptr_t relocationDistance, uint32_t success);
+static void guideXosNativeAotC011EC35RelocateReturned(
+    uintptr_t slot, uintptr_t oldObject, uintptr_t newObject,
+    uintptr_t storeReturnAddress);
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC34_RELOCATION_ROOT_UPDATE)
 static guidexos_nativeaot_c011ec34_relocation_record&
 guideXosNativeAotC011EC34Record() {
@@ -11287,6 +11329,11 @@ guideXosNativeAotC011EC34RelocationLookupObserved(
             r.firstRootPlannedToMove = newObject != oldObject ? 1u : 0u;
         }
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+    guideXosNativeAotC011EC35RelocationLookupObserved(
+        oldObject, newObject, brickTable, brickIndex, brickEntry, treeNode,
+        relocationDistance, success);
+#endif
 }
 
 extern "C" void __cdecl
@@ -11306,9 +11353,18 @@ guideXosNativeAotC011EC34RelocateReturned(
             ++r.callbackInvariantFailures;
         }
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+    guideXosNativeAotC011EC35RelocateReturned(
+        slot, oldObject, newObject,
+        reinterpret_cast<uintptr_t>(_ReturnAddress()));
+#endif
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+extern "C" void __cdecl
+#else
 extern "C" __declspec(noreturn) void __cdecl
+#endif
 guideXosNativeAotC011EC34RelocationRootScanReturned() {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
@@ -11318,6 +11374,9 @@ guideXosNativeAotC011EC34RelocationRootScanReturned() {
     r.eeSuspended = d.eeSuspended;
     r.threadStoreLockHeld = d.threadStoreLockRecursionDepth != 0u ? 1u : 0u;
     r.managedEntryProhibited = d.managedEntryProhibited;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+    return;
+#else
     const bool lookupEvidenceValid =
         r.relocationLookupEntries == 0u
             ? r.firstRootRewrite == 0u
@@ -11396,6 +11455,429 @@ guideXosNativeAotC011EC34RelocationRootScanReturned() {
 #undef C34C32
 #undef C34C64
     suspendEeSerialPutString("\n");
+    for (;;) {
+    }
+#endif
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+static guidexos_nativeaot_c011ec35_relocated_handle_record&
+guideXosNativeAotC011EC35Record() {
+    return g_guideXosAllocationDiagnostics.c011ec35RelocatedHandle;
+}
+
+static void guideXosNativeAotC011EC35EmitPreflight() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    const guidexos_nativeaot_c011ec34_relocation_record& c34 =
+        d.c011ec34Relocation;
+    if (r.preflightEmitted != 0u ||
+        c34.gcScanRootsReturns != 1u || c34.firstRootRewrite == 0u ||
+        r.handleScanEntered == 0u || r.exactSlotObserved == 0u ||
+        r.exactSlotBefore != c34.firstRootOldValue ||
+        r.exactRelocationOldObject != c34.firstRootOldValue ||
+        r.exactRelocationNewObject != c34.firstRootNewValue ||
+        r.relocationLookupEntries == 0u ||
+        r.relocationLookupReturns == 0u ||
+        r.relocationLookupSuccesses == 0u) {
+        return;
+    }
+    r.preflightEmitted = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-relocated-handle-update] PREFLIGHT marker=C011EC35-PREFLIGHT");
+#define C35P32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C35P64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C35P32("scanMode", r.scanMode);
+    C35P32("scanFlags", r.scanFlags);
+    C35P32("typeCount", r.typeCount);
+    C35P32("typeMask", r.typeMask);
+    C35P32("handleType", static_cast<uint32_t>(r.exactHandleType));
+    C35P64("table", r.exactTable);
+    C35P64("segment", r.exactSegment);
+    C35P64("block", r.exactBlock);
+    C35P64("blockFirstSlot", r.exactBlockFirstSlot);
+    C35P64("slot", r.exactSlot);
+    C35P64("oldSlot", r.exactSlotBefore);
+    C35P64("targetGeneration", r.exactTargetGeneration);
+    C35P64("lookupInput", r.exactRelocationOldObject);
+    C35P64("brickTable", r.exactBrickTable);
+    C35P64("brickIndex", r.exactBrickIndex);
+    C35P64("brickEntry", r.exactBrickEntry);
+    C35P64("treeNode", r.exactTreeNode);
+    C35P64("relocationDistance", r.exactRelocationDistance);
+    C35P64("destination", r.exactRelocationNewObject);
+    C35P64("callback", r.exactCallbackFunction);
+    C35P64("mutationFunction", r.exactMutationFunction);
+#undef C35P32
+#undef C35P64
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC35EmitHandleMarker() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    const guidexos_nativeaot_c011ec34_relocation_record& c34 =
+        d.c011ec34Relocation;
+    if (r.handleMarkerEmitted != 0u || r.exactSlotRewritten == 0u ||
+        r.exactSlotAfter != c34.firstRootNewValue ||
+        r.exactSlotAfter == r.exactSlotBefore ||
+        r.exactSlotAfter == 0u || r.exactSlotAfter == c34.firstRootOldValue ||
+        r.callbackEntries != r.callbackReturns) {
+        return;
+    }
+    r.handleMarkerEmitted = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-relocated-handle-update] HANDLE marker=C011EC35-HANDLE");
+#define C35H32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C35H64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C35H64("slot", r.exactSlot);
+    C35H64("before", r.exactSlotBefore);
+    C35H64("after", r.exactSlotAfter);
+    C35H64("oldTarget", r.preRelocationObject);
+    C35H64("newTarget", r.postRelocationObject);
+    C35H64("managedRoot", c34.firstRootNewValue);
+    C35H32("handleType", static_cast<uint32_t>(r.exactHandleType));
+    C35H32("callbackEntries", r.callbackEntries);
+    C35H32("callbackReturns", r.callbackReturns);
+    C35H32("shortWeakCallbacks", r.shortWeakCallbacks);
+    C35H32("shortWeakRewritten", r.shortWeakRewritten);
+    C35H32("shortWeakUnchanged", r.shortWeakUnchanged);
+    C35H64("mutationFunction", r.exactMutationFunction);
+    C35H64("storeReturn", r.exactStoreReturnAddress);
+    C35H64("lookupAddress", r.exactRelocationLookupAddress);
+    C35H64("lookupReturn", r.exactRelocationLookupReturnAddress);
+    C35H64("destination", r.exactRelocationNewObject);
+    C35H32("safeStopReason", r.safeStopReason);
+#undef C35H32
+#undef C35H64
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC35HandleRelocationScanEntered(
+    uint32_t condemned, uint32_t maxGeneration, uintptr_t scanContext,
+    uintptr_t callback, uint32_t flags, uint32_t typeCount,
+    uint32_t typeMask, uintptr_t updatePointerFunction) {
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    r.handleScanEntered++;
+    r.scanMode = 1u;
+    r.condemnedGeneration = condemned;
+    r.maximumGeneration = maxGeneration;
+    r.scanContext = scanContext;
+    r.scanCallback = callback;
+    r.updatePointerFunction = updatePointerFunction;
+    r.scanFlags = flags;
+    r.typeCount = typeCount;
+    r.typeMask = typeMask;
+    r.firstPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC35HandleSlotObserved(
+    uintptr_t slot, uintptr_t value, uintptr_t table, uintptr_t segment,
+    uint32_t blockIndex, uintptr_t blockFirstSlot, uint32_t slotIndex,
+    uint32_t handleType, uint32_t flags, uintptr_t callback) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    if (r.exactSlot == 0u) {
+        if (handleType == 0u && slot == d.c011ec33WeakHandleSlot &&
+            value == d.c011ec33InitialTarget && table != 0u &&
+            segment != 0u && blockFirstSlot != 0u) {
+            r.exactTable = table;
+            r.exactSegment = segment;
+            r.exactBlock = blockFirstSlot;
+            r.exactBlockFirstSlot = blockFirstSlot;
+            r.exactSlot = slot;
+            r.exactSlotBefore = value;
+            r.exactHandleType = handleType;
+            r.exactBlockIndex = blockIndex;
+            r.exactSlotIndex = slotIndex;
+            r.exactFlags = flags;
+            r.exactTargetGeneration =
+                d.c011ec33Collections[0].targetGeneration;
+            r.preRelocationObject = value;
+        }
+        return;
+    }
+    ++r.slotInspections;
+    if (handleType < 16u) ++r.categoryInspected[handleType];
+    if (handleType == 0u) ++r.shortWeakInspected;
+    if (slot == r.exactSlot && table == r.exactTable &&
+        segment == r.exactSegment && blockFirstSlot == r.exactBlockFirstSlot &&
+        blockIndex == r.exactBlockIndex && slotIndex == r.exactSlotIndex &&
+        handleType == static_cast<uint32_t>(r.exactHandleType) &&
+        value == r.preRelocationObject) {
+        r.exactSlotObserved = 1u;
+        r.exactSlotBefore = value;
+        r.exactFlags = flags;
+        r.exactCallbackFunction = callback;
+        r.exactTargetGeneration =
+            d.c011ec33Collections[0].targetGeneration;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC35HandleCallbackDispatched(
+    uintptr_t slot, uint32_t handleType, uintptr_t callback) {
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    if (r.handleScanEntered == 0u) return;
+    if (handleType < 16u) ++r.categoryCallbacks[handleType];
+    r.pendingCallbackType = handleType;
+    r.pendingCallbackSlot = slot;
+    r.exactCallbackFunction = callback;
+    if (handleType == 0u) ++r.shortWeakCallbacks;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC35UpdatePointerEntered(
+    uintptr_t slot, uintptr_t before, uintptr_t scanContext,
+    uintptr_t mutationFunction, uintptr_t callbackFunction) {
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    if (r.handleScanEntered == 0u) return;
+    ++r.callbackEntries;
+    r.scanContext = scanContext;
+    r.exactMutationFunction = mutationFunction;
+    if (slot == r.exactSlot && before == r.preRelocationObject &&
+        r.pendingCallbackType == 0u) {
+        r.exactSlotCallbackEntered = 1u;
+        r.exactCallbackActive = 1u;
+        r.exactSlotBefore = before;
+        r.exactCallbackEntry = reinterpret_cast<uintptr_t>(_ReturnAddress());
+        guideXosNativeAotC011EC35EmitPreflight();
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC35UpdatePointerReturned(
+    uintptr_t slot, uintptr_t before, uintptr_t after) {
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    if (r.handleScanEntered == 0u) return;
+    ++r.callbackReturns;
+    const uint32_t type = r.pendingCallbackType;
+    if (type < 16u) {
+        if (before != after) ++r.categoryRewritten[type];
+        else ++r.categoryUnchanged[type];
+    }
+    if (type == 0u) {
+        if (before != after) ++r.shortWeakRewritten;
+        else ++r.shortWeakUnchanged;
+    }
+    if (before != after) ++r.rewrittenHandles;
+    else ++r.unchangedHandles;
+    if (slot == r.exactSlot && before == r.preRelocationObject &&
+        r.pendingCallbackType == 0u) {
+        r.exactSlotCallbackReturned = 1u;
+        r.exactCallbackActive = 0u;
+        r.exactSlotAfter = after;
+        r.exactCallbackReturn = reinterpret_cast<uintptr_t>(_ReturnAddress());
+        if (after != 0u && after != before) r.exactSlotRewritten = 1u;
+        else ++r.exactSlotStale;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC35HandleRelocationScanReturned() {
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    ++r.handleScanReturned;
+    r.phaseHandleScanReturned = 1u;
+    r.nextPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    r.pendingCallbackSlot = 0u;
+    guideXosNativeAotC011EC35EmitHandleMarker();
+}
+
+static void guideXosNativeAotC011EC35RelocationLookupObserved(
+    uintptr_t oldObject, uintptr_t newObject, uintptr_t brickTable,
+    uintptr_t brickIndex, uintptr_t brickEntry, uintptr_t treeNode,
+    uintptr_t relocationDistance, uint32_t success) {
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    if (r.exactCallbackActive == 0u) return;
+    ++r.relocationLookupEntries;
+    ++r.relocationLookupReturns;
+    if (success != 0u) ++r.relocationLookupSuccesses;
+    else ++r.relocationLookupFailures;
+    r.exactRelocationLookupReturnAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    r.exactRelocationOldObject = oldObject;
+    r.exactRelocationNewObject = newObject;
+    r.exactBrickTable = brickTable;
+    r.exactBrickIndex = brickIndex;
+    r.exactBrickEntry = brickEntry;
+    r.exactTreeNode = treeNode;
+    r.exactRelocationDistance = relocationDistance;
+    guideXosNativeAotC011EC35EmitPreflight();
+}
+
+static void guideXosNativeAotC011EC35RelocateReturned(
+    uintptr_t slot, uintptr_t oldObject, uintptr_t newObject,
+    uintptr_t storeReturnAddress) {
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    if (r.exactCallbackActive == 0u || slot != r.exactSlot ||
+        oldObject != r.preRelocationObject) return;
+    r.exactStoreReturnAddress = storeReturnAddress;
+    r.exactRelocationOldObject = oldObject;
+    r.exactRelocationNewObject = newObject;
+    r.postRelocationObject = newObject;
+    if (newObject != oldObject && newObject != 0u) {
+        guideXosNativeAotC011EC35EmitPreflight();
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC35CollectionPhase(uint32_t phase) {
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    switch (phase) {
+    case 1u: r.phaseHandleScanReturned = 1u; break;
+    case 2u: r.phaseRelocateReturned = 1u; break;
+    case 3u: r.phaseCompactReturned = 1u; break;
+    case 4u: r.phaseGenerationBoundsReturned = 1u; break;
+    case 5u: r.phaseCardsReturned = 1u; break;
+    case 6u: r.gcDone = 1u; break;
+    default: break;
+    }
+    if (r.firstPhaseAddress == 0u)
+        r.firstPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    r.nextPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC35ManagedResumeCheck() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec35_relocated_handle_record& r =
+        guideXosNativeAotC011EC35Record();
+    const guidexos_nativeaot_c011ec34_relocation_record& c34 =
+        d.c011ec34Relocation;
+    const uintptr_t managedRoot = c34.firstRootNewValue;
+    const uintptr_t weakAfter = r.exactSlot == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t*>(r.exactSlot);
+    r.managedRootPostRelocation = managedRoot;
+    r.managedResumeControlPc = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    r.managedResume = 1u;
+    r.eeResumedAfterRestart = r.restartReturns != 0u ? 1u : 0u;
+    const bool valid =
+        c34.gcScanRootsReturns == 1u && c34.firstRootRewrite != 0u &&
+        c34.firstRootNewValue != 0u && r.preflightEmitted != 0u &&
+        r.handleMarkerEmitted != 0u && r.handleScanReturned != 0u &&
+        r.callbackEntries == r.callbackReturns &&
+        r.exactSlot != 0u && weakAfter != 0u && weakAfter == managedRoot &&
+        weakAfter != c34.firstRootOldValue && r.exactSlotStale == 0u &&
+        r.phaseRelocateReturned != 0u && r.phaseCompactReturned != 0u &&
+        r.phaseGenerationBoundsReturned != 0u && r.gcDone != 0u &&
+        r.restartEntries != 0u && r.restartReturns != 0u &&
+        r.eeResumedAfterRestart != 0u && d.c011ec33Collection1Completed != 0u;
+    r.safeStopReason = valid ? 0u : 0xC0350001u;
+    r.completionMarkerEmitted = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-relocated-handle-update] COMPLETE marker=C011EC35 outcome=");
+    suspendEeSerialPutString(valid ? "LEVEL3" : "BLOCKED");
+#define C35C32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C35C64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C35C32("successLevel", valid ? 3u : 0u);
+    C35C64("oldTarget", c34.firstRootOldValue);
+    C35C64("relocatedTarget", c34.firstRootNewValue);
+    C35C64("managedRootPostC34", managedRoot);
+    C35C32("c34GcScanRootsEntries", c34.gcScanRootsEntries);
+    C35C32("c34GcScanRootsReturns", c34.gcScanRootsReturns);
+    C35C32("c34RootRewritten", c34.firstRootRewrite);
+    C35C64("weakSlot", r.exactSlot);
+    C35C64("weakBefore", r.exactSlotBefore);
+    C35C64("weakAfter", weakAfter);
+    C35C32("handleType", static_cast<uint32_t>(r.exactHandleType));
+    C35C32("handleScanEntered", r.handleScanEntered);
+    C35C32("handleScanReturned", r.handleScanReturned);
+    C35C64("table", r.exactTable);
+    C35C64("segment", r.exactSegment);
+    C35C64("block", r.exactBlock);
+    C35C64("blockIndex", r.exactBlockIndex);
+    C35C64("slotIndex", r.exactSlotIndex);
+    C35C32("slotInspections", r.slotInspections);
+    C35C32("callbackEntries", r.callbackEntries);
+    C35C32("callbackReturns", r.callbackReturns);
+    C35C32("rewrittenHandles", r.rewrittenHandles);
+    C35C32("unchangedHandles", r.unchangedHandles);
+    C35C32("shortWeakInspected", r.shortWeakInspected);
+    C35C32("shortWeakCallbacks", r.shortWeakCallbacks);
+    C35C32("shortWeakRewritten", r.shortWeakRewritten);
+    C35C32("shortWeakUnchanged", r.shortWeakUnchanged);
+    C35C32("exactSlotObserved", r.exactSlotObserved);
+    C35C32("exactCallbackEntered", r.exactSlotCallbackEntered);
+    C35C32("exactCallbackReturned", r.exactSlotCallbackReturned);
+    C35C32("staleWeakHandles", r.exactSlotStale);
+    C35C32("lookupEntries", r.relocationLookupEntries);
+    C35C32("lookupReturns", r.relocationLookupReturns);
+    C35C32("lookupSuccesses", r.relocationLookupSuccesses);
+    C35C32("lookupFailures", r.relocationLookupFailures);
+    C35C64("lookupInput", r.exactRelocationOldObject);
+    C35C64("destination", r.exactRelocationNewObject);
+    C35C64("brickTable", r.exactBrickTable);
+    C35C64("brickIndex", r.exactBrickIndex);
+    C35C64("brickEntry", r.exactBrickEntry);
+    C35C64("treeNode", r.exactTreeNode);
+    C35C64("relocationDistance", r.exactRelocationDistance);
+    C35C64("callbackFunction", r.exactCallbackFunction);
+    C35C64("mutationFunction", r.exactMutationFunction);
+    C35C64("storeReturn", r.exactStoreReturnAddress);
+    C35C64("callbackEntry", r.exactCallbackEntry);
+    C35C64("callbackReturn", r.exactCallbackReturn);
+    C35C32("phaseHandleScan", r.phaseHandleScanReturned);
+    C35C32("phaseRelocate", r.phaseRelocateReturned);
+    C35C32("phaseCompact", r.phaseCompactReturned);
+    C35C32("phaseGenerationBounds", r.phaseGenerationBoundsReturned);
+    C35C32("phaseCards", r.phaseCardsReturned);
+    C35C32("gcDone", r.gcDone);
+    C35C32("restartEntries", r.restartEntries);
+    C35C32("restartReturns", r.restartReturns);
+    C35C32("managedResume", r.managedResume);
+    C35C32("eeSuspendedBeforeRestart", r.eeSuspendedBeforeRestart);
+    C35C32("eeResumedAfterRestart", r.eeResumedAfterRestart);
+    C35C32("threadStoreLockHeld", r.threadStoreLockHeld);
+    C35C32("managedEntryProhibited", r.managedEntryProhibited);
+    C35C32("sensitiveAllocations", r.sensitiveAllocations);
+    C35C32("managedReentryWhileSuspended", r.managedReentryWhileSuspended);
+    C35C64("managedResumeControlPC", r.managedResumeControlPc);
+    C35C32("safeStopReason", r.safeStopReason);
+    for (uint32_t i = 0; i < 16u; ++i) {
+        if (r.categoryInspected[i] == 0u && r.categoryCallbacks[i] == 0u)
+            continue;
+        suspendEeSerialPutString(" cat");
+        suspendEeSerialPutHex32(i);
+        suspendEeSerialPutString("Inspected=");
+        suspendEeSerialPutHex32(r.categoryInspected[i]);
+        suspendEeSerialPutString("Callbacks=");
+        suspendEeSerialPutHex32(r.categoryCallbacks[i]);
+        suspendEeSerialPutString("Rewritten=");
+        suspendEeSerialPutHex32(r.categoryRewritten[i]);
+        suspendEeSerialPutString("Unchanged=");
+        suspendEeSerialPutHex32(r.categoryUnchanged[i]);
+    }
+#undef C35C32
+#undef C35C64
+    suspendEeSerialPutString("\n");
+    if (!valid) {
+        for (;;) {
+        }
+    }
     for (;;) {
     }
 }
