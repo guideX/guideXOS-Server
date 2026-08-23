@@ -7074,9 +7074,12 @@ guideXosNativeAotC011EC15CandidateObserved(
     d.c011ec15NextRootCallback = callback;
     d.c011ec15NextRootContext = context;
     if (callback == 0u || context == 0u) {
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
         c011ec15SafeStop(0xEC1501u);
+#endif
     }
-#if !defined(GUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO)
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO) && \
+    !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
     c011ec15SafeStop(0xC011EC15u);
 #endif
 }
@@ -7101,7 +7104,8 @@ guideXosNativeAotC011EC15PromoteEntered(
     if (d.c011ec15FirstRootCallbackReturnCount != 0u && rawValue != 0u) {
         ++d.c011ec15SecondPromoteAttemptCount;
         ++d.c011ec15SecondPromoteEntryCount;
-#if !defined(GUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO)
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO) && \
+    !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
         c011ec15SafeStop(0xEC1507u);
 #endif
     }
@@ -7155,12 +7159,23 @@ guideXosNativeAotC011EC15QueueMarkReturned(
         return;
     }
 #endif
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
     if (d.c011ec15QueueMarkReturnCount != 1u ||
         d.c011ec15FirstRootValue != object || oldValue != 0u ||
         newValue != object || slotIndex != 0u || cursorBefore != 0u ||
         cursorAfter != 1u || slot != queueBase) {
         c011ec15SafeStop(0xEC1502u);
     }
+#else
+    (void)object;
+    (void)slot;
+    (void)oldValue;
+    (void)newValue;
+    (void)slotIndex;
+    (void)cursorBefore;
+    (void)cursorAfter;
+    (void)queueBase;
+#endif
 }
 
 extern "C" void __cdecl
@@ -7174,7 +7189,9 @@ guideXosNativeAotC011EC15MarkHelperReturned(uintptr_t object) {
     }
 #endif
     if (object != d.c011ec15FirstRootValue) {
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
         c011ec15SafeStop(0xEC1503u);
+#endif
     }
 }
 
@@ -7190,7 +7207,9 @@ guideXosNativeAotC011EC15PromoteReturned(uintptr_t object) {
     }
 #endif
     if (object != d.c011ec15FirstRootValue) {
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
         c011ec15SafeStop(0xEC1504u);
+#endif
     }
 }
 
@@ -7220,7 +7239,9 @@ guideXosNativeAotC011EC15EnumGcRefReturned(
         if (slot != d.c011ec15FirstRootSlot || rawValue != d.c011ec15FirstRootValue ||
             callback != d.c011ec15FirstRootCallback ||
             context != d.c011ec15FirstRootContext) {
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
             c011ec15SafeStop(0xEC1505u);
+#endif
         }
         d.c011ec15ThreadStoreLockHeld =
             d.threadStoreLockRecursionDepth == 1u ? 1u : 0u;
@@ -9204,6 +9225,15 @@ guideXosNativeAotC011EC29NextPhaseEntered(
         d.c011ec29PreflightProven = 1u;
         emitC011EC29Preflight();
     } else {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+        /*
+         * C011EC33 observes this production boundary while continuing into
+         * the real short-weak scan.  The earlier C011EC29 milestone owns the
+         * invariant stop at this point; do not reuse that stop in the
+         * two-collection lifetime experiment.
+         */
+        d.c011ec29SafeStopReason = 0u;
+#else
         d.c011ec29SafeStopReason = 0xC0290001u;
         suspendEeSerialPutString(
             "[nativeaot-gc-post-mark-phase] BLOCKED outcome=H marker=C011EC29-BLOCKED");
@@ -9230,6 +9260,7 @@ guideXosNativeAotC011EC29NextPhaseEntered(
         suspendEeSerialPutString("\n");
         for (;;) {
         }
+#endif
     }
 }
 
@@ -9453,13 +9484,24 @@ static void emitC011EC31Blocked(uint32_t reason) {
     suspendEeSerialPutString("\n");
 }
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK) && !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC32WeakHandleAllocated__Ansi;
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC32WeakHandleAllocated(
     uintptr_t target, uintptr_t targetType, uintptr_t weakHandleSlot,
     uint32_t handleType);
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC32HelperReturned__Ansi;
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC32HelperReturned(
+    uintptr_t target, uintptr_t targetType, uintptr_t weakHandleSlot);
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC33WeakHandleAllocated__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC33WeakHandleAllocated(
+    uintptr_t target, uintptr_t targetType, uintptr_t weakHandleSlot,
+    uint32_t handleType);
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC33GetCompletedCollections__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC33GetCompletedCollections();
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC33LifetimeBoundaryReturned__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC33LifetimeBoundaryReturned(
     uintptr_t target, uintptr_t targetType, uintptr_t weakHandleSlot);
 #endif
 
@@ -10048,6 +10090,552 @@ guideXosNativeAotC011EC32ClearingStoreEntered(
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+static guidexos_nativeaot_c011ec33_collection_record&
+guideXosNativeAotC011EC33CurrentCollection() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    const uint32_t index = d.c011ec33ActiveCollection <= 1u
+        ? 0u : 1u;
+    return d.c011ec33Collections[index];
+}
+
+static void guideXosNativeAotC011EC33ClearCollectionRecord(
+    guidexos_nativeaot_c011ec33_collection_record& record) {
+    uint32_t* words = reinterpret_cast<uint32_t*>(&record);
+    for (size_t i = 0u; i < sizeof(record) / sizeof(uint32_t); ++i) {
+        words[i] = 0u;
+    }
+}
+
+static void guideXosNativeAotC011EC33ResetRootMarkCounters() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec32StrongRootMatchCount = 0u;
+    d.c011ec32StackRootMatchCount = 0u;
+    d.c011ec32RegisterRootMatchCount = 0u;
+    d.c011ec32OrdinaryRootMatchCount = 0u;
+    d.c011ec32StaticThreadStaticRootMatchCount = 0u;
+    d.c011ec32ThreadAbortRootMatchCount = 0u;
+    d.c011ec32StrongHandleMatchCount = 0u;
+    d.c011ec32GraphDerivedPromotionCount = 0u;
+    d.c011ec32TargetQueueInsertionCount = 0u;
+    d.c011ec32TargetChildDiscoveryCount = 0u;
+    d.c011ec32TargetMarkWriteCount = 0u;
+}
+
+static void guideXosNativeAotC011EC33SnapshotRootMarkState(
+    guidexos_nativeaot_c011ec33_collection_record& record) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    const uintptr_t target = d.c011ec32Target;
+    record.strongHandleMatches = d.c011ec32StrongHandleMatchCount;
+    record.graphDerivedPromotions = d.c011ec32GraphDerivedPromotionCount;
+    record.targetQueueInsertions = d.c011ec32TargetQueueInsertionCount;
+    record.targetChildDiscoveries = d.c011ec32TargetChildDiscoveryCount;
+    record.targetMarkWrites = d.c011ec32TargetMarkWriteCount;
+    record.targetPromoteCount = record.targetRootMatches;
+    record.markWordAddress = target;
+    record.markWordMask = 1u;
+    record.markWordBefore = target == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t*>(target);
+    record.targetMarkStateBefore =
+        (record.markWordBefore & record.markWordMask) != 0u ? 1u : 0u;
+    record.markWordAfter = record.markWordBefore;
+    record.targetMarkStateAfter = record.targetMarkStateBefore;
+    record.targetMarked = record.targetMarkStateAfter;
+}
+
+static void guideXosNativeAotC011EC33EmitLive() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    const guidexos_nativeaot_c011ec33_collection_record& r =
+        d.c011ec33Collections[0];
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] LIVE marker=C011EC33-LIVE");
+#define C33L32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C33L64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C33L32("collection", 1u);
+    C33L64("target", r.targetAtRoot);
+    C33L64("weakSlot", r.weakHandleSlot);
+    C33L64("slotBefore", r.weakSlotBefore);
+    C33L64("slotAfter", r.weakSlotAfter);
+    C33L32("targetRootMatches", r.targetRootMatches);
+    C33L32("rootKind", r.rootKind);
+    C33L64("rootSlot", r.rootSlot);
+    C33L64("rootValue", r.rootValue);
+    C33L64("rootRegisterSlot", r.rootRegisterSlot);
+    C33L64("controlPC", r.controlPc);
+    C33L64("methodInfo", r.methodInfo);
+    C33L64("methodStart", r.methodStart);
+    C33L64("methodEnd", r.methodEnd);
+    C33L64("gcInfo", r.gcInfo);
+    C33L64("safePoint", r.safePointAddress);
+    C33L32("targetPromoteCount", r.targetPromoteCount);
+    C33L32("targetMarked", r.targetMarked);
+    C33L64("markWordAddress", r.markWordAddress);
+    C33L64("markWordBefore", r.markWordBefore);
+    C33L64("markWordAfter", r.markWordAfter);
+    C33L32("markWordMask", r.markWordMask);
+    C33L32("livenessCallbacks", r.livenessCallbacks);
+    C33L32("livenessDecisions", r.livenessDecisions);
+    C33L32("livenessResult", r.liveDecisions != 0u ? 1u : 0u);
+    C33L32("preservedCount", r.preservedCount);
+    C33L32("collectionCompleted", r.collectionCompleted);
+    C33L32("restartReturns", r.eeRestartReturns);
+    C33L32("managedResume", r.managedResumeCount);
+#undef C33L32
+#undef C33L64
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC33EmitPreflight() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    const guidexos_nativeaot_c011ec33_collection_record& r =
+        d.c011ec33Collections[1];
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC33-PREFLIGHT");
+#define C33P32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C33P64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C33P32("collection1Completed", d.c011ec33Collection1Completed);
+    C33P32("lifetimeBoundaryReturned", d.c011ec33LifetimeBoundaryReturned);
+    C33P32("targetRootMatches", r.targetRootMatches);
+    C33P32("stackRootMatches", r.stackRootMatches);
+    C33P32("registerRootMatches", r.registerRootMatches);
+    C33P32("staticThreadStaticRootMatches", r.staticThreadStaticRootMatches);
+    C33P32("strongHandleMatches", r.strongHandleMatches);
+    C33P32("graphDerivedPromotions", r.graphDerivedPromotions);
+    C33P32("targetQueueInsertions", r.targetQueueInsertions);
+    C33P32("targetMarkWrites", r.targetMarkWrites);
+    C33P32("targetMarked", r.targetMarked);
+    C33P32("weakSlotMatched", r.weakSlotMatched);
+    C33P64("target", r.targetAtRoot);
+    C33P64("weakSlot", r.weakHandleSlot);
+    C33P64("slotBefore", r.weakSlotBefore);
+#undef C33P32
+#undef C33P64
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC33EmitCompletion() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    const guidexos_nativeaot_c011ec33_collection_record& c1 =
+        d.c011ec33Collections[0];
+    const guidexos_nativeaot_c011ec33_collection_record& c2 =
+        d.c011ec33Collections[1];
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC33");
+#define C33C32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C33C64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C33C32("successLevel", 3u);
+    C33C32("collection1TargetRoots", c1.targetRootMatches);
+    C33C32("collection1TargetPromote", c1.targetPromoteCount);
+    C33C32("collection1TargetMarked", c1.targetMarked);
+    C33C32("collection1Live", c1.liveDecisions);
+    C33C32("collection1Preserved", c1.preservedCount);
+    C33C32("collection1Completed", c1.collectionCompleted);
+    C33C32("collection1RestartReturns", c1.eeRestartReturns);
+    C33C32("collection1ManagedResume", c1.managedResumeCount);
+    C33C32("collection2TargetRoots", c2.targetRootMatches);
+    C33C32("collection2StackRoots", c2.stackRootMatches);
+    C33C32("collection2RegisterRoots", c2.registerRootMatches);
+    C33C32("collection2StaticThreadStaticRoots", c2.staticThreadStaticRootMatches);
+    C33C32("collection2StrongHandles", c2.strongHandleMatches);
+    C33C32("collection2GraphPromotions", c2.graphDerivedPromotions);
+    C33C32("collection2QueueInsertions", c2.targetQueueInsertions);
+    C33C32("collection2MarkWrites", c2.targetMarkWrites);
+    C33C32("collection2TargetMarked", c2.targetMarked);
+    C33C32("collection2Dead", c2.deadDecisions);
+    C33C32("collection2Cleared", c2.clearedCount);
+    C33C64("initialTarget", d.c011ec33InitialTarget);
+    C33C64("targetType", d.c011ec33TargetType);
+    C33C64("initialWeakValue", d.c011ec33InitialWeakValue);
+    C33C64("targetAfterCollection1", d.c011ec33TargetAfterCollection1);
+    C33C32("targetRelocated", d.c011ec33TargetRelocated);
+    C33C64("weakSlot", d.c011ec33WeakHandleSlot);
+    C33C64("collection1SlotBefore", c1.weakSlotBefore);
+    C33C64("collection1SlotAfter", c1.weakSlotAfter);
+    C33C64("collection1RootSlot", c1.rootSlot);
+    C33C64("collection1RootValue", c1.rootValue);
+    C33C64("collection1RootRegisterSlot", c1.rootRegisterSlot);
+    C33C32("collection1RootKind", c1.rootKind);
+    C33C64("collection1MarkWordAddress", c1.markWordAddress);
+    C33C64("collection1MarkWordBefore", c1.markWordBefore);
+    C33C64("collection1MarkWordAfter", c1.markWordAfter);
+    C33C32("collection1MarkWordMask", c1.markWordMask);
+    C33C64("collection2SlotBefore", c2.weakSlotBefore);
+    C33C64("collection2SlotAfter", c2.weakSlotAfter);
+    C33C64("collection2MarkWordAddress", c2.markWordAddress);
+    C33C64("collection2MarkWordBefore", c2.markWordBefore);
+    C33C64("collection2MarkWordAfter", c2.markWordAfter);
+    C33C32("collection2MarkWordMask", c2.markWordMask);
+    C33C64("collection2ClearingStore", c2.clearingStoreAddress);
+    C33C64("collection1ControlPC", c1.controlPc);
+    C33C64("collection1MethodInfo", c1.methodInfo);
+    C33C64("collection1MethodStart", c1.methodStart);
+    C33C64("collection1MethodEnd", c1.methodEnd);
+    C33C64("collection1GcInfo", c1.gcInfo);
+    C33C64("collection1SafePoint", c1.safePointAddress);
+    C33C64("collection2ControlPC", c2.controlPc);
+    C33C64("collection2MethodInfo", c2.methodInfo);
+    C33C64("collection2GcInfo", c2.gcInfo);
+    C33C32("c1GcScanRootsEntries", c1.gcScanRootsEntries);
+    C33C32("c1GcScanRootsReturns", c1.gcScanRootsReturns);
+    C33C32("c2GcScanRootsEntries", c2.gcScanRootsEntries);
+    C33C32("c2GcScanRootsReturns", c2.gcScanRootsReturns);
+    C33C32("c1HandleScanEntries", c1.handleScanEntries);
+    C33C32("c2HandleScanEntries", c2.handleScanEntries);
+    C33C32("c1LivenessCallbacks", c1.livenessCallbacks);
+    C33C32("c2LivenessCallbacks", c2.livenessCallbacks);
+    C33C32("c1WeakSlotMatched", c1.weakSlotMatched);
+    C33C32("c2WeakSlotMatched", c2.weakSlotMatched);
+    C33C32("restartEntries", d.c011ec33RestartEntryCount);
+    C33C32("restartReturns", d.c011ec33RestartReturnCount);
+    C33C32("managedResume", d.c011ec33ManagedResumeCount);
+    C33C32("safeStopReason", d.c011ec33SafeStopReason);
+#undef C33C32
+#undef C33C64
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC33EmitBlocked(uint32_t reason) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    d.c011ec33SafeStopReason = reason;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] BLOCKED outcome=D marker=C011EC33-BLOCKED");
+    suspendEeSerialPutString(" collection=");
+    suspendEeSerialPutHex32(d.c011ec33ActiveCollection);
+    suspendEeSerialPutString(" c1Completed=");
+    suspendEeSerialPutHex32(d.c011ec33Collection1Completed);
+    suspendEeSerialPutString(" restartReturns=");
+    suspendEeSerialPutHex32(d.c011ec33RestartReturnCount);
+    const guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    suspendEeSerialPutString(" targetRootMatches=");
+    suspendEeSerialPutHex32(r.targetRootMatches);
+    suspendEeSerialPutString(" targetMarked=");
+    suspendEeSerialPutHex32(r.targetMarked);
+    suspendEeSerialPutString(" liveDecisions=");
+    suspendEeSerialPutHex32(r.liveDecisions);
+    suspendEeSerialPutString(" deadDecisions=");
+    suspendEeSerialPutHex32(r.deadDecisions);
+    suspendEeSerialPutString(" livenessCallbacks=");
+    suspendEeSerialPutHex32(r.livenessCallbacks);
+    suspendEeSerialPutString(" livenessDecisions=");
+    suspendEeSerialPutHex32(r.livenessDecisions);
+    suspendEeSerialPutString(" weakSlotMatched=");
+    suspendEeSerialPutHex32(r.weakSlotMatched);
+    suspendEeSerialPutString(" weakSlot=");
+    suspendEeSerialPutHex64(r.weakHandleSlot);
+    suspendEeSerialPutString(" slotBefore=");
+    suspendEeSerialPutHex64(r.weakSlotBefore);
+    suspendEeSerialPutString(" slotAfter=");
+    suspendEeSerialPutHex64(r.weakSlotAfter);
+    suspendEeSerialPutString(" rootReports=");
+    suspendEeSerialPutHex32(r.rootReports);
+    suspendEeSerialPutString(" initialTarget=");
+    suspendEeSerialPutHex64(d.c011ec33InitialTarget);
+    suspendEeSerialPutString(" initialWeakValue=");
+    suspendEeSerialPutHex64(d.c011ec33InitialWeakValue);
+    suspendEeSerialPutString(" safeStopReason=");
+    suspendEeSerialPutHex32(reason);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33PostWeakPhase(uint32_t phase);
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC33WeakHandleAllocated(
+    uintptr_t target, uintptr_t targetType, uintptr_t weakHandleSlot,
+    uint32_t handleType) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec33WeakHandleAllocationCount;
+    d.c011ec33InitialTarget = target;
+    d.c011ec33TargetType = targetType;
+    d.c011ec33WeakHandleSlot = weakHandleSlot;
+    d.c011ec33InitialWeakValue = weakHandleSlot == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t*>(weakHandleSlot);
+    d.c011ec32Target = target;
+    d.c011ec32TargetType = targetType;
+    d.c011ec32WeakHandleSlot = weakHandleSlot;
+    d.c011ec32WeakHandleValueBefore = d.c011ec33InitialWeakValue;
+    d.c011ec32HandleType = handleType;
+    const bool valid = target != 0u && targetType != 0u &&
+        weakHandleSlot != 0u && d.c011ec33InitialWeakValue == target &&
+        handleType == 0u;
+    return valid ? 0 : -1;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC33GetCompletedCollections() {
+    return static_cast<int>(g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount);
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC33LifetimeBoundaryReturned(
+    uintptr_t target, uintptr_t targetType, uintptr_t weakHandleSlot) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    const uintptr_t observed = weakHandleSlot == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t*>(weakHandleSlot);
+    const bool valid = d.c011ec33Collection1Completed != 0u &&
+        d.c011ec33WeakHandleAllocationCount == 1u &&
+        target != 0u && targetType == d.c011ec33TargetType &&
+        weakHandleSlot == d.c011ec33WeakHandleSlot && observed != 0u;
+    if (!valid) return -1;
+    d.c011ec33HelperReturned = 1u;
+    d.c011ec33LifetimeBoundaryReturned = 1u;
+    d.c011ec33HelperReturnAddress = target;
+    d.c011ec33LifetimeBoundaryAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec33TargetAfterCollection1 = observed;
+    d.c011ec33TargetRelocated = observed != d.c011ec33InitialTarget ? 1u : 0u;
+    d.c011ec32Target = observed;
+    d.c011ec32WeakHandleValueBefore = observed;
+    d.c011ec32WeakHandleSlot = weakHandleSlot;
+    return 0;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33HandleAllocationEntered(
+    uintptr_t allocationEntryAddress) {
+    g_guideXosAllocationDiagnostics.c011ec32AllocationEntryCount++;
+    g_guideXosAllocationDiagnostics.c011ec32AllocationEntryAddress =
+        allocationEntryAddress;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33HandleAllocated(
+    uintptr_t handleSlot, uintptr_t target, uint32_t handleType,
+    uintptr_t allocationContinuationAddress) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec32AllocationCount;
+    d.c011ec32AllocationEntryAddress = allocationContinuationAddress;
+    d.c011ec32HandleType = handleType;
+    d.c011ec32Target = target;
+    d.c011ec32WeakHandleSlot = handleSlot;
+    d.c011ec32WeakHandleValueBefore = handleSlot == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t*>(handleSlot);
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33GcScanRootsEntered(
+    int /*condemned*/, int /*maxGeneration*/, uintptr_t /*scanContext*/) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec33GcScanRootsEntryCount;
+    d.c011ec33ActiveCollection = d.c011ec33GcScanRootsEntryCount;
+    if (d.c011ec33ActiveCollection > 2u) {
+        d.c011ec33ActiveCollection = 2u;
+    }
+    guideXosNativeAotC011EC33ClearCollectionRecord(
+        guideXosNativeAotC011EC33CurrentCollection());
+    guideXosNativeAotC011EC33ResetRootMarkCounters();
+    if (d.c011ec33GcScanRootsEntryCount == 2u) {
+        guideXosNativeAotC011EC33PostWeakPhase(17u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33GcScanRootsReturned() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec33GcScanRootsReturnCount;
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    r.gcScanRootsReturns++;
+    if (d.c011ec33GcScanRootsReturnCount == 2u) {
+        guideXosNativeAotC011EC33PostWeakPhase(18u);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33AfterGcScanRootsEntered(
+    int /*condemned*/, int /*maxGeneration*/, uintptr_t /*scanContext*/) {
+    ++g_guideXosAllocationDiagnostics.c011ec33AfterGcScanRootsEntryCount;
+    guideXosNativeAotC011EC33CurrentCollection().afterGcScanRootsEntries++;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33AfterGcScanRootsReturned() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec33AfterGcScanRootsReturnCount;
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    ++r.afterGcScanRootsReturns;
+    r.rootEnumerationEntries = r.rootReports;
+    r.strongHandleMatches = d.c011ec32StrongHandleMatchCount;
+    r.stackRootMatches = d.c011ec32StackRootMatchCount;
+    r.registerRootMatches = d.c011ec32RegisterRootMatchCount;
+    r.ordinaryRootMatches = d.c011ec32OrdinaryRootMatchCount;
+    r.staticThreadStaticRootMatches =
+        d.c011ec32StaticThreadStaticRootMatchCount;
+    r.threadAbortRootMatches = d.c011ec32ThreadAbortRootMatchCount;
+    guideXosNativeAotC011EC33SnapshotRootMarkState(r);
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33GcRootReported(
+    uintptr_t slot, uint32_t /*flags*/, uint32_t rootKind,
+    uintptr_t registerSlot) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    ++r.rootReports;
+    const uintptr_t value = slot == 0u
+        ? 0u : *reinterpret_cast<const uintptr_t*>(slot);
+    if (value != d.c011ec32Target) return;
+    ++r.targetRootMatches;
+    r.targetAtRoot = value;
+    r.rootSlot = slot;
+    r.rootValue = value;
+    r.rootRegisterSlot = registerSlot;
+    r.rootKind = rootKind;
+    if (rootKind == 1u) {
+        ++r.registerRootMatches;
+    } else {
+        ++r.stackRootMatches;
+    }
+    r.controlPc = d.c011ec19ControlPc != 0u
+        ? d.c011ec19ControlPc : d.c011ec18IteratorControlPc;
+    r.methodInfo = d.c011ec19MethodInfo;
+    r.methodStart = d.c011ec19MethodStart;
+    r.methodEnd = d.c011ec19MethodEnd;
+    r.gcInfo = d.c011ec19GcInfo;
+    r.safePointAddress = d.c011ec19SafePointAddress;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33PostWeakPhase(uint32_t phase) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    d.c011ec33LastPostWeakPhase = phase;
+    ++d.c011ec33PostWeakPhaseCount;
+    r.postWeakPhase = phase;
+    ++r.postWeakPhaseCount;
+    r.postWeakPhaseAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    d.c011ec33LastPostWeakPhaseAddress = r.postWeakPhaseAddress;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] POST-WEAK phase=");
+    suspendEeSerialPutHex32(phase);
+    suspendEeSerialPutString(" address=");
+    suspendEeSerialPutHex64(r.postWeakPhaseAddress);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33LivenessCheckEntered(
+    uintptr_t slotAddress, uintptr_t target, uintptr_t targetGeneration,
+    uintptr_t markWordAddress, uintptr_t markWordBefore,
+    uintptr_t markMask) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    ++r.livenessCallbacks;
+    r.weakHandleSlot = slotAddress;
+    r.weakSlotBefore = target;
+    r.targetAtRoot = r.targetAtRoot == 0u ? target : r.targetAtRoot;
+    r.targetGeneration = static_cast<uint32_t>(targetGeneration);
+    r.markWordAddress = markWordAddress;
+    r.markWordBefore = markWordBefore;
+    r.markWordMask = static_cast<uint32_t>(markMask);
+    r.targetMarkStateBefore =
+        (markWordBefore & markMask) != 0u ? 1u : 0u;
+    r.targetMarked = r.targetMarkStateBefore;
+    r.livenessDecisionAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    r.livenessCallbackAddress = d.c011ec30FirstProductionCallbackEntryAddress;
+    r.weakSlotMatched = slotAddress == d.c011ec33WeakHandleSlot &&
+        (target == d.c011ec32Target || target == d.c011ec33TargetAfterCollection1)
+        ? 1u : 0u;
+    r.handleScanEntries = d.c011ec30HandleScanEntryCount;
+    r.handleMapReads = d.c011ec30HandleMapReadCount;
+    r.bucketsVisited = d.c011ec30BucketVisitCount;
+    r.tablesVisited = d.c011ec30HandleTableVisitCount;
+    r.segmentsVisited = d.c011ec30SegmentVisitCount;
+    r.blocksVisited = d.c011ec30BlockVisitCount;
+    r.slotsInspected = d.c011ec30HandleSlotInspectCount;
+    r.candidateHandles = d.c011ec30CandidateHandleCount;
+    if (d.c011ec33ActiveCollection == 2u && r.weakSlotMatched != 0u &&
+        r.targetRootMatches == 0u && r.targetMarked == 0u &&
+        r.strongHandleMatches == 0u && r.graphDerivedPromotions == 0u &&
+        r.targetQueueInsertions == 0u && r.targetMarkWrites == 0u &&
+        d.c011ec33Collection1Completed != 0u &&
+        d.c011ec33LifetimeBoundaryReturned != 0u) {
+        d.c011ec33PreflightProven = 1u;
+        guideXosNativeAotC011EC33EmitPreflight();
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33ClearingStoreEntered(
+    uintptr_t slotAddress, uintptr_t before) {
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    r.clearingStoreAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    r.weakHandleSlot = slotAddress;
+    r.weakSlotBefore = before;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33LivenessDecisionObserved(uint32_t promoted) {
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    ++r.livenessDecisions;
+    if (promoted != 0u) ++r.liveDecisions;
+    else ++r.deadDecisions;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33GcDoneEntered(int /*condemned*/) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec33GcDoneCount;
+    guideXosNativeAotC011EC33CurrentCollection().collectionCompleted = 1u;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33RestartEEEntered(int /*finishedGc*/) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec33RestartEntryCount;
+    guideXosNativeAotC011EC33CurrentCollection().eeRestartEntries++;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC33RestartEEReturned(int /*finishedGc*/) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    ++d.c011ec33RestartReturnCount;
+    ++d.c011ec33ManagedResumeCount;
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    ++r.eeRestartReturns;
+    r.managedResumeCount = d.c011ec33ManagedResumeCount;
+    if (d.c011ec33RestartReturnCount == 1u) {
+        d.c011ec33Collection1Completed = 1u;
+    }
+}
+#endif
+
 extern "C" void __cdecl
 guideXosNativeAotC011EC30HandleScanEntered(
     uint32_t condemned, uint32_t maxGeneration, uintptr_t scanContext) {
@@ -10464,11 +11052,67 @@ guideXosNativeAotC011EC30LivenessDecisionObserved(uint32_t promoted) {
 #endif
 }
 
-extern "C" __declspec(noreturn) void __cdecl
+extern "C" void __cdecl
 guideXosNativeAotC011EC30LivenessDecisionCompleted(
     uintptr_t slotAddress, uintptr_t before, uintptr_t after) {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+    guidexos_nativeaot_c011ec33_collection_record& r =
+        guideXosNativeAotC011EC33CurrentCollection();
+    r.weakHandleSlot = slotAddress;
+    r.weakSlotBefore = before;
+    r.weakSlotAfter = after;
+    r.mutationAttempts = before != after ? 1u : 0u;
+    r.livenessDecisionAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if (before != 0u && before == after) ++r.preservedCount;
+    if (before != 0u && after == 0u) ++r.clearedCount;
+    const bool sameSlot = slotAddress == d.c011ec33WeakHandleSlot &&
+        r.weakSlotMatched != 0u;
+    if (d.c011ec33ActiveCollection == 1u) {
+        const bool liveValid =
+            sameSlot && before != 0u && after == before &&
+            r.targetRootMatches != 0u && r.targetMarked != 0u &&
+            r.liveDecisions == 1u && r.deadDecisions == 0u &&
+            r.livenessCallbacks == 1u && r.livenessDecisions == 1u &&
+            d.c011ec33WeakHandleAllocationCount == 1u &&
+            d.c011ec33InitialWeakValue == d.c011ec33InitialTarget;
+        if (liveValid) {
+            guideXosNativeAotC011EC33EmitLive();
+            return;
+        }
+        guideXosNativeAotC011EC33EmitBlocked(0xC0330001u);
+        for (;;) {
+        }
+    }
+    if (d.c011ec33ActiveCollection == 2u) {
+        const bool deadValid =
+            d.c011ec33PreflightProven != 0u &&
+            d.c011ec33Collection1Completed != 0u &&
+            d.c011ec33LifetimeBoundaryReturned != 0u &&
+            r.targetRootMatches == 0u && r.stackRootMatches == 0u &&
+            r.registerRootMatches == 0u &&
+            r.staticThreadStaticRootMatches == 0u &&
+            r.strongHandleMatches == 0u &&
+            r.graphDerivedPromotions == 0u &&
+            r.targetQueueInsertions == 0u &&
+            r.targetMarkWrites == 0u && r.targetMarked == 0u &&
+            r.deadDecisions == 1u && r.liveDecisions == 0u &&
+            r.livenessCallbacks == 1u && r.livenessDecisions == 1u &&
+            sameSlot && before != 0u && after == 0u &&
+            r.clearedCount == 1u;
+        if (deadValid) {
+            d.c011ec33MarkerEmitted = 1u;
+            d.c011ec33SafeStopReason = 0u;
+            guideXosNativeAotC011EC33EmitCompletion();
+        } else {
+            guideXosNativeAotC011EC33EmitBlocked(0xC0330002u);
+        }
+        for (;;) {
+        }
+    }
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK)
     d.c011ec32SlotAddress = slotAddress;
     d.c011ec32SlotBefore = before;
@@ -10708,11 +11352,16 @@ guideXosNativeAotC011EC30LivenessDecisionCompleted(
     }
 }
 
-extern "C" __declspec(noreturn) void __cdecl
+extern "C" void __cdecl
 guideXosNativeAotC011EC30HandleScanCompleted(
     uint32_t condemned, uint32_t maxGeneration) {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+    if (d.c011ec33ActiveCollection == 1u) {
+        return;
+    }
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
     (void)condemned;
     (void)maxGeneration;
@@ -14171,7 +14820,7 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC31StrongRootRecordedFn>(
             guideXosNativeAotC011EC31StrongRootRecorded));
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC32_DEAD_SHORT_WEAK) && !defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
     using GuideXosNativeAotC011EC32WeakHandleAllocatedFn = int (__cdecl*)(
         uintptr_t, uintptr_t, uintptr_t, uint32_t);
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC32WeakHandleAllocated__Ansi =
@@ -14182,6 +14831,22 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC32HelperReturned__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC32HelperReturnedFn>(
             guideXosNativeAotC011EC32HelperReturned));
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+    using GuideXosNativeAotC011EC33WeakHandleAllocatedFn = int (__cdecl*)(
+        uintptr_t, uintptr_t, uintptr_t, uint32_t);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC33WeakHandleAllocated__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC33WeakHandleAllocatedFn>(
+            guideXosNativeAotC011EC33WeakHandleAllocated));
+    using GuideXosNativeAotC011EC33GetCompletedCollectionsFn = int (__cdecl*)(void);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC33GetCompletedCollections__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC33GetCompletedCollectionsFn>(
+            guideXosNativeAotC011EC33GetCompletedCollections));
+    using GuideXosNativeAotC011EC33LifetimeBoundaryReturnedFn = int (__cdecl*)(
+        uintptr_t, uintptr_t, uintptr_t);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC33LifetimeBoundaryReturned__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC33LifetimeBoundaryReturnedFn>(
+            guideXosNativeAotC011EC33LifetimeBoundaryReturned));
 #endif
 #if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     using GuideXosManagedArrayHostLogFn = int (__cdecl*)(void*, void*);

@@ -138,6 +138,78 @@ typedef struct guidexos_nativeaot_candidate_slot_record {
     uintptr_t scanContextIdentity;
 } guidexos_nativeaot_candidate_slot_record;
 
+/* C011EC33 per-collection snapshot for one last-strong-reference transition. */
+typedef struct guidexos_nativeaot_c011ec33_collection_record {
+    uint32_t gcScanRootsEntries;
+    uint32_t gcScanRootsReturns;
+    uint32_t afterGcScanRootsEntries;
+    uint32_t afterGcScanRootsReturns;
+    uint32_t rootEnumerationEntries;
+    uint32_t rootReports;
+    uint32_t targetRootMatches;
+    uint32_t stackRootMatches;
+    uint32_t registerRootMatches;
+    uint32_t ordinaryRootMatches;
+    uint32_t staticThreadStaticRootMatches;
+    uint32_t threadAbortRootMatches;
+    uint32_t strongHandleMatches;
+    uint32_t graphDerivedPromotions;
+    uint32_t targetQueueInsertions;
+    uint32_t targetChildDiscoveries;
+    uint32_t targetMarkWrites;
+    uint32_t targetPromoteCount;
+    uint32_t targetMarkStateBefore;
+    uint32_t targetMarkStateAfter;
+    uint32_t targetMarked;
+    uint32_t markWordMask;
+    uint32_t handleScanEntries;
+    uint32_t handleMapReads;
+    uint32_t bucketsVisited;
+    uint32_t tablesVisited;
+    uint32_t segmentsVisited;
+    uint32_t blocksVisited;
+    uint32_t slotsInspected;
+    uint32_t candidateHandles;
+    uint32_t livenessCallbacks;
+    uint32_t livenessDecisions;
+    uint32_t liveDecisions;
+    uint32_t deadDecisions;
+    uint32_t mutationAttempts;
+    uint32_t preservedCount;
+    uint32_t clearedCount;
+    uint32_t weakSlotMatched;
+    uint32_t collectionCompleted;
+    uint32_t eeRestartEntries;
+    uint32_t eeRestartReturns;
+    uint32_t managedResumeCount;
+    uint32_t condemnedGeneration;
+    uint32_t targetGeneration;
+    uint32_t postWeakPhase;
+    uint32_t postWeakPhaseCount;
+
+    uintptr_t targetAtRoot;
+    uintptr_t weakHandleSlot;
+    uintptr_t weakSlotBefore;
+    uintptr_t weakSlotAfter;
+    uintptr_t rootSlot;
+    uintptr_t rootValue;
+    uintptr_t rootRegisterSlot;
+    uint32_t rootKind;
+    uintptr_t markWordAddress;
+    uintptr_t markWordBefore;
+    uintptr_t markWordAfter;
+    uintptr_t livenessCallbackAddress;
+    uintptr_t livenessDecisionAddress;
+    uintptr_t clearingStoreAddress;
+    uintptr_t controlPc;
+    uintptr_t methodInfo;
+    uintptr_t methodStart;
+    uintptr_t methodEnd;
+    uintptr_t gcInfo;
+    uintptr_t safePointAddress;
+    uintptr_t postWeakPhaseAddress;
+} guidexos_nativeaot_c011ec33_collection_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -1933,6 +2005,38 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec32CurrentBlockFirstSlotAddress;
     uint32_t c011ec32CurrentBlockIndex;
     uint32_t c011ec32CurrentBlockType;
+
+    /* C011EC33 one target/one short-weak handle across two collections. */
+    uint32_t c011ec33ActiveCollection;
+    uint32_t c011ec33GcScanRootsEntryCount;
+    uint32_t c011ec33GcScanRootsReturnCount;
+    uint32_t c011ec33AfterGcScanRootsEntryCount;
+    uint32_t c011ec33AfterGcScanRootsReturnCount;
+    uint32_t c011ec33WeakHandleAllocationCount;
+    uint32_t c011ec33HelperReturned;
+    uint32_t c011ec33LifetimeBoundaryReturned;
+    uint32_t c011ec33Collection1Completed;
+    uint32_t c011ec33GcDoneCount;
+    uint32_t c011ec33RestartEntryCount;
+    uint32_t c011ec33RestartReturnCount;
+    uint32_t c011ec33ManagedResumeCount;
+    uint32_t c011ec33TargetRelocated;
+    uint32_t c011ec33PreflightProven;
+    uint32_t c011ec33MarkerEmitted;
+    uint32_t c011ec33SafeStopReason;
+    uint32_t c011ec33LastPostWeakPhase;
+    uint32_t c011ec33PostWeakPhaseCount;
+
+    uintptr_t c011ec33InitialTarget;
+    uintptr_t c011ec33TargetType;
+    uintptr_t c011ec33WeakHandleSlot;
+    uintptr_t c011ec33InitialWeakValue;
+    uintptr_t c011ec33TargetAfterCollection1;
+    uintptr_t c011ec33HelperReturnAddress;
+    uintptr_t c011ec33LifetimeBoundaryAddress;
+    uintptr_t c011ec33LastPostWeakPhaseAddress;
+
+    guidexos_nativeaot_c011ec33_collection_record c011ec33Collections[2];
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

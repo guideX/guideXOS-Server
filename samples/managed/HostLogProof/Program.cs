@@ -34,6 +34,99 @@ public static unsafe class Program
     private static byte[]? s_gcProofThreadRoot;
 #endif
 
+#if HOSTLOGPROOF_SHORT_WEAK_LIFETIME
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC33WeakHandleAllocated")]
+    private static extern int GuideXosNativeAotC011EC33WeakHandleAllocated(
+        nint target,
+        nint targetType,
+        nint weakHandleSlot,
+        uint handleType);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC33GetCompletedCollections")]
+    private static extern int GuideXosNativeAotC011EC33GetCompletedCollections();
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC33LifetimeBoundaryReturned")]
+    private static extern int GuideXosNativeAotC011EC33LifetimeBoundaryReturned(
+        nint target,
+        nint targetType,
+        nint weakHandleSlot);
+
+    private readonly struct ShortWeakLifetimeSetup
+    {
+        internal readonly nint Target;
+        internal readonly nint TargetType;
+        internal readonly nint WeakHandleSlot;
+        internal readonly int Status;
+
+        internal ShortWeakLifetimeSetup(
+            nint target,
+            nint targetType,
+            nint weakHandleSlot,
+            int status)
+        {
+            Target = target;
+            TargetType = targetType;
+            WeakHandleSlot = weakHandleSlot;
+            Status = status;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static ShortWeakLifetimeSetup CreateAndRunLiveCollection1()
+    {
+        byte[] target = new byte[64];
+        for (int i = 0; i < target.Length; i++)
+        {
+            target[i] = (byte)(0xE0 + i);
+        }
+
+        nint targetAddress = Unsafe.As<byte[], nint>(ref target);
+        nint targetType = typeof(byte[]).TypeHandle.Value;
+        GCHandle weakHandle = GCHandle.Alloc(target, GCHandleType.Weak);
+        nint weakHandleSlot = GCHandle.ToIntPtr(weakHandle);
+        int status = GuideXosNativeAotC011EC33WeakHandleAllocated(
+            targetAddress, targetType, weakHandleSlot,
+            (uint)GCHandleType.Weak);
+
+        const int arrayLength = 4096;
+        byte[] current = null;
+        uint hardLimit = GuideXosManagedAllocationGetHardLimit();
+        if (hardLimit < 8u || hardLimit > 1024u)
+        {
+            return new ShortWeakLifetimeSetup(
+                targetAddress, targetType, weakHandleSlot, -1);
+        }
+
+        for (uint iteration = 0u; iteration < hardLimit; iteration++)
+        {
+            current = new byte[arrayLength];
+            uint zeroByteCount = CountZeroBytes(current);
+            WriteIdentifyingPattern(current, iteration);
+            bool patternValid = HasIdentifyingPattern(current, iteration);
+            nint objectReference = Unsafe.As<byte[], nint>(ref current);
+            if (GuideXosManagedAllocationValidateObject(
+                    objectReference, arrayLength, iteration, zeroByteCount,
+                    patternValid ? 1u : 0u) != 0)
+            {
+                return new ShortWeakLifetimeSetup(
+                    targetAddress, targetType, weakHandleSlot, -1);
+            }
+
+            // This is the controlled strong lifetime: target is a real local
+            // in this NoInlining frame while Collection 1 is enumerating.
+            GC.KeepAlive(target);
+            GC.KeepAlive(current);
+            if (GuideXosNativeAotC011EC33GetCompletedCollections() >= 1)
+            {
+                break;
+            }
+        }
+
+        return new ShortWeakLifetimeSetup(
+            targetAddress, targetType, weakHandleSlot, status);
+    }
+#endif
+
 #if HOSTLOGPROOF_SHORT_WEAK_LIVE
     [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC31WeakHandleAllocated")]
     private static extern int GuideXosNativeAotC011EC31WeakHandleAllocated(
@@ -426,6 +519,71 @@ public static unsafe class Program
                     return GxAbi.ErrorInvalidArgument;
                 }
             }
+            else if (iteration == 1u) sentinel1 = current;
+            else if (iteration == 2u) sentinel2 = current;
+            else if (iteration == 3u) sentinel3 = current;
+            GC.KeepAlive(sentinel0);
+            GC.KeepAlive(sentinel1);
+            GC.KeepAlive(sentinel2);
+            GC.KeepAlive(sentinel3);
+            GC.KeepAlive(current);
+        }
+
+        return GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_SHORT_WEAK_LIFETIME
+        // Collection 1 is triggered while the NoInlining helper owns the
+        // only managed strong reference. Only scalar identity crosses its
+        // return boundary; the same production weak handle remains allocated.
+        ShortWeakLifetimeSetup setup = CreateAndRunLiveCollection1();
+        if (setup.Status != 0 || setup.Target == 0 ||
+            setup.TargetType == 0 || setup.WeakHandleSlot == 0 ||
+            GuideXosNativeAotC011EC33GetCompletedCollections() < 1 ||
+            GuideXosNativeAotC011EC33LifetimeBoundaryReturned(
+                setup.Target, setup.TargetType, setup.WeakHandleSlot) != 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        const int arrayLength = 4096;
+        byte[] sentinel0 = null;
+        byte[] sentinel1 = null;
+        byte[] sentinel2 = null;
+        byte[] sentinel3 = null;
+        byte[] current = null;
+        uint hardLimit = GuideXosManagedAllocationGetHardLimit();
+        if (hardLimit < 8u || hardLimit > 1024u)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        // The helper frame has returned. This outer frame carries only scalar
+        // target/handle identity and ordinary allocation sentinels.
+        for (uint iteration = 0u; iteration < hardLimit; iteration++)
+        {
+            bool sentinelsValid = ValidateSample(sentinel0, 0u) &&
+                ValidateSample(sentinel1, 1u) &&
+                ValidateSample(sentinel2, 2u) &&
+                ValidateSample(sentinel3, 3u);
+            GuideXosManagedAllocationRecordSentinelValidation(
+                iteration == 0u ? 0u : 4u, sentinelsValid ? 0u : 1u);
+            if (!sentinelsValid)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+
+            current = new byte[arrayLength];
+            uint zeroByteCount = CountZeroBytes(current);
+            WriteIdentifyingPattern(current, iteration);
+            bool patternValid = HasIdentifyingPattern(current, iteration);
+            nint objectReference = Unsafe.As<byte[], nint>(ref current);
+            if (GuideXosManagedAllocationValidateObject(
+                    objectReference, arrayLength, iteration, zeroByteCount,
+                    patternValid ? 1u : 0u) != 0)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+
+            if (iteration == 0u) sentinel0 = current;
             else if (iteration == 1u) sentinel1 = current;
             else if (iteration == 2u) sentinel2 = current;
             else if (iteration == 3u) sentinel3 = current;
