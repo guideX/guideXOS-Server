@@ -1,5 +1,6 @@
 #include "save_dialog.h"
 #include "gui_protocol.h"
+#include "desktop_theme.h"
 #include "logger.h"
 #include <sstream>
 #include <algorithm>
@@ -12,6 +13,46 @@
 namespace gxos { namespace dialogs {
     
     using namespace gxos::gui;
+
+    static void publishSciFiRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color) {
+        if (GetCurrentDesktopTheme().id != DesktopThemeId::SciFi || w <= 0 || h <= 0) return;
+
+        ipc::Message msg;
+        msg.type = (uint32_t)MsgType::MT_DrawRect;
+        std::ostringstream oss;
+        oss << windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|"
+            << ((color >> 16) & 0xFFu) << "|" << ((color >> 8) & 0xFFu) << "|" << (color & 0xFFu);
+        const std::string payload = oss.str();
+        msg.data.assign(payload.begin(), payload.end());
+        ipc::Bus::publish("gui.input", std::move(msg), false);
+    }
+
+    static void drawSciFiSaveSurfaces(uint64_t windowId, int entryCount, int selectedIndex,
+                                      int scrollOffset, bool fileNameFocus, int dialogW,
+                                      int padding, int rowH) {
+        const DesktopTheme& theme = GetCurrentDesktopTheme();
+        if (theme.id != DesktopThemeId::SciFi) return;
+
+        const int contentW = dialogW - padding * 2;
+        const int visibleCount = std::min(10, std::max(0, entryCount - scrollOffset));
+        const int listRows = std::max(1, visibleCount);
+        const int listY = rowH;
+        const int listH = listRows * rowH;
+        const int filenameLine = 1 + (visibleCount > 0 ? visibleCount : 1);
+        const int filenameY = filenameLine * rowH;
+        const uint32_t surface = theme.taskbarBackground;
+        const uint32_t filenameSurface = fileNameFocus ? surface : theme.windowBackground;
+
+        publishSciFiRect(windowId, 0, 0, dialogW, 400, theme.windowBackground);
+        publishSciFiRect(windowId, padding, listY, contentW, listH, surface);
+        publishSciFiRect(windowId, padding, filenameY, contentW, rowH, filenameSurface);
+
+        const int selectedRow = selectedIndex - scrollOffset;
+        if (selectedRow >= 0 && selectedRow < visibleCount) {
+            publishSciFiRect(windowId, padding + 1, listY + 1 + selectedRow * rowH,
+                            contentW - 2, rowH, theme.accent);
+        }
+    }
     
     // Static member initialization
     uint64_t SaveDialog::s_windowId = 0;
@@ -67,7 +108,8 @@ namespace gxos { namespace dialogs {
             ipc::Message createMsg;
             createMsg.type = (uint32_t)MsgType::MT_Create;
             std::ostringstream oss;
-            oss << "Save As|520|400|" << x << "|" << y;
+            const uint32_t createFlags = static_cast<uint32_t>(x) | kWindowCreateFlagFileDialogSurface;
+            oss << "Save As|520|400|" << createFlags << "|" << x << "|" << y;
             std::string payload = oss.str();
             createMsg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish(kGuiChanIn, std::move(createMsg), false);
@@ -439,6 +481,9 @@ namespace gxos { namespace dialogs {
         std::string clearPayload = std::to_string(s_windowId) + "|\f";
         clearMsg.data.assign(clearPayload.begin(), clearPayload.end());
         ipc::Bus::publish(kGuiChanIn, std::move(clearMsg), false);
+
+        drawSciFiSaveSurfaces(s_windowId, static_cast<int>(s_entries.size()), s_selectedIndex,
+                              s_scrollOffset, s_fileNameFocus, 520, 10, 24);
         
         // Draw current path
         ipc::Message pathMsg;

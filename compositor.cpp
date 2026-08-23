@@ -319,36 +319,46 @@ namespace gxos {
             return winfo.coreDialogSurface && theme.id == DesktopThemeId::SciFi;
         }
 
-        static bool isPrimaryCoreDialogButton(const WinInfo& winfo, const Widget& widget) {
-            (void)winfo;
+        static bool isSciFiFileDialogSurface(const WinInfo& winfo, const DesktopTheme& theme) {
+            return winfo.fileDialogSurface && theme.id == DesktopThemeId::SciFi;
+        }
+
+        static bool isSciFiDialogSurface(const WinInfo& winfo, const DesktopTheme& theme) {
+            return isSciFiCoreDialogSurface(winfo, theme) || isSciFiFileDialogSurface(winfo, theme);
+        }
+
+        static bool isPrimaryDialogButton(const WinInfo& winfo, const Widget& widget) {
+            if (winfo.fileDialogSurface) {
+                return widget.text == "Open" || widget.text == "Save";
+            }
             return widget.id == 1;
         }
 
-        static uint32_t coreDialogSciFiWidgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+        static uint32_t sciFiDialogWidgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
             const uint32_t secondaryBase = WindowRenderer::BlendThemeColor(theme.windowBackground, theme.taskbarBackground, 18);
             const uint32_t primaryBase = WindowRenderer::BlendThemeColor(theme.windowBackground, theme.accent, 24);
-            const uint32_t base = isPrimaryCoreDialogButton(winfo, widget) ? primaryBase : secondaryBase;
+            const uint32_t base = isPrimaryDialogButton(winfo, widget) ? primaryBase : secondaryBase;
             if (widget.pressed) return WindowRenderer::BlendThemeColor(base, theme.accent, 28);
             if (widget.hover) return WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 18);
             return base;
         }
 
-        static uint32_t coreDialogSciFiWidgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+        static uint32_t sciFiDialogWidgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
             const uint32_t secondaryBase = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.taskbarBorder, 20);
             const uint32_t primaryBase = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.accent, 38);
-            const uint32_t base = isPrimaryCoreDialogButton(winfo, widget) ? primaryBase : secondaryBase;
+            const uint32_t base = isPrimaryDialogButton(winfo, widget) ? primaryBase : secondaryBase;
             if (widget.pressed) return WindowRenderer::BlendThemeColor(base, theme.accent, 24);
             if (widget.hover) return WindowRenderer::BlendThemeColor(base, theme.titleBarText, 14);
             return base;
         }
 
-        static uint32_t coreDialogSciFiWidgetTextColor(const DesktopTheme& theme, const Widget&) {
+        static uint32_t sciFiDialogWidgetTextColor(const DesktopTheme& theme, const Widget&) {
             return theme.titleBarText;
         }
 
         static uint32_t widgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
-            if (isSciFiCoreDialogSurface(winfo, theme)) {
-                return coreDialogSciFiWidgetFillColor(winfo, widget, theme);
+            if (isSciFiDialogSurface(winfo, theme)) {
+                return sciFiDialogWidgetFillColor(winfo, widget, theme);
             }
             if (isImageViewerWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
@@ -364,8 +374,8 @@ namespace gxos {
         }
 
         static uint32_t widgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
-            if (isSciFiCoreDialogSurface(winfo, theme)) {
-                return coreDialogSciFiWidgetBorderColor(winfo, widget, theme);
+            if (isSciFiDialogSurface(winfo, theme)) {
+                return sciFiDialogWidgetBorderColor(winfo, widget, theme);
             }
             if (isImageViewerWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
@@ -381,8 +391,8 @@ namespace gxos {
         }
 
         static uint32_t widgetTextColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
-            if (isSciFiCoreDialogSurface(winfo, theme)) {
-                return coreDialogSciFiWidgetTextColor(theme, widget);
+            if (isSciFiDialogSurface(winfo, theme)) {
+                return sciFiDialogWidgetTextColor(theme, widget);
             }
             if (isImageViewerWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
@@ -4638,7 +4648,7 @@ namespace gxos {
                     }
                     int ty = contentY;
                     for (const auto& tx : winfo.texts) {
-                        const COLORREF textColor = isSciFiCoreDialogSurface(winfo, theme)
+                        const COLORREF textColor = isSciFiDialogSurface(winfo, theme)
                             ? colorFromTheme(theme.titleBarText)
                             : RGB(220, 220, 220);
                         drawUiText(dc, contentX, ty, tx, textColor, FontRole::Default);
@@ -6320,6 +6330,7 @@ namespace gxos {
                     wi.resizable = (createFlags & gui::kWindowCreateFlagResizable) != 0;
                     wi.modal = isDialogTitle(title);
                     wi.coreDialogSurface = (createFlags & gui::kWindowCreateFlagCoreDialogSurface) != 0;
+                    wi.fileDialogSurface = (createFlags & gui::kWindowCreateFlagFileDialogSurface) != 0;
                     wi.ownerPid = m.srcPid;
                     wi.persistenceKey = persistenceKey;
                     int desktopWidth = 1024;
@@ -7916,7 +7927,7 @@ namespace gxos {
                     for (const auto& tx : w.texts) {
                         fbDrawText(pixels, pitch, fbW, fbH,
                             contentX, ty, tx,
-                            isSciFiCoreDialogSurface(w, theme) ? theme.titleBarText : 0x00DCDCDC,
+                            isSciFiDialogSurface(w, theme) ? theme.titleBarText : 0x00DCDCDC,
                             FontRole::Default);
                         ty += SystemFont::MeasureHeight(FontRole::Default);
                     }

@@ -1,9 +1,11 @@
 #include "open_dialog.h"
 #include "gui_protocol.h"
+#include "desktop_theme.h"
 #include "logger.h"
 #include <sstream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 namespace gxos { namespace dialogs {
 
@@ -22,6 +24,40 @@ bool OpenDialog::s_keyDown = false;
 // Static storage for launch parameters
 static std::string s_launchPath;
 static std::function<void(const std::string&)> s_launchOnOpen;
+
+static void publishSciFiRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color) {
+    if (GetCurrentDesktopTheme().id != DesktopThemeId::SciFi || w <= 0 || h <= 0) return;
+
+    ipc::Message m;
+    m.type = static_cast<uint32_t>(MsgType::MT_DrawRect);
+    std::ostringstream payload;
+    payload << windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|"
+            << ((color >> 16) & 0xFFu) << "|" << ((color >> 8) & 0xFFu) << "|" << (color & 0xFFu);
+    const std::string data = payload.str();
+    m.data.assign(data.begin(), data.end());
+    ipc::Bus::publish("gui.input", std::move(m), false);
+}
+
+static void drawSciFiOpenSurfaces(uint64_t windowId, int selectedIndex, int scrollOffset,
+                                  int dialogW, int dialogH, int padding, int rowH, int buttonH) {
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    if (theme.id != DesktopThemeId::SciFi) return;
+    publishSciFiRect(windowId, 0, 0, dialogW, dialogH, theme.windowBackground);
+
+    const int contentW = dialogW - padding * 2;
+    const int listY = rowH;
+    const int listH = dialogH - listY - padding - buttonH - 8;
+    const uint32_t surface = theme.taskbarBackground;
+
+    publishSciFiRect(windowId, padding, listY, contentW, listH, surface);
+
+    const int selectedRow = selectedIndex - scrollOffset;
+    const int visibleRows = std::max(0, (listH - 2) / rowH);
+    if (selectedRow >= 0 && selectedRow < visibleRows) {
+        publishSciFiRect(windowId, padding + 1, listY + 1 + selectedRow * rowH,
+                        contentW - 2, rowH, theme.accent);
+    }
+}
 
 void OpenDialog::Show(int /*ownerX*/, int /*ownerY*/,
                       const std::string& startPath,
@@ -49,7 +85,9 @@ int OpenDialog::main(int /*argc*/, char** /*argv*/) {
     {
         ipc::Message m;
         m.type = static_cast<uint32_t>(MsgType::MT_Create);
-        std::string payload = "Open|" + std::to_string(kDialogW) + "|" + std::to_string(kDialogH);
+        const uint32_t createFlags = kWindowCreateFlagResizable | kWindowCreateFlagFileDialogSurface;
+        std::string payload = "Open|" + std::to_string(kDialogW) + "|" + std::to_string(kDialogH) + "|" +
+            std::to_string(createFlags);
         m.data.assign(payload.begin(), payload.end());
         ipc::Bus::publish("gui.input", std::move(m), false);
     }
@@ -209,6 +247,9 @@ void OpenDialog::redraw() {
     if (s_windowId == 0) return;
     const char* kGuiChanIn = "gui.input";
     std::string wid = std::to_string(s_windowId);
+
+    drawSciFiOpenSurfaces(s_windowId, s_selectedIndex, s_scrollOffset,
+                          kDialogW, kDialogH, kPadding, kRowH, kBtnH);
 
     // Draw current path label
     {

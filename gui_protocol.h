@@ -74,6 +74,9 @@ namespace gxos {
         // existing modal surface treatment. It has no geometry or input
         // semantics and is separate from the generic widget theme path.
         constexpr uint32_t kWindowCreateFlagCoreDialogSurface = 1u << 2;
+        // Visual marker for the hosted Open/Save client surfaces. It has no
+        // geometry, file-system, or input semantics.
+        constexpr uint32_t kWindowCreateFlagFileDialogSurface = 1u << 3;
         inline std::vector<uint8_t> packString(const std::string& s) { return std::vector<uint8_t>(s.begin( ), s.end( )); }
         inline std::string unpackString(const std::vector<uint8_t>& d) { return std::string(d.begin( ), d.end( )); }
 

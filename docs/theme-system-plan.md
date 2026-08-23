@@ -758,6 +758,40 @@ Phase 6A applies the existing Sci Fi desktop language to the three smaller hoste
 * Generic controls outside these three marked dialogs remain unchanged; generic text boxes, lists, checkboxes, radio buttons, combo boxes, tabs, and scrollbars remain future work.
 * Final Phase 6A outcome: Outcome B — implementation complete; direct hosted visual and interaction proof remains technically limited by the unavailable targetable compositor host surface. No Phase 6B implementation was started.
 
+## Phase 6B — Hosted Open/Save Dialog Consistency
+
+Phase 6B applies the existing Sci Fi language to the hosted Open and Save As file-dialog client surfaces without changing their file-navigation or result behavior. The scope is intentionally limited to the two existing dialog implementations and the already-established retained compositor widget/theme path.
+
+* Open and Save As now mark their retained compositor windows with a file-dialog visual create flag. The marker has no geometry, modality, hit-testing, file-system, callback, or keyboard semantics.
+* The compositor reuses the Phase 6A Sci Fi dialog button/text relationships for marked file dialogs. The existing `Open` and `Save` labels identify the primary action; all other file-dialog buttons use the established secondary relationship. Classic windows do not carry the marker and keep the prior rendering path.
+* Open keeps its existing path label, VFS refresh, directory/file text rows, `> ` selection representation, Up/Open/Cancel widgets, keyboard handling, and callback behavior. When Sci Fi is active, a bounded client base, list surface, and selected-row surface are published behind those existing messages using `DesktopTheme` roles.
+* Save As keeps its existing `Save in:` path label, VFS refresh, directory/file text rows, local filename text entry, Drives/Up/Save/Cancel widgets, extension handling, overwrite check, callback behavior, and keyboard handling. When Sci Fi is active, a bounded client base, list surface, filename surface, and selected-row surface are published behind the existing redraw messages.
+* No generic text-box, list-view, scrollbar, button, combo-box, or control framework was introduced. The filename field remains the dialog-local text boundary, and the file list remains the dialog-local rendering path.
+* Dialog dimensions, positions, row heights, button bounds, scroll offsets, focus state, navigation, selection, double-click/open paths where present, result codes, and file-system semantics were not intentionally changed.
+
+### Phase 6B Validation State
+
+* The expected ignored local dependency `third_party\stb\stb_image.h` remained available in the exact checkout.
+* `.\build.bat` succeeded from the exact `v0.3_SCI_FI_THEME` checkout after the Open/Save changes. Existing compiler warnings remained; no compile or link failure occurred.
+* `.\scripts\smoke-theme-system.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-live-directory-desktop-status.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-hosted-display-runtime.ps1` passed in its no-gates, synthetic-only, and dual-window modes.
+* No dedicated Open/Save smoke test exists in this checkout. The existing hosted compositor, modal, and runtime validation paths were reused; no new test framework was added.
+* With the exact branch executable, a Classic Open dialog was created from hosted Notepad, its original path/control layout was visible, and Cancel dismissed it. A Sci Fi Open dialog was created after persisted Sci Fi activation; the direct hosted capture showed the navy client surface, readable path, indigo list surface/selection treatment, and Sci Fi-styled Up/Cancel/Open controls. No project or user file was opened or overwritten.
+* The repository's advertised `vfs.mkdir`, `vfs.write`, and `vfs.ls` console commands are not implemented by this runtime, and the starting `data/` directory was empty. Therefore a disposable-file Open result, directory navigation, scrolling, and Save-to-disposable-path callback could not be honestly claimed from this run. The existing source paths and result/extension/overwrite logic were audited and left behaviorally unchanged.
+* Runtime validation temporarily switched the persisted theme to Sci Fi, then restored `desktop.json`, `desktop.state`, and `display-options.cfg` byte-for-byte to the repository baseline. Temporary runtime bounds state created by this validation was removed.
+
+### Phase 6B Hosted Evidence and Known Limitations
+
+* The strongest available hosted evidence is the direct top-level compositor capture described above, together with the exact executable's retained-window marker logs and geometry. It confirms the file-dialog visual marker, window dimensions, Sci Fi client palette, list surface, readable text, and button treatment.
+* The Open and Save surfaces remain retained compositor content rather than independently targetable Win32 child windows. As in Phase 6A, no screenshot claim is made for an independently captured dialog HWND, and no production compositor redesign was added to manufacture one.
+* Save filename editing, overwrite confirmation, and returned-path behavior remain covered by the existing dialog implementation and source audit, but were not directly demonstrated end-to-end with a disposable file because the current hosted test runtime does not expose the needed VFS operations and the Notepad-hosted Save As route did not provide a reliable direct interaction path in this run.
+* Remaining dialog/control gaps are the pre-existing local list/scroll behavior boundaries, the lack of a shared Sci Fi text-entry control, and the retained-compositor capture limitation. These are future scoped work; Phase 6C is not started.
+
+### Phase 6B Resulting State
+
+The hosted Open and Save As client surfaces now use the same Sci Fi navy/indigo/blue language as the surrounding desktop, shell popups, window chrome, and Phase 6A dialogs while Classic retains its original fallback path. The implementation is complete within the Phase 6B scope. Final outcome: Outcome B — implementation complete; direct hosted visual and interaction proof remains partially limited by the retained compositor surface and the current runtime's unavailable disposable-file operations.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
