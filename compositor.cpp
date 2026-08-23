@@ -1755,6 +1755,28 @@ namespace gxos {
                 : RGB(255, 255, 255);
         }
 
+        static uint32_t hostedNotificationSurfaceColor(const DesktopTheme& theme, NotificationLevel level) {
+            if (!hostedSciFiTheme(theme)) {
+                return level == NotificationLevel::Error ? RGB(120, 40, 40) : RGB(40, 55, 80);
+            }
+
+            const uint32_t base = hostedPanelSurfaceColor(theme);
+            if (level == NotificationLevel::Error) {
+                // Keep the existing error meaning while grounding the surface in
+                // the Sci-Fi panel palette.
+                return WindowRenderer::BlendThemeColor(base, 0xFF782828u, 48);
+            }
+            return WindowRenderer::BlendThemeColor(base, theme.accent, 24);
+        }
+
+        static uint32_t hostedNotificationBorderColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme) ? hostedPanelBorderColor(theme) : RGB(255, 255, 255);
+        }
+
+        static uint32_t hostedNotificationTextColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme) ? theme.titleBarText : RGB(240, 240, 240);
+        }
+
         static uint32_t hostedTaskbarItemFillColor(const DesktopTheme& theme, bool focused, bool hover, bool minimized, bool tombstoned) {
             if (!hostedSciFiTheme(theme)) {
                 return hover ? theme.accent : (focused ? theme.mutedAccent : (minimized ? 0xFF28303Bu : (tombstoned ? 0xFF533F2Cu : 0xFF373A46u)));
@@ -4855,10 +4877,11 @@ namespace gxos {
                         int noteH = 32;
                         int noteX = cr.right - noteW - 8;
                         RECT noteR{ noteX, noteY, noteX + noteW, noteY + noteH };
-                        HBRUSH nb = CreateSolidBrush(n.level == NotificationLevel::Error ? RGB(120, 40, 40) : RGB(40, 55, 80));
+                        HBRUSH nb = CreateSolidBrush(colorFromTheme(hostedNotificationSurfaceColor(theme, n.level)));
                         FillRect(dc, &noteR, nb); DeleteObject(nb);
-                        FrameRect(dc, &noteR, (HBRUSH)GetStockObject(WHITE_BRUSH));
-                        drawUiText(dc, noteX + 12, noteY + 8, nmsg, (int)n.message.size(), RGB(240, 240, 240), FontRole::Default);
+                        HBRUSH noteBorder = CreateSolidBrush(colorFromTheme(hostedNotificationBorderColor(theme)));
+                        FrameRect(dc, &noteR, noteBorder); DeleteObject(noteBorder);
+                        drawUiText(dc, noteX + 12, noteY + 8, nmsg, (int)n.message.size(), colorFromTheme(hostedNotificationTextColor(theme)), FontRole::Default);
                         noteY += noteH + 4;
                     }
                 }

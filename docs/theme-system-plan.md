@@ -792,6 +792,51 @@ Phase 6B applies the existing Sci Fi language to the hosted Open and Save As fil
 
 The hosted Open and Save As client surfaces now use the same Sci Fi navy/indigo/blue language as the surrounding desktop, shell popups, window chrome, and Phase 6A dialogs while Classic retains its original fallback path. The implementation is complete within the Phase 6B scope. Final outcome: Outcome B — implementation complete; direct hosted visual and interaction proof remains partially limited by the retained compositor surface and the current runtime's unavailable disposable-file operations.
 
+## Phase 6C — Hosted Notification & Transient System Surface Consistency
+
+Phase 6C themes the existing hosted desktop notification toast path so a Sci Fi desktop does not fall back to the Classic-colored system notification surface. The scope is intentionally limited to the compositor-owned top-right notification toasts; Phase 5 tooltips and context menus are not repeated, and no notification center or generic transient framework is introduced.
+
+### Phase 6C Scope and Architecture
+
+* `NotificationManager` remains the owner of notification state, queue order, animation progress, five-second lifetime after entry completes, dismissal, and snapshotting. The existing hosted compositor paint block remains the renderer.
+* The covered surface is the hosted GDI top-right toast: its fixed client rectangle, stacked position, information/error fill, border, and message text.
+* The current notification implementation has no close button, hover state, focus route, or per-notification hit testing. None was added.
+* `server.cpp`'s existing `notify <text>` and `notify.clear` commands were used for harmless runtime validation. No new production trigger or test harness was added.
+* Bare-metal notification parity, application-owned transient UI, tooltips, context menus, generic controls, notification history, and actionable notifications remain outside this phase.
+
+### Phase 6C Implementation
+
+* `compositor.cpp` now keeps the original Classic information/error fills, white border, and light text through the Classic branch.
+* When Sci Fi is active, the information surface blends the existing hosted panel surface with `DesktopTheme::accent`; the border uses the existing hosted panel border relationship; and message text uses `DesktopTheme::titleBarText`.
+* Error notifications retain the existing red semantic meaning by blending the established red error color into the Sci Fi panel base. Warning/error categories were not flattened and no notification-only palette was created.
+* Toast width, height, top-right placement, row spacing, text measurement, ordering, lifetime, animation, dismissal, and paint/update flow were not changed.
+
+### Phase 6C Validation State
+
+* The expected ignored dependency `third_party\stb\stb_image.h` remained available in the exact checkout.
+* `.\build.bat` succeeded from the exact `v0.3_SCI_FI_THEME` checkout and produced `guideXOSServer.exe`; existing repository warnings remained without a Phase 6C compile or link failure.
+* `.\scripts\smoke-theme-system.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-live-directory-desktop-status.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-hosted-display-runtime.ps1` passed in no-gates, synthetic-only, and dual-window modes.
+* `git diff --check` passed before the final documentation/commit review.
+* Classic runtime: after `gui.start`, the supported `notify Phase6C Classic` path queued a notification through `NotificationManager`; `notify.clear` completed the manual-dismiss path; the compositor/server lifecycle remained responsive.
+* Sci Fi runtime: after persisted `classic` -> `scifi` restart, `desktop.showconfig` reported `Theme: Sci Fi (scifi)`. Three supported notifications were queued to exercise normal information and stacking/lifetime activity; after the expiry interval the server remained responsive, and `notify.clear` completed cleanup.
+* A harmless unknown desktop-launch attempt also exercised the existing error-notification producer path without modifying files or changing launch behavior.
+* Runtime validation restored `desktop.json`, `desktop.state`, and `display-options.cfg` to the repository baseline. No runtime state, logs, or disposable test artifacts are part of the phase change.
+
+### Phase 6C Hosted Evidence and Known Limitations
+
+* Source evidence confirms the exact hosted renderer now selects Classic or Sci Fi notification colors from the active theme boundary while preserving the existing notification-manager lifecycle.
+* Runtime evidence confirms Classic and Sci Fi persisted-theme restart paths, supported notification queueing, stacking activity, expiry-window responsiveness, manual clearing, and clean compositor shutdown.
+* Direct notification pixels were not claimed. The available computer-control window-state capture returned the foreground desktop/Codex surface rather than an independently targetable retained compositor client, matching the known Phase 6A/6B hosted-surface limitation. No compositor redesign or screenshot-only production exposure was added.
+* Because the capture limitation prevents direct pixel inspection in this environment, exact contrast and visual appearance remain source/runtime-supported rather than independently screenshot-proven. The implementation is therefore classified as Outcome B.
+
+### Phase 6C Resulting State and Remaining Gaps
+
+The existing hosted notification toast now follows the established Sci Fi shell language for information, error, border, and text roles while Classic keeps its original fallback appearance and all notification behavior remains unchanged. Remaining relevant gaps are bare-metal notification parity, any future close/hover affordance if the product adds one, and broader transient/system-surface coverage. No Phase 7 or generic-control work was started.
+
+Final Phase 6C outcome: Outcome B — implementation complete; direct visual proof partially limited by the retained compositor surface.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
