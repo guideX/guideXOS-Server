@@ -1693,7 +1693,7 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 		(parsed.scheme == "https" && parsed.port == 443))) request << ":" << parsed.port;
 	request << "\r\n"
 		<< "User-Agent: guideXOS-Navigator/0.2\r\n"
-		<< "Accept: text/html, text/plain, image/png, */*\r\n"
+		<< "Accept: text/html, text/plain, image/png, image/jpeg, */*\r\n"
 		<< "Accept-Encoding: " << kHttpSharedProductionAcceptEncoding << "\r\n"
 		<< "Connection: close\r\n";
 	if (isPost) {

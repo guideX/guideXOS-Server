@@ -1,17 +1,21 @@
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "guide_web_http_shared.h"
 #include "jpeg_loader.h"
+#include "jpeg_test_fixtures.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
 using gxos::gui::ImageAdapter;
 using gxos::gui::ImageLoadStatus;
 using gxos::gui::ImageSafetyLimits;
+using gxos::gui::JpegHeaderInfo;
+using gxos::gui::JpegProbeStatus;
 
 namespace {
 
@@ -25,6 +29,36 @@ std::vector<uint8_t> readFixture(const char* path)
 {
     std::ifstream file(path, std::ios::binary);
     return std::vector<uint8_t>(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
+int base64Value(char c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+std::vector<uint8_t> decodeFixture(const char* encoded)
+{
+    std::vector<uint8_t> result;
+    if (!encoded) return result;
+    int value = 0;
+    int bits = -8;
+    for (const char* p = encoded; *p; ++p) {
+        if (*p == '=') break;
+        const int digit = base64Value(*p);
+        if (digit < 0) continue;
+        value = (value << 6) | digit;
+        bits += 6;
+        if (bits >= 0) {
+            result.push_back(static_cast<uint8_t>((value >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+    return result;
 }
 
 size_t findMarker(const std::vector<uint8_t>& bytes, uint8_t marker)
@@ -76,6 +110,13 @@ ImageSafetyLimits limitsFor(uint32_t width, uint32_t height)
     return limits;
 }
 
+std::string hexSize(size_t value)
+{
+    std::ostringstream stream;
+    stream << std::hex << value;
+    return stream.str();
+}
+
 } // namespace
 
 int main()
@@ -85,11 +126,40 @@ int main()
     ok &= expect(!fixture.empty(), "tracked JPEG fixture is available");
     if (fixture.empty()) return 1;
 
+    const std::vector<uint8_t> grayscale = decodeFixture(gxos_test_fixtures::kGrayJpeg);
+    const std::vector<uint8_t> color444 = decodeFixture(gxos_test_fixtures::k444RestartJpeg);
+    const std::vector<uint8_t> color422 = decodeFixture(gxos_test_fixtures::k422Jpeg);
+    const std::vector<uint8_t> progressive = decodeFixture(gxos_test_fixtures::kProgressiveJpeg);
+    ok &= expect(!grayscale.empty() && !color444.empty() && !color422.empty() && !progressive.empty(),
+                 "embedded JPEG mode fixtures are available");
+
+    auto expectMode = [&](const std::vector<uint8_t>& bytes, uint32_t width, uint32_t height,
+                          uint8_t components, uint8_t maxH, uint8_t maxV, bool isProgressive,
+                          const char* label) {
+        JpegHeaderInfo info{};
+        const JpegProbeStatus probe = gxos::gui::InspectJpeg(bytes.data(), bytes.size(), info);
+        ok &= expect(probe == JpegProbeStatus::Valid, label);
+        ok &= expect(info.width == width && info.height == height && info.components == components &&
+                     info.maxHorizontalSampling == maxH && info.maxVerticalSampling == maxV &&
+                     info.progressive == isProgressive, "JPEG mode header fields");
+        const auto decoded = ImageAdapter::LoadFromBytes(bytes, label, limitsFor(width, height));
+        ok &= expect(decoded.status == ImageLoadStatus::Ok && decoded.width == static_cast<int>(width) &&
+                     decoded.height == static_cast<int>(height) && decoded.format == gxos::gui::ImageFormat::Jpeg,
+                     "JPEG mode decodes through ImageAdapter");
+    };
+
+    expectMode(grayscale, 16, 24, 1, 2, 2, false, "grayscale JPEG fixture");
+    expectMode(color444, 33, 33, 3, 1, 1, false, "4:4:4 JPEG fixture");
+    expectMode(color422, 640, 480, 3, 2, 1, false, "4:2:2 JPEG fixture");
+    expectMode(progressive, 16, 16, 3, 2, 2, true, "progressive JPEG fixture");
+
     gxos::gui::JpegHeaderInfo header{};
     ok &= expect(gxos::gui::InspectJpeg(fixture.data(), fixture.size(), header) == gxos::gui::JpegProbeStatus::Valid,
                  "baseline JPEG header is valid");
     ok &= expect(header.width == 326 && header.height == 86 && header.components == 3,
                  "baseline JPEG dimensions/components");
+    ok &= expect(header.maxHorizontalSampling == 2 && header.maxVerticalSampling == 2,
+                 "baseline JPEG uses common 4:2:0 sampling");
     ok &= expect(!header.progressive, "fixture is baseline sequential");
 
     const ImageSafetyLimits exactLimits = limitsFor(326, 86);
@@ -122,6 +192,26 @@ int main()
     ok &= expect(ImageAdapter::LoadFromBytes(split, "split.jpg", exactLimits).status == ImageLoadStatus::Ok,
                  "JPEG assembled from split HTTP reads decodes");
 
+    const size_t chunkMidpoint = fixture.size() / 2;
+    std::string chunked = hexSize(chunkMidpoint) + "\r\n";
+    chunked.append(reinterpret_cast<const char*>(fixture.data()), chunkMidpoint);
+    chunked += "\r\n";
+    chunked += hexSize(fixture.size() - chunkMidpoint) + "\r\n";
+    chunked.append(reinterpret_cast<const char*>(fixture.data() + chunkMidpoint), fixture.size() - chunkMidpoint);
+    chunked += "\r\n0\r\nX-JPEG-Fixture: chunked\r\n\r\n";
+    std::vector<char> dechunked(fixture.size() + 1, 0);
+    int dechunkedBytes = 0;
+    char chunkError[96] = {};
+    const bool chunkedOk = gxos::web::httpSharedDecodeChunkedBody(
+        chunked.data(), static_cast<int>(chunked.size()), dechunked.data(),
+        static_cast<int>(dechunked.size()), &dechunkedBytes, chunkError, sizeof(chunkError));
+    ok &= expect(chunkedOk && dechunkedBytes == static_cast<int>(fixture.size()) &&
+                 std::equal(fixture.begin(), fixture.end(), reinterpret_cast<uint8_t*>(dechunked.data())),
+                 "chunked JPEG body is de-framed before decode");
+    ok &= expect(ImageAdapter::LoadFromBytes(reinterpret_cast<const uint8_t*>(dechunked.data()),
+                 static_cast<size_t>(dechunkedBytes), "chunked-fixture.jpg", exactLimits).status == ImageLoadStatus::Ok,
+                 "de-framed chunked JPEG decodes through the image adapter");
+
     ImageSafetyLimits onePixelLess = exactLimits;
     onePixelLess.maxPixels = 326u * 86u - 1u;
     ok &= expect(ImageAdapter::LoadFromBytes(fixture, "pixel-cap.jpg", onePixelLess).status == ImageLoadStatus::TooLarge,
@@ -130,6 +220,14 @@ int main()
     oneByteLess.maxDecodedBytes = 326u * 86u * 4u - 1u;
     ok &= expect(ImageAdapter::LoadFromBytes(fixture, "decoded-byte-cap.jpg", oneByteLess).status == ImageLoadStatus::TooLarge,
                  "decoded-pixel-byte cap rejects max plus one");
+    ImageSafetyLimits widthOneLess = exactLimits;
+    widthOneLess.maxWidth = 325;
+    ok &= expect(ImageAdapter::LoadFromBytes(fixture, "width-cap.jpg", widthOneLess).status == ImageLoadStatus::TooLarge,
+                 "maximum-width boundary rejects one over the configured width");
+    ImageSafetyLimits heightOneLess = exactLimits;
+    heightOneLess.maxHeight = 85;
+    ok &= expect(ImageAdapter::LoadFromBytes(fixture, "height-cap.jpg", heightOneLess).status == ImageLoadStatus::TooLarge,
+                 "maximum-height boundary rejects one over the configured height");
 
     for (uint32_t failAfter = 0; failAfter < 4; ++failAfter) {
         gxos::gui::SetJpegAllocationFailureInjection(failAfter);
@@ -140,6 +238,14 @@ int main()
     gxos::gui::SetJpegAllocationFailureInjection(0xFFFFFFFFu);
     ok &= expect(ImageAdapter::LoadFromBytes(fixture, "post-injection-recovery.jpg", exactLimits).status == ImageLoadStatus::Ok,
                  "valid JPEG recovers after allocation-failure injection");
+
+    gxos::gui::SetImageAllocationFailureInjection(0);
+    ok &= expect(ImageAdapter::LoadFromBytes(fixture, "final-pixel-allocation-failure.jpg", exactLimits).status == ImageLoadStatus::OutOfMemory,
+                 "final JPEG pixel allocation failure reports bounded OOM");
+    gxos::gui::SetImageAllocationFailureInjection(0xFFFFFFFFu);
+    const std::vector<uint8_t> pngFixture = readFixture("assets/Images/NuoveXT/PNG/48/edit_add_10261.png");
+    ok &= expect(!pngFixture.empty() && ImageAdapter::LoadFromBytes(pngFixture, "recovery.png").status == ImageLoadStatus::Ok,
+                 "PNG remains valid after JPEG allocation failure");
 
     std::vector<uint8_t> missingSoi = fixture;
     missingSoi[0] = 0;
@@ -183,8 +289,32 @@ int main()
     ok &= expect(ImageAdapter::LoadFromBytes(missingEoi, "missing-eoi.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
                  "missing EOI fails cleanly");
 
+    const size_t sof = findMarker(fixture, 0xC0);
+    std::vector<uint8_t> zeroDimensions = fixture;
+    if (sof + 8 < zeroDimensions.size()) {
+        zeroDimensions[sof + 5] = 0;
+        zeroDimensions[sof + 6] = 0;
+        zeroDimensions[sof + 7] = 0;
+        zeroDimensions[sof + 8] = 0;
+    }
+    ok &= expect(ImageAdapter::LoadFromBytes(zeroDimensions, "zero-dimensions.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
+                 "zero JPEG dimensions fail cleanly");
+
+    std::vector<uint8_t> unsupportedComponents = fixture;
+    const size_t unsupportedSof = findMarker(unsupportedComponents, 0xC0);
+    if (unsupportedSof + 9 < unsupportedComponents.size()) {
+        const uint16_t oldLength = static_cast<uint16_t>((unsupportedComponents[unsupportedSof + 2] << 8) |
+                                                          unsupportedComponents[unsupportedSof + 3]);
+        const size_t componentEnd = unsupportedSof + 2 + oldLength;
+        unsupportedComponents[unsupportedSof + 9] = 4;
+        unsupportedComponents[unsupportedSof + 2] = static_cast<uint8_t>((oldLength + 3) >> 8);
+        unsupportedComponents[unsupportedSof + 3] = static_cast<uint8_t>(oldLength + 3);
+        unsupportedComponents.insert(unsupportedComponents.begin() + componentEnd, { 4, 0x11, 0 });
+    }
+    ok &= expect(ImageAdapter::LoadFromBytes(unsupportedComponents, "unsupported-components.jpg", exactLimits).status == ImageLoadStatus::UnsupportedFormat,
+                 "unsupported four-component JPEG is rejected without color corruption");
+
     std::vector<uint8_t> impossibleDimensions = fixture;
-    const size_t sof = findMarker(impossibleDimensions, 0xC0);
     if (sof + 8 < impossibleDimensions.size()) {
         impossibleDimensions[sof + 5] = 0xFF;
         impossibleDimensions[sof + 6] = 0xFF;

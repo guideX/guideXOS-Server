@@ -19,6 +19,7 @@
 #define STBI_NO_THREAD_LOCALS
 #define STBI_NO_SIMD
 #define STBI_FAILURE_USERMSG
+#define STBI_MAX_DIMENSIONS 4096
 #define STB_IMAGE_STATIC
 #define STBI_ASSERT(x) do { (void)sizeof(x); } while (0)
 
@@ -127,35 +128,24 @@ static void* gxos_jpeg_realloc_sized(void* ptr, size_t oldSize, size_t newSize)
     uint8_t* oldRaw = static_cast<uint8_t*>(ptr) - sizeof(JpegAllocationHeader);
     JpegAllocationHeader* oldHeader = reinterpret_cast<JpegAllocationHeader*>(oldRaw);
     const size_t actualOldSize = oldHeader->size;
-    size_t activeWithoutOld = 0;
     if (g_jpegAllocationContext) {
-        activeWithoutOld = g_jpegAllocationContext->activeBytes >= actualOldSize
-            ? g_jpegAllocationContext->activeBytes - actualOldSize : 0;
-        if (activeWithoutOld > g_jpegAllocationContext->limitBytes ||
-            newSize > g_jpegAllocationContext->limitBytes - activeWithoutOld) {
+        // stb reallocates while the old buffer is still live. Keep the old
+        // allocation in the accounting until the copy succeeds so the
+        // temporary old+new peak cannot bypass the JPEG workspace budget.
+        if (g_jpegAllocationContext->activeBytes > g_jpegAllocationContext->limitBytes ||
+            newSize > g_jpegAllocationContext->limitBytes - g_jpegAllocationContext->activeBytes) {
             g_jpegAllocationContext->allocationDenied = true;
             return nullptr;
         }
-        if (activeWithoutOld <= g_jpegAllocationContext->limitBytes - newSize &&
-            activeWithoutOld + newSize > g_jpegAllocationContext->peakBytes) {
-            g_jpegAllocationContext->peakBytes = activeWithoutOld + newSize;
-        }
     }
 
-    if (g_jpegAllocationContext) g_jpegAllocationContext->activeBytes = activeWithoutOld;
     uint8_t* newRaw = allocateRaw(newSize);
-    if (!newRaw) {
-        if (g_jpegAllocationContext) g_jpegAllocationContext->activeBytes += actualOldSize;
-        return nullptr;
-    }
+    if (!newRaw) return nullptr;
     const size_t copyBytes = actualOldSize < newSize ? actualOldSize : newSize;
     for (size_t i = 0; i < copyBytes; ++i) newRaw[sizeof(JpegAllocationHeader) + i] = oldRaw[sizeof(JpegAllocationHeader) + i];
 
-    // The old allocation was removed from active accounting before the new
-    // allocation was made; the peak still records the true realloc high-water
-    // mark if the allocator had to hold both buffers at once.
     (void)oldSize;
-    delete[] oldRaw;
+    freeRaw(oldRaw);
     return newRaw + sizeof(JpegAllocationHeader);
 }
 

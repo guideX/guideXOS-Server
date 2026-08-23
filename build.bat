@@ -32,6 +32,9 @@ if not exist "third_party\stb\stb_image.h" (
     exit /b 1
 )
 
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\verify-stb-image.ps1"
+if errorlevel 1 exit /b 1
+
 powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\verify-mbedtls-profile.ps1"
 if errorlevel 1 exit /b 1
 

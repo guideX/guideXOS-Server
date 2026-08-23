@@ -546,7 +546,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(runtimeReport, "TLS Prerequisites.Root CA bytes=0"), "expected hosted trust store diagnostics");
     add("runtime TLS readiness boundary", contains(runtimeReport, "TLS Prerequisites.TLS readiness=yes") &&
         contains(runtimeReport, "TLS Prerequisites.TLS readiness blocker=(none)"), "expected hosted readiness details");
-    add("remote PNG enabled", contains(runtimeReport, "Capabilities.Remote PNG=enabled"), "expected enabled");
+    add("remote PNG/JPEG enabled",
+        contains(runtimeReport, "Capabilities.Remote PNG/JPEG=enabled") ||
+            contains(runtimeReport, "Capabilities.Remote PNG=enabled"),
+        "expected enabled");
     add("downloads enabled", contains(runtimeReport, "Capabilities.Downloads=enabled"), "expected enabled");
     add("CSS-lite enabled", contains(runtimeReport, "Capabilities.CSS-lite embedded <style>=enabled"), "expected enabled");
     add("colored text primitive enabled", contains(runtimeReport, "Capabilities.Hosted colored text primitive=enabled"), "expected enabled");

@@ -6,6 +6,9 @@
 namespace gxos {
 namespace gui {
 
+static uint32_t g_imageFailAfterAllocations = 0xFFFFFFFFu;
+static uint32_t g_imageAllocationAttempts = 0;
+
 Image::Image(int width, int height, int channels)
     : Width(width)
     , Height(height)
@@ -30,6 +33,13 @@ Image::Image(int width, int height, int channels)
         return;
     }
     const size_t totalBytes = widthBytes * heightBytes * channelBytes;
+    if (g_imageFailAfterAllocations != 0xFFFFFFFFu &&
+        g_imageAllocationAttempts++ >= g_imageFailAfterAllocations) {
+        Width = 0;
+        Height = 0;
+        Channels = 0;
+        return;
+    }
     Pixels = new (std::nothrow) uint8_t[totalBytes];
     if (!Pixels) {
         Width = 0;
@@ -75,6 +85,12 @@ Image& Image::operator=(Image&& other) noexcept
 bool Image::isValid() const
 {
     return Width > 0 && Height > 0 && Channels > 0 && Pixels != nullptr;
+}
+
+void SetImageAllocationFailureInjection(uint32_t failAfterAllocations)
+{
+    g_imageFailAfterAllocations = failAfterAllocations;
+    g_imageAllocationAttempts = 0;
 }
 
 } // namespace gui

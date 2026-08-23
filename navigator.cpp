@@ -19271,8 +19271,8 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP read timeout", gxos::web::kHttpReadTimeoutMs) + " ms", ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("File text limit", static_cast<int>(kNavigatorMaxFileBytes)) + " bytes", ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source preview limit", static_cast<int>(kNavigatorMaxSourcePreviewBytes)) + " bytes", ""});
-	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote PNG byte limit", static_cast<int>(kRemoteImageMaxBytes)) + " bytes", ""});
-	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote PNG dimensions", "2048 x 2048 pixels"), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote PNG/JPEG byte limit", static_cast<int>(kRemoteImageMaxBytes)) + " bytes", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote PNG/JPEG dimensions", "2048 x 2048 pixels"), ""});
 
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
 	doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});

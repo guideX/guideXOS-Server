@@ -8366,8 +8366,8 @@ void NavigatorApp::buildPageInfoDocument()
     addBlock(BLOCK_LIST_ITEM, "DNS lookup: A records only, timeout 3000 ms, retries 3");
     addBlock(BLOCK_LIST_ITEM, "File text/source preview limit: 32768 bytes");
     addBlock(BLOCK_LIST_ITEM, "Stored source preview limit: 2048 bytes");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG byte limit: 262144 bytes");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG dimensions: 2048 x 2048 pixels");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG byte limit: 262144 bytes");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG dimensions: 2048 x 2048 pixels");
     addBlock(BLOCK_LINK, "View Source", "about:view-source");
     addBlock(BLOCK_LINK, "Navigator Runtime", "about:navigator-runtime");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
@@ -8427,7 +8427,7 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "File read: enabled through VFS; Local PNG: enabled through shared ImageAdapter where VFS image data exists");
     addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records; HTTP redirects: enabled, limit 5; HTTP chunked transfer decoding: enabled");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images; Downloads: enabled for unsupported HTTP(S) content within the response body limit");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG: enabled-basic for numeric IPv4 and hostname http:// PNG/JPEG images; Downloads: enabled for unsupported HTTP(S) content within the response body limit");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: controlled local smoke remains available, and ProductionValidated trust-store policy enables arbitrary-origin bare-metal https:// with DNS, SNI, certificate, and hostname checks without plaintext fallback");
     addBlock(BLOCK_LIST_ITEM, "Public HTTPS: enabled for arbitrary hostnames only after ProductionValidated trust-store prerequisites; IPv4-only, bounded, and fail-closed without a real production CA bundle");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS bare-metal transport is ready with CA and hostname validation");
@@ -8680,7 +8680,7 @@ void NavigatorApp::buildRuntimeDocument()
     strappend(dnsLine, kernel::dns::get_server() ? dnsIp : "(none)", sizeof(dnsLine));
     addBlock(BLOCK_LIST_ITEM, dnsLine);
     addBlock(BLOCK_LIST_ITEM, "Image backend: shared ImageAdapter + framebuffer/compositor drawing");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG backend: kernel HTTP fetch + ImageAdapter::LoadFromBytes");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG backend: kernel HTTP fetch + ImageAdapter::LoadFromBytes");
 
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "View Source", "about:view-source");
@@ -10941,7 +10941,7 @@ static bool kernel_http_build_request(const char* method, const KernelHttpUrl& p
         APPEND_REQ(":");
         APPEND_REQ(portText);
     }
-    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.2\r\nAccept: text/html, text/plain, image/png, */*\r\nAccept-Encoding: ");
+    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.2\r\nAccept: text/html, text/plain, image/png, image/jpeg, */*\r\nAccept-Encoding: ");
     APPEND_REQ(gxos::web::kHttpSharedProductionAcceptEncoding);
     APPEND_REQ("\r\nConnection: close\r\n");
     if (isPost) {
