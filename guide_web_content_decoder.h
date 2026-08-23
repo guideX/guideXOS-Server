@@ -24,6 +24,7 @@ enum class HttpContentDecodeResult : uint8_t {
     UnsupportedEncoding,
     MalformedCompressedResponse,
     DecodedResponseTooLarge,
+    OutputAllocationFailed,
 };
 
 static const int kHttpContentDecoderFastBits = 9;
@@ -37,11 +38,28 @@ struct HttpContentDecoderHuffmanTable {
     int symbolCount;
 };
 
+// The caller owns the bounded destination.  A sink keeps segmented document
+// storage out of this freestanding decoder while preserving a hard aggregate
+// output limit and a caller-provided DEFLATE history window.
+struct HttpContentDecoderSink {
+    void* context;
+    bool (*writeByte)(void* context, uint8_t value);
+    bool (*prepareHistory)(void* context, uint8_t** history, int* historyCapacity);
+    int capacityBytes;
+    int bytesWritten;
+    uint8_t* history;
+    int historyCapacity;
+    bool capacityExceeded;
+    bool allocationFailed;
+};
+
 struct HttpContentDecoderWorkspace {
     HttpContentDecoderHuffmanTable codeLength;
     HttpContentDecoderHuffmanTable literalLength;
     HttpContentDecoderHuffmanTable distance;
     uint8_t codeLengths[288 + 32];
+    uint32_t lastChecksum;
+    int lastChecksumMode;
 };
 
 inline void httpSharedDecoderCopyLiteral(const char* value, char* out, int outSize)
@@ -111,6 +129,7 @@ inline const char* httpSharedContentDecodeResultName(HttpContentDecodeResult res
     case HttpContentDecodeResult::UnsupportedEncoding: return "Unsupported Content Encoding";
     case HttpContentDecodeResult::MalformedCompressedResponse: return "Malformed Compressed Response";
     case HttpContentDecodeResult::DecodedResponseTooLarge: return "Decoded Response Too Large";
+    case HttpContentDecodeResult::OutputAllocationFailed: return "Document Storage Allocation Failed";
     }
     return "Unknown";
 }
@@ -145,6 +164,16 @@ inline uint32_t httpSharedAdler32(const uint8_t* bytes, int length)
         if (b >= mod) b %= mod;
     }
     return (b << 16) | a;
+}
+
+inline void httpSharedAdler32Update(uint32_t* a, uint32_t* b, uint8_t value)
+{
+    if (!a || !b) return;
+    const uint32_t mod = 65521u;
+    *a += value;
+    if (*a >= mod) *a %= mod;
+    *b += *a;
+    if (*b >= mod) *b %= mod;
 }
 
 inline uint32_t httpSharedReadLe32(const uint8_t* bytes)
@@ -235,6 +264,14 @@ struct HttpSharedDeflateReader {
     uint8_t* output;
     int outputCapacity;
     int outputLength;
+    int outputOffset;
+    HttpContentDecoderSink* sink;
+    uint8_t* history;
+    int historyCapacity;
+    int checksumMode;
+    uint32_t checksumCrc;
+    uint32_t checksumA;
+    uint32_t checksumB;
     uint32_t operations;
     uint32_t operationLimit;
 };
@@ -300,6 +337,62 @@ inline bool httpSharedDeflateAlignByte(HttpSharedDeflateReader* reader)
     return httpSharedDeflateReadBits(reader, discard, &ignored);
 }
 
+inline bool httpSharedDeflateWriteByte(HttpSharedDeflateReader* reader, uint8_t value)
+{
+    if (!reader) return false;
+    if (reader->outputLength >= reader->outputCapacity) {
+        if (reader->sink) reader->sink->capacityExceeded = true;
+        reader->outputLength = reader->outputCapacity + 1;
+        return false;
+    }
+    if (reader->sink) {
+        if (!reader->sink->writeByte ||
+            !reader->sink->writeByte(reader->sink->context, value)) {
+            if (reader->sink->bytesWritten >= reader->sink->capacityBytes) {
+                reader->sink->capacityExceeded = true;
+            } else {
+                reader->sink->allocationFailed = true;
+            }
+            reader->outputLength = reader->outputCapacity + 1;
+            return false;
+        }
+        ++reader->sink->bytesWritten;
+    } else {
+        if (!reader->output) return false;
+        reader->output[reader->outputLength] = value;
+    }
+
+    const int streamOffset = reader->outputLength - reader->outputOffset;
+    if (reader->history && reader->historyCapacity > 0) {
+        reader->history[streamOffset % reader->historyCapacity] = value;
+    }
+    if (reader->checksumMode == 1) {
+        reader->checksumCrc = httpSharedCrc32Update(reader->checksumCrc, value);
+    } else if (reader->checksumMode == 2) {
+        httpSharedAdler32Update(&reader->checksumA, &reader->checksumB, value);
+    }
+    ++reader->outputLength;
+    return true;
+}
+
+inline bool httpSharedDeflateReadBackByte(const HttpSharedDeflateReader* reader,
+                                          int distance, uint8_t* value)
+{
+    if (!reader || !value || distance <= 0 || distance > reader->outputLength - reader->outputOffset) {
+        return false;
+    }
+    const int source = reader->outputLength - distance;
+    if (reader->sink) {
+        if (!reader->history || reader->historyCapacity <= 0) return false;
+        const int streamOffset = source - reader->outputOffset;
+        *value = reader->history[streamOffset % reader->historyCapacity];
+        return true;
+    }
+    if (!reader->output) return false;
+    *value = reader->output[source];
+    return true;
+}
+
 inline bool httpSharedDeflateBuildFixed(HttpContentDecoderWorkspace* workspace)
 {
     if (!workspace) return false;
@@ -318,11 +411,13 @@ inline bool httpSharedDeflateDecode(const uint8_t* input, int inputLength,
                                     uint8_t* output, int outputCapacity,
                                     int outputOffset, int* outputLength,
                                     int* consumed,
-                                    HttpContentDecoderWorkspace* workspace)
+                                    HttpContentDecoderWorkspace* workspace,
+                                    HttpContentDecoderSink* sink = nullptr,
+                                    int checksumMode = 0)
 {
     if (outputLength) *outputLength = outputOffset;
     if (consumed) *consumed = 0;
-    if (!input || inputLength < 0 || !output || outputCapacity < 0 ||
+    if (!input || inputLength < 0 || (!output && !sink) || outputCapacity < 0 ||
         outputOffset < 0 || outputOffset > outputCapacity || !workspace) return false;
 
     HttpSharedDeflateReader reader{};
@@ -331,6 +426,14 @@ inline bool httpSharedDeflateDecode(const uint8_t* input, int inputLength,
     reader.output = output;
     reader.outputCapacity = outputCapacity;
     reader.outputLength = outputOffset;
+    reader.outputOffset = outputOffset;
+    reader.sink = sink;
+    reader.history = sink ? sink->history : nullptr;
+    reader.historyCapacity = sink ? sink->historyCapacity : 0;
+    reader.checksumMode = checksumMode;
+    reader.checksumCrc = 0xFFFFFFFFu;
+    reader.checksumA = 1u;
+    reader.checksumB = 0u;
     reader.operationLimit = (uint32_t)inputLength * 64u + (uint32_t)outputCapacity * 4u + 1024u;
     if (reader.operationLimit < 1024u) reader.operationLimit = 1024u;
 
@@ -371,7 +474,10 @@ inline bool httpSharedDeflateDecode(const uint8_t* input, int inputLength,
             }
             if (lenValue > (uint32_t)(reader.inputLength - reader.inputPosition)) return false;
             for (uint32_t i = 0; i < lenValue; ++i) {
-                reader.output[reader.outputLength++] = reader.input[reader.inputPosition++];
+                if (!httpSharedDeflateWriteByte(&reader, reader.input[reader.inputPosition++])) {
+                    if (outputLength) *outputLength = reader.outputLength;
+                    return false;
+                }
                 if (++reader.operations > reader.operationLimit) return false;
             }
             continue;
@@ -439,12 +545,10 @@ inline bool httpSharedDeflateDecode(const uint8_t* input, int inputLength,
             if (!httpSharedDeflateDecodeSymbol(&reader, &workspace->literalLength, &symbol)) return false;
             if (++reader.operations > reader.operationLimit) return false;
             if (symbol < 256) {
-                if (reader.outputLength >= reader.outputCapacity) {
-                    reader.outputLength = reader.outputCapacity + 1;
+                if (!httpSharedDeflateWriteByte(&reader, (uint8_t)symbol)) {
                     if (outputLength) *outputLength = reader.outputLength;
                     return false;
                 }
-                reader.output[reader.outputLength++] = (uint8_t)symbol;
             } else if (symbol == 256) {
                 endOfBlock = true;
             } else {
@@ -465,15 +569,20 @@ inline bool httpSharedDeflateDecode(const uint8_t* input, int inputLength,
                     if (!httpSharedDeflateReadBits(&reader, distanceExtra[distanceSymbol], &extra)) return false;
                     distance += (int)extra;
                 }
-                if (distance <= 0 || distance > 32768 || distance > reader.outputLength) return false;
+                if (distance <= 0 || distance > 32768 ||
+                    distance > reader.outputLength - reader.outputOffset) return false;
                 if (length > reader.outputCapacity - reader.outputLength) {
                     reader.outputLength = reader.outputCapacity + 1;
                     if (outputLength) *outputLength = reader.outputLength;
                     return false;
                 }
                 for (int i = 0; i < length; ++i) {
-                    reader.output[reader.outputLength] = reader.output[reader.outputLength - distance];
-                    ++reader.outputLength;
+                    uint8_t backReference = 0;
+                    if (!httpSharedDeflateReadBackByte(&reader, distance, &backReference) ||
+                        !httpSharedDeflateWriteByte(&reader, backReference)) {
+                        if (outputLength) *outputLength = reader.outputLength;
+                        return false;
+                    }
                     if (++reader.operations > reader.operationLimit) return false;
                 }
             }
@@ -482,6 +591,10 @@ inline bool httpSharedDeflateDecode(const uint8_t* input, int inputLength,
 
     if (!httpSharedDeflateAlignByte(&reader)) return false;
     if (outputLength) *outputLength = reader.outputLength;
+    workspace->lastChecksumMode = checksumMode;
+    workspace->lastChecksum = checksumMode == 1
+        ? (reader.checksumCrc ^ 0xFFFFFFFFu)
+        : (checksumMode == 2 ? ((reader.checksumB << 16) | reader.checksumA) : 0u);
     if (consumed) {
         const int unreadWholeBytes = reader.bitCount / 8;
         *consumed = reader.inputPosition - unreadWholeBytes;
@@ -503,13 +616,23 @@ inline HttpContentDecodeResult httpSharedDecodeContent(const uint8_t* encoded, i
                                                        uint8_t* decoded, int decodedCapacity,
                                                        int* decodedLength,
                                                        HttpContentDecoderWorkspace* workspace,
-                                                       char* error, int errorLength)
+                                                       char* error, int errorLength,
+                                                       HttpContentDecoderSink* sink = nullptr)
 {
     if (decodedLength) *decodedLength = 0;
     if (error && errorLength > 0) error[0] = '\0';
-    if (!encoded || encodedLength < 0 || !decoded || decodedCapacity < 0 || !workspace) {
+    if (!encoded || encodedLength < 0 || (!decoded && !sink) || decodedCapacity < 0 || !workspace) {
         httpSharedDecoderCopyLiteral("Malformed compressed response", error, errorLength);
         return HttpContentDecodeResult::MalformedCompressedResponse;
+    }
+    if (sink) {
+        sink->capacityExceeded = false;
+        sink->allocationFailed = false;
+        sink->bytesWritten = 0;
+        if (!sink->writeByte || sink->capacityBytes < 0) {
+            httpSharedDecoderCopyLiteral("Document storage sink was invalid", error, errorLength);
+            return HttpContentDecodeResult::OutputAllocationFailed;
+        }
     }
     if (coding == HttpContentCoding::Unsupported) {
         httpSharedDecoderCopyLiteral("Unsupported Content-Encoding", error, errorLength);
@@ -520,9 +643,36 @@ inline HttpContentDecodeResult httpSharedDecodeContent(const uint8_t* encoded, i
             httpSharedDecoderCopyLiteral("Decoded response exceeded the safety limit", error, errorLength);
             return HttpContentDecodeResult::DecodedResponseTooLarge;
         }
-        for (int i = 0; i < encodedLength; ++i) decoded[i] = encoded[i];
+        for (int i = 0; i < encodedLength; ++i) {
+            if (sink) {
+                if (sink->bytesWritten >= sink->capacityBytes ||
+                    !sink->writeByte(sink->context, encoded[i])) {
+                    if (sink->bytesWritten >= sink->capacityBytes) sink->capacityExceeded = true;
+                    else sink->allocationFailed = true;
+                    httpSharedDecoderCopyLiteral(
+                        sink->capacityExceeded ? "Decoded response exceeded the safety limit" :
+                            "Document storage allocation failed", error, errorLength);
+                    return sink->capacityExceeded
+                        ? HttpContentDecodeResult::DecodedResponseTooLarge
+                        : HttpContentDecodeResult::OutputAllocationFailed;
+                }
+                ++sink->bytesWritten;
+            } else {
+                decoded[i] = encoded[i];
+            }
+        }
         if (decodedLength) *decodedLength = encodedLength;
         return HttpContentDecodeResult::Success;
+    }
+
+    if (sink) {
+        if (!sink->prepareHistory ||
+            !sink->prepareHistory(sink->context, &sink->history, &sink->historyCapacity) ||
+            !sink->history || sink->historyCapacity < 32768) {
+            sink->allocationFailed = true;
+            httpSharedDecoderCopyLiteral("Document storage allocation failed", error, errorLength);
+            return HttpContentDecodeResult::OutputAllocationFailed;
+        }
     }
 
     if (coding == HttpContentCoding::Deflate) {
@@ -545,7 +695,11 @@ inline HttpContentDecodeResult httpSharedDecodeContent(const uint8_t* encoded, i
         int outputLengthValue = 0;
         int consumed = 0;
         if (!httpSharedDeflateDecode(encoded + 2, deflateLength, decoded, decodedCapacity, 0,
-                                     &outputLengthValue, &consumed, workspace)) {
+                                     &outputLengthValue, &consumed, workspace, sink, 2)) {
+            if (sink && sink->allocationFailed && !sink->capacityExceeded) {
+                httpSharedDecoderCopyLiteral("Document storage allocation failed", error, errorLength);
+                return HttpContentDecodeResult::OutputAllocationFailed;
+            }
             if (outputLengthValue > decodedCapacity) {
                 if (decodedLength) *decodedLength = outputLengthValue;
                 httpSharedDecoderCopyLiteral("Decoded response exceeded the safety limit", error, errorLength);
@@ -554,7 +708,8 @@ inline HttpContentDecodeResult httpSharedDecodeContent(const uint8_t* encoded, i
             httpSharedDecoderCopyLiteral("Malformed deflate stream", error, errorLength);
             return HttpContentDecodeResult::MalformedCompressedResponse;
         }
-        if (consumed != deflateLength || httpSharedReadBe32(encoded + encodedLength - 4) != httpSharedAdler32(decoded, outputLengthValue)) {
+        if (consumed != deflateLength ||
+            httpSharedReadBe32(encoded + encodedLength - 4) != workspace->lastChecksum) {
             httpSharedDecoderCopyLiteral("Invalid zlib Adler-32 or trailing data", error, errorLength);
             return HttpContentDecodeResult::MalformedCompressedResponse;
         }
@@ -640,7 +795,11 @@ inline HttpContentDecodeResult httpSharedDecodeContent(const uint8_t* encoded, i
         int consumed = 0;
         if (!httpSharedDeflateDecode(encoded + position, encodedLength - position, decoded,
                                      decodedCapacity, memberOutputStart, &outputLengthValue,
-                                     &consumed, workspace)) {
+                                     &consumed, workspace, sink, 1)) {
+            if (sink && sink->allocationFailed && !sink->capacityExceeded) {
+                httpSharedDecoderCopyLiteral("Document storage allocation failed", error, errorLength);
+                return HttpContentDecodeResult::OutputAllocationFailed;
+            }
             if (outputLengthValue > decodedCapacity) {
                 if (decodedLength) *decodedLength = outputLengthValue;
                 httpSharedDecoderCopyLiteral("Decoded response exceeded the safety limit", error, errorLength);
@@ -657,7 +816,7 @@ inline HttpContentDecodeResult httpSharedDecodeContent(const uint8_t* encoded, i
         const int trailer = position + consumed;
         const uint32_t expectedCrc = httpSharedReadLe32(encoded + trailer);
         const uint32_t expectedSize = httpSharedReadLe32(encoded + trailer + 4);
-        const uint32_t actualCrc = httpSharedCrc32(decoded + memberOutputStart, outputLengthValue - memberOutputStart);
+        const uint32_t actualCrc = workspace->lastChecksum;
         const uint32_t actualSize = (uint32_t)(outputLengthValue - memberOutputStart);
         if (expectedCrc != actualCrc) {
             httpSharedDecoderCopyLiteral("Invalid gzip CRC32", error, errorLength);

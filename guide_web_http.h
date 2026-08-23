@@ -22,6 +22,10 @@ namespace gxos {
 namespace web {
 
 constexpr std::size_t kHttpMaxHeaderBytes = static_cast<std::size_t>(kHttpSharedMaxHeaderBytes);
+constexpr std::size_t kHttpMaxEncodedBodyBytes = static_cast<std::size_t>(kHttpSharedMaxBodyBytes);
+constexpr std::size_t kHttpMaxDecodedDocumentBytes =
+	static_cast<std::size_t>(kHttpSharedMaxDecodedDocumentBytes);
+// Compatibility name for callers that mean the encoded transaction-body cap.
 constexpr std::size_t kHttpMaxBodyBytes = static_cast<std::size_t>(kHttpSharedMaxBodyBytes);
 constexpr int kHttpConnectTimeoutMs = kHttpSharedConnectTimeoutMs;
 constexpr int kHttpReadTimeoutMs = kHttpSharedReadTimeoutMs;
@@ -64,6 +68,7 @@ enum class HttpError {
 	UnsupportedContentEncoding,
 	MalformedCompressedResponse,
 	DecodedResponseTooLarge,
+	DocumentStorageAllocationFailed,
 	MalformedChunkedEncoding,
 	TlsHandshakeFailed,
 	TlsCertificateValidationFailed,
@@ -90,6 +95,11 @@ struct HttpResponse {
 	std::size_t contentLength = 0;
 	std::size_t encodedBodyBytes = 0;
 	std::size_t decodedBodyBytes = 0;
+	std::size_t documentSegmentCount = 0;
+	std::size_t documentStorageBytes = 0;
+	std::size_t documentStorageCapacity = 0;
+	std::size_t documentHistoryBytes = 0;
+	bool documentStorageAllocationFailed = false;
 	bool truncatedResponse = false;
 	int redirectCount = 0;
 	std::vector<std::string> redirectChain;

@@ -28,6 +28,7 @@
 #include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
+#include "../../guide_web_document_storage.h"
 
 #include <string.h>
 
@@ -7187,6 +7188,13 @@ NavigatorApp::NavigatorApp()
     m_metaContentLengthPresent = false;
     m_metaEncodedBodyBytes = 0;
     m_metaDecodedBodyBytes = 0;
+    m_metaDocumentSegmentCount = 0;
+    m_metaDocumentStorageBytes = 0;
+    m_metaDocumentStorageCapacity = 0;
+    m_metaDocumentHistoryBytes = 0;
+    m_metaDocumentStorageAllocationFailed = false;
+    m_metaParserScratchBytes = 0;
+    m_metaActiveDocumentBytes = 0;
     m_metaTruncatedResponse = false;
     m_metaContentEncoding[0] = '\0';
     m_metaUnsupportedReason[0] = '\0';
@@ -8150,6 +8158,16 @@ void NavigatorApp::buildPageInfoDocument()
     if (m_metaContentLengthPresent) NAV_INFO_INT("Content-Length: ", m_metaContentLength);
     NAV_INFO_INT("Encoded body bytes: ", m_metaEncodedBodyBytes);
     NAV_INFO_INT("Decoded body bytes: ", m_metaDecodedBodyBytes);
+    NAV_INFO_INT("Document segments: ", m_metaDocumentSegmentCount);
+    NAV_INFO_INT("Document storage bytes: ", m_metaDocumentStorageBytes);
+    NAV_INFO_INT("Document storage cap: ", m_metaDocumentStorageCapacity);
+    NAV_INFO_INT("Decoder history bytes: ", m_metaDocumentHistoryBytes);
+    NAV_INFO_TEXT("Document storage allocation failed: ",
+        m_metaDocumentStorageAllocationFailed ? "yes" : "no");
+    NAV_INFO_INT("Parser scratch bytes: ", m_metaParserScratchBytes);
+    NAV_INFO_INT("Active document bytes: ", m_metaActiveDocumentBytes);
+    NAV_INFO_INT("Encoded body cap: ", gxos::web::kHttpSharedMaxBodyBytes);
+    NAV_INFO_INT("Decoded document cap: ", gxos::web::kHttpSharedMaxDecodedDocumentBytes);
     NAV_INFO_TEXT("Truncated response: ", m_metaTruncatedResponse ? "yes" : "no");
     NAV_INFO_TEXT("Unsupported reason: ", m_metaUnsupportedReason[0] ? m_metaUnsupportedReason : "(none)");
     if (m_metaHttpStatusCode > 0) NAV_INFO_INT("HTTP status: ", m_metaHttpStatusCode);
@@ -8326,8 +8344,21 @@ void NavigatorApp::buildPageInfoDocument()
 #undef NAV_INFO_INT
 
     addBlock(BLOCK_HEADING, "Safety Limits");
-    addBlock(BLOCK_LIST_ITEM, "HTTP header limit: 32768 bytes");
-    addBlock(BLOCK_LIST_ITEM, "HTTP body limit: 262144 bytes");
+    strcopy(line, "HTTP header limit: ", sizeof(line));
+    nav_int_to_text(gxos::web::kHttpSharedMaxHeaderBytes, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " bytes", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Encoded HTTP body limit: ", sizeof(line));
+    nav_int_to_text(gxos::web::kHttpSharedMaxBodyBytes, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " bytes", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Decoded document limit: ", sizeof(line));
+    nav_int_to_text(gxos::web::kHttpSharedMaxDecodedDocumentBytes, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " bytes", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST body limit: 8192 bytes");
     addBlock(BLOCK_LIST_ITEM, "HTTP redirect limit: 5");
     addBlock(BLOCK_LIST_ITEM, "HTTP timeouts: 5000 ms connect/read");
@@ -9185,14 +9216,21 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
     static char resolved[MAX_URL_LEN];
     static char href[MAX_URL_LEN];
 
+    m_metaParserScratchBytes = sizeof(cssRules) + sizeof(currentFormAction) + sizeof(currentFormMethod) +
+        sizeof(currentFormEncoding) + sizeof(text) + sizeof(className) + sizeof(id) + sizeof(action) +
+        sizeof(type) + sizeof(rows) + sizeof(src) + sizeof(alt) + sizeof(widthText) + sizeof(heightText) +
+        sizeof(resolved) + sizeof(href);
+
     const int boundedInputBytes = inputBytes >= 0
-        ? (inputBytes > gxos::web::kHttpSharedMaxBodyBytes ? gxos::web::kHttpSharedMaxBodyBytes : inputBytes)
+        ? (inputBytes > gxos::web::kHttpSharedMaxDecodedDocumentBytes
+            ? gxos::web::kHttpSharedMaxDecodedDocumentBytes : inputBytes)
         : strlen_local(html);
     m_metaParserInvoked = true;
     m_metaParserCompleted = false;
     m_metaParserInputBytes = boundedInputBytes > 0 ? boundedInputBytes : 0;
     m_metaDocumentCreated = false;
     m_metaDocumentCount = 0;
+    m_metaActiveDocumentBytes = 0;
     m_metaActiveDocumentGeneration = m_documentGeneration;
     m_metaTextFragmentCount = 0;
     m_metaLinkCount = 0;
@@ -9404,6 +9442,7 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
     m_metaParserCompleted = true;
     m_metaDocumentCreated = m_blockCount > 0;
     m_metaDocumentCount = m_metaDocumentCreated ? 1 : 0;
+    m_metaActiveDocumentBytes = m_blockCount * static_cast<int>(sizeof(m_blocks[0]));
     m_metaActiveDocumentGeneration = m_documentGeneration;
     for (int i = 0; i < m_blockCount; ++i) {
         const DocBlock& block = m_blocks[i];
@@ -9428,6 +9467,7 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
 static const int kKernelHttpUrlLen = 512;
 static const int kKernelHttpHeaderLimit = gxos::web::kHttpSharedMaxHeaderBytes;
 static const int kKernelHttpBodyLimit = gxos::web::kHttpSharedMaxBodyBytes;
+static const int kKernelHttpDecodedDocumentLimit = gxos::web::kHttpSharedMaxDecodedDocumentBytes;
 static const int kKernelHttpRawLimit = kKernelHttpHeaderLimit + kKernelHttpBodyLimit;
 static const int kKernelHttpPostBodyLimit = 8 * 1024;
 static const int kKernelHttpConnectTimeoutMs = gxos::web::kHttpSharedConnectTimeoutMs;
@@ -9495,6 +9535,12 @@ struct KernelHttpResponse {
     int bodyBytes;
     int encodedBodyBytes;
     int decodedBodyBytes;
+    bool documentStorageUsed;
+    int documentSegmentCount;
+    int documentStorageBytes;
+    int documentStorageCapacity;
+    int documentHistoryBytes;
+    bool documentStorageAllocationFailed;
     int redirectCount;
     bool headerCapHit;
     bool bodyCapHit;
@@ -9593,10 +9639,13 @@ static void kernel_http_capture_trace_snapshot(const KernelHttpResponse& respons
 
 static KernelHttpResponse s_kernelHttpResponse;
 static char s_kernelHttpRaw[kKernelHttpRawLimit + 1];
-static char s_kernelHttpDocumentBody[kKernelHttpBodyLimit + 1];
 // Shared sequential HTTP use keeps this workspace transaction-local by
 // discipline while placing all DEFLATE/Huffman scratch outside the boot stack.
 static gxos::web::HttpContentDecoderWorkspace s_kernelHttpContentDecoderWorkspace;
+// HTML source ownership is dynamic and segmented.  It is transaction-local;
+// parseHtmlDocument copies the bounded strings needed by the active document
+// before the storage is released for the next network/resource transaction.
+static gxos::web::BoundedDocumentStorage s_kernelHttpDocumentStorage;
 
 static void kernel_http_reset_response(KernelHttpResponse* response)
 {
@@ -9616,6 +9665,12 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->bodyBytes = 0;
     response->encodedBodyBytes = 0;
     response->decodedBodyBytes = 0;
+    response->documentStorageUsed = false;
+    response->documentSegmentCount = 0;
+    response->documentStorageBytes = 0;
+    response->documentStorageCapacity = 0;
+    response->documentHistoryBytes = 0;
+    response->documentStorageAllocationFailed = false;
     response->redirectCount = 0;
     response->headerCapHit = false;
     response->bodyCapHit = false;
@@ -9685,6 +9740,12 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     m_metaContentLengthPresent = networkResponse ? networkResponse->contentLengthPresent : false;
     m_metaEncodedBodyBytes = networkResponse ? networkResponse->encodedBodyBytes : 0;
     m_metaDecodedBodyBytes = networkResponse ? networkResponse->decodedBodyBytes : 0;
+    m_metaDocumentSegmentCount = networkResponse ? networkResponse->documentSegmentCount : 0;
+    m_metaDocumentStorageBytes = networkResponse ? networkResponse->documentStorageBytes : 0;
+    m_metaDocumentStorageCapacity = networkResponse ? networkResponse->documentStorageCapacity : 0;
+    m_metaDocumentHistoryBytes = networkResponse ? networkResponse->documentHistoryBytes : 0;
+    m_metaDocumentStorageAllocationFailed = networkResponse ?
+        networkResponse->documentStorageAllocationFailed : false;
     m_metaTruncatedResponse = networkResponse ? networkResponse->truncatedResponse : false;
     strcopy(m_metaUnsupportedReason, networkResponse ? networkResponse->unsupportedReason : "", sizeof(m_metaUnsupportedReason));
     m_metaRedirectCount = redirectCount;
@@ -10730,19 +10791,34 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     response->encodedBodyBytes = encodedBodyBytes;
     const gxos::web::HttpContentCoding coding =
         gxos::web::httpSharedParseContentCoding(response->contentEncoding);
+    const bool htmlDocument = gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html");
+    gxos::web::HttpContentDecoderSink documentSink{};
+    if (htmlDocument) {
+        s_kernelHttpDocumentStorage.reset();
+        documentSink = s_kernelHttpDocumentStorage.decoderSink();
+    }
     int decodedBytes = 0;
     char decodeError[128];
     const gxos::web::HttpContentDecodeResult decodeResult =
         gxos::web::httpSharedDecodeContent(
             reinterpret_cast<const uint8_t*>(s_kernelHttpRaw + bodyStart), encodedBodyBytes,
-            coding, reinterpret_cast<uint8_t*>(response->body), kKernelHttpBodyLimit,
-            &decodedBytes, &s_kernelHttpContentDecoderWorkspace,
-            decodeError, sizeof(decodeError));
-    response->decodedBodyBytes = decodedBytes > kKernelHttpBodyLimit
-        ? kKernelHttpBodyLimit : decodedBytes;
+            coding, htmlDocument ? nullptr : reinterpret_cast<uint8_t*>(response->body),
+            htmlDocument ? kKernelHttpDecodedDocumentLimit : kKernelHttpBodyLimit,
+             &decodedBytes, &s_kernelHttpContentDecoderWorkspace,
+            decodeError, sizeof(decodeError), htmlDocument ? &documentSink : nullptr);
+    response->decodedBodyBytes = htmlDocument
+        ? s_kernelHttpDocumentStorage.size()
+        : (decodedBytes > kKernelHttpBodyLimit ? kKernelHttpBodyLimit : decodedBytes);
     if (decodeResult != gxos::web::HttpContentDecodeResult::Success) {
         response->bodyBytes = 0;
         response->body[0] = '\0';
+        response->documentStorageUsed = false;
+        response->documentSegmentCount = htmlDocument ? s_kernelHttpDocumentStorage.segmentsUsed() : 0;
+        response->documentStorageBytes = htmlDocument ? s_kernelHttpDocumentStorage.size() : 0;
+        response->documentStorageCapacity = htmlDocument ? kKernelHttpDecodedDocumentLimit : 0;
+        response->documentHistoryBytes = htmlDocument ? s_kernelHttpDocumentStorage.historyBytes() : 0;
+        response->documentStorageAllocationFailed = htmlDocument &&
+            (decodeResult == gxos::web::HttpContentDecodeResult::OutputAllocationFailed);
         if (decodeResult == gxos::web::HttpContentDecodeResult::UnsupportedEncoding) {
             strcopy(response->unsupportedReason, "Unsupported Content-Encoding", sizeof(response->unsupportedReason));
             strcopy(response->error, "Unsupported content encoding", sizeof(response->error));
@@ -10750,14 +10826,26 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
             response->bodyCapHit = true;
             strcopy(response->unsupportedReason, "Decoded Response Too Large", sizeof(response->unsupportedReason));
             strcopy(response->error, "Decoded response too large", sizeof(response->error));
+        } else if (decodeResult == gxos::web::HttpContentDecodeResult::OutputAllocationFailed) {
+            strcopy(response->unsupportedReason, "Document Storage Allocation Failed", sizeof(response->unsupportedReason));
+            strcopy(response->error, "Document storage allocation failed", sizeof(response->error));
         } else {
             strcopy(response->unsupportedReason, "Malformed Compressed Response", sizeof(response->unsupportedReason));
             strcopy(response->error, "Compressed response invalid", sizeof(response->error));
         }
         return false;
     }
-    response->bodyBytes = decodedBytes;
-    response->body[decodedBytes] = '\0';
+    response->bodyBytes = htmlDocument ? s_kernelHttpDocumentStorage.size() : decodedBytes;
+    if (htmlDocument) {
+        response->body[0] = '\0';
+        response->documentStorageUsed = true;
+        response->documentSegmentCount = s_kernelHttpDocumentStorage.segmentsUsed();
+        response->documentStorageBytes = s_kernelHttpDocumentStorage.size();
+        response->documentStorageCapacity = kKernelHttpDecodedDocumentLimit;
+        response->documentHistoryBytes = s_kernelHttpDocumentStorage.historyBytes();
+    } else {
+        response->body[decodedBytes] = '\0';
+    }
 
     response->ok = true;
     return true;
@@ -11186,6 +11274,7 @@ static KernelHttpResponse* kernel_http_request_once_internal(const char* url, co
 {
     KernelHttpResponse* response = &s_kernelHttpResponse;
     kernel_http_reset_response(response);
+    s_kernelHttpDocumentStorage.reset();
     strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
     strcopy(response->finalUrl, url ? url : "", sizeof(response->finalUrl));
     s_kernelLastDnsUsed = false;
@@ -11754,6 +11843,39 @@ void NavigatorApp::loadHttpUrl(const char* url)
 {
     clearPageDownloadMetadata();
     loadHttpResponse(url, kernel_http_fetch(url));
+    // The response storage is transaction-local.  HTML parsing has already
+    // copied the bounded strings needed by the active document by the time
+    // loadHttpResponse returns, including any resource loads it initiated.
+    s_kernelHttpDocumentStorage.release();
+}
+
+static bool kernel_http_prepare_document_parser_input(const KernelHttpResponse* response,
+                                                      char** ownedInput,
+                                                      const char** parserInput)
+{
+    if (ownedInput) *ownedInput = nullptr;
+    if (parserInput) *parserInput = nullptr;
+    if (!response || !ownedInput || !parserInput) return false;
+    if (response->documentStorageUsed) {
+        if (response->bodyBytes < 0 ||
+            response->bodyBytes > gxos::web::kHttpSharedMaxDecodedDocumentBytes ||
+            response->documentStorageBytes != response->bodyBytes ||
+            (response->bodyBytes > 0 && response->documentSegmentCount <= 0) ||
+            (response->bodyBytes == 0 && response->documentSegmentCount != 0)) {
+            return false;
+        }
+        char* flattened = s_kernelHttpDocumentStorage.allocateFlattenedCopy();
+        if (!flattened) return false;
+        *ownedInput = flattened;
+        *parserInput = flattened;
+        return true;
+    }
+    if (response->bodyBytes < 0 || response->bodyBytes > kKernelHttpBodyLimit ||
+        response->body[response->bodyBytes] != '\0') {
+        return false;
+    }
+    *parserInput = response->body;
+    return true;
 }
 
 void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* response)
@@ -11779,14 +11901,25 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         rememberPageMetadata(url, url, "http", "", "Null HTTP response", nullptr, 0);
         return;
     }
+    const bool documentStorageValid = response->documentStorageUsed &&
+        response->bodyBytes >= 0 &&
+        response->bodyBytes <= gxos::web::kHttpSharedMaxDecodedDocumentBytes &&
+        response->documentStorageBytes == response->bodyBytes &&
+        ((response->bodyBytes > 0 && response->documentSegmentCount > 0) ||
+         (response->bodyBytes == 0 && response->documentSegmentCount == 0));
     const bool bodyBytesInBounds = response->bodyBytes >= 0 &&
-        response->bodyBytes <= kKernelHttpBodyLimit;
+        ((response->documentStorageUsed && documentStorageValid) ||
+         (!response->documentStorageUsed && response->bodyBytes <= kKernelHttpBodyLimit));
     m_metaBodyBufferValid = bodyBytesInBounds;
-    m_metaBodyNullTerminated = bodyBytesInBounds && response->body[response->bodyBytes] == '\0';
+    m_metaBodyNullTerminated = bodyBytesInBounds &&
+        (response->documentStorageUsed ? documentStorageValid :
+            response->body[response->bodyBytes] == '\0');
     m_metaBodyComplete = response->ok && !response->truncatedResponse &&
         (!response->contentLengthPresent || response->encodedBodyBytes == response->contentLength);
     strcopy(m_metaBodyOwnership,
-        "static-response-buffer-copied-to-document-buffer", sizeof(m_metaBodyOwnership));
+        response->documentStorageUsed
+            ? "segmented-document-storage-flattened-for-parser"
+            : "static-response-buffer-used-for-parser", sizeof(m_metaBodyOwnership));
     strcopy(m_metaHandoffResult, "pending", sizeof(m_metaHandoffResult));
     const char* transportSource = response && response->scheme[0] ? response->scheme : "http";
     auto buildCompatibilityFailureDocument = [&](const char* title, const char* summary) {
@@ -11834,7 +11967,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             addBlock(BLOCK_LIST_ITEM, "Header limit hit: 32768 bytes");
         }
         if (response->bodyCapHit) {
-            addBlock(BLOCK_LIST_ITEM, "Body limit hit: 262144 bytes");
+            addBlock(BLOCK_LIST_ITEM, "Encoded HTTP body limit hit: 262144 bytes");
         }
         if (response->encodedBodyBytes > 0 || response->contentEncoding[0]) {
             char sizeText[24];
@@ -11846,7 +11979,16 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             strcopy(line, "Decoded body bytes: ", sizeof(line));
             strappend(line, sizeText, sizeof(line));
             addBlock(BLOCK_LIST_ITEM, line);
-            addBlock(BLOCK_LIST_ITEM, "Decoded body cap: 262144 bytes");
+            addBlock(BLOCK_LIST_ITEM, "Encoded body cap: 262144 bytes");
+            addBlock(BLOCK_LIST_ITEM, "Decoded document cap: 524288 bytes");
+            nav_int_to_text(response->documentSegmentCount, sizeText, sizeof(sizeText));
+            strcopy(line, "Document segments: ", sizeof(line));
+            strappend(line, sizeText, sizeof(sizeText));
+            addBlock(BLOCK_LIST_ITEM, line);
+            nav_int_to_text(response->documentHistoryBytes, sizeText, sizeof(sizeText));
+            strcopy(line, "Decoder history bytes: ", sizeof(line));
+            strappend(line, sizeText, sizeof(sizeText));
+            addBlock(BLOCK_LIST_ITEM, line);
         }
         addBlock(BLOCK_LIST_ITEM,
             response->tlsSucceededBeforeContentFailure
@@ -11891,9 +12033,17 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         }
         if (streq_local(response->error, "Decoded response too large")) {
             buildCompatibilityFailureDocument("Decoded Response Too Large",
-                "Navigator rejected the decoded representation because it exceeded the configured body limit.");
+                "Navigator rejected the decoded HTML representation because it exceeded the configured document limit.");
             rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
                 "Decoded Response Too Large", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "Document storage allocation failed")) {
+            buildCompatibilityFailureDocument("Document Storage Allocation Failed",
+                "Navigator could not allocate the bounded decoded-document segments or parser handoff buffer.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "Document Storage Allocation Failed", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
                 response->redirectCount, response);
             return;
         }
@@ -11949,8 +12099,6 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
 
     if (response->statusCode == 200) {
         if (gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html")) {
-            int docBytes = response->bodyBytes;
-            if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
             if (!m_metaBodyBufferValid || !m_metaBodyNullTerminated) {
                 strcopy(m_metaHandoffResult, "rejected:invalid-body-buffer", sizeof(m_metaHandoffResult));
                 buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url,
@@ -11961,8 +12109,19 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
                     response->statusCode, response->reason, response->redirectCount, response);
                 return;
             }
-            for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
-            s_kernelHttpDocumentBody[docBytes] = '\0';
+            char* ownedParserInput = nullptr;
+            const char* parserInput = nullptr;
+            if (!kernel_http_prepare_document_parser_input(response, &ownedParserInput, &parserInput)) {
+                strcopy(m_metaHandoffResult, "rejected:document-parser-input", sizeof(m_metaHandoffResult));
+                buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url,
+                    "Navigator could not allocate or flatten the bounded document source.");
+                rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url,
+                    response->finalUrl[0] ? response->finalUrl : url, transportSource,
+                    response->contentType, "Document parser input unavailable", nullptr, 0, nullptr, nullptr,
+                    response->statusCode, response->reason, response->redirectCount, response);
+                return;
+            }
+            const int docBytes = response->bodyBytes;
             strcopy(m_metaHandoffResult, "accepted:html-document", sizeof(m_metaHandoffResult));
             serial::puts("[NAVIGATOR-STREAM] document_handoff status=");
             char handoffStatus[16];
@@ -11979,10 +12138,11 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             serial::puts(" final=");
             serial::puts(response->finalUrl[0] ? response->finalUrl : url);
             serial::puts("\n");
-            parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
+            parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, parserInput,
                 transportSource, response->contentType, response->statusCode, response->reason,
                 response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount, response,
                 docBytes);
+            delete[] ownedParserInput;
         } else if (!response->contentType[0] || gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
             strcopy(m_metaHandoffResult, "accepted:plain-text-document", sizeof(m_metaHandoffResult));
             strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
@@ -12144,6 +12304,7 @@ void NavigatorApp::submitFormsLitePost(const char* action, const char* body, int
         m_forwardCount = 0;
     }
     loadHttpResponse(safeAction, response);
+    s_kernelHttpDocumentStorage.release();
 }
 
 bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* contentType,
@@ -12171,24 +12332,31 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (redirectCount) *redirectCount = response->redirectCount;
     if (!response->ok) {
         if (error && errorLen > 0) strcopy(error, response->error, errorLen);
+        s_kernelHttpDocumentStorage.release();
         return false;
     }
 
     NavigatorApp* heapApp = new NavigatorApp();
     if (!heapApp) {
         if (error && errorLen > 0) strcopy(error, "Navigator allocation failed", errorLen);
+        s_kernelHttpDocumentStorage.release();
         return false;
     }
     NavigatorApp& app = *heapApp;
+    bool parserInputReady = true;
     if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html")) {
-        int docBytes = response->bodyBytes;
-        if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
-        for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
-        s_kernelHttpDocumentBody[docBytes] = '\0';
-        app.parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
-            response->scheme[0] ? response->scheme : "http", response->contentType, response->statusCode,
-            response->reason, response->requestedUrl[0] ? response->requestedUrl : url,
-            response->redirectCount, response, docBytes);
+        char* ownedParserInput = nullptr;
+        const char* parserInput = nullptr;
+        parserInputReady = kernel_http_prepare_document_parser_input(response, &ownedParserInput, &parserInput);
+        if (parserInputReady) {
+            app.parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, parserInput,
+                response->scheme[0] ? response->scheme : "http", response->contentType, response->statusCode,
+                response->reason, response->requestedUrl[0] ? response->requestedUrl : url,
+                response->redirectCount, response, response->bodyBytes);
+        } else if (error && errorLen > 0) {
+            strcopy(error, "Document parser input unavailable", errorLen);
+        }
+        delete[] ownedParserInput;
     } else if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
         app.m_blockCount = 0;
         app.addBlock(BLOCK_PREFORMATTED, response->body);
@@ -12197,7 +12365,8 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (remoteImages) *remoteImages = app.m_metaRemoteImages;
     if (loadedImages) *loadedImages = app.m_metaLoadedImages;
     if (failedImages) *failedImages = app.m_metaFailedImages;
-    const bool result = response->ok;
+    const bool result = response->ok && parserInputReady;
+    s_kernelHttpDocumentStorage.release();
     delete heapApp;
     return result;
 }
@@ -14266,6 +14435,14 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     serial_put_dec((uint32_t)app.m_metaEncodedBodyBytes);
     serial::puts(" decoded_body_bytes=");
     serial_put_dec((uint32_t)app.m_metaDecodedBodyBytes);
+    serial::puts(" document_segments=");
+    serial_put_dec((uint32_t)app.m_metaDocumentSegmentCount);
+    serial::puts(" document_storage_bytes=");
+    serial_put_dec((uint32_t)app.m_metaDocumentStorageBytes);
+    serial::puts(" document_storage_capacity=");
+    serial_put_dec((uint32_t)app.m_metaDocumentStorageCapacity);
+    serial::puts(" decoder_history_bytes=");
+    serial_put_dec((uint32_t)app.m_metaDocumentHistoryBytes);
     serial::puts(" content_encoding=");
     serial::puts(app.m_metaContentEncoding[0] ? app.m_metaContentEncoding : "identity");
     serial::puts(" result=");
@@ -17011,10 +17188,10 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_body_bytes=");
     serial_put_dec((uint32_t)decodedBodyBytes);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_body_cap=");
-    serial_put_dec((uint32_t)gxos::web::kHttpSharedMaxBodyBytes);
+    serial_put_dec((uint32_t)gxos::web::kHttpSharedMaxDecodedDocumentBytes);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_cap_headroom=");
-    serial_put_dec((uint32_t)(decodedBodyBytes < gxos::web::kHttpSharedMaxBodyBytes
-        ? gxos::web::kHttpSharedMaxBodyBytes - decodedBodyBytes : 0));
+    serial_put_dec((uint32_t)(decodedBodyBytes < gxos::web::kHttpSharedMaxDecodedDocumentBytes
+        ? gxos::web::kHttpSharedMaxDecodedDocumentBytes - decodedBodyBytes : 0));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.parsed_blocks=");
     serial_put_dec((uint32_t)parsedBlocks);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.content_type=");

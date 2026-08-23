@@ -57,6 +57,11 @@ struct NavigatorPageMetadata {
 	size_t      contentLength = 0;
 	size_t      encodedBodyBytes = 0;
 	size_t      decodedBodyBytes = 0;
+	size_t      documentSegmentCount = 0;
+	size_t      documentStorageBytes = 0;
+	size_t      documentStorageCapacity = 0;
+	size_t      documentHistoryBytes = 0;
+	bool        documentStorageAllocationFailed = false;
 	bool        truncatedResponse = false;
 	bool        redirected = false;
 	int         redirectCount = 0;

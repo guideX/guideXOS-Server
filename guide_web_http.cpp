@@ -1,4 +1,5 @@
 #include "guide_web_http.h"
+#include "guide_web_document_storage.h"
 #include "network_telemetry.h"
 
 #include <algorithm>
@@ -154,21 +155,45 @@ static bool decodeContentEncoding(HttpResponse& response)
 	}
 
 	static HttpContentDecoderWorkspace workspace;
-	std::string decoded(kHttpMaxBodyBytes, '\0');
+	const bool htmlDocument = response.contentType == "text/html";
+	const std::size_t decodedLimit = htmlDocument ? kHttpMaxDecodedDocumentBytes : kHttpMaxBodyBytes;
+	BoundedDocumentStorage documentStorage;
+	HttpContentDecoderSink documentSink{};
+	std::string decoded;
+	if (htmlDocument) {
+		documentSink = documentStorage.decoderSink();
+	} else {
+		decoded.assign(decodedLimit, '\0');
+	}
 	int decodedLength = 0;
 	char error[160] = {};
 	const HttpContentDecodeResult result = httpSharedDecodeContent(
 		reinterpret_cast<const uint8_t*>(response.body.data()),
 		static_cast<int>(response.body.size()), coding,
-		reinterpret_cast<uint8_t*>(&decoded[0]), static_cast<int>(decoded.size()),
-		&decodedLength, &workspace, error, sizeof(error));
-	response.decodedBodyBytes = decodedLength > 0
-		? static_cast<std::size_t>(std::min(decodedLength, static_cast<int>(kHttpMaxBodyBytes)))
-		: 0;
+		htmlDocument ? nullptr : reinterpret_cast<uint8_t*>(&decoded[0]),
+		static_cast<int>(decodedLimit), &decodedLength, &workspace, error, sizeof(error),
+		htmlDocument ? &documentSink : nullptr);
+	response.decodedBodyBytes = htmlDocument
+		? static_cast<std::size_t>(documentStorage.size())
+		: (decodedLength > 0
+			? static_cast<std::size_t>(std::min(decodedLength, static_cast<int>(decodedLimit)))
+			: 0);
+	response.documentSegmentCount = htmlDocument ? static_cast<std::size_t>(documentStorage.segmentsUsed()) : 0;
+	response.documentStorageBytes = htmlDocument ? static_cast<std::size_t>(documentStorage.size()) : 0;
+	response.documentStorageCapacity = htmlDocument ? static_cast<std::size_t>(documentStorage.capacityBytes()) : 0;
+	response.documentHistoryBytes = htmlDocument ? static_cast<std::size_t>(documentStorage.historyBytes()) : 0;
+	response.documentStorageAllocationFailed = htmlDocument && documentStorage.allocationFailed;
 	if (result == HttpContentDecodeResult::DecodedResponseTooLarge) {
 		response.bodyCapHit = true;
 		setError(response, HttpError::DecodedResponseTooLarge,
 			"Decoded response exceeded the safety limit.");
+		response.body.clear();
+		return false;
+	}
+	if (result == HttpContentDecodeResult::OutputAllocationFailed) {
+		response.documentStorageAllocationFailed = true;
+		setError(response, HttpError::DocumentStorageAllocationFailed,
+			"Decoded document storage allocation failed.");
 		response.body.clear();
 		return false;
 	}
@@ -178,7 +203,20 @@ static bool decodeContentEncoding(HttpResponse& response)
 		response.body.clear();
 		return false;
 	}
-	decoded.resize(static_cast<std::size_t>(decodedLength));
+	if (htmlDocument) {
+		decoded.assign(static_cast<std::size_t>(documentStorage.size() + 1), '\0');
+		if (!documentStorage.flatten(reinterpret_cast<uint8_t*>(&decoded[0]),
+			static_cast<int>(decoded.size()))) {
+			response.documentStorageAllocationFailed = true;
+			setError(response, HttpError::DocumentStorageAllocationFailed,
+				"Decoded document flattening failed.");
+			response.body.clear();
+			return false;
+		}
+		decoded.resize(static_cast<std::size_t>(documentStorage.size()));
+	} else {
+		decoded.resize(static_cast<std::size_t>(decodedLength));
+	}
 	response.body = std::move(decoded);
 	return true;
 }
@@ -1512,6 +1550,7 @@ const char* httpErrorName(HttpError error)
 	case HttpError::UnsupportedContentEncoding: return "UnsupportedContentEncoding";
 	case HttpError::MalformedCompressedResponse: return "MalformedCompressedResponse";
 	case HttpError::DecodedResponseTooLarge: return "DecodedResponseTooLarge";
+	case HttpError::DocumentStorageAllocationFailed: return "DocumentStorageAllocationFailed";
 	case HttpError::MalformedChunkedEncoding: return "MalformedChunkedEncoding";
 	case HttpError::TlsHandshakeFailed: return "TlsHandshakeFailed";
 	case HttpError::TlsCertificateValidationFailed: return "TlsCertificateValidationFailed";

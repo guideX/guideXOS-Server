@@ -13,7 +13,14 @@ namespace gxos {
 namespace web {
 
 static const int kHttpSharedMaxHeaderBytes = 32 * 1024;
+// The encoded HTTP transaction remains deliberately bounded at 256 KiB.
+// Decoded HTML has a separate, larger semantic limit because compression can
+// make an ordinary document substantially larger than its wire representation.
 static const int kHttpSharedMaxBodyBytes = 256 * 1024;
+static const int kHttpSharedDecodedDocumentSegmentBytes = 16 * 1024;
+static const int kHttpSharedMaxDecodedDocumentSegments = 32;
+static const int kHttpSharedMaxDecodedDocumentBytes =
+    kHttpSharedDecodedDocumentSegmentBytes * kHttpSharedMaxDecodedDocumentSegments;
 static const int kHttpSharedMaxUrlBytes = 2048;
 static const int kHttpSharedMaxHostnameBytes = 253;
 static const int kHttpSharedMaxRemoteResources = 32;

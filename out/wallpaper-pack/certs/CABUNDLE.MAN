@@ -1,15 +1,15 @@
 {
     "schema_version":  "guidexos.navigator.ca-bundle-manifest.v0.1",
-    "bundle_type":  "production-public-probe-merged",
-    "source":  "merged:explicit-public-root-input+scripts/fixtures/navigator-validated-root-ca-bundle.pem",
-    "generated_utc":  "2026-08-22T20:01:07.3869288Z",
-    "root_count":  122,
-    "pem_bytes":  190251,
-    "sha256":  "5f95400e255b60708d0e2350b1025a03952cd5b4e25b76c1504946489ee74343",
-    "subject_summary":  "CN=guideXOS Navigator Validated Root CA | CN=COMODO ECC Certification Authority, O=COMODO CA Limited, L=Salford, S=Greater Manchester, C=GB | CN=NetLock Arany (Class Gold) F?tan?s?tv?ny, OU=Tan?s?tv?nykiad?k (Certification Services), O=NetLock Kft., L=Budapest, C=HU | E=info@e-szigno.hu, CN=Microsec e-Szigno Root CA 2009, O=Microsec Ltd., L=Budapest, C=HU | +118 more",
+    "bundle_type":  "shipped-public",
+    "source":  "curl-ca-extract:Mozilla-2026-08-13",
+    "generated_utc":  "2026-08-13T03:12:01.0000000Z",
+    "root_count":  121,
+    "pem_bytes":  188900,
+    "sha256":  "f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9",
+    "subject_summary":  "CN=COMODO ECC Certification Authority, O=COMODO CA Limited, L=Salford, S=Greater Manchester, C=GB | CN=NetLock Arany (Class Gold) F?tan?s?tv?ny, OU=Tan?s?tv?nykiad?k (Certification Services), O=NetLock Kft., L=Budapest, C=HU | E=info@e-szigno.hu, CN=Microsec e-Szigno Root CA 2009, O=Microsec Ltd., L=Budapest, C=HU | CN=GlobalSign, O=GlobalSign, OU=GlobalSign Root CA - R3 | +117 more",
     "not_before_min":  "2007-12-13T13:08:28.0000000Z",
     "not_after_max":  "2049-01-14T05:52:34.0000000Z",
     "production_ready":  "yes",
     "test_only":  "no",
-    "rotation_id":  "sha256:5f95400e255b60708d0e2350b1025a03952cd5b4e25b76c1504946489ee74343"
+    "rotation_id":  "mozilla-2026-08-13"
 }

@@ -835,6 +835,13 @@ private:
     bool m_metaContentLengthPresent;
     int m_metaEncodedBodyBytes;
     int m_metaDecodedBodyBytes;
+    int m_metaDocumentSegmentCount;
+    int m_metaDocumentStorageBytes;
+    int m_metaDocumentStorageCapacity;
+    int m_metaDocumentHistoryBytes;
+    bool m_metaDocumentStorageAllocationFailed;
+    int m_metaParserScratchBytes;
+    int m_metaActiveDocumentBytes;
     bool m_metaTruncatedResponse;
     char m_metaContentEncoding[32];
     char m_metaUnsupportedReason[128];

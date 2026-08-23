@@ -14430,6 +14430,14 @@ std::string Navigator::SmokePageDiagnostics()
 	out << "response_framing=" << m.responseFraming << "\n";
 	out << "content_length_present=" << yesNo(m.contentLengthPresent) << "\n";
 	out << "content_length=" << m.contentLength << "\n";
+	out << "encoded_body_bytes=" << m.encodedBodyBytes << "\n";
+	out << "decoded_body_bytes=" << m.decodedBodyBytes << "\n";
+	out << "decoded_document_cap=" << gxos::web::kHttpMaxDecodedDocumentBytes << "\n";
+	out << "document_segments=" << m.documentSegmentCount << "\n";
+	out << "document_storage_bytes=" << m.documentStorageBytes << "\n";
+	out << "document_storage_capacity=" << m.documentStorageCapacity << "\n";
+	out << "decoder_history_bytes=" << m.documentHistoryBytes << "\n";
+	out << "document_storage_allocation_failed=" << yesNo(m.documentStorageAllocationFailed) << "\n";
 	out << "truncated_response=" << yesNo(m.truncatedResponse) << "\n";
 	out << "redirect_count=" << m.redirectCount << "\n";
 	out << "error_status=" << m.errorStatus << "\n";
@@ -19068,6 +19076,11 @@ WebDocument Navigator::buildPageInfoDocument()
 	}
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Encoded body bytes", static_cast<int>(m.encodedBodyBytes)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Decoded body bytes", static_cast<int>(m.decodedBodyBytes)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Document segments", static_cast<int>(m.documentSegmentCount)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Document storage bytes", static_cast<int>(m.documentStorageBytes)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Document storage cap", static_cast<int>(m.documentStorageCapacity)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Decoder history bytes", static_cast<int>(m.documentHistoryBytes)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Document storage allocation failed", yesNo(m.documentStorageAllocationFailed)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Truncated response", yesNo(m.truncatedResponse)), ""});
 
 	if (m.httpStatusCode > 0) {
@@ -19204,6 +19217,7 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::Heading, "Safety Limits", ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP header limit", static_cast<int>(gxos::web::kHttpMaxHeaderBytes)) + " bytes", ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP body limit", static_cast<int>(gxos::web::kHttpMaxBodyBytes)) + " bytes", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Decoded document limit", static_cast<int>(gxos::web::kHttpMaxDecodedDocumentBytes)) + " bytes", ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP redirect limit", gxos::web::kHttpMaxRedirects), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP connect timeout", gxos::web::kHttpConnectTimeoutMs) + " ms", ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP read timeout", gxos::web::kHttpReadTimeoutMs) + " ms", ""});
@@ -19823,6 +19837,11 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.contentLength = response.contentLength;
 	metadata.encodedBodyBytes = response.encodedBodyBytes;
 	metadata.decodedBodyBytes = response.decodedBodyBytes;
+	metadata.documentSegmentCount = response.documentSegmentCount;
+	metadata.documentStorageBytes = response.documentStorageBytes;
+	metadata.documentStorageCapacity = response.documentStorageCapacity;
+	metadata.documentHistoryBytes = response.documentHistoryBytes;
+	metadata.documentStorageAllocationFailed = response.documentStorageAllocationFailed;
 	metadata.truncatedResponse = response.truncatedResponse;
 	if (response.redirectCount < 0 || response.redirectCount > gxos::web::kHttpMaxRedirects)
 		incrementLifecycleCounter(s_lifecycleDiagnostics.transitionMetadataClamps);
