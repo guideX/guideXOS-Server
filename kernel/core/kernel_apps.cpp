@@ -7173,6 +7173,7 @@ NavigatorApp::NavigatorApp()
       m_documentGeneration(0),
       m_focusedFormBlock(-1), m_formCaret(0)
 {
+    for (int i = 0; i < MAX_BLOCKS; ++i) m_imagePaintLogged[i] = false;
     strcopy(m_status, "Ready", MAX_STATUS_LEN);
     strcopy(m_currentUrl, "about:navigator", MAX_URL_LEN);
     strcopy(m_title, "guideXOS Navigator", MAX_TITLE_LEN_NAV);
@@ -7930,6 +7931,7 @@ void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url, c
     if (m_blockCount >= MAX_BLOCKS) return;
     DocBlock& block = m_blocks[m_blockCount];
     block = DocBlock{};
+    m_imagePaintLogged[m_blockCount] = false;
     block.kind = kind;
     strcopy(block.text, text ? text : "", MAX_BLOCK_TEXT);
     strcopy(block.url, url ? url : "", MAX_URL_LEN);
@@ -7945,6 +7947,7 @@ void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* r
     if (m_blockCount >= MAX_BLOCKS) return;
     DocBlock& block = m_blocks[m_blockCount];
     block = DocBlock{};
+    m_imagePaintLogged[m_blockCount] = false;
     block.kind = BLOCK_IMAGE;
     strcopy(block.text, alt ? alt : "", MAX_BLOCK_TEXT);
     strcopy(block.url, resolvedUrl ? resolvedUrl : "", MAX_URL_LEN);
@@ -9500,7 +9503,7 @@ static const char* kNavigatorRealPublicProbeCaCertsCompatPath = "/config/navigat
 static const char* kNavigatorRealPublicProbeCaEnabledPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
 static const char* kNavigatorRealPublicProbeCaEnabledCompatPath = "/config/navigator/RPUBCAEN.TXT";
 static const char* kNavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/";
-static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.6";
+static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.7";
 static const uint32_t kNavigatorSmokeTextFileMaxBytes = 512u;
 
 enum class NavigatorHttpsSmokeFaultMode {
@@ -11700,6 +11703,7 @@ void NavigatorApp::releaseImageResources()
             gxos::gui::ImageAdapter::Release(bitmap);
         }
         block.imagePixels = nullptr;
+        m_imagePaintLogged[i] = false;
     }
 }
 
@@ -12397,6 +12401,11 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (remoteImages) *remoteImages = app.m_metaRemoteImages;
     if (loadedImages) *loadedImages = app.m_metaLoadedImages;
     if (failedImages) *failedImages = app.m_metaFailedImages;
+    app::KernelWindow smokeWindow;
+    smokeWindow.w = 920;
+    smokeWindow.h = 640;
+    app.m_window = &smokeWindow;
+    app.drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
     const bool result = response->ok && parserInputReady;
     s_kernelHttpDocumentStorage.release();
     delete heapApp;
@@ -13758,6 +13767,28 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
                 bitmap.height = (uint32_t)m_blocks[i].naturalHeight;
                 bitmap.format = (gxos::gui::ImageFormat)m_blocks[i].imageFormat;
                 bool drew = gxos::gui::ImageAdapter::DrawToFramebuffer(bitmap, textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH);
+                if (drew && !m_imagePaintLogged[i]) {
+                    m_imagePaintLogged[i] = true;
+                    char blockText[16];
+                    char widthText[16];
+                    char heightText[16];
+                    char formatText[16];
+                    nav_int_to_text(i, blockText, sizeof(blockText));
+                    nav_int_to_text((int)bitmap.width, widthText, sizeof(widthText));
+                    nav_int_to_text((int)bitmap.height, heightText, sizeof(heightText));
+                    nav_int_to_text((int)bitmap.format, formatText, sizeof(formatText));
+                    serial::puts("[NAVIGATOR-PAINT] image_block=");
+                    serial::puts(blockText);
+                    serial::puts(" status=Ok format=");
+                    serial::puts(formatText);
+                    serial::puts(" dims=");
+                    serial::puts(widthText);
+                    serial::putc('x');
+                    serial::puts(heightText);
+                    serial::puts(" url=");
+                    serial::puts(m_blocks[i].url);
+                    serial::puts("\n");
+                }
                 if (!drew) {
                     framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
                     framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, 1, rgb(145, 153, 168));
@@ -14113,6 +14144,13 @@ static const NavigatorReviewedPublicTarget kNavigatorReviewedPublicTargets[] = {
         443,
         "/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
         "Direct Wikimedia Commons PNG control for binary MIME handling, response bounds, and non-HTML navigation capture."
+    },
+    {
+        "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg",
+        "upload.wikimedia.org",
+        443,
+        "/wikipedia/commons/a/a9/Example.jpg",
+        "Direct Wikimedia Commons JPEG control for public HTTPS JPEG decoding, response bounds, and non-HTML navigation capture."
     }
 };
 
@@ -14228,7 +14266,7 @@ static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
             config.targetValid = false;
             strcopy(config.reviewedTargetPolicy, "rejected", sizeof(config.reviewedTargetPolicy));
             strcopy(config.reviewedTargetReason,
-                "The requested target is outside the reviewed public HTTPS allowlist for v0.5.",
+            "The requested target is outside the reviewed public HTTPS allowlist for v0.7.",
                 sizeof(config.reviewedTargetReason));
         }
     }

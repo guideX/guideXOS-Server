@@ -3837,6 +3837,15 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(remotePngPageInfo, "Loaded images: 1"),
         "expected one loaded remote PNG");
 
+    bool remoteJpegLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/image-jpeg.html");
+    bool remoteJpegPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string remoteJpegPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("remote JPEG loads through HTTP", remoteJpegLoaded && remoteJpegPageInfoLoaded &&
+        contains(remoteJpegPageInfo, "Remote images: 1") &&
+        contains(remoteJpegPageInfo, "Loaded images: 1") &&
+        contains(remoteJpegPageInfo, "JPEG loaded: 1"),
+        "expected one loaded remote JPEG");
+
     bool httpsRemotePngLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/image-relative.html");
     bool httpsRemotePngPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
     std::string httpsRemotePngPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();

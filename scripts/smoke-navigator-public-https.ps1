@@ -350,7 +350,7 @@ function Test-NavigatorRealPublicProbeTarget {
         ReviewedTargetMatch = "no"
         ReviewedTargetOverride = "no"
         ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
-        ReviewedTargetReason = "The requested target is outside the reviewed public HTTPS allowlist for v0.5."
+        ReviewedTargetReason = "The requested target is outside the reviewed public HTTPS allowlist for v0.7."
     }
 }
 

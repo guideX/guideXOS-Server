@@ -84,6 +84,10 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - `scripts/fixtures/public-roots/ca-bundle.pem.local`
   - Ignored local convention for explicit public-root material.
   - This is for manual/dev or intentionally secret-injected proof runs only; it is not a shipped trust store.
+- `scripts/reconstruct-navigator-public-root-fixture.ps1`
+  - Reconstructs the ignored local public-root fixture from the tracked Mozilla CA Extract source.
+  - Refuses source bytes whose reviewed identity does not match Mozilla rotation `mozilla-2026-08-13` (`188900` bytes, `121` certificates, SHA-256 `f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9`).
+  - Performs local X.509 validation and writes an ignored manifest under `logs/`; it never downloads roots or accepts private/machine-specific material.
 
 Trust source distinction in this repository today:
 
@@ -119,6 +123,9 @@ Trust source distinction in this repository today:
 - Provide a public-root PEM bundle explicitly through either:
   - `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE=C:\path\to\ca-bundle.pem`, or
   - the conventional ignored local file `scripts/fixtures/public-roots/ca-bundle.pem.local` (copy `scripts/fixtures/public-roots/ca-bundle.pem.example` and replace its placeholder text with real roots).
+- For the established repository production source, reconstruct that ignored local file deterministically with:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\reconstruct-navigator-public-root-fixture.ps1`
+  - This uses only `assets/certs/mozilla-cacert-2026-08-13.pem`; the helper verifies its reviewed bytes/hash before copying and validating the fixture.
 - The dedicated script prefers `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` when both the env var path and `scripts/fixtures/public-roots/ca-bundle.pem.local` are present, and it reports that choice clearly.
 - The staging flow validates the explicit public-root PEM locally before building the ramdisk:
   - the file must exist and be readable;

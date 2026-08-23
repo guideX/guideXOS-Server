@@ -785,6 +785,7 @@ private:
     char m_currentUrl[MAX_URL_LEN];
     char m_title[MAX_TITLE_LEN_NAV];
     DocBlock m_blocks[MAX_BLOCKS];
+    bool m_imagePaintLogged[MAX_BLOCKS];
     int m_blockCount;
     Bookmark m_bookmarks[MAX_BOOKMARKS];
     int m_bookmarkCount;

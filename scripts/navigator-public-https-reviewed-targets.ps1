@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 
-$script:NavigatorPublicHttpsReviewedTargetAllowlistName = "guidexos-reviewed-public-https-v0.6"
-$script:NavigatorPublicHttpsReviewedTargetAllowlistVersion = "v0.6"
+$script:NavigatorPublicHttpsReviewedTargetAllowlistName = "guidexos-reviewed-public-https-v0.7"
+$script:NavigatorPublicHttpsReviewedTargetAllowlistVersion = "v0.7"
 $script:NavigatorPublicHttpsReviewedTargets = @(
     [pscustomobject]@{
         Url = "https://sha256.badssl.com/"
@@ -92,6 +92,12 @@ $script:NavigatorPublicHttpsReviewedTargets = @(
         Host = "upload.wikimedia.org"
         Default = $false
         Reason = "Direct Wikimedia Commons PNG control for binary MIME handling, response bounds, and non-HTML navigation capture."
+    },
+    [pscustomobject]@{
+        Url = "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg"
+        Host = "upload.wikimedia.org"
+        Default = $false
+        Reason = "Direct Wikimedia Commons JPEG control for public HTTPS JPEG decoding, response bounds, and non-HTML navigation capture."
     }
 )
 
