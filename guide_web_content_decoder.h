@@ -719,9 +719,14 @@ inline HttpContentDecodeResult httpSharedDecodeContent(const uint8_t* encoded, i
 
     int position = 0;
     int memberCount = 0;
+    // The encoded transaction is bounded by the caller, and every valid gzip
+    // member consumes at least the header, a deflate block, and a trailer. Do
+    // not impose a smaller arbitrary member-count limit: concatenated members
+    // are valid gzip and the large-document fixture intentionally crosses it.
+    const int maxMemberCount = encodedLength / 18;
     int totalOutputLength = 0;
     while (position < encodedLength) {
-        if (++memberCount > 64 || encodedLength - position < 18 ||
+        if (++memberCount > maxMemberCount || encodedLength - position < 18 ||
             encoded[position] != 0x1Fu || encoded[position + 1] != 0x8Bu || encoded[position + 2] != 8u) {
             httpSharedDecoderCopyLiteral("Malformed gzip member", error, errorLength);
             return HttpContentDecodeResult::MalformedCompressedResponse;
