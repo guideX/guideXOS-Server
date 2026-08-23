@@ -6245,11 +6245,30 @@ guideXosNativeAotC011EC23TryNativeUnwind(
         return 0u;
     }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    /* Native unwind starts before the production GcScanRoots callback.  Use
+     * the already-crossed frame count to identify the active collection at
+     * this earlier boundary; the later root callback retains these fields. */
+    if (d.c011ec33Collection1Completed == 0u)
+        d.c011ec33ActiveCollection = 1u;
+    else
+        d.c011ec33ActiveCollection = 2u;
+#endif
+
     uintptr_t currentPc = controlPc;
     for (uint32_t frameIndex = 0u;
          frameIndex < kC011EC23MaximumNativeFrames; ++frameIndex) {
 #if defined(GUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION)
         ++d.c011ec26TerminalLookupAttemptCount;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+        if (d.c011ec33ActiveCollection == 1u ||
+            d.c011ec33ActiveCollection == 2u) {
+            if (frameIndex > 2u) {
+                ++d.c011ec33Collections[d.c011ec33ActiveCollection - 1u]
+                    .thirdUnwindAttempts;
+            }
+        }
+#endif
         guidexos_nativeaot_native_unwind_lookup_result terminal = {};
         const int32_t terminalClassification =
             guidexos_nativeaot_gc_native_unwind_classify(currentPc, &terminal);
@@ -6294,8 +6313,20 @@ guideXosNativeAotC011EC23TryNativeUnwind(
                 return 2u;
             }
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+            const bool c36PerCollectionUnwind =
+                (d.c011ec33ActiveCollection == 1u ||
+                 d.c011ec33ActiveCollection == 2u) &&
+                d.c011ec33Collections[d.c011ec33ActiveCollection - 1u]
+                    .nativeUnwindFrames == 2u &&
+                d.c011ec33Collections[d.c011ec33ActiveCollection - 1u]
+                    .thirdUnwindAttempts == 0u;
+            d.c011ec26PreflightProven =
+                descriptorValid && c36PerCollectionUnwind &&
+#else
             d.c011ec26PreflightProven =
                 descriptorValid && d.c011ec23NativeFramesCrossed == 2u &&
+#endif
                 d.c011ec25SecondMetadataValid != 0u &&
                 d.c011ec25SecondOutputAgreement != 0u &&
                 d.c011ec26ThirdUnwindAttemptCount == 0u ? 1u : 0u;
@@ -6535,6 +6566,13 @@ guideXosNativeAotC011EC23TryNativeUnwind(
         display->IP = outputRip;
         c011ec23StoreRegDisplayLocations(display, contextPointers);
         ++d.c011ec23NativeFramesCrossed;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+        if (d.c011ec33ActiveCollection == 1u ||
+            d.c011ec33ActiveCollection == 2u) {
+            ++d.c011ec33Collections[d.c011ec33ActiveCollection - 1u]
+                .nativeUnwindFrames;
+        }
+#endif
         currentPc = outputRip;
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC34_RELOCATION_ROOT_UPDATE)
@@ -6861,6 +6899,14 @@ guideXosNativeAotC011EC18IteratorInitial(
     d.c011ec18IteratorInitialSp = sp;
     d.c011ec18IteratorInitialFp = fp;
     d.c011ec18TransitionFrameFlags = flags;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+    {
+        const uint32_t index = d.c011ec33ActiveCollection <= 1u ? 0u : 1u;
+        guidexos_nativeaot_c011ec33_collection_record& c33 =
+            d.c011ec33Collections[index];
+        ++c33.managedFrames;
+    }
+#endif
     if (frameAddress != d.c011ec18TransitionFrameAddress ||
         controlPc != d.c011ec18TransitionFrameRip ||
         (((d.c011ec18TransitionFrameFlags & PTFF_SAVE_RSP) != 0u) &&
@@ -6906,6 +6952,13 @@ guideXosNativeAotC011EC18IteratorFindMethodInfo(
     ++d.c011ec18FindMethodInfoAttemptCount;
     d.c011ec18IteratorControlPc = controlPc;
     d.c011ec18IteratorMethodInfo = methodInfo;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+    if (d.c011ec33ActiveCollection == 2u &&
+        methodInfo != 0u &&
+        methodInfo == d.c011ec33Collections[0].methodInfo) {
+        ++d.c011ec33Collections[1].rootOwningFrameMatches;
+    }
+#endif
     if (found != 0u) {
         ++d.c011ec18FindMethodInfoSuccessCount;
         d.c011ec18MethodMetadataValid = methodInfo != 0u ? 1u : 0u;
@@ -10178,8 +10231,13 @@ static void guideXosNativeAotC011EC33EmitLive() {
         g_guideXosAllocationDiagnostics;
     const guidexos_nativeaot_c011ec33_collection_record& r =
         d.c011ec33Collections[0];
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] LIVE marker=C011EC36-C1-LIVE");
+#else
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] LIVE marker=C011EC33-LIVE");
+#endif
 #define C33L32(name, value) \
     suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
 #define C33L64(name, value) \
@@ -10223,8 +10281,13 @@ static void guideXosNativeAotC011EC33EmitPreflight() {
         g_guideXosAllocationDiagnostics;
     const guidexos_nativeaot_c011ec33_collection_record& r =
         d.c011ec33Collections[1];
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC36-PREFLIGHT");
+#else
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC33-PREFLIGHT");
+#endif
 #define C33P32(name, value) \
     suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
 #define C33P64(name, value) \
@@ -10238,12 +10301,22 @@ static void guideXosNativeAotC011EC33EmitPreflight() {
     C33P32("strongHandleMatches", r.strongHandleMatches);
     C33P32("graphDerivedPromotions", r.graphDerivedPromotions);
     C33P32("targetQueueInsertions", r.targetQueueInsertions);
+    C33P32("targetChildDiscoveries", r.targetChildDiscoveries);
     C33P32("targetMarkWrites", r.targetMarkWrites);
     C33P32("targetMarked", r.targetMarked);
+    C33P32("threadAbortRootMatches", r.threadAbortRootMatches);
+    C33P32("ordinaryRootMatches", r.ordinaryRootMatches);
     C33P32("weakSlotMatched", r.weakSlotMatched);
     C33P64("target", r.targetAtRoot);
     C33P64("weakSlot", r.weakHandleSlot);
     C33P64("slotBefore", r.weakSlotBefore);
+    C33P64("slotAfter", r.weakSlotAfter);
+    C33P32("condemnedGeneration", r.condemnedGeneration);
+    C33P32("collectionReason", r.collectionReason);
+    C33P32("compacting", r.compacting);
+    C33P32("eeSuspended", r.eeSuspended);
+    C33P32("threadStoreLockHeld", r.threadStoreLockHeld);
+    C33P32("managedEntryProhibited", r.managedEntryProhibited);
 #undef C33P32
 #undef C33P64
     suspendEeSerialPutString("\n");
@@ -10256,8 +10329,13 @@ static void guideXosNativeAotC011EC33EmitCompletion() {
         d.c011ec33Collections[0];
     const guidexos_nativeaot_c011ec33_collection_record& c2 =
         d.c011ec33Collections[1];
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC36 outcome=C");
+#else
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC33");
+#endif
 #define C33C32(name, value) \
     suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
 #define C33C64(name, value) \
@@ -10267,21 +10345,59 @@ static void guideXosNativeAotC011EC33EmitCompletion() {
     C33C32("collection1TargetPromote", c1.targetPromoteCount);
     C33C32("collection1TargetMarked", c1.targetMarked);
     C33C32("collection1Live", c1.liveDecisions);
+    C33C32("collection1LivenessResult", c1.liveDecisions != 0u ? 1u : 0u);
     C33C32("collection1Preserved", c1.preservedCount);
     C33C32("collection1Completed", c1.collectionCompleted);
     C33C32("collection1RestartReturns", c1.eeRestartReturns);
     C33C32("collection1ManagedResume", c1.managedResumeCount);
+    C33C32("collection1CondemnedGeneration", c1.condemnedGeneration);
+    C33C32("collection1CollectionReason", c1.collectionReason);
+    C33C32("collection1Compacting", c1.compacting);
+    C33C32("collection1Relocating", c1.relocating);
+    C33C32("collection1EeSuspended", c1.eeSuspended);
+    C33C32("collection1ThreadStoreLockHeld", c1.threadStoreLockHeld);
+    C33C32("collection1ManagedEntryProhibited", c1.managedEntryProhibited);
+    C33C32("collection1SensitiveAllocations", d.c011ec35RelocatedHandle.sensitiveAllocations);
+    C33C32("collection1ManagedReentryWhileSuspended", d.c011ec35RelocatedHandle.managedReentryWhileSuspended);
     C33C32("collection2TargetRoots", c2.targetRootMatches);
     C33C32("collection2StackRoots", c2.stackRootMatches);
     C33C32("collection2RegisterRoots", c2.registerRootMatches);
     C33C32("collection2StaticThreadStaticRoots", c2.staticThreadStaticRootMatches);
+    C33C32("collection2ThreadAbortRoots", c2.threadAbortRootMatches);
+    C33C32("collection2OrdinaryRoots", c2.ordinaryRootMatches);
     C33C32("collection2StrongHandles", c2.strongHandleMatches);
     C33C32("collection2GraphPromotions", c2.graphDerivedPromotions);
     C33C32("collection2QueueInsertions", c2.targetQueueInsertions);
+    C33C32("collection2ChildDiscoveries", c2.targetChildDiscoveries);
     C33C32("collection2MarkWrites", c2.targetMarkWrites);
     C33C32("collection2TargetMarked", c2.targetMarked);
+    C33C32("collection2LivenessResult", c2.liveDecisions != 0u ? 1u : 0u);
+    C33C32("collection2MarkStateBefore", c2.targetMarkStateBefore);
+    C33C32("collection2MarkStateAfter", c2.targetMarkStateAfter);
+    C33C32("collection2MarkMask", c2.markWordMask);
+    C33C32("collection2CondemnedGeneration", c2.condemnedGeneration);
+    C33C32("collection2CollectionReason", c2.collectionReason);
+    C33C32("collection2Compacting", c2.compacting);
+    C33C32("collection2Relocating", c2.relocating);
+    C33C32("collection2EeSuspended", c2.eeSuspended);
+    C33C32("collection2ThreadStoreLockHeld", c2.threadStoreLockHeld);
+    C33C32("collection2ManagedEntryProhibited", c2.managedEntryProhibited);
+    C33C32("collection2SensitiveAllocations", d.c011ec29SensitiveAllocationCount);
+    C33C32("collection2ManagedEntryAttempts", d.c011ec29ManagedEntryAttempts);
+    C33C32("collection1ManagedFrames", c1.managedFrames);
+    C33C32("collection2ManagedFrames", c2.managedFrames);
+    C33C32("collection2RootOwningFrameMatches", c2.rootOwningFrameMatches);
+    C33C32("collection2RootOwningFrameAbsent", c2.rootOwningFrameMatches == 0u ? 1u : 0u);
+    C33C32("collection2ThreadAbortRoots", c2.threadAbortRootMatches);
+    C33C32("collection2OrdinaryRoots", c2.ordinaryRootMatches);
+    C33C32("collection2TargetChildDiscoveries", c2.targetChildDiscoveries);
     C33C32("collection2Dead", c2.deadDecisions);
+    C33C32("collection2Live", c2.liveDecisions);
     C33C32("collection2Cleared", c2.clearedCount);
+    C33C32("collection2LivenessCallbacks", c2.livenessCallbacks);
+    C33C32("collection2LivenessDecisions", c2.livenessDecisions);
+    C33C32("collection2WeakSlotMatched", c2.weakSlotMatched);
+    C33C32("collection2TargetGeneration", c2.targetGeneration);
     C33C64("initialTarget", d.c011ec33InitialTarget);
     C33C64("targetType", d.c011ec33TargetType);
     C33C64("initialWeakValue", d.c011ec33InitialWeakValue);
@@ -10322,8 +10438,28 @@ static void guideXosNativeAotC011EC33EmitCompletion() {
     C33C32("c2HandleScanEntries", c2.handleScanEntries);
     C33C32("c1LivenessCallbacks", c1.livenessCallbacks);
     C33C32("c2LivenessCallbacks", c2.livenessCallbacks);
+    C33C32("c1LivenessDecisions", c1.livenessDecisions);
+    C33C32("c2LivenessDecisions", c2.livenessDecisions);
     C33C32("c1WeakSlotMatched", c1.weakSlotMatched);
     C33C32("c2WeakSlotMatched", c2.weakSlotMatched);
+    C33C64("collection2Target", c2.targetAtRoot);
+    C33C64("collection2LivenessCallbackAddress", c2.livenessCallbackAddress);
+    C33C64("collection2LivenessDecisionAddress", c2.livenessDecisionAddress);
+    C33C64("collection2CheckPromotedEntry", c2.livenessDecisionAddress);
+    C33C32("collection2IsPromoted", c2.liveDecisions != 0u ? 1u : 0u);
+    C33C32("collection2MutationAttempted", c2.mutationAttempts);
+    C33C64("collection2ClearFunction", c2.clearingStoreAddress);
+    C33C32("weakHandleAllocationCount", d.c011ec33WeakHandleAllocationCount);
+    C33C32("helperReturned", d.c011ec33HelperReturned);
+    C33C32("lifetimeBoundaryReturned", d.c011ec33LifetimeBoundaryReturned);
+    C33C32("c35ManagedResume", d.c011ec35RelocatedHandle.managedResume);
+    C33C32("c35HandleMarker", d.c011ec35RelocatedHandle.handleMarkerEmitted);
+    C33C32("sameHandleTable", d.c011ec35RelocatedHandle.exactTable != 0u ? 1u : 0u);
+    C33C32("sameHandleSegment", d.c011ec35RelocatedHandle.exactSegment != 0u ? 1u : 0u);
+    C33C32("sameHandleType", static_cast<uint32_t>(d.c011ec35RelocatedHandle.exactHandleType));
+    C33C64("sameHandleTableAddress", d.c011ec35RelocatedHandle.exactTable);
+    C33C64("sameHandleSegmentAddress", d.c011ec35RelocatedHandle.exactSegment);
+    C33C64("sameHandleSlot", d.c011ec35RelocatedHandle.exactSlot);
     C33C32("restartEntries", d.c011ec33RestartEntryCount);
     C33C32("restartReturns", d.c011ec33RestartReturnCount);
     C33C32("managedResume", d.c011ec33ManagedResumeCount);
@@ -10337,8 +10473,13 @@ static void guideXosNativeAotC011EC33EmitBlocked(uint32_t reason) {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     d.c011ec33SafeStopReason = reason;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] BLOCKED outcome=D marker=C011EC36-BLOCKED");
+#else
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] BLOCKED outcome=D marker=C011EC33-BLOCKED");
+#endif
     suspendEeSerialPutString(" collection=");
     suspendEeSerialPutHex32(d.c011ec33ActiveCollection);
     suspendEeSerialPutString(" c1Completed=");
@@ -10401,7 +10542,8 @@ guideXosNativeAotC011EC33WeakHandleAllocated(
     const bool valid = target != 0u && targetType != 0u &&
         weakHandleSlot != 0u && d.c011ec33InitialWeakValue == target &&
         handleType == 0u;
-    return valid ? 0 : -1;
+    const int result = valid ? 0 : -1;
+    return result;
 }
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
@@ -10417,7 +10559,9 @@ guideXosNativeAotC011EC33GetCompletedCollections() {
     if (g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount != 0u)
         guideXosNativeAotC011EC35ManagedResumeCheck();
 #endif
-    return static_cast<int>(g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount);
+    const int result = static_cast<int>(
+        g_guideXosAllocationDiagnostics.c011ec33RestartReturnCount);
+    return result;
 }
 
 extern "C" __declspec(dllexport) int __cdecl
@@ -10431,10 +10575,21 @@ guideXosNativeAotC011EC33LifetimeBoundaryReturned(
         d.c011ec33WeakHandleAllocationCount == 1u &&
         target != 0u && targetType == d.c011ec33TargetType &&
         weakHandleSlot == d.c011ec33WeakHandleSlot && observed != 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    const bool c35RelocatedIdentity =
+        d.c011ec35RelocatedHandle.managedResume != 0u &&
+        d.c011ec35RelocatedHandle.handleMarkerEmitted != 0u &&
+        d.c011ec35RelocatedHandle.exactSlot == weakHandleSlot &&
+        d.c011ec35RelocatedHandle.exactSlotAfter == observed &&
+        observed != d.c011ec33InitialTarget;
+    if (!valid || !c35RelocatedIdentity) return -1;
+#else
     if (!valid) return -1;
+#endif
     d.c011ec33HelperReturned = 1u;
     d.c011ec33LifetimeBoundaryReturned = 1u;
-    d.c011ec33HelperReturnAddress = target;
+    d.c011ec33HelperReturnAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
     d.c011ec33LifetimeBoundaryAddress =
         reinterpret_cast<uintptr_t>(_ReturnAddress());
     d.c011ec33TargetAfterCollection1 = observed;
@@ -10470,16 +10625,61 @@ guideXosNativeAotC011EC33HandleAllocated(
 
 extern "C" void __cdecl
 guideXosNativeAotC011EC33GcScanRootsEntered(
-    int /*condemned*/, int /*maxGeneration*/, uintptr_t /*scanContext*/) {
+    int condemned, int /*maxGeneration*/, uintptr_t /*scanContext*/) {
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
     ++d.c011ec33GcScanRootsEntryCount;
-    d.c011ec33ActiveCollection = d.c011ec33GcScanRootsEntryCount;
-    if (d.c011ec33ActiveCollection > 2u) {
-        d.c011ec33ActiveCollection = 2u;
+    const uint32_t requestedCollection =
+        d.c011ec33Collection1Completed == 0u ? 1u : 2u;
+    d.c011ec33ActiveCollection = requestedCollection;
+    guidexos_nativeaot_c011ec33_collection_record& existing =
+        guideXosNativeAotC011EC33CurrentCollection();
+
+    /* Workstation GC scans roots once for marking and can scan them again
+     * for relocation during the same collection. Keep that second pass in
+     * the same record; it is not Collection 2. The first pass owns the root
+     * and mark counters used by the lifetime proof. */
+    if (existing.gcScanRootsEntries != 0u &&
+        existing.collectionCompleted == 0u) {
+        ++existing.gcScanRootsEntries;
+        return;
     }
-    guideXosNativeAotC011EC33ClearCollectionRecord(
-        guideXosNativeAotC011EC33CurrentCollection());
+
+    const uint32_t nativeUnwindFrames = existing.nativeUnwindFrames;
+    const uint32_t thirdUnwindAttempts = existing.thirdUnwindAttempts;
+    const uint32_t managedFrames = existing.managedFrames;
+    const uint32_t rootOwningFrameMatches = existing.rootOwningFrameMatches;
+    guideXosNativeAotC011EC33ClearCollectionRecord(existing);
+    guidexos_nativeaot_c011ec33_collection_record& r = existing;
+    ++r.gcScanRootsEntries;
+    r.condemnedGeneration = static_cast<uint32_t>(condemned);
+    r.collectionReason = d.collectionReason;
+    r.compacting = d.collectionCompactingMode;
+    r.eeSuspended = d.eeSuspended;
+    r.threadStoreLockHeld = d.threadStoreLockRecursionDepth != 0u ? 1u : 0u;
+    r.managedEntryProhibited = d.managedEntryProhibited;
+    r.nativeUnwindFrames = nativeUnwindFrames;
+    r.thirdUnwindAttempts = thirdUnwindAttempts;
+    r.managedFrames = managedFrames;
+    r.rootOwningFrameMatches = rootOwningFrameMatches;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    if (d.c011ec33ActiveCollection == 2u) {
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] C2-GC-ROOTS");
+        suspendEeSerialPutString(" condemned=");
+        suspendEeSerialPutHex32(r.condemnedGeneration);
+        suspendEeSerialPutString(" reason=");
+        suspendEeSerialPutHex32(r.collectionReason);
+        suspendEeSerialPutString(" compacting=");
+        suspendEeSerialPutHex32(r.compacting);
+        suspendEeSerialPutString(" target=");
+        suspendEeSerialPutHex64(d.c011ec33TargetAfterCollection1);
+        suspendEeSerialPutString(" weakValue=");
+        suspendEeSerialPutHex64(d.c011ec33WeakHandleSlot == 0u ? 0u :
+            *reinterpret_cast<const uintptr_t*>(d.c011ec33WeakHandleSlot));
+        suspendEeSerialPutString("\n");
+    }
+#endif
     guideXosNativeAotC011EC33ResetRootMarkCounters();
     if (d.c011ec33GcScanRootsEntryCount == 2u) {
         guideXosNativeAotC011EC33PostWeakPhase(17u);
@@ -10537,6 +10737,10 @@ guideXosNativeAotC011EC33GcRootReported(
     const uintptr_t value = slot == 0u
         ? 0u : *reinterpret_cast<const uintptr_t*>(slot);
     if (value != d.c011ec32Target) return;
+    /* The same physical managed root is reported again during the
+     * relocation-side root pass. Count logical root slots, not callback
+     * visits, so Collection 1's root evidence remains per-collection. */
+    if (r.targetRootMatches != 0u && r.rootSlot == slot) return;
     ++r.targetRootMatches;
     r.targetAtRoot = value;
     r.rootSlot = slot;
@@ -10612,12 +10816,44 @@ guideXosNativeAotC011EC33LivenessCheckEntered(
     r.blocksVisited = d.c011ec30BlockVisitCount;
     r.slotsInspected = d.c011ec30HandleSlotInspectCount;
     r.candidateHandles = d.c011ec30CandidateHandleCount;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    if (d.c011ec33ActiveCollection >= 1u) {
+        suspendEeSerialPutString(d.c011ec33ActiveCollection == 1u
+            ? "[nativeaot-gc-short-weak-lifetime] C1-CALLBACK"
+            : "[nativeaot-gc-short-weak-lifetime] C2-CALLBACK");
+        suspendEeSerialPutString(" collection=");
+        suspendEeSerialPutHex32(d.c011ec33ActiveCollection);
+        suspendEeSerialPutString(" slot=");
+        suspendEeSerialPutHex64(slotAddress);
+        suspendEeSerialPutString(" target=");
+        suspendEeSerialPutHex64(target);
+        suspendEeSerialPutString(" targetGeneration=");
+        suspendEeSerialPutHex64(targetGeneration);
+        suspendEeSerialPutString(" markWord=");
+        suspendEeSerialPutHex64(markWordBefore);
+        suspendEeSerialPutString(" markMask=");
+        suspendEeSerialPutHex64(markMask);
+        suspendEeSerialPutString(" sameSlot=");
+        suspendEeSerialPutHex32(r.weakSlotMatched);
+        suspendEeSerialPutString(" roots=");
+        suspendEeSerialPutHex32(r.targetRootMatches);
+        suspendEeSerialPutString("\n");
+    }
+#endif
     if (d.c011ec33ActiveCollection == 2u && r.weakSlotMatched != 0u &&
         r.targetRootMatches == 0u && r.targetMarked == 0u &&
         r.strongHandleMatches == 0u && r.graphDerivedPromotions == 0u &&
         r.targetQueueInsertions == 0u && r.targetMarkWrites == 0u &&
         d.c011ec33Collection1Completed != 0u &&
-        d.c011ec33LifetimeBoundaryReturned != 0u) {
+        d.c011ec33LifetimeBoundaryReturned != 0u &&
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+        d.c011ec33HelperReturned != 0u &&
+        d.c011ec33TargetRelocated != 0u &&
+        d.c011ec35RelocatedHandle.managedResume != 0u &&
+        d.c011ec35RelocatedHandle.handleMarkerEmitted != 0u &&
+        r.weakSlotBefore == d.c011ec33TargetAfterCollection1 &&
+#endif
+        true) {
         d.c011ec33PreflightProven = 1u;
         guideXosNativeAotC011EC33EmitPreflight();
     }
@@ -10811,6 +11047,25 @@ guideXosNativeAotC011EC30HandleScanEntered(
     d.c011ec30HandleScanFlags = 0u;
     d.c011ec30SafeStopReason = 0u;
     c011ec30CaptureContract();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    if (d.c011ec33ActiveCollection >= 1u) {
+        suspendEeSerialPutString(d.c011ec33ActiveCollection == 1u
+            ? "[nativeaot-gc-short-weak-lifetime] C1-HANDLE-SCAN"
+            : "[nativeaot-gc-short-weak-lifetime] C2-HANDLE-SCAN");
+        suspendEeSerialPutString(" collection=");
+        suspendEeSerialPutHex32(d.c011ec33ActiveCollection);
+        suspendEeSerialPutString(" condemned=");
+        suspendEeSerialPutHex32(condemned);
+        suspendEeSerialPutString(" target=");
+        suspendEeSerialPutHex64(d.c011ec33TargetAfterCollection1);
+        suspendEeSerialPutString(" weakSlot=");
+        suspendEeSerialPutHex64(d.c011ec33WeakHandleSlot);
+        suspendEeSerialPutString(" weakValue=");
+        suspendEeSerialPutHex64(d.c011ec33WeakHandleSlot == 0u ? 0u :
+            *reinterpret_cast<const uintptr_t*>(d.c011ec33WeakHandleSlot));
+        suspendEeSerialPutString("\n");
+    }
+#endif
 }
 
 extern "C" void __cdecl
@@ -11170,11 +11425,21 @@ static void guideXosNativeAotC011EC34EmitPreflight() {
 extern "C" void __cdecl
 guideXosNativeAotC011EC34RelocationPhaseEntered(
     uint32_t condemnedGeneration, uint32_t compacting) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
     guidexos_nativeaot_c011ec34_relocation_record& r =
         guideXosNativeAotC011EC34Record();
     r.condemnedGeneration = condemnedGeneration;
     r.compacting = compacting;
     r.relocating = 1u;
+    d.c011ec33Collections[0].condemnedGeneration = condemnedGeneration;
+    d.c011ec33Collections[0].compacting = compacting;
+    d.c011ec33Collections[0].relocating = 1u;
+    d.c011ec33Collections[0].eeSuspended = d.eeSuspended;
+    d.c011ec33Collections[0].threadStoreLockHeld =
+        d.threadStoreLockRecursionDepth != 0u ? 1u : 0u;
+    d.c011ec33Collections[0].managedEntryProhibited =
+        d.managedEntryProhibited;
 }
 
 extern "C" void __cdecl
@@ -11764,6 +12029,7 @@ guideXosNativeAotC011EC35ManagedResumeCheck() {
         g_guideXosAllocationDiagnostics;
     guidexos_nativeaot_c011ec35_relocated_handle_record& r =
         guideXosNativeAotC011EC35Record();
+    if (r.managedResume != 0u) return;
     const guidexos_nativeaot_c011ec34_relocation_record& c34 =
         d.c011ec34Relocation;
     const uintptr_t managedRoot = c34.firstRootNewValue;
@@ -11784,6 +12050,39 @@ guideXosNativeAotC011EC35ManagedResumeCheck() {
         r.phaseGenerationBoundsReturned != 0u && r.gcDone != 0u &&
         r.restartEntries != 0u && r.restartReturns != 0u &&
         r.eeResumedAfterRestart != 0u && d.c011ec33Collection1Completed != 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    if (!valid) {
+        r.safeStopReason = 0xC0360001u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] BLOCKED marker=C011EC36-RESUME-BLOCKED");
+        suspendEeSerialPutString(" weakSlot=");
+        suspendEeSerialPutHex64(r.exactSlot);
+        suspendEeSerialPutString(" weakValue=");
+        suspendEeSerialPutHex64(weakAfter);
+        suspendEeSerialPutString(" managedRoot=");
+        suspendEeSerialPutHex64(managedRoot);
+        suspendEeSerialPutString(" safeStopReason=");
+        suspendEeSerialPutHex32(r.safeStopReason);
+        suspendEeSerialPutString("\n");
+        for (;;) {
+        }
+    }
+    r.safeStopReason = 0u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] RESUMED marker=C011EC36-RESUMED");
+    suspendEeSerialPutString(" method=CreateAndRunLiveCollection1 weakSlot=");
+    suspendEeSerialPutHex64(r.exactSlot);
+    suspendEeSerialPutString(" weakValue=");
+    suspendEeSerialPutHex64(weakAfter);
+    suspendEeSerialPutString(" relocatedTarget=");
+    suspendEeSerialPutHex64(managedRoot);
+    suspendEeSerialPutString(" controlPC=");
+    suspendEeSerialPutHex64(r.managedResumeControlPc);
+    suspendEeSerialPutString(" sameSlot=");
+    suspendEeSerialPutHex32(r.exactSlot == d.c011ec33WeakHandleSlot ? 1u : 0u);
+    suspendEeSerialPutString("\n");
+    return;
+#endif
     r.safeStopReason = valid ? 0u : 0xC0350001u;
     r.completionMarkerEmitted = 1u;
     suspendEeSerialPutString(
@@ -11945,14 +12244,24 @@ guideXosNativeAotC011EC30LivenessDecisionCompleted(
             r.targetRootMatches == 0u && r.stackRootMatches == 0u &&
             r.registerRootMatches == 0u &&
             r.staticThreadStaticRootMatches == 0u &&
+            r.threadAbortRootMatches == 0u &&
+            r.ordinaryRootMatches == 0u &&
             r.strongHandleMatches == 0u &&
             r.graphDerivedPromotions == 0u &&
             r.targetQueueInsertions == 0u &&
+            r.targetChildDiscoveries == 0u &&
             r.targetMarkWrites == 0u && r.targetMarked == 0u &&
             r.deadDecisions == 1u && r.liveDecisions == 0u &&
             r.livenessCallbacks == 1u && r.livenessDecisions == 1u &&
             sameSlot && before != 0u && after == 0u &&
-            r.clearedCount == 1u;
+            before == d.c011ec33TargetAfterCollection1 &&
+            r.clearingStoreAddress != 0u &&
+            r.clearedCount == 1u &&
+#if defined(GUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE)
+            d.c011ec35RelocatedHandle.managedResume != 0u &&
+            d.c011ec35RelocatedHandle.handleMarkerEmitted != 0u &&
+#endif
+            true;
         if (deadValid) {
             d.c011ec33MarkerEmitted = 1u;
             d.c011ec33SafeStopReason = 0u;
@@ -12209,7 +12518,12 @@ guideXosNativeAotC011EC30HandleScanCompleted(
     guidexos_nativeaot_allocation_diagnostics& d =
         g_guideXosAllocationDiagnostics;
 #if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    if (d.c011ec33ActiveCollection == 1u ||
+        d.c011ec33ActiveCollection == 2u) {
+#else
     if (d.c011ec33ActiveCollection == 1u) {
+#endif
         return;
     }
 #endif
@@ -15275,6 +15589,16 @@ guideXosManagedAllocationValidateObject(
         ++g_guideXosAllocationDiagnostics.contextGeometryFailures;
         failure = 1u;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    // The first post-resume validation is the natural managed boundary:
+    // return from CreateAndRunLiveCollection1 before starting Collection 2.
+    // This is the selected FIRST_REFILL/SEGMENT_BOUNDARY implementation used
+    // by the C36 workload, not the repeated-allocation implementation below.
+    if (failure == 0u &&
+        g_guideXosAllocationDiagnostics.c011ec33Collection1Completed != 0u) {
+        return 2;
+    }
+#endif
     return failure == 0u ? 0 : -1;
 }
 
@@ -15401,7 +15725,8 @@ guideXosManagedAllocationGetLoopStatus() {
 
 extern "C" __declspec(noinline) __declspec(dllexport) gx_uint32 __cdecl
 guideXosManagedAllocationGetHardLimit() {
-    return g_guideXosAllocationDiagnostics.hardAllocationLimit;
+    const gx_uint32 limit = g_guideXosAllocationDiagnostics.hardAllocationLimit;
+    return limit;
 }
 #endif
 
@@ -15482,8 +15807,17 @@ extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationValidateObj
     }
     if (failure != 0u) {
         g_guideXosAllocationDiagnostics.sampledObjectFailures += 1u;
+        return -1;
     }
-    return failure == 0u ? 0 : -1;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE)
+    // The validation call made for the allocation that resumes after
+    // Collection 1 is the last helper-side managed boundary.  Return a
+    // scalar completion code so the helper can return without another probe
+    // or allocation after RestartEE.
+    if (g_guideXosAllocationDiagnostics.c011ec33Collection1Completed != 0u)
+        return 2;
+#endif
+    return 0;
 }
 
 extern "C" __declspec(noinline) int __cdecl guideXosManagedAllocationRecordFailure(gx_uint32 reason) {

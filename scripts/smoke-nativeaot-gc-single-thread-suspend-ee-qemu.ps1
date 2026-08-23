@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -61,6 +61,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec34-relocation-root-update"
     } elseif ($ProofMode -eq "relocated-handle-update") {
         Join-Path $root "out\dotnet\c011ec35-relocated-handle-update"
+    } elseif ($ProofMode -eq "lifetime-transition-complete") {
+        Join-Path $root "out\dotnet\c011ec36-lifetime-transition-complete"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -98,13 +100,15 @@ $isFirstRootFirstNonNullOldO = $ProofMode -eq "first-root-first-non-null-old-o"
 $isStackProviderTransitionFailFast = $ProofMode -eq "stack-provider-transition-failfast"
 $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registration"
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
-$isC011EC35 = $ProofMode -eq "relocated-handle-update"
-$isC011EC34 = $ProofMode -in @("relocation-root-update", "relocated-handle-update")
-$isC011EC33 = $ProofMode -in @("short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update")
+$isC011EC36 = $ProofMode -eq "lifetime-transition-complete"
+$isC011EC35 = $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete")
+$isC011EC35Proof = $ProofMode -eq "relocated-handle-update"
+$isC011EC34 = $ProofMode -in @("relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")
+$isC011EC33 = $ProofMode -in @("short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")
 $isC011EC31 = $ProofMode -eq "short-weak-live-handle"
-$isC011EC32 = $ProofMode -in @("short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update")
+$isC011EC32 = $ProofMode -in @("short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")
 $isC011EC30 = $isC011EC31 -or $isC011EC32 -or ($ProofMode -eq "short-weak-handle-operation")
-$isC011EC29 = $ProofMode -in @("post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update")
+$isC011EC29 = $ProofMode -in @("post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")
 $isC011EC28 = $isC011EC29 -or ($ProofMode -eq "mark-queue-closure")
 $isC011EC27Stop = $ProofMode -eq "post-root-queue-mark-processing"
 $isC011EC27 = $isC011EC28 -or $isC011EC27Stop
@@ -115,16 +119,16 @@ $isC011EC21 = $isC011EC24 -or $ProofMode -eq "stack-provider-native-transition-c
 $isC011EC23 = $isC011EC21
 $isC011EC20 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isC011EC19 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
-$isNextGenuineRootProvider = $isC011EC24 -or $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update")
+$isNextGenuineRootProvider = $isC011EC24 -or $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
-$isFirstRootCallbackEntry = $isC011EC24 -or $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update")
+$isFirstRootCallbackEntry = $isC011EC24 -or $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
 $isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
-$isFirstPerThreadRootProvider = $isC011EC24 -or $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "relocation-root-update", "relocated-handle-update")
-$isAllocationContextFixupRootBoundary = $isC011EC24 -or $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "relocation-root-update", "relocated-handle-update")
+$isFirstPerThreadRootProvider = $isC011EC24 -or $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")
+$isAllocationContextFixupRootBoundary = $isC011EC24 -or $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete")
 $proofDefine = if ($isNextGenuineRootProvider) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($isTransitionFrameControlPc -or $isC011EC19) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
@@ -143,8 +147,9 @@ $proofDefine = if ($isNextGenuineRootProvider) {
     $c33Define = if ($isC011EC33) { " /DGUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION" } else { "" }
     $c34Define = if ($isC011EC34) { " /DGUIDEXOS_NATIVEAOT_C011EC34_RELOCATION_ROOT_UPDATE" } else { "" }
     $c35Define = if ($isC011EC35) { " /DGUIDEXOS_NATIVEAOT_C011EC35_RELOCATED_HANDLE_UPDATE" } else { "" }
+    $c36Define = if ($isC011EC36) { " /DGUIDEXOS_NATIVEAOT_C011EC36_LIFETIME_TRANSITION_COMPLETE" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -744,6 +749,11 @@ extern "C" void __cdecl guideXosNativeAotC011EC26IteratorCompleted();
         {
             SetControlPC(dac_cast<PTR_VOID>(
                 PCODEToPINSTR(m_RegDisplay.GetIP())));
+            // The native provider has crossed into a different code range.  Do
+            // not carry the native-frame manager into the managed caller;
+            // CalculateCurrentMethodState must perform the normal production
+            // lookup for the new ControlPC.
+            m_pCodeManager = nullptr;
             m_pPreviousTransitionFrame = nullptr;
             m_dwFlags &= ~UnwoundReversePInvoke;
         }
@@ -3864,7 +3874,9 @@ exit /b %errorlevel%
     $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine$c27KernelDefine -I$artifactRoot"
     Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","C011EC26_STACK_COMPLETION=$isC011EC26","C011EC27_POST_ROOT_QUEUE=$isC011EC27","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
-    Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","clean") (Join-Path $runRoot "kernel-preclean.log")
+    $specializedKernelBuildRoot = Join-Path $root "kernel\build\amd64"
+    $specializedKernelCleanCommand = "if exist `"$specializedKernelBuildRoot`" rmdir /s /q `"$specializedKernelBuildRoot`""
+    Invoke-LoggedCommand "cmd.exe" @("/d", "/c", $specializedKernelCleanCommand) (Join-Path $runRoot "kernel-preclean.log")
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
     Require-File $kernelPath "Specialized single-thread SuspendEE kernel"
     $specializedKernelHash = Hash-File $kernelPath
@@ -4053,7 +4065,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC35) {
+                    $stopPattern = if ($isC011EC36) {
+                        'marker=C011EC36 outcome=C.*safeStopReason=00000000|marker=C011EC36-(?:RESUME-)?BLOCKED'
+                    } elseif ($isC011EC35Proof) {
                         'marker=C011EC35(?:\s|$)|marker=C011EC35-BLOCKED'
                     } elseif ($isC011EC34) {
                         'marker=C011EC34(?:\s|$)|marker=C011EC34-BLOCKED'
@@ -4121,6 +4135,8 @@ exit /b %errorlevel%
                     $earlyFailure = "nativeaot-thread-static-startup-page-fault"
                 } elseif ($isC011EC34 -and $failureSerial -match 'marker=C011EC33-LIVE') {
                     $earlyFailure = "relocation-root-scan-timeout-after-c011ec33-relocation-entry"
+                } elseif ($isC011EC36 -and $failureSerial -match 'marker=C011EC36-C1-LIVE') {
+                    $earlyFailure = "collection2-same-handle-clear-timeout-after-c011ec36-preflight"
                 } elseif ($isC011EC33 -and $failureSerial -match 'marker=C011EC33-LIVE') {
                     $earlyFailure = "collection1-post-weak-completion-timeout"
                 } elseif ($qemuProcess.HasExited) {
@@ -4143,7 +4159,39 @@ exit /b %errorlevel%
         $validationText = $validationText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
         $validationText = $validationText -replace '\s*=\s*', '='
         $validationText = $validationText -replace '\s*-\s*', '-'
-        if ($isC011EC35) {
+        if ($isC011EC36) {
+            $c36LiveStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] LIVE marker=C011EC36-C1-LIVE')
+            $c36ResumeStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] RESUMED marker=C011EC36-RESUMED')
+            $c36PreflightStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC36-PREFLIGHT')
+            $c36CompleteStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC36')
+            $c36BlockedStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] BLOCKED marker=C011EC36')
+            if ($c36CompleteStart -lt 0) {
+                $c36Evidence = @($c36BlockedStart, $c36PreflightStart, $c36ResumeStart, $c36LiveStart | Where-Object { $_ -ge 0 } | Sort-Object | Select-Object -First 1)
+                $c36Marker = if ($c36Evidence.Count -ne 0) { $validationText.Substring([int]$c36Evidence[0]) } else { $validationText.Substring([Math]::Max(0, $validationText.Length - 16000)) }
+                $c36SafeStop = if ($c36BlockedStart -ge 0) { if ($c36Marker -match 'marker=C011EC36-RESUME-BLOCKED') { 'C011EC36-RESUME-BLOCKED' } else { 'C011EC36-BLOCKED' } } elseif ($c36PreflightStart -ge 0) { 'C011EC36-PREFLIGHT-TIMEOUT' } elseif ($c36ResumeStart -ge 0) { 'C011EC36-POST-RESUME-TIMEOUT' } else { 'C011EC36-NO-LIVE' }
+                $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker=$c36SafeStop; outcome='D / same-handle lifetime transition did not reach production clearing'; successLevel=0; harnessTerminated=$true; markerLine=$c36Marker; liveMarkerLine=if($c36LiveStart -ge 0){$validationText.Substring($c36LiveStart)}else{$null}; resumeMarkerLine=if($c36ResumeStart -ge 0){$validationText.Substring($c36ResumeStart)}else{$null}; preflightMarkerLine=if($c36PreflightStart -ge 0){$validationText.Substring($c36PreflightStart)}else{$null}; earlyFailure=$earlyFailure; serialTail=if($validationText.Length -gt 16000){$validationText.Substring($validationText.Length - 16000)}else{$validationText} }
+                continue
+            }
+            if ($c36LiveStart -lt 0 -or $c36ResumeStart -lt $c36LiveStart -or $c36PreflightStart -lt $c36ResumeStart -or $c36CompleteStart -lt $c36PreflightStart) { throw "C011EC36 live/resume/preflight/completion chronology was incomplete in $name." }
+            $c36LiveLine = $validationText.Substring($c36LiveStart, $c36ResumeStart - $c36LiveStart)
+            $c36ResumeLine = $validationText.Substring($c36ResumeStart, $c36PreflightStart - $c36ResumeStart)
+            $c36PreflightLine = $validationText.Substring($c36PreflightStart, $c36CompleteStart - $c36PreflightStart)
+            $c36MarkerLine = $validationText.Substring($c36CompleteStart)
+            if ($c36MarkerLine -notmatch 'marker=C011EC36 outcome=C') { throw "C011EC36 completion outcome was missing in $name." }
+            $c36Read = { param([string]$Line,[string]$Field) $v=Get-MarkerField $Line $Field; if($null -eq $v){throw "C011EC36 missing field $Field."}; [Convert]::ToUInt64($v.Substring(2),16) }
+            foreach ($check in @(
+                @('successLevel',3), @('collection1TargetRoots',1), @('collection1TargetPromote',1), @('collection1TargetMarked',1), @('collection1Live',1), @('collection1LivenessResult',1), @('collection1Preserved',1), @('collection1Completed',1), @('collection1RestartReturns',1), @('collection1ManagedResume',1),
+                @('collection2TargetRoots',0), @('collection2StackRoots',0), @('collection2RegisterRoots',0), @('collection2StaticThreadStaticRoots',0), @('collection2ThreadAbortRoots',0), @('collection2OrdinaryRoots',0), @('collection2StrongHandles',0), @('collection2GraphPromotions',0), @('collection2QueueInsertions',0), @('collection2ChildDiscoveries',0), @('collection2TargetChildDiscoveries',0), @('collection2MarkWrites',0), @('collection2TargetMarked',0), @('collection2LivenessResult',0), @('collection2MarkStateBefore',0), @('collection2MarkStateAfter',0), @('collection2Dead',1), @('collection2Live',0), @('collection2Cleared',1), @('collection2LivenessCallbacks',1), @('collection2LivenessDecisions',1), @('collection2WeakSlotMatched',1), @('collection2IsPromoted',0), @('collection2MutationAttempted',1),
+                @('collection2RootOwningFrameMatches',0), @('collection2RootOwningFrameAbsent',1), @('weakHandleAllocationCount',1), @('helperReturned',1), @('lifetimeBoundaryReturned',1), @('c35ManagedResume',1), @('c35HandleMarker',1), @('sameHandleTable',1), @('sameHandleSegment',1), @('sameHandleType',0), @('targetRelocated',1), @('collection2MarkWordMask',1), @('safeStopReason',0)
+            )) { if ((& $c36Read $c36MarkerLine $check[0]) -ne [uint64]$check[1]) { throw "C011EC36 expected $($check[0])=$($check[1]) in $name." } }
+            foreach ($field in @('initialTarget','initialWeakValue','targetAfterCollection1','weakSlot','collection1SlotBefore','collection1SlotAfter','collection2SlotBefore','collection2Target','collection2LivenessCallbackAddress','collection2LivenessDecisionAddress','collection2CheckPromotedEntry','collection2ClearFunction','sameHandleSlot','sameHandleTableAddress','sameHandleSegmentAddress','collection1RootSlot','collection1ControlPC','collection1MethodInfo','collection1MethodStart','collection1MethodEnd','collection1GcInfo','collection1SafePoint','collection1MarkWordAddress','collection2MarkWordAddress','collection2ClearingStore')) { if ((& $c36Read $c36MarkerLine $field) -eq 0) { throw "C011EC36 expected nonzero $field in $name." } }
+            foreach ($pair in @(@('initialTarget','initialWeakValue'), @('initialTarget','collection1SlotBefore'), @('initialTarget','collection1SlotAfter'), @('targetAfterCollection1','collection2SlotBefore'), @('targetAfterCollection1','collection2Target'), @('weakSlot','sameHandleSlot'), @('collection2ClearFunction','collection2ClearingStore'))) { if ((& $c36Read $c36MarkerLine $pair[0]) -ne (& $c36Read $c36MarkerLine $pair[1])) { throw "C011EC36 $($pair[0]) did not equal $($pair[1]) in $name." } }
+            if ((& $c36Read $c36MarkerLine 'targetAfterCollection1') -eq (& $c36Read $c36MarkerLine 'initialTarget')) { throw "C011EC36 target did not relocate in $name." }
+            if ((& $c36Read $c36MarkerLine 'collection2SlotAfter') -ne 0) { throw "C011EC36 same weak slot was not cleared in $name." }
+            $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC36'; outcome='C / same short-weak handle survived relocation and was cleared after the managed lifetime ended'; successLevel=3; harnessTerminated=$true; markerLine=$c36MarkerLine; liveMarkerLine=$c36LiveLine; resumeMarkerLine=$c36ResumeLine; preflightMarkerLine=$c36PreflightLine; earlyFailure=$earlyFailure }
+            continue
+        }
+        if ($isC011EC35Proof) {
             $c35PreflightStart = $validationText.IndexOf('[nativeaot-gc-relocated-handle-update] PREFLIGHT marker=C011EC35-PREFLIGHT')
             $c35HandleStart = $validationText.IndexOf('[nativeaot-gc-relocated-handle-update] HANDLE marker=C011EC35-HANDLE')
             $c35CompleteStart = $validationText.IndexOf('[nativeaot-gc-relocated-handle-update] COMPLETE marker=C011EC35')
@@ -5965,7 +6013,49 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
-    } elseif ($isC011EC35) {
+    } elseif ($isC011EC36) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC36 same-handle lifetime proof produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $blockedC36Runs = @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC36' })
+        if ($blockedC36Runs.Count -ne 0) {
+            $minimumC36Success = (@($runResults | ForEach-Object { [int]$_.successLevel } | Measure-Object -Minimum).Minimum)
+            $manifest = [ordered]@{
+                outcome='D / Collection 2 did not prove same-slot production weak clearing'; successLevel=$minimumC36Success; proofMode=$ProofMode; marker='C011EC36'; preflightMarker='C011EC36-PREFLIGHT'; resumeMarker='C011EC36-RESUMED'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+                lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; runs=$runResults }
+                ordinaryRestoration=[ordered]@{ buildSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath); expectedSha256=$normalKernelHash; restoredByFinally=$true }; documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_WEAK_HANDLE_LIFETIME_TRANSITION_COMPLETE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+            }
+            $manifest | ConvertTo-Json -Depth 80 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host "C011EC36 same-handle lifetime transition: blocker (Outcome D)" -ForegroundColor Yellow
+        } else {
+            $firstC36Run = $runResults[0]
+            $c36ReadManifest = { param([string]$Line,[string]$Field) $v=Get-MarkerField $Line $Field; if($null -eq $v){throw "C011EC36 missing field $Field in manifest."}; $v }
+            $c36AgreeFields = @(
+                'successLevel','collection1TargetRoots','collection1TargetPromote','collection1TargetMarked','collection1Live','collection1LivenessResult','collection1Preserved','collection1Completed','collection1RestartReturns','collection1ManagedResume','collection1CondemnedGeneration','collection1CollectionReason','collection1Compacting','collection1Relocating','collection1EeSuspended','collection1ThreadStoreLockHeld','collection1ManagedEntryProhibited','collection1SensitiveAllocations','collection1ManagedReentryWhileSuspended',
+                'collection2TargetRoots','collection2StackRoots','collection2RegisterRoots','collection2StaticThreadStaticRoots','collection2ThreadAbortRoots','collection2OrdinaryRoots','collection2StrongHandles','collection2GraphPromotions','collection2QueueInsertions','collection2ChildDiscoveries','collection2TargetChildDiscoveries','collection2MarkWrites','collection2TargetMarked','collection2LivenessResult','collection2MarkStateBefore','collection2MarkStateAfter','collection2MarkMask','collection2CondemnedGeneration','collection2CollectionReason','collection2Compacting','collection2Relocating','collection2EeSuspended','collection2ThreadStoreLockHeld','collection2ManagedEntryProhibited','collection2SensitiveAllocations','collection2ManagedEntryAttempts','collection2Dead','collection2Live','collection2Cleared','collection2LivenessCallbacks','collection2LivenessDecisions','collection2WeakSlotMatched','collection2IsPromoted','collection2MutationAttempted','collection2RootOwningFrameMatches','collection2RootOwningFrameAbsent','weakHandleAllocationCount','helperReturned','lifetimeBoundaryReturned','c35ManagedResume','c35HandleMarker','sameHandleTable','sameHandleSegment','sameHandleType','targetRelocated','safeStopReason'
+            )
+            foreach ($field in $c36AgreeFields) {
+                $values = @($runResults | ForEach-Object { & $c36ReadManifest $_.markerLine $field } | Select-Object -Unique)
+                if ($values.Count -ne 1) { throw "C011EC36 semantic field $field varied across fresh boots." }
+            }
+            $c36ManifestFields = { param([string]$Field) & $c36ReadManifest $firstC36Run.markerLine $Field }
+            $manifest = [ordered]@{
+                outcome='C / same genuine NativeAOT short-weak handle survived Collection 1 relocation and was cleared by Collection 2 after the final managed root ended'; successLevel=3; proofMode=$ProofMode; marker='C011EC36'; preflightMarker='C011EC36-PREFLIGHT'; resumeMarker='C011EC36-RESUMED'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+                lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+                logicalObject=[ordered]@{ originalTarget=(& $c36ManifestFields 'initialTarget'); collection1WeakValue=(& $c36ManifestFields 'initialWeakValue'); relocatedTarget=(& $c36ManifestFields 'targetAfterCollection1'); relocationProven=(& $c36ManifestFields 'targetRelocated'); collection1SlotBefore=(& $c36ManifestFields 'collection1SlotBefore'); collection1SlotAfter=(& $c36ManifestFields 'collection1SlotAfter'); collection2SlotBefore=(& $c36ManifestFields 'collection2SlotBefore'); collection2Target=(& $c36ManifestFields 'collection2Target'); collection2SlotAfter=(& $c36ManifestFields 'collection2SlotAfter') }
+                collection1=[ordered]@{ rootMethod='CreateAndRunLiveCollection1'; rootFrame=(& $c36ManifestFields 'collection1MethodInfo'); rootControlPC=(& $c36ManifestFields 'collection1ControlPC'); targetRootMatches=(& $c36ManifestFields 'collection1TargetRoots'); promote=(& $c36ManifestFields 'collection1TargetPromote'); markState=(& $c36ManifestFields 'collection1TargetMarked'); markWord=(& $c36ManifestFields 'collection1MarkWordBefore'); markMask=(& $c36ManifestFields 'collection1MarkWordMask'); liveness=(& $c36ManifestFields 'collection1LivenessResult'); preserved=(& $c36ManifestFields 'collection1Preserved'); completed=(& $c36ManifestFields 'collection1Completed'); restartReturns=(& $c36ManifestFields 'collection1RestartReturns'); managedResume=(& $c36ManifestFields 'collection1ManagedResume'); condemnedGeneration=(& $c36ManifestFields 'collection1CondemnedGeneration'); collectionReason=(& $c36ManifestFields 'collection1CollectionReason'); compacting=(& $c36ManifestFields 'collection1Compacting'); relocating=(& $c36ManifestFields 'collection1Relocating') }
+                lifetimeBoundary=[ordered]@{ helperReturned=(& $c36ManifestFields 'helperReturned'); lifetimeBoundaryReturned=(& $c36ManifestFields 'lifetimeBoundaryReturned'); rootOwningFrame='CreateAndRunLiveCollection1 frame returned naturally; no forced unwind or stack nulling'; caller='main resumed with scalar-only target identity' }
+                collection2=[ordered]@{ condemnedGeneration=(& $c36ManifestFields 'collection2CondemnedGeneration'); collectionReason=(& $c36ManifestFields 'collection2CollectionReason'); compacting=(& $c36ManifestFields 'collection2Compacting'); rootOwningFrameAbsent=(& $c36ManifestFields 'collection2RootOwningFrameAbsent'); managedFrames=(& $c36ManifestFields 'collection2ManagedFrames'); stackRoots=(& $c36ManifestFields 'collection2StackRoots'); registerRoots=(& $c36ManifestFields 'collection2RegisterRoots'); staticThreadStaticRoots=(& $c36ManifestFields 'collection2StaticThreadStaticRoots'); normalHandleRoots=(& $c36ManifestFields 'collection2StrongHandles'); threadAbortRoots=(& $c36ManifestFields 'collection2ThreadAbortRoots'); ordinaryRoots=(& $c36ManifestFields 'collection2OrdinaryRoots'); graphDerived=(& $c36ManifestFields 'collection2GraphPromotions'); queueInsertions=(& $c36ManifestFields 'collection2QueueInsertions'); childDiscoveries=(& $c36ManifestFields 'collection2TargetChildDiscoveries'); promote=(& $c36ManifestFields 'collection2TargetRoots'); markWordBefore=(& $c36ManifestFields 'collection2MarkWordBefore'); markWordAfter=(& $c36ManifestFields 'collection2MarkWordAfter'); markMask=(& $c36ManifestFields 'collection2MarkMask'); marked=(& $c36ManifestFields 'collection2TargetMarked'); liveness=(& $c36ManifestFields 'collection2LivenessResult'); checkPromotedEntry=(& $c36ManifestFields 'collection2CheckPromotedEntry'); isPromoted=(& $c36ManifestFields 'collection2IsPromoted'); dead=(& $c36ManifestFields 'collection2Dead'); cleared=(& $c36ManifestFields 'collection2Cleared'); clearFunction=(& $c36ManifestFields 'collection2ClearFunction'); mutationAttempted=(& $c36ManifestFields 'collection2MutationAttempted') }
+                sameHandle=[ordered]@{ allocationCount=(& $c36ManifestFields 'weakHandleAllocationCount'); slot=(& $c36ManifestFields 'sameHandleSlot'); weakSlot=(& $c36ManifestFields 'weakSlot'); table=(& $c36ManifestFields 'sameHandleTableAddress'); segment=(& $c36ManifestFields 'sameHandleSegmentAddress'); handleType=(& $c36ManifestFields 'sameHandleType'); c35ManagedResume=(& $c36ManifestFields 'c35ManagedResume'); c35HandleMarker=(& $c36ManifestFields 'c35HandleMarker'); collection1Value=(& $c36ManifestFields 'collection1SlotAfter'); collection2ValueBefore=(& $c36ManifestFields 'collection2SlotBefore'); collection2ValueAfter=(& $c36ManifestFields 'collection2SlotAfter') }
+                invariants=[ordered]@{ collection1EeSuspended=(& $c36ManifestFields 'collection1EeSuspended'); collection1ThreadStoreLockHeld=(& $c36ManifestFields 'collection1ThreadStoreLockHeld'); collection1ManagedEntryProhibited=(& $c36ManifestFields 'collection1ManagedEntryProhibited'); collection2EeSuspended=(& $c36ManifestFields 'collection2EeSuspended'); collection2ThreadStoreLockHeld=(& $c36ManifestFields 'collection2ThreadStoreLockHeld'); collection2ManagedEntryProhibited=(& $c36ManifestFields 'collection2ManagedEntryProhibited'); collection1SensitiveAllocations=(& $c36ManifestFields 'collection1SensitiveAllocations'); collection2SensitiveAllocations=(& $c36ManifestFields 'collection2SensitiveAllocations'); collection2ManagedEntryAttempts=(& $c36ManifestFields 'collection2ManagedEntryAttempts') }
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+                payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; pe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath) }
+                regressions=[ordered]@{ C19ToC35='retained chronology and prior guards'; C31C32='live short-weak preserved / dead short-weak cleared semantics retained'; C34='real root relocation rewrite retained'; C35='managed resume and weak-handle relocation retained'; converter='PE to ELF conversion retained'; sourceLinkerGuards='PASS'; ordinaryBootSmoke='PASS after restoration'; diffCheck='PASS git diff --check' }
+                documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_WEAK_HANDLE_LIFETIME_TRANSITION_COMPLETE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ buildSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath); expectedSha256=$normalKernelHash; restoredByFinally=$true }
+            }
+            $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host "C011EC36 NativeAOT Workstation same-handle lifetime transition: Outcome C" -ForegroundColor Green
+        }
+    } elseif ($isC011EC35Proof) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC35 relocated-handle proof produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $blockedC35Runs = @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC35' })
         if ($blockedC35Runs.Count -ne 0) {
@@ -6799,9 +6889,9 @@ exit /b %errorlevel%
     }
 }
 finally {
-    if (-not [string]::IsNullOrWhiteSpace($make)) {
-        try { & $make -C kernel ARCH=amd64 clean *> (Join-Path $runRoot "kernel-clean.log") } catch { }
-    }
+    $specializedKernelBuildRoot = Join-Path $root "kernel\build\amd64"
+    $specializedKernelCleanCommand = "if exist `"$specializedKernelBuildRoot`" rmdir /s /q `"$specializedKernelBuildRoot`""
+    try { & cmd.exe /d /c $specializedKernelCleanCommand *> (Join-Path $runRoot "kernel-clean.log") } catch { }
     if (Test-Path -LiteralPath $normalKernelSource -PathType Leaf) {
         New-Item -ItemType Directory -Force -Path (Split-Path $kernelPath), (Split-Path $espKernelPath) | Out-Null
         Copy-Item -LiteralPath $normalKernelSource -Destination $kernelPath -Force

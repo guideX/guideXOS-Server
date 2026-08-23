@@ -182,8 +182,18 @@ typedef struct guidexos_nativeaot_c011ec33_collection_record {
     uint32_t eeRestartEntries;
     uint32_t eeRestartReturns;
     uint32_t managedResumeCount;
+    uint32_t nativeUnwindFrames;
+    uint32_t thirdUnwindAttempts;
     uint32_t condemnedGeneration;
     uint32_t targetGeneration;
+    uint32_t collectionReason;
+    uint32_t compacting;
+    uint32_t relocating;
+    uint32_t eeSuspended;
+    uint32_t threadStoreLockHeld;
+    uint32_t managedEntryProhibited;
+    uint32_t managedFrames;
+    uint32_t rootOwningFrameMatches;
     uint32_t postWeakPhase;
     uint32_t postWeakPhaseCount;
 

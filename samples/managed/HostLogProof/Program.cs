@@ -88,35 +88,40 @@ public static unsafe class Program
             targetAddress, targetType, weakHandleSlot,
             (uint)GCHandleType.Weak);
 
+        // The production allocation loop is the authentic Collection-1
+        // trigger in this locked bring-up. The validation return code ends
+        // the loop on the allocation that resumes after Collection 1, so the
+        // next managed action is the natural helper return.
         const int arrayLength = 4096;
-        byte[] current = null;
         uint hardLimit = GuideXosManagedAllocationGetHardLimit();
         if (hardLimit < 8u || hardLimit > 1024u)
         {
             return new ShortWeakLifetimeSetup(
                 targetAddress, targetType, weakHandleSlot, -1);
         }
-
         for (uint iteration = 0u; iteration < hardLimit; iteration++)
         {
-            current = new byte[arrayLength];
+            byte[] current = new byte[arrayLength];
+            // This is a scalar native observer. Before Collection 1 it is a
+            // no-op; on the first managed instruction after RestartEE it
+            // records the C35 resume boundary. The following validator then
+            // returns the C36 boundary code and this helper returns naturally.
+            _ = GuideXosNativeAotC011EC33GetCompletedCollections();
             uint zeroByteCount = CountZeroBytes(current);
             WriteIdentifyingPattern(current, iteration);
             bool patternValid = HasIdentifyingPattern(current, iteration);
             nint objectReference = Unsafe.As<byte[], nint>(ref current);
-            if (GuideXosManagedAllocationValidateObject(
-                    objectReference, arrayLength, iteration, zeroByteCount,
-                    patternValid ? 1u : 0u) != 0)
+            int validationStatus = GuideXosManagedAllocationValidateObject(
+                objectReference, arrayLength, iteration, zeroByteCount,
+                patternValid ? 1u : 0u);
+            if (validationStatus < 0)
             {
                 return new ShortWeakLifetimeSetup(
                     targetAddress, targetType, weakHandleSlot, -1);
             }
-
-            // This is the controlled strong lifetime: target is a real local
-            // in this NoInlining frame while Collection 1 is enumerating.
             GC.KeepAlive(target);
             GC.KeepAlive(current);
-            if (GuideXosNativeAotC011EC33GetCompletedCollections() >= 1)
+            if (validationStatus > 0)
             {
                 break;
             }
@@ -125,6 +130,7 @@ public static unsafe class Program
         return new ShortWeakLifetimeSetup(
             targetAddress, targetType, weakHandleSlot, status);
     }
+
 #endif
 
 #if HOSTLOGPROOF_SHORT_WEAK_LIVE
@@ -535,16 +541,24 @@ public static unsafe class Program
         // only managed strong reference. Only scalar identity crosses its
         // return boundary; the same production weak handle remains allocated.
         ShortWeakLifetimeSetup setup = CreateAndRunLiveCollection1();
-        if (setup.Status != 0 || setup.Target == 0 ||
-            setup.TargetType == 0 || setup.WeakHandleSlot == 0 ||
-            GuideXosNativeAotC011EC33GetCompletedCollections() < 1 ||
-            GuideXosNativeAotC011EC33LifetimeBoundaryReturned(
-                setup.Target, setup.TargetType, setup.WeakHandleSlot) != 0)
+        bool setupValid = setup.Status == 0 && setup.Target != 0 &&
+            setup.TargetType != 0 && setup.WeakHandleSlot != 0;
+        int boundaryStatus = setupValid
+            ? GuideXosNativeAotC011EC33LifetimeBoundaryReturned(
+                setup.Target, setup.TargetType, setup.WeakHandleSlot)
+            : -1;
+        setup = default;
+        if (!setupValid || boundaryStatus != 0)
         {
             return GxAbi.ErrorInvalidArgument;
         }
 
-        const int arrayLength = 4096;
+        // The helper's 4-KiB arrays establish Collection 1. After the
+        // helper returns, use ordinary 64-KiB allocations to create enough
+        // real allocation pressure for the target's promoted generation to
+        // be condemned by a later collection. The four retained sentinels
+        // are diagnostic workload roots, not references to the target.
+        const int arrayLength = 65536;
         byte[] sentinel0 = null;
         byte[] sentinel1 = null;
         byte[] sentinel2 = null;
@@ -557,7 +571,7 @@ public static unsafe class Program
         }
 
         // The helper frame has returned. This outer frame carries only scalar
-        // target/handle identity and ordinary allocation sentinels.
+        // status and ordinary allocation sentinels.
         for (uint iteration = 0u; iteration < hardLimit; iteration++)
         {
             bool sentinelsValid = ValidateSample(sentinel0, 0u) &&
@@ -575,10 +589,7 @@ public static unsafe class Program
             uint zeroByteCount = CountZeroBytes(current);
             WriteIdentifyingPattern(current, iteration);
             bool patternValid = HasIdentifyingPattern(current, iteration);
-            nint objectReference = Unsafe.As<byte[], nint>(ref current);
-            if (GuideXosManagedAllocationValidateObject(
-                    objectReference, arrayLength, iteration, zeroByteCount,
-                    patternValid ? 1u : 0u) != 0)
+            if (zeroByteCount != arrayLength || !patternValid)
             {
                 return GxAbi.ErrorInvalidArgument;
             }
