@@ -1,8 +1,5 @@
 #include "desktop_theme.h"
 
-#include <cctype>
-#include <string>
-
 namespace {
     const DesktopTheme kClassicTheme{
         DesktopThemeId::Classic,
@@ -60,20 +57,31 @@ namespace {
 
     DesktopThemeId g_currentDesktopThemeId = DesktopThemeId::Classic;
 
-    std::string normalizeThemeToken(const char* text)
+    bool themeTokenMatches(const char* text, const char* expected)
     {
-        std::string out;
-        if (!text) {
-            return out;
+        if (!text || !expected) {
+            return false;
         }
-        for (const char* p = text; *p; ++p) {
-            const unsigned char ch = static_cast<unsigned char>(*p);
-            if (std::isspace(ch) || ch == '-' || ch == '_') {
+
+        const char* expectedCursor = expected;
+        for (const char* cursor = text; *cursor; ++cursor) {
+            const unsigned char ch = static_cast<unsigned char>(*cursor);
+            if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+                ch == '\f' || ch == '\v' || ch == '-' || ch == '_') {
                 continue;
             }
-            out.push_back(static_cast<char>(std::tolower(ch)));
+
+            char normalized = static_cast<char>(ch);
+            if (normalized >= 'A' && normalized <= 'Z') {
+                normalized = static_cast<char>(normalized - 'A' + 'a');
+            }
+            if (!*expectedCursor || normalized != *expectedCursor) {
+                return false;
+            }
+            ++expectedCursor;
         }
-        return out;
+
+        return *expectedCursor == '\0';
     }
 }
 
@@ -125,11 +133,10 @@ bool TryParseDesktopThemeId(const char* text, DesktopThemeId* out)
     }
 
     *out = DesktopThemeId::Classic;
-    const std::string token = normalizeThemeToken(text);
-    if (token.empty() || token == "classic") {
+    if (!text || themeTokenMatches(text, "") || themeTokenMatches(text, "classic")) {
         return true;
     }
-    if (token == "scifi") {
+    if (themeTokenMatches(text, "scifi")) {
         *out = DesktopThemeId::SciFi;
         return true;
     }

@@ -7750,6 +7750,49 @@ namespace gxos {
             fbFillRect(pixels, pitch, bufW, bufH, iconX, iconY, kStartMenuIconSize, kStartMenuIconSize, startMenuFallbackIconColor32(label));
             fbDrawRect(pixels, pitch, bufW, bufH, iconX, iconY, kStartMenuIconSize, kStartMenuIconSize, 0x00FFFFFF);
         }
+
+        static uint32_t bareMetalTaskbarSurfaceColor(const DesktopTheme& theme) {
+            return theme.id == DesktopThemeId::SciFi
+                ? BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 8)
+                : 0x00373A46u;
+        }
+
+        static uint32_t bareMetalTaskbarItemFillColor(const DesktopTheme& theme, bool focused, bool minimized, bool tombstoned) {
+            if (theme.id != DesktopThemeId::SciFi) {
+                return focused ? 0x00466496u
+                    : (minimized ? 0x00282832u : (tombstoned ? 0x00554123u : 0x00373A46u));
+            }
+
+            const uint32_t base = bareMetalTaskbarSurfaceColor(theme);
+            if (focused) return BlendDesktopThemeColor(base, theme.mutedAccent, 22);
+            if (minimized) return BlendDesktopThemeColor(base, theme.taskbarBorder, 26);
+            if (tombstoned) return BlendDesktopThemeColor(base, 0xFF782828u, 48);
+            return base;
+        }
+
+        static uint32_t bareMetalTaskbarIndicatorColor(const DesktopTheme& theme) {
+            return theme.id == DesktopThemeId::SciFi
+                ? BlendDesktopThemeColor(theme.accent, theme.mutedAccent, 14)
+                : 0x0064A0F0u;
+        }
+
+        static uint32_t bareMetalTaskbarTextColor(const DesktopTheme& theme) {
+            return theme.id == DesktopThemeId::SciFi ? theme.titleBarText : 0x00E6E6F0u;
+        }
+
+        static uint32_t bareMetalStartButtonFillColor(const DesktopTheme& theme, bool open) {
+            if (theme.id != DesktopThemeId::SciFi) return 0x00374B64u;
+
+            const uint32_t base = bareMetalTaskbarSurfaceColor(theme);
+            return open ? BlendDesktopThemeColor(base, theme.accent, 26)
+                        : BlendDesktopThemeColor(base, theme.windowBorder, 18);
+        }
+
+        static uint32_t bareMetalStartButtonBorderColor(const DesktopTheme& theme, bool open) {
+            if (theme.id != DesktopThemeId::SciFi) return 0x00FFFFFFu;
+            return open ? BlendDesktopThemeColor(theme.taskbarBorder, theme.accent, 42)
+                        : BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBorder, 18);
+        }
         
         void Compositor::renderToFramebuffer() {
             if (!g_videoBackend) {
@@ -7802,8 +7845,14 @@ namespace gxos {
             const int taskbarH = 40;
             const int titleBarH = theme.titleBarHeight;
 
-            drawBackgroundGradientToPixels(pixels, fbW, fbH - taskbarH, pitch, g_gradientTopColor, g_gradientBottomColor);
-            if (g_wallpaperImage && g_wallpaperImage->isValid()) {
+            const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+            const bool hasWallpaper = g_wallpaperImage && g_wallpaperImage->isValid();
+            drawBackgroundGradientToPixels(pixels, fbW, fbH - taskbarH, pitch,
+                sciFiTheme && !hasWallpaper ? theme.desktopBackground : g_gradientTopColor,
+                sciFiTheme && !hasWallpaper
+                    ? BlendDesktopThemeColor(theme.desktopBackground, theme.windowBackground, 12)
+                    : g_gradientBottomColor);
+            if (hasWallpaper) {
                 drawBackgroundImageToPixels(pixels, fbW, fbH - taskbarH, pitch, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode));
             } else {
 
@@ -7811,10 +7860,10 @@ namespace gxos {
                 const char* brand = "guideXOS Server - UEFI Mode";
                 BitmapFont::DrawStringToBufferScaled(pixels, pitch, fbW, fbH,
                     fbW / 2 - BitmapFont::MeasureWidth(brand) * 2 / 2,
-                    fbH / 2 - 50, brand, -1, 0x00404040, 2);
+                    fbH / 2 - 50, brand, -1, sciFiTheme ? BlendDesktopThemeColor(theme.desktopBackground, theme.titleBarText, 58) : 0x00404040u, 2);
                 BitmapFont::DrawStringToBufferScaled(pixels, pitch, fbW, fbH,
                     fbW / 2 - BitmapFont::MeasureWidth(brand) * 2 / 2 - 1,
-                    fbH / 2 - 51, brand, -1, 0x00808090, 2);
+                    fbH / 2 - 51, brand, -1, sciFiTheme ? BlendDesktopThemeColor(theme.desktopBackground, theme.titleBarText, 74) : 0x00808090u, 2);
             }
 
             // Draw desktop icons
@@ -7967,24 +8016,42 @@ namespace gxos {
             }
 
             // Draw taskbar
-            for (int y = fbH - taskbarH; y < fbH; ++y) {
-                float t = (float)(y - (fbH - taskbarH)) / (float)taskbarH;
-                uint8_t gray = (uint8_t)(30 + t * 10);
-                uint32_t color = (gray << 16) | (gray << 8) | (gray + 8);
-                for (int x = 0; x < fbW; ++x) {
-                    pixels[y * (pitch/4) + x] = color;
+            if (!sciFiTheme) {
+                for (int y = fbH - taskbarH; y < fbH; ++y) {
+                    float t = (float)(y - (fbH - taskbarH)) / (float)taskbarH;
+                    uint8_t gray = (uint8_t)(30 + t * 10);
+                    uint32_t color = (gray << 16) | (gray << 8) | (gray + 8);
+                    for (int x = 0; x < fbW; ++x) {
+                        pixels[y * (pitch/4) + x] = color;
+                    }
+                }
+            } else {
+                const uint32_t top = bareMetalTaskbarSurfaceColor(theme);
+                const uint32_t bottom = theme.taskbarBackground;
+                for (int y = fbH - taskbarH; y < fbH; ++y) {
+                    const int offset = y - (fbH - taskbarH);
+                    const int percent = taskbarH > 1 ? (offset * 100) / (taskbarH - 1) : 0;
+                    const uint32_t color = BlendDesktopThemeColor(top, bottom, percent);
+                    for (int x = 0; x < fbW; ++x) {
+                        pixels[y * (pitch/4) + x] = color;
+                    }
                 }
             }
 
             // Taskbar top edge
             for (int x = 0; x < fbW; ++x) {
-                pixels[(fbH - taskbarH) * (pitch/4) + x] = 0x003C4150;
+                pixels[(fbH - taskbarH) * (pitch/4) + x] = sciFiTheme
+                    ? BlendDesktopThemeColor(theme.taskbarBorder, theme.accent, 52)
+                    : 0x003C4150u;
             }
 
             // Start button
-            fbFillRect(pixels, pitch, fbW, fbH, theme.taskbarPadding, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00374B64);
-            fbDrawRect(pixels, pitch, fbW, fbH, theme.taskbarPadding, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00FFFFFF);
-            fbDrawText(pixels, pitch, fbW, fbH, theme.taskbarPadding + 4, fbH - taskbarH + 12, "S", 1, 0x00FFFFFF, FontRole::SmallBold);
+            fbFillRect(pixels, pitch, fbW, fbH, theme.taskbarPadding, fbH - taskbarH + 6, 32, taskbarH - 12,
+                       bareMetalStartButtonFillColor(theme, g_startMenuVisible));
+            fbDrawRect(pixels, pitch, fbW, fbH, theme.taskbarPadding, fbH - taskbarH + 6, 32, taskbarH - 12,
+                       bareMetalStartButtonBorderColor(theme, g_startMenuVisible));
+            fbDrawText(pixels, pitch, fbW, fbH, theme.taskbarPadding + 4, fbH - taskbarH + 12, "S", 1,
+                       sciFiTheme ? theme.titleBarText : 0x00FFFFFFu, FontRole::SmallBold);
 
             if (g_startMenuVisible) {
                 const int smW = 440;
@@ -8067,18 +8134,18 @@ namespace gxos {
                     int bw = fbMeasureText(w.title.c_str(), labelLen, FontRole::Small) + theme.taskbarItemPadding * 2 + 12;
                     if (bw > 150) bw = 150;
 
-                    uint32_t btnColor = (wid == g_focus) ? 0x00466496 :
-                                        (w.minimized ? 0x00282832 :
-                                        (w.tombstoned ? 0x00554123 : 0x00373A46));
+                    uint32_t btnColor = bareMetalTaskbarItemFillColor(theme, wid == g_focus, w.minimized, w.tombstoned);
                     fbFillRect(pixels, pitch, fbW, fbH, btnX, fbH - taskbarH + 6, bw, taskbarH - 12, btnColor);
 
                     // Focus indicator
                     if (wid == g_focus) {
-                        fbFillRect(pixels, pitch, fbW, fbH, btnX + 2, fbH - 9, bw - 4, 2, 0x0064A0F0);
+                        fbFillRect(pixels, pitch, fbW, fbH, btnX + 2, fbH - 9, bw - 4, 2,
+                                   bareMetalTaskbarIndicatorColor(theme));
                     }
 
                     fbDrawText(pixels, pitch, fbW, fbH,
-                        btnX + theme.taskbarItemPadding + 12, fbH - taskbarH + 12, w.title.c_str(), labelLen, 0x00E6E6F0, FontRole::Small);
+                        btnX + theme.taskbarItemPadding + 12, fbH - taskbarH + 12, w.title.c_str(), labelLen,
+                        bareMetalTaskbarTextColor(theme), FontRole::Small);
 
                     btnX += bw + theme.taskbarItemPadding / 2;
                 }
@@ -8093,9 +8160,13 @@ namespace gxos {
             int clockW = std::max(timeW, dateW) + 16;
             int clockX = fbW - clockW - theme.taskbarPadding;
             fbDrawText(pixels, pitch, fbW, fbH,
-                clockX + (clockW - timeW) / 2, fbH - taskbarH + 8, timeText.c_str(), -1, 0x00C8C8D2, FontRole::Small);
+                clockX + (clockW - timeW) / 2, fbH - taskbarH + 8, timeText.c_str(), -1,
+                bareMetalTaskbarTextColor(theme), FontRole::Small);
             fbDrawText(pixels, pitch, fbW, fbH,
-                clockX + (clockW - dateW) / 2, fbH - taskbarH + 22, dateText.c_str(), -1, 0x009696A5, FontRole::Small);
+                clockX + (clockW - dateW) / 2, fbH - taskbarH + 22, dateText.c_str(), -1,
+                theme.id == DesktopThemeId::SciFi
+                    ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 38)
+                    : 0x009696A5u, FontRole::Small);
 
             // Present to hardware framebuffer
             g_videoBackend->present();

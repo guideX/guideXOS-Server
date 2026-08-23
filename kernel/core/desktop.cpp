@@ -47,6 +47,7 @@
 #if !defined(GXOS_BARE_METAL)
 #include "../../icon_theme_manager.h"
 #endif
+#include "../../desktop_theme.h"
 
 // ------------------------------------------------------------
 // Phase 3 typed dispatch keeps legacy and special-case fallbacks authoritative
@@ -415,6 +416,72 @@ static uint32_t lerp_color(uint32_t c1, uint32_t c2, uint32_t num, uint32_t den)
     uint8_t g = (uint8_t)(g1 + (int)(g2 - g1) * (int)num / (int)den);
     uint8_t b = (uint8_t)(b1 + (int)(b2 - b1) * (int)num / (int)den);
     return rgb(r, g, b);
+}
+
+static uint32_t bare_metal_taskbar_top_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 8)
+        : rgb(45, 45, 55);
+}
+
+static uint32_t bare_metal_taskbar_bottom_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi ? theme.taskbarBackground : rgb(30, 30, 38);
+}
+
+static uint32_t bare_metal_taskbar_border_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBackground, 16)
+        : rgb(70, 70, 85);
+}
+
+static uint32_t bare_metal_taskbar_surface_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 8)
+        : rgb(55, 58, 70);
+}
+
+static uint32_t bare_metal_taskbar_item_color(const DesktopTheme& theme, bool active, bool hover)
+{
+    if (theme.id != DesktopThemeId::SciFi) {
+        return active ? rgb(70, 100, 150) : (hover ? rgb(60, 65, 75) : rgb(55, 58, 70));
+    }
+
+    const uint32_t base = bare_metal_taskbar_surface_color(theme);
+    if (active) return BlendDesktopThemeColor(base, theme.mutedAccent, 22);
+    if (hover) return BlendDesktopThemeColor(base, theme.accent, 22);
+    return base;
+}
+
+static uint32_t bare_metal_taskbar_indicator_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.accent, theme.mutedAccent, 14)
+        : rgb(100, 160, 240);
+}
+
+static uint32_t bare_metal_taskbar_text_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi ? theme.titleBarText : rgb(230, 230, 240);
+}
+
+static uint32_t bare_metal_start_button_color(const DesktopTheme& theme, bool open)
+{
+    if (theme.id != DesktopThemeId::SciFi) return open ? rgb(70, 100, 150) : rgb(50, 70, 110);
+
+    const uint32_t base = BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 8);
+    return open ? BlendDesktopThemeColor(base, theme.accent, 26) :
+        BlendDesktopThemeColor(base, theme.windowBorder, 18);
+}
+
+static uint32_t bare_metal_start_button_border_color(const DesktopTheme& theme, bool open)
+{
+    if (theme.id != DesktopThemeId::SciFi) return open ? rgb(100, 140, 200) : rgb(90, 120, 180);
+    return open ? BlendDesktopThemeColor(theme.taskbarBorder, theme.accent, 42) :
+        BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBorder, 18);
 }
 
 static bool desktop_str_eq(const char* a, const char* b)
@@ -1356,6 +1423,28 @@ static void load_persisted_taskbar_position()
     s_taskbarDockPosition = parse_taskbar_position(store.taskbarPosition);
     serial::puts("[desktop] loaded taskbar position=");
     serial::puts(taskbar_position_name(s_taskbarDockPosition));
+    serial::puts(" source=");
+    serial::puts(bare_metal_display_options_load_source_name(source));
+    serial::puts("\n");
+}
+
+static void load_persisted_desktop_theme()
+{
+    BareMetalDisplayOptionsData store;
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    if (!bare_metal_load_display_options(store, &source)) {
+        SetCurrentDesktopTheme(DesktopThemeId::Classic);
+        return;
+    }
+
+    DesktopThemeId themeId = DesktopThemeId::Classic;
+    if (!TryParseDesktopThemeId(store.desktopThemeId, &themeId)) {
+        themeId = DesktopThemeId::Classic;
+    }
+    SetCurrentDesktopTheme(themeId);
+
+    serial::puts("[desktop] loaded desktop theme=");
+    serial::puts(DesktopThemeIdToString(themeId));
     serial::puts(" source=");
     serial::puts(bare_metal_display_options_load_source_name(source));
     serial::puts("\n");
@@ -4211,6 +4300,10 @@ void refresh_bare_metal_desktop_folders_after_vfs_ready()
     } else {
         serial::puts("[desktop] desktop backing directory unresolved after VFS ready\n");
     }
+    // The initial desktop draw precedes VFS mount. Reload the shared theme
+    // state now so persisted Classic/Sci-Fi selection reaches the first
+    // post-mount redraw without changing geometry or input behavior.
+    load_persisted_desktop_theme();
     if (!bare_metal_ensure_standard_user_folders()) {
         serial::puts("[desktop] warning: one or more standard user folders could not be created\n");
     }
@@ -5628,6 +5721,7 @@ static void draw_background()
 {
     uint32_t w = s_screenW;
     uint32_t h = s_screenH;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
 
     // Draw wallpaper based on configured type
     switch (s_wallpaperConfig.type) {
@@ -5673,9 +5767,9 @@ static void draw_background()
         }
 
         case WallpaperType::BuiltIn: {
-            draw_wallpaper_gradient_base(w, h);
             WallpaperImageCache* image = load_wallpaper_full_cache(get_wallpaper_id());
             if (image) {
+                draw_wallpaper_gradient_base(w, h);
                 serial::puts("[desktop] rendering wallpaper image for id=");
                 serial::puts(get_wallpaper_id());
                 serial::puts(" scale=");
@@ -5684,17 +5778,24 @@ static void draw_background()
                 draw_gximg_scaled_mode(*image, w, h, s_wallpaperConfig.scaleMode);
             } else {
                 serial::puts("[desktop] wallpaper image fallback to gradient\n");
+                const uint32_t fallbackTop = theme.id == DesktopThemeId::SciFi
+                    ? theme.desktopBackground : s_wallpaperConfig.topColor;
+                const uint32_t fallbackBottom = theme.id == DesktopThemeId::SciFi
+                    ? BlendDesktopThemeColor(theme.desktopBackground, theme.windowBackground, 12)
+                    : s_wallpaperConfig.bottomColor;
                 for (uint32_t y = 0; y < h; y++) {
                     uint32_t lineColor = lerp_color(
-                        s_wallpaperConfig.topColor,
-                        s_wallpaperConfig.bottomColor,
+                        fallbackTop,
+                        fallbackBottom,
                         y,
                         h > 1 ? h - 1 : 1
                     );
                     framebuffer::fill_rect(0, y, w, 1, lineColor);
                 }
 
-                uint32_t accent = s_wallpaperConfig.gridColor;
+                uint32_t accent = theme.id == DesktopThemeId::SciFi
+                    ? BlendDesktopThemeColor(theme.desktopBackground, theme.accent, 10)
+                    : s_wallpaperConfig.gridColor;
                 uint32_t cx = w / 2;
                 uint32_t cy = h / 2;
                 for (uint32_t ring = 0; ring < 7; ++ring) {
@@ -6585,21 +6686,26 @@ static void click_volume_widget(TaskbarWidget& widget)
 
 static void draw_clock_widget(TaskbarWidget& widget)
 {
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const uint32_t primaryText = bare_metal_taskbar_text_color(theme);
+    const uint32_t secondaryText = theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 38)
+        : rgb(160, 160, 175);
     char timeStr[6];
     char dateStr[11];
     format_time_string(timeStr, sizeof(timeStr));
     format_date_string(dateStr, sizeof(dateStr));
 
     if (is_vertical_taskbar(s_taskbarDockPosition)) {
-        draw_text_centered(widget.bounds.x, widget.bounds.y + 4, widget.bounds.w, 12, timeStr, rgb(210, 210, 220), 1);
-        draw_text_centered(widget.bounds.x, widget.bounds.y + 18, widget.bounds.w, 12, dateStr, rgb(160, 160, 175), 1);
+        draw_text_centered(widget.bounds.x, widget.bounds.y + 4, widget.bounds.w, 12, timeStr, primaryText, 1);
+        draw_text_centered(widget.bounds.x, widget.bounds.y + 18, widget.bounds.w, 12, dateStr, secondaryText, 1);
         return;
     }
 
     uint32_t timeY = widget.bounds.y + 6;
-    draw_text_centered(widget.bounds.x, timeY, widget.bounds.w, kTaskbarH / 2 - 4, timeStr, rgb(210, 210, 220), 1);
+    draw_text_centered(widget.bounds.x, timeY, widget.bounds.w, kTaskbarH / 2 - 4, timeStr, primaryText, 1);
     uint32_t dateY = widget.bounds.y + kTaskbarH / 2 + 2;
-    draw_text_centered(widget.bounds.x, dateY, widget.bounds.w, kTaskbarH / 2 - 4, dateStr, rgb(160, 160, 175), 1);
+    draw_text_centered(widget.bounds.x, dateY, widget.bounds.w, kTaskbarH / 2 - 4, dateStr, secondaryText, 1);
 }
 
 static void init_taskbar_widgets()
@@ -6656,7 +6762,11 @@ static void draw_system_tray(uint32_t trayX, uint32_t taskbarY)
     if (trayW == 0) return;
 
     uint32_t iconY = taskbarY + (kTaskbarH - kTrayIconSize) / 2;
-    vline(trayX - 2, taskbarY + 4, kTaskbarH - 8, rgb(80, 80, 90));
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const uint32_t separatorColor = theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBorder, theme.accent, 24)
+        : rgb(80, 80, 90);
+    vline(trayX - 2, taskbarY + 4, kTaskbarH - 8, separatorColor);
 
     uint32_t cx = trayX + 4;
     for (int i = (int)TaskbarWidgetType::Network; i <= (int)TaskbarWidgetType::Battery; i++) {
@@ -6718,6 +6828,8 @@ static bool is_taskbar_drag_area(int32_t mx, int32_t my)
 
 static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
 {
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+
     if (is_vertical_taskbar(s_taskbarDockPosition)) {
         s_terminalBtnVisible = false;
         if (!shell::is_open()) return;
@@ -6736,11 +6848,13 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
         s_terminalBtnVisible = true;
 
         bool isActive = !s_shellMinimized && s_shellActive;
-        uint32_t bgColor = isActive ? rgb(70, 100, 150) : rgb(55, 58, 70);
+        uint32_t bgColor = bare_metal_taskbar_item_color(theme, isActive, false);
         framebuffer::fill_rect(btnX, btnY, btnW, btnH, bgColor);
-        if (isActive) framebuffer::fill_rect(btnX + 2, btnY + btnH - 3, btnW - 4, 2, rgb(100, 160, 240));
+        if (isActive) framebuffer::fill_rect(btnX + 2, btnY + btnH - 3, btnW - 4, 2,
+                                             bare_metal_taskbar_indicator_color(theme));
         framebuffer::fill_rect(btnX + (btnW > 14 ? (btnW - 14) / 2 : 0), btnY + 4, 14, 14, rgb(120, 180, 80));
-        draw_text_centered(btnX, btnY + 18, btnW, btnH > 18 ? btnH - 18 : btnH, "Term", rgb(230, 230, 240), 1);
+        draw_text_centered(btnX, btnY + 18, btnW, btnH > 18 ? btnH - 18 : btnH, "Term",
+                           bare_metal_taskbar_text_color(theme), 1);
         return;
     }
 
@@ -6756,14 +6870,13 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
         if (btnW > kTaskbarBtnMaxW) btnW = kTaskbarBtnMaxW;
 
         // Button background
-        uint32_t bgColor = s_taskbarEntries[i].active
-            ? rgb(70, 100, 150)
-            : rgb(55, 58, 70);
+        uint32_t bgColor = bare_metal_taskbar_item_color(theme, s_taskbarEntries[i].active, false);
         framebuffer::fill_rect(btnX, btnY, btnW, kTaskbarBtnH, bgColor);
 
         // Active indicator line at bottom (matching compositor)
         if (s_taskbarEntries[i].active) {
-            framebuffer::fill_rect(btnX + 2, btnY + kTaskbarBtnH - 3, btnW - 4, 2, rgb(100, 160, 240));
+            framebuffer::fill_rect(btnX + 2, btnY + kTaskbarBtnH - 3, btnW - 4, 2,
+                                   bare_metal_taskbar_indicator_color(theme));
         }
 
         // Small colored icon
@@ -6774,7 +6887,7 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
 
         // Title text
         draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2,
-                  s_taskbarEntries[i].title, rgb(230, 230, 240), 1);
+                  s_taskbarEntries[i].title, bare_metal_taskbar_text_color(theme), 1);
 
         btnX += btnW + kTaskbarBtnGap;
     }
@@ -6797,17 +6910,19 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
             
             // Button background - active if not minimized and is active
             bool isActive = !s_shellMinimized && s_shellActive;
-            uint32_t bgColor = isActive ? rgb(70, 100, 150) : rgb(55, 58, 70);
+            uint32_t bgColor = bare_metal_taskbar_item_color(theme, isActive, false);
             framebuffer::fill_rect(btnX, btnY, btnW, kTaskbarBtnH, bgColor);
             
             // Active indicator line at bottom
             if (isActive) {
-                framebuffer::fill_rect(btnX + 2, btnY + kTaskbarBtnH - 3, btnW - 4, 2, rgb(100, 160, 240));
+                framebuffer::fill_rect(btnX + 2, btnY + kTaskbarBtnH - 3, btnW - 4, 2,
+                                       bare_metal_taskbar_indicator_color(theme));
             }
             
             // Minimized indicator (dot) when minimized
             if (s_shellMinimized) {
-                framebuffer::fill_rect(btnX + btnW/2 - 2, btnY + kTaskbarBtnH - 5, 4, 2, rgb(100, 160, 240));
+                framebuffer::fill_rect(btnX + btnW/2 - 2, btnY + kTaskbarBtnH - 5, 4, 2,
+                                       bare_metal_taskbar_indicator_color(theme));
             }
             
             // Terminal icon (green square)
@@ -6817,7 +6932,8 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
             framebuffer::fill_rect(iconX, iconY2, iconSz, iconSz, rgb(120, 180, 80));
             
             // Title text
-            draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2, title, rgb(230, 230, 240), 1);
+            draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2, title,
+                      bare_metal_taskbar_text_color(theme), 1);
         }
     }
 }
@@ -6831,10 +6947,11 @@ static void draw_taskbar()
     apply_taskbar_layout();
     DesktopRect tb = get_current_taskbar_rect();
     bool vertical = is_vertical_taskbar(s_taskbarDockPosition);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
 
     // Taskbar background (dark gradient)
-    uint32_t tbTop = rgb(45, 45, 55);
-    uint32_t tbBot = rgb(30, 30, 38);
+    uint32_t tbTop = bare_metal_taskbar_top_color(theme);
+    uint32_t tbBot = bare_metal_taskbar_bottom_color(theme);
     uint32_t gradientLen = vertical ? tb.w : tb.h;
     for (uint32_t i = 0; i < gradientLen; i++) {
         uint32_t c = lerp_color(tbTop, tbBot, i, gradientLen > 1 ? gradientLen - 1 : 1);
@@ -6842,13 +6959,13 @@ static void draw_taskbar()
         else framebuffer::fill_rect(tb.x, tb.y + i, tb.w, 1, c);
     }
 
-    if (vertical) vline(tb.x, tb.y, tb.h, rgb(70, 70, 85));
-    else hline(tb.x, tb.y, tb.w, rgb(70, 70, 85));
+    if (vertical) vline(tb.x, tb.y, tb.h, bare_metal_taskbar_border_color(theme));
+    else hline(tb.x, tb.y, tb.w, bare_metal_taskbar_border_color(theme));
 
     // Start button - draw image centered in button area, with tint when menu open
     DesktopRect start = get_start_button_rect();
-    uint32_t btnColor = s_startMenuOpen ? rgb(70, 100, 150) : rgb(50, 70, 110);
-    uint32_t btnBorder = s_startMenuOpen ? rgb(100, 140, 200) : rgb(90, 120, 180);
+    uint32_t btnColor = bare_metal_start_button_color(theme, s_startMenuOpen);
+    uint32_t btnBorder = bare_metal_start_button_border_color(theme, s_startMenuOpen);
     framebuffer::fill_rect(start.x, start.y, start.w, start.h, btnColor);
     draw_rect(start.x, start.y, start.w, start.h, btnBorder);
     // Draw the start button image, centered within the button
@@ -6869,8 +6986,12 @@ static void draw_taskbar()
         }
 
         DesktopRect sd = get_show_desktop_rect();
-        framebuffer::fill_rect(sd.x, sd.y, sd.w, sd.h, rgb(50, 50, 60));
-        hline(sd.x + 4, sd.y, sd.w > 8 ? sd.w - 8 : sd.w, rgb(70, 75, 90));
+        framebuffer::fill_rect(sd.x, sd.y, sd.w, sd.h,
+                               theme.id == DesktopThemeId::SciFi
+                                   ? bare_metal_taskbar_surface_color(theme) : rgb(50, 50, 60));
+        hline(sd.x + 4, sd.y, sd.w > 8 ? sd.w - 8 : sd.w,
+              theme.id == DesktopThemeId::SciFi
+                  ? bare_metal_taskbar_border_color(theme) : rgb(70, 75, 90));
         return;
     }
 
@@ -6909,12 +7030,19 @@ static void draw_taskbar()
 
     // Show Desktop button (thin sliver on far right)
     uint32_t sdX = tb.x + tb.w - kShowDesktopW;
-    framebuffer::fill_rect(sdX, tb.y, kShowDesktopW, kTaskbarH, rgb(50, 50, 60));
+    framebuffer::fill_rect(sdX, tb.y, kShowDesktopW, kTaskbarH,
+                           theme.id == DesktopThemeId::SciFi
+                               ? bare_metal_taskbar_surface_color(theme) : rgb(50, 50, 60));
     // Separator before show desktop
-    vline(sdX, tb.y + 4, kTaskbarH - 8, rgb(70, 75, 90));
+    vline(sdX, tb.y + 4, kTaskbarH - 8,
+          theme.id == DesktopThemeId::SciFi
+              ? bare_metal_taskbar_border_color(theme) : rgb(70, 75, 90));
     
     // Subtle vertical line pattern in show desktop area
-    vline(sdX + 2, tb.y + 10, kTaskbarH - 20, rgb(60, 60, 70));
+    vline(sdX + 2, tb.y + 10, kTaskbarH - 20,
+          theme.id == DesktopThemeId::SciFi
+              ? BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBackground, 24)
+              : rgb(60, 60, 70));
 }
 
 // ============================================================
@@ -8748,6 +8876,7 @@ void init()
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
     load_persisted_taskbar_position();
+    load_persisted_desktop_theme();
     apply_taskbar_layout();
     reload_persisted_system_desktop_icons();
     load_persisted_app_shortcuts();

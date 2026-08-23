@@ -837,6 +837,74 @@ The existing hosted notification toast now follows the established Sci Fi shell 
 
 Final Phase 6C outcome: Outcome B — implementation complete; direct visual proof partially limited by the retained compositor surface.
 
+## Phase 7A — Bare-Metal Desktop and Taskbar Surface Parity
+
+Phase 7A is the first bare-metal Sci Fi parity pass. It is deliberately limited to the primary framebuffer desktop/taskbar shell surfaces:
+
+* bare-metal desktop fallback/background fill when no wallpaper image is available;
+* bare-metal taskbar surface, top edge/border, separators, text, and existing show-desktop surface;
+* taskbar item normal, hover, active/selected, minimized, and indicator colors where those states already exist;
+* the existing Start button normal and open/pressed visual states.
+
+No geometry or shell behavior was redesigned. Taskbar height, padding, item sizing, Start-button dimensions and hit region, desktop work area, input routing, window behavior, wallpaper ownership, and icon layout remain on their existing paths.
+
+### Bare-Metal Rendering Paths Modified
+
+* `kernel/core/desktop.cpp` remains the primary UEFI/PS/2 framebuffer desktop path. Its existing `draw_background`, `draw_taskbar`, `draw_taskbar_buttons`, clock, tray separator, and Start-button paint paths now select Sci Fi colors through `GetCurrentDesktopTheme()` and the shared `DesktopTheme` fields. The existing VFS-ready desktop refresh also reloads the persisted theme after the initial pre-mount draw.
+* `kernel/core/kernel_compositor.cpp` owns live kernel-app taskbar item painting and hover tracking. Its normal, hover, active, indicator, and text colors now use the shared theme state.
+* `compositor.cpp` keeps the existing non-Windows framebuffer fallback path theme-aware for desktop fallback, taskbar, Start button, taskbar items, indicators, and clock text. Wallpaper images still take precedence over the fallback fill.
+* `desktop_theme.h/.cpp` remain the single theme definition and selector boundary. The parser was made freestanding-safe, and the existing `desktop_theme.cpp` is linked into the kernel through `kernel/Makefile`; no second palette or bare-metal theme table was added.
+
+The framebuffer path can safely call the existing accessors because the theme data is portable, constant-sized state and the shared implementation no longer depends on the hosted C++ standard library. Bare-metal code imports only the existing `kernel/types.h` compatibility layer; no GDI, Win32, allocation, filesystem, floating-point effect, or architecture-specific theme dependency was introduced. The amd64 QEMU path uses the shared renderer; the palette/blend helpers use integer RGB arithmetic and preserve opaque framebuffer colors.
+
+### Classic Preservation
+
+Classic remains the default and fallback. The Classic branches retain the prior framebuffer RGB values for desktop/taskbar surfaces, taskbar item states, Start button, borders, indicators, and text. Missing, invalid, or unavailable persisted theme configuration selects Classic. No geometry, hit testing, work-area calculation, or input behavior changed.
+
+### Sci-Fi Result
+
+When Sci Fi is active, the bare-metal desktop fallback uses the existing dark desktop/window/accent relationship, while an active wallpaper remains untouched. The taskbar uses the existing Sci Fi taskbar background and border relationship with inexpensive integer blending; Start, taskbar items, active indicators, hover surfaces, separators, and text use the existing Sci Fi palette. The result is palette/surface parity with the hosted shell without gradients beyond the existing framebuffer gradient primitive, shadows, blur, glow, animation, or rounded clipping.
+
+### Start-Menu Boundary
+
+The themed Start button continues to open and dismiss the existing Start menu. Start-menu contents remain Classic and are explicitly outside Phase 7A. This boundary is intentional and preserves the existing menu behavior while the primary desktop/taskbar shell surfaces receive parity.
+
+### Phase 7A Build and Automated Evidence
+
+* `third_party/stb/stb_image.h` remained available as the ignored dependency (283,010 bytes).
+* `.\build.bat` passed and produced `guideXOSServer.exe`.
+* `mingw32-make -C kernel ARCH=amd64 -j2` passed, including the shared `desktop_theme.cpp` object and the linked `kernel/build/amd64/bin/kernel.elf`.
+* `.\scripts\smoke-theme-system.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-live-directory-desktop-status.ps1 -SkipBuild` passed.
+* `.\scripts\smoke-hosted-display-runtime.ps1` passed in normal-single-output, synthetic-only, and dual-window modes.
+* `.\scripts\smoke-desktop-startup-sync.ps1 -TimeoutSeconds 90` passed against the exact built AMD64 image; the desktop mounted VFS, loaded the persisted theme once, and completed startup scanning without a launch loop.
+* `.\scripts\smoke-bootinfo-framebuffer-array.ps1` passed as the existing framebuffer/boot-info source smoke.
+* `git diff --check` passed after the source/documentation changes.
+
+### Phase 7A Bare-Metal/QEMU Evidence
+
+The exact workspace image was built with `.\build.ps1 -Arch amd64`: UEFI bootloader, AMD64 kernel, ESP staging, and QEMU prerequisites all passed. QEMU booted the image through UEFI handoff, framebuffer initialization, VFS mount, desktop redraw, PS/2 mouse and keyboard initialization, and the normal main loop.
+
+* Classic persisted configuration booted to the normal usable desktop/taskbar shell and logged the standard framebuffer, taskbar, Start-menu, and event-loop capabilities.
+* A temporary ESP `desktop.cfg` selection of `desktopThemeId=scifi` loaded after VFS mount as `[desktop] loaded desktop theme=scifi source=primary`; the subsequent redraw reached the normal event loop with `taskbar_enabled=true` and `start_menu_enabled=true`.
+* QMP VGA capture produced the ignored local screenshot `logs/phase7a-qemu/phase7a-scifi-vga.png`, showing the Sci Fi desktop/taskbar palette with the active wallpaper and readable clock text.
+* A QMP mouse click on the existing Start-button hit region produced `logs/phase7a-qemu/phase7a-scifi-start-menu-click.png`; the Classic Start menu opened over the themed Start button/taskbar, confirming the intentional Phase 7A boundary and preserved invocation path.
+* The temporary ESP theme selection and generated build/config artifacts were restored to their pre-validation baseline. The screenshots remain local ignored evidence and are not release artifacts.
+
+The QEMU visual captures directly prove the Sci Fi desktop/taskbar and Start-button surfaces. Live taskbar item hover/active rendering is source/build-proven through the kernel compositor path; this boot did not launch a separate taskbar application instance for a dedicated live item-state screenshot. Phase 7A is therefore classified as Outcome B: implementation complete with strong bare-metal boot and visual proof, with a narrow live-item-state capture limitation.
+
+### Phase 7A Remaining Bare-Metal Gaps
+
+The following remain outside this phase and were not changed:
+
+* bare-metal window chrome, title bars, and window buttons;
+* Start-menu contents and Start-menu surface restyling;
+* bare-metal dialogs and notifications;
+* application surfaces such as File Explorer, Navigator, Developer Studio, and other apps;
+* icons, fonts, wallpaper ownership/selection, multi-monitor behavior, glass/blur, shadows, animations, rounded clipping, and rounded hit testing.
+
+After this validation, the recommended next phase is a separately scoped bare-metal window-chrome pass. It should not be started as part of Phase 7A.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -876,9 +944,14 @@ Final Phase 6C outcome: Outcome B — implementation complete; direct visual pro
 
 ### Bare-metal checklist
 
-* Bare-metal still boots.
+* Bare-metal still boots to a usable framebuffer desktop and taskbar.
+* Classic remains the default and retains its prior desktop/taskbar/Start-button colors.
+* Sci Fi persisted configuration selects the Sci Fi desktop/taskbar/Start-button palette after VFS mount.
+* The Sci Fi desktop fallback remains readable when wallpaper is unavailable; active wallpaper ownership is unchanged.
+* Taskbar normal, hover, active/selected, and indicator paths use the shared palette without geometry drift.
+* The Start button opens the existing Classic Start menu without changing its hit region or routing.
 * Bare-metal remains rectangular for now.
-* Bare-metal does not accidentally depend on hosted GDI theme helpers.
+* Bare-metal does not depend on hosted GDI theme helpers.
 * Display Options and the theme config path do not break bare-metal.
 
 ## Deferred / Future Work Queue
@@ -888,7 +961,7 @@ Final Phase 6C outcome: Outcome B — implementation complete; direct visual pro
 * Blur/glass simulation
 * Animations and slide-in/out transitions
 * High-DPI/scaling/resolution polish
-* Bare-metal theme parity
+* Remaining bare-metal parity: window chrome, Start-menu contents, dialogs, notifications, and application surfaces
 * Taskbar shadows
 * Theme wallpaper/asset selection
 * Per-theme user-editable settings
@@ -900,10 +973,10 @@ Final Phase 6C outcome: Outcome B — implementation complete; direct visual pro
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, the Phase 4F extended app-surface closeout, the Phase 4G Image Viewer readiness inventory, the Phase 4G.1 hosted large-image lifecycle safety check, the Phase 4H hosted Image Viewer chrome-only app-surface pilot, and the Phase 5 hosted shell popup consistency pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, the Phase 4F extended app-surface closeout, the Phase 4G Image Viewer readiness inventory, the Phase 4G.1 hosted large-image lifecycle safety check, the Phase 4H hosted Image Viewer chrome-only app-surface pilot, the Phase 5 hosted shell popup consistency pass, and the Phase 7A bare-metal desktop/taskbar surface parity pass.
 
 ## Recommended Next Pass
 
-1. Restore the missing hosted build prerequisite and complete the Phase 5 Classic/Sci Fi popup visual and interaction checklist.
-2. If useful, add a focused hosted screenshot harness for popup surfaces without changing popup behavior.
-3. Continue only with separately scoped deferred work such as bare-metal parity, high-DPI/scaling, rounded clipping/hit-testing research, or future app-surface polish.
+1. After this phase is validated, separately scope bare-metal window chrome/title bars and window buttons; do not include Start-menu contents in that pass unless explicitly authorized.
+2. Keep bare-metal dialogs, notifications, and application surfaces as later focused phases.
+3. Continue to preserve Classic as the default and keep geometry/input behavior frozen for each visual parity pass.

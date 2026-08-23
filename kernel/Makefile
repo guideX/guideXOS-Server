@@ -105,6 +105,7 @@ LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
 
 # Source files
 CORE_SOURCES := $(wildcard core/*.cpp)
+SHARED_SOURCES := ../desktop_theme.cpp
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
@@ -112,14 +113,15 @@ MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PR
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
+SHARED_OBJS := $(patsubst ../%.cpp,$(OBJ_DIR)/shared/%.o,$(SHARED_SOURCES))
 ARCH_OBJS := $(patsubst arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
 ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
 MBEDTLS_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
 
-ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
-DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
+ALL_OBJS := $(CORE_OBJS) $(SHARED_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
+DEPFILES := $(CORE_OBJS:.o=.d) $(SHARED_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
 
 # Targets
 .PHONY: all clean info mbedtls-guidexos-compile-probe
@@ -176,6 +178,16 @@ $(OBJ_DIR)/core/%.o: core/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/core)
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/shared/%.o: ../%.cpp
+	@$(call MKDIR,$(OBJ_DIR)/shared)
+	@echo "Compiling shared source $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/shared/%.d: ../%.cpp
+	@$(call MKDIR,$(OBJ_DIR)/shared)
+	@echo "Bootstrapping dependencies for shared source $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/shared/$*.o
 
 $(OBJ_DIR)/core/gxos_tls_foundation.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
 

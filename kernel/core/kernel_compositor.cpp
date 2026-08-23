@@ -9,6 +9,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/serial_debug.h"
+#include "../../desktop_theme.h"
 
 namespace kernel {
 namespace compositor {
@@ -1191,23 +1192,36 @@ void TaskbarManager::updateButtons() {
 
 void TaskbarManager::drawButtons() {
     updateButtons();
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const uint32_t normalColor = theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 8)
+        : KernelCompositor::rgb(55, 58, 70);
+    const uint32_t hoverColor = theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(normalColor, theme.accent, 22)
+        : KernelCompositor::rgb(60, 65, 75);
+    const uint32_t activeColor = theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(normalColor, theme.mutedAccent, 22)
+        : KernelCompositor::rgb(70, 100, 150);
+    const uint32_t indicatorColor = theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.accent, theme.mutedAccent, 14)
+        : KernelCompositor::rgb(100, 160, 240);
+    const uint32_t textColor = theme.id == DesktopThemeId::SciFi
+        ? theme.titleBarText : KernelCompositor::rgb(230, 230, 240);
 
     for (int i = 0; i < s_buttonCount; i++) {
         TaskbarButton& btn = s_buttons[i];
         
-        uint32_t bgColor = btn.active ? KernelCompositor::rgb(70, 100, 150) :
-                           btn.hover ? KernelCompositor::rgb(60, 65, 75) :
-                                       KernelCompositor::rgb(55, 58, 70);
+        uint32_t bgColor = btn.active ? activeColor : btn.hover ? hoverColor : normalColor;
         
         KernelCompositor::fillRect(btn.x, btn.y, btn.w, btn.h, bgColor);
         
         if (btn.active) {
             KernelCompositor::fillRect(btn.x + 2, btn.y + btn.h - 3, btn.w - 4, 2,
-                                       KernelCompositor::rgb(100, 160, 240));
+                                       indicatorColor);
         }
         
         KernelCompositor::drawTextCentered(btn.x, btn.y, btn.w, btn.h, btn.title,
-                                           KernelCompositor::rgb(230, 230, 240));
+                                           textColor);
     }
 }
 
