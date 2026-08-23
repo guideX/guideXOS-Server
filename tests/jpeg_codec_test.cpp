@@ -1,0 +1,208 @@
+#include "kernel/core/include/kernel/image_adapter.h"
+#include "guide_web_http_shared.h"
+#include "jpeg_loader.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <vector>
+
+using gxos::gui::ImageAdapter;
+using gxos::gui::ImageLoadStatus;
+using gxos::gui::ImageSafetyLimits;
+
+namespace {
+
+bool expect(bool condition, const char* label)
+{
+    if (!condition) std::cerr << "FAIL: " << label << "\n";
+    return condition;
+}
+
+std::vector<uint8_t> readFixture(const char* path)
+{
+    std::ifstream file(path, std::ios::binary);
+    return std::vector<uint8_t>(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
+size_t findMarker(const std::vector<uint8_t>& bytes, uint8_t marker)
+{
+    for (size_t i = 1; i < bytes.size(); ++i) {
+        if (bytes[i - 1] == 0xFF && bytes[i] == marker) return i - 1;
+    }
+    return bytes.size();
+}
+
+std::vector<uint8_t> withMetadata(const std::vector<uint8_t>& source)
+{
+    std::vector<uint8_t> result;
+    const uint8_t app1[] = { 0xFF, 0xE1, 0x00, 0x08, 'E', 'x', 'i', 'f', 0, 0 };
+    const uint8_t com[] = { 0xFF, 0xFE, 0x00, 0x06, 't', 'e', 's', 't' };
+    result.insert(result.end(), source.begin(), source.begin() + 2);
+    result.insert(result.end(), app1, app1 + sizeof(app1));
+    result.insert(result.end(), com, com + sizeof(com));
+    result.insert(result.end(), source.begin() + 2, source.end());
+    return result;
+}
+
+std::vector<uint8_t> gzipStored(const std::vector<uint8_t>& plain)
+{
+    const uint16_t length = static_cast<uint16_t>(plain.size());
+    const uint16_t inverse = static_cast<uint16_t>(~length);
+    std::vector<uint8_t> gzip = { 0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 0,
+                                  0x01,
+                                  static_cast<uint8_t>(length & 0xFFu),
+                                  static_cast<uint8_t>(length >> 8),
+                                  static_cast<uint8_t>(inverse & 0xFFu),
+                                  static_cast<uint8_t>(inverse >> 8) };
+    gzip.insert(gzip.end(), plain.begin(), plain.end());
+    const uint32_t crc = gxos::web::httpSharedCrc32(plain.data(), static_cast<int>(plain.size()));
+    for (int shift = 0; shift < 32; shift += 8) gzip.push_back(static_cast<uint8_t>(crc >> shift));
+    const uint32_t size = static_cast<uint32_t>(plain.size());
+    for (int shift = 0; shift < 32; shift += 8) gzip.push_back(static_cast<uint8_t>(size >> shift));
+    return gzip;
+}
+
+ImageSafetyLimits limitsFor(uint32_t width, uint32_t height)
+{
+    ImageSafetyLimits limits{};
+    limits.maxBytes = 256u * 1024u;
+    limits.maxWidth = width;
+    limits.maxHeight = height;
+    limits.maxPixels = width * height;
+    limits.maxDecodedBytes = width * height * 4u;
+    return limits;
+}
+
+} // namespace
+
+int main()
+{
+    bool ok = true;
+    const std::vector<uint8_t> fixture = readFixture("bkup/appdemo.jpg");
+    ok &= expect(!fixture.empty(), "tracked JPEG fixture is available");
+    if (fixture.empty()) return 1;
+
+    gxos::gui::JpegHeaderInfo header{};
+    ok &= expect(gxos::gui::InspectJpeg(fixture.data(), fixture.size(), header) == gxos::gui::JpegProbeStatus::Valid,
+                 "baseline JPEG header is valid");
+    ok &= expect(header.width == 326 && header.height == 86 && header.components == 3,
+                 "baseline JPEG dimensions/components");
+    ok &= expect(!header.progressive, "fixture is baseline sequential");
+
+    const ImageSafetyLimits exactLimits = limitsFor(326, 86);
+    const auto decoded = ImageAdapter::LoadFromBytes(fixture, "fixture.jpg", exactLimits);
+    ok &= expect(decoded.status == ImageLoadStatus::Ok && decoded.width == 326 && decoded.height == 86,
+                 "baseline JPEG decodes through ImageAdapter");
+    ok &= expect(decoded.format == gxos::gui::ImageFormat::Jpeg, "JPEG format ownership is retained");
+
+    const auto metadataDecoded = ImageAdapter::LoadFromBytes(withMetadata(fixture), "metadata.jpg", exactLimits);
+    ok &= expect(metadataDecoded.status == ImageLoadStatus::Ok,
+                 "APP1/Exif and COM metadata are skipped safely");
+
+    const std::vector<uint8_t> gzipJpeg = gzipStored(fixture);
+    gxos::web::HttpContentDecoderWorkspace decoderWorkspace{};
+    std::vector<uint8_t> inflated(gxos::web::kHttpSharedMaxBodyBytes);
+    int inflatedBytes = 0;
+    char decoderError[96] = {};
+    const auto gzipResult = gxos::web::httpSharedDecodeContent(
+        gzipJpeg.data(), static_cast<int>(gzipJpeg.size()), gxos::web::HttpContentCoding::Gzip,
+        inflated.data(), static_cast<int>(inflated.size()), &inflatedBytes,
+        &decoderWorkspace, decoderError, sizeof(decoderError));
+    inflated.resize(static_cast<size_t>(inflatedBytes));
+    ok &= expect(gzipResult == gxos::web::HttpContentDecodeResult::Success && inflated == fixture,
+                 "gzip-wrapped JPEG inflates to the original bytes");
+    ok &= expect(ImageAdapter::LoadFromBytes(inflated, "gzip-fixture.jpg", exactLimits).status == ImageLoadStatus::Ok,
+                 "inflated JPEG decodes through the image adapter");
+
+    std::vector<uint8_t> split(fixture.begin(), fixture.begin() + fixture.size() / 2);
+    split.insert(split.end(), fixture.begin() + fixture.size() / 2, fixture.end());
+    ok &= expect(ImageAdapter::LoadFromBytes(split, "split.jpg", exactLimits).status == ImageLoadStatus::Ok,
+                 "JPEG assembled from split HTTP reads decodes");
+
+    ImageSafetyLimits onePixelLess = exactLimits;
+    onePixelLess.maxPixels = 326u * 86u - 1u;
+    ok &= expect(ImageAdapter::LoadFromBytes(fixture, "pixel-cap.jpg", onePixelLess).status == ImageLoadStatus::TooLarge,
+                 "pixel-count cap rejects max plus one");
+    ImageSafetyLimits oneByteLess = exactLimits;
+    oneByteLess.maxDecodedBytes = 326u * 86u * 4u - 1u;
+    ok &= expect(ImageAdapter::LoadFromBytes(fixture, "decoded-byte-cap.jpg", oneByteLess).status == ImageLoadStatus::TooLarge,
+                 "decoded-pixel-byte cap rejects max plus one");
+
+    for (uint32_t failAfter = 0; failAfter < 4; ++failAfter) {
+        gxos::gui::SetJpegAllocationFailureInjection(failAfter);
+        const auto injected = ImageAdapter::LoadFromBytes(fixture, "injected-allocation-failure.jpg", exactLimits);
+        ok &= expect(injected.status == ImageLoadStatus::OutOfMemory,
+                     "injected JPEG allocation failure reports bounded OOM");
+    }
+    gxos::gui::SetJpegAllocationFailureInjection(0xFFFFFFFFu);
+    ok &= expect(ImageAdapter::LoadFromBytes(fixture, "post-injection-recovery.jpg", exactLimits).status == ImageLoadStatus::Ok,
+                 "valid JPEG recovers after allocation-failure injection");
+
+    std::vector<uint8_t> missingSoi = fixture;
+    missingSoi[0] = 0;
+    ok &= expect(ImageAdapter::LoadFromBytes(missingSoi, "missing-soi.jpg", exactLimits).status == ImageLoadStatus::UnsupportedFormat,
+                 "missing SOI is rejected as unsupported input");
+    ok &= expect(ImageAdapter::LoadFromBytes(std::vector<uint8_t>{0xFF, 0xD8, 0xFF}, "truncated-marker.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
+                 "truncated marker fails cleanly");
+
+    std::vector<uint8_t> invalidSegmentLength = fixture;
+    const size_t app0 = findMarker(invalidSegmentLength, 0xE0);
+    if (app0 + 3 < invalidSegmentLength.size()) {
+        invalidSegmentLength[app0 + 2] = 0;
+        invalidSegmentLength[app0 + 3] = 1;
+    }
+    ok &= expect(ImageAdapter::LoadFromBytes(invalidSegmentLength, "invalid-segment-length.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
+                 "invalid segment length fails cleanly");
+
+    std::vector<uint8_t> truncatedDqt = fixture;
+    const size_t dqt = findMarker(truncatedDqt, 0xDB);
+    if (dqt + 3 < truncatedDqt.size()) truncatedDqt.resize(dqt + 3);
+    ok &= expect(ImageAdapter::LoadFromBytes(truncatedDqt, "truncated-dqt.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
+                 "truncated quantization table fails cleanly");
+
+    std::vector<uint8_t> truncatedDht = fixture;
+    const size_t dht = findMarker(truncatedDht, 0xC4);
+    if (dht + 3 < truncatedDht.size()) truncatedDht.resize(dht + 3);
+    ok &= expect(ImageAdapter::LoadFromBytes(truncatedDht, "truncated-dht.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
+                 "truncated Huffman table fails cleanly");
+
+    std::vector<uint8_t> malformedScan = fixture;
+    const size_t sos = findMarker(malformedScan, 0xDA);
+    if (sos + 3 < malformedScan.size()) {
+        malformedScan[sos + 2] = 0;
+        malformedScan[sos + 3] = 1;
+    }
+    ok &= expect(ImageAdapter::LoadFromBytes(malformedScan, "malformed-scan.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
+                 "malformed scan header fails cleanly");
+
+    std::vector<uint8_t> missingEoi = fixture;
+    if (missingEoi.size() > 2) missingEoi.resize(missingEoi.size() - 2);
+    ok &= expect(ImageAdapter::LoadFromBytes(missingEoi, "missing-eoi.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
+                 "missing EOI fails cleanly");
+
+    std::vector<uint8_t> impossibleDimensions = fixture;
+    const size_t sof = findMarker(impossibleDimensions, 0xC0);
+    if (sof + 8 < impossibleDimensions.size()) {
+        impossibleDimensions[sof + 5] = 0xFF;
+        impossibleDimensions[sof + 6] = 0xFF;
+        impossibleDimensions[sof + 7] = 0xFF;
+        impossibleDimensions[sof + 8] = 0xFF;
+    }
+    ok &= expect(ImageAdapter::LoadFromBytes(impossibleDimensions, "impossible-dimensions.jpg", exactLimits).status == ImageLoadStatus::TooLarge,
+                 "dimensions over the configured policy reject before decode");
+
+    // Decoder state must not leak across failure.  A valid JPEG still works
+    // after malformed input and repeated decode/reset cycles.
+    for (int i = 0; i < 3; ++i) {
+        ok &= expect(ImageAdapter::LoadFromBytes(malformedScan, "failure-reset.jpg", exactLimits).status == ImageLoadStatus::DecodeFailed,
+                     "malformed decode remains contained");
+        ok &= expect(ImageAdapter::LoadFromBytes(fixture, "recovery.jpg", exactLimits).status == ImageLoadStatus::Ok,
+                     "valid JPEG recovers after malformed decode");
+    }
+
+    std::cout << (ok ? "JPEG codec tests PASS\n" : "JPEG codec tests FAIL\n");
+    return ok ? 0 : 1;
+}

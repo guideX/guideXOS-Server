@@ -739,6 +739,7 @@ private:
         int naturalWidth;
         int naturalHeight;
         int imageStatus;
+        int imageFormat;
         const uint32_t* imagePixels;
         char imageError[128];
         gxos::web::WebStyle style;

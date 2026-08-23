@@ -37,6 +37,7 @@ def make_smoke_png(width, height):
 SMOKE_PNG = make_smoke_png(2, 2)
 SMOKE_WIDE_PNG = make_smoke_png(640, 160)
 SMOKE_TALL_PNG = make_smoke_png(160, 640)
+SMOKE_JPEG = (Path(__file__).resolve().parent.parent / "bkup" / "appdemo.jpg").read_bytes()
 CANONICAL_TLS12_SUITES = {
     0xC02F: "TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256",
     0xC030: "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
@@ -1882,11 +1883,29 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Relative PNG</h1><img src=\"logo.png\" alt=\"relative png\"></body></html>")
             return
+        if path == "/navigator-smoke/image-jpeg.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Relative JPEG</h1><img src=\"photo.jpg\" alt=\"relative jpeg\"></body></html>")
+            return
+        if path == "/navigator-smoke/image-jpeg-chunked.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Chunked JPEG</h1><img src=\"chunked-photo.jpg\" alt=\"chunked jpeg\"></body></html>")
+            return
+        if compat_path == "/navigator-smoke/image-jpeg-compressed.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Compressed JPEG</h1><img src=\"compressed-photo.jpg\" alt=\"compressed jpeg\"></body></html>")
+            return
         if path == "/navigator-smoke/real-public-png.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Real public HTTPS PNG resource</h1>"
                              b"<img src=\"https://upload.wikimedia.org/wikipedia/commons/6/63/Wikipedia-logo.png\" "
                              b"alt=\"real public HTTPS PNG\"></body></html>")
+            return
+        if path == "/navigator-smoke/real-public-jpeg.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Real public HTTPS JPEG resource</h1>"
+                             b"<img src=\"https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg\" "
+                             b"alt=\"real public HTTPS JPEG\"></body></html>")
             return
         if path == "/navigator-smoke/hostname-image.html":
             self.write_bytes(200, "text/html; charset=utf-8",
@@ -1914,6 +1933,9 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/navigator-smoke/logo.png":
             self.write_bytes(200, "image/png", SMOKE_PNG)
+            return
+        if path == "/navigator-smoke/photo.jpg":
+            self.write_bytes(200, "image/jpeg", SMOKE_JPEG)
             return
         if path == "/navigator-smoke/wide.png":
             self.write_bytes(200, "image/png", SMOKE_WIDE_PNG)
@@ -1943,6 +1965,24 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                 return
             body = gzip.compress(SMOKE_PNG, mtime=0)
             self.write_bytes(200, "image/png", body,
+                             {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+            return
+        if path == "/navigator-smoke/chunked-photo.jpg":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            midpoint = len(SMOKE_JPEG) // 2
+            for chunk in (SMOKE_JPEG[:midpoint], SMOKE_JPEG[midpoint:]):
+                self.wfile.write(("%x\r\n" % len(chunk)).encode("ascii"))
+                self.wfile.write(chunk + b"\r\n")
+            self.wfile.write(b"0\r\n\r\n")
+            return
+        if compat_path == "/navigator-smoke/compressed-photo.jpg":
+            if self.reject_bad_accept_encoding():
+                return
+            body = gzip.compress(SMOKE_JPEG, mtime=0)
+            self.write_bytes(200, "image/jpeg", body,
                              {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
             return
         if path == "/navigator-smoke/not-png.txt":

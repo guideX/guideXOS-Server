@@ -53,6 +53,8 @@ static void* gxos_stbi_realloc(void* ptr, size_t newSize)
 #define STBI_NO_LINEAR
 #define STBI_FAILURE_USERMSG
 #define STBI_NO_THREAD_LOCALS
+#define STBI_NO_SIMD
+#define STB_IMAGE_STATIC
 #define STBI_MALLOC(sz) gxos_stbi_malloc(sz)
 #define STBI_REALLOC(p, sz) gxos_stbi_realloc(p, sz)
 #define STBI_REALLOC_SIZED(p, oldsz, newsz) gxos_stbi_realloc_sized(p, oldsz, newsz)

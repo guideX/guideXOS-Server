@@ -105,6 +105,7 @@ package_manager.cpp ^
 paint.cpp ^
 process.cpp ^
 png_loader.cpp ^
+jpeg_loader.cpp ^
 png_codec.cpp ^
 right_click_menu.cpp ^
 save_changes_dialog.cpp ^

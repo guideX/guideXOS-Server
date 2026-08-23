@@ -132,7 +132,7 @@ try {
         throw "Content hash was not stable across independent processes: '$firstHash' vs '$secondHash'"
     }
 
-    $codecTestBuild = & cmd.exe /c "g++ -std=c++17 -O2 -iquote . tests\png_codec_test.cpp png_codec.cpp image.cpp image_adapter.cpp image_renderer.cpp png_loader.cpp vfs.cpp logger.cpp -lgdi32 -lmsimg32 -o tmp\user-background-phase1-test\png_codec_test.exe 2>&1"
+    $codecTestBuild = & cmd.exe /c "g++ -std=c++17 -O2 -iquote . tests\png_codec_test.cpp png_codec.cpp image.cpp image_adapter.cpp image_renderer.cpp png_loader.cpp jpeg_loader.cpp vfs.cpp logger.cpp -lgdi32 -lmsimg32 -o tmp\user-background-phase1-test\png_codec_test.exe 2>&1"
     if ($LASTEXITCODE -ne 0) {
         throw "PNG codec test build failed with exit code $LASTEXITCODE`n$($codecTestBuild -join [Environment]::NewLine)"
     }

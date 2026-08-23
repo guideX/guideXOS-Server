@@ -1,6 +1,7 @@
 #include "kernel/core/include/kernel/image_adapter.h"
 
 #include "image_renderer.h"
+#include "jpeg_loader.h"
 #include "logger.h"
 #include "png_loader.h"
 #include "vfs.h"
@@ -46,7 +47,8 @@ static bool withinLimits(uint64_t byteCount, uint32_t width, uint32_t height, co
     if (width == 0 || height == 0) return false;
     if (width > limits.maxWidth || height > limits.maxHeight) return false;
     uint64_t pixels = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
-    return pixels <= limits.maxPixels;
+    if (pixels == 0 || pixels > limits.maxPixels || pixels > static_cast<uint64_t>(-1) / 4u) return false;
+    return pixels * 4u <= limits.maxDecodedBytes;
 }
 
 static std::string runtimeWallpaperPathToHostPath(const std::string& path)
@@ -130,7 +132,9 @@ ImageBitmap ImageAdapter::LoadFromFile(const std::string& path, const ImageSafet
         result.status = ImageLoadStatus::NotFound;
         return result;
     }
-    if (!endsWithIgnoreCase(path, ".png")) {
+    if (!endsWithIgnoreCase(path, ".png") &&
+        !endsWithIgnoreCase(path, ".jpg") &&
+        !endsWithIgnoreCase(path, ".jpeg")) {
         result.status = ImageLoadStatus::UnsupportedFormat;
         return result;
     }
@@ -168,33 +172,86 @@ ImageBitmap ImageAdapter::LoadFromBytes(const uint8_t* bytes, size_t byteCount, 
 
     uint32_t headerW = 0;
     uint32_t headerH = 0;
-    if (!readPngSize(bytes, byteCount, headerW, headerH)) {
+    if (readPngSize(bytes, byteCount, headerW, headerH)) {
+        if (!withinLimits(byteCount, headerW, headerH, limits)) {
+            result.status = ImageLoadStatus::TooLarge;
+            return result;
+        }
+
+        ImagePtr decoded = PngLoader::LoadFromMemory(bytes, byteCount, sourceName);
+        if (!decoded) {
+            result.status = ImageLoadStatus::DecodeFailed;
+            return result;
+        }
+        if (!decoded->isValid()) {
+            result.status = ImageLoadStatus::OutOfMemory;
+            return result;
+        }
+        if (!withinLimits(byteCount, static_cast<uint32_t>(decoded->Width), static_cast<uint32_t>(decoded->Height), limits)) {
+            result.status = ImageLoadStatus::TooLarge;
+            return result;
+        }
+
+        result.status = ImageLoadStatus::Ok;
+        result.image = decoded;
+        result.width = decoded->Width;
+        result.height = decoded->Height;
+        result.format = ImageFormat::Png;
+        return result;
+    }
+
+    if (!IsJpegSignature(bytes, byteCount)) {
         result.status = ImageLoadStatus::UnsupportedFormat;
         return result;
     }
-    if (!withinLimits(byteCount, headerW, headerH, limits)) {
-        result.status = ImageLoadStatus::TooLarge;
-        return result;
-    }
 
-    ImagePtr decoded = PngLoader::LoadFromMemory(bytes, byteCount, sourceName);
-    if (!decoded) {
+    JpegHeaderInfo jpegInfo;
+    const JpegProbeStatus jpegProbe = InspectJpeg(bytes, byteCount, jpegInfo);
+    if (jpegProbe == JpegProbeStatus::Malformed) {
         result.status = ImageLoadStatus::DecodeFailed;
         return result;
     }
-    if (!decoded->isValid()) {
-        result.status = ImageLoadStatus::OutOfMemory;
+    if (jpegProbe == JpegProbeStatus::Unsupported || jpegProbe == JpegProbeStatus::NotJpeg) {
+        result.status = ImageLoadStatus::UnsupportedFormat;
         return result;
     }
-    if (!withinLimits(byteCount, static_cast<uint32_t>(decoded->Width), static_cast<uint32_t>(decoded->Height), limits)) {
+    uint64_t jpegRequiredBytes = 0;
+    uint64_t jpegDecodedBytes = 0;
+    if (!EstimateJpegAllocation(jpegInfo, limits, jpegRequiredBytes, jpegDecodedBytes)) {
         result.status = ImageLoadStatus::TooLarge;
         return result;
     }
+    (void)jpegRequiredBytes;
+    (void)jpegDecodedBytes;
 
+    JpegDecodedBuffer decoded = DecodeJpegRgba(bytes, byteCount, limits);
+    if (decoded.status == JpegDecodeStatus::TooLarge) {
+        result.status = ImageLoadStatus::TooLarge;
+        return result;
+    }
+    if (decoded.status == JpegDecodeStatus::OutOfMemory) {
+        result.status = ImageLoadStatus::OutOfMemory;
+        return result;
+    }
+    if (decoded.status != JpegDecodeStatus::Ok || !decoded.pixels) {
+        result.status = ImageLoadStatus::DecodeFailed;
+        return result;
+    }
+
+    ImagePtr image(new (std::nothrow) Image(static_cast<int>(decoded.width),
+                                             static_cast<int>(decoded.height), 4));
+    if (!image || !image->isValid()) {
+        ReleaseJpegBuffer(decoded.pixels);
+        result.status = ImageLoadStatus::OutOfMemory;
+        return result;
+    }
+    std::copy(decoded.pixels, decoded.pixels + decoded.pixelBytes, image->Pixels);
+    ReleaseJpegBuffer(decoded.pixels);
     result.status = ImageLoadStatus::Ok;
-    result.image = decoded;
-    result.width = decoded->Width;
-    result.height = decoded->Height;
+    result.image = image;
+    result.width = image->Width;
+    result.height = image->Height;
+    result.format = ImageFormat::Jpeg;
     return result;
 }
 

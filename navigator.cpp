@@ -2057,6 +2057,7 @@ namespace {
 		int naturalH = 0;
 		std::string filePath;
 		std::string drawPath;
+		std::string format;
 		std::string message;
 		std::string errorDetail;
 	};
@@ -2239,10 +2240,10 @@ namespace {
 		return hash;
 	}
 
-	static std::string remoteImageTempPath(const std::string& url)
+	static std::string remoteImageTempPath(const std::string& url, bool jpeg)
 	{
 		std::ostringstream oss;
-		oss << "navigator_remote_image_" << std::hex << fnv1a64(url) << ".png";
+		oss << "navigator_remote_image_" << std::hex << fnv1a64(url) << (jpeg ? ".jpg" : ".png");
 		return oss.str();
 	}
 
@@ -2261,6 +2262,7 @@ namespace {
 		limits.maxWidth = kRemoteImageMaxWidth;
 		limits.maxHeight = kRemoteImageMaxHeight;
 		limits.maxPixels = kRemoteImageMaxPixels;
+		limits.maxDecodedBytes = kRemoteImageMaxPixels * 4u;
 		return limits;
 	}
 
@@ -2691,6 +2693,11 @@ namespace {
 		metadata.failedImageCount = 0;
 		metadata.remoteImageCount = 0;
 		metadata.localImageCount = 0;
+		metadata.jpegImageReferenceCount = 0;
+		metadata.jpegImageAttemptCount = 0;
+		metadata.jpegImageLoadCount = 0;
+		metadata.pngImageLoadCount = 0;
+		metadata.unsupportedImageCount = 0;
 		metadata.lastImageError.clear();
 		metadata.cssEnabled = doc.cssDiagnostics.cssEnabled;
 		metadata.cssDetected = doc.cssDiagnostics.cssDetected;
@@ -3473,6 +3480,15 @@ namespace {
 			const int imageAvailableWidth = blockAvailableWidth(block, doc);
 			imageDisplaySize(block, imageAvailableWidth, imageW, imageH, &imageConstrained, &imageAspectPreserved, &imageSizeClamped);
 			const ImageInfo& info = imageInfoForBlock(block);
+			if (info.format == "jpeg") {
+				++metadata.jpegImageReferenceCount;
+				if (info.attempted) ++metadata.jpegImageAttemptCount;
+				if (info.ok) ++metadata.jpegImageLoadCount;
+			} else if (info.format == "png" && info.ok) {
+				++metadata.pngImageLoadCount;
+			}
+			if (info.status == gxos::gui::ImageLoadStatus::UnsupportedFormat)
+				++metadata.unsupportedImageCount;
 			if (info.ok) {
 				++metadata.loadedImageCount;
 			} else {
@@ -4507,6 +4523,13 @@ namespace {
 			if (isTableCellLikeBlock(candidate) && tableSerialForBlock(candidate) == tableSerial) return false;
 		}
 		return true;
+	}
+
+	static bool isJpegSignature(const std::string& bytes)
+	{
+		return bytes.size() >= 2 &&
+			static_cast<unsigned char>(bytes[0]) == 0xFF &&
+			static_cast<unsigned char>(bytes[1]) == 0xD8;
 	}
 
 	static int tableGroupStartIndex(const WebDocument& doc, int index)
@@ -11041,7 +11064,7 @@ namespace {
 			{"Capabilities", "File write", "enabled for bookmark persistence"},
 			{"Capabilities", "Local PNG", "enabled"},
 			{"Capabilities", "HTTP", "enabled for http:// and arbitrary https:// via bounded Winsock transport"},
-			{"Capabilities", "Remote PNG", "enabled for http:// and arbitrary https:// PNG images"},
+            {"Capabilities", "Remote PNG/JPEG", "enabled for http:// and arbitrary https:// PNG and JPEG images"},
 			{"Capabilities", "Downloads", "enabled for unsupported HTTP(S) content within body limit"},
 			{"Capabilities", "Temp files", "enabled for compositor image handoff"},
 			{"Capabilities", "Bookmark persistence", "enabled"},
@@ -11829,6 +11852,11 @@ namespace {
 
 		ImageInfo info;
 		info.attempted = true;
+		const std::string requestedUrl = block.url;
+		if (endsWithIgnoreCase(requestedUrl, ".jpg") || endsWithIgnoreCase(requestedUrl, ".jpeg"))
+			info.format = "jpeg";
+		else if (endsWithIgnoreCase(requestedUrl, ".png"))
+			info.format = "png";
 
 		if (isRemoteHttpUrl(block.url)) {
 			if (s_remoteImageFetchCount >= gxos::web::kHttpSharedMaxRemoteResources) {
@@ -11864,21 +11892,30 @@ namespace {
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
-			const bool contentTypePng = response.contentType == "image/png";
-			const bool urlLooksPng = endsWithIgnoreCase(response.finalUrl.empty() ? block.url : response.finalUrl, ".png");
-			if (!contentTypePng && !urlLooksPng) {
+			const std::string responseType = toLowerAscii(response.contentType);
+			const bool contentTypePng = responseType == "image/png";
+			const bool contentTypeJpeg = responseType == "image/jpeg" || responseType == "image/jpg";
+			const std::string finalUrl = response.finalUrl.empty() ? block.url : response.finalUrl;
+			const bool urlLooksPng = endsWithIgnoreCase(finalUrl, ".png");
+			const bool urlLooksJpeg = endsWithIgnoreCase(finalUrl, ".jpg") || endsWithIgnoreCase(finalUrl, ".jpeg");
+			const bool expectedJpeg = contentTypeJpeg || (!contentTypePng && urlLooksJpeg);
+			if (!contentTypePng && !contentTypeJpeg && !urlLooksPng && !urlLooksJpeg) {
 				info.unsupported = true;
 				info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
 				info.message = "[unsupported image]";
-				info.errorDetail = "Remote image is not image/png";
+				info.errorDetail = "Remote image MIME/extension is not PNG or JPEG";
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
-			if (!isPngSignature(response.body)) {
+			info.format = expectedJpeg ? "jpeg" : "png";
+			if ((expectedJpeg && !isJpegSignature(response.body)) ||
+				(!expectedJpeg && !isPngSignature(response.body))) {
 				info.unsupported = true;
 				info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
 				info.message = "[unsupported image]";
-				info.errorDetail = "Remote image PNG signature is invalid";
+				info.errorDetail = expectedJpeg
+					? "Remote image JPEG signature is invalid"
+					: "Remote image PNG signature is invalid";
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
@@ -11890,7 +11927,7 @@ namespace {
 				remoteImageSafetyLimits());
 			info.status = decoded.status;
 			if (decoded.status == gxos::gui::ImageLoadStatus::Ok) {
-				const std::string tempPath = remoteImageTempPath(response.finalUrl.empty() ? block.url : response.finalUrl);
+				const std::string tempPath = remoteImageTempPath(finalUrl, expectedJpeg);
 				if (writeBinaryTempFile(tempPath, response.body)) {
 					info.ok = true;
 					info.naturalW = decoded.width;
@@ -11924,11 +11961,12 @@ namespace {
 		}
 
 		info.filePath = filePathFromUrl(block.url);
-		if (!endsWithIgnoreCase(info.filePath, ".png")) {
+		const bool localJpeg = endsWithIgnoreCase(info.filePath, ".jpg") || endsWithIgnoreCase(info.filePath, ".jpeg");
+		if (!endsWithIgnoreCase(info.filePath, ".png") && !localJpeg) {
 			info.unsupported = true;
 			info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
 			info.message = "[unsupported image]";
-			info.errorDetail = "Local image is not a PNG";
+			info.errorDetail = "Local image is not a PNG or JPEG";
 			auto inserted = s_imageCache.emplace(key, std::move(info));
 			return inserted.first->second;
 		}
@@ -11948,6 +11986,7 @@ namespace {
 			info.message = "[image read error]";
 			info.errorDetail = "Local image read error";
 		} else {
+			info.format = localJpeg ? "jpeg" : "png";
 			gxos::gui::ImageBitmap decoded = gxos::gui::ImageAdapter::LoadFromBytes(br.bytes, info.filePath);
 			info.status = decoded.status;
 			if (decoded.status == gxos::gui::ImageLoadStatus::Ok) {
@@ -14451,6 +14490,11 @@ std::string Navigator::SmokePageDiagnostics()
 	out << "document_block_count=" << m.documentBlockCount << "\n";
 	out << "remote_resource_count=" << m.remoteImageCount << "\n";
 	out << "resource_failures=" << m.failedImageCount << "\n";
+	out << "jpeg_references=" << m.jpegImageReferenceCount << "\n";
+	out << "jpeg_attempts=" << m.jpegImageAttemptCount << "\n";
+	out << "jpeg_loaded=" << m.jpegImageLoadCount << "\n";
+	out << "png_loaded=" << m.pngImageLoadCount << "\n";
+	out << "unsupported_image_count=" << m.unsupportedImageCount << "\n";
 	out << "unsupported_reason=" << m.unsupportedReason << "\n";
 	return out.str();
 }
@@ -19132,6 +19176,10 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote images", m.remoteImageCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Loaded images", m.loadedImageCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Failed images", m.failedImageCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("JPEG references", m.jpegImageReferenceCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("JPEG attempts", m.jpegImageAttemptCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("JPEG loaded", m.jpegImageLoadCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("PNG loaded", m.pngImageLoadCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last image error", m.lastImageError), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS detected", yesNo(m.cssDetected)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS enabled", yesNo(m.cssEnabled)), ""});

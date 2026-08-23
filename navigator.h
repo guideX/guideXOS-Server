@@ -108,6 +108,11 @@ struct NavigatorPageMetadata {
 		int         failedImageCount = 0;
 		int         remoteImageCount = 0;
 		int         localImageCount = 0;
+		int         jpegImageReferenceCount = 0;
+		int         jpegImageAttemptCount = 0;
+		int         jpegImageLoadCount = 0;
+		int         pngImageLoadCount = 0;
+		int         unsupportedImageCount = 0;
 		std::string lastImageError;
 		bool        cssEnabled = false;
 		bool        cssDetected = false;

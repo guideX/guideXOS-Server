@@ -992,6 +992,9 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] http.case.negotiated_identity.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.negotiated_br.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_relative.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_jpeg.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_jpeg_chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_jpeg_compressed.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_absolute.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_chunked.result=PASS",
@@ -1096,7 +1099,8 @@ $publicPilotEnabledChecks = @(
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.transport_selection=BlockedPolicy",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.tls_status=PolicyBlocked",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.error=HTTPS downgrade redirect blocked",
-    "[NAVIGATOR-SMOKE] http.case.real_public_https_png_resource.result=PASS"
+    "[NAVIGATOR-SMOKE] http.case.real_public_https_png_resource.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.real_public_https_jpeg_resource.result=PASS"
 )
 
 $realPublicProbeDisabledChecks = @(

@@ -7959,6 +7959,7 @@ void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* r
     block.naturalWidth = (int)probe.width;
     block.naturalHeight = (int)probe.height;
     block.imageStatus = (int)probe.status;
+    block.imageFormat = (int)gxos::gui::ImageFormat::Unknown;
     block.style = style ? *style : gxos::web::WebStyle{};
     block.formIndex = -1;
     block.selectedOption = -1;
@@ -11652,6 +11653,7 @@ static gxos::gui::ImageSafetyLimits nav_kernel_remote_png_limits()
     limits.maxWidth = 2048u;
     limits.maxHeight = 2048u;
     limits.maxPixels = 2048u * 2048u;
+    limits.maxDecodedBytes = 2048u * 2048u * 4u;
     return limits;
 }
 
@@ -11668,6 +11670,19 @@ static bool nav_url_path_ends_with_png(const char* url)
     return endsWithIgnoreCaseLocal(path, ".png");
 }
 
+static bool nav_url_path_ends_with_jpeg(const char* url)
+{
+    if (!url) return false;
+    char path[kKernelHttpUrlLen];
+    int i = 0;
+    while (url[i] && url[i] != '?' && url[i] != '#' && i < kKernelHttpUrlLen - 1) {
+        path[i] = url[i];
+        ++i;
+    }
+    path[i] = '\0';
+    return endsWithIgnoreCaseLocal(path, ".jpg") || endsWithIgnoreCaseLocal(path, ".jpeg");
+}
+
 static const int kNavigatorUrlStorageBytes = 512;
 static void nav_push_url(char stack[][kNavigatorUrlStorageBytes], int& count, const char* url);
 
@@ -11681,6 +11696,7 @@ void NavigatorApp::releaseImageResources()
             bitmap.pixels = block.imagePixels;
             bitmap.width = block.naturalWidth > 0 ? (uint32_t)block.naturalWidth : 0;
             bitmap.height = block.naturalHeight > 0 ? (uint32_t)block.naturalHeight : 0;
+            bitmap.format = (gxos::gui::ImageFormat)block.imageFormat;
             gxos::gui::ImageAdapter::Release(bitmap);
         }
         block.imagePixels = nullptr;
@@ -11696,6 +11712,7 @@ void NavigatorApp::prepareImageResources()
     for (int i = 0; i < m_blockCount; ++i) {
         if (m_blocks[i].kind != BLOCK_IMAGE) continue;
         m_blocks[i].imagePixels = nullptr;
+        m_blocks[i].imageFormat = (int)gxos::gui::ImageFormat::Unknown;
         m_blocks[i].imageError[0] = '\0';
 
         if (nav_starts_with(m_blocks[i].url, "file://")) {
@@ -11705,6 +11722,7 @@ void NavigatorApp::prepareImageResources()
             m_blocks[i].imageStatus = (int)bitmap.status;
             m_blocks[i].naturalWidth = (int)bitmap.width;
             m_blocks[i].naturalHeight = (int)bitmap.height;
+            m_blocks[i].imageFormat = (int)bitmap.format;
             m_blocks[i].imagePixels = bitmap.pixels;
             if (bitmap.status != gxos::gui::ImageLoadStatus::Ok) {
                 strcopy(m_blocks[i].imageError, gxos::gui::ImageLoadStatusName(bitmap.status), sizeof(m_blocks[i].imageError));
@@ -11773,10 +11791,23 @@ void NavigatorApp::prepareImageResources()
         }
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : m_blocks[i].url;
         bool contentTypePng = gxos::web::httpSharedEqualsInsensitive(response->contentType, "image/png");
+        bool contentTypeJpeg = gxos::web::httpSharedEqualsInsensitive(response->contentType, "image/jpeg") ||
+            gxos::web::httpSharedEqualsInsensitive(response->contentType, "image/jpg");
         bool urlLooksPng = nav_url_path_ends_with_png(finalUrl);
-        if (!contentTypePng && !urlLooksPng) {
+        bool urlLooksJpeg = nav_url_path_ends_with_jpeg(finalUrl);
+        bool expectedJpeg = contentTypeJpeg || (!contentTypePng && urlLooksJpeg);
+        if (!contentTypePng && !contentTypeJpeg && !urlLooksPng && !urlLooksJpeg) {
             m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
-            strcopy(m_blocks[i].imageError, "Remote image is not image/png", sizeof(m_blocks[i].imageError));
+            strcopy(m_blocks[i].imageError, "Remote image is not image/png or image/jpeg", sizeof(m_blocks[i].imageError));
+            continue;
+        }
+        const uint8_t* bodyBytes = reinterpret_cast<const uint8_t*>(response->body);
+        const bool signatureOk = expectedJpeg
+            ? (response->bodyBytes >= 2 && bodyBytes[0] == 0xFF && bodyBytes[1] == 0xD8)
+            : (response->bodyBytes >= 8 && bodyBytes[0] == 0x89 && bodyBytes[1] == 'P' && bodyBytes[2] == 'N' && bodyBytes[3] == 'G');
+        if (!signatureOk) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
+            strcopy(m_blocks[i].imageError, expectedJpeg ? "Remote JPEG signature is invalid" : "Remote PNG signature is invalid", sizeof(m_blocks[i].imageError));
             continue;
         }
         gxos::gui::ImageBitmap bitmap = gxos::gui::ImageAdapter::LoadFromBytes(
@@ -11784,6 +11815,7 @@ void NavigatorApp::prepareImageResources()
         m_blocks[i].imageStatus = (int)bitmap.status;
         m_blocks[i].naturalWidth = (int)bitmap.width;
         m_blocks[i].naturalHeight = (int)bitmap.height;
+        m_blocks[i].imageFormat = (int)bitmap.format;
         m_blocks[i].imagePixels = bitmap.pixels;
         if (resourceTraceCount <= gxos::web::kHttpSharedMaxRemoteResources) {
             serial::puts("[NAVIGATOR-RESOURCE] decode_result index=");
@@ -13724,6 +13756,7 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
                 bitmap.pixels = m_blocks[i].imagePixels;
                 bitmap.width = (uint32_t)m_blocks[i].naturalWidth;
                 bitmap.height = (uint32_t)m_blocks[i].naturalHeight;
+                bitmap.format = (gxos::gui::ImageFormat)m_blocks[i].imageFormat;
                 bool drew = gxos::gui::ImageAdapter::DrawToFramebuffer(bitmap, textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH);
                 if (!drew) {
                     framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
@@ -17598,6 +17631,12 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/malformed-gzip.html", false, false, true) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_relative", "http://10.0.2.2:8080/navigator-smoke/image-relative.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-relative.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_jpeg", "http://10.0.2.2:8080/navigator-smoke/image-jpeg.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-jpeg.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_jpeg_chunked", "http://10.0.2.2:8080/navigator-smoke/image-jpeg-chunked.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-jpeg-chunked.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_jpeg_compressed", "http://10.0.2.2:8080/navigator-smoke/image-jpeg-compressed.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-jpeg-compressed.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_absolute", "http://10.0.2.2:8080/navigator-smoke/image-absolute.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-absolute.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_redirect", "http://10.0.2.2:8080/navigator-smoke/image-redirect.html", 200,
@@ -17613,6 +17652,10 @@ static bool printNavigatorHttpSmokeCases()
         httpOk = printNavigatorHttpSmokeCase("real_public_https_png_resource",
             "http://10.0.2.2:8080/navigator-smoke/real-public-png.html", 200,
             "http://10.0.2.2:8080/navigator-smoke/real-public-png.html", true, true, false,
+            1, 1, 0) && httpOk;
+        httpOk = printNavigatorHttpSmokeCase("real_public_https_jpeg_resource",
+            "http://10.0.2.2:8080/navigator-smoke/real-public-jpeg.html", 200,
+            "http://10.0.2.2:8080/navigator-smoke/real-public-jpeg.html", true, true, false,
             1, 1, 0) && httpOk;
     }
     httpOk = printNavigatorHttpSmokeCase("hostname_image_relative", "http://guidexos.test:8080/navigator-smoke/hostname-image.html", 200,
