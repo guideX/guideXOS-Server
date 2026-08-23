@@ -46,7 +46,11 @@ constexpr int kMaxDrawSize = 4096;
 // A compositor can briefly drain queued input/paint work between repeated
 // Native ELF launches. Keep window creation bounded, but allow that queue to
 // clear before reporting a false compositor-unavailable result.
-constexpr uint64_t kWindowCreateTimeoutMs = 5000;
+// A hosted debug target can request its window while the compositor is
+// draining a burst of editor repaint work from the owning Developer Studio.
+// Keep the request bounded, but allow that queue to drain before reporting a
+// false compositor-unavailable launch failure.
+constexpr uint64_t kWindowCreateTimeoutMs = 15000;
 constexpr int kMinWaitForCloseTimeoutMs = 0;
 constexpr int kMaxWaitForCloseTimeoutMs = 300000;
 constexpr int kMinPollEventTimeoutMs = 0;
