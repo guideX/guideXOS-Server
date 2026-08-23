@@ -210,6 +210,81 @@ typedef struct guidexos_nativeaot_c011ec33_collection_record {
     uintptr_t postWeakPhaseAddress;
 } guidexos_nativeaot_c011ec33_collection_record;
 
+/* C011EC34 bounded relocation-root evidence.  This is append-only proof
+ * storage: it records the production callback contract and the first real
+ * relocation lookup without changing collector metadata or root slots. */
+typedef struct guidexos_nativeaot_c011ec34_relocation_record {
+    uint32_t gcScanRootsEntries;
+    uint32_t gcScanRootsReturns;
+    uint32_t rootReports;
+    uint32_t managedFrames;
+    uint32_t callbackEntries;
+    uint32_t callbackReturns;
+    uint32_t rootsUnchanged;
+    uint32_t rootsRewritten;
+    uint32_t relocationLookupEntries;
+    uint32_t relocationLookupReturns;
+    uint32_t relocationLookupSuccesses;
+    uint32_t relocationLookupFailures;
+    uint32_t callbackInvariantFailures;
+    uint32_t iteratorCompletions;
+    uint32_t iteratorFrames;
+    uint32_t nativeUnwinds;
+    uint32_t thirdUnwindAttempts;
+    uint32_t condemnedGeneration;
+    uint32_t maximumGeneration;
+    uint32_t compacting;
+    uint32_t relocating;
+    uint32_t promotion;
+    uint32_t concurrent;
+    uint32_t stackBoundsConsumed;
+    uint32_t threadUnderCrawl;
+    uint32_t eeSuspended;
+    uint32_t threadStoreLockHeld;
+    uint32_t managedEntryProhibited;
+    uint32_t callbackType;
+    uint32_t firstRootKind;
+    uint32_t firstRootFlags;
+    uint32_t firstRootInCondemnedGeneration;
+    uint32_t firstRootPlannedToMove;
+    uint32_t firstRootRewrite;
+    uint32_t preflightEmitted;
+    uint32_t markerEmitted;
+    uint32_t safeStopReason;
+    uint32_t reserved[4];
+
+    uintptr_t scanContext;
+    uintptr_t scanRootsCallback;
+    uintptr_t scanRootsCaller;
+    uintptr_t firstRootSlot;
+    uintptr_t firstRootOldValue;
+    uintptr_t firstRootNewValue;
+    uintptr_t firstRootCallback;
+    uintptr_t firstRootCallbackContext;
+    uintptr_t firstRootCallbackEntry;
+    uintptr_t firstRootCallbackReturn;
+    uintptr_t firstRootControlPc;
+    uintptr_t firstRootMethodInfo;
+    uintptr_t firstRootMethodStart;
+    uintptr_t firstRootMethodEnd;
+    uintptr_t firstRootGcInfo;
+    uintptr_t firstRootSafePoint;
+    uintptr_t firstRootThread;
+    uintptr_t firstRelocationLookupAddress;
+    uintptr_t firstRelocationLookupReturnAddress;
+    uintptr_t firstRelocationOldObject;
+    uintptr_t firstRelocationNewObject;
+    uintptr_t firstRelocationBrickTable;
+    uintptr_t firstRelocationBrickIndex;
+    uintptr_t firstRelocationBrickEntry;
+    uintptr_t firstRelocationTreeNode;
+    uintptr_t firstRelocationDistance;
+    uintptr_t firstRelocationCallbackSlot;
+    uintptr_t firstRelocationSlotBefore;
+    uintptr_t firstRelocationSlotAfter;
+    uintptr_t nextCallerAfterReturn;
+} guidexos_nativeaot_c011ec34_relocation_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2037,6 +2112,9 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec33LastPostWeakPhaseAddress;
 
     guidexos_nativeaot_c011ec33_collection_record c011ec33Collections[2];
+
+    /* C011EC34 relocation-root update evidence. */
+    guidexos_nativeaot_c011ec34_relocation_record c011ec34Relocation;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
