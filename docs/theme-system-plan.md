@@ -897,13 +897,53 @@ The QEMU visual captures directly prove the Sci Fi desktop/taskbar and Start-but
 
 The following remain outside this phase and were not changed:
 
-* bare-metal window chrome, title bars, and window buttons;
+* bare-metal window chrome, title bars, and window buttons (the Phase 7A closeout gap addressed by Phase 7B below);
 * Start-menu contents and Start-menu surface restyling;
 * bare-metal dialogs and notifications;
 * application surfaces such as File Explorer, Navigator, Developer Studio, and other apps;
 * icons, fonts, wallpaper ownership/selection, multi-monitor behavior, glass/blur, shadows, animations, rounded clipping, and rounded hit testing.
 
 After this validation, the recommended next phase is a separately scoped bare-metal window-chrome pass. It should not be started as part of Phase 7A.
+
+## Phase 7B — Bare-Metal Window Chrome & Title Bar Parity
+
+Phase 7B closes the first Phase 7A window-surface gap without reopening or reclassifying Phase 7A. It is a framebuffer paint-parity pass for existing kernel windows: outer frame and border, active/inactive title bars, title text, the existing title-bar accent treatment, close/minimize/maximize-or-restore button surfaces, and their existing hover/pressed states. Application client surfaces and Start-menu contents remain outside Phase 7B.
+
+### Bare-Metal Chrome Architecture
+
+The normal UEFI/framebuffer desktop path remains in `kernel/core/desktop.cpp`. Its compositor boundary is `kernel/core/kernel_compositor.cpp`: `KernelCompositor::drawAllWindows()` calls `drawWindow()` for the frame/background/border and `drawTitlebar()` for title text and title buttons. `DesktopTheme`, `DesktopThemeId`, and `GetCurrentDesktopTheme()` remain the only theme-selection boundary; no second window palette or architecture-specific table was added.
+
+The existing geometry constants in `kernel/core/include/kernel/kernel_compositor.h` remain authoritative: title-bar height 24, border width 1, button size 16, button gap 6, and the existing resize margin. `hitTest()`, mouse capture, focus, drag, resize, close, minimize, maximize, restore, z-order, clipping, and repaint routing remain on their prior paths.
+
+### Sci-Fi Active and Inactive Treatment
+
+Sci-Fi active windows use the existing dark navy/indigo relationship: `titleBarBackground` for the active title bar, `titleBarText` for readable titles/icons, an integer-blended `accent` top highlight, and a stronger `windowBorder`/`accent` frame edge. Inactive windows use `taskbarBackground`, dimmed title text, a muted-accent highlight, and a conservative `windowBorder`/`mutedAccent` frame blend. This preserves a clear active/inactive distinction without glow, blur, transparency, animation, or geometry changes.
+
+The existing simple shadow is recolored only for Sci-Fi using the shared integer blend helper. Its offset, dimensions, algorithm, and paint cost are unchanged. The framebuffer branch does not consume hosted title-bar metrics or hosted rounded/soft-shadow effects.
+
+### Title Buttons
+
+The existing close, maximize/restore, and minimize paint paths keep their original positions, dimensions, icon geometry, and state booleans. Sci-Fi idle, hover, and pressed surfaces use blends of the shared chrome colors. Close retains its existing danger/red semantic, blended over the Sci-Fi chrome base rather than being converted into a generic blue control. Classic keeps the original button colors and fallback branches.
+
+### Classic Preservation and Geometry Freeze
+
+Classic remains the fallback and its existing active/inactive title bars, border colors, title text, button colors, and red close semantic remain unchanged. The Sci-Fi branch is narrow and selected only when `GetCurrentDesktopTheme().id` is `DesktopThemeId::SciFi`.
+
+No window bounds, title-bar height, frame thickness, button width/height/spacing, title coordinates, resize borders or hit zones, drag region, client origin/dimensions, clipping, maximized bounds, or title-button hit regions changed. The expected Phase 7B geometry result is **no change**.
+
+### Build, QEMU, and Interaction Proof
+
+The exact workspace passed `mingw32-make -C kernel ARCH=amd64 -j2`, `.\build.bat`, and `.\build.ps1 -Arch amd64`. The required smoke tests passed: `smoke-theme-system.ps1 -SkipBuild`, `smoke-live-directory-desktop-status.ps1 -SkipBuild`, `smoke-hosted-display-runtime.ps1`, `smoke-desktop-startup-sync.ps1`, `smoke-bootinfo-framebuffer-array.ps1`, `smoke-virtio-gpu-input-routing.ps1`, and `git diff --check`.
+
+The exact staged AMD64 image booted through the normal UEFI/framebuffer path. For this local OVMF image, a temporary ignored `ESP/startup.nsh` fallback-entry helper was used to select `EFI/BOOT/BOOTX64.EFI`; it was removed after validation. Persisted `desktopThemeId=classic` logged Classic chrome, and persisted `desktopThemeId=scifi` logged `[desktop] loaded desktop theme=scifi source=primary` before the normal event loop.
+
+Classic QMP VGA captures launched Calculator and Notepad, exercised the existing drag route, switched focus in both directions, and closed a harmless window. Sci-Fi captures launched the same two windows, showed the Sci-Fi desktop/taskbar plus one active and one inactive themed window, exercised drag and both focus transitions, closed Calculator, and reopened it through the existing Start-menu/recent-app route. Representative local ignored evidence is `logs/phase7b-qemu/scifi-20260823-125702-two-windows-after-drag.png`, `logs/phase7b-qemu/scifi-20260823-125702-focus-calculator.png`, `logs/phase7b-qemu/scifi-20260823-125702-focus-notepad.png`, and the matching Classic captures. The QMP path was the existing PS/2-relative input path; no hit-region drift was observed.
+
+### Performance, Portability, and Remaining Gaps
+
+The paint change adds no heap allocation, large buffer, GDI/Win32 call, filesystem access, floating-point effect, animation, blur, glow, or architecture-specific assumption. Shared theme colors and integer blending remain portable to freestanding framebuffer architectures.
+
+Remaining bare-metal gaps are bounded to Start-menu contents and surface restyling, dialogs and notifications, and application client surfaces such as File Explorer, Navigator, and Developer Studio. Generic controls, fonts, icons, wallpaper ownership, multi-monitor behavior, glass/blur, new shadows, animations, and rounded clipping/hit testing remain outside this phase. Phase 7C is not started.
 
 ## Manual Validation Runbook
 
@@ -950,6 +990,9 @@ After this validation, the recommended next phase is a separately scoped bare-me
 * The Sci Fi desktop fallback remains readable when wallpaper is unavailable; active wallpaper ownership is unchanged.
 * Taskbar normal, hover, active/selected, and indicator paths use the shared palette without geometry drift.
 * The Start button opens the existing Classic Start menu without changing its hit region or routing.
+* Sci Fi bare-metal windows use shared themed active/inactive frames, title bars, title text, and existing title-button states.
+* Classic bare-metal window chrome remains on its original fallback colors.
+* Bare-metal window geometry and title-button hit regions remain frozen.
 * Bare-metal remains rectangular for now.
 * Bare-metal does not depend on hosted GDI theme helpers.
 * Display Options and the theme config path do not break bare-metal.
@@ -961,7 +1004,7 @@ After this validation, the recommended next phase is a separately scoped bare-me
 * Blur/glass simulation
 * Animations and slide-in/out transitions
 * High-DPI/scaling/resolution polish
-* Remaining bare-metal parity: window chrome, Start-menu contents, dialogs, notifications, and application surfaces
+* Remaining bare-metal parity: Start-menu contents, dialogs, notifications, and application surfaces
 * Taskbar shadows
 * Theme wallpaper/asset selection
 * Per-theme user-editable settings

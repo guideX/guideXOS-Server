@@ -843,15 +843,25 @@ void KernelCompositor::drawWindow(app::KernelWindow* window) {
     uint32_t w = (uint32_t)window->w;
     uint32_t h = (uint32_t)window->h;
     bool focused = (window->flags & app::WF_FOCUSED) != 0;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
     
     // Window shadow
-    fillRect(x + 3, y + 3, w, h, rgb(15, 15, 20));
+    const uint32_t shadowColor = sciFiTheme
+        ? BlendDesktopThemeColor(theme.desktopBackground, theme.taskbarBackground, 70)
+        : rgb(15, 15, 20);
+    fillRect(x + 3, y + 3, w, h, shadowColor);
     
     // Window background
-    fillRect(x, y, w, h, rgb(34, 34, 34));
+    const uint32_t windowBackground = sciFiTheme ? theme.windowBackground : rgb(34, 34, 34);
+    fillRect(x, y, w, h, windowBackground);
     
     // Border
-    uint32_t borderColor = focused ? rgb(85, 136, 170) : rgb(51, 51, 51);
+    const uint32_t borderColor = sciFiTheme
+        ? (focused
+            ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 72)
+            : BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 20))
+        : (focused ? rgb(85, 136, 170) : rgb(51, 51, 51));
     drawRect(x, y, w, h, borderColor);
     
     // Titlebar
@@ -898,15 +908,33 @@ void KernelCompositor::drawTitlebar(app::KernelWindow* window) {
     uint32_t y = (uint32_t)window->y;
     uint32_t w = (uint32_t)window->w;
     bool focused = (window->flags & app::WF_FOCUSED) != 0;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const uint32_t chromeBase = focused ? theme.titleBarBackground : theme.taskbarBackground;
     
     // Titlebar background
-    uint32_t titlebarColor = focused ? rgb(43, 80, 111) : rgb(17, 17, 17);
+    const uint32_t titlebarColor = sciFiTheme
+        ? chromeBase
+        : (focused ? rgb(43, 80, 111) : rgb(17, 17, 17));
     fillRect(x + 1, y + 1, w - 2, TITLEBAR_HEIGHT - 1, titlebarColor);
+
+    // Keep the accent inside the proven titlebar bounds; this branch only
+    // adds a one-pixel surface treatment and does not alter the geometry.
+    if (sciFiTheme) {
+        const uint32_t highlightColor = focused
+            ? BlendDesktopThemeColor(theme.titleBarBackground, theme.accent, 48)
+            : BlendDesktopThemeColor(theme.taskbarBackground, theme.mutedAccent, 28);
+        hline(x + 1, y + 1, w - 2, highlightColor);
+    }
     
     // Title text
     int titleW = measureText(window->title);
     uint32_t titleX = x + (w - titleW) / 2;
-    uint32_t titleColor = focused ? rgb(240, 240, 240) : rgb(150, 150, 160);
+    const uint32_t titleColor = sciFiTheme
+        ? (focused
+            ? theme.titleBarText
+            : BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 38))
+        : (focused ? rgb(240, 240, 240) : rgb(150, 150, 160));
     drawText(titleX, y + 7, window->title, titleColor);
     
     // Buttons
@@ -915,13 +943,28 @@ void KernelCompositor::drawTitlebar(app::KernelWindow* window) {
     // Close button
     if (window->flags & app::WF_CLOSABLE) {
         uint32_t closeBtnX = x + w - BUTTON_GAP - BUTTON_SIZE;
-        uint32_t closeColor = window->closeBtnPressed ? rgb(200, 50, 50) :
-                              window->closeBtnHover ? rgb(170, 64, 64) : rgb(120, 40, 40);
+        const uint32_t closeColor = sciFiTheme
+            ? (window->closeBtnPressed
+                ? BlendDesktopThemeColor(chromeBase, rgb(200, 50, 50), 72)
+                : (window->closeBtnHover
+                    ? BlendDesktopThemeColor(chromeBase, rgb(170, 64, 64), 58)
+                    : BlendDesktopThemeColor(chromeBase, rgb(120, 40, 40), 42)))
+            : (window->closeBtnPressed ? rgb(200, 50, 50) :
+                window->closeBtnHover ? rgb(170, 64, 64) : rgb(120, 40, 40));
         fillRect(closeBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, closeColor);
-        drawRect(closeBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, rgb(80, 80, 80));
+        const uint32_t buttonBorderColor = sciFiTheme
+            ? (window->closeBtnPressed
+                ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 36)
+                : (window->closeBtnHover
+                    ? BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 30)
+                    : BlendDesktopThemeColor(theme.windowBorder, theme.titleBarBackground, 22)))
+            : rgb(80, 80, 80);
+        drawRect(closeBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, buttonBorderColor);
         
         // X icon
-        uint32_t iconColor = rgb(250, 250, 250);
+        const uint32_t iconColor = sciFiTheme
+            ? (focused ? theme.titleBarText : BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 24))
+            : rgb(250, 250, 250);
         for (int i = 0; i < 8; i++) {
             framebuffer::put_pixel(closeBtnX + 4 + i, btnY + 4 + i, iconColor);
             framebuffer::put_pixel(closeBtnX + 4 + i + 1, btnY + 4 + i, iconColor);
@@ -932,13 +975,30 @@ void KernelCompositor::drawTitlebar(app::KernelWindow* window) {
     
     // Maximize button
     uint32_t maxBtnX = x + w - BUTTON_GAP * 2 - BUTTON_SIZE * 2;
-    uint32_t maxColor = window->maxBtnPressed ? rgb(70, 70, 80) :
-                        window->maxBtnHover ? rgb(60, 60, 70) : rgb(46, 46, 46);
+    const uint32_t idleButtonColor = sciFiTheme
+        ? BlendDesktopThemeColor(chromeBase, theme.windowBorder, 18)
+        : rgb(46, 46, 46);
+    const uint32_t hoverButtonColor = sciFiTheme
+        ? BlendDesktopThemeColor(chromeBase, theme.mutedAccent, 26)
+        : rgb(60, 60, 70);
+    const uint32_t pressedButtonColor = sciFiTheme
+        ? BlendDesktopThemeColor(chromeBase, theme.accent, 22)
+        : rgb(70, 70, 80);
+    const uint32_t maxColor = window->maxBtnPressed ? pressedButtonColor :
+                              window->maxBtnHover ? hoverButtonColor : idleButtonColor;
     fillRect(maxBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, maxColor);
-    drawRect(maxBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, rgb(80, 80, 80));
+    drawRect(maxBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, sciFiTheme
+        ? (window->maxBtnPressed
+            ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 36)
+            : (window->maxBtnHover
+                ? BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 30)
+                : BlendDesktopThemeColor(theme.windowBorder, theme.titleBarBackground, 22)))
+        : rgb(80, 80, 80));
     
     // Max/restore icon
-    uint32_t iconColor = rgb(250, 250, 250);
+    const uint32_t iconColor = sciFiTheme
+        ? (focused ? theme.titleBarText : BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 24))
+        : rgb(250, 250, 250);
     if (window->flags & app::WF_MAXIMIZED) {
         drawRect(maxBtnX + 5, btnY + 3, 7, 7, iconColor);
         drawRect(maxBtnX + 3, btnY + 5, 7, 7, iconColor);
@@ -948,10 +1008,16 @@ void KernelCompositor::drawTitlebar(app::KernelWindow* window) {
     
     // Minimize button
     uint32_t minBtnX = x + w - BUTTON_GAP * 3 - BUTTON_SIZE * 3;
-    uint32_t minColor = window->minBtnPressed ? rgb(70, 70, 80) :
-                        window->minBtnHover ? rgb(60, 60, 70) : rgb(46, 46, 46);
+    const uint32_t minColor = window->minBtnPressed ? pressedButtonColor :
+                              window->minBtnHover ? hoverButtonColor : idleButtonColor;
     fillRect(minBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, minColor);
-    drawRect(minBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, rgb(80, 80, 80));
+    drawRect(minBtnX, btnY, BUTTON_SIZE, BUTTON_SIZE, sciFiTheme
+        ? (window->minBtnPressed
+            ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 36)
+            : (window->minBtnHover
+                ? BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 30)
+                : BlendDesktopThemeColor(theme.windowBorder, theme.titleBarBackground, 22)))
+        : rgb(80, 80, 80));
     hline(minBtnX + 4, btnY + BUTTON_SIZE - 5, 8, iconColor);
 }
 
