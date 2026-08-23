@@ -943,7 +943,37 @@ Classic QMP VGA captures launched Calculator and Notepad, exercised the existing
 
 The paint change adds no heap allocation, large buffer, GDI/Win32 call, filesystem access, floating-point effect, animation, blur, glow, or architecture-specific assumption. Shared theme colors and integer blending remain portable to freestanding framebuffer architectures.
 
-Remaining bare-metal gaps are bounded to Start-menu contents and surface restyling, dialogs and notifications, and application client surfaces such as File Explorer, Navigator, and Developer Studio. Generic controls, fonts, icons, wallpaper ownership, multi-monitor behavior, glass/blur, new shadows, animations, and rounded clipping/hit testing remain outside this phase. Phase 7C is not started.
+Remaining bare-metal gaps are bounded to dialogs and notifications, and application client surfaces such as File Explorer, Navigator, and Developer Studio. Generic controls, fonts, icons, wallpaper ownership, multi-monitor behavior, glass/blur, new shadows, animations, and rounded clipping/hit testing remain outside this phase. Phase 7C below owns the Start-menu surface pass.
+
+## Phase 7C — Bare-Metal Start Menu Consistency
+
+Phase 7C closes the remaining obvious Phase 7A/7B shell boundary: when Sci-Fi is active, the existing bare-metal Start menu uses the same dark navy / indigo / blue relationship as the Sci-Fi desktop, taskbar, Start button, and window chrome. This is a styling-only pass. Menu contents, command semantics, navigation, and geometry remain unchanged.
+
+### Start-Menu Rendering Architecture
+
+The normal UEFI/framebuffer Start-menu renderer is `draw_start_menu()` in `kernel/core/desktop.cpp`, called once from the ordinary desktop `draw()` path. It paints the existing fixed two-column surface: a user header, left recent/all-program rows, right system-shortcut rows, the column/header/footer separators, an All Programs toggle, and the existing Sleep/Restart/Shut Down footer actions. Existing Flat start-menu icons and colored fallback blocks remain in their current positions and sizes. No second bare-metal Start-menu renderer was found in `kernel/core/kernel_compositor.cpp` or another shell path.
+
+`get_start_menu_geometry()` is shared by paint and hit testing. It calculates the existing 420-pixel menu width, 30-pixel header, 22-pixel rows, 36-pixel footer, two-column bounds, taskbar-dock-aware origin, and body height. `hit_test_start_menu()` handles left/right row routing, `hit_test_start_menu_footer()` handles the footer controls, and the existing mouse-down/mouse-move paths handle launch, hover, click-outside dismissal, keyboard selection, and taskbar interaction. No submenu implementation exists in this bare-metal menu, so no submenu surface or timing was added.
+
+### Sci-Fi Menu Treatment
+
+Sci-Fi menu colors are selected from `GetCurrentDesktopTheme()` and the shared `DesktopTheme` fields. The menu surface uses `windowBackground`, its border and separators use blended `windowBorder`/`taskbarBorder` with `accent`, and the existing header/footer regions use `titleBarBackground` and `taskbarBackground`. Left and right rows use darker shared-theme surfaces, while hover, clicked, and keyboard-selected rows use integer blends with `accent` or `mutedAccent`. Primary and secondary labels use `titleBarText` blends for contrast. The All Programs control follows the same active/inactive relationship. Shut Down retains a visible red danger treatment blended into the Sci-Fi shell; Sleep and Restart remain neutral session controls. There is no transparency, blur, glow, gradient, animation, new shadow, rounded clipping, or expensive framebuffer primitive.
+
+### Classic Preservation, Geometry, and Behavior Freeze
+
+Classic color branches return the prior literal framebuffer colors for the menu background, header, rows, separators, text, All Programs control, and power/session controls. Sci-Fi-only palette selection does not alter item ordering, icons, text coordinates, row padding, menu origin, menu width/height calculation, Start-button dimensions, footer bounds, submenu placement, or hit regions. The expected geometry result is **no change**. Existing launch, session-action, hover, keyboard-selection, click-outside dismissal, taskbar responsiveness, and any right-click Start-menu context behavior remain on their existing paths.
+
+### Phase 7C Validation Record
+
+The exact workspace passed `.\build.bat`, `mingw32-make -C kernel ARCH=amd64 -j2`, and `.\build.ps1 -Arch amd64`. The required `smoke-theme-system.ps1 -SkipBuild`, `smoke-live-directory-desktop-status.ps1 -SkipBuild`, `smoke-hosted-display-runtime.ps1`, `smoke-desktop-startup-sync.ps1`, `smoke-bootinfo-framebuffer-array.ps1`, and `git diff --check` checks passed. The existing `smoke-virtio-gpu-input-routing.ps1` source check also passed. `smoke-appmodel-launchshadow.ps1` was attempted as the available Start-menu dispatch regression, but its pre-QEMU rebuild stopped in the child Windows PowerShell environment because `Get-FileHash` was unavailable there; the normal PowerShell 7 image build passed afterward and the exact-image launch proof below passed.
+
+The exact AMD64 image booted through UEFI/framebuffer with the repository's writable ESP configuration path and `-machine pc`. A temporary local `ESP/startup.nsh` fallback selected `EFI/BOOT/BOOTX64.EFI`; it was removed after validation. With `desktopThemeId=classic`, serial logged `loaded desktop theme=classic source=primary`; with `desktopThemeId=scifi`, serial logged `loaded desktop theme=scifi source=primary`. The tracked configuration was restored to Classic after both boots.
+
+Classic QMP/VGA evidence is in the ignored local run `logs/phase7c-qemu/final-classic-20260823-150553/`: the menu opened from the Start button, the Control Panel row hovered, click-outside dismissed it, All Programs exposed the existing application list, Calculator hovered and launched, and Start reopened over the running Calculator before a second outside dismissal. The Classic menu retained its original dark gray/blue/red treatment. Sci-Fi evidence is in `logs/phase7c-qemu/final-scifi-20260823-150652/`: the same sequence produced the dark navy/indigo menu surface, shared blue borders and row states, readable text, preserved red Shut Down semantics, a Sci-Fi-framed Calculator window behind the reopened menu, and a responsive taskbar. The QMP path was the existing PS/2-relative input path; no submenu exists. No menu origin, width/height, row bounds, footer bounds, Start-button dimensions, text/icon coordinates, or hit regions changed. Screenshots, logs, generated images, and temporary ESP/runtime configuration remain local validation state and are not release files.
+
+### Phase 7C Remaining Bare-Metal Gaps
+
+Dialogs, notifications, application client surfaces, generic controls, icons, fonts, wallpaper ownership, multi-monitor behavior, and other non-Start-menu shell/app parity remain outside Phase 7C. This phase does not begin the next bare-metal pass.
 
 ## Manual Validation Runbook
 
@@ -989,10 +1019,12 @@ Remaining bare-metal gaps are bounded to Start-menu contents and surface restyli
 * Sci Fi persisted configuration selects the Sci Fi desktop/taskbar/Start-button palette after VFS mount.
 * The Sci Fi desktop fallback remains readable when wallpaper is unavailable; active wallpaper ownership is unchanged.
 * Taskbar normal, hover, active/selected, and indicator paths use the shared palette without geometry drift.
-* The Start button opens the existing Classic Start menu without changing its hit region or routing.
+* Classic bare-metal configuration retains the existing Classic Start menu colors and behavior.
+* Sci Fi bare-metal configuration applies the shared Sci Fi palette to the existing Start-menu surface, rows, states, text, separators, and session footer while preserving its hit regions and routing.
 * Sci Fi bare-metal windows use shared themed active/inactive frames, title bars, title text, and existing title-button states.
 * Classic bare-metal window chrome remains on its original fallback colors.
 * Bare-metal window geometry and title-button hit regions remain frozen.
+* Bare-metal Start-menu geometry, row bounds, footer bounds, and input boundaries remain frozen.
 * Bare-metal remains rectangular for now.
 * Bare-metal does not depend on hosted GDI theme helpers.
 * Display Options and the theme config path do not break bare-metal.
@@ -1004,7 +1036,7 @@ Remaining bare-metal gaps are bounded to Start-menu contents and surface restyli
 * Blur/glass simulation
 * Animations and slide-in/out transitions
 * High-DPI/scaling/resolution polish
-* Remaining bare-metal parity: Start-menu contents, dialogs, notifications, and application surfaces
+* Remaining bare-metal parity: dialogs, notifications, and application surfaces
 * Taskbar shadows
 * Theme wallpaper/asset selection
 * Per-theme user-editable settings

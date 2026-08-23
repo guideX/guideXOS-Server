@@ -7049,9 +7049,207 @@ static void draw_taskbar()
 // Start menu
 // ============================================================
 
+static uint32_t bare_metal_start_menu_background_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi ? theme.windowBackground : rgb(40, 40, 50);
+}
+
+static uint32_t bare_metal_start_menu_border_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 44)
+        : rgb(80, 100, 140);
+}
+
+static uint32_t bare_metal_start_menu_header_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi ? theme.titleBarBackground : rgb(50, 70, 110);
+}
+
+static uint32_t bare_metal_start_menu_avatar_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.titleBarBackground, theme.accent, 54)
+        : rgb(90, 140, 200);
+}
+
+static uint32_t bare_metal_start_menu_avatar_border_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi ? theme.accent : rgb(130, 170, 230);
+}
+
+static uint32_t bare_metal_start_menu_separator_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBorder, theme.accent, 24)
+        : rgb(60, 70, 90);
+}
+
+static uint32_t bare_metal_start_menu_left_background_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.windowBackground, theme.desktopBackground, 12)
+        : rgb(42, 42, 52);
+}
+
+static uint32_t bare_metal_start_menu_right_background_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 14)
+        : rgb(38, 38, 48);
+}
+
+static uint32_t bare_metal_start_menu_left_normal_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(bare_metal_start_menu_left_background_color(theme), theme.windowBackground, 24)
+        : rgb(46, 46, 58);
+}
+
+static uint32_t bare_metal_start_menu_left_hover_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(bare_metal_start_menu_left_normal_color(theme), theme.accent, 28)
+        : rgb(55, 60, 80);
+}
+
+static uint32_t bare_metal_start_menu_left_clicked_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(bare_metal_start_menu_left_normal_color(theme), theme.accent, 50)
+        : rgb(50, 90, 160);
+}
+
+static uint32_t bare_metal_start_menu_left_selected_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(bare_metal_start_menu_left_normal_color(theme), theme.mutedAccent, 54)
+        : rgb(90, 100, 60);
+}
+
+static uint32_t bare_metal_start_menu_right_normal_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(bare_metal_start_menu_right_background_color(theme), theme.windowBackground, 26)
+        : rgb(42, 42, 52);
+}
+
+static uint32_t bare_metal_start_menu_right_hover_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(bare_metal_start_menu_right_normal_color(theme), theme.accent, 28)
+        : rgb(50, 55, 72);
+}
+
+static uint32_t bare_metal_start_menu_right_clicked_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(bare_metal_start_menu_right_normal_color(theme), theme.accent, 50)
+        : rgb(50, 90, 160);
+}
+
+static uint32_t bare_metal_start_menu_normal_text_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.titleBarText, theme.windowBackground, 24)
+        : rgb(210, 210, 225);
+}
+
+static uint32_t bare_metal_start_menu_active_text_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi ? theme.titleBarText : rgb(255, 255, 255);
+}
+
+static uint32_t bare_metal_start_menu_secondary_text_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 30)
+        : rgb(200, 200, 220);
+}
+
+static uint32_t bare_metal_start_menu_scroll_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 20)
+        : rgb(180, 190, 210);
+}
+
+static uint32_t bare_metal_start_menu_footer_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi ? theme.taskbarBackground : rgb(38, 38, 46);
+}
+
+static uint32_t bare_metal_start_menu_all_programs_color(const DesktopTheme& theme, bool active)
+{
+    if (theme.id != DesktopThemeId::SciFi) return active ? rgb(60, 80, 120) : rgb(50, 55, 65);
+    const uint32_t base = theme.taskbarBackground;
+    return active
+        ? BlendDesktopThemeColor(base, theme.accent, 30)
+        : BlendDesktopThemeColor(base, theme.windowBorder, 30);
+}
+
+static uint32_t bare_metal_start_menu_all_programs_border_color(const DesktopTheme& theme, bool active)
+{
+    if (theme.id != DesktopThemeId::SciFi) return active ? rgb(90, 120, 180) : rgb(70, 80, 100);
+    return active
+        ? BlendDesktopThemeColor(theme.taskbarBorder, theme.accent, 48)
+        : BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBorder, 30);
+}
+
+static uint32_t bare_metal_start_menu_all_programs_text_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 24)
+        : rgb(190, 195, 210);
+}
+
+static uint32_t bare_metal_start_menu_power_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBackground, rgb(140, 50, 50), 72)
+        : rgb(140, 50, 50);
+}
+
+static uint32_t bare_metal_start_menu_power_border_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.windowBorder, rgb(180, 80, 80), 62)
+        : rgb(180, 80, 80);
+}
+
+static uint32_t bare_metal_start_menu_power_text_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.titleBarText, rgb(255, 190, 190), 24)
+        : rgb(240, 220, 220);
+}
+
+static uint32_t bare_metal_start_menu_neutral_footer_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 34)
+        : rgb(50, 60, 80);
+}
+
+static uint32_t bare_metal_start_menu_neutral_footer_border_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBorder, 34)
+        : rgb(80, 100, 130);
+}
+
+static uint32_t bare_metal_start_menu_neutral_footer_text_color(const DesktopTheme& theme)
+{
+    return theme.id == DesktopThemeId::SciFi
+        ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 24)
+        : rgb(200, 200, 220);
+}
+
 static void draw_start_menu()
 {
     if (!s_startMenuOpen) return;
+
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
 
     // Get current item count based on mode (pinned+recent or all programs)
     int itemCount = get_start_menu_item_count();
@@ -7083,24 +7281,32 @@ static void draw_start_menu()
     uint32_t leftColW = kStartMenuW - kStartMenuRightColW;
 
     // Menu background
-    framebuffer::fill_rect(menuX, menuY, kStartMenuW, menuH, rgb(40, 40, 50));
-    draw_rect(menuX, menuY, kStartMenuW, menuH, rgb(80, 100, 140));
+    framebuffer::fill_rect(menuX, menuY, kStartMenuW, menuH,
+                           bare_metal_start_menu_background_color(theme));
+    draw_rect(menuX, menuY, kStartMenuW, menuH,
+              bare_metal_start_menu_border_color(theme));
 
     // Header bar (user profile area)
-    framebuffer::fill_rect(menuX + 1, menuY + 1, kStartMenuW - 2, headerH - 1, rgb(50, 70, 110));
+    framebuffer::fill_rect(menuX + 1, menuY + 1, kStartMenuW - 2, headerH - 1,
+                           bare_metal_start_menu_header_color(theme));
     // User avatar placeholder
-    framebuffer::fill_rect(menuX + 8, menuY + 6, 18, 18, rgb(90, 140, 200));
-    draw_rect(menuX + 8, menuY + 6, 18, 18, rgb(130, 170, 230));
+    framebuffer::fill_rect(menuX + 8, menuY + 6, 18, 18,
+                           bare_metal_start_menu_avatar_color(theme));
+    draw_rect(menuX + 8, menuY + 6, 18, 18,
+              bare_metal_start_menu_avatar_border_color(theme));
     // Username
-    draw_text(menuX + 32, menuY + 10, "User", rgb(230, 230, 250), 1);
-    hline(menuX + 1, menuY + headerH, kStartMenuW - 2, rgb(60, 70, 90));
+    draw_text(menuX + 32, menuY + 10, "User",
+              theme.id == DesktopThemeId::SciFi ? theme.titleBarText : rgb(230, 230, 250), 1);
+    hline(menuX + 1, menuY + headerH, kStartMenuW - 2,
+          bare_metal_start_menu_separator_color(theme));
 
     // === Left column: Recent Programs or All Programs ===
     uint32_t leftX = menuX;
     uint32_t contentY = menuY + headerH + 1;
 
     // Left column background
-    framebuffer::fill_rect(leftX + 1, contentY, leftColW - 1, maxBodyH, rgb(42, 42, 52));
+    framebuffer::fill_rect(leftX + 1, contentY, leftColW - 1, maxBodyH,
+                           bare_metal_start_menu_left_background_color(theme));
 
     // Draw visible items with scroll
     for (int i = 0; i < visibleRows; i++) {
@@ -7121,21 +7327,25 @@ static void draw_start_menu()
             isPinned = s_startMenuAllProgs ? app->pinned : false;
         }
 
-        // Keyboard selection highlight (yellow/gold)
+        // Keyboard selection highlight
         if (itemIndex == s_startMenuSelection) {
-            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(90, 100, 60));
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH,
+                                   bare_metal_start_menu_left_selected_color(theme));
         }
         // Clicked item highlight (bright blue)
         else if (i == s_clickedMenuLeft) {
-            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(50, 90, 160));
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH,
+                                   bare_metal_start_menu_left_clicked_color(theme));
         }
         // Hover highlight (subtle blue tint)
         else if (i == s_hoverMenuLeft) {
-            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(55, 60, 80));
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH,
+                                   bare_metal_start_menu_left_hover_color(theme));
         }
         // Alternate row shading
         else if (i % 2 == 0) {
-            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(46, 46, 58));
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH,
+                                   bare_metal_start_menu_left_normal_color(theme));
         }
 
         uint32_t iconSize = s_startMenuIconSize > 0 ? s_startMenuIconSize : 16;
@@ -7148,31 +7358,37 @@ static void draw_start_menu()
         
         // Pin indicator (star) if pinned
         if (isPinned) {
-            draw_text(leftX + 20, start_menu_text_y(itemY), "*", rgb(255, 220, 80), 1);
+            draw_text(leftX + 20, start_menu_text_y(itemY), "*",
+                      theme.id == DesktopThemeId::SciFi ? theme.accent : rgb(255, 220, 80), 1);
         }
 
         // App name
         uint32_t textColor = (itemIndex == s_startMenuSelection || i == s_clickedMenuLeft || i == s_hoverMenuLeft)
-            ? rgb(255, 255, 255) : rgb(210, 210, 225);
+            ? bare_metal_start_menu_active_text_color(theme)
+            : bare_metal_start_menu_normal_text_color(theme);
         draw_text(iconX + iconSize + 6, start_menu_text_y(itemY), appName, textColor, 1);
     }
     
     // Scroll indicators if needed
     if (s_startMenuScroll > 0) {
         // Up arrow indicator
-        draw_text(leftX + leftColW - 16, contentY + 2, "^", rgb(180, 190, 210), 1);
+        draw_text(leftX + leftColW - 16, contentY + 2, "^",
+                  bare_metal_start_menu_scroll_color(theme), 1);
     }
     if (s_startMenuScroll + visibleRows < itemCount) {
         // Down arrow indicator
-        draw_text(leftX + leftColW - 16, contentY + maxBodyH - 12, "v", rgb(180, 190, 210), 1);
+        draw_text(leftX + leftColW - 16, contentY + maxBodyH - 12, "v",
+                  bare_metal_start_menu_scroll_color(theme), 1);
     }
 
     // Vertical divider between columns
-    vline(leftX + leftColW, contentY, maxBodyH, rgb(60, 70, 90));
+    vline(leftX + leftColW, contentY, maxBodyH,
+          bare_metal_start_menu_separator_color(theme));
 
     // === Right column: System shortcuts ===
     uint32_t rightX = leftX + leftColW + 1;
-    framebuffer::fill_rect(rightX, contentY, kStartMenuRightColW - 2, maxBodyH, rgb(38, 38, 48));
+    framebuffer::fill_rect(rightX, contentY, kStartMenuRightColW - 2, maxBodyH,
+                           bare_metal_start_menu_right_background_color(theme));
 
     for (int i = 0; i < kStartMenuRightCount; i++) {
         uint32_t itemY = contentY + (uint32_t)i * kStartMenuRowH;
@@ -7180,15 +7396,18 @@ static void draw_start_menu()
 
         // Clicked item highlight
         if (i == s_clickedMenuRight) {
-            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH, rgb(50, 90, 160));
+            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH,
+                                   bare_metal_start_menu_right_clicked_color(theme));
         }
         // Hover highlight
         else if (i == s_hoverMenuRight) {
-            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH, rgb(50, 55, 72));
+            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH,
+                                   bare_metal_start_menu_right_hover_color(theme));
         }
         // Alternate shading
         else if (i % 2 == 1) {
-            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH, rgb(42, 42, 52));
+            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH,
+                                   bare_metal_start_menu_right_normal_color(theme));
         }
 
         uint32_t iconSize = s_startMenuIconSize > 0 ? s_startMenuIconSize : 16;
@@ -7201,51 +7420,64 @@ static void draw_start_menu()
 
         // Label
         uint32_t rTextColor = (i == s_clickedMenuRight || i == s_hoverMenuRight)
-            ? rgb(255, 255, 255) : rgb(200, 200, 220);
+            ? bare_metal_start_menu_active_text_color(theme)
+            : bare_metal_start_menu_secondary_text_color(theme);
         draw_text(iconX + iconSize + 6, start_menu_text_y(itemY), s_startMenuRight[i].label, rTextColor, 1);
     }
 
     // === Footer: "All Programs" toggle + Power buttons ===
     uint32_t footerY = menuY + headerH + maxBodyH;
-    hline(menuX + 1, footerY, kStartMenuW - 2, rgb(60, 70, 90));
+    hline(menuX + 1, footerY, kStartMenuW - 2,
+          bare_metal_start_menu_separator_color(theme));
 
     // Footer background
-    framebuffer::fill_rect(menuX + 1, footerY + 1, kStartMenuW - 2, footerH - 2, rgb(38, 38, 46));
+    framebuffer::fill_rect(menuX + 1, footerY + 1, kStartMenuW - 2, footerH - 2,
+                           bare_metal_start_menu_footer_color(theme));
 
     // "All Programs" toggle button (label changes when Recent Programs is shown)
     uint32_t allBtnW = 132;
     uint32_t allBtnH = 24;
     uint32_t allBtnX = menuX + 10;
     uint32_t allBtnY = footerY + (footerH - allBtnH) / 2;
-    uint32_t allBtnBg = s_startMenuAllProgs ? rgb(60, 80, 120) : rgb(50, 55, 65);
-    uint32_t allBtnBorder = s_startMenuAllProgs ? rgb(90, 120, 180) : rgb(70, 80, 100);
+    uint32_t allBtnBg = bare_metal_start_menu_all_programs_color(theme, s_startMenuAllProgs);
+    uint32_t allBtnBorder = bare_metal_start_menu_all_programs_border_color(theme, s_startMenuAllProgs);
     framebuffer::fill_rect(allBtnX, allBtnY, allBtnW, allBtnH, allBtnBg);
     draw_rect(allBtnX, allBtnY, allBtnW, allBtnH, allBtnBorder);
     const char* allBtnText = s_startMenuAllProgs ? "Recent Programs" : "All Programs";
-    draw_text_centered(allBtnX, allBtnY, allBtnW, allBtnH, allBtnText, rgb(190, 195, 210), 1);
+    draw_text_centered(allBtnX, allBtnY, allBtnW, allBtnH, allBtnText,
+                       bare_metal_start_menu_all_programs_text_color(theme), 1);
 
     // Power buttons (right side of footer)
     uint32_t shutW = 80;
     uint32_t shutH = 24;
     uint32_t shutX = menuX + kStartMenuW - shutW - 12;
     uint32_t shutY = footerY + (footerH - shutH) / 2;
-    framebuffer::fill_rect(shutX, shutY, shutW, shutH, rgb(140, 50, 50));
-    draw_rect(shutX, shutY, shutW, shutH, rgb(180, 80, 80));
-    draw_text_centered(shutX, shutY, shutW, shutH, "Shut Down", rgb(240, 220, 220), 1);
+    framebuffer::fill_rect(shutX, shutY, shutW, shutH,
+                           bare_metal_start_menu_power_color(theme));
+    draw_rect(shutX, shutY, shutW, shutH,
+              bare_metal_start_menu_power_border_color(theme));
+    draw_text_centered(shutX, shutY, shutW, shutH, "Shut Down",
+                       bare_metal_start_menu_power_text_color(theme), 1);
 
     // Restart button
     uint32_t restartW = 62;
     uint32_t restartX = shutX - restartW - 6;
-    framebuffer::fill_rect(restartX, shutY, restartW, shutH, rgb(50, 60, 80));
-    draw_rect(restartX, shutY, restartW, shutH, rgb(80, 100, 130));
-    draw_text_centered(restartX, shutY, restartW, shutH, "Restart", rgb(200, 200, 220), 1);
+    framebuffer::fill_rect(restartX, shutY, restartW, shutH,
+                           bare_metal_start_menu_neutral_footer_color(theme));
+    draw_rect(restartX, shutY, restartW, shutH,
+              bare_metal_start_menu_neutral_footer_border_color(theme));
+    draw_text_centered(restartX, shutY, restartW, shutH, "Restart",
+                       bare_metal_start_menu_neutral_footer_text_color(theme), 1);
 
     // Sleep button
     uint32_t sleepW = 50;
     uint32_t sleepX = restartX - sleepW - 6;
-    framebuffer::fill_rect(sleepX, shutY, sleepW, shutH, rgb(50, 60, 80));
-    draw_rect(sleepX, shutY, sleepW, shutH, rgb(80, 100, 130));
-    draw_text_centered(sleepX, shutY, sleepW, shutH, "Sleep", rgb(200, 200, 220), 1);
+    framebuffer::fill_rect(sleepX, shutY, sleepW, shutH,
+                           bare_metal_start_menu_neutral_footer_color(theme));
+    draw_rect(sleepX, shutY, sleepW, shutH,
+              bare_metal_start_menu_neutral_footer_border_color(theme));
+    draw_text_centered(sleepX, shutY, sleepW, shutH, "Sleep",
+                       bare_metal_start_menu_neutral_footer_text_color(theme), 1);
 }
 
 // ============================================================
