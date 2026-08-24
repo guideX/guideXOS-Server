@@ -710,6 +710,131 @@ typedef struct guidexos_nativeaot_c011ec40_compaction_record {
     uintptr_t allocationPath;
 } guidexos_nativeaot_c011ec40_compaction_record;
 
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC41_MAX_ALLOCATIONS = 8u
+};
+
+/* C011EC41 post-GC allocation provenance.  These records are fixed-size and
+ * written only by the managed-resume/managed-allocation observers.  They
+ * describe the production Thread allocation context and the object/segment
+ * returned by the locked NativeAOT helper; they do not select or modify any
+ * allocator state. */
+typedef struct guidexos_nativeaot_c011ec41_allocation_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t requestedPayload;
+    uint32_t requestedSize;
+    uint32_t alignedSize;
+    uint32_t fastPath;
+    uint32_t rarePath;
+    uint32_t segmentChanged;
+    uint32_t pointerValid;
+    uint32_t fitValid;
+    uint32_t monotonicValid;
+    uint32_t overlapValid;
+    uint32_t heapOwned;
+    uint32_t collectionBefore;
+    uint32_t collectionAfter;
+    uint32_t invariantFailures;
+
+    uintptr_t objectAddress;
+    uintptr_t objectEnd;
+    uintptr_t contextBefore;
+    uintptr_t limitBefore;
+    uintptr_t contextAfter;
+    uintptr_t limitAfter;
+    uintptr_t allocBytesBefore;
+    uintptr_t allocBytesAfter;
+    uintptr_t threadIdentity;
+    uintptr_t contextIdentity;
+    uintptr_t heapIdentity;
+    uintptr_t segmentIdentity;
+    uintptr_t segmentBase;
+    uintptr_t segmentAllocated;
+    uintptr_t segmentCommitted;
+    uintptr_t segmentReserved;
+    uintptr_t segmentGeneration;
+} guidexos_nativeaot_c011ec41_allocation_record;
+
+typedef struct guidexos_nativeaot_c011ec41_provenance_record {
+    uint32_t managedResumeObserved;
+    uint32_t activeContextCaptured;
+    uint32_t activeContextValid;
+    uint32_t firstHelperEntry;
+    uint32_t preflightEmitted;
+    uint32_t provenanceEmitted;
+    uint32_t completionMarkerEmitted;
+    uint32_t allocationCount;
+    uint32_t fastCount;
+    uint32_t rareCount;
+    uint32_t refillCount;
+    uint32_t collection3Triggered;
+    uint32_t sensitiveDiagnosticAllocations;
+    uint32_t invariantFailures;
+    uint32_t contextOverlapsTail;
+    uint32_t contextSameSegment;
+    uint32_t tailEligible;
+    uint32_t tailEligibilityTiming;
+    uint32_t tailConsidered;
+    uint32_t tailConsumed;
+    uint32_t naturalRefillObserved;
+    uint32_t contextRestoredValid;
+    uint32_t supplyingRegionKnown;
+    uint32_t safeStopReason;
+    uint32_t requestActive;
+    uint32_t currentOrdinal;
+    uint32_t nativeHelperObserved;
+    uint32_t nativeGcCountBefore;
+    uint32_t reserved[4];
+
+    uintptr_t threadIdentity;
+    uintptr_t contextIdentity;
+    uintptr_t initialAllocPtr;
+    uintptr_t initialAllocLimit;
+    uintptr_t initialAllocBytes;
+    uintptr_t initialAllocBytesUoh;
+    uintptr_t homeHeap;
+    uintptr_t activeSegment;
+    uintptr_t activeSegmentBase;
+    uintptr_t activeSegmentAllocated;
+    uintptr_t activeSegmentCommitted;
+    uintptr_t activeSegmentReserved;
+    uintptr_t activeGeneration;
+
+    uintptr_t tailSegment;
+    uintptr_t tailStart;
+    uintptr_t tailEnd;
+    uintptr_t tailSize;
+
+    uintptr_t supplyingStart;
+    uintptr_t supplyingEnd;
+    uintptr_t supplyingSegment;
+    uintptr_t supplyingGeneration;
+
+    uintptr_t finalAllocPtr;
+    uintptr_t finalAllocLimit;
+    uintptr_t finalAllocBytes;
+    uintptr_t firstPointerBefore;
+    uintptr_t firstLimit;
+    uintptr_t firstObject;
+    uintptr_t firstPointerAfter;
+    uintptr_t firstAlignedSize;
+
+    /* C011EC41 stock AllocFast entry snapshot.  These fields are populated by
+     * the diagnostic call inserted around the locked RhpNewArray entry and
+     * consumed by the post-allocation callback. */
+    uintptr_t nativeRequestedSize;
+    uintptr_t nativePointerBefore;
+    uintptr_t nativeLimitBefore;
+    uintptr_t nativeAllocBytesBefore;
+    uintptr_t nativeThreadBefore;
+    uintptr_t nativeContextBefore;
+    uintptr_t nativeHeapBefore;
+
+    guidexos_nativeaot_c011ec41_allocation_record allocations[
+        GUIDEXOS_NATIVEAOT_C011EC41_MAX_ALLOCATIONS];
+} guidexos_nativeaot_c011ec41_provenance_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2558,6 +2683,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec39_plan_record c011ec39Plan;
     /* C011EC40 authentic compacting reclamation provenance. */
     guidexos_nativeaot_c011ec40_compaction_record c011ec40Compaction;
+    /* C011EC41 authentic post-GC allocation-context provenance. */
+    guidexos_nativeaot_c011ec41_provenance_record c011ec41Provenance;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

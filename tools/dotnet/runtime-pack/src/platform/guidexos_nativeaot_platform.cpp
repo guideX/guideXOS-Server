@@ -12408,6 +12408,31 @@ static void guideXosNativeAotC011EC37ResetPhaseChronology(
     }
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+static void guideXosNativeAotC011EC41CaptureActiveContext();
+static void guideXosNativeAotC011EC41BeginRequest(
+    uint32_t ordinal, uint32_t payloadSize);
+static void guideXosNativeAotC011EC41HelperEntry(
+    uintptr_t requestedSize);
+extern "C" void __cdecl guideXosNativeAotC011EC41NativeHelperEntry(
+    uintptr_t requestedSize);
+static void guideXosNativeAotC011EC41RecordAllocation(
+    uint32_t ordinal, uintptr_t requestedSize,
+    uintptr_t objectAddress, uintptr_t pointerBefore,
+    uintptr_t limitBefore, uintptr_t pointerAfter,
+    uintptr_t limitAfter, uintptr_t allocBytesBefore,
+    uintptr_t allocBytesAfter, uintptr_t threadIdentity,
+    uintptr_t contextIdentity, uintptr_t heapIdentity,
+    uint32_t heapOwned, uint32_t gcCountBefore, uint32_t gcCountAfter);
+static void guideXosNativeAotC011EC41AfterAllocation(
+    uintptr_t objectAddress);
+extern "C" void __cdecl guideXosNativeAotC011EC41NativeAfterAllocation(
+    uintptr_t objectAddress);
+extern "C" void __cdecl guideXosNativeAotC011EC41RareAllocationCompleted(
+    uintptr_t objectAddress);
+static int guideXosNativeAotC011EC41Finish();
+#endif
+
 extern "C" __declspec(dllexport) int __cdecl
 guideXosNativeAotC011EC37ManagedCheckpoint(
     uint32_t checkpoint, uintptr_t weakHandleSlot) {
@@ -12498,6 +12523,12 @@ guideXosNativeAotC011EC37ManagedCheckpoint(
         suspendEeSerialPutString("\n");
         return -1;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+    // This call is made by the authentic managed continuation after
+    // RestartEE.  It records the production Thread allocation context before
+    // the first bounded post-GC array allocation begins.
+    guideXosNativeAotC011EC41CaptureActiveContext();
+#endif
     d.c011ec37SafeStopReason = 0u;
     d.c011ec37ManagedMarkerEmitted = 1u;
     suspendEeSerialPutString(
@@ -13380,6 +13411,9 @@ guideXosNativeAotC011EC40BeforeAllocation(
             "[nativeaot-gc-short-weak-lifetime] MANAGED marker=C011EC40-MANAGED");
         suspendEeSerialPutString(" method=RunC011EC40AllocationReuse\n");
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+    guideXosNativeAotC011EC41BeginRequest(ordinal, payloadSize);
+#endif
     return 0;
 }
 
@@ -13402,6 +13436,9 @@ guideXosNativeAotC011EC40AfterAllocation(uintptr_t objectAddress) {
         r.oldTargetExtentOverlap = 1u;
     if (objectAddress == r.targetStart) r.exactStartReuse = 1u;
     ++r.allocationCount;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+    guideXosNativeAotC011EC41AfterAllocation(objectAddress);
+#endif
     return 0;
 }
 
@@ -13423,7 +13460,11 @@ guideXosNativeAotC011EC40Finish() {
         if (r.safeStopReason == 0u) r.safeStopReason = 0xC0400003u;
         guideXosNativeAotC011EC40EmitRecord(
             "BLOCKED marker=C011EC40-BLOCKED", r, d);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+        return guideXosNativeAotC011EC41Finish();
+#else
         return -1;
+#endif
     }
     r.successLevel = 1u;
     if (r.allocationTestAttempted != 0u &&
@@ -13436,6 +13477,568 @@ guideXosNativeAotC011EC40Finish() {
     r.completionMarkerEmitted = 1u;
     guideXosNativeAotC011EC40EmitRecord(
         "COMPLETE marker=C011EC40 outcome=C", r, d);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+    return guideXosNativeAotC011EC41Finish();
+#else
+    return 0;
+#endif
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+static void guideXosNativeAotC011EC41CaptureActiveContext() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        d.c011ec41Provenance;
+    if (r.activeContextCaptured != 0u) {
+        return;
+    }
+
+    uintptr_t allocationPointer = 0u;
+    uintptr_t allocationLimit = 0u;
+    uintptr_t currentThread = 0u;
+    uintptr_t gcHeap = 0u;
+    gx_uint32 gcCount = 0u;
+    uintptr_t allocatedBytes = 0u;
+    gx_uint32 finalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    uintptr_t contextIdentity = 0u;
+    uintptr_t allocBytes = 0u;
+    uintptr_t allocBytesUoh = 0u;
+    (void)finalizableObjects;
+    (void)gcInProgress;
+    (void)gcMode;
+    (void)gcCount;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationPointer, &allocationLimit, &currentThread, &gcHeap,
+            &gcCount, &allocatedBytes, &finalizableObjects, &gcInProgress,
+            &gcMode, &contextIdentity, &allocBytes, &allocBytesUoh) != 0 ||
+        currentThread == 0u || gcHeap == 0u || contextIdentity == 0u) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410001u;
+        return;
+    }
+
+    r.managedResumeObserved = 1u;
+    r.activeContextCaptured = 1u;
+    r.threadIdentity = currentThread;
+    r.contextIdentity = contextIdentity;
+    r.initialAllocPtr = allocationPointer;
+    r.initialAllocLimit = allocationLimit;
+    r.initialAllocBytes = allocBytes;
+    r.initialAllocBytesUoh = allocBytesUoh;
+    r.homeHeap = gcHeap;
+    r.activeContextValid = allocationLimit >= allocationPointer &&
+        (allocationPointer == 0u || (allocationPointer & 7u) == 0u);
+    r.contextRestoredValid = r.activeContextValid ? 1u : 0u;
+    if (!r.activeContextValid) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410002u;
+    }
+
+    const guidexos_nativeaot_c011ec40_compaction_record& c40 =
+        d.c011ec40Compaction;
+    r.tailSegment = c40.segment;
+    r.tailStart = c40.freeTailStart;
+    r.tailEnd = c40.freeTailEnd;
+    r.tailSize = c40.freeTailSize;
+    r.tailEligible = c40.allocatorVisibleTail != 0u &&
+        c40.freeTailEnd > c40.freeTailStart ? 1u : 0u;
+
+    if (allocationPointer != 0u) {
+        gx_uint32 segmentFlags = 0u;
+        gx_uint32 segmentGeneration = 0u;
+        if (guidexos_nativeaot_gc_describe_segment(
+                reinterpret_cast<void*>(allocationPointer),
+                &r.activeSegment, &r.activeSegmentBase,
+                &r.activeSegmentAllocated, &r.activeSegmentCommitted,
+                &r.activeSegmentReserved, &segmentFlags,
+                &segmentGeneration) != 0 || r.activeSegment == 0u) {
+            ++r.invariantFailures;
+            r.safeStopReason = 0xC0410003u;
+        } else {
+            r.activeGeneration = segmentGeneration;
+        }
+    }
+    r.contextOverlapsTail = guideXosNativeAotC011EC40RangeOverlaps(
+        allocationPointer, allocationLimit, r.tailStart, r.tailEnd) ? 1u : 0u;
+    r.contextSameSegment = r.activeSegment != 0u &&
+        r.tailSegment != 0u && r.activeSegment == r.tailSegment ? 1u : 0u;
+    if (r.tailEligible != 0u) {
+        r.tailEligibilityTiming = r.contextOverlapsTail != 0u ? 1u : 2u;
+    }
+}
+
+static void guideXosNativeAotC011EC41BeginRequest(
+    uint32_t ordinal, uint32_t payloadSize) {
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        g_guideXosAllocationDiagnostics.c011ec41Provenance;
+    if (ordinal >= GUIDEXOS_NATIVEAOT_C011EC41_MAX_ALLOCATIONS ||
+        payloadSize != 64u) {
+        r.safeStopReason = 0xC0410004u;
+        return;
+    }
+    if (r.activeContextCaptured == 0u) {
+        guideXosNativeAotC011EC41CaptureActiveContext();
+    }
+    r.requestActive = 1u;
+    r.currentOrdinal = ordinal;
+}
+
+static void guideXosNativeAotC011EC41EmitPreflight() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        d.c011ec41Provenance;
+    if (r.preflightEmitted != 0u) return;
+    const guidexos_nativeaot_c011ec40_compaction_record& c40 =
+        d.c011ec40Compaction;
+    if (r.requestActive == 0u || r.firstHelperEntry == 0u ||
+        r.activeContextCaptured == 0u || r.activeContextValid == 0u ||
+        d.c011ec33Collections[1].collectionCompleted == 0u ||
+        d.c011ec33Collections[1].eeRestartReturns == 0u ||
+        d.c011ec33Collections[1].managedResumeCount == 0u ||
+        c40.reclaimedEmitted == 0u || r.collection3Triggered != 0u) {
+        r.safeStopReason = 0xC0410005u;
+        return;
+    }
+    r.preflightEmitted = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC41-PREFLIGHT");
+#define C41PF32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C41PF64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C41PF32("activeContextCaptured", r.activeContextCaptured);
+    C41PF32("contextValid", r.activeContextValid);
+    C41PF32("managedResume", r.managedResumeObserved);
+    C41PF32("firstHelperEntry", r.firstHelperEntry);
+    C41PF32("collection3Triggered", r.collection3Triggered);
+    C41PF32("tailEligible", r.tailEligible);
+    C41PF32("tailEligibilityTiming", r.tailEligibilityTiming);
+    C41PF32("contextOverlapsTail", r.contextOverlapsTail);
+    C41PF32("contextSameSegment", r.contextSameSegment);
+    C41PF64("thread", r.threadIdentity);
+    C41PF64("context", r.contextIdentity);
+    C41PF64("ptr", r.initialAllocPtr);
+    C41PF64("limit", r.initialAllocLimit);
+    C41PF64("allocBytes", r.initialAllocBytes);
+    C41PF64("heap", r.homeHeap);
+    C41PF64("activeSegment", r.activeSegment);
+    C41PF64("activeSegmentBase", r.activeSegmentBase);
+    C41PF64("activeSegmentAllocated", r.activeSegmentAllocated);
+    C41PF64("activeSegmentCommitted", r.activeSegmentCommitted);
+    C41PF64("activeGeneration", r.activeGeneration);
+    C41PF64("tailSegment", r.tailSegment);
+    C41PF64("tailStart", r.tailStart);
+    C41PF64("tailEnd", r.tailEnd);
+    C41PF64("tailSize", r.tailSize);
+    C41PF32("c40Reclaimed", c40.reclaimedEmitted);
+    C41PF32("c37Collection2Completed", d.c011ec33Collections[1].collectionCompleted);
+    C41PF32("c37RestartEE", d.c011ec33Collections[1].eeRestartReturns != 0u ? 1u : 0u);
+    C41PF32("c37ManagedResume", d.c011ec33Collections[1].managedResumeCount != 0u ? 1u : 0u);
+#undef C41PF32
+#undef C41PF64
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC41HelperEntry(uintptr_t requestedSize) {
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        g_guideXosAllocationDiagnostics.c011ec41Provenance;
+    if (r.requestActive == 0u || r.firstHelperEntry != 0u) return;
+    r.firstHelperEntry = 1u;
+    (void)requestedSize;
+    // C40's production compaction/reclamation facts are published at this
+    // managed boundary before C41 classifies the allocation context.
+    guideXosNativeAotC011EC40EmitPreflightAndReclaimed();
+    guideXosNativeAotC011EC41EmitPreflight();
+}
+
+static void guideXosNativeAotC011EC41CaptureNativeHelperState(
+    uintptr_t requestedSize) {
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        g_guideXosAllocationDiagnostics.c011ec41Provenance;
+    if (r.requestActive == 0u) return;
+    if (r.currentOrdinal >= GUIDEXOS_NATIVEAOT_C011EC41_MAX_ALLOCATIONS) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410004u;
+        return;
+    }
+
+    uintptr_t allocationPointer = 0u;
+    uintptr_t allocationLimit = 0u;
+    uintptr_t currentThread = 0u;
+    uintptr_t gcHeap = 0u;
+    gx_uint32 gcCount = 0u;
+    uintptr_t allocatedBytes = 0u;
+    gx_uint32 finalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    uintptr_t contextIdentity = 0u;
+    uintptr_t allocBytes = 0u;
+    uintptr_t allocBytesUoh = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationPointer, &allocationLimit, &currentThread, &gcHeap,
+            &gcCount, &allocatedBytes, &finalizableObjects, &gcInProgress,
+            &gcMode, &contextIdentity, &allocBytes, &allocBytesUoh) != 0 ||
+        currentThread == 0u || gcHeap == 0u || contextIdentity == 0u ||
+        allocationLimit < allocationPointer) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410005u;
+        return;
+    }
+
+    r.nativeHelperObserved = 1u;
+    r.nativeGcCountBefore = gcCount;
+    r.nativeRequestedSize = requestedSize;
+    r.nativePointerBefore = allocationPointer;
+    r.nativeLimitBefore = allocationLimit;
+    r.nativeAllocBytesBefore = allocBytes;
+    r.nativeThreadBefore = currentThread;
+    r.nativeContextBefore = contextIdentity;
+    r.nativeHeapBefore = gcHeap;
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC41NativeHelperEntry(
+    uintptr_t requestedSize) {
+    guideXosNativeAotC011EC41HelperEntry(requestedSize);
+    guideXosNativeAotC011EC41CaptureNativeHelperState(requestedSize);
+}
+
+static void guideXosNativeAotC011EC41RecordAllocation(
+    uint32_t ordinal, uintptr_t requestedSize, uintptr_t objectAddress,
+    uintptr_t pointerBefore, uintptr_t limitBefore, uintptr_t pointerAfter,
+    uintptr_t limitAfter, uintptr_t allocBytesBefore,
+    uintptr_t allocBytesAfter, uintptr_t threadIdentity,
+    uintptr_t contextIdentity, uintptr_t heapIdentity, uint32_t heapOwned,
+    uint32_t gcCountBefore, uint32_t gcCountAfter) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        d.c011ec41Provenance;
+    if (r.requestActive == 0u) return;
+    if (ordinal >= GUIDEXOS_NATIVEAOT_C011EC41_MAX_ALLOCATIONS) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410006u;
+        return;
+    }
+
+    guidexos_nativeaot_c011ec41_allocation_record& a = r.allocations[ordinal];
+    a = {};
+    a.observed = 1u;
+    a.ordinal = ordinal;
+    a.requestedPayload = 64u;
+    a.requestedSize = static_cast<uint32_t>(requestedSize);
+    a.alignedSize = static_cast<uint32_t>(requestedSize);
+    a.contextBefore = pointerBefore;
+    a.limitBefore = limitBefore;
+    a.contextAfter = pointerAfter;
+    a.limitAfter = limitAfter;
+    a.allocBytesBefore = allocBytesBefore;
+    a.allocBytesAfter = allocBytesAfter;
+    a.threadIdentity = threadIdentity;
+    a.contextIdentity = contextIdentity;
+    a.heapIdentity = heapIdentity;
+    a.heapOwned = heapOwned;
+    a.collectionBefore = gcCountBefore;
+    a.collectionAfter = gcCountAfter;
+    a.objectAddress = objectAddress;
+    a.objectEnd = objectAddress + requestedSize;
+    a.pointerValid = limitBefore >= pointerBefore &&
+        limitAfter >= pointerAfter &&
+        (pointerBefore == 0u || (pointerBefore & 7u) == 0u) &&
+        (pointerAfter == 0u || (pointerAfter & 7u) == 0u) ? 1u : 0u;
+    const uintptr_t remainingBefore = limitBefore >= pointerBefore
+        ? limitBefore - pointerBefore : 0u;
+    a.fastPath = pointerBefore != 0u && requestedSize <= remainingBefore &&
+        objectAddress == pointerBefore &&
+        pointerAfter == pointerBefore + requestedSize &&
+        limitAfter == limitBefore ? 1u : 0u;
+    a.rarePath = a.fastPath == 0u ? 1u : 0u;
+    a.fitValid = a.fastPath != 0u
+        ? (objectAddress + requestedSize <= limitBefore ? 1u : 0u)
+        : (objectAddress != 0u && pointerAfter >= objectAddress + requestedSize ? 1u : 0u);
+    const uintptr_t previousEnd = ordinal == 0u ? 0u :
+        r.allocations[ordinal - 1u].objectEnd;
+    a.monotonicValid = ordinal == 0u || objectAddress >=
+        r.allocations[ordinal - 1u].objectAddress ? 1u : 0u;
+    a.overlapValid = ordinal == 0u || objectAddress >= previousEnd ? 1u : 0u;
+    a.invariantFailures = (a.pointerValid == 0u ? 1u : 0u) +
+        (a.fitValid == 0u ? 1u : 0u) +
+        (a.monotonicValid == 0u ? 1u : 0u) +
+        (a.overlapValid == 0u ? 1u : 0u) +
+        (heapOwned == 0u ? 1u : 0u) +
+        (gcCountAfter != gcCountBefore ? 1u : 0u);
+    r.invariantFailures += a.invariantFailures;
+    if (a.fastPath != 0u) {
+        ++r.fastCount;
+    } else {
+        ++r.rareCount;
+        ++r.refillCount;
+        r.naturalRefillObserved = 1u;
+    }
+    r.allocationCount = ordinal + 1u;
+    r.finalAllocPtr = pointerAfter;
+    r.finalAllocLimit = limitAfter;
+    r.finalAllocBytes = allocBytesAfter;
+    if (ordinal == 0u) {
+        r.firstPointerBefore = pointerBefore;
+        r.firstLimit = limitBefore;
+        r.firstObject = objectAddress;
+        r.firstPointerAfter = pointerAfter;
+        r.firstAlignedSize = requestedSize;
+    }
+
+    gx_uint32 segmentFlags = 0u;
+    gx_uint32 segmentGeneration = 0u;
+    if (guidexos_nativeaot_gc_describe_segment(
+            reinterpret_cast<void*>(objectAddress), &a.segmentIdentity,
+            &a.segmentBase, &a.segmentAllocated, &a.segmentCommitted,
+            &a.segmentReserved, &segmentFlags, &segmentGeneration) != 0 ||
+        a.segmentIdentity == 0u || a.segmentCommitted < a.segmentBase ||
+        a.segmentReserved < a.segmentCommitted) {
+        ++a.invariantFailures;
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410007u;
+    } else {
+        a.segmentGeneration = segmentGeneration;
+        if (ordinal == 0u) {
+            r.supplyingSegment = a.segmentIdentity;
+            r.supplyingGeneration = segmentGeneration;
+            r.supplyingStart = a.fastPath != 0u && pointerBefore != 0u
+                ? pointerBefore : a.segmentBase;
+            r.supplyingEnd = a.fastPath != 0u && limitBefore >= pointerBefore
+                ? limitBefore : a.segmentCommitted;
+            r.supplyingRegionKnown = 1u;
+        }
+        if (r.tailSegment != 0u && a.segmentIdentity == r.tailSegment) {
+            r.contextSameSegment = 1u;
+        }
+        if (guideXosNativeAotC011EC40RangeOverlaps(
+                a.objectAddress, a.objectEnd, r.tailStart, r.tailEnd)) {
+            r.tailConsumed = 1u;
+        }
+        if (a.rarePath != 0u) {
+            r.tailConsidered = a.segmentIdentity == r.tailSegment ? 1u : 0u;
+        }
+    }
+    a.segmentChanged = ordinal != 0u &&
+        a.segmentIdentity != r.allocations[ordinal - 1u].segmentIdentity ? 1u : 0u;
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] ALLOC marker=C011EC41-ALLOC");
+#define C41A32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C41A64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C41A32("ordinal", a.ordinal);
+    C41A32("requested", a.requestedPayload);
+    C41A32("aligned", a.alignedSize);
+    C41A32("fast", a.fastPath);
+    C41A32("rare", a.rarePath);
+    C41A32("invariantFailures", a.invariantFailures);
+    C41A64("object", a.objectAddress);
+    C41A64("objectEnd", a.objectEnd);
+    C41A64("ptrBefore", a.contextBefore);
+    C41A64("ptrAfter", a.contextAfter);
+    C41A64("limit", a.limitBefore);
+    C41A64("allocBytesBefore", a.allocBytesBefore);
+    C41A64("allocBytesAfter", a.allocBytesAfter);
+    C41A64("heap", a.heapIdentity);
+    C41A64("segment", a.segmentIdentity);
+    C41A64("segmentBase", a.segmentBase);
+    C41A64("segmentCommitted", a.segmentCommitted);
+    C41A64("generation", a.segmentGeneration);
+#undef C41A32
+#undef C41A64
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC41AfterAllocation(uintptr_t objectAddress) {
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        g_guideXosAllocationDiagnostics.c011ec41Provenance;
+    if (r.requestActive == 0u) return;
+    const uint32_t ordinal = r.currentOrdinal;
+    if (ordinal >= GUIDEXOS_NATIVEAOT_C011EC41_MAX_ALLOCATIONS ||
+        r.allocations[ordinal].observed == 0u ||
+        r.allocations[ordinal].objectAddress != objectAddress) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410008u;
+    }
+    r.requestActive = 0u;
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC41NativeAfterAllocation(
+    uintptr_t objectAddress) {
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        g_guideXosAllocationDiagnostics.c011ec41Provenance;
+    if (r.requestActive == 0u) return;
+    if (r.nativeHelperObserved == 0u) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410008u;
+        return;
+    }
+
+    uintptr_t allocationPointerAfter = 0u;
+    uintptr_t allocationLimitAfter = 0u;
+    uintptr_t currentThreadAfter = 0u;
+    uintptr_t gcHeapAfter = 0u;
+    gx_uint32 gcCountAfter = 0u;
+    uintptr_t allocatedBytesAfter = 0u;
+    gx_uint32 finalizableObjectsAfter = 0u;
+    gx_uint32 gcInProgressAfter = 0u;
+    gx_uint32 gcModeAfter = 0u;
+    uintptr_t contextIdentityAfter = 0u;
+    uintptr_t allocBytesAfter = 0u;
+    uintptr_t allocBytesUohAfter = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationPointerAfter, &allocationLimitAfter,
+            &currentThreadAfter, &gcHeapAfter, &gcCountAfter,
+            &allocatedBytesAfter, &finalizableObjectsAfter,
+            &gcInProgressAfter, &gcModeAfter, &contextIdentityAfter,
+            &allocBytesAfter, &allocBytesUohAfter) != 0 ||
+        currentThreadAfter != r.nativeThreadBefore ||
+        gcHeapAfter != r.nativeHeapBefore) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0410008u;
+    }
+
+    uintptr_t heapBase = 0u;
+    uintptr_t heapAllocated = 0u;
+    uintptr_t heapReserved = 0u;
+    gx_uint32 heapOwned = 0u;
+    if (guidexos_nativeaot_gc_describe_object(
+            reinterpret_cast<void*>(objectAddress), &heapBase,
+            &heapAllocated, &heapReserved, &heapOwned) != 0) {
+        heapOwned = 0u;
+    }
+
+    guideXosNativeAotC011EC41RecordAllocation(
+        r.currentOrdinal, r.nativeRequestedSize, objectAddress,
+        r.nativePointerBefore, r.nativeLimitBefore, allocationPointerAfter,
+        allocationLimitAfter, r.nativeAllocBytesBefore, allocBytesAfter,
+        currentThreadAfter, contextIdentityAfter, gcHeapAfter, heapOwned,
+        r.nativeGcCountBefore, gcCountAfter);
+    r.nativeHelperObserved = 0u;
+    guideXosNativeAotC011EC41AfterAllocation(objectAddress);
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC41RareAllocationCompleted(
+    uintptr_t objectAddress) {
+    guideXosNativeAotC011EC41NativeAfterAllocation(objectAddress);
+}
+
+static void guideXosNativeAotC011EC41EmitProvenance(
+    const char* marker, const guidexos_nativeaot_c011ec41_provenance_record& r,
+    const guidexos_nativeaot_allocation_diagnostics& d) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] ");
+    suspendEeSerialPutString(marker);
+#define C41P32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C41P64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C41P32("activeContextCaptured", r.activeContextCaptured);
+    C41P32("contextValid", r.activeContextValid);
+    C41P32("firstHelperEntry", r.firstHelperEntry);
+    C41P32("preflight", r.preflightEmitted);
+    C41P32("provenance", r.provenanceEmitted);
+    C41P32("completionMarker", r.completionMarkerEmitted);
+    C41P32("allocationCount", r.allocationCount);
+    C41P32("fastCount", r.fastCount);
+    C41P32("rareCount", r.rareCount);
+    C41P32("refillCount", r.refillCount);
+    C41P32("naturalRefill", r.naturalRefillObserved);
+    C41P32("collection3Triggered", r.collection3Triggered);
+    C41P32("sensitiveDiagnosticAllocations", r.sensitiveDiagnosticAllocations);
+    C41P32("invariantFailures", r.invariantFailures);
+    C41P32("contextOverlapsTail", r.contextOverlapsTail);
+    C41P32("contextSameSegment", r.contextSameSegment);
+    C41P32("tailEligible", r.tailEligible);
+    C41P32("tailEligibilityTiming", r.tailEligibilityTiming);
+    C41P32("tailConsidered", r.tailConsidered);
+    C41P32("tailConsumed", r.tailConsumed);
+    C41P32("supplyingRegionKnown", r.supplyingRegionKnown);
+    C41P32("contextRestoredValid", r.contextRestoredValid);
+    C41P32("c40Reclaimed", d.c011ec40Compaction.reclaimedEmitted);
+    C41P32("c37Collection2Completed", d.c011ec33Collections[1].collectionCompleted);
+    C41P32("c37RestartEE", d.c011ec33Collections[1].eeRestartReturns != 0u ? 1u : 0u);
+    C41P32("c37ManagedResume", d.c011ec33Collections[1].managedResumeCount != 0u ? 1u : 0u);
+    C41P32("safeStopReason", r.safeStopReason);
+    C41P64("thread", r.threadIdentity);
+    C41P64("context", r.contextIdentity);
+    C41P64("initialPtr", r.initialAllocPtr);
+    C41P64("initialLimit", r.initialAllocLimit);
+    C41P64("initialAllocBytes", r.initialAllocBytes);
+    C41P64("homeHeap", r.homeHeap);
+    C41P64("activeSegment", r.activeSegment);
+    C41P64("activeGeneration", r.activeGeneration);
+    C41P64("tailSegment", r.tailSegment);
+    C41P64("tailStart", r.tailStart);
+    C41P64("tailEnd", r.tailEnd);
+    C41P64("tailSize", r.tailSize);
+    C41P64("supplyStart", r.supplyingStart);
+    C41P64("supplyEnd", r.supplyingEnd);
+    C41P64("supplySegment", r.supplyingSegment);
+    C41P64("supplyGeneration", r.supplyingGeneration);
+    C41P64("finalPtr", r.finalAllocPtr);
+    C41P64("finalLimit", r.finalAllocLimit);
+    C41P64("firstPtrBefore", r.firstPointerBefore);
+    C41P64("firstLimit", r.firstLimit);
+    C41P64("firstObject", r.firstObject);
+    C41P64("firstPtrAfter", r.firstPointerAfter);
+    C41P64("firstAlignedSize", r.firstAlignedSize);
+#undef C41P32
+#undef C41P64
+    suspendEeSerialPutString("\n");
+}
+
+static int guideXosNativeAotC011EC41Finish() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec41_provenance_record& r =
+        d.c011ec41Provenance;
+    r.collection3Triggered = d.c011ec40Compaction.collection3Triggered;
+    r.sensitiveDiagnosticAllocations = d.c011ec29SensitiveAllocationCount;
+    const bool valid = d.c011ec40Compaction.completionMarkerEmitted != 0u &&
+        d.c011ec40Compaction.reclaimedEmitted != 0u &&
+        r.managedResumeObserved != 0u && r.activeContextCaptured != 0u &&
+        r.activeContextValid != 0u && r.firstHelperEntry != 0u &&
+        r.preflightEmitted != 0u && r.allocationCount == 8u &&
+        r.requestActive == 0u && r.collection3Triggered == 0u &&
+        r.sensitiveDiagnosticAllocations == 0u && r.invariantFailures == 0u;
+    if (!valid) {
+        if (r.safeStopReason == 0u) r.safeStopReason = 0xC0410009u;
+        guideXosNativeAotC011EC41EmitProvenance(
+            "BLOCKED marker=C011EC41-BLOCKED", r, d);
+        return -1;
+    }
+    // The recovered tail is in the generation-1 compacted segment, while the
+    // ordinary post-resume byte-array path is supplied by the generation-0
+    // ephemeral segment.  Keep the raw C40 publication fact, but classify the
+    // tail as outside this allocation domain for the provenance result.
+    if (r.supplyingRegionKnown != 0u &&
+        r.supplyingGeneration != d.c011ec40Compaction.generation) {
+        r.tailEligible = 0u;
+        r.tailEligibilityTiming = 3u;
+    }
+    // The bounded run intentionally does not force refill.  With a valid
+    // current context, the locked RhpNewArray bump branch wins before
+    // GCHeap::Alloc is entered; the published tail becomes visible when this
+    // context is naturally exhausted.
+    if (r.rareCount == 0u) {
+        r.tailConsidered = 0u;
+        if (r.tailEligible != 0u) r.tailEligibilityTiming = 2u;
+    }
+    r.provenanceEmitted = 1u;
+    guideXosNativeAotC011EC41EmitProvenance(
+        "PROVENANCE marker=C011EC41-PROVENANCE", r, d);
+    r.safeStopReason = 0u;
+    r.completionMarkerEmitted = 1u;
+    guideXosNativeAotC011EC41EmitProvenance(
+        "COMPLETE marker=C011EC41 outcome=C", r, d);
     return 0;
 }
 #endif
@@ -16706,6 +17309,13 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     g_guideXosAllocationDiagnostics.requestedArrayLength = static_cast<gx_uint32>(length);
     g_guideXosAllocationDiagnostics.requestedObjectSize = static_cast<gx_uint32>(objectSize);
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+    // This is the C41 first-helper boundary: the wrapper has accepted the
+    // managed array request and derived its production object size, but the
+    // locked stock RhpNewArray has not yet run.
+    guideXosNativeAotC011EC41HelperEntry(objectSize);
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A03_TYPE_LENGTH_ACCEPTED,
                           eeType, length, objectSize);
@@ -17074,6 +17684,15 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
         segmentIdentity, segmentBase, segmentAllocated, segmentCommitted,
         segmentReserved, gcCountBefore, gcCountAfter, segmentChanged);
 #endif
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
+    guideXosNativeAotC011EC41RecordAllocation(
+        g_guideXosAllocationDiagnostics.c011ec41Provenance.currentOrdinal,
+        objectSize, reinterpret_cast<gx_uintptr>(result),
+        allocationPointerBefore, allocationLimitBefore, allocationPointerAfter,
+        allocationLimitAfter, allocBytesBefore, allocBytesAfter,
+        currentThreadAfter, contextIdentityAfter, gcHeapAfter, heapOwned,
+        gcCountBefore, gcCountAfter);
 #endif
     recordAllocationStage(GUIDEXOS_NATIVEAOT_ALLOC_STAGE_A16_ALLOCATION_RETURNED,
                           eeType, length, objectSize, allocationPointerAfter,
