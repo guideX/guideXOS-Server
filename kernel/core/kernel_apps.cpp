@@ -4409,6 +4409,237 @@ static const int kFileExplorerScrollbarW = 8;
 static const int kFileExplorerScrollbarPad = 2;
 static const int kFileExplorerScrollbarMinThumbH = 18;
 
+static bool kernelFileExplorerSciFiThemeActive()
+{
+    return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+}
+
+static uint32_t kernelFileExplorerClientColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(246, 246, 246);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 12);
+}
+
+static uint32_t kernelFileExplorerToolbarColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(246, 246, 246);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 24);
+}
+
+static uint32_t kernelFileExplorerAddressColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(255, 255, 255);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 5);
+}
+
+static uint32_t kernelFileExplorerAddressLabelColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(70, 70, 70);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 34);
+}
+
+static uint32_t kernelFileExplorerPrimaryTextColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(20, 20, 20);
+    return GetCurrentDesktopTheme().titleBarText;
+}
+
+static uint32_t kernelFileExplorerPathTextColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(30, 30, 30);
+    return GetCurrentDesktopTheme().titleBarText;
+}
+
+static uint32_t kernelFileExplorerSecondaryTextColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(70, 70, 70);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 34);
+}
+
+static uint32_t kernelFileExplorerMutedTextColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(110, 110, 110);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 48);
+}
+
+static uint32_t kernelFileExplorerNavigationColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(238, 238, 238);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 18);
+}
+
+static uint32_t kernelFileExplorerNavigationHeadingColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(40, 40, 40);
+    return GetCurrentDesktopTheme().titleBarText;
+}
+
+static uint32_t kernelFileExplorerNavigationItemColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(50, 70, 110);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 16);
+}
+
+static uint32_t kernelFileExplorerNoMountsColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(130, 60, 60);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.mutedAccent, theme.windowBackground, 20);
+}
+
+static uint32_t kernelFileExplorerListColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(255, 255, 255);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 8);
+}
+
+static uint32_t kernelFileExplorerHeaderColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(230, 230, 230);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 36);
+}
+
+static uint32_t kernelFileExplorerHeaderTextColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(40, 40, 40);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 18);
+}
+
+static uint32_t kernelFileExplorerSelectionColor(bool focused)
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(200, 220, 245);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const uint32_t base = focused ? theme.accent : theme.mutedAccent;
+    return kernelThemeBlend(theme.windowBackground, base, focused ? 48 : 42);
+}
+
+static uint32_t kernelFileExplorerScrollbarTrackColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(236, 238, 242);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 28);
+}
+
+static uint32_t kernelFileExplorerScrollbarThumbColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(150, 160, 176);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.accent, 30);
+}
+
+static uint32_t kernelFileExplorerScrollbarBorderColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(208, 212, 220);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.taskbarBorder, 24);
+}
+
+static uint32_t kernelFileExplorerFooterColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(235, 235, 235);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 30);
+}
+
+static uint32_t kernelFileExplorerFooterTextColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(40, 40, 40);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 35);
+}
+
+static uint32_t kernelFileExplorerMenuColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(245, 245, 248);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 30);
+}
+
+static uint32_t kernelFileExplorerMenuBorderColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(120, 120, 140);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.accent, 30);
+}
+
+static uint32_t kernelFileExplorerMenuHoverColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(60, 90, 140);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.accent, 52);
+}
+
+static uint32_t kernelFileExplorerMenuTextColor(bool hovered)
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(20, 20, 20);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return hovered ? theme.titleBarText : kernelThemeBlend(theme.titleBarText, theme.windowBackground, 14);
+}
+
+static uint32_t kernelFileExplorerDialogColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(245, 245, 250);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 20);
+}
+
+static uint32_t kernelFileExplorerDialogBorderColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(110, 110, 130);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.accent, 28);
+}
+
+static uint32_t kernelFileExplorerDialogHeadingColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(30, 30, 30);
+    return GetCurrentDesktopTheme().titleBarText;
+}
+
+static uint32_t kernelFileExplorerDialogSecondaryColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(80, 80, 80);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 42);
+}
+
+static uint32_t kernelFileExplorerDeleteDialogColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(250, 245, 245);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 12);
+}
+
+static uint32_t kernelFileExplorerDeleteHeadingColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(80, 30, 30);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 38);
+}
+
+static uint32_t kernelFileExplorerDeleteNameColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(30, 30, 30);
+    return GetCurrentDesktopTheme().titleBarText;
+}
+
+static uint32_t kernelFileExplorerPropertiesColor()
+{
+    if (!kernelFileExplorerSciFiThemeActive()) return rgb(244, 244, 248);
+    return kernelFileExplorerDialogColor();
+}
+
 static bool fileExplorerPrepareStartPath(const char* startPath, char* resolvedPath, int resolvedPathSize, const char* contextLabel)
 {
     if (!resolvedPath || resolvedPathSize <= 0) return false;
@@ -4674,7 +4905,8 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     }
 
     static const uint32_t kIconSize = 16;
-    framebuffer::fill_rect(x, y, w, h, rgb(246, 246, 246));
+    framebuffer::fill_rect(x, y, w, h, kernelFileExplorerClientColor());
+    framebuffer::fill_rect(x, y, w, TOOLBAR_H, kernelFileExplorerToolbarColor());
 
     uint32_t toolbarIconY = y + 7;
     drawThemedIcon(x + 10, toolbarIconY, kIconSize, "place.computer");
@@ -4683,46 +4915,46 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     drawThemedIcon(x + 172, toolbarIconY, kIconSize, "drive.mounted");
 
     uint32_t addressY = y + TOOLBAR_H;
-    framebuffer::fill_rect(x, addressY, w, ADDRESS_H, rgb(255, 255, 255));
-    appDrawText(x + 8, addressY + 7, "Address:", rgb(70, 70, 70));
-    appDrawText(x + 62, addressY + 7, m_currentPath, rgb(30, 30, 30));
+    framebuffer::fill_rect(x, addressY, w, ADDRESS_H, kernelFileExplorerAddressColor());
+    appDrawText(x + 8, addressY + 7, "Address:", kernelFileExplorerAddressLabelColor());
+    appDrawText(x + 62, addressY + 7, m_currentPath, kernelFileExplorerPathTextColor());
 
     uint32_t bodyY = y + TOOLBAR_H + ADDRESS_H;
     uint32_t statusH = 22;
     uint32_t bodyH = h > TOOLBAR_H + ADDRESS_H + statusH ? h - TOOLBAR_H - ADDRESS_H - statusH : 0;
 
-    framebuffer::fill_rect(x, bodyY, LEFT_W, bodyH, rgb(238, 238, 238));
-    appDrawText(x + 8, bodyY + 10, "Navigation", rgb(40, 40, 40));
+    framebuffer::fill_rect(x, bodyY, LEFT_W, bodyH, kernelFileExplorerNavigationColor());
+    appDrawText(x + 8, bodyY + 10, "Navigation", kernelFileExplorerNavigationHeadingColor());
     if (!drawThemedIcon(x + 10, bodyY + 26, kIconSize, "place.computer")) drawPlaceholderIcon(x + 10, bodyY + 26, kIconSize);
-    appDrawText(x + 30, bodyY + 30, "Root", rgb(50, 70, 110));
+    appDrawText(x + 30, bodyY + 30, "Root", kernelFileExplorerNavigationItemColor());
     if (!drawThemedIcon(x + 10, bodyY + 42, kIconSize, "drive.fixed")) drawPlaceholderIcon(x + 10, bodyY + 42, kIconSize);
-    appDrawText(x + 30, bodyY + 46, "Mounted drives", rgb(50, 70, 110));
+    appDrawText(x + 30, bodyY + 46, "Mounted drives", kernelFileExplorerNavigationItemColor());
 
     uint8_t mountCount = vfs::mount_count();
     if (mountCount == 0) {
-        appDrawText(x + 18, bodyY + 64, "No mounts", rgb(130, 60, 60));
+        appDrawText(x + 18, bodyY + 64, "No mounts", kernelFileExplorerNoMountsColor());
     } else {
         int row = 0;
         for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS && row < 8; ++i) {
             const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
             if (!mp || !mp->active) continue;
             if (!drawThemedIcon(x + 10, bodyY + 60 + row * ROW_H, kIconSize, "drive.mounted")) drawPlaceholderIcon(x + 10, bodyY + 60 + row * ROW_H, kIconSize);
-            appDrawText(x + 30, bodyY + 64 + row * ROW_H, mp->path, rgb(30, 30, 30));
+            appDrawText(x + 30, bodyY + 64 + row * ROW_H, mp->path, kernelFileExplorerPathTextColor());
             row++;
         }
     }
 
     uint32_t mainX = x + LEFT_W;
     uint32_t mainW = w > LEFT_W ? w - LEFT_W : 0;
-    framebuffer::fill_rect(mainX, bodyY, mainW, bodyH, rgb(255, 255, 255));
-    framebuffer::fill_rect(mainX, bodyY, mainW, 22, rgb(230, 230, 230));
-    appDrawText(mainX + 8, bodyY + 7, "Name", rgb(40, 40, 40));
-    appDrawText(mainX + 250, bodyY + 7, "Size", rgb(40, 40, 40));
-    appDrawText(mainX + 330, bodyY + 7, "Type", rgb(40, 40, 40));
-    appDrawText(mainX + 430, bodyY + 7, "Modified", rgb(40, 40, 40));
+    framebuffer::fill_rect(mainX, bodyY, mainW, bodyH, kernelFileExplorerListColor());
+    framebuffer::fill_rect(mainX, bodyY, mainW, 22, kernelFileExplorerHeaderColor());
+    appDrawText(mainX + 8, bodyY + 7, "Name", kernelFileExplorerHeaderTextColor());
+    appDrawText(mainX + 250, bodyY + 7, "Size", kernelFileExplorerHeaderTextColor());
+    appDrawText(mainX + 330, bodyY + 7, "Type", kernelFileExplorerHeaderTextColor());
+    appDrawText(mainX + 430, bodyY + 7, "Modified", kernelFileExplorerHeaderTextColor());
 
     if (m_entryCount == 0) {
-        appDrawText(mainX + 8, bodyY + 34, "Empty directory or unavailable path", rgb(120, 120, 120));
+        appDrawText(mainX + 8, bodyY + 34, "Empty directory or unavailable path", kernelFileExplorerMutedTextColor());
     }
 
     int visibleRows = visibleRowCount();
@@ -4732,23 +4964,24 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     if (start > maxScroll) start = maxScroll;
     int end = start + visibleRows;
     if (end > m_entryCount) end = m_entryCount;
+    const bool focused = m_window && (m_window->flags & app::WF_FOCUSED);
 
     for (int i = 0; i < end - start; ++i) {
         int entryIndex = start + i;
         Entry& e = m_entries[entryIndex];
         uint32_t rowY = bodyY + kFileExplorerListHeaderH + i * ROW_H;
         if (entryIndex == m_selected) {
-            framebuffer::fill_rect(mainX + 1, rowY - 2, mainW - 2, ROW_H, rgb(200, 220, 245));
+            framebuffer::fill_rect(mainX + 1, rowY - 2, mainW - 2, ROW_H, kernelFileExplorerSelectionColor(focused));
         }
 
         char sizeText[24];
         formatSize(e.size, sizeText, sizeof(sizeText));
         const char* logicalIcon = fileLogicalIcon(e);
         if (!drawThemedIcon(mainX + 8, rowY - 2, kIconSize, logicalIcon)) drawPlaceholderIcon(mainX + 8, rowY - 2, kIconSize);
-        appDrawText(mainX + 30, rowY, e.name, rgb(20, 20, 20));
-        appDrawText(mainX + 250, rowY, e.isDir ? "" : sizeText, rgb(70, 70, 70));
-        appDrawText(mainX + 330, rowY, fileType(e), rgb(70, 70, 70));
-        appDrawText(mainX + 430, rowY, "--", rgb(110, 110, 110));
+        appDrawText(mainX + 30, rowY, e.name, kernelFileExplorerPrimaryTextColor());
+        appDrawText(mainX + 250, rowY, e.isDir ? "" : sizeText, kernelFileExplorerSecondaryTextColor());
+        appDrawText(mainX + 330, rowY, fileType(e), kernelFileExplorerSecondaryTextColor());
+        appDrawText(mainX + 430, rowY, "--", kernelFileExplorerMutedTextColor());
     }
 
     if (isScrollbarVisible()) {
@@ -4757,68 +4990,70 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         uint32_t sbH = (uint32_t)scrollbarTrackHeight();
         uint32_t thumbY = y + (uint32_t)scrollbarThumbTop();
         uint32_t thumbH = (uint32_t)scrollbarThumbHeight();
-        framebuffer::fill_rect(sbX, sbY, kFileExplorerScrollbarW, sbH, rgb(236, 238, 242));
-        framebuffer::fill_rect(sbX, thumbY, kFileExplorerScrollbarW, thumbH, rgb(150, 160, 176));
-        framebuffer::fill_rect(sbX, sbY, kFileExplorerScrollbarW, 1, rgb(208, 212, 220));
-        framebuffer::fill_rect(sbX, sbY + sbH - 1, kFileExplorerScrollbarW, 1, rgb(208, 212, 220));
+        framebuffer::fill_rect(sbX, sbY, kFileExplorerScrollbarW, sbH, kernelFileExplorerScrollbarTrackColor());
+        framebuffer::fill_rect(sbX, thumbY, kFileExplorerScrollbarW, thumbH, kernelFileExplorerScrollbarThumbColor());
+        framebuffer::fill_rect(sbX, sbY, kFileExplorerScrollbarW, 1, kernelFileExplorerScrollbarBorderColor());
+        framebuffer::fill_rect(sbX, sbY + sbH - 1, kFileExplorerScrollbarW, 1, kernelFileExplorerScrollbarBorderColor());
     }
 
-    framebuffer::fill_rect(x, y + h - statusH, w, statusH, rgb(235, 235, 235));
-    appDrawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
+    framebuffer::fill_rect(x, y + h - statusH, w, statusH, kernelFileExplorerFooterColor());
+    appDrawText(x + 8, y + h - 15, m_status, kernelFileExplorerFooterTextColor());
 
     if (m_contextMenuOpen) {
         const int kContextMenuItems = contextMenuItemCount();
-        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, rgb(245, 245, 248));
-        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
-        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY + CONTEXT_MENU_ITEM_H * kContextMenuItems + 1, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
-        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, rgb(120, 120, 140));
-        framebuffer::fill_rect(x + m_contextMenuX + CONTEXT_MENU_W - 1, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, rgb(120, 120, 140));
+        const uint32_t menuBorderColor = kernelFileExplorerMenuBorderColor();
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, kernelFileExplorerMenuColor());
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, 1, menuBorderColor);
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY + CONTEXT_MENU_ITEM_H * kContextMenuItems + 1, CONTEXT_MENU_W, 1, menuBorderColor);
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, menuBorderColor);
+        framebuffer::fill_rect(x + m_contextMenuX + CONTEXT_MENU_W - 1, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, menuBorderColor);
         for (int i = 0; i < kContextMenuItems; ++i) {
             if (m_contextMenuHover == i) {
-                framebuffer::fill_rect(x + m_contextMenuX + 1, y + m_contextMenuY + 1 + i * CONTEXT_MENU_ITEM_H, CONTEXT_MENU_W - 2, CONTEXT_MENU_ITEM_H, rgb(60, 90, 140));
+                framebuffer::fill_rect(x + m_contextMenuX + 1, y + m_contextMenuY + 1 + i * CONTEXT_MENU_ITEM_H, CONTEXT_MENU_W - 2, CONTEXT_MENU_ITEM_H, kernelFileExplorerMenuHoverColor());
             }
         }
         for (int i = 0; i < kContextMenuItems; ++i) {
             appDrawText(x + m_contextMenuX + 8,
                         y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * i,
-                        contextMenuItemLabel(i), rgb(20, 20, 20));
+                        contextMenuItemLabel(i), kernelFileExplorerMenuTextColor(m_contextMenuHover == i));
         }
     }
 
     if (m_renamePrompt) {
-        framebuffer::fill_rect(x + 220, y + 165, 360, 92, rgb(245, 245, 250));
-        appDrawText(x + 232, y + 182, m_createFolderPrompt ? "Create folder" : "Rename selected item", rgb(30, 30, 30));
-        appDrawText(x + 232, y + 205, m_renameValue, rgb(20, 20, 20));
+        framebuffer::fill_rect(x + 220, y + 165, 360, 92, kernelFileExplorerDialogColor());
+        appDrawText(x + 232, y + 182, m_createFolderPrompt ? "Create folder" : "Rename selected item", kernelFileExplorerDialogHeadingColor());
+        appDrawText(x + 232, y + 205, m_renameValue, kernelFileExplorerPrimaryTextColor());
         appDrawText(x + 232, y + 230,
                     m_createFolderPrompt
                         ? "Enter=Create  Esc=Cancel  Backspace=Delete"
                         : "Enter=OK  Esc=Cancel  Backspace=Delete",
-                    rgb(80, 80, 80));
+                    kernelFileExplorerDialogSecondaryColor());
     } else if (m_deleteConfirm) {
-        framebuffer::fill_rect(x + 220, y + 165, 390, 92, rgb(250, 245, 245));
-        appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Move this folder to Trash?" : "Move this file to Trash?", rgb(80, 30, 30));
-        appDrawText(x + 232, y + 205, m_deleteTargetName, rgb(30, 30, 30));
-        appDrawText(x + 232, y + 230, "The item will be moved to Trash.", rgb(80, 80, 80));
+        framebuffer::fill_rect(x + 220, y + 165, 390, 92, kernelFileExplorerDeleteDialogColor());
+        appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Move this folder to Trash?" : "Move this file to Trash?", kernelFileExplorerDeleteHeadingColor());
+        appDrawText(x + 232, y + 205, m_deleteTargetName, kernelFileExplorerDeleteNameColor());
+        appDrawText(x + 232, y + 230, "The item will be moved to Trash.", kernelFileExplorerDialogSecondaryColor());
     } else if (m_propertiesOpen) {
-        framebuffer::fill_rect(x + 200, y + 145, 400, 150, rgb(244, 244, 248));
-        framebuffer::fill_rect(x + 200, y + 145, 400, 1, rgb(110, 110, 130));
-        framebuffer::fill_rect(x + 200, y + 294, 400, 1, rgb(110, 110, 130));
-        framebuffer::fill_rect(x + 200, y + 145, 1, 150, rgb(110, 110, 130));
-        framebuffer::fill_rect(x + 599, y + 145, 1, 150, rgb(110, 110, 130));
+        const uint32_t dialogBorderColor = kernelFileExplorerDialogBorderColor();
+        framebuffer::fill_rect(x + 200, y + 145, 400, 150, kernelFileExplorerPropertiesColor());
+        framebuffer::fill_rect(x + 200, y + 145, 400, 1, dialogBorderColor);
+        framebuffer::fill_rect(x + 200, y + 294, 400, 1, dialogBorderColor);
+        framebuffer::fill_rect(x + 200, y + 145, 1, 150, dialogBorderColor);
+        framebuffer::fill_rect(x + 599, y + 145, 1, 150, dialogBorderColor);
         if (!drawThemedIcon(x + 216, y + 162, 24, m_propertiesIcon[0] ? m_propertiesIcon : (m_propertiesIsDir ? "file.folder" : "file.unknown"))) {
             drawPlaceholderIcon(x + 216, y + 162, 24);
         }
-        appDrawText(x + 248, y + 168, "Properties", rgb(30, 30, 30));
-        appDrawText(x + 216, y + 194, "Name:", rgb(70, 70, 70));
-        appDrawText(x + 286, y + 194, m_propertiesName, rgb(20, 20, 20));
-        appDrawText(x + 216, y + 212, "Type:", rgb(70, 70, 70));
-        appDrawText(x + 286, y + 212, m_propertiesType, rgb(20, 20, 20));
-        appDrawText(x + 216, y + 230, "Size:", rgb(70, 70, 70));
-        appDrawText(x + 286, y + 230, m_propertiesSize, rgb(20, 20, 20));
-        appDrawText(x + 216, y + 248, "Path:", rgb(70, 70, 70));
-        appDrawText(x + 286, y + 248, m_propertiesPath, rgb(20, 20, 20));
-        appDrawText(x + 216, y + 266, "Modified:", rgb(70, 70, 70));
-        appDrawText(x + 286, y + 266, m_propertiesModified, rgb(20, 20, 20));
+        appDrawText(x + 248, y + 168, "Properties", kernelFileExplorerDialogHeadingColor());
+        appDrawText(x + 216, y + 194, "Name:", kernelFileExplorerSecondaryTextColor());
+        appDrawText(x + 286, y + 194, m_propertiesName, kernelFileExplorerPrimaryTextColor());
+        appDrawText(x + 216, y + 212, "Type:", kernelFileExplorerSecondaryTextColor());
+        appDrawText(x + 286, y + 212, m_propertiesType, kernelFileExplorerPrimaryTextColor());
+        appDrawText(x + 216, y + 230, "Size:", kernelFileExplorerSecondaryTextColor());
+        appDrawText(x + 286, y + 230, m_propertiesSize, kernelFileExplorerPrimaryTextColor());
+        appDrawText(x + 216, y + 248, "Path:", kernelFileExplorerSecondaryTextColor());
+        appDrawText(x + 286, y + 248, m_propertiesPath, kernelFileExplorerPrimaryTextColor());
+        appDrawText(x + 216, y + 266, "Modified:", kernelFileExplorerSecondaryTextColor());
+        appDrawText(x + 286, y + 266, m_propertiesModified, kernelFileExplorerPrimaryTextColor());
     }
 }
 

@@ -1049,6 +1049,32 @@ Classic was booted from the exact AMD64 image with the Classic configuration. Ca
 
 The QEMU shell-overlay/input path prevented a clean second-window capture and prevented completing the requested Sci-Fi Notepad typing, selection, caret, and combined Calculator/Notepad screenshot proof. Source inspection and exact builds confirm that Notepad's existing text, caret, and select-all paths now consume the Sci-Fi editor, text, caret, and selection colors while Classic remains unchanged. No behavior or geometry was changed to work around the proof limitation. Classic and Sci-Fi configuration selection were both boot-tested; tracked configuration was restored afterward. File Explorer and generic controls remain outside Phase 8A.
 
+## Phase 8B — Bare-Metal File Explorer Surface Consistency
+
+Phase 8B applies the established Sci-Fi palette to the existing bare-metal File Explorer client surface. It is a styling-only pass: the same File Explorer, files, navigation, geometry, and input behavior remain in place. Classic remains the default and exact fallback, and no Phase 8C or generic-control work is included.
+
+### Bare-Metal File Explorer Architecture
+
+The freestanding implementation is `FileExplorerApp` in `kernel/core/kernel_apps.cpp`, registered by the existing bare-metal app factory and launched through the normal `Files`/`FileExplorer` dispatch aliases. `FileExplorerApp::draw()` owns the client paint path: toolbar, address/path strip, left navigation pane, list header and rows, selection, local scrollbar, footer/status text, context menu, rename/create-folder prompt, delete confirmation, and properties surface. The existing `KernelCompositor::drawWindow()` supplies the window frame/title bar and paints the existing toolbar widgets afterward. A narrow File Explorer owner guard in `kernel/core/kernel_compositor.cpp` styles those existing widgets only for Sci-Fi; it does not change the shared widget defaults.
+
+The app owns VFS enumeration and sorting, current-path normalization, mount/root navigation, parent navigation, selection and scroll state, row hit testing, double-click activation, keyboard navigation, wheel scrolling, context-menu routing, file/folder activation, rename/delete/copy/move/paste, and close/reopen lifecycle. `handleNavigationPaneClick()` owns root and mount-row hit bands. No row-hover renderer exists in the bare-metal path; the existing context-menu hover remains the only local hover state. Hosted File Explorer uses a separate hosted renderer and was not changed.
+
+### Sci-Fi Surfaces and Boundaries
+
+Sci-Fi uses `GetCurrentDesktopTheme()` and `BlendDesktopThemeColor()` through local File Explorer color-role helpers. The client, toolbar, address/path strip, navigation pane, list surface, list header, primary/secondary/muted text, focused/inactive selected-row treatment, footer/status region, local scrollbar track/thumb/borders, context menu, and application-owned rename/delete/properties overlays now use the existing dark navy, blue, indigo, and title-text relationships. The toolbar buttons use the same palette through the narrow File Explorer compositor guard, including existing hover and pressed states.
+
+Classic branches retain the prior File Explorer literals. No client, toolbar, address, navigation, list, row, icon, scrollbar, footer, overlay, or widget geometry changed. The existing bitmap icons are deliberately untouched: no icon recoloring, replacement, spacing change, size change, or icon-theme integration was introduced. No filesystem reads, allocations, effects, hosted dependencies, floating-point work, or architecture-specific theme behavior were added. The local scrollbar remains application-specific; no generic scrollbar framework was started.
+
+### Phase 8B Validation Record
+
+The exact workspace passed `.\build.bat`, `mingw32-make -C kernel ARCH=amd64 -j2`, and `.\build.ps1 -Arch amd64`. `smoke-theme-system.ps1 -SkipBuild`, `smoke-live-directory-desktop-status.ps1 -SkipBuild`, `smoke-hosted-display-runtime.ps1`, `smoke-bootinfo-framebuffer-array.ps1`, `smoke-virtio-gpu-input-routing.ps1`, and `git diff --check` passed. The standalone `tests/file_explorer_navigation_test.cpp` regression test also passed. `smoke-desktop-startup-sync.ps1` was attempted but its UEFI harness remained at the shell because the workspace ESP has no tracked `startup.nsh`; no startup logic was changed. `smoke-appmodel-launchshadow.ps1` remains limited by the known child Windows PowerShell `Get-FileHash` failure before QEMU.
+
+Classic and Sci-Fi were booted from disposable copies of the exact workspace-built ESP payload. Each copy added only a temporary `startup.nsh` handoff to `EFI/BOOT/BOOTX64.EFI`; the tracked ESP state was restored afterward. `desktopThemeId=classic` produced the original light File Explorer surface, and `desktopThemeId=scifi` produced the dark Sci-Fi surface. The Classic capture set is `logs/phase8b-qemu-classic-after-file-click.png`, `logs/phase8b-qemu-classic-apps.png`, `logs/phase8b-qemu-classic-up.png`, `logs/phase8b-qemu-classic-file-selected.png`, `logs/phase8b-qemu-classic-closed.png`, and `logs/phase8b-qemu-classic-reopened.png`. The Sci-Fi set is `logs/phase8b-qemu-scifi-file-explorer.png`, `logs/phase8b-qemu-scifi-apps.png`, `logs/phase8b-qemu-scifi-up.png`, `logs/phase8b-qemu-scifi-file-selected.png`, `logs/phase8b-qemu-scifi-closed.png`, and `logs/phase8b-qemu-scifi-reopened.png`.
+
+QMP input proof confirmed launch from the desktop icon, a populated root list, row selection, double-click navigation into `/Apps`, `Up` navigation back to `/`, file selection of `desktop.cfg`, close, and reopen under both themes. The root contents fit within the existing list bounds, so no scrollbar interaction was required and no keyboard-navigation pass was added. No destructive file operation was attempted. No combined Calculator/Notepad capture was needed for this phase.
+
+Remaining gaps are bounded to larger bare-metal application interiors, generic-control parity, icon/font integration, and settings/system application coverage. Generic lists, generic scrollbars, generic buttons, menus, dialogs, and icon integration remain out of scope unless separately authorized.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.

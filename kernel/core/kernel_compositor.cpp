@@ -1043,6 +1043,9 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
     const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
     const bool calculatorWindow = window && window->owner &&
         kernelCompositorTextEquals(window->owner->getName(), "Calculator");
+    const bool fileExplorerWindow = window && window->owner &&
+        (kernelCompositorTextEquals(window->owner->getName(), "Files") ||
+         kernelCompositorTextEquals(window->owner->getName(), "FileExplorer"));
 
     switch (widget->type) {
         case app::WidgetType::Label:
@@ -1089,6 +1092,20 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
                 } else if (widget->hover) {
                     borderColor = BlendDesktopThemeColor(borderColor, theme.titleBarText, 12);
                 }
+                textColor = theme.titleBarText;
+            } else if (fileExplorerWindow && sciFiTheme) {
+                const uint32_t baseColor = BlendDesktopThemeColor(
+                    theme.taskbarBackground, theme.windowBackground, 24);
+                bgColor = widget->pressed
+                    ? BlendDesktopThemeColor(baseColor, theme.accent, 24)
+                    : (widget->hover
+                        ? BlendDesktopThemeColor(baseColor, theme.mutedAccent, 18)
+                        : baseColor);
+                borderColor = widget->pressed
+                    ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 34)
+                    : (widget->hover
+                        ? BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 30)
+                        : BlendDesktopThemeColor(theme.windowBorder, theme.taskbarBorder, 20));
                 textColor = theme.titleBarText;
             }
             fillRect(x, y, w, h, bgColor);

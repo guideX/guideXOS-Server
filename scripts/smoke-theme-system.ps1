@@ -311,6 +311,10 @@ $kernelNotepadThemeMatch = Find-FirstMatch $kernelApps 'kernelNotepadEditorColor
 $kernelCalculatorThemeMatch = Find-FirstMatch $kernelApps 'kernelCalculatorBodyColor|kernelCalculatorDisplayColor|kernelCalculatorDisplayBorderColor|kernelCalculatorDisplayTextColor|kernelSciFiThemeActive'
 $kernelCalculatorWidgetGuardMatch = Find-RawMatch $kernelCompositor 'calculatorWindow.*sciFiTheme|window->owner->getName().*Calculator'
 $phase8aClassicBoundaryMatch = Find-RawMatch $planDoc 'Classic branches retain the prior literal Calculator and Notepad client colors.*?No Calculator or Notepad window/client bounds.*?expected geometry result is \*\*no change\*\*'
+$kernelFileExplorerThemeMatch = Find-FirstMatch $kernelApps 'kernelFileExplorerClientColor|kernelFileExplorerToolbarColor|kernelFileExplorerSelectionColor|kernelFileExplorerScrollbarThumbColor|kernelFileExplorerMenuColor|kernelFileExplorerDialogColor'
+$kernelFileExplorerWidgetGuardMatch = Find-RawMatch $kernelCompositor 'fileExplorerWindow.*sciFiTheme|owner->getName\(\).*Files|owner->getName\(\).*FileExplorer'
+$phase8bHeadingMatch = Find-FirstMatch $planDoc '## Phase 8B — Bare-Metal File Explorer Surface Consistency'
+$phase8bBoundaryMatch = Find-RawMatch $planDoc 'Classic branches retain the prior File Explorer literals.*?No client, toolbar, address, navigation, list, row, icon, scrollbar, footer, overlay, or widget geometry changed'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -508,6 +512,9 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 8a bare-metal Calculator theme path wired"; Pass = $null -ne $kernelCalculatorThemeMatch; Match = $kernelCalculatorThemeMatch },
     [pscustomobject]@{ Name = "phase 8a Calculator widget guard scoped"; Pass = $null -ne $kernelCalculatorWidgetGuardMatch; Match = $kernelCalculatorWidgetGuardMatch },
     [pscustomobject]@{ Name = "phase 8a Classic and geometry boundaries documented"; Pass = $null -ne $phase8aClassicBoundaryMatch; Match = $phase8aClassicBoundaryMatch },
+    [pscustomobject]@{ Name = "phase 8b bare-metal File Explorer theme path wired"; Pass = $null -ne $kernelFileExplorerThemeMatch; Match = $kernelFileExplorerThemeMatch },
+    [pscustomobject]@{ Name = "phase 8b File Explorer widget guard scoped"; Pass = $null -ne $kernelFileExplorerWidgetGuardMatch; Match = $kernelFileExplorerWidgetGuardMatch },
+    [pscustomobject]@{ Name = "phase 8b File Explorer Classic and geometry boundaries documented"; Pass = $null -ne $phase8bHeadingMatch -and $null -ne $phase8bBoundaryMatch; Match = $(if ($null -ne $phase8bBoundaryMatch) { $phase8bBoundaryMatch } else { $phase8bHeadingMatch }) },
     [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
 )
 
