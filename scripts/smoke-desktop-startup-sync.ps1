@@ -9,6 +9,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $serialLog = Join-Path $LogDir "desktop-startup-sync-$stamp.serial.log"
+$stagedEsp = Join-Path $LogDir "desktop-startup-sync-$stamp-esp"
 
 function Find-Qemu {
     $qemu = Get-Command "qemu-system-x86_64" -ErrorAction SilentlyContinue
@@ -94,6 +95,14 @@ if (-not (Test-Path $bootloader)) {
     throw "ESP/EFI/BOOT/BOOTX64.EFI not found. Run build.bat first."
 }
 
+# A clean checkout intentionally does not track ESP/startup.nsh.  Stage an
+# isolated copy and create the UEFI shell handoff there so this smoke never
+# depends on an accidentally present local file or mutates the release ESP.
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+Copy-Item -LiteralPath $esp -Destination $stagedEsp -Recurse -Force
+$stagedStartup = Join-Path $stagedEsp "startup.nsh"
+"FS0:\EFI\BOOT\BOOTX64.EFI" | Set-Content -LiteralPath $stagedStartup -Encoding ASCII
+
 $cleanupMarker = "desktopCleanupRuntimePass=2"
 $builtKernel = Join-Path $Root "kernel\build\amd64\bin\kernel.elf"
 $espKernel = Join-Path $esp "kernel.elf"
@@ -103,7 +112,7 @@ $cleanupMarkerInEspKernel = Test-FileContainsAscii -Path $espKernel -Pattern $cl
 $args = @(
     "-machine", "pc",
     "-drive", "if=pflash,format=raw,readonly=on,file=`"$ovmf`"",
-    "-drive", "file=fat:rw:`"$esp`",format=raw,if=ide,index=0",
+    "-drive", "file=fat:rw:`"$stagedEsp`",format=raw,if=ide,index=0",
     "-m", "512M",
     "-vga", "std",
     "-display", "none",
@@ -128,6 +137,9 @@ try {
     }
 } finally {
     Start-Sleep -Milliseconds 250
+    if (Test-Path -LiteralPath $stagedEsp) {
+        Remove-Item -LiteralPath $stagedEsp -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 $output = if (Test-Path $serialLog) { Get-Content $serialLog -Raw } else { "" }

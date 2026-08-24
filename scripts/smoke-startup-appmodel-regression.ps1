@@ -47,7 +47,24 @@ function Invoke-ControlledRuntime {
     )
 
     $outputPath = Join-Path $Path ("$Label.output.log")
-    $output = ($Commands | & (Join-Path $Path "run-server.bat") 2>&1 | Out-String)
+    # Windows PowerShell 5.1 can corrupt a multi-line native stdin pipeline
+    # when a copied runtime is launched through a .bat wrapper. Feed an ASCII
+    # command file through cmd.exe instead; this preserves line boundaries and
+    # works consistently in both Windows PowerShell and PowerShell 7.
+    $inputName = "$Label.input.txt"
+    $inputPath = Join-Path $Path $inputName
+    [System.IO.File]::WriteAllText(
+        $inputPath,
+        (($Commands -join "`r`n") + "`r`n"),
+        [System.Text.Encoding]::ASCII
+    )
+    Push-Location -LiteralPath $Path
+    try {
+        $output = (& cmd.exe /d /c "guideXOSServer.exe < $inputName" 2>&1 | Out-String)
+    } finally {
+        Pop-Location
+        Remove-Item -LiteralPath $inputPath -Force -ErrorAction SilentlyContinue
+    }
     [System.IO.File]::WriteAllText($outputPath, $output)
     Write-Host "[$Label] output: $outputPath"
     return $output

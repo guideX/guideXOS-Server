@@ -1152,83 +1152,180 @@ Theme persistence was source-proven through the passing theme-system smoke: Clas
 
 Remaining settings/application gaps are bounded to Device Manager, Network settings, Disk Manager, other system applications, generic control parity, and icon/font integration. No Phase 8E work is included.
 
+## Phase 9A — Feature-Complete Assessment
+
+Phase 9A concluded that the Sci-Fi theme is feature complete for the v0.3 scope and should proceed to release validation. Estimated coverage was approximately 90 percent for core user-facing theme surfaces and approximately 65 percent for universal theme coverage. No Sci-Fi-theme release blockers were identified in that assessment.
+
+The current architecture remains intentionally narrow: `DesktopThemeId` and the existing `desktop.theme.id` configuration path select `classic` or `scifi`; theme roles provide palette relationships; hosted compositor and window-rendering paths consume those roles; and the bare-metal desktop, kernel compositor, and selected applications consume the same configuration after VFS load. Theme selection, persistence, Classic fallback, and display configuration remain existing product paths rather than new release infrastructure.
+
+Hosted coverage includes the desktop, taskbar, Start surface, window chrome, shell popups, notifications, Control Panel, Display Options, Notepad, Calculator, File Explorer, and the documented chrome-only or bounded treatment of other applications. Bare-metal coverage includes the desktop, taskbar, Start surface, window chrome, shell popups, notifications, Notepad, Calculator, File Explorer, Control Panel, and Display Options surfaces where their existing paint paths support the scoped treatment. Specialized interiors and generic controls are not universalized.
+
+## Phase 9B — Release Validation and Closeout
+
+Phase 9B adds no new Sci-Fi visual features. It establishes a reproducible release-validation path, validates the supported Classic and Sci-Fi configuration behavior, records hosted and bare-metal workflow evidence, repairs two small validation-harness defects, closes the documentation, and assesses—but does not perform—any v0.2 promotion.
+
+### Canonical AMD64 boot path
+
+The canonical clean-workspace path is:
+
+1. `.\build.ps1 -Arch amd64`
+2. `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-desktop-startup-sync.ps1 -TimeoutSeconds 90`
+
+`build.ps1` builds the PacMan package, wallpaper/runtime ramdisk, UEFI bootloader, AMD64 kernel, and the `ESP` payload. The startup-sync harness copies that exact generated ESP into an ignored per-run staging directory, writes a temporary `startup.nsh` containing `FS0:\EFI\BOOT\BOOTX64.EFI`, launches QEMU with the repository OVMF/QEMU prerequisites, and removes the staging directory in `finally`. The real workspace ESP is not modified by the handoff. The UEFI shell briefly appears before the intentional handoff runs; that is an expected part of this harness path, not a product boot failure.
+
+`run-qemu.bat` and the older i386/BIOS scripts remain useful manual or historical runners, but they are not the authoritative AMD64 release-signoff path. A locally or accidentally present `ESP/startup.nsh` is neither required nor used by the canonical harness.
+
+### Harness repair and disposition
+
+The recurring PacMan build failure was a validation-environment dependency on `Get-FileHash` in a child Windows PowerShell process. The current machine resolves that cmdlet in both PowerShell 7 and Windows PowerShell 5.1, but the dependency was unnecessary and made the harness fragile. `scripts/build-pacman-package.ps1` now computes SHA-256 through the .NET cryptography API, removing the nested PowerShell module/cmdlet assumption while preserving the same hash values.
+
+The theme smoke's Phase 8A/8B documentation probes were also made ASCII-tolerant. Windows PowerShell 5.1 can decode a UTF-8 documentation file without a BOM through the active code page, changing an em dash while preserving the heading text. This was a test-script encoding defect, not a product defect. No known trivially reproducible release-gate failure remains in the focused suite.
+
+The hosted startup/app-model regression harness had a second Windows PowerShell 5.1 issue: piping multiple commands through a copied native runtime and batch wrapper could turn the explicit regression command into the server help fallback. It now feeds an ASCII command file through `cmd.exe` from the isolated controlled-runtime directory, so registration, launch ownership, and persistence checks use the intended runtime state.
+
+### Authoritative validation suite
+
+Run these commands in order from the repository root:
+
+```powershell
+.\build.bat
+mingw32-make -C kernel ARCH=amd64 -j2
+.\build.ps1 -Arch amd64
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-theme-system.ps1 -SkipBuild
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-startup-appmodel-regression.ps1 -SkipBuild
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-desktop-startup-sync.ps1 -TimeoutSeconds 90
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-live-directory-desktop-status.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-hosted-display-runtime.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-bootinfo-framebuffer-array.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-virtio-gpu-input-routing.ps1
+git diff --check
+git status --short --branch
+```
+
+The suite is intentionally smaller than the complete historical phase inventory. It covers theme architecture, hosted rendering/runtime, bare-metal boot and framebuffer, input and application launch, persistence paths, representative applications, and repository hygiene without deleting the useful historical smoke scripts.
+
+### Classic/default proof
+
+Classic remains the default. The source and theme smoke prove that missing configuration, invalid configuration, and the persisted `classic` token normalize and load as Classic. Hosted configuration and reload paths preserve the token, while the bare-metal startup serial proof reports `desktop theme=classic source=primary` after VFS load. The Sci-Fi branches are opt-in and do not make the default theme mandatory or alter Classic geometry, hit testing, or application behavior.
+
+### Sci-Fi opt-in and persistence proof
+
+The supported selector/configuration path accepts `scifi`, persists the token, and reloads it through the existing hosted configuration path. The bare-metal path consumes the selected theme after VFS/configuration load. Existing Classic/Sci-Fi QEMU evidence and source/runtime checks confirm the desktop, taskbar, Start surface, window chrome, File Explorer, Calculator, Notepad, Control Panel, and Display Options treatments. Switching the persisted token back to `classic` remains supported and is covered by the same normalization and reload checks.
+
+## v0.3 Sci-Fi Release Scope
+
+Sci-Fi is opt-in; Classic remains default. v0.3 themes the core shell and core applications. Some specialized utilities retain local/Classic interiors. Icons, fonts, and wallpapers remain independent. Universal control theming is not required for this release.
+
+## Hosted Workflow Checklist
+
+### A — Boot/session shell equivalent
+
+Hosted source/runtime checks cover desktop startup, taskbar, Start, and window chrome. The hosted build and startup/app-model regression path passed; direct command-driven launch was used where the compositor capture path was available.
+
+### B — File management
+
+Hosted File Explorer registration, launch, selection/navigation ownership, and close/reopen paths remain covered by the source/runtime checks and the existing application smoke coverage. The Sci-Fi client and chrome roles are wired without geometry or hit-region changes.
+
+### C — Text work
+
+Notepad launch and its existing input/caret/selection ownership remain covered by the application model and theme source checks. Its themed surface is bounded to the existing paint path.
+
+### D — Calculator
+
+Calculator launch and the existing input/evaluation path remain covered by the application model checks. The representative themed surface and widget guard preserve the existing button geometry and behavior.
+
+### E — Settings
+
+Control Panel and Display Options are covered by the Phase 8D source/runtime inventory and the theme smoke. Their existing safe interaction and display-configuration ownership remain unchanged.
+
+### F — System feedback
+
+Notification, context-menu, and shutdown/system-confirmation paint paths remain source-covered and retain their existing non-destructive cancel/close behavior. Direct screenshot capture of retained compositor surfaces is a bounded harness limitation described below.
+
+## Bare-Metal Workflow Checklist
+
+### A — Boot and launch
+
+The canonical startup-sync run passed on the rebuilt AMD64 ESP. Serial evidence confirms UEFI handoff, GOP/framebuffer setup, kernel entry, VFS mount, Classic theme load, desktop startup scan, and a usable desktop startup path. Existing QMP/VGA evidence covers the Sci-Fi desktop/taskbar/Start/window-chrome launch state.
+
+### B — File management
+
+The retained Classic and Sci-Fi QMP/VGA evidence covers File Explorer launch, root list population, selection, navigation into `/Apps`, `Up` navigation, close, and reopen. No destructive filesystem operation was attempted.
+
+### C — Text work
+
+Notepad is registered and its bare-metal themed surface/input ownership is source-covered. Existing QEMU evidence covers launch; direct typing/caret capture remains bounded by the retained-surface capture limitation.
+
+### D — Calculator
+
+Calculator is registered and its bare-metal launch, widget, and input/evaluation paths are source-covered. The existing QEMU/application evidence covers launch; a fresh pixel capture of `2 + 2 = 4` was not required to validate the unchanged arithmetic path.
+
+### E — Settings
+
+Control Panel and Display Options launch paths and paint ownership are source-covered, with Phase 8D preserving safe interaction and display Apply/Cancel behavior. A fresh interactive screenshot was not obtained in the startup-sync run because that run is intentionally bounded to boot/startup synchronization.
+
+### F — System feedback
+
+Context menu, notification, and shutdown confirmation paths are source-covered and preserve existing hit testing and cancel behavior. The QEMU evidence set provides the surrounding shell state; retained-surface capture limits direct popup screenshots.
+
+## Visual Evidence Set
+
+The authoritative local evidence is intentionally small and remains ignored/generated rather than committed. The fresh startup serial proof is `logs/desktop-startup-sync-20260824-104538.serial.log`. The retained Classic baseline includes `logs/phase8b-qemu-classic-apps.png` and `logs/phase8b-qemu-classic-file-explorer.png`. The retained Sci-Fi set includes `logs/phase8b-qemu-scifi-apps.png`, `logs/phase8b-qemu-scifi-file-explorer.png`, and `logs/phase8b-qemu-scifi-up.png`, with corresponding serial/QMP logs in `logs/`. These images prove the shell, File Explorer, and representative application chrome; direct retained-surface popup capture remains a known proof limitation.
+
+The focused QEMU display-control proof passed. The separate QEMU display-persistence proof reached live two-output presentation and valid input mapping but did not emit its second automatic-restore marker before timeout; this remains a bounded display-harness proof limitation, not a Sci-Fi product defect. Source-level persistence validation passed.
+
+## v0.2 Promotion Assessment
+
+No merge, rebase, cherry-pick, or branch switch was performed. Against local `origin/v0.2`, this branch is 23 commits ahead and 40 commits behind, with 22 changed files across the two branch tips. The overlap includes `compositor.cpp/.h`, `kernel/core/desktop.cpp`, `kernel/core/kernel_compositor.cpp`, `kernel/core/kernel_apps.cpp`, theme/configuration files, dialogs, `ESP/desktop.cfg`, build identity, and validation scripts.
+
+The divergence is material rather than a small release-portable patch. The overlapping compositor, desktop, and kernel-app files touch the same areas as v0.2's already-proven Navigator, network, display, HTTPS, and packaging work. A promotion would require conflict resolution plus a full hosted and bare-metal regression pass, including Navigator, network, display, packaging, and the six theme workflows. That validation burden is substantial and would create a real risk of destabilizing v0.2 or delaying its release.
+
+**KEEP FOR v0.3 — protect v0.2.** The Sci-Fi theme itself is release-ready for its v0.3 scope, but that is not sufficient evidence for a late v0.2 promotion. No bounded integration trial is started in Phase 9B.
+
+## Release-Blocker Recheck
+
+**No Sci-Fi-theme release blockers remain.** Phase 9B found no product blocker. The repaired hash and startup-sync issues were harness defects; retained-compositor screenshots, incomplete direct popup capture, and the bounded application-interior evidence are proof limitations; compiler warnings and deferred universal coverage are polish or scope boundaries.
+
+## Deferred / Future Work Queue
+
+The following remain deliberately frozen unless a separate release reason authorizes them: Navigator interior polish; Task Manager; Clock; Disk Manager; Device Manager; Network utilities; universal controls; icons; fonts; wallpaper coupling; glass/blur; animations; rounded hit testing; and pixel-identical hosted/bare-metal rendering.
+
 ## Manual Validation Runbook
 
-* Start the hosted server executable.
-* Use server command `gui.start` to open the hosted compositor.
+* Start the hosted server executable and use `gui.start` to open the compositor.
 * Launch Display Options with the registered app name `DisplayOptions`.
-* Validate Classic first.
-* Capture hosted window screenshots with `PrintWindow` if needed.
-* If the Theme-tab click path is brittle, validate Sci Fi with the persisted `desktop.theme.id=scifi` token instead.
-* Persisted theme tokens are `classic` and `scifi`.
-* Restart or reload the compositor after changing persisted config if needed.
-* Screenshot PNGs named `theme-phase2g1-*.png` are local validation artifacts unless intentionally moved into a documented artifact folder.
+* Validate Classic first, then select or persist `desktop.theme.id=scifi` for Sci-Fi.
+* Persisted theme tokens are `classic` and `scifi`; restart or reload after changing configuration.
+* Capture hosted windows with the strongest available direct path, using source/runtime markers when retained compositor surfaces cannot be captured reliably.
+* Keep generated screenshots and logs local unless an artifact is intentionally moved into a documented evidence folder.
 
 ## Manual Validation Checklist
 
 ### Classic hosted checklist
 
-* Classic is the default theme on a fresh config.
-* Classic windows remain rectangular.
-* Classic taskbar, menu, and search styling remains familiar.
-* Classic has no Sci Fi shadow or highlight treatment.
-* Theme selection persists after restart.
+* Classic is the default on a fresh, missing, or invalid configuration.
+* Classic taskbar, Start, window chrome, File Explorer, settings, and application surfaces retain their existing behavior and fallback colors.
+* The persisted Classic token reloads after restart.
 
 ### Sci Fi hosted checklist
 
-* Sci Fi can be selected from Display Options.
-* Sci Fi selection persists after restart.
-* Sci Fi windows show roomier titlebar and chrome spacing.
-* Rounded hosted chrome preview appears.
-* Active and inactive borders are distinct.
-* Title button hover and pressed states are visible and aligned.
-* Soft shadow appears behind hosted windows.
-* Moving, resizing, and overlapping windows does not leave stale shadow or corner pixels.
-* Taskbar hover and active states align with click regions.
-* Start button paint and click region line up.
-* Search box, start menu, and context menu remain readable.
-* No-wallpaper desktop uses the dark Sci Fi surface.
+* Sci-Fi is selected only through the supported opt-in path.
+* Sci-Fi persists after restart and can be switched back to Classic.
+* Desktop, taskbar, Start, window chrome, File Explorer, Notepad, Calculator, Control Panel, and Display Options use the scoped roles without geometry or hit-region changes.
+* Notification, context-menu, and shutdown-confirmation paths remain readable and non-destructive.
 
 ### Bare-metal checklist
 
-* Bare-metal still boots to a usable framebuffer desktop and taskbar.
-* Classic remains the default and retains its prior desktop/taskbar/Start-button colors.
-* Sci Fi persisted configuration selects the Sci Fi desktop/taskbar/Start-button palette after VFS mount.
-* The Sci Fi desktop fallback remains readable when wallpaper is unavailable; active wallpaper ownership is unchanged.
-* Taskbar normal, hover, active/selected, and indicator paths use the shared palette without geometry drift.
-* Classic bare-metal configuration retains the existing Classic Start menu colors and behavior.
-* Sci Fi bare-metal configuration applies the shared Sci Fi palette to the existing Start-menu surface, rows, states, text, separators, and session footer while preserving its hit regions and routing.
-* Sci Fi bare-metal windows use shared themed active/inactive frames, title bars, title text, and existing title-button states.
-* Classic bare-metal window chrome remains on its original fallback colors.
-* Bare-metal window geometry and title-button hit regions remain frozen.
-* Bare-metal Start-menu geometry, row bounds, footer bounds, and input boundaries remain frozen.
-* Bare-metal remains rectangular for now.
-* Bare-metal does not depend on hosted GDI theme helpers.
-* Display Options and the theme config path do not break bare-metal.
-
-## Deferred / Future Work Queue
-
-* Full rounded client clipping
-* Rounded hit-testing
-* Blur/glass simulation
-* Animations and slide-in/out transitions
-* High-DPI/scaling/resolution polish
-* Remaining bare-metal parity: dialogs, notifications, and application surfaces
-* Taskbar shadows
-* Theme wallpaper/asset selection
-* Per-theme user-editable settings
-* Deeper app surface polish, one app at a time
-* Visual screenshot-based smoke tests
-* Broad app redesign / multi-app restyling
+* The rebuilt AMD64 image boots through the canonical disposable-ESP handoff to a framebuffer desktop.
+* Classic remains the default after VFS/configuration load.
+* Persisted Sci-Fi selects the Sci-Fi desktop/taskbar/Start/window/application palette where the scoped bare-metal paint paths consume it.
+* File Explorer, Notepad, Calculator, Control Panel, and Display Options retain existing launch, input, navigation, and safe-close behavior.
+* Geometry, hit testing, and the existing rectangular bare-metal surfaces remain frozen.
 
 ## Notes
 
-* Classic should continue to look basically unchanged.
-* Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, the Phase 4F extended app-surface closeout, the Phase 4G Image Viewer readiness inventory, the Phase 4G.1 hosted large-image lifecycle safety check, the Phase 4H hosted Image Viewer chrome-only app-surface pilot, the Phase 5 hosted shell popup consistency pass, and the Phase 7A bare-metal desktop/taskbar surface parity pass.
+Classic remains the compatibility baseline. The v0.3 Sci-Fi milestone is a scoped, role-based visual release rather than universal restyling. The evidence and validation boundaries above are deliberate; they do not authorize another visual theme phase.
 
 ## Recommended Next Pass
 
-1. After this phase is validated, separately scope bare-metal window chrome/title bars and window buttons; do not include Start-menu contents in that pass unless explicitly authorized.
-2. Keep bare-metal dialogs, notifications, and application surfaces as later focused phases.
-3. Continue to preserve Classic as the default and keep geometry/input behavior frozen for each visual parity pass.
+None for v0.3 closeout. Preserve the deferred-work freeze, protect v0.2 from late integration, and address any future surface expansion only through a separately authorized phase.

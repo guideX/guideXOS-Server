@@ -48,6 +48,17 @@ function Assert-File([string]$Path, [string]$Description) {
     }
 }
 
+function Get-Sha256Hex([string]$Path) {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '')
+    } finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
+}
+
 function Invoke-Native([string]$FilePath, [string[]]$Arguments, [string]$Description) {
     & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) {
@@ -133,8 +144,8 @@ if ($bytes.Length -lt 20 -or $bytes[0] -ne 0x7f -or $bytes[1] -ne 0x45 -or $byte
     throw "PacMan output is not a little-endian AMD64 ELF64 executable."
 }
 
-$elfHash = (Get-FileHash -LiteralPath $outputElf -Algorithm SHA256).Hash
-$manifestHash = (Get-FileHash -LiteralPath (Join-Path $OutputPackage "app.json") -Algorithm SHA256).Hash
+$elfHash = Get-Sha256Hex $outputElf
+$manifestHash = Get-Sha256Hex (Join-Path $OutputPackage "app.json")
 Write-Host "      PacMan package staged: $OutputPackage" -ForegroundColor Green
 Write-Host "      ELF bytes=$($bytes.Length) sha256=$elfHash" -ForegroundColor Green
 Write-Host "      manifest sha256=$manifestHash" -ForegroundColor Green

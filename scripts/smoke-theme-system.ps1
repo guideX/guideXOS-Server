@@ -306,14 +306,17 @@ $calculatorThemeHelperMatch = Find-FirstMatch $calculator 'CalculatorBodyColor|C
 $calculatorWidgetGuardMatch = Find-RawMatch $compositor 'static uint32_t calculatorWidgetFillColor\(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme\)\s*\{\s*if \(!isCalculatorWindow\(winfo\) \|\| theme\.id != DesktopThemeId::SciFi\) \{\s*return calculatorClassicWidgetFillColor\(widget\);'
 $calculatorThemeFieldMatch = Find-FirstMatch $calculator 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText|windowPadding|titleBarHeight'
 $calculatorPerEffectMatch = Find-FirstMatch $calculator 'Visual Effects|per-effect'
-$phase8aHeadingMatch = Find-FirstMatch $planDoc '## Phase 8A — Bare-Metal Core Application Surface Consistency'
+# Keep the phase-heading probes ASCII-tolerant because Windows PowerShell 5.1
+# may decode a UTF-8 documentation file without a BOM using the active code
+# page, which can change the em dash while leaving the heading text intact.
+$phase8aHeadingMatch = Find-FirstMatch $planDoc '## Phase 8A .*Bare-Metal Core Application Surface Consistency'
 $kernelNotepadThemeMatch = Find-FirstMatch $kernelApps 'kernelNotepadEditorColor|kernelNotepadSelectionColor|kernelNotepadCaretColor|kernelNotepadMenuSurfaceColor|kernelSciFiThemeActive'
 $kernelCalculatorThemeMatch = Find-FirstMatch $kernelApps 'kernelCalculatorBodyColor|kernelCalculatorDisplayColor|kernelCalculatorDisplayBorderColor|kernelCalculatorDisplayTextColor|kernelSciFiThemeActive'
 $kernelCalculatorWidgetGuardMatch = Find-RawMatch $kernelCompositor 'calculatorWindow.*sciFiTheme|window->owner->getName().*Calculator'
 $phase8aClassicBoundaryMatch = Find-RawMatch $planDoc 'Classic branches retain the prior literal Calculator and Notepad client colors.*?No Calculator or Notepad window/client bounds.*?expected geometry result is \*\*no change\*\*'
 $kernelFileExplorerThemeMatch = Find-FirstMatch $kernelApps 'kernelFileExplorerClientColor|kernelFileExplorerToolbarColor|kernelFileExplorerSelectionColor|kernelFileExplorerScrollbarThumbColor|kernelFileExplorerMenuColor|kernelFileExplorerDialogColor'
 $kernelFileExplorerWidgetGuardMatch = Find-RawMatch $kernelCompositor 'fileExplorerWindow.*sciFiTheme|owner->getName\(\).*Files|owner->getName\(\).*FileExplorer'
-$phase8bHeadingMatch = Find-FirstMatch $planDoc '## Phase 8B — Bare-Metal File Explorer Surface Consistency'
+$phase8bHeadingMatch = Find-FirstMatch $planDoc '## Phase 8B .*Bare-Metal File Explorer Surface Consistency'
 $phase8bBoundaryMatch = Find-RawMatch $planDoc 'Classic branches retain the prior File Explorer literals.*?No client, toolbar, address, navigation, list, row, icon, scrollbar, footer, overlay, or widget geometry changed'
 
 $checks = @(
