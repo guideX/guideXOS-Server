@@ -609,6 +609,12 @@
     <ClInclude Include="navigator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="navigator_javascript\lexer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="navigator_javascript\source.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gxos_tls_prerequisites.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1368,6 +1374,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="navigator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="navigator_javascript\lexer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="gxos_tls_prerequisites.cpp">
