@@ -975,6 +975,50 @@ Classic QMP/VGA evidence is in the ignored local run `logs/phase7c-qemu/final-cl
 
 Dialogs, notifications, application client surfaces, generic controls, icons, fonts, wallpaper ownership, multi-monitor behavior, and other non-Start-menu shell/app parity remain outside Phase 7C. This phase does not begin the next bare-metal pass.
 
+## Phase 7D — Bare-Metal System Dialog & Notification Consistency
+
+Phase 7D is a compact bare-metal shell pass for the small system-owned surfaces that can otherwise interrupt an otherwise coherent Sci-Fi desktop. It is styling-only: existing geometry, hit testing, lifecycle, input routing, and action semantics remain authoritative.
+
+### Exact Scope and Popup Architecture
+
+The included surfaces are the existing framebuffer paths in `kernel/core/desktop.cpp`:
+
+* `draw_right_click_menu()` — the shell-owned desktop context menu, including its existing Start-menu-app variant. It is a fixed-width transient overlay positioned from the existing pointer/menu state; the existing item list, separators, hover tracking, command dispatch, click-outside dismissal, and input hit regions remain unchanged.
+* `draw_notifications()` — the desktop-owned `NotificationToast` at the existing fixed top-right location. Its existing title/message/close/timestamp paint, five-second lifetime, close dismissal, and cleanup remain unchanged. No separate bare-metal notification manager or queue renderer was found.
+* `draw_shutdown_dialog()` — the existing centered shutdown confirmation opened by the Start-menu footer. Its existing Yes/No buttons, outside dismissal, Escape/Alt-F4 dismissal, modality, and shutdown result path remain unchanged. The safe validation path is Cancel/No; destructive shutdown is not exercised.
+
+The normal desktop `draw()` path paints these surfaces after the desktop/taskbar and before the compositor windows. No separate system-popup renderer was found in `kernel/core/kernel_compositor.cpp`, and no additional freestanding message-box or save-changes renderer was identified in the shell path.
+
+### Scope Exclusions
+
+The App Model viewer, Control Panel, Device Manager, Network Adapters, Network Configuration, Notepad, Open/Save/Save As, file pickers, and other application-owned or large multi-control dialogs remain excluded. They require application-surface work, filesystem workflow review, or broader control/dialog infrastructure and are not part of this compact phase. No generic button, text-box, list, scrollbar, checkbox, radio, combo, tab, notification-center, history, action, sound, or animation work was added.
+
+### Classic Preservation and Sci-Fi Treatment
+
+Classic remains the fallback and retains the existing popup literals, borders, text colors, dimensions, and control appearance. Sci-Fi branches consume only `GetCurrentDesktopTheme()` / `DesktopTheme` and the existing integer `BlendDesktopThemeColor()` helper:
+
+* The context menu uses the existing Sci-Fi window/desktop/taskbar surfaces, border, accent, separator, hover, and readable title-text roles.
+* Notifications use blended Sci-Fi taskbar/window surfaces, window border/accent, accent strip, title/body/close/timestamp text, and the existing transient layout.
+* The shutdown dialog uses Sci-Fi window/title-bar/border/text roles. `Yes` remains a red destructive action with a red semantic border/text treatment, while `No` remains the neutral/cancel action using the Sci-Fi taskbar/window relationship. Error/warning semantics are not collapsed into a single indigo action color.
+
+No dialog-specific theme object, notification palette table, duplicated Sci-Fi constants, hosted dependency, allocation, filesystem access, large buffer, floating-point effect, or architecture-specific theme behavior was introduced.
+
+### Geometry and Behavior Freeze
+
+The existing dialog/menu/toast dimensions, positions, borders, padding, text bounds, button bounds, notification stacking/lifetime, modal work area, and hit regions are unchanged. Modality, focus, input capture, result codes, Enter/Escape/Alt-F4 behavior, outside dismissal, shutdown semantics, notification timeout, and cleanup are unchanged. The expected geometry result is **no change**.
+
+### Phase 7D Validation Record
+
+The exact workspace passed `.\\build.bat`, `mingw32-make -C kernel ARCH=amd64 -j2`, and `.\\build.ps1 -Arch amd64`. The required theme, live-directory, hosted-display, startup-sync, framebuffer-array, VirtIO routing, and `git diff --check` validations passed. The available `smoke-appmodel-launchshadow.ps1` regression was attempted; its child Windows PowerShell rebuild stopped before QEMU because `Get-FileHash` was unavailable in that child environment, while the normal PowerShell 7 image build passed.
+
+The exact staged AMD64 image booted through UEFI/framebuffer and reached the normal bare-metal desktop. A temporary ignored `ESP/startup.nsh` fallback selected `EFI/BOOT/BOOTX64.EFI` for the local OVMF entry-point quirk and was removed after validation. Classic configuration loaded `desktopThemeId=classic`; Sci-Fi configuration loaded `desktopThemeId=scifi` through the established bare-metal path. Classic QEMU capture showed the existing Classic context menu and Start-menu shell, and the existing notification path was observed during desktop startup. Sci-Fi QEMU capture showed the corresponding themed desktop context-menu surface and notification surface in surrounding shell context. Serial/QMP evidence remains in ignored local `logs/phase7d-qemu/` artifacts.
+
+The safe interaction proof confirmed context-menu opening/hover and dismissal, Start-menu opening, and the existing notification lifecycle without changing queue or timeout behavior. The QEMU PS/2 pointer path was not reliable enough for a repeatable pixel-targeted click on the shutdown footer in this run; source-level inspection and the exact image boot prove the existing shutdown dialog path and unchanged hit geometry, but a fresh visual screenshot of the shutdown dialog and its No/Cancel click is still a proof limitation. No destructive action was attempted.
+
+### Remaining Bare-Metal Gaps
+
+Phase 7D closes the small shell-owned context-menu, notification-toast, and shutdown-dialog styling gap. Remaining relevant gaps are the explicitly excluded application-owned/large dialogs and broader application surfaces, plus generic-control parity, icons, fonts, wallpaper ownership, multi-monitor behavior, blur/glass, animations, rounded clipping, and rounded hit testing. These remain separate future work and are not claimed as generic dialog/control parity.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
