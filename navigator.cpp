@@ -10,6 +10,7 @@
 #include "bitmap_font.h"
 #include "ipc_bus.h"
 #include "guide_web_http.h"
+#include "jpeg_loader.h"
 #include "logger.h"
 #include "navigator_file_io.h"
 #include "navigator_html_parser.h"
@@ -2060,11 +2061,42 @@ namespace {
 		std::string format;
 		std::string message;
 		std::string errorDetail;
+		NavigatorResourceClassification classification = NavigatorResourceClassification::OtherFailure;
+		std::string responseUrl;
+		std::string responseContentType;
+		std::string responseContentEncoding;
+		int responseStatusCode = 0;
+		size_t encodedBodyBytes = 0;
+		size_t decodedBodyBytes = 0;
+		int redirectCount = 0;
 	};
 
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
 	static std::vector<std::string> s_remoteImageTempFiles;
 	static int s_remoteImageFetchCount = 0;
+	static size_t s_releasedImageResources = 0;
+	static size_t s_releasedImageBytes = 0;
+
+	static size_t imagePixelBytes(const ImageInfo& info)
+	{
+		if (!info.ok || info.naturalW <= 0 || info.naturalH <= 0) return 0;
+		const uint64_t pixels = static_cast<uint64_t>(info.naturalW) * static_cast<uint64_t>(info.naturalH);
+		const uint64_t bytes = pixels * 4u;
+		return bytes > static_cast<uint64_t>(std::numeric_limits<size_t>::max())
+			? 0 : static_cast<size_t>(bytes);
+	}
+
+	static void releaseCachedImages()
+	{
+		for (const auto& entry : s_imageCache) {
+			const size_t bytes = imagePixelBytes(entry.second);
+			if (bytes == 0) continue;
+			++s_releasedImageResources;
+			if (s_releasedImageBytes <= std::numeric_limits<size_t>::max() - bytes)
+				s_releasedImageBytes += bytes;
+		}
+		s_imageCache.clear();
+	}
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
 	static void imageDisplaySize(const DocBlock& block, int availableWidth, int& outW, int& outH,
 		bool* outConstrained = nullptr, bool* outAspectPreserved = nullptr, bool* outClamped = nullptr);
@@ -2264,6 +2296,186 @@ namespace {
 		limits.maxPixels = kRemoteImageMaxPixels;
 		limits.maxDecodedBytes = kRemoteImageMaxPixels * 4u;
 		return limits;
+	}
+
+	static bool isRemoteHttpUrl(const std::string& url);
+
+	static std::string boundedResourceText(const std::string& value, size_t maxBytes = 96)
+	{
+		std::string result = value.substr(0, maxBytes);
+		for (char& ch : result) {
+			if (ch == '\r' || ch == '\n' || ch == ';') ch = '_';
+		}
+		return result;
+	}
+
+	static std::string resourceUrlPath(const std::string& url)
+	{
+		const size_t query = url.find('?');
+		const size_t fragment = url.find('#');
+		const size_t end = std::min(query == std::string::npos ? url.size() : query,
+			fragment == std::string::npos ? url.size() : fragment);
+		return url.substr(0, end);
+	}
+
+	static bool resourcePathEndsWith(const std::string& url, const std::string& suffix)
+	{
+		return endsWithIgnoreCase(resourceUrlPath(url), suffix);
+	}
+
+	static std::string resourceCacheKey(const std::string& url)
+	{
+		if (isRemoteHttpUrl(url)) {
+			const gxos::web::ParsedHttpUrl parsed = gxos::web::parseHttpUrl(url);
+			if (parsed.valid) return parsed.origin() + parsed.requestTarget();
+		}
+		const size_t fragment = url.find('#');
+		return fragment == std::string::npos ? url : url.substr(0, fragment);
+	}
+
+	static std::string resourceOriginHost(const std::string& url)
+	{
+		if (isRemoteHttpUrl(url)) {
+			const gxos::web::ParsedHttpUrl parsed = gxos::web::parseHttpUrl(url);
+			if (parsed.valid) return boundedResourceText(parsed.host, 96);
+		}
+		return "";
+	}
+
+	static bool resourceSameOrigin(const std::string& documentUrl, const std::string& resourceUrl)
+	{
+		const gxos::web::ParsedHttpUrl document = gxos::web::parseHttpUrl(documentUrl);
+		const gxos::web::ParsedHttpUrl resource = gxos::web::parseHttpUrl(resourceUrl);
+		return document.valid && resource.valid && document.scheme == resource.scheme &&
+			document.host == resource.host && document.port == resource.port;
+	}
+
+	static NavigatorResourceImageFormat resourceImageFormat(const std::string& url)
+	{
+		if (resourcePathEndsWith(url, ".png")) return NavigatorResourceImageFormat::Png;
+		if (resourcePathEndsWith(url, ".jpg") || resourcePathEndsWith(url, ".jpeg"))
+			return NavigatorResourceImageFormat::Jpeg;
+		return NavigatorResourceImageFormat::Other;
+	}
+
+	static void setImageClassification(ImageInfo& info,
+		const NavigatorResourceClassificationInput& input, const std::string& reason)
+	{
+		info.classification = classifyNavigatorResource(input);
+		info.errorDetail = boundedResourceText(reason);
+		info.message = std::string("[") + navigatorResourceClassificationName(info.classification) + "]";
+	}
+
+	static NavigatorResourceClassificationInput resourceInputForHttpResponse(
+		const gxos::web::HttpResponse& response)
+	{
+		NavigatorResourceClassificationInput input;
+		using gxos::web::HttpError;
+		if (response.error != HttpError::None) {
+			switch (response.error) {
+			case HttpError::InvalidUrl:
+				input.policyFailure = response.redirectCount > 0
+					? NavigatorResourcePolicyFailure::None
+					: NavigatorResourcePolicyFailure::MalformedUrl;
+				input.httpFailure = response.redirectCount > 0
+					? NavigatorResourceHttpFailure::RedirectInvalid
+					: NavigatorResourceHttpFailure::None;
+				break;
+			case HttpError::UnsupportedScheme:
+				input.policyFailure = response.redirectCount > 0
+					? NavigatorResourcePolicyFailure::None
+					: NavigatorResourcePolicyFailure::UnsupportedScheme;
+				input.httpFailure = response.redirectCount > 0
+					? NavigatorResourceHttpFailure::RedirectInvalid
+					: NavigatorResourceHttpFailure::None;
+				break;
+			case HttpError::ResolveFailed: input.transportFailure = NavigatorResourceTransportFailure::DnsFailed; break;
+			case HttpError::ConnectFailed: input.transportFailure = NavigatorResourceTransportFailure::TcpFailed; break;
+			case HttpError::Timeout:
+				input.transportFailure = response.tlsEnabled
+					? (response.tlsValidated ? NavigatorResourceTransportFailure::TimeoutHttp
+						: NavigatorResourceTransportFailure::TimeoutTls)
+					: NavigatorResourceTransportFailure::TimeoutConnect;
+				break;
+			case HttpError::TlsHandshakeFailed:
+			case HttpError::TlsReadFailed:
+			case HttpError::TlsWriteFailed:
+				input.transportFailure = NavigatorResourceTransportFailure::TlsFailed;
+				break;
+			case HttpError::TlsCertificateValidationFailed:
+			case HttpError::TlsCertificateExpired:
+				input.transportFailure = NavigatorResourceTransportFailure::CertificateFailed;
+				break;
+			case HttpError::TlsCertificateHostnameMismatch:
+				input.transportFailure = NavigatorResourceTransportFailure::HostnameFailed;
+				break;
+			case HttpError::BodyTooLarge:
+				input.httpFailure = NavigatorResourceHttpFailure::BodyTooLargeEncoded;
+				break;
+			case HttpError::UnsupportedTransferEncoding:
+				input.httpFailure = NavigatorResourceHttpFailure::UnsupportedTransferEncoding;
+				break;
+			case HttpError::UnsupportedContentEncoding:
+				input.contentEncodingFailure = NavigatorResourceContentEncodingFailure::Unsupported;
+				break;
+			case HttpError::MalformedCompressedResponse:
+				input.contentEncodingFailure = response.contentEncoding.find("gzip") != std::string::npos
+					? NavigatorResourceContentEncodingFailure::MalformedGzip
+					: NavigatorResourceContentEncodingFailure::MalformedDeflate;
+				break;
+			case HttpError::DecodedResponseTooLarge:
+			case HttpError::DocumentStorageAllocationFailed:
+				input.contentEncodingFailure = NavigatorResourceContentEncodingFailure::DecodedTooLarge;
+				break;
+			case HttpError::TruncatedResponse:
+			case HttpError::ReceiveFailed:
+				input.transportFailure = NavigatorResourceTransportFailure::ConnectionClosedIncomplete;
+				break;
+			case HttpError::RedirectLimitExceeded:
+				input.httpFailure = NavigatorResourceHttpFailure::RedirectLimit;
+				break;
+			case HttpError::InsecureRedirectBlocked:
+				input.policyFailure = NavigatorResourcePolicyFailure::InsecureRedirectBlocked;
+				break;
+			case HttpError::MalformedResponse:
+			case HttpError::HeaderTooLarge:
+			case HttpError::MalformedChunkedEncoding:
+				input.httpFailure = NavigatorResourceHttpFailure::MalformedHttp;
+				break;
+			case HttpError::NetworkUnavailable:
+			case HttpError::SendFailed:
+			case HttpError::TlsProtocolUnsupported:
+			default:
+				input.transportFailure = NavigatorResourceTransportFailure::TcpFailed;
+				break;
+			}
+			return input;
+		}
+		input.httpStatusCode = response.statusCode;
+		if (response.statusCode >= 300 && response.statusCode < 400)
+			input.httpFailure = NavigatorResourceHttpFailure::Status3xxUnresolved;
+		else if (response.statusCode >= 400 && response.statusCode < 500)
+			input.httpFailure = NavigatorResourceHttpFailure::Status4xx;
+		else if (response.statusCode >= 500 && response.statusCode < 600)
+			input.httpFailure = NavigatorResourceHttpFailure::Status5xx;
+		else if (response.statusCode != 200)
+			input.httpFailure = NavigatorResourceHttpFailure::StatusOther;
+		return input;
+	}
+
+	static bool pngHeaderDimensions(const std::string& body, uint32_t& width, uint32_t& height)
+	{
+		width = height = 0;
+		if (body.size() < 24 || !isPngSignature(body)) return false;
+		const auto read32 = [&](size_t offset) -> uint32_t {
+			return (static_cast<uint32_t>(static_cast<unsigned char>(body[offset])) << 24) |
+				(static_cast<uint32_t>(static_cast<unsigned char>(body[offset + 1])) << 16) |
+				(static_cast<uint32_t>(static_cast<unsigned char>(body[offset + 2])) << 8) |
+				static_cast<uint32_t>(static_cast<unsigned char>(body[offset + 3]));
+		};
+		width = read32(16);
+		height = read32(20);
+		return width != 0 && height != 0;
 	}
 
 	static WebDocument buildSimpleDocument(const std::string& url,
@@ -2699,6 +2911,13 @@ namespace {
 		metadata.pngImageLoadCount = 0;
 		metadata.unsupportedImageCount = 0;
 		metadata.lastImageError.clear();
+		metadata.resourceCounters = NavigatorResourceAggregateCounters{};
+		metadata.resourceTelemetry.clear();
+		metadata.resourceClassificationCounts.fill(0);
+		metadata.activeImageResources = 0;
+		metadata.allocatedImageBytes = 0;
+		metadata.releasedImageResources = s_releasedImageResources;
+		metadata.releasedImageBytes = s_releasedImageBytes;
 		metadata.cssEnabled = doc.cssDiagnostics.cssEnabled;
 		metadata.cssDetected = doc.cssDiagnostics.cssDetected;
 		metadata.styleRuleCount = doc.cssDiagnostics.styleRuleCount;
@@ -3169,6 +3388,7 @@ namespace {
 			return false;
 		};
 		std::unordered_set<uint64_t> overflowStyleSerials;
+		std::unordered_set<std::string> seenResourceKeys;
 		for (size_t i = 0; i < doc.blocks.size(); ++i) {
 			const DocBlock& block = doc.blocks[i];
 			if (block.elementMetadata.serial != 0) overflowStyleSerials.insert(block.elementMetadata.serial);
@@ -3480,14 +3700,32 @@ namespace {
 			const int imageAvailableWidth = blockAvailableWidth(block, doc);
 			imageDisplaySize(block, imageAvailableWidth, imageW, imageH, &imageConstrained, &imageAspectPreserved, &imageSizeClamped);
 			const ImageInfo& info = imageInfoForBlock(block);
+			const std::string resourceKey = resourceCacheKey(block.url);
+			const bool duplicate = !seenResourceKeys.insert(resourceKey).second;
+			NavigatorResourceClassification classification = info.classification;
+			if (duplicate) classification = NavigatorResourceClassification::DuplicateResourceSkipped;
+			NavigatorResourceAggregateCounters& counters = metadata.resourceCounters;
+			++counters.totalResourceReferences;
 			if (info.format == "jpeg") {
 				++metadata.jpegImageReferenceCount;
-				if (info.attempted) ++metadata.jpegImageAttemptCount;
-				if (info.ok) ++metadata.jpegImageLoadCount;
-			} else if (info.format == "png" && info.ok) {
-				++metadata.pngImageLoadCount;
+				++counters.jpegReferences;
+				if (!duplicate && info.attempted) ++metadata.jpegImageAttemptCount;
+				if (!duplicate && classification == NavigatorResourceClassification::LoadedJpeg) {
+					++metadata.jpegImageLoadCount;
+					++counters.jpegLoads;
+				}
+			} else if (info.format == "png") {
+				++counters.pngReferences;
+				if (!duplicate && classification == NavigatorResourceClassification::LoadedPng) {
+					++metadata.pngImageLoadCount;
+					++counters.pngLoads;
+				}
 			}
-			if (info.status == gxos::gui::ImageLoadStatus::UnsupportedFormat)
+			if (info.format == "svg") { ++counters.svgReferences; if (!duplicate && classification == NavigatorResourceClassification::UnsupportedSvg) ++counters.svgFailures; }
+			if (info.format == "webp") { ++counters.webpReferences; if (!duplicate && classification == NavigatorResourceClassification::UnsupportedWebp) ++counters.webpFailures; }
+			if (info.format == "avif") { ++counters.avifReferences; if (!duplicate && classification == NavigatorResourceClassification::UnsupportedAvif) ++counters.avifFailures; }
+			if (info.format == "gif") { ++counters.gifReferences; if (!duplicate && classification == NavigatorResourceClassification::UnsupportedGif) ++counters.gifFailures; }
+			if (info.status == gxos::gui::ImageLoadStatus::UnsupportedFormat && !duplicate)
 				++metadata.unsupportedImageCount;
 			if (info.ok) {
 				++metadata.loadedImageCount;
@@ -3500,6 +3738,82 @@ namespace {
 					metadata.lastImageError = info.errorDetail.empty() ? info.message : info.errorDetail;
 				}
 			}
+			const bool loaded = classification == NavigatorResourceClassification::LoadedPng ||
+				classification == NavigatorResourceClassification::LoadedJpeg ||
+				classification == NavigatorResourceClassification::LoadedOtherExistingSupportedResource;
+			if (!duplicate && loaded) {
+				++metadata.activeImageResources;
+				const size_t pixelBytes = imagePixelBytes(info);
+				if (metadata.allocatedImageBytes <= std::numeric_limits<size_t>::max() - pixelBytes)
+					metadata.allocatedImageBytes += pixelBytes;
+			}
+			const bool skipped = duplicate || classification == NavigatorResourceClassification::ResourceLimitReached ||
+				classification == NavigatorResourceClassification::ResourceSlotUnavailable;
+			if (duplicate) {
+				++counters.skipped;
+				++counters.duplicateSkips;
+				++counters.duplicateResourceUrls;
+				if (info.ok) ++counters.duplicateDecodedImages;
+			} else if (skipped) {
+				++counters.skipped;
+				if (classification == NavigatorResourceClassification::ResourceLimitReached) ++counters.resourceLimitSkips;
+			} else {
+				++counters.attempted;
+				if (loaded) ++counters.loaded;
+				else ++counters.failed;
+			}
+			if (!duplicate && info.redirectCount > 0) ++counters.redirects;
+			switch (classification) {
+			case NavigatorResourceClassification::HttpStatus4xx: ++counters.http4xx; break;
+			case NavigatorResourceClassification::HttpStatus5xx: ++counters.http5xx; break;
+			case NavigatorResourceClassification::BodyTooLargeEncoded:
+			case NavigatorResourceClassification::DecodedResourceTooLarge:
+			case NavigatorResourceClassification::ImageDimensionsTooLarge:
+			case NavigatorResourceClassification::ImagePixelBudgetExceeded: ++counters.sizeBoundFailures; break;
+		case NavigatorResourceClassification::PngDecodeFailed:
+			case NavigatorResourceClassification::JpegDecodeFailed:
+			case NavigatorResourceClassification::ImageAllocationFailed:
+			case NavigatorResourceClassification::UnsupportedJpegVariant:
+			case NavigatorResourceClassification::CorruptImage: ++counters.decodeFailures; break;
+		case NavigatorResourceClassification::DnsFailed:
+			case NavigatorResourceClassification::TcpFailed:
+			case NavigatorResourceClassification::TlsFailed:
+			case NavigatorResourceClassification::CertificateFailed:
+			case NavigatorResourceClassification::HostnameFailed:
+			case NavigatorResourceClassification::TimeoutConnect:
+			case NavigatorResourceClassification::TimeoutTls:
+			case NavigatorResourceClassification::TimeoutHttp:
+			case NavigatorResourceClassification::ConnectionClosedIncomplete: ++counters.networkTlsFailures; break;
+		case NavigatorResourceClassification::UnsupportedMime:
+		case NavigatorResourceClassification::ContentTypeMissing:
+		case NavigatorResourceClassification::ContentTypeMismatch:
+		case NavigatorResourceClassification::MimeExtensionDisagreement:
+		case NavigatorResourceClassification::UnsupportedOtherImage: ++counters.unsupportedMime; break;
+		default: break;
+		}
+		const size_t classIndex = static_cast<size_t>(classification);
+		if (classIndex < metadata.resourceClassificationCounts.size())
+			++metadata.resourceClassificationCounts[classIndex];
+		if (metadata.resourceTelemetry.size() < 64u) {
+			NavigatorResourceTelemetry telemetry;
+			telemetry.ordinal = static_cast<int>(metadata.resourceTelemetry.size());
+			std::ostringstream hash;
+			hash << "fnv1a64:" << std::hex << fnv1a64(resourceKey);
+			telemetry.urlHash = hash.str();
+			telemetry.originHost = resourceOriginHost(info.responseUrl.empty() ? block.url : info.responseUrl);
+			telemetry.sameOrigin = resourceSameOrigin(doc.url, info.responseUrl.empty() ? block.url : info.responseUrl);
+			telemetry.responseStatusCode = info.responseStatusCode;
+			telemetry.contentType = boundedResourceText(info.responseContentType, 96);
+			telemetry.contentEncoding = boundedResourceText(info.responseContentEncoding, 64);
+			telemetry.encodedBodyBytes = info.encodedBodyBytes;
+			telemetry.decodedBodyBytes = info.decodedBodyBytes;
+			telemetry.imageWidth = info.naturalW > 0 ? static_cast<uint32_t>(info.naturalW) : 0;
+			telemetry.imageHeight = info.naturalH > 0 ? static_cast<uint32_t>(info.naturalH) : 0;
+			telemetry.redirectCount = info.redirectCount;
+			telemetry.classification = classification;
+			telemetry.reason = duplicate ? "same-document duplicate URL skipped" : boundedResourceText(info.errorDetail.empty() ? info.message : info.errorDetail);
+			metadata.resourceTelemetry.push_back(std::move(telemetry));
+		}
 			if (imageConstrained) {
 				++metadata.cssImagesConstrained;
 			}
@@ -11846,76 +12160,219 @@ namespace {
 
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block)
 	{
-		const std::string key = block.url.empty() ? block.src : block.url;
+		const std::string requestedUrl = block.url.empty() ? block.src : block.url;
+		const std::string key = resourceCacheKey(requestedUrl);
 		auto found = s_imageCache.find(key);
 		if (found != s_imageCache.end()) return found->second;
 
 		ImageInfo info;
 		info.attempted = true;
-		const std::string requestedUrl = block.url;
-		if (endsWithIgnoreCase(requestedUrl, ".jpg") || endsWithIgnoreCase(requestedUrl, ".jpeg"))
-			info.format = "jpeg";
-		else if (endsWithIgnoreCase(requestedUrl, ".png"))
-			info.format = "png";
+		const NavigatorResourceImageFormat requestedFormat = resourceImageFormat(requestedUrl);
+		if (requestedFormat == NavigatorResourceImageFormat::Jpeg) info.format = "jpeg";
+		else if (requestedFormat == NavigatorResourceImageFormat::Png) info.format = "png";
+		else if (resourcePathEndsWith(requestedUrl, ".svg")) info.format = "svg";
+		else if (resourcePathEndsWith(requestedUrl, ".webp")) info.format = "webp";
+		else if (resourcePathEndsWith(requestedUrl, ".avif")) info.format = "avif";
+		else if (resourcePathEndsWith(requestedUrl, ".gif")) info.format = "gif";
 
-		if (isRemoteHttpUrl(block.url)) {
+		if (requestedUrl.empty()) {
+			NavigatorResourceClassificationInput input;
+			input.policyFailure = NavigatorResourcePolicyFailure::RelativeUrlResolutionFailed;
+			setImageClassification(info, input, "Image URL resolution produced an empty URL.");
+			auto inserted = s_imageCache.emplace(key, std::move(info));
+			return inserted.first->second;
+		}
+
+		if (requestedUrl.rfind("data:", 0) == 0) {
+			NavigatorResourceClassificationInput input;
+			input.policyFailure = NavigatorResourcePolicyFailure::DataUrlUnsupported;
+			setImageClassification(info, input, "Data URLs are not supported by Navigator resources.");
+			auto inserted = s_imageCache.emplace(key, std::move(info));
+			return inserted.first->second;
+		}
+
+		if (isRemoteHttpUrl(requestedUrl)) {
 			if (s_remoteImageFetchCount >= gxos::web::kHttpSharedMaxRemoteResources) {
-				info.status = gxos::gui::ImageLoadStatus::NotFound;
-				info.message = "[remote resource limit]";
-				info.errorDetail = "Navigator remote resource limit reached";
+				NavigatorResourceClassificationInput input;
+				input.policyFailure = NavigatorResourcePolicyFailure::ResourceLimitReached;
+				setImageClassification(info, input, "Navigator remote resource limit reached.");
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
 			++s_remoteImageFetchCount;
-			gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(block.url);
+			gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(requestedUrl);
+			info.responseUrl = response.finalUrl.empty() ? requestedUrl : response.finalUrl;
+			info.responseStatusCode = response.statusCode;
+			info.responseContentType = boundedResourceText(response.contentType, 96);
+			info.responseContentEncoding = boundedResourceText(response.contentEncoding, 64);
+			info.encodedBodyBytes = response.encodedBodyBytes;
+			info.decodedBodyBytes = response.decodedBodyBytes;
+			info.redirectCount = std::max(0, response.redirectCount);
 			if (!response.ok()) {
 				info.status = gxos::gui::ImageLoadStatus::NotFound;
-				info.message = "[remote image error]";
-				info.errorDetail = std::string("Remote image fetch failed: ") +
-					gxos::web::httpErrorName(response.error);
-				if (!response.errorMessage.empty()) info.errorDetail += ": " + response.errorMessage;
+				const NavigatorResourceClassificationInput input = resourceInputForHttpResponse(response);
+				setImageClassification(info, input,
+					std::string("Remote image fetch failed: ") +
+					gxos::web::httpErrorName(response.error) +
+					(response.errorMessage.empty() ? std::string() : std::string(": ") + response.errorMessage));
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
 			if (response.statusCode != 200) {
 				info.status = gxos::gui::ImageLoadStatus::NotFound;
-				info.message = "[remote image not found]";
-				info.errorDetail = "Remote image HTTP status " + std::to_string(response.statusCode);
+				const NavigatorResourceClassificationInput input = resourceInputForHttpResponse(response);
+				setImageClassification(info, input,
+					"Remote image HTTP status " + std::to_string(response.statusCode));
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
 			if (response.body.size() > kRemoteImageMaxBytes) {
 				info.tooLarge = true;
 				info.status = gxos::gui::ImageLoadStatus::TooLarge;
-				info.message = "[image too large]";
-				info.errorDetail = "Remote image exceeds byte limit";
+				NavigatorResourceClassificationInput input;
+				input.httpFailure = NavigatorResourceHttpFailure::BodyTooLargeEncoded;
+				setImageClassification(info, input, "Remote image exceeds encoded byte limit.");
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
 			const std::string responseType = toLowerAscii(response.contentType);
 			const bool contentTypePng = responseType == "image/png";
 			const bool contentTypeJpeg = responseType == "image/jpeg" || responseType == "image/jpg";
-			const std::string finalUrl = response.finalUrl.empty() ? block.url : response.finalUrl;
-			const bool urlLooksPng = endsWithIgnoreCase(finalUrl, ".png");
-			const bool urlLooksJpeg = endsWithIgnoreCase(finalUrl, ".jpg") || endsWithIgnoreCase(finalUrl, ".jpeg");
-			const bool expectedJpeg = contentTypeJpeg || (!contentTypePng && urlLooksJpeg);
-			if (!contentTypePng && !contentTypeJpeg && !urlLooksPng && !urlLooksJpeg) {
-				info.unsupported = true;
-				info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
-				info.message = "[unsupported image]";
-				info.errorDetail = "Remote image MIME/extension is not PNG or JPEG";
+			const std::string finalUrl = info.responseUrl;
+			const NavigatorResourceImageFormat finalFormat = resourceImageFormat(finalUrl);
+			if (responseType.empty()) {
+				NavigatorResourceClassificationInput input;
+				input.mimeFailure = NavigatorResourceMimeFailure::ContentTypeMissing;
+				setImageClassification(info, input, "Remote image response did not include Content-Type.");
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
-			info.format = expectedJpeg ? "jpeg" : "png";
-			if ((expectedJpeg && !isJpegSignature(response.body)) ||
-				(!expectedJpeg && !isPngSignature(response.body))) {
+			if (responseType == "image/svg+xml") {
+				info.format = "svg";
+				NavigatorResourceClassificationInput input;
+				input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedSvg;
+				setImageClassification(info, input, "SVG image rendering is outside the current Navigator scope.");
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (responseType == "image/webp") {
+				info.format = "webp";
+				NavigatorResourceClassificationInput input;
+				input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedWebp;
+				setImageClassification(info, input, "WebP image decoding is outside the current Navigator scope.");
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (responseType == "image/avif") {
+				info.format = "avif";
+				NavigatorResourceClassificationInput input;
+				input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedAvif;
+				setImageClassification(info, input, "AVIF image decoding is outside the current Navigator scope.");
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (responseType == "image/gif") {
+				info.format = "gif";
+				NavigatorResourceClassificationInput input;
+				input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedGif;
+				setImageClassification(info, input, "GIF image decoding is outside the current Navigator scope.");
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (!contentTypePng && !contentTypeJpeg) {
+				NavigatorResourceClassificationInput input;
+				input.mimeFailure = responseType.rfind("image/", 0) == 0
+					? NavigatorResourceMimeFailure::UnsupportedOtherImage
+					: NavigatorResourceMimeFailure::UnsupportedMime;
+				setImageClassification(info, input, "Remote image MIME is not an existing supported PNG/JPEG type.");
 				info.unsupported = true;
 				info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
-				info.message = "[unsupported image]";
-				info.errorDetail = expectedJpeg
-					? "Remote image JPEG signature is invalid"
-					: "Remote image PNG signature is invalid";
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			const NavigatorResourceImageFormat mimeFormat = contentTypeJpeg
+				? NavigatorResourceImageFormat::Jpeg : NavigatorResourceImageFormat::Png;
+			info.format = mimeFormat == NavigatorResourceImageFormat::Jpeg ? "jpeg" : "png";
+			if (finalFormat == NavigatorResourceImageFormat::Png || finalFormat == NavigatorResourceImageFormat::Jpeg) {
+				if (finalFormat != mimeFormat) {
+					NavigatorResourceClassificationInput input;
+					input.mimeFailure = NavigatorResourceMimeFailure::MimeExtensionDisagreement;
+					setImageClassification(info, input, "Image MIME and URL extension disagree.");
+					info.unsupported = true;
+					info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
+					auto inserted = s_imageCache.emplace(key, std::move(info));
+					return inserted.first->second;
+				}
+			}
+			const bool signatureOk = mimeFormat == NavigatorResourceImageFormat::Jpeg
+				? isJpegSignature(response.body)
+				: isPngSignature(response.body);
+			if (!signatureOk) {
+				info.unsupported = true;
+				info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
+				NavigatorResourceClassificationInput input;
+				const bool oppositeSignature = mimeFormat == NavigatorResourceImageFormat::Jpeg
+					? isPngSignature(response.body)
+					: isJpegSignature(response.body);
+				if (oppositeSignature) {
+					input.mimeFailure = NavigatorResourceMimeFailure::ContentTypeMismatch;
+					setImageClassification(info, input, "Image bytes do not match the declared Content-Type.");
+				} else {
+					input.decodeFailure = NavigatorResourceDecodeFailure::CorruptImage;
+					setImageClassification(info, input, "Image signature is malformed.");
+				}
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			uint32_t headerWidth = 0;
+			uint32_t headerHeight = 0;
+			if (mimeFormat == NavigatorResourceImageFormat::Png) {
+				if (!pngHeaderDimensions(response.body, headerWidth, headerHeight)) {
+					NavigatorResourceClassificationInput input;
+					input.decodeFailure = NavigatorResourceDecodeFailure::CorruptImage;
+					setImageClassification(info, input, "PNG header is malformed.");
+					auto inserted = s_imageCache.emplace(key, std::move(info));
+					return inserted.first->second;
+				}
+			} else {
+				gxos::gui::JpegHeaderInfo jpegInfo{};
+				const gxos::gui::JpegProbeStatus probe = gxos::gui::InspectJpeg(
+					reinterpret_cast<const uint8_t*>(response.body.data()), response.body.size(), jpegInfo);
+				if (probe == gxos::gui::JpegProbeStatus::Malformed) {
+					NavigatorResourceClassificationInput input;
+					input.decodeFailure = NavigatorResourceDecodeFailure::CorruptImage;
+					setImageClassification(info, input, "JPEG structure is malformed.");
+					auto inserted = s_imageCache.emplace(key, std::move(info));
+					return inserted.first->second;
+				}
+				if (probe == gxos::gui::JpegProbeStatus::Unsupported) {
+					NavigatorResourceClassificationInput input;
+					input.decodeFailure = NavigatorResourceDecodeFailure::UnsupportedJpegVariant;
+					setImageClassification(info, input, "JPEG variant is outside the supported decoder subset.");
+					auto inserted = s_imageCache.emplace(key, std::move(info));
+					return inserted.first->second;
+				}
+				headerWidth = jpegInfo.width;
+				headerHeight = jpegInfo.height;
+			}
+			info.naturalW = static_cast<int>(headerWidth);
+			info.naturalH = static_cast<int>(headerHeight);
+			const uint64_t headerPixels = static_cast<uint64_t>(headerWidth) * headerHeight;
+			if (headerWidth > kRemoteImageMaxWidth || headerHeight > kRemoteImageMaxHeight) {
+				NavigatorResourceClassificationInput input;
+				input.decodeFailure = NavigatorResourceDecodeFailure::DimensionsTooLarge;
+				setImageClassification(info, input, "Image dimensions exceed the Navigator cap.");
+				info.tooLarge = true;
+				info.status = gxos::gui::ImageLoadStatus::TooLarge;
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (headerPixels > kRemoteImageMaxPixels || headerPixels * 4u > kRemoteImageMaxPixels * 4u) {
+				NavigatorResourceClassificationInput input;
+				input.decodeFailure = NavigatorResourceDecodeFailure::PixelBudgetExceeded;
+				setImageClassification(info, input, "Image decoded pixel budget is exceeded.");
+				info.tooLarge = true;
+				info.status = gxos::gui::ImageLoadStatus::TooLarge;
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
@@ -11923,28 +12380,48 @@ namespace {
 			gxos::gui::ImageBitmap decoded = gxos::gui::ImageAdapter::LoadFromBytes(
 				reinterpret_cast<const uint8_t*>(response.body.data()),
 				response.body.size(),
-				response.finalUrl.empty() ? block.url : response.finalUrl,
+				finalUrl,
 				remoteImageSafetyLimits());
 			info.status = decoded.status;
 			if (decoded.status == gxos::gui::ImageLoadStatus::Ok) {
-				const std::string tempPath = remoteImageTempPath(finalUrl, expectedJpeg);
+				const std::string tempPath = remoteImageTempPath(finalUrl,
+					mimeFormat == NavigatorResourceImageFormat::Jpeg);
 				if (writeBinaryTempFile(tempPath, response.body)) {
 					info.ok = true;
 					info.naturalW = decoded.width;
 					info.naturalH = decoded.height;
-					info.filePath = response.finalUrl.empty() ? block.url : response.finalUrl;
+					info.filePath = finalUrl;
 					info.drawPath = tempPath;
 					s_remoteImageTempFiles.push_back(tempPath);
+					NavigatorResourceClassificationInput input;
+					input.loaded = true;
+					input.imageFormat = mimeFormat;
+					setImageClassification(info, input, "Remote image loaded.");
 				} else {
 					info.status = gxos::gui::ImageLoadStatus::DecodeFailed;
-					info.message = "[image cache error]";
-					info.errorDetail = "Could not write remote image temp file";
+					NavigatorResourceClassificationInput input;
+					input.lifecycleFailure = NavigatorResourceLifecycleFailure::AttachmentFailed;
+					setImageClassification(info, input, "Could not attach remote image to the document.");
 				}
 			} else {
 				info.unsupported = decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat;
 				info.tooLarge = decoded.status == gxos::gui::ImageLoadStatus::TooLarge;
-				info.message = std::string("[") + gxos::gui::ImageLoadStatusName(decoded.status) + "]";
-				info.errorDetail = "Remote image decode failed: " + std::string(gxos::gui::ImageLoadStatusName(decoded.status));
+				NavigatorResourceClassificationInput input;
+				if (decoded.status == gxos::gui::ImageLoadStatus::TooLarge) {
+					input.decodeFailure = NavigatorResourceDecodeFailure::PixelBudgetExceeded;
+				} else if (decoded.status == gxos::gui::ImageLoadStatus::OutOfMemory) {
+					input.decodeFailure = NavigatorResourceDecodeFailure::AllocationFailed;
+				} else if (decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat) {
+					input.decodeFailure = mimeFormat == NavigatorResourceImageFormat::Jpeg
+						? NavigatorResourceDecodeFailure::UnsupportedJpegVariant
+						: NavigatorResourceDecodeFailure::CorruptImage;
+				} else {
+					input.decodeFailure = mimeFormat == NavigatorResourceImageFormat::Png
+						? NavigatorResourceDecodeFailure::PngDecodeFailed
+						: NavigatorResourceDecodeFailure::JpegDecodeFailed;
+				}
+				setImageClassification(info, input,
+					"Remote image decode failed: " + std::string(gxos::gui::ImageLoadStatusName(decoded.status)));
 			}
 
 			auto inserted = s_imageCache.emplace(key, std::move(info));
@@ -11954,8 +12431,9 @@ namespace {
 		if (block.url.rfind("file://", 0) != 0) {
 			info.unsupported = true;
 			info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
-			info.message = "[unsupported image]";
-			info.errorDetail = "Unsupported image URL scheme";
+			NavigatorResourceClassificationInput input;
+			input.policyFailure = NavigatorResourcePolicyFailure::UnsupportedScheme;
+			setImageClassification(info, input, "Unsupported image URL scheme.");
 			auto inserted = s_imageCache.emplace(key, std::move(info));
 			return inserted.first->second;
 		}
@@ -11965,8 +12443,9 @@ namespace {
 		if (!endsWithIgnoreCase(info.filePath, ".png") && !localJpeg) {
 			info.unsupported = true;
 			info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
-			info.message = "[unsupported image]";
-			info.errorDetail = "Local image is not a PNG or JPEG";
+			NavigatorResourceClassificationInput input;
+			input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedOtherImage;
+			setImageClassification(info, input, "Local image is not a PNG or JPEG.");
 			auto inserted = s_imageCache.emplace(key, std::move(info));
 			return inserted.first->second;
 		}
@@ -11974,17 +12453,20 @@ namespace {
 		BinaryReadResult br = readBinaryFile(info.filePath);
 		if (br.status == FileReadStatus::NotFound) {
 			info.status = gxos::gui::ImageLoadStatus::NotFound;
-			info.message = "[missing image]";
-			info.errorDetail = "Local image file not found";
+			NavigatorResourceClassificationInput input;
+			input.lifecycleFailure = NavigatorResourceLifecycleFailure::AttachmentFailed;
+			setImageClassification(info, input, "Local image file was not found.");
 		} else if (br.status == FileReadStatus::TooLarge) {
 			info.tooLarge = true;
 			info.status = gxos::gui::ImageLoadStatus::TooLarge;
-			info.message = "[image too large]";
-			info.errorDetail = "Local image exceeds byte limit";
+			NavigatorResourceClassificationInput input;
+			input.httpFailure = NavigatorResourceHttpFailure::BodyTooLargeEncoded;
+			setImageClassification(info, input, "Local image exceeds the encoded byte limit.");
 		} else if (br.status == FileReadStatus::IoError) {
 			info.status = gxos::gui::ImageLoadStatus::DecodeFailed;
-			info.message = "[image read error]";
-			info.errorDetail = "Local image read error";
+			NavigatorResourceClassificationInput input;
+			input.lifecycleFailure = NavigatorResourceLifecycleFailure::AttachmentFailed;
+			setImageClassification(info, input, "Local image read error.");
 		} else {
 			info.format = localJpeg ? "jpeg" : "png";
 			gxos::gui::ImageBitmap decoded = gxos::gui::ImageAdapter::LoadFromBytes(br.bytes, info.filePath);
@@ -11994,11 +12476,26 @@ namespace {
 				info.naturalW = decoded.width;
 				info.naturalH = decoded.height;
 				info.drawPath = imageLoaderPathForFile(info.filePath);
+				NavigatorResourceClassificationInput input;
+				input.loaded = true;
+				input.imageFormat = localJpeg ? NavigatorResourceImageFormat::Jpeg : NavigatorResourceImageFormat::Png;
+				setImageClassification(info, input, "Local image loaded.");
 			} else {
 				info.unsupported = decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat;
 				info.tooLarge = decoded.status == gxos::gui::ImageLoadStatus::TooLarge;
-				info.message = std::string("[") + gxos::gui::ImageLoadStatusName(decoded.status) + "]";
-				info.errorDetail = "Local image decode failed: " + std::string(gxos::gui::ImageLoadStatusName(decoded.status));
+				NavigatorResourceClassificationInput input;
+				if (decoded.status == gxos::gui::ImageLoadStatus::TooLarge)
+					input.decodeFailure = NavigatorResourceDecodeFailure::PixelBudgetExceeded;
+				else if (decoded.status == gxos::gui::ImageLoadStatus::OutOfMemory)
+					input.decodeFailure = NavigatorResourceDecodeFailure::AllocationFailed;
+				else if (decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat)
+					input.decodeFailure = localJpeg ? NavigatorResourceDecodeFailure::UnsupportedJpegVariant
+						: NavigatorResourceDecodeFailure::CorruptImage;
+				else
+					input.decodeFailure = localJpeg ? NavigatorResourceDecodeFailure::JpegDecodeFailed
+						: NavigatorResourceDecodeFailure::PngDecodeFailed;
+				setImageClassification(info, input,
+					"Local image decode failed: " + std::string(gxos::gui::ImageLoadStatusName(decoded.status)));
 			}
 		}
 
@@ -14496,6 +14993,60 @@ std::string Navigator::SmokePageDiagnostics()
 	out << "png_loaded=" << m.pngImageLoadCount << "\n";
 	out << "unsupported_image_count=" << m.unsupportedImageCount << "\n";
 	out << "unsupported_reason=" << m.unsupportedReason << "\n";
+	const NavigatorResourceAggregateCounters& c = m.resourceCounters;
+	out << "resource_total_references=" << c.totalResourceReferences << "\n";
+	out << "resource_attempted=" << c.attempted << "\n";
+	out << "resource_loaded=" << c.loaded << "\n";
+	out << "resource_failed=" << c.failed << "\n";
+	out << "resource_skipped=" << c.skipped << "\n";
+	out << "resource_png_references=" << c.pngReferences << "\n";
+	out << "resource_png_loads=" << c.pngLoads << "\n";
+	out << "resource_jpeg_references=" << c.jpegReferences << "\n";
+	out << "resource_jpeg_loads=" << c.jpegLoads << "\n";
+	out << "resource_svg_references=" << c.svgReferences << "\n";
+	out << "resource_svg_failures=" << c.svgFailures << "\n";
+	out << "resource_webp_references=" << c.webpReferences << "\n";
+	out << "resource_webp_failures=" << c.webpFailures << "\n";
+	out << "resource_avif_references=" << c.avifReferences << "\n";
+	out << "resource_avif_failures=" << c.avifFailures << "\n";
+	out << "resource_gif_references=" << c.gifReferences << "\n";
+	out << "resource_gif_failures=" << c.gifFailures << "\n";
+	out << "resource_redirects=" << c.redirects << "\n";
+	out << "resource_http_4xx=" << c.http4xx << "\n";
+	out << "resource_http_5xx=" << c.http5xx << "\n";
+	out << "resource_size_bound_failures=" << c.sizeBoundFailures << "\n";
+	out << "resource_decode_failures=" << c.decodeFailures << "\n";
+	out << "resource_network_tls_failures=" << c.networkTlsFailures << "\n";
+	out << "resource_unsupported_mime=" << c.unsupportedMime << "\n";
+	out << "resource_duplicate_skips=" << c.duplicateSkips << "\n";
+	out << "resource_limit_skips=" << c.resourceLimitSkips << "\n";
+	out << "resource_duplicate_urls=" << c.duplicateResourceUrls << "\n";
+	out << "resource_duplicate_network_fetches=" << c.duplicateNetworkFetches << "\n";
+	out << "resource_duplicate_decoded_images=" << c.duplicateDecodedImages << "\n";
+	out << "active_image_resources=" << m.activeImageResources << "\n";
+	out << "allocated_image_bytes_estimate=" << m.allocatedImageBytes << "\n";
+	out << "released_image_resources=" << m.releasedImageResources << "\n";
+	out << "released_image_bytes_estimate=" << m.releasedImageBytes << "\n";
+	for (size_t i = 0; i < m.resourceClassificationCounts.size(); ++i) {
+		if (m.resourceClassificationCounts[i] == 0) continue;
+		out << "resource_classification_" << navigatorResourceClassificationName(
+			static_cast<NavigatorResourceClassification>(i)) << "="
+			<< m.resourceClassificationCounts[i] << "\n";
+	}
+	for (const NavigatorResourceTelemetry& resource : m.resourceTelemetry) {
+		out << "resource[" << resource.ordinal << "].url_hash=" << resource.urlHash << "\n";
+		out << "resource[" << resource.ordinal << "].origin_host=" << resource.originHost << "\n";
+		out << "resource[" << resource.ordinal << "].same_origin=" << yesNo(resource.sameOrigin) << "\n";
+		out << "resource[" << resource.ordinal << "].status=" << resource.responseStatusCode << "\n";
+		out << "resource[" << resource.ordinal << "].content_type=" << resource.contentType << "\n";
+		out << "resource[" << resource.ordinal << "].content_encoding=" << resource.contentEncoding << "\n";
+		out << "resource[" << resource.ordinal << "].encoded_bytes=" << resource.encodedBodyBytes << "\n";
+		out << "resource[" << resource.ordinal << "].decoded_bytes=" << resource.decodedBodyBytes << "\n";
+		out << "resource[" << resource.ordinal << "].dimensions=" << resource.imageWidth << "x" << resource.imageHeight << "\n";
+		out << "resource[" << resource.ordinal << "].redirects=" << resource.redirectCount << "\n";
+		out << "resource[" << resource.ordinal << "].classification=" << navigatorResourceClassificationName(resource.classification) << "\n";
+		out << "resource[" << resource.ordinal << "].reason=" << resource.reason << "\n";
+	}
 	return out.str();
 }
 
@@ -18808,10 +19359,10 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	if (s_windowId != 0) {
 		navigatorSmokeProgress("pre-load-paint-start");
 		updateDisplay(false);
-		navigatorSmokeProgress("pre-load-paint-complete");
+	navigatorSmokeProgress("pre-load-paint-complete");
 	}
 	cleanupRemoteImageTempFiles();
-	s_imageCache.clear();
+	releaseCachedImages();
 	s_remoteImageFetchCount = 0;
 	// clearDocumentFocus() above is the complete replacement boundary.  Do not
 	// call blurDocumentInput() here: its recomputation guard intentionally
@@ -19181,6 +19732,32 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("JPEG loaded", m.jpegImageLoadCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("PNG loaded", m.pngImageLoadCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last image error", m.lastImageError), ""});
+	doc.blocks.push_back({BlockType::Heading, "Navigator Resource Reliability", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Resource references", m.resourceCounters.totalResourceReferences), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Resource attempted", m.resourceCounters.attempted), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Resource loaded", m.resourceCounters.loaded), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Resource failed", m.resourceCounters.failed), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Resource skipped", m.resourceCounters.skipped), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("PNG references/loads", std::to_string(m.resourceCounters.pngReferences) + "/" + std::to_string(m.resourceCounters.pngLoads)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("JPEG references/loads", std::to_string(m.resourceCounters.jpegReferences) + "/" + std::to_string(m.resourceCounters.jpegLoads)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("SVG references/failures", std::to_string(m.resourceCounters.svgReferences) + "/" + std::to_string(m.resourceCounters.svgFailures)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("WebP references/failures", std::to_string(m.resourceCounters.webpReferences) + "/" + std::to_string(m.resourceCounters.webpFailures)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("AVIF references/failures", std::to_string(m.resourceCounters.avifReferences) + "/" + std::to_string(m.resourceCounters.avifFailures)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("GIF references/failures", std::to_string(m.resourceCounters.gifReferences) + "/" + std::to_string(m.resourceCounters.gifFailures)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirects", m.resourceCounters.redirects), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP 4xx/5xx", std::to_string(m.resourceCounters.http4xx) + "/" + std::to_string(m.resourceCounters.http5xx)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Size-bound failures", m.resourceCounters.sizeBoundFailures), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Decode failures", m.resourceCounters.decodeFailures), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Network/TLS failures", m.resourceCounters.networkTlsFailures), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported MIME", m.resourceCounters.unsupportedMime), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Duplicate skips", m.resourceCounters.duplicateSkips), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Resource-limit skips", m.resourceCounters.resourceLimitSkips), ""});
+	for (size_t i = 0; i < m.resourceClassificationCounts.size(); ++i) {
+		if (m.resourceClassificationCounts[i] == 0) continue;
+		doc.blocks.push_back({BlockType::ListItem,
+			pageInfoLine(navigatorResourceClassificationName(
+				static_cast<NavigatorResourceClassification>(i)), m.resourceClassificationCounts[i]), ""});
+	}
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS detected", yesNo(m.cssDetected)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS enabled", yesNo(m.cssEnabled)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS rules parsed", m.styleRuleCount), ""});

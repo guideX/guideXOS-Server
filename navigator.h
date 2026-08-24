@@ -2,6 +2,7 @@
 
 #include "process.h"
 #include "guide_web_document.h"   // BlockType, DocBlock, WebDocument (gxos::web)
+#include "navigator_resource_diagnostics.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -42,6 +43,58 @@ struct DownloadItem {
 	size_t      byteCount = 0;
 	bool        success = false;
 	std::string error;
+};
+
+// One bounded record is retained per image reference in the current document.
+// URLs are represented by a short hash in the public diagnostics surface; the
+// resource cache still owns the full URL for the duration of the document.
+struct NavigatorResourceTelemetry {
+	int         ordinal = 0;
+	std::string urlHash;
+	std::string originHost;
+	bool        sameOrigin = false;
+	int         responseStatusCode = 0;
+	std::string contentType;
+	std::string contentEncoding;
+	size_t      encodedBodyBytes = 0;
+	size_t      decodedBodyBytes = 0;
+	uint32_t    imageWidth = 0;
+	uint32_t    imageHeight = 0;
+	int         redirectCount = 0;
+	NavigatorResourceClassification classification = NavigatorResourceClassification::OtherFailure;
+	std::string reason;
+};
+
+struct NavigatorResourceAggregateCounters {
+	int totalResourceReferences = 0;
+	int attempted = 0;
+	int loaded = 0;
+	int failed = 0;
+	int skipped = 0;
+	int pngReferences = 0;
+	int pngLoads = 0;
+	int jpegReferences = 0;
+	int jpegLoads = 0;
+	int svgReferences = 0;
+	int svgFailures = 0;
+	int webpReferences = 0;
+	int webpFailures = 0;
+	int avifReferences = 0;
+	int avifFailures = 0;
+	int gifReferences = 0;
+	int gifFailures = 0;
+	int redirects = 0;
+	int http4xx = 0;
+	int http5xx = 0;
+	int sizeBoundFailures = 0;
+	int decodeFailures = 0;
+	int networkTlsFailures = 0;
+	int unsupportedMime = 0;
+	int duplicateSkips = 0;
+	int resourceLimitSkips = 0;
+	int duplicateResourceUrls = 0;
+	int duplicateNetworkFetches = 0;
+	int duplicateDecodedImages = 0;
 };
 
 struct NavigatorPageMetadata {
@@ -114,6 +167,13 @@ struct NavigatorPageMetadata {
 		int         pngImageLoadCount = 0;
 		int         unsupportedImageCount = 0;
 		std::string lastImageError;
+		NavigatorResourceAggregateCounters resourceCounters;
+		std::vector<NavigatorResourceTelemetry> resourceTelemetry;
+		std::array<int, 64> resourceClassificationCounts{};
+		size_t activeImageResources = 0;
+		size_t releasedImageResources = 0;
+		size_t allocatedImageBytes = 0;
+		size_t releasedImageBytes = 0;
 		bool        cssEnabled = false;
 		bool        cssDetected = false;
 		int         styleRuleCount = 0;

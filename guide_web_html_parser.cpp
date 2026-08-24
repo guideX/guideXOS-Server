@@ -30,6 +30,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace gxos {
 namespace web {
@@ -7272,27 +7273,77 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 		if (scheme) return href;
 	}
 
-	// Root-relative: preserve the HTTP(S) origin, or use the existing file:// rule.
-	if (href[0] == '/') {
-		if (base.rfind("http://", 0) == 0 || base.rfind("https://", 0) == 0) {
-			size_t authorityStart = base.find("://") + 3;
-			size_t authorityEnd = base.find('/', authorityStart);
-			if (authorityEnd == std::string::npos) return base + href;
-			return base.substr(0, authorityEnd) + href;
-		}
-		return "file://" + href;
-	}
-
 	// Fragment-only ("#...") – stay on the same page.
 	if (href[0] == '#') return base;
 
-	// Relative: strip the last path segment from base, append href.
-	// base looks like "file:///docs/index.html" or "http://host/docs/index.html"
-	size_t end = base.find_first_of("?#");
-	std::string baseNoQuery = end == std::string::npos ? base : base.substr(0, end);
-	size_t lastSlash = baseNoQuery.rfind('/');
-	if (lastSlash == std::string::npos) return "file:///" + href;
-	return baseNoQuery.substr(0, lastSlash + 1) + href;
+	const bool httpBase = base.rfind("http://", 0) == 0 || base.rfind("https://", 0) == 0;
+	const size_t schemeEnd = base.find("://");
+	const size_t authorityStart = schemeEnd == std::string::npos ? 0 : schemeEnd + 3;
+	const size_t pathStart = httpBase ? base.find('/', authorityStart) : base.find('/', authorityStart);
+	const std::string origin = httpBase
+		? (pathStart == std::string::npos ? base : base.substr(0, pathStart))
+		: std::string();
+
+	// Protocol-relative references select their own authority.  The old path
+	// accidentally appended them to the current host (https://host//cdn...).
+	if (href.rfind("//", 0) == 0) {
+		if (schemeEnd != std::string::npos) return base.substr(0, schemeEnd + 1) + href;
+		return href;
+	}
+
+	const size_t hrefQuery = href.find('?');
+	const size_t hrefFragment = href.find('#');
+	const size_t hrefPathEnd = std::min(hrefQuery == std::string::npos ? href.size() : hrefQuery,
+		hrefFragment == std::string::npos ? href.size() : hrefFragment);
+	const std::string hrefPath = href.substr(0, hrefPathEnd);
+	const std::string hrefSuffix = href.substr(hrefPathEnd);
+	const std::string baseNoQuery = base.substr(0, base.find_first_of("?#"));
+	const size_t basePathStart = httpBase
+		? (baseNoQuery.find('/', authorityStart) == std::string::npos
+			? baseNoQuery.size() : baseNoQuery.find('/', authorityStart))
+		: baseNoQuery.find('/', authorityStart);
+	const std::string basePath = basePathStart == std::string::npos || basePathStart >= baseNoQuery.size()
+		? std::string("/") : baseNoQuery.substr(basePathStart);
+
+	auto normalizePath = [](const std::string& path) {
+			std::vector<std::string> parts;
+			size_t start = 0;
+			while (start <= path.size()) {
+				size_t slash = path.find('/', start);
+				if (slash == std::string::npos) slash = path.size();
+				const std::string part = path.substr(start, slash - start);
+				if (part.empty() || part == ".") {
+					// Empty path components are normalized away except for the
+					// leading/trailing slash represented outside this list.
+				} else if (part == "..") {
+					if (!parts.empty()) parts.pop_back();
+				} else {
+					parts.push_back(part);
+				}
+				if (slash == path.size()) break;
+				start = slash + 1;
+			}
+			std::string result = "/";
+			for (size_t i = 0; i < parts.size(); ++i) {
+				if (i != 0) result += "/";
+				result += parts[i];
+			}
+			if (path.size() > 1 && path.back() == '/') result += "/";
+			return result;
+		};
+
+	if (!hrefPath.empty() && hrefPath[0] == '/') {
+		const std::string normalized = normalizePath(hrefPath);
+		return httpBase ? origin + normalized + hrefSuffix : "file://" + normalized + hrefSuffix;
+	}
+	if (hrefPath.empty()) {
+		return (httpBase ? origin : baseNoQuery.substr(0, basePathStart)) + basePath + hrefSuffix;
+	}
+
+	const size_t lastSlash = basePath.rfind('/');
+	const std::string baseDirectory = lastSlash == std::string::npos ? "/" : basePath.substr(0, lastSlash + 1);
+	const std::string normalized = normalizePath(baseDirectory + hrefPath);
+	return (httpBase ? origin : baseNoQuery.substr(0, basePathStart)) + normalized + hrefSuffix;
 }
 
 void recomputeDocumentStyles(WebDocument& document)

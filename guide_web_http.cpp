@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -242,13 +243,44 @@ static std::string resolveHttpReference(const std::string& baseUrl, const std::s
 	ParsedHttpUrl base = parseHttpUrl(baseUrl);
 	if (!base.valid) return ref;
 	if (ref.rfind("//", 0) == 0) return base.scheme + ":" + ref;
-	if (ref[0] == '/') return base.origin() + ref;
 	if (ref[0] == '#') return baseUrl;
 
+	const size_t query = ref.find('?');
+	const size_t fragment = ref.find('#');
+	const size_t pathEnd = std::min(query == std::string::npos ? ref.size() : query,
+		fragment == std::string::npos ? ref.size() : fragment);
+	const std::string refPath = ref.substr(0, pathEnd);
+	const std::string suffix = ref.substr(pathEnd);
+	const auto normalizePath = [](const std::string& path) {
+		std::vector<std::string> parts;
+		size_t start = 0;
+		while (start <= path.size()) {
+			size_t slash = path.find('/', start);
+			if (slash == std::string::npos) slash = path.size();
+			const std::string part = path.substr(start, slash - start);
+			if (part.empty() || part == ".") {
+			} else if (part == "..") {
+				if (!parts.empty()) parts.pop_back();
+			} else {
+				parts.push_back(part);
+			}
+			if (slash == path.size()) break;
+			start = slash + 1;
+		}
+		std::string result = "/";
+		for (size_t i = 0; i < parts.size(); ++i) {
+			if (i != 0) result += "/";
+			result += parts[i];
+		}
+		if (path.size() > 1 && path.back() == '/') result += "/";
+		return result;
+	};
+	if (!refPath.empty() && refPath[0] == '/') return base.origin() + normalizePath(refPath) + suffix;
+	if (refPath.empty()) return base.origin() + (base.path.empty() ? "/" : base.path) + suffix;
 	std::string path = base.path.empty() ? "/" : base.path;
 	size_t slash = path.rfind('/');
 	std::string dir = slash == std::string::npos ? "/" : path.substr(0, slash + 1);
-	return base.origin() + dir + ref;
+	return base.origin() + normalizePath(dir + refPath) + suffix;
 }
 
 static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
@@ -316,6 +348,7 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 		response.contentLength = static_cast<size_t>(contentLength);
 		if (response.contentLength > kHttpMaxBodyBytes) {
 			response.bodyCapHit = true;
+			response.encodedBodyBytes = response.body.size();
 			setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 			return false;
 		}
@@ -338,6 +371,7 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 			if (!decodeChunkedBody(response.body, decoded, chunkError)) {
 				if (chunkError.find("safety limit") != std::string::npos) {
 					response.bodyCapHit = true;
+					response.encodedBodyBytes = response.body.size();
 				}
 				setError(response, chunkError.find("safety limit") != std::string::npos
 					? HttpError::BodyTooLarge
@@ -1776,10 +1810,13 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 					}
 					expectedBodyBytes = static_cast<size_t>(length);
 					contentLengthKnown = !rawChunked;
+					response.contentLengthPresent = true;
+					response.contentLength = expectedBodyBytes;
 					if (expectedBodyBytes > kHttpMaxBodyBytes) {
 						if (activeTls) copyTlsDiagnostics(response, *activeTls);
 						stream.close(stream.context);
 						response.bodyCapHit = true;
+						response.encodedBodyBytes = raw.size() > headerBytes ? raw.size() - headerBytes : 0;
 						setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 						return response;
 					}
@@ -1798,6 +1835,7 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 			if (activeTls) copyTlsDiagnostics(response, *activeTls);
 			stream.close(stream.context);
 			response.bodyCapHit = true;
+			response.encodedBodyBytes = raw.size() > headerBytes ? raw.size() - headerBytes : 0;
 			setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 			return response;
 		}
