@@ -94,6 +94,8 @@ $fileExplorerHeader = Join-Path $Root "file_explorer.h"
 $imageViewer = Join-Path $Root "image_viewer.cpp"
 $taskManager = Join-Path $Root "task_manager.cpp"
 $compositor = Join-Path $Root "compositor.cpp"
+$kernelApps = Join-Path $Root "kernel\core\kernel_apps.cpp"
+$kernelCompositor = Join-Path $Root "kernel\core\kernel_compositor.cpp"
 $windowRenderer = Join-Path $Root "window_renderer.h"
 $planDoc = Join-Path $Root "docs\theme-system-plan.md"
 $smokeScriptPath = $MyInvocation.MyCommand.Path
@@ -304,6 +306,11 @@ $calculatorThemeHelperMatch = Find-FirstMatch $calculator 'CalculatorBodyColor|C
 $calculatorWidgetGuardMatch = Find-RawMatch $compositor 'static uint32_t calculatorWidgetFillColor\(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme\)\s*\{\s*if \(!isCalculatorWindow\(winfo\) \|\| theme\.id != DesktopThemeId::SciFi\) \{\s*return calculatorClassicWidgetFillColor\(widget\);'
 $calculatorThemeFieldMatch = Find-FirstMatch $calculator 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText|windowPadding|titleBarHeight'
 $calculatorPerEffectMatch = Find-FirstMatch $calculator 'Visual Effects|per-effect'
+$phase8aHeadingMatch = Find-FirstMatch $planDoc '## Phase 8A — Bare-Metal Core Application Surface Consistency'
+$kernelNotepadThemeMatch = Find-FirstMatch $kernelApps 'kernelNotepadEditorColor|kernelNotepadSelectionColor|kernelNotepadCaretColor|kernelNotepadMenuSurfaceColor|kernelSciFiThemeActive'
+$kernelCalculatorThemeMatch = Find-FirstMatch $kernelApps 'kernelCalculatorBodyColor|kernelCalculatorDisplayColor|kernelCalculatorDisplayBorderColor|kernelCalculatorDisplayTextColor|kernelSciFiThemeActive'
+$kernelCalculatorWidgetGuardMatch = Find-RawMatch $kernelCompositor 'calculatorWindow.*sciFiTheme|window->owner->getName().*Calculator'
+$phase8aClassicBoundaryMatch = Find-RawMatch $planDoc 'Classic branches retain the prior literal Calculator and Notepad client colors.*?No Calculator or Notepad window/client bounds.*?expected geometry result is \*\*no change\*\*'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -496,6 +503,11 @@ $checks = @(
     [pscustomobject]@{ Name = "calculator theme helpers wired"; Pass = $null -ne $calculatorThemeHelperMatch -or $null -ne $calculatorThemeFieldMatch; Match = $(if ($null -ne $calculatorThemeHelperMatch) { $calculatorThemeHelperMatch } else { $calculatorThemeFieldMatch }) },
     [pscustomobject]@{ Name = "calculator widget sci fi guard narrow"; Pass = $null -ne $calculatorWidgetGuardMatch; Match = $calculatorWidgetGuardMatch },
     [pscustomobject]@{ Name = "calculator no per-effect controls"; Pass = $null -eq $calculatorPerEffectMatch; Match = $calculatorPerEffectMatch },
+    [pscustomobject]@{ Name = "phase 8a docs heading"; Pass = $null -ne $phase8aHeadingMatch; Match = $phase8aHeadingMatch },
+    [pscustomobject]@{ Name = "phase 8a bare-metal Notepad theme path wired"; Pass = $null -ne $kernelNotepadThemeMatch; Match = $kernelNotepadThemeMatch },
+    [pscustomobject]@{ Name = "phase 8a bare-metal Calculator theme path wired"; Pass = $null -ne $kernelCalculatorThemeMatch; Match = $kernelCalculatorThemeMatch },
+    [pscustomobject]@{ Name = "phase 8a Calculator widget guard scoped"; Pass = $null -ne $kernelCalculatorWidgetGuardMatch; Match = $kernelCalculatorWidgetGuardMatch },
+    [pscustomobject]@{ Name = "phase 8a Classic and geometry boundaries documented"; Pass = $null -ne $phase8aClassicBoundaryMatch; Match = $phase8aClassicBoundaryMatch },
     [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
 )
 

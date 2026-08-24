@@ -882,7 +882,7 @@ void KernelCompositor::drawWindow(app::KernelWindow* window) {
     for (int i = 0; i < window->widgetCount; i++) {
         app::Widget* widget = &window->widgets[i];
         if (widget->visible) {
-            drawWidget(widget, x, clientY);
+            drawWidget(window, widget, x, clientY);
         }
     }
     
@@ -1021,30 +1021,84 @@ void KernelCompositor::drawTitlebar(app::KernelWindow* window) {
     hline(minBtnX + 4, btnY + BUTTON_SIZE - 5, 8, iconColor);
 }
 
-void KernelCompositor::drawWidget(app::Widget* widget, uint32_t winX, uint32_t winY) {
+static bool kernelCompositorTextEquals(const char* left, const char* right)
+{
+    if (!left || !right) return false;
+    while (*left && *right) {
+        if (*left != *right) return false;
+        ++left;
+        ++right;
+    }
+    return *left == '\0' && *right == '\0';
+}
+
+void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget, uint32_t winX, uint32_t winY) {
     if (!widget || !widget->visible) return;
     
     uint32_t x = winX + widget->x;
     uint32_t y = winY + widget->y;
     uint32_t w = (uint32_t)widget->w;
     uint32_t h = (uint32_t)widget->h;
-    
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const bool calculatorWindow = window && window->owner &&
+        kernelCompositorTextEquals(window->owner->getName(), "Calculator");
+
     switch (widget->type) {
         case app::WidgetType::Label:
-            drawText(x, y + (h - kGlyphH) / 2, widget->text, widget->fgColor);
+            drawText(x, y + (h - kGlyphH) / 2, widget->text,
+                     calculatorWindow && sciFiTheme ? theme.titleBarText : widget->fgColor);
             break;
             
         case app::WidgetType::Button: {
             uint32_t bgColor = widget->pressed ? rgb(70, 100, 150) :
                                widget->hover ? rgb(60, 80, 120) : widget->bgColor;
+            uint32_t borderColor = rgb(80, 100, 140);
+            uint32_t textColor = widget->fgColor;
+            if (calculatorWindow && sciFiTheme) {
+                const bool operatorButton = kernelCompositorTextEquals(widget->text, "+") ||
+                    kernelCompositorTextEquals(widget->text, "-") ||
+                    kernelCompositorTextEquals(widget->text, "*") ||
+                    kernelCompositorTextEquals(widget->text, "/");
+                const bool equalsButton = kernelCompositorTextEquals(widget->text, "=");
+                const bool clearButton = kernelCompositorTextEquals(widget->text, "C") ||
+                    kernelCompositorTextEquals(widget->text, "CE");
+
+                uint32_t baseColor = BlendDesktopThemeColor(
+                    theme.windowBackground, theme.taskbarBackground, 20);
+                if (operatorButton) {
+                    baseColor = BlendDesktopThemeColor(theme.windowBorder, theme.accent, 22);
+                } else if (equalsButton) {
+                    baseColor = BlendDesktopThemeColor(theme.accent, theme.windowBackground, 20);
+                } else if (clearButton) {
+                    baseColor = BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBorder, 20);
+                }
+
+                bgColor = widget->pressed
+                    ? BlendDesktopThemeColor(baseColor, theme.accent, 24)
+                    : (widget->hover
+                        ? BlendDesktopThemeColor(baseColor, theme.mutedAccent, 16)
+                        : baseColor);
+                borderColor = operatorButton || equalsButton
+                    ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 36)
+                    : (clearButton
+                        ? BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 30)
+                        : BlendDesktopThemeColor(theme.windowBorder, theme.taskbarBorder, 20));
+                if (widget->pressed) {
+                    borderColor = BlendDesktopThemeColor(borderColor, theme.accent, 20);
+                } else if (widget->hover) {
+                    borderColor = BlendDesktopThemeColor(borderColor, theme.titleBarText, 12);
+                }
+                textColor = theme.titleBarText;
+            }
             fillRect(x, y, w, h, bgColor);
-            drawRect(x, y, w, h, rgb(80, 100, 140));
+            drawRect(x, y, w, h, borderColor);
             if (widget->iconPixels && widget->iconWidth > 0 && widget->iconHeight > 0) {
                 gxos::gui::ImageBitmap icon{gxos::gui::ImageLoadStatus::Ok, widget->iconPixels, widget->iconWidth, widget->iconHeight};
                 gxos::gui::ImageAdapter::DrawToFramebuffer(icon, x + 4, y + (h - 16) / 2, 16, 16);
-                drawText(x + 24, y + (h - kGlyphH) / 2, widget->text, widget->fgColor);
+                drawText(x + 24, y + (h - kGlyphH) / 2, widget->text, textColor);
             } else {
-                drawTextCentered(x, y, w, h, widget->text, widget->fgColor);
+                drawTextCentered(x, y, w, h, widget->text, textColor);
             }
             break;
         }

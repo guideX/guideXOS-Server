@@ -1019,6 +1019,36 @@ The safe interaction proof confirmed context-menu opening/hover and dismissal, S
 
 Phase 7D closes the small shell-owned context-menu, notification-toast, and shutdown-dialog styling gap. Remaining relevant gaps are the explicitly excluded application-owned/large dialogs and broader application surfaces, plus generic-control parity, icons, fonts, wallpaper ownership, multi-monitor behavior, blur/glass, animations, rounded clipping, and rounded hit testing. These remain separate future work and are not claimed as generic dialog/control parity.
 
+## Phase 8A — Bare-Metal Core Application Surface Consistency
+
+Phase 8A applies the established Sci-Fi palette to the two small bare-metal application interiors that are most visible beside the Phase 7 shell and window chrome: Calculator and Notepad. This is a styling/parity pass only. Classic remains the default and fallback, and no generic control-system rewrite or Phase 8B work is included.
+
+### Bare-Metal Application Architecture
+
+The affected bare-metal applications are kernel-owned `CalculatorApp` and `NotepadApp` in `kernel/core/kernel_apps.cpp`. Their framebuffer paint paths are called from the existing `KernelCompositor::drawWindow()` path in `kernel/core/kernel_compositor.cpp`. The same compositor owns widget paint, window hit testing, mouse routing, keyboard routing, and application focus/lifecycle dispatch. The root `calculator.cpp` and `notepad.cpp` files are hosted IPC clients with an already-validated hosted Sci-Fi path; they were not restyled or refactored in Phase 8A.
+
+Calculator keeps its existing window geometry, display bounds, button layout, button labels, manual framebuffer result glyphs, and application input/arithmetic paths. Its bare-metal Sci-Fi branch uses the shared `DesktopTheme` and integer `BlendDesktopThemeColor()` relationship for the client body, display surface/border, result text, and display punctuation. The compositor's existing widget primitive is guarded narrowly by the Calculator window name and Sci-Fi theme ID. Numeric buttons stay neutral; operators, equals, and clear retain distinct accent/semantic relationships; hover and pressed states are blends of the same local roles. No global button styling change was made.
+
+Notepad keeps its existing editor origin and dimensions, fixed font and text measurement, menu geometry, context-menu geometry, caret width, selection behavior, keyboard routing, scrolling, and document/file semantics. Its bare-metal Sci-Fi branch themes the client/editor surface, editor border, normal text, caret, select-all selection fill, menu bar, menu items, hover states, context menu, and existing shadow relationship. The bare-metal implementation has no locally drawn status bar or scrollbar surface to theme. Open/Save dialog styling remains excluded as an application-owned dialog boundary.
+
+### Classic Preservation, Behavior, and Geometry Freeze
+
+Classic branches retain the prior literal Calculator and Notepad client colors and the prior generic widget colors. The Sci-Fi selection is made through `GetCurrentDesktopTheme()` / `GetCurrentDesktopThemeId()` and `DesktopThemeId::SciFi`; no CalculatorTheme, NotepadTheme, application registry, bare-metal color table, hosted dependency, or second palette was introduced.
+
+No Calculator or Notepad window/client bounds, display/button/editor/menu/status bounds, button dimensions, editor/text coordinates, spacing, hit regions, focus routing, keyboard shortcuts, arithmetic, clear behavior, caret movement, selection semantics, clipboard behavior, scrolling, dirty-state handling, line endings, encoding, or close/reopen behavior changed. The expected geometry result is **no change**. Existing bare-metal Notepad selection remains the existing select-all path; Phase 8A does not invent range-selection behavior.
+
+### Performance and Portability Boundary
+
+The paint changes add no allocations, large buffers, filesystem access, GDI/Win32 dependency, floating-point effect, blur, glow, shadow system, animation, rounded clipping, or architecture-specific rendering behavior. They use the existing framebuffer primitives, shared theme fields, and integer blending helper. Generic buttons, text boxes, scrollbars, lists, menus, icons, fonts, File Explorer, and larger application interiors remain outside Phase 8A.
+
+### Phase 8A Validation Record
+
+The exact workspace passed `build.bat`, `mingw32-make -C kernel ARCH=amd64 -j2`, and `build.ps1 -Arch amd64`. The Phase 8A theme smoke, live-directory desktop-status smoke, hosted display-runtime smoke, desktop-startup-sync smoke, bootinfo/framebuffer-array smoke, virtio-GPU input-routing smoke, and `git diff --check` passed. `smoke-appmodel-launchshadow.ps1` remains limited by the known child-Windows-PowerShell `Get-FileHash` harness issue in `build-pacman-package.ps1`; no unrelated theme code was changed for it.
+
+Classic was booted from the exact AMD64 image with the Classic configuration. Calculator rendered with its original client appearance, accepted mouse-targeted input, and completed `2 + 2` with a visible result of `4`; the Classic Calculator proof is retained in `logs/phase8a-qemu/classic-calculator-2plus2-final.png`. Classic Notepad was launched and its original editor surface remained readable in `logs/phase8a-qemu/classic-notepad.png`. The Sci-Fi configuration was then booted from the same exact image. The Sci-Fi desktop and taskbar rendered correctly, and the Calculator client visibly used the Sci-Fi body, display, display border, button grouping, and accent relationships in `logs/phase8a-qemu/scifi-calculator-shell.png`.
+
+The QEMU shell-overlay/input path prevented a clean second-window capture and prevented completing the requested Sci-Fi Notepad typing, selection, caret, and combined Calculator/Notepad screenshot proof. Source inspection and exact builds confirm that Notepad's existing text, caret, and select-all paths now consume the Sci-Fi editor, text, caret, and selection colors while Classic remains unchanged. No behavior or geometry was changed to work around the proof limitation. Classic and Sci-Fi configuration selection were both boot-tested; tracked configuration was restored afterward. File Explorer and generic controls remain outside Phase 8A.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.

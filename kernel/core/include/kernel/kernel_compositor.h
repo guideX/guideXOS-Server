@@ -134,7 +134,7 @@ public:
     static void drawAllWindows();
     static void drawWindow(app::KernelWindow* window);
     static void drawTitlebar(app::KernelWindow* window);
-    static void drawWidget(app::Widget* widget, uint32_t winX, uint32_t winY);
+    static void drawWidget(app::KernelWindow* window, app::Widget* widget, uint32_t winX, uint32_t winY);
     
     // Check if any windows are open
     static bool hasWindows();

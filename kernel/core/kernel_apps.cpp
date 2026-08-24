@@ -27,6 +27,7 @@
 #include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
+#include "../../desktop_theme.h"
 
 #include <string.h>
 
@@ -194,6 +195,132 @@ static bool endsWithIgnoreCaseLocal(const char* value, const char* suffix) {
 
 static uint32_t rgb(uint8_t r, uint8_t g, uint8_t b) {
     return 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+static bool kernelSciFiThemeActive()
+{
+    return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+}
+
+static uint32_t kernelThemeBlend(uint32_t base, uint32_t overlay, int overlayPercent)
+{
+    return BlendDesktopThemeColor(base, overlay, overlayPercent);
+}
+
+static uint32_t kernelNotepadMenuSurfaceColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(240, 240, 245);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 28);
+}
+
+static uint32_t kernelNotepadMenuBorderColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(160, 160, 170);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.accent, 28);
+}
+
+static uint32_t kernelNotepadMenuHoverColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(45, 95, 180);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.accent, 34);
+}
+
+static uint32_t kernelNotepadMenuTextColor(bool hovered)
+{
+    if (!kernelSciFiThemeActive()) return hovered ? rgb(255, 255, 255) : rgb(0, 0, 0);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return hovered ? theme.titleBarText : kernelThemeBlend(theme.titleBarText, theme.windowBackground, 18);
+}
+
+static uint32_t kernelNotepadMenuBarColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(50, 50, 60);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 18);
+}
+
+static uint32_t kernelNotepadMenuBarSeparatorColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(70, 70, 80);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.accent, 24);
+}
+
+static uint32_t kernelNotepadMenuItemTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(220, 220, 230);
+    return GetCurrentDesktopTheme().titleBarText;
+}
+
+static uint32_t kernelNotepadEditorColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(45, 45, 55);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 8);
+}
+
+static uint32_t kernelNotepadEditorBorderColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(45, 45, 55);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.taskbarBorder, 28);
+}
+
+static uint32_t kernelNotepadTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(220, 220, 235);
+    return GetCurrentDesktopTheme().titleBarText;
+}
+
+static uint32_t kernelNotepadCaretColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(200, 200, 220);
+    return GetCurrentDesktopTheme().accent;
+}
+
+static uint32_t kernelNotepadSelectionColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(42, 91, 154);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const uint32_t editor = kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 8);
+    return kernelThemeBlend(editor, theme.accent, 48);
+}
+
+static uint32_t kernelNotepadContextShadowColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(100, 100, 110);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.desktopBackground, theme.windowBackground, 36);
+}
+
+static uint32_t kernelCalculatorBodyColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(34, 34, 34);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 12);
+}
+
+static uint32_t kernelCalculatorDisplayColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(30, 35, 45);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 8);
+}
+
+static uint32_t kernelCalculatorDisplayBorderColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(60, 70, 90);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    return kernelThemeBlend(theme.windowBorder, theme.accent, 28);
+}
+
+static uint32_t kernelCalculatorDisplayTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(200, 220, 255);
+    return GetCurrentDesktopTheme().titleBarText;
 }
 
 static uint32_t css_color_or(uint32_t fallback, const gxos::web::WebStyle& style) {
@@ -1044,18 +1171,29 @@ void NotepadApp::shutdown() {
 }
 
 void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    const bool sciFiTheme = kernelSciFiThemeActive();
+
+    if (sciFiTheme) {
+        const DesktopTheme& theme = GetCurrentDesktopTheme();
+        framebuffer::fill_rect(x, y, w, h,
+                               kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 14));
+    }
+
     // Draw menu bar background
-    framebuffer::fill_rect(x, y, w, MENU_BAR_HEIGHT, rgb(50, 50, 60));
+    framebuffer::fill_rect(x, y, w, MENU_BAR_HEIGHT, kernelNotepadMenuBarColor());
     drawMenuBar(x, y, w);
     
     // Text editor background
     uint32_t textAreaY = y + MENU_BAR_HEIGHT;
     uint32_t textAreaH = h - MENU_BAR_HEIGHT;
-    framebuffer::fill_rect(x + 4, textAreaY + 4, w - 8, textAreaH - 8, rgb(45, 45, 55));
+    framebuffer::fill_rect(x + 4, textAreaY + 4, w - 8, textAreaH - 8, kernelNotepadEditorColor());
     
     // Select-all highlight
     if (m_selectAll && m_textLength > 0) {
-        framebuffer::fill_rect(x + 4, textAreaY + 4, w - 8, textAreaH - 8, rgb(42, 91, 154));
+        framebuffer::fill_rect(x + 4, textAreaY + 4, w - 8, textAreaH - 8, kernelNotepadSelectionColor());
+    }
+    if (sciFiTheme) {
+        appDrawRect(x + 4, textAreaY + 4, w - 8, textAreaH - 8, kernelNotepadEditorBorderColor());
     }
     
     // Draw text
@@ -1074,7 +1212,7 @@ void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         // Draw cursor
         if (charIdx == m_cursorPos) {
             framebuffer::fill_rect(textX + col * (kGlyphW + kGlyphSpacing), textY,
-                                   2, kGlyphH + 2, rgb(200, 200, 220));
+                                   2, kGlyphH + 2, kernelNotepadCaretColor());
         }
         
         if (c == '\n' || c == '\0') {
@@ -1087,7 +1225,7 @@ void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             uint32_t cx = textX + col * (kGlyphW + kGlyphSpacing);
             
             if (c != ' ') {
-                drawChar(cx, textY, c, rgb(220, 220, 235));
+                drawChar(cx, textY, c, kernelNotepadTextColor());
             }
             col++;
             
@@ -1864,32 +2002,33 @@ void NotepadApp::paste() {
 // Menu and UI drawing
 void NotepadApp::drawMenuBar(uint32_t x, uint32_t y, uint32_t w) {
     // Draw menu bar background
-    framebuffer::fill_rect(x, y, w, MENU_BAR_HEIGHT, rgb(50, 50, 60));
+    framebuffer::fill_rect(x, y, w, MENU_BAR_HEIGHT, kernelNotepadMenuBarColor());
     
     // Draw bottom separator line
-    framebuffer::fill_rect(x, y + MENU_BAR_HEIGHT - 1, w, 1, rgb(70, 70, 80));
+    framebuffer::fill_rect(x, y + MENU_BAR_HEIGHT - 1, w, 1, kernelNotepadMenuBarSeparatorColor());
     
     // File menu item
     uint32_t fileX = x + 4;
     uint32_t fileW = 40;
     if (m_showFileMenu || (m_hoveredMenuType == 1 && m_hoveredMenuItem == -2)) {
-        framebuffer::fill_rect(fileX, y + 2, fileW, MENU_BAR_HEIGHT - 4, rgb(70, 100, 150));
+        framebuffer::fill_rect(fileX, y + 2, fileW, MENU_BAR_HEIGHT - 4, kernelNotepadMenuHoverColor());
     }
-    drawChar(fileX + 4, y + 6, 'F', rgb(220, 220, 230));
-    drawChar(fileX + 10, y + 6, 'i', rgb(220, 220, 230));
-    drawChar(fileX + 16, y + 6, 'l', rgb(220, 220, 230));
-    drawChar(fileX + 22, y + 6, 'e', rgb(220, 220, 230));
+    const uint32_t menuBarTextColor = kernelNotepadMenuItemTextColor();
+    drawChar(fileX + 4, y + 6, 'F', menuBarTextColor);
+    drawChar(fileX + 10, y + 6, 'i', menuBarTextColor);
+    drawChar(fileX + 16, y + 6, 'l', menuBarTextColor);
+    drawChar(fileX + 22, y + 6, 'e', menuBarTextColor);
     
     // Edit menu item
     uint32_t editX = fileX + fileW + 4;
     uint32_t editW = 40;
     if (m_showEditMenu || (m_hoveredMenuType == 2 && m_hoveredMenuItem == -2)) {
-        framebuffer::fill_rect(editX, y + 2, editW, MENU_BAR_HEIGHT - 4, rgb(70, 100, 150));
+        framebuffer::fill_rect(editX, y + 2, editW, MENU_BAR_HEIGHT - 4, kernelNotepadMenuHoverColor());
     }
-    drawChar(editX + 4, y + 6, 'E', rgb(220, 220, 230));
-    drawChar(editX + 10, y + 6, 'd', rgb(220, 220, 230));
-    drawChar(editX + 16, y + 6, 'i', rgb(220, 220, 230));
-    drawChar(editX + 22, y + 6, 't', rgb(220, 220, 230));
+    drawChar(editX + 4, y + 6, 'E', menuBarTextColor);
+    drawChar(editX + 10, y + 6, 'd', menuBarTextColor);
+    drawChar(editX + 16, y + 6, 'i', menuBarTextColor);
+    drawChar(editX + 22, y + 6, 't', menuBarTextColor);
 }
 
 void NotepadApp::drawFileMenu(uint32_t x, uint32_t y) {
@@ -1899,23 +2038,25 @@ void NotepadApp::drawFileMenu(uint32_t x, uint32_t y) {
     const int itemH = 22;
 
     // Menu background
-    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, rgb(240, 240, 245));
+    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, kernelNotepadMenuSurfaceColor());
+    const uint32_t borderColor = kernelNotepadMenuBorderColor();
 
     // Border
-    framebuffer::fill_rect(x, y, menuW, 1, rgb(160, 160, 170)); // Top
-    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, rgb(160, 160, 170)); // Bottom
-    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, rgb(160, 160, 170)); // Left
-    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, rgb(160, 160, 170)); // Right
+    framebuffer::fill_rect(x, y, menuW, 1, borderColor); // Top
+    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, borderColor); // Bottom
+    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, borderColor); // Left
+    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, borderColor); // Right
 
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = y + 1 + i * itemH;
+        const bool hovered = m_hoveredMenuType == 1 && m_hoveredMenuItem == i;
 
-        if (m_hoveredMenuType == 1 && m_hoveredMenuItem == i) {
-            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, rgb(45, 95, 180));
+        if (hovered) {
+            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, kernelNotepadMenuHoverColor());
         }
 
         // Item text
-        uint32_t textColor = (m_hoveredMenuType == 1 && m_hoveredMenuItem == i) ? rgb(255, 255, 255) : rgb(0, 0, 0);
+        uint32_t textColor = kernelNotepadMenuTextColor(hovered);
         for (int j = 0; items[i][j]; j++) {
             drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
         }
@@ -1929,23 +2070,25 @@ void NotepadApp::drawEditMenu(uint32_t x, uint32_t y) {
     const int itemH = 22;
     
     // Menu background
-    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, rgb(240, 240, 245));
+    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, kernelNotepadMenuSurfaceColor());
+    const uint32_t borderColor = kernelNotepadMenuBorderColor();
     
     // Border
-    framebuffer::fill_rect(x, y, menuW, 1, rgb(160, 160, 170));
-    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, rgb(160, 160, 170));
-    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, rgb(160, 160, 170));
-    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, rgb(160, 160, 170));
+    framebuffer::fill_rect(x, y, menuW, 1, borderColor);
+    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, borderColor);
+    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, borderColor);
+    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, borderColor);
     
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = y + 1 + i * itemH;
+        const bool hovered = m_hoveredMenuType == 2 && m_hoveredMenuItem == i;
 
-        if (m_hoveredMenuType == 2 && m_hoveredMenuItem == i) {
-            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, rgb(45, 95, 180));
+        if (hovered) {
+            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, kernelNotepadMenuHoverColor());
         }
         
         // Item text
-        uint32_t textColor = (m_hoveredMenuType == 2 && m_hoveredMenuItem == i) ? rgb(255, 255, 255) : rgb(0, 0, 0);
+        uint32_t textColor = kernelNotepadMenuTextColor(hovered);
         for (int j = 0; items[i][j]; j++) {
             drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
         }
@@ -1959,27 +2102,29 @@ void NotepadApp::drawContextMenu(uint32_t x, uint32_t y) {
     const int itemH = 22;
     
     // Menu background
-    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, rgb(240, 240, 245));
+    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, kernelNotepadMenuSurfaceColor());
+    const uint32_t borderColor = kernelNotepadMenuBorderColor();
     
     // Border with shadow effect
-    framebuffer::fill_rect(x, y, menuW, 1, rgb(160, 160, 170));
-    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, rgb(160, 160, 170));
-    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, rgb(160, 160, 170));
-    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, rgb(160, 160, 170));
+    framebuffer::fill_rect(x, y, menuW, 1, borderColor);
+    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, borderColor);
+    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, borderColor);
+    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, borderColor);
     
     // Shadow
-    framebuffer::fill_rect(x + 2, y + itemCount * itemH + 2, menuW, 2, rgb(100, 100, 110));
-    framebuffer::fill_rect(x + menuW, y + 2, 2, itemCount * itemH, rgb(100, 100, 110));
+    framebuffer::fill_rect(x + 2, y + itemCount * itemH + 2, menuW, 2, kernelNotepadContextShadowColor());
+    framebuffer::fill_rect(x + menuW, y + 2, 2, itemCount * itemH, kernelNotepadContextShadowColor());
     
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = y + 1 + i * itemH;
+        const bool hovered = m_hoveredMenuType == 3 && m_hoveredMenuItem == i;
 
-        if (m_hoveredMenuType == 3 && m_hoveredMenuItem == i) {
-            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, rgb(45, 95, 180));
+        if (hovered) {
+            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, kernelNotepadMenuHoverColor());
         }
         
         // Item text
-        uint32_t textColor = (m_hoveredMenuType == 3 && m_hoveredMenuItem == i) ? rgb(255, 255, 255) : rgb(0, 0, 0);
+        uint32_t textColor = kernelNotepadMenuTextColor(hovered);
         for (int j = 0; items[i][j]; j++) {
             drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
         }
@@ -3407,17 +3552,22 @@ void CalculatorApp::shutdown() {
 }
 
 void CalculatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    if (kernelSciFiThemeActive()) {
+        framebuffer::fill_rect(x, y, w, h, kernelCalculatorBodyColor());
+    }
+
     // Display background
-    framebuffer::fill_rect(x + 10, y + 10, w - 20, 30, rgb(30, 35, 45));
+    framebuffer::fill_rect(x + 10, y + 10, w - 20, 30, kernelCalculatorDisplayColor());
     
     // Display border
+    const uint32_t displayBorderColor = kernelCalculatorDisplayBorderColor();
     for (uint32_t i = 0; i < w - 20; i++) {
-        framebuffer::put_pixel(x + 10 + i, y + 10, rgb(60, 70, 90));
-        framebuffer::put_pixel(x + 10 + i, y + 39, rgb(60, 70, 90));
+        framebuffer::put_pixel(x + 10 + i, y + 10, displayBorderColor);
+        framebuffer::put_pixel(x + 10 + i, y + 39, displayBorderColor);
     }
     for (uint32_t i = 0; i < 30; i++) {
-        framebuffer::put_pixel(x + 10, y + 10 + i, rgb(60, 70, 90));
-        framebuffer::put_pixel(x + w - 11, y + 10 + i, rgb(60, 70, 90));
+        framebuffer::put_pixel(x + 10, y + 10 + i, displayBorderColor);
+        framebuffer::put_pixel(x + w - 11, y + 10 + i, displayBorderColor);
     }
     
     // Display text (right-aligned)
@@ -3425,6 +3575,7 @@ void CalculatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     uint32_t textW = dispLen * (kGlyphW + kGlyphSpacing);
     uint32_t textX = x + w - 15 - textW;
     uint32_t textY = y + 10 + (30 - kGlyphH) / 2;
+    const uint32_t displayTextColor = kernelCalculatorDisplayTextColor();
     
     // Draw display digits
     for (int i = 0; i < dispLen; i++) {
@@ -3437,16 +3588,16 @@ void CalculatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 for (int dx = 0; dx < kGlyphW; dx++) {
                     bool on = ((c - '0' + dx + dy) % 2 == 0);
                     if (on) {
-                        framebuffer::put_pixel(cx + dx, textY + dy, rgb(200, 220, 255));
+                        framebuffer::put_pixel(cx + dx, textY + dy, displayTextColor);
                     }
                 }
             }
         } else if (c == '.') {
-            framebuffer::put_pixel(cx + 2, textY + kGlyphH - 1, rgb(200, 220, 255));
-            framebuffer::put_pixel(cx + 2, textY + kGlyphH - 2, rgb(200, 220, 255));
+            framebuffer::put_pixel(cx + 2, textY + kGlyphH - 1, displayTextColor);
+            framebuffer::put_pixel(cx + 2, textY + kGlyphH - 2, displayTextColor);
         } else if (c == '-') {
             for (int dx = 0; dx < kGlyphW; dx++) {
-                framebuffer::put_pixel(cx + dx, textY + kGlyphH / 2, rgb(200, 220, 255));
+                framebuffer::put_pixel(cx + dx, textY + kGlyphH / 2, displayTextColor);
             }
         }
     }
