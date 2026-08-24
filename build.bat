@@ -94,7 +94,9 @@ module_manager.cpp ^
 navigator.cpp ^
 navigator_file_io.cpp ^
 navigator_html_parser.cpp ^
+navigator_javascript/ast.cpp ^
 navigator_javascript/lexer.cpp ^
+navigator_javascript/parser.cpp ^
 native_app_debug_log.cpp ^
 native_app_process_table.cpp ^
 native_app_runtime.cpp ^

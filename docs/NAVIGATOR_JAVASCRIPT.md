@@ -10,8 +10,9 @@ JavaScript lexer, parser, runtime, DOM abstraction, event scripting system, or
 `<script>` content.
 
 JavaScript is therefore a separate subsystem. It must not become an implicit
-part of HTML parsing or page loading. Phase JS1 only accepts source text and
-produces a deterministic token stream. It has no connection to document
+part of HTML parsing or page loading. Phase JS1 accepts source text and
+produces a deterministic token stream; Phase JS2 consumes that stream and
+produces a bounded syntax tree. Neither phase has a connection to document
 mutation, rendering, navigation, networking, or normal page loading.
 
 ## Phase JS1 architecture
@@ -125,11 +126,153 @@ The runtime must remain separable from the browser/DOM host. Host bindings are
 future policy-controlled capabilities, not an automatic consequence of
 parsing source.
 
+## Phase JS2 architecture
+
+Phase JS2 extends the independent subsystem with a parser and indexed AST:
+
+```text
+navigator_javascript/
+  source.h       non-owning source span
+  lexer.h/.cpp   JS1 token and lexer abstractions
+  ast.h/.cpp     bounded indexed node storage
+  parser.h/.cpp  bounded recursive-descent parser
+```
+
+`parser.cpp` consumes the successful JS1 `Token` vector and does not include
+Navigator rendering, HTML, networking, or host-object headers. The parser is
+deterministic recursive descent with explicit parser-depth, expression-depth,
+block-depth, statement, node, parameter, and argument limits. It creates no
+runtime values and never evaluates a node.
+
+### AST model and ownership
+
+`AstNodeKind` includes `Program`, `EmptyStatement`, `VariableDeclaration`,
+`VariableDeclarator`, `ExpressionStatement`, `BlockStatement`,
+`ReturnStatement`, `IfStatement`, `WhileStatement`, `ForStatement`,
+`BreakStatement`, `ContinueStatement`, `FunctionDeclaration`, `Identifier`,
+`NumericLiteral`, `StringLiteral`, `BooleanLiteral`, `NullLiteral`,
+`ThisExpression`, `UnaryExpression`, `BinaryExpression`,
+`LogicalExpression`, `AssignmentExpression`, `UpdateExpression`,
+`CallExpression`, `MemberExpression`, and `NewExpression`.
+
+The `Ast` owns a contiguous `std::vector<AstNode>` and a contiguous child-index
+vector. Every relationship is an `AstNodeId` index; no AST node points into a
+temporary parser object. `Ast::root()` identifies the `Program` node, and
+`Ast::reset()` clears the complete tree and child storage deterministically.
+Node IDs remain stable as vector indices even if the backing vector grows.
+
+Nodes retain `SourceLocation` values from lexer tokens. Literal and identifier
+spelling is a source slice obtained from the authoritative `SourceView`; the
+AST does not copy or own source bytes. The caller must keep the source buffer
+alive while inspecting `Ast::sourceSlice()` or `Ast::nodeText()`. Resetting or
+destroying the AST releases all node/index storage but does not release the
+caller-owned source.
+
+### Supported grammar
+
+JS2 supports the bounded subset needed by the host tests and representative
+programs:
+
+- `var` declarations, including multiple declarators and initializers
+- expression and empty statements, blocks, `return`, `if`/`else`, `while`,
+  representative `for`, `break`, and `continue`
+- named function declarations with ordered identifier parameters and block
+  bodies
+- identifiers, numeric/string/boolean/null literals, `this`, unary `!`, `+`,
+  and `-`
+- arithmetic, equality, strict equality, relational, logical, assignment and
+  compound-assignment operators
+- prefix/postfix `++` and `--`, with identifier/member target checks
+- dot and computed member access, calls with bounded argument lists, and
+  bounded `new` expressions
+
+Function expressions, arrays, object literals, regular-expression literals,
+conditional expressions, comma expressions, bitwise operators, `typeof`,
+`void`, `delete`, `let`, `const`, labels, `switch`, exceptions, and other
+ECMAScript features remain deliberately unsupported. JS1's conservative
+string-escape and ASCII-identifier policy also remains in force.
+
+### Precedence and associativity
+
+The parser uses this precedence order, from lowest to highest:
+
+```text
+assignment       right associative
+logical OR       left associative
+logical AND      left associative
+equality         left associative
+relational       left associative
+additive         left associative
+multiplicative   left associative
+unary            right associative
+postfix/update
+member/call
+primary
+```
+
+Thus `a + b * c` stores an additive root with a multiplicative right child,
+`a || b && c` stores an OR root with an AND right child, and `a = b = 5`
+stores a right-nested assignment tree. Parentheses affect the stored shape and
+the resulting composite node location.
+
+Assignment and update targets are checked structurally. Only identifiers and
+member expressions are valid targets, so `1 = x`, `++1`, and `foo()++` fail
+with `InvalidAssignmentTarget` rather than producing misleading AST nodes.
+
+### Semicolon policy
+
+JS2 requires explicit semicolons after variable declarations, expression
+statements, `return`, `break`, and `continue`. Blocks and control-flow or
+function declarations do not require a trailing semicolon. Full JavaScript
+Automatic Semicolon Insertion is not implemented or claimed; a missing
+required semicolon is a deterministic parser error.
+
+### Limits and parser errors
+
+The default parser limits are finite and configurable:
+
+| Resource | Default limit |
+| --- | ---: |
+| AST nodes | 16,384 |
+| parser recursion depth | 256 |
+| statements | 4,096 |
+| function parameters | 64 |
+| call/new arguments | 64 |
+| block nesting | 128 |
+| expression nesting | 256 |
+
+The parser reports `LexerFailure`, `UnexpectedToken`, `ExpectedToken`,
+`InvalidExpression`, `InvalidAssignmentTarget`, `UnexpectedEndOfInput`,
+`AstNodeLimitExceeded`, `NestingLimitExceeded`, `TooManyStatements`,
+`TooManyParameters`, `TooManyArguments`, and `AllocationFailure`. Every error
+contains a source location derived from the token stream (or the authoritative
+source extent for a bounded missing EOF). Failed results clear partial AST
+storage. Malformed input, limit exhaustion, and repeated parsing of the same
+input are bounded and deterministic; no evaluator, host callback, or assertion
+is involved.
+
+### Validation tiers
+
+Tier 1 is the mandatory isolated JavaScript-engine gate for JS2: focused
+structural AST tests, MinGW/g++ tests, MSVC `/W4 /WX` tests, deterministic
+limits and malformed-input coverage, source/build-list integration, and
+`git diff --check`. Tier 2 is the Navigator integration gate: the full guideXOS
+build, hosted Navigator regression, bare-metal/QEMU regression, layout/image/
+resource regression, and HTTP/HTTPS/TLS regression. Tier 2 is attempted when
+practical and becomes mandatory before JavaScript affects page execution or
+browser behavior. Existing Mbed TLS dependency/profile and QEMU/full-project
+environment failures remain inherited integration blockers for this isolated
+phase; they do not weaken or bypass TLS/security requirements.
+
+**Navigator still does not execute JavaScript after Phase JS2.** There is no
+`<script>` execution, `window`, `document`, DOM binding, events, timers,
+networking API, or page-loading hook.
+
 ## Roadmap
 
 ```text
 JS lexer
-  -> parser / AST
+  -> bounded parser / AST
   -> runtime values
   -> expressions/statements
   -> scopes/functions
@@ -142,8 +285,7 @@ JS lexer
   -> increasingly capable web APIs
 ```
 
-The next milestone is **Phase JS2 — bounded parser / AST foundation**. It
-should consume only successful JS1 tokens, retain explicit bounds and source
-locations, and remain execution-free until a later phase has a reviewed
-runtime and explicit host capability boundary. Full ECMAScript compatibility is
-not promised.
+The next milestone is **Phase JS3 — JavaScript Runtime Values & Execution Core
+Foundation**: values, environments/scopes, expression evaluation, and bounded
+execution, still without DOM integration. Full ECMAScript compatibility is not
+promised.
