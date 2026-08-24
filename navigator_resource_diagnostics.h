@@ -7,8 +7,54 @@
 
 #include <stdint.h>
 
+#include "navigator_resource_scheduler.h"
+
 namespace gxos {
 namespace apps {
+
+static const uint32_t kNavigatorMaxResourceTelemetryRecords =
+    kNavigatorMaxResourceReferences;
+
+enum class NavigatorResourceViewportRelation : uint8_t {
+    Unknown = 0,
+    InitialViewport,
+    AboveInitialViewport,
+    BelowInitialViewport,
+};
+
+// Fixed-size bare-metal record. It is a member of NavigatorApp, never a boot
+// stack allocation, and is bounded to the same 96-reference document limit.
+// URL bodies are intentionally absent; host/reason are truncated diagnostics.
+struct NavigatorResourceTelemetryRecord {
+    uint32_t sourceOrdinal = 0;
+    uint32_t schedulerOrdinal = 0;
+    uint32_t normalizedUrlHash = 0;
+    uint32_t encodedBodyBytes = 0;
+    uint32_t decodedBodyBytes = 0;
+    uint32_t naturalWidth = 0;
+    uint32_t naturalHeight = 0;
+    uint32_t decodedRgbaBytes = 0;
+    uint32_t activeBytesBefore = 0;
+    uint32_t budgetHeadroomBefore = 0;
+    uint32_t displayPixelBytes = 0;
+    int32_t blockIndex = -1;
+    int32_t blockY = -1;
+    uint16_t displayWidth = 0;
+    uint16_t displayHeight = 0;
+    uint16_t sharedOwnerOrdinal = 0xFFFFu;
+    uint8_t formatHint = 0;
+    uint8_t schedulerState = static_cast<uint8_t>(NavigatorResourceSchedulerState::Empty);
+    uint8_t classification = 0;
+    uint8_t sameOrigin = 0;
+    uint8_t likelyVisible = 0;
+    uint8_t viewportRelation = static_cast<uint8_t>(NavigatorResourceViewportRelation::Unknown);
+    uint8_t duplicate = 0;
+    char host[40] = {};
+    char reason[48] = {};
+};
+
+static_assert(sizeof(NavigatorResourceTelemetryRecord) <= 160u,
+    "Navigator telemetry records must remain compact");
 
 enum class NavigatorResourceTransportFailure : uint8_t {
     None = 0,
@@ -75,6 +121,7 @@ enum class NavigatorResourceDecodeFailure : uint8_t {
     JpegDecodeFailed,
     DimensionsTooLarge,
     PixelBudgetExceeded,
+    AggregateImageBudgetExceeded,
     AllocationFailed,
     UnsupportedJpegVariant,
     CorruptImage,
@@ -142,6 +189,7 @@ enum class NavigatorResourceClassification : uint8_t {
     JpegDecodeFailed,
     ImageDimensionsTooLarge,
     ImagePixelBudgetExceeded,
+    ImageMemoryBudgetDenied,
     ImageAllocationFailed,
     UnsupportedJpegVariant,
     CorruptImage,
@@ -237,6 +285,7 @@ inline NavigatorResourceClassification classifyNavigatorResource(
     case NavigatorResourceDecodeFailure::JpegDecodeFailed: return NavigatorResourceClassification::JpegDecodeFailed;
     case NavigatorResourceDecodeFailure::DimensionsTooLarge: return NavigatorResourceClassification::ImageDimensionsTooLarge;
     case NavigatorResourceDecodeFailure::PixelBudgetExceeded: return NavigatorResourceClassification::ImagePixelBudgetExceeded;
+    case NavigatorResourceDecodeFailure::AggregateImageBudgetExceeded: return NavigatorResourceClassification::ImageMemoryBudgetDenied;
     case NavigatorResourceDecodeFailure::AllocationFailed: return NavigatorResourceClassification::ImageAllocationFailed;
     case NavigatorResourceDecodeFailure::UnsupportedJpegVariant: return NavigatorResourceClassification::UnsupportedJpegVariant;
     case NavigatorResourceDecodeFailure::CorruptImage: return NavigatorResourceClassification::CorruptImage;
@@ -305,6 +354,7 @@ inline const char* navigatorResourceClassificationName(NavigatorResourceClassifi
     case NavigatorResourceClassification::JpegDecodeFailed: return "jpeg_decode_failed";
     case NavigatorResourceClassification::ImageDimensionsTooLarge: return "image_dimensions_too_large";
     case NavigatorResourceClassification::ImagePixelBudgetExceeded: return "image_pixel_budget_exceeded";
+    case NavigatorResourceClassification::ImageMemoryBudgetDenied: return "image_memory_budget_denied";
     case NavigatorResourceClassification::ImageAllocationFailed: return "image_allocation_failed";
     case NavigatorResourceClassification::UnsupportedJpegVariant: return "unsupported_jpeg_variant";
     case NavigatorResourceClassification::CorruptImage: return "corrupt_image";

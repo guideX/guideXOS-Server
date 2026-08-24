@@ -3,6 +3,7 @@
 #include "process.h"
 #include "guide_web_document.h"   // BlockType, DocBlock, WebDocument (gxos::web)
 #include "navigator_resource_diagnostics.h"
+#include "navigator_resource_scheduler.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -50,6 +51,13 @@ struct DownloadItem {
 // resource cache still owns the full URL for the duration of the document.
 struct NavigatorResourceTelemetry {
 	int         ordinal = 0;
+	uint32_t    schedulerOrdinal = 0;
+	int         blockIndex = -1;
+	int         blockY = -1;
+	int         displayWidth = 0;
+	int         displayHeight = 0;
+	int         viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::Unknown);
+	bool        likelyVisible = false;
 	std::string urlHash;
 	std::string originHost;
 	bool        sameOrigin = false;
@@ -60,7 +68,17 @@ struct NavigatorResourceTelemetry {
 	size_t      decodedBodyBytes = 0;
 	uint32_t    imageWidth = 0;
 	uint32_t    imageHeight = 0;
+	uint64_t    decodedRgbaBytes = 0;
+	uint64_t    activeBytesBefore = 0;
+	uint64_t    budgetHeadroomBefore = 0;
+	uint64_t    displayPixelBytes = 0;
 	int         redirectCount = 0;
+	uint32_t    priority = 0;
+	NavigatorResourceSchedulerState schedulerState = NavigatorResourceSchedulerState::Empty;
+	uint64_t    budgetRequestedBytes = 0;
+	uint64_t    budgetAcceptedBytes = 0;
+	int         sharedResourceId = -1;
+	bool        duplicate = false;
 	NavigatorResourceClassification classification = NavigatorResourceClassification::OtherFailure;
 	std::string reason;
 };
@@ -95,6 +113,31 @@ struct NavigatorResourceAggregateCounters {
 	int duplicateResourceUrls = 0;
 	int duplicateNetworkFetches = 0;
 	int duplicateDecodedImages = 0;
+	uint32_t referencesDiscovered = 0;
+	uint32_t uniqueReferences = 0;
+	uint32_t duplicateReferences = 0;
+	uint32_t schedulerCandidates = 0;
+	uint32_t pending = 0;
+	uint32_t fetchStarted = 0;
+	uint32_t fetchCompleted = 0;
+	uint32_t decodeStarted = 0;
+	uint32_t decoded = 0;
+	uint32_t attached = 0;
+	uint32_t budgetDenied = 0;
+	uint32_t resourceCapDenied = 0;
+	uint32_t unsupportedSkipped = 0;
+	uint32_t referencesCapacityDenied = 0;
+	uint32_t released = 0;
+	uint64_t activeCount = 0;
+	uint64_t activeBytes = 0;
+	uint64_t peakActiveBytes = 0;
+	uint64_t currentEncodedResourceBytes = 0;
+	uint64_t peakEncodedResourceBytes = 0;
+	uint64_t peakTemporaryDecodeBytes = 0;
+	uint64_t releasedDecodedBytes = 0;
+	uint64_t deniedAllocationBytes = 0;
+	uint64_t totalLoadedDecodedBytes = 0;
+	uint64_t totalDeniedRequestedBytes = 0;
 };
 
 struct NavigatorPageMetadata {
@@ -171,6 +214,13 @@ struct NavigatorPageMetadata {
 		std::vector<NavigatorResourceTelemetry> resourceTelemetry;
 		std::array<int, 64> resourceClassificationCounts{};
 		size_t activeImageResources = 0;
+		size_t activeImageBytes = 0;
+		size_t peakActiveImageBytes = 0;
+		size_t decodedImageBudgetBytes = static_cast<size_t>(kNavigatorDecodedImageBudgetBytes);
+		size_t budgetDeniedBytes = 0;
+		size_t peakEncodedResourceBytes = 0;
+		size_t releasedDecodedBytes = 0;
+		NavigatorResourceSchedulerStats resourceScheduler;
 		size_t releasedImageResources = 0;
 		size_t allocatedImageBytes = 0;
 		size_t releasedImageBytes = 0;

@@ -2069,6 +2069,11 @@ namespace {
 		size_t encodedBodyBytes = 0;
 		size_t decodedBodyBytes = 0;
 		int redirectCount = 0;
+		uint64_t budgetRequestedBytes = 0;
+		uint64_t budgetAcceptedBytes = 0;
+		uint64_t activeBytesBefore = 0;
+		uint64_t budgetHeadroomBefore = 0;
+		uint64_t displayPixelBytes = 0;
 	};
 
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
@@ -2076,6 +2081,11 @@ namespace {
 	static int s_remoteImageFetchCount = 0;
 	static size_t s_releasedImageResources = 0;
 	static size_t s_releasedImageBytes = 0;
+	static NavigatorResourceReferenceMetadata s_resourceReferences[kNavigatorMaxResourceReferences];
+	static NavigatorResourceSchedulerStats s_resourceScheduler;
+	static NavigatorResourceMemoryAccounting s_resourceMemory;
+	static bool s_resourceSchedulerPrepared = false;
+	static ImageInfo s_resourceOverflowInfo;
 
 	static size_t imagePixelBytes(const ImageInfo& info)
 	{
@@ -2094,10 +2104,16 @@ namespace {
 			++s_releasedImageResources;
 			if (s_releasedImageBytes <= std::numeric_limits<size_t>::max() - bytes)
 				s_releasedImageBytes += bytes;
+			s_resourceMemory.releaseDecoded(static_cast<uint64_t>(bytes));
 		}
 		s_imageCache.clear();
+		s_resourceScheduler = NavigatorResourceSchedulerStats{};
+		s_resourceMemory.reset();
+		s_resourceSchedulerPrepared = false;
 	}
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
+	static void prepareDocumentResources(const WebDocument& doc);
+	static int resourceReferenceIndexForBlock(int blockIndex);
 	static void imageDisplaySize(const DocBlock& block, int availableWidth, int& outW, int& outH,
 		bool* outConstrained = nullptr, bool* outAspectPreserved = nullptr, bool* outClamped = nullptr);
 	static int cssWidthPx(const WebStyle& style, int availableWidth, int fallbackValue);
@@ -2357,6 +2373,30 @@ namespace {
 			return NavigatorResourceImageFormat::Jpeg;
 		return NavigatorResourceImageFormat::Other;
 	}
+
+	static bool knownUnsupportedResourceFormat(const std::string& url, std::string& format)
+	{
+		if (resourcePathEndsWith(url, ".svg")) { format = "svg"; return true; }
+		if (resourcePathEndsWith(url, ".webp")) { format = "webp"; return true; }
+		if (resourcePathEndsWith(url, ".avif")) { format = "avif"; return true; }
+		if (resourcePathEndsWith(url, ".gif")) { format = "gif"; return true; }
+		return false;
+	}
+
+	struct EncodedBodyCharge {
+		uint64_t bytes = 0;
+		bool charged = false;
+
+		explicit EncodedBodyCharge(uint64_t value) : bytes(value)
+		{
+			charged = s_resourceMemory.beginEncoded(bytes);
+		}
+
+		~EncodedBodyCharge()
+		{
+			if (charged) s_resourceMemory.endEncoded(bytes);
+		}
+	};
 
 	static void setImageClassification(ImageInfo& info,
 		const NavigatorResourceClassificationInput& input, const std::string& reason)
@@ -2893,6 +2933,10 @@ namespace {
 	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc,
 		int scrollOffset)
 	{
+		// Resource discovery and scheduling happen before any layout pass can
+		// lazily request an image.  This makes fetch order deterministic and
+		// prevents paint/layout traversal from becoming an accidental scheduler.
+		prepareDocumentResources(doc);
 		ensureCssMarginLayout(doc);
 		ensureCssFlexLayout(doc);
 		ensureCssFloatLayout(doc);
@@ -2915,6 +2959,38 @@ namespace {
 		metadata.resourceTelemetry.clear();
 		metadata.resourceClassificationCounts.fill(0);
 		metadata.activeImageResources = 0;
+		metadata.activeImageBytes = 0;
+		metadata.peakActiveImageBytes = 0;
+		metadata.decodedImageBudgetBytes = static_cast<size_t>(kNavigatorDecodedImageBudgetBytes);
+		metadata.budgetDeniedBytes = 0;
+		metadata.peakEncodedResourceBytes = 0;
+		metadata.releasedDecodedBytes = s_releasedImageBytes;
+		metadata.resourceScheduler = s_resourceScheduler;
+		metadata.resourceCounters.referencesDiscovered = s_resourceScheduler.referencesDiscovered;
+		metadata.resourceCounters.uniqueReferences = s_resourceScheduler.uniqueReferences;
+		metadata.resourceCounters.duplicateReferences = s_resourceScheduler.duplicateReferences;
+		metadata.resourceCounters.schedulerCandidates = s_resourceScheduler.schedulerCandidates;
+		metadata.resourceCounters.pending = s_resourceScheduler.pending;
+		metadata.resourceCounters.fetchStarted = s_resourceScheduler.fetchStarted;
+		metadata.resourceCounters.fetchCompleted = s_resourceScheduler.fetchCompleted;
+		metadata.resourceCounters.decodeStarted = s_resourceScheduler.decodeStarted;
+		metadata.resourceCounters.decoded = s_resourceScheduler.decoded;
+		metadata.resourceCounters.attached = s_resourceScheduler.attached;
+		metadata.resourceCounters.budgetDenied = s_resourceScheduler.budgetDenied;
+		metadata.resourceCounters.resourceCapDenied = s_resourceScheduler.resourceCapDenied;
+		metadata.resourceCounters.unsupportedSkipped = s_resourceScheduler.unsupportedSkipped;
+		metadata.resourceCounters.referencesCapacityDenied = s_resourceScheduler.referencesCapacityDenied;
+		metadata.resourceCounters.released = s_resourceScheduler.released;
+		metadata.resourceCounters.activeCount = s_resourceScheduler.activeCount;
+		metadata.resourceCounters.activeBytes = s_resourceScheduler.activeBytes;
+		metadata.resourceCounters.peakActiveBytes = s_resourceScheduler.peakActiveBytes;
+		metadata.resourceCounters.currentEncodedResourceBytes = s_resourceMemory.currentEncodedBytes;
+		metadata.resourceCounters.peakEncodedResourceBytes = s_resourceMemory.peakEncodedBytes;
+		metadata.resourceCounters.peakTemporaryDecodeBytes = s_resourceMemory.peakTemporaryDecodeBytes;
+		metadata.resourceCounters.releasedDecodedBytes = s_releasedImageBytes;
+		metadata.resourceCounters.deniedAllocationBytes = s_resourceMemory.deniedAllocationBytes;
+		metadata.resourceCounters.totalLoadedDecodedBytes = s_resourceScheduler.totalLoadedDecodedBytes;
+		metadata.resourceCounters.totalDeniedRequestedBytes = s_resourceScheduler.totalDeniedRequestedBytes;
 		metadata.allocatedImageBytes = 0;
 		metadata.releasedImageResources = s_releasedImageResources;
 		metadata.releasedImageBytes = s_releasedImageBytes;
@@ -3748,7 +3824,8 @@ namespace {
 					metadata.allocatedImageBytes += pixelBytes;
 			}
 			const bool skipped = duplicate || classification == NavigatorResourceClassification::ResourceLimitReached ||
-				classification == NavigatorResourceClassification::ResourceSlotUnavailable;
+				classification == NavigatorResourceClassification::ResourceSlotUnavailable ||
+				classification == NavigatorResourceClassification::ImageMemoryBudgetDenied;
 			if (duplicate) {
 				++counters.skipped;
 				++counters.duplicateSkips;
@@ -3757,6 +3834,8 @@ namespace {
 			} else if (skipped) {
 				++counters.skipped;
 				if (classification == NavigatorResourceClassification::ResourceLimitReached) ++counters.resourceLimitSkips;
+				if (classification == NavigatorResourceClassification::ResourceSlotUnavailable) ++counters.resourceCapDenied;
+				if (classification == NavigatorResourceClassification::ImageMemoryBudgetDenied) ++counters.budgetDenied;
 			} else {
 				++counters.attempted;
 				if (loaded) ++counters.loaded;
@@ -3769,7 +3848,8 @@ namespace {
 			case NavigatorResourceClassification::BodyTooLargeEncoded:
 			case NavigatorResourceClassification::DecodedResourceTooLarge:
 			case NavigatorResourceClassification::ImageDimensionsTooLarge:
-			case NavigatorResourceClassification::ImagePixelBudgetExceeded: ++counters.sizeBoundFailures; break;
+			case NavigatorResourceClassification::ImagePixelBudgetExceeded:
+			case NavigatorResourceClassification::ImageMemoryBudgetDenied: ++counters.sizeBoundFailures; break;
 		case NavigatorResourceClassification::PngDecodeFailed:
 			case NavigatorResourceClassification::JpegDecodeFailed:
 			case NavigatorResourceClassification::ImageAllocationFailed:
@@ -3794,9 +3874,30 @@ namespace {
 		const size_t classIndex = static_cast<size_t>(classification);
 		if (classIndex < metadata.resourceClassificationCounts.size())
 			++metadata.resourceClassificationCounts[classIndex];
-		if (metadata.resourceTelemetry.size() < 64u) {
+		if (metadata.resourceTelemetry.size() < kNavigatorMaxResourceReferences) {
 			NavigatorResourceTelemetry telemetry;
-			telemetry.ordinal = static_cast<int>(metadata.resourceTelemetry.size());
+			const int schedulerIndex = resourceReferenceIndexForBlock(static_cast<int>(&block - doc.blocks.data()));
+			const NavigatorResourceReferenceMetadata* reference = schedulerIndex >= 0
+				? &s_resourceReferences[schedulerIndex] : nullptr;
+			telemetry.ordinal = static_cast<int>(reference ? reference->sourceOrdinal : metadata.resourceTelemetry.size());
+			telemetry.schedulerOrdinal = reference ? reference->sourceOrdinal : telemetry.ordinal;
+			telemetry.blockIndex = static_cast<int>(&block - doc.blocks.data());
+			telemetry.blockY = geometry.outerY;
+			telemetry.displayWidth = imageW;
+			telemetry.displayHeight = imageH;
+			telemetry.displayPixelBytes = static_cast<uint64_t>(std::max(0, imageW)) *
+				static_cast<uint64_t>(std::max(0, imageH)) * 4u;
+			const int initialViewportTop = kContentY;
+			const int initialViewportBottom = kContentY + kContentH;
+			const int blockBottom = geometry.outerY + std::max(0, geometry.outerHeight);
+			if (blockBottom > initialViewportTop && geometry.outerY < initialViewportBottom) {
+				telemetry.viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::InitialViewport);
+				telemetry.likelyVisible = true;
+			} else if (blockBottom <= initialViewportTop) {
+				telemetry.viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::AboveInitialViewport);
+			} else {
+				telemetry.viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::BelowInitialViewport);
+			}
 			std::ostringstream hash;
 			hash << "fnv1a64:" << std::hex << fnv1a64(resourceKey);
 			telemetry.urlHash = hash.str();
@@ -3809,7 +3910,19 @@ namespace {
 			telemetry.decodedBodyBytes = info.decodedBodyBytes;
 			telemetry.imageWidth = info.naturalW > 0 ? static_cast<uint32_t>(info.naturalW) : 0;
 			telemetry.imageHeight = info.naturalH > 0 ? static_cast<uint32_t>(info.naturalH) : 0;
+			telemetry.decodedRgbaBytes = info.budgetRequestedBytes;
+			telemetry.activeBytesBefore = reference ? reference->activeBytesBefore : info.activeBytesBefore;
+			telemetry.budgetHeadroomBefore = reference ? reference->budgetHeadroomBefore : info.budgetHeadroomBefore;
 			telemetry.redirectCount = info.redirectCount;
+			telemetry.priority = reference ? reference->priority : 0;
+			telemetry.schedulerState = reference
+				? static_cast<NavigatorResourceSchedulerState>(reference->state)
+				: NavigatorResourceSchedulerState::Failed;
+			telemetry.budgetRequestedBytes = reference ? reference->budgetRequestedBytes : info.budgetRequestedBytes;
+			telemetry.budgetAcceptedBytes = reference ? reference->budgetAcceptedBytes : info.budgetAcceptedBytes;
+			telemetry.sharedResourceId = reference && reference->duplicateOf != 0xFFFFu
+				? static_cast<int>(reference->duplicateOf) : -1;
+			telemetry.duplicate = duplicate;
 			telemetry.classification = classification;
 			telemetry.reason = duplicate ? "same-document duplicate URL skipped" : boundedResourceText(info.errorDetail.empty() ? info.message : info.errorDetail);
 			metadata.resourceTelemetry.push_back(std::move(telemetry));
@@ -3824,6 +3937,14 @@ namespace {
 				++metadata.cssImageSizeClamps;
 			}
 		}
+		metadata.resourceScheduler = s_resourceScheduler;
+		metadata.activeImageBytes = static_cast<size_t>(s_resourceMemory.activeDecodedBytes);
+		metadata.peakActiveImageBytes = static_cast<size_t>(s_resourceMemory.peakDecodedBytes);
+		metadata.budgetDeniedBytes = static_cast<size_t>(s_resourceMemory.deniedAllocationBytes);
+		metadata.peakEncodedResourceBytes = static_cast<size_t>(s_resourceMemory.peakEncodedBytes);
+		metadata.releasedDecodedBytes = s_releasedImageBytes;
+		metadata.activeImageResources = static_cast<size_t>(s_resourceScheduler.activeCount);
+		metadata.allocatedImageBytes = static_cast<size_t>(s_resourceMemory.activeDecodedBytes);
 		// Structural containers such as a div wrapping text may not have their
 		// own legacy block record.  Count their typed computed overflow once so
 		// diagnostics describe the actual style-bearing nodes without duplicating
@@ -12158,12 +12279,142 @@ namespace {
 		return path;
 	}
 
+	static int resourceReferenceIndexForBlock(int blockIndex)
+	{
+		if (blockIndex < 0) return -1;
+		for (uint32_t i = 0; i < kNavigatorMaxResourceReferences; ++i) {
+			if (s_resourceReferences[i].state != static_cast<uint8_t>(NavigatorResourceSchedulerState::Empty) &&
+				static_cast<int>(s_resourceReferences[i].blockIndex) == blockIndex) {
+				return static_cast<int>(i);
+			}
+		}
+		return -1;
+	}
+
+	static NavigatorResourceSchedulerState schedulerStateForImage(const ImageInfo& info)
+	{
+		if (info.ok) return NavigatorResourceSchedulerState::Attached;
+		if (info.classification == NavigatorResourceClassification::ImageMemoryBudgetDenied)
+			return NavigatorResourceSchedulerState::BudgetDenied;
+		if (info.classification == NavigatorResourceClassification::ResourceSlotUnavailable)
+			return NavigatorResourceSchedulerState::ResourceCapDenied;
+		if (info.classification == NavigatorResourceClassification::UnsupportedSvg ||
+			info.classification == NavigatorResourceClassification::UnsupportedWebp ||
+			info.classification == NavigatorResourceClassification::UnsupportedAvif ||
+			info.classification == NavigatorResourceClassification::UnsupportedGif)
+			return NavigatorResourceSchedulerState::UnsupportedSkipped;
+		return NavigatorResourceSchedulerState::Failed;
+	}
+
+	static bool schedulerCandidateLess(const NavigatorResourceReferenceMetadata& left,
+		const NavigatorResourceReferenceMetadata& right)
+	{
+		if (left.priority != right.priority) return left.priority < right.priority;
+		return left.sourceOrdinal < right.sourceOrdinal;
+	}
+
+	static void prepareDocumentResources(const WebDocument& doc)
+	{
+		if (s_resourceSchedulerPrepared) return;
+		s_resourceSchedulerPrepared = true;
+		s_resourceScheduler = NavigatorResourceSchedulerStats{};
+		for (uint32_t i = 0; i < kNavigatorMaxResourceReferences; ++i)
+			s_resourceReferences[i] = NavigatorResourceReferenceMetadata{};
+		s_resourceOverflowInfo = ImageInfo{};
+
+		uint32_t referenceCount = 0;
+		for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+			if (block.type != BlockType::Image) continue;
+			++s_resourceScheduler.referencesDiscovered;
+			if (referenceCount >= kNavigatorMaxResourceReferences) {
+				++s_resourceScheduler.referencesCapacityDenied;
+				continue;
+			}
+			NavigatorResourceReferenceMetadata& reference = s_resourceReferences[referenceCount];
+			reference.sourceOrdinal = static_cast<uint32_t>(blockIndex);
+			reference.blockIndex = static_cast<uint16_t>(blockIndex);
+			const std::string key = resourceCacheKey(block.url);
+			reference.normalizedUrlHash = static_cast<uint32_t>(fnv1a64(key) & 0xFFFFFFFFu);
+			std::string knownFormat;
+			const bool knownUnsupported = knownUnsupportedResourceFormat(block.url, knownFormat);
+			reference.formatHint = static_cast<uint8_t>(knownUnsupported ? 3u :
+				resourceImageFormat(block.url) == NavigatorResourceImageFormat::Png ? 1u :
+				resourceImageFormat(block.url) == NavigatorResourceImageFormat::Jpeg ? 2u : 0u);
+			reference.priority = knownUnsupported ? 3u :
+				(reference.formatHint == 1u || reference.formatHint == 2u ? 0u : 1u);
+			reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Discovered);
+			int duplicateOf = -1;
+			for (uint32_t prior = 0; prior < referenceCount; ++prior) {
+				const int priorBlockIndex = static_cast<int>(s_resourceReferences[prior].blockIndex);
+				if (priorBlockIndex < 0 || priorBlockIndex >= static_cast<int>(doc.blocks.size())) continue;
+				if (resourceCacheKey(doc.blocks[static_cast<size_t>(priorBlockIndex)].url) == key) {
+					duplicateOf = static_cast<int>(prior);
+					break;
+				}
+			}
+			if (duplicateOf >= 0) {
+				reference.duplicateOf = static_cast<uint16_t>(duplicateOf);
+				reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Deduplicated);
+				++s_resourceScheduler.duplicateReferences;
+			} else {
+				reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Pending);
+				++s_resourceScheduler.uniqueReferences;
+				++s_resourceScheduler.pending;
+				if (!knownUnsupported) ++s_resourceScheduler.schedulerCandidates;
+			}
+			++referenceCount;
+		}
+
+		for (;;) {
+			int selected = -1;
+			for (uint32_t i = 0; i < referenceCount; ++i) {
+				const NavigatorResourceReferenceMetadata& candidate = s_resourceReferences[i];
+				if (candidate.state != static_cast<uint8_t>(NavigatorResourceSchedulerState::Pending) ||
+					candidate.duplicateOf != 0xFFFFu) continue;
+				if (selected < 0 || schedulerCandidateLess(candidate, s_resourceReferences[selected]))
+					selected = static_cast<int>(i);
+			}
+			if (selected < 0) break;
+			NavigatorResourceReferenceMetadata& reference = s_resourceReferences[selected];
+			if (s_resourceScheduler.pending > 0) --s_resourceScheduler.pending;
+			reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Fetching);
+			const DocBlock& block = doc.blocks[static_cast<size_t>(reference.blockIndex)];
+			const ImageInfo& info = imageInfoForBlock(block);
+			reference.budgetRequestedBytes = info.budgetRequestedBytes;
+			reference.budgetAcceptedBytes = info.budgetAcceptedBytes;
+			reference.activeBytesBefore = static_cast<uint32_t>(std::min<uint64_t>(info.activeBytesBefore, UINT32_MAX));
+			reference.budgetHeadroomBefore = static_cast<uint32_t>(std::min<uint64_t>(info.budgetHeadroomBefore, UINT32_MAX));
+			reference.classification = static_cast<uint8_t>(info.classification);
+			reference.state = static_cast<uint8_t>(schedulerStateForImage(info));
+		}
+		for (uint32_t i = 0; i < referenceCount; ++i) {
+			NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
+			if (reference.duplicateOf != 0xFFFFu) {
+				const NavigatorResourceReferenceMetadata& canonical = s_resourceReferences[reference.duplicateOf];
+				reference.classification = canonical.classification;
+				reference.budgetRequestedBytes = canonical.budgetRequestedBytes;
+				reference.budgetAcceptedBytes = canonical.budgetAcceptedBytes;
+				reference.activeBytesBefore = canonical.activeBytesBefore;
+				reference.budgetHeadroomBefore = canonical.budgetHeadroomBefore;
+			}
+		}
+	}
+
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block)
 	{
 		const std::string requestedUrl = block.url.empty() ? block.src : block.url;
 		const std::string key = resourceCacheKey(requestedUrl);
 		auto found = s_imageCache.find(key);
 		if (found != s_imageCache.end()) return found->second;
+		if (s_resourceSchedulerPrepared && s_imageCache.size() >= kNavigatorMaxResourceReferences) {
+			s_resourceOverflowInfo = ImageInfo{};
+			NavigatorResourceClassificationInput input;
+			input.lifecycleFailure = NavigatorResourceLifecycleFailure::ResourceSlotUnavailable;
+			setImageClassification(s_resourceOverflowInfo, input,
+				"Navigator bounded resource metadata capacity was reached.");
+			return s_resourceOverflowInfo;
+		}
 
 		ImageInfo info;
 		info.attempted = true;
@@ -12183,6 +12434,22 @@ namespace {
 			return inserted.first->second;
 		}
 
+		std::string knownUnsupportedFormat;
+		if (knownUnsupportedResourceFormat(requestedUrl, knownUnsupportedFormat)) {
+			info.format = knownUnsupportedFormat;
+			NavigatorResourceClassificationInput input;
+			if (knownUnsupportedFormat == "svg") input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedSvg;
+			else if (knownUnsupportedFormat == "webp") input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedWebp;
+			else if (knownUnsupportedFormat == "avif") input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedAvif;
+			else input.mimeFailure = NavigatorResourceMimeFailure::UnsupportedGif;
+			info.unsupported = true;
+			info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
+			++s_resourceScheduler.unsupportedSkipped;
+			setImageClassification(info, input, "Image format is known unsupported from the URL hint.");
+			auto inserted = s_imageCache.emplace(key, std::move(info));
+			return inserted.first->second;
+		}
+
 		if (requestedUrl.rfind("data:", 0) == 0) {
 			NavigatorResourceClassificationInput input;
 			input.policyFailure = NavigatorResourcePolicyFailure::DataUrlUnsupported;
@@ -12192,15 +12459,19 @@ namespace {
 		}
 
 		if (isRemoteHttpUrl(requestedUrl)) {
-			if (s_remoteImageFetchCount >= gxos::web::kHttpSharedMaxRemoteResources) {
+			if (s_resourceScheduler.activeCount >= kNavigatorMaxActiveResources) {
 				NavigatorResourceClassificationInput input;
-				input.policyFailure = NavigatorResourcePolicyFailure::ResourceLimitReached;
-				setImageClassification(info, input, "Navigator remote resource limit reached.");
+				input.lifecycleFailure = NavigatorResourceLifecycleFailure::ResourceSlotUnavailable;
+				setImageClassification(info, input, "Navigator active decoded-resource capacity reached.");
+				++s_resourceScheduler.resourceCapDenied;
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
 			++s_remoteImageFetchCount;
+			++s_resourceScheduler.fetchStarted;
 			gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(requestedUrl);
+			++s_resourceScheduler.fetchCompleted;
+			EncodedBodyCharge encodedCharge(static_cast<uint64_t>(response.body.size()));
 			info.responseUrl = response.finalUrl.empty() ? requestedUrl : response.finalUrl;
 			info.responseStatusCode = response.statusCode;
 			info.responseContentType = boundedResourceText(response.contentType, 96);
@@ -12376,6 +12647,36 @@ namespace {
 				auto inserted = s_imageCache.emplace(key, std::move(info));
 				return inserted.first->second;
 			}
+			uint64_t requestedDecodedBytes = 0;
+			if (!navigatorCheckedRgbaBytes(headerWidth, headerHeight, requestedDecodedBytes)) {
+				NavigatorResourceClassificationInput input;
+				input.decodeFailure = NavigatorResourceDecodeFailure::PixelBudgetExceeded;
+				setImageClassification(info, input, "Image decoded RGBA size is outside the per-image cap.");
+				info.tooLarge = true;
+				info.status = gxos::gui::ImageLoadStatus::TooLarge;
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			info.budgetRequestedBytes = requestedDecodedBytes;
+			info.activeBytesBefore = s_resourceMemory.activeDecodedBytes;
+			info.budgetHeadroomBefore = info.activeBytesBefore < kNavigatorDecodedImageBudgetBytes
+				? kNavigatorDecodedImageBudgetBytes - info.activeBytesBefore : 0;
+			if (!s_resourceMemory.reserveDecoded(requestedDecodedBytes)) {
+				NavigatorResourceClassificationInput input;
+				input.decodeFailure = NavigatorResourceDecodeFailure::AggregateImageBudgetExceeded;
+				setImageClassification(info, input, "Document decoded-image memory budget denied this resource.");
+				info.status = gxos::gui::ImageLoadStatus::TooLarge;
+				++s_resourceScheduler.budgetDenied;
+				s_resourceScheduler.noteDeniedDecoded(requestedDecodedBytes);
+				if (s_resourceScheduler.deniedAllocationBytes <= UINT64_MAX - requestedDecodedBytes)
+					s_resourceScheduler.deniedAllocationBytes += requestedDecodedBytes;
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			info.budgetAcceptedBytes = requestedDecodedBytes;
+			++s_resourceScheduler.decodeStarted;
+			s_resourceScheduler.peakTemporaryDecodeBytes = std::max(
+				s_resourceScheduler.peakTemporaryDecodeBytes, requestedDecodedBytes);
 
 			gxos::gui::ImageBitmap decoded = gxos::gui::ImageAdapter::LoadFromBytes(
 				reinterpret_cast<const uint8_t*>(response.body.data()),
@@ -12397,13 +12698,22 @@ namespace {
 					input.loaded = true;
 					input.imageFormat = mimeFormat;
 					setImageClassification(info, input, "Remote image loaded.");
+					++s_resourceScheduler.decoded;
+					++s_resourceScheduler.attached;
+					++s_resourceScheduler.activeCount;
+					s_resourceScheduler.noteLoadedDecoded(requestedDecodedBytes);
+					s_resourceScheduler.activeBytes = s_resourceMemory.activeDecodedBytes;
+					if (s_resourceScheduler.activeBytes > s_resourceScheduler.peakActiveBytes)
+						s_resourceScheduler.peakActiveBytes = s_resourceScheduler.activeBytes;
 				} else {
+					s_resourceMemory.releaseDecoded(requestedDecodedBytes);
 					info.status = gxos::gui::ImageLoadStatus::DecodeFailed;
 					NavigatorResourceClassificationInput input;
 					input.lifecycleFailure = NavigatorResourceLifecycleFailure::AttachmentFailed;
 					setImageClassification(info, input, "Could not attach remote image to the document.");
 				}
 			} else {
+				s_resourceMemory.releaseDecoded(requestedDecodedBytes);
 				info.unsupported = decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat;
 				info.tooLarge = decoded.status == gxos::gui::ImageLoadStatus::TooLarge;
 				NavigatorResourceClassificationInput input;
@@ -12469,6 +12779,44 @@ namespace {
 			setImageClassification(info, input, "Local image read error.");
 		} else {
 			info.format = localJpeg ? "jpeg" : "png";
+			uint32_t localWidth = 0;
+			uint32_t localHeight = 0;
+			bool localHeaderValid = false;
+			if (localJpeg) {
+				gxos::gui::JpegHeaderInfo localJpegInfo{};
+				localHeaderValid = gxos::gui::InspectJpeg(
+					reinterpret_cast<const uint8_t*>(br.bytes.data()), br.bytes.size(), localJpegInfo) ==
+					gxos::gui::JpegProbeStatus::Valid;
+				localWidth = localJpegInfo.width;
+				localHeight = localJpegInfo.height;
+			} else {
+				const std::string localPngBytes(
+					reinterpret_cast<const char*>(br.bytes.data()), br.bytes.size());
+				localHeaderValid = pngHeaderDimensions(localPngBytes, localWidth, localHeight);
+			}
+			uint64_t localDecodedBytes = 0;
+			if (localHeaderValid && navigatorCheckedRgbaBytes(localWidth, localHeight, localDecodedBytes)) {
+				info.activeBytesBefore = s_resourceMemory.activeDecodedBytes;
+				info.budgetHeadroomBefore = info.activeBytesBefore < kNavigatorDecodedImageBudgetBytes
+					? kNavigatorDecodedImageBudgetBytes - info.activeBytesBefore : 0;
+			}
+			if (localHeaderValid && localDecodedBytes > 0 &&
+				!s_resourceMemory.reserveDecoded(localDecodedBytes)) {
+				NavigatorResourceClassificationInput input;
+				input.decodeFailure = NavigatorResourceDecodeFailure::AggregateImageBudgetExceeded;
+				setImageClassification(info, input, "Document decoded-image memory budget denied this resource.");
+				info.status = gxos::gui::ImageLoadStatus::TooLarge;
+				info.budgetRequestedBytes = localDecodedBytes;
+				++s_resourceScheduler.budgetDenied;
+				s_resourceScheduler.noteDeniedDecoded(localDecodedBytes);
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (localHeaderValid) {
+				info.budgetRequestedBytes = localDecodedBytes;
+				info.budgetAcceptedBytes = localDecodedBytes;
+				++s_resourceScheduler.decodeStarted;
+			}
 			gxos::gui::ImageBitmap decoded = gxos::gui::ImageAdapter::LoadFromBytes(br.bytes, info.filePath);
 			info.status = decoded.status;
 			if (decoded.status == gxos::gui::ImageLoadStatus::Ok) {
@@ -12480,7 +12828,17 @@ namespace {
 				input.loaded = true;
 				input.imageFormat = localJpeg ? NavigatorResourceImageFormat::Jpeg : NavigatorResourceImageFormat::Png;
 				setImageClassification(info, input, "Local image loaded.");
+				if (localHeaderValid) {
+					++s_resourceScheduler.decoded;
+					++s_resourceScheduler.attached;
+					++s_resourceScheduler.activeCount;
+					s_resourceScheduler.noteLoadedDecoded(localDecodedBytes);
+					s_resourceScheduler.activeBytes = s_resourceMemory.activeDecodedBytes;
+					s_resourceScheduler.peakActiveBytes = std::max(
+						s_resourceScheduler.peakActiveBytes, s_resourceScheduler.activeBytes);
+				}
 			} else {
+				if (localHeaderValid) s_resourceMemory.releaseDecoded(localDecodedBytes);
 				info.unsupported = decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat;
 				info.tooLarge = decoded.status == gxos::gui::ImageLoadStatus::TooLarge;
 				NavigatorResourceClassificationInput input;
@@ -15023,7 +15381,42 @@ std::string Navigator::SmokePageDiagnostics()
 	out << "resource_duplicate_urls=" << c.duplicateResourceUrls << "\n";
 	out << "resource_duplicate_network_fetches=" << c.duplicateNetworkFetches << "\n";
 	out << "resource_duplicate_decoded_images=" << c.duplicateDecodedImages << "\n";
+	out << "references_discovered=" << c.referencesDiscovered << "\n";
+	out << "unique_references=" << c.uniqueReferences << "\n";
+	out << "duplicate_references=" << c.duplicateReferences << "\n";
+	out << "scheduler_candidates=" << c.schedulerCandidates << "\n";
+	out << "scheduler_pending=" << c.pending << "\n";
+	out << "fetch_started=" << c.fetchStarted << "\n";
+	out << "fetch_completed=" << c.fetchCompleted << "\n";
+	out << "decode_started=" << c.decodeStarted << "\n";
+	out << "decoded=" << c.decoded << "\n";
+	out << "attached=" << c.attached << "\n";
+	out << "budget_denied=" << c.budgetDenied << "\n";
+	out << "resource_cap_denied=" << c.resourceCapDenied << "\n";
+	out << "unsupported_skipped=" << c.unsupportedSkipped << "\n";
+	out << "references_capacity_denied=" << c.referencesCapacityDenied << "\n";
+	out << "scheduler_released=" << c.released << "\n";
+	out << "scheduler_active_count=" << c.activeCount << "\n";
+	out << "scheduler_active_bytes=" << c.activeBytes << "\n";
+	out << "scheduler_peak_active_bytes=" << c.peakActiveBytes << "\n";
+	out << "current_encoded_resource_bytes=" << c.currentEncodedResourceBytes << "\n";
+	out << "peak_encoded_resource_bytes=" << c.peakEncodedResourceBytes << "\n";
+	out << "peak_temporary_decode_bytes=" << c.peakTemporaryDecodeBytes << "\n";
+	out << "released_decoded_bytes=" << c.releasedDecodedBytes << "\n";
+	out << "denied_allocation_bytes=" << c.deniedAllocationBytes << "\n";
+	out << "total_loaded_decoded_bytes=" << c.totalLoadedDecodedBytes << "\n";
+	out << "total_denied_requested_bytes=" << c.totalDeniedRequestedBytes << "\n";
+	for (size_t bucket = 0; bucket < 6; ++bucket) {
+		out << "loaded_size_bucket_" << bucket << "=" << m.resourceScheduler.loadedDecodedSizeBuckets[bucket] << "\n";
+		out << "denied_size_bucket_" << bucket << "=" << m.resourceScheduler.deniedDecodedSizeBuckets[bucket] << "\n";
+	}
 	out << "active_image_resources=" << m.activeImageResources << "\n";
+	out << "active_image_bytes=" << m.activeImageBytes << "\n";
+	out << "peak_active_image_bytes=" << m.peakActiveImageBytes << "\n";
+	out << "decoded_image_budget_bytes=" << m.decodedImageBudgetBytes << "\n";
+	out << "budget_denied_bytes=" << m.budgetDeniedBytes << "\n";
+	out << "peak_encoded_body_bytes=" << m.peakEncodedResourceBytes << "\n";
+	out << "released_decoded_image_bytes=" << m.releasedDecodedBytes << "\n";
 	out << "allocated_image_bytes_estimate=" << m.allocatedImageBytes << "\n";
 	out << "released_image_resources=" << m.releasedImageResources << "\n";
 	out << "released_image_bytes_estimate=" << m.releasedImageBytes << "\n";
@@ -15035,6 +15428,11 @@ std::string Navigator::SmokePageDiagnostics()
 	}
 	for (const NavigatorResourceTelemetry& resource : m.resourceTelemetry) {
 		out << "resource[" << resource.ordinal << "].url_hash=" << resource.urlHash << "\n";
+		out << "resource[" << resource.ordinal << "].block_index=" << resource.blockIndex << "\n";
+		out << "resource[" << resource.ordinal << "].block_y=" << resource.blockY << "\n";
+		out << "resource[" << resource.ordinal << "].display_dimensions=" << resource.displayWidth << "x" << resource.displayHeight << "\n";
+		out << "resource[" << resource.ordinal << "].viewport_relation=" << resource.viewportRelation << "\n";
+		out << "resource[" << resource.ordinal << "].likely_visible=" << yesNo(resource.likelyVisible) << "\n";
 		out << "resource[" << resource.ordinal << "].origin_host=" << resource.originHost << "\n";
 		out << "resource[" << resource.ordinal << "].same_origin=" << yesNo(resource.sameOrigin) << "\n";
 		out << "resource[" << resource.ordinal << "].status=" << resource.responseStatusCode << "\n";
@@ -15044,6 +15442,18 @@ std::string Navigator::SmokePageDiagnostics()
 		out << "resource[" << resource.ordinal << "].decoded_bytes=" << resource.decodedBodyBytes << "\n";
 		out << "resource[" << resource.ordinal << "].dimensions=" << resource.imageWidth << "x" << resource.imageHeight << "\n";
 		out << "resource[" << resource.ordinal << "].redirects=" << resource.redirectCount << "\n";
+		out << "resource[" << resource.ordinal << "].scheduler_ordinal=" << resource.schedulerOrdinal << "\n";
+		out << "resource[" << resource.ordinal << "].priority=" << resource.priority << "\n";
+		out << "resource[" << resource.ordinal << "].scheduler_state=" <<
+			navigatorResourceSchedulerStateName(resource.schedulerState) << "\n";
+		out << "resource[" << resource.ordinal << "].budget_requested=" << resource.budgetRequestedBytes << "\n";
+		out << "resource[" << resource.ordinal << "].budget_accepted=" << resource.budgetAcceptedBytes << "\n";
+		out << "resource[" << resource.ordinal << "].decoded_rgba_bytes=" << resource.decodedRgbaBytes << "\n";
+		out << "resource[" << resource.ordinal << "].active_bytes_before=" << resource.activeBytesBefore << "\n";
+		out << "resource[" << resource.ordinal << "].budget_headroom_before=" << resource.budgetHeadroomBefore << "\n";
+		out << "resource[" << resource.ordinal << "].display_pixel_bytes=" << resource.displayPixelBytes << "\n";
+		out << "resource[" << resource.ordinal << "].shared_resource_id=" << resource.sharedResourceId << "\n";
+		out << "resource[" << resource.ordinal << "].duplicate=" << yesNo(resource.duplicate) << "\n";
 		out << "resource[" << resource.ordinal << "].classification=" << navigatorResourceClassificationName(resource.classification) << "\n";
 		out << "resource[" << resource.ordinal << "].reason=" << resource.reason << "\n";
 	}

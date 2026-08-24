@@ -17,6 +17,8 @@
 #include "kernel/image_adapter.h"
 #include "display_configuration_service.h"
 #include "../../../../guide_web_http_shared.h"
+#include "../../../../navigator_resource_scheduler.h"
+#include "../../../../navigator_resource_diagnostics.h"
 
 // Bare-metal Navigator is a capability-limited adapter.  It mirrors the small
 // guideWeb CSS-lite value types it needs without including the hosted
@@ -741,6 +743,7 @@ private:
         int imageStatus;
         int imageFormat;
         const uint32_t* imagePixels;
+        int imageOwnerBlockIndex = -1;
         char imageError[128];
         char resourceClassification[64];
         int resourceStatusCode;
@@ -916,6 +919,12 @@ private:
     int m_metaDuplicateNetworkFetches;
     int m_metaDuplicateDecodedImages;
     int m_metaResourceClassificationCounts[64];
+    gxos::apps::NavigatorResourceReferenceMetadata m_resourceReferences[gxos::apps::kNavigatorMaxResourceReferences];
+    uint16_t m_resourceOrder[gxos::apps::kNavigatorMaxResourceReferences];
+    gxos::apps::NavigatorResourceTelemetryRecord m_resourceTelemetry[gxos::apps::kNavigatorMaxResourceTelemetryRecords];
+    uint32_t m_resourceTelemetryCount;
+    gxos::apps::NavigatorResourceSchedulerStats m_resourceScheduler;
+    gxos::apps::NavigatorResourceMemoryAccounting m_resourceMemory;
     char m_metaScheme[8];
     bool m_metaDnsUsed;
     char m_metaDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
