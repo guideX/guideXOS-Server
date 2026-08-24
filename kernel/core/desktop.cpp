@@ -48,6 +48,7 @@
 #include "../../icon_theme_manager.h"
 #endif
 #include "../../desktop_theme.h"
+#include "../../desktop_control_theme.h"
 
 // ------------------------------------------------------------
 // Phase 3 typed dispatch keeps legacy and special-case fallbacks authoritative
@@ -8103,32 +8104,45 @@ static void draw_control_panel()
 
     uint32_t dlgX = (s_screenW - kControlPanelW) / 2;
     uint32_t dlgY = (s_screenH - kControlPanelH) / 2;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
 
     // Shadow
-    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kControlPanelW, kControlPanelH, rgb(10, 10, 15));
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kControlPanelW, kControlPanelH,
+        sciFiTheme ? BlendDesktopThemeColor(theme.desktopBackground, theme.windowBackground, 40) : rgb(10, 10, 15));
 
     // Window background
-    framebuffer::fill_rect(dlgX, dlgY, kControlPanelW, kControlPanelH, rgb(35, 35, 45));
-    draw_rect(dlgX, dlgY, kControlPanelW, kControlPanelH, rgb(70, 90, 130));
+    framebuffer::fill_rect(dlgX, dlgY, kControlPanelW, kControlPanelH,
+        sciFiTheme ? roles.panelBackground : rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, kControlPanelW, kControlPanelH,
+        sciFiTheme ? BlendDesktopThemeColor(roles.border, theme.accent, 38) : rgb(70, 90, 130));
 
     // Title bar
-    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kControlPanelW - 2, 28, rgb(50, 70, 110));
-    draw_text(dlgX + 12, dlgY + 8, "Control Panel", rgb(220, 225, 240), 1);
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kControlPanelW - 2, 28,
+        sciFiTheme ? theme.titleBarBackground : rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "Control Panel",
+        sciFiTheme ? roles.primaryText : rgb(220, 225, 240), 1);
 
     // Close button
     uint32_t closeBtnX = dlgX + kControlPanelW - 26;
     uint32_t closeBtnY = dlgY + 4;
-    framebuffer::fill_rect(closeBtnX, closeBtnY, 20, 20, rgb(180, 60, 60));
-    draw_rect(closeBtnX, closeBtnY, 20, 20, rgb(200, 80, 80));
-    draw_text(closeBtnX + 6, closeBtnY + 5, "x", rgb(240, 220, 220), 1);
+    framebuffer::fill_rect(closeBtnX, closeBtnY, 20, 20,
+        sciFiTheme ? BlendDesktopThemeColor(roles.raisedPanel, rgb(140, 50, 50), 72) : rgb(180, 60, 60));
+    draw_rect(closeBtnX, closeBtnY, 20, 20,
+        sciFiTheme ? BlendDesktopThemeColor(roles.border, rgb(180, 80, 80), 62) : rgb(200, 80, 80));
+    draw_text(closeBtnX + 6, closeBtnY + 5, "x",
+        sciFiTheme ? BlendDesktopThemeColor(roles.primaryText, rgb(255, 190, 190), 24) : rgb(240, 220, 220), 1);
 
     // Content area
     uint32_t contentY = dlgY + 36;
     uint32_t contentH = kControlPanelH - 44;
-    framebuffer::fill_rect(dlgX + 8, contentY, kControlPanelW - 16, contentH, rgb(30, 30, 38));
+    framebuffer::fill_rect(dlgX + 8, contentY, kControlPanelW - 16, contentH,
+        sciFiTheme ? roles.recessedField : rgb(30, 30, 38));
 
     // Draw header text
-    draw_text(dlgX + 20, contentY + 12, "System Settings", rgb(200, 200, 220), 1);
+    draw_text(dlgX + 20, contentY + 12, "System Settings",
+        sciFiTheme ? roles.primaryText : rgb(200, 200, 220), 1);
 
     // Draw icons
     for (int i = 0; i < kControlPanelItemCount; i++) {
@@ -8137,13 +8151,16 @@ static void draw_control_panel()
 
         // Hover highlight
         if (s_controlPanelHover == i) {
-            framebuffer::fill_rect(iconX - 8, iconY - 4, kCPIconSize + 16, kCPIconSize + 30, rgb(50, 70, 100));
-            draw_rect(iconX - 8, iconY - 4, kCPIconSize + 16, kCPIconSize + 30, rgb(80, 110, 160));
+            framebuffer::fill_rect(iconX - 8, iconY - 4, kCPIconSize + 16, kCPIconSize + 30,
+                sciFiTheme ? roles.selectionInactive : rgb(50, 70, 100));
+            draw_rect(iconX - 8, iconY - 4, kCPIconSize + 16, kCPIconSize + 30,
+                sciFiTheme ? BlendDesktopThemeColor(roles.border, theme.mutedAccent, 30) : rgb(80, 110, 160));
         }
 
         // Icon
         framebuffer::fill_rect(iconX, iconY, kCPIconSize, kCPIconSize, s_controlPanelItems[i].color);
-        draw_rect(iconX, iconY, kCPIconSize, kCPIconSize, rgb(180, 180, 200));
+        draw_rect(iconX, iconY, kCPIconSize, kCPIconSize,
+            sciFiTheme ? BlendDesktopThemeColor(roles.border, roles.primaryText, 18) : rgb(180, 180, 200));
 
         // Inner highlight
         uint32_t innerSize = 20;
@@ -8160,7 +8177,7 @@ static void draw_control_panel()
         int tw = measure_text(lbl);
         uint32_t lx = iconX + (kCPIconSize > (uint32_t)tw ? (kCPIconSize - tw) / 2 : 0);
         uint32_t ly = iconY + kCPIconSize + 8;
-        draw_text(lx, ly, lbl, rgb(210, 210, 225), 1);
+        draw_text(lx, ly, lbl, sciFiTheme ? roles.primaryText : rgb(210, 210, 225), 1);
     }
 }
 

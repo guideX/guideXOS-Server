@@ -1047,6 +1047,8 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
     const bool fileExplorerWindow = window && window->owner &&
         (kernelCompositorTextEquals(window->owner->getName(), "Files") ||
          kernelCompositorTextEquals(window->owner->getName(), "FileExplorer"));
+    const bool displayOptionsWindow = window && window->owner &&
+        kernelCompositorTextEquals(window->owner->getName(), "DisplayOptions");
 
     switch (widget->type) {
         case app::WidgetType::Label:
@@ -1107,6 +1109,20 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
                     : (widget->hover
                         ? BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 30)
                         : BlendDesktopThemeColor(theme.windowBorder, theme.taskbarBorder, 20));
+                textColor = buttonRoles.text;
+            } else if (displayOptionsWindow && sciFiTheme) {
+                const BareMetalControlTheme controlRoles = GetBareMetalControlTheme(theme);
+                const uint32_t baseColor = BlendDesktopThemeColor(
+                    controlRoles.raisedPanel, controlRoles.panelBackground, 18);
+                const BareMetalButtonSurfaceRoles buttonRoles =
+                    GetBareMetalButtonSurfaceRoles(theme, baseColor, 18, 24);
+                bgColor = widget->pressed ? buttonRoles.pressed
+                    : (widget->hover ? buttonRoles.hover : buttonRoles.normal);
+                borderColor = widget->pressed
+                    ? BlendDesktopThemeColor(controlRoles.border, theme.accent, 36)
+                    : (widget->hover
+                        ? BlendDesktopThemeColor(controlRoles.border, theme.mutedAccent, 30)
+                        : BlendDesktopThemeColor(controlRoles.border, theme.taskbarBorder, 20));
                 textColor = buttonRoles.text;
             }
             fillRect(x, y, w, h, bgColor);

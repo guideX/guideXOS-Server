@@ -1116,7 +1116,41 @@ Fresh pixel-targeted QEMU interaction proof was not completed in this consolidat
 
 ### Remaining Control Gaps
 
-No general bare-metal button renderer, generic list/textbox/dialog framework, generic scrollbar, shared shell-popup renderer, icon/font role system, larger application interior abstraction, or settings/system-application theme pass was added. These remain separate future work. Phase 8D is not started.
+No general bare-metal button renderer, generic list/textbox/dialog framework, generic scrollbar, shared shell-popup renderer, icon/font role system, or larger application interior abstraction was added. These remain separate future work; the scoped settings-surface treatment is documented below as Phase 8D.
+
+## Phase 8D — Bare-Metal Control Panel and Display Options Surface Consistency
+
+Phase 8D applies the proven bare-metal Sci-Fi color relationships to the existing system/settings surfaces: the freestanding Control Panel and the freestanding Display Options application. This is a paint-only parity phase. It does not redesign settings, add a settings framework, change theme persistence, or change display behavior. Device Manager, Network settings, Disk Manager, generic controls, icons, and fonts remain outside this phase.
+
+### Audit and Architecture
+
+Bare-metal Control Panel is a desktop-owned modal surface in `kernel/core/desktop.cpp`. `draw_control_panel()` owns the client paint path for the fixed window, title bar, close button, content panel, three existing category/item cards, hover treatment, labels, and unchanged bitmap-like item icon fills. `hit_test_control_panel()` and the desktop mouse router continue to own the close and item hit bands and launch behavior. It has no separate control-panel application object. The hosted `control_panel.cpp` client is a different IPC renderer and was not changed.
+
+Bare-metal Display Options is `DisplayOptionsApp` in `kernel/core/kernel_apps.cpp`. Its `draw()` path owns the tab/section strips, gallery cards, local scrollbar, desktop-icon checkboxes, status text, and the existing select button widget. `drawDisplayTab()` owns the monitor/display preview information, mode and primary-monitor choices, resolution choices, pending-topology warning, status, and Apply/Cancel/Review/Refresh/Keep paint. The app's existing mouse/key handlers own tab, gallery, checkbox, scrollbar, button, and display-option hit testing. The existing display configuration service owns monitor enumeration, mode/primary selection, Apply/Cancel transaction flow, persistence, rollback, and topology reconciliation. The `DisplayOptionsApp` path has no bare-metal Classic/Sci-Fi theme selector; the existing theme selector remains in the separate hosted/root `display_options.cpp` path and was not changed.
+
+No geometry or input refactor was necessary. Local tabs, checkboxes, display choices, warning panels, and the gallery scrollbar remain application-owned. No generic tab, checkbox, radio, combo, list, or scrollbar renderer was introduced.
+
+### Sci-Fi Treatment and Phase 8C Reuse
+
+Control Panel now uses `GetBareMetalControlTheme()` for its Sci-Fi panel, recessed content, border, primary-text, and inactive-selection roles. The existing icon fills and inner icon marks remain unchanged. The close button keeps its existing red semantic treatment, with only its Sci-Fi surface and border blended against the shared roles. Hover stays visual-only and uses the shared inactive-selection relationship.
+
+Display Options now uses local semantic helpers backed by `desktop_control_theme.h`: body and panel surfaces, active/inactive section strips, borders, primary/secondary/muted text, selected gallery borders, cards, scrollbar track/thumb, warning/status text, and local button state. Existing application-specific formulas remain local where they carry meaning, including wallpaper/gradient preview pixels, gradient accent borders, warning semantics, display-option button geometry, and the local checkbox paint path. The existing `m_selectButtonId` widget continues through the compositor's normal/hover/pressed path; a narrow `DisplayOptions` owner guard applies the Phase 8C button roles only for Sci-Fi. Classic branches retain their prior literals, including the original Control Panel and Display Options surfaces.
+
+The reused Phase 8C roles are panel/raised/recessed surfaces, primary/secondary text, active/inactive selection, and button normal/hover/pressed/text transitions. No new abstraction was added for the remaining local controls because their ownership and semantics are application-specific.
+
+### Geometry, Behavior, and Persistence Boundaries
+
+The Control Panel window, item/card bounds, icon positions, text positions, close/item hit bands, category ordering, launch targets, focus, and lifecycle are unchanged. Display Options tab bounds, gallery/card bounds, scrollbar bounds, checkbox rows, selector/button bounds, monitor preview geometry, window dimensions, hit regions, keyboard traversal, callbacks, and lifecycle are unchanged. The display configuration service and theme configuration paths were not modified. `DesktopThemeId` tokens, Classic default/fallback, `display-options.cfg`, `desktop.json` compatibility, Apply/Cancel behavior, and reload/restart behavior remain owned by the existing hosted theme/configuration implementation.
+
+### Phase 8D Validation Record
+
+The exact workspace passed `.\build.bat`, `mingw32-make -C kernel ARCH=amd64 -j2`, and `.\build.ps1 -Arch amd64`. `smoke-theme-system.ps1 -SkipBuild`, `smoke-live-directory-desktop-status.ps1 -SkipBuild`, `smoke-bootinfo-framebuffer-array.ps1`, and `smoke-virtio-gpu-input-routing.ps1` passed. `smoke-hosted-display-runtime.ps1` passed its normal single-output/no-gates checks and emitted synthetic-mode evidence, but its dual-window continuation did not complete cleanly in the harness and left a validation-only server process that was stopped. The Display Options source/runtime inventory, display configuration control-plane source, display persistence source, synthetic display layout, and virtio-GPU Display Options source checks passed. `git diff --check` was run after validation-state restoration.
+
+The desktop-startup-sync and bounded QEMU display probes were attempted against the exact generated ESP. They reached the UEFI interactive shell because this workspace ESP has no `startup.nsh`, so they did not provide a fresh post-8D framebuffer screenshot or interactive Control Panel/Display Options session. The bounded display persistence/control harness also remains limited by the repository's child Windows PowerShell `Get-FileHash` failure during the PacMan build path. These are proof limitations, not styling regressions; no boot/configuration workaround was committed. Prior Phase 8B Classic/Sci-Fi QEMU captures remain the visual baseline for the surrounding bare-metal shell and application chrome.
+
+Theme persistence was source-proven through the passing theme-system smoke: Classic and Sci-Fi tokens, default/fallback normalization, hosted selector wiring, save/reload paths, and compositor synchronization remain present. This phase did not touch those paths. Because the freestanding Display Options client has no theme selector, no bare-metal selector interaction was available to exercise; its existing display Apply/Cancel and monitor configuration paths remain unchanged and are covered by the display source/control checks. Generated PacMan/ESP/display validation state was restored after the checks.
+
+Remaining settings/application gaps are bounded to Device Manager, Network settings, Disk Manager, other system applications, generic control parity, and icon/font integration. No Phase 8E work is included.
 
 ## Manual Validation Runbook
 

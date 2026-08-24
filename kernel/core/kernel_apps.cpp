@@ -323,6 +323,132 @@ static uint32_t kernelCalculatorDisplayTextColor()
     return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
 }
 
+static uint32_t kernelDisplayOptionsBodyColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(28, 30, 38);
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(GetCurrentDesktopTheme());
+    return BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 18);
+}
+
+static uint32_t kernelDisplayOptionsPanelColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(22, 22, 24);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).recessedField;
+}
+
+static uint32_t kernelDisplayOptionsTabColor(bool active)
+{
+    if (!kernelSciFiThemeActive()) return active ? rgb(58, 58, 58) : rgb(34, 34, 38);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
+    const uint32_t base = BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 18);
+    return active ? BareMetalSelectionFillColor(theme, base, true) : base;
+}
+
+static uint32_t kernelDisplayOptionsTabBorderColor(bool active)
+{
+    if (!kernelSciFiThemeActive()) return rgb(90, 90, 96);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
+    return BlendDesktopThemeColor(roles.border, active ? theme.accent : theme.mutedAccent, active ? 38 : 22);
+}
+
+static uint32_t kernelDisplayOptionsHeadingTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(230, 230, 238);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
+}
+
+static uint32_t kernelDisplayOptionsLabelTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(190, 195, 205);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).secondaryText;
+}
+
+static uint32_t kernelDisplayOptionsValueTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(225, 228, 236);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
+}
+
+static uint32_t kernelDisplayOptionsMutedTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(160, 165, 176);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).secondaryText;
+}
+
+static uint32_t kernelDisplayOptionsSelectionBorderColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(72, 110, 180);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).selectionActive;
+}
+
+static uint32_t kernelDisplayOptionsCardColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(42, 42, 42);
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(GetCurrentDesktopTheme());
+    return BlendDesktopThemeColor(roles.panelBackground, roles.raisedPanel, 16);
+}
+
+static uint32_t kernelDisplayOptionsCardBorderColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(130, 130, 145);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).border;
+}
+
+static uint32_t kernelDisplayOptionsScrollbarTrackColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(36, 36, 40);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).panelBackground;
+}
+
+static uint32_t kernelDisplayOptionsScrollbarThumbColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(150, 160, 176);
+    return GetCurrentDesktopTheme().accent;
+}
+
+static BareMetalButtonSurfaceRoles kernelDisplayOptionsButtonRoles()
+{
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
+    const uint32_t base = BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 18);
+    return GetBareMetalButtonSurfaceRoles(theme, base, 18, 24);
+}
+
+static uint32_t kernelDisplayOptionsButtonFillColor(bool selected)
+{
+    if (!kernelSciFiThemeActive()) return selected ? rgb(62, 96, 150) : rgb(38, 39, 46);
+    const BareMetalButtonSurfaceRoles roles = kernelDisplayOptionsButtonRoles();
+    return selected ? roles.pressed : roles.normal;
+}
+
+static uint32_t kernelDisplayOptionsButtonBorderColor(bool selected)
+{
+    if (!kernelSciFiThemeActive()) return rgb(112, 120, 140);
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
+    return BlendDesktopThemeColor(roles.border, selected ? theme.accent : theme.mutedAccent, selected ? 36 : 26);
+}
+
+static uint32_t kernelDisplayOptionsButtonTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(235, 238, 246);
+    return kernelDisplayOptionsButtonRoles().text;
+}
+
+static uint32_t kernelDisplayOptionsPositiveTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(190, 205, 225);
+    return GetCurrentDesktopTheme().accent;
+}
+
+static uint32_t kernelDisplayOptionsWarningTextColor()
+{
+    if (!kernelSciFiThemeActive()) return rgb(235, 180, 120);
+    return BlendDesktopThemeColor(GetCurrentDesktopTheme().accent, rgb(235, 180, 120), 46);
+}
+
 static uint32_t css_color_or(uint32_t fallback, const gxos::web::WebStyle& style) {
     return style.hasColor ? style.color : fallback;
 }
@@ -2588,20 +2714,20 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
     const uint32_t panelY = y + 74u;
     const uint32_t panelW = w > 28u ? w - 28u : 1u;
     const uint32_t panelH = h > 92u ? h - 92u : 1u;
-    framebuffer::fill_rect(panelX, panelY, panelW, panelH, rgb(22, 22, 24));
+    framebuffer::fill_rect(panelX, panelY, panelW, panelH, kernelDisplayOptionsPanelColor());
 
-    appDrawText(x + 18u, y + 58u, "Display configuration", rgb(230, 230, 238));
-    appDrawText(x + 28u, y + 92u, "Mode", rgb(190, 195, 205));
+    appDrawText(x + 18u, y + 58u, "Display configuration", kernelDisplayOptionsHeadingTextColor());
+    appDrawText(x + 28u, y + 92u, "Mode", kernelDisplayOptionsLabelTextColor());
 
     const auto button = [&](uint32_t bx, uint32_t by, uint32_t bw, const char* label, bool selected) {
-        framebuffer::fill_rect(bx, by, bw, 28u, selected ? rgb(62, 96, 150) : rgb(38, 39, 46));
-        appDrawRect(bx, by, bw, 28u, rgb(112, 120, 140));
-        appDrawText(bx + 10u, by + 9u, label, rgb(235, 238, 246));
+        framebuffer::fill_rect(bx, by, bw, 28u, kernelDisplayOptionsButtonFillColor(selected));
+        appDrawRect(bx, by, bw, 28u, kernelDisplayOptionsButtonBorderColor(selected));
+        appDrawText(bx + 10u, by + 9u, label, kernelDisplayOptionsButtonTextColor());
     };
     button(x + 88u, y + 86u, 92u, "Extend", m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Extend);
     button(x + 188u, y + 86u, 92u, "Mirror", m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Mirror);
 
-    appDrawText(x + 28u, y + 132u, "Primary monitor", rgb(190, 195, 205));
+    appDrawText(x + 28u, y + 132u, "Primary monitor", kernelDisplayOptionsLabelTextColor());
     button(x + 150u, y + 126u, 112u, "Display 1", m_selectedPrimaryOutput == 1u);
     button(x + 270u, y + 126u, 112u, "Display 2", m_selectedPrimaryOutput == 2u);
 
@@ -2612,10 +2738,10 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
     strappend(geometry, "x", sizeof(geometry));
     display_config_number(static_cast<uint32_t>(m_activeDisplayConfiguration.virtualDesktopHeight), number, sizeof(number));
     strappend(geometry, number, sizeof(geometry));
-    appDrawText(x + 28u, y + 174u, "Active desktop", rgb(190, 195, 205));
-    appDrawText(x + 150u, y + 174u, geometry, rgb(225, 228, 236));
-    appDrawText(x + 28u, y + 198u, "Backend", rgb(190, 195, 205));
-    appDrawText(x + 150u, y + 198u, m_activeDisplayConfiguration.backend[0] != '\0' ? m_activeDisplayConfiguration.backend : "Unavailable", rgb(225, 228, 236));
+    appDrawText(x + 28u, y + 174u, "Active desktop", kernelDisplayOptionsLabelTextColor());
+    appDrawText(x + 150u, y + 174u, geometry, kernelDisplayOptionsValueTextColor());
+    appDrawText(x + 28u, y + 198u, "Backend", kernelDisplayOptionsLabelTextColor());
+    appDrawText(x + 150u, y + 198u, m_activeDisplayConfiguration.backend[0] != '\0' ? m_activeDisplayConfiguration.backend : "Unavailable", kernelDisplayOptionsValueTextColor());
 
     const gxos::display::DisplayConfigurationSnapshot& requested =
         qemu_logical_resolution_ui_enabled(m_activeDisplayConfiguration)
@@ -2627,8 +2753,8 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
     else strcopy(resolution0, "Unavailable", sizeof(resolution0));
     if (requested.outputCount > 1u) format_qemu_logical_resolution(requested.outputs[1], resolution1, sizeof(resolution1));
     else strcopy(resolution1, "Unavailable", sizeof(resolution1));
-    appDrawText(x + 28u, y + 230u, "Monitor 1", rgb(190, 195, 205));
-    appDrawText(x + 150u, y + 230u, requested.outputCount > 0u ? requested.outputs[0].stableId : "Unavailable", rgb(225, 228, 236));
+    appDrawText(x + 28u, y + 230u, "Monitor 1", kernelDisplayOptionsLabelTextColor());
+    appDrawText(x + 150u, y + 230u, requested.outputCount > 0u ? requested.outputs[0].stableId : "Unavailable", kernelDisplayOptionsValueTextColor());
     if (requested.outputCount > 0u) {
         char origin[32];
         char originNumber[16];
@@ -2637,10 +2763,10 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
         strappend(origin, ",", sizeof(origin));
         display_config_signed_number(requested.outputs[0].virtualY, originNumber, sizeof(originNumber));
         strappend(origin, originNumber, sizeof(origin));
-        appDrawText(x + 300u, y + 230u, origin, rgb(185, 190, 202));
+        appDrawText(x + 300u, y + 230u, origin, kernelDisplayOptionsMutedTextColor());
     }
-    appDrawText(x + 28u, y + 254u, "Monitor 2", rgb(190, 195, 205));
-    appDrawText(x + 150u, y + 254u, requested.outputCount > 1u ? requested.outputs[1].stableId : "Unavailable", rgb(225, 228, 236));
+    appDrawText(x + 28u, y + 254u, "Monitor 2", kernelDisplayOptionsLabelTextColor());
+    appDrawText(x + 150u, y + 254u, requested.outputCount > 1u ? requested.outputs[1].stableId : "Unavailable", kernelDisplayOptionsValueTextColor());
     if (requested.outputCount > 1u) {
         char origin[32];
         char originNumber[16];
@@ -2649,37 +2775,46 @@ void DisplayOptionsApp::drawDisplayTab(uint32_t x, uint32_t y, uint32_t w, uint3
         strappend(origin, ",", sizeof(origin));
         display_config_signed_number(requested.outputs[1].virtualY, originNumber, sizeof(originNumber));
         strappend(origin, originNumber, sizeof(origin));
-        appDrawText(x + 300u, y + 254u, origin, rgb(185, 190, 202));
+        appDrawText(x + 300u, y + 254u, origin, kernelDisplayOptionsMutedTextColor());
     }
     button(x + 430u, y + 216u, 130u, resolution0, qemuLogicalResolution);
     button(x + 430u, y + 240u, 130u, resolution1, qemuLogicalResolution);
     appDrawText(x + 28u, y + 284u,
         qemuLogicalResolution ? "QEMU logical scanout resolution (click a value to cycle)" : "Resolution selection unavailable for this backend",
-        rgb(190, 195, 205));
+        kernelDisplayOptionsLabelTextColor());
     bool mirrorCompatible = requested.outputCount < 2u ||
         (requested.outputs[0].width == requested.outputs[1].width && requested.outputs[0].height == requested.outputs[1].height);
     appDrawText(x + 28u, y + 306u,
         m_selectedDisplayMode == gxos::display::DisplayConfigurationMode::Mirror
             ? (mirrorCompatible ? "Mirror: compatible resolutions" : "Mirror: rejected until resolutions match")
             : "Extend: unequal logical resolutions are supported",
-        mirrorCompatible ? rgb(190, 205, 225) : rgb(235, 180, 120));
-    appDrawText(x + 28u, y + 328u, "Refresh rate: Not available    Rotation: Not available", rgb(160, 165, 176));
+        mirrorCompatible ? kernelDisplayOptionsPositiveTextColor() : kernelDisplayOptionsWarningTextColor());
+    appDrawText(x + 28u, y + 328u, "Refresh rate: Not available    Rotation: Not available", kernelDisplayOptionsMutedTextColor());
 
     if (m_pendingTopologyChange.pending != 0u) {
-        framebuffer::fill_rect(x + 18u, y + 348u, w > 36u ? w - 36u : 1u, 54u, rgb(76, 52, 36));
-        appDrawRect(x + 18u, y + 348u, w > 36u ? w - 36u : 1u, 54u, rgb(190, 132, 72));
-        appDrawText(x + 28u, y + 356u, "Display hardware configuration changed.", rgb(248, 220, 174));
+        const uint32_t warningFill = kernelSciFiThemeActive()
+            ? BlendDesktopThemeColor(GetBareMetalControlTheme(GetCurrentDesktopTheme()).raisedPanel, rgb(120, 80, 40), 42)
+            : rgb(76, 52, 36);
+        const uint32_t warningBorder = kernelSciFiThemeActive()
+            ? BlendDesktopThemeColor(GetBareMetalControlTheme(GetCurrentDesktopTheme()).border, rgb(190, 132, 72), 54)
+            : rgb(190, 132, 72);
+        const uint32_t warningBodyText = kernelSciFiThemeActive()
+            ? BlendDesktopThemeColor(GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText, rgb(232, 216, 192), 36)
+            : rgb(232, 216, 192);
+        framebuffer::fill_rect(x + 18u, y + 348u, w > 36u ? w - 36u : 1u, 54u, warningFill);
+        appDrawRect(x + 18u, y + 348u, w > 36u ? w - 36u : 1u, 54u, warningBorder);
+        appDrawText(x + 28u, y + 356u, "Display hardware configuration changed.", kernelDisplayOptionsWarningTextColor());
         appDrawText(x + 28u, y + 374u,
             m_pendingTopologyChange.removedOutputCount > 0u ? "Review proposes removing an output; active state is unchanged."
                 : "Review proposes restoring an output; active state is unchanged.",
-            rgb(232, 216, 192));
+            warningBodyText);
         button(x + 430u, y + 350u, 76u, "Review", false);
         button(x + 512u, y + 350u, 76u, "Apply", false);
         button(x + 430u, y + 382u, 76u, "Refresh", false);
         button(x + 512u, y + 382u, 76u, "Keep", false);
     }
 
-    appDrawText(x + 28u, y + static_cast<uint32_t>(maxInt(292, static_cast<int>(h) - 56u)), m_displayStatus[0] != '\0' ? m_displayStatus : "Ready", rgb(190, 205, 225));
+    appDrawText(x + 28u, y + static_cast<uint32_t>(maxInt(292, static_cast<int>(h) - 56u)), m_displayStatus[0] != '\0' ? m_displayStatus : "Ready", kernelDisplayOptionsPositiveTextColor());
 
     const uint32_t actionY = y + h - 38u;
 #if defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE) && defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE)
@@ -2974,28 +3109,28 @@ void DisplayOptionsApp::cancelDisplayConfiguration()
 void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     m_windowW = static_cast<int>(w);
     m_windowH = static_cast<int>(h);
-    framebuffer::fill_rect(x, y, w, h, rgb(28, 30, 38));
+    framebuffer::fill_rect(x, y, w, h, kernelDisplayOptionsBodyColor());
 
-    framebuffer::fill_rect(x + 16, y + 16, 140, 30, m_activeTab == 0 ? rgb(58, 58, 58) : rgb(34, 34, 38));
-    appDrawRect(x + 16, y + 16, 140, 30, rgb(90, 90, 96));
-    appDrawText(x + 28, y + 27, "Backgrounds", m_activeTab == 0 ? rgb(235, 235, 240) : rgb(160, 160, 168));
+    framebuffer::fill_rect(x + 16, y + 16, 140, 30, kernelDisplayOptionsTabColor(m_activeTab == 0));
+    appDrawRect(x + 16, y + 16, 140, 30, kernelDisplayOptionsTabBorderColor(m_activeTab == 0));
+    appDrawText(x + 28, y + 27, "Backgrounds", m_activeTab == 0 ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
 
-    framebuffer::fill_rect(x + 166, y + 16, 140, 30, m_activeTab == 2 ? rgb(58, 58, 58) : rgb(34, 34, 38));
-    appDrawRect(x + 166, y + 16, 140, 30, rgb(90, 90, 96));
-    appDrawText(x + 178, y + 27, "Desktop Icons", m_activeTab == 2 ? rgb(235, 235, 240) : rgb(160, 160, 168));
+    framebuffer::fill_rect(x + 166, y + 16, 140, 30, kernelDisplayOptionsTabColor(m_activeTab == 2));
+    appDrawRect(x + 166, y + 16, 140, 30, kernelDisplayOptionsTabBorderColor(m_activeTab == 2));
+    appDrawText(x + 178, y + 27, "Desktop Icons", m_activeTab == 2 ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
 
-    framebuffer::fill_rect(x + 316, y + 16, 140, 30, m_activeTab == 1 ? rgb(58, 58, 58) : rgb(34, 34, 38));
-    appDrawRect(x + 316, y + 16, 140, 30, rgb(90, 90, 96));
-    appDrawText(x + 328, y + 27, "Gradients", m_activeTab == 1 ? rgb(235, 235, 240) : rgb(160, 160, 168));
+    framebuffer::fill_rect(x + 316, y + 16, 140, 30, kernelDisplayOptionsTabColor(m_activeTab == 1));
+    appDrawRect(x + 316, y + 16, 140, 30, kernelDisplayOptionsTabBorderColor(m_activeTab == 1));
+    appDrawText(x + 328, y + 27, "Gradients", m_activeTab == 1 ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
 
-    framebuffer::fill_rect(x + 466, y + 16, 140, 30, m_activeTab == 3 ? rgb(58, 58, 58) : rgb(34, 34, 38));
-    appDrawRect(x + 466, y + 16, 140, 30, rgb(90, 90, 96));
-    appDrawText(x + 478, y + 27, "Displays", m_activeTab == 3 ? rgb(235, 235, 240) : rgb(160, 160, 168));
+    framebuffer::fill_rect(x + 466, y + 16, 140, 30, kernelDisplayOptionsTabColor(m_activeTab == 3));
+    appDrawRect(x + 466, y + 16, 140, 30, kernelDisplayOptionsTabBorderColor(m_activeTab == 3));
+    appDrawText(x + 478, y + 27, "Displays", m_activeTab == 3 ? kernelDisplayOptionsHeadingTextColor() : kernelDisplayOptionsMutedTextColor());
 
-    appDrawText(x + 18, y + 58, m_activeTab == 3 ? "Configure the QEMU display layout:" : (m_activeTab == 2 ? "Choose system icons shown on the desktop:" : (m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:")), rgb(230, 230, 238));
+    appDrawText(x + 18, y + 58, m_activeTab == 3 ? "Configure the QEMU display layout:" : (m_activeTab == 2 ? "Choose system icons shown on the desktop:" : (m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:")), kernelDisplayOptionsHeadingTextColor());
     const int panelW = maxInt(1, static_cast<int>(w) - 28);
     const int panelH = maxInt(1, static_cast<int>(h) - 92);
-    framebuffer::fill_rect(x + 14, y + 74, static_cast<uint32_t>(panelW), static_cast<uint32_t>(panelH), rgb(22, 22, 24));
+    framebuffer::fill_rect(x + 14, y + 74, static_cast<uint32_t>(panelW), static_cast<uint32_t>(panelH), kernelDisplayOptionsPanelColor());
 
     if (m_activeTab == 0 || m_activeTab == 1) {
         const bool showWallpapers = m_activeTab == 0;
@@ -3017,9 +3152,9 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             const bool applied = showWallpapers ? (i == m_appliedBackgroundIndex) : (i == m_appliedGradientIndex);
 
             if (selected) {
-                framebuffer::fill_rect(tx - 4, ty - 4, kTileW + 8, kTileH + 8, rgb(72, 110, 180));
+                framebuffer::fill_rect(tx - 4, ty - 4, kTileW + 8, kTileH + 8, kernelDisplayOptionsSelectionBorderColor());
             }
-            framebuffer::fill_rect(tx, ty, kTileW, kTileH, rgb(42, 42, 42));
+            framebuffer::fill_rect(tx, ty, kTileW, kTileH, kernelDisplayOptionsCardColor());
 
             if (showWallpapers) {
                 bool drewThumb = kernel::desktop::draw_wallpaper_thumbnail_by_id(s_kernelWallpapers[i].id, tx + 6, ty + 6, kTileW - 12, 42);
@@ -3033,8 +3168,8 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                         framebuffer::fill_rect(tx + 6, ty + 6 + (uint32_t)py, kTileW - 12, 1, color);
                     }
                 }
-                appDrawRect(tx + 6, ty + 6, kTileW - 12, 42, rgb(130, 130, 145));
-                appDrawText(tx + 6, ty + 54, s_kernelWallpapers[i].displayName, rgb(220, 220, 225));
+                appDrawRect(tx + 6, ty + 6, kTileW - 12, 42, kernelDisplayOptionsCardBorderColor());
+                appDrawText(tx + 6, ty + 54, s_kernelWallpapers[i].displayName, kernelDisplayOptionsValueTextColor());
             } else {
                 for (int py = 0; py < 42; ++py) {
                     uint8_t t = (uint8_t)((py * 255) / 41);
@@ -3047,22 +3182,22 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                     framebuffer::fill_rect(tx + 6, ty + 6 + (uint32_t)py, kTileW - 12, 1, color);
                 }
                 appDrawRect(tx + 6, ty + 6, kTileW - 12, 42, s_kernelGradients[i].accentColor);
-                appDrawText(tx + 6, ty + 54, s_kernelGradients[i].displayName, rgb(220, 220, 225));
+                appDrawText(tx + 6, ty + 54, s_kernelGradients[i].displayName, kernelDisplayOptionsValueTextColor());
             }
 
             if (applied) {
-                appDrawText(tx + kTileW - 12, ty + 54, "*", rgb(255, 220, 80));
+                appDrawText(tx + kTileW - 12, ty + 54, "*", kernelSciFiThemeActive() ? GetCurrentDesktopTheme().accent : rgb(255, 220, 80));
             }
         }
 
         if (layout.showScrollbar) {
-            framebuffer::fill_rect(x + layout.scrollbarX, y + layout.galleryY, kGalleryScrollBarW, static_cast<uint32_t>(layout.galleryH), rgb(36, 36, 40));
+            framebuffer::fill_rect(x + layout.scrollbarX, y + layout.galleryY, kGalleryScrollBarW, static_cast<uint32_t>(layout.galleryH), kernelDisplayOptionsScrollbarTrackColor());
             int thumbH = (layout.visibleRows * layout.galleryH) / (layout.rowCount > 0 ? layout.rowCount : 1);
             if (thumbH < kMinScrollbarThumbH) thumbH = kMinScrollbarThumbH;
             if (thumbH > layout.galleryH) thumbH = layout.galleryH;
             const int thumbTravel = layout.galleryH - thumbH;
             const int thumbY = layout.galleryY + ((thumbTravel * scrollOffset) / (layout.maxScroll > 0 ? layout.maxScroll : 1));
-            framebuffer::fill_rect(x + layout.scrollbarX, y + thumbY, kGalleryScrollBarW, static_cast<uint32_t>(thumbH), rgb(150, 160, 176));
+            framebuffer::fill_rect(x + layout.scrollbarX, y + thumbY, kGalleryScrollBarW, static_cast<uint32_t>(thumbH), kernelDisplayOptionsScrollbarThumbColor());
         }
 
         if (m_selectButtonId >= 0) {
@@ -3083,7 +3218,7 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY, "Trash", m_desktopIconVisibility.showTrash);
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH, "File Explorer", m_desktopIconVisibility.showThisSystem || m_desktopIconVisibility.showFileManager);
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 2, "System Settings", m_desktopIconVisibility.showSystemSettings);
-        appDrawText(x + kDesktopIconCheckboxX, y + maxInt(292, static_cast<int>(h) - 28), "Changes are saved immediately.", rgb(190, 195, 205));
+        appDrawText(x + kDesktopIconCheckboxX, y + maxInt(292, static_cast<int>(h) - 28), "Changes are saved immediately.", kernelDisplayOptionsLabelTextColor());
     } else {
         if (m_selectButtonId >= 0) {
             if (app::Widget* button = getWidget(m_selectButtonId)) {
@@ -3164,10 +3299,19 @@ int DisplayOptionsApp::hitDesktopIconCheckbox(int mx, int my) const {
 }
 
 void DisplayOptionsApp::drawCheckbox(uint32_t x, uint32_t y, const char* label, bool checked) {
-    framebuffer::fill_rect(x, y, kDesktopIconCheckboxSize, kDesktopIconCheckboxSize, checked ? rgb(70, 110, 180) : rgb(30, 30, 34));
-    appDrawRect(x, y, kDesktopIconCheckboxSize, kDesktopIconCheckboxSize, rgb(130, 135, 150));
-    if (checked) appDrawText(x + 3, y + 2, "x", rgb(245, 245, 250));
-    appDrawText(x + kDesktopIconCheckboxSize + 12, y + 2, label, rgb(225, 228, 236));
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
+    const uint32_t uncheckedFill = kernelSciFiThemeActive() ? roles.recessedField : rgb(30, 30, 34);
+    const uint32_t checkboxFill = checked
+        ? (kernelSciFiThemeActive() ? roles.selectionActive : rgb(70, 110, 180))
+        : uncheckedFill;
+    const uint32_t checkboxBorder = kernelSciFiThemeActive() ? roles.border : rgb(130, 135, 150);
+    const uint32_t checkText = kernelSciFiThemeActive() ? roles.selectionText : rgb(245, 245, 250);
+    framebuffer::fill_rect(x, y, kDesktopIconCheckboxSize, kDesktopIconCheckboxSize, checkboxFill);
+    appDrawRect(x, y, kDesktopIconCheckboxSize, kDesktopIconCheckboxSize, checkboxBorder);
+    if (checked) appDrawText(x + 3, y + 2, "x", checkText);
+    appDrawText(x + kDesktopIconCheckboxSize + 12, y + 2, label,
+        kernelSciFiThemeActive() ? roles.primaryText : rgb(225, 228, 236));
 }
 
 void DisplayOptionsApp::toggleDesktopIconCheckbox(int index) {
